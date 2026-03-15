@@ -16,6 +16,7 @@ import type {
   Message,
   ToolCall,
   ProviderCall,
+  RuntimeEvent,
   SessionListOptions,
   SessionSearchOptions,
   SessionMessageOptions,
@@ -292,6 +293,23 @@ export class SessionApiService {
         return [];
       }
       throw new Error(`Failed to fetch provider calls: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data || [];
+  }
+
+  async getEvents(
+    workspace: string,
+    sessionId: string
+  ): Promise<RuntimeEvent[]> {
+    const response = await fetch(
+      `${SESSION_API_BASE}/${encodeURIComponent(workspace)}/sessions/${encodeURIComponent(sessionId)}/events`
+    );
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        return [];
+      }
+      throw new Error(`Failed to fetch runtime events: ${response.statusText}`);
     }
     const data = await response.json();
     return data || [];

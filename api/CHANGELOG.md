@@ -9,6 +9,10 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 ---
 
 ## 2026-03-15
+- **Session API**: Added runtime events endpoints (`POST/GET /api/v1/sessions/{sessionID}/events`)
+  - New `RuntimeEvent` schema in OpenAPI spec
+  - Stores PromptKit lifecycle events (pipeline, stage, middleware, validation, workflow) in dedicated `runtime_events` table instead of as system messages
+  - Migration `000018_create_runtime_events` creates partitioned table
 - **Session API**: Added OpenAPI 3.0 spec at `api/session-api/openapi.yaml` covering all 18 endpoints
   - Generated Go client: `pkg/sessionapi/` (via oapi-codegen v2.4.1)
   - Generated TS types: `dashboard/src/lib/api/session-api-schema.d.ts` (via openapi-typescript)

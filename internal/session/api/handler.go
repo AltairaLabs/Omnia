@@ -178,6 +178,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/provider-calls", h.handleRecordProviderCall)
 	mux.HandleFunc("GET /api/v1/sessions/{sessionID}/provider-calls", h.handleGetProviderCalls)
 
+	// Runtime event endpoints
+	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/events", h.handleRecordRuntimeEvent)
+	mux.HandleFunc("GET /api/v1/sessions/{sessionID}/events", h.handleGetRuntimeEvents)
+
 	// Eval result endpoints
 	mux.HandleFunc("GET /api/v1/sessions/{sessionID}/eval-results", h.handleGetSessionEvalResults)
 	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/evaluate", h.handleEvaluateSession)
@@ -656,6 +660,59 @@ func (h *Handler) handleGetProviderCalls(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, calls)
+}
+
+// handleRecordRuntimeEvent records a runtime event for a session.
+func (h *Handler) handleRecordRuntimeEvent(w http.ResponseWriter, r *http.Request) {
+	sessionID, err := sessionIDFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	h.limitBody(w, r)
+	var evt session.RuntimeEvent
+	if err := json.NewDecoder(r.Body).Decode(&evt); err != nil {
+		if isMaxBytesError(err) {
+			writeError(w, ErrBodyTooLarge)
+			return
+		}
+		writeError(w, ErrMissingBody)
+		return
+	}
+
+	log := h.requestLog(r.Context())
+	if err := h.service.RecordRuntimeEvent(r.Context(), sessionID, &evt); err != nil {
+		if !errors.Is(err, session.ErrSessionNotFound) {
+			log.Error(err, "RecordRuntimeEvent failed", "sessionID", sessionID)
+		}
+		writeError(w, err)
+		return
+	}
+
+	log.V(2).Info("runtime event recorded", "sessionID", sessionID, "eventType", evt.EventType)
+	w.WriteHeader(http.StatusCreated)
+}
+
+// handleGetRuntimeEvents returns all runtime events for a session.
+func (h *Handler) handleGetRuntimeEvents(w http.ResponseWriter, r *http.Request) {
+	sessionID, err := sessionIDFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	ctx := withRequestContext(r.Context(), extractRequestContext(r))
+	events, err := h.service.GetRuntimeEvents(ctx, sessionID)
+	if err != nil {
+		if !errors.Is(err, session.ErrSessionNotFound) {
+			h.requestLog(r.Context()).Error(err, "GetRuntimeEvents failed", "sessionID", sessionID)
+		}
+		writeError(w, err)
+		return
+	}
+
+	writeJSON(w, events)
 }
 
 // parseListParams extracts common list/search query parameters from the request.

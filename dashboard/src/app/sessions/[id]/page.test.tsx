@@ -14,6 +14,7 @@ vi.mock("@/hooks", () => ({
   useSessionEvalResults: vi.fn(),
   useSessionToolCalls: vi.fn(() => ({ data: [] })),
   useSessionProviderCalls: vi.fn(() => ({ data: [] })),
+  useSessionRuntimeEvents: vi.fn(() => ({ data: [] })),
   useSessionAllMessages: vi.fn(() => ({
     messages: [],
     totalLoaded: 0,
@@ -115,7 +116,7 @@ describe("SessionDetailPage", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     // Default mocks to avoid errors in tests that don't set them
-    const { useSessionEvalResults, useSessionToolCalls, useSessionProviderCalls } = await import("@/hooks");
+    const { useSessionEvalResults, useSessionToolCalls, useSessionProviderCalls, useSessionRuntimeEvents } = await import("@/hooks");
     vi.mocked(useSessionEvalResults).mockReturnValue({
       data: [],
       isLoading: false,
@@ -127,6 +128,11 @@ describe("SessionDetailPage", () => {
       error: null,
     } as any);
     vi.mocked(useSessionProviderCalls).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+    } as any);
+    vi.mocked(useSessionRuntimeEvents).mockReturnValue({
       data: [],
       isLoading: false,
       error: null,

@@ -99,6 +99,15 @@ type WarmStoreProvider interface {
 	// Returns session.ErrSessionNotFound if the session does not exist.
 	GetProviderCalls(ctx context.Context, sessionID string) ([]*session.ProviderCall, error)
 
+	// RecordRuntimeEvent records a runtime lifecycle event for the session.
+	// Events are immutable (INSERT only, no upsert).
+	// Returns session.ErrSessionNotFound if the session does not exist.
+	RecordRuntimeEvent(ctx context.Context, sessionID string, evt *session.RuntimeEvent) error
+
+	// GetRuntimeEvents retrieves all runtime events for a session ordered by timestamp.
+	// Returns session.ErrSessionNotFound if the session does not exist.
+	GetRuntimeEvents(ctx context.Context, sessionID string) ([]*session.RuntimeEvent, error)
+
 	// SaveArtifact persists a binary artifact reference.
 	SaveArtifact(ctx context.Context, artifact *session.Artifact) error
 

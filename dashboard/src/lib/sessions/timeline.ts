@@ -1,4 +1,4 @@
-import type { Message, ToolCall, ProviderCall } from "@/types/session";
+import type { Message, ToolCall, ProviderCall, RuntimeEvent } from "@/types/session";
 
 export type TimelineEventKind =
   | "user_message"
@@ -28,6 +28,10 @@ export interface TimelineEvent {
 
 const MAX_DETAIL_LENGTH = 120;
 
+/** Event type constants to avoid string duplication (sonarjs/no-duplicate-string). */
+const EVENT_PIPELINE_STARTED = "pipeline.started";
+const EVENT_PIPELINE_COMPLETED = "pipeline.completed";
+
 function truncate(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
   return text.slice(0, maxLength) + "...";
@@ -42,7 +46,7 @@ function resolveMessageKind(message: Message): TimelineEventKind {
   if (metadataType === "workflow_transition") return "workflow_transition";
   if (metadataType === "workflow_completed") return "workflow_completed";
   if (metadataType === "error") return "error";
-  if (metadataType === "pipeline.started" || metadataType === "pipeline.completed") return "pipeline_event";
+  if (metadataType === EVENT_PIPELINE_STARTED || metadataType === EVENT_PIPELINE_COMPLETED) return "pipeline_event";
   if (metadataType === "stage.started" || metadataType === "stage.completed") return "stage_event";
   if (metadataType === "provider_call") return "provider_call";
 
@@ -116,7 +120,7 @@ function buildLabel(kind: TimelineEventKind, message: Message): string {
 
   switch (kind) {
     case "pipeline_event":
-      return `Pipeline ${message.metadata?.type === "pipeline.started" ? "started" : "completed"}`;
+      return `Pipeline ${message.metadata?.type === EVENT_PIPELINE_STARTED ? "started" : "completed"}`;
     case "stage_event":
       return buildStageLabel(message);
     case "tool_call": {
@@ -188,14 +192,84 @@ export function providerCallsToTimelineEvents(providerCalls: ProviderCall[]): Ti
   }));
 }
 
+/** Map a runtime event type to a TimelineEventKind. */
+function runtimeEventKind(eventType: string): TimelineEventKind {
+  if (eventType.startsWith("pipeline.")) return "pipeline_event";
+  if (eventType.startsWith("stage.")) return "stage_event";
+  if (eventType.startsWith("middleware.")) return "stage_event";
+  if (eventType.startsWith("validation.")) return "stage_event";
+  if (eventType === "workflow.completed") return "workflow_completed";
+  if (eventType.startsWith("workflow.")) return "workflow_transition";
+  if (eventType === "context_built" || eventType === "token_budget_exceeded") return "system_message";
+  if (eventType === "state_loaded" || eventType === "state_saved") return "system_message";
+  if (eventType === "stream_interrupted") return "error";
+  return "system_message";
+}
+
+/** Build a human-readable label for a runtime event. */
+function runtimeEventLabel(eventType: string, data?: Record<string, unknown>): string {
+  const name = data?.Name || data?.name;
+  const nameStr = typeof name === "string" ? `: ${name}` : "";
+
+  if (eventType === EVENT_PIPELINE_STARTED) return "Pipeline started";
+  if (eventType === EVENT_PIPELINE_COMPLETED) return "Pipeline completed";
+  if (eventType === "pipeline.failed") return "Pipeline failed";
+  if (eventType.startsWith("stage.")) return `Stage${nameStr} ${eventType.split(".")[1]}`;
+  if (eventType.startsWith("middleware.")) return `Middleware${nameStr} ${eventType.split(".")[1]}`;
+  if (eventType.startsWith("validation.")) return `Validation${nameStr} ${eventType.split(".")[1]}`;
+  if (eventType === "workflow.transitioned") return `Workflow transition${nameStr}`;
+  if (eventType === "workflow.completed") return "Workflow completed";
+  if (eventType === "context_built") return "Context built";
+  if (eventType === "token_budget_exceeded") return "Token budget exceeded";
+  if (eventType === "state_loaded") return "State loaded";
+  if (eventType === "state_saved") return "State saved";
+  if (eventType === "stream_interrupted") return "Stream interrupted";
+  return eventType;
+}
+
+/** Convert first-class RuntimeEvent records to timeline events. */
+export function runtimeEventsToTimelineEvents(events: RuntimeEvent[]): TimelineEvent[] {
+  return events.map((evt) => {
+    const kind = runtimeEventKind(evt.eventType);
+    const isFailed = evt.eventType.endsWith(".failed") || !!evt.errorMessage;
+    const isCompleted = evt.eventType.endsWith(".completed") || evt.eventType.endsWith(".passed");
+    let status: TimelineEvent["status"];
+    if (isFailed) status = "error";
+    else if (isCompleted) status = "success";
+
+    return {
+      id: `re-${evt.id}`,
+      timestamp: evt.timestamp,
+      kind,
+      label: runtimeEventLabel(evt.eventType, evt.data),
+      detail: evt.errorMessage || (evt.data ? truncate(JSON.stringify(evt.data), MAX_DETAIL_LENGTH) : undefined),
+      duration: evt.durationMs,
+      status,
+      metadata: { type: evt.eventType },
+    };
+  });
+}
+
+/** Lifecycle event kinds that are replaced by first-class RuntimeEvents. */
+const RUNTIME_EVENT_KINDS = new Set<TimelineEventKind>([
+  "pipeline_event",
+  "stage_event",
+  "workflow_transition",
+  "workflow_completed",
+]);
+
 /** Check whether a message-based event should be skipped because first-class records replace it. */
 function shouldSkipMessageEvent(
   kind: TimelineEventKind,
   hasToolCalls: boolean,
   hasProviderCalls: boolean,
+  hasRuntimeEvents: boolean,
 ): boolean {
   if (hasToolCalls && (kind === "tool_call" || kind === "tool_result")) return true;
   if (hasProviderCalls && kind === "provider_call") return true;
+  if (hasRuntimeEvents && RUNTIME_EVENT_KINDS.has(kind)) return true;
+  // Skip generic system messages from runtime events when first-class events exist
+  if (hasRuntimeEvents && kind === "system_message") return true;
   return false;
 }
 
@@ -219,26 +293,29 @@ function messageToTimelineEvent(message: Message, kind: TimelineEventKind): Time
 
 /**
  * Extract a flat, chronologically sorted list of timeline events from session messages,
- * optionally merging first-class tool call and provider call records.
+ * optionally merging first-class tool call, provider call, and runtime event records.
  */
 export function extractTimelineEvents(
   messages: Message[],
   toolCalls?: ToolCall[],
   providerCalls?: ProviderCall[],
+  runtimeEvents?: RuntimeEvent[],
 ): TimelineEvent[] {
   const hasToolCalls = (toolCalls?.length ?? 0) > 0;
   const hasProviderCalls = (providerCalls?.length ?? 0) > 0;
+  const hasRuntimeEvents = (runtimeEvents?.length ?? 0) > 0;
   const events: TimelineEvent[] = [];
 
   for (const message of messages) {
     const kind = resolveMessageKind(message);
-    if (shouldSkipMessageEvent(kind, hasToolCalls, hasProviderCalls)) continue;
+    if (shouldSkipMessageEvent(kind, hasToolCalls, hasProviderCalls, hasRuntimeEvents)) continue;
     events.push(messageToTimelineEvent(message, kind));
   }
 
   // Merge first-class records
   if (toolCalls) events.push(...toolCallsToTimelineEvents(toolCalls));
   if (providerCalls) events.push(...providerCallsToTimelineEvents(providerCalls));
+  if (runtimeEvents) events.push(...runtimeEventsToTimelineEvents(runtimeEvents));
 
   // Sort by timestamp (stable sort preserves insertion order for equal timestamps)
   events.sort((a, b) => a.timestamp.localeCompare(b.timestamp));

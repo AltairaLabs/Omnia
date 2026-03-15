@@ -33,6 +33,16 @@ export interface ProviderCall {
   createdAt: string;
 }
 
+export interface RuntimeEvent {
+  id: string;
+  sessionId: string;
+  eventType: string;
+  data?: Record<string, unknown>;
+  durationMs?: number;
+  errorMessage?: string;
+  timestamp: string;
+}
+
 /** Inline tool call embedded in a message (live console WebSocket path). */
 export interface MessageToolCall {
   id: string;

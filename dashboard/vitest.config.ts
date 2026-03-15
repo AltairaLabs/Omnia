@@ -91,6 +91,7 @@ export default defineConfig({
         // Session sub-route proxies — simple pass-through to session-api
         "src/app/api/workspaces/[name]/sessions/[sessionId]/tool-calls/**",
         "src/app/api/workspaces/[name]/sessions/[sessionId]/provider-calls/**",
+        "src/app/api/workspaces/[name]/sessions/[sessionId]/events/**",
 
         // Other API routes that require K8s infrastructure
         "src/app/api/workspaces/[name]/agents/**",

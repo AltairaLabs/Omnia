@@ -34,6 +34,7 @@ type MemoryStore struct {
 	closed        bool
 	toolCalls     map[string][]ToolCall     // keyed by sessionID
 	providerCalls map[string][]ProviderCall // keyed by sessionID
+	runtimeEvents map[string][]RuntimeEvent // keyed by sessionID
 }
 
 // NewMemoryStore creates a new in-memory session store.
@@ -42,6 +43,7 @@ func NewMemoryStore() *MemoryStore {
 		sessions:      make(map[string]*Session),
 		toolCalls:     make(map[string][]ToolCall),
 		providerCalls: make(map[string][]ProviderCall),
+		runtimeEvents: make(map[string][]RuntimeEvent),
 	}
 }
 
@@ -130,6 +132,7 @@ func (m *MemoryStore) DeleteSession(ctx context.Context, sessionID string) error
 	delete(m.sessions, sessionID)
 	delete(m.toolCalls, sessionID)
 	delete(m.providerCalls, sessionID)
+	delete(m.runtimeEvents, sessionID)
 	return nil
 }
 
@@ -293,6 +296,7 @@ func (m *MemoryStore) Close() error {
 	m.sessions = nil
 	m.toolCalls = nil
 	m.providerCalls = nil
+	m.runtimeEvents = nil
 	return nil
 }
 
@@ -464,6 +468,55 @@ func (m *MemoryStore) GetProviderCalls(ctx context.Context, sessionID string) ([
 	calls := m.providerCalls[sessionID]
 	result := make([]ProviderCall, len(calls))
 	copy(result, calls)
+	return result, nil
+}
+
+// RecordRuntimeEvent records a runtime lifecycle event for the session.
+func (m *MemoryStore) RecordRuntimeEvent(ctx context.Context, sessionID string, evt RuntimeEvent) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if sessionID == "" {
+		return ErrInvalidSessionID
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.sessions[sessionID]; !exists {
+		return ErrSessionNotFound
+	}
+
+	if evt.ID == "" {
+		evt.ID = uuid.New().String()
+	}
+	if evt.Timestamp.IsZero() {
+		evt.Timestamp = time.Now()
+	}
+
+	m.runtimeEvents[sessionID] = append(m.runtimeEvents[sessionID], evt)
+	return nil
+}
+
+// GetRuntimeEvents retrieves all runtime events for a session ordered by timestamp.
+func (m *MemoryStore) GetRuntimeEvents(ctx context.Context, sessionID string) ([]RuntimeEvent, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if sessionID == "" {
+		return nil, ErrInvalidSessionID
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if _, exists := m.sessions[sessionID]; !exists {
+		return nil, ErrSessionNotFound
+	}
+
+	events := m.runtimeEvents[sessionID]
+	result := make([]RuntimeEvent, len(events))
+	copy(result, events)
 	return result, nil
 }
 

@@ -295,6 +295,26 @@ type ProviderCall struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+// RuntimeEvent represents a lifecycle event from the PromptKit runtime
+// (pipeline, stage, middleware, validation, workflow, context/state events).
+// These are persisted in a dedicated table rather than as system messages.
+type RuntimeEvent struct {
+	// ID is the unique identifier for this event.
+	ID string `json:"id"`
+	// SessionID links this event to its parent session.
+	SessionID string `json:"sessionId"`
+	// EventType is the PromptKit event type (e.g., "pipeline.started").
+	EventType string `json:"eventType"`
+	// Data contains the event payload as arbitrary JSON.
+	Data map[string]any `json:"data,omitempty"`
+	// DurationMs is the event duration in milliseconds (for completed events).
+	DurationMs int64 `json:"durationMs,omitempty"`
+	// ErrorMessage contains error details for failed events.
+	ErrorMessage string `json:"errorMessage,omitempty"`
+	// Timestamp is when the event occurred.
+	Timestamp time.Time `json:"timestamp"`
+}
+
 // Store defines the interface for session storage.
 type Store interface {
 	// CreateSession creates a new session and returns its ID.
@@ -352,6 +372,15 @@ type Store interface {
 	// GetProviderCalls retrieves all provider calls for a session ordered by created_at.
 	// Returns ErrSessionNotFound if the session does not exist.
 	GetProviderCalls(ctx context.Context, sessionID string) ([]ProviderCall, error)
+
+	// RecordRuntimeEvent records a runtime lifecycle event for the session.
+	// Events are immutable (append-only, no upsert).
+	// Returns ErrSessionNotFound if the session does not exist.
+	RecordRuntimeEvent(ctx context.Context, sessionID string, evt RuntimeEvent) error
+
+	// GetRuntimeEvents retrieves all runtime events for a session ordered by timestamp.
+	// Returns ErrSessionNotFound if the session does not exist.
+	GetRuntimeEvents(ctx context.Context, sessionID string) ([]RuntimeEvent, error)
 
 	// Close releases any resources held by the store.
 	Close() error

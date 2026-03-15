@@ -36,11 +36,13 @@ import (
 
 // eventAction holds the outputs of converting a single PromptKit event.
 // For tool/provider events, only the first-class record is set (no legacy message).
-// For other events, the message field carries the data.
+// For runtime lifecycle events, the event field carries the data.
+// For message events, the message field carries the data.
 type eventAction struct {
 	message      *session.Message
 	toolCall     *session.ToolCall
 	providerCall *session.ProviderCall
+	event        *session.RuntimeEvent
 	stats        session.SessionStatsUpdate
 }
 
@@ -669,22 +671,26 @@ func (s *OmniaEventStore) convertEvalEvent(event *events.Event) (eventAction, bo
 
 // --- Generic event handler ---
 
-// convertGenericEvent records any event type by serializing its Data as JSON.
+// convertGenericEvent records any event type as a first-class RuntimeEvent.
 // This ensures full recording fidelity — no events are silently dropped.
 func (s *OmniaEventStore) convertGenericEvent(event *events.Event) (eventAction, bool) {
-	content := "{}"
+	var data map[string]any
 	if event.Data != nil {
-		if data, err := json.Marshal(event.Data); err == nil {
-			content = string(data)
+		// Round-trip through JSON to convert typed structs to map[string]any.
+		raw, err := json.Marshal(event.Data)
+		if err == nil {
+			_ = json.Unmarshal(raw, &data)
 		}
 	}
 
-	msg := s.buildMessage(session.RoleSystem, content, event.Timestamp, map[string]string{
-		metaKeyType:   string(event.Type),
-		metaKeySource: metaValueSource,
-	})
+	evt := session.RuntimeEvent{
+		ID:        uuid.New().String(),
+		EventType: string(event.Type),
+		Data:      data,
+		Timestamp: event.Timestamp,
+	}
 
-	return eventAction{message: &msg}, true
+	return eventAction{event: &evt}, true
 }
 
 // --- Helpers ---
@@ -705,8 +711,8 @@ func (s *OmniaEventStore) buildMessage(
 	}
 }
 
-// writeAction persists an eventAction to session-api: the message (for non-tool/provider events)
-// and/or first-class tool/provider call records.
+// writeAction persists an eventAction to session-api: first-class tool/provider call records,
+// runtime events, and/or legacy messages.
 // Errors are logged but never propagated, matching the facade's fire-and-forget pattern.
 func (s *OmniaEventStore) writeAction(traceCtx context.Context, sessionID string, action eventAction) {
 	if s.sessionStore == nil {
@@ -717,13 +723,10 @@ func (s *OmniaEventStore) writeAction(traceCtx context.Context, sessionID string
 	defer cancel()
 	log := logctx.LoggerWithContext(s.log, traceCtx)
 
-	msgType := ""
-	if action.message != nil {
-		msgType = action.message.Metadata[metaKeyType]
-	}
+	eventType := s.resolveEventType(action)
 
 	log.V(1).Info("writing event to session-api",
-		"sessionID", sessionID, "messageType", msgType)
+		"sessionID", sessionID, "eventType", eventType)
 
 	// Write first-class records first (they update session counters atomically).
 	if action.toolCall != nil {
@@ -742,11 +745,20 @@ func (s *OmniaEventStore) writeAction(traceCtx context.Context, sessionID string
 		}
 	}
 
-	// Write message (for non-tool/provider events).
+	// Write runtime event (for lifecycle events).
+	if action.event != nil {
+		action.event.SessionID = sessionID
+		if err := s.sessionStore.RecordRuntimeEvent(ctx, sessionID, *action.event); err != nil {
+			log.Error(err, "failed to record runtime event",
+				"sessionID", sessionID, "eventType", action.event.EventType)
+		}
+	}
+
+	// Write message (for message/conversation events).
 	if action.message != nil {
 		if err := s.sessionStore.AppendMessage(ctx, sessionID, *action.message); err != nil {
 			log.Error(err, "failed to append event message",
-				"sessionID", sessionID, "messageType", msgType)
+				"sessionID", sessionID, "eventType", eventType)
 			return
 		}
 	}
@@ -754,12 +766,29 @@ func (s *OmniaEventStore) writeAction(traceCtx context.Context, sessionID string
 	// Update session stats (tokens, cost, message counts, etc.).
 	if err := s.sessionStore.UpdateSessionStats(ctx, sessionID, action.stats); err != nil {
 		log.Error(err, "failed to update session stats",
-			"sessionID", sessionID, "messageType", msgType)
+			"sessionID", sessionID, "eventType", eventType)
 		return
 	}
 
 	log.V(1).Info("event written to session-api",
-		"sessionID", sessionID, "messageType", msgType)
+		"sessionID", sessionID, "eventType", eventType)
+}
+
+// resolveEventType returns a descriptive string for the action being written.
+func (s *OmniaEventStore) resolveEventType(action eventAction) string {
+	if action.event != nil {
+		return action.event.EventType
+	}
+	if action.message != nil {
+		return action.message.Metadata[metaKeyType]
+	}
+	if action.toolCall != nil {
+		return "tool_call:" + action.toolCall.Name
+	}
+	if action.providerCall != nil {
+		return "provider_call:" + action.providerCall.Provider
+	}
+	return "unknown"
 }
 
 // --- Dual-write helpers ---

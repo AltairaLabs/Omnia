@@ -12,6 +12,7 @@ import type {
   Message,
   ToolCall,
   ProviderCall,
+  RuntimeEvent,
 } from "@/types/session";
 
 /**
@@ -224,6 +225,24 @@ export function useSessionProviderCalls(sessionId: string) {
       if (!currentWorkspace) return [];
       const service = new SessionApiService();
       return service.getProviderCalls(currentWorkspace.name, sessionId);
+    },
+    enabled: !!currentWorkspace && !!sessionId,
+    staleTime: 10000,
+  });
+}
+
+/**
+ * Fetch runtime events for a session from the first-class runtime_events table.
+ */
+export function useSessionRuntimeEvents(sessionId: string) {
+  const { currentWorkspace } = useWorkspace();
+
+  return useQuery({
+    queryKey: ["session-runtime-events", currentWorkspace?.name, sessionId],
+    queryFn: async (): Promise<RuntimeEvent[]> => {
+      if (!currentWorkspace) return [];
+      const service = new SessionApiService();
+      return service.getEvents(currentWorkspace.name, sessionId);
     },
     enabled: !!currentWorkspace && !!sessionId,
     staleTime: 10000,

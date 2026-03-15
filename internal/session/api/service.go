@@ -405,6 +405,30 @@ func (s *SessionService) GetProviderCalls(ctx context.Context, sessionID string)
 	return warm.GetProviderCalls(ctx, sessionID)
 }
 
+// RecordRuntimeEvent records a runtime lifecycle event via the warm store.
+func (s *SessionService) RecordRuntimeEvent(ctx context.Context, sessionID string, evt *session.RuntimeEvent) error {
+	if sessionID == "" {
+		return ErrMissingSessionID
+	}
+	warm, err := s.registry.WarmStore()
+	if err != nil {
+		return ErrWarmStoreRequired
+	}
+	return warm.RecordRuntimeEvent(ctx, sessionID, evt)
+}
+
+// GetRuntimeEvents retrieves all runtime events for a session via the warm store.
+func (s *SessionService) GetRuntimeEvents(ctx context.Context, sessionID string) ([]*session.RuntimeEvent, error) {
+	if sessionID == "" {
+		return nil, ErrMissingSessionID
+	}
+	warm, err := s.registry.WarmStore()
+	if err != nil {
+		return nil, ErrWarmStoreRequired
+	}
+	return warm.GetRuntimeEvents(ctx, sessionID)
+}
+
 // getFromHot attempts to retrieve a session from the hot cache.
 func (s *SessionService) getFromHot(ctx context.Context, sessionID string) (*session.Session, error) {
 	hot, err := s.registry.HotCache()

@@ -841,6 +841,14 @@ func (m *MockWarmStoreProvider) GetProviderCalls(_ context.Context, _ string) ([
 	return []*session.ProviderCall{}, nil
 }
 
+func (m *MockWarmStoreProvider) RecordRuntimeEvent(_ context.Context, _ string, _ *session.RuntimeEvent) error {
+	return nil
+}
+
+func (m *MockWarmStoreProvider) GetRuntimeEvents(_ context.Context, _ string) ([]*session.RuntimeEvent, error) {
+	return nil, nil
+}
+
 func TestWarmStoreSessionDeleter_ListSessionsByUser(t *testing.T) {
 	mock := &MockWarmStoreProvider{
 		sessions: []*session.Session{{ID: "s1"}, {ID: "s2"}},

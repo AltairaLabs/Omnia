@@ -704,6 +704,84 @@ func (p *Provider) GetProviderCalls(ctx context.Context, sessionID string) ([]*s
 	return calls, nil
 }
 
+// --- Runtime event management -----------------------------------------------
+
+func scanRuntimeEvent(row pgx.Row) (*session.RuntimeEvent, error) {
+	var evt session.RuntimeEvent
+	var durationMs *int64
+	var errorMessage *string
+	var dataJSON []byte
+
+	err := row.Scan(
+		&evt.ID, &evt.SessionID, &evt.EventType,
+		&dataJSON, &durationMs, &errorMessage, &evt.Timestamp,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: scan runtime event: %w", err)
+	}
+
+	if len(dataJSON) > 0 {
+		_ = json.Unmarshal(dataJSON, &evt.Data)
+	}
+	if durationMs != nil {
+		evt.DurationMs = *durationMs
+	}
+	evt.ErrorMessage = pgutil.DerefString(errorMessage)
+	return &evt, nil
+}
+
+func (p *Provider) RecordRuntimeEvent(ctx context.Context, sessionID string, evt *session.RuntimeEvent) error {
+	if err := p.sessionExists(ctx, sessionID); err != nil {
+		return err
+	}
+
+	query := `INSERT INTO runtime_events (id, session_id, event_type, data, duration_ms, error_message, timestamp)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`
+
+	dataJSON, _ := json.Marshal(evt.Data)
+
+	_, err := p.pool.Exec(ctx, query,
+		evt.ID, sessionID, evt.EventType,
+		dataJSON, pgutil.NullInt64(evt.DurationMs),
+		pgutil.NullString(evt.ErrorMessage), evt.Timestamp,
+	)
+	if err != nil {
+		return fmt.Errorf("postgres: record runtime event: %w", err)
+	}
+	return nil
+}
+
+func (p *Provider) GetRuntimeEvents(ctx context.Context, sessionID string) ([]*session.RuntimeEvent, error) {
+	if err := p.sessionExists(ctx, sessionID); err != nil {
+		return nil, err
+	}
+
+	query := `SELECT id, session_id, event_type, data, duration_ms, error_message, timestamp
+		FROM runtime_events WHERE session_id=$1 ORDER BY timestamp ASC`
+
+	rows, err := p.pool.Query(ctx, query, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: get runtime events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []*session.RuntimeEvent
+	for rows.Next() {
+		evt, err := scanRuntimeEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, evt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres: iterate runtime events: %w", err)
+	}
+	if events == nil {
+		events = []*session.RuntimeEvent{}
+	}
+	return events, nil
+}
+
 // --- Artifact management ----------------------------------------------------
 
 func (p *Provider) SaveArtifact(ctx context.Context, artifact *session.Artifact) error {
@@ -804,7 +882,7 @@ func collectArtifacts(rows pgx.Rows) ([]*session.Artifact, error) {
 
 // --- Partition management ---------------------------------------------------
 
-var partitionTables = []string{"sessions", "messages", "tool_calls", "provider_calls", "message_artifacts", "audit_log"}
+var partitionTables = []string{"sessions", "messages", "tool_calls", "provider_calls", "runtime_events", "message_artifacts", "audit_log"}
 
 func (p *Provider) CreatePartition(ctx context.Context, date time.Time) error {
 	// Align to ISO week boundary (Monday).
@@ -856,7 +934,7 @@ func (p *Provider) DropPartition(ctx context.Context, date time.Time) error {
 	}
 
 	// Drop all table partitions in reverse dependency order.
-	for _, table := range []string{"audit_log", "message_artifacts", "provider_calls", "tool_calls", "messages", "sessions"} {
+	for _, table := range []string{"audit_log", "message_artifacts", "runtime_events", "provider_calls", "tool_calls", "messages", "sessions"} {
 		name := pgx.Identifier{table + "_" + suffix}.Sanitize()
 		_, err := tx.Exec(ctx, "DROP TABLE IF EXISTS "+name)
 		if err != nil {

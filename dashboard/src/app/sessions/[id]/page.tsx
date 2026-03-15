@@ -42,8 +42,8 @@ import {
   XCircle,
   Shield,
 } from "lucide-react";
-import { useSessionDetail, useSessionAllMessages, useSessionEvalResults, useSessionToolCalls, useSessionProviderCalls } from "@/hooks";
-import type { Message, Session, ToolCall, ProviderCall, EvalResult } from "@/types";
+import { useSessionDetail, useSessionAllMessages, useSessionEvalResults, useSessionToolCalls, useSessionProviderCalls, useSessionRuntimeEvents } from "@/hooks";
+import type { Message, Session, ToolCall, ProviderCall, RuntimeEvent, EvalResult } from "@/types";
 import { EvalResultsBadge } from "@/components/sessions/eval-results-badge";
 import { ToolCallBadge } from "@/components/sessions/tool-call-badge";
 import { DebugPanel } from "@/components/sessions/debug-panel";
@@ -446,6 +446,7 @@ export default function SessionDetailPage({
   const { data: evalResults } = useSessionEvalResults(id);
   const { data: toolCalls } = useSessionToolCalls(id);
   const { data: providerCalls } = useSessionProviderCalls(id);
+  const { data: runtimeEvents } = useSessionRuntimeEvents(id);
   const grafana = useGrafana();
   const sessionDashboardUrl = grafana.enabled && session
     ? buildSessionDashboardUrl(grafana, id, session.agentName, session.agentNamespace)
@@ -648,7 +649,7 @@ export default function SessionDetailPage({
           </TabsList>
 
           <TabsContent value="conversation" className="flex-1 min-h-0 mt-4">
-            <ConversationWithDebugPanel session={session} evalResults={evalResults || []} toolCalls={toolCalls || []} providerCalls={providerCalls || []} />
+            <ConversationWithDebugPanel session={session} evalResults={evalResults || []} toolCalls={toolCalls || []} providerCalls={providerCalls || []} runtimeEvents={runtimeEvents || []} />
           </TabsContent>
 
           <TabsContent value="evals" className="mt-4">
@@ -1051,7 +1052,8 @@ function ConversationWithDebugPanel({
   evalResults,
   toolCalls,
   providerCalls,
-}: Readonly<{ session: Session; evalResults: EvalResult[]; toolCalls: ToolCall[]; providerCalls: ProviderCall[] }>) {
+  runtimeEvents,
+}: Readonly<{ session: Session; evalResults: EvalResult[]; toolCalls: ToolCall[]; providerCalls: ProviderCall[]; runtimeEvents: RuntimeEvent[] }>) {
   const debugOpen = useDebugPanelStore((s) => s.isOpen);
 
   // Use paginated message loading. Falls back to session.messages while loading.
@@ -1084,7 +1086,7 @@ function ConversationWithDebugPanel({
             {conversationContent}
           </ScrollArea>
         </Card>
-        <DebugPanel messages={messages} session={session} toolCalls={toolCalls} providerCalls={providerCalls} />
+        <DebugPanel messages={messages} session={session} toolCalls={toolCalls} providerCalls={providerCalls} runtimeEvents={runtimeEvents} />
       </div>
     );
   }
@@ -1100,7 +1102,7 @@ function ConversationWithDebugPanel({
       </ResizablePanel>
       <ResizableHandle withHandle />
       <ResizablePanel defaultSize={30} minSize={15}>
-        <DebugPanel messages={messages} session={session} toolCalls={toolCalls} providerCalls={providerCalls} />
+        <DebugPanel messages={messages} session={session} toolCalls={toolCalls} providerCalls={providerCalls} runtimeEvents={runtimeEvents} />
       </ResizablePanel>
     </ResizablePanelGroup>
   );

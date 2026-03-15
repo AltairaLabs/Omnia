@@ -40,6 +40,7 @@ type mockSessionStore struct {
 	stats         []session.SessionStatsUpdate
 	toolCalls     []session.ToolCall
 	providerCalls []session.ProviderCall
+	runtimeEvents []session.RuntimeEvent
 	appendFn      func(ctx context.Context, sessionID string, msg session.Message) error
 }
 
@@ -114,6 +115,25 @@ func (m *mockSessionStore) GetProviderCalls(_ context.Context, _ string) ([]sess
 	return nil, nil
 }
 
+func (m *mockSessionStore) RecordRuntimeEvent(_ context.Context, _ string, evt session.RuntimeEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.runtimeEvents = append(m.runtimeEvents, evt)
+	return nil
+}
+
+func (m *mockSessionStore) GetRuntimeEvents(_ context.Context, _ string) ([]session.RuntimeEvent, error) {
+	return nil, nil
+}
+
+func (m *mockSessionStore) getRuntimeEvents() []session.RuntimeEvent {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]session.RuntimeEvent, len(m.runtimeEvents))
+	copy(result, m.runtimeEvents)
+	return result
+}
+
 func (m *mockSessionStore) getToolCalls() []session.ToolCall {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -161,6 +181,24 @@ func (m *mockSessionStore) waitForProviderCalls(t *testing.T, count int) {
 		select {
 		case <-deadline:
 			t.Fatalf("timed out waiting for %d provider calls (got %d)", count, n)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func (m *mockSessionStore) waitForRuntimeEvents(t *testing.T, count int) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		m.mu.Lock()
+		n := len(m.runtimeEvents)
+		m.mu.Unlock()
+		if n >= count {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for %d runtime events (got %d)", count, n)
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
@@ -840,23 +878,20 @@ func TestOmniaEventStore_AppendPipelineStarted(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
+	store.waitForRuntimeEvents(t, 1)
 
-	if msg.Metadata["type"] != "pipeline.started" {
-		t.Errorf("expected type=pipeline.started, got %s", msg.Metadata["type"])
-	}
-	if msg.Role != session.RoleSystem {
-		t.Errorf("expected role=system, got %s", msg.Role)
+	// Should NOT produce a message — goes to runtime_events table.
+	msgs := store.getMessages()
+	if len(msgs) != 0 {
+		t.Errorf("expected no messages for pipeline event, got %d", len(msgs))
 	}
 
-	// Verify content has serialized data
-	var content map[string]interface{}
-	if err := json.Unmarshal([]byte(msg.Content), &content); err != nil {
-		t.Fatalf("failed to unmarshal content: %v", err)
+	evt := store.getRuntimeEvents()[0]
+	if evt.EventType != "pipeline.started" {
+		t.Errorf("expected eventType=pipeline.started, got %s", evt.EventType)
 	}
-	if content["MiddlewareCount"] != float64(3) {
-		t.Errorf("expected MiddlewareCount=3, got %v", content["MiddlewareCount"])
+	if evt.Data["MiddlewareCount"] != float64(3) {
+		t.Errorf("expected MiddlewareCount=3, got %v", evt.Data["MiddlewareCount"])
 	}
 }
 
@@ -881,11 +916,11 @@ func TestOmniaEventStore_AppendPipelineCompleted(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
+	store.waitForRuntimeEvents(t, 1)
+	evt := store.getRuntimeEvents()[0]
 
-	if msg.Metadata["type"] != "pipeline.completed" {
-		t.Errorf("expected type=pipeline.completed, got %s", msg.Metadata["type"])
+	if evt.EventType != "pipeline.completed" {
+		t.Errorf("expected eventType=pipeline.completed, got %s", evt.EventType)
 	}
 }
 
@@ -909,11 +944,11 @@ func TestOmniaEventStore_AppendValidationFailed(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
+	store.waitForRuntimeEvents(t, 1)
+	evt := store.getRuntimeEvents()[0]
 
-	if msg.Metadata["type"] != "validation.failed" {
-		t.Errorf("expected type=validation.failed, got %s", msg.Metadata["type"])
+	if evt.EventType != "validation.failed" {
+		t.Errorf("expected eventType=validation.failed, got %s", evt.EventType)
 	}
 }
 
@@ -937,9 +972,9 @@ func TestOmniaEventStore_AppendStageCompleted(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	if store.getMessages()[0].Metadata["type"] != "stage.completed" {
-		t.Errorf("expected type=stage.completed")
+	store.waitForRuntimeEvents(t, 1)
+	if store.getRuntimeEvents()[0].EventType != "stage.completed" {
+		t.Errorf("expected eventType=stage.completed")
 	}
 }
 
@@ -963,9 +998,9 @@ func TestOmniaEventStore_AppendWorkflowTransitioned(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	if store.getMessages()[0].Metadata["type"] != "workflow.transitioned" {
-		t.Errorf("expected type=workflow.transitioned")
+	store.waitForRuntimeEvents(t, 1)
+	if store.getRuntimeEvents()[0].EventType != "workflow.transitioned" {
+		t.Errorf("expected eventType=workflow.transitioned")
 	}
 }
 

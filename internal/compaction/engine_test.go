@@ -129,6 +129,12 @@ func (m *mockWarmStore) GetToolCalls(context.Context, string) ([]*session.ToolCa
 func (m *mockWarmStore) GetProviderCalls(context.Context, string) ([]*session.ProviderCall, error) {
 	return nil, nil
 }
+func (m *mockWarmStore) RecordRuntimeEvent(context.Context, string, *session.RuntimeEvent) error {
+	return nil
+}
+func (m *mockWarmStore) GetRuntimeEvents(context.Context, string) ([]*session.RuntimeEvent, error) {
+	return nil, nil
+}
 func (m *mockWarmStore) Ping(context.Context) error { return nil }
 func (m *mockWarmStore) Close() error               { return nil }
 

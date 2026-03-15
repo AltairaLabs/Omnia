@@ -446,6 +446,14 @@ func (m *mockWarmStore) GetProviderCalls(_ context.Context, _ string) ([]*sessio
 	return []*session.ProviderCall{}, nil
 }
 
+func (m *mockWarmStore) RecordRuntimeEvent(_ context.Context, _ string, _ *session.RuntimeEvent) error {
+	return nil
+}
+
+func (m *mockWarmStore) GetRuntimeEvents(_ context.Context, _ string) ([]*session.RuntimeEvent, error) {
+	return nil, nil
+}
+
 func (m *mockWarmStore) Ping(_ context.Context) error { return nil }
 
 func (m *mockWarmStore) Close() error {

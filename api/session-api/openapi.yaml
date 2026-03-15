@@ -26,6 +26,8 @@ tags:
     description: Tool call recording
   - name: provider-calls
     description: Provider call recording
+  - name: runtime-events
+    description: Runtime lifecycle event recording
   - name: eval-results
     description: Eval result operations
 
@@ -360,6 +362,52 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ProviderCall'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/sessions/{sessionID}/events:
+    post:
+      tags: [runtime-events]
+      summary: Record a runtime event for a session
+      operationId: recordRuntimeEvent
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeEvent'
+      responses:
+        '201':
+          description: Runtime event recorded
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/BodyTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [runtime-events]
+      summary: Get runtime events for a session
+      operationId: getRuntimeEvents
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      responses:
+        '200':
+          description: Runtime events list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RuntimeEvent'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -767,6 +815,29 @@ components:
           additionalProperties:
             type: string
         createdAt:
+          type: string
+          format: date-time
+
+    RuntimeEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+        durationMs:
+          type: integer
+          format: int64
+        errorMessage:
+          type: string
+        timestamp:
           type: string
           format: date-time
 

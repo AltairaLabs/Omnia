@@ -86,7 +86,7 @@ export { useProviderPreview } from "./use-provider-preview";
 export { useToolRegistryPreview } from "./use-tool-registry-preview";
 export type { ProviderPreviewResult } from "./use-provider-preview";
 export type { ToolRegistryPreviewResult } from "./use-tool-registry-preview";
-export { useSessions, useSessionDetail, useSessionSearch, useSessionMessages, useSessionAllMessages, useSessionToolCalls, useSessionProviderCalls, useSessionEvalResults } from "./use-sessions";
+export { useSessions, useSessionDetail, useSessionSearch, useSessionMessages, useSessionAllMessages, useSessionToolCalls, useSessionProviderCalls, useSessionRuntimeEvents, useSessionEvalResults } from "./use-sessions";
 export { useEvalSummary } from "./use-eval-quality";
 export type { EvalScoreSummary } from "./use-eval-quality";
 export { useEvalScoreTrends, useEvalMetrics, EVAL_TREND_RANGES } from "./use-eval-trends";

@@ -167,6 +167,14 @@ func (w *integrationWarmStore) GetProviderCalls(_ context.Context, _ string) ([]
 	return []*session.ProviderCall{}, nil
 }
 
+func (w *integrationWarmStore) RecordRuntimeEvent(_ context.Context, _ string, _ *session.RuntimeEvent) error {
+	return nil
+}
+
+func (w *integrationWarmStore) GetRuntimeEvents(_ context.Context, _ string) ([]*session.RuntimeEvent, error) {
+	return []*session.RuntimeEvent{}, nil
+}
+
 func (w *integrationWarmStore) Ping(context.Context) error { return nil }
 func (w *integrationWarmStore) Close() error               { return nil }
 

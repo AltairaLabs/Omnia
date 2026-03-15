@@ -8,17 +8,18 @@ import { RawTab } from "./raw-tab";
 import { Button } from "@/components/ui/button";
 import { ChevronUp, ChevronDown, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Message, Session, ToolCall, ProviderCall } from "@/types/session";
+import type { Message, Session, ToolCall, ProviderCall, RuntimeEvent } from "@/types/session";
 
 interface DebugPanelProps {
   readonly messages: Message[];
   readonly session: Session;
   readonly toolCalls?: ToolCall[];
   readonly providerCalls?: ProviderCall[];
+  readonly runtimeEvents?: RuntimeEvent[];
   readonly className?: string;
 }
 
-export function DebugPanel({ messages, session, toolCalls, providerCalls, className }: DebugPanelProps) {
+export function DebugPanel({ messages, session, toolCalls, providerCalls, runtimeEvents, className }: DebugPanelProps) {
   const isOpen = useDebugPanelStore((s) => s.isOpen);
   const activeTab = useDebugPanelStore((s) => s.activeTab);
   const toggle = useDebugPanelStore((s) => s.toggle);
@@ -62,7 +63,7 @@ export function DebugPanel({ messages, session, toolCalls, providerCalls, classN
         </div>
       </div>
       <div className="flex-1 min-h-0">
-        {activeTab === "timeline" && <TimelineTab messages={messages} toolCalls={toolCalls} providerCalls={providerCalls} />}
+        {activeTab === "timeline" && <TimelineTab messages={messages} toolCalls={toolCalls} providerCalls={providerCalls} runtimeEvents={runtimeEvents} />}
         {activeTab === "toolcalls" && <ToolCallsTab toolCalls={toolCalls || []} />}
         {activeTab === "raw" && <RawTab session={session} />}
       </div>

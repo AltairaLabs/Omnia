@@ -249,6 +249,14 @@ func (m *mockWarmStore) GetProviderCalls(_ context.Context, sessionID string) ([
 	return []*session.ProviderCall{}, nil
 }
 
+func (m *mockWarmStore) RecordRuntimeEvent(_ context.Context, _ string, _ *session.RuntimeEvent) error {
+	return nil
+}
+
+func (m *mockWarmStore) GetRuntimeEvents(_ context.Context, _ string) ([]*session.RuntimeEvent, error) {
+	return nil, nil
+}
+
 type mockColdArchive struct {
 	sessions map[string]*session.Session
 }
