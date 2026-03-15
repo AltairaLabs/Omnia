@@ -18,6 +18,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -164,6 +165,61 @@ func scanMessage(row pgx.Row) (*session.Message, error) {
 		m.OutputTokens = *outputTokens
 	}
 	return &m, nil
+}
+
+func scanToolCall(row pgx.Row) (*session.ToolCall, error) {
+	var tc session.ToolCall
+	var durationMs *int64
+	var errorMessage *string
+	var argsJSON, resultJSON, labelsJSON []byte
+
+	err := row.Scan(
+		&tc.ID, &tc.SessionID, &tc.CallID, &tc.Name,
+		&argsJSON, &resultJSON,
+		&tc.Status, &durationMs, &tc.Execution,
+		&errorMessage, &labelsJSON, &tc.CreatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: scan tool call: %w", err)
+	}
+
+	if len(argsJSON) > 0 {
+		_ = json.Unmarshal(argsJSON, &tc.Arguments)
+	}
+	if len(resultJSON) > 0 {
+		_ = json.Unmarshal(resultJSON, &tc.Result)
+	}
+	if durationMs != nil {
+		tc.DurationMs = *durationMs
+	}
+	tc.ErrorMessage = pgutil.DerefString(errorMessage)
+	tc.Labels = pgutil.UnmarshalJSONB(labelsJSON)
+	return &tc, nil
+}
+
+func scanProviderCall(row pgx.Row) (*session.ProviderCall, error) {
+	var pc session.ProviderCall
+	var durationMs *int64
+	var finishReason, errorMessage *string
+	var labelsJSON []byte
+
+	err := row.Scan(
+		&pc.ID, &pc.SessionID, &pc.Provider, &pc.Model,
+		&pc.Status, &pc.InputTokens, &pc.OutputTokens, &pc.CachedTokens,
+		&pc.CostUSD, &durationMs, &finishReason, &pc.ToolCallCount,
+		&errorMessage, &labelsJSON, &pc.CreatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: scan provider call: %w", err)
+	}
+
+	if durationMs != nil {
+		pc.DurationMs = *durationMs
+	}
+	pc.FinishReason = pgutil.DerefString(finishReason)
+	pc.ErrorMessage = pgutil.DerefString(errorMessage)
+	pc.Labels = pgutil.UnmarshalJSONB(labelsJSON)
+	return &pc, nil
 }
 
 // --- helper: session exists check -------------------------------------------
@@ -518,6 +574,136 @@ func (p *Provider) UpdateSessionStats(ctx context.Context, sessionID string, upd
 	return nil
 }
 
+// --- Tool call and provider call management ---------------------------------
+
+func (p *Provider) RecordToolCall(ctx context.Context, sessionID string, tc *session.ToolCall) error {
+	if err := p.sessionExists(ctx, sessionID); err != nil {
+		return err
+	}
+
+	query := `INSERT INTO tool_calls (id, session_id, call_id, name, arguments, result, status, duration_ms, execution, error_message, labels, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		ON CONFLICT (id, created_at) DO UPDATE SET
+			result = EXCLUDED.result,
+			status = EXCLUDED.status,
+			duration_ms = EXCLUDED.duration_ms,
+			error_message = EXCLUDED.error_message,
+			labels = EXCLUDED.labels`
+
+	argsJSON, _ := json.Marshal(tc.Arguments)
+	var resultJSON []byte
+	if tc.Result != nil {
+		resultJSON, _ = json.Marshal(tc.Result)
+	}
+
+	_, err := p.pool.Exec(ctx, query,
+		tc.ID, sessionID, tc.CallID, tc.Name,
+		argsJSON, resultJSON,
+		string(tc.Status), pgutil.NullInt64(tc.DurationMs),
+		string(tc.Execution), pgutil.NullString(tc.ErrorMessage),
+		pgutil.MarshalJSONB(tc.Labels), tc.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("postgres: record tool call: %w", err)
+	}
+	return nil
+}
+
+func (p *Provider) RecordProviderCall(ctx context.Context, sessionID string, pc *session.ProviderCall) error {
+	if err := p.sessionExists(ctx, sessionID); err != nil {
+		return err
+	}
+
+	query := `INSERT INTO provider_calls (id, session_id, provider, model, status, input_tokens, output_tokens, cached_tokens, cost_usd, duration_ms, finish_reason, tool_call_count, error_message, labels, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		ON CONFLICT (id, created_at) DO UPDATE SET
+			status = EXCLUDED.status,
+			input_tokens = EXCLUDED.input_tokens,
+			output_tokens = EXCLUDED.output_tokens,
+			cached_tokens = EXCLUDED.cached_tokens,
+			cost_usd = EXCLUDED.cost_usd,
+			duration_ms = EXCLUDED.duration_ms,
+			finish_reason = EXCLUDED.finish_reason,
+			tool_call_count = EXCLUDED.tool_call_count,
+			error_message = EXCLUDED.error_message,
+			labels = EXCLUDED.labels`
+
+	_, err := p.pool.Exec(ctx, query,
+		pc.ID, sessionID, pc.Provider, pc.Model,
+		string(pc.Status), pc.InputTokens, pc.OutputTokens, pc.CachedTokens,
+		pc.CostUSD, pgutil.NullInt64(pc.DurationMs),
+		pgutil.NullString(pc.FinishReason), pc.ToolCallCount,
+		pgutil.NullString(pc.ErrorMessage), pgutil.MarshalJSONB(pc.Labels),
+		pc.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("postgres: record provider call: %w", err)
+	}
+	return nil
+}
+
+func (p *Provider) GetToolCalls(ctx context.Context, sessionID string) ([]*session.ToolCall, error) {
+	if err := p.sessionExists(ctx, sessionID); err != nil {
+		return nil, err
+	}
+
+	query := `SELECT id, session_id, call_id, name, arguments, result, status, duration_ms, execution, error_message, labels, created_at
+		FROM tool_calls WHERE session_id=$1 ORDER BY created_at ASC`
+
+	rows, err := p.pool.Query(ctx, query, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: get tool calls: %w", err)
+	}
+	defer rows.Close()
+
+	var calls []*session.ToolCall
+	for rows.Next() {
+		tc, err := scanToolCall(rows)
+		if err != nil {
+			return nil, err
+		}
+		calls = append(calls, tc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres: iterate tool calls: %w", err)
+	}
+	if calls == nil {
+		calls = []*session.ToolCall{}
+	}
+	return calls, nil
+}
+
+func (p *Provider) GetProviderCalls(ctx context.Context, sessionID string) ([]*session.ProviderCall, error) {
+	if err := p.sessionExists(ctx, sessionID); err != nil {
+		return nil, err
+	}
+
+	query := `SELECT id, session_id, provider, model, status, input_tokens, output_tokens, cached_tokens, cost_usd, duration_ms, finish_reason, tool_call_count, error_message, labels, created_at
+		FROM provider_calls WHERE session_id=$1 ORDER BY created_at ASC`
+
+	rows, err := p.pool.Query(ctx, query, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: get provider calls: %w", err)
+	}
+	defer rows.Close()
+
+	var calls []*session.ProviderCall
+	for rows.Next() {
+		pc, err := scanProviderCall(rows)
+		if err != nil {
+			return nil, err
+		}
+		calls = append(calls, pc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres: iterate provider calls: %w", err)
+	}
+	if calls == nil {
+		calls = []*session.ProviderCall{}
+	}
+	return calls, nil
+}
+
 // --- Artifact management ----------------------------------------------------
 
 func (p *Provider) SaveArtifact(ctx context.Context, artifact *session.Artifact) error {
@@ -618,7 +804,7 @@ func collectArtifacts(rows pgx.Rows) ([]*session.Artifact, error) {
 
 // --- Partition management ---------------------------------------------------
 
-var partitionTables = []string{"sessions", "messages", "tool_calls", "message_artifacts", "audit_log"}
+var partitionTables = []string{"sessions", "messages", "tool_calls", "provider_calls", "message_artifacts", "audit_log"}
 
 func (p *Provider) CreatePartition(ctx context.Context, date time.Time) error {
 	// Align to ISO week boundary (Monday).
@@ -670,7 +856,7 @@ func (p *Provider) DropPartition(ctx context.Context, date time.Time) error {
 	}
 
 	// Drop all table partitions in reverse dependency order.
-	for _, table := range []string{"audit_log", "message_artifacts", "tool_calls", "messages", "sessions"} {
+	for _, table := range []string{"audit_log", "message_artifacts", "provider_calls", "tool_calls", "messages", "sessions"} {
 		name := pgx.Identifier{table + "_" + suffix}.Sanitize()
 		_, err := tx.Exec(ctx, "DROP TABLE IF EXISTS "+name)
 		if err != nil {

@@ -53,3 +53,6 @@
 - Runtime gRPC server (default `localhost:9000`)
 - Session API HTTP endpoint (configurable via `SESSION_API_URL`)
 - Media storage provider (optional: S3/GCS/Azure/local)
+
+## Migration Note
+The hand-written `internal/session/httpclient/` client will migrate to the generated `pkg/sessionapi/` client in a future PR.

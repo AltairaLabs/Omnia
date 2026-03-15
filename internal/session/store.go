@@ -199,6 +199,102 @@ type SessionStatsUpdate struct {
 	SetEndedAt      time.Time     // zero means no change
 }
 
+// ToolCallStatus represents the lifecycle state of a tool call.
+type ToolCallStatus string
+
+const (
+	// ToolCallStatusPending indicates the tool call is in progress.
+	ToolCallStatusPending ToolCallStatus = "pending"
+	// ToolCallStatusSuccess indicates the tool call completed successfully.
+	ToolCallStatusSuccess ToolCallStatus = "success"
+	// ToolCallStatusError indicates the tool call failed.
+	ToolCallStatusError ToolCallStatus = "error"
+)
+
+// ToolCallExecution indicates where the tool call is executed.
+type ToolCallExecution string
+
+const (
+	// ToolCallExecutionServer indicates the tool runs on the server (runtime).
+	ToolCallExecutionServer ToolCallExecution = "server"
+	// ToolCallExecutionClient indicates the tool runs on the client (browser).
+	ToolCallExecutionClient ToolCallExecution = "client"
+)
+
+// ToolCall represents a single tool invocation within a session.
+type ToolCall struct {
+	// ID is the unique identifier for this tool call record.
+	ID string `json:"id"`
+	// SessionID links this tool call to its parent session.
+	SessionID string `json:"sessionId"`
+	// CallID is the provider-assigned tool call identifier.
+	CallID string `json:"callId"`
+	// Name is the tool name.
+	Name string `json:"name"`
+	// Arguments contains the tool input parameters.
+	Arguments map[string]any `json:"arguments,omitempty"`
+	// Result contains the tool output (nil while pending).
+	Result any `json:"result,omitempty"`
+	// Status is the lifecycle state of the tool call.
+	Status ToolCallStatus `json:"status"`
+	// DurationMs is the execution duration in milliseconds.
+	DurationMs int64 `json:"durationMs,omitempty"`
+	// Execution indicates where the tool runs (server or client).
+	Execution ToolCallExecution `json:"execution,omitempty"`
+	// ErrorMessage contains the error details when status is error.
+	ErrorMessage string `json:"errorMessage,omitempty"`
+	// Labels contains arbitrary key-value pairs for categorization.
+	Labels map[string]string `json:"labels,omitempty"`
+	// CreatedAt is when the tool call was initiated.
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// ProviderCallStatus represents the lifecycle state of a provider call.
+type ProviderCallStatus string
+
+const (
+	// ProviderCallStatusPending indicates the provider call is in progress.
+	ProviderCallStatusPending ProviderCallStatus = "pending"
+	// ProviderCallStatusCompleted indicates the provider call completed.
+	ProviderCallStatusCompleted ProviderCallStatus = "completed"
+	// ProviderCallStatusFailed indicates the provider call failed.
+	ProviderCallStatusFailed ProviderCallStatus = "failed"
+)
+
+// ProviderCall represents a single LLM provider invocation within a session.
+type ProviderCall struct {
+	// ID is the unique identifier for this provider call record.
+	ID string `json:"id"`
+	// SessionID links this provider call to its parent session.
+	SessionID string `json:"sessionId"`
+	// Provider is the LLM provider name (e.g., "anthropic", "openai").
+	Provider string `json:"provider"`
+	// Model is the model identifier (e.g., "claude-sonnet-4-20250514").
+	Model string `json:"model"`
+	// Status is the lifecycle state of the provider call.
+	Status ProviderCallStatus `json:"status"`
+	// InputTokens is the number of input tokens consumed.
+	InputTokens int64 `json:"inputTokens,omitempty"`
+	// OutputTokens is the number of output tokens produced.
+	OutputTokens int64 `json:"outputTokens,omitempty"`
+	// CachedTokens is the number of cached input tokens.
+	CachedTokens int64 `json:"cachedTokens,omitempty"`
+	// CostUSD is the estimated cost in USD.
+	CostUSD float64 `json:"costUsd,omitempty"`
+	// DurationMs is the call duration in milliseconds.
+	DurationMs int64 `json:"durationMs,omitempty"`
+	// FinishReason is the provider-reported finish reason.
+	FinishReason string `json:"finishReason,omitempty"`
+	// ToolCallCount is the number of tool calls in the response.
+	ToolCallCount int32 `json:"toolCallCount,omitempty"`
+	// ErrorMessage contains the error details when status is failed.
+	ErrorMessage string `json:"errorMessage,omitempty"`
+	// Labels contains arbitrary key-value pairs for categorization.
+	Labels map[string]string `json:"labels,omitempty"`
+	// CreatedAt is when the provider call was initiated.
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 // Store defines the interface for session storage.
 type Store interface {
 	// CreateSession creates a new session and returns its ID.
@@ -238,6 +334,24 @@ type Store interface {
 	// Returns ErrSessionNotFound if the session does not exist.
 	// Returns ErrSessionExpired if the session has expired.
 	UpdateSessionStats(ctx context.Context, sessionID string, update SessionStatsUpdate) error
+
+	// RecordToolCall records or updates a tool call for the session.
+	// Uses upsert semantics: if a record with the same ID exists, it is updated.
+	// Returns ErrSessionNotFound if the session does not exist.
+	RecordToolCall(ctx context.Context, sessionID string, tc ToolCall) error
+
+	// RecordProviderCall records or updates a provider call for the session.
+	// Uses upsert semantics: if a record with the same ID exists, it is updated.
+	// Returns ErrSessionNotFound if the session does not exist.
+	RecordProviderCall(ctx context.Context, sessionID string, pc ProviderCall) error
+
+	// GetToolCalls retrieves all tool calls for a session ordered by created_at.
+	// Returns ErrSessionNotFound if the session does not exist.
+	GetToolCalls(ctx context.Context, sessionID string) ([]ToolCall, error)
+
+	// GetProviderCalls retrieves all provider calls for a session ordered by created_at.
+	// Returns ErrSessionNotFound if the session does not exist.
+	GetProviderCalls(ctx context.Context, sessionID string) ([]ProviderCall, error)
 
 	// Close releases any resources held by the store.
 	Close() error

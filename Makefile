@@ -332,8 +332,20 @@ generate-websocket-types: ## Generate TypeScript types from Go WebSocket protoco
 generate-dashboard-api: ## Generate TypeScript API client from OpenAPI spec
 	cd dashboard && npm run generate:api
 
+.PHONY: generate-session-api-client
+generate-session-api-client: oapi-codegen ## Generate Go client from Session API OpenAPI spec
+	"$(OAPI_CODEGEN)" -package sessionapi -generate types,client -o pkg/sessionapi/client.gen.go api/session-api/openapi.yaml
+
+.PHONY: generate-session-api-types
+generate-session-api-types: ## Generate TypeScript types from Session API OpenAPI spec
+	cd dashboard && npm run generate:session-api
+
+.PHONY: validate-session-api-spec
+validate-session-api-spec: oapi-codegen ## Validate Session API OpenAPI spec
+	"$(OAPI_CODEGEN)" -package sessionapi -generate types -o /dev/null api/session-api/openapi.yaml
+
 .PHONY: generate-all
-generate-all: manifests generate generate-proto generate-proto-ts sync-chart-crds generate-dashboard-types generate-websocket-types generate-dashboard-api ## Run all code generation
+generate-all: manifests generate generate-proto generate-proto-ts sync-chart-crds generate-dashboard-types generate-websocket-types generate-dashboard-api generate-session-api-client generate-session-api-types ## Run all code generation
 	@echo "All code generation complete."
 
 ##@ Local Development (Tilt)
@@ -507,6 +519,7 @@ PROTOC ?= protoc
 PROTOC_GEN_GO ?= $(LOCALBIN)/protoc-gen-go
 PROTOC_GEN_GO_GRPC ?= $(LOCALBIN)/protoc-gen-go-grpc
 GOTESTSUM ?= $(LOCALBIN)/gotestsum
+OAPI_CODEGEN ?= $(LOCALBIN)/oapi-codegen
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.7.1
@@ -514,6 +527,7 @@ CONTROLLER_TOOLS_VERSION ?= v0.19.0
 PROTOC_GEN_GO_VERSION ?= v1.36.6
 PROTOC_GEN_GO_GRPC_VERSION ?= v1.5.1
 GOTESTSUM_VERSION ?= v1.13.0
+OAPI_CODEGEN_VERSION ?= v2.4.1
 
 #ENVTEST_VERSION is the version of controller-runtime release branch to fetch the envtest setup script (i.e. release-0.20)
 ENVTEST_VERSION ?= $(shell v='$(call gomodver,sigs.k8s.io/controller-runtime)'; \
@@ -568,6 +582,11 @@ $(PROTOC_GEN_GO_GRPC): $(LOCALBIN)
 gotestsum: $(GOTESTSUM) ## Download gotestsum locally if necessary.
 $(GOTESTSUM): $(LOCALBIN)
 	$(call go-install-tool,$(GOTESTSUM),gotest.tools/gotestsum,$(GOTESTSUM_VERSION))
+
+.PHONY: oapi-codegen
+oapi-codegen: $(OAPI_CODEGEN) ## Download oapi-codegen locally if necessary.
+$(OAPI_CODEGEN): $(LOCALBIN)
+	$(call go-install-tool,$(OAPI_CODEGEN),github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen,$(OAPI_CODEGEN_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary

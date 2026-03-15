@@ -29,15 +29,19 @@ import (
 // This implementation is thread-safe and suitable for testing
 // and single-instance development deployments.
 type MemoryStore struct {
-	mu       sync.RWMutex
-	sessions map[string]*Session
-	closed   bool
+	mu            sync.RWMutex
+	sessions      map[string]*Session
+	closed        bool
+	toolCalls     map[string][]ToolCall     // keyed by sessionID
+	providerCalls map[string][]ProviderCall // keyed by sessionID
 }
 
 // NewMemoryStore creates a new in-memory session store.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		sessions: make(map[string]*Session),
+		sessions:      make(map[string]*Session),
+		toolCalls:     make(map[string][]ToolCall),
+		providerCalls: make(map[string][]ProviderCall),
 	}
 }
 
@@ -124,6 +128,8 @@ func (m *MemoryStore) DeleteSession(ctx context.Context, sessionID string) error
 	}
 
 	delete(m.sessions, sessionID)
+	delete(m.toolCalls, sessionID)
+	delete(m.providerCalls, sessionID)
 	return nil
 }
 
@@ -285,6 +291,8 @@ func (m *MemoryStore) Close() error {
 
 	m.closed = true
 	m.sessions = nil
+	m.toolCalls = nil
+	m.providerCalls = nil
 	return nil
 }
 
@@ -327,6 +335,136 @@ func (m *MemoryStore) UpdateSessionStats(ctx context.Context, sessionID string, 
 	session.UpdatedAt = time.Now()
 
 	return nil
+}
+
+// RecordToolCall records or updates a tool call for the session.
+func (m *MemoryStore) RecordToolCall(ctx context.Context, sessionID string, tc ToolCall) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if sessionID == "" {
+		return ErrInvalidSessionID
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		return ErrSessionNotFound
+	}
+	if session.IsExpired() {
+		return ErrSessionExpired
+	}
+
+	// Upsert: find existing by ID and replace, or append.
+	calls := m.toolCalls[sessionID]
+	found := false
+	for i, existing := range calls {
+		if existing.ID == tc.ID {
+			calls[i] = tc
+			found = true
+			break
+		}
+	}
+	if !found {
+		calls = append(calls, tc)
+		// Increment tool call count on initial insert.
+		session.ToolCallCount++
+	}
+	m.toolCalls[sessionID] = calls
+	session.UpdatedAt = time.Now()
+
+	return nil
+}
+
+// RecordProviderCall records or updates a provider call for the session.
+func (m *MemoryStore) RecordProviderCall(ctx context.Context, sessionID string, pc ProviderCall) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if sessionID == "" {
+		return ErrInvalidSessionID
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		return ErrSessionNotFound
+	}
+	if session.IsExpired() {
+		return ErrSessionExpired
+	}
+
+	// Upsert: find existing by ID and replace, or append.
+	calls := m.providerCalls[sessionID]
+	found := false
+	for i, existing := range calls {
+		if existing.ID == pc.ID {
+			// On completion update, apply token/cost deltas to session.
+			if existing.Status == ProviderCallStatusPending && pc.Status == ProviderCallStatusCompleted {
+				session.TotalInputTokens += pc.InputTokens
+				session.TotalOutputTokens += pc.OutputTokens
+				session.EstimatedCostUSD += pc.CostUSD
+			}
+			calls[i] = pc
+			found = true
+			break
+		}
+	}
+	if !found {
+		calls = append(calls, pc)
+	}
+	m.providerCalls[sessionID] = calls
+	session.UpdatedAt = time.Now()
+
+	return nil
+}
+
+// GetToolCalls retrieves all tool calls for a session ordered by created_at.
+func (m *MemoryStore) GetToolCalls(ctx context.Context, sessionID string) ([]ToolCall, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if sessionID == "" {
+		return nil, ErrInvalidSessionID
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if _, exists := m.sessions[sessionID]; !exists {
+		return nil, ErrSessionNotFound
+	}
+
+	calls := m.toolCalls[sessionID]
+	result := make([]ToolCall, len(calls))
+	copy(result, calls)
+	return result, nil
+}
+
+// GetProviderCalls retrieves all provider calls for a session ordered by created_at.
+func (m *MemoryStore) GetProviderCalls(ctx context.Context, sessionID string) ([]ProviderCall, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if sessionID == "" {
+		return nil, ErrInvalidSessionID
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if _, exists := m.sessions[sessionID]; !exists {
+		return nil, ErrSessionNotFound
+	}
+
+	calls := m.providerCalls[sessionID]
+	result := make([]ProviderCall, len(calls))
+	copy(result, calls)
+	return result, nil
 }
 
 // CleanupExpired removes all expired sessions.

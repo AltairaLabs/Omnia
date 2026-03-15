@@ -26,6 +26,7 @@
     "test:e2e:multimodal": "playwright test --config=playwright.multimodal.config.ts",
     "test:e2e:multimodal:coverage": "COLLECT_COVERAGE=true playwright test --config=playwright.multimodal.config.ts",
     "generate:api": "openapi-typescript ../api/openapi/openapi.yaml -o src/lib/api/schema.d.ts",
+    "generate:session-api": "openapi-typescript ../api/session-api/openapi.yaml -o src/lib/api/session-api-schema.d.ts && sed -i '' '1s/^/\\/* eslint-disable sonarjs\\/class-name *\\/\\n/' src/lib/api/session-api-schema.d.ts",
     "generate:proto": "./scripts/generate-proto.sh",
     "generate:api-key": "node scripts/generate-api-key.mjs",
     "screenshots": "playwright test --project=screenshots",

@@ -36,3 +36,6 @@
 - Session API (result storage)
 - LLM provider (for judge evals)
 - PromptKit SDK (eval execution)
+
+## Migration Note
+The hand-written `ee/pkg/evals/session_api_client.go` will migrate to the generated `pkg/sessionapi/` client in a future PR.

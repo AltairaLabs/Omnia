@@ -151,8 +151,24 @@ func (w *integrationWarmStore) GetSessionArtifacts(context.Context, string) ([]*
 	return nil, nil
 }
 func (w *integrationWarmStore) DeleteSessionArtifacts(context.Context, string) error { return nil }
-func (w *integrationWarmStore) Ping(context.Context) error                           { return nil }
-func (w *integrationWarmStore) Close() error                                         { return nil }
+func (w *integrationWarmStore) RecordToolCall(_ context.Context, _ string, _ *session.ToolCall) error {
+	return nil
+}
+
+func (w *integrationWarmStore) RecordProviderCall(_ context.Context, _ string, _ *session.ProviderCall) error {
+	return nil
+}
+
+func (w *integrationWarmStore) GetToolCalls(_ context.Context, _ string) ([]*session.ToolCall, error) {
+	return []*session.ToolCall{}, nil
+}
+
+func (w *integrationWarmStore) GetProviderCalls(_ context.Context, _ string) ([]*session.ProviderCall, error) {
+	return []*session.ProviderCall{}, nil
+}
+
+func (w *integrationWarmStore) Ping(context.Context) error { return nil }
+func (w *integrationWarmStore) Close() error               { return nil }
 
 // getSessionCount returns the number of sessions in the warm store.
 func (w *integrationWarmStore) getSessionCount() int {

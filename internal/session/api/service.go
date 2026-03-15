@@ -357,6 +357,54 @@ func (s *SessionService) RefreshTTL(ctx context.Context, sessionID string, ttl t
 	return warm.UpdateSession(ctx, sess)
 }
 
+// RecordToolCall records a tool call via the warm store.
+func (s *SessionService) RecordToolCall(ctx context.Context, sessionID string, tc *session.ToolCall) error {
+	if sessionID == "" {
+		return ErrMissingSessionID
+	}
+	warm, err := s.registry.WarmStore()
+	if err != nil {
+		return ErrWarmStoreRequired
+	}
+	return warm.RecordToolCall(ctx, sessionID, tc)
+}
+
+// RecordProviderCall records a provider call via the warm store.
+func (s *SessionService) RecordProviderCall(ctx context.Context, sessionID string, pc *session.ProviderCall) error {
+	if sessionID == "" {
+		return ErrMissingSessionID
+	}
+	warm, err := s.registry.WarmStore()
+	if err != nil {
+		return ErrWarmStoreRequired
+	}
+	return warm.RecordProviderCall(ctx, sessionID, pc)
+}
+
+// GetToolCalls retrieves all tool calls for a session via the warm store.
+func (s *SessionService) GetToolCalls(ctx context.Context, sessionID string) ([]*session.ToolCall, error) {
+	if sessionID == "" {
+		return nil, ErrMissingSessionID
+	}
+	warm, err := s.registry.WarmStore()
+	if err != nil {
+		return nil, ErrWarmStoreRequired
+	}
+	return warm.GetToolCalls(ctx, sessionID)
+}
+
+// GetProviderCalls retrieves all provider calls for a session via the warm store.
+func (s *SessionService) GetProviderCalls(ctx context.Context, sessionID string) ([]*session.ProviderCall, error) {
+	if sessionID == "" {
+		return nil, ErrMissingSessionID
+	}
+	warm, err := s.registry.WarmStore()
+	if err != nil {
+		return nil, ErrWarmStoreRequired
+	}
+	return warm.GetProviderCalls(ctx, sessionID)
+}
+
 // getFromHot attempts to retrieve a session from the hot cache.
 func (s *SessionService) getFromHot(ctx context.Context, sessionID string) (*session.Session, error) {
 	hot, err := s.registry.HotCache()

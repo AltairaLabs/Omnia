@@ -221,6 +221,34 @@ func (m *mockWarmStore) DeleteSessionArtifacts(_ context.Context, _ string) erro
 func (m *mockWarmStore) Ping(_ context.Context) error                             { return nil }
 func (m *mockWarmStore) Close() error                                             { return nil }
 
+func (m *mockWarmStore) RecordToolCall(_ context.Context, sessionID string, _ *session.ToolCall) error {
+	if _, ok := m.sessions[sessionID]; !ok {
+		return session.ErrSessionNotFound
+	}
+	return nil
+}
+
+func (m *mockWarmStore) RecordProviderCall(_ context.Context, sessionID string, _ *session.ProviderCall) error {
+	if _, ok := m.sessions[sessionID]; !ok {
+		return session.ErrSessionNotFound
+	}
+	return nil
+}
+
+func (m *mockWarmStore) GetToolCalls(_ context.Context, sessionID string) ([]*session.ToolCall, error) {
+	if _, ok := m.sessions[sessionID]; !ok {
+		return nil, session.ErrSessionNotFound
+	}
+	return []*session.ToolCall{}, nil
+}
+
+func (m *mockWarmStore) GetProviderCalls(_ context.Context, sessionID string) ([]*session.ProviderCall, error) {
+	if _, ok := m.sessions[sessionID]; !ok {
+		return nil, session.ErrSessionNotFound
+	}
+	return []*session.ProviderCall{}, nil
+}
+
 type mockColdArchive struct {
 	sessions map[string]*session.Session
 }
@@ -2579,4 +2607,139 @@ func TestTraceLogMiddleware(t *testing.T) {
 			t.Errorf("expected no logctx values without span, got %v", values)
 		}
 	})
+}
+
+func TestHandleRecordToolCall(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions[testSessionID] = &session.Session{
+		ID: testSessionID, AgentName: "a", Namespace: "n", Status: session.SessionStatusActive,
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"id":"tc-1","name":"weather","status":"pending","execution":"server"}`
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/sessions/"+testSessionID+"/tool-calls",
+		strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusCreated)
+	}
+}
+
+func TestHandleGetToolCalls(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions[testSessionID] = &session.Session{
+		ID: testSessionID, AgentName: "a", Namespace: "n", Status: session.SessionStatusActive,
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions/"+testSessionID+"/tool-calls", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+}
+
+func TestHandleRecordProviderCall(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions[testSessionID] = &session.Session{
+		ID: testSessionID, AgentName: "a", Namespace: "n", Status: session.SessionStatusActive,
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"id":"pc-1","provider":"anthropic","model":"claude-sonnet-4-20250514","status":"pending"}`
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/sessions/"+testSessionID+"/provider-calls",
+		strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusCreated)
+	}
+}
+
+func TestHandleGetProviderCalls(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions[testSessionID] = &session.Session{
+		ID: testSessionID, AgentName: "a", Namespace: "n", Status: session.SessionStatusActive,
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions/"+testSessionID+"/provider-calls", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+}
+
+func TestHandleRecordToolCall_InvalidSessionID(t *testing.T) {
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(newMockWarmStore())
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/sessions/not-a-uuid/tool-calls",
+		strings.NewReader(`{}`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleRecordToolCall_SessionNotFound(t *testing.T) {
+	warm := newMockWarmStore()
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/sessions/"+testSessionID+"/tool-calls",
+		strings.NewReader(`{"id":"tc-1","name":"weather"}`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusNotFound)
+	}
 }

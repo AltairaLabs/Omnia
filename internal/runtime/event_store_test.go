@@ -35,10 +35,12 @@ import (
 
 // mockSessionStore implements session.Store for testing.
 type mockSessionStore struct {
-	mu       sync.Mutex
-	messages []session.Message
-	stats    []session.SessionStatsUpdate
-	appendFn func(ctx context.Context, sessionID string, msg session.Message) error
+	mu            sync.Mutex
+	messages      []session.Message
+	stats         []session.SessionStatsUpdate
+	toolCalls     []session.ToolCall
+	providerCalls []session.ProviderCall
+	appendFn      func(ctx context.Context, sessionID string, msg session.Message) error
 }
 
 func (m *mockSessionStore) CreateSession(_ context.Context, _ session.CreateSessionOptions) (*session.Session, error) {
@@ -88,6 +90,80 @@ func (m *mockSessionStore) UpdateSessionStats(_ context.Context, _ string, updat
 
 func (m *mockSessionStore) Close() error {
 	return nil
+}
+
+func (m *mockSessionStore) RecordToolCall(_ context.Context, _ string, tc session.ToolCall) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.toolCalls = append(m.toolCalls, tc)
+	return nil
+}
+
+func (m *mockSessionStore) RecordProviderCall(_ context.Context, _ string, pc session.ProviderCall) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.providerCalls = append(m.providerCalls, pc)
+	return nil
+}
+
+func (m *mockSessionStore) GetToolCalls(_ context.Context, _ string) ([]session.ToolCall, error) {
+	return nil, nil
+}
+
+func (m *mockSessionStore) GetProviderCalls(_ context.Context, _ string) ([]session.ProviderCall, error) {
+	return nil, nil
+}
+
+func (m *mockSessionStore) getToolCalls() []session.ToolCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]session.ToolCall, len(m.toolCalls))
+	copy(result, m.toolCalls)
+	return result
+}
+
+func (m *mockSessionStore) getProviderCalls() []session.ProviderCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]session.ProviderCall, len(m.providerCalls))
+	copy(result, m.providerCalls)
+	return result
+}
+
+func (m *mockSessionStore) waitForToolCalls(t *testing.T, count int) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		m.mu.Lock()
+		n := len(m.toolCalls)
+		m.mu.Unlock()
+		if n >= count {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for %d tool calls (got %d)", count, n)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func (m *mockSessionStore) waitForProviderCalls(t *testing.T, count int) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		m.mu.Lock()
+		n := len(m.providerCalls)
+		m.mu.Unlock()
+		if n >= count {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for %d provider calls (got %d)", count, n)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
 
 func (m *mockSessionStore) getMessages() []session.Message {
@@ -191,10 +267,17 @@ func TestOmniaEventStore_AppendToolCallStarted(t *testing.T) {
 		t.Errorf("expected tool name weather, got %v", content["name"])
 	}
 
-	store.waitForStats(t, 1)
-	stats := store.getStats()
-	if stats[0].AddToolCalls != 1 {
-		t.Errorf("expected AddToolCalls=1, got %d", stats[0].AddToolCalls)
+	// Tool call counter is now handled by RecordToolCall, not stats.
+	store.waitForToolCalls(t, 1)
+	tcs := store.getToolCalls()
+	if tcs[0].Name != "weather" {
+		t.Errorf("expected tool call name weather, got %s", tcs[0].Name)
+	}
+	if tcs[0].Status != session.ToolCallStatusPending {
+		t.Errorf("expected tool call status pending, got %s", tcs[0].Status)
+	}
+	if tcs[0].Execution != session.ToolCallExecutionServer {
+		t.Errorf("expected execution server, got %s", tcs[0].Execution)
 	}
 }
 

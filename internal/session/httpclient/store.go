@@ -345,6 +345,54 @@ func (s *Store) RefreshTTL(ctx context.Context, sessionID string, ttl time.Durat
 	return nil
 }
 
+// RecordToolCall sends a tool call record via POST /api/v1/sessions/{sessionID}/tool-calls.
+// On transient failure, the write is buffered and retried automatically.
+func (s *Store) RecordToolCall(ctx context.Context, sessionID string, tc session.ToolCall) error {
+	path := fmt.Sprintf("/api/v1/sessions/%s/tool-calls", sessionID)
+	body, err := json.Marshal(&tc)
+	if err != nil {
+		return fmt.Errorf("record tool call: encode: %w", err)
+	}
+
+	resp, err := s.doWithRetry(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return s.bufferWrite(err, http.MethodPost, path, body)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return session.ErrSessionNotFound
+	}
+	if resp.StatusCode != http.StatusCreated {
+		return s.readError(resp)
+	}
+	return nil
+}
+
+// RecordProviderCall sends a provider call record via POST /api/v1/sessions/{sessionID}/provider-calls.
+// On transient failure, the write is buffered and retried automatically.
+func (s *Store) RecordProviderCall(ctx context.Context, sessionID string, pc session.ProviderCall) error {
+	path := fmt.Sprintf("/api/v1/sessions/%s/provider-calls", sessionID)
+	body, err := json.Marshal(&pc)
+	if err != nil {
+		return fmt.Errorf("record provider call: encode: %w", err)
+	}
+
+	resp, err := s.doWithRetry(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return s.bufferWrite(err, http.MethodPost, path, body)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return session.ErrSessionNotFound
+	}
+	if resp.StatusCode != http.StatusCreated {
+		return s.readError(resp)
+	}
+	return nil
+}
+
 // Ping checks session-api connectivity via a lightweight /healthz endpoint.
 // Uses an uninstrumented HTTP client to avoid generating trace spans from
 // K8s readiness probes (which call Ping every 10s per agent).
@@ -404,6 +452,50 @@ func (s *Store) DeleteSession(_ context.Context, _ string) error {
 // GetMessages is not used by the facade.
 func (s *Store) GetMessages(_ context.Context, _ string) ([]session.Message, error) {
 	return nil, ErrNotImplemented
+}
+
+// GetToolCalls retrieves tool calls via GET /api/v1/sessions/{sessionID}/tool-calls.
+func (s *Store) GetToolCalls(ctx context.Context, sessionID string) ([]session.ToolCall, error) {
+	resp, err := s.doWithRetry(ctx, http.MethodGet, fmt.Sprintf("/api/v1/sessions/%s/tool-calls", sessionID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("get tool calls: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, session.ErrSessionNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, s.readError(resp)
+	}
+
+	var calls []session.ToolCall
+	if err := json.NewDecoder(resp.Body).Decode(&calls); err != nil {
+		return nil, fmt.Errorf("decode tool calls: %w", err)
+	}
+	return calls, nil
+}
+
+// GetProviderCalls retrieves provider calls via GET /api/v1/sessions/{sessionID}/provider-calls.
+func (s *Store) GetProviderCalls(ctx context.Context, sessionID string) ([]session.ProviderCall, error) {
+	resp, err := s.doWithRetry(ctx, http.MethodGet, fmt.Sprintf("/api/v1/sessions/%s/provider-calls", sessionID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("get provider calls: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, session.ErrSessionNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, s.readError(resp)
+	}
+
+	var calls []session.ProviderCall
+	if err := json.NewDecoder(resp.Body).Decode(&calls); err != nil {
+		return nil, fmt.Errorf("decode provider calls: %w", err)
+	}
+	return calls, nil
 }
 
 // SetState is not used by the facade.

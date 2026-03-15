@@ -132,6 +132,74 @@ func mockSessionAPI(t *testing.T) *httptest.Server {
 		w.WriteHeader(http.StatusOK)
 	})
 
+	// Tool call storage per session.
+	toolCalls := make(map[string][]session.ToolCall)
+
+	// POST /api/v1/sessions/{sessionID}/tool-calls
+	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/tool-calls", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("sessionID")
+		if _, ok := sessions[id]; !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(errorResponse{Error: "session not found"})
+			return
+		}
+		var tc session.ToolCall
+		if err := json.NewDecoder(r.Body).Decode(&tc); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		toolCalls[id] = append(toolCalls[id], tc)
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	// GET /api/v1/sessions/{sessionID}/tool-calls
+	mux.HandleFunc("GET /api/v1/sessions/{sessionID}/tool-calls", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("sessionID")
+		if _, ok := sessions[id]; !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(errorResponse{Error: "session not found"})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(toolCalls[id])
+	})
+
+	// Provider call storage per session.
+	providerCalls := make(map[string][]session.ProviderCall)
+
+	// POST /api/v1/sessions/{sessionID}/provider-calls
+	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/provider-calls", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("sessionID")
+		if _, ok := sessions[id]; !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(errorResponse{Error: "session not found"})
+			return
+		}
+		var pc session.ProviderCall
+		if err := json.NewDecoder(r.Body).Decode(&pc); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		providerCalls[id] = append(providerCalls[id], pc)
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	// GET /api/v1/sessions/{sessionID}/provider-calls
+	mux.HandleFunc("GET /api/v1/sessions/{sessionID}/provider-calls", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("sessionID")
+		if _, ok := sessions[id]; !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(errorResponse{Error: "session not found"})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(providerCalls[id])
+	})
+
 	return httptest.NewServer(mux)
 }
 
@@ -879,6 +947,161 @@ func TestCreateSession_409ConflictReturnsExisting(t *testing.T) {
 	}
 	if sess.ID != "existing-id" {
 		t.Fatalf("expected existing session ID, got %s", sess.ID)
+	}
+}
+
+func TestRecordToolCall_OK(t *testing.T) {
+	srv := mockSessionAPI(t)
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+
+	created, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+		AgentName: "a", Namespace: "ns",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	err = store.RecordToolCall(context.Background(), created.ID, session.ToolCall{
+		ID: "tc1", Name: "search", Status: session.ToolCallStatusSuccess,
+	})
+	if err != nil {
+		t.Fatalf("record tool call: %v", err)
+	}
+}
+
+func TestRecordToolCall_NotFound(t *testing.T) {
+	srv := mockSessionAPI(t)
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+
+	err := store.RecordToolCall(context.Background(), "nonexistent", session.ToolCall{
+		ID: "tc1", Name: "search",
+	})
+	if err != session.ErrSessionNotFound {
+		t.Fatalf("expected ErrSessionNotFound, got %v", err)
+	}
+}
+
+func TestGetToolCalls_OK(t *testing.T) {
+	srv := mockSessionAPI(t)
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+
+	created, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+		AgentName: "a", Namespace: "ns",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	_ = store.RecordToolCall(context.Background(), created.ID, session.ToolCall{
+		ID: "tc1", Name: "search", Status: session.ToolCallStatusSuccess,
+	})
+
+	calls, err := store.GetToolCalls(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("get tool calls: %v", err)
+	}
+	if len(calls) != 1 || calls[0].ID != "tc1" {
+		t.Fatalf("expected 1 tool call with ID tc1, got %v", calls)
+	}
+}
+
+func TestGetToolCalls_NotFound(t *testing.T) {
+	srv := mockSessionAPI(t)
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+
+	_, err := store.GetToolCalls(context.Background(), "nonexistent")
+	if err != session.ErrSessionNotFound {
+		t.Fatalf("expected ErrSessionNotFound, got %v", err)
+	}
+}
+
+func TestRecordProviderCall_OK(t *testing.T) {
+	srv := mockSessionAPI(t)
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+
+	created, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+		AgentName: "a", Namespace: "ns",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	err = store.RecordProviderCall(context.Background(), created.ID, session.ProviderCall{
+		ID: "pc1", Provider: "anthropic", Model: "claude-sonnet-4-20250514",
+		Status: session.ProviderCallStatusCompleted,
+	})
+	if err != nil {
+		t.Fatalf("record provider call: %v", err)
+	}
+}
+
+func TestRecordProviderCall_NotFound(t *testing.T) {
+	srv := mockSessionAPI(t)
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+
+	err := store.RecordProviderCall(context.Background(), "nonexistent", session.ProviderCall{
+		ID: "pc1", Provider: "anthropic",
+	})
+	if err != session.ErrSessionNotFound {
+		t.Fatalf("expected ErrSessionNotFound, got %v", err)
+	}
+}
+
+func TestGetProviderCalls_OK(t *testing.T) {
+	srv := mockSessionAPI(t)
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+
+	created, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+		AgentName: "a", Namespace: "ns",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	_ = store.RecordProviderCall(context.Background(), created.ID, session.ProviderCall{
+		ID: "pc1", Provider: "anthropic", Status: session.ProviderCallStatusCompleted,
+	})
+
+	calls, err := store.GetProviderCalls(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("get provider calls: %v", err)
+	}
+	if len(calls) != 1 || calls[0].ID != "pc1" {
+		t.Fatalf("expected 1 provider call with ID pc1, got %v", calls)
+	}
+}
+
+func TestGetProviderCalls_NotFound(t *testing.T) {
+	srv := mockSessionAPI(t)
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+
+	_, err := store.GetProviderCalls(context.Background(), "nonexistent")
+	if err != session.ErrSessionNotFound {
+		t.Fatalf("expected ErrSessionNotFound, got %v", err)
 	}
 }
 

@@ -476,6 +476,11 @@ if [ -f coverage.out ]; then
             continue
         fi
 
+        # Skip oapi-codegen generated files
+        if [[ "$file" == *.gen.go ]]; then
+            continue
+        fi
+
         # Skip E2E test utilities
         if [[ "$file" == test/* ]]; then
             continue

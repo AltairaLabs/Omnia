@@ -825,6 +825,22 @@ func (m *MockWarmStoreProvider) Close() error {
 	return nil
 }
 
+func (m *MockWarmStoreProvider) RecordToolCall(_ context.Context, _ string, _ *session.ToolCall) error {
+	return nil
+}
+
+func (m *MockWarmStoreProvider) RecordProviderCall(_ context.Context, _ string, _ *session.ProviderCall) error {
+	return nil
+}
+
+func (m *MockWarmStoreProvider) GetToolCalls(_ context.Context, _ string) ([]*session.ToolCall, error) {
+	return []*session.ToolCall{}, nil
+}
+
+func (m *MockWarmStoreProvider) GetProviderCalls(_ context.Context, _ string) ([]*session.ProviderCall, error) {
+	return []*session.ProviderCall{}, nil
+}
+
 func TestWarmStoreSessionDeleter_ListSessionsByUser(t *testing.T) {
 	mock := &MockWarmStoreProvider{
 		sessions: []*session.Session{{ID: "s1"}, {ID: "s2"}},

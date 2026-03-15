@@ -585,5 +585,25 @@ end
 return 1
 `)
 
+// RecordToolCall is not supported by the Redis hot cache store.
+func (r *RedisStore) RecordToolCall(_ context.Context, _ string, _ ToolCall) error {
+	return nil
+}
+
+// RecordProviderCall is not supported by the Redis hot cache store.
+func (r *RedisStore) RecordProviderCall(_ context.Context, _ string, _ ProviderCall) error {
+	return nil
+}
+
+// GetToolCalls is not supported by the Redis hot cache store.
+func (r *RedisStore) GetToolCalls(_ context.Context, _ string) ([]ToolCall, error) {
+	return nil, nil
+}
+
+// GetProviderCalls is not supported by the Redis hot cache store.
+func (r *RedisStore) GetProviderCalls(_ context.Context, _ string) ([]ProviderCall, error) {
+	return nil, nil
+}
+
 // Ensure RedisStore implements Store interface.
 var _ Store = (*RedisStore)(nil)
