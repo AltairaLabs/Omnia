@@ -552,25 +552,20 @@ func (s *OmniaEventStore) convertToolCallFailed(event *events.Event) (eventActio
 
 // --- Client tool events ---
 
-// convertClientToolRequest records a client-side tool request as a first-class ToolCall.
+// convertClientToolRequest updates an existing tool call to mark it as client-side.
+// The SDK emits ToolCallStarted (server) first, then ClientToolRequest when the tool
+// is delegated to the client. We upsert the same row to avoid duplicates.
 func (s *OmniaEventStore) convertClientToolRequest(event *events.Event) (eventAction, bool) {
 	data, ok := asPtr[events.ClientToolRequestData](event.Data)
 	if !ok {
 		return eventAction{}, false
 	}
 
-	tcID := uuid.New().String()
-	tc := session.ToolCall{
-		ID:        tcID,
-		CallID:    data.CallID,
-		Name:      data.ToolName,
-		Arguments: data.Args,
-		Status:    session.ToolCallStatusPending,
-		Execution: session.ToolCallExecutionClient,
-		CreatedAt: event.Timestamp,
-	}
-	s.enrichToolCallLabels(&tc, data.ToolName)
-	s.toolCallKeys.Store(data.CallID, callKey{id: tcID, createdAt: event.Timestamp})
+	// Reuse the ID from the started event so the upsert updates the same row.
+	tc := s.buildToolCallUpsert(data.CallID, data.ToolName, event.Timestamp)
+	tc.Arguments = data.Args
+	tc.Status = session.ToolCallStatusPending
+	tc.Execution = session.ToolCallExecutionClient
 
 	return eventAction{toolCall: &tc}, true
 }
