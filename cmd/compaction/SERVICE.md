@@ -21,6 +21,14 @@
 - Session query/search (Session API's job)
 - Retention policy reconciliation (Operator's job)
 
+## Observability
+
+**Metrics** (Prometheus, prefix `omnia_compaction_`):
+- `run_duration_seconds`, `sessions_compacted_total`, `batches_processed_total`
+- `errors_total` (by operation), `last_run_timestamp`
+
+**Traces**: None.
+
 ## Dependencies
 - PostgreSQL (warm store)
 - Redis (hot cache)

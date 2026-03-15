@@ -20,6 +20,12 @@
 - Dashboard UI (Dashboard's job)
 - Production agent serving (Facade + Runtime's job)
 
+## Observability
+
+**Metrics**: Shares the same LLM metrics as Runtime (`omnia_llm_*`) via PromptKit SDK collector.
+
+**Traces**: Uses the shared tracing provider (`internal/tracing`) — emits conversation and LLM spans like the Runtime.
+
 ## Dependencies
 - PromptKit SDK (conversation management)
 - Session API (session recording)

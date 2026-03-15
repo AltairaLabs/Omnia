@@ -25,6 +25,15 @@
 - Agent runtime management (Operator's job)
 - LLM provider interaction (Runtime's job)
 
+## Observability
+
+**Metrics** (Prometheus, prefix `omnia_arena_queue_`):
+- Queue state: `queue_items` (by status), `queue_jobs_active`, `queue_retries_total`
+- Operations: `queue_operations_total` (by operation, status), `queue_operation_duration_seconds`
+- Standard controller-runtime metrics (reconciliation counts, queue depth)
+
+**Traces**: None — uses controller-runtime logging.
+
 ## Dependencies
 - controller-runtime / client-go
 - Redis (work queue)

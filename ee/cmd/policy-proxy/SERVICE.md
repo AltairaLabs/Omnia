@@ -20,6 +20,12 @@
 - Agent runtime (Facade + Runtime's job)
 - Session management (Session API's job)
 
+## Observability
+
+**Metrics**: None currently — policy decisions are logged.
+
+**Traces**: None.
+
 ## Dependencies
 - K8s client (policy watching)
 - CEL evaluator

@@ -19,6 +19,12 @@
 - Agent execution (Runtime's job)
 - Dashboard UI (Dashboard's job)
 
+## Observability
+
+**Metrics**: None currently.
+
+**Traces**: None.
+
 ## Dependencies
 - Dashboard API (file access proxy)
 - PromptKit schema definitions

@@ -37,6 +37,20 @@
 - K8s resource management (Operator's job)
 - Session creation decisions (callers decide when to create)
 
+## Observability
+
+**Metrics** (Prometheus, prefix `omnia_session_api_`):
+- HTTP: `requests_total` (by method, route, status_code), `request_duration_seconds`
+- Events: `events_published_total` (by status), `event_publish_duration_seconds`
+- Route paths are normalized (UUIDs → `:id`) to prevent cardinality explosion
+
+**Traces** (OpenTelemetry):
+- OTLP trace ingestion endpoint (optional) — receives and stores traces from other services
+- Does NOT create its own trace spans for API requests
+
+**Audit** (enterprise, prefix `omnia_audit_`):
+- `audit_events_total`, `audit_write_duration_seconds`, `audit_buffer_drops_total`
+
 ## Dependencies
 - PostgreSQL (required, warm store)
 - Redis (optional, hot cache + event streaming)

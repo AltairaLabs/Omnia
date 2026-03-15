@@ -35,6 +35,18 @@
 - UI state management (Dashboard's job)
 - Authentication (passes headers through)
 
+## Observability
+
+**Metrics** (Prometheus, prefix `omnia_agent_` and `omnia_facade_`):
+- Connection gauges: `connections_active`, `sessions_active`, `requests_inflight`
+- Request counters: `requests_total` (by status), `messages_received_total`, `messages_sent_total`
+- Latency: `request_duration_seconds` (by handler)
+- Media transfer: `uploads_total`, `upload_bytes_total`, `downloads_total`, `media_chunks_total`
+
+**Traces** (OpenTelemetry):
+- Propagates W3C trace context to Runtime via gRPC
+- Does NOT create its own spans — the Runtime owns conversation-level tracing
+
 ## Dependencies
 - Runtime gRPC server (default `localhost:9000`)
 - Session API HTTP endpoint (configurable via `SESSION_API_URL`)

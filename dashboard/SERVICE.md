@@ -26,6 +26,12 @@
 - K8s resource management (Operator's job)
 - Authentication (relies on external auth headers)
 
+## Observability
+
+**Metrics**: None — client-side only. Server-side metrics are handled by the Operator (which hosts the dashboard).
+
+**Traces**: None — does not emit OpenTelemetry spans.
+
 ## Dependencies
 - Operator REST API (proxied via Next.js API routes)
 - Session API (proxied via Operator)

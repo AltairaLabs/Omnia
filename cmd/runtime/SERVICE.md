@@ -31,6 +31,21 @@
 - CRD reconciliation (Operator's job)
 - Session persistence (Session API's job)
 
+## Observability
+
+**Metrics** (Prometheus, prefix `omnia_llm_` and `omnia_runtime_`):
+- LLM usage: `llm_input_tokens_total`, `llm_output_tokens_total`, `llm_cost_usd_total` (by provider, model)
+- LLM requests: `llm_requests_total` (by status), `llm_request_duration_seconds`
+- Cache: `llm_cache_hits_total` (prompt caching)
+- Runtime info: `runtime_info` gauge with agent/namespace labels
+- PromptKit SDK metrics exported via isolated registry on `/metrics`
+
+**Traces** (OpenTelemetry):
+- `omnia.runtime.conversation.turn` — wraps each conversation turn (session.id, turn.index, promptpack)
+- `genai.chat` — LLM call span following GenAI semantic conventions (tokens, cost, model, finish reason)
+- `omnia.tool.call` — tool execution span (tool.name, duration, request/response size)
+- gRPC server instrumented with `otelgrpc` for incoming requests from Facade
+
 ## Dependencies
 - PromptKit SDK (local via `go.work`, published for CI)
 - LLM provider endpoints (configured via environment or CRD)

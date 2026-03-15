@@ -32,6 +32,14 @@
 - Tool execution (Runtime's job)
 - Authentication/authorization (external RBAC/Istio)
 
+## Observability
+
+**Metrics** (Prometheus, prefix `omnia_retention_`):
+- Retention: `active_policies`, `workspace_overrides`, `reconcile_errors_total`
+- Standard controller-runtime metrics (reconciliation counts, queue depth, work duration)
+
+**Traces**: None — uses controller-runtime's built-in logging; tracing config is passed through to Facade/Runtime pods.
+
 ## Dependencies
 - controller-runtime / client-go (K8s interaction)
 - Omnia CRD types (`api/v1alpha1/`)
