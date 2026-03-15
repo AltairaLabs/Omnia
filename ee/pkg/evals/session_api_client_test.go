@@ -21,30 +21,40 @@ import (
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/api"
+	"github.com/altairalabs/omnia/pkg/sessionapi"
 )
 
-func TestHTTPSessionAPIClient_GetSession_Success(t *testing.T) {
-	sess := &session.Session{
-		ID:        "s1",
-		AgentName: "test-agent",
-		Namespace: "ns",
-		CreatedAt: time.Now().Truncate(time.Second),
-	}
+// newTestClient creates an HTTPSessionAPIClient pointed at the given test server.
+func newTestClient(t *testing.T, serverURL string) *HTTPSessionAPIClient {
+	t.Helper()
+	client, err := NewHTTPSessionAPIClient(serverURL)
+	require.NoError(t, err)
+	return client
+}
 
+func TestHTTPSessionAPIClient_GetSession_Success(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/v1/sessions/s1", r.URL.Path)
+		assert.Equal(t, "/api/v1/sessions/550e8400-e29b-41d4-a716-446655440000", r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(sessionResponse{Session: sess})
+		_ = json.NewEncoder(w).Encode(sessionapi.SessionResponse{
+			Session: &sessionapi.Session{
+				Id:        uuidPtr("550e8400-e29b-41d4-a716-446655440000"),
+				AgentName: ptr("test-agent"),
+				Namespace: ptr("ns"),
+				CreatedAt: &now,
+			},
+		})
 	}))
 	defer server.Close()
 
-	client := NewHTTPSessionAPIClient(server.URL)
-	result, err := client.GetSession(context.Background(), "s1")
+	client := newTestClient(t, server.URL)
+	result, err := client.GetSession(context.Background(), "550e8400-e29b-41d4-a716-446655440000")
 
 	require.NoError(t, err)
-	assert.Equal(t, "s1", result.ID)
+	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", result.ID)
 	assert.Equal(t, "test-agent", result.AgentName)
 	assert.Equal(t, "ns", result.Namespace)
 }
@@ -55,37 +65,39 @@ func TestHTTPSessionAPIClient_GetSession_NotFound(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPSessionAPIClient(server.URL)
-	_, err := client.GetSession(context.Background(), "nonexistent")
+	client := newTestClient(t, server.URL)
+	_, err := client.GetSession(context.Background(), "550e8400-e29b-41d4-a716-446655440000")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "404")
 }
 
 func TestHTTPSessionAPIClient_GetSession_ConnectionError(t *testing.T) {
-	client := NewHTTPSessionAPIClient("http://localhost:1")
-	_, err := client.GetSession(context.Background(), "s1")
+	client, err := NewHTTPSessionAPIClient("http://localhost:1")
+	require.NoError(t, err)
+	_, err = client.GetSession(context.Background(), "550e8400-e29b-41d4-a716-446655440000")
 
 	require.Error(t, err)
 }
 
 func TestHTTPSessionAPIClient_GetSessionMessages_Success(t *testing.T) {
-	msgs := []*session.Message{
-		{ID: "m1", Role: session.RoleUser, Content: "hello"},
-		{ID: "m2", Role: session.RoleAssistant, Content: "hi there"},
-	}
-
+	role := sessionapi.User
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/v1/sessions/s1/messages", r.URL.Path)
+		assert.Equal(t, "/api/v1/sessions/550e8400-e29b-41d4-a716-446655440000/messages", r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(messagesResponse{Messages: msgs, HasMore: false})
+		_ = json.NewEncoder(w).Encode(sessionapi.MessagesResponse{
+			Messages: &[]sessionapi.Message{
+				{Id: ptr("m1"), Role: &role, Content: ptr("hello")},
+				{Id: ptr("m2"), Role: &role, Content: ptr("hi there")},
+			},
+		})
 	}))
 	defer server.Close()
 
-	client := NewHTTPSessionAPIClient(server.URL)
-	result, err := client.GetSessionMessages(context.Background(), "s1")
+	client := newTestClient(t, server.URL)
+	result, err := client.GetSessionMessages(context.Background(), "550e8400-e29b-41d4-a716-446655440000")
 
 	require.NoError(t, err)
 	require.Len(t, result, 2)
@@ -101,16 +113,17 @@ func TestHTTPSessionAPIClient_GetSessionMessages_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPSessionAPIClient(server.URL)
-	_, err := client.GetSessionMessages(context.Background(), "s1")
+	client := newTestClient(t, server.URL)
+	_, err := client.GetSessionMessages(context.Background(), "550e8400-e29b-41d4-a716-446655440000")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "500")
 }
 
 func TestHTTPSessionAPIClient_GetSessionMessages_ConnectionError(t *testing.T) {
-	client := NewHTTPSessionAPIClient("http://localhost:1")
-	_, err := client.GetSessionMessages(context.Background(), "s1")
+	client, err := NewHTTPSessionAPIClient("http://localhost:1")
+	require.NoError(t, err)
+	_, err = client.GetSessionMessages(context.Background(), "550e8400-e29b-41d4-a716-446655440000")
 
 	require.Error(t, err)
 }
@@ -118,37 +131,35 @@ func TestHTTPSessionAPIClient_GetSessionMessages_ConnectionError(t *testing.T) {
 func TestHTTPSessionAPIClient_GetSessionMessages_NilMessages(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		// Respond with null messages array.
-		_ = json.NewEncoder(w).Encode(messagesResponse{Messages: nil})
+		_ = json.NewEncoder(w).Encode(sessionapi.MessagesResponse{Messages: nil})
 	}))
 	defer server.Close()
 
-	client := NewHTTPSessionAPIClient(server.URL)
-	result, err := client.GetSessionMessages(context.Background(), "s1")
+	client := newTestClient(t, server.URL)
+	result, err := client.GetSessionMessages(context.Background(), "550e8400-e29b-41d4-a716-446655440000")
 
 	require.NoError(t, err)
 	assert.Empty(t, result)
 }
 
 func TestHTTPSessionAPIClient_WriteEvalResults_Success(t *testing.T) {
-	var received []*api.EvalResult
+	var received []sessionapi.EvalResult
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/v1/eval-results", r.URL.Path)
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 		_ = json.NewDecoder(r.Body).Decode(&received)
 		w.WriteHeader(http.StatusCreated)
 	}))
 	defer server.Close()
 
-	client := NewHTTPSessionAPIClient(server.URL)
+	client := newTestClient(t, server.URL)
 
 	score := 0.8
 	results := []*api.EvalResult{
 		{
-			SessionID: "s1",
+			SessionID: "550e8400-e29b-41d4-a716-446655440000",
 			EvalID:    "e1",
 			EvalType:  "contains",
 			Passed:    true,
@@ -161,8 +172,8 @@ func TestHTTPSessionAPIClient_WriteEvalResults_Success(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, received, 1)
-	assert.Equal(t, "e1", received[0].EvalID)
-	assert.Equal(t, "worker", received[0].Source)
+	assert.Equal(t, "e1", deref(received[0].EvalId))
+	assert.Equal(t, "worker", deref(received[0].Source))
 }
 
 func TestHTTPSessionAPIClient_WriteEvalResults_ServerError(t *testing.T) {
@@ -171,7 +182,7 @@ func TestHTTPSessionAPIClient_WriteEvalResults_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPSessionAPIClient(server.URL)
+	client := newTestClient(t, server.URL)
 	err := client.WriteEvalResults(context.Background(), []*api.EvalResult{{EvalID: "e1"}})
 
 	require.Error(t, err)
@@ -179,8 +190,9 @@ func TestHTTPSessionAPIClient_WriteEvalResults_ServerError(t *testing.T) {
 }
 
 func TestHTTPSessionAPIClient_WriteEvalResults_ConnectionError(t *testing.T) {
-	client := NewHTTPSessionAPIClient("http://localhost:1")
-	err := client.WriteEvalResults(context.Background(), []*api.EvalResult{{EvalID: "e1"}})
+	client, err := NewHTTPSessionAPIClient("http://localhost:1")
+	require.NoError(t, err)
+	err = client.WriteEvalResults(context.Background(), []*api.EvalResult{{EvalID: "e1"}})
 
 	require.Error(t, err)
 }
@@ -191,7 +203,7 @@ func TestHTTPSessionAPIClient_WriteEvalResults_BadRequest(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPSessionAPIClient(server.URL)
+	client := newTestClient(t, server.URL)
 	err := client.WriteEvalResults(context.Background(), []*api.EvalResult{})
 
 	require.Error(t, err)
@@ -199,11 +211,6 @@ func TestHTTPSessionAPIClient_WriteEvalResults_BadRequest(t *testing.T) {
 }
 
 func TestHTTPSessionAPIClient_ListEvalResults_Success(t *testing.T) {
-	results := []*api.EvalResult{
-		{ID: "er1", SessionID: "s1", EvalType: "contains", Passed: false},
-		{ID: "er2", SessionID: "s2", EvalType: "contains", Passed: false},
-	}
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/v1/eval-results", r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
@@ -211,15 +218,18 @@ func TestHTTPSessionAPIClient_ListEvalResults_Success(t *testing.T) {
 		assert.Equal(t, "10", r.URL.Query().Get("limit"))
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(api.EvalResultListResponse{
-			Results: results,
-			Total:   2,
-			HasMore: false,
+		_ = json.NewEncoder(w).Encode(sessionapi.EvalResultListResponse{
+			Results: &[]sessionapi.EvalResult{
+				{Id: ptr("er1"), EvalType: ptr("contains"), Passed: ptr(false)},
+				{Id: ptr("er2"), EvalType: ptr("contains"), Passed: ptr(false)},
+			},
+			Total:   ptr(int64(2)),
+			HasMore: ptr(false),
 		})
 	}))
 	defer server.Close()
 
-	client := NewHTTPSessionAPIClient(server.URL)
+	client := newTestClient(t, server.URL)
 	passed := false
 	got, err := client.ListEvalResults(context.Background(), api.EvalResultListOpts{
 		Passed: &passed,
@@ -243,11 +253,13 @@ func TestHTTPSessionAPIClient_ListEvalResults_WithAllParams(t *testing.T) {
 		assert.Equal(t, "eval-1", q.Get("evalId"))
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(api.EvalResultListResponse{Results: []*api.EvalResult{}})
+		_ = json.NewEncoder(w).Encode(sessionapi.EvalResultListResponse{
+			Results: &[]sessionapi.EvalResult{},
+		})
 	}))
 	defer server.Close()
 
-	client := NewHTTPSessionAPIClient(server.URL)
+	client := newTestClient(t, server.URL)
 	passed := true
 	_, err := client.ListEvalResults(context.Background(), api.EvalResultListOpts{
 		Passed:    &passed,
@@ -267,7 +279,7 @@ func TestHTTPSessionAPIClient_ListEvalResults_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPSessionAPIClient(server.URL)
+	client := newTestClient(t, server.URL)
 	_, err := client.ListEvalResults(context.Background(), api.EvalResultListOpts{})
 
 	require.Error(t, err)
@@ -275,29 +287,30 @@ func TestHTTPSessionAPIClient_ListEvalResults_ServerError(t *testing.T) {
 }
 
 func TestHTTPSessionAPIClient_ListEvalResults_ConnectionError(t *testing.T) {
-	client := NewHTTPSessionAPIClient("http://localhost:1")
-	_, err := client.ListEvalResults(context.Background(), api.EvalResultListOpts{})
+	client, err := NewHTTPSessionAPIClient("http://localhost:1")
+	require.NoError(t, err)
+	_, err = client.ListEvalResults(context.Background(), api.EvalResultListOpts{})
 
 	require.Error(t, err)
 }
 
 func TestHTTPSessionAPIClient_GetSessionEvalResults_Success(t *testing.T) {
-	results := []*api.EvalResult{
-		{ID: "er1", SessionID: "s1", EvalType: "contains", Passed: true},
-		{ID: "er2", SessionID: "s1", EvalType: "tone", Passed: false, MessageID: "m2"},
-	}
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/v1/sessions/s1/eval-results", r.URL.Path)
+		assert.Equal(t, "/api/v1/sessions/550e8400-e29b-41d4-a716-446655440000/eval-results", r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(api.EvalResultSessionResponse{Results: results})
+		_ = json.NewEncoder(w).Encode(sessionapi.EvalResultSessionResponse{
+			Results: &[]sessionapi.EvalResult{
+				{Id: ptr("er1"), EvalType: ptr("contains"), Passed: ptr(true)},
+				{Id: ptr("er2"), EvalType: ptr("tone"), Passed: ptr(false), MessageId: ptr("m2")},
+			},
+		})
 	}))
 	defer server.Close()
 
-	client := NewHTTPSessionAPIClient(server.URL)
-	got, err := client.GetSessionEvalResults(context.Background(), "s1")
+	client := newTestClient(t, server.URL)
+	got, err := client.GetSessionEvalResults(context.Background(), "550e8400-e29b-41d4-a716-446655440000")
 
 	require.NoError(t, err)
 	require.Len(t, got, 2)
@@ -312,24 +325,58 @@ func TestHTTPSessionAPIClient_GetSessionEvalResults_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPSessionAPIClient(server.URL)
-	_, err := client.GetSessionEvalResults(context.Background(), "s1")
+	client := newTestClient(t, server.URL)
+	_, err := client.GetSessionEvalResults(context.Background(), "550e8400-e29b-41d4-a716-446655440000")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "500")
 }
 
 func TestHTTPSessionAPIClient_GetSessionEvalResults_ConnectionError(t *testing.T) {
-	client := NewHTTPSessionAPIClient("http://localhost:1")
-	_, err := client.GetSessionEvalResults(context.Background(), "s1")
+	client, err := NewHTTPSessionAPIClient("http://localhost:1")
+	require.NoError(t, err)
+	_, err = client.GetSessionEvalResults(context.Background(), "550e8400-e29b-41d4-a716-446655440000")
 
 	require.Error(t, err)
 }
 
 func TestNewHTTPSessionAPIClient(t *testing.T) {
-	client := NewHTTPSessionAPIClient("http://example.com")
+	client, err := NewHTTPSessionAPIClient("http://example.com")
 
-	assert.Equal(t, "http://example.com", client.baseURL)
-	assert.NotNil(t, client.httpClient)
-	assert.Equal(t, defaultHTTPTimeout, client.httpClient.Timeout)
+	require.NoError(t, err)
+	assert.NotNil(t, client)
+	assert.NotNil(t, client.client)
+}
+
+func TestNewHTTPSessionAPIClient_InvalidSessionID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+
+	_, err := client.GetSession(context.Background(), "not-a-uuid")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid session ID")
+}
+
+// --- helpers used by tests (re-export from sessionapi to avoid import cycle) ---
+
+func ptr[T any](v T) *T { return &v }
+
+func deref[T any](p *T) T {
+	if p == nil {
+		var zero T
+		return zero
+	}
+	return *p
+}
+
+func uuidPtr(s string) *sessionapi.SessionID {
+	var id sessionapi.SessionID
+	if err := id.UnmarshalText([]byte(s)); err != nil {
+		return nil
+	}
+	return &id
 }

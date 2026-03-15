@@ -110,7 +110,11 @@ func main() {
 	}
 	defer func() { _ = redisClient.Close() }()
 
-	sessionClient := evals.NewHTTPSessionAPIClient(cfg.SessionAPIURL)
+	sessionClient, err := evals.NewHTTPSessionAPIClient(cfg.SessionAPIURL)
+	if err != nil {
+		logger.Error("failed to create session-api client", "error", err)
+		os.Exit(1)
+	}
 
 	msgStore := redisprovider.NewFromClient(redisClient, redisprovider.DefaultOptions())
 

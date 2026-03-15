@@ -60,7 +60,7 @@ The **source of truth** for the Session API surface is:
 - **Generated Go client**: `pkg/sessionapi/` (regenerate with `make generate-session-api-client`)
 - **Generated TS types**: `dashboard/src/lib/api/session-api-schema.d.ts` (regenerate with `make generate-session-api-types`)
 
-All new consumers should use the generated client. The hand-written clients (`internal/session/httpclient/` and `ee/pkg/evals/session_api_client.go`) are deprecated and will be migrated in a future PR.
+All consumers now use the generated client types from `pkg/sessionapi/`. The eval worker uses `ClientWithResponses` directly; the facade httpclient uses the generated types for serialization while keeping its own retry/circuit-breaker/write-buffer infrastructure.
 
 ## Dependencies
 - PostgreSQL (required, warm store)
