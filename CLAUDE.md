@@ -1,5 +1,17 @@
 # Omnia - Claude Code Project Instructions
 
+## PromptKit SDK (`promptkit-local/`)
+
+**`promptkit-local/` is READ-ONLY.** It is a local checkout of the [PromptKit repo](https://github.com/AltairaLabs/PromptKit) used via `go.work` for local development. You MUST NOT:
+
+- Edit, write, or modify any file under `promptkit-local/`
+- Create new files in `promptkit-local/`
+- Run `go mod tidy` or any command that modifies files in `promptkit-local/`
+
+If you find a bug or need a change in PromptKit, **do not fix it here**. Instead:
+- Note the issue and tell the user to create an issue at https://github.com/AltairaLabs/PromptKit/issues
+- Work around it in Omnia code if possible (e.g., string literal fallbacks for missing constants)
+
 ## Git Workflow
 
 - **Never push directly to main** — main has branch protection enabled.
