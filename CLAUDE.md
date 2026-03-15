@@ -165,6 +165,18 @@ Exceptions configured in `sonar-project.properties` — cognitive complexity is 
 - **Formatting**: `gofmt` and `goimports` are enforced. Run before committing.
 - Runtime and runtime test packages (`internal/runtime/`, `cmd/runtime/`) are excluded from golangci-lint because they depend on the unpublished PromptKit SDK.
 
+### PromptKit SDK Version Strategy
+
+Local development uses `go.work` with `promptkit-local/`, but CI uses the published module (`GOWORK=off`). To avoid CI-only failures:
+
+- **Rule**: Code in `internal/runtime/` must compile with the **published** SDK. If you need a new PromptKit type or event, the PromptKit release must happen first.
+- **Guard**: CI runs `GOWORK=off go build ./...` — this catches unpublished SDK dependencies.
+- **Pattern for unreleased types**: Use the string literal form with a TODO comment:
+  ```go
+  events.EventType("tool.client.resolved") // TODO: use events.EventClientToolResolved when published
+  ```
+- **Never** add types/constants from `promptkit-local/` that don't exist in the published SDK without this pattern.
+
 ## Structured Logging
 
 All Go code uses **structured logging** via `logr.Logger` backed by Zap (`pkg/logging/`). Production emits JSON; development emits human-readable output.
