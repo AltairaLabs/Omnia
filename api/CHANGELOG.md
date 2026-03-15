@@ -9,6 +9,10 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 ---
 
 ## 2026-03-15
+- **Session API**: Added OpenAPI 3.0 spec at `api/session-api/openapi.yaml` covering all 18 endpoints
+  - Generated Go client: `pkg/sessionapi/` (via oapi-codegen v2.4.1)
+  - Generated TS types: `dashboard/src/lib/api/session-api-schema.d.ts` (via openapi-typescript)
+  - Makefile targets: `generate-session-api-client`, `generate-session-api-types`, `validate-session-api-spec`
 - **WebSocket protocol**: Removed `execution` field from `ToolCallInfo`
   - Go struct: `internal/facade/protocol.go:ToolCallInfo`
   - Reason: All tool calls sent over WebSocket are client-side by definition. Server-side tool calls are filtered at the facade and never forwarded.

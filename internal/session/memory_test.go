@@ -1112,3 +1112,226 @@ func TestMemoryStoreCopySessionWithMessages(t *testing.T) {
 		t.Errorf("Original state affected by copy modification")
 	}
 }
+
+func TestMemoryStoreRecordToolCall(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	sess, err := store.CreateSession(ctx, CreateSessionOptions{
+		AgentName: testAgentName,
+		Namespace: testNamespace,
+	})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	tc := ToolCall{
+		ID:        "tc-1",
+		CallID:    "call-1",
+		Name:      "weather",
+		Status:    ToolCallStatusPending,
+		Execution: ToolCallExecutionServer,
+		CreatedAt: time.Now(),
+	}
+
+	err = store.RecordToolCall(ctx, sess.ID, tc)
+	if err != nil {
+		t.Fatalf("RecordToolCall failed: %v", err)
+	}
+
+	calls, err := store.GetToolCalls(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("GetToolCalls failed: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(calls))
+	}
+	if calls[0].Name != "weather" {
+		t.Errorf("tool call name = %q, want %q", calls[0].Name, "weather")
+	}
+
+	// Verify session tool call count was incremented.
+	updated, _ := store.GetSession(ctx, sess.ID)
+	if updated.ToolCallCount != 1 {
+		t.Errorf("ToolCallCount = %d, want 1", updated.ToolCallCount)
+	}
+}
+
+func TestMemoryStoreRecordToolCall_Upsert(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	sess, _ := store.CreateSession(ctx, CreateSessionOptions{
+		AgentName: testAgentName,
+		Namespace: testNamespace,
+	})
+
+	// Insert pending.
+	tc := ToolCall{
+		ID:        "tc-1",
+		CallID:    "call-1",
+		Name:      "weather",
+		Status:    ToolCallStatusPending,
+		Execution: ToolCallExecutionServer,
+		CreatedAt: time.Now(),
+	}
+	_ = store.RecordToolCall(ctx, sess.ID, tc)
+
+	// Upsert to success.
+	tc.Status = ToolCallStatusSuccess
+	tc.DurationMs = 150
+	_ = store.RecordToolCall(ctx, sess.ID, tc)
+
+	calls, _ := store.GetToolCalls(ctx, sess.ID)
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 tool call after upsert, got %d", len(calls))
+	}
+	if calls[0].Status != ToolCallStatusSuccess {
+		t.Errorf("status = %q, want %q", calls[0].Status, ToolCallStatusSuccess)
+	}
+	if calls[0].DurationMs != 150 {
+		t.Errorf("duration = %d, want 150", calls[0].DurationMs)
+	}
+
+	// Counter should still be 1 (upsert doesn't re-increment).
+	updated, _ := store.GetSession(ctx, sess.ID)
+	if updated.ToolCallCount != 1 {
+		t.Errorf("ToolCallCount = %d, want 1", updated.ToolCallCount)
+	}
+}
+
+func TestMemoryStoreRecordToolCall_NotFound(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	err := store.RecordToolCall(ctx, "non-existent", ToolCall{ID: "tc-1"})
+	if err != ErrSessionNotFound {
+		t.Errorf("error = %v, want %v", err, ErrSessionNotFound)
+	}
+}
+
+func TestMemoryStoreGetToolCalls_NotFound(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	_, err := store.GetToolCalls(ctx, "non-existent")
+	if err != ErrSessionNotFound {
+		t.Errorf("error = %v, want %v", err, ErrSessionNotFound)
+	}
+}
+
+func TestMemoryStoreRecordProviderCall(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	sess, _ := store.CreateSession(ctx, CreateSessionOptions{
+		AgentName: testAgentName,
+		Namespace: testNamespace,
+	})
+
+	pc := ProviderCall{
+		ID:        "pc-1",
+		Provider:  "anthropic",
+		Model:     "claude-sonnet-4-20250514",
+		Status:    ProviderCallStatusPending,
+		CreatedAt: time.Now(),
+	}
+
+	err := store.RecordProviderCall(ctx, sess.ID, pc)
+	if err != nil {
+		t.Fatalf("RecordProviderCall failed: %v", err)
+	}
+
+	calls, err := store.GetProviderCalls(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("GetProviderCalls failed: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 provider call, got %d", len(calls))
+	}
+	if calls[0].Provider != "anthropic" {
+		t.Errorf("provider = %q, want %q", calls[0].Provider, "anthropic")
+	}
+}
+
+func TestMemoryStoreRecordProviderCall_Upsert(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	sess, _ := store.CreateSession(ctx, CreateSessionOptions{
+		AgentName: testAgentName,
+		Namespace: testNamespace,
+	})
+
+	// Insert pending.
+	pc := ProviderCall{
+		ID:        "pc-1",
+		Provider:  "anthropic",
+		Model:     "claude-sonnet-4-20250514",
+		Status:    ProviderCallStatusPending,
+		CreatedAt: time.Now(),
+	}
+	_ = store.RecordProviderCall(ctx, sess.ID, pc)
+
+	// Upsert to completed — should update session tokens/cost.
+	pc.Status = ProviderCallStatusCompleted
+	pc.InputTokens = 100
+	pc.OutputTokens = 50
+	pc.CostUSD = 0.005
+	_ = store.RecordProviderCall(ctx, sess.ID, pc)
+
+	calls, _ := store.GetProviderCalls(ctx, sess.ID)
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 provider call after upsert, got %d", len(calls))
+	}
+	if calls[0].Status != ProviderCallStatusCompleted {
+		t.Errorf("status = %q, want %q", calls[0].Status, ProviderCallStatusCompleted)
+	}
+
+	updated, _ := store.GetSession(ctx, sess.ID)
+	if updated.TotalInputTokens != 100 {
+		t.Errorf("TotalInputTokens = %d, want 100", updated.TotalInputTokens)
+	}
+	if updated.TotalOutputTokens != 50 {
+		t.Errorf("TotalOutputTokens = %d, want 50", updated.TotalOutputTokens)
+	}
+}
+
+func TestMemoryStoreRecordProviderCall_NotFound(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	err := store.RecordProviderCall(ctx, "non-existent", ProviderCall{ID: "pc-1"})
+	if err != ErrSessionNotFound {
+		t.Errorf("error = %v, want %v", err, ErrSessionNotFound)
+	}
+}
+
+func TestMemoryStoreDeleteSession_CleansToolAndProviderCalls(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	sess, _ := store.CreateSession(ctx, CreateSessionOptions{
+		AgentName: testAgentName,
+		Namespace: testNamespace,
+	})
+
+	_ = store.RecordToolCall(ctx, sess.ID, ToolCall{ID: "tc-1", Name: "test", CreatedAt: time.Now()})
+	_ = store.RecordProviderCall(ctx, sess.ID, ProviderCall{ID: "pc-1", Provider: "test", CreatedAt: time.Now()})
+
+	_ = store.DeleteSession(ctx, sess.ID)
+
+	// Verify tool/provider calls are cleaned up (session not found).
+	_, err := store.GetToolCalls(ctx, sess.ID)
+	if err != ErrSessionNotFound {
+		t.Errorf("GetToolCalls after delete: error = %v, want %v", err, ErrSessionNotFound)
+	}
+}

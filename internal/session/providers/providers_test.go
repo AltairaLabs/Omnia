@@ -430,6 +430,22 @@ func (m *mockWarmStore) GetSessionArtifacts(_ context.Context, _ string) ([]*ses
 }
 func (m *mockWarmStore) DeleteSessionArtifacts(_ context.Context, _ string) error { return nil }
 
+func (m *mockWarmStore) RecordToolCall(_ context.Context, _ string, _ *session.ToolCall) error {
+	return nil
+}
+
+func (m *mockWarmStore) RecordProviderCall(_ context.Context, _ string, _ *session.ProviderCall) error {
+	return nil
+}
+
+func (m *mockWarmStore) GetToolCalls(_ context.Context, _ string) ([]*session.ToolCall, error) {
+	return []*session.ToolCall{}, nil
+}
+
+func (m *mockWarmStore) GetProviderCalls(_ context.Context, _ string) ([]*session.ProviderCall, error) {
+	return []*session.ProviderCall{}, nil
+}
+
 func (m *mockWarmStore) Ping(_ context.Context) error { return nil }
 
 func (m *mockWarmStore) Close() error {

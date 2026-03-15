@@ -190,7 +190,7 @@ func TestMigrator_UpDown(t *testing.T) {
 	// Verify version
 	v, dirty, err := mg.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(16), v)
+	assert.Equal(t, uint(17), v)
 	assert.False(t, dirty)
 
 	// Idempotent — running Up again should succeed
@@ -218,7 +218,7 @@ func TestMigrator_TablesExist(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify all expected tables exist as partitioned tables
-	for _, table := range []string{"sessions", "messages", "tool_calls", "message_artifacts", "audit_log"} {
+	for _, table := range []string{"sessions", "messages", "tool_calls", "provider_calls", "message_artifacts", "audit_log"} {
 		var exists bool
 		err := db.QueryRow(`
 			SELECT EXISTS (
@@ -249,7 +249,7 @@ func TestMigrator_PartitionsCreated(t *testing.T) {
 	require.NoError(t, err)
 
 	// Each table should have partitions (4 weeks back + 2 weeks ahead ≈ 5-7 partitions)
-	for _, table := range []string{"sessions", "messages", "tool_calls", "message_artifacts", "audit_log"} {
+	for _, table := range []string{"sessions", "messages", "tool_calls", "provider_calls", "message_artifacts", "audit_log"} {
 		var count int
 		err := db.QueryRow(`
 			SELECT COUNT(*) FROM pg_class c
@@ -287,9 +287,11 @@ func TestMigrator_IndexesExist(t *testing.T) {
 		"idx_messages_session_seq",
 		"idx_messages_search",
 		"idx_messages_tool_call_id",
-		"idx_tool_calls_message",
 		"idx_tool_calls_session",
 		"idx_tool_calls_name",
+		"idx_tool_calls_call_id",
+		"idx_provider_calls_session",
+		"idx_provider_calls_provider",
 		"idx_message_artifacts_message",
 		"idx_message_artifacts_session",
 		"idx_messages_search_vector",
@@ -363,9 +365,17 @@ func TestMigrator_DataOperations(t *testing.T) {
 	// Insert a tool call
 	toolCallID := "c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
 	_, err = db.Exec(`
-		INSERT INTO tool_calls (id, message_id, session_id, name, arguments, status, created_at)
-		VALUES ($1, $2, $3, 'kubectl_get', '{"resource": "pods"}', 'success', $4)`,
-		toolCallID, messageID, sessionID, now)
+		INSERT INTO tool_calls (id, session_id, call_id, name, arguments, status, execution, created_at)
+		VALUES ($1, $2, 'call-1', 'kubectl_get', '{"resource": "pods"}', 'success', 'server', $3)`,
+		toolCallID, sessionID, now)
+	require.NoError(t, err)
+
+	// Insert a provider call
+	providerCallID := "d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+	_, err = db.Exec(`
+		INSERT INTO provider_calls (id, session_id, provider, model, status, input_tokens, output_tokens, created_at)
+		VALUES ($1, $2, 'anthropic', 'claude-sonnet-4-20250514', 'completed', 1000, 500, $3)`,
+		providerCallID, sessionID, now)
 	require.NoError(t, err)
 
 	// Insert a message artifact
@@ -462,7 +472,7 @@ func TestMigrator_CleanTeardown(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify all tables are gone
-	for _, table := range []string{"sessions", "messages", "tool_calls", "message_artifacts", "audit_log"} {
+	for _, table := range []string{"sessions", "messages", "tool_calls", "provider_calls", "message_artifacts", "audit_log"} {
 		var exists bool
 		err := db.QueryRow(`
 			SELECT EXISTS (

@@ -1,0 +1,5 @@
+package: sessionapi
+generate:
+  client: true
+  models: true
+output: pkg/sessionapi/client.gen.go

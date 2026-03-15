@@ -117,8 +117,20 @@ func (m *mockWarmStore) GetSessionArtifacts(context.Context, string) ([]*session
 	return []*session.Artifact{}, nil
 }
 func (m *mockWarmStore) DeleteSessionArtifacts(context.Context, string) error { return nil }
-func (m *mockWarmStore) Ping(context.Context) error                           { return nil }
-func (m *mockWarmStore) Close() error                                         { return nil }
+func (m *mockWarmStore) RecordToolCall(context.Context, string, *session.ToolCall) error {
+	return nil
+}
+func (m *mockWarmStore) RecordProviderCall(context.Context, string, *session.ProviderCall) error {
+	return nil
+}
+func (m *mockWarmStore) GetToolCalls(context.Context, string) ([]*session.ToolCall, error) {
+	return nil, nil
+}
+func (m *mockWarmStore) GetProviderCalls(context.Context, string) ([]*session.ProviderCall, error) {
+	return nil, nil
+}
+func (m *mockWarmStore) Ping(context.Context) error { return nil }
+func (m *mockWarmStore) Close() error               { return nil }
 
 type mockColdArchive struct {
 	written       [][]*session.Session

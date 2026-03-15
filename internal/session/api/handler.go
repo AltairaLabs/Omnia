@@ -170,6 +170,14 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/ttl", h.handleRefreshTTL)
 	mux.HandleFunc("DELETE /api/v1/sessions/{sessionID}", h.handleDeleteSession)
 
+	// Tool call endpoints
+	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/tool-calls", h.handleRecordToolCall)
+	mux.HandleFunc("GET /api/v1/sessions/{sessionID}/tool-calls", h.handleGetToolCalls)
+
+	// Provider call endpoints
+	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/provider-calls", h.handleRecordProviderCall)
+	mux.HandleFunc("GET /api/v1/sessions/{sessionID}/provider-calls", h.handleGetProviderCalls)
+
 	// Eval result endpoints
 	mux.HandleFunc("GET /api/v1/sessions/{sessionID}/eval-results", h.handleGetSessionEvalResults)
 	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/evaluate", h.handleEvaluateSession)
@@ -542,6 +550,112 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 
 	log.V(1).Info("session deleted", "sessionID", sessionID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleRecordToolCall records a tool call for a session.
+func (h *Handler) handleRecordToolCall(w http.ResponseWriter, r *http.Request) {
+	sessionID, err := sessionIDFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	h.limitBody(w, r)
+	var tc session.ToolCall
+	if err := json.NewDecoder(r.Body).Decode(&tc); err != nil {
+		if isMaxBytesError(err) {
+			writeError(w, ErrBodyTooLarge)
+			return
+		}
+		writeError(w, ErrMissingBody)
+		return
+	}
+
+	log := h.requestLog(r.Context())
+	if err := h.service.RecordToolCall(r.Context(), sessionID, &tc); err != nil {
+		if !errors.Is(err, session.ErrSessionNotFound) {
+			log.Error(err, "RecordToolCall failed", "sessionID", sessionID)
+		}
+		writeError(w, err)
+		return
+	}
+
+	log.V(2).Info("tool call recorded", "sessionID", sessionID, "toolName", tc.Name)
+	w.WriteHeader(http.StatusCreated)
+}
+
+// handleGetToolCalls returns all tool calls for a session.
+func (h *Handler) handleGetToolCalls(w http.ResponseWriter, r *http.Request) {
+	sessionID, err := sessionIDFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	ctx := withRequestContext(r.Context(), extractRequestContext(r))
+	calls, err := h.service.GetToolCalls(ctx, sessionID)
+	if err != nil {
+		if !errors.Is(err, session.ErrSessionNotFound) {
+			h.requestLog(r.Context()).Error(err, "GetToolCalls failed", "sessionID", sessionID)
+		}
+		writeError(w, err)
+		return
+	}
+
+	writeJSON(w, calls)
+}
+
+// handleRecordProviderCall records a provider call for a session.
+func (h *Handler) handleRecordProviderCall(w http.ResponseWriter, r *http.Request) {
+	sessionID, err := sessionIDFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	h.limitBody(w, r)
+	var pc session.ProviderCall
+	if err := json.NewDecoder(r.Body).Decode(&pc); err != nil {
+		if isMaxBytesError(err) {
+			writeError(w, ErrBodyTooLarge)
+			return
+		}
+		writeError(w, ErrMissingBody)
+		return
+	}
+
+	log := h.requestLog(r.Context())
+	if err := h.service.RecordProviderCall(r.Context(), sessionID, &pc); err != nil {
+		if !errors.Is(err, session.ErrSessionNotFound) {
+			log.Error(err, "RecordProviderCall failed", "sessionID", sessionID)
+		}
+		writeError(w, err)
+		return
+	}
+
+	log.V(2).Info("provider call recorded", "sessionID", sessionID, "provider", pc.Provider)
+	w.WriteHeader(http.StatusCreated)
+}
+
+// handleGetProviderCalls returns all provider calls for a session.
+func (h *Handler) handleGetProviderCalls(w http.ResponseWriter, r *http.Request) {
+	sessionID, err := sessionIDFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	ctx := withRequestContext(r.Context(), extractRequestContext(r))
+	calls, err := h.service.GetProviderCalls(ctx, sessionID)
+	if err != nil {
+		if !errors.Is(err, session.ErrSessionNotFound) {
+			h.requestLog(r.Context()).Error(err, "GetProviderCalls failed", "sessionID", sessionID)
+		}
+		writeError(w, err)
+		return
+	}
+
+	writeJSON(w, calls)
 }
 
 // parseListParams extracts common list/search query parameters from the request.

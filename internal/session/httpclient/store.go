@@ -34,6 +34,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/pkg/sessionapi"
 )
 
 // ErrNotImplemented is returned for Store methods not needed by the facade.
@@ -191,42 +192,11 @@ func (s *Store) notifyFlush(state gobreaker.State) {
 	}
 }
 
-// createSessionRequest mirrors the session-api CreateSessionRequest.
-type createSessionRequest struct {
-	ID                string `json:"id"`
-	AgentName         string `json:"agentName"`
-	Namespace         string `json:"namespace"`
-	WorkspaceName     string `json:"workspaceName,omitempty"`
-	TTLSeconds        int    `json:"ttlSeconds,omitempty"`
-	PromptPackName    string `json:"promptPackName,omitempty"`
-	PromptPackVersion string `json:"promptPackVersion,omitempty"`
-}
-
-// sessionResponse mirrors the session-api SessionResponse.
-type sessionResponse struct {
-	Session *session.Session `json:"session"`
-}
-
-// refreshTTLRequest mirrors the session-api RefreshTTLRequest.
-type refreshTTLRequest struct {
-	TTLSeconds int `json:"ttlSeconds"`
-}
-
 // CreateSession creates a new session via POST /api/v1/sessions.
 // This is NOT buffered — callers need the session ID synchronously.
 func (s *Store) CreateSession(ctx context.Context, opts session.CreateSessionOptions) (*session.Session, error) {
 	id := uuid.New().String()
-	reqBody := createSessionRequest{
-		ID:                id,
-		AgentName:         opts.AgentName,
-		Namespace:         opts.Namespace,
-		WorkspaceName:     opts.WorkspaceName,
-		PromptPackName:    opts.PromptPackName,
-		PromptPackVersion: opts.PromptPackVersion,
-	}
-	if opts.TTL > 0 {
-		reqBody.TTLSeconds = int(opts.TTL.Seconds())
-	}
+	reqBody := sessionapi.SessionToAPI(id, opts)
 
 	resp, err := s.doJSON(ctx, http.MethodPost, "/api/v1/sessions", reqBody)
 	if err != nil {
@@ -244,11 +214,11 @@ func (s *Store) CreateSession(ctx context.Context, opts session.CreateSessionOpt
 		return nil, s.readError(resp)
 	}
 
-	var sr sessionResponse
+	var sr sessionapi.SessionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&sr); err != nil {
 		return nil, fmt.Errorf("decode create session response: %w", err)
 	}
-	return sr.Session, nil
+	return sessionapi.SessionFromAPI(sr.Session), nil
 }
 
 // GetSession retrieves a session via GET /api/v1/sessions/{sessionID}.
@@ -266,11 +236,11 @@ func (s *Store) GetSession(ctx context.Context, sessionID string) (*session.Sess
 		return nil, s.readError(resp)
 	}
 
-	var sr sessionResponse
+	var sr sessionapi.SessionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&sr); err != nil {
 		return nil, fmt.Errorf("decode get session response: %w", err)
 	}
-	return sr.Session, nil
+	return sessionapi.SessionFromAPI(sr.Session), nil
 }
 
 // AppendMessage appends a message via POST /api/v1/sessions/{sessionID}/messages.
@@ -325,7 +295,7 @@ func (s *Store) UpdateSessionStats(ctx context.Context, sessionID string, update
 // On transient failure, the write is buffered and retried automatically.
 func (s *Store) RefreshTTL(ctx context.Context, sessionID string, ttl time.Duration) error {
 	path := fmt.Sprintf("/api/v1/sessions/%s/ttl", sessionID)
-	body, err := json.Marshal(refreshTTLRequest{TTLSeconds: int(ttl.Seconds())})
+	body, err := json.Marshal(sessionapi.RefreshTTLRequest{TtlSeconds: int(ttl.Seconds())})
 	if err != nil {
 		return fmt.Errorf("refresh TTL: encode: %w", err)
 	}
@@ -340,6 +310,54 @@ func (s *Store) RefreshTTL(ctx context.Context, sessionID string, ttl time.Durat
 		return session.ErrSessionNotFound
 	}
 	if resp.StatusCode != http.StatusOK {
+		return s.readError(resp)
+	}
+	return nil
+}
+
+// RecordToolCall sends a tool call record via POST /api/v1/sessions/{sessionID}/tool-calls.
+// On transient failure, the write is buffered and retried automatically.
+func (s *Store) RecordToolCall(ctx context.Context, sessionID string, tc session.ToolCall) error {
+	path := fmt.Sprintf("/api/v1/sessions/%s/tool-calls", sessionID)
+	body, err := json.Marshal(&tc)
+	if err != nil {
+		return fmt.Errorf("record tool call: encode: %w", err)
+	}
+
+	resp, err := s.doWithRetry(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return s.bufferWrite(err, http.MethodPost, path, body)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return session.ErrSessionNotFound
+	}
+	if resp.StatusCode != http.StatusCreated {
+		return s.readError(resp)
+	}
+	return nil
+}
+
+// RecordProviderCall sends a provider call record via POST /api/v1/sessions/{sessionID}/provider-calls.
+// On transient failure, the write is buffered and retried automatically.
+func (s *Store) RecordProviderCall(ctx context.Context, sessionID string, pc session.ProviderCall) error {
+	path := fmt.Sprintf("/api/v1/sessions/%s/provider-calls", sessionID)
+	body, err := json.Marshal(&pc)
+	if err != nil {
+		return fmt.Errorf("record provider call: encode: %w", err)
+	}
+
+	resp, err := s.doWithRetry(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return s.bufferWrite(err, http.MethodPost, path, body)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return session.ErrSessionNotFound
+	}
+	if resp.StatusCode != http.StatusCreated {
 		return s.readError(resp)
 	}
 	return nil
@@ -404,6 +422,50 @@ func (s *Store) DeleteSession(_ context.Context, _ string) error {
 // GetMessages is not used by the facade.
 func (s *Store) GetMessages(_ context.Context, _ string) ([]session.Message, error) {
 	return nil, ErrNotImplemented
+}
+
+// GetToolCalls retrieves tool calls via GET /api/v1/sessions/{sessionID}/tool-calls.
+func (s *Store) GetToolCalls(ctx context.Context, sessionID string) ([]session.ToolCall, error) {
+	resp, err := s.doWithRetry(ctx, http.MethodGet, fmt.Sprintf("/api/v1/sessions/%s/tool-calls", sessionID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("get tool calls: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, session.ErrSessionNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, s.readError(resp)
+	}
+
+	var calls []session.ToolCall
+	if err := json.NewDecoder(resp.Body).Decode(&calls); err != nil {
+		return nil, fmt.Errorf("decode tool calls: %w", err)
+	}
+	return calls, nil
+}
+
+// GetProviderCalls retrieves provider calls via GET /api/v1/sessions/{sessionID}/provider-calls.
+func (s *Store) GetProviderCalls(ctx context.Context, sessionID string) ([]session.ProviderCall, error) {
+	resp, err := s.doWithRetry(ctx, http.MethodGet, fmt.Sprintf("/api/v1/sessions/%s/provider-calls", sessionID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("get provider calls: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, session.ErrSessionNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, s.readError(resp)
+	}
+
+	var calls []session.ProviderCall
+	if err := json.NewDecoder(resp.Body).Decode(&calls); err != nil {
+		return nil, fmt.Errorf("decode provider calls: %w", err)
+	}
+	return calls, nil
 }
 
 // SetState is not used by the facade.
@@ -591,13 +653,8 @@ func drainAndClose(body io.ReadCloser) error {
 	return body.Close()
 }
 
-// errorResponse mirrors the session-api ErrorResponse.
-type errorResponse struct {
-	Error string `json:"error"`
-}
-
 func (s *Store) readError(resp *http.Response) error {
-	var errResp errorResponse
+	var errResp sessionapi.ErrorResponse
 	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}

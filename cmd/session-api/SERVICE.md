@@ -52,6 +52,16 @@
 **Audit** (enterprise, prefix `omnia_audit_`):
 - `audit_events_total`, `audit_write_duration_seconds`, `audit_buffer_drops_total`
 
+## API Contract
+
+The **source of truth** for the Session API surface is:
+
+- **OpenAPI spec**: `api/session-api/openapi.yaml`
+- **Generated Go client**: `pkg/sessionapi/` (regenerate with `make generate-session-api-client`)
+- **Generated TS types**: `dashboard/src/lib/api/session-api-schema.d.ts` (regenerate with `make generate-session-api-types`)
+
+All consumers now use the generated client types from `pkg/sessionapi/`. The eval worker uses `ClientWithResponses` directly; the facade httpclient uses the generated types for serialization while keeping its own retry/circuit-breaker/write-buffer infrastructure.
+
 ## Dependencies
 - PostgreSQL (required, warm store)
 - Redis (optional, hot cache + event streaming)

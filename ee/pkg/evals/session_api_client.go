@@ -9,18 +9,16 @@ Functional Source License. See ee/LICENSE for details.
 package evals
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
-	neturl "net/url"
-	"strconv"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/api"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"github.com/altairalabs/omnia/pkg/sessionapi"
 )
 
 // Default HTTP client timeout for session-api requests.
@@ -48,102 +46,81 @@ type EvalResultWriter interface {
 	WriteEvalResults(ctx context.Context, results []*api.EvalResult) error
 }
 
-// HTTPSessionAPIClient implements SessionAPIClient using HTTP calls to session-api.
+// HTTPSessionAPIClient implements SessionAPIClient using the generated session-api client.
 type HTTPSessionAPIClient struct {
-	baseURL    string
-	httpClient *http.Client
+	client *sessionapi.ClientWithResponses
 }
 
 // NewHTTPSessionAPIClient creates a new HTTP client for session-api.
 // The client's transport is wrapped with otelhttp to propagate trace context.
-func NewHTTPSessionAPIClient(baseURL string) *HTTPSessionAPIClient {
-	return &HTTPSessionAPIClient{
-		baseURL: baseURL,
-		httpClient: &http.Client{
-			Timeout:   defaultHTTPTimeout,
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
-		},
+func NewHTTPSessionAPIClient(baseURL string) (*HTTPSessionAPIClient, error) {
+	httpClient := &http.Client{
+		Timeout:   defaultHTTPTimeout,
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
 	}
-}
-
-// doGet performs a GET request to the given URL and decodes the JSON response into dest.
-func (c *HTTPSessionAPIClient) doGet(ctx context.Context, url string, dest any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	client, err := sessionapi.NewClientWithResponses(baseURL,
+		sessionapi.WithHTTPClient(httpClient))
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create session-api client: %w", err)
 	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("GET %s: %w", url, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("GET %s returned status %d", url, resp.StatusCode)
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
-		return fmt.Errorf("decode response from %s: %w", url, err)
-	}
-
-	return nil
+	return &HTTPSessionAPIClient{client: client}, nil
 }
 
 // GetSession retrieves session metadata by ID from the session-api.
 func (c *HTTPSessionAPIClient) GetSession(ctx context.Context, sessionID string) (*session.Session, error) {
-	url := fmt.Sprintf("%s/api/v1/sessions/%s", c.baseURL, sessionID)
-
-	var result sessionResponse
-	if err := c.doGet(ctx, url, &result); err != nil {
+	id, err := parseSessionID(sessionID)
+	if err != nil {
 		return nil, err
 	}
 
-	return result.Session, nil
+	resp, err := c.client.GetSessionWithResponse(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get session %s: %w", sessionID, err)
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("get session %s: status %d", sessionID, resp.StatusCode())
+	}
+	if resp.JSON200 == nil || resp.JSON200.Session == nil {
+		return nil, fmt.Errorf("get session %s: empty response", sessionID)
+	}
+
+	return sessionapi.SessionFromAPI(resp.JSON200.Session), nil
 }
 
 // GetSessionMessages retrieves all messages for a session from the session-api.
 func (c *HTTPSessionAPIClient) GetSessionMessages(ctx context.Context, sessionID string) ([]session.Message, error) {
-	url := fmt.Sprintf("%s/api/v1/sessions/%s/messages", c.baseURL, sessionID)
-
-	var result messagesResponse
-	if err := c.doGet(ctx, url, &result); err != nil {
+	id, err := parseSessionID(sessionID)
+	if err != nil {
 		return nil, err
 	}
 
-	messages := make([]session.Message, 0, len(result.Messages))
-	for _, m := range result.Messages {
-		if m != nil {
-			messages = append(messages, *m)
-		}
+	resp, err := c.client.GetMessagesWithResponse(ctx, id, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get messages for %s: %w", sessionID, err)
 	}
 
-	return messages, nil
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("get messages for %s: status %d", sessionID, resp.StatusCode())
+	}
+	if resp.JSON200 == nil {
+		return nil, fmt.Errorf("get messages for %s: empty response", sessionID)
+	}
+
+	return sessionapi.MessagesFromAPI(resp.JSON200.Messages), nil
 }
 
 // WriteEvalResults sends eval results to the session-api for persistence.
 func (c *HTTPSessionAPIClient) WriteEvalResults(ctx context.Context, results []*api.EvalResult) error {
-	url := fmt.Sprintf("%s/api/v1/eval-results", c.baseURL)
+	body := sessionapi.EvalResultsToAPI(results)
 
-	body, err := json.Marshal(results)
+	resp, err := c.client.CreateEvalResultsWithResponse(ctx, body)
 	if err != nil {
-		return fmt.Errorf("marshal eval results: %w", err)
+		return fmt.Errorf("write eval results: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("POST %s: %w", url, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("POST %s returned status %d", url, resp.StatusCode)
+	if resp.StatusCode() != http.StatusCreated {
+		return fmt.Errorf("write eval results: status %d", resp.StatusCode())
 	}
 
 	return nil
@@ -151,63 +128,50 @@ func (c *HTTPSessionAPIClient) WriteEvalResults(ctx context.Context, results []*
 
 // ListEvalResults retrieves eval results matching the given filters from the session-api.
 func (c *HTTPSessionAPIClient) ListEvalResults(ctx context.Context, opts api.EvalResultListOpts) ([]*api.EvalResult, error) {
-	url := fmt.Sprintf("%s/api/v1/eval-results?%s", c.baseURL, encodeEvalListQuery(opts))
+	params := sessionapi.EvalListOptsToParams(opts)
 
-	var result api.EvalResultListResponse
-	if err := c.doGet(ctx, url, &result); err != nil {
-		return nil, err
+	resp, err := c.client.ListEvalResultsWithResponse(ctx, &params)
+	if err != nil {
+		return nil, fmt.Errorf("list eval results: %w", err)
 	}
 
-	return result.Results, nil
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("list eval results: status %d", resp.StatusCode())
+	}
+	if resp.JSON200 == nil {
+		return nil, fmt.Errorf("list eval results: empty response")
+	}
+
+	return sessionapi.EvalResultsFromAPI(resp.JSON200.Results), nil
 }
 
 // GetSessionEvalResults retrieves eval results for a specific session from the session-api.
 func (c *HTTPSessionAPIClient) GetSessionEvalResults(ctx context.Context, sessionID string) ([]*api.EvalResult, error) {
-	url := fmt.Sprintf("%s/api/v1/sessions/%s/eval-results", c.baseURL, sessionID)
-
-	var result api.EvalResultSessionResponse
-	if err := c.doGet(ctx, url, &result); err != nil {
+	id, err := parseSessionID(sessionID)
+	if err != nil {
 		return nil, err
 	}
 
-	return result.Results, nil
+	resp, err := c.client.GetSessionEvalResultsWithResponse(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get session eval results for %s: %w", sessionID, err)
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("get session eval results for %s: status %d", sessionID, resp.StatusCode())
+	}
+	if resp.JSON200 == nil {
+		return nil, fmt.Errorf("get session eval results for %s: empty response", sessionID)
+	}
+
+	return sessionapi.EvalResultsFromAPI(resp.JSON200.Results), nil
 }
 
-// encodeEvalListQuery builds query parameters for the eval results list endpoint.
-func encodeEvalListQuery(opts api.EvalResultListOpts) string {
-	q := make(neturl.Values)
-	if opts.Passed != nil {
-		q.Set("passed", strconv.FormatBool(*opts.Passed))
+// parseSessionID parses a string session ID into the UUID type expected by the generated client.
+func parseSessionID(sessionID string) (sessionapi.SessionID, error) {
+	var id sessionapi.SessionID
+	if err := id.UnmarshalText([]byte(sessionID)); err != nil {
+		return id, fmt.Errorf("invalid session ID %q: %w", sessionID, err)
 	}
-	if opts.Limit > 0 {
-		q.Set("limit", strconv.Itoa(opts.Limit))
-	}
-	if opts.Offset > 0 {
-		q.Set("offset", strconv.Itoa(opts.Offset))
-	}
-	if opts.AgentName != "" {
-		q.Set("agentName", opts.AgentName)
-	}
-	if opts.Namespace != "" {
-		q.Set("namespace", opts.Namespace)
-	}
-	if opts.EvalID != "" {
-		q.Set("evalId", opts.EvalID)
-	}
-	if opts.EvalType != "" {
-		q.Set("evalType", opts.EvalType)
-	}
-	return q.Encode()
-}
-
-// sessionResponse mirrors the session-api GET /sessions/{id} JSON response.
-type sessionResponse struct {
-	Session  *session.Session  `json:"session"`
-	Messages []session.Message `json:"messages,omitempty"`
-}
-
-// messagesResponse mirrors the session-api GET /sessions/{id}/messages JSON response.
-type messagesResponse struct {
-	Messages []*session.Message `json:"messages"`
-	HasMore  bool               `json:"hasMore"`
+	return id, nil
 }
