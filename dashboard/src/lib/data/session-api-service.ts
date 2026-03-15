@@ -14,6 +14,8 @@ import type {
   Session,
   SessionSummary,
   Message,
+  ToolCall,
+  ProviderCall,
   SessionListOptions,
   SessionSearchOptions,
   SessionMessageOptions,
@@ -259,6 +261,40 @@ export class SessionApiService {
       messages: transformMessages(data.messages || []),
       hasMore: data.hasMore || false,
     };
+  }
+
+  async getToolCalls(
+    workspace: string,
+    sessionId: string
+  ): Promise<ToolCall[]> {
+    const response = await fetch(
+      `${SESSION_API_BASE}/${encodeURIComponent(workspace)}/sessions/${encodeURIComponent(sessionId)}/tool-calls`
+    );
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        return [];
+      }
+      throw new Error(`Failed to fetch tool calls: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data || [];
+  }
+
+  async getProviderCalls(
+    workspace: string,
+    sessionId: string
+  ): Promise<ProviderCall[]> {
+    const response = await fetch(
+      `${SESSION_API_BASE}/${encodeURIComponent(workspace)}/sessions/${encodeURIComponent(sessionId)}/provider-calls`
+    );
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        return [];
+      }
+      throw new Error(`Failed to fetch provider calls: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data || [];
   }
 
   async getSessionEvalResults(

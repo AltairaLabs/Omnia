@@ -22,10 +22,12 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Message } from "@/types/session";
+import type { Message, ToolCall, ProviderCall } from "@/types/session";
 
 interface TimelineTabProps {
   readonly messages: Message[];
+  readonly toolCalls?: ToolCall[];
+  readonly providerCalls?: ProviderCall[];
 }
 
 const KIND_CONFIG: Record<TimelineEventKind, {
@@ -362,9 +364,9 @@ function EvalGroupSection({ group, openToolCall }: {
   );
 }
 
-export function TimelineTab({ messages }: TimelineTabProps) {
+export function TimelineTab({ messages, toolCalls, providerCalls }: TimelineTabProps) {
   const openToolCall = useDebugPanelStore((s) => s.openToolCall);
-  const events = extractTimelineEvents(messages);
+  const events = extractTimelineEvents(messages, toolCalls, providerCalls);
 
   if (events.length === 0) {
     return (

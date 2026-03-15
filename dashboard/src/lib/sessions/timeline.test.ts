@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { extractTimelineEvents } from "./timeline";
-import type { Message } from "@/types/session";
+import { extractTimelineEvents, toolCallsToTimelineEvents, providerCallsToTimelineEvents } from "./timeline";
+import type { Message, ToolCall, ProviderCall } from "@/types/session";
 
 function makeMessage(overrides: Partial<Message> & { id: string }): Message {
   return {
@@ -293,5 +293,122 @@ describe("extractTimelineEvents", () => {
       "tool_call",
       "assistant_message",
     ]);
+  });
+
+  it("merges first-class tool calls into timeline", () => {
+    const messages: Message[] = [
+      makeMessage({ id: "m1", role: "user", content: "Hi", timestamp: "2024-01-01T00:00:00Z" }),
+      makeMessage({ id: "m2", role: "assistant", content: "Hello!", timestamp: "2024-01-01T00:00:03Z" }),
+    ];
+    const toolCalls: ToolCall[] = [
+      {
+        id: "tc1", callId: "call-1", sessionId: "s1", name: "search",
+        arguments: { q: "test" }, status: "success", durationMs: 100,
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+
+    const events = extractTimelineEvents(messages, toolCalls);
+
+    expect(events).toHaveLength(3);
+    expect(events[1].kind).toBe("tool_call");
+    expect(events[1].label).toBe("Tool: search");
+    expect(events[1].status).toBe("success");
+  });
+
+  it("merges first-class provider calls into timeline", () => {
+    const messages: Message[] = [
+      makeMessage({ id: "m1", role: "user", content: "Hi", timestamp: "2024-01-01T00:00:00Z" }),
+    ];
+    const providerCalls: ProviderCall[] = [
+      {
+        id: "pc1", sessionId: "s1", provider: "claude", model: "sonnet",
+        status: "completed", durationMs: 500, createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+
+    const events = extractTimelineEvents(messages, undefined, providerCalls);
+
+    expect(events).toHaveLength(2);
+    expect(events[1].kind).toBe("provider_call");
+    expect(events[1].label).toBe("Provider: claude/sonnet");
+    expect(events[1].status).toBe("success");
+  });
+
+  it("skips message-based tool events when first-class records provided", () => {
+    const messages: Message[] = [
+      makeMessage({ id: "m1", role: "user", content: "Hi", timestamp: "2024-01-01T00:00:00Z" }),
+      {
+        id: "m2", role: "assistant",
+        content: '{"name":"search","arguments":{}}',
+        timestamp: "2024-01-01T00:00:01Z",
+        metadata: { type: "tool_call" }, toolCallId: "tc1",
+      },
+    ];
+    const toolCalls: ToolCall[] = [
+      {
+        id: "tc1", callId: "call-1", sessionId: "s1", name: "search",
+        arguments: {}, status: "success", createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+
+    const events = extractTimelineEvents(messages, toolCalls);
+
+    // Should have user message + first-class tool call, not the message-based one
+    expect(events).toHaveLength(2);
+    expect(events[1].kind).toBe("tool_call");
+    expect(events[1].id).toBe("tc-tc1");
+  });
+});
+
+describe("toolCallsToTimelineEvents", () => {
+  it("converts tool calls to timeline events", () => {
+    const toolCalls: ToolCall[] = [
+      {
+        id: "tc1", callId: "call-1", sessionId: "s1", name: "search",
+        arguments: { q: "test" }, status: "success", durationMs: 100,
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+      {
+        id: "tc2", callId: "call-2", sessionId: "s1", name: "fetch",
+        arguments: {}, status: "error", errorMessage: "timeout",
+        createdAt: "2024-01-01T00:00:02Z",
+      },
+    ];
+
+    const events = toolCallsToTimelineEvents(toolCalls);
+
+    expect(events).toHaveLength(2);
+    expect(events[0].kind).toBe("tool_call");
+    expect(events[0].label).toBe("Tool: search");
+    expect(events[0].status).toBe("success");
+    expect(events[0].duration).toBe(100);
+    expect(events[1].status).toBe("error");
+  });
+});
+
+describe("providerCallsToTimelineEvents", () => {
+  it("converts provider calls to timeline events", () => {
+    const providerCalls: ProviderCall[] = [
+      {
+        id: "pc1", sessionId: "s1", provider: "claude", model: "sonnet",
+        status: "completed", durationMs: 2000,
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+      {
+        id: "pc2", sessionId: "s1", provider: "claude", model: "sonnet",
+        status: "failed", errorMessage: "rate limited",
+        createdAt: "2024-01-01T00:00:02Z",
+      },
+    ];
+
+    const events = providerCallsToTimelineEvents(providerCalls);
+
+    expect(events).toHaveLength(2);
+    expect(events[0].kind).toBe("provider_call");
+    expect(events[0].label).toBe("Provider: claude/sonnet");
+    expect(events[0].status).toBe("success");
+    expect(events[0].duration).toBe(2000);
+    expect(events[1].status).toBe("error");
   });
 });
