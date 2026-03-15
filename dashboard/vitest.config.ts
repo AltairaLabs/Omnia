@@ -88,6 +88,10 @@ export default defineConfig({
         "src/app/api/workspaces/[name]/arena/projects/**",
         "src/app/api/workspaces/[name]/arena/sources/[sourceName]/file/**",
 
+        // Session sub-route proxies — simple pass-through to session-api
+        "src/app/api/workspaces/[name]/sessions/[sessionId]/tool-calls/**",
+        "src/app/api/workspaces/[name]/sessions/[sessionId]/provider-calls/**",
+
         // Other API routes that require K8s infrastructure
         "src/app/api/workspaces/[name]/agents/**",
         "src/app/api/workspaces/[name]/costs/**",

@@ -1,4 +1,4 @@
-import type { Message } from "@/types/session";
+import type { Message, ToolCall, ProviderCall } from "@/types/session";
 
 export type TimelineEventKind =
   | "user_message"
@@ -149,30 +149,96 @@ function resolveEventStatus(kind: TimelineEventKind, message: Message): Timeline
   return undefined;
 }
 
+function resolveToolCallStatus(status: string): TimelineEvent["status"] {
+  if (status === "error") return "error";
+  if (status === "success") return "success";
+  return undefined;
+}
+
+function resolveProviderCallStatus(status: string): TimelineEvent["status"] {
+  if (status === "failed") return "error";
+  if (status === "completed") return "success";
+  return undefined;
+}
+
+/** Convert first-class ToolCall records to timeline events. */
+export function toolCallsToTimelineEvents(toolCalls: ToolCall[]): TimelineEvent[] {
+  return toolCalls.map((tc) => ({
+    id: `tc-${tc.id}`,
+    timestamp: tc.createdAt,
+    kind: "tool_call" as TimelineEventKind,
+    label: `Tool: ${tc.name}`,
+    detail: tc.arguments ? truncate(JSON.stringify(tc.arguments), MAX_DETAIL_LENGTH) : undefined,
+    toolCallId: tc.callId || tc.id,
+    duration: tc.durationMs,
+    status: resolveToolCallStatus(tc.status),
+  }));
+}
+
+/** Convert first-class ProviderCall records to timeline events. */
+export function providerCallsToTimelineEvents(providerCalls: ProviderCall[]): TimelineEvent[] {
+  return providerCalls.map((pc) => ({
+    id: `pc-${pc.id}`,
+    timestamp: pc.createdAt,
+    kind: "provider_call" as TimelineEventKind,
+    label: `Provider: ${pc.provider}/${pc.model}`,
+    detail: pc.durationMs ? `${pc.durationMs}ms` : undefined,
+    duration: pc.durationMs,
+    status: resolveProviderCallStatus(pc.status),
+  }));
+}
+
+/** Check whether a message-based event should be skipped because first-class records replace it. */
+function shouldSkipMessageEvent(
+  kind: TimelineEventKind,
+  hasToolCalls: boolean,
+  hasProviderCalls: boolean,
+): boolean {
+  if (hasToolCalls && (kind === "tool_call" || kind === "tool_result")) return true;
+  if (hasProviderCalls && kind === "provider_call") return true;
+  return false;
+}
+
+/** Convert a single message to a TimelineEvent. */
+function messageToTimelineEvent(message: Message, kind: TimelineEventKind): TimelineEvent {
+  const durationStr = message.metadata?.duration_ms;
+  const duration = durationStr ? Number.parseInt(durationStr, 10) : undefined;
+
+  return {
+    id: message.id,
+    timestamp: message.timestamp,
+    kind,
+    label: buildLabel(kind, message),
+    detail: message.content ? truncate(message.content, MAX_DETAIL_LENGTH) : undefined,
+    toolCallId: (kind === "tool_call" || kind === "tool_result") ? message.toolCallId : undefined,
+    duration: duration && !Number.isNaN(duration) ? duration : undefined,
+    metadata: message.metadata,
+    status: resolveEventStatus(kind, message),
+  };
+}
+
 /**
- * Extract a flat, chronologically sorted list of timeline events from session messages.
+ * Extract a flat, chronologically sorted list of timeline events from session messages,
+ * optionally merging first-class tool call and provider call records.
  */
-export function extractTimelineEvents(messages: Message[]): TimelineEvent[] {
+export function extractTimelineEvents(
+  messages: Message[],
+  toolCalls?: ToolCall[],
+  providerCalls?: ProviderCall[],
+): TimelineEvent[] {
+  const hasToolCalls = (toolCalls?.length ?? 0) > 0;
+  const hasProviderCalls = (providerCalls?.length ?? 0) > 0;
   const events: TimelineEvent[] = [];
 
   for (const message of messages) {
     const kind = resolveMessageKind(message);
-
-    const durationStr = message.metadata?.duration_ms;
-    const duration = durationStr ? Number.parseInt(durationStr, 10) : undefined;
-
-    events.push({
-      id: message.id,
-      timestamp: message.timestamp,
-      kind,
-      label: buildLabel(kind, message),
-      detail: message.content ? truncate(message.content, MAX_DETAIL_LENGTH) : undefined,
-      toolCallId: (kind === "tool_call" || kind === "tool_result") ? message.toolCallId : undefined,
-      duration: duration && !Number.isNaN(duration) ? duration : undefined,
-      metadata: message.metadata,
-      status: resolveEventStatus(kind, message),
-    });
+    if (shouldSkipMessageEvent(kind, hasToolCalls, hasProviderCalls)) continue;
+    events.push(messageToTimelineEvent(message, kind));
   }
+
+  // Merge first-class records
+  if (toolCalls) events.push(...toolCallsToTimelineEvents(toolCalls));
+  if (providerCalls) events.push(...providerCallsToTimelineEvents(providerCalls));
 
   // Sort by timestamp (stable sort preserves insertion order for equal timestamps)
   events.sort((a, b) => a.timestamp.localeCompare(b.timestamp));

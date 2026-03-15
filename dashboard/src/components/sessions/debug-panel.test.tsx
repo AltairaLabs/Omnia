@@ -2,12 +2,25 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { DebugPanel } from "./debug-panel";
 import { useDebugPanelStore } from "@/stores/debug-panel-store";
-import type { Session, Message } from "@/types/session";
+import type { Session, Message, ToolCall } from "@/types/session";
 
 const mockMessages: Message[] = [
   { id: "m1", role: "user", content: "Hello", timestamp: "2024-01-01T00:00:01Z" },
   { id: "m2", role: "assistant", content: '{"name":"search","arguments":{"q":"test"}}', timestamp: "2024-01-01T00:00:02Z", metadata: { type: "tool_call", duration_ms: "100", status: "success" }, toolCallId: "tc1" },
   { id: "m3", role: "assistant", content: "Hi!", timestamp: "2024-01-01T00:00:03Z" },
+];
+
+const mockToolCalls: ToolCall[] = [
+  {
+    id: "tc1",
+    callId: "call-1",
+    sessionId: "s1",
+    name: "search",
+    arguments: { q: "test" },
+    status: "success",
+    durationMs: 100,
+    createdAt: "2024-01-01T00:00:02Z",
+  },
 ];
 
 const mockSession: Session = {
@@ -67,7 +80,7 @@ describe("DebugPanel", () => {
 
   it("shows tool calls tab content when selected", () => {
     useDebugPanelStore.setState({ isOpen: true, activeTab: "toolcalls" });
-    render(<DebugPanel messages={mockMessages} session={mockSession} />);
+    render(<DebugPanel messages={mockMessages} session={mockSession} toolCalls={mockToolCalls} />);
 
     expect(screen.getByTestId("toolcalls-tab")).toBeInTheDocument();
   });
@@ -97,7 +110,7 @@ describe("DebugPanel", () => {
 
   it("displays tool call count badge", () => {
     useDebugPanelStore.setState({ isOpen: true });
-    render(<DebugPanel messages={mockMessages} session={mockSession} />);
+    render(<DebugPanel messages={mockMessages} session={mockSession} toolCalls={mockToolCalls} />);
 
     expect(screen.getByText("1")).toBeInTheDocument();
   });

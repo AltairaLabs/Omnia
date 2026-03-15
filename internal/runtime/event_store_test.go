@@ -243,35 +243,19 @@ func TestOmniaEventStore_AppendToolCallStarted(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-
-	if msg.Role != session.RoleAssistant {
-		t.Errorf("expected role assistant, got %s", msg.Role)
-	}
-	if msg.ToolCallID != "call-123" {
-		t.Errorf("expected toolCallID call-123, got %s", msg.ToolCallID)
-	}
-	if msg.Metadata["type"] != "tool_call" {
-		t.Errorf("expected metadata type tool_call, got %s", msg.Metadata["type"])
-	}
-	if msg.Metadata["source"] != "runtime" {
-		t.Errorf("expected metadata source runtime, got %s", msg.Metadata["source"])
-	}
-
-	var content map[string]interface{}
-	if err := json.Unmarshal([]byte(msg.Content), &content); err != nil {
-		t.Fatalf("failed to unmarshal content: %v", err)
-	}
-	if content["name"] != "weather" {
-		t.Errorf("expected tool name weather, got %v", content["name"])
-	}
-
-	// Tool call counter is now handled by RecordToolCall, not stats.
+	// No legacy message — only first-class tool call record.
 	store.waitForToolCalls(t, 1)
+	msgs := store.getMessages()
+	if len(msgs) != 0 {
+		t.Errorf("expected no messages for tool call started, got %d", len(msgs))
+	}
+
 	tcs := store.getToolCalls()
 	if tcs[0].Name != "weather" {
 		t.Errorf("expected tool call name weather, got %s", tcs[0].Name)
+	}
+	if tcs[0].CallID != "call-123" {
+		t.Errorf("expected callID call-123, got %s", tcs[0].CallID)
 	}
 	if tcs[0].Status != session.ToolCallStatusPending {
 		t.Errorf("expected tool call status pending, got %s", tcs[0].Status)
@@ -301,32 +285,22 @@ func TestOmniaEventStore_AppendToolCallCompleted(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-
-	if msg.Role != session.RoleSystem {
-		t.Errorf("expected role system, got %s", msg.Role)
-	}
-	if msg.ToolCallID != "call-123" {
-		t.Errorf("expected toolCallID call-123, got %s", msg.ToolCallID)
-	}
-	if msg.Metadata["type"] != "tool_call_completed" {
-		t.Errorf("expected metadata type tool_call_completed, got %s", msg.Metadata["type"])
-	}
-	if msg.Metadata["status"] != "success" {
-		t.Errorf("expected status=success, got %s", msg.Metadata["status"])
-	}
-	if msg.Metadata["duration_ms"] != "500" {
-		t.Errorf("expected duration_ms=500, got %s", msg.Metadata["duration_ms"])
+	// No legacy message — only first-class tool call record.
+	store.waitForToolCalls(t, 1)
+	msgs := store.getMessages()
+	if len(msgs) != 0 {
+		t.Errorf("expected no messages for tool call completed, got %d", len(msgs))
 	}
 
-	// Verify content has structured data
-	var content map[string]interface{}
-	if err := json.Unmarshal([]byte(msg.Content), &content); err != nil {
-		t.Fatalf("failed to unmarshal content: %v", err)
+	tcs := store.getToolCalls()
+	if tcs[0].Name != "weather" {
+		t.Errorf("expected tool call name weather, got %s", tcs[0].Name)
 	}
-	if content["toolName"] != "weather" {
-		t.Errorf("expected toolName=weather, got %v", content["toolName"])
+	if tcs[0].Status != session.ToolCallStatusSuccess {
+		t.Errorf("expected status success, got %s", tcs[0].Status)
+	}
+	if tcs[0].DurationMs != 500 {
+		t.Errorf("expected durationMs=500, got %d", tcs[0].DurationMs)
 	}
 }
 
@@ -351,19 +325,13 @@ func TestOmniaEventStore_ToolCallCompletedWithResultBody(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-
-	var content map[string]interface{}
-	if err := json.Unmarshal([]byte(msg.Content), &content); err != nil {
-		t.Fatalf("failed to unmarshal content: %v", err)
+	store.waitForToolCalls(t, 1)
+	tcs := store.getToolCalls()
+	if tcs[0].Result != "91" {
+		t.Errorf("expected result=91, got %v", tcs[0].Result)
 	}
-
-	if content["result"] != "91" {
-		t.Errorf("expected result=91, got %v", content["result"])
-	}
-	if content["toolName"] != "calculate" {
-		t.Errorf("expected toolName=calculate, got %v", content["toolName"])
+	if tcs[0].Name != "calculate" {
+		t.Errorf("expected name=calculate, got %s", tcs[0].Name)
 	}
 }
 
@@ -387,16 +355,10 @@ func TestOmniaEventStore_ToolCallCompletedWithoutParts(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-
-	var content map[string]interface{}
-	if err := json.Unmarshal([]byte(msg.Content), &content); err != nil {
-		t.Fatalf("failed to unmarshal content: %v", err)
-	}
-
-	if _, exists := content["result"]; exists {
-		t.Errorf("expected no result key when Parts is empty, got %v", content["result"])
+	store.waitForToolCalls(t, 1)
+	tcs := store.getToolCalls()
+	if tcs[0].Result != nil {
+		t.Errorf("expected no result when Parts is empty, got %v", tcs[0].Result)
 	}
 }
 
@@ -420,17 +382,22 @@ func TestOmniaEventStore_AppendToolCallFailed(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
+	// No legacy message — only first-class tool call record.
+	store.waitForToolCalls(t, 1)
+	msgs := store.getMessages()
+	if len(msgs) != 0 {
+		t.Errorf("expected no messages for tool call failed, got %d", len(msgs))
+	}
 
-	if msg.Metadata["is_error"] != "true" {
-		t.Errorf("expected is_error=true, got %s", msg.Metadata["is_error"])
+	tcs := store.getToolCalls()
+	if tcs[0].Status != session.ToolCallStatusError {
+		t.Errorf("expected status error, got %s", tcs[0].Status)
 	}
-	if msg.Content != "API timeout" {
-		t.Errorf("expected content 'API timeout', got %s", msg.Content)
+	if tcs[0].ErrorMessage != "API timeout" {
+		t.Errorf("expected errorMessage 'API timeout', got %s", tcs[0].ErrorMessage)
 	}
-	if msg.ToolCallID != "call-456" {
-		t.Errorf("expected toolCallID call-456, got %s", msg.ToolCallID)
+	if tcs[0].CallID != "call-456" {
+		t.Errorf("expected callID call-456, got %s", tcs[0].CallID)
 	}
 }
 
@@ -453,9 +420,10 @@ func TestOmniaEventStore_ToolCallFailedNilError(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	if store.getMessages()[0].Content != "unknown error" {
-		t.Errorf("expected 'unknown error' for nil error, got %s", store.getMessages()[0].Content)
+	store.waitForToolCalls(t, 1)
+	tcs := store.getToolCalls()
+	if tcs[0].ErrorMessage != "unknown error" {
+		t.Errorf("expected 'unknown error' for nil error, got %s", tcs[0].ErrorMessage)
 	}
 }
 
@@ -481,14 +449,22 @@ func TestOmniaEventStore_AppendProviderCallStarted(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-
-	if msg.Metadata["type"] != "provider_call_started" {
-		t.Errorf("expected type provider_call_started, got %s", msg.Metadata["type"])
+	// No legacy message — only first-class provider call record.
+	store.waitForProviderCalls(t, 1)
+	msgs := store.getMessages()
+	if len(msgs) != 0 {
+		t.Errorf("expected no messages for provider call started, got %d", len(msgs))
 	}
-	if msg.Metadata["provider"] != "claude" {
-		t.Errorf("expected provider=claude, got %s", msg.Metadata["provider"])
+
+	pcs := store.getProviderCalls()
+	if pcs[0].Provider != "claude" {
+		t.Errorf("expected provider=claude, got %s", pcs[0].Provider)
+	}
+	if pcs[0].Model != "claude-3-sonnet" {
+		t.Errorf("expected model=claude-3-sonnet, got %s", pcs[0].Model)
+	}
+	if pcs[0].Status != session.ProviderCallStatusPending {
+		t.Errorf("expected status pending, got %s", pcs[0].Status)
 	}
 }
 
@@ -516,19 +492,31 @@ func TestOmniaEventStore_AppendProviderCallCompleted(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-
-	if msg.Metadata["type"] != "provider_call" {
-		t.Errorf("expected type provider_call, got %s", msg.Metadata["type"])
-	}
-	if msg.InputTokens != 100 {
-		t.Errorf("expected inputTokens=100, got %d", msg.InputTokens)
-	}
-	if msg.OutputTokens != 200 {
-		t.Errorf("expected outputTokens=200, got %d", msg.OutputTokens)
+	// No legacy message — only first-class provider call record.
+	store.waitForProviderCalls(t, 1)
+	msgs := store.getMessages()
+	if len(msgs) != 0 {
+		t.Errorf("expected no messages for provider call completed, got %d", len(msgs))
 	}
 
+	pcs := store.getProviderCalls()
+	if pcs[0].Status != session.ProviderCallStatusCompleted {
+		t.Errorf("expected status completed, got %s", pcs[0].Status)
+	}
+	if pcs[0].InputTokens != 100 {
+		t.Errorf("expected inputTokens=100, got %d", pcs[0].InputTokens)
+	}
+	if pcs[0].OutputTokens != 200 {
+		t.Errorf("expected outputTokens=200, got %d", pcs[0].OutputTokens)
+	}
+	if pcs[0].CostUSD != 0.005 {
+		t.Errorf("expected costUSD=0.005, got %f", pcs[0].CostUSD)
+	}
+	if pcs[0].FinishReason != "end_turn" {
+		t.Errorf("expected finishReason=end_turn, got %s", pcs[0].FinishReason)
+	}
+
+	// Stats should still be updated for session counters.
 	store.waitForStats(t, 1)
 	stats := store.getStats()
 	if stats[0].AddInputTokens != 100 {
@@ -559,14 +547,19 @@ func TestOmniaEventStore_AppendProviderCallFailed(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-
-	if msg.Metadata["type"] != "provider_call_failed" {
-		t.Errorf("expected type provider_call_failed, got %s", msg.Metadata["type"])
+	// No legacy message — only first-class provider call record.
+	store.waitForProviderCalls(t, 1)
+	msgs := store.getMessages()
+	if len(msgs) != 0 {
+		t.Errorf("expected no messages for provider call failed, got %d", len(msgs))
 	}
-	if msg.Metadata["is_error"] != "true" {
-		t.Errorf("expected is_error=true, got %s", msg.Metadata["is_error"])
+
+	pcs := store.getProviderCalls()
+	if pcs[0].Status != session.ProviderCallStatusFailed {
+		t.Errorf("expected status failed, got %s", pcs[0].Status)
+	}
+	if pcs[0].ErrorMessage != "rate limited" {
+		t.Errorf("expected errorMessage 'rate limited', got %s", pcs[0].ErrorMessage)
 	}
 }
 
@@ -661,26 +654,15 @@ func TestOmniaEventStore_AppendMessageCreated_WithToolCalls(t *testing.T) {
 	store.waitForMessages(t, 1)
 	msg := store.getMessages()[0]
 
-	if msg.Metadata["type"] != "tool_call" {
-		t.Errorf("expected type=tool_call, got %s", msg.Metadata["type"])
+	// Message should NOT have tool_call metadata — tool calls are first-class records now.
+	if msg.Metadata["type"] == "tool_call" {
+		t.Error("expected no tool_call type metadata on message")
 	}
-	if msg.ToolCallID != "tc-1" {
-		t.Errorf("expected toolCallID=tc-1, got %s", msg.ToolCallID)
-	}
-	if msg.Metadata["tool_calls"] == "" {
-		t.Error("expected tool_calls metadata to be set")
+	if msg.Metadata["tool_calls"] != "" {
+		t.Error("expected no tool_calls metadata on message")
 	}
 
-	// Verify tool_calls contains both calls
-	var toolCalls []events.MessageToolCall
-	if err := json.Unmarshal([]byte(msg.Metadata["tool_calls"]), &toolCalls); err != nil {
-		t.Fatalf("failed to unmarshal tool_calls: %v", err)
-	}
-	if len(toolCalls) != 2 {
-		t.Errorf("expected 2 tool calls, got %d", len(toolCalls))
-	}
-
-	// Stats should count both tool calls
+	// Stats should still count tool calls.
 	store.waitForStats(t, 1)
 	stats := store.getStats()
 	if stats[0].AddToolCalls != 2 {
@@ -1285,8 +1267,8 @@ func TestOmniaEventStore_AppendEmptySessionID(t *testing.T) {
 	}
 
 	time.Sleep(50 * time.Millisecond)
-	if len(store.getMessages()) != 0 {
-		t.Error("expected no messages for empty sessionID")
+	if len(store.getToolCalls()) != 0 {
+		t.Error("expected no tool calls for empty sessionID")
 	}
 }
 
@@ -1479,14 +1461,13 @@ func TestOmniaEventStore_ValueTypeToolCall(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-
-	if msg.Metadata["type"] != "tool_call" {
-		t.Errorf("expected type=tool_call, got %s", msg.Metadata["type"])
+	store.waitForToolCalls(t, 1)
+	tcs := store.getToolCalls()
+	if tcs[0].Name != "get_weather" {
+		t.Errorf("expected name=get_weather, got %s", tcs[0].Name)
 	}
-	if msg.ToolCallID != "call-val-1" {
-		t.Errorf("expected ToolCallID=call-val-1, got %s", msg.ToolCallID)
+	if tcs[0].CallID != "call-val-1" {
+		t.Errorf("expected callID=call-val-1, got %s", tcs[0].CallID)
 	}
 }
 
@@ -1512,14 +1493,13 @@ func TestOmniaEventStore_ValueTypeToolCallCompleted(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-
-	if msg.Metadata["type"] != "tool_call_completed" {
-		t.Errorf("expected type=tool_call_completed, got %s", msg.Metadata["type"])
+	store.waitForToolCalls(t, 1)
+	tcs := store.getToolCalls()
+	if tcs[0].Name != "get_weather" {
+		t.Errorf("expected name=get_weather, got %s", tcs[0].Name)
 	}
-	if msg.Metadata["duration_ms"] != "500" {
-		t.Errorf("expected duration_ms=500, got %s", msg.Metadata["duration_ms"])
+	if tcs[0].DurationMs != 500 {
+		t.Errorf("expected durationMs=500, got %d", tcs[0].DurationMs)
 	}
 }
 
@@ -1545,11 +1525,10 @@ func TestOmniaEventStore_ValueTypeProviderCallStarted(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-
-	if msg.Metadata["type"] != "provider_call_started" {
-		t.Errorf("expected type=provider_call_started, got %s", msg.Metadata["type"])
+	store.waitForProviderCalls(t, 1)
+	pcs := store.getProviderCalls()
+	if pcs[0].Provider != "ollama" {
+		t.Errorf("expected provider=ollama, got %s", pcs[0].Provider)
 	}
 }
 
@@ -1574,16 +1553,18 @@ func TestOmniaEventStore_ValueTypeProviderCallFailed(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-
-	if msg.Metadata["type"] != "provider_call_failed" {
-		t.Errorf("expected type=provider_call_failed, got %s", msg.Metadata["type"])
+	store.waitForProviderCalls(t, 1)
+	pcs := store.getProviderCalls()
+	if pcs[0].Status != session.ProviderCallStatusFailed {
+		t.Errorf("expected status=failed, got %s", pcs[0].Status)
+	}
+	if pcs[0].ErrorMessage != "timeout" {
+		t.Errorf("expected errorMessage=timeout, got %s", pcs[0].ErrorMessage)
 	}
 }
 
-// TestOmniaEventStore_ToolCallWithRegistryMeta verifies that tool call messages
-// are enriched with registry/handler metadata when toolMetaFn is set.
+// TestOmniaEventStore_ToolCallWithRegistryMeta verifies that tool call records
+// are enriched with registry/handler labels when toolMetaFn is set.
 func TestOmniaEventStore_ToolCallWithRegistryMeta(t *testing.T) {
 	store := &mockSessionStore{}
 	es := NewOmniaEventStore(store, logr.Discard())
@@ -1615,24 +1596,23 @@ func TestOmniaEventStore_ToolCallWithRegistryMeta(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-
-	if msg.Metadata["handler_name"] != "mcp-handler" {
-		t.Errorf("expected handler_name=mcp-handler, got %s", msg.Metadata["handler_name"])
+	store.waitForToolCalls(t, 1)
+	tcs := store.getToolCalls()
+	if tcs[0].Labels["handler_name"] != "mcp-handler" {
+		t.Errorf("expected label handler_name=mcp-handler, got %s", tcs[0].Labels["handler_name"])
 	}
-	if msg.Metadata["handler_type"] != "mcp" {
-		t.Errorf("expected handler_type=mcp, got %s", msg.Metadata["handler_type"])
+	if tcs[0].Labels["handler_type"] != "mcp" {
+		t.Errorf("expected label handler_type=mcp, got %s", tcs[0].Labels["handler_type"])
 	}
-	if msg.Metadata["registry_name"] != "my-registry" {
-		t.Errorf("expected registry_name=my-registry, got %s", msg.Metadata["registry_name"])
+	if tcs[0].Labels["registry_name"] != "my-registry" {
+		t.Errorf("expected label registry_name=my-registry, got %s", tcs[0].Labels["registry_name"])
 	}
-	if msg.Metadata["registry_namespace"] != "my-ns" {
-		t.Errorf("expected registry_namespace=my-ns, got %s", msg.Metadata["registry_namespace"])
+	if tcs[0].Labels["registry_namespace"] != "my-ns" {
+		t.Errorf("expected label registry_namespace=my-ns, got %s", tcs[0].Labels["registry_namespace"])
 	}
 }
 
-// TestOmniaEventStore_ToolCallCompletedWithRegistryMeta verifies completed events get metadata.
+// TestOmniaEventStore_ToolCallCompletedWithRegistryMeta verifies completed events get labels.
 func TestOmniaEventStore_ToolCallCompletedWithRegistryMeta(t *testing.T) {
 	store := &mockSessionStore{}
 	es := NewOmniaEventStore(store, logr.Discard())
@@ -1660,14 +1640,13 @@ func TestOmniaEventStore_ToolCallCompletedWithRegistryMeta(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-
-	if msg.Metadata["handler_type"] != "http" {
-		t.Errorf("expected handler_type=http, got %s", msg.Metadata["handler_type"])
+	store.waitForToolCalls(t, 1)
+	tcs := store.getToolCalls()
+	if tcs[0].Labels["handler_type"] != "http" {
+		t.Errorf("expected label handler_type=http, got %s", tcs[0].Labels["handler_type"])
 	}
-	if msg.Metadata["registry_name"] != "reg" {
-		t.Errorf("expected registry_name=reg, got %s", msg.Metadata["registry_name"])
+	if tcs[0].Labels["registry_name"] != "reg" {
+		t.Errorf("expected label registry_name=reg, got %s", tcs[0].Labels["registry_name"])
 	}
 }
 
@@ -1692,11 +1671,12 @@ func TestOmniaEventStore_ToolCallWithoutMetaFn(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-
-	if _, ok := msg.Metadata["handler_name"]; ok {
-		t.Error("expected no handler_name when toolMetaFn is nil")
+	store.waitForToolCalls(t, 1)
+	tcs := store.getToolCalls()
+	if tcs[0].Labels != nil {
+		if _, ok := tcs[0].Labels["handler_name"]; ok {
+			t.Error("expected no handler_name label when toolMetaFn is nil")
+		}
 	}
 }
 
