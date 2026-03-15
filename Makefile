@@ -324,12 +324,16 @@ sync-chart-crds: manifests manifests-ee ## Sync CRDs from config/crd/bases to ch
 generate-dashboard-types: sync-chart-crds ## Generate TypeScript types from CRD schemas
 	node scripts/generate-dashboard-types.js
 
+.PHONY: generate-websocket-types
+generate-websocket-types: ## Generate TypeScript types from Go WebSocket protocol structs
+	tygo generate
+
 .PHONY: generate-dashboard-api
 generate-dashboard-api: ## Generate TypeScript API client from OpenAPI spec
 	cd dashboard && npm run generate:api
 
 .PHONY: generate-all
-generate-all: manifests generate generate-proto generate-proto-ts sync-chart-crds generate-dashboard-types generate-dashboard-api ## Run all code generation
+generate-all: manifests generate generate-proto generate-proto-ts sync-chart-crds generate-dashboard-types generate-websocket-types generate-dashboard-api ## Run all code generation
 	@echo "All code generation complete."
 
 ##@ Local Development (Tilt)

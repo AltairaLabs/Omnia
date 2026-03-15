@@ -1,152 +1,67 @@
 /**
  * WebSocket protocol types for agent communication.
- * These mirror the Go types in internal/facade/protocol.go
  *
- * NOTE: The proto types (api/proto/runtime/v1/runtime.proto) define the internal
- * gRPC protocol between facade and runtime. These WebSocket types define the
- * external protocol between dashboard and facade, which includes additional
- * metadata fields for rich client experiences.
+ * Protocol types (ClientMessage, ServerMessage, ToolCallInfo, etc.) are
+ * auto-generated from Go structs in internal/facade/protocol.go via tygo.
+ * Run 'make generate-websocket-types' to regenerate.
  *
- * To regenerate proto types: npm run generate:proto
+ * This file re-exports those generated types and adds dashboard-specific
+ * UI types that don't exist in the Go protocol layer.
  */
 
-// Message types
-export type MessageType =
-  | "message"         // Client → Server: user message
-  | "chat"            // Client → Server: dev console chat message
-  | "upload_request"  // Client → Server: file upload request
-  | "chunk"           // Server → Client: streaming text chunk
-  | "done"            // Server → Client: response complete
-  | "tool_call"       // Server → Client: agent is calling a tool
-  | "tool_result"     // Server → Client: tool execution result
-  | "error"           // Server → Client: error occurred
-  | "connected"       // Server → Client: connection established
-  | "reloaded"        // Server → Client: configuration reloaded (dev console)
-  | "upload_ready"    // Server → Client: upload URL ready
-  | "upload_complete" // Server → Client: upload complete
-  | "media_chunk";    // Server → Client: streaming media chunk
+// Re-export all generated protocol types
+export type {
+  ContentPart,
+  ContentPartType,
+  ClientMessage,
+  ClientToolResultInfo,
+  ServerMessage,
+  ToolCallInfo,
+  ToolResultInfo,
+  ErrorInfo,
+  UploadRequestInfo,
+  UploadReadyInfo,
+  UploadCompleteInfo,
+  MediaChunkInfo,
+  ConnectionCapabilities,
+  ConnectedInfo,
+} from "./generated/websocket";
 
-// Client → Server message
-export interface ClientMessage {
-  type: "message" | "tool_result";
-  session_id?: string;
-  content: string;
-  /** Multi-modal content parts (images, audio, etc.). Takes precedence over content. */
-  parts?: ContentPart[];
-  metadata?: Record<string, string>;
-}
+export {
+  ContentPartTypeText,
+  ContentPartTypeImage,
+  ContentPartTypeAudio,
+  ContentPartTypeVideo,
+  ContentPartTypeFile,
+  MessageTypeMessage,
+  MessageTypeUploadRequest,
+  MessageTypeToolResult,
+  MessageTypeChunk,
+  MessageTypeDone,
+  MessageTypeToolCall,
+  MessageTypeError,
+  MessageTypeConnected,
+  MessageTypeUploadReady,
+  MessageTypeUploadComplete,
+  MessageTypeMediaChunk,
+  ErrorCodeInvalidMessage,
+  ErrorCodeSessionNotFound,
+  ErrorCodeSessionExpired,
+  ErrorCodeInternalError,
+  ErrorCodeAgentUnavailable,
+  ErrorCodeToolFailed,
+  ErrorCodeUploadFailed,
+  ErrorCodeMediaNotEnabled,
+  ErrorCodeRateLimited,
+} from "./generated/websocket";
 
-// Client → Server: client-side tool result
-export interface ClientToolResultMessage {
-  type: "tool_result";
-  session_id?: string;
-  tool_result: {
-    call_id: string;
-    result?: unknown;
-    error?: string;
-  };
-}
+export type { MediaContent } from "./generated/websocket";
 
-// Connection capabilities for binary frame support
-export interface ConnectionCapabilities {
-  binary_frames: boolean;
-  max_payload_size?: number;
-  protocol_version?: number;
-}
+// Re-export MessageType — generated as `string`, but we keep the union alias
+// for backward compatibility with code that uses the literal union.
+export type { MessageType } from "./generated/websocket";
 
-// Connected message info with capabilities
-export interface ConnectedInfo {
-  capabilities?: ConnectionCapabilities;
-}
-
-// Content part types for multi-modal messages
-export type ContentPartType = "text" | "image" | "audio" | "video" | "file";
-
-// Media content for non-text parts
-export interface MediaContent {
-  data?: string;      // base64-encoded content
-  url?: string;       // HTTP/HTTPS URL
-  storage_ref?: string; // backend storage reference
-  mime_type: string;
-  filename?: string;
-  size_bytes?: number;
-  // Image-specific fields
-  width?: number;
-  height?: number;
-  detail?: string;
-  // Audio/Video-specific fields
-  duration_ms?: number;
-  sample_rate?: number;
-  channels?: number;
-}
-
-// Content part for multi-modal messages
-export interface ContentPart {
-  type: ContentPartType;
-  text?: string;      // for type "text"
-  media?: MediaContent; // for image, audio, video, file types
-}
-
-// Media chunk info for streaming responses
-export interface MediaChunkInfo {
-  media_id: string;
-  sequence: number;
-  is_last: boolean;
-  data: string; // base64 for JSON frames
-  mime_type: string;
-}
-
-// Upload ready info
-export interface UploadReadyInfo {
-  upload_id: string;
-  upload_url: string;
-  storage_ref: string;
-  expires_at: string;
-}
-
-// Upload complete info
-export interface UploadCompleteInfo {
-  upload_id: string;
-  storage_ref: string;
-  size_bytes: number;
-}
-
-// Server → Client message
-export interface ServerMessage {
-  type: MessageType;
-  session_id?: string;
-  content?: string;
-  parts?: ContentPart[]; // multi-modal content parts
-  tool_call?: ToolCallInfo;
-  tool_result?: ToolResultInfo;
-  error?: ErrorInfo;
-  connected?: ConnectedInfo;
-  media_chunk?: MediaChunkInfo;
-  upload_ready?: UploadReadyInfo;
-  upload_complete?: UploadCompleteInfo;
-  timestamp: string;
-}
-
-export interface ToolCallInfo {
-  id: string;
-  name: string;
-  arguments?: Record<string, unknown>;
-  execution?: "server" | "client";
-  consent_message?: string;
-  categories?: string[];
-}
-
-export interface ToolResultInfo {
-  id: string;
-  result?: unknown;
-  error?: string;
-}
-
-export interface ErrorInfo {
-  code: string;
-  message: string;
-  details?: Record<string, unknown>;
-}
+// ─── Dashboard-specific UI types (not part of the WebSocket protocol) ────────
 
 // File attachment for messages
 export interface FileAttachment {
@@ -177,7 +92,6 @@ export interface ToolCallWithResult {
   result?: unknown;
   error?: string;
   status: "pending" | "awaiting_consent" | "success" | "error";
-  execution?: "server" | "client";
   consent_message?: string;
   categories?: string[];
 }
@@ -192,4 +106,3 @@ export interface ConsoleState {
   messages: ConsoleMessage[];
   error: string | null;
 }
-

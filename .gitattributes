@@ -10,3 +10,11 @@
 *.gif binary
 *.ico binary
 *.pdf binary
+
+# Generated and lock files — accept "ours" on conflict, then regenerate.
+# After merging, run: make generate && make manifests && go mod tidy
+# For dashboard: cd dashboard && npm install
+go.sum merge=ours
+dashboard/package-lock.json merge=ours
+**/zz_generated.deepcopy.go merge=ours
+dashboard/src/types/generated/*.ts merge=ours

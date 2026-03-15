@@ -272,7 +272,6 @@ func TestToolCallInfoClientFieldsJSON(t *testing.T) {
 	info := ToolCallInfo{
 		ID:             "call-456",
 		Name:           "get_location",
-		Execution:      "client",
 		ConsentMessage: "Allow location access?",
 		Categories:     []string{"location", "privacy"},
 	}
@@ -287,9 +286,6 @@ func TestToolCallInfoClientFieldsJSON(t *testing.T) {
 		t.Fatalf("Failed to unmarshal: %v", err)
 	}
 
-	if decoded.Execution != "client" {
-		t.Errorf("Execution = %v, want 'client'", decoded.Execution)
-	}
 	if decoded.ConsentMessage != info.ConsentMessage {
 		t.Errorf("ConsentMessage = %v, want %v", decoded.ConsentMessage, info.ConsentMessage)
 	}
@@ -299,10 +295,16 @@ func TestToolCallInfoClientFieldsJSON(t *testing.T) {
 	if decoded.Categories[0] != "location" {
 		t.Errorf("Categories[0] = %v, want 'location'", decoded.Categories[0])
 	}
+
+	// All WebSocket tool calls are client-side — no execution field in protocol
+	jsonStr := string(data)
+	if strings.Contains(jsonStr, "execution") {
+		t.Error("ToolCallInfo should not include an 'execution' field")
+	}
 }
 
-func TestToolCallInfoServerOmitsClientFields(t *testing.T) {
-	// Server-side tool calls should omit client fields via omitempty
+func TestToolCallInfoOmitsEmptyOptionalFields(t *testing.T) {
+	// Tool call with only required fields should omit optional fields via omitempty
 	info := ToolCallInfo{
 		ID:   "call-789",
 		Name: "weather",
@@ -314,14 +316,11 @@ func TestToolCallInfoServerOmitsClientFields(t *testing.T) {
 	}
 
 	jsonStr := string(data)
-	if strings.Contains(jsonStr, "execution") {
-		t.Error("Server-side tool call should not include 'execution' field")
-	}
 	if strings.Contains(jsonStr, "consent_message") {
-		t.Error("Server-side tool call should not include 'consent_message' field")
+		t.Error("Should not include empty 'consent_message' field")
 	}
 	if strings.Contains(jsonStr, "categories") {
-		t.Error("Server-side tool call should not include 'categories' field")
+		t.Error("Should not include empty 'categories' field")
 	}
 }
 

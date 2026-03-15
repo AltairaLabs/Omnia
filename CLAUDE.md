@@ -1,11 +1,45 @@
 # Omnia - Claude Code Project Instructions
 
+## PromptKit SDK (`promptkit-local/`)
+
+**`promptkit-local/` is READ-ONLY.** It is a local checkout of the [PromptKit repo](https://github.com/AltairaLabs/PromptKit) used via `go.work` for local development. You MUST NOT:
+
+- Edit, write, or modify any file under `promptkit-local/`
+- Create new files in `promptkit-local/`
+- Run `go mod tidy` or any command that modifies files in `promptkit-local/`
+
+If you find a bug or need a change in PromptKit, **do not fix it here**. Instead:
+- Note the issue and tell the user to create an issue at https://github.com/AltairaLabs/PromptKit/issues
+- Work around it in Omnia code if possible (e.g., string literal fallbacks for missing constants)
+
 ## Git Workflow
 
 - **Never push directly to main** — main has branch protection enabled.
 - Always use feature branches: `git checkout -b feature/<issue-number>-<short-description>` or `feat/<description>`.
 - Standard flow: branch → commit → push with `-u` → create PR via `gh pr create` → monitor CI → merge via `gh pr merge --squash`.
 - When continuing a previous session, check `git status`, `git log --oneline -5`, and any existing plan files before taking action.
+- **Never manually resolve conflicts in generated files** (`zz_generated.deepcopy.go`, `go.sum`, `package-lock.json`, `dashboard/src/types/generated/*.ts`). After merging, re-run `make generate && make manifests && go mod tidy` (and `cd dashboard && npm install` for dashboard changes). The `.gitattributes` merge drivers will auto-accept "ours" for these files.
+
+## Keeping Documentation In Sync
+
+Architecture docs are only useful if they reflect reality. When your changes affect service boundaries, update the docs as part of the same PR — not as a follow-up.
+
+**When to update `SERVICE.md`** (in the service's `cmd/` or `ee/cmd/` directory):
+- Adding or removing an input/output (new API endpoint, new gRPC method, new message type)
+- Changing what a service owns or does NOT own
+- Adding or removing Prometheus metrics or OpenTelemetry trace spans
+- Adding or changing dependencies (new external service, database, cache)
+
+**When to update `SERVICES.md`** (repo root):
+- Adding a new deployable service
+- Changing how services communicate (new protocol, new connection between services)
+- Adding or removing trace spans (update the span inventory table and trace flow diagram)
+
+**When to update `api/CHANGELOG.md`**:
+- Any change to REST, gRPC, or WebSocket message schemas
+
+**When to update `api/websocket/asyncapi.yaml`**:
+- Adding/removing/changing WebSocket message types or payload schemas
 
 ## Pre-commit Hooks
 
@@ -163,6 +197,18 @@ Exceptions configured in `sonar-project.properties` — cognitive complexity is 
 - **Naming**: Follow Go conventions. Test doubles should use `Mock` prefix (e.g., `MockStore`).
 - **Formatting**: `gofmt` and `goimports` are enforced. Run before committing.
 - Runtime and runtime test packages (`internal/runtime/`, `cmd/runtime/`) are excluded from golangci-lint because they depend on the unpublished PromptKit SDK.
+
+### PromptKit SDK Version Strategy
+
+Local development uses `go.work` with `promptkit-local/`, but CI uses the published module (`GOWORK=off`). To avoid CI-only failures:
+
+- **Rule**: Code in `internal/runtime/` must compile with the **published** SDK. If you need a new PromptKit type or event, the PromptKit release must happen first.
+- **Guard**: CI runs `GOWORK=off go build ./...` — this catches unpublished SDK dependencies.
+- **Pattern for unreleased types**: Use the string literal form with a TODO comment:
+  ```go
+  events.EventType("tool.client.resolved") // TODO: use events.EventClientToolResolved when published
+  ```
+- **Never** add types/constants from `promptkit-local/` that don't exist in the published SDK without this pattern.
 
 ## Structured Logging
 

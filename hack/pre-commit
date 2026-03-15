@@ -649,6 +649,39 @@ if [ -n "$STAGED_DASHBOARD_FILES" ] || [ -n "$GO_CHANGES" ]; then
     fi
 fi
 
+# Check WebSocket types if facade protocol.go was changed
+STAGED_PROTOCOL=$(echo "$STAGED_GO_FILES" | grep 'internal/facade/protocol\.go$' || true)
+if [ -n "$STAGED_PROTOCOL" ]; then
+    if command -v tygo &> /dev/null; then
+        make generate-websocket-types 2>/dev/null
+
+        WS_TYPE_CHANGES=$(git diff --name-only dashboard/src/types/generated/websocket.ts 2>/dev/null || true)
+        if [ -n "$WS_TYPE_CHANGES" ]; then
+            print_error "Generated WebSocket TypeScript types are out of date:"
+            echo "  - dashboard/src/types/generated/websocket.ts"
+            echo ""
+            print_info "Run 'make generate-websocket-types' and commit the changes"
+            CHECKS_FAILED=1
+        else
+            print_success "WebSocket TypeScript types are up to date"
+        fi
+    else
+        print_warning "tygo not installed — skipping WebSocket type generation check"
+        print_info "Install with: go install github.com/gzuidhof/tygo@latest"
+    fi
+fi
+
+# Warn if API-surface files are staged without api/CHANGELOG.md
+STAGED_API_FILES=$(echo "$STAGED_GO_FILES" | grep -E 'internal/session/api/|internal/facade/protocol\.go$' || true)
+STAGED_PROTO_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '^api/proto/' || true)
+STAGED_CHANGELOG=$(git diff --cached --name-only --diff-filter=ACM | grep '^api/CHANGELOG.md$' || true)
+if [ -n "$STAGED_API_FILES" ] || [ -n "$STAGED_PROTO_FILES" ]; then
+    if [ -z "$STAGED_CHANGELOG" ]; then
+        print_warning "API-surface files changed without updating api/CHANGELOG.md"
+        print_info "Consider documenting the change in api/CHANGELOG.md for cross-team visibility"
+    fi
+fi
+
 #
 # 7. Helm template validation (if chart files changed)
 #

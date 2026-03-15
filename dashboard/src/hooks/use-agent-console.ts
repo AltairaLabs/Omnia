@@ -114,18 +114,17 @@ function isLastMessageStreamingAssistant(messages: ConsoleMessage[]): boolean {
 }
 
 /**
- * Build a ToolCallWithResult entry from a server tool_call message.
+ * Build a ToolCallWithResult entry from a WebSocket tool_call message.
+ * All tool calls received over WebSocket are client-side (requiring consent).
  */
 function buildToolCallEntry(tc: NonNullable<ServerMessage["tool_call"]>) {
-  const isClient = tc.execution === "client";
   return {
     id: tc.id,
     name: tc.name,
     arguments: tc.arguments,
-    execution: tc.execution,
     consent_message: tc.consent_message,
     categories: tc.categories,
-    status: isClient ? "awaiting_consent" as const : "pending" as const,
+    status: "awaiting_consent" as const,
   };
 }
 

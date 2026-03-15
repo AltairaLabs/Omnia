@@ -1,0 +1,13 @@
+# tygo configuration for generating TypeScript types from Go structs.
+# See https://github.com/gzuidhof/tygo
+#
+# Usage: tygo generate (or: make generate-websocket-types)
+
+packages:
+  - path: "github.com/altairalabs/omnia/internal/facade"
+    type_mappings:
+      time.Time: string
+    output_path: "dashboard/src/types/generated/websocket.ts"
+    # Only include types/constants, not helper functions
+    include_files:
+      - "protocol.go"

@@ -156,7 +156,7 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
   useEffect(() => {
     for (const msg of messages) {
       for (const tc of msg.toolCalls || []) {
-        if (tc.status === "awaiting_consent" && tc.execution === "client" && !autoExecutedRef.current.has(tc.id) && isAutoApproved(tc.name)) {
+        if (tc.status === "awaiting_consent" && !autoExecutedRef.current.has(tc.id) && isAutoApproved(tc.name)) {
           autoExecutedRef.current.add(tc.id);
           executeClientTool(tc.id, tc.name, tc.arguments);
         }

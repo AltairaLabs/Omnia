@@ -427,7 +427,7 @@ describe("useAgentConsole message handling", () => {
     const assistantMessage = result.current.messages.find(m => m.role === "assistant");
     expect(assistantMessage?.toolCalls).toHaveLength(1);
     expect(assistantMessage?.toolCalls?.[0].name).toBe("search");
-    expect(assistantMessage?.toolCalls?.[0].status).toBe("pending");
+    expect(assistantMessage?.toolCalls?.[0].status).toBe("awaiting_consent");
   });
 
   it("should handle tool_result message", () => {
