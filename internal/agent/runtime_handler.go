@@ -329,6 +329,11 @@ func (h *RuntimeHandler) forwardResponse(resp *runtimev1.ServerMessage, writer f
 		return writer.WriteDone(msg.Done.FinalContent)
 
 	case *runtimev1.ServerMessage_ToolCall:
+		// Only forward client-side tool calls. Server-side tool calls are an
+		// internal runtime concern and should never reach the WebSocket client.
+		if msg.ToolCall.Execution != runtimev1.ToolExecution_TOOL_EXECUTION_CLIENT {
+			return nil
+		}
 		return h.forwardToolCall(msg.ToolCall, writer)
 
 	case *runtimev1.ServerMessage_MediaChunk:
@@ -351,6 +356,8 @@ func (h *RuntimeHandler) forwardResponse(resp *runtimev1.ServerMessage, writer f
 }
 
 // forwardToolCall translates a gRPC ToolCall to a facade ToolCallInfo.
+// Only client-side tool calls should reach this point; server-side tool calls
+// are handled internally by the runtime and filtered in forwardResponse.
 func (h *RuntimeHandler) forwardToolCall(tc *runtimev1.ToolCall, writer facade.ResponseWriter) error {
 	var args map[string]interface{}
 	if tc.ArgumentsJson != "" {
@@ -360,19 +367,16 @@ func (h *RuntimeHandler) forwardToolCall(tc *runtimev1.ToolCall, writer facade.R
 	}
 
 	info := &facade.ToolCallInfo{
-		ID:        tc.Id,
-		Name:      tc.Name,
-		Arguments: args,
+		ID:             tc.Id,
+		Name:           tc.Name,
+		Arguments:      args,
+		ConsentMessage: tc.ConsentMessage,
 	}
 
-	// Add client tool fields — copy Categories to avoid sharing the proto slice.
-	if tc.Execution == runtimev1.ToolExecution_TOOL_EXECUTION_CLIENT {
-		info.Execution = "client"
-		info.ConsentMessage = tc.ConsentMessage
-		if len(tc.Categories) > 0 {
-			info.Categories = make([]string, len(tc.Categories))
-			copy(info.Categories, tc.Categories)
-		}
+	// Copy Categories to avoid sharing the proto slice.
+	if len(tc.Categories) > 0 {
+		info.Categories = make([]string, len(tc.Categories))
+		copy(info.Categories, tc.Categories)
 	}
 
 	return writer.WriteToolCall(info)

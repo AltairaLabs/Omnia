@@ -122,6 +122,7 @@ func TestRuntimeHandler_HandleMessage_Chunks(t *testing.T) {
 }
 
 func TestRuntimeHandler_HandleMessage_ToolCall(t *testing.T) {
+	// Server-side tool calls (default execution) should be silently filtered.
 	mock := &mockRuntimeServer{
 		responses: []*runtimev1.ServerMessage{
 			{Message: &runtimev1.ServerMessage_ToolCall{ToolCall: &runtimev1.ToolCall{
@@ -154,11 +155,8 @@ func TestRuntimeHandler_HandleMessage_ToolCall(t *testing.T) {
 	err = handler.HandleMessage(context.Background(), "session-123", msg, writer)
 	require.NoError(t, err)
 
-	require.Len(t, writer.toolCalls, 1)
-	assert.Equal(t, "call-1", writer.toolCalls[0].ID)
-	assert.Equal(t, "weather", writer.toolCalls[0].Name)
-	assert.Equal(t, "Denver", writer.toolCalls[0].Arguments["location"])
-
+	// Server-side tool calls are filtered — not forwarded to WebSocket
+	assert.Empty(t, writer.toolCalls)
 	assert.Equal(t, "It's 72°F", writer.doneMsg)
 }
 
@@ -287,6 +285,7 @@ func TestRuntimeHandler_HandleMessage_WithMetadata(t *testing.T) {
 }
 
 func TestRuntimeHandler_HandleMessage_ToolCallInvalidJSON(t *testing.T) {
+	// Server-side tool call with invalid JSON args — filtered, not forwarded.
 	mock := &mockRuntimeServer{
 		responses: []*runtimev1.ServerMessage{
 			{Message: &runtimev1.ServerMessage_ToolCall{ToolCall: &runtimev1.ToolCall{
@@ -312,19 +311,16 @@ func TestRuntimeHandler_HandleMessage_ToolCallInvalidJSON(t *testing.T) {
 	handler := NewRuntimeHandler(client)
 	writer := &mockResponseWriter{}
 
-	msg := &facade.ClientMessage{Content: "Hello"}
-
-	err = handler.HandleMessage(context.Background(), "session-123", msg, writer)
+	err = handler.HandleMessage(context.Background(), "session-123", &facade.ClientMessage{Content: "Hello"}, writer)
 	require.NoError(t, err)
 
-	require.Len(t, writer.toolCalls, 1)
-	assert.Equal(t, "call-1", writer.toolCalls[0].ID)
-	assert.Equal(t, "test_tool", writer.toolCalls[0].Name)
-	// Invalid JSON should fallback to raw
-	assert.Equal(t, "invalid json {", writer.toolCalls[0].Arguments["raw"])
+	// Server-side tool calls are filtered
+	assert.Empty(t, writer.toolCalls)
+	assert.Equal(t, "Done", writer.doneMsg)
 }
 
 func TestRuntimeHandler_HandleMessage_ToolCallEmptyArgs(t *testing.T) {
+	// Server-side tool call with empty args — filtered, not forwarded.
 	mock := &mockRuntimeServer{
 		responses: []*runtimev1.ServerMessage{
 			{Message: &runtimev1.ServerMessage_ToolCall{ToolCall: &runtimev1.ToolCall{
@@ -350,17 +346,17 @@ func TestRuntimeHandler_HandleMessage_ToolCallEmptyArgs(t *testing.T) {
 	handler := NewRuntimeHandler(client)
 	writer := &mockResponseWriter{}
 
-	msg := &facade.ClientMessage{Content: "Hello"}
-
-	err = handler.HandleMessage(context.Background(), "session-123", msg, writer)
+	err = handler.HandleMessage(context.Background(), "session-123", &facade.ClientMessage{Content: "Hello"}, writer)
 	require.NoError(t, err)
 
-	require.Len(t, writer.toolCalls, 1)
-	assert.Nil(t, writer.toolCalls[0].Arguments)
+	// Server-side tool calls are filtered
+	assert.Empty(t, writer.toolCalls)
+	assert.Equal(t, "Done", writer.doneMsg)
 }
 
-func TestRuntimeHandler_HandleMessage_ToolCallServerSidePassthrough(t *testing.T) {
-	// Server-side tool calls should pass through without waiting
+func TestRuntimeHandler_HandleMessage_ToolCallServerSideFiltered(t *testing.T) {
+	// Server-side tool calls should be filtered out — they are an internal
+	// runtime concern and must not be forwarded to the WebSocket client.
 	mock := &mockRuntimeServer{
 		responses: []*runtimev1.ServerMessage{
 			{Message: &runtimev1.ServerMessage_ToolCall{ToolCall: &runtimev1.ToolCall{
@@ -392,9 +388,8 @@ func TestRuntimeHandler_HandleMessage_ToolCallServerSidePassthrough(t *testing.T
 	}, writer)
 	require.NoError(t, err)
 
-	// Server tool calls pass through as informational (no waiting)
-	require.Len(t, writer.toolCalls, 1)
-	assert.Empty(t, writer.toolCalls[0].Execution)
+	// Server-side tool calls must not be forwarded to the client
+	assert.Empty(t, writer.toolCalls)
 	assert.Equal(t, "72°F", writer.doneMsg)
 }
 
@@ -733,10 +728,9 @@ func TestRuntimeHandler_ClientToolCall(t *testing.T) {
 		t.Fatal("timed out waiting for tool call")
 	}
 
-	// Verify the tool call fields
+	// Verify the tool call fields — all WebSocket tool calls are client-side
 	assert.Equal(t, "ct-1", tc.ID)
 	assert.Equal(t, "get_location", tc.Name)
-	assert.Equal(t, "client", tc.Execution)
 	assert.Equal(t, "Allow location access?", tc.ConsentMessage)
 	assert.Equal(t, []string{"location"}, tc.Categories)
 

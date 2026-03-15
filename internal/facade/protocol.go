@@ -173,7 +173,10 @@ type ServerMessage struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// ToolCallInfo contains information about a tool call.
+// ToolCallInfo contains information about a client-side tool call.
+// All tool calls sent over the WebSocket are client-side by definition;
+// server-side tool calls are handled internally by the runtime and are
+// never forwarded to the facade or dashboard.
 type ToolCallInfo struct {
 	// ID is the unique identifier for this tool call.
 	ID string `json:"id"`
@@ -181,8 +184,6 @@ type ToolCallInfo struct {
 	Name string `json:"name"`
 	// Arguments are the arguments passed to the tool.
 	Arguments map[string]interface{} `json:"arguments,omitempty"`
-	// Execution indicates where the tool runs: "server" or "client".
-	Execution string `json:"execution,omitempty"`
 	// ConsentMessage is a human-readable consent prompt for client-side tools.
 	ConsentMessage string `json:"consent_message,omitempty"`
 	// Categories are semantic consent categories (e.g., "location", "filesystem").
