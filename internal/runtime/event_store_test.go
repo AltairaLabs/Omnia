@@ -41,6 +41,7 @@ type mockSessionStore struct {
 	toolCalls     []session.ToolCall
 	providerCalls []session.ProviderCall
 	runtimeEvents []session.RuntimeEvent
+	evalResults   []session.EvalResult
 	appendFn      func(ctx context.Context, sessionID string, msg session.Message) error
 }
 
@@ -115,6 +116,13 @@ func (m *mockSessionStore) GetProviderCalls(_ context.Context, _ string) ([]sess
 	return nil, nil
 }
 
+func (m *mockSessionStore) RecordEvalResult(_ context.Context, _ string, result session.EvalResult) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.evalResults = append(m.evalResults, result)
+	return nil
+}
+
 func (m *mockSessionStore) RecordRuntimeEvent(_ context.Context, _ string, evt session.RuntimeEvent) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -184,6 +192,32 @@ func (m *mockSessionStore) waitForProviderCalls(t *testing.T, count int) {
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
+}
+
+func (m *mockSessionStore) waitForEvalResults(t *testing.T, count int) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		m.mu.Lock()
+		n := len(m.evalResults)
+		m.mu.Unlock()
+		if n >= count {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for %d eval results (got %d)", count, n)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func (m *mockSessionStore) getEvalResults() []session.EvalResult {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]session.EvalResult, len(m.evalResults))
+	copy(result, m.evalResults)
+	return result
 }
 
 func (m *mockSessionStore) waitForRuntimeEvents(t *testing.T, count int) {
@@ -1352,13 +1386,10 @@ func TestOmniaEventStore_AppendEmptySessionID_BackfillsFromFallback(t *testing.T
 		t.Errorf("expected event.SessionID='fallback-sess', got %q", event.SessionID)
 	}
 
-	store.waitForRuntimeEvents(t, 1)
-	evt := store.getRuntimeEvents()[0]
-	if evt.EventType != "eval.completed" {
-		t.Errorf("expected eventType 'eval.completed', got %q", evt.EventType)
-	}
-	if evt.Data["eval_id"] != "conciseness" {
-		t.Errorf("expected eval_id 'conciseness', got %v", evt.Data["eval_id"])
+	store.waitForEvalResults(t, 1)
+	er := store.getEvalResults()[0]
+	if er.EvalID != "conciseness" {
+		t.Errorf("expected EvalID 'conciseness', got %q", er.EvalID)
 	}
 }
 
@@ -1390,7 +1421,7 @@ func TestOmniaEventStore_AppendPreservesExistingSessionID(t *testing.T) {
 		t.Errorf("expected event.SessionID='real-sess', got %q", event.SessionID)
 	}
 
-	store.waitForRuntimeEvents(t, 1)
+	store.waitForEvalResults(t, 1)
 }
 
 func TestOmniaEventStore_SetSessionID(t *testing.T) {
@@ -1757,25 +1788,25 @@ func TestOmniaEventStore_EvalCompleted(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	// Eval events now go to runtime_events, not messages.
-	store.waitForRuntimeEvents(t, 1)
+	// Eval events now go to eval_results, not messages.
+	store.waitForEvalResults(t, 1)
 	msgs := store.getMessages()
 	if len(msgs) != 0 {
 		t.Errorf("expected no messages for eval event, got %d", len(msgs))
 	}
 
-	evt := store.getRuntimeEvents()[0]
-	if evt.EventType != "eval.completed" {
-		t.Errorf("expected eventType 'eval.completed', got %q", evt.EventType)
+	er := store.getEvalResults()[0]
+	if er.EvalID != "conciseness" {
+		t.Errorf("expected EvalID 'conciseness', got %q", er.EvalID)
 	}
-	if evt.Data["eval_id"] != "conciseness" {
-		t.Errorf("expected EvalID 'conciseness', got %v", evt.Data["eval_id"])
+	if er.EvalType != "regex" {
+		t.Errorf("expected EvalType 'regex', got %q", er.EvalType)
 	}
-	if evt.Data["passed"] != true {
-		t.Errorf("expected Passed true, got %v", evt.Data["passed"])
+	if !er.Passed {
+		t.Errorf("expected Passed true, got %v", er.Passed)
 	}
-	if evt.DurationMs != 5 {
-		t.Errorf("expected DurationMs=5, got %d", evt.DurationMs)
+	if er.DurationMs == nil || *er.DurationMs != 5 {
+		t.Errorf("expected DurationMs=5, got %v", er.DurationMs)
 	}
 }
 
@@ -1803,17 +1834,24 @@ func TestOmniaEventStore_EvalFailed(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForRuntimeEvents(t, 1)
-	evt := store.getRuntimeEvents()[0]
-	if evt.EventType != "eval.failed" {
-		t.Errorf("expected eventType 'eval.failed', got %q", evt.EventType)
+	store.waitForEvalResults(t, 1)
+	er := store.getEvalResults()[0]
+	if er.EvalID != "accuracy" {
+		t.Errorf("expected EvalID 'accuracy', got %q", er.EvalID)
 	}
-	// Explanation should be preserved in the runtime event data.
-	if evt.Data["explanation"] != "Score was 0.3, threshold is 0.7" {
-		t.Errorf("expected explanation preserved, got %v", evt.Data["explanation"])
+	if er.Passed {
+		t.Errorf("expected Passed false, got true")
 	}
-	if evt.DurationMs != 2500 {
-		t.Errorf("expected DurationMs=2500, got %d", evt.DurationMs)
+	// Explanation should be preserved in the Details JSON.
+	var details map[string]any
+	if err := json.Unmarshal(er.Details, &details); err != nil {
+		t.Fatalf("failed to unmarshal Details: %v", err)
+	}
+	if details["explanation"] != "Score was 0.3, threshold is 0.7" {
+		t.Errorf("expected explanation preserved, got %v", details["explanation"])
+	}
+	if er.DurationMs == nil || *er.DurationMs != 2500 {
+		t.Errorf("expected DurationMs=2500, got %v", er.DurationMs)
 	}
 }
 
@@ -1838,13 +1876,17 @@ func TestOmniaEventStore_EvalSkipped(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForRuntimeEvents(t, 1)
-	evt := store.getRuntimeEvents()[0]
-	if evt.Data["skipped"] != true {
-		t.Errorf("expected Skipped true, got %v", evt.Data["skipped"])
+	store.waitForEvalResults(t, 1)
+	er := store.getEvalResults()[0]
+	var details map[string]any
+	if err := json.Unmarshal(er.Details, &details); err != nil {
+		t.Fatalf("failed to unmarshal Details: %v", err)
 	}
-	if evt.Data["skip_reason"] != "sampling" {
-		t.Errorf("expected SkipReason 'sampling', got %v", evt.Data["skip_reason"])
+	if details["skipped"] != true {
+		t.Errorf("expected skipped true, got %v", details["skipped"])
+	}
+	if details["skipReason"] != "sampling" {
+		t.Errorf("expected skipReason 'sampling', got %v", details["skipReason"])
 	}
 }
 
@@ -1869,14 +1911,18 @@ func TestOmniaEventStore_EvalWithError(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForRuntimeEvents(t, 1)
-	evt := store.getRuntimeEvents()[0]
-	if evt.ErrorMessage != "invalid regex pattern" {
-		t.Errorf("expected errorMessage 'invalid regex pattern', got %q", evt.ErrorMessage)
+	store.waitForEvalResults(t, 1)
+	er := store.getEvalResults()[0]
+	var details map[string]any
+	if err := json.Unmarshal(er.Details, &details); err != nil {
+		t.Fatalf("failed to unmarshal Details: %v", err)
+	}
+	if details["error"] != "invalid regex pattern" {
+		t.Errorf("expected error 'invalid regex pattern', got %v", details["error"])
 	}
 }
 
-func TestOmniaEventStore_EvalPersistsAsRuntimeEvent(t *testing.T) {
+func TestOmniaEventStore_EvalPersistsAsEvalResult(t *testing.T) {
 	store := &mockSessionStore{}
 	es := NewOmniaEventStore(store, logr.Discard())
 
@@ -1896,10 +1942,16 @@ func TestOmniaEventStore_EvalPersistsAsRuntimeEvent(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForRuntimeEvents(t, 1)
-	evt := store.getRuntimeEvents()[0]
-	if evt.EventType != "eval.completed" {
-		t.Errorf("expected eventType 'eval.completed', got %q", evt.EventType)
+	store.waitForEvalResults(t, 1)
+	er := store.getEvalResults()[0]
+	if er.EvalID != "test-eval" {
+		t.Errorf("expected EvalID 'test-eval', got %q", er.EvalID)
+	}
+	if er.EvalType != "contains" {
+		t.Errorf("expected EvalType 'contains', got %q", er.EvalType)
+	}
+	if !er.Passed {
+		t.Errorf("expected Passed true, got false")
 	}
 }
 
@@ -1924,12 +1976,12 @@ func TestOmniaEventStore_EvalValueTypedData(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForRuntimeEvents(t, 1)
-	evt := store.getRuntimeEvents()[0]
-	if evt.EventType != "eval.completed" {
-		t.Errorf("expected eventType 'eval.completed', got %q", evt.EventType)
+	store.waitForEvalResults(t, 1)
+	er := store.getEvalResults()[0]
+	if er.EvalID != "value-typed" {
+		t.Errorf("expected EvalID 'value-typed', got %q", er.EvalID)
 	}
-	if evt.Data["eval_id"] != "value-typed" {
-		t.Errorf("expected EvalID 'value-typed', got %v", evt.Data["eval_id"])
+	if er.EvalType != "contains" {
+		t.Errorf("expected EvalType 'contains', got %q", er.EvalType)
 	}
 }

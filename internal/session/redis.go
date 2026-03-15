@@ -605,6 +605,11 @@ func (r *RedisStore) GetProviderCalls(_ context.Context, _ string) ([]ProviderCa
 	return nil, nil
 }
 
+// RecordEvalResult is not supported by the Redis hot cache store.
+func (r *RedisStore) RecordEvalResult(_ context.Context, _ string, _ EvalResult) error {
+	return nil
+}
+
 // RecordRuntimeEvent is not supported by the Redis hot cache store.
 func (r *RedisStore) RecordRuntimeEvent(_ context.Context, _ string, _ RuntimeEvent) error {
 	return nil

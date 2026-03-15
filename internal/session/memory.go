@@ -471,6 +471,12 @@ func (m *MemoryStore) GetProviderCalls(ctx context.Context, sessionID string) ([
 	return result, nil
 }
 
+// RecordEvalResult records an eval result (no-op storage in memory store — eval results
+// are persisted via the session-api eval_results table in production).
+func (m *MemoryStore) RecordEvalResult(_ context.Context, _ string, _ EvalResult) error {
+	return nil
+}
+
 // RecordRuntimeEvent records a runtime lifecycle event for the session.
 func (m *MemoryStore) RecordRuntimeEvent(ctx context.Context, sessionID string, evt RuntimeEvent) error {
 	if err := ctx.Err(); err != nil {

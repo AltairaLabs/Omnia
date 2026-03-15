@@ -363,6 +363,27 @@ func (s *Store) RecordProviderCall(ctx context.Context, sessionID string, pc ses
 	return nil
 }
 
+// RecordEvalResult sends an eval result via POST /api/v1/eval-results.
+// Uses the existing batch endpoint with a single-element array.
+func (s *Store) RecordEvalResult(ctx context.Context, sessionID string, result session.EvalResult) error {
+	result.SessionID = sessionID
+	body, err := json.Marshal([]session.EvalResult{result})
+	if err != nil {
+		return fmt.Errorf("record eval result: encode: %w", err)
+	}
+
+	resp, err := s.doWithRetry(ctx, http.MethodPost, "/api/v1/eval-results", body)
+	if err != nil {
+		return s.bufferWrite(err, http.MethodPost, "/api/v1/eval-results", body)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusCreated {
+		return s.readError(resp)
+	}
+	return nil
+}
+
 // RecordRuntimeEvent sends a runtime event via POST /api/v1/sessions/{sessionID}/events.
 // On transient failure, the write is buffered and retried automatically.
 func (s *Store) RecordRuntimeEvent(ctx context.Context, sessionID string, evt session.RuntimeEvent) error {

@@ -36,12 +36,14 @@ import (
 
 // eventAction holds the outputs of converting a single PromptKit event.
 // For tool/provider events, only the first-class record is set (no legacy message).
+// For eval events, the evalResult field carries the data.
 // For runtime lifecycle events, the event field carries the data.
 // For message events, the message field carries the data.
 type eventAction struct {
 	message      *session.Message
 	toolCall     *session.ToolCall
 	providerCall *session.ProviderCall
+	evalResult   *session.EvalResult
 	event        *session.RuntimeEvent
 	stats        session.SessionStatsUpdate
 }
@@ -651,38 +653,41 @@ func (s *OmniaEventStore) convertProviderCallFailed(event *events.Event) (eventA
 
 // --- Eval events ---
 
-// convertEvalEvent records an eval completed/failed event as a RuntimeEvent.
-// The authoritative eval_results record is written by the arena eval worker;
-// this RuntimeEvent preserves timeline visibility without polluting messages.
+// convertEvalEvent records an eval completed/failed event as an EvalResult.
+// Both the runtime (inline evals) and the arena eval worker write to the
+// same eval_results table so all results are in one place.
 func (s *OmniaEventStore) convertEvalEvent(event *events.Event) (eventAction, bool) {
 	data, ok := asPtr[events.EvalEventData](event.Data)
 	if !ok {
 		return eventAction{}, false
 	}
 
-	// Round-trip through JSON to convert typed struct to map[string]any.
-	var evtData map[string]any
-	raw, err := json.Marshal(data)
-	if err == nil {
-		_ = json.Unmarshal(raw, &evtData)
+	// Build details JSON with the textual fields (explanation, message, violations).
+	details, _ := json.Marshal(map[string]any{
+		"explanation": data.Explanation,
+		"message":     data.Message,
+		"violations":  data.Violations,
+		"error":       data.Error,
+		"skipped":     data.Skipped,
+		"skipReason":  data.SkipReason,
+	})
+
+	durationMs := int(data.DurationMs)
+	result := session.EvalResult{
+		EvalID:    data.EvalID,
+		EvalType:  data.EvalType,
+		Trigger:   data.Trigger,
+		Passed:    data.Passed,
+		Score:     data.Score,
+		Details:   details,
+		Source:    metaValueSource,
+		CreatedAt: event.Timestamp,
+	}
+	if durationMs > 0 {
+		result.DurationMs = &durationMs
 	}
 
-	evtType := string(event.Type)
-	var errMsg string
-	if data.Error != "" {
-		errMsg = data.Error
-	}
-
-	evt := session.RuntimeEvent{
-		ID:           uuid.New().String(),
-		EventType:    evtType,
-		Data:         evtData,
-		DurationMs:   data.DurationMs,
-		ErrorMessage: errMsg,
-		Timestamp:    event.Timestamp,
-	}
-
-	return eventAction{event: &evt}, true
+	return eventAction{evalResult: &result}, true
 }
 
 // --- Generic event handler ---
@@ -761,6 +766,15 @@ func (s *OmniaEventStore) writeAction(traceCtx context.Context, sessionID string
 		}
 	}
 
+	// Write eval result (for eval completed/failed events).
+	if action.evalResult != nil {
+		action.evalResult.SessionID = sessionID
+		if err := s.sessionStore.RecordEvalResult(ctx, sessionID, *action.evalResult); err != nil {
+			log.Error(err, "failed to record eval result",
+				"sessionID", sessionID, "evalID", action.evalResult.EvalID)
+		}
+	}
+
 	// Write runtime event (for lifecycle events).
 	if action.event != nil {
 		action.event.SessionID = sessionID
@@ -792,6 +806,9 @@ func (s *OmniaEventStore) writeAction(traceCtx context.Context, sessionID string
 
 // resolveEventType returns a descriptive string for the action being written.
 func (s *OmniaEventStore) resolveEventType(action eventAction) string {
+	if action.evalResult != nil {
+		return "eval:" + action.evalResult.EvalID
+	}
 	if action.event != nil {
 		return action.event.EventType
 	}
