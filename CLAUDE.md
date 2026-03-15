@@ -6,6 +6,7 @@
 - Always use feature branches: `git checkout -b feature/<issue-number>-<short-description>` or `feat/<description>`.
 - Standard flow: branch → commit → push with `-u` → create PR via `gh pr create` → monitor CI → merge via `gh pr merge --squash`.
 - When continuing a previous session, check `git status`, `git log --oneline -5`, and any existing plan files before taking action.
+- **Never manually resolve conflicts in generated files** (`zz_generated.deepcopy.go`, `go.sum`, `package-lock.json`, `dashboard/src/types/generated/*.ts`). After merging, re-run `make generate && make manifests && go mod tidy` (and `cd dashboard && npm install` for dashboard changes). The `.gitattributes` merge drivers will auto-accept "ours" for these files.
 
 ## Pre-commit Hooks
 

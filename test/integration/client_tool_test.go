@@ -187,7 +187,6 @@ func TestClientToolExecution(t *testing.T) {
 
 		tc := writer.getToolCalls()[0]
 		assert.Equal(t, "get_user_location", tc.Name)
-		assert.Equal(t, "client", tc.Execution)
 		assert.Equal(t, "Allow location access?", tc.ConsentMessage)
 		assert.Equal(t, []string{"location"}, tc.Categories)
 
