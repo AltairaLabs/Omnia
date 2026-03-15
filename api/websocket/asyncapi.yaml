@@ -1,0 +1,511 @@
+asyncapi: 3.0.0
+info:
+  title: Omnia Agent WebSocket Protocol
+  version: 1.0.0
+  description: |
+    WebSocket protocol between the Dashboard (browser) and Facade (agent pod).
+    All tool calls sent over this channel are client-side; server-side tool
+    execution is handled internally by the Runtime and never reaches this layer.
+
+    Source of truth: `internal/facade/protocol.go`
+    Generated types: `dashboard/src/types/generated/websocket.ts`
+
+servers:
+  agent:
+    host: "{agentHost}"
+    protocol: ws
+    description: WebSocket endpoint on the Facade container
+
+channels:
+  agentWs:
+    address: /ws
+    description: |
+      Main WebSocket channel for agent communication.
+      Requires `?agent=<name>` query parameter.
+      Optional: `?namespace=<ns>`, `?binary=true`
+    messages:
+      # Client -> Server
+      clientMessage:
+        $ref: "#/components/messages/ClientMessage"
+      clientToolResult:
+        $ref: "#/components/messages/ClientToolResult"
+      uploadRequest:
+        $ref: "#/components/messages/UploadRequest"
+      # Server -> Client
+      connected:
+        $ref: "#/components/messages/Connected"
+      chunk:
+        $ref: "#/components/messages/Chunk"
+      done:
+        $ref: "#/components/messages/Done"
+      toolCall:
+        $ref: "#/components/messages/ToolCall"
+      error:
+        $ref: "#/components/messages/Error"
+      uploadReady:
+        $ref: "#/components/messages/UploadReady"
+      uploadComplete:
+        $ref: "#/components/messages/UploadComplete"
+      mediaChunk:
+        $ref: "#/components/messages/MediaChunk"
+
+operations:
+  sendMessage:
+    action: send
+    channel:
+      $ref: "#/channels/agentWs"
+    summary: Client sends a user message
+    messages:
+      - $ref: "#/channels/agentWs/messages/clientMessage"
+
+  sendToolResult:
+    action: send
+    channel:
+      $ref: "#/channels/agentWs"
+    summary: Client sends a tool execution result
+    messages:
+      - $ref: "#/channels/agentWs/messages/clientToolResult"
+
+  sendUploadRequest:
+    action: send
+    channel:
+      $ref: "#/channels/agentWs"
+    summary: Client requests a file upload URL
+    messages:
+      - $ref: "#/channels/agentWs/messages/uploadRequest"
+
+  receiveConnected:
+    action: receive
+    channel:
+      $ref: "#/channels/agentWs"
+    summary: Server sends connection acknowledgement with session ID
+    messages:
+      - $ref: "#/channels/agentWs/messages/connected"
+
+  receiveChunk:
+    action: receive
+    channel:
+      $ref: "#/channels/agentWs"
+    summary: Server streams a text chunk
+    messages:
+      - $ref: "#/channels/agentWs/messages/chunk"
+
+  receiveDone:
+    action: receive
+    channel:
+      $ref: "#/channels/agentWs"
+    summary: Server signals response complete
+    messages:
+      - $ref: "#/channels/agentWs/messages/done"
+
+  receiveToolCall:
+    action: receive
+    channel:
+      $ref: "#/channels/agentWs"
+    summary: Server requests client-side tool execution
+    messages:
+      - $ref: "#/channels/agentWs/messages/toolCall"
+
+  receiveError:
+    action: receive
+    channel:
+      $ref: "#/channels/agentWs"
+    summary: Server sends an error
+    messages:
+      - $ref: "#/channels/agentWs/messages/error"
+
+components:
+  messages:
+    ClientMessage:
+      name: ClientMessage
+      title: User message
+      summary: Text or multimodal message from the client
+      payload:
+        type: object
+        required: [type]
+        properties:
+          type:
+            type: string
+            const: message
+          session_id:
+            type: string
+            description: Session ID for resuming (required after first message)
+          content:
+            type: string
+            description: Text content (backward compat; Parts takes precedence)
+          parts:
+            type: array
+            items:
+              $ref: "#/components/schemas/ContentPart"
+          metadata:
+            type: object
+            additionalProperties:
+              type: string
+
+    ClientToolResult:
+      name: ClientToolResult
+      title: Client-side tool result
+      summary: Response to a tool_call message
+      payload:
+        type: object
+        required: [type, tool_result]
+        properties:
+          type:
+            type: string
+            const: tool_result
+          session_id:
+            type: string
+          tool_result:
+            $ref: "#/components/schemas/ClientToolResultInfo"
+
+    UploadRequest:
+      name: UploadRequest
+      title: File upload request
+      payload:
+        type: object
+        required: [type, upload_request]
+        properties:
+          type:
+            type: string
+            const: upload_request
+          upload_request:
+            $ref: "#/components/schemas/UploadRequestInfo"
+
+    Connected:
+      name: Connected
+      title: Connection established
+      summary: Sent eagerly on WebSocket open with the session ID
+      payload:
+        type: object
+        required: [type, session_id, timestamp]
+        properties:
+          type:
+            type: string
+            const: connected
+          session_id:
+            type: string
+          connected:
+            $ref: "#/components/schemas/ConnectedInfo"
+          timestamp:
+            type: string
+            format: date-time
+
+    Chunk:
+      name: Chunk
+      title: Streaming text chunk
+      payload:
+        type: object
+        required: [type, timestamp]
+        properties:
+          type:
+            type: string
+            const: chunk
+          session_id:
+            type: string
+          content:
+            type: string
+          parts:
+            type: array
+            items:
+              $ref: "#/components/schemas/ContentPart"
+          timestamp:
+            type: string
+            format: date-time
+
+    Done:
+      name: Done
+      title: Response complete
+      payload:
+        type: object
+        required: [type, timestamp]
+        properties:
+          type:
+            type: string
+            const: done
+          session_id:
+            type: string
+          content:
+            type: string
+          parts:
+            type: array
+            items:
+              $ref: "#/components/schemas/ContentPart"
+          timestamp:
+            type: string
+            format: date-time
+
+    ToolCall:
+      name: ToolCall
+      title: Client-side tool call
+      summary: |
+        All tool calls over WebSocket are client-side. Server-side tool calls
+        are handled internally by the Runtime and never forwarded.
+      payload:
+        type: object
+        required: [type, timestamp]
+        properties:
+          type:
+            type: string
+            const: tool_call
+          session_id:
+            type: string
+          tool_call:
+            $ref: "#/components/schemas/ToolCallInfo"
+          timestamp:
+            type: string
+            format: date-time
+
+    Error:
+      name: Error
+      title: Error response
+      payload:
+        type: object
+        required: [type, timestamp]
+        properties:
+          type:
+            type: string
+            const: error
+          session_id:
+            type: string
+          error:
+            $ref: "#/components/schemas/ErrorInfo"
+          timestamp:
+            type: string
+            format: date-time
+
+    UploadReady:
+      name: UploadReady
+      title: Upload URL ready
+      payload:
+        type: object
+        required: [type, timestamp]
+        properties:
+          type:
+            type: string
+            const: upload_ready
+          session_id:
+            type: string
+          upload_ready:
+            $ref: "#/components/schemas/UploadReadyInfo"
+          timestamp:
+            type: string
+            format: date-time
+
+    UploadComplete:
+      name: UploadComplete
+      title: Upload complete
+      payload:
+        type: object
+        required: [type, timestamp]
+        properties:
+          type:
+            type: string
+            const: upload_complete
+          session_id:
+            type: string
+          upload_complete:
+            $ref: "#/components/schemas/UploadCompleteInfo"
+          timestamp:
+            type: string
+            format: date-time
+
+    MediaChunk:
+      name: MediaChunk
+      title: Streaming media chunk
+      payload:
+        type: object
+        required: [type, timestamp]
+        properties:
+          type:
+            type: string
+            const: media_chunk
+          session_id:
+            type: string
+          media_chunk:
+            $ref: "#/components/schemas/MediaChunkInfo"
+          timestamp:
+            type: string
+            format: date-time
+
+  schemas:
+    ContentPart:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [text, image, audio, video, file]
+        text:
+          type: string
+        media:
+          $ref: "#/components/schemas/MediaContent"
+
+    MediaContent:
+      type: object
+      required: [mime_type]
+      properties:
+        data:
+          type: string
+          description: Base64-encoded content
+        url:
+          type: string
+          description: HTTP/HTTPS URL
+        storage_ref:
+          type: string
+          description: Backend storage reference
+        mime_type:
+          type: string
+        filename:
+          type: string
+        size_bytes:
+          type: integer
+        width:
+          type: integer
+        height:
+          type: integer
+        detail:
+          type: string
+          enum: [low, high, auto]
+        duration_ms:
+          type: integer
+        sample_rate:
+          type: integer
+        channels:
+          type: integer
+
+    ToolCallInfo:
+      type: object
+      description: |
+        Client-side tool call. No execution field — all tool calls over
+        WebSocket are client-side by definition.
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        arguments:
+          type: object
+          additionalProperties: true
+        consent_message:
+          type: string
+          description: Human-readable consent prompt
+        categories:
+          type: array
+          items:
+            type: string
+          description: Semantic consent categories (e.g., "location", "filesystem")
+
+    ClientToolResultInfo:
+      type: object
+      required: [call_id]
+      properties:
+        call_id:
+          type: string
+          description: Matches the ToolCallInfo.id
+        result:
+          description: Tool execution result (JSON-serializable)
+        error:
+          type: string
+          description: Set when the client rejects or fails the tool call
+
+    ToolResultInfo:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        result: {}
+        error:
+          type: string
+
+    ErrorInfo:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - INVALID_MESSAGE
+            - SESSION_NOT_FOUND
+            - SESSION_EXPIRED
+            - INTERNAL_ERROR
+            - AGENT_UNAVAILABLE
+            - TOOL_FAILED
+            - UPLOAD_FAILED
+            - MEDIA_NOT_ENABLED
+            - RATE_LIMITED
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
+    UploadRequestInfo:
+      type: object
+      required: [filename, mime_type, size_bytes]
+      properties:
+        filename:
+          type: string
+        mime_type:
+          type: string
+        size_bytes:
+          type: integer
+
+    UploadReadyInfo:
+      type: object
+      required: [upload_id, upload_url, storage_ref, expires_at]
+      properties:
+        upload_id:
+          type: string
+        upload_url:
+          type: string
+        storage_ref:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+
+    UploadCompleteInfo:
+      type: object
+      required: [upload_id, storage_ref, size_bytes]
+      properties:
+        upload_id:
+          type: string
+        storage_ref:
+          type: string
+        size_bytes:
+          type: integer
+
+    MediaChunkInfo:
+      type: object
+      required: [media_id, sequence, is_last, data, mime_type]
+      properties:
+        media_id:
+          type: string
+        sequence:
+          type: integer
+        is_last:
+          type: boolean
+        data:
+          type: string
+          description: Base64-encoded chunk data
+        mime_type:
+          type: string
+
+    ConnectedInfo:
+      type: object
+      properties:
+        capabilities:
+          $ref: "#/components/schemas/ConnectionCapabilities"
+
+    ConnectionCapabilities:
+      type: object
+      required: [binary_frames]
+      properties:
+        binary_frames:
+          type: boolean
+        max_payload_size:
+          type: integer
+        protocol_version:
+          type: integer
