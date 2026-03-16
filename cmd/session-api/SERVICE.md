@@ -6,6 +6,8 @@
 - Session listing, search, and filtering
 - Message append with event publishing (Redis Streams)
 - TTL management and session expiry
+- Tool call and provider call recording (first-class tables)
+- Runtime event recording (pipeline, stage, middleware, validation lifecycle)
 - Eval result storage and retrieval
 - OTLP trace ingestion (optional)
 - Rate limiting per client IP
@@ -19,14 +21,23 @@
   - `GET /api/v1/sessions/{id}` — retrieve session
   - `GET /api/v1/sessions/{id}/messages` — get messages
   - `POST /api/v1/sessions/{id}/messages` — append message
+  - `POST /api/v1/sessions/{id}/tool-calls` — record tool call
+  - `GET /api/v1/sessions/{id}/tool-calls` — get tool calls
+  - `POST /api/v1/sessions/{id}/provider-calls` — record provider call
+  - `GET /api/v1/sessions/{id}/provider-calls` — get provider calls
+  - `POST /api/v1/sessions/{id}/events` — record runtime event
+  - `GET /api/v1/sessions/{id}/events` — get runtime events
+  - `POST /api/v1/eval-results` — record eval results
+  - `GET /api/v1/sessions/{id}/eval-results` — get session eval results
+  - `GET /api/v1/eval-results` — list eval results with filters
   - `POST /api/v1/sessions/{id}/ttl` — refresh TTL
+  - `PATCH /api/v1/sessions/{id}/stats` — update session counters
   - `DELETE /api/v1/sessions/{id}` — delete session
-  - Eval result endpoints (POST/GET)
 - **gRPC/HTTP** OTLP trace ingestion (optional)
 
 ## Outputs
 - **HTTP** responses with JSON payloads to callers
-- **PostgreSQL** writes: session records, messages, eval results
+- **PostgreSQL** writes: sessions, messages, tool_calls, provider_calls, runtime_events, eval_results, message_artifacts
 - **Redis** writes: hot cache, event publishing via Redis Streams
 - **Cold storage** writes: archived sessions (S3/GCS/Azure)
 
