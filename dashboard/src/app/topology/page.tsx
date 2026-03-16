@@ -1,8 +1,14 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { Header } from "@/components/layout";
-import { TopologyGraph, NotesPanel, NodeSummaryCard, type SelectedNode } from "@/components/topology";
+import { NotesPanel, NodeSummaryCard, type SelectedNode } from "@/components/topology";
+
+const TopologyGraph = dynamic(
+  () => import("@/components/topology").then((m) => m.TopologyGraph),
+  { ssr: false }
+);
 import { NamespaceFilter } from "@/components/filters";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Bot, FileText, Package, Wrench, Zap } from "lucide-react";

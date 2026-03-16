@@ -26,11 +26,11 @@ import {
   AlertTriangle,
   FolderTree,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
   ArenaBreadcrumb,
   SourceDialog,
-  SourceExplorer,
   formatDate as formatDateBase,
   formatInterval,
   formatBytes,
@@ -38,6 +38,11 @@ import {
   getStatusBadge,
   getConditionIcon,
 } from "@/components/arena";
+
+const SourceExplorer = dynamic(
+  () => import("@/components/arena").then((m) => m.SourceExplorer),
+  { ssr: false }
+);
 import type { ArenaSource } from "@/types/arena";
 import type { Condition } from "@/types/common";
 

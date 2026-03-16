@@ -1,14 +1,26 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { Header } from "@/components/layout";
 import { StatCard } from "@/components/dashboard";
-import {
-  CostByProviderChart,
-  CostByModelChart,
-  CostOverTimeChart,
-  CostBreakdownTable,
-  CostUnavailableBanner,
-} from "@/components/cost";
+import { CostUnavailableBanner } from "@/components/cost";
+
+const CostOverTimeChart = dynamic(
+  () => import("@/components/cost").then((m) => m.CostOverTimeChart),
+  { ssr: false }
+);
+const CostByProviderChart = dynamic(
+  () => import("@/components/cost").then((m) => m.CostByProviderChart),
+  { ssr: false }
+);
+const CostByModelChart = dynamic(
+  () => import("@/components/cost").then((m) => m.CostByModelChart),
+  { ssr: false }
+);
+const CostBreakdownTable = dynamic(
+  () => import("@/components/cost").then((m) => m.CostBreakdownTable),
+  { ssr: false }
+);
 import { formatCost, formatTokens } from "@/lib/pricing";
 import { getProviderDisplayName } from "@/lib/provider-utils";
 import { DollarSign, TrendingUp, Coins, PiggyBank, Loader2 } from "lucide-react";
