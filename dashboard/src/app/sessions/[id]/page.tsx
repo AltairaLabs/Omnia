@@ -117,63 +117,7 @@ function getBubbleClassName(isUser: boolean, isSystem: boolean): string {
   return "bg-muted";
 }
 
-/** Compact expandable badge for inline eval results attached to assistant messages. */
-function InlineEvalsBadge({ evals }: Readonly<{ evals: ParsedEval[] }>) {
-  const [expanded, setExpanded] = useState(false);
-  const passed = evals.filter((e) => e.passed).length;
-  const failed = evals.length - passed;
-  const allPassed = failed === 0;
-
-  return (
-    <div className="mt-1">
-      <button
-        className="inline-flex items-center gap-1"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <Badge
-          variant={allPassed ? "secondary" : "destructive"}
-          className={cn(
-            "gap-1 text-xs cursor-pointer",
-            allPassed && "bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400"
-          )}
-        >
-          <Shield className="h-3 w-3" />
-          {allPassed
-            ? `${passed} eval${passed === 1 ? "" : "s"} passed`
-            : `${failed} of ${evals.length} eval${evals.length === 1 ? "" : "s"} failed`}
-        </Badge>
-      </button>
-      {expanded && (
-        <div className="mt-2 space-y-1 max-w-md">
-          {evals.map((e) => (
-            <div key={e.evalID} className="border rounded p-2 text-xs space-y-0.5">
-              <div className="flex items-center gap-2">
-                {e.passed
-                  ? <CheckCircle2 className="h-3 w-3 text-green-500" />
-                  : <XCircle className="h-3 w-3 text-red-500" />
-                }
-                <span className="font-medium font-mono">{e.evalID}</span>
-                <Badge variant="outline" className="text-[10px] px-1 py-0">
-                  {evalTypeLabel(e.evalType)}
-                </Badge>
-                {e.score !== undefined && e.score !== null && (
-                  <span className="text-muted-foreground">{(e.score * 100).toFixed(0)}%</span>
-                )}
-                {e.durationMs !== undefined && e.durationMs > 0 && (
-                  <span className="text-muted-foreground">{e.durationMs}ms</span>
-                )}
-              </div>
-              {e.explanation && <p className="text-muted-foreground pl-5">{e.explanation}</p>}
-              {e.error && <p className="text-red-500 pl-5">{e.error}</p>}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MessageBubble({ message, showTimestamp, evalResults, inlineEvals }: Readonly<{ message: Message; showTimestamp?: boolean; evalResults?: EvalResult[]; inlineEvals?: ParsedEval[] }>) {
+function MessageBubble({ message, showTimestamp, evalResults }: Readonly<{ message: Message; showTimestamp?: boolean; evalResults?: EvalResult[] }>) {
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
   const isSystem = message.role === "system";
@@ -204,11 +148,6 @@ function MessageBubble({ message, showTimestamp, evalResults, inlineEvals }: Rea
           <EvalResultsBadge results={evalResults} />
         )}
 
-        {/* Inline eval results from message events */}
-        {inlineEvals && inlineEvals.length > 0 && (
-          <InlineEvalsBadge evals={inlineEvals} />
-        )}
-
         {/* Timestamp and tokens */}
         <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
           {showTimestamp && (
@@ -227,14 +166,6 @@ function MessageBubble({ message, showTimestamp, evalResults, inlineEvals }: Rea
 }
 
 /**
- * Returns true if a message is an eval result event.
- */
-function isEvalMessage(m: Message): boolean {
-  const t = m.metadata?.type;
-  return t === "eval_completed" || t === "eval_failed";
-}
-
-/**
  * Returns true if a message belongs in the conversation view.
  *
  * Conversation messages are: user/assistant messages without a metadata.type.
@@ -245,55 +176,6 @@ function isConversationMessage(m: Message): boolean {
   if (m.metadata?.type) return false;
   if (m.metadata?.source === "runtime") return false;
   return true;
-}
-
-/** Parsed eval content from a message. */
-interface ParsedEval {
-  evalID: string;
-  evalType: string;
-  trigger: string;
-  passed: boolean;
-  score?: number;
-  durationMs?: number;
-  explanation?: string;
-  message?: string;
-  error?: string;
-}
-
-/** Parse the JSON content of an eval message into structured data. */
-function parseEvalContent(content: string): ParsedEval {
-  try {
-    return JSON.parse(content);
-  } catch {
-    return { evalID: "unknown", evalType: "unknown", trigger: "", passed: false };
-  }
-}
-
-/**
- * Collect eval messages that follow each assistant message.
- * Returns a map from assistant message ID to the parsed eval results.
- */
-function collectEvalsForAssistantMessages(messages: Message[]): Map<string, ParsedEval[]> {
-  const sorted = [...messages].sort(
-    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-  );
-  const evalMap = new Map<string, ParsedEval[]>();
-  let lastAssistantId: string | null = null;
-
-  for (const m of sorted) {
-    if (m.role === "assistant" && !m.metadata?.type) {
-      lastAssistantId = m.id;
-    } else if (isEvalMessage(m) && lastAssistantId) {
-      const existing = evalMap.get(lastAssistantId);
-      const parsed = parseEvalContent(m.content);
-      if (existing) {
-        existing.push(parsed);
-      } else {
-        evalMap.set(lastAssistantId, [parsed]);
-      }
-    }
-  }
-  return evalMap;
 }
 
 const INITIAL_MESSAGE_WINDOW = 50;
@@ -325,7 +207,6 @@ function ConversationMessages({
 }>) {
   const [visibleCount, setVisibleCount] = useState(INITIAL_MESSAGE_WINDOW);
   const evalsByMessage = groupEvalResultsByMessageId(evalResults);
-  const inlineEvalsByMessage = collectEvalsForAssistantMessages(messages);
 
   // Merge messages and tool calls into a single timeline
   const items: ConversationItem[] = [];
@@ -376,7 +257,6 @@ function ConversationMessages({
             message={item.message}
             showTimestamp
             evalResults={evalsByMessage.get(item.message.id)}
-            inlineEvals={inlineEvalsByMessage.get(item.message.id)}
           />
         ) : (
           <ToolCallIndicator key={item.id} toolCall={item.toolCall} />
@@ -628,18 +508,14 @@ export default function SessionDetailPage({
               <Shield className="h-3.5 w-3.5" />
               Evals
               {(() => {
-                const hasTableResults = evalResults && evalResults.length > 0;
-                const hasMsgResults = session.messages.some(isEvalMessage);
-                if (!hasTableResults && !hasMsgResults) return null;
-                const msgFailed = session.messages.filter((m) => m.metadata?.type === "eval_failed").length;
-                const tableFailed = evalResults?.filter((r) => !r.passed).length ?? 0;
-                const totalFailed = tableFailed + msgFailed;
+                if (!evalResults || evalResults.length === 0) return null;
+                const failed = evalResults.filter((r) => !r.passed).length;
                 return (
                   <Badge
-                    variant={totalFailed > 0 ? "destructive" : "secondary"}
+                    variant={failed > 0 ? "destructive" : "secondary"}
                     className="ml-1 px-1.5 py-0 text-[10px] leading-4"
                   >
-                    {totalFailed > 0 ? `${totalFailed} failed` : "pass"}
+                    {failed > 0 ? `${failed} failed` : "pass"}
                   </Badge>
                 );
               })()}
@@ -824,10 +700,10 @@ interface AggregatedEval {
   details?: Record<string, unknown>;
 }
 
-/** Extract and aggregate eval items from both sources. Turn evals are averaged by evalId. */
+/** Extract and aggregate eval items from the eval_results table. Turn evals are averaged by evalId. */
 function aggregateEvals(
   results: EvalResult[],
-  messages: Message[],
+  _messages: Message[],
 ): { turnEvals: AggregatedEval[]; sessionEvals: AggregatedEval[] } {
   // Collect all raw items
   interface RawItem {
@@ -846,14 +722,6 @@ function aggregateEvals(
     rawItems.push({
       evalId: r.evalId, evalType: r.evalType, trigger: r.trigger,
       passed: r.passed, score: r.score, durationMs: r.durationMs, details: r.details,
-    });
-  }
-
-  for (const m of messages.filter(isEvalMessage)) {
-    const data = parseEvalContent(m.content);
-    rawItems.push({
-      evalId: data.evalID, evalType: data.evalType, trigger: data.trigger,
-      passed: data.passed, score: data.score, durationMs: data.durationMs,
     });
   }
 
