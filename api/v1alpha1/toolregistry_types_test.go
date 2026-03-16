@@ -70,6 +70,27 @@ func TestHandlerTypeConstants(t *testing.T) {
 	}
 }
 
+func TestValidHandlerTypesContainsAllConstants(t *testing.T) {
+	// Every HandlerType constant must be in ValidHandlerTypes.
+	// If you add a new HandlerType and this test fails, add it to ValidHandlerTypes.
+	allTypes := []HandlerType{
+		HandlerTypeHTTP,
+		HandlerTypeOpenAPI,
+		HandlerTypeGRPC,
+		HandlerTypeMCP,
+		HandlerTypeClient,
+	}
+	for _, ht := range allTypes {
+		if !ValidHandlerTypes[ht] {
+			t.Errorf("HandlerType %q is not in ValidHandlerTypes — add it", ht)
+		}
+	}
+	// ValidHandlerTypes should not contain extra entries.
+	if len(ValidHandlerTypes) != len(allTypes) {
+		t.Errorf("ValidHandlerTypes has %d entries but there are %d HandlerType constants", len(ValidHandlerTypes), len(allTypes))
+	}
+}
+
 func TestToolRegistryPhaseConstants(t *testing.T) {
 	tests := []struct {
 		name     string

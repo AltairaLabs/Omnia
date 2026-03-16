@@ -1047,6 +1047,15 @@ var _ = Describe("ToolRegistry Controller", func() {
 			Expect(err.Error()).To(ContainSubstring("unknown handler type"))
 		})
 
+		It("should accept client handler without server config", func() {
+			handler := &omniav1alpha1.HandlerDefinition{
+				Name: "client-tool",
+				Type: omniav1alpha1.HandlerTypeClient,
+			}
+			err := reconciler.validateHandler(handler)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
 		It("should accept valid gRPC handler", func() {
 			handler := &omniav1alpha1.HandlerDefinition{
 				Name: "valid-grpc",

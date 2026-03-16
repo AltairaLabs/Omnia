@@ -40,6 +40,17 @@ const (
 	HandlerTypeClient HandlerType = "client"
 )
 
+// ValidHandlerTypes is the authoritative set of recognized handler types.
+// The controller's validateHandler uses this to reject unknown types.
+// When adding a new HandlerType constant, add it here too.
+var ValidHandlerTypes = map[HandlerType]bool{
+	HandlerTypeHTTP:    true,
+	HandlerTypeOpenAPI: true,
+	HandlerTypeGRPC:    true,
+	HandlerTypeMCP:     true,
+	HandlerTypeClient:  true,
+}
+
 // MCPTransport defines the transport type for MCP connections
 // +kubebuilder:validation:Enum=sse;stdio;streamable-http
 type MCPTransport string
