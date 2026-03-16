@@ -5,11 +5,11 @@ go 1.25.6
 require (
 	cloud.google.com/go/kms v1.26.0
 	cloud.google.com/go/storage v1.60.0
-	github.com/AltairaLabs/PromptKit/pkg v1.3.13
-	github.com/AltairaLabs/PromptKit/runtime v1.3.13
-	github.com/AltairaLabs/PromptKit/sdk v1.3.13
-	github.com/AltairaLabs/PromptKit/server/a2a v1.3.13
-	github.com/AltairaLabs/PromptKit/tools/arena v1.3.13
+	github.com/AltairaLabs/PromptKit/pkg v1.3.16
+	github.com/AltairaLabs/PromptKit/runtime v1.3.16
+	github.com/AltairaLabs/PromptKit/sdk v1.3.16
+	github.com/AltairaLabs/PromptKit/server/a2a v1.3.16
+	github.com/AltairaLabs/PromptKit/tools/arena v1.3.16
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1
 	github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azkeys v1.4.0
