@@ -25,7 +25,7 @@ vi.mock("@/stores", () => ({
   useHasUnsavedChanges: vi.fn(() => false),
 }));
 
-vi.mock("@/hooks", () => ({
+vi.mock("@/hooks/arena", () => ({
   useArenaProjects: vi.fn(() => ({
     projects: [],
     loading: false,
@@ -49,11 +49,7 @@ vi.mock("@/hooks", () => ({
     deleteFile: vi.fn(),
     refreshFileTree: vi.fn(),
   })),
-  useProviders: vi.fn(() => ({
-    data: [],
-    isLoading: false,
-    error: null,
-  })),
+  useProviderBindingStatus: vi.fn(() => new Map()),
   useDevSession: vi.fn(() => ({
     session: null,
     isLoading: false,
@@ -67,11 +63,7 @@ vi.mock("@/hooks", () => ({
   })),
 }));
 
-vi.mock("@/hooks/use-provider-binding-status", () => ({
-  useProviderBindingStatus: vi.fn(() => new Map()),
-}));
-
-vi.mock("@/hooks/use-providers", () => ({
+vi.mock("@/hooks/resources", () => ({
   useProviders: vi.fn(() => ({
     data: [],
     isLoading: false,
@@ -79,7 +71,13 @@ vi.mock("@/hooks/use-providers", () => ({
   })),
 }));
 
-vi.mock("@/hooks/use-toast", () => ({
+vi.mock("@/hooks/core", () => ({
+  useEnterpriseConfig: vi.fn(() => ({
+    enterpriseEnabled: true,
+    hideEnterprise: false,
+    showUpgradePrompts: false,
+    loading: false,
+  })),
   useToast: () => ({
     toast: vi.fn(),
   }),

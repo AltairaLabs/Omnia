@@ -23,10 +23,7 @@
  */
 
 import { type ReactNode, type ReactElement, cloneElement, isValidElement } from "react";
-import {
-  useWorkspacePermissions,
-  type PermissionType,
-} from "@/hooks/use-workspace-permissions";
+import { useWorkspacePermissions, type PermissionType } from "@/hooks/auth";
 import {
   Tooltip,
   TooltipContent,

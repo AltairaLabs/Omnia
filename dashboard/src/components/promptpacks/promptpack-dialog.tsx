@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { usePromptPackMutations } from "@/hooks/use-promptpack-mutations";
+import { usePromptPackMutations } from "@/hooks/resources";
 import {
   Dialog,
   DialogContent,

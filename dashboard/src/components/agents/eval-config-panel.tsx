@@ -7,7 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { useEnterpriseConfig } from "@/hooks/use-runtime-config";
+import { useEnterpriseConfig } from "@/hooks/core";
 import { useDataService } from "@/lib/data";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { useQueryClient } from "@tanstack/react-query";

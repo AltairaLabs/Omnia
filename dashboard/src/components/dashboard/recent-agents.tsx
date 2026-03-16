@@ -3,7 +3,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAgents, useProvider } from "@/hooks";
+import { useAgents } from "@/hooks/agents";
+import { useProvider } from "@/hooks/resources";
 import { cn } from "@/lib/utils";
 import type { AgentRuntime, AgentRuntimePhase } from "@/types";
 

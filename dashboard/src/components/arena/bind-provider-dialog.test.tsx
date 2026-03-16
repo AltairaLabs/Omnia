@@ -13,7 +13,7 @@ const mockProviders = [
   },
 ];
 
-vi.mock("@/hooks/use-providers", () => ({
+vi.mock("@/hooks/resources", () => ({
   useProviders: vi.fn(() => ({
     data: mockProviders,
     isLoading: false,

@@ -10,9 +10,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Play, ChevronDown, Loader2, Beaker, Settings } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
-import { useProjectJobsWithRun } from "@/hooks/use-project-jobs";
-import { useProjectDeployment } from "@/hooks/use-project-deployment";
+import { useToast } from "@/hooks/core";
+import { useProjectJobsWithRun, useProjectDeployment } from "@/hooks/arena";
 import { cn } from "@/lib/utils";
 import { QuickRunDialog } from "./quick-run-dialog";
 

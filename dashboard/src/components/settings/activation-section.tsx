@@ -24,7 +24,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { useLicense } from "@/hooks/use-license";
+import { useLicense } from "@/hooks/auth";
 import type { ClusterActivation } from "@/app/api/license/activations/route";
 
 interface ActivationsResponse {

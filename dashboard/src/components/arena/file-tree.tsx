@@ -14,14 +14,14 @@ import {
   Settings,
 } from "lucide-react";
 import type { FileTreeNode, FileType } from "@/types/arena-project";
-import type { ProviderBindingInfo } from "@/hooks/use-provider-binding-status";
+import type { ProviderBindingInfo } from "@/hooks/arena";
 import { FileContextMenu } from "./file-context-menu";
 import { ProviderBindingIndicator } from "./provider-binding-indicator";
 import { NewItemDialog } from "./new-item-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import { ImportProviderDialog } from "./import-provider-dialog";
 import { ImportToolDialog } from "./import-tool-dialog";
-import { useToast } from "@/hooks/use-toast";
+import { useToast } from "@/hooks/core";
 import {
   type ArenaFileKind,
   generateUniqueBaseName,

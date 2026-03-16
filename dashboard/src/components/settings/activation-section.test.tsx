@@ -7,10 +7,10 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ActivationSection } from "./activation-section";
-import { useLicense } from "@/hooks/use-license";
+import { useLicense } from "@/hooks/auth";
 import type { License } from "@/types/license";
 
-vi.mock("@/hooks/use-license");
+vi.mock("@/hooks/auth");
 
 const mockUseLicense = vi.mocked(useLicense);
 const mockFetchGlobal = vi.fn();

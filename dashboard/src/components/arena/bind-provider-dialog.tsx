@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, Server } from "lucide-react";
-import { useProviders } from "@/hooks/use-providers";
+import { useProviders } from "@/hooks/resources";
 import { insertBindingAnnotations } from "@/lib/arena/provider-binding";
 import type { Provider } from "@/types";
 

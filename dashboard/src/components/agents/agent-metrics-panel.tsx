@@ -17,8 +17,8 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { useAgentMetrics, type AgentMetric, type TokenUsagePoint } from "@/hooks/use-agent-metrics";
-import { useGrafana, buildDashboardUrl, GRAFANA_DASHBOARDS } from "@/hooks/use-grafana";
+import { useAgentMetrics, type AgentMetric, type TokenUsagePoint } from "@/hooks/agents";
+import { useGrafana, buildDashboardUrl, GRAFANA_DASHBOARDS } from "@/hooks/logs";
 import { cn } from "@/lib/utils";
 
 interface MetricCardProps {

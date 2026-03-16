@@ -42,7 +42,7 @@ import {
   XCircle,
   Shield,
 } from "lucide-react";
-import { useSessionDetail, useSessionAllMessages, useSessionEvalResults } from "@/hooks";
+import { useSessionDetail, useSessionAllMessages, useSessionEvalResults } from "@/hooks/sessions";
 import type { Message, Session, EvalResult } from "@/types";
 import { EvalResultsBadge } from "@/components/sessions/eval-results-badge";
 import { ToolCallBadge } from "@/components/sessions/tool-call-badge";
@@ -53,7 +53,7 @@ import { cn } from "@/lib/utils";
 import {
   useGrafana,
   buildSessionDashboardUrl,
-} from "@/hooks/use-grafana";
+} from "@/hooks/logs";
 
 function getStatusBadge(status: Session["status"]) {
   const variants: Record<Session["status"], { variant: "default" | "secondary" | "destructive" | "outline"; label: string }> = {

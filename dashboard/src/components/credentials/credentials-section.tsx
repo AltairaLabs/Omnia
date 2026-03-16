@@ -53,7 +53,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useSecrets, useCreateSecret, useDeleteSecret, usePermissions, Permission, useNamespaces } from "@/hooks";
+import { useSecrets, useCreateSecret, useDeleteSecret, useNamespaces } from "@/hooks/resources";
+import { usePermissions, Permission } from "@/hooks/auth";
 import { formatDistanceToNow } from "date-fns";
 import type { SecretSummary } from "@/lib/data/secrets-service";
 import Link from "next/link";

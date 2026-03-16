@@ -2,7 +2,7 @@
 
 import { AlertTriangle, XCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { useLicense } from "@/hooks/use-license";
+import { useLicense } from "@/hooks/auth";
 
 const WARNING_THRESHOLD_DAYS = 30;
 

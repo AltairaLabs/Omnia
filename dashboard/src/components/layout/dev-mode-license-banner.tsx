@@ -1,7 +1,7 @@
 "use client";
 
 import { ShieldAlert } from "lucide-react";
-import { useDevMode } from "@/hooks/use-runtime-config";
+import { useDevMode } from "@/hooks/core";
 
 /**
  * Banner displayed when the instance is running with a development license.

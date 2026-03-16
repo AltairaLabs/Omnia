@@ -8,11 +8,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WorkspaceProvider, useWorkspace } from "./workspace-context";
 
 // Mock the useWorkspaces hook
-vi.mock("@/hooks/use-workspaces", () => ({
+vi.mock("@/hooks/resources", () => ({
   useWorkspaces: vi.fn(),
 }));
 
-import { useWorkspaces, type WorkspaceListItem } from "@/hooks/use-workspaces";
+import { useWorkspaces, type WorkspaceListItem } from "@/hooks/resources";
 
 const mockWorkspaces: WorkspaceListItem[] = [
   {

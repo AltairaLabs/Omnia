@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Wrench, ChevronLeft, ChevronRight } from "lucide-react";
-import { useToolRegistries } from "@/hooks/use-tool-registries";
+import { useToolRegistries } from "@/hooks/resources";
 import {
   convertToolToArena,
   generateToolFilename,

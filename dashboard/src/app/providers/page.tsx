@@ -24,8 +24,7 @@ import { ProviderTypeIcon } from "@/components/providers/provider-type-icon";
 import { ProviderDialog } from "@/components/providers/provider-dialog";
 import { SharedBadge } from "@/components/shared";
 import { formatCost, formatTokens } from "@/lib/pricing";
-import { useProviders, useSharedProviders } from "@/hooks";
-import { useProviderMetrics } from "@/hooks/use-provider-metrics";
+import { useProviders, useSharedProviders, useProviderMetrics } from "@/hooks/resources";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { Provider } from "@/types";
 

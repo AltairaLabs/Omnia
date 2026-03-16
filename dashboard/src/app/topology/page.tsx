@@ -6,8 +6,8 @@ import { TopologyGraph, NotesPanel, NodeSummaryCard, type SelectedNode } from "@
 import { NamespaceFilter } from "@/components/filters";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Bot, FileText, Package, Wrench, Zap } from "lucide-react";
-import { useAgents, usePromptPacks, useToolRegistries } from "@/hooks";
-import { useProviders } from "@/hooks/use-providers";
+import { useAgents } from "@/hooks/agents";
+import { usePromptPacks, useToolRegistries, useProviders } from "@/hooks/resources";
 import { loadNotes, setNote, deleteNote, type NotesMap } from "@/lib/notes-storage";
 import {
   Dialog,

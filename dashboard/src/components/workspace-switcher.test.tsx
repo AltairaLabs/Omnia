@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { WorkspaceSwitcher } from "./workspace-switcher";
-import type { WorkspaceListItem } from "@/hooks/use-workspaces";
+import type { WorkspaceListItem } from "@/hooks/resources";
 
 // Mock the workspace context
 vi.mock("@/contexts/workspace-context", () => ({

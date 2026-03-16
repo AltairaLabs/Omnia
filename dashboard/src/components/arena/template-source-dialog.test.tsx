@@ -7,11 +7,11 @@ import { TemplateSourceDialog } from "./template-source-dialog";
 import type { ArenaTemplateSource } from "@/types/arena-template";
 
 // Mock the hook
-vi.mock("@/hooks/use-template-sources", () => ({
+vi.mock("@/hooks/arena", () => ({
   useTemplateSourceMutations: vi.fn(),
 }));
 
-import { useTemplateSourceMutations } from "@/hooks/use-template-sources";
+import { useTemplateSourceMutations } from "@/hooks/arena";
 
 function createMockSource(overrides: Partial<ArenaTemplateSource> = {}): ArenaTemplateSource {
   return {

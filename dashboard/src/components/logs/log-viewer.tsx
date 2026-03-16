@@ -19,16 +19,8 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import {
-  useLogs,
-  useArenaJobLogs,
-  useDemoMode,
-  useObservabilityConfig,
-  useGrafana,
-  buildLokiExploreUrl,
-  buildTempoExploreUrl,
-  buildArenaJobDashboardUrl,
-} from "@/hooks";
+import { useDemoMode, useObservabilityConfig } from "@/hooks/core";
+import { useLogs, useArenaJobLogs, useGrafana, buildLokiExploreUrl, buildTempoExploreUrl, buildArenaJobDashboardUrl } from "@/hooks/logs";
 
 export interface LogEntry {
   timestamp: Date;

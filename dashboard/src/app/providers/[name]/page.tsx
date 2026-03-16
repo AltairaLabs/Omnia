@@ -23,8 +23,7 @@ import { Label } from "@/components/ui/label";
 import { ProviderStatusBadge } from "@/components/providers/provider-status-badge";
 import { ProviderTypeIcon } from "@/components/providers/provider-type-icon";
 import { ProviderDialog } from "@/components/providers/provider-dialog";
-import { useProvider, useUpdateProviderSecretRef, useSecrets } from "@/hooks";
-import { useProviderMetrics } from "@/hooks/use-provider-metrics";
+import { useProvider, useUpdateProviderSecretRef, useSecrets, useProviderMetrics } from "@/hooks/resources";
 import { useWorkspace } from "@/contexts/workspace-context";
 
 interface ProviderDetailPageProps {

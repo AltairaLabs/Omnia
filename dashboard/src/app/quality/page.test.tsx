@@ -16,9 +16,11 @@ const mockUseEvalFilter = vi.fn();
 const mockUseGrafana = vi.fn();
 const mockBuildDashboardUrl = vi.fn();
 
-vi.mock("@/hooks", () => ({
+vi.mock("@/hooks/sessions", () => ({
   useEvalSummary: (...args: unknown[]) => mockUseEvalSummary(...args),
   useEvalFilter: () => mockUseEvalFilter(),
+}));
+vi.mock("@/hooks/logs", () => ({
   useGrafana: () => mockUseGrafana(),
   buildDashboardUrl: (...args: unknown[]) => mockBuildDashboardUrl(...args),
   GRAFANA_DASHBOARDS: { QUALITY: "omnia-quality" },

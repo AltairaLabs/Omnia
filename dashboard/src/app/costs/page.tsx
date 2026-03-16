@@ -12,7 +12,7 @@ import {
 import { formatCost, formatTokens } from "@/lib/pricing";
 import { getProviderDisplayName } from "@/lib/provider-utils";
 import { DollarSign, TrendingUp, Coins, PiggyBank, Loader2 } from "lucide-react";
-import { useCosts } from "@/hooks";
+import { useCosts } from "@/hooks/costs";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ProviderCost } from "@/lib/data/types";
 

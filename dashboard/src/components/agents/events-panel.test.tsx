@@ -7,7 +7,7 @@ import { EventsPanel } from "./events-panel";
 const mockRefetch = vi.fn();
 const mockUseAgentEvents = vi.fn();
 
-vi.mock("@/hooks", () => ({
+vi.mock("@/hooks/agents", () => ({
   useAgentEvents: (...args: unknown[]) => mockUseAgentEvents(...args),
 }));
 

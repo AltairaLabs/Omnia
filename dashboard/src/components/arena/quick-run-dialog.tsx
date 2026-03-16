@@ -21,10 +21,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
-import { useAgents } from "@/hooks/use-agents";
-import { useToast } from "@/hooks/use-toast";
-import { useProjectJobsWithRun, type QuickRunRequest } from "@/hooks/use-project-jobs";
-import { useProjectDeployment } from "@/hooks/use-project-deployment";
+import { useAgents } from "@/hooks/agents";
+import { useToast } from "@/hooks/core";
+import { useProjectJobsWithRun, type QuickRunRequest, useProjectDeployment } from "@/hooks/arena";
 import type { ExecutionMode } from "@/types/arena";
 
 export interface QuickRunInitialValues {

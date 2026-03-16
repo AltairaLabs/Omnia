@@ -7,8 +7,8 @@ import {
   useJobLogsStream,
   formatLogTimestamp,
   parseLogLevel,
-  type LogEntry,
-} from "@/hooks/use-job-logs-stream";
+  type JobLogEntry as LogEntry,
+} from "@/hooks/logs";
 import { Button } from "@/components/ui/button";
 import {
   ScrollText,

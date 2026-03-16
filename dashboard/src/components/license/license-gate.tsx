@@ -4,8 +4,8 @@ import { type ReactNode } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Lock, Sparkles, ExternalLink } from "lucide-react";
-import { useLicense } from "@/hooks/use-license";
-import { useEnterpriseConfig } from "@/hooks/use-runtime-config";
+import { useLicense } from "@/hooks/auth";
+import { useEnterpriseConfig } from "@/hooks/core";
 import type { LicenseFeatures } from "@/types/license";
 
 const UPGRADE_URL = "https://altairalabs.ai/enterprise";

@@ -11,7 +11,7 @@ import { createContext, useContext, useMemo } from "react";
 import type { DataService } from "./types";
 import { MockDataService } from "./mock-service";
 import { LiveDataService } from "./live-service";
-import { useRuntimeConfig } from "@/hooks/use-runtime-config";
+import { useRuntimeConfig } from "@/hooks/core";
 
 const DataServiceContext = createContext<DataService | null>(null);
 

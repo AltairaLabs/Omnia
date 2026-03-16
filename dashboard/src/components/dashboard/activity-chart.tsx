@@ -13,7 +13,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { useAgentActivity, type ActivityDataPoint } from "@/hooks";
+import { useAgentActivity, type ActivityDataPoint } from "@/hooks/agents";
 
 /** Renders the appropriate chart content based on loading/data state */
 function ChartContent({

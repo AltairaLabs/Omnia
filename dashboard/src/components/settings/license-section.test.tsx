@@ -5,10 +5,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { LicenseSection } from "./license-section";
-import { useLicense } from "@/hooks/use-license";
+import { useLicense } from "@/hooks/auth";
 import type { License } from "@/types/license";
 
-vi.mock("@/hooks/use-license");
+vi.mock("@/hooks/auth");
 
 const mockUseLicense = vi.mocked(useLicense);
 const mockRefresh = vi.fn();
