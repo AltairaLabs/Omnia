@@ -1056,6 +1056,19 @@ var _ = Describe("ToolRegistry Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
+		It("should resolve client handler endpoint as client://browser", func() {
+			handler := &omniav1alpha1.HandlerDefinition{
+				Name: "client-tool",
+				Type: omniav1alpha1.HandlerTypeClient,
+			}
+			registry := &omniav1alpha1.ToolRegistry{
+				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+			}
+			endpoint, err := reconciler.resolveEndpoint(ctx, registry, handler)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(endpoint).To(Equal("client://browser"))
+		})
+
 		It("should accept valid gRPC handler", func() {
 			handler := &omniav1alpha1.HandlerDefinition{
 				Name: "valid-grpc",

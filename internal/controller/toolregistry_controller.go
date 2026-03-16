@@ -220,6 +220,9 @@ func (r *ToolRegistryReconciler) resolveEndpoint(ctx context.Context, toolRegist
 		return "", fmt.Errorf("no endpoint configured for MCP handler")
 	case omniav1alpha1.HandlerTypeOpenAPI:
 		return h.OpenAPIConfig.SpecURL, nil
+	case omniav1alpha1.HandlerTypeClient:
+		// Client-side tools have no server endpoint — they execute in the browser.
+		return "client://browser", nil
 	}
 
 	return "", fmt.Errorf("cannot determine endpoint for handler type %s", h.Type)
