@@ -11,6 +11,7 @@ import { formatCost, formatTokens } from "@/lib/pricing";
 import { useProvider, useAgentCost } from "@/hooks";
 import { useProviderMetrics } from "@/hooks/use-provider-metrics";
 import type { AgentRuntime, PromptPack, ToolRegistry, Provider, ProviderType } from "@/types";
+import { getDefaultProviderRef } from "@/types/agent-runtime";
 
 /** Selected node info for rendering the appropriate card */
 export interface SelectedNode {
@@ -168,14 +169,15 @@ function StatItem({ label, value, title }: Readonly<{ label: string; value: stri
 /** Agent summary card */
 function AgentSummaryCard({ agent, onClose }: Readonly<{ agent: AgentRuntime; onClose: () => void }>) {
   const { metadata, spec, status } = agent;
-  const { data: provider } = useProvider(spec.providerRef?.name, metadata.namespace || "default");
+  const defaultProviderRef = getDefaultProviderRef(spec);
+  const { data: provider } = useProvider(defaultProviderRef?.name, metadata.namespace || "default");
   const { data: costData } = useAgentCost(metadata.namespace || "default", metadata.name);
 
   const sparklineData = costData?.timeSeries || [];
   const totalCost = costData?.totalCost || 0;
-  const providerType = provider?.spec?.type || spec.provider?.type;
+  const providerType = provider?.spec?.type;
   const sparklineColor = providerType === "openai" ? "#8B5CF6" : "#3B82F6";
-  const modelDisplay = (provider?.spec?.model || spec.provider?.model)?.split("-").slice(-2).join("-") || "-";
+  const modelDisplay = provider?.spec?.model?.split("-").slice(-2).join("-") || "-";
   const replicaDisplay = `${status?.replicas?.ready ?? 0}/${status?.replicas?.desired ?? spec.runtime?.replicas ?? 1}`;
 
   return (
@@ -199,7 +201,7 @@ function AgentSummaryCard({ agent, onClose }: Readonly<{ agent: AgentRuntime; on
       {/* Stats */}
       <div className="grid grid-cols-2 gap-3 text-sm">
         <StatItem label="Provider" value={providerType || "-"} />
-        <StatItem label="Model" value={modelDisplay} title={provider?.spec?.model || spec.provider?.model} />
+        <StatItem label="Model" value={modelDisplay} title={provider?.spec?.model} />
         <StatItem label="Replicas" value={replicaDisplay} />
         <StatItem label="Facade" value={spec.facade?.type || "websocket"} />
       </div>

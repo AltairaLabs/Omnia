@@ -109,17 +109,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(omnia_llm_request_duration_seconds_bucket{agent=\"$agent\", namespace=\"$namespace\"}[$__rate_interval])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(omnia_provider_request_duration_seconds_bucket{agent=\"$agent\", namespace=\"$namespace\"}[$__rate_interval])) by (le))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(omnia_llm_request_duration_seconds_bucket{agent=\"$agent\", namespace=\"$namespace\"}[$__rate_interval])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(omnia_provider_request_duration_seconds_bucket{agent=\"$agent\", namespace=\"$namespace\"}[$__rate_interval])) by (le))",
           "legendFormat": "p95",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(omnia_llm_request_duration_seconds_bucket{agent=\"$agent\", namespace=\"$namespace\"}[$__rate_interval])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(omnia_provider_request_duration_seconds_bucket{agent=\"$agent\", namespace=\"$namespace\"}[$__rate_interval])) by (le))",
           "legendFormat": "p99",
           "refId": "C"
         }
@@ -155,12 +155,12 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(omnia_llm_input_tokens_total{agent=\"$agent\", namespace=\"$namespace\"}[$__rate_interval]))",
+          "expr": "sum(increase(omnia_provider_input_tokens_total{agent=\"$agent\", namespace=\"$namespace\"}[$__rate_interval]))",
           "legendFormat": "Input tokens",
           "refId": "A"
         },
         {
-          "expr": "sum(increase(omnia_llm_output_tokens_total{agent=\"$agent\", namespace=\"$namespace\"}[$__rate_interval]))",
+          "expr": "sum(increase(omnia_provider_output_tokens_total{agent=\"$agent\", namespace=\"$namespace\"}[$__rate_interval]))",
           "legendFormat": "Output tokens",
           "refId": "B"
         }
@@ -196,7 +196,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (tool, status) (increase(omnia_runtime_tool_calls_total{agent=\"$agent\", namespace=\"$namespace\"}[$__rate_interval]))",
+          "expr": "sum by (tool, status) (increase(omnia_tool_calls_total{agent=\"$agent\", namespace=\"$namespace\"}[$__rate_interval]))",
           "legendFormat": "{{ "{{tool}}" }} ({{ "{{status}}" }})",
           "refId": "A"
         }
@@ -252,7 +252,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum(increase(omnia_llm_cost_usd_total{agent=\"$agent\", namespace=\"$namespace\"}[$__rate_interval]))",
+          "expr": "sum(increase(omnia_provider_cost_total{agent=\"$agent\", namespace=\"$namespace\"}[$__rate_interval]))",
           "legendFormat": "Cost (USD)",
           "refId": "B"
         }

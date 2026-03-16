@@ -43,22 +43,14 @@ spec:
         cpu: "1000m"
         memory: "1Gi"
 
-  # Provider configuration - Claude via providerRef
-  providerRef:
-    name: claude-sonnet
-    namespace: omnia-system
-
-  # Alternative: inline provider config for OpenAI
-  # provider:
-  #   type: openai
-  #   model: gpt-4o
-  #   secretRef:
-  #     name: openai-credentials
-  #   config:
-  #     temperature: "0.7"
-  #     contextWindow: 128000
+  # Provider configuration - Claude via providers list
+  providers:
+    - name: default
+      providerRef:
+        name: claude-sonnet
+        namespace: omnia-system
 ---
-# Example Provider resource for Claude (referenced by providerRef above)
+# Example Provider resource for Claude (referenced by providers list above)
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: Provider
 metadata:

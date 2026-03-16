@@ -103,11 +103,6 @@ func (r *AgentRuntimeReconciler) getSecretHash(
 		}
 	}
 
-	// Include inline provider secret if present (legacy)
-	if agentRuntime.Spec.Provider != nil && agentRuntime.Spec.Provider.SecretRef != nil {
-		r.hashSecretData(ctx, hasher, agentRuntime.Spec.Provider.SecretRef.Name, agentRuntime.Namespace)
-	}
-
 	hashStr := hex.EncodeToString(hasher.Sum(nil))
 	// Use first 16 chars for brevity
 	if len(hashStr) > 16 {

@@ -523,16 +523,6 @@ func (in *AgentRuntimeSpec) DeepCopyInto(out *AgentRuntimeSpec) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
-	if in.ProviderRef != nil {
-		in, out := &in.ProviderRef, &out.ProviderRef
-		*out = new(ProviderRef)
-		(*in).DeepCopyInto(*out)
-	}
-	if in.Provider != nil {
-		in, out := &in.Provider, &out.Provider
-		*out = new(ProviderConfig)
-		(*in).DeepCopyInto(*out)
-	}
 	if in.Evals != nil {
 		in, out := &in.Evals, &out.Evals
 		*out = new(EvalConfig)

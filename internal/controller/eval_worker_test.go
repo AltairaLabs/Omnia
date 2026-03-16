@@ -68,6 +68,19 @@ var _ = Describe("Eval Worker Reconciliation", func() {
 				Namespace: namespace,
 			}
 
+			// Create Provider CRD referenced by AgentRuntime
+			provider := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-provider",
+					Namespace: namespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
 			// Create shared PromptPack
 			pp := &omniav1alpha1.PromptPack{
 				ObjectMeta: metav1.ObjectMeta{
@@ -101,6 +114,12 @@ var _ = Describe("Eval Worker Reconciliation", func() {
 				ar.Finalizers = nil
 				_ = k8sClient.Update(ctx, ar)
 				_ = k8sClient.Delete(ctx, ar)
+			}
+
+			// Clean up Provider
+			p := &omniav1alpha1.Provider{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: "test-provider", Namespace: namespace}, p); err == nil {
+				_ = k8sClient.Delete(ctx, p)
 			}
 
 			// Clean up PromptPack
@@ -268,11 +287,8 @@ func newTestAgentRuntime(
 			Facade: omniav1alpha1.FacadeConfig{
 				Type: omniav1alpha1.FacadeTypeWebSocket,
 			},
-			Provider: &omniav1alpha1.ProviderConfig{
-				Type: omniav1alpha1.ProviderTypeClaude,
-				SecretRef: &corev1.LocalObjectReference{
-					Name: "test-secret",
-				},
+			Providers: []omniav1alpha1.NamedProviderRef{
+				{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "test-provider"}},
 			},
 		},
 	}

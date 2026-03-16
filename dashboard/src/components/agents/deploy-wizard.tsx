@@ -236,9 +236,14 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
 
     // Provider reference
     if (formData.providerRefName) {
-      (yaml.spec as Record<string, unknown>).providerRef = {
-        name: formData.providerRefName,
-      };
+      (yaml.spec as Record<string, unknown>).providers = [
+        {
+          name: "default",
+          providerRef: {
+            name: formData.providerRefName,
+          },
+        },
+      ];
     }
 
     // Tool Registry

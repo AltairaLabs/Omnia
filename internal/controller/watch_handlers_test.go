@@ -83,7 +83,9 @@ func TestFindAgentRuntimesForSecret(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
-						ProviderRef:   &omniav1alpha1.ProviderRef{Name: "my-provider"},
+						Providers: []omniav1alpha1.NamedProviderRef{
+							{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "my-provider"}},
+						},
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
 					},
 				},
@@ -92,13 +94,25 @@ func TestFindAgentRuntimesForSecret(t *testing.T) {
 			expectedAgents: []string{"my-agent"},
 		},
 		{
-			name: "credential secret triggers agent reconcile via inline provider",
+			name: "credential secret triggers agent reconcile via named provider",
 			secret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "inline-secret",
 					Namespace: "default",
 					Labels: map[string]string{
 						"omnia.altairalabs.ai/type": "credentials",
+					},
+				},
+			},
+			providers: []omniav1alpha1.Provider{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "inline-provider",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.ProviderSpec{
+						Type:      "openai",
+						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "inline-secret"},
 					},
 				},
 			},
@@ -109,9 +123,8 @@ func TestFindAgentRuntimesForSecret(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
-						Provider: &omniav1alpha1.ProviderConfig{
-							Type:      "openai",
-							SecretRef: &corev1.LocalObjectReference{Name: "inline-secret"},
+						Providers: []omniav1alpha1.NamedProviderRef{
+							{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "inline-provider"}},
 						},
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
 					},
@@ -150,7 +163,9 @@ func TestFindAgentRuntimesForSecret(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
-						ProviderRef:   &omniav1alpha1.ProviderRef{Name: "my-provider"},
+						Providers: []omniav1alpha1.NamedProviderRef{
+							{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "my-provider"}},
+						},
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
 					},
 				},
@@ -187,7 +202,9 @@ func TestFindAgentRuntimesForSecret(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
-						ProviderRef:   &omniav1alpha1.ProviderRef{Name: "shared-provider"},
+						Providers: []omniav1alpha1.NamedProviderRef{
+							{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "shared-provider"}},
+						},
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
 					},
 				},
@@ -197,7 +214,9 @@ func TestFindAgentRuntimesForSecret(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
-						ProviderRef:   &omniav1alpha1.ProviderRef{Name: "shared-provider"},
+						Providers: []omniav1alpha1.NamedProviderRef{
+							{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "shared-provider"}},
+						},
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
 					},
 				},
@@ -266,7 +285,9 @@ func TestFindAgentRuntimesForProvider(t *testing.T) {
 				Namespace: "default",
 			},
 			Spec: omniav1alpha1.AgentRuntimeSpec{
-				ProviderRef:   &omniav1alpha1.ProviderRef{Name: "test-provider"},
+				Providers: []omniav1alpha1.NamedProviderRef{
+					{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "test-provider"}},
+				},
 				PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
 			},
 		},
@@ -276,7 +297,9 @@ func TestFindAgentRuntimesForProvider(t *testing.T) {
 				Namespace: "default",
 			},
 			Spec: omniav1alpha1.AgentRuntimeSpec{
-				ProviderRef:   &omniav1alpha1.ProviderRef{Name: "other-provider"},
+				Providers: []omniav1alpha1.NamedProviderRef{
+					{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "other-provider"}},
+				},
 				PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
 			},
 		},
@@ -608,20 +631,30 @@ func TestGetSecretHash(t *testing.T) {
 			expectEmpty: false,
 		},
 		{
-			name: "inline provider secret returns hash",
+			name: "named provider secret returns hash",
 			agentRuntime: &omniav1alpha1.AgentRuntime{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-agent",
 					Namespace: "default",
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
-					Provider: &omniav1alpha1.ProviderConfig{
-						Type:      "openai",
-						SecretRef: &corev1.LocalObjectReference{Name: "inline-secret"},
+					Providers: []omniav1alpha1.NamedProviderRef{
+						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "openai-provider"}},
 					},
 				},
 			},
-			providers: nil,
+			providers: map[string]*omniav1alpha1.Provider{
+				"default": {
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "openai-provider",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.ProviderSpec{
+						Type:      "openai",
+						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "inline-secret"},
+					},
+				},
+			},
 			secrets: []*corev1.Secret{
 				{
 					ObjectMeta: metav1.ObjectMeta{

@@ -33,18 +33,12 @@ spec:
       limits:
         cpu: "500m"
         memory: "512Mi"
-  # Option 1: Reference a Provider CRD (recommended for shared configurations)
-  providerRef:
-    name: claude-sonnet
-    namespace: omnia-system
-  # Option 2: Inline provider config (uncomment to use instead of providerRef)
-  # provider:
-  #   type: openai
-  #   model: gpt-4o
-  #   secretRef:
-  #     name: openai-credentials
-  #   config:
-  #     temperature: "0.7"
+  # Reference a Provider CRD for LLM configuration
+  providers:
+    - name: default
+      providerRef:
+        name: claude-sonnet
+        namespace: omnia-system
 ---
 # Secret containing Redis connection URL
 apiVersion: v1

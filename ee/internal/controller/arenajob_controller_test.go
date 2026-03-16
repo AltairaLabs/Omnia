@@ -1449,7 +1449,7 @@ var _ = Describe("ArenaJob Controller", func() {
 				RedisAddr: "", // No Redis configured
 			}
 
-			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, nil)
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(count).To(Equal(0))
 		})
@@ -1485,7 +1485,7 @@ var _ = Describe("ArenaJob Controller", func() {
 				Queue:  memQueue,
 			}
 
-			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(count).To(Equal(3))
 
@@ -1581,7 +1581,7 @@ spec:
 			// Update WorkspaceContentPath to parent of the workspace tree
 			reconciler.WorkspaceContentPath = filepath.Join(dir, "..")
 
-			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs, nil)
 			Expect(err).NotTo(HaveOccurred())
 			// 2 scenarios × 2 providers = 4 work items
 			Expect(count).To(Equal(4))
@@ -1636,7 +1636,7 @@ spec:
 				// No WorkspaceContentPath — filesystem unavailable
 			}
 
-			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(count).To(Equal(2))
 
@@ -1711,7 +1711,7 @@ spec:
 				WorkspaceContentPath: dir,
 			}
 
-			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs, nil)
 			Expect(err).NotTo(HaveOccurred())
 			// 2 scenarios (wip-test excluded) × 1 provider = 2 items
 			Expect(count).To(Equal(2))
@@ -1751,7 +1751,7 @@ spec:
 				Queue:  memQueue,
 			}
 
-			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, nil)
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(count).To(Equal(1))
 
@@ -1802,7 +1802,7 @@ spec:
 				WorkspaceContentPath: dir,
 			}
 
-			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs, nil)
 			Expect(err).NotTo(HaveOccurred())
 			// Falls back to per-provider: 2 items with ScenarioID "default"
 			Expect(count).To(Equal(2))
@@ -2845,7 +2845,7 @@ spec:
 				{ObjectMeta: metav1.ObjectMeta{Name: "provider-1"}},
 			}
 
-			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(count).To(Equal(1))
 

@@ -35,9 +35,9 @@ describe("prometheus-queries", () => {
     });
 
     it("exports LLM_METRICS with correct prefixes", () => {
-      expect(LLM_METRICS.COST_USD).toBe("omnia_llm_cost_usd_total");
-      expect(LLM_METRICS.INPUT_TOKENS).toBe("omnia_llm_input_tokens_total");
-      expect(LLM_METRICS.OUTPUT_TOKENS).toBe("omnia_llm_output_tokens_total");
+      expect(LLM_METRICS.COST_USD).toBe("omnia_provider_cost_total");
+      expect(LLM_METRICS.INPUT_TOKENS).toBe("omnia_provider_input_tokens_total");
+      expect(LLM_METRICS.OUTPUT_TOKENS).toBe("omnia_provider_output_tokens_total");
     });
 
     it("exports LABELS with correct names", () => {

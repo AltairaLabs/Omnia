@@ -12,6 +12,7 @@ import { formatCost } from "@/lib/pricing";
 import { useDataService } from "@/lib/data";
 import { useProvider, useAgentCost } from "@/hooks";
 import type { AgentRuntime } from "@/types";
+import { getDefaultProviderRef } from "@/types/agent-runtime";
 
 interface AgentCardProps {
   agent: AgentRuntime;
@@ -21,7 +22,8 @@ export function AgentCard({ agent }: Readonly<AgentCardProps>) {
   const { metadata, spec, status } = agent;
   const queryClient = useQueryClient();
   const dataService = useDataService();
-  const { data: provider } = useProvider(spec.providerRef?.name, metadata.namespace || "default");
+  const defaultProviderRef = getDefaultProviderRef(spec);
+  const { data: provider } = useProvider(defaultProviderRef?.name, metadata.namespace || "default");
 
   // Fetch real cost data from Prometheus
   const { data: costData } = useAgentCost(
@@ -44,7 +46,7 @@ export function AgentCard({ agent }: Readonly<AgentCardProps>) {
   const totalCost = costData?.totalCost || 0;
 
   // Determine sparkline color based on provider
-  const providerType = provider?.spec?.type || spec.provider?.type;
+  const providerType = provider?.spec?.type;
   const sparklineColor = providerType === "openai" ? "#8B5CF6" : "#3B82F6";
 
   return (
@@ -82,8 +84,8 @@ export function AgentCard({ agent }: Readonly<AgentCardProps>) {
             </div>
             <div>
               <p className="text-muted-foreground">Model</p>
-              <p className="font-medium truncate" title={provider?.spec?.model || spec.provider?.model}>
-                {(provider?.spec?.model || spec.provider?.model)?.split("-").slice(-2).join("-") || "-"}
+              <p className="font-medium truncate" title={provider?.spec?.model}>
+                {provider?.spec?.model?.split("-").slice(-2).join("-") || "-"}
               </p>
             </div>
             <div

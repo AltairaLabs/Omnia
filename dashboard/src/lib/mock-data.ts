@@ -35,7 +35,7 @@ export const mockAgentRuntimes: AgentRuntime[] = [
       framework: { type: "promptkit", version: "0.4.0" },
       promptPackRef: { name: "support-prompts", version: "1.2.0" },
       facade: { type: "websocket", port: 8080, handler: "runtime" },
-      provider: { type: "claude", model: "claude-sonnet-4-20250514" },
+      providers: [{ name: "default", providerRef: { name: "claude-production" } }],
       session: { type: "redis", ttl: "24h" },
       runtime: {
         replicas: 3,
@@ -77,7 +77,7 @@ export const mockAgentRuntimes: AgentRuntime[] = [
     spec: {
       promptPackRef: { name: "code-prompts", track: "stable" },
       facade: { type: "websocket", port: 8080, handler: "runtime" },
-      provider: { type: "claude", model: "claude-sonnet-4-20250514" },
+      providers: [{ name: "default", providerRef: { name: "claude-production" } }],
       session: { type: "redis", ttl: "1h" },
       runtime: { replicas: 2 },
     },
@@ -112,7 +112,7 @@ export const mockAgentRuntimes: AgentRuntime[] = [
       framework: { type: "langchain", version: "0.3.0" },
       promptPackRef: { name: "analyst-prompts", version: "1.0.0" },
       facade: { type: "websocket", port: 8080, handler: "runtime" },
-      provider: { type: "openai", model: "gpt-4-turbo" },
+      providers: [{ name: "default", providerRef: { name: "openai-production" } }],
       toolRegistryRef: { name: "data-tools" },
       session: { type: "redis", ttl: "2h" },
       runtime: { replicas: 2 },
@@ -147,7 +147,7 @@ export const mockAgentRuntimes: AgentRuntime[] = [
     spec: {
       promptPackRef: { name: "onboarding-prompts", version: "0.9.0" },
       facade: { type: "websocket", port: 8080, handler: "runtime" },
-      provider: { type: "claude", model: "claude-sonnet-4-20250514" },
+      providers: [{ name: "default", providerRef: { name: "claude-production" } }],
       session: { type: "memory", ttl: "30m" },
       runtime: { replicas: 1 },
     },
@@ -181,7 +181,7 @@ export const mockAgentRuntimes: AgentRuntime[] = [
     spec: {
       promptPackRef: { name: "sales-prompts", version: "1.1.0" },
       facade: { type: "grpc", port: 9090, handler: "runtime" },
-      provider: { type: "openai", model: "gpt-4-turbo" },
+      providers: [{ name: "default", providerRef: { name: "openai-production" } }],
       toolRegistryRef: { name: "crm-tools" },
       session: { type: "redis", ttl: "4h" },
       runtime: { replicas: 2 },
@@ -223,7 +223,7 @@ export const mockAgentRuntimes: AgentRuntime[] = [
     spec: {
       promptPackRef: { name: "legacy-prompts", version: "0.5.0" },
       facade: { type: "websocket", port: 8080, handler: "demo" },
-      provider: { type: "openai", model: "gpt-3.5-turbo" },
+      providers: [{ name: "default", providerRef: { name: "openai-staging" } }],
       session: { type: "memory", ttl: "1h" },
       runtime: { replicas: 1 },
     },
@@ -259,7 +259,7 @@ export const mockAgentRuntimes: AgentRuntime[] = [
       framework: { type: "promptkit", version: "0.4.0" },
       promptPackRef: { name: "e2e-test-promptpack", version: "1.0.0" },
       facade: { type: "websocket", port: 8080, handler: "demo" },
-      provider: { type: "claude", model: "claude-sonnet-4-20250514" },
+      providers: [{ name: "default", providerRef: { name: "claude-production" } }],
       session: { type: "memory", ttl: "1h" },
       runtime: { replicas: 1 },
     },

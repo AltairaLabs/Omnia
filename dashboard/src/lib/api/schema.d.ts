@@ -252,7 +252,7 @@ export interface components {
         AgentRuntimeSpec: {
             promptPackRef?: components["schemas"]["LocalObjectReference"];
             toolRegistryRef?: components["schemas"]["LocalObjectReference"];
-            providerRef?: components["schemas"]["LocalObjectReference"];
+            providers?: components["schemas"]["NamedProviderRef"][];
             facade?: components["schemas"]["FacadeConfig"];
             session?: components["schemas"]["SessionConfig"];
             runtime?: components["schemas"]["RuntimeConfig"];
@@ -261,6 +261,10 @@ export interface components {
         LocalObjectReference: {
             name?: string;
             namespace?: string;
+        };
+        NamedProviderRef: {
+            name: string;
+            providerRef: components["schemas"]["LocalObjectReference"];
         };
         FacadeConfig: {
             /** @enum {string} */

@@ -362,82 +362,9 @@ export interface AgentRuntimeSpec {
      * If not specified, the track field is used instead. */
     version?: string;
   };
-  /** provider configures the LLM provider inline (type, model, credentials, tuning).
-   * Deprecated: Use providers with a Provider CRD instead. When providers is set, this field is ignored. */
-  provider?: {
-    /** additionalConfig contains provider-specific settings passed to PromptKit.
-     * For Ollama: "keep_alive" (e.g., "5m") to keep model loaded between requests.
-     * For Mock: "mock_config" path to mock responses YAML file. */
-    additionalConfig?: Record<string, string>;
-    /** baseURL overrides the provider's default API endpoint.
-     * Useful for proxies or self-hosted models. */
-    baseURL?: string;
-    /** config contains provider tuning parameters. */
-    config?: {
-      /** contextWindow is the model's maximum context size in tokens.
-       * When conversation history exceeds this budget, truncation is applied.
-       * If not specified, no automatic truncation is performed. */
-      contextWindow?: number;
-      /** maxTokens limits the maximum number of tokens in the response. */
-      maxTokens?: number;
-      /** temperature controls randomness in responses (0.0-2.0).
-       * Lower values make output more focused and deterministic.
-       * Specified as a string to support decimal values (e.g., "0.7"). */
-      temperature?: string;
-      /** topP controls nucleus sampling (0.0-1.0).
-       * Specified as a string to support decimal values (e.g., "0.9"). */
-      topP?: string;
-      /** truncationStrategy defines how to handle context overflow.
-       * - sliding: Remove oldest messages first (default)
-       * - summarize: Summarize old messages before removing
-       * - custom: Delegate to custom runtime implementation */
-      truncationStrategy?: "sliding" | "summarize" | "custom";
-    };
-    /** model specifies the model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4o").
-     * If not specified, the provider's default model is used. */
-    model?: string;
-    /** pricing configures cost tracking for this provider.
-     * If not specified, PromptKit's built-in pricing is used. */
-    pricing?: {
-      /** cachedCostPer1K is the cost per 1000 cached tokens (e.g., "0.0003").
-       * Cached tokens have reduced cost with some providers. */
-      cachedCostPer1K?: string;
-      /** inputCostPer1K is the cost per 1000 input tokens (e.g., "0.003"). */
-      inputCostPer1K?: string;
-      /** outputCostPer1K is the cost per 1000 output tokens (e.g., "0.015"). */
-      outputCostPer1K?: string;
-    };
-    /** secretRef references a Secret containing API credentials.
-     * The secret should contain a key matching the provider's expected env var:
-     * - ANTHROPIC_API_KEY for Claude
-     * - OPENAI_API_KEY for OpenAI
-     * - GEMINI_API_KEY or GOOGLE_API_KEY for Gemini
-     * Or use "api-key" as a generic key name. */
-    secretRef?: {
-      /** Name of the referent.
-       * This field is effectively required, but due to backwards compatibility is
-       * allowed to be empty. Instances of this type with an empty value here are
-       * almost certainly wrong.
-       * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
-      name?: string;
-    };
-    /** type specifies the provider type.
-     * "claude", "openai", "gemini", "ollama", or "mock". */
-    type: "claude" | "openai" | "gemini" | "ollama" | "mock" | "bedrock" | "vertex" | "azure-ai";
-  };
-  /** providerRef references a Provider resource for LLM configuration.
-   * Deprecated: Use providers instead. When providers is set, this field is ignored. */
-  providerRef?: {
-    /** name is the name of the Provider resource. */
-    name: string;
-    /** namespace is the namespace of the Provider resource.
-     * If not specified, the same namespace as the AgentRuntime is used. */
-    namespace?: string;
-  };
   /** providers is a list of named provider references.
    * Each entry maps a logical name to a Provider CRD.
-   * The "default" name is used as the primary provider for the runtime.
-   * Deprecates providerRef and provider fields. */
+   * The "default" name is used as the primary provider for the runtime. */
   providers?: {
     /** name is the logical name for this provider (e.g. "default", "judge", "embeddings"). */
     name: string;

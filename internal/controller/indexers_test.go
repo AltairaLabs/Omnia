@@ -59,11 +59,13 @@ func TestExtractProviderRefs_CrossNamespace(t *testing.T) {
 	assert.Equal(t, []string{"shared/openai-prod"}, refs)
 }
 
-func TestExtractProviderRefs_LegacyProviderRef(t *testing.T) {
+func TestExtractProviderRefs_SingleProvider(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "agent1", Namespace: "ns1"},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
-			ProviderRef: &omniav1alpha1.ProviderRef{Name: "legacy-provider"},
+			Providers: []omniav1alpha1.NamedProviderRef{
+				{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "legacy-provider"}},
+			},
 		},
 	}
 

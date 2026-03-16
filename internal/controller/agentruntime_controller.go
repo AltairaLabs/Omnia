@@ -119,7 +119,6 @@ func (r *AgentRuntimeReconciler) reconcileReferences(
 }
 
 // reconcileProviders resolves the providers map from the AgentRuntime spec.
-// If spec.providers is set, each entry is fetched. Otherwise, falls back to spec.providerRef.
 func (r *AgentRuntimeReconciler) reconcileProviders(
 	ctx context.Context,
 	log logr.Logger,
@@ -127,26 +126,12 @@ func (r *AgentRuntimeReconciler) reconcileProviders(
 ) (map[string]*omniav1alpha1.Provider, ctrl.Result, error) {
 	providers := make(map[string]*omniav1alpha1.Provider)
 
-	// New-style: spec.providers list takes precedence
-	if len(agentRuntime.Spec.Providers) > 0 {
-		for _, np := range agentRuntime.Spec.Providers {
-			provider, result, err := r.fetchAndValidateProvider(ctx, log, agentRuntime, np.ProviderRef)
-			if err != nil || result.RequeueAfter > 0 {
-				return nil, result, err
-			}
-			providers[np.Name] = provider
-		}
-		return providers, ctrl.Result{}, nil
-	}
-
-	// Legacy: spec.providerRef
-	if agentRuntime.Spec.ProviderRef != nil {
-		provider, result, err := r.fetchAndValidateProvider(ctx, log, agentRuntime, *agentRuntime.Spec.ProviderRef)
+	for _, np := range agentRuntime.Spec.Providers {
+		provider, result, err := r.fetchAndValidateProvider(ctx, log, agentRuntime, np.ProviderRef)
 		if err != nil || result.RequeueAfter > 0 {
 			return nil, result, err
 		}
-		providers["default"] = provider
-		return providers, ctrl.Result{}, nil
+		providers[np.Name] = provider
 	}
 
 	return providers, ctrl.Result{}, nil

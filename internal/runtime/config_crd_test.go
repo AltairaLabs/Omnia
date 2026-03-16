@@ -118,7 +118,7 @@ func TestLoadFromCRD_NamedProviders(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("ANTHROPIC_API_KEY") })
 }
 
-func TestLoadFromCRD_LegacyProviderRef(t *testing.T) {
+func TestLoadFromCRD_SingleProvider(t *testing.T) {
 	provider := &v1alpha1.Provider{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "openai-provider",
@@ -151,7 +151,9 @@ func TestLoadFromCRD_LegacyProviderRef(t *testing.T) {
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
 			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
-			ProviderRef:   &v1alpha1.ProviderRef{Name: "openai-provider"},
+			Providers: []v1alpha1.NamedProviderRef{
+				{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "openai-provider"}},
+			},
 		},
 	}
 
@@ -165,41 +167,7 @@ func TestLoadFromCRD_LegacyProviderRef(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("OPENAI_API_KEY") })
 }
 
-func TestLoadFromCRD_InlineProvider(t *testing.T) {
-	ar := &v1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-agent",
-			Namespace: "test-ns",
-		},
-		Spec: v1alpha1.AgentRuntimeSpec{
-			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
-			Provider: &v1alpha1.ProviderConfig{
-				Type:    v1alpha1.ProviderTypeOllama,
-				Model:   "llama3",
-				BaseURL: "http://localhost:11434",
-				Config: &v1alpha1.ProviderDefaults{
-					ContextWindow:      int32Ptr(8192),
-					TruncationStrategy: v1alpha1.TruncationStrategySummarize,
-				},
-			},
-		},
-	}
-
-	c := buildTestClient(ar)
-	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
-	require.NoError(t, err)
-
-	assert.Equal(t, "ollama", cfg.ProviderType)
-	assert.Equal(t, "llama3", cfg.Model)
-	assert.Equal(t, "http://localhost:11434", cfg.BaseURL)
-	assert.Equal(t, 8192, cfg.ContextWindow)
-	assert.Equal(t, "summarize", cfg.TruncationStrategy)
-	// No provider ref for inline
-	assert.Empty(t, cfg.ProviderRefName)
-}
-
-func TestLoadFromCRD_NoProvider(t *testing.T) {
+func TestLoadFromCRD_NoProviders(t *testing.T) {
 	ar := &v1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-agent",
@@ -217,6 +185,7 @@ func TestLoadFromCRD_NoProvider(t *testing.T) {
 
 	assert.Empty(t, cfg.ProviderType)
 	assert.Empty(t, cfg.Model)
+	assert.Empty(t, cfg.ProviderRefName)
 }
 
 func TestLoadFromCRD_MockProviderAnnotation(t *testing.T) {
@@ -260,7 +229,9 @@ func TestLoadFromCRD_MockProviderType(t *testing.T) {
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
 			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
-			ProviderRef:   &v1alpha1.ProviderRef{Name: "mock-provider"},
+			Providers: []v1alpha1.NamedProviderRef{
+				{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "mock-provider"}},
+			},
 		},
 	}
 
@@ -308,7 +279,9 @@ func TestLoadFromCRD_CredentialSecretRef(t *testing.T) {
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
 			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
-			ProviderRef:   &v1alpha1.ProviderRef{Name: "gemini-provider"},
+			Providers: []v1alpha1.NamedProviderRef{
+				{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "gemini-provider"}},
+			},
 		},
 	}
 
@@ -379,7 +352,9 @@ func TestLoadFromCRD_ProviderNotFound(t *testing.T) {
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
 			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
-			ProviderRef:   &v1alpha1.ProviderRef{Name: "missing-provider"},
+			Providers: []v1alpha1.NamedProviderRef{
+				{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "missing-provider"}},
+			},
 		},
 	}
 
@@ -411,7 +386,9 @@ func TestLoadFromCRD_SecretNotFound(t *testing.T) {
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
 			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
-			ProviderRef:   &v1alpha1.ProviderRef{Name: "claude-provider"},
+			Providers: []v1alpha1.NamedProviderRef{
+				{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "claude-provider"}},
+			},
 		},
 	}
 
@@ -453,7 +430,9 @@ func TestLoadFromCRD_SecretMissingKey(t *testing.T) {
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
 			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
-			ProviderRef:   &v1alpha1.ProviderRef{Name: "claude-provider"},
+			Providers: []v1alpha1.NamedProviderRef{
+				{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "claude-provider"}},
+			},
 		},
 	}
 

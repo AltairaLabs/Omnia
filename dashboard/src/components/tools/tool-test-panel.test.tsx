@@ -166,7 +166,7 @@ describe("ToolTestPanel", () => {
     fireEvent.change(textarea, { target: { value: "{invalid json" } });
     fireEvent.click(screen.getByText("Run Test"));
 
-    expect(screen.getByText("Invalid JSON")).toBeInTheDocument();
+    expect(screen.getByText(/Invalid JSON/)).toBeInTheDocument();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -396,11 +396,11 @@ describe("ToolTestPanel", () => {
     fireEvent.change(textarea, { target: { value: "{invalid" } });
     fireEvent.click(screen.getByText("Run Test"));
 
-    expect(screen.getByText("Invalid JSON")).toBeInTheDocument();
+    expect(screen.getByText(/Invalid JSON/)).toBeInTheDocument();
 
     // Change textarea to clear the error
     fireEvent.change(textarea, { target: { value: "{}" } });
-    expect(screen.queryByText("Invalid JSON")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Invalid JSON/)).not.toBeInTheDocument();
   });
 
   it("handles registry with no status or discoveredTools", () => {

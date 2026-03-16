@@ -99,6 +99,7 @@ spec:
               execution:
                 description: |-
                   execution configures the execution mode and target.
+                  Deprecated: Use providers with agentRef entries instead of fleet mode.
                   If not specified, defaults to direct provider execution.
                 properties:
                   mode:
@@ -278,9 +279,58 @@ spec:
                   type: object
                 description: |-
                   providerOverrides allows overriding provider groups defined in the arena config file.
+                  Deprecated: Use providers field instead for direct CRD-based provider resolution.
                   Keys are group names from the arena config file (e.g., "default", "judge").
                   Use "*" as a catch-all for groups not explicitly specified.
                   Provider CRDs matching the label selector provide credentials for the matched groups.
+                type: object
+              providers:
+                additionalProperties:
+                  items:
+                    description: |-
+                      ArenaProviderEntry references either a Provider CRD or an AgentRuntime CRD.
+                      Exactly one of providerRef or agentRef must be set.
+                    properties:
+                      agentRef:
+                        description: |-
+                          agentRef references an AgentRuntime CRD.
+                          The worker connects via WebSocket (fleet mode).
+                        properties:
+                          name:
+                            description: name is the name of the object.
+                            minLength: 1
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      providerRef:
+                        description: providerRef references a Provider CRD for LLM
+                          access.
+                        properties:
+                          name:
+                            description: name is the name of the Provider resource.
+                            minLength: 1
+                            type: string
+                          namespace:
+                            description: |-
+                              namespace is the namespace of the Provider resource.
+                              If not specified, the same namespace as the AgentRuntime is used.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                    type: object
+                    x-kubernetes-validations:
+                    - message: exactly one of providerRef or agentRef must be set
+                      rule: has(self.providerRef) != has(self.agentRef)
+                  type: array
+                description: |-
+                  providers maps group names to lists of provider/agent entries.
+                  Groups correspond to the arena config's provider groups (e.g., "default", "judge").
+                  When set, provider YAML files from the arena project are ignored
+                  and the worker resolves providers directly from CRDs.
+                  An agentRef can appear in any provider position — agents and LLM providers
+                  are interchangeable in the scenario × provider matrix.
                 type: object
               scenarios:
                 description: |-
@@ -340,11 +390,29 @@ spec:
                 required:
                 - name
                 type: object
+              toolRegistries:
+                description: |-
+                  toolRegistries lists ToolRegistry CRDs whose discovered tools replace
+                  the arena config's tool/mcp_server file references.
+                  When set, tool YAML files from the arena project are ignored.
+                items:
+                  description: LocalObjectReference contains enough information to
+                    let you locate the referenced object.
+                  properties:
+                    name:
+                      description: name is the name of the object.
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
               toolRegistryOverride:
                 description: |-
                   toolRegistryOverride allows overriding tools/mcp_servers defined in the arena config file
                   with handlers from ToolRegistry CRDs. All tools from matching registries will
                   override tools with matching names in the arena config.
+                  Deprecated: Use toolRegistries field instead for direct CRD-based tool resolution.
                 properties:
                   selector:
                     description: |-

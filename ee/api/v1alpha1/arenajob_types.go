@@ -245,6 +245,20 @@ type ScheduleConfig struct {
 	ConcurrencyPolicy string `json:"concurrencyPolicy,omitempty"`
 }
 
+// ArenaProviderEntry references either a Provider CRD or an AgentRuntime CRD.
+// Exactly one of providerRef or agentRef must be set.
+// +kubebuilder:validation:XValidation:rule="has(self.providerRef) != has(self.agentRef)",message="exactly one of providerRef or agentRef must be set"
+type ArenaProviderEntry struct {
+	// providerRef references a Provider CRD for LLM access.
+	// +optional
+	ProviderRef *corev1alpha1.ProviderRef `json:"providerRef,omitempty"`
+
+	// agentRef references an AgentRuntime CRD.
+	// The worker connects via WebSocket (fleet mode).
+	// +optional
+	AgentRef *corev1alpha1.LocalObjectReference `json:"agentRef,omitempty"`
+}
+
 // ArenaJobSpec defines the desired state of ArenaJob.
 type ArenaJobSpec struct {
 	// sourceRef references the ArenaSource containing test scenarios and configuration.
@@ -300,7 +314,23 @@ type ArenaJobSpec struct {
 	// +optional
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
 
+	// providers maps group names to lists of provider/agent entries.
+	// Groups correspond to the arena config's provider groups (e.g., "default", "judge").
+	// When set, provider YAML files from the arena project are ignored
+	// and the worker resolves providers directly from CRDs.
+	// An agentRef can appear in any provider position — agents and LLM providers
+	// are interchangeable in the scenario × provider matrix.
+	// +optional
+	Providers map[string][]ArenaProviderEntry `json:"providers,omitempty"`
+
+	// toolRegistries lists ToolRegistry CRDs whose discovered tools replace
+	// the arena config's tool/mcp_server file references.
+	// When set, tool YAML files from the arena project are ignored.
+	// +optional
+	ToolRegistries []corev1alpha1.LocalObjectReference `json:"toolRegistries,omitempty"`
+
 	// execution configures the execution mode and target.
+	// Deprecated: Use providers with agentRef entries instead of fleet mode.
 	// If not specified, defaults to direct provider execution.
 	// +optional
 	Execution *ExecutionConfig `json:"execution,omitempty"`
@@ -311,6 +341,7 @@ type ArenaJobSpec struct {
 	Verbose bool `json:"verbose,omitempty"`
 
 	// providerOverrides allows overriding provider groups defined in the arena config file.
+	// Deprecated: Use providers field instead for direct CRD-based provider resolution.
 	// Keys are group names from the arena config file (e.g., "default", "judge").
 	// Use "*" as a catch-all for groups not explicitly specified.
 	// Provider CRDs matching the label selector provide credentials for the matched groups.
@@ -320,6 +351,7 @@ type ArenaJobSpec struct {
 	// toolRegistryOverride allows overriding tools/mcp_servers defined in the arena config file
 	// with handlers from ToolRegistry CRDs. All tools from matching registries will
 	// override tools with matching names in the arena config.
+	// Deprecated: Use toolRegistries field instead for direct CRD-based tool resolution.
 	// +optional
 	ToolRegistryOverride *ToolRegistrySelector `json:"toolRegistryOverride,omitempty"`
 }

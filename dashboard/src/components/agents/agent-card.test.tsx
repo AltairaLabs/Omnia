@@ -6,8 +6,9 @@ import { DataServiceProvider, type DataService } from "@/lib/data";
 import type { AgentRuntime } from "@/types";
 
 // Mock the hooks
+let mockProviderData: unknown = null;
 vi.mock("@/hooks", () => ({
-  useProvider: vi.fn(() => ({ data: null })),
+  useProvider: vi.fn(() => ({ data: mockProviderData })),
   useAgentCost: vi.fn(() => ({ data: null })),
   useReadOnly: vi.fn(() => ({ isReadOnly: false, message: "" })),
   usePermissions: vi.fn(() => ({
@@ -44,10 +45,9 @@ const createMockAgent = (overrides?: Partial<AgentRuntime>): AgentRuntime => ({
     framework: {
       type: "promptkit",
     },
-    provider: {
-      type: "openai",
-      model: "gpt-4",
-    },
+    providers: [
+      { name: "default", providerRef: { name: "openai-provider" } },
+    ],
     facade: {
       type: "websocket",
       port: 8080,
@@ -161,6 +161,7 @@ function renderWithProviders(component: React.ReactNode) {
 describe("AgentCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockProviderData = null;
   });
 
   it("renders agent name and namespace", () => {
@@ -179,6 +180,7 @@ describe("AgentCard", () => {
   });
 
   it("renders provider type", () => {
+    mockProviderData = { spec: { type: "openai", model: "gpt-4" } };
     const agent = createMockAgent();
     renderWithProviders(<AgentCard agent={agent} />);
 
@@ -286,10 +288,9 @@ describe("AgentCard", () => {
         framework: { type: "promptkit" },
         promptPackRef: { name: "test-pack" },
         facade: { type: "websocket", port: 8080 },
-        providerRef: {
-          name: "my-provider",
-          namespace: "default",
-        },
+        providers: [
+          { name: "default", providerRef: { name: "my-provider", namespace: "default" } },
+        ],
         runtime: {
           replicas: 1,
         },
@@ -333,15 +334,15 @@ describe("AgentCard", () => {
   });
 
   it("renders model name when available from provider spec", () => {
+    mockProviderData = { spec: { type: "claude", model: "claude-3-opus" } };
     const agent = createMockAgent({
       spec: {
         framework: { type: "promptkit" },
         promptPackRef: { name: "test-pack" },
         facade: { type: "websocket", port: 8080 },
-        provider: {
-          type: "claude",
-          model: "claude-3-opus",
-        },
+        providers: [
+          { name: "default", providerRef: { name: "claude-provider" } },
+        ],
       },
     });
     renderWithProviders(<AgentCard agent={agent} />);
@@ -409,15 +410,15 @@ describe("AgentCard", () => {
   });
 
   it("renders correctly with different provider types", () => {
+    mockProviderData = { spec: { type: "gemini", model: "gemini-pro" } };
     const agent = createMockAgent({
       spec: {
         framework: { type: "promptkit" },
         promptPackRef: { name: "test-pack" },
         facade: { type: "websocket", port: 8080 },
-        provider: {
-          type: "gemini",
-          model: "gemini-pro",
-        },
+        providers: [
+          { name: "default", providerRef: { name: "gemini-provider" } },
+        ],
       },
     });
     renderWithProviders(<AgentCard agent={agent} />);
@@ -426,15 +427,15 @@ describe("AgentCard", () => {
   });
 
   it("renders correctly with ollama provider", () => {
+    mockProviderData = { spec: { type: "ollama", model: "llama2" } };
     const agent = createMockAgent({
       spec: {
         framework: { type: "promptkit" },
         promptPackRef: { name: "test-pack" },
         facade: { type: "websocket", port: 8080 },
-        provider: {
-          type: "ollama",
-          model: "llama2",
-        },
+        providers: [
+          { name: "default", providerRef: { name: "ollama-provider" } },
+        ],
       },
     });
     renderWithProviders(<AgentCard agent={agent} />);

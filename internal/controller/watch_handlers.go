@@ -206,38 +206,6 @@ func (r *AgentRuntimeReconciler) findAgentRuntimesForSecret(ctx context.Context,
 		if seen[key] {
 			continue
 		}
-
-		// Check legacy spec.providerRef
-		if ar.Spec.ProviderRef != nil {
-			providerNS := ar.Namespace
-			if ar.Spec.ProviderRef.Namespace != nil {
-				providerNS = *ar.Spec.ProviderRef.Namespace
-			}
-			if providerNS == secret.Namespace && providersUsingSecret[ar.Spec.ProviderRef.Name] {
-				log.Info("enqueueing AgentRuntime for Secret change (via Provider)", "agentruntime", ar.Name)
-				requests = append(requests, reconcile.Request{
-					NamespacedName: types.NamespacedName{
-						Name:      ar.Name,
-						Namespace: ar.Namespace,
-					},
-				})
-				seen[key] = true
-				continue
-			}
-		}
-
-		// Check legacy inline provider with this secret
-		if ar.Spec.Provider != nil && ar.Spec.Provider.SecretRef != nil &&
-			ar.Spec.Provider.SecretRef.Name == secret.Name && ar.Namespace == secret.Namespace {
-			log.Info("enqueueing AgentRuntime for Secret change (inline provider)", "agentruntime", ar.Name)
-			requests = append(requests, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      ar.Name,
-					Namespace: ar.Namespace,
-				},
-			})
-			seen[key] = true
-		}
 	}
 
 	return requests

@@ -37,6 +37,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/arena/overrides"
 	"github.com/altairalabs/omnia/ee/pkg/arena/providers"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
+	"github.com/altairalabs/omnia/pkg/k8s"
 )
 
 // Status constants for execution results.
@@ -439,42 +440,64 @@ func executeWorkItem(
 	// The workspace content is mounted read-only, so we need a writable path for media files
 	arenaCfg.Defaults.Output.Dir = "/tmp/arena-output"
 
-	// Load and apply overrides from ConfigMap (new method - takes precedence)
-	overrideCfg, err := loadOverrides(cfg.OverridesPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load overrides: %w", err)
-	}
-	if overrideCfg != nil {
-		if err := applyOverridesFromConfig(log, arenaCfg, overrideCfg); err != nil {
-			return nil, fmt.Errorf("failed to apply overrides from ConfigMap: %w", err)
+	// Resolve providers and tools — either from CRDs (new path) or overrides (legacy path)
+	var crdFleetProviders []*resolvedFleetProvider
+	if isProviderGroupsMode() {
+		// New path: resolve providers directly from CRDs referenced in spec.Providers
+		k8sClient, k8sErr := k8s.NewClient()
+		if k8sErr != nil {
+			return nil, fmt.Errorf("failed to create k8s client for CRD resolution: %w", k8sErr)
 		}
-	} else if len(cfg.ToolOverrides) > 0 {
-		// Fall back to legacy tool overrides from env var (for backwards compatibility)
-		if err := applyToolOverrides(log, arenaCfg, cfg.ToolOverrides); err != nil {
-			return nil, fmt.Errorf("failed to apply tool overrides: %w", err)
+
+		crdFleetProviders, err = resolveProvidersFromCRD(ctx, log, k8sClient, cfg, arenaCfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve providers from CRDs: %w", err)
+		}
+		defer closeFleetProviders(crdFleetProviders)
+
+		if err := resolveToolsFromCRD(ctx, log, k8sClient, cfg); err != nil {
+			return nil, fmt.Errorf("failed to resolve tools from CRDs: %w", err)
+		}
+
+		// Apply tool overrides (from CRD resolution) to the config
+		if len(cfg.ToolOverrides) > 0 {
+			if err := applyToolOverrides(log, arenaCfg, cfg.ToolOverrides); err != nil {
+				return nil, fmt.Errorf("failed to apply tool overrides: %w", err)
+			}
+		}
+	} else {
+		// Legacy path: load overrides from ConfigMap
+		overrideCfg, err := loadOverrides(cfg.OverridesPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load overrides: %w", err)
+		}
+		if overrideCfg != nil {
+			if err := applyOverridesFromConfig(log, arenaCfg, overrideCfg); err != nil {
+				return nil, fmt.Errorf("failed to apply overrides from ConfigMap: %w", err)
+			}
+		} else if len(cfg.ToolOverrides) > 0 {
+			if err := applyToolOverrides(log, arenaCfg, cfg.ToolOverrides); err != nil {
+				return nil, fmt.Errorf("failed to apply tool overrides: %w", err)
+			}
+		}
+
+		// Apply provider bindings (annotation-based credential resolution)
+		if overrideCfg != nil && len(overrideCfg.Bindings) > 0 {
+			if err := applyProviderBindings(log, arenaCfg, overrideCfg.Bindings, configPath); err != nil {
+				log.Error(err, "failed to apply provider bindings")
+			}
 		}
 	}
 
-	// Apply provider bindings (annotation-based credential resolution)
-	// This runs after explicit overrides so they take precedence
-	if overrideCfg != nil && len(overrideCfg.Bindings) > 0 {
-		if err := applyProviderBindings(log, arenaCfg, overrideCfg.Bindings, configPath); err != nil {
-			// Non-fatal: log warning and continue
-			log.Error(err, "failed to apply provider bindings")
-		}
-	}
-
-	// For fleet mode, connect to the agent and prepare provider injection
+	// For legacy fleet mode, connect to the agent and prepare provider injection
 	var fleetProvider *fleet.Provider
-	if cfg.ExecutionMode == executionModeFleet {
+	if !isProviderGroupsMode() && cfg.ExecutionMode == executionModeFleet {
 		fleetProvider = fleet.NewProvider("fleet-agent", cfg.FleetWSURL, nil)
 		if err := fleetProvider.Connect(ctx); err != nil {
 			return nil, fmt.Errorf("failed to connect to fleet agent: %w", err)
 		}
 		defer func() { _ = fleetProvider.Close() }()
 
-		// Record a link from this arena trace to the session trace so the two
-		// can be cross-referenced in Tempo from either direction.
 		sessionTraceID := sessionIDToTraceID(fleetProvider.SessionID())
 		_, linkSpan := otel.Tracer("omnia-arena-worker").Start(ctx, "arena.fleet.session",
 			trace.WithLinks(trace.Link{
@@ -506,12 +529,12 @@ func executeWorkItem(
 		defer a2aCleanup()
 	}
 
-	// For fleet mode, register the fleet provider into both the runtime
-	// registry (so ExecuteRuns can dispatch to it) and LoadedProviders (so
-	// GenerateRunPlan includes it when building combinations). This must
-	// happen AFTER BuildEngineComponents — which would reject the unknown
-	// "fleet" type — but BEFORE NewEngine which snapshots LoadedProviders
-	// into the planner's provider map.
+	// Register fleet providers into the runtime registry AFTER BuildEngineComponents
+	// (which would reject the unknown "fleet" type) but BEFORE NewEngine which
+	// snapshots LoadedProviders into the planner's provider map.
+	if len(crdFleetProviders) > 0 {
+		registerFleetProviders(providerRegistry, crdFleetProviders)
+	}
 	if fleetProvider != nil {
 		providerRegistry.Register(fleetProvider)
 		injectFleetProviderConfig(arenaCfg)
@@ -529,8 +552,10 @@ func executeWorkItem(
 		}
 	}()
 
-	// Validate provider credentials before execution (skip for fleet — no external credentials needed)
-	if cfg.ExecutionMode != executionModeFleet {
+	// Validate provider credentials before execution
+	// Skip for CRD-resolved providers (credentials validated during resolution)
+	// Skip for fleet mode (no external credentials needed)
+	if !isProviderGroupsMode() && cfg.ExecutionMode != executionModeFleet {
 		if err := providers.ValidateProviderCredentials(arenaCfg, item.ProviderID); err != nil {
 			result.Status = statusFail
 			result.Error = err.Error()
@@ -546,9 +571,14 @@ func executeWorkItem(
 	}
 
 	// Determine provider filter
-	// For fleet mode, route to the fleet provider only
 	providerFilter := []string{}
-	if cfg.ExecutionMode == executionModeFleet {
+	if isProviderGroupsMode() {
+		// New path: work item's ProviderID is the resolved provider/agent ID
+		if item.ProviderID != "" {
+			providerFilter = []string{item.ProviderID}
+		}
+	} else if cfg.ExecutionMode == executionModeFleet {
+		// Legacy fleet mode: route to the fleet provider only
 		providerFilter = []string{"fleet-agent"}
 	} else if item.ProviderID != "" {
 		providerFilter = []string{item.ProviderID}

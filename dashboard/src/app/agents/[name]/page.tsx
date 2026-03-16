@@ -18,9 +18,36 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { YamlBlock } from "@/components/ui/yaml-block";
 import { useAgent, useProvider, usePromptPack } from "@/hooks";
+import type { NamedProviderRef } from "@/types/agent-runtime";
 
 interface AgentDetailPageProps {
   params: Promise<{ name: string }>;
+}
+
+/** Shows a single provider row with fetched details */
+function ProviderDetail({ namedRef, namespace }: Readonly<{ namedRef: NamedProviderRef; namespace: string }>) {
+  const { data: provider } = useProvider(namedRef.providerRef.name, namespace);
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-between">
+        <span className="text-muted-foreground">Name</span>
+        <Link
+          href={`/providers/${namedRef.providerRef.name}?namespace=${namedRef.providerRef.namespace || namespace}`}
+          className="font-medium text-primary hover:underline"
+        >
+          {namedRef.providerRef.name}
+        </Link>
+      </div>
+      <div className="flex justify-between">
+        <span className="text-muted-foreground">Type</span>
+        <span className="font-medium capitalize">{provider?.spec?.type || "-"}</span>
+      </div>
+      <div className="flex justify-between">
+        <span className="text-muted-foreground">Model</span>
+        <span className="font-medium">{provider?.spec?.model || "-"}</span>
+      </div>
+    </div>
+  );
 }
 
 function formatDate(timestamp?: string): string {
@@ -41,7 +68,6 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
   const dataService = useDataService();
 
   const { data: agent, isLoading } = useAgent(name, workspace);
-  const { data: provider } = useProvider(agent?.spec?.providerRef?.name, workspace);
   const { data: promptPack } = usePromptPack(agent?.spec?.promptPackRef?.name || "", workspace);
 
   const handleTabChange = useCallback((tab: string) => {
@@ -249,52 +275,30 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
                 </CardContent>
               </Card>
 
-              {spec.providerRef?.name ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Provider</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Name</span>
-                      <Link
-                        href={`/providers/${spec.providerRef.name}?namespace=${spec.providerRef.namespace || metadata.namespace}`}
-                        className="font-medium text-primary hover:underline"
-                      >
-                        {spec.providerRef.name}
-                      </Link>
+              <Card>
+                <CardHeader>
+                  <CardTitle>{spec.providers && spec.providers.length > 1 ? "Providers" : "Provider"}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {spec.providers && spec.providers.length > 0 ? (
+                    <div className="space-y-4">
+                      {spec.providers.map((namedRef, i) => (
+                        <div key={namedRef.name}>
+                          {spec.providers!.length > 1 && (
+                            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                              {namedRef.name}
+                            </p>
+                          )}
+                          <ProviderDetail namedRef={namedRef} namespace={metadata.namespace || "default"} />
+                          {spec.providers!.length > 1 && i < spec.providers!.length - 1 && <Separator className="mt-3" />}
+                        </div>
+                      ))}
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Type</span>
-                      <span className="font-medium capitalize">{provider?.spec?.type || spec.provider?.type || "-"}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Model</span>
-                      <span className="font-medium">{provider?.spec?.model || spec.provider?.model || "-"}</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              ) : (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Provider</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Name</span>
-                      <span className="font-medium">-</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Type</span>
-                      <span className="font-medium capitalize">{spec.provider?.type || "-"}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Model</span>
-                      <span className="font-medium">{spec.provider?.model || "-"}</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No providers configured</p>
+                  )}
+                </CardContent>
+              </Card>
 
               <Card>
                 <CardHeader>

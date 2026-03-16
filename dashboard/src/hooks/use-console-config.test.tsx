@@ -209,12 +209,19 @@ describe("useConsoleConfig", () => {
     const mockAgentWithClaudeProvider = {
       ...mockAgentWithoutConsoleConfig,
       spec: {
-        provider: { type: "claude" },
+        providers: [{ name: "default", providerRef: { name: "claude-provider" } }],
       },
     };
 
     mockUseAgent.mockReturnValue({
       data: mockAgentWithClaudeProvider,
+      isLoading: false,
+      error: null,
+    });
+
+    // Mock the provider CRD resolution
+    mockUseProvider.mockReturnValue({
+      data: { spec: { type: "claude" } },
       isLoading: false,
       error: null,
     });
@@ -234,17 +241,16 @@ describe("useConsoleConfig", () => {
     expect(result.current.mediaRequirements.image?.compressionGuidance).toBe("lossless");
   });
 
-  it("should use provider from ProviderRef when available", async () => {
-    const mockAgentWithProviderRef = {
+  it("should use provider from providers list when available", async () => {
+    const mockAgentWithProviders = {
       ...mockAgentWithoutConsoleConfig,
       spec: {
-        providerRef: { name: "shared-openai", namespace: "production" },
-        provider: { type: "claude" }, // inline provider should be overridden
+        providers: [{ name: "default", providerRef: { name: "shared-openai", namespace: "production" } }],
       },
     };
 
     mockUseAgent.mockReturnValue({
-      data: mockAgentWithProviderRef,
+      data: mockAgentWithProviders,
       isLoading: false,
       error: null,
     });
@@ -265,7 +271,7 @@ describe("useConsoleConfig", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    // Should use openai from ProviderRef, not claude from inline provider
+    // Should use openai from providers list
     expect(result.current.providerType).toBe("openai");
     expect(result.current.mediaRequirements.image?.maxSizeBytes).toBe(20 * 1024 * 1024);
   });
@@ -274,7 +280,7 @@ describe("useConsoleConfig", () => {
     const mockAgentWithOverrides = {
       ...mockAgentWithoutConsoleConfig,
       spec: {
-        provider: { type: "claude" },
+        providers: [{ name: "default", providerRef: { name: "claude-provider" } }],
         console: {
           mediaRequirements: {
             image: {
@@ -287,6 +293,13 @@ describe("useConsoleConfig", () => {
 
     mockUseAgent.mockReturnValue({
       data: mockAgentWithOverrides,
+      isLoading: false,
+      error: null,
+    });
+
+    // Mock the provider CRD resolution
+    mockUseProvider.mockReturnValue({
+      data: { spec: { type: "claude" } },
       isLoading: false,
       error: null,
     });
@@ -309,7 +322,7 @@ describe("useConsoleConfig", () => {
     const mockAgentWithPartialOverrides = {
       ...mockAgentWithoutConsoleConfig,
       spec: {
-        provider: { type: "openai" },
+        providers: [{ name: "default", providerRef: { name: "openai-provider" } }],
         console: {
           mediaRequirements: {
             video: {
@@ -322,6 +335,13 @@ describe("useConsoleConfig", () => {
 
     mockUseAgent.mockReturnValue({
       data: mockAgentWithPartialOverrides,
+      isLoading: false,
+      error: null,
+    });
+
+    // Mock the provider CRD resolution
+    mockUseProvider.mockReturnValue({
+      data: { spec: { type: "openai" } },
       isLoading: false,
       error: null,
     });

@@ -135,8 +135,6 @@ export function buildTopologyGraph({
   const connectedPromptPacks = new Set<string>();
   const connectedToolRegistries = new Set<string>();
   const connectedProviders = new Set<string>();
-  // Track synthetic providers (inline provider configs)
-  const syntheticProviders = new Map<string, { type: ProviderType; model?: string; baseURL?: string }>();
 
   // First pass: Create agent nodes and find connections
   agents.forEach((agent) => {
@@ -171,19 +169,13 @@ export function buildTopologyGraph({
       connectedToolRegistries.add(trKey);
     }
 
-    // Connect to Provider (via providerRef or inline provider)
-    if (agent.spec.providerRef?.name) {
-      const pNamespace = agent.spec.providerRef.namespace || agent.metadata.namespace || "default";
-      const pKey = `${pNamespace}/${agent.spec.providerRef.name}`;
-      connectedProviders.add(pKey);
-    } else if (agent.spec.provider?.type) {
-      // Inline provider - create synthetic provider node
-      const syntheticKey = `synthetic-${agent.spec.provider.type}-${agent.spec.provider.model || "default"}`;
-      syntheticProviders.set(syntheticKey, {
-        type: agent.spec.provider.type,
-        model: agent.spec.provider.model,
-        baseURL: agent.spec.provider.baseURL,
-      });
+    // Connect to Providers (via providers list)
+    if (agent.spec.providers?.length) {
+      for (const namedRef of agent.spec.providers) {
+        const pNamespace = namedRef.providerRef.namespace || agent.metadata.namespace || "default";
+        const pKey = `${pNamespace}/${namedRef.providerRef.name}`;
+        connectedProviders.add(pKey);
+      }
     }
   });
 
@@ -341,10 +333,12 @@ export function buildTopologyGraph({
 
     // Create edges from agents to this Provider
     agents.forEach((agent) => {
-      if (
-        agent.spec.providerRef?.name === provider.metadata.name &&
-        (agent.spec.providerRef.namespace || agent.metadata.namespace || "default") === (provider.metadata.namespace || "default")
-      ) {
+      const hasRef = agent.spec.providers?.some((namedRef) => {
+        const refNs = namedRef.providerRef.namespace || agent.metadata.namespace || "default";
+        const provNs = provider.metadata.namespace || "default";
+        return namedRef.providerRef.name === provider.metadata.name && refNs === provNs;
+      });
+      if (hasRef) {
         edges.push({
           id: `edge-agent-${agent.metadata.namespace}-${agent.metadata.name}-to-${nodeId}`,
           source: `agent-${agent.metadata.namespace}-${agent.metadata.name}`,
@@ -352,46 +346,6 @@ export function buildTopologyGraph({
           type: "smoothstep",
           animated: true,
           style: { stroke: getProviderColor(providerType) },
-          label: "powered by",
-          labelStyle: { fontSize: 10, fill: "#666" },
-          labelBgStyle: { fill: "white", fillOpacity: 0.8 },
-        });
-      }
-    });
-  });
-
-  // Create synthetic provider nodes (for inline provider configs)
-  syntheticProviders.forEach((config, syntheticKey) => {
-    const nodeId = `provider-${syntheticKey}`;
-
-    nodes.push({
-      id: nodeId,
-      type: "provider",
-      position: { x: 0, y: 0 },
-      data: {
-        label: config.type,
-        namespace: "(inline)",
-        providerType: config.type,
-        model: config.model,
-        baseURL: config.baseURL,
-        phase: "Ready", // Inline providers don't have status
-      },
-    });
-
-    // Create edges from agents using this inline provider
-    agents.forEach((agent) => {
-      if (
-        !agent.spec.providerRef &&
-        agent.spec.provider?.type === config.type &&
-        (agent.spec.provider.model || "default") === (config.model || "default")
-      ) {
-        edges.push({
-          id: `edge-agent-${agent.metadata.namespace}-${agent.metadata.name}-to-${nodeId}`,
-          source: `agent-${agent.metadata.namespace}-${agent.metadata.name}`,
-          target: nodeId,
-          type: "smoothstep",
-          animated: true,
-          style: { stroke: getProviderColor(config.type) },
           label: "powered by",
           labelStyle: { fontSize: 10, fill: "#666" },
           labelBgStyle: { fill: "white", fillOpacity: 0.8 },
