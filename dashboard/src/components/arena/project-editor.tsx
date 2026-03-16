@@ -8,18 +8,18 @@ import {
   useArenaProject,
   useArenaProjectMutations,
   useArenaProjectFiles,
-  useProviders,
+  useProviderBindingStatus,
   useDevSession,
-} from "@/hooks";
+} from "@/hooks/arena";
+import { useProviders } from "@/hooks/resources";
+import { useEnterpriseConfig, useToast } from "@/hooks/core";
 import { FileTree } from "./file-tree";
 import { BindProviderDialog } from "./bind-provider-dialog";
-import { useProviderBindingStatus } from "@/hooks/use-provider-binding-status";
 import { EditorTabs, EditorTabsEmptyState } from "./editor-tabs";
 import { YamlEditor, YamlEditorEmptyState } from "./yaml-editor";
 import { ProjectToolbar } from "./project-toolbar";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { getRuntimeConfig } from "@/lib/config";
-import { useEnterpriseConfig } from "@/hooks/use-runtime-config";
 import { NewItemDialog } from "./new-item-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import {
@@ -27,7 +27,6 @@ import {
   type ValidationResults,
 } from "./validation-results-dialog";
 import { cn } from "@/lib/utils";
-import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
 import {
   ResizablePanelGroup,

@@ -16,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EvalScoreBreakdown } from "@/components/quality/eval-score-breakdown";
 import { EvalScoreTrendChart } from "@/components/quality/eval-score-trend-chart";
-import { useEvalSummary, type EvalTrendRange } from "@/hooks";
+import { useEvalSummary, type EvalTrendRange } from "@/hooks/sessions";
 import type { EvalFilter } from "@/lib/prometheus-queries";
 
 const TIME_RANGES: { label: string; value: EvalTrendRange }[] = [

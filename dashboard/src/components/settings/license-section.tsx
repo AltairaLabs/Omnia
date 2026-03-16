@@ -13,7 +13,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { useLicense } from "@/hooks/use-license";
+import { useLicense } from "@/hooks/auth";
 import type { LicenseFeatures } from "@/types/license";
 
 const FEATURE_LABELS: Record<keyof LicenseFeatures, string> = {

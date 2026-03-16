@@ -6,18 +6,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import ArenaPage from "./page";
 
-// Mock useArenaStats hook
-vi.mock("@/hooks", () => ({
+// Mock arena hooks
+vi.mock("@/hooks/arena", () => ({
   useArenaStats: vi.fn(),
-}));
-
-// Mock useArenaSources hook
-vi.mock("@/hooks/use-arena-sources", () => ({
   useArenaSources: () => ({ sources: [], loading: false, error: null }),
-}));
-
-// Mock useArenaJobMutations hook
-vi.mock("@/hooks/use-arena-jobs", () => ({
   useArenaJobMutations: () => ({
     createJob: vi.fn(),
     cancelJob: vi.fn(),
@@ -45,7 +37,7 @@ vi.mock("@/components/arena", () => ({
 }));
 
 // Mock useEnterpriseConfig hook to enable enterprise features for tests
-vi.mock("@/hooks/use-runtime-config", () => ({
+vi.mock("@/hooks/core", () => ({
   useEnterpriseConfig: vi.fn().mockReturnValue({
     enterpriseEnabled: true,
     hideEnterprise: false,

@@ -22,9 +22,9 @@ import {
   K8sLabelSelector,
   type LabelSelectorValue,
 } from "@/components/ui/k8s-label-selector";
-import { useArenaSourceContent } from "@/hooks/use-arena-source-content";
-import { useArenaConfigPreview, estimateWorkItems } from "@/hooks/use-arena-config-preview";
-import { useProviderPreview, useToolRegistryPreview, useAgents } from "@/hooks";
+import { useArenaSourceContent, useArenaConfigPreview, estimateWorkItems } from "@/hooks/arena";
+import { useAgents } from "@/hooks/agents";
+import { useProviderPreview, useToolRegistryPreview } from "@/hooks/resources";
 import { useWorkspace } from "@/contexts/workspace-context";
 import {
   ChevronLeft,

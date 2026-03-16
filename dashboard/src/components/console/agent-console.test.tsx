@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { AgentConsole } from "./agent-console";
 
 // Mock the hooks
-vi.mock("@/hooks", () => ({
+vi.mock("@/hooks/console", () => ({
   useAgentConsole: () => ({
     sessionId: "test-session",
     status: "connected",

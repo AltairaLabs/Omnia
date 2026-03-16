@@ -3,8 +3,7 @@
 import { useState, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout";
-import { useArenaJobs, useArenaJobMutations } from "@/hooks/use-arena-jobs";
-import { useArenaSources } from "@/hooks/use-arena-sources";
+import { useArenaJobs, useArenaJobMutations, useArenaSources } from "@/hooks/arena";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";

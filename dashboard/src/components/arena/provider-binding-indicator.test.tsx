@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 import { ProviderBindingIndicator } from "./provider-binding-indicator";
-import type { ProviderBindingInfo } from "@/hooks/use-provider-binding-status";
+import type { ProviderBindingInfo } from "@/hooks/arena";
 
 describe("ProviderBindingIndicator", () => {
   it("should render green dot for bound status", () => {

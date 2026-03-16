@@ -9,7 +9,7 @@ import userEvent from "@testing-library/user-event";
 import SessionDetailPage from "./page";
 
 // Mock hooks
-vi.mock("@/hooks", () => ({
+vi.mock("@/hooks/sessions", () => ({
   useSessionDetail: vi.fn(),
   useSessionEvalResults: vi.fn(),
   useSessionAllMessages: vi.fn(() => ({

@@ -6,7 +6,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { ProviderBindingInfo } from "@/hooks/use-provider-binding-status";
+import type { ProviderBindingInfo } from "@/hooks/arena";
 
 interface ProviderBindingIndicatorProps {
   readonly bindingInfo: ProviderBindingInfo;

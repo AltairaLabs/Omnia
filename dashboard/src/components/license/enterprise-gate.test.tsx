@@ -3,11 +3,11 @@ import { render, screen } from "@testing-library/react";
 import { EnterpriseGate, EnterpriseUpgradePage, useShowEnterpriseNav } from "./license-gate";
 
 // Mock the useEnterpriseConfig hook
-vi.mock("@/hooks/use-runtime-config", () => ({
+vi.mock("@/hooks/core", () => ({
   useEnterpriseConfig: vi.fn(),
 }));
 
-import { useEnterpriseConfig } from "@/hooks/use-runtime-config";
+import { useEnterpriseConfig } from "@/hooks/core";
 
 const mockUseEnterpriseConfig = vi.mocked(useEnterpriseConfig);
 

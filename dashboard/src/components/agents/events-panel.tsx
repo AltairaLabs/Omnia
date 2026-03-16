@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useAgentEvents, type K8sEvent } from "@/hooks";
+import { useAgentEvents, type K8sEvent } from "@/hooks/agents";
 import { cn } from "@/lib/utils";
 
 interface EventsPanelProps {

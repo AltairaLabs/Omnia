@@ -8,8 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { CostSparkline } from "@/components/cost";
 import { ProviderIcon } from "./provider-icons";
 import { formatCost, formatTokens } from "@/lib/pricing";
-import { useProvider, useAgentCost } from "@/hooks";
-import { useProviderMetrics } from "@/hooks/use-provider-metrics";
+import { useAgentCost } from "@/hooks/agents";
+import { useProvider, useProviderMetrics } from "@/hooks/resources";
 import type { AgentRuntime, PromptPack, ToolRegistry, Provider, ProviderType } from "@/types";
 
 /** Selected node info for rendering the appropriate card */

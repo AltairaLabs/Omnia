@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Header } from "@/components/layout";
-import { useArenaJob, useArenaJobMutations } from "@/hooks/use-arena-jobs";
-import { useProviderPreview, useToolRegistryPreview } from "@/hooks";
+import { useArenaJob, useArenaJobMutations } from "@/hooks/arena";
+import { useProviderPreview, useToolRegistryPreview } from "@/hooks/resources";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useArenaSourceMutations } from "@/hooks";
-import { useLicense } from "@/hooks/use-license";
+import { useArenaSourceMutations } from "@/hooks/arena";
+import { useLicense } from "@/hooks/auth";
 import {
   Dialog,
   DialogContent,

@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { Bot, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useAgents } from "@/hooks/use-agents";
+import { useAgents } from "@/hooks/agents";
 import { Button } from "@/components/ui/button";
 import {
   Select,

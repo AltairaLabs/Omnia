@@ -5,9 +5,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { ActivityChart } from "./activity-chart";
-import { useAgentActivity, type ActivityDataPoint } from "@/hooks";
+import { useAgentActivity, type ActivityDataPoint } from "@/hooks/agents";
 
-vi.mock("@/hooks", () => ({
+vi.mock("@/hooks/agents", () => ({
   useAgentActivity: vi.fn(),
 }));
 

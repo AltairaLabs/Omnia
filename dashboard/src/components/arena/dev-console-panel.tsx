@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { useDevConsole } from "@/hooks";
+import { useDevConsole } from "@/hooks/console";
 import { ConsoleMessage } from "@/components/console/console-message";
 import { AttachmentPreview } from "@/components/console/attachment-preview";
 import { ImageCropDialog } from "@/components/console/image-crop-dialog";

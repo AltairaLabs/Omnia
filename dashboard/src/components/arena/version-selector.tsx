@@ -18,7 +18,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { AlertCircle, GitBranch, Clock, FileText, HardDrive, Loader2 } from "lucide-react";
-import { useArenaSourceVersions, useArenaSourceVersionMutations } from "@/hooks/use-arena-source-versions";
+import { useArenaSourceVersions, useArenaSourceVersionMutations } from "@/hooks/arena";
 import { formatBytes, formatDate } from "./source-utils";
 import type { ArenaVersion } from "@/types/arena";
 

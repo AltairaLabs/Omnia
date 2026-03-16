@@ -1,7 +1,7 @@
 "use client";
 
 import { FlaskConical } from "lucide-react";
-import { useDemoMode } from "@/hooks/use-runtime-config";
+import { useDemoMode } from "@/hooks/core";
 
 /**
  * Banner displayed at the top of the page when the dashboard is in demo mode.

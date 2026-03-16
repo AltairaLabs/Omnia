@@ -8,7 +8,7 @@ import { ImportProviderDialog } from "./import-provider-dialog";
 import type { Provider } from "@/types";
 
 // Mock the providers hook
-vi.mock("@/hooks/use-providers", () => ({
+vi.mock("@/hooks/resources", () => ({
   useProviders: vi.fn(),
 }));
 
@@ -35,7 +35,7 @@ const mockProviders: Provider[] = [
 
 /** Helper to create mock UseQuery result */
 function mockQueryResult(data: unknown, isLoading = false) {
-  return { data, isLoading, error: null, refetch: vi.fn() } as unknown as ReturnType<typeof import("@/hooks/use-providers").useProviders>;
+  return { data, isLoading, error: null, refetch: vi.fn() } as unknown as ReturnType<typeof import("@/hooks/resources").useProviders>;
 }
 
 describe("ImportProviderDialog", () => {
@@ -51,7 +51,7 @@ describe("ImportProviderDialog", () => {
   });
 
   it("should show loading state", async () => {
-    const { useProviders } = await import("@/hooks/use-providers");
+    const { useProviders } = await import("@/hooks/resources");
     vi.mocked(useProviders).mockReturnValue(mockQueryResult(undefined, true));
 
     render(<ImportProviderDialog {...defaultProps} />);
@@ -60,7 +60,7 @@ describe("ImportProviderDialog", () => {
   });
 
   it("should show empty state when no providers", async () => {
-    const { useProviders } = await import("@/hooks/use-providers");
+    const { useProviders } = await import("@/hooks/resources");
     vi.mocked(useProviders).mockReturnValue(mockQueryResult([]));
 
     render(<ImportProviderDialog {...defaultProps} />);
@@ -69,7 +69,7 @@ describe("ImportProviderDialog", () => {
   });
 
   it("should render provider list", async () => {
-    const { useProviders } = await import("@/hooks/use-providers");
+    const { useProviders } = await import("@/hooks/resources");
     vi.mocked(useProviders).mockReturnValue(mockQueryResult(mockProviders));
 
     render(<ImportProviderDialog {...defaultProps} />);
@@ -80,7 +80,7 @@ describe("ImportProviderDialog", () => {
   });
 
   it("should show parent path in description", async () => {
-    const { useProviders } = await import("@/hooks/use-providers");
+    const { useProviders } = await import("@/hooks/resources");
     vi.mocked(useProviders).mockReturnValue(mockQueryResult(mockProviders));
 
     render(<ImportProviderDialog {...defaultProps} parentPath="prompts" />);
@@ -89,7 +89,7 @@ describe("ImportProviderDialog", () => {
   });
 
   it("should show root level description when no parent path", async () => {
-    const { useProviders } = await import("@/hooks/use-providers");
+    const { useProviders } = await import("@/hooks/resources");
     vi.mocked(useProviders).mockReturnValue(mockQueryResult(mockProviders));
 
     render(<ImportProviderDialog {...defaultProps} parentPath={null} />);
@@ -98,7 +98,7 @@ describe("ImportProviderDialog", () => {
   });
 
   it("should toggle provider selection", async () => {
-    const { useProviders } = await import("@/hooks/use-providers");
+    const { useProviders } = await import("@/hooks/resources");
     vi.mocked(useProviders).mockReturnValue(mockQueryResult(mockProviders));
 
     render(<ImportProviderDialog {...defaultProps} />);
@@ -116,7 +116,7 @@ describe("ImportProviderDialog", () => {
   });
 
   it("should select all providers", async () => {
-    const { useProviders } = await import("@/hooks/use-providers");
+    const { useProviders } = await import("@/hooks/resources");
     vi.mocked(useProviders).mockReturnValue(mockQueryResult(mockProviders));
 
     render(<ImportProviderDialog {...defaultProps} />);
@@ -130,7 +130,7 @@ describe("ImportProviderDialog", () => {
   });
 
   it("should disable import button when nothing selected", async () => {
-    const { useProviders } = await import("@/hooks/use-providers");
+    const { useProviders } = await import("@/hooks/resources");
     vi.mocked(useProviders).mockReturnValue(mockQueryResult(mockProviders));
 
     render(<ImportProviderDialog {...defaultProps} />);
@@ -139,7 +139,7 @@ describe("ImportProviderDialog", () => {
   });
 
   it("should enable import button when provider selected", async () => {
-    const { useProviders } = await import("@/hooks/use-providers");
+    const { useProviders } = await import("@/hooks/resources");
     vi.mocked(useProviders).mockReturnValue(mockQueryResult(mockProviders));
 
     render(<ImportProviderDialog {...defaultProps} />);
@@ -149,7 +149,7 @@ describe("ImportProviderDialog", () => {
   });
 
   it("should call onImport with converted files", async () => {
-    const { useProviders } = await import("@/hooks/use-providers");
+    const { useProviders } = await import("@/hooks/resources");
     vi.mocked(useProviders).mockReturnValue(mockQueryResult(mockProviders));
 
     const onImport = vi.fn().mockResolvedValue(undefined);
@@ -171,7 +171,7 @@ describe("ImportProviderDialog", () => {
   });
 
   it("should close dialog after successful import", async () => {
-    const { useProviders } = await import("@/hooks/use-providers");
+    const { useProviders } = await import("@/hooks/resources");
     vi.mocked(useProviders).mockReturnValue(mockQueryResult(mockProviders));
 
     const onOpenChange = vi.fn();
@@ -186,7 +186,7 @@ describe("ImportProviderDialog", () => {
   });
 
   it("should show error on import failure", async () => {
-    const { useProviders } = await import("@/hooks/use-providers");
+    const { useProviders } = await import("@/hooks/resources");
     vi.mocked(useProviders).mockReturnValue(mockQueryResult(mockProviders));
 
     const onImport = vi.fn().mockRejectedValue(new Error("Import failed"));
@@ -201,7 +201,7 @@ describe("ImportProviderDialog", () => {
   });
 
   it("should show generic error for non-Error exceptions", async () => {
-    const { useProviders } = await import("@/hooks/use-providers");
+    const { useProviders } = await import("@/hooks/resources");
     vi.mocked(useProviders).mockReturnValue(mockQueryResult(mockProviders));
 
     const onImport = vi.fn().mockRejectedValue("string error");
@@ -216,7 +216,7 @@ describe("ImportProviderDialog", () => {
   });
 
   it("should handle undefined providers data", async () => {
-    const { useProviders } = await import("@/hooks/use-providers");
+    const { useProviders } = await import("@/hooks/resources");
     vi.mocked(useProviders).mockReturnValue(mockQueryResult(undefined));
 
     render(<ImportProviderDialog {...defaultProps} />);
@@ -225,7 +225,7 @@ describe("ImportProviderDialog", () => {
   });
 
   it("should call onOpenChange when cancel clicked", async () => {
-    const { useProviders } = await import("@/hooks/use-providers");
+    const { useProviders } = await import("@/hooks/resources");
     vi.mocked(useProviders).mockReturnValue(mockQueryResult(mockProviders));
 
     const onOpenChange = vi.fn();
@@ -237,7 +237,7 @@ describe("ImportProviderDialog", () => {
   });
 
   it("should handle provider without model", async () => {
-    const { useProviders } = await import("@/hooks/use-providers");
+    const { useProviders } = await import("@/hooks/resources");
     vi.mocked(useProviders).mockReturnValue(mockQueryResult([
       {
         apiVersion: "omnia.altairalabs.ai/v1alpha1",

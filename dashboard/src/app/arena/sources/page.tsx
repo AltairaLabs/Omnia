@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Header } from "@/components/layout";
-import { useArenaSources, useArenaSourceMutations } from "@/hooks";
+import { useArenaSources, useArenaSourceMutations } from "@/hooks/arena";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";

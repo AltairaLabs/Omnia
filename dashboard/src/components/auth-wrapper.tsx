@@ -1,5 +1,5 @@
 import { getUser } from "@/lib/auth";
-import { AuthProvider } from "@/hooks/use-auth";
+import { AuthProvider } from "@/hooks/auth";
 
 interface AuthWrapperProps {
   children: React.ReactNode;

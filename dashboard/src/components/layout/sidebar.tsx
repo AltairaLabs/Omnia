@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useShowEnterpriseNav } from "@/components/license/license-gate";
-import { useEnterpriseConfig } from "@/hooks/use-runtime-config";
+import { useEnterpriseConfig } from "@/hooks/core";
 import {
   LayoutDashboard,
   Bot,

@@ -20,7 +20,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { useReadOnly, usePermissions, Permission, useWorkspacePermissions } from "@/hooks";
+import { useReadOnly } from "@/hooks/core";
+import { usePermissions, Permission, useWorkspacePermissions } from "@/hooks/auth";
 
 interface ScaleControlProps {
   currentReplicas: number;
