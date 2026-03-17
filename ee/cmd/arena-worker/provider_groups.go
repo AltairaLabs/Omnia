@@ -325,11 +325,6 @@ func sanitizeID(name string) string {
 	return strings.ToLower(nonAlphaNum.ReplaceAllString(name, "-"))
 }
 
-// isProviderGroupsMode returns true when the worker should resolve providers from CRDs.
-func isProviderGroupsMode() bool {
-	return os.Getenv("ARENA_PROVIDER_GROUPS") == "true"
-}
-
 // getArenaJob fetches an ArenaJob CRD. Since the core k8s package doesn't register
 // EE types, we use an unstructured get and unmarshal the spec.Providers field.
 func getArenaJob(

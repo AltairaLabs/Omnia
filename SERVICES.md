@@ -94,8 +94,9 @@ This document maps every deployable service, how they communicate, and where to 
 | Operator | K8s API | K8s client | CRD reconciliation |
 | Arena Controller | K8s API | K8s client | Job/worker pod management |
 | Arena Worker | Redis Streams | Redis | Work item consumption and result reporting |
+| Arena Worker | K8s API | K8s client | CRD reads: Provider, AgentRuntime, ToolRegistry, ArenaJob (when `spec.providers` is set) |
 | Arena Worker | LLM APIs | HTTPS | Direct mode: provider calls via PromptKit SDK |
-| Arena Worker | Facade | WebSocket | Fleet mode: agent interaction via `fleet-agent` provider |
+| Arena Worker | Facade | WebSocket | Agent interaction via fleet providers (agentRef entries or legacy fleet mode) |
 | Arena Eval Worker | Redis Streams | Redis | Event consumption |
 | Arena Eval Worker | Session API | HTTP | Eval result storage |
 | Compaction | PostgreSQL/Redis/Cold | Direct | Data lifecycle management |
@@ -132,6 +133,7 @@ Browser ──WebSocket──▶ Facade ──gRPC──▶ Runtime ──HTTP�
 - **Facade**: Creates root span, derives trace ID from session UUID, links to caller's W3C traceparent if present (e.g., arena-worker). Propagates context to Runtime (gRPC) and Session API (HTTP).
 - **Runtime**: Creates conversation turn, LLM, and tool spans. Records token usage, cost, and tool execution metrics on spans.
 - **Session API**: Inherits trace context from HTTP requests. Optional OTLP ingestion endpoint transforms traces into session-linked records for dashboard display.
+- **Arena Worker**: Derives trace ID from job name. Spans: `arena.worker` (root), `arena.work-item` (per item), `arena.engine.execute`, `arena.fleet.session` (links to agent session trace).
 - **Eval Worker**: Inherits trace context from session events when available.
 - **Operator, Compaction, Policy Proxy, LSP**: No OTel spans.
 

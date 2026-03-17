@@ -32,10 +32,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"gopkg.in/yaml.v3"
 
-	"github.com/altairalabs/omnia/ee/pkg/arena/binding"
-	"github.com/altairalabs/omnia/ee/pkg/arena/fleet"
-	"github.com/altairalabs/omnia/ee/pkg/arena/overrides"
-	"github.com/altairalabs/omnia/ee/pkg/arena/providers"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 	"github.com/altairalabs/omnia/pkg/k8s"
 )
@@ -78,11 +76,7 @@ func sessionIDToTraceID(sessionID string) trace.TraceID {
 // maxItemTimeout is the maximum time allowed for a single work item execution.
 const maxItemTimeout = 10 * time.Minute
 
-// Execution mode constants.
-const (
-	executionModeFleet = "fleet"
-	defaultScenarioID  = "default"
-)
+const defaultScenarioID = "default"
 
 // Config holds the worker configuration from environment variables.
 type Config struct {
@@ -99,18 +93,10 @@ type Config struct {
 	ContentVersion string // Content-addressable version hash
 	ConfigFile     string // Arena config filename within the content path
 
-	// Override configuration from mounted ConfigMap
-	// OverridesPath is the path to the mounted overrides.json file
-	OverridesPath string
-
 	// Redis configuration
 	RedisAddr     string
 	RedisPassword string
 	RedisDB       int
-
-	// Execution mode
-	ExecutionMode string // "direct" or "fleet"
-	FleetWSURL    string // WebSocket URL for fleet mode
 
 	// Worker configuration
 	WorkDir       string
@@ -118,9 +104,12 @@ type Config struct {
 	ShutdownDelay time.Duration
 	Verbose       bool // Enable verbose/debug output from promptarena
 
-	// Override configurations (resolved from CRDs by controller)
-	// Deprecated: Use OverridesPath instead
+	// Override configurations (resolved from CRDs)
 	ToolOverrides map[string]ToolOverrideConfig // Tool name -> override config
+
+	// K8sClient is an optional pre-configured k8s client for testing.
+	// When nil, the worker creates one via k8s.NewClient() (in-cluster config).
+	K8sClient client.Client
 }
 
 // ToolOverrideConfig contains the configuration for a tool override from ToolRegistry CRD.
@@ -158,7 +147,6 @@ func loadConfig() (*Config, error) {
 		ContentPath:    os.Getenv("ARENA_CONTENT_PATH"),
 		ContentVersion: os.Getenv("ARENA_CONTENT_VERSION"),
 		ConfigFile:     os.Getenv("ARENA_CONFIG_FILE"), // Config file name in content path
-		OverridesPath:  os.Getenv("ARENA_OVERRIDES_PATH"),
 		RedisAddr:      getEnvOrDefault("REDIS_ADDR", "redis:6379"),
 		RedisPassword:  os.Getenv("REDIS_PASSWORD"),
 		RedisDB:        0,
@@ -168,26 +156,11 @@ func loadConfig() (*Config, error) {
 		Verbose:        os.Getenv("ARENA_VERBOSE") == "true",
 	}
 
-	cfg.ExecutionMode = getEnvOrDefault("ARENA_EXECUTION_MODE", "direct")
-	cfg.FleetWSURL = os.Getenv("ARENA_FLEET_WS_URL")
-
 	if cfg.JobName == "" {
 		return nil, errors.New("ARENA_JOB_NAME is required")
 	}
 	if cfg.ContentPath == "" {
 		return nil, errors.New("ARENA_CONTENT_PATH is required")
-	}
-	if cfg.ExecutionMode == executionModeFleet && cfg.FleetWSURL == "" {
-		return nil, errors.New("ARENA_FLEET_WS_URL is required when ARENA_EXECUTION_MODE is fleet")
-	}
-
-	// Parse tool overrides if provided (legacy env var, prefer OverridesPath)
-	if toolOverridesJSON := os.Getenv("ARENA_TOOL_OVERRIDES"); toolOverridesJSON != "" {
-		var toolOverrides map[string]ToolOverrideConfig
-		if err := json.Unmarshal([]byte(toolOverridesJSON), &toolOverrides); err != nil {
-			return nil, fmt.Errorf("failed to parse ARENA_TOOL_OVERRIDES: %w", err)
-		}
-		cfg.ToolOverrides = toolOverrides
 	}
 
 	return cfg, nil
@@ -246,7 +219,6 @@ func processWorkItems(ctx context.Context, log logr.Logger, cfg *Config, q queue
 	ctx, rootSpan := otel.Tracer("omnia-arena-worker").Start(ctx, "arena.worker",
 		trace.WithAttributes(
 			attribute.String("arena.job", jobID),
-			attribute.String("arena.execution_mode", cfg.ExecutionMode),
 		),
 	)
 	defer rootSpan.End()
@@ -289,7 +261,6 @@ func processWorkItems(ctx context.Context, log logr.Logger, cfg *Config, q queue
 				attribute.String("arena.job", jobID),
 				attribute.String("arena.scenario", item.ScenarioID),
 				attribute.String("arena.provider", item.ProviderID),
-				attribute.String("arena.execution_mode", cfg.ExecutionMode),
 			),
 		)
 		result, execErr := executeWorkItem(itemCtx, log, cfg, item, bundlePath)
@@ -440,82 +411,32 @@ func executeWorkItem(
 	// The workspace content is mounted read-only, so we need a writable path for media files
 	arenaCfg.Defaults.Output.Dir = "/tmp/arena-output"
 
-	// Resolve providers and tools — either from CRDs (new path) or overrides (legacy path)
-	var crdFleetProviders []*resolvedFleetProvider
-	if isProviderGroupsMode() {
-		// New path: resolve providers directly from CRDs referenced in spec.Providers
-		k8sClient, k8sErr := k8s.NewClient()
+	// Resolve providers and tools from CRDs
+	k8sClient := cfg.K8sClient
+	if k8sClient == nil {
+		var k8sErr error
+		k8sClient, k8sErr = k8s.NewClient()
 		if k8sErr != nil {
 			return nil, fmt.Errorf("failed to create k8s client for CRD resolution: %w", k8sErr)
 		}
-
-		crdFleetProviders, err = resolveProvidersFromCRD(ctx, log, k8sClient, cfg, arenaCfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve providers from CRDs: %w", err)
-		}
-		defer closeFleetProviders(crdFleetProviders)
-
-		if err := resolveToolsFromCRD(ctx, log, k8sClient, cfg); err != nil {
-			return nil, fmt.Errorf("failed to resolve tools from CRDs: %w", err)
-		}
-
-		// Apply tool overrides (from CRD resolution) to the config
-		if len(cfg.ToolOverrides) > 0 {
-			if err := applyToolOverrides(log, arenaCfg, cfg.ToolOverrides); err != nil {
-				return nil, fmt.Errorf("failed to apply tool overrides: %w", err)
-			}
-		}
-	} else {
-		// Legacy path: load overrides from ConfigMap
-		overrideCfg, err := loadOverrides(cfg.OverridesPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load overrides: %w", err)
-		}
-		if overrideCfg != nil {
-			if err := applyOverridesFromConfig(log, arenaCfg, overrideCfg); err != nil {
-				return nil, fmt.Errorf("failed to apply overrides from ConfigMap: %w", err)
-			}
-		} else if len(cfg.ToolOverrides) > 0 {
-			if err := applyToolOverrides(log, arenaCfg, cfg.ToolOverrides); err != nil {
-				return nil, fmt.Errorf("failed to apply tool overrides: %w", err)
-			}
-		}
-
-		// Apply provider bindings (annotation-based credential resolution)
-		if overrideCfg != nil && len(overrideCfg.Bindings) > 0 {
-			if err := applyProviderBindings(log, arenaCfg, overrideCfg.Bindings, configPath); err != nil {
-				log.Error(err, "failed to apply provider bindings")
-			}
-		}
 	}
 
-	// For legacy fleet mode, connect to the agent and prepare provider injection
-	var fleetProvider *fleet.Provider
-	if !isProviderGroupsMode() && cfg.ExecutionMode == executionModeFleet {
-		fleetProvider = fleet.NewProvider("fleet-agent", cfg.FleetWSURL, nil)
-		if err := fleetProvider.Connect(ctx); err != nil {
-			return nil, fmt.Errorf("failed to connect to fleet agent: %w", err)
+	var crdFleetProviders []*resolvedFleetProvider
+	crdFleetProviders, err = resolveProvidersFromCRD(ctx, log, k8sClient, cfg, arenaCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve providers from CRDs: %w", err)
+	}
+	defer closeFleetProviders(crdFleetProviders)
+
+	if err := resolveToolsFromCRD(ctx, log, k8sClient, cfg); err != nil {
+		return nil, fmt.Errorf("failed to resolve tools from CRDs: %w", err)
+	}
+
+	// Apply tool overrides (from CRD resolution) to the config
+	if len(cfg.ToolOverrides) > 0 {
+		if err := applyToolOverrides(log, arenaCfg, cfg.ToolOverrides); err != nil {
+			return nil, fmt.Errorf("failed to apply tool overrides: %w", err)
 		}
-		defer func() { _ = fleetProvider.Close() }()
-
-		sessionTraceID := sessionIDToTraceID(fleetProvider.SessionID())
-		_, linkSpan := otel.Tracer("omnia-arena-worker").Start(ctx, "arena.fleet.session",
-			trace.WithLinks(trace.Link{
-				SpanContext: trace.NewSpanContext(trace.SpanContextConfig{
-					TraceID:    sessionTraceID,
-					TraceFlags: trace.FlagsSampled,
-				}),
-				Attributes: []attribute.KeyValue{
-					attribute.String("link.type", "session-trace"),
-				},
-			}),
-			trace.WithAttributes(
-				attribute.String("session.id", fleetProvider.SessionID()),
-			),
-		)
-		linkSpan.End()
-
-		log.Info("fleet agent connected", "wsURL", cfg.FleetWSURL, "sessionID", fleetProvider.SessionID())
 	}
 
 	// Build registries and executors from the config
@@ -535,10 +456,6 @@ func executeWorkItem(
 	if len(crdFleetProviders) > 0 {
 		registerFleetProviders(providerRegistry, crdFleetProviders)
 	}
-	if fleetProvider != nil {
-		providerRegistry.Register(fleetProvider)
-		injectFleetProviderConfig(arenaCfg)
-	}
 
 	// Create engine with all components
 	eng, err := engine.NewEngine(arenaCfg, providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry)
@@ -552,35 +469,15 @@ func executeWorkItem(
 		}
 	}()
 
-	// Validate provider credentials before execution
-	// Skip for CRD-resolved providers (credentials validated during resolution)
-	// Skip for fleet mode (no external credentials needed)
-	if !isProviderGroupsMode() && cfg.ExecutionMode != executionModeFleet {
-		if err := providers.ValidateProviderCredentials(arenaCfg, item.ProviderID); err != nil {
-			result.Status = statusFail
-			result.Error = err.Error()
-			result.DurationMs = float64(time.Since(start).Milliseconds())
-			return result, nil
-		}
-	}
-
 	// Determine scenario filter
 	scenarioFilter := []string{}
 	if item.ScenarioID != "" && item.ScenarioID != defaultScenarioID {
 		scenarioFilter = []string{item.ScenarioID}
 	}
 
-	// Determine provider filter
+	// Determine provider filter — work item's ProviderID is the resolved provider/agent ID
 	providerFilter := []string{}
-	if isProviderGroupsMode() {
-		// New path: work item's ProviderID is the resolved provider/agent ID
-		if item.ProviderID != "" {
-			providerFilter = []string{item.ProviderID}
-		}
-	} else if cfg.ExecutionMode == executionModeFleet {
-		// Legacy fleet mode: route to the fleet provider only
-		providerFilter = []string{"fleet-agent"}
-	} else if item.ProviderID != "" {
+	if item.ProviderID != "" {
 		providerFilter = []string{item.ProviderID}
 	}
 
@@ -603,9 +500,7 @@ func executeWorkItem(
 	}
 
 	providerDesc := "all providers"
-	if cfg.ExecutionMode == executionModeFleet {
-		providerDesc = "fleet agent"
-	} else if item.ProviderID != "" {
+	if item.ProviderID != "" {
 		providerDesc = item.ProviderID
 	}
 	log.Info("executing scenarios",
@@ -882,182 +777,6 @@ func applyToolOverrides(log logr.Logger, cfg *config.Config, toolOverrides map[s
 
 	if appliedCount > 0 {
 		log.Info("tool overrides applied", "count", appliedCount)
-	}
-
-	return nil
-}
-
-// loadOverrides reads the override config from the mounted ConfigMap file.
-// Returns nil if the file doesn't exist (no overrides configured).
-func loadOverrides(path string) (*overrides.OverrideConfig, error) {
-	if path == "" {
-		return nil, nil
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to read overrides file: %w", err)
-	}
-
-	var cfg overrides.OverrideConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse overrides: %w", err)
-	}
-
-	return &cfg, nil
-}
-
-// injectFleetProviderConfig adds a fleet-agent entry to the arena config's
-// LoadedProviders map so that GenerateRunPlan can produce combinations for it.
-// The fleet provider is a passthrough (no credentials, no model) since the
-// target agent handles LLM calls internally.
-func injectFleetProviderConfig(arenaCfg *config.Config) {
-	if arenaCfg.LoadedProviders == nil {
-		arenaCfg.LoadedProviders = make(map[string]*config.Provider)
-	}
-	arenaCfg.LoadedProviders["fleet-agent"] = &config.Provider{
-		ID:   "fleet-agent",
-		Type: "fleet",
-	}
-}
-
-// applyProviderOverrides injects provider configs from CRD overrides into the arena config.
-// Providers are added to LoadedProviders and can be used by the engine.
-func applyProviderOverrides(
-	log logr.Logger,
-	arenaCfg *config.Config,
-	providersByGroup map[string][]overrides.ProviderOverride,
-) {
-	if len(providersByGroup) == 0 {
-		return
-	}
-
-	if arenaCfg.LoadedProviders == nil {
-		arenaCfg.LoadedProviders = make(map[string]*config.Provider)
-	}
-
-	appliedCount := 0
-	for groupName, groupProviders := range providersByGroup {
-		for _, p := range groupProviders {
-			// Create a PromptKit-compatible provider config
-			provider := &config.Provider{
-				ID:      p.ID,
-				Type:    p.Type,
-				Model:   p.Model,
-				BaseURL: p.BaseURL,
-				Defaults: config.ProviderDefaults{
-					Temperature: float32(p.Temperature),
-					TopP:        float32(p.TopP),
-					MaxTokens:   p.MaxTokens,
-				},
-			}
-
-			// Set credential from override config
-			if p.SecretEnvVar != "" {
-				provider.Credential = &config.CredentialConfig{
-					CredentialEnv: p.SecretEnvVar,
-				}
-			} else if p.CredentialFile != "" {
-				provider.Credential = &config.CredentialConfig{
-					CredentialFile: p.CredentialFile,
-				}
-			}
-
-			// Add to LoadedProviders (overwriting any existing provider with same ID)
-			arenaCfg.LoadedProviders[p.ID] = provider
-
-			// Track provider group for filtering
-			if arenaCfg.ProviderGroups == nil {
-				arenaCfg.ProviderGroups = make(map[string]string)
-			}
-			arenaCfg.ProviderGroups[p.ID] = groupName
-
-			appliedCount++
-
-			hasCreds := (p.SecretEnvVar != "" && os.Getenv(p.SecretEnvVar) != "") ||
-				(p.CredentialFile != "" && fileExists(p.CredentialFile))
-			log.V(1).Info("provider override applied",
-				"providerID", p.ID,
-				"providerType", p.Type,
-				"model", p.Model,
-				"group", groupName,
-				"hasCreds", hasCreds,
-			)
-		}
-	}
-
-	if appliedCount > 0 {
-		log.Info("provider overrides applied", "count", appliedCount)
-	}
-}
-
-// fileExists returns true if the file exists.
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-// applyProviderBindings resolves provider binding annotations against the registry
-// and injects credentials into providers that don't already have them.
-func applyProviderBindings(
-	log logr.Logger,
-	cfg *config.Config,
-	registry map[string]overrides.ProviderOverride,
-	configPath string,
-) error {
-	bindings, err := binding.ParseProviderAnnotations(cfg, configPath)
-	if err != nil {
-		return fmt.Errorf("failed to parse provider annotations: %w", err)
-	}
-
-	verbose := log.V(1).Enabled()
-	boundCount := binding.ApplyBindings(cfg, bindings, registry, verbose)
-	matchedCount := binding.ApplyNameMatching(cfg, registry, verbose)
-
-	if boundCount > 0 || matchedCount > 0 {
-		log.V(1).Info("provider bindings applied",
-			"annotationBound", boundCount,
-			"nameMatched", matchedCount,
-		)
-	}
-
-	return nil
-}
-
-// applyOverridesFromConfig applies all overrides from the loaded override config.
-// This handles both provider and tool overrides from the ConfigMap.
-func applyOverridesFromConfig(
-	log logr.Logger,
-	arenaCfg *config.Config,
-	overrideCfg *overrides.OverrideConfig,
-) error {
-	if overrideCfg == nil {
-		return nil
-	}
-
-	// Apply provider overrides first
-	applyProviderOverrides(log, arenaCfg, overrideCfg.Providers)
-
-	// Apply tool overrides
-	if len(overrideCfg.Tools) > 0 {
-		// Convert to the legacy ToolOverrideConfig format for compatibility
-		toolOverrides := make(map[string]ToolOverrideConfig)
-		for _, t := range overrideCfg.Tools {
-			toolOverrides[t.Name] = ToolOverrideConfig{
-				Name:         t.Name,
-				Description:  t.Description,
-				Endpoint:     t.Endpoint,
-				HandlerType:  t.HandlerType,
-				RegistryName: t.RegistryName,
-				HandlerName:  t.HandlerName,
-			}
-		}
-		if err := applyToolOverrides(log, arenaCfg, toolOverrides); err != nil {
-			return fmt.Errorf("failed to apply tool overrides: %w", err)
-		}
 	}
 
 	return nil

@@ -15,7 +15,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -36,12 +35,10 @@ import (
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/aggregator"
-	"github.com/altairalabs/omnia/ee/pkg/arena/overrides"
 	"github.com/altairalabs/omnia/ee/pkg/arena/partitioner"
 	"github.com/altairalabs/omnia/ee/pkg/arena/providers"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 	"github.com/altairalabs/omnia/ee/pkg/license"
-	"github.com/altairalabs/omnia/ee/pkg/selector"
 	"github.com/altairalabs/omnia/ee/pkg/workspace"
 )
 
@@ -379,52 +376,6 @@ func (r *ArenaJobReconciler) getWorkerServiceAccountName(providerCRDs []*corev1a
 	return ""
 }
 
-// isFleetMode returns true if the ArenaJob is configured for fleet execution mode.
-func isFleetMode(arenaJob *omniav1alpha1.ArenaJob) bool {
-	return arenaJob.Spec.Execution != nil && arenaJob.Spec.Execution.Mode == omniav1alpha1.ExecutionModeFleet
-}
-
-// resolveFleetTarget resolves the fleet target AgentRuntime to a WebSocket URL.
-// It reads the AgentRuntime's status.serviceEndpoint and constructs a ws:// URL.
-func (r *ArenaJobReconciler) resolveFleetTarget(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob) (string, error) {
-	if arenaJob.Spec.Execution == nil || arenaJob.Spec.Execution.Target == nil {
-		return "", fmt.Errorf("fleet target not specified")
-	}
-
-	target := arenaJob.Spec.Execution.Target
-	targetNamespace := target.Namespace
-	if targetNamespace == "" {
-		targetNamespace = arenaJob.Namespace
-	}
-
-	agentRuntime := &corev1alpha1.AgentRuntime{}
-	if err := r.Get(ctx, types.NamespacedName{
-		Name:      target.AgentRuntimeRef.Name,
-		Namespace: targetNamespace,
-	}, agentRuntime); err != nil {
-		if apierrors.IsNotFound(err) {
-			return "", fmt.Errorf("agentRuntime %s/%s not found", targetNamespace, target.AgentRuntimeRef.Name)
-		}
-		return "", fmt.Errorf("failed to get agentRuntime %s/%s: %w", targetNamespace, target.AgentRuntimeRef.Name, err)
-	}
-
-	if agentRuntime.Status.ServiceEndpoint == "" {
-		return "", fmt.Errorf("agentRuntime %s/%s has no service endpoint (not ready)", targetNamespace, target.AgentRuntimeRef.Name)
-	}
-
-	wsURL := fmt.Sprintf("ws://%s/ws?agent=%s&namespace=%s",
-		agentRuntime.Status.ServiceEndpoint,
-		target.AgentRuntimeRef.Name,
-		targetNamespace,
-	)
-	return wsURL, nil
-}
-
-// hasProviderGroups returns true if the ArenaJob uses the new providers field.
-func hasProviderGroups(arenaJob *omniav1alpha1.ArenaJob) bool {
-	return len(arenaJob.Spec.Providers) > 0
-}
-
 // resolvedProviderGroup holds the resolved CRDs and agent WebSocket URLs for a provider group.
 type resolvedProviderGroup struct {
 	providers []*corev1alpha1.Provider
@@ -572,352 +523,11 @@ func getProviderIDsFromGroups(groups map[string]*resolvedProviderGroup) []string
 	return ids
 }
 
-// resolveProviderOverrides resolves provider CRDs based on ArenaJob's providerOverrides.
-// Returns providers grouped by their selector group name (e.g., "default", "judge").
-// If no overrides are specified, returns nil (use ArenaConfig providers).
-func (r *ArenaJobReconciler) resolveProviderOverrides(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob) (map[string][]*corev1alpha1.Provider, error) {
-	if len(arenaJob.Spec.ProviderOverrides) == 0 {
-		return nil, nil
-	}
-
-	log := logf.FromContext(ctx)
-	log.V(1).Info("resolving provider overrides", "overrides", len(arenaJob.Spec.ProviderOverrides))
-
-	// Resolve all provider overrides (returns map of group -> providers)
-	resolvedByGroup, err := selector.ResolveProviderOverrides(ctx, r.Client, arenaJob.Namespace, arenaJob.Spec.ProviderOverrides)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve provider overrides: %w", err)
-	}
-
-	totalCount := 0
-	for group, groupProviders := range resolvedByGroup {
-		log.V(1).Info("resolved providers for group", "group", group, "count", len(groupProviders))
-		totalCount += len(groupProviders)
-	}
-
-	log.Info("resolved provider overrides", "groups", len(resolvedByGroup), "totalProviders", totalCount)
-	return resolvedByGroup, nil
-}
-
 // buildProviderEnvVarsFromCRDs builds environment variables for Provider CRDs.
 // This extracts credentials from each provider's secretRef.
 // Delegates to the shared providers.BuildEnvVarsFromProviders function.
 func (r *ArenaJobReconciler) buildProviderEnvVarsFromCRDs(providerCRDs []*corev1alpha1.Provider) []corev1.EnvVar {
 	return providers.BuildEnvVarsFromProviders(providerCRDs)
-}
-
-// getProviderIDsFromCRDs extracts provider IDs from Provider CRDs for work queue.
-func (r *ArenaJobReconciler) getProviderIDsFromCRDs(providerCRDs []*corev1alpha1.Provider) []string {
-	ids := make([]string, len(providerCRDs))
-	for i, p := range providerCRDs {
-		ids[i] = p.Name
-	}
-	return ids
-}
-
-// resolveBindingRegistry lists all Provider CRDs in the given namespace and converts them
-// to a binding registry for annotation-based credential resolution. Returns the registry
-// map and the list of Provider CRDs for env var injection.
-func (r *ArenaJobReconciler) resolveBindingRegistry(ctx context.Context, namespace string) (map[string]overrides.ProviderOverride, []*corev1alpha1.Provider, error) {
-	log := logf.FromContext(ctx)
-
-	providerList := &corev1alpha1.ProviderList{}
-	if err := r.List(ctx, providerList, client.InNamespace(namespace)); err != nil {
-		return nil, nil, fmt.Errorf("failed to list providers in namespace %s: %w", namespace, err)
-	}
-
-	if len(providerList.Items) == 0 {
-		return nil, nil, nil
-	}
-
-	registry := make(map[string]overrides.ProviderOverride, len(providerList.Items))
-	providerCRDs := make([]*corev1alpha1.Provider, 0, len(providerList.Items))
-
-	for i := range providerList.Items {
-		p := &providerList.Items[i]
-		key := p.Namespace + "/" + p.Name
-		registry[key] = convertProviderToOverride(p)
-		providerCRDs = append(providerCRDs, p)
-	}
-
-	log.V(1).Info("resolved binding registry", "namespace", namespace, "providers", len(registry))
-	return registry, providerCRDs, nil
-}
-
-// deduplicateProviders merges additional providers into an existing list, skipping duplicates
-// by namespace/name. This ensures env vars are injected for all relevant providers.
-func deduplicateProviders(existing, additional []*corev1alpha1.Provider) []*corev1alpha1.Provider {
-	if len(additional) == 0 {
-		return existing
-	}
-
-	seen := make(map[string]bool, len(existing))
-	for _, p := range existing {
-		seen[p.Namespace+"/"+p.Name] = true
-	}
-
-	result := make([]*corev1alpha1.Provider, len(existing))
-	copy(result, existing)
-
-	for _, p := range additional {
-		key := p.Namespace + "/" + p.Name
-		if !seen[key] {
-			result = append(result, p)
-			seen[key] = true
-		}
-	}
-
-	return result
-}
-
-// resolveToolRegistryOverride resolves tool registry CRDs based on ArenaJob's toolRegistryOverride.
-// Returns the resolved tool overrides configuration for the worker.
-func (r *ArenaJobReconciler) resolveToolRegistryOverride(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob) (map[string]selector.ToolOverrideConfig, error) {
-	if arenaJob.Spec.ToolRegistryOverride == nil {
-		return nil, nil
-	}
-
-	log := logf.FromContext(ctx)
-	log.Info("resolving tool registry override")
-
-	// Resolve tool registries matching the selector
-	registries, err := selector.ResolveToolRegistryOverride(ctx, r.Client, arenaJob.Namespace, arenaJob.Spec.ToolRegistryOverride)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve tool registry override: %w", err)
-	}
-
-	if len(registries) == 0 {
-		log.Info("no tool registries matched the selector")
-		return nil, nil
-	}
-
-	// Log resolved registries
-	registryNames := make([]string, len(registries))
-	for i, reg := range registries {
-		registryNames[i] = reg.Name
-	}
-	log.Info("resolved tool registries", "registries", registryNames, "count", len(registries))
-
-	// Extract tool override configurations
-	toolOverrides := selector.GetToolOverridesFromRegistries(registries)
-
-	// Log individual tool overrides
-	for toolName, config := range toolOverrides {
-		log.Info("tool override configured",
-			"tool", toolName,
-			"registry", config.RegistryName,
-			"handler", config.HandlerName,
-			"endpoint", config.Endpoint,
-			"type", config.HandlerType,
-		)
-	}
-
-	log.Info("resolved tool overrides", "totalTools", len(toolOverrides))
-	return toolOverrides, nil
-}
-
-// getOverrideConfigMapName returns the name for the override ConfigMap.
-func getOverrideConfigMapName(jobName string) string {
-	return fmt.Sprintf("%s-overrides", jobName)
-}
-
-// convertProviderToOverride converts a Provider CRD to a ProviderOverride struct.
-func convertProviderToOverride(p *corev1alpha1.Provider) overrides.ProviderOverride {
-	override := overrides.ProviderOverride{
-		ID:      p.Name,
-		Type:    string(p.Spec.Type),
-		Model:   p.Spec.Model,
-		BaseURL: p.Spec.BaseURL,
-	}
-
-	override.SecretEnvVar, override.CredentialFile = resolveCredential(p)
-
-	// Set platform configuration
-	if p.Spec.Platform != nil {
-		override.Platform = &overrides.PlatformOverride{
-			Type:     string(p.Spec.Platform.Type),
-			Region:   p.Spec.Platform.Region,
-			Project:  p.Spec.Platform.Project,
-			Endpoint: p.Spec.Platform.Endpoint,
-		}
-	}
-
-	// Set auth configuration
-	if p.Spec.Auth != nil {
-		override.AuthMethod = string(p.Spec.Auth.Type)
-		override.RoleARN = p.Spec.Auth.RoleArn
-		override.ServiceAccountEmail = p.Spec.Auth.ServiceAccountEmail
-	}
-
-	applyDefaults(&override, p.Spec.Defaults)
-
-	return override
-}
-
-// resolveCredential determines the secret env var and credential file path from the provider spec.
-func resolveCredential(p *corev1alpha1.Provider) (secretEnvVar, credentialFile string) {
-	if p.Spec.Credential != nil {
-		if p.Spec.Credential.SecretRef != nil {
-			secretRefs := providers.GetSecretRefsForProvider(string(p.Spec.Type))
-			if len(secretRefs) > 0 {
-				return secretRefs[0].EnvVar, ""
-			}
-		} else if p.Spec.Credential.EnvVar != "" {
-			return p.Spec.Credential.EnvVar, ""
-		} else if p.Spec.Credential.FilePath != "" {
-			return "", p.Spec.Credential.FilePath
-		}
-		return "", ""
-	}
-	if p.Spec.SecretRef != nil {
-		secretRefs := providers.GetSecretRefsForProvider(string(p.Spec.Type))
-		if len(secretRefs) > 0 {
-			return secretRefs[0].EnvVar, ""
-		}
-	}
-	return "", ""
-}
-
-// applyDefaults sets temperature, topP, and maxTokens on the override from the provider defaults.
-func applyDefaults(override *overrides.ProviderOverride, defaults *corev1alpha1.ProviderDefaults) {
-	if defaults == nil {
-		return
-	}
-	if defaults.Temperature != nil {
-		if temp, err := strconv.ParseFloat(*defaults.Temperature, 64); err == nil {
-			override.Temperature = temp
-		}
-	}
-	if defaults.TopP != nil {
-		if topP, err := strconv.ParseFloat(*defaults.TopP, 64); err == nil {
-			override.TopP = topP
-		}
-	}
-	if defaults.MaxTokens != nil {
-		override.MaxTokens = int(*defaults.MaxTokens)
-	}
-}
-
-// convertToolOverrides converts tool overrides to the override config format.
-func convertToolOverrides(toolOverrides map[string]selector.ToolOverrideConfig) []overrides.ToolOverride {
-	if len(toolOverrides) == 0 {
-		return nil
-	}
-
-	tools := make([]overrides.ToolOverride, 0, len(toolOverrides))
-	for _, t := range toolOverrides {
-		tools = append(tools, overrides.ToolOverride{
-			Name:         t.Name,
-			Description:  t.Description,
-			Endpoint:     t.Endpoint,
-			HandlerType:  t.HandlerType,
-			RegistryName: t.RegistryName,
-			HandlerName:  t.HandlerName,
-		})
-	}
-	return tools
-}
-
-// buildOverrideConfig creates the override config from resolved CRDs.
-// providersByGroup maps group name (e.g., "default", "judge") to Provider CRDs.
-// toolOverrides maps tool name to its override configuration.
-func (r *ArenaJobReconciler) buildOverrideConfig(
-	ctx context.Context,
-	providersByGroup map[string][]*corev1alpha1.Provider,
-	toolOverrides map[string]selector.ToolOverrideConfig,
-) *overrides.OverrideConfig {
-	log := logf.FromContext(ctx)
-
-	// If no overrides, return nil (worker will use arena config providers)
-	if len(providersByGroup) == 0 && len(toolOverrides) == 0 {
-		return nil
-	}
-
-	cfg := &overrides.OverrideConfig{
-		Providers: make(map[string][]overrides.ProviderOverride),
-	}
-
-	// Convert Provider CRDs to ProviderOverride structs
-	for groupName, groupProviders := range providersByGroup {
-		overrideList := make([]overrides.ProviderOverride, 0, len(groupProviders))
-		for _, p := range groupProviders {
-			override := convertProviderToOverride(p)
-			overrideList = append(overrideList, override)
-			log.V(1).Info("added provider override",
-				"group", groupName,
-				"id", override.ID,
-				"type", override.Type,
-				"model", override.Model,
-			)
-		}
-		cfg.Providers[groupName] = overrideList
-	}
-
-	// Convert tool overrides
-	cfg.Tools = convertToolOverrides(toolOverrides)
-
-	return cfg
-}
-
-// createOverrideConfigMap creates or updates the ConfigMap containing provider/tool overrides.
-// The ConfigMap is owned by the ArenaJob and will be garbage collected when the job is deleted.
-func (r *ArenaJobReconciler) createOverrideConfigMap(
-	ctx context.Context,
-	arenaJob *omniav1alpha1.ArenaJob,
-	config *overrides.OverrideConfig,
-) error {
-	log := logf.FromContext(ctx)
-
-	// Marshal config to JSON
-	configJSON, err := json.Marshal(config)
-	if err != nil {
-		return fmt.Errorf("failed to marshal override config: %w", err)
-	}
-
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      getOverrideConfigMapName(arenaJob.Name),
-			Namespace: arenaJob.Namespace,
-			Labels: map[string]string{
-				"app.kubernetes.io/name":       "arena-overrides",
-				"app.kubernetes.io/managed-by": "omnia-operator",
-				"omnia.altairalabs.ai/job":     arenaJob.Name,
-			},
-		},
-		Data: map[string]string{
-			overrides.ConfigMapKey: string(configJSON),
-		},
-	}
-
-	// Set ArenaJob as owner - ConfigMap will be GC'd when job is deleted
-	if err := ctrl.SetControllerReference(arenaJob, cm, r.Scheme); err != nil {
-		return fmt.Errorf("failed to set owner reference: %w", err)
-	}
-
-	// Try to create, update if already exists
-	if err := r.Create(ctx, cm); err != nil {
-		if apierrors.IsAlreadyExists(err) {
-			// Update existing ConfigMap
-			existing := &corev1.ConfigMap{}
-			if getErr := r.Get(ctx, types.NamespacedName{
-				Name:      cm.Name,
-				Namespace: cm.Namespace,
-			}, existing); getErr != nil {
-				return fmt.Errorf("failed to get existing ConfigMap: %w", getErr)
-			}
-			existing.Data = cm.Data
-			if updateErr := r.Update(ctx, existing); updateErr != nil {
-				return fmt.Errorf("failed to update ConfigMap: %w", updateErr)
-			}
-			log.V(1).Info("updated override ConfigMap", "name", cm.Name)
-		} else {
-			return fmt.Errorf("failed to create ConfigMap: %w", err)
-		}
-	} else {
-		log.Info("created override ConfigMap", "name", cm.Name)
-	}
-
-	return nil
 }
 
 // createWorkerJob creates a K8s Job for the Arena workers.
@@ -950,56 +560,15 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		log.V(1).Info("workspace PVC ensured", "workspace", workspaceName)
 	}
 
-	// Track resolved provider CRDs (for env var injection) and whether we have overrides
-	var providerCRDs []*corev1alpha1.Provider
-	var resolvedGroups map[string]*resolvedProviderGroup
-	hasOverrides := false
-
-	if hasProviderGroups(arenaJob) {
-		// New path: resolve providers directly from CRD refs
-		var err error
-		resolvedGroups, providerCRDs, err = r.resolveProviderGroups(ctx, arenaJob)
-		if err != nil {
-			return fmt.Errorf("failed to resolve provider groups: %w", err)
-		}
-		log.Info("resolved provider groups from CRDs",
-			"groups", len(resolvedGroups),
-			"providerCRDs", len(providerCRDs),
-		)
-	} else {
-		// Legacy path: resolve via overrides/bindings/ConfigMap pipeline
-		providersByGroup, err := r.resolveProviderOverrides(ctx, arenaJob)
-		if err != nil {
-			return fmt.Errorf("failed to resolve provider overrides: %w", err)
-		}
-
-		toolOverrides, err := r.resolveToolRegistryOverride(ctx, arenaJob)
-		if err != nil {
-			return fmt.Errorf("failed to resolve tool registry override: %w", err)
-		}
-
-		bindingRegistry, bindingProviders, err := r.resolveBindingRegistry(ctx, arenaJob.Namespace)
-		if err != nil {
-			log.Error(err, "failed to resolve binding registry, continuing without bindings")
-		}
-
-		overrideConfig := r.buildOverrideConfig(ctx, providersByGroup, toolOverrides)
-		if len(bindingRegistry) > 0 {
-			if overrideConfig == nil {
-				overrideConfig = &overrides.OverrideConfig{}
-			}
-			overrideConfig.Bindings = bindingRegistry
-		}
-		hasOverrides = overrideConfig != nil
-		if hasOverrides {
-			if err := r.createOverrideConfigMap(ctx, arenaJob, overrideConfig); err != nil {
-				return fmt.Errorf("failed to create override ConfigMap: %w", err)
-			}
-		}
-
-		providerCRDs = providers.FlattenProviderGroups(providersByGroup)
-		providerCRDs = deduplicateProviders(providerCRDs, bindingProviders)
+	// Resolve providers directly from CRD refs
+	resolvedGroups, providerCRDs, err := r.resolveProviderGroups(ctx, arenaJob)
+	if err != nil {
+		return fmt.Errorf("failed to resolve provider groups: %w", err)
 	}
+	log.Info("resolved provider groups from CRDs",
+		"groups", len(resolvedGroups),
+		"providerCRDs", len(providerCRDs),
+	)
 
 	// Determine arena file path
 	arenaFile := arenaJob.Spec.ArenaFile
@@ -1114,27 +683,8 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	// Add platform environment variables for hyperscaler providers
 	env = append(env, providers.BuildPlatformEnvVars(providerCRDs)...)
 
-	// Add provider group env vars (new path) or fleet mode env vars (legacy path)
-	if hasProviderGroups(arenaJob) {
-		// New path: signal the worker to read spec.Providers from the ArenaJob CRD
-		env = append(env, corev1.EnvVar{
-			Name:  "ARENA_PROVIDER_GROUPS",
-			Value: "true",
-		})
-		// Pass agent WebSocket URLs directly (worker needs them before K8s API access)
-		env = append(env, buildProviderGroupEnvVars(resolvedGroups)...)
-	} else if isFleetMode(arenaJob) {
-		// Legacy fleet mode
-		wsURL, err := r.resolveFleetTarget(ctx, arenaJob)
-		if err != nil {
-			return fmt.Errorf("failed to resolve fleet target: %w", err)
-		}
-		env = append(env,
-			corev1.EnvVar{Name: "ARENA_EXECUTION_MODE", Value: "fleet"},
-			corev1.EnvVar{Name: "ARENA_FLEET_WS_URL", Value: wsURL},
-		)
-		log.Info("fleet mode enabled", "wsURL", wsURL)
-	}
+	// Pass agent WebSocket URLs directly (worker needs them before K8s API access)
+	env = append(env, buildProviderGroupEnvVars(resolvedGroups)...)
 
 	// Add tracing env vars for arena worker pods
 	if r.TracingEnabled && r.TracingEndpoint != "" {
@@ -1143,14 +693,6 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 			corev1.EnvVar{Name: "TRACING_ENDPOINT", Value: r.TracingEndpoint},
 			corev1.EnvVar{Name: "TRACING_INSECURE", Value: "true"},
 		)
-	}
-
-	// Add overrides path env var if ConfigMap was created
-	if hasOverrides {
-		env = append(env, corev1.EnvVar{
-			Name:  "ARENA_OVERRIDES_PATH",
-			Value: "/etc/arena/overrides.json",
-		})
 	}
 
 	// Build volumes list
@@ -1169,25 +711,6 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 			Name:      "tmp",
 			MountPath: "/tmp",
 		},
-	}
-
-	// Add override ConfigMap volume if there are overrides
-	if hasOverrides {
-		volumes = append(volumes, corev1.Volume{
-			Name: "arena-overrides",
-			VolumeSource: corev1.VolumeSource{
-				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: getOverrideConfigMapName(arenaJob.Name),
-					},
-				},
-			},
-		})
-		volumeMounts = append(volumeMounts, corev1.VolumeMount{
-			Name:      "arena-overrides",
-			MountPath: "/etc/arena",
-			ReadOnly:  true,
-		})
 	}
 
 	// Add workspace content volume if using filesystem mode
@@ -1489,40 +1012,6 @@ func buildFallbackWorkItems(jobName, bundleURL string, providerIDs []string) []q
 	return items
 }
 
-// buildFleetWorkItems creates one work item per scenario (no provider dimension).
-// Used in fleet mode where the agent handles its own provider configuration.
-func buildFleetWorkItems(jobName, bundleURL string, scenarios []partitioner.Scenario) []queue.WorkItem {
-	now := time.Now()
-	if len(scenarios) == 0 {
-		// Single default item when scenarios can't be enumerated
-		return []queue.WorkItem{{
-			ID:          fmt.Sprintf("%s-fleet-0", jobName),
-			JobID:       jobName,
-			ScenarioID:  "default",
-			BundleURL:   bundleURL,
-			Status:      queue.ItemStatusPending,
-			Attempt:     1,
-			MaxAttempts: 3,
-			CreatedAt:   now,
-		}}
-	}
-
-	items := make([]queue.WorkItem, 0, len(scenarios))
-	for i, s := range scenarios {
-		items = append(items, queue.WorkItem{
-			ID:          fmt.Sprintf("%s-%s-%d", jobName, s.ID, i),
-			JobID:       jobName,
-			ScenarioID:  s.ID,
-			BundleURL:   bundleURL,
-			Status:      queue.ItemStatusPending,
-			Attempt:     1,
-			MaxAttempts: 3,
-			CreatedAt:   now,
-		})
-	}
-	return items
-}
-
 // enqueueWorkItems creates and enqueues work items for the Arena job.
 // When scenarios can be enumerated from the filesystem, work items are created
 // for each scenario × provider combination for maximum parallelism.
@@ -1570,31 +1059,16 @@ func (r *ArenaJobReconciler) enqueueWorkItems(
 		}
 	}
 
-	// Build work items based on execution mode
+	// Build work items: unified scenario × provider matrix
+	providerIDs := getProviderIDsFromGroups(resolvedGroups)
+	log.V(1).Info("building work items", "providerIDs", providerIDs)
+
 	var items []queue.WorkItem
-
-	if hasProviderGroups(arenaJob) {
-		// New path: unified scenario × provider matrix (agents and LLMs are interchangeable)
-		providerIDs := getProviderIDsFromGroups(resolvedGroups)
-		log.V(1).Info("using provider groups for work items", "providerIDs", providerIDs)
+	if len(scenarios) > 0 && len(providerCRDs) > 0 {
+		items = r.buildMatrixWorkItems(ctx, arenaJob.Name, bundleURL, scenarios, providerCRDs)
+	}
+	if len(items) == 0 {
 		items = buildFallbackWorkItems(arenaJob.Name, bundleURL, providerIDs)
-	} else if isFleetMode(arenaJob) {
-		// Legacy fleet mode: one work item per scenario (no provider dimension)
-		items = buildFleetWorkItems(arenaJob.Name, bundleURL, scenarios)
-	} else {
-		// Legacy direct mode: scenario × provider matrix
-		var providerIDs []string
-		if len(providerCRDs) > 0 {
-			providerIDs = r.getProviderIDsFromCRDs(providerCRDs)
-			log.V(1).Info("using providers for work items", "count", len(providerIDs))
-		}
-
-		if len(scenarios) > 0 && len(providerIDs) > 0 {
-			items = r.buildMatrixWorkItems(ctx, arenaJob.Name, bundleURL, scenarios, providerCRDs)
-		}
-		if len(items) == 0 {
-			items = buildFallbackWorkItems(arenaJob.Name, bundleURL, providerIDs)
-		}
 	}
 
 	log.Info("enqueueing work items", "count", len(items))

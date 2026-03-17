@@ -134,32 +134,6 @@ func TestParseAgentWSURLs(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// isProviderGroupsMode
-// ---------------------------------------------------------------------------
-
-func TestIsProviderGroupsMode(t *testing.T) {
-	t.Run("returns false when not set", func(t *testing.T) {
-		t.Setenv("ARENA_PROVIDER_GROUPS", "")
-		assert.False(t, isProviderGroupsMode())
-	})
-
-	t.Run("returns true when set to 'true'", func(t *testing.T) {
-		t.Setenv("ARENA_PROVIDER_GROUPS", "true")
-		assert.True(t, isProviderGroupsMode())
-	})
-
-	t.Run("returns false for non-true value", func(t *testing.T) {
-		t.Setenv("ARENA_PROVIDER_GROUPS", "1")
-		assert.False(t, isProviderGroupsMode())
-	})
-
-	t.Run("returns false for 'True' (case-sensitive)", func(t *testing.T) {
-		t.Setenv("ARENA_PROVIDER_GROUPS", "True")
-		assert.False(t, isProviderGroupsMode())
-	})
-}
-
-// ---------------------------------------------------------------------------
 // resolveProviderCredentialEnv
 // ---------------------------------------------------------------------------
 
