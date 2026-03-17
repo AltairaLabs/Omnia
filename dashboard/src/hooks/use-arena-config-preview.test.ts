@@ -45,7 +45,7 @@ describe("estimateWorkItems", () => {
 
   describe("when config is not loaded", () => {
     it("returns 1 work item and 1 worker", () => {
-      const result = estimateWorkItems(unloadedConfig, "direct", false, 0, 0);
+      const result = estimateWorkItems(unloadedConfig, 0, 0);
 
       expect(result.workItems).toBe(1);
       expect(result.recommendedWorkers).toBe(1);
@@ -53,173 +53,18 @@ describe("estimateWorkItems", () => {
     });
   });
 
-  describe("direct mode without provider overrides", () => {
-    it("returns 1 work item regardless of scenario count", () => {
-      const result = estimateWorkItems(
-        loadedConfig(5, 2),
-        "direct",
-        false,
-        0,
-        0
-      );
-
-      expect(result.workItems).toBe(1);
-      expect(result.recommendedWorkers).toBe(1);
-      expect(result.description).toContain("5 scenarios");
-      expect(result.description).toContain("single work item");
-    });
-
-    it("handles 1 scenario", () => {
-      const result = estimateWorkItems(
-        loadedConfig(1, 0),
-        "direct",
-        false,
-        0,
-        0
-      );
-
-      expect(result.workItems).toBe(1);
-      expect(result.description).toContain("1 scenario");
-    });
-  });
-
-  describe("direct mode with provider overrides", () => {
+  describe("with providers specified", () => {
     it("returns scenarios x providers matrix", () => {
-      const result = estimateWorkItems(
-        loadedConfig(3, 2),
-        "direct",
-        true,
-        4,
-        0
-      );
+      const result = estimateWorkItems(loadedConfig(3, 2), 4, 0);
 
-      expect(result.workItems).toBe(12); // 3 scenarios x 4 override providers
+      expect(result.workItems).toBe(12); // 3 scenarios x 4 providers
       expect(result.recommendedWorkers).toBe(12);
       expect(result.description).toContain("3 scenarios");
       expect(result.description).toContain("4 providers");
     });
 
-    it("treats 0 override providers as 1 work item", () => {
-      // Provider overrides enabled but no providers match the selector
-      const result = estimateWorkItems(
-        loadedConfig(3, 2),
-        "direct",
-        true,
-        0,
-        0
-      );
-
-      // Falls into "no overrides" path since overrideProviderCount is 0
-      expect(result.workItems).toBe(1);
-    });
-
-    it("caps workers at maxWorkerReplicas", () => {
-      const result = estimateWorkItems(
-        loadedConfig(10, 0),
-        "direct",
-        true,
-        5,
-        3
-      );
-
-      expect(result.workItems).toBe(50);
-      expect(result.recommendedWorkers).toBe(3);
-    });
-  });
-
-  describe("fleet mode", () => {
-    it("returns 1 work item per scenario", () => {
-      const result = estimateWorkItems(
-        loadedConfig(5, 3),
-        "fleet",
-        false,
-        0,
-        0
-      );
-
-      expect(result.workItems).toBe(5);
-      expect(result.recommendedWorkers).toBe(5);
-      expect(result.description).toContain("5 scenarios");
-    });
-
-    it("handles 1 scenario", () => {
-      const result = estimateWorkItems(
-        loadedConfig(1, 0),
-        "fleet",
-        false,
-        0,
-        0
-      );
-
-      expect(result.workItems).toBe(1);
-      expect(result.description).toBe("1 scenario");
-    });
-
-    it("caps workers at maxWorkerReplicas", () => {
-      const result = estimateWorkItems(
-        loadedConfig(10, 0),
-        "fleet",
-        false,
-        0,
-        3
-      );
-
-      expect(result.workItems).toBe(10);
-      expect(result.recommendedWorkers).toBe(3);
-    });
-
-    it("ignores provider overrides", () => {
-      const result = estimateWorkItems(
-        loadedConfig(4, 0),
-        "fleet",
-        true,
-        5,
-        0
-      );
-
-      // Fleet mode ignores providers — always 1 item per scenario
-      expect(result.workItems).toBe(4);
-      expect(result.recommendedWorkers).toBe(4);
-    });
-  });
-
-  describe("edge cases", () => {
-    it("uses minimum of 1 scenario when config has 0", () => {
-      const result = estimateWorkItems(
-        loadedConfig(0, 0),
-        "fleet",
-        false,
-        0,
-        0
-      );
-
-      expect(result.workItems).toBe(1);
-      expect(result.recommendedWorkers).toBe(1);
-    });
-
-    it("does not cap when maxWorkerReplicas is 0 (unlimited)", () => {
-      const result = estimateWorkItems(
-        loadedConfig(20, 0),
-        "fleet",
-        false,
-        0,
-        0
-      );
-
-      expect(result.workItems).toBe(20);
-      expect(result.recommendedWorkers).toBe(20);
-    });
-  });
-
-  describe("plural helper coverage", () => {
-    it("uses singular for 1 scenario in direct mode with overrides", () => {
-      const result = estimateWorkItems(
-        loadedConfig(1, 0),
-        "direct",
-        true,
-        1,
-        0
-      );
+    it("handles 1 scenario and 1 provider", () => {
+      const result = estimateWorkItems(loadedConfig(1, 0), 1, 0);
 
       expect(result.workItems).toBe(1);
       expect(result.description).toContain("1 scenario");
@@ -227,6 +72,58 @@ describe("estimateWorkItems", () => {
       // Should not have trailing "s"
       expect(result.description).not.toMatch(/1 scenarios/);
       expect(result.description).not.toMatch(/1 providers/);
+    });
+
+    it("caps workers at maxWorkerReplicas", () => {
+      const result = estimateWorkItems(loadedConfig(10, 0), 5, 3);
+
+      expect(result.workItems).toBe(50);
+      expect(result.recommendedWorkers).toBe(3);
+    });
+  });
+
+  describe("without providers (zero entries)", () => {
+    it("returns 1 fallback work item", () => {
+      const result = estimateWorkItems(loadedConfig(5, 2), 0, 0);
+
+      expect(result.workItems).toBe(1);
+      expect(result.recommendedWorkers).toBe(1);
+      expect(result.description).toContain("no providers specified");
+    });
+  });
+
+  describe("with providers but no scenarios in config", () => {
+    it("returns providers count as work items", () => {
+      const result = estimateWorkItems(loadedConfig(0, 0), 3, 0);
+
+      expect(result.workItems).toBe(3);
+      expect(result.recommendedWorkers).toBe(3);
+      expect(result.description).toContain("3 providers");
+      expect(result.description).toContain("scenarios enumerated at runtime");
+    });
+
+    it("handles 1 provider with no scenarios", () => {
+      const result = estimateWorkItems(loadedConfig(0, 0), 1, 0);
+
+      expect(result.workItems).toBe(1);
+      expect(result.description).toContain("1 provider");
+      expect(result.description).not.toMatch(/1 providers/);
+    });
+  });
+
+  describe("edge cases", () => {
+    it("does not cap when maxWorkerReplicas is 0 (unlimited)", () => {
+      const result = estimateWorkItems(loadedConfig(5, 0), 4, 0);
+
+      expect(result.workItems).toBe(20);
+      expect(result.recommendedWorkers).toBe(20);
+    });
+
+    it("caps workers at maxWorkerReplicas when set", () => {
+      const result = estimateWorkItems(loadedConfig(5, 0), 4, 2);
+
+      expect(result.workItems).toBe(20);
+      expect(result.recommendedWorkers).toBe(2);
     });
   });
 });

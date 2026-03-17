@@ -8,6 +8,17 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ---
 
+## 2026-03-17
+- **ArenaJob CRD** (Enterprise): Replaced provider/tool override pipeline with CRD-based provider groups
+  - **Added** `spec.providers` — map of group names to lists of `ArenaProviderEntry` (providerRef or agentRef)
+  - **Added** `spec.toolRegistries` — list of ToolRegistry CRD refs by name
+  - **Removed** `spec.providerOverrides` — label-selector-based provider matching
+  - **Removed** `spec.toolRegistryOverride` — label-selector-based tool registry matching
+  - **Removed** `spec.execution` — fleet mode is replaced by `agentRef` entries in provider groups
+  - **Removed** `ExecutionMode`, `ExecutionConfig`, `FleetTarget`, `ProviderGroupSelector`, `ToolRegistrySelector` types
+  - Agents and LLM providers are now interchangeable in the scenario × provider matrix
+  - Deleted `ee/pkg/selector/` package (no longer needed)
+
 ## 2026-03-15
 - **Session API**: Fixed `eval_results.session_id` type from TEXT to UUID (migration 000020)
   - Added `(session_id, message_id)` composite index for faster lookups

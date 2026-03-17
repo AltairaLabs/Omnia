@@ -395,13 +395,11 @@ describe("JobDialog", () => {
       await selectOption(screen.getByLabelText("Source"), "test-source");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
-      // Step 2-5: Skip (execution, providers, tools, options)
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      // Step 2-3: Skip (providers, tools)
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
-      // Step 6: Submit (review)
+      // Step 4: Submit (options & review)
       fireEvent.click(screen.getByRole("button", { name: /create job/i }));
 
       // Wait for success and onSuccess callback

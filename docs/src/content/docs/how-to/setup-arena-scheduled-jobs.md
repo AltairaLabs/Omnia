@@ -21,7 +21,7 @@ metadata:
   name: nightly-regression
   namespace: default
 spec:
-  configRef:
+  sourceRef:
     name: regression-config
   type: evaluation
   workers:
@@ -120,7 +120,7 @@ metadata:
     team: platform
     environment: staging
 spec:
-  configRef:
+  sourceRef:
     name: regression-suite
   type: evaluation
 
@@ -216,7 +216,7 @@ kind: ArenaJob
 metadata:
   name: quick-check-hourly
 spec:
-  configRef:
+  sourceRef:
     name: quick-check-config  # Subset of scenarios
   schedule:
     cron: "0 * * * *"
@@ -229,7 +229,7 @@ kind: ArenaJob
 metadata:
   name: full-suite-nightly
 spec:
-  configRef:
+  sourceRef:
     name: full-suite-config  # All scenarios
   schedule:
     cron: "0 2 * * *"
@@ -252,7 +252,7 @@ metadata:
   generateName: manual-regression-
   namespace: arena
 spec:
-  configRef:
+  sourceRef:
     name: regression-suite
   type: evaluation
   workers:

@@ -1,13 +1,22 @@
-# Sample ArenaJob - One-time evaluation job
+# Sample ArenaJob - Evaluation with Provider CRD refs
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ArenaJob
 metadata:
   name: assertions-eval-run
   namespace: omnia-system
 spec:
-  configRef:
+  sourceRef:
     name: assertions-eval
   type: evaluation
+  providers:
+    default:
+      - providerRef:
+          name: claude-sonnet
+      - providerRef:
+          name: gpt-4o
+    judge:
+      - providerRef:
+          name: claude-haiku
   evaluation:
     outputFormats:
       - junit
@@ -16,16 +25,42 @@ spec:
     replicas: 2
   ttlSecondsAfterFinished: 3600
 ---
-# Sample ArenaJob - Scheduled evaluation
+# Sample ArenaJob - Evaluation with agent (fleet-style)
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaJob
+metadata:
+  name: agent-eval-run
+  namespace: omnia-system
+spec:
+  sourceRef:
+    name: assertions-eval
+  type: evaluation
+  providers:
+    default:
+      - agentRef:
+          name: support-agent
+    selfplay:
+      - providerRef:
+          name: gpt-4o-mini
+  workers:
+    replicas: 1
+---
+# Sample ArenaJob - Scheduled evaluation with tool registries
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ArenaJob
 metadata:
   name: nightly-eval
   namespace: omnia-system
 spec:
-  configRef:
+  sourceRef:
     name: assertions-eval
   type: evaluation
+  providers:
+    default:
+      - providerRef:
+          name: claude-sonnet
+  toolRegistries:
+    - name: internal-tools
   workers:
     replicas: 1
   schedule:

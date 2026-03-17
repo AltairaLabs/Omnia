@@ -350,11 +350,10 @@ spec:
     name: assertions-test-source
   arenaFile: config.arena.yaml
   type: evaluation
-  providerOverrides:
+  providers:
     default:
-      selector:
-        matchLabels:
-          arena.altairalabs.ai/test-provider: "true"
+      - providerRef:
+          name: test-mock-provider
   workers:
     replicas: 1
 `, arenaNamespace)
@@ -445,11 +444,10 @@ spec:
     name: assertions-test-source
   arenaFile: config.arena.yaml
   type: evaluation
-  providerOverrides:
+  providers:
     default:
-      selector:
-        matchLabels:
-          arena.altairalabs.ai/test-provider: "true"
+      - providerRef:
+          name: test-mock-provider
   workers:
     replicas: 3
 `, arenaNamespace)

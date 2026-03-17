@@ -7,15 +7,6 @@ import { render, screen } from "@testing-library/react";
 import { QuickRunDialog, type QuickRunInitialValues } from "./quick-run-dialog";
 
 // Mock hooks
-vi.mock("@/hooks/use-agents", () => ({
-  useAgents: () => ({
-    data: [
-      { metadata: { name: "agent-1" } },
-      { metadata: { name: "agent-2" } },
-    ],
-  }),
-}));
-
 vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast: vi.fn() }),
 }));
@@ -66,7 +57,6 @@ describe("QuickRunDialog", () => {
       includePatterns: "scenarios/*.yaml",
       excludePatterns: "wip/**",
       verbose: true,
-      executionMode: "direct",
     };
 
     render(<QuickRunDialog {...defaultProps} initialValues={initialValues} />);

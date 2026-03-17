@@ -1,6 +1,6 @@
 ---
-title: "Arena Fleet Architecture"
-description: "Understanding Arena Fleet for prompt testing and evaluation"
+title: "Arena Architecture"
+description: "Understanding Arena for prompt testing and evaluation"
 sidebar:
   order: 6
   badge:
@@ -8,23 +8,24 @@ sidebar:
     variant: note
 ---
 
-Arena Fleet is Omnia's distributed testing framework for evaluating PromptKit bundles at scale. It enables systematic testing of prompts against datasets, tracking results, and comparing performance across versions.
+Arena is Omnia's distributed testing framework for evaluating PromptKit bundles at scale. It enables systematic testing of prompts against datasets, tracking results, and comparing performance across versions.
 
 ## Overview
 
-Arena Fleet provides:
+Arena provides:
 
 - **Distributed execution**: Run tests across multiple workers
 - **GitOps integration**: Source bundles from Git, OCI, or ConfigMaps
 - **Revision tracking**: Track which bundle versions were tested
 - **Result aggregation**: Collect and analyze test results
 - **Scalability**: Handle large test datasets efficiently
+- **Unified provider model**: LLM providers and agents are interchangeable in the evaluation matrix
 
 ## Core Concepts
 
 ### PromptKit Bundles
 
-Arena Fleet tests [PromptKit](https://promptpack.org) bundles - structured collections of prompts with versioning, templating, and parameter definitions. Bundles are fetched from external sources and tested against datasets.
+Arena tests [PromptKit](https://promptpack.org) bundles - structured collections of prompts with versioning, templating, and parameter definitions. Bundles are fetched from external sources and tested against datasets.
 
 ### Sources
 
@@ -49,20 +50,23 @@ The controller automatically:
 3. Updates the artifact URL and revision
 4. Triggers downstream jobs when sources change
 
-### Configurations
+### Providers and Agents
 
-An **ArenaConfig** defines how to run tests:
+An ArenaJob references **providers** — the LLM backends or agents that execute prompts during a test run. Providers are organized into named groups (e.g., `default`, `judge`) that correspond to roles defined in the arena configuration file.
 
-- Which sources to use (prompt bundles, test data)
-- Which provider to use for LLM calls
-- Test parameters (concurrency, timeout, etc.)
-- Evaluation criteria
+Each entry in a provider group is either:
+
+- A **providerRef** pointing to a Provider CRD (direct LLM access)
+- An **agentRef** pointing to an AgentRuntime CRD (the worker connects via WebSocket)
+
+Agents and LLM providers are interchangeable — they can appear in any provider position within the scenario-by-provider evaluation matrix. There is no separate "fleet mode"; an agent is simply another provider entry.
 
 ### Jobs
 
 An **ArenaJob** executes a test run:
 
-- References an ArenaConfig
+- References an ArenaSource via `sourceRef`
+- Maps provider groups to Provider or AgentRuntime CRDs
 - Partitions work across workers
 - Tracks progress and collects results
 - Stores aggregated results
@@ -74,10 +78,10 @@ An **ArenaJob** executes a test run:
 │                     Arena Controllers                        │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
-│  │ ArenaSource  │───▶│ ArenaConfig  │───▶│  ArenaJob    │  │
-│  │ Controller   │    │ Controller   │    │ Controller   │  │
-│  └──────┬───────┘    └──────────────┘    └──────┬───────┘  │
+│  ┌──────────────┐                        ┌──────────────┐  │
+│  │ ArenaSource  │───────────────────────▶│  ArenaJob    │  │
+│  │ Controller   │                        │ Controller   │  │
+│  └──────┬───────┘                        └──────┬───────┘  │
 │         │                                        │          │
 │         ▼                                        ▼          │
 │  ┌──────────────┐                        ┌──────────────┐  │
@@ -114,28 +118,9 @@ spec:
       branch: main
 ```
 
-### 2. Configure Tests
+### 2. Run Jobs
 
-Create an ArenaConfig that references sources and defines test parameters:
-
-```yaml
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: ArenaConfig
-metadata:
-  name: evaluation-config
-spec:
-  sourceRef:
-    name: my-prompts
-  providers:
-    - name: claude-provider
-  evaluation:
-    timeout: 5m
-    concurrency: 4
-```
-
-### 3. Run Jobs
-
-Create an ArenaJob to execute tests:
+Create an ArenaJob that references the source and maps provider groups:
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -143,11 +128,31 @@ kind: ArenaJob
 metadata:
   name: evaluation-run-001
 spec:
-  configRef:
-    name: evaluation-config
+  sourceRef:
+    name: my-prompts
+  providers:
+    default:
+      - providerRef:
+          name: claude-sonnet
 ```
 
-### 4. Monitor Results
+The `providers` field maps group names (here, `default`) to lists of provider or agent entries. Groups correspond to the roles defined in the arena configuration file within the source. You can mix LLM providers and agents in the same group:
+
+```yaml
+  providers:
+    default:
+      - providerRef:
+          name: claude-sonnet
+      - providerRef:
+          name: gpt-4o
+      - agentRef:
+          name: my-custom-agent
+    judge:
+      - providerRef:
+          name: claude-opus
+```
+
+### 3. Monitor Results
 
 Check job status and retrieve results:
 
@@ -157,7 +162,7 @@ kubectl get arenajob evaluation-run-001 -o yaml
 
 ## Revision Tracking
 
-Arena Fleet tracks source revisions for reproducibility:
+Arena tracks source revisions for reproducibility:
 
 | Source Type | Revision Format | Example |
 |-------------|-----------------|---------|
@@ -172,7 +177,7 @@ This enables:
 
 ## GitOps Integration
 
-Arena Fleet integrates naturally with GitOps workflows:
+Arena integrates naturally with GitOps workflows:
 
 1. **Developers** push prompt changes to Git
 2. **ArenaSource** detects changes and updates artifacts
@@ -188,5 +193,4 @@ Developer → Git Push → ArenaSource → ArenaJob → Results
 ## Next Steps
 
 - **[ArenaSource CRD Reference](/reference/arenasource)**: Complete spec details
-- **[ArenaConfig CRD Reference](/reference/arenaconfig)**: Test configuration options
 - **[ArenaJob CRD Reference](/reference/arenajob)**: Job execution details

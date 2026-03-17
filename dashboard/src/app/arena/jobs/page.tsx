@@ -620,8 +620,6 @@ export default function ArenaJobsPage() {
           onOpenChange={(open) => { if (!open) setCloneJob(null); }}
           projectId={cloneJob.metadata?.labels?.["arena.omnia.altairalabs.ai/project-id"]}
           initialValues={{
-            executionMode: cloneJob.spec.execution?.mode ?? "direct",
-            targetAgent: cloneJob.spec.execution?.target?.agentRuntimeRef?.name ?? "",
             includePatterns: cloneJob.spec.scenarios?.include?.join(", ") ?? "",
             excludePatterns: cloneJob.spec.scenarios?.exclude?.join(", ") ?? "",
             verbose: cloneJob.spec.verbose ?? false,

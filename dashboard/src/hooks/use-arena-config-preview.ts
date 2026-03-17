@@ -133,18 +133,17 @@ export interface WorkItemEstimate {
 /**
  * Calculates the estimated number of work items and recommended worker count.
  *
- * The controller creates work items differently based on the execution mode
- * and whether provider overrides are enabled:
+ * Work items = scenarios x totalProviderEntries (from CRD-based provider groups).
+ * If no providers are specified, falls back to 1 work item.
+ * If scenarios are not yet known, uses totalProviderEntries alone.
  *
- * - Direct + provider overrides: scenarios x overrideProviders matrix items
- * - Direct + no overrides: 1 fallback item (single worker runs entire matrix)
- * - Fleet: 1 item per scenario (no provider dimension)
+ * @param config - Parsed arena config preview with scenario/provider counts
+ * @param totalProviderEntries - Total number of provider/agent entries across all groups
+ * @param maxWorkerReplicas - Maximum allowed worker replicas (0 = unlimited)
  */
 export function estimateWorkItems(
   config: ArenaConfigPreview,
-  executionMode: string,
-  providerOverridesEnabled: boolean,
-  overrideProviderCount: number,
+  totalProviderEntries: number,
   maxWorkerReplicas: number
 ): WorkItemEstimate {
   if (!config.loaded) {
@@ -155,28 +154,24 @@ export function estimateWorkItems(
     };
   }
 
-  const scenarios = Math.max(config.scenarioCount, 1);
+  const providers = Math.max(totalProviderEntries, 0);
   const plural = (n: number) => (n === 1 ? "" : "s");
   let workItems: number;
   let description: string;
 
-  if (executionMode === "fleet") {
-    // Fleet mode: one work item per scenario
-    workItems = scenarios;
-    description =
-      scenarios === 1
-        ? "1 scenario"
-        : `${scenarios} scenarios`;
-  } else if (providerOverridesEnabled && overrideProviderCount > 0) {
-    // Direct mode with provider overrides: scenarios x providers matrix
-    workItems = scenarios * overrideProviderCount;
-    description =
-      `${scenarios} scenario${plural(scenarios)} \u00d7 ${overrideProviderCount} provider${plural(overrideProviderCount)}`;
-  } else {
-    // Direct mode without overrides: single fallback work item
+  if (providers === 0) {
+    // No providers specified -- single fallback work item
     workItems = 1;
+    description = "1 work item (no providers specified)";
+  } else if (config.scenarioCount > 0) {
+    workItems = config.scenarioCount * providers;
     description =
-      `${scenarios} scenario${plural(scenarios)} (single work item \u2014 engine runs full matrix)`;
+      `${config.scenarioCount} scenario${plural(config.scenarioCount)} \u00d7 ${providers} provider${plural(providers)}`;
+  } else {
+    // Scenarios will be enumerated at runtime from the arena file
+    workItems = providers;
+    description =
+      `${providers} provider${plural(providers)} (scenarios enumerated at runtime)`;
   }
 
   let recommendedWorkers = workItems;
