@@ -30,6 +30,7 @@ describe("estimateWorkItems", () => {
   ): ArenaConfigPreview => ({
     scenarioCount,
     configProviderCount,
+    requiredGroups: [],
     loaded: true,
     loading: false,
     error: null,
@@ -38,6 +39,7 @@ describe("estimateWorkItems", () => {
   const unloadedConfig: ArenaConfigPreview = {
     scenarioCount: 0,
     configProviderCount: 0,
+    requiredGroups: [],
     loaded: false,
     loading: false,
     error: null,
@@ -324,6 +326,72 @@ spec:
     });
 
     expect(result.current.loaded).toBe(false);
+  });
+
+  it("extracts required groups from provider groups and self-play roles", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+    - file: providers/selfplay.provider.yaml
+      group: selfplay
+    - file: providers/judge.provider.yaml
+      group: judge
+  self_play:
+    enabled: true
+    roles:
+      - id: user-sim
+        provider: selfplay
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    expect(result.current.requiredGroups).toContain("default");
+    expect(result.current.requiredGroups).toContain("selfplay");
+    expect(result.current.requiredGroups).toContain("judge");
+    expect(result.current.requiredGroups).toHaveLength(3);
+  });
+
+  it("returns empty required groups when no providers or self-play", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  scenarios:
+    - file: scenario1.yaml
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    expect(result.current.requiredGroups).toHaveLength(0);
   });
 
   it("handles config YAML with empty spec", async () => {

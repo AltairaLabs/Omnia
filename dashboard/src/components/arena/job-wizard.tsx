@@ -105,7 +105,8 @@ export interface JobWizardProps {
 
 function validateForm(
   form: JobWizardFormState,
-  maxWorkerReplicas: number
+  maxWorkerReplicas: number,
+  requiredGroups: string[]
 ): string | null {
   if (!form.name.trim()) {
     return "Name is required";
@@ -115,6 +116,14 @@ function validateForm(
   }
   if (!form.sourceRef) {
     return "Source is required";
+  }
+
+  // Check required provider groups have at least one entry
+  for (const group of requiredGroups) {
+    const entries = form.providerGroups[group] || [];
+    if (entries.length === 0) {
+      return `Provider group "${group}" is required by the arena config but has no entries`;
+    }
   }
 
   const workers = Number.parseInt(form.workers, 10);
@@ -196,6 +205,7 @@ function groupSummary(entries: ProviderGroupEntry[]): string {
 interface ProviderGroupEditorProps {
   readonly group: string;
   readonly entries: ProviderGroupEntry[];
+  readonly required: boolean;
   readonly onAddEntry: (entry: ProviderGroupEntry) => void;
   readonly onRemoveEntry: (index: number) => void;
   readonly onRemoveGroup: () => void;
@@ -206,6 +216,7 @@ interface ProviderGroupEditorProps {
 function ProviderGroupEditor({
   group,
   entries,
+  required,
   onAddEntry,
   onRemoveEntry,
   onRemoveGroup,
@@ -246,21 +257,37 @@ function ProviderGroupEditor({
           <Badge variant="outline" className="font-mono">
             {group}
           </Badge>
-          <span className="text-xs text-muted-foreground">
-            {entries.length === 0
-              ? "No entries"
-              : groupSummary(entries)}
-          </span>
+          {required && (
+            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+              required
+            </Badge>
+          )}
+          {entries.length === 0 ? (
+            required ? (
+              <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                <AlertCircle className="h-3 w-3 mr-0.5" />
+                empty
+              </Badge>
+            ) : (
+              <span className="text-xs text-muted-foreground">No entries</span>
+            )
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              {groupSummary(entries)}
+            </span>
+          )}
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={onRemoveGroup}
-          className="h-6 w-6 p-0"
-        >
-          <X className="h-4 w-4" />
-        </Button>
+        {!required && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onRemoveGroup}
+            className="h-6 w-6 p-0"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        )}
       </div>
 
       {/* Existing entries */}
@@ -378,6 +405,32 @@ export function JobWizard({
     () => estimateWorkItems(configPreview, totalProviderEntries, maxWorkerReplicas),
     [configPreview, totalProviderEntries, maxWorkerReplicas]
   );
+
+  // Auto-populate provider groups required by the arena config
+  const prevRequiredGroups = useRef<string[]>([]);
+  useEffect(() => {
+    if (!configPreview.loaded || configPreview.requiredGroups.length === 0) return;
+
+    const required = configPreview.requiredGroups;
+    // Skip if the required groups haven't changed
+    if (
+      required.length === prevRequiredGroups.current.length &&
+      required.every((g) => prevRequiredGroups.current.includes(g))
+    ) {
+      return;
+    }
+    prevRequiredGroups.current = required;
+
+    setFormState((prev) => {
+      const updated = { ...prev.providerGroups };
+      for (const group of required) {
+        if (!(group in updated)) {
+          updated[group] = [];
+        }
+      }
+      return { ...prev, providerGroups: updated };
+    });
+  }, [configPreview.loaded, configPreview.requiredGroups]);
 
   // Auto-update workers when the recommended count changes
   const prevRecommended = useRef(workEstimate.recommendedWorkers);
@@ -510,7 +563,7 @@ export function JobWizard({
       setError(null);
       setIsSubmitting(true);
 
-      const validationError = validateForm(formState, maxWorkerReplicas);
+      const validationError = validateForm(formState, maxWorkerReplicas, configPreview.requiredGroups);
       if (validationError) {
         setError(validationError);
         setIsSubmitting(false);
@@ -670,6 +723,7 @@ export function JobWizard({
           key={group}
           group={group}
           entries={formState.providerGroups[group] || []}
+          required={configPreview.requiredGroups.includes(group)}
           onAddEntry={(entry) => handleAddEntryToGroup(group, entry)}
           onRemoveEntry={(index) => handleRemoveEntryFromGroup(group, index)}
           onRemoveGroup={() => handleRemoveProviderGroup(group)}

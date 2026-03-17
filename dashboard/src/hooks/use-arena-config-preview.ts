@@ -9,6 +9,8 @@ export interface ArenaConfigPreview {
   scenarioCount: number;
   /** Number of providers declared in the arena config */
   configProviderCount: number;
+  /** Provider groups required by the arena config (from provider file groups + self-play roles) */
+  requiredGroups: string[];
   /** Whether the config was successfully parsed */
   loaded: boolean;
   /** Whether the config is being fetched */
@@ -19,13 +21,39 @@ export interface ArenaConfigPreview {
 
 /**
  * Minimal shape of the arena config YAML we need for preview.
- * Only extracts scenario and provider counts from spec.
+ * Extracts scenario counts, provider groups, and self-play role references.
  */
 interface ArenaConfigYaml {
   spec?: {
     scenarios?: { file?: string }[];
-    providers?: { file?: string; name?: string }[];
+    providers?: { file?: string; name?: string; group?: string }[];
+    self_play?: {
+      enabled?: boolean;
+      roles?: { id?: string; provider?: string }[];
+    };
   };
+}
+
+/**
+ * Extract the unique provider group names referenced by the arena config.
+ * Sources: spec.providers[].group (default: "default") and spec.self_play.roles[].provider.
+ */
+function extractRequiredGroups(parsed: ArenaConfigYaml): string[] {
+  const groups = new Set<string>();
+
+  for (const p of parsed?.spec?.providers ?? []) {
+    groups.add(p.group || "default");
+  }
+
+  if (parsed?.spec?.self_play?.enabled) {
+    for (const role of parsed.spec.self_play.roles ?? []) {
+      if (role.provider) {
+        groups.add(role.provider);
+      }
+    }
+  }
+
+  return Array.from(groups);
 }
 
 /**
@@ -42,23 +70,20 @@ export function useArenaConfigPreview(
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
 
-  const [state, setState] = useState<ArenaConfigPreview>({
+  const emptyState: ArenaConfigPreview = {
     scenarioCount: 0,
     configProviderCount: 0,
+    requiredGroups: [],
     loaded: false,
     loading: false,
     error: null,
-  });
+  };
+
+  const [state, setState] = useState<ArenaConfigPreview>(emptyState);
 
   const fetchConfig = useCallback(async () => {
     if (!workspace || !sourceName || !configPath) {
-      setState({
-        scenarioCount: 0,
-        configProviderCount: 0,
-        loaded: false,
-        loading: false,
-        error: null,
-      });
+      setState(emptyState);
       return;
     }
 
@@ -70,13 +95,7 @@ export function useArenaConfigPreview(
 
       if (!response.ok) {
         if (response.status === 404) {
-          setState({
-            scenarioCount: 0,
-            configProviderCount: 0,
-            loaded: false,
-            loading: false,
-            error: null,
-          });
+          setState(emptyState);
           return;
         }
         throw new Error(`Failed to fetch config: ${response.statusText}`);
@@ -87,28 +106,21 @@ export function useArenaConfigPreview(
 
       const scenarios = parsed?.spec?.scenarios ?? [];
       const providers = parsed?.spec?.providers ?? [];
-
-      // Count only entries that have a file or name reference
-      const scenarioCount = scenarios.filter(
-        (s) => s?.file || s
-      ).length;
-      const configProviderCount = providers.filter(
-        (p) => p?.file || p?.name || p
-      ).length;
+      const scenarioCount = scenarios.filter((s) => s?.file || s).length;
+      const configProviderCount = providers.filter((p) => p?.file || p?.name || p).length;
+      const requiredGroups = extractRequiredGroups(parsed);
 
       setState({
         scenarioCount,
         configProviderCount,
+        requiredGroups,
         loaded: true,
         loading: false,
         error: null,
       });
     } catch (err) {
       setState({
-        scenarioCount: 0,
-        configProviderCount: 0,
-        loaded: false,
-        loading: false,
+        ...emptyState,
         error: err instanceof Error ? err.message : String(err),
       });
     }
