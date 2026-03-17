@@ -11,6 +11,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
@@ -996,6 +998,350 @@ func TestResolveToolsFromCRD(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, cfg.ToolOverrides)
 		assert.Contains(t, cfg.ToolOverrides, "my_tool")
+	})
+}
+
+// ---------------------------------------------------------------------------
+// remapProviderIDs
+// ---------------------------------------------------------------------------
+
+func TestRemapProviderIDs(t *testing.T) {
+	writeConfig := func(t *testing.T, yamlContent string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.arena.yaml")
+		require.NoError(t, os.WriteFile(path, []byte(yamlContent), 0644))
+		return path
+	}
+
+	t.Run("self-play provider remapped", func(t *testing.T) {
+		configPath := writeConfig(t, `spec:
+  providers:
+    - file: providers/target.yaml
+    - file: providers/sim.yaml
+      group: selfplay
+  self_play:
+    enabled: true
+    roles:
+      - id: user-sim
+        provider: selfplay`)
+
+		arenaCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"ollama-tools": {ID: "ollama-tools", Type: "ollama", Model: "llama3"},
+			},
+			ProviderGroups: map[string]string{
+				"ollama-tools": "selfplay",
+			},
+		}
+
+		err := remapProviderIDs(testLog(), arenaCfg, configPath)
+		require.NoError(t, err)
+
+		assert.NotContains(t, arenaCfg.LoadedProviders, "ollama-tools")
+		require.Contains(t, arenaCfg.LoadedProviders, "selfplay")
+		assert.Equal(t, "selfplay", arenaCfg.LoadedProviders["selfplay"].ID)
+		assert.Equal(t, "selfplay", arenaCfg.ProviderGroups["selfplay"])
+	})
+
+	t.Run("judge provider remapped", func(t *testing.T) {
+		configPath := writeConfig(t, `spec:
+  providers:
+    - file: providers/main.yaml
+  judges:
+    - name: quality
+      provider: quality-judge`)
+
+		arenaCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"gpt-4o-judge": {ID: "gpt-4o-judge", Type: "openai", Model: "gpt-4o"},
+			},
+			ProviderGroups: map[string]string{
+				"gpt-4o-judge": "quality-judge",
+			},
+		}
+
+		err := remapProviderIDs(testLog(), arenaCfg, configPath)
+		require.NoError(t, err)
+
+		require.Contains(t, arenaCfg.LoadedProviders, "quality-judge")
+		assert.Equal(t, "quality-judge", arenaCfg.LoadedProviders["quality-judge"].ID)
+	})
+
+	t.Run("judge spec provider remapped", func(t *testing.T) {
+		configPath := writeConfig(t, `spec:
+  providers:
+    - file: providers/main.yaml
+  judge_specs:
+    safety:
+      provider: safety-judge`)
+
+		arenaCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"claude-judge": {ID: "claude-judge", Type: "claude", Model: "claude-3-haiku"},
+			},
+			ProviderGroups: map[string]string{
+				"claude-judge": "safety-judge",
+			},
+		}
+
+		err := remapProviderIDs(testLog(), arenaCfg, configPath)
+		require.NoError(t, err)
+
+		require.Contains(t, arenaCfg.LoadedProviders, "safety-judge")
+		assert.Equal(t, "safety-judge", arenaCfg.LoadedProviders["safety-judge"].ID)
+	})
+
+	t.Run("no-op when no self-play or judges in config", func(t *testing.T) {
+		configPath := writeConfig(t, `spec:
+  providers:
+    - file: providers/main.yaml
+  scenarios:
+    - file: scenarios/test.yaml`)
+
+		arenaCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"my-provider": {ID: "my-provider", Type: "mock"},
+			},
+			ProviderGroups: map[string]string{
+				"my-provider": "default",
+			},
+		}
+
+		err := remapProviderIDs(testLog(), arenaCfg, configPath)
+		require.NoError(t, err)
+
+		// Nothing should change
+		assert.Contains(t, arenaCfg.LoadedProviders, "my-provider")
+		assert.Len(t, arenaCfg.LoadedProviders, 1)
+	})
+
+	t.Run("no-op when CRD name already matches expected ID", func(t *testing.T) {
+		configPath := writeConfig(t, `spec:
+  providers:
+    - file: providers/sim.yaml
+      group: selfplay
+  self_play:
+    enabled: true
+    roles:
+      - id: sim
+        provider: selfplay`)
+
+		arenaCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"selfplay": {ID: "selfplay", Type: "mock"},
+			},
+			ProviderGroups: map[string]string{
+				"selfplay": "selfplay",
+			},
+		}
+
+		err := remapProviderIDs(testLog(), arenaCfg, configPath)
+		require.NoError(t, err)
+
+		// Should remain unchanged
+		assert.Contains(t, arenaCfg.LoadedProviders, "selfplay")
+		assert.Equal(t, "selfplay", arenaCfg.LoadedProviders["selfplay"].ID)
+	})
+
+	t.Run("error when group has no provider for expected ID", func(t *testing.T) {
+		configPath := writeConfig(t, `spec:
+  providers:
+    - file: providers/main.yaml
+  self_play:
+    enabled: true
+    roles:
+      - id: sim
+        provider: selfplay`)
+
+		arenaCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"some-provider": {ID: "some-provider", Type: "mock"},
+			},
+			ProviderGroups: map[string]string{
+				"some-provider": "default", // wrong group
+			},
+		}
+
+		err := remapProviderIDs(testLog(), arenaCfg, configPath)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "selfplay")
+		assert.Contains(t, err.Error(), "no provider in group")
+	})
+
+	t.Run("error when group has multiple providers (ambiguous)", func(t *testing.T) {
+		configPath := writeConfig(t, `spec:
+  providers:
+    - file: providers/main.yaml
+  self_play:
+    enabled: true
+    roles:
+      - id: sim
+        provider: selfplay`)
+
+		arenaCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"provider-a": {ID: "provider-a", Type: "mock"},
+				"provider-b": {ID: "provider-b", Type: "mock"},
+			},
+			ProviderGroups: map[string]string{
+				"provider-a": "selfplay",
+				"provider-b": "selfplay",
+			},
+		}
+
+		err := remapProviderIDs(testLog(), arenaCfg, configPath)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ambiguous")
+		assert.Contains(t, err.Error(), "selfplay")
+	})
+
+	t.Run("fleet provider in self-play group remapped", func(t *testing.T) {
+		configPath := writeConfig(t, `spec:
+  providers:
+    - file: providers/target.yaml
+  self_play:
+    enabled: true
+    roles:
+      - id: user-sim
+        provider: selfplay`)
+
+		arenaCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"agent-my-agent": {ID: "agent-my-agent", Type: "fleet"},
+			},
+			ProviderGroups: map[string]string{
+				"agent-my-agent": "selfplay",
+			},
+		}
+
+		err := remapProviderIDs(testLog(), arenaCfg, configPath)
+		require.NoError(t, err)
+
+		assert.NotContains(t, arenaCfg.LoadedProviders, "agent-my-agent")
+		require.Contains(t, arenaCfg.LoadedProviders, "selfplay")
+		assert.Equal(t, "selfplay", arenaCfg.LoadedProviders["selfplay"].ID)
+		assert.Equal(t, "fleet", arenaCfg.LoadedProviders["selfplay"].Type)
+	})
+
+	t.Run("self-play disabled skips remapping", func(t *testing.T) {
+		configPath := writeConfig(t, `spec:
+  providers:
+    - file: providers/target.yaml
+  self_play:
+    enabled: false
+    roles:
+      - id: sim
+        provider: selfplay`)
+
+		arenaCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"ollama-tools": {ID: "ollama-tools", Type: "ollama"},
+			},
+			ProviderGroups: map[string]string{
+				"ollama-tools": "selfplay",
+			},
+		}
+
+		err := remapProviderIDs(testLog(), arenaCfg, configPath)
+		require.NoError(t, err)
+
+		// Should remain unchanged — self-play disabled
+		assert.Contains(t, arenaCfg.LoadedProviders, "ollama-tools")
+		assert.NotContains(t, arenaCfg.LoadedProviders, "selfplay")
+	})
+}
+
+// ---------------------------------------------------------------------------
+// extractProviderIDRefs
+// ---------------------------------------------------------------------------
+
+func TestExtractProviderIDRefs(t *testing.T) {
+	writeConfig := func(t *testing.T, yamlContent string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.arena.yaml")
+		require.NoError(t, os.WriteFile(path, []byte(yamlContent), 0644))
+		return path
+	}
+
+	t.Run("extracts self-play role providers", func(t *testing.T) {
+		path := writeConfig(t, `spec:
+  self_play:
+    enabled: true
+    roles:
+      - id: sim
+        provider: selfplay`)
+
+		ids, err := extractProviderIDRefs(path)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"selfplay"}, ids)
+	})
+
+	t.Run("extracts judge providers", func(t *testing.T) {
+		path := writeConfig(t, `spec:
+  judges:
+    - name: quality
+      provider: judge-provider`)
+
+		ids, err := extractProviderIDRefs(path)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"judge-provider"}, ids)
+	})
+
+	t.Run("extracts judge spec providers", func(t *testing.T) {
+		path := writeConfig(t, `spec:
+  judge_specs:
+    safety:
+      provider: safety-judge`)
+
+		ids, err := extractProviderIDRefs(path)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"safety-judge"}, ids)
+	})
+
+	t.Run("deduplicates provider IDs", func(t *testing.T) {
+		path := writeConfig(t, `spec:
+  self_play:
+    enabled: true
+    roles:
+      - id: sim1
+        provider: selfplay
+      - id: sim2
+        provider: selfplay
+  judges:
+    - name: j1
+      provider: selfplay`)
+
+		ids, err := extractProviderIDRefs(path)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"selfplay"}, ids)
+	})
+
+	t.Run("returns empty for config with no refs", func(t *testing.T) {
+		path := writeConfig(t, `spec:
+  providers:
+    - file: providers/main.yaml`)
+
+		ids, err := extractProviderIDRefs(path)
+		require.NoError(t, err)
+		assert.Empty(t, ids)
+	})
+
+	t.Run("ignores disabled self-play", func(t *testing.T) {
+		path := writeConfig(t, `spec:
+  self_play:
+    enabled: false
+    roles:
+      - id: sim
+        provider: selfplay`)
+
+		ids, err := extractProviderIDRefs(path)
+		require.NoError(t, err)
+		assert.Empty(t, ids)
+	})
+
+	t.Run("returns error for missing file", func(t *testing.T) {
+		_, err := extractProviderIDRefs("/nonexistent/config.yaml")
+		require.Error(t, err)
 	})
 }
 

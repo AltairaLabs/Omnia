@@ -431,6 +431,12 @@ func executeWorkItem(
 		return nil, fmt.Errorf("failed to resolve tools from CRDs: %w", err)
 	}
 
+	// Remap provider IDs so that self-play/judge references in the arena config
+	// match the CRD-resolved provider keys in LoadedProviders.
+	if err := remapProviderIDs(log, arenaCfg, configPath); err != nil {
+		return nil, fmt.Errorf("failed to remap provider IDs: %w", err)
+	}
+
 	// Apply tool overrides (from CRD resolution) to the config
 	if len(cfg.ToolOverrides) > 0 {
 		if err := applyToolOverrides(log, arenaCfg, cfg.ToolOverrides); err != nil {

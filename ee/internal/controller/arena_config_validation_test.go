@@ -213,6 +213,253 @@ func TestValidateProviderGroups(t *testing.T) {
 	})
 }
 
+func TestValidateProviderIDMappings(t *testing.T) {
+	writeConfig := func(t *testing.T, yaml string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.arena.yaml")
+		if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	t.Run("passes when self-play group has exactly one provider", func(t *testing.T) {
+		path := writeConfig(t, `spec:
+  providers:
+    - file: p.yaml
+    - file: sim.yaml
+      group: selfplay
+  self_play:
+    enabled: true
+    roles:
+      - id: sim
+        provider: selfplay`)
+
+		job := &omniav1alpha1.ArenaJob{
+			Spec: omniav1alpha1.ArenaJobSpec{
+				SourceRef: corev1alpha1.LocalObjectReference{Name: "src"},
+				Providers: map[string][]omniav1alpha1.ArenaProviderEntry{
+					"default":  {{ProviderRef: &corev1alpha1.ProviderRef{Name: "claude"}}},
+					"selfplay": {{ProviderRef: &corev1alpha1.ProviderRef{Name: "ollama-tools"}}},
+				},
+			},
+		}
+
+		msg := validateProviderIDMappings(job, path)
+		if msg != "" {
+			t.Errorf("expected no error, got: %s", msg)
+		}
+	})
+
+	t.Run("fails when self-play group has multiple providers", func(t *testing.T) {
+		path := writeConfig(t, `spec:
+  providers:
+    - file: p.yaml
+    - file: sim.yaml
+      group: selfplay
+  self_play:
+    enabled: true
+    roles:
+      - id: sim
+        provider: selfplay`)
+
+		job := &omniav1alpha1.ArenaJob{
+			Spec: omniav1alpha1.ArenaJobSpec{
+				SourceRef: corev1alpha1.LocalObjectReference{Name: "src"},
+				Providers: map[string][]omniav1alpha1.ArenaProviderEntry{
+					"default": {{ProviderRef: &corev1alpha1.ProviderRef{Name: "claude"}}},
+					"selfplay": {
+						{ProviderRef: &corev1alpha1.ProviderRef{Name: "ollama-a"}},
+						{ProviderRef: &corev1alpha1.ProviderRef{Name: "ollama-b"}},
+					},
+				},
+			},
+		}
+
+		msg := validateProviderIDMappings(job, path)
+		if msg == "" {
+			t.Error("expected ambiguity error, got none")
+		}
+		if !contains(msg, "selfplay") {
+			t.Errorf("expected error to mention 'selfplay', got: %s", msg)
+		}
+		if !contains(msg, "ambiguous") {
+			t.Errorf("expected error to mention 'ambiguous', got: %s", msg)
+		}
+	})
+
+	t.Run("passes for judge with single provider in group", func(t *testing.T) {
+		path := writeConfig(t, `spec:
+  providers:
+    - file: p.yaml
+  judges:
+    - name: quality
+      provider: judge`)
+
+		job := &omniav1alpha1.ArenaJob{
+			Spec: omniav1alpha1.ArenaJobSpec{
+				SourceRef: corev1alpha1.LocalObjectReference{Name: "src"},
+				Providers: map[string][]omniav1alpha1.ArenaProviderEntry{
+					"default": {{ProviderRef: &corev1alpha1.ProviderRef{Name: "claude"}}},
+					"judge":   {{ProviderRef: &corev1alpha1.ProviderRef{Name: "gpt-4o"}}},
+				},
+			},
+		}
+
+		msg := validateProviderIDMappings(job, path)
+		if msg != "" {
+			t.Errorf("expected no error, got: %s", msg)
+		}
+	})
+
+	t.Run("skips when config file not found", func(t *testing.T) {
+		job := &omniav1alpha1.ArenaJob{
+			Spec: omniav1alpha1.ArenaJobSpec{
+				SourceRef: corev1alpha1.LocalObjectReference{Name: "src"},
+			},
+		}
+
+		msg := validateProviderIDMappings(job, "/nonexistent/config.yaml")
+		if msg != "" {
+			t.Errorf("expected empty (skip), got: %s", msg)
+		}
+	})
+
+	t.Run("no-op when no provider ID refs in config", func(t *testing.T) {
+		path := writeConfig(t, `spec:
+  providers:
+    - file: p.yaml`)
+
+		job := &omniav1alpha1.ArenaJob{
+			Spec: omniav1alpha1.ArenaJobSpec{
+				SourceRef: corev1alpha1.LocalObjectReference{Name: "src"},
+				Providers: map[string][]omniav1alpha1.ArenaProviderEntry{
+					"default": {{ProviderRef: &corev1alpha1.ProviderRef{Name: "claude"}}},
+				},
+			},
+		}
+
+		msg := validateProviderIDMappings(job, path)
+		if msg != "" {
+			t.Errorf("expected no error, got: %s", msg)
+		}
+	})
+}
+
+func TestExtractProviderIDRefsController(t *testing.T) {
+	writeConfig := func(t *testing.T, yaml string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.arena.yaml")
+		if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	t.Run("extracts self-play providers", func(t *testing.T) {
+		path := writeConfig(t, `spec:
+  self_play:
+    enabled: true
+    roles:
+      - id: sim
+        provider: selfplay`)
+
+		ids, err := extractProviderIDRefs(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ids) != 1 || ids[0] != "selfplay" {
+			t.Errorf("expected [selfplay], got %v", ids)
+		}
+	})
+
+	t.Run("extracts judge providers", func(t *testing.T) {
+		path := writeConfig(t, `spec:
+  judges:
+    - name: q
+      provider: judge-prov`)
+
+		ids, err := extractProviderIDRefs(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ids) != 1 || ids[0] != "judge-prov" {
+			t.Errorf("expected [judge-prov], got %v", ids)
+		}
+	})
+
+	t.Run("extracts judge spec providers", func(t *testing.T) {
+		path := writeConfig(t, `spec:
+  judge_specs:
+    safety:
+      provider: safety-judge`)
+
+		ids, err := extractProviderIDRefs(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ids) != 1 || ids[0] != "safety-judge" {
+			t.Errorf("expected [safety-judge], got %v", ids)
+		}
+	})
+
+	t.Run("returns error for missing file", func(t *testing.T) {
+		_, err := extractProviderIDRefs("/nonexistent/path.yaml")
+		if err == nil {
+			t.Error("expected error")
+		}
+	})
+}
+
+// validateProviderGroups integration: ambiguous mapping caught end-to-end
+
+func TestValidateProviderGroups_AmbiguousMapping(t *testing.T) {
+	r := &ArenaJobReconciler{}
+
+	writeConfig := func(t *testing.T, yaml string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.arena.yaml")
+		if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	t.Run("catches ambiguous self-play mapping via validateProviderGroups", func(t *testing.T) {
+		path := writeConfig(t, `spec:
+  providers:
+    - file: p.yaml
+    - file: sim.yaml
+      group: selfplay
+  self_play:
+    enabled: true
+    roles:
+      - id: sim
+        provider: selfplay`)
+
+		job := &omniav1alpha1.ArenaJob{
+			Spec: omniav1alpha1.ArenaJobSpec{
+				SourceRef: corev1alpha1.LocalObjectReference{Name: "src"},
+				Providers: map[string][]omniav1alpha1.ArenaProviderEntry{
+					"default": {{ProviderRef: &corev1alpha1.ProviderRef{Name: "claude"}}},
+					"selfplay": {
+						{ProviderRef: &corev1alpha1.ProviderRef{Name: "a"}},
+						{ProviderRef: &corev1alpha1.ProviderRef{Name: "b"}},
+					},
+				},
+			},
+		}
+
+		msg := r.validateProviderGroups(job, path)
+		if msg == "" {
+			t.Error("expected ambiguity error")
+		}
+		if !contains(msg, "ambiguous") {
+			t.Errorf("expected 'ambiguous' in error, got: %s", msg)
+		}
+	})
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstring(s, substr))
 }

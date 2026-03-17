@@ -19,6 +19,7 @@ import (
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/go-logr/logr"
+	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -341,6 +342,128 @@ func convertProviderDefaults(d *v1alpha1.ProviderDefaults) config.ProviderDefaul
 	}
 
 	return pd
+}
+
+// remapProviderIDs remaps CRD-resolved provider IDs to match the IDs expected by
+// the arena config's self-play roles and judges. When CRD resolution creates a provider
+// with key "ollama-tools" in group "selfplay", but the config references provider "selfplay",
+// PromptKit's engine fails with "unknown provider". This function bridges that gap.
+func remapProviderIDs(log logr.Logger, arenaCfg *config.Config, configPath string) error {
+	expectedIDs, err := extractProviderIDRefs(configPath)
+	if err != nil {
+		return fmt.Errorf("extract provider ID refs from config: %w", err)
+	}
+	if len(expectedIDs) == 0 {
+		return nil
+	}
+
+	// Build reverse map: group → []providerID from ProviderGroups
+	groupToProviders := make(map[string][]string)
+	for provID, group := range arenaCfg.ProviderGroups {
+		groupToProviders[group] = append(groupToProviders[group], provID)
+	}
+
+	for _, expectedID := range expectedIDs {
+		// Skip if already present in LoadedProviders
+		if _, exists := arenaCfg.LoadedProviders[expectedID]; exists {
+			continue
+		}
+
+		// Look for CRD providers whose group matches the expected ID
+		candidates := groupToProviders[expectedID]
+		if len(candidates) == 0 {
+			return fmt.Errorf(
+				"config references provider %q but no provider in group %q",
+				expectedID, expectedID,
+			)
+		}
+		if len(candidates) > 1 {
+			return fmt.Errorf(
+				"group %q has %d providers %v; ambiguous mapping to ID %q",
+				expectedID, len(candidates), candidates, expectedID,
+			)
+		}
+
+		// Exactly one match — remap
+		oldID := candidates[0]
+		provider := arenaCfg.LoadedProviders[oldID]
+		provider.ID = expectedID
+
+		// Move in LoadedProviders
+		delete(arenaCfg.LoadedProviders, oldID)
+		arenaCfg.LoadedProviders[expectedID] = provider
+
+		// Update ProviderGroups
+		delete(arenaCfg.ProviderGroups, oldID)
+		arenaCfg.ProviderGroups[expectedID] = expectedID
+
+		log.V(1).Info("provider ID remapped",
+			"oldID", oldID,
+			"newID", expectedID,
+			"group", expectedID,
+		)
+	}
+
+	return nil
+}
+
+// arenaConfigProviderRefs is a minimal representation of the arena config YAML
+// for extracting provider ID references from self-play roles, judges, and judge specs.
+type arenaConfigProviderRefs struct {
+	Spec struct {
+		SelfPlay *struct {
+			Enabled bool `yaml:"enabled"`
+			Roles   []struct {
+				Provider string `yaml:"provider"`
+			} `yaml:"roles"`
+		} `yaml:"self_play"`
+		Judges []struct {
+			Provider string `yaml:"provider"`
+		} `yaml:"judges"`
+		JudgeSpecs map[string]struct {
+			Provider string `yaml:"provider"`
+		} `yaml:"judge_specs"`
+	} `yaml:"spec"`
+}
+
+// extractProviderIDRefs parses the arena config YAML and returns all provider IDs
+// referenced by self-play roles, judges, and judge specs.
+func extractProviderIDRefs(configPath string) ([]string, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("read arena config: %w", err)
+	}
+
+	var cfg arenaConfigProviderRefs
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse arena config: %w", err)
+	}
+
+	seen := make(map[string]bool)
+	var ids []string
+
+	addID := func(id string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+
+	if cfg.Spec.SelfPlay != nil && cfg.Spec.SelfPlay.Enabled {
+		for _, role := range cfg.Spec.SelfPlay.Roles {
+			addID(role.Provider)
+		}
+	}
+
+	for _, judge := range cfg.Spec.Judges {
+		addID(judge.Provider)
+	}
+
+	for _, spec := range cfg.Spec.JudgeSpecs {
+		addID(spec.Provider)
+	}
+
+	return ids, nil
 }
 
 // sanitizeID converts a CRD name to a safe provider ID.
