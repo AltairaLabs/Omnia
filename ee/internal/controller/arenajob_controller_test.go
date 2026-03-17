@@ -2185,27 +2185,6 @@ spec:
 		})
 	})
 
-	Context("getWorkerServiceAccountName", func() {
-		It("should return empty when WorkerServiceAccountName is not configured", func() {
-			reconciler := &ArenaJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			Expect(reconciler.getWorkerServiceAccountName()).To(BeEmpty())
-		})
-
-		It("should return SA name when WorkerServiceAccountName is configured", func() {
-			reconciler := &ArenaJobReconciler{
-				Client:                   k8sClient,
-				Scheme:                   k8sClient.Scheme(),
-				WorkerServiceAccountName: "my-arena-worker",
-			}
-
-			Expect(reconciler.getWorkerServiceAccountName()).To(Equal("my-arena-worker"))
-		})
-	})
-
 	Context("buildRedisPasswordEnvVar", func() {
 		It("should return secretKeyRef when RedisPasswordSecret is set", func() {
 			reconciler := &ArenaJobReconciler{

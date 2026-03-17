@@ -85,15 +85,6 @@ enterprise:
         # -- Worker image pull policy
         pullPolicy: IfNotPresent
 
-      # ServiceAccount for arena worker pods (required for CRD-based provider resolution)
-      serviceAccount:
-        # -- Create a ServiceAccount for worker pods (required — workers read Provider/AgentRuntime/ToolRegistry CRDs)
-        create: true
-        # -- Annotations for the worker ServiceAccount (e.g., IRSA role ARN)
-        annotations: {}
-        # -- Name of the worker ServiceAccount (auto-generated if not set)
-        name: ""
-
       # -- Default resource limits for worker pods
       resources:
         limits:

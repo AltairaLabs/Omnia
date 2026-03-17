@@ -119,10 +119,6 @@ type ArenaJobReconciler struct {
 	// When set, the reconciler will ensure workspace PVC exists before creating worker jobs
 	// that mount the PVC. Ignored when NFSServer/NFSPath are set (direct NFS mount).
 	StorageManager *workspace.StorageManager
-	// WorkerServiceAccountName is the ServiceAccount name for worker pods.
-	// Used for workload identity authentication with hyperscaler providers.
-	// When set and a provider uses workloadIdentity auth, worker pods will use this SA.
-	WorkerServiceAccountName string
 	// TracingEnabled enables OTel tracing for arena worker pods.
 	TracingEnabled bool
 	// TracingEndpoint is the OTLP gRPC endpoint for arena worker tracing.
@@ -136,7 +132,8 @@ type ArenaJobReconciler struct {
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=providers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -362,13 +359,6 @@ func (r *ArenaJobReconciler) getWorkerResources(_ *omniav1alpha1.ArenaJob) corev
 	return defaultWorkerResources
 }
 
-// getWorkerServiceAccountName returns the ServiceAccount name for worker pods.
-// Workers need a ServiceAccount with RBAC permissions to read Provider, AgentRuntime,
-// ToolRegistry, and ArenaJob CRDs for provider resolution.
-func (r *ArenaJobReconciler) getWorkerServiceAccountName() string {
-	return r.WorkerServiceAccountName
-}
-
 // resolvedProviderGroup holds the resolved CRDs and agent WebSocket URLs for a provider group.
 type resolvedProviderGroup struct {
 	providers []*corev1alpha1.Provider
@@ -528,6 +518,12 @@ func (r *ArenaJobReconciler) buildProviderEnvVarsFromCRDs(providerCRDs []*corev1
 //nolint:gocognit,gocyclo // Pre-existing complexity, scheduled for refactoring
 func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, source *omniav1alpha1.ArenaSource) error {
 	log := logf.FromContext(ctx)
+
+	// Create ServiceAccount + Role + RoleBinding for worker CRD reads (namespace-scoped)
+	workerSAName, err := r.reconcileWorkerRBAC(ctx, arenaJob)
+	if err != nil {
+		return fmt.Errorf("failed to reconcile worker RBAC: %w", err)
+	}
 
 	replicas := int32(1)
 	if arenaJob.Spec.Workers != nil && arenaJob.Spec.Workers.Replicas > 0 {
@@ -803,11 +799,8 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		},
 	}
 
-	// Set ServiceAccountName for workload identity
-	if saName := r.getWorkerServiceAccountName(); saName != "" {
-		job.Spec.Template.Spec.ServiceAccountName = saName
-		log.Info("setting worker ServiceAccountName for workload identity", "serviceAccount", saName)
-	}
+	// Set ServiceAccountName for CRD reads (created by reconcileWorkerRBAC above)
+	job.Spec.Template.Spec.ServiceAccountName = workerSAName
 
 	// Set TTL for automatic cleanup after completion (default: 1 hour)
 	if arenaJob.Spec.TTLSecondsAfterFinished != nil {

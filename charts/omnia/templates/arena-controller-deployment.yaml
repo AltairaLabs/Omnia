@@ -66,9 +66,6 @@ spec:
             - --workspace-storage-class={{ include "omnia.nfsStorageClass" . }}
             {{- end }}
             - --workspace-content-path=/workspace-content
-            {{- if .Values.enterprise.arena.worker.serviceAccount.create }}
-            - --worker-service-account-name={{ .Values.enterprise.arena.worker.serviceAccount.name | default (printf "%s-arena-worker" (include "omnia.fullname" .)) }}
-            {{- end }}
             {{- if .Values.devMode }}
             - --dev-mode
             {{- end }}
