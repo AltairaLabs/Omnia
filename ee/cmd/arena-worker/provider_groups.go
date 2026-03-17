@@ -29,11 +29,13 @@ import (
 	"github.com/altairalabs/omnia/pkg/k8s"
 )
 
-// resolvedFleetProvider holds a connected fleet provider for registration after engine init.
+// resolvedFleetProvider tracks a fleet provider that needs post-build connection.
+// The provider is created by BuildEngineComponents via the fleet factory; we just
+// need to connect it to the agent WebSocket after the engine is built.
 type resolvedFleetProvider struct {
-	provider *fleet.Provider
-	id       string
-	group    string
+	wsURL string
+	id    string
+	group string
 }
 
 // resolveProvidersFromCRD resolves providers from CRD refs when ARENA_PROVIDER_GROUPS is set.
@@ -165,29 +167,29 @@ func resolveAgentRefEntry(
 
 	providerID := sanitizeID("agent-" + agentName)
 
-	// Create fleet provider and connect
-	fp := fleet.NewProvider(providerID, wsURL, nil)
-	if err := fp.Connect(ctx); err != nil {
-		return nil, fmt.Errorf("group %q: failed to connect to agent %s: %w", groupName, agentName, err)
+	// Add to LoadedProviders with ws_url in AdditionalConfig.
+	// The fleet provider factory (registered via init() in ee/pkg/arena/fleet/factory.go)
+	// will create the Provider instance during BuildEngineComponents.
+	arenaCfg.LoadedProviders[providerID] = &config.Provider{
+		ID:   providerID,
+		Type: "fleet",
+		AdditionalConfig: map[string]interface{}{
+			"ws_url": wsURL,
+		},
 	}
-
-	// NOTE: Do NOT add fleet providers to LoadedProviders here.
-	// BuildEngineComponents rejects the unknown "fleet" type.
-	// Fleet providers are added to LoadedProviders AFTER BuildEngineComponents
-	// but BEFORE NewEngine (see registerFleetProviders in worker.go).
+	arenaCfg.ProviderGroups[providerID] = groupName
 
 	log.Info("agent resolved from CRD",
 		"providerID", providerID,
 		"agentName", agentName,
 		"wsURL", wsURL,
 		"group", groupName,
-		"sessionID", fp.SessionID(),
 	)
 
 	return &resolvedFleetProvider{
-		provider: fp,
-		id:       providerID,
-		group:    groupName,
+		wsURL: wsURL,
+		id:    providerID,
+		group: groupName,
 	}, nil
 }
 
@@ -244,31 +246,46 @@ func resolveToolsFromCRD(
 	return nil
 }
 
-// registerFleetProviders registers pre-connected fleet providers into the provider registry
-// AND adds them to LoadedProviders. Must be called AFTER BuildEngineComponents (which rejects
-// the unknown "fleet" type) but BEFORE NewEngine (which snapshots LoadedProviders into the
-// planner's provider map for GenerateRunPlan).
-func registerFleetProviders(
+// connectFleetProviders connects fleet providers that were created by BuildEngineComponents
+// via the fleet factory. The factory creates the provider but doesn't connect it.
+// This must be called AFTER BuildEngineComponents but BEFORE engine execution.
+func connectFleetProviders(
+	ctx context.Context,
+	log logr.Logger,
 	registry *pkproviders.Registry,
-	arenaCfg *config.Config,
 	fleetProviders []*resolvedFleetProvider,
-) {
+) error {
 	for _, fp := range fleetProviders {
-		registry.Register(fp.provider)
-		arenaCfg.LoadedProviders[fp.id] = &config.Provider{
-			ID:   fp.id,
-			Type: "fleet",
+		provider, _ := registry.Get(fp.id)
+		if provider == nil {
+			return fmt.Errorf("fleet provider %q not found in registry after engine build", fp.id)
 		}
-		if fp.group != "" {
-			arenaCfg.ProviderGroups[fp.id] = fp.group
+		fleetProv, ok := provider.(*fleet.Provider)
+		if !ok {
+			return fmt.Errorf("provider %q is not a fleet provider (type %T)", fp.id, provider)
 		}
+		if err := fleetProv.Connect(ctx); err != nil {
+			return fmt.Errorf("failed to connect fleet provider %q: %w", fp.id, err)
+		}
+		log.Info("fleet provider connected",
+			"providerID", fp.id,
+			"wsURL", fp.wsURL,
+			"sessionID", fleetProv.SessionID(),
+		)
 	}
+	return nil
 }
 
-// closeFleetProviders closes all fleet provider connections.
-func closeFleetProviders(fleetProviders []*resolvedFleetProvider) {
+// closeFleetProviders closes all fleet provider connections via the registry.
+func closeFleetProviders(registry *pkproviders.Registry, fleetProviders []*resolvedFleetProvider) {
 	for _, fp := range fleetProviders {
-		_ = fp.provider.Close()
+		provider, _ := registry.Get(fp.id)
+		if provider == nil {
+			continue
+		}
+		if fleetProv, ok := provider.(*fleet.Provider); ok {
+			_ = fleetProv.Close()
+		}
 	}
 }
 

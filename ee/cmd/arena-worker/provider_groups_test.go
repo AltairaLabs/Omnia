@@ -268,68 +268,61 @@ func TestConvertProviderDefaults(t *testing.T) {
 
 func TestCloseFleetProviders(t *testing.T) {
 	t.Run("nil slice is a no-op", func(t *testing.T) {
-		// Should not panic
-		closeFleetProviders(nil)
+		registry := pkproviders.NewRegistry()
+		closeFleetProviders(registry, nil)
 	})
 
 	t.Run("empty slice is a no-op", func(t *testing.T) {
-		closeFleetProviders([]*resolvedFleetProvider{})
+		registry := pkproviders.NewRegistry()
+		closeFleetProviders(registry, []*resolvedFleetProvider{})
 	})
 
-	t.Run("closes unconnected providers without error", func(t *testing.T) {
-		// fleet.Provider.Close() on an unconnected provider returns nil (conn is nil).
-		// This verifies the loop body executes without panicking.
+	t.Run("closes providers found in registry", func(t *testing.T) {
+		registry := pkproviders.NewRegistry()
+		// Register unconnected fleet providers (Close is a no-op when not connected)
 		fp1 := fleet.NewProvider("p1", "ws://fake:8080/ws", nil)
 		fp2 := fleet.NewProvider("p2", "ws://fake:8080/ws", nil)
+		registry.Register(fp1)
+		registry.Register(fp2)
+
 		fps := []*resolvedFleetProvider{
-			{provider: fp1, id: "p1", group: "default"},
-			{provider: fp2, id: "p2", group: "default"},
+			{id: "p1", wsURL: "ws://fake:8080/ws", group: "default"},
+			{id: "p2", wsURL: "ws://fake:8080/ws", group: "default"},
 		}
-		// Should not panic — conn is nil so Close is a no-op
-		closeFleetProviders(fps)
+		// Should not panic
+		closeFleetProviders(registry, fps)
+	})
+
+	t.Run("skips providers not in registry", func(t *testing.T) {
+		registry := pkproviders.NewRegistry()
+		fps := []*resolvedFleetProvider{
+			{id: "missing", wsURL: "ws://fake:8080/ws", group: "default"},
+		}
+		// Should not panic
+		closeFleetProviders(registry, fps)
 	})
 }
 
 // ---------------------------------------------------------------------------
-// registerFleetProviders
+// connectFleetProviders
 // ---------------------------------------------------------------------------
 
-func TestRegisterFleetProviders(t *testing.T) {
-	t.Run("adds fleet providers to LoadedProviders and ProviderGroups", func(t *testing.T) {
+func TestConnectFleetProviders(t *testing.T) {
+	t.Run("returns error when provider not in registry", func(t *testing.T) {
 		registry := pkproviders.NewRegistry()
-		arenaCfg := &config.Config{
-			LoadedProviders: make(map[string]*config.Provider),
-			ProviderGroups:  make(map[string]string),
-		}
-
-		fp1 := fleet.NewProvider("agent-bot", "ws://fake:8080/ws", nil)
-		fp2 := fleet.NewProvider("agent-assistant", "ws://fake:8080/ws", nil)
 		fps := []*resolvedFleetProvider{
-			{provider: fp1, id: "agent-bot", group: "default"},
-			{provider: fp2, id: "agent-assistant", group: "selfplay"},
+			{id: "missing", wsURL: "ws://fake:8080/ws", group: "default"},
 		}
 
-		registerFleetProviders(registry, arenaCfg, fps)
-
-		// Verify LoadedProviders populated
-		require.Len(t, arenaCfg.LoadedProviders, 2)
-		assert.Equal(t, "fleet", arenaCfg.LoadedProviders["agent-bot"].Type)
-		assert.Equal(t, "fleet", arenaCfg.LoadedProviders["agent-assistant"].Type)
-
-		// Verify ProviderGroups populated
-		assert.Equal(t, "default", arenaCfg.ProviderGroups["agent-bot"])
-		assert.Equal(t, "selfplay", arenaCfg.ProviderGroups["agent-assistant"])
+		err := connectFleetProviders(context.Background(), testLog(), registry, fps)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not found in registry")
 	})
 
 	t.Run("no-op with empty slice", func(t *testing.T) {
 		registry := pkproviders.NewRegistry()
-		arenaCfg := &config.Config{
-			LoadedProviders: make(map[string]*config.Provider),
-			ProviderGroups:  make(map[string]string),
-		}
-
-		registerFleetProviders(registry, arenaCfg, nil)
-		assert.Empty(t, arenaCfg.LoadedProviders)
+		err := connectFleetProviders(context.Background(), testLog(), registry, nil)
+		require.NoError(t, err)
 	})
 }
 

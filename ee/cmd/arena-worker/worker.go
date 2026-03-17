@@ -426,7 +426,6 @@ func executeWorkItem(
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve providers from CRDs: %w", err)
 	}
-	defer closeFleetProviders(crdFleetProviders)
 
 	if err := resolveToolsFromCRD(ctx, log, k8sClient, cfg); err != nil {
 		return nil, fmt.Errorf("failed to resolve tools from CRDs: %w", err)
@@ -439,7 +438,9 @@ func executeWorkItem(
 		}
 	}
 
-	// Build registries and executors from the config
+	// Build registries and executors from the config.
+	// Fleet providers in LoadedProviders are handled by the registered fleet factory
+	// (ee/pkg/arena/fleet/factory.go) — no special ordering needed.
 	log.Info("building engine components")
 	providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry, a2aCleanup, _, err :=
 		engine.BuildEngineComponents(arenaCfg)
@@ -450,11 +451,13 @@ func executeWorkItem(
 		defer a2aCleanup()
 	}
 
-	// Register fleet providers into the runtime registry AFTER BuildEngineComponents
-	// (which would reject the unknown "fleet" type) but BEFORE NewEngine which
-	// snapshots LoadedProviders into the planner's provider map.
+	// Connect fleet providers to their agent WebSocket endpoints.
+	// The factory created them but didn't connect (no context available at factory time).
 	if len(crdFleetProviders) > 0 {
-		registerFleetProviders(providerRegistry, arenaCfg, crdFleetProviders)
+		if err := connectFleetProviders(ctx, log, providerRegistry, crdFleetProviders); err != nil {
+			return nil, fmt.Errorf("failed to connect fleet providers: %w", err)
+		}
+		defer closeFleetProviders(providerRegistry, crdFleetProviders)
 	}
 
 	// Create engine with all components
