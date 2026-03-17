@@ -1168,7 +1168,7 @@ func TestRemapProviderIDs(t *testing.T) {
 		assert.Contains(t, err.Error(), "no provider in group")
 	})
 
-	t.Run("error when group has multiple providers (ambiguous)", func(t *testing.T) {
+	t.Run("multiple providers in group picks first and remaps", func(t *testing.T) {
 		configPath := writeConfig(t, `spec:
   providers:
     - file: providers/main.yaml
@@ -1180,8 +1180,8 @@ func TestRemapProviderIDs(t *testing.T) {
 
 		arenaCfg := &config.Config{
 			LoadedProviders: map[string]*config.Provider{
-				"provider-a": {ID: "provider-a", Type: "mock"},
-				"provider-b": {ID: "provider-b", Type: "mock"},
+				"provider-a": {ID: "provider-a", Type: "mock", Model: "model-a"},
+				"provider-b": {ID: "provider-b", Type: "mock", Model: "model-b"},
 			},
 			ProviderGroups: map[string]string{
 				"provider-a": "selfplay",
@@ -1190,9 +1190,14 @@ func TestRemapProviderIDs(t *testing.T) {
 		}
 
 		err := remapProviderIDs(testLog(), arenaCfg, configPath)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "ambiguous")
-		assert.Contains(t, err.Error(), "selfplay")
+		require.NoError(t, err)
+
+		// One of the providers should be remapped to "selfplay"
+		require.Contains(t, arenaCfg.LoadedProviders, "selfplay")
+		assert.Equal(t, "selfplay", arenaCfg.LoadedProviders["selfplay"].ID)
+
+		// Should still have 2 providers total (one remapped, one untouched)
+		assert.Len(t, arenaCfg.LoadedProviders, 2)
 	})
 
 	t.Run("fleet provider in self-play group remapped", func(t *testing.T) {

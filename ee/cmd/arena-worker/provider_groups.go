@@ -377,14 +377,9 @@ func remapProviderIDs(log logr.Logger, arenaCfg *config.Config, configPath strin
 				expectedID, expectedID,
 			)
 		}
-		if len(candidates) > 1 {
-			return fmt.Errorf(
-				"group %q has %d providers %v; ambiguous mapping to ID %q",
-				expectedID, len(candidates), candidates, expectedID,
-			)
-		}
-
-		// Exactly one match — remap
+		// Pick the first provider in the group to remap.
+		// Groups can have multiple providers (e.g., for A/B testing); we remap
+		// one to the expected ID so PromptKit can find it, others keep their CRD names.
 		oldID := candidates[0]
 		provider := arenaCfg.LoadedProviders[oldID]
 		provider.ID = expectedID
