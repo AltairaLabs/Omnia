@@ -454,7 +454,7 @@ func executeWorkItem(
 	// (which would reject the unknown "fleet" type) but BEFORE NewEngine which
 	// snapshots LoadedProviders into the planner's provider map.
 	if len(crdFleetProviders) > 0 {
-		registerFleetProviders(providerRegistry, crdFleetProviders)
+		registerFleetProviders(providerRegistry, arenaCfg, crdFleetProviders)
 	}
 
 	// Create engine with all components

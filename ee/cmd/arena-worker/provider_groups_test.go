@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
+	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -286,6 +287,49 @@ func TestCloseFleetProviders(t *testing.T) {
 		}
 		// Should not panic — conn is nil so Close is a no-op
 		closeFleetProviders(fps)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// registerFleetProviders
+// ---------------------------------------------------------------------------
+
+func TestRegisterFleetProviders(t *testing.T) {
+	t.Run("adds fleet providers to LoadedProviders and ProviderGroups", func(t *testing.T) {
+		registry := pkproviders.NewRegistry()
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+
+		fp1 := fleet.NewProvider("agent-bot", "ws://fake:8080/ws", nil)
+		fp2 := fleet.NewProvider("agent-assistant", "ws://fake:8080/ws", nil)
+		fps := []*resolvedFleetProvider{
+			{provider: fp1, id: "agent-bot", group: "default"},
+			{provider: fp2, id: "agent-assistant", group: "selfplay"},
+		}
+
+		registerFleetProviders(registry, arenaCfg, fps)
+
+		// Verify LoadedProviders populated
+		require.Len(t, arenaCfg.LoadedProviders, 2)
+		assert.Equal(t, "fleet", arenaCfg.LoadedProviders["agent-bot"].Type)
+		assert.Equal(t, "fleet", arenaCfg.LoadedProviders["agent-assistant"].Type)
+
+		// Verify ProviderGroups populated
+		assert.Equal(t, "default", arenaCfg.ProviderGroups["agent-bot"])
+		assert.Equal(t, "selfplay", arenaCfg.ProviderGroups["agent-assistant"])
+	})
+
+	t.Run("no-op with empty slice", func(t *testing.T) {
+		registry := pkproviders.NewRegistry()
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+
+		registerFleetProviders(registry, arenaCfg, nil)
+		assert.Empty(t, arenaCfg.LoadedProviders)
 	})
 }
 

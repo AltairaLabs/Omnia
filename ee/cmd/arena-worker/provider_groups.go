@@ -171,12 +171,10 @@ func resolveAgentRefEntry(
 		return nil, fmt.Errorf("group %q: failed to connect to agent %s: %w", groupName, agentName, err)
 	}
 
-	// Add to LoadedProviders so GenerateRunPlan can produce combinations
-	arenaCfg.LoadedProviders[providerID] = &config.Provider{
-		ID:   providerID,
-		Type: "fleet",
-	}
-	arenaCfg.ProviderGroups[providerID] = groupName
+	// NOTE: Do NOT add fleet providers to LoadedProviders here.
+	// BuildEngineComponents rejects the unknown "fleet" type.
+	// Fleet providers are added to LoadedProviders AFTER BuildEngineComponents
+	// but BEFORE NewEngine (see registerFleetProviders in worker.go).
 
 	log.Info("agent resolved from CRD",
 		"providerID", providerID,
@@ -246,11 +244,24 @@ func resolveToolsFromCRD(
 	return nil
 }
 
-// registerFleetProviders registers pre-connected fleet providers into the provider registry.
-// Must be called AFTER BuildEngineComponents but BEFORE NewEngine.
-func registerFleetProviders(registry *pkproviders.Registry, fleetProviders []*resolvedFleetProvider) {
+// registerFleetProviders registers pre-connected fleet providers into the provider registry
+// AND adds them to LoadedProviders. Must be called AFTER BuildEngineComponents (which rejects
+// the unknown "fleet" type) but BEFORE NewEngine (which snapshots LoadedProviders into the
+// planner's provider map for GenerateRunPlan).
+func registerFleetProviders(
+	registry *pkproviders.Registry,
+	arenaCfg *config.Config,
+	fleetProviders []*resolvedFleetProvider,
+) {
 	for _, fp := range fleetProviders {
 		registry.Register(fp.provider)
+		arenaCfg.LoadedProviders[fp.id] = &config.Provider{
+			ID:   fp.id,
+			Type: "fleet",
+		}
+		if fp.group != "" {
+			arenaCfg.ProviderGroups[fp.id] = fp.group
+		}
 	}
 }
 
