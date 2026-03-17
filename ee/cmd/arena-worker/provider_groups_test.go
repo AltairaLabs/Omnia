@@ -667,6 +667,58 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 		assert.Contains(t, err.Error(), "no providers")
 	})
 
+	t.Run("clears pre-existing LoadedProviders from arena config", func(t *testing.T) {
+		// Create Provider CRD
+		provider := &v1alpha1.Provider{
+			Spec: v1alpha1.ProviderSpec{
+				Type:  "openai",
+				Model: "gpt-4o",
+			},
+		}
+		provider.Name = "crd-provider"
+		provider.Namespace = testNamespace
+
+		spec := map[string]interface{}{
+			"providers": map[string]interface{}{
+				"default": []interface{}{
+					map[string]interface{}{
+						"providerRef": map[string]interface{}{
+							"name": "crd-provider",
+						},
+					},
+				},
+			},
+		}
+		u := makeArenaJobUnstructured("test-job", testNamespace, spec)
+
+		c := fake.NewClientBuilder().
+			WithScheme(k8s.Scheme()).
+			WithObjects(provider, u).
+			Build()
+
+		cfg := &Config{JobName: "test-job", JobNamespace: testNamespace}
+		// Pre-populate with arena config file providers (simulating config.LoadConfig)
+		arenaCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"gemini-from-config": {ID: "gemini-from-config", Type: "gemini", Model: "gemini-2.0-flash"},
+				"mock-from-config":   {ID: "mock-from-config", Type: "mock"},
+			},
+			ProviderGroups: map[string]string{
+				"gemini-from-config": "selfplay",
+			},
+		}
+
+		_, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
+		require.NoError(t, err)
+
+		// Arena config providers must be gone — only CRD providers remain
+		assert.NotContains(t, arenaCfg.LoadedProviders, "gemini-from-config",
+			"arena config providers should be cleared when spec.providers is set")
+		assert.NotContains(t, arenaCfg.LoadedProviders, "mock-from-config")
+		assert.Len(t, arenaCfg.LoadedProviders, 1)
+		assert.Contains(t, arenaCfg.LoadedProviders, "crd-provider")
+	})
+
 	t.Run("resolves providerRef entries from CRD", func(t *testing.T) {
 		// Create Provider CRD
 		provider := &v1alpha1.Provider{

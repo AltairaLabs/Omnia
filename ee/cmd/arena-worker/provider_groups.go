@@ -61,12 +61,10 @@ func resolveProvidersFromCRD(
 		return nil, fmt.Errorf("ArenaJob %s/%s has no providers", jobNamespace, jobName)
 	}
 
-	if arenaCfg.LoadedProviders == nil {
-		arenaCfg.LoadedProviders = make(map[string]*config.Provider)
-	}
-	if arenaCfg.ProviderGroups == nil {
-		arenaCfg.ProviderGroups = make(map[string]string)
-	}
+	// Clear providers loaded from arena config file references.
+	// When spec.providers is set, CRD refs replace the arena config's provider YAML files.
+	arenaCfg.LoadedProviders = make(map[string]*config.Provider)
+	arenaCfg.ProviderGroups = make(map[string]string)
 
 	// Parse agent WebSocket URLs from env var (injected by controller)
 	agentWSURLs := parseAgentWSURLs()
