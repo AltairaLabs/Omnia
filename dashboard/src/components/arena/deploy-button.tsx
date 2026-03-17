@@ -28,12 +28,12 @@ import {
   Clock,
   RefreshCw,
 } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
+import { useToast } from "@/hooks/core";
 import {
   useProjectDeployment,
   type DeployRequest,
   type DeploymentStatus,
-} from "@/hooks/use-project-deployment";
+} from "@/hooks/arena";
 import { cn } from "@/lib/utils";
 
 interface DeployButtonProps {

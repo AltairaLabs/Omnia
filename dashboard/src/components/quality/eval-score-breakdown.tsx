@@ -19,7 +19,7 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sparkline } from "@/components/ui/sparkline";
-import { useEvalMetrics, type EvalMetricInfo } from "@/hooks";
+import { useEvalMetrics, type EvalMetricInfo } from "@/hooks/sessions";
 import type { EvalFilter } from "@/lib/prometheus-queries";
 
 /** Format a metric name for display by stripping the prefix and converting underscores. */

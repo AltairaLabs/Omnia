@@ -4,24 +4,20 @@ import { FileTree } from "./file-tree";
 import type { FileTreeNode } from "@/types/arena-project";
 
 // Mock the toast hook
-vi.mock("@/hooks/use-toast", () => ({
+vi.mock("@/hooks/core", () => ({
   useToast: () => ({
     toast: vi.fn(),
   }),
 }));
 
 // Mock the providers hook used by import dialogs
-vi.mock("@/hooks/use-providers", () => ({
+vi.mock("@/hooks/resources", () => ({
   useProviders: () => ({
     data: [],
     loading: false,
     error: null,
     refetch: vi.fn(),
   }),
-}));
-
-// Mock the tool registries hook used by import dialogs
-vi.mock("@/hooks/use-tool-registries", () => ({
   useToolRegistries: () => ({
     data: [],
     loading: false,

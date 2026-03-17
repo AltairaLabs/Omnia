@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
-import { useArenaSourceContent } from "@/hooks/use-arena-source-content";
+import { useArenaSourceContent } from "@/hooks/arena";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { YamlEditor, YamlEditorEmptyState } from "./yaml-editor";
 import {

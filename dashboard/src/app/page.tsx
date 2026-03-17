@@ -3,7 +3,8 @@
 import { Bot, FileText, Wrench, Activity, DollarSign, Coins } from "lucide-react";
 import { Header } from "@/components/layout";
 import { StatCard, RecentAgents, ActivityChart, SystemMetrics } from "@/components/dashboard";
-import { useStats, useCosts } from "@/hooks";
+import { useStats } from "@/hooks/core";
+import { useCosts } from "@/hooks/costs";
 import { formatCost, formatTokens } from "@/lib/pricing";
 
 export default function Home() {

@@ -4,12 +4,11 @@ import { NodeSummaryCard, type SelectedNode } from "./node-summary-card";
 import type { AgentRuntime, PromptPack, ToolRegistry, Provider } from "@/types";
 
 // Mock hooks
-vi.mock("@/hooks", () => ({
-  useProvider: vi.fn(() => ({ data: null })),
+vi.mock("@/hooks/agents", () => ({
   useAgentCost: vi.fn(() => ({ data: null })),
 }));
-
-vi.mock("@/hooks/use-provider-metrics", () => ({
+vi.mock("@/hooks/resources", () => ({
+  useProvider: vi.fn(() => ({ data: null })),
   useProviderMetrics: vi.fn(() => ({ data: null })),
 }));
 

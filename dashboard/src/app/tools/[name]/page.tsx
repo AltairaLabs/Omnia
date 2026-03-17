@@ -33,7 +33,8 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { useToolRegistry, useAgents } from "@/hooks";
+import { useAgents } from "@/hooks/agents";
+import { useToolRegistry } from "@/hooks/resources";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { ToolTestPanel } from "@/components/tools/tool-test-panel";
 import type { DiscoveredTool, HandlerDefinition } from "@/types";

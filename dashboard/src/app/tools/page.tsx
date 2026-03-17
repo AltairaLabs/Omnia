@@ -8,7 +8,7 @@ import { NamespaceFilter } from "@/components/filters";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useToolRegistries, useSharedToolRegistries } from "@/hooks";
+import { useToolRegistries, useSharedToolRegistries } from "@/hooks/resources";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { ToolRegistry, ToolRegistryPhase } from "@/types";
 

@@ -35,7 +35,9 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
-import { useSessions, useSessionSearch, useAgents, useDebounce } from "@/hooks";
+import { useAgents } from "@/hooks/agents";
+import { useSessions, useSessionSearch } from "@/hooks/sessions";
+import { useDebounce } from "@/hooks/core";
 import type { SessionSummary, SessionListOptions, Session } from "@/types/session";
 import { formatDistanceToNow } from "date-fns";
 

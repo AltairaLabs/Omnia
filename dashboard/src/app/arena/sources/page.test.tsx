@@ -7,13 +7,13 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import ArenaSourcesPage from "./page";
 
 // Mock hooks
-vi.mock("@/hooks", () => ({
+vi.mock("@/hooks/arena", () => ({
   useArenaSources: vi.fn(),
   useArenaSourceMutations: vi.fn(),
 }));
 
 // Mock hooks/use-license
-vi.mock("@/hooks/use-license", () => ({
+vi.mock("@/hooks/auth", () => ({
   useLicense: vi.fn(() => ({
     license: { tier: "enterprise" },
     isEnterprise: true,

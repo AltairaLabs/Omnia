@@ -10,8 +10,8 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from "recharts";
-import { useSystemMetrics, type SystemMetric } from "@/hooks/use-system-metrics";
-import { useGrafana, buildDashboardUrl, GRAFANA_DASHBOARDS } from "@/hooks/use-grafana";
+import { useSystemMetrics, type SystemMetric } from "@/hooks/core";
+import { useGrafana, buildDashboardUrl, GRAFANA_DASHBOARDS } from "@/hooks/logs";
 import { cn } from "@/lib/utils";
 
 interface MetricCardProps {

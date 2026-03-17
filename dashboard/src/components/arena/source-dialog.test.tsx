@@ -19,7 +19,7 @@ const createMockSource = (overrides: Partial<ArenaSource> = {}): ArenaSource => 
 // Mock hooks
 const mockCreateSource = vi.fn();
 const mockUpdateSource = vi.fn();
-vi.mock("@/hooks", () => ({
+vi.mock("@/hooks/arena", () => ({
   useArenaSourceMutations: vi.fn(() => ({
     createSource: mockCreateSource,
     updateSource: mockUpdateSource,
@@ -28,7 +28,7 @@ vi.mock("@/hooks", () => ({
   })),
 }));
 
-vi.mock("@/hooks/use-license", () => ({
+vi.mock("@/hooks/auth", () => ({
   useLicense: vi.fn(() => ({
     license: { tier: "enterprise" },
     isEnterprise: true,

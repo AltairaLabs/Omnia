@@ -12,7 +12,7 @@ import {
 import { StatusBadge } from "./status-badge";
 import { FrameworkBadge } from "./framework-badge";
 import { CostBadge } from "@/components/cost";
-import { useAgentCost } from "@/hooks";
+import { useAgentCost } from "@/hooks/agents";
 import type { AgentRuntime } from "@/types";
 import { getDefaultProviderRef } from "@/types/agent-runtime";
 

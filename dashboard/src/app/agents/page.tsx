@@ -9,7 +9,7 @@ import { RequirePermission } from "@/components/require-permission";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAgents } from "@/hooks";
+import { useAgents } from "@/hooks/agents";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { AgentRuntimePhase } from "@/types";
 

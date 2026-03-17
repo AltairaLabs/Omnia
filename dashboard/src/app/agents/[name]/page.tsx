@@ -17,7 +17,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { YamlBlock } from "@/components/ui/yaml-block";
-import { useAgent, useProvider, usePromptPack } from "@/hooks";
+import { useAgent } from "@/hooks/agents";
+import { useProvider, usePromptPack } from "@/hooks/resources";
 import type { NamedProviderRef } from "@/types/agent-runtime";
 
 interface AgentDetailPageProps {

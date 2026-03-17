@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Header } from "@/components/layout";
-import { useArenaSource, useArenaSourceMutations } from "@/hooks";
+import { useArenaSource, useArenaSourceMutations } from "@/hooks/arena";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -26,11 +26,11 @@ import {
   AlertTriangle,
   FolderTree,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
   ArenaBreadcrumb,
   SourceDialog,
-  SourceExplorer,
   formatDate as formatDateBase,
   formatInterval,
   formatBytes,
@@ -38,6 +38,11 @@ import {
   getStatusBadge,
   getConditionIcon,
 } from "@/components/arena";
+
+const SourceExplorer = dynamic(
+  () => import("@/components/arena").then((m) => m.SourceExplorer),
+  { ssr: false }
+);
 import type { ArenaSource } from "@/types/arena";
 import type { Condition } from "@/types/common";
 

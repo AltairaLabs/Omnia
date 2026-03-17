@@ -20,7 +20,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import { useWorkspaces, type WorkspaceListItem } from "@/hooks/use-workspaces";
+import { useWorkspaces, type WorkspaceListItem } from "@/hooks/resources";
 
 const STORAGE_KEY = "omnia-selected-workspace";
 

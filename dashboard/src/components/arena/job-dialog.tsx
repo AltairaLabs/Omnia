@@ -1,7 +1,7 @@
 "use client";
 
-import { useArenaJobMutations } from "@/hooks/use-arena-jobs";
-import { useLicense } from "@/hooks/use-license";
+import { useArenaJobMutations } from "@/hooks/arena";
+import { useLicense } from "@/hooks/auth";
 import { JobWizard } from "./job-wizard";
 import {
   Dialog,

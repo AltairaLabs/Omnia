@@ -10,7 +10,8 @@ import { ScaleControl } from "./scale-control";
 import { CostSparkline } from "@/components/cost";
 import { formatCost } from "@/lib/pricing";
 import { useDataService } from "@/lib/data";
-import { useProvider, useAgentCost } from "@/hooks";
+import { useAgentCost } from "@/hooks/agents";
+import { useProvider } from "@/hooks/resources";
 import type { AgentRuntime } from "@/types";
 import { getDefaultProviderRef } from "@/types/agent-runtime";
 

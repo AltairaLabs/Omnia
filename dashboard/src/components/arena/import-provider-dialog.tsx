@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Loader2, Server } from "lucide-react";
-import { useProviders } from "@/hooks/use-providers";
+import { useProviders } from "@/hooks/resources";
 import {
   convertProviderToArena,
   generateProviderFilename,

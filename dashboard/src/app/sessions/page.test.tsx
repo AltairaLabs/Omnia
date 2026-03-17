@@ -7,10 +7,14 @@ import { render, screen } from "@testing-library/react";
 import SessionsPage from "./page";
 
 // Mock hooks
-vi.mock("@/hooks", () => ({
+vi.mock("@/hooks/agents", () => ({
+  useAgents: vi.fn(),
+}));
+vi.mock("@/hooks/sessions", () => ({
   useSessions: vi.fn(),
   useSessionSearch: vi.fn(),
-  useAgents: vi.fn(),
+}));
+vi.mock("@/hooks/core", () => ({
   useDebounce: vi.fn((v: string) => v),
 }));
 

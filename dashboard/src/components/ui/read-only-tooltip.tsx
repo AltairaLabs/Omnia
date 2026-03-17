@@ -8,7 +8,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useReadOnly } from "@/hooks";
+import { useReadOnly } from "@/hooks/core";
 import { cn } from "@/lib/utils";
 
 interface ReadOnlyTooltipProps {

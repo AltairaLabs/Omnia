@@ -13,7 +13,7 @@ import React from "react";
 // Mock hooks
 const mockUseEvalScoreTrends = vi.fn();
 
-vi.mock("@/hooks", () => ({
+vi.mock("@/hooks/sessions", () => ({
   useEvalScoreTrends: (...args: unknown[]) => mockUseEvalScoreTrends(...args),
 }));
 

@@ -1,7 +1,12 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { Header } from "@/components/layout";
-import { ConsoleTabs } from "@/components/console";
+
+const ConsoleTabs = dynamic(
+  () => import("@/components/console").then((m) => m.ConsoleTabs),
+  { ssr: false }
+);
 
 export default function ConsolePage() {
   return (

@@ -7,10 +7,17 @@ import type { AgentRuntime } from "@/types";
 
 // Mock the hooks
 let mockProviderData: unknown = null;
-vi.mock("@/hooks", () => ({
-  useProvider: vi.fn(() => ({ data: mockProviderData })),
+vi.mock("@/hooks/agents", () => ({
   useAgentCost: vi.fn(() => ({ data: null })),
+}));
+vi.mock("@/hooks/resources", () => ({
+  useProvider: vi.fn(() => ({ data: mockProviderData })),
+}));
+vi.mock("@/hooks/core", () => ({
   useReadOnly: vi.fn(() => ({ isReadOnly: false, message: "" })),
+  useRuntimeConfig: vi.fn(() => ({ config: { demoMode: false } })),
+}));
+vi.mock("@/hooks/auth", () => ({
   usePermissions: vi.fn(() => ({
     can: () => true,
     hasRole: () => true,

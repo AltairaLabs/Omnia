@@ -18,7 +18,9 @@ import { Badge } from "@/components/ui/badge";
 import { YamlBlock } from "@/components/ui/yaml-block";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import { usePromptPacks, useToolRegistries, useProviders, useReadOnly, usePermissions, Permission } from "@/hooks";
+import { usePromptPacks, useToolRegistries, useProviders } from "@/hooks/resources";
+import { useReadOnly } from "@/hooks/core";
+import { usePermissions, Permission } from "@/hooks/auth";
 import { useDataService } from "@/lib/data";
 import { useWorkspace } from "@/contexts/workspace-context";
 import {

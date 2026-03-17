@@ -13,14 +13,10 @@ import {
 import { EnterpriseGate } from "@/components/license/license-gate";
 import { TemplateBrowser } from "@/components/arena/template-browser";
 import { TemplateWizard, type ProviderOption } from "@/components/arena/template-wizard";
-import { useProviders } from "@/hooks/use-providers";
+import { useProviders } from "@/hooks/resources";
 import { TemplateSourceDialog } from "@/components/arena/template-source-dialog";
-import {
-  useTemplateSources,
-  useAllTemplates,
-  useTemplateRendering,
-} from "@/hooks/use-template-sources";
-import { useToast } from "@/hooks/use-toast";
+import { useTemplateSources, useAllTemplates, useTemplateRendering } from "@/hooks/arena";
+import { useToast } from "@/hooks/core";
 import {
   Plus,
   RefreshCw,

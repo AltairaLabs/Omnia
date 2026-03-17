@@ -1,7 +1,7 @@
 "use client";
 
 import { Lock } from "lucide-react";
-import { useReadOnly } from "@/hooks";
+import { useReadOnly } from "@/hooks/core";
 
 /**
  * Banner displayed at the top of the page when the dashboard is in read-only mode.

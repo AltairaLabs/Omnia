@@ -164,6 +164,53 @@ const eslintConfig = defineConfig([
       "sonarjs/table-header": "off",
     },
   },
+  // Module boundary rules — prevent cross-domain imports
+  {
+    files: [
+      "src/app/**/*.ts",
+      "src/app/**/*.tsx",
+      "src/components/**/*.ts",
+      "src/components/**/*.tsx",
+    ],
+    ignores: [
+      "src/app/arena/**",
+      "src/components/arena/**",
+    ],
+    rules: {
+      "no-restricted-imports": ["error", {
+        patterns: [{
+          group: ["@/components/arena", "@/components/arena/*"],
+          message: "Arena components can only be imported within arena pages/components.",
+        }],
+      }],
+    },
+  },
+  {
+    files: [
+      "src/app/**/*.ts",
+      "src/app/**/*.tsx",
+      "src/components/**/*.ts",
+      "src/components/**/*.tsx",
+    ],
+    ignores: [
+      "src/app/console/**",
+      "src/components/console/**",
+      // Agent detail page uses AgentConsole
+      "src/app/agents/**",
+      // Session detail page uses Markdown renderer from console
+      "src/app/sessions/**",
+      // Arena dev console panel uses console components
+      "src/components/arena/**",
+    ],
+    rules: {
+      "no-restricted-imports": ["error", {
+        patterns: [{
+          group: ["@/components/console", "@/components/console/*"],
+          message: "Console components can only be imported within console or agent pages/components.",
+        }],
+      }],
+    },
+  },
   // Data services - relaxed cognitive complexity for query builders
   {
     files: ["**/lib/data/**/*.ts", "**/lib/auth/**/*.ts"],

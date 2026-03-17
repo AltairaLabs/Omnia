@@ -28,8 +28,6 @@ import { createAnonymousUser, type User } from "./types";
 import { getCurrentUser, saveUserToSession, getSession } from "./session";
 import { getUserFromProxyHeaders } from "./proxy";
 import { userHasPermission, type PermissionType } from "./permissions";
-import { authenticateApiKey, isApiKeyAuthEnabled } from "./api-keys";
-import { refreshAccessToken, extractClaims, mapClaimsToUser, validateClaims } from "./oauth";
 
 /**
  * Handle proxy mode authentication.
@@ -105,7 +103,8 @@ async function handleOAuthAuth(config: AuthConfig): Promise<User> {
 export async function getUser(): Promise<User> {
   const config = getAuthConfig();
 
-  // Check for API key authentication first (works in any mode)
+  // Lazy-load API key module only when enabled
+  const { isApiKeyAuthEnabled, authenticateApiKey } = await import("./api-keys");
   if (isApiKeyAuthEnabled()) {
     const apiKeyUser = await authenticateApiKey();
     if (apiKeyUser) {
@@ -149,6 +148,8 @@ async function tryRefreshToken(
   if (!session.oauth?.refreshToken) return;
 
   try {
+    // Lazy-load OAuth module only when token refresh is needed
+    const { refreshAccessToken, extractClaims, mapClaimsToUser, validateClaims } = await import("./oauth");
     const tokens = await refreshAccessToken(session.oauth.refreshToken);
 
     // Update tokens in session

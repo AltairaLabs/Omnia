@@ -8,7 +8,7 @@ import { NamespaceFilter } from "@/components/filters";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { usePromptPacks } from "@/hooks";
+import { usePromptPacks } from "@/hooks/resources";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { PromptPackPhase } from "@/types";

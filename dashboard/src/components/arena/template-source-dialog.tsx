@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useTemplateSourceMutations } from "@/hooks/use-template-sources";
+import { useTemplateSourceMutations } from "@/hooks/arena";
 import {
   Dialog,
   DialogContent,

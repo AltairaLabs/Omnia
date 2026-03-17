@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { useAgentConsole, useConsoleConfig } from "@/hooks";
+import { useAgentConsole, useConsoleConfig } from "@/hooks/console";
 import { ConsoleMessage } from "./console-message";
 import { AttachmentPreview } from "./attachment-preview";
 import { ImageCropDialog } from "./image-crop-dialog";

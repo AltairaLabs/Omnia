@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useProviderMutations } from "@/hooks";
+import { useProviderMutations } from "@/hooks/resources";
 import {
   Dialog,
   DialogContent,

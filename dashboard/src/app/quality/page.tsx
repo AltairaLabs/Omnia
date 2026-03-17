@@ -23,15 +23,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Activity, TrendingUp, AlertCircle, ExternalLink, TrendingDown } from "lucide-react";
-import {
-  useEvalSummary,
-  useEvalFilter,
-  useGrafana,
-  buildDashboardUrl,
-  GRAFANA_DASHBOARDS,
-  type EvalTrendRange,
-  type EvalScoreSummary,
-} from "@/hooks";
+import { useEvalSummary, useEvalFilter, type EvalTrendRange, type EvalScoreSummary } from "@/hooks/sessions";
+import { useGrafana, buildDashboardUrl, GRAFANA_DASHBOARDS } from "@/hooks/logs";
 import { Button } from "@/components/ui/button";
 import { EvalScoreBreakdown } from "@/components/quality/eval-score-breakdown";
 import { EvalScoreTrendChart } from "@/components/quality/eval-score-trend-chart";

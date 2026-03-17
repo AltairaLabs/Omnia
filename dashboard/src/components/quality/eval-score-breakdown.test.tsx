@@ -13,7 +13,7 @@ import React from "react";
 // Mock hooks
 const mockUseEvalMetrics = vi.fn();
 
-vi.mock("@/hooks", () => ({
+vi.mock("@/hooks/sessions", () => ({
   useEvalMetrics: (...args: unknown[]) => mockUseEvalMetrics(...args),
 }));
 

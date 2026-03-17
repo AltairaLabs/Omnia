@@ -24,8 +24,8 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { usePromptPack, usePromptPackContent, useAgents } from "@/hooks";
-import { useWorkspaces } from "@/hooks/use-workspaces";
+import { useAgents } from "@/hooks/agents";
+import { usePromptPack, usePromptPackContent, useWorkspaces } from "@/hooks/resources";
 import type {
   PromptDefinition,
   ToolDefinition,

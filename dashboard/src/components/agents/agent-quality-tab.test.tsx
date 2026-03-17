@@ -12,7 +12,7 @@ import { AgentQualityTab } from "./agent-quality-tab";
 
 // Mock eval hooks
 const mockUseEvalSummary = vi.fn();
-vi.mock("@/hooks", () => ({
+vi.mock("@/hooks/sessions", () => ({
   useEvalSummary: (...args: unknown[]) => mockUseEvalSummary(...args),
 }));
 

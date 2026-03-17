@@ -23,7 +23,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { useEvalScoreTrends, type EvalTrendRange, type EvalTrendPoint } from "@/hooks";
+import { useEvalScoreTrends, type EvalTrendRange, type EvalTrendPoint } from "@/hooks/sessions";
 import type { EvalFilter } from "@/lib/prometheus-queries";
 
 /** Color palette for eval metric lines. */

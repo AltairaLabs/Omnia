@@ -1,8 +1,13 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { Header } from "@/components/layout";
 import { EnterpriseGate } from "@/components/license/license-gate";
-import { ProjectEditor } from "@/components/arena";
+
+const ProjectEditor = dynamic(
+  () => import("@/components/arena").then((m) => m.ProjectEditor),
+  { ssr: false }
+);
 
 function ProjectsContent() {
   return (
