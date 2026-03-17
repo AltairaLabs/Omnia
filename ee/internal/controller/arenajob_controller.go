@@ -362,18 +362,11 @@ func (r *ArenaJobReconciler) getWorkerResources(_ *omniav1alpha1.ArenaJob) corev
 	return defaultWorkerResources
 }
 
-// getWorkerServiceAccountName returns the ServiceAccount name for worker pods if any
-// provider uses workload identity authentication. Returns empty string if not needed.
-func (r *ArenaJobReconciler) getWorkerServiceAccountName(providerCRDs []*corev1alpha1.Provider) string {
-	if r.WorkerServiceAccountName == "" {
-		return ""
-	}
-	for _, p := range providerCRDs {
-		if p.Spec.Auth != nil && p.Spec.Auth.Type == corev1alpha1.AuthMethodWorkloadIdentity {
-			return r.WorkerServiceAccountName
-		}
-	}
-	return ""
+// getWorkerServiceAccountName returns the ServiceAccount name for worker pods.
+// Workers need a ServiceAccount with RBAC permissions to read Provider, AgentRuntime,
+// ToolRegistry, and ArenaJob CRDs for provider resolution.
+func (r *ArenaJobReconciler) getWorkerServiceAccountName() string {
+	return r.WorkerServiceAccountName
 }
 
 // resolvedProviderGroup holds the resolved CRDs and agent WebSocket URLs for a provider group.
@@ -811,7 +804,7 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	}
 
 	// Set ServiceAccountName for workload identity
-	if saName := r.getWorkerServiceAccountName(providerCRDs); saName != "" {
+	if saName := r.getWorkerServiceAccountName(); saName != "" {
 		job.Spec.Template.Spec.ServiceAccountName = saName
 		log.Info("setting worker ServiceAccountName for workload identity", "serviceAccount", saName)
 	}

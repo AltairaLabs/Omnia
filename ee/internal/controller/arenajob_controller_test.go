@@ -2188,107 +2188,21 @@ spec:
 	Context("getWorkerServiceAccountName", func() {
 		It("should return empty when WorkerServiceAccountName is not configured", func() {
 			reconciler := &ArenaJobReconciler{
-				Client:                   k8sClient,
-				Scheme:                   k8sClient.Scheme(),
-				WorkerServiceAccountName: "",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
-			providerCRDs := []*corev1alpha1.Provider{
-				{
-					Spec: corev1alpha1.ProviderSpec{
-						Type: corev1alpha1.ProviderTypeBedrock,
-						Auth: &corev1alpha1.AuthConfig{
-							Type: corev1alpha1.AuthMethodWorkloadIdentity,
-						},
-					},
-				},
-			}
-
-			Expect(reconciler.getWorkerServiceAccountName(providerCRDs)).To(BeEmpty())
+			Expect(reconciler.getWorkerServiceAccountName()).To(BeEmpty())
 		})
 
-		It("should return SA name when a provider uses workload identity", func() {
+		It("should return SA name when WorkerServiceAccountName is configured", func() {
 			reconciler := &ArenaJobReconciler{
 				Client:                   k8sClient,
 				Scheme:                   k8sClient.Scheme(),
 				WorkerServiceAccountName: "my-arena-worker",
 			}
 
-			providerCRDs := []*corev1alpha1.Provider{
-				{
-					Spec: corev1alpha1.ProviderSpec{
-						Type: corev1alpha1.ProviderTypeBedrock,
-						Auth: &corev1alpha1.AuthConfig{
-							Type: corev1alpha1.AuthMethodWorkloadIdentity,
-						},
-					},
-				},
-			}
-
-			Expect(reconciler.getWorkerServiceAccountName(providerCRDs)).To(Equal("my-arena-worker"))
-		})
-
-		It("should return empty when no provider uses workload identity", func() {
-			reconciler := &ArenaJobReconciler{
-				Client:                   k8sClient,
-				Scheme:                   k8sClient.Scheme(),
-				WorkerServiceAccountName: "my-arena-worker",
-			}
-
-			providerCRDs := []*corev1alpha1.Provider{
-				{
-					Spec: corev1alpha1.ProviderSpec{
-						Type: corev1alpha1.ProviderTypeClaude,
-						// No auth config
-					},
-				},
-				{
-					Spec: corev1alpha1.ProviderSpec{
-						Type: corev1alpha1.ProviderTypeBedrock,
-						Auth: &corev1alpha1.AuthConfig{
-							Type: corev1alpha1.AuthMethodAccessKey,
-						},
-					},
-				},
-			}
-
-			Expect(reconciler.getWorkerServiceAccountName(providerCRDs)).To(BeEmpty())
-		})
-
-		It("should return SA name when at least one provider uses workload identity among multiple", func() {
-			reconciler := &ArenaJobReconciler{
-				Client:                   k8sClient,
-				Scheme:                   k8sClient.Scheme(),
-				WorkerServiceAccountName: "my-arena-worker",
-			}
-
-			providerCRDs := []*corev1alpha1.Provider{
-				{
-					Spec: corev1alpha1.ProviderSpec{
-						Type: corev1alpha1.ProviderTypeClaude,
-					},
-				},
-				{
-					Spec: corev1alpha1.ProviderSpec{
-						Type: corev1alpha1.ProviderTypeBedrock,
-						Auth: &corev1alpha1.AuthConfig{
-							Type: corev1alpha1.AuthMethodWorkloadIdentity,
-						},
-					},
-				},
-			}
-
-			Expect(reconciler.getWorkerServiceAccountName(providerCRDs)).To(Equal("my-arena-worker"))
-		})
-
-		It("should return empty when providers list is empty", func() {
-			reconciler := &ArenaJobReconciler{
-				Client:                   k8sClient,
-				Scheme:                   k8sClient.Scheme(),
-				WorkerServiceAccountName: "my-arena-worker",
-			}
-
-			Expect(reconciler.getWorkerServiceAccountName([]*corev1alpha1.Provider{})).To(BeEmpty())
+			Expect(reconciler.getWorkerServiceAccountName()).To(Equal("my-arena-worker"))
 		})
 	})
 
