@@ -559,6 +559,15 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		"providerCRDs", len(providerCRDs),
 	)
 
+	// Validate that spec.providers covers all groups required by the arena config.
+	// This catches misconfiguration early (controller-side) instead of failing in the worker.
+	basePath := r.getContentBasePath(ctx, arenaJob, source)
+	if configPath := r.getArenaConfigPath(arenaJob, basePath); configPath != "" {
+		if validationMsg := r.validateProviderGroups(arenaJob, configPath); validationMsg != "" {
+			return fmt.Errorf("provider group validation failed: %s", validationMsg)
+		}
+	}
+
 	// Determine arena file path
 	arenaFile := arenaJob.Spec.ArenaFile
 	if arenaFile == "" {
