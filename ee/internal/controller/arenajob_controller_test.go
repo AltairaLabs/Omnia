@@ -1947,6 +1947,65 @@ spec:
 		})
 	})
 
+	Context("When enqueueing work items with mixed array/map groups", func() {
+		It("should only create work items for array-mode providers", func() {
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mixed-enqueue-test",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{
+					SourceRef: corev1alpha1.LocalObjectReference{Name: "test-source"},
+				},
+			}
+
+			arenaSource := &omniav1alpha1.ArenaSource{
+				Status: omniav1alpha1.ArenaSourceStatus{
+					Artifact: &omniav1alpha1.Artifact{Revision: "v1.0.0"},
+				},
+			}
+
+			testProvider := &corev1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-provider", Namespace: arenaJobNamespace},
+			}
+			judgeProvider := &corev1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{Name: "judge-haiku", Namespace: arenaJobNamespace},
+			}
+
+			// All provider CRDs (flat list from resolveProviderGroups)
+			allProviderCRDs := []*corev1alpha1.Provider{testProvider, judgeProvider}
+
+			// Resolved groups: default is array-mode, judges is map-mode
+			resolvedGroups := map[string]*resolvedProviderGroup{
+				"default": {
+					providers: []*corev1alpha1.Provider{testProvider},
+					mapMode:   false,
+				},
+				"judges": {
+					providers: []*corev1alpha1.Provider{judgeProvider},
+					mapMode:   true,
+				},
+			}
+
+			memQueue := queue.NewMemoryQueueWithDefaults()
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				Queue:  memQueue,
+			}
+
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, allProviderCRDs, resolvedGroups)
+			Expect(err).NotTo(HaveOccurred())
+			// Fallback mode: 1 work item per array-mode provider (NOT 2)
+			Expect(count).To(Equal(1))
+
+			item, popErr := memQueue.Pop(ctx, "mixed-enqueue-test")
+			Expect(popErr).NotTo(HaveOccurred())
+			// Provider ID should be from the array-mode group only
+			Expect(item.ProviderID).To(Equal("test-provider"))
+		})
+	})
+
 	Context("When updating status from completed K8s Job with aggregator", func() {
 		It("should aggregate results and populate JobResult", func() {
 			arenaJob := &omniav1alpha1.ArenaJob{
