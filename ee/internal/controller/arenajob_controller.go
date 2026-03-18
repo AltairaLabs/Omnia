@@ -364,6 +364,9 @@ type resolvedProviderGroup struct {
 	providers []*corev1alpha1.Provider
 	// agentWSURLs maps agentRef name to its resolved WebSocket URL.
 	agentWSURLs map[string]string
+	// mapMode indicates this group uses 1:1 config-provider-ID mapping (judges, self-play).
+	// Map-mode groups don't participate in the scenario × provider work item matrix.
+	mapMode bool
 }
 
 // resolveProviderGroups resolves the new spec.Providers field.
@@ -379,7 +382,10 @@ func (r *ArenaJobReconciler) resolveProviderGroups(
 	seen := make(map[string]bool)
 
 	for groupName, pg := range arenaJob.Spec.Providers {
-		grp := &resolvedProviderGroup{agentWSURLs: make(map[string]string)}
+		grp := &resolvedProviderGroup{
+			agentWSURLs: make(map[string]string),
+			mapMode:     pg.IsMapMode(),
+		}
 
 		for _, entry := range pg.AllEntries() {
 			if entry.ProviderRef != nil {
@@ -482,12 +488,17 @@ func buildProviderGroupEnvVars(groups map[string]*resolvedProviderGroup) []corev
 }
 
 // getProviderIDsFromGroups extracts provider IDs from resolved provider groups.
+// Only array-mode groups participate in the scenario × provider work item matrix.
+// Map-mode groups (judges, self-play) are 1:1 config references and are excluded.
 // Provider CRDs use their CRD name; agent entries use "agent-{name}".
 func getProviderIDsFromGroups(groups map[string]*resolvedProviderGroup) []string {
 	seen := make(map[string]bool)
 	var ids []string
 
 	for _, grp := range groups {
+		if grp.mapMode {
+			continue
+		}
 		for _, p := range grp.providers {
 			if !seen[p.Name] {
 				seen[p.Name] = true

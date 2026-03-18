@@ -1827,6 +1827,126 @@ spec:
 		})
 	})
 
+	Context("When extracting provider IDs for work item matrix", func() {
+		It("should exclude map-mode groups from provider IDs", func() {
+			// Map-mode groups (judges, self-play) are 1:1 config references.
+			// They should NOT create work items in the scenario × provider matrix.
+			testProvider := &corev1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-provider"},
+			}
+			judgeProvider := &corev1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{Name: "judge-haiku"},
+			}
+			resolvedGroups := map[string]*resolvedProviderGroup{
+				"default": {
+					providers: []*corev1alpha1.Provider{testProvider},
+					mapMode:   false,
+				},
+				"judges": {
+					providers: []*corev1alpha1.Provider{judgeProvider},
+					mapMode:   true,
+				},
+			}
+			ids := getProviderIDsFromGroups(resolvedGroups)
+			Expect(ids).To(ContainElement("test-provider"))
+			Expect(ids).NotTo(ContainElement("judge-haiku"))
+			Expect(ids).To(HaveLen(1))
+		})
+
+		It("should exclude map-mode agent groups from provider IDs", func() {
+			resolvedGroups := map[string]*resolvedProviderGroup{
+				"default": {
+					agentWSURLs: map[string]string{"my-agent": "ws://agent:8080"},
+					mapMode:     false,
+				},
+				"selfplay": {
+					agentWSURLs: map[string]string{"sim-agent": "ws://sim:8080"},
+					mapMode:     true,
+				},
+			}
+			ids := getProviderIDsFromGroups(resolvedGroups)
+			Expect(ids).To(ContainElement("agent-my-agent"))
+			Expect(ids).NotTo(ContainElement("agent-sim-agent"))
+			Expect(ids).To(HaveLen(1))
+		})
+
+		It("should include all providers when no map-mode groups exist", func() {
+			p1 := &corev1alpha1.Provider{ObjectMeta: metav1.ObjectMeta{Name: "p1"}}
+			p2 := &corev1alpha1.Provider{ObjectMeta: metav1.ObjectMeta{Name: "p2"}}
+			resolvedGroups := map[string]*resolvedProviderGroup{
+				"default": {
+					providers: []*corev1alpha1.Provider{p1, p2},
+					mapMode:   false,
+				},
+			}
+			ids := getProviderIDsFromGroups(resolvedGroups)
+			Expect(ids).To(HaveLen(2))
+			Expect(ids).To(ContainElement("p1"))
+			Expect(ids).To(ContainElement("p2"))
+		})
+	})
+
+	Context("When resolving provider groups with map mode", func() {
+		It("should set mapMode flag on map-mode groups", func() {
+			// Create an ArenaJob with mixed groups
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "map-mode-test",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{
+					SourceRef: corev1alpha1.LocalObjectReference{Name: "src"},
+					Providers: map[string]omniav1alpha1.ArenaProviderGroup{
+						"default": {
+							Entries: []omniav1alpha1.ArenaProviderEntry{
+								{ProviderRef: &corev1alpha1.ProviderRef{Name: "test-provider"}},
+							},
+						},
+						"judges": {
+							Mapping: map[string]omniav1alpha1.ArenaProviderEntry{
+								"judge-quality": {ProviderRef: &corev1alpha1.ProviderRef{Name: "judge-provider"}},
+							},
+						},
+					},
+				},
+			}
+
+			// Create the provider CRDs
+			testProv := &corev1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-provider",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: corev1alpha1.ProviderSpec{Type: "mock", Model: "mock-model"},
+			}
+			judgeProv := &corev1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "judge-provider",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: corev1alpha1.ProviderSpec{Type: "mock", Model: "mock-model"},
+			}
+			Expect(k8sClient.Create(ctx, testProv)).To(Succeed())
+			Expect(k8sClient.Create(ctx, judgeProv)).To(Succeed())
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			groups, _, err := reconciler.resolveProviderGroups(ctx, arenaJob)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(groups["default"].mapMode).To(BeFalse())
+			Expect(groups["judges"].mapMode).To(BeTrue())
+
+			// Only default group providers should appear in IDs
+			ids := getProviderIDsFromGroups(groups)
+			Expect(ids).To(ContainElement("test-provider"))
+			Expect(ids).NotTo(ContainElement("judge-provider"))
+		})
+	})
+
 	Context("When updating status from completed K8s Job with aggregator", func() {
 		It("should aggregate results and populate JobResult", func() {
 			arenaJob := &omniav1alpha1.ArenaJob{
