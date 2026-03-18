@@ -159,17 +159,15 @@ export function buildSpec(form: JobWizardFormState): ArenaJobSpec {
   };
 }
 
-/** Count total provider/agent entries across all groups (array + map mode). */
+/**
+ * Count provider/agent entries that participate in the scenario × provider matrix.
+ * Only array-mode groups (test provider pools) are counted — map-mode groups
+ * (judges, self-play) are 1:1 config references that don't multiply with scenarios.
+ */
 export function countTotalEntries(
   groups: Record<string, ProviderGroupEntry[]>,
-  mappings: Record<string, Record<string, ProviderGroupEntry | null>>
 ): number {
-  const arrayCount = Object.values(groups).reduce((sum, entries) => sum + entries.length, 0);
-  const mapCount = Object.values(mappings).reduce(
-    (sum, mapping) => sum + Object.values(mapping).filter(Boolean).length,
-    0
-  );
-  return arrayCount + mapCount;
+  return Object.values(groups).reduce((sum, entries) => sum + entries.length, 0);
 }
 
 export function getStepIndicatorClassName(stepIndex: number, currentStep: number): string {

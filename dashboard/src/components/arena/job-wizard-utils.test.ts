@@ -257,29 +257,27 @@ describe("buildSpec", () => {
 // =============================================================================
 
 describe("countTotalEntries", () => {
-  it("counts array-mode entries", () => {
+  it("counts array-mode entries only", () => {
     expect(countTotalEntries(
       { default: [{ type: "provider", name: "a" }, { type: "provider", name: "b" }] },
-      {}
     )).toBe(2);
   });
 
-  it("counts map-mode entries (non-null only)", () => {
-    expect(countTotalEntries(
-      {},
-      { judges: { a: { type: "provider", name: "x" }, b: null } }
-    )).toBe(1);
+  it("ignores map-mode groups (not passed)", () => {
+    // Map-mode groups are not included in the count because they
+    // don't participate in the scenario × provider matrix
+    expect(countTotalEntries({})).toBe(0);
   });
 
-  it("counts combined array + map", () => {
-    expect(countTotalEntries(
-      { default: [{ type: "provider", name: "a" }] },
-      { judges: { a: { type: "provider", name: "x" } } }
-    )).toBe(2);
+  it("counts only array entries across multiple groups", () => {
+    expect(countTotalEntries({
+      default: [{ type: "provider", name: "a" }],
+      extra: [{ type: "agent", name: "b" }, { type: "provider", name: "c" }],
+    })).toBe(3);
   });
 
   it("returns 0 for empty", () => {
-    expect(countTotalEntries({}, {})).toBe(0);
+    expect(countTotalEntries({})).toBe(0);
   });
 });
 

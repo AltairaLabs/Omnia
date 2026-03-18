@@ -363,7 +363,7 @@ export function JobWizard({
     arenaFilePath
   );
 
-  const totalProviderEntries = countTotalEntries(formState.providerGroups, formState.providerMappings);
+  const totalProviderEntries = countTotalEntries(formState.providerGroups);
   const workEstimate = useMemo(
     () => estimateWorkItems(configPreview, totalProviderEntries, maxWorkerReplicas),
     [configPreview, totalProviderEntries, maxWorkerReplicas]
