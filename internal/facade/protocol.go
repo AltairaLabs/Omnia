@@ -96,6 +96,8 @@ const (
 	// Client to Server message types
 	MessageTypeMessage       MessageType = "message"
 	MessageTypeUploadRequest MessageType = "upload_request"
+	MessageTypeToolCallAck   MessageType = "tool_call_ack"
+	MessageTypeToolCallNack  MessageType = "tool_call_nack"
 
 	// Bidirectional message types
 	// Server → Client: tool execution result (informational)
@@ -112,6 +114,22 @@ const (
 	MessageTypeUploadComplete MessageType = "upload_complete"
 	MessageTypeMediaChunk     MessageType = "media_chunk"
 )
+
+// ToolCallAckInfo contains acknowledgement of a client-side tool call.
+// Sent by the client to indicate it received the tool call and is working on it.
+type ToolCallAckInfo struct {
+	// CallID matches the ToolCallInfo.ID being acknowledged.
+	CallID string `json:"call_id"`
+}
+
+// ToolCallNackInfo contains rejection of a client-side tool call.
+// Sent by the client to indicate it cannot or will not handle the tool call.
+type ToolCallNackInfo struct {
+	// CallID matches the ToolCallInfo.ID being rejected.
+	CallID string `json:"call_id"`
+	// Reason explains why the tool call was rejected (e.g. "tool not supported").
+	Reason string `json:"reason"`
+}
 
 // ClientToolResultInfo contains the client's response to a client-side tool call.
 type ClientToolResultInfo struct {
@@ -141,6 +159,10 @@ type ClientMessage struct {
 	UploadRequest *UploadRequestInfo `json:"upload_request,omitempty"`
 	// ToolResult contains the client's response to a client-side tool call.
 	ToolResult *ClientToolResultInfo `json:"tool_result,omitempty"`
+	// ToolCallAck acknowledges receipt of a client-side tool call.
+	ToolCallAck *ToolCallAckInfo `json:"tool_call_ack,omitempty"`
+	// ToolCallNack rejects a client-side tool call.
+	ToolCallNack *ToolCallNackInfo `json:"tool_call_nack,omitempty"`
 }
 
 // ServerMessage represents a message sent from server to client.

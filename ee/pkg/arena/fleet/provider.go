@@ -98,7 +98,7 @@ func (p *Provider) Predict(ctx context.Context, req providers.PredictionRequest)
 		return providers.PredictionResponse{}, fmt.Errorf("failed to send message: %w", err)
 	}
 
-	turnMsgs, err := collectTurnResponse(ctx, p.conn)
+	turnMsgs, err := collectTurnResponse(ctx, p.conn, p.sessionID)
 	if err != nil {
 		return providers.PredictionResponse{}, fmt.Errorf("agent error during turn: %w", err)
 	}
@@ -135,7 +135,7 @@ func (p *Provider) streamResponse(ctx context.Context, ch chan<- providers.Strea
 	defer p.mu.Unlock()
 	defer close(ch)
 
-	turnMsgs, err := collectTurnResponse(ctx, p.conn)
+	turnMsgs, err := collectTurnResponse(ctx, p.conn, p.sessionID)
 	if err != nil {
 		finishReason := "error"
 		ch <- providers.StreamChunk{

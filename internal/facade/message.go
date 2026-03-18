@@ -73,6 +73,25 @@ func (s *Server) handleClientMessage(ctx context.Context, c *Connection, message
 		return
 	}
 
+	// Route tool call ACK to the active handler
+	if clientMsg.Type == MessageTypeToolCallAck && clientMsg.ToolCallAck != nil {
+		if router, ok := s.handler.(ClientToolRouter); ok {
+			router.AckToolCall(c.sessionID, clientMsg.ToolCallAck.CallID)
+		}
+		return
+	}
+
+	// Route tool call NACK — convert to a rejection tool_result
+	if clientMsg.Type == MessageTypeToolCallNack && clientMsg.ToolCallNack != nil {
+		if router, ok := s.handler.(ClientToolRouter); ok {
+			router.SendToolResult(c.sessionID, &ClientToolResultInfo{
+				CallID: clientMsg.ToolCallNack.CallID,
+				Error:  clientMsg.ToolCallNack.Reason,
+			})
+		}
+		return
+	}
+
 	// Route client-side tool results to the active handler
 	if clientMsg.Type == MessageTypeToolResult && clientMsg.ToolResult != nil {
 		if router, ok := s.handler.(ClientToolRouter); ok {

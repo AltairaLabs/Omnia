@@ -147,6 +147,61 @@ func TestConnect_InjectsTraceHeaders(t *testing.T) {
 	assert.Contains(t, traceparent, span.SpanContext().TraceID().String())
 }
 
+func TestCollectTurnResponse_RejectsToolCalls(t *testing.T) {
+	wsURL := testServer(t, func(conn *websocket.Conn) {
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeConnected,
+			SessionID: "sess-reject",
+			Timestamp: time.Now(),
+		})
+
+		// Read the user message
+		readClientMsg(t, conn)
+
+		// Send a tool_call
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeToolCall,
+			SessionID: "sess-reject",
+			ToolCall: &facade.ToolCallInfo{
+				ID:   "tc-fleet-1",
+				Name: "get_location",
+			},
+			Timestamp: time.Now(),
+		})
+
+		// Read the rejection that collectTurnResponse should send
+		rejection := readClientMsg(t, conn)
+		assert.Equal(t, facade.MessageTypeToolResult, rejection.Type)
+		require.NotNil(t, rejection.ToolResult)
+		assert.Equal(t, "tc-fleet-1", rejection.ToolResult.CallID)
+		assert.Contains(t, rejection.ToolResult.Error, "arena evaluation mode")
+
+		// Send done to complete the turn
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeDone,
+			SessionID: "sess-reject",
+			Content:   "Tool was rejected",
+			Timestamp: time.Now(),
+		})
+	})
+
+	p := NewProvider("test-fleet", wsURL, nil)
+	require.NoError(t, p.Connect(context.Background()))
+	defer func() { _ = p.Close() }()
+
+	// Send a message to trigger the tool call flow
+	require.NoError(t, sendMessage(p.conn, p.sessionID, "do something"))
+
+	msgs, err := collectTurnResponse(context.Background(), p.conn, p.sessionID)
+	require.NoError(t, err)
+
+	// Should have the tool_call in the transcript and the assistant done message
+	require.Len(t, msgs, 2)
+	assert.Equal(t, "tool_call", msgs[0].Role)
+	assert.Equal(t, "assistant", msgs[1].Role)
+	assert.Equal(t, "Tool was rejected", msgs[1].Content)
+}
+
 func TestConnect_WorksWithoutTraceContext(t *testing.T) {
 	var capturedHeaders http.Header
 	wsURL := testServerWithHeaders(t, &capturedHeaders, func(conn *websocket.Conn) {

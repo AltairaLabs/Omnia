@@ -817,7 +817,9 @@ func TestRuntimeHandler_ClientToolCall_Rejected(t *testing.T) {
 	assert.Equal(t, "User denied", mock.receivedResult.RejectionReason)
 }
 
-func TestRuntimeHandler_ClientToolCall_Timeout(t *testing.T) {
+func TestRuntimeHandler_ClientToolCall_NoAck_AutoReject(t *testing.T) {
+	// When no ACK is received within the ack timeout, the handler auto-rejects
+	// the tool call and sends a rejection to the runtime.
 	mock := &clientToolRuntimeServer{
 		toolCall: &runtimev1.ToolCall{
 			Id:        "ct-3",
@@ -825,7 +827,7 @@ func TestRuntimeHandler_ClientToolCall_Timeout(t *testing.T) {
 			Execution: runtimev1.ToolExecution_TOOL_EXECUTION_CLIENT,
 		},
 		afterResume: []*runtimev1.ServerMessage{
-			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "Done"}}},
+			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "Tool was auto-rejected"}}},
 		},
 	}
 
@@ -844,15 +846,149 @@ func TestRuntimeHandler_ClientToolCall_Timeout(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	handler := NewRuntimeHandler(client)
-	handler.SetClientToolTimeout(200 * time.Millisecond)
+	handler.SetToolCallAckTimeout(200 * time.Millisecond)
 	writer := &mockResponseWriter{}
 
 	err = handler.HandleMessage(context.Background(), "session-ct-3", &facade.ClientMessage{
 		Content: "Do something slow",
 	}, writer)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "client tool timeout")
+	require.NoError(t, err)
+
+	// Verify the runtime received a rejection
+	require.NotNil(t, mock.receivedResult)
+	assert.True(t, mock.receivedResult.IsRejected)
+	assert.Contains(t, mock.receivedResult.RejectionReason, "did not acknowledge")
+	assert.Equal(t, "Tool was auto-rejected", writer.doneMsg)
+}
+
+func TestRuntimeHandler_ClientToolCall_AckThenResult(t *testing.T) {
+	// When client sends ACK then later sends tool_result, the full flow completes.
+	mock := &clientToolRuntimeServer{
+		toolCall: &runtimev1.ToolCall{
+			Id:        "ct-4",
+			Name:      "get_location",
+			Execution: runtimev1.ToolExecution_TOOL_EXECUTION_CLIENT,
+		},
+		afterResume: []*runtimev1.ServerMessage{
+			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "Location: Denver"}}},
+		},
+	}
+
+	lis, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	server := grpc.NewServer()
+	runtimev1.RegisterRuntimeServiceServer(server, mock)
+	go func() { _ = server.Serve(lis) }()
+	t.Cleanup(func() { server.Stop() })
+
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     lis.Addr().String(),
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+
+	handler := NewRuntimeHandler(client)
+	handler.SetToolCallAckTimeout(2 * time.Second)
+	toolCallCh := make(chan *facade.ToolCallInfo, 1)
+	writer := &mockResponseWriter{toolCallCh: toolCallCh}
+	sessionID := "session-ct-4"
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- handler.HandleMessage(context.Background(), sessionID, &facade.ClientMessage{
+			Content: "Where am I?",
+		}, writer)
+	}()
+
+	// Wait for the tool call to be forwarded
+	select {
+	case <-toolCallCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for tool call")
+	}
+
+	// Send ACK first
+	handler.AckToolCall(sessionID, "ct-4")
+
+	// Then send the actual result
+	time.Sleep(50 * time.Millisecond) // small delay to simulate user interaction
+	routed := handler.SendToolResult(sessionID, &facade.ClientToolResultInfo{
+		CallID: "ct-4",
+		Result: map[string]string{"city": "Denver"},
+	})
+	assert.True(t, routed)
+
+	err = <-errCh
+	require.NoError(t, err)
+
+	// Verify the runtime received the result (not a rejection)
+	require.NotNil(t, mock.receivedResult)
+	assert.False(t, mock.receivedResult.IsRejected)
+	assert.Contains(t, mock.receivedResult.ResultJson, "Denver")
+	assert.Equal(t, "Location: Denver", writer.doneMsg)
+}
+
+func TestRuntimeHandler_ClientToolCall_NackConverted(t *testing.T) {
+	// When the routing layer converts a NACK to a tool_result with error,
+	// it arrives on the toolResultCh and completes immediately.
+	mock := &clientToolRuntimeServer{
+		toolCall: &runtimev1.ToolCall{
+			Id:        "ct-5",
+			Name:      "read_file",
+			Execution: runtimev1.ToolExecution_TOOL_EXECUTION_CLIENT,
+		},
+		afterResume: []*runtimev1.ServerMessage{
+			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "Tool not supported"}}},
+		},
+	}
+
+	lis, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	server := grpc.NewServer()
+	runtimev1.RegisterRuntimeServiceServer(server, mock)
+	go func() { _ = server.Serve(lis) }()
+	t.Cleanup(func() { server.Stop() })
+
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     lis.Addr().String(),
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+
+	handler := NewRuntimeHandler(client)
+	toolCallCh := make(chan *facade.ToolCallInfo, 1)
+	writer := &mockResponseWriter{toolCallCh: toolCallCh}
+	sessionID := "session-ct-5"
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- handler.HandleMessage(context.Background(), sessionID, &facade.ClientMessage{
+			Content: "Read a file",
+		}, writer)
+	}()
+
+	select {
+	case <-toolCallCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for tool call")
+	}
+
+	// Send rejection via SendToolResult (simulates NACK→tool_result conversion in message.go)
+	routed := handler.SendToolResult(sessionID, &facade.ClientToolResultInfo{
+		CallID: "ct-5",
+		Error:  "tool not supported",
+	})
+	assert.True(t, routed)
+
+	err = <-errCh
+	require.NoError(t, err)
+
+	require.NotNil(t, mock.receivedResult)
+	assert.True(t, mock.receivedResult.IsRejected)
+	assert.Equal(t, "tool not supported", mock.receivedResult.RejectionReason)
 }
 
 func TestRuntimeHandler_SendToolResult_NoActiveHandler(t *testing.T) {
