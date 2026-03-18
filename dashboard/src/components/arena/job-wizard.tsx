@@ -41,8 +41,19 @@ import type {
   ArenaSource,
   ArenaJob,
   ArenaJobSpec,
-  ArenaProviderEntry,
 } from "@/types/arena";
+import type { ConfigProviderRef } from "@/hooks/use-arena-config-preview";
+import {
+  validateForm,
+  buildSpec,
+  buildArenaFilePath,
+  countTotalEntries,
+  groupSummary,
+  getStepIndicatorClassName,
+  getInitialFormState,
+  type ProviderGroupEntry,
+  type JobWizardFormState,
+} from "./job-wizard-utils";
 
 // =============================================================================
 // Types
@@ -58,36 +69,6 @@ const WIZARD_STEPS = [
 
 const DEFAULT_PROVIDER_GROUPS = ["default", "judge", "selfplay"];
 
-interface ProviderGroupEntry {
-  type: "provider" | "agent";
-  name: string;
-  namespace?: string;
-}
-
-interface JobWizardFormState {
-  name: string;
-  sourceRef: string;
-  rootPath: string;
-  arenaFileName: string;
-  providerGroups: Record<string, ProviderGroupEntry[]>;
-  selectedToolRegistries: string[];
-  workers: string;
-  verbose: boolean;
-}
-
-function getInitialFormState(preselectedSource?: string): JobWizardFormState {
-  return {
-    name: generateName(),
-    sourceRef: preselectedSource || "",
-    rootPath: "",
-    arenaFileName: "config.arena.yaml",
-    providerGroups: {},
-    selectedToolRegistries: [],
-    workers: "1",
-    verbose: false,
-  };
-}
-
 export interface JobWizardProps {
   sources: ArenaSource[];
   preselectedSource?: string;
@@ -99,104 +80,7 @@ export interface JobWizardProps {
   onClose?: () => void;
 }
 
-// =============================================================================
-// Helper Functions
-// =============================================================================
 
-function validateForm(
-  form: JobWizardFormState,
-  maxWorkerReplicas: number,
-  requiredGroups: string[]
-): string | null {
-  if (!form.name.trim()) {
-    return "Name is required";
-  }
-  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(form.name)) {
-    return "Name must be lowercase alphanumeric and may contain hyphens";
-  }
-  if (!form.sourceRef) {
-    return "Source is required";
-  }
-
-  // Check required provider groups have at least one entry
-  for (const group of requiredGroups) {
-    const entries = form.providerGroups[group] || [];
-    if (entries.length === 0) {
-      return `Provider group "${group}" is required by the arena config but has no entries`;
-    }
-  }
-
-  const workers = Number.parseInt(form.workers, 10);
-  if (Number.isNaN(workers) || workers < 1) {
-    return "Workers must be a positive integer";
-  }
-
-  if (maxWorkerReplicas > 0 && workers > maxWorkerReplicas) {
-    return `Open Core is limited to ${maxWorkerReplicas} worker(s)`;
-  }
-
-  return null;
-}
-
-function buildArenaFilePath(rootPath: string, fileName: string): string | undefined {
-  if (!rootPath && !fileName) return undefined;
-  if (!rootPath) return fileName;
-  if (!fileName) return `${rootPath}/config.arena.yaml`;
-  return `${rootPath}/${fileName}`;
-}
-
-function buildSpec(form: JobWizardFormState): ArenaJobSpec {
-  const arenaFile = buildArenaFilePath(form.rootPath, form.arenaFileName);
-
-  const providers: Record<string, ArenaProviderEntry[]> = {};
-  for (const [group, entries] of Object.entries(form.providerGroups)) {
-    if (entries.length > 0) {
-      providers[group] = entries.map((e) =>
-        e.type === "agent"
-          ? { agentRef: { name: e.name } }
-          : { providerRef: { name: e.name, namespace: e.namespace } }
-      );
-    }
-  }
-
-  const toolRegistries = form.selectedToolRegistries.map((name) => ({ name }));
-
-  return {
-    sourceRef: { name: form.sourceRef },
-    arenaFile: arenaFile || undefined,
-    type: "evaluation",
-    providers: Object.keys(providers).length > 0 ? providers : undefined,
-    toolRegistries: toolRegistries.length > 0 ? toolRegistries : undefined,
-    workers: {
-      replicas: Number.parseInt(form.workers, 10),
-    },
-    verbose: form.verbose || undefined,
-    evaluation: {
-      outputFormats: ["json", "junit"],
-    },
-  };
-}
-
-function getStepIndicatorClassName(stepIndex: number, currentStep: number): string {
-  if (stepIndex < currentStep) return "bg-primary text-primary-foreground";
-  if (stepIndex === currentStep) return "border-2 border-primary";
-  return "border border-muted-foreground/30";
-}
-
-/** Count total provider/agent entries across all groups. */
-function countTotalEntries(groups: Record<string, ProviderGroupEntry[]>): number {
-  return Object.values(groups).reduce((sum, entries) => sum + entries.length, 0);
-}
-
-/** Build a summary string for a provider group. */
-function groupSummary(entries: ProviderGroupEntry[]): string {
-  const providers = entries.filter((e) => e.type === "provider").length;
-  const agents = entries.filter((e) => e.type === "agent").length;
-  const parts: string[] = [];
-  if (providers > 0) parts.push(`${providers} provider${providers === 1 ? "" : "s"}`);
-  if (agents > 0) parts.push(`${agents} agent${agents === 1 ? "" : "s"}`);
-  return parts.join(", ");
-}
 
 // =============================================================================
 // Subcomponents
@@ -346,6 +230,85 @@ function ProviderGroupEditor({
   );
 }
 
+interface ProviderMappingEditorProps {
+  readonly group: string;
+  readonly mapping: Record<string, ProviderGroupEntry | null>;
+  readonly availableProviders: { name: string }[];
+  readonly availableAgents: { name: string }[];
+  readonly onSetMapping: (group: string, configID: string, entry: ProviderGroupEntry | null) => void;
+}
+
+function ProviderMappingEditor({
+  group,
+  mapping,
+  availableProviders,
+  availableAgents,
+  onSetMapping,
+}: ProviderMappingEditorProps) {
+  const handleChange = useCallback(
+    (configID: string, v: string) => {
+      if (!v) {
+        onSetMapping(group, configID, null);
+        return;
+      }
+      const [type, name] = v.split(":") as ["provider" | "agent", string];
+      if (type && name) {
+        onSetMapping(group, configID, { type, name });
+      }
+    },
+    [group, onSetMapping]
+  );
+
+  return (
+    <div className="space-y-2 rounded-md border p-3">
+      <div className="flex items-center gap-2">
+        <Badge variant="outline" className="font-mono">
+          {group}
+        </Badge>
+        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+          mapped
+        </Badge>
+      </div>
+      {Object.entries(mapping).map(([configID, entry]) => (
+        <div key={configID} className="flex items-center gap-2">
+          <code className="text-xs bg-muted px-2 py-1 rounded min-w-[120px]">
+            {configID}
+          </code>
+          <Select
+            value={entry ? `${entry.type}:${entry.name}` : ""}
+            onValueChange={(v) => handleChange(configID, v)}
+          >
+            <SelectTrigger className="flex-1">
+              <SelectValue placeholder="Select provider or agent..." />
+            </SelectTrigger>
+            <SelectContent>
+              {availableProviders.map((p) => (
+                <SelectItem key={`provider:${p.name}`} value={`provider:${p.name}`}>
+                  <span className="flex items-center gap-2">
+                    <Zap className="h-3.5 w-3.5 text-amber-500" />
+                    {p.name}
+                  </span>
+                </SelectItem>
+              ))}
+              {availableAgents.map((a) => (
+                <SelectItem key={`agent:${a.name}`} value={`agent:${a.name}`}>
+                  <span className="flex items-center gap-2">
+                    <Network className="h-3.5 w-3.5 text-blue-500" />
+                    {a.name}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {!entry && (
+            <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // =============================================================================
 // Main Component
 // =============================================================================
@@ -361,7 +324,7 @@ export function JobWizard({
 }: Readonly<JobWizardProps>) {
   const [step, setStep] = useState(0);
   const [formState, setFormState] = useState<JobWizardFormState>(() =>
-    getInitialFormState(preselectedSource)
+    getInitialFormState(preselectedSource, generateName())
   );
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -400,37 +363,74 @@ export function JobWizard({
     arenaFilePath
   );
 
-  const totalProviderEntries = countTotalEntries(formState.providerGroups);
+  const totalProviderEntries = countTotalEntries(formState.providerGroups, formState.providerMappings);
   const workEstimate = useMemo(
     () => estimateWorkItems(configPreview, totalProviderEntries, maxWorkerReplicas),
     [configPreview, totalProviderEntries, maxWorkerReplicas]
   );
 
+  // Determine which groups should be map-mode based on providerRefs
+  const mapModeGroups = useMemo(() => {
+    if (!configPreview.loaded) return new Map<string, ConfigProviderRef[]>();
+    // Group providerRefs by their source category to determine map-mode groups
+    const grouped = new Map<string, ConfigProviderRef[]>();
+    for (const ref of configPreview.providerRefs) {
+      // Use the source as the group name (judges, judge_specs, self_play → selfplay, judges)
+      const groupName = ref.source === "self_play" ? "selfplay" : ref.source;
+      if (!grouped.has(groupName)) {
+        grouped.set(groupName, []);
+      }
+      grouped.get(groupName)!.push(ref);
+    }
+    return grouped;
+  }, [configPreview.loaded, configPreview.providerRefs]);
+
   // Auto-populate provider groups required by the arena config
   const prevRequiredGroups = useRef<string[]>([]);
+  const prevProviderRefs = useRef<ConfigProviderRef[]>([]);
   useEffect(() => {
-    if (!configPreview.loaded || configPreview.requiredGroups.length === 0) return;
+    if (!configPreview.loaded) return;
 
     const required = configPreview.requiredGroups;
-    // Skip if the required groups haven't changed
-    if (
-      required.length === prevRequiredGroups.current.length &&
-      required.every((g) => prevRequiredGroups.current.includes(g))
-    ) {
-      return;
-    }
+    const refs = configPreview.providerRefs;
+
+    // Skip if nothing changed
+    const refsChanged = refs.length !== prevProviderRefs.current.length ||
+      refs.some((r, i) => r.id !== prevProviderRefs.current[i]?.id);
+    const groupsChanged = required.length !== prevRequiredGroups.current.length ||
+      !required.every((g) => prevRequiredGroups.current.includes(g));
+
+    if (!refsChanged && !groupsChanged) return;
     prevRequiredGroups.current = required;
+    prevProviderRefs.current = refs;
 
     setFormState((prev) => {
-      const updated = { ...prev.providerGroups };
+      const updatedGroups = { ...prev.providerGroups };
+      const updatedMappings = { ...prev.providerMappings };
+
       for (const group of required) {
-        if (!(group in updated)) {
-          updated[group] = [];
+        // Check if this group should be map-mode
+        const mapRefs = mapModeGroups.get(group);
+        if (mapRefs && mapRefs.length > 0) {
+          // Map-mode: create mapping entries for each provider ref
+          if (!(group in updatedMappings)) {
+            const mapping: Record<string, ProviderGroupEntry | null> = {};
+            for (const ref of mapRefs) {
+              mapping[ref.id] = null;
+            }
+            updatedMappings[group] = mapping;
+          }
+        } else {
+          // Array-mode: ensure group exists
+          if (!(group in updatedGroups)) {
+            updatedGroups[group] = [];
+          }
         }
       }
-      return { ...prev, providerGroups: updated };
+
+      return { ...prev, providerGroups: updatedGroups, providerMappings: updatedMappings };
     });
-  }, [configPreview.loaded, configPreview.requiredGroups]);
+  }, [configPreview.loaded, configPreview.requiredGroups, configPreview.providerRefs, mapModeGroups]);
 
   // Auto-update workers when the recommended count changes
   const prevRecommended = useRef(workEstimate.recommendedWorkers);
@@ -700,22 +700,62 @@ export function JobWizard({
     </div>
   );
 
+  // Provider mapping management
+  const handleSetMapping = useCallback((group: string, configID: string, entry: ProviderGroupEntry | null) => {
+    setFormState((prev) => ({
+      ...prev,
+      providerMappings: {
+        ...prev.providerMappings,
+        [group]: {
+          ...prev.providerMappings[group],
+          [configID]: entry,
+        },
+      },
+    }));
+  }, []);
+
+  const activeMappingGroups = Object.keys(formState.providerMappings);
+
   const renderProvidersStep = () => (
     <div className="space-y-4">
-      <div className="space-y-0.5">
-        <Label>Provider Groups</Label>
-        <p className="text-xs text-muted-foreground">
-          Configure which providers and agents to use for each group.
-          Leave empty to use defaults from the arena config.
-        </p>
-      </div>
-
       {(providersLoading || agentsLoading) && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           Loading providers and agents...
         </div>
       )}
+
+      {/* Map-mode groups: Provider Mappings */}
+      {activeMappingGroups.length > 0 && (
+        <>
+          <div className="space-y-0.5">
+            <Label>Provider Mappings</Label>
+            <p className="text-xs text-muted-foreground">
+              Select a CRD provider or agent for each config-referenced provider ID.
+            </p>
+          </div>
+
+          {activeMappingGroups.map((group) => (
+            <ProviderMappingEditor
+              key={group}
+              group={group}
+              mapping={formState.providerMappings[group]}
+              availableProviders={availableProviders}
+              availableAgents={availableAgents}
+              onSetMapping={handleSetMapping}
+            />
+          ))}
+        </>
+      )}
+
+      {/* Array-mode groups: Test Providers */}
+      <div className="space-y-0.5">
+        <Label>Test Providers</Label>
+        <p className="text-xs text-muted-foreground">
+          Configure which providers and agents to use for each group.
+          Leave empty to use defaults from the arena config.
+        </p>
+      </div>
 
       {/* Active provider groups */}
       {activeGroupNames.map((group) => (
@@ -777,7 +817,7 @@ export function JobWizard({
         </Button>
       </div>
 
-      {activeGroupNames.length === 0 && (
+      {activeGroupNames.length === 0 && activeMappingGroups.length === 0 && (
         <p className="text-xs text-muted-foreground italic">
           No provider groups configured. The arena config defaults will be used.
         </p>
@@ -932,10 +972,28 @@ export function JobWizard({
               <div className="text-muted-foreground">Workers</div>
               <div>{formState.workers}</div>
 
-              {activeGroupNames.length > 0 && (
+              {(activeGroupNames.length > 0 || activeMappingGroups.length > 0) && (
                 <>
                   <div className="text-muted-foreground">Provider Groups</div>
                   <div className="space-y-1">
+                    {activeMappingGroups.map((group) => {
+                      const mapping = formState.providerMappings[group];
+                      return (
+                        <div key={group} className="flex items-center gap-1 flex-wrap">
+                          <Badge variant="outline" className="font-mono text-xs">
+                            {group}
+                          </Badge>
+                          <Badge variant="secondary" className="text-[10px] px-1 py-0">
+                            mapped
+                          </Badge>
+                          {Object.entries(mapping).map(([configID, entry]) => (
+                            <span key={configID} className="text-xs">
+                              {configID}→{entry ? entry.name : "?"}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    })}
                     {activeGroupNames.map((group) => {
                       const entries = formState.providerGroups[group] || [];
                       return (

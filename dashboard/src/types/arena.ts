@@ -163,6 +163,15 @@ export interface ArenaProviderEntry {
   agentRef?: { name: string };
 }
 
+/**
+ * Polymorphic provider group value.
+ * Array mode: pool of test providers (ArenaProviderEntry[]).
+ * Map mode: 1:1 config-provider-ID → CRD mapping (Record<string, ArenaProviderEntry>).
+ */
+export type ArenaProviderGroup =
+  | ArenaProviderEntry[]
+  | Record<string, ArenaProviderEntry>;
+
 // =============================================================================
 // ArenaJob - Execution of evaluation/loadtest/datagen
 // =============================================================================
@@ -261,8 +270,8 @@ export interface ArenaJobSpec {
   type: ArenaJobType;
   /** Scenario filtering - filters which scenarios to run from the arena file */
   scenarios?: ScenarioFilter;
-  /** Provider groups - map of group names to provider/agent entries */
-  providers?: Record<string, ArenaProviderEntry[]>;
+  /** Provider groups - map of group names to provider groups (array or map mode) */
+  providers?: Record<string, ArenaProviderGroup>;
   /** Tool registries - list of ToolRegistry CRD refs */
   toolRegistries?: { name: string }[];
   /** Worker configuration */

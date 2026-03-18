@@ -130,9 +130,9 @@ func TestValidateProviderGroups(t *testing.T) {
 		job := &omniav1alpha1.ArenaJob{
 			Spec: omniav1alpha1.ArenaJobSpec{
 				SourceRef: corev1alpha1.LocalObjectReference{Name: "src"},
-				Providers: map[string][]omniav1alpha1.ArenaProviderEntry{
-					"default": {{ProviderRef: &corev1alpha1.ProviderRef{Name: "claude"}}},
-					"judge":   {{ProviderRef: &corev1alpha1.ProviderRef{Name: "haiku"}}},
+				Providers: map[string]omniav1alpha1.ArenaProviderGroup{
+					"default": {Entries: []omniav1alpha1.ArenaProviderEntry{{ProviderRef: &corev1alpha1.ProviderRef{Name: "claude"}}}},
+					"judge":   {Entries: []omniav1alpha1.ArenaProviderEntry{{ProviderRef: &corev1alpha1.ProviderRef{Name: "haiku"}}}},
 				},
 			},
 		}
@@ -154,8 +154,8 @@ func TestValidateProviderGroups(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "test"},
 			Spec: omniav1alpha1.ArenaJobSpec{
 				SourceRef: corev1alpha1.LocalObjectReference{Name: "src"},
-				Providers: map[string][]omniav1alpha1.ArenaProviderEntry{
-					"default": {{ProviderRef: &corev1alpha1.ProviderRef{Name: "claude"}}},
+				Providers: map[string]omniav1alpha1.ArenaProviderGroup{
+					"default": {Entries: []omniav1alpha1.ArenaProviderEntry{{ProviderRef: &corev1alpha1.ProviderRef{Name: "claude"}}}},
 					// judge group missing
 				},
 			},
@@ -183,8 +183,8 @@ func TestValidateProviderGroups(t *testing.T) {
 		job := &omniav1alpha1.ArenaJob{
 			Spec: omniav1alpha1.ArenaJobSpec{
 				SourceRef: corev1alpha1.LocalObjectReference{Name: "src"},
-				Providers: map[string][]omniav1alpha1.ArenaProviderEntry{
-					"default":  {{ProviderRef: &corev1alpha1.ProviderRef{Name: "claude"}}},
+				Providers: map[string]omniav1alpha1.ArenaProviderGroup{
+					"default":  {Entries: []omniav1alpha1.ArenaProviderEntry{{ProviderRef: &corev1alpha1.ProviderRef{Name: "claude"}}}},
 					"selfplay": {}, // empty
 				},
 			},
@@ -209,6 +209,62 @@ func TestValidateProviderGroups(t *testing.T) {
 		msg := r.validateProviderGroups(job, "/nonexistent/config.yaml")
 		if msg != "" {
 			t.Errorf("expected empty (skip), got: %s", msg)
+		}
+	})
+
+	t.Run("passes when map-mode groups have entries", func(t *testing.T) {
+		path := writeConfig(t, `spec:
+  providers:
+    - file: p.yaml
+      group: default
+    - file: j.yaml
+      group: judge`)
+
+		job := &omniav1alpha1.ArenaJob{
+			Spec: omniav1alpha1.ArenaJobSpec{
+				SourceRef: corev1alpha1.LocalObjectReference{Name: "src"},
+				Providers: map[string]omniav1alpha1.ArenaProviderGroup{
+					"default": {Mapping: map[string]omniav1alpha1.ArenaProviderEntry{
+						"claude": {ProviderRef: &corev1alpha1.ProviderRef{Name: "claude"}},
+					}},
+					"judge": {Mapping: map[string]omniav1alpha1.ArenaProviderEntry{
+						"haiku": {ProviderRef: &corev1alpha1.ProviderRef{Name: "haiku"}},
+					}},
+				},
+			},
+		}
+
+		msg := r.validateProviderGroups(job, path)
+		if msg != "" {
+			t.Errorf("expected no error for map-mode groups, got: %s", msg)
+		}
+	})
+
+	t.Run("fails when map-mode group is empty", func(t *testing.T) {
+		path := writeConfig(t, `spec:
+  providers:
+    - file: p.yaml
+    - file: j.yaml
+      group: judge`)
+
+		job := &omniav1alpha1.ArenaJob{
+			Spec: omniav1alpha1.ArenaJobSpec{
+				SourceRef: corev1alpha1.LocalObjectReference{Name: "src"},
+				Providers: map[string]omniav1alpha1.ArenaProviderGroup{
+					"default": {Mapping: map[string]omniav1alpha1.ArenaProviderEntry{
+						"claude": {ProviderRef: &corev1alpha1.ProviderRef{Name: "claude"}},
+					}},
+					"judge": {Mapping: map[string]omniav1alpha1.ArenaProviderEntry{}}, // empty map
+				},
+			},
+		}
+
+		msg := r.validateProviderGroups(job, path)
+		if msg == "" {
+			t.Error("expected validation error for empty map-mode judge group")
+		}
+		if !contains(msg, "judge") {
+			t.Errorf("expected error to mention 'judge', got: %s", msg)
 		}
 	})
 }
@@ -240,12 +296,12 @@ func TestValidateProviderGroups_MultipleProvidersAllowed(t *testing.T) {
 		job := &omniav1alpha1.ArenaJob{
 			Spec: omniav1alpha1.ArenaJobSpec{
 				SourceRef: corev1alpha1.LocalObjectReference{Name: "src"},
-				Providers: map[string][]omniav1alpha1.ArenaProviderEntry{
-					"default": {{ProviderRef: &corev1alpha1.ProviderRef{Name: "claude"}}},
-					"selfplay": {
+				Providers: map[string]omniav1alpha1.ArenaProviderGroup{
+					"default": {Entries: []omniav1alpha1.ArenaProviderEntry{{ProviderRef: &corev1alpha1.ProviderRef{Name: "claude"}}}},
+					"selfplay": {Entries: []omniav1alpha1.ArenaProviderEntry{
 						{ProviderRef: &corev1alpha1.ProviderRef{Name: "ollama-a"}},
 						{ProviderRef: &corev1alpha1.ProviderRef{Name: "ollama-b"}},
-					},
+					}},
 				},
 			},
 		}
@@ -269,12 +325,12 @@ func TestValidateProviderGroups_MultipleProvidersAllowed(t *testing.T) {
 		job := &omniav1alpha1.ArenaJob{
 			Spec: omniav1alpha1.ArenaJobSpec{
 				SourceRef: corev1alpha1.LocalObjectReference{Name: "src"},
-				Providers: map[string][]omniav1alpha1.ArenaProviderEntry{
-					"default": {{ProviderRef: &corev1alpha1.ProviderRef{Name: "claude"}}},
-					"judge": {
+				Providers: map[string]omniav1alpha1.ArenaProviderGroup{
+					"default": {Entries: []omniav1alpha1.ArenaProviderEntry{{ProviderRef: &corev1alpha1.ProviderRef{Name: "claude"}}}},
+					"judge": {Entries: []omniav1alpha1.ArenaProviderEntry{
 						{ProviderRef: &corev1alpha1.ProviderRef{Name: "gpt-4o"}},
 						{ProviderRef: &corev1alpha1.ProviderRef{Name: "claude-haiku"}},
-					},
+					}},
 				},
 			},
 		}

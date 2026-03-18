@@ -178,46 +178,17 @@ spec:
                 type: object
               providers:
                 additionalProperties:
-                  items:
-                    description: |-
-                      ArenaProviderEntry references either a Provider CRD or an AgentRuntime CRD.
-                      Exactly one of providerRef or agentRef must be set.
-                    properties:
-                      agentRef:
-                        description: |-
-                          agentRef references an AgentRuntime CRD.
-                          The worker connects via WebSocket (fleet mode).
-                        properties:
-                          name:
-                            description: name is the name of the object.
-                            minLength: 1
-                            type: string
-                        required:
-                        - name
-                        type: object
-                      providerRef:
-                        description: providerRef references a Provider CRD for LLM
-                          access.
-                        properties:
-                          name:
-                            description: name is the name of the Provider resource.
-                            minLength: 1
-                            type: string
-                          namespace:
-                            description: |-
-                              namespace is the namespace of the Provider resource.
-                              If not specified, the same namespace as the AgentRuntime is used.
-                            type: string
-                        required:
-                        - name
-                        type: object
-                    type: object
-                    x-kubernetes-validations:
-                    - message: exactly one of providerRef or agentRef must be set
-                      rule: has(self.providerRef) != has(self.agentRef)
-                  type: array
+                  description: |-
+                    ArenaProviderGroup is a polymorphic provider group value.
+                    Array mode: []ArenaProviderEntry (test provider pools).
+                    Map mode: map[string]ArenaProviderEntry (1:1 config-provider-ID → CRD mappings).
+                    JSON auto-detects: arrays → Entries, objects → Mapping.
+                  x-kubernetes-preserve-unknown-fields: true
                 description: |-
-                  providers maps group names to lists of provider/agent entries.
+                  providers maps group names to provider groups.
+                  Each group is either an array (pool of test providers) or an object
+                  (1:1 config-provider-ID → CRD mapping). Array mode is the default;
+                  map mode lets the wizard set the exact provider ID the arena config expects.
                   Groups correspond to the arena config's provider groups (e.g., "default", "judge").
                   When set, provider YAML files from the arena project are ignored
                   and the worker resolves providers directly from CRDs.

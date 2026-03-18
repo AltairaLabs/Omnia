@@ -378,10 +378,10 @@ func (r *ArenaJobReconciler) resolveProviderGroups(
 	var allProviders []*corev1alpha1.Provider
 	seen := make(map[string]bool)
 
-	for groupName, entries := range arenaJob.Spec.Providers {
+	for groupName, pg := range arenaJob.Spec.Providers {
 		grp := &resolvedProviderGroup{agentWSURLs: make(map[string]string)}
 
-		for _, entry := range entries {
+		for _, entry := range pg.AllEntries() {
 			if entry.ProviderRef != nil {
 				provider, err := r.resolveProviderEntry(ctx, arenaJob.Namespace, *entry.ProviderRef)
 				if err != nil {

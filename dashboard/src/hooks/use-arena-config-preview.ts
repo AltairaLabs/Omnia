@@ -4,6 +4,16 @@ import { useState, useEffect, useCallback } from "react";
 import { useWorkspace } from "@/contexts/workspace-context";
 import yaml from "js-yaml";
 
+/** A provider ID referenced by the arena config (judges, self-play roles, etc.) */
+export interface ConfigProviderRef {
+  /** The provider ID as referenced in the config */
+  id: string;
+  /** Source context: which config section references this provider */
+  source: "judges" | "judge_specs" | "self_play";
+  /** Human-readable label for display */
+  label: string;
+}
+
 export interface ArenaConfigPreview {
   /** Number of scenarios declared in the arena config */
   scenarioCount: number;
@@ -11,6 +21,8 @@ export interface ArenaConfigPreview {
   configProviderCount: number;
   /** Provider groups required by the arena config (from provider file groups + self-play roles) */
   requiredGroups: string[];
+  /** Provider IDs referenced by judges, judge_specs, and self-play roles */
+  providerRefs: ConfigProviderRef[];
   /** Whether the config was successfully parsed */
   loaded: boolean;
   /** Whether the config is being fetched */
@@ -31,12 +43,57 @@ interface ArenaConfigYaml {
       enabled?: boolean;
       roles?: { id?: string; provider?: string }[];
     };
+    judges?: { name?: string; provider?: string }[];
+    judge_specs?: Record<string, { provider?: string }>;
   };
 }
 
 /**
+ * Extract provider ID references from judges, judge_specs, and self-play roles.
+ * These are provider IDs the config expects to exist — map-mode groups use them as keys.
+ */
+function extractProviderRefs(parsed: ArenaConfigYaml): ConfigProviderRef[] {
+  const refs: ConfigProviderRef[] = [];
+  const seen = new Set<string>();
+
+  const add = (id: string, source: ConfigProviderRef["source"], label: string) => {
+    const key = `${source}:${id}`;
+    if (id && !seen.has(key)) {
+      seen.add(key);
+      refs.push({ id, source, label });
+    }
+  };
+
+  if (parsed?.spec?.self_play?.enabled) {
+    for (const role of parsed.spec.self_play.roles ?? []) {
+      if (role.provider) {
+        add(role.provider, "self_play", `Self-play role "${role.id || "unknown"}"`);
+      }
+    }
+  }
+
+  for (const judge of parsed?.spec?.judges ?? []) {
+    if (judge.provider) {
+      add(judge.provider, "judges", `Judge "${judge.name || "unknown"}"`);
+    }
+  }
+
+  for (const [name, spec] of Object.entries(parsed?.spec?.judge_specs ?? {})) {
+    if (spec.provider) {
+      add(spec.provider, "judge_specs", `Judge spec "${name}"`);
+    }
+  }
+
+  return refs;
+}
+
+/**
  * Extract the unique provider group names referenced by the arena config.
- * Sources: spec.providers[].group (default: "default") and spec.self_play.roles[].provider.
+ * Sources:
+ *   - spec.providers[].group (default: "default")
+ *   - spec.self_play.roles[].provider (when self_play is enabled)
+ *   - spec.judges[].provider
+ *   - spec.judge_specs.<key>.provider
  */
 function extractRequiredGroups(parsed: ArenaConfigYaml): string[] {
   const groups = new Set<string>();
@@ -50,6 +107,18 @@ function extractRequiredGroups(parsed: ArenaConfigYaml): string[] {
       if (role.provider) {
         groups.add(role.provider);
       }
+    }
+  }
+
+  for (const judge of parsed?.spec?.judges ?? []) {
+    if (judge.provider) {
+      groups.add(judge.provider);
+    }
+  }
+
+  for (const spec of Object.values(parsed?.spec?.judge_specs ?? {})) {
+    if (spec.provider) {
+      groups.add(spec.provider);
     }
   }
 
@@ -74,6 +143,7 @@ export function useArenaConfigPreview(
     scenarioCount: 0,
     configProviderCount: 0,
     requiredGroups: [],
+    providerRefs: [],
     loaded: false,
     loading: false,
     error: null,
@@ -109,11 +179,13 @@ export function useArenaConfigPreview(
       const scenarioCount = scenarios.filter((s) => s?.file || s).length;
       const configProviderCount = providers.filter((p) => p?.file || p?.name || p).length;
       const requiredGroups = extractRequiredGroups(parsed);
+      const providerRefs = extractProviderRefs(parsed);
 
       setState({
         scenarioCount,
         configProviderCount,
         requiredGroups,
+        providerRefs,
         loaded: true,
         loading: false,
         error: null,

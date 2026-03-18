@@ -152,6 +152,14 @@ function formatDuration(startTime?: string, completionTime?: string): string {
   return `${seconds}s`;
 }
 
+// Normalize a polymorphic provider group to an array of entries.
+function normalizeProviderGroup(
+  group: ArenaProviderEntry[] | Record<string, ArenaProviderEntry>
+): ArenaProviderEntry[] {
+  if (Array.isArray(group)) return group;
+  return Object.values(group);
+}
+
 // Component to show provider group with its entries
 function ProviderGroupDisplay({
   groupName,
@@ -470,11 +478,11 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {Object.entries(spec.providers).map(([groupName, entries]) => (
+              {Object.entries(spec.providers).map(([groupName, group]) => (
                 <ProviderGroupDisplay
                   key={groupName}
                   groupName={groupName}
-                  entries={entries}
+                  entries={normalizeProviderGroup(group)}
                 />
               ))}
             </div>

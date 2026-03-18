@@ -41,6 +41,22 @@ vi.mock("@/hooks/use-arena-source-content", () => ({
   }),
 }));
 
+// Mock useArenaConfigPreview — default returns empty, tests can override via mockConfigPreview
+const mockConfigPreview = {
+  scenarioCount: 0,
+  configProviderCount: 0,
+  requiredGroups: [] as string[],
+  providerRefs: [] as { id: string; source: string; label: string }[],
+  loaded: false,
+  loading: false,
+  error: null,
+};
+
+vi.mock("@/hooks/use-arena-config-preview", () => ({
+  useArenaConfigPreview: () => mockConfigPreview,
+  estimateWorkItems: () => ({ workItems: 1, recommendedWorkers: 1, description: "" }),
+}));
+
 // Mock useAgents hook
 const mockAgents = [
   {
@@ -184,6 +200,14 @@ async function navigateToStep(user: ReturnType<typeof userEvent.setup>, stepInde
 describe("JobWizard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset config preview to default empty state
+    mockConfigPreview.scenarioCount = 0;
+    mockConfigPreview.configProviderCount = 0;
+    mockConfigPreview.requiredGroups = [];
+    mockConfigPreview.providerRefs = [];
+    mockConfigPreview.loaded = false;
+    mockConfigPreview.loading = false;
+    mockConfigPreview.error = null;
   });
 
   describe("Step 0: Basic Info", () => {
@@ -260,7 +284,7 @@ describe("JobWizard", () => {
       const user = userEvent.setup();
       renderWizard();
       await navigateToStep(user, 2);
-      expect(screen.getByText("Provider Groups")).toBeInTheDocument();
+      expect(screen.getByText("Test Providers")).toBeInTheDocument();
     });
 
     it("shows no groups message when none configured", async () => {
@@ -1007,6 +1031,140 @@ describe("JobWizard", () => {
       // The submit button should now show "Created" and be disabled
       const createdButton = screen.getByRole("button", { name: /created/i });
       expect(createdButton).toBeDisabled();
+    });
+  });
+
+  describe("Provider Mappings (map mode)", () => {
+    it("shows mapping section when config has providerRefs", async () => {
+      // Set config preview to include providerRefs
+      mockConfigPreview.loaded = true;
+      mockConfigPreview.requiredGroups = ["default", "judges"];
+      mockConfigPreview.providerRefs = [
+        { id: "judge-quality", source: "judges", label: 'Judge "quality"' },
+        { id: "judge-safety", source: "judges", label: 'Judge "safety"' },
+      ];
+
+      const user = userEvent.setup();
+      renderWizard();
+      await navigateToStep(user, 2);
+
+      // Should see the Provider Mappings section
+      expect(screen.getByText("Provider Mappings")).toBeInTheDocument();
+      // Should see the config provider IDs as labels
+      expect(screen.getByText("judge-quality")).toBeInTheDocument();
+      expect(screen.getByText("judge-safety")).toBeInTheDocument();
+    });
+
+    it("shows mapped badge for map-mode groups", async () => {
+      mockConfigPreview.loaded = true;
+      mockConfigPreview.requiredGroups = ["judges"];
+      mockConfigPreview.providerRefs = [
+        { id: "judge-quality", source: "judges", label: 'Judge "quality"' },
+      ];
+
+      const user = userEvent.setup();
+      renderWizard();
+      await navigateToStep(user, 2);
+
+      expect(screen.getByText("mapped")).toBeInTheDocument();
+    });
+
+    it("selects a provider for a mapping entry", async () => {
+      mockConfigPreview.loaded = true;
+      mockConfigPreview.requiredGroups = ["judges"];
+      mockConfigPreview.providerRefs = [
+        { id: "judge-quality", source: "judges", label: 'Judge "quality"' },
+      ];
+
+      const user = userEvent.setup();
+      const onSubmit = vi.fn().mockResolvedValue({} as ArenaJob);
+      renderWizard({ onSubmit });
+      await navigateToStep(user, 2);
+
+      // Select provider for the mapping entry
+      const selectTrigger = screen.getByText("Select provider or agent...").closest("button") as HTMLElement;
+      await selectOption(selectTrigger, "claude-prod");
+
+      // Navigate to review and submit
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+      fireEvent.click(screen.getByRole("button", { name: /create job/i }));
+
+      await waitFor(() => {
+        const spec = onSubmit.mock.calls[0][1];
+        expect(spec.providers).toBeDefined();
+        // Map-mode group should be an object, not an array
+        expect(Array.isArray(spec.providers.judges)).toBe(false);
+        expect(spec.providers.judges["judge-quality"]).toEqual({
+          providerRef: { name: "claude-prod", namespace: undefined },
+        });
+      });
+    });
+
+    it("shows mapping groups in review", async () => {
+      mockConfigPreview.loaded = true;
+      mockConfigPreview.requiredGroups = ["judges"];
+      mockConfigPreview.providerRefs = [
+        { id: "judge-quality", source: "judges", label: 'Judge "quality"' },
+      ];
+
+      const user = userEvent.setup();
+      renderWizard();
+      await navigateToStep(user, 2);
+
+      // Select a provider
+      const selectTrigger = screen.getByText("Select provider or agent...").closest("button") as HTMLElement;
+      await selectOption(selectTrigger, "claude-prod");
+
+      // Navigate to review
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+      expect(screen.getByText("Provider Groups")).toBeInTheDocument();
+      expect(screen.getByText("judges")).toBeInTheDocument();
+    });
+
+    it("validation fails when mapping entry has no selection", async () => {
+      mockConfigPreview.loaded = true;
+      mockConfigPreview.requiredGroups = ["judges"];
+      mockConfigPreview.providerRefs = [
+        { id: "judge-quality", source: "judges", label: 'Judge "quality"' },
+      ];
+
+      const user = userEvent.setup();
+      const onSubmit = vi.fn().mockResolvedValue({} as ArenaJob);
+      renderWizard({ onSubmit });
+
+      // Navigate to review without selecting a provider for the mapping
+      await navigateToStep(user, 4);
+      fireEvent.click(screen.getByRole("button", { name: /create job/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("alert")).toBeInTheDocument();
+        expect(screen.getByRole("alert").textContent).toContain("judge-quality");
+      });
+
+      // onSubmit should NOT have been called
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("shows mixed array + map groups", async () => {
+      mockConfigPreview.loaded = true;
+      mockConfigPreview.requiredGroups = ["default", "judges"];
+      mockConfigPreview.providerRefs = [
+        { id: "judge-quality", source: "judges", label: 'Judge "quality"' },
+      ];
+
+      const user = userEvent.setup();
+      renderWizard();
+      await navigateToStep(user, 2);
+
+      // Should see both sections
+      expect(screen.getByText("Provider Mappings")).toBeInTheDocument();
+      expect(screen.getByText("Test Providers")).toBeInTheDocument();
+      // default group should be auto-populated as array-mode (required group)
+      expect(screen.getByText("default")).toBeInTheDocument();
     });
   });
 });

@@ -232,19 +232,10 @@ func (in *ArenaJobSpec) DeepCopyInto(out *ArenaJobSpec) {
 	}
 	if in.Providers != nil {
 		in, out := &in.Providers, &out.Providers
-		*out = make(map[string][]ArenaProviderEntry, len(*in))
+		*out = make(map[string]ArenaProviderGroup, len(*in))
 		for key, val := range *in {
-			var outVal []ArenaProviderEntry
-			if val == nil {
-				(*out)[key] = nil
-			} else {
-				inVal := (*in)[key]
-				in, out := &inVal, &outVal
-				*out = make([]ArenaProviderEntry, len(*in))
-				for i := range *in {
-					(*in)[i].DeepCopyInto(&(*out)[i])
-				}
-			}
+			var outVal ArenaProviderGroup
+			val.DeepCopyInto(&outVal)
 			(*out)[key] = outVal
 		}
 	}

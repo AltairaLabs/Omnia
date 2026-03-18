@@ -31,6 +31,7 @@ describe("estimateWorkItems", () => {
     scenarioCount,
     configProviderCount,
     requiredGroups: [],
+    providerRefs: [],
     loaded: true,
     loading: false,
     error: null,
@@ -40,6 +41,7 @@ describe("estimateWorkItems", () => {
     scenarioCount: 0,
     configProviderCount: 0,
     requiredGroups: [],
+    providerRefs: [],
     loaded: false,
     loading: false,
     error: null,
@@ -367,6 +369,120 @@ spec:
     expect(result.current.requiredGroups).toHaveLength(3);
   });
 
+  it("extracts required groups from judges", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+  judges:
+    - name: quality
+      provider: quality-judge
+    - name: safety
+      provider: safety-judge
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    expect(result.current.requiredGroups).toContain("default");
+    expect(result.current.requiredGroups).toContain("quality-judge");
+    expect(result.current.requiredGroups).toContain("safety-judge");
+    expect(result.current.requiredGroups).toHaveLength(3);
+  });
+
+  it("extracts required groups from judge_specs", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+  judge_specs:
+    safety:
+      provider: safety-judge
+    coherence:
+      provider: coherence-judge
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    expect(result.current.requiredGroups).toContain("default");
+    expect(result.current.requiredGroups).toContain("safety-judge");
+    expect(result.current.requiredGroups).toContain("coherence-judge");
+    expect(result.current.requiredGroups).toHaveLength(3);
+  });
+
+  it("deduplicates groups across providers, self-play, judges, and judge_specs", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+    - file: providers/judge.provider.yaml
+      group: judge
+  self_play:
+    enabled: true
+    roles:
+      - id: sim
+        provider: selfplay
+  judges:
+    - name: quality
+      provider: judge
+  judge_specs:
+    safety:
+      provider: judge
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    // "judge" appears in providers group, judges, and judge_specs — should be deduplicated
+    expect(result.current.requiredGroups).toContain("default");
+    expect(result.current.requiredGroups).toContain("judge");
+    expect(result.current.requiredGroups).toContain("selfplay");
+    expect(result.current.requiredGroups).toHaveLength(3);
+  });
+
   it("returns empty required groups when no providers or self-play", async () => {
     const { useWorkspace } = await import("@/contexts/workspace-context");
     vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
@@ -392,6 +508,204 @@ spec:
     });
 
     expect(result.current.requiredGroups).toHaveLength(0);
+  });
+
+  it("extracts providerRefs from judges", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+  judges:
+    - name: quality
+      provider: quality-judge
+    - name: safety
+      provider: safety-judge
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    expect(result.current.providerRefs).toHaveLength(2);
+    expect(result.current.providerRefs).toContainEqual({
+      id: "quality-judge",
+      source: "judges",
+      label: 'Judge "quality"',
+    });
+    expect(result.current.providerRefs).toContainEqual({
+      id: "safety-judge",
+      source: "judges",
+      label: 'Judge "safety"',
+    });
+  });
+
+  it("extracts providerRefs from judge_specs", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+  judge_specs:
+    safety:
+      provider: safety-judge
+    coherence:
+      provider: coherence-judge
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    expect(result.current.providerRefs).toHaveLength(2);
+    expect(result.current.providerRefs).toContainEqual({
+      id: "safety-judge",
+      source: "judge_specs",
+      label: 'Judge spec "safety"',
+    });
+    expect(result.current.providerRefs).toContainEqual({
+      id: "coherence-judge",
+      source: "judge_specs",
+      label: 'Judge spec "coherence"',
+    });
+  });
+
+  it("extracts providerRefs from self_play roles", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+  self_play:
+    enabled: true
+    roles:
+      - id: user-sim
+        provider: selfplay
+      - id: adversary
+        provider: adversary-provider
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    expect(result.current.providerRefs).toHaveLength(2);
+    expect(result.current.providerRefs).toContainEqual({
+      id: "selfplay",
+      source: "self_play",
+      label: 'Self-play role "user-sim"',
+    });
+    expect(result.current.providerRefs).toContainEqual({
+      id: "adversary-provider",
+      source: "self_play",
+      label: 'Self-play role "adversary"',
+    });
+  });
+
+  it("extracts providerRefs from all sources, deduplicated by source+id", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+  self_play:
+    enabled: true
+    roles:
+      - id: user-sim
+        provider: shared-provider
+  judges:
+    - name: quality
+      provider: shared-provider
+    - name: safety
+      provider: safety-judge
+  judge_specs:
+    coherence:
+      provider: shared-provider
+    tone:
+      provider: tone-judge
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    // "shared-provider" appears in all three sources — each source+id combo is unique
+    const refs = result.current.providerRefs;
+    expect(refs).toContainEqual({
+      id: "shared-provider",
+      source: "self_play",
+      label: 'Self-play role "user-sim"',
+    });
+    expect(refs).toContainEqual({
+      id: "shared-provider",
+      source: "judges",
+      label: 'Judge "quality"',
+    });
+    expect(refs).toContainEqual({
+      id: "shared-provider",
+      source: "judge_specs",
+      label: 'Judge spec "coherence"',
+    });
+    expect(refs).toContainEqual({
+      id: "safety-judge",
+      source: "judges",
+      label: 'Judge "safety"',
+    });
+    expect(refs).toContainEqual({
+      id: "tone-judge",
+      source: "judge_specs",
+      label: 'Judge spec "tone"',
+    });
+    // Total: 3 (shared-provider x 3 sources) + safety-judge + tone-judge = 5
+    expect(refs).toHaveLength(5);
   });
 
   it("handles config YAML with empty spec", async () => {

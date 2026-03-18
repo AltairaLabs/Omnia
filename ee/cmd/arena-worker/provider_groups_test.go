@@ -393,8 +393,9 @@ func TestGetArenaJob(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, got)
 		assert.Contains(t, got.Providers, "default")
-		assert.Len(t, got.Providers["default"], 1)
-		assert.Equal(t, "my-provider", got.Providers["default"][0].ProviderRef.Name)
+		defaultGroup := got.Providers["default"]
+		assert.Len(t, defaultGroup.allEntries(), 1)
+		assert.Equal(t, "my-provider", defaultGroup.entries[0].ProviderRef.Name)
 	})
 
 	t.Run("returns spec with toolRegistries", func(t *testing.T) {
@@ -1358,12 +1359,16 @@ func TestArenaJobSpecJSONRoundTrip(t *testing.T) {
 	t.Run("providers with mixed entries round-trips correctly", func(t *testing.T) {
 		nsPtr := ptr.To("other-ns")
 		original := arenaJobSpec{
-			Providers: map[string][]arenaProviderEntry{
+			Providers: map[string]arenaProviderGroup{
 				"default": {
-					{ProviderRef: &v1alpha1.ProviderRef{Name: "my-provider", Namespace: nsPtr}},
+					entries: []arenaProviderEntry{
+						{ProviderRef: &v1alpha1.ProviderRef{Name: "my-provider", Namespace: nsPtr}},
+					},
 				},
 				"fleet": {
-					{AgentRef: &v1alpha1.LocalObjectReference{Name: "my-agent"}},
+					entries: []arenaProviderEntry{
+						{AgentRef: &v1alpha1.LocalObjectReference{Name: "my-agent"}},
+					},
 				},
 			},
 			ToolRegistries: []v1alpha1.LocalObjectReference{
@@ -1378,9 +1383,192 @@ func TestArenaJobSpecJSONRoundTrip(t *testing.T) {
 		err = json.Unmarshal(data, &got)
 		require.NoError(t, err)
 
-		assert.Equal(t, "my-provider", got.Providers["default"][0].ProviderRef.Name)
-		assert.Equal(t, "other-ns", *got.Providers["default"][0].ProviderRef.Namespace)
-		assert.Equal(t, "my-agent", got.Providers["fleet"][0].AgentRef.Name)
+		defaultGroup := got.Providers["default"]
+		assert.Equal(t, "my-provider", defaultGroup.entries[0].ProviderRef.Name)
+		assert.Equal(t, "other-ns", *defaultGroup.entries[0].ProviderRef.Namespace)
+		fleetGroup := got.Providers["fleet"]
+		assert.Equal(t, "my-agent", fleetGroup.entries[0].AgentRef.Name)
 		assert.Equal(t, "registry-a", got.ToolRegistries[0].Name)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// arenaProviderGroup UnmarshalJSON
+// ---------------------------------------------------------------------------
+
+func TestArenaProviderGroupUnmarshalJSON(t *testing.T) {
+	t.Run("array JSON populates entries", func(t *testing.T) {
+		raw := `[{"providerRef":{"name":"p1"}},{"agentRef":{"name":"a1"}}]`
+		var pg arenaProviderGroup
+		err := json.Unmarshal([]byte(raw), &pg)
+		require.NoError(t, err)
+
+		assert.False(t, pg.isMapMode())
+		require.Len(t, pg.entries, 2)
+		assert.Equal(t, "p1", pg.entries[0].ProviderRef.Name)
+		assert.Equal(t, "a1", pg.entries[1].AgentRef.Name)
+		assert.Nil(t, pg.mapping)
+	})
+
+	t.Run("object JSON populates mapping", func(t *testing.T) {
+		raw := `{"my-config-id":{"providerRef":{"name":"p1"}},"other-id":{"agentRef":{"name":"a1"}}}`
+		var pg arenaProviderGroup
+		err := json.Unmarshal([]byte(raw), &pg)
+		require.NoError(t, err)
+
+		assert.True(t, pg.isMapMode())
+		require.Len(t, pg.mapping, 2)
+		assert.Equal(t, "p1", pg.mapping["my-config-id"].ProviderRef.Name)
+		assert.Equal(t, "a1", pg.mapping["other-id"].AgentRef.Name)
+		assert.Nil(t, pg.entries)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// arenaProviderGroup MarshalJSON
+// ---------------------------------------------------------------------------
+
+func TestArenaProviderGroupMarshalJSON(t *testing.T) {
+	t.Run("array mode marshals to JSON array", func(t *testing.T) {
+		pg := arenaProviderGroup{
+			entries: []arenaProviderEntry{
+				{ProviderRef: &v1alpha1.ProviderRef{Name: "p1"}},
+			},
+		}
+
+		data, err := json.Marshal(pg)
+		require.NoError(t, err)
+
+		// Should start with '[' (array)
+		assert.Equal(t, byte('['), data[0])
+
+		// Round-trip
+		var got arenaProviderGroup
+		require.NoError(t, json.Unmarshal(data, &got))
+		assert.False(t, got.isMapMode())
+		require.Len(t, got.entries, 1)
+		assert.Equal(t, "p1", got.entries[0].ProviderRef.Name)
+	})
+
+	t.Run("map mode marshals to JSON object", func(t *testing.T) {
+		pg := arenaProviderGroup{
+			mapping: map[string]arenaProviderEntry{
+				"my-id": {ProviderRef: &v1alpha1.ProviderRef{Name: "p1"}},
+			},
+		}
+
+		data, err := json.Marshal(pg)
+		require.NoError(t, err)
+
+		// Should start with '{' (object)
+		assert.Equal(t, byte('{'), data[0])
+
+		// Round-trip
+		var got arenaProviderGroup
+		require.NoError(t, json.Unmarshal(data, &got))
+		assert.True(t, got.isMapMode())
+		assert.Equal(t, "p1", got.mapping["my-id"].ProviderRef.Name)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// resolveProvidersFromCRD — map mode
+// ---------------------------------------------------------------------------
+
+func TestResolveProvidersFromCRD_MapMode(t *testing.T) {
+	ctx := context.Background()
+	log := testLog()
+
+	t.Run("map mode uses map key as provider ID", func(t *testing.T) {
+		// Create Provider CRD
+		provider := &v1alpha1.Provider{
+			Spec: v1alpha1.ProviderSpec{
+				Type:  "openai",
+				Model: "gpt-4o",
+			},
+		}
+		provider.Name = "my-provider"
+		provider.Namespace = testNamespace
+
+		// Build ArenaJob with map-mode providers (object, not array)
+		spec := map[string]interface{}{
+			"providers": map[string]interface{}{
+				"selfplay": map[string]interface{}{
+					"my-config-id": map[string]interface{}{
+						"providerRef": map[string]interface{}{
+							"name": "my-provider",
+						},
+					},
+				},
+			},
+		}
+		u := makeArenaJobUnstructured("map-job", testNamespace, spec)
+
+		c := fake.NewClientBuilder().
+			WithScheme(k8s.Scheme()).
+			WithObjects(provider, u).
+			Build()
+
+		cfg := &Config{JobName: "map-job", JobNamespace: testNamespace}
+		arenaCfg := &config.Config{}
+
+		fps, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
+		require.NoError(t, err)
+		assert.Empty(t, fps)
+
+		// The provider should be keyed by "my-config-id" (the map key), not "my-provider"
+		require.Contains(t, arenaCfg.LoadedProviders, "my-config-id")
+		assert.Equal(t, "my-config-id", arenaCfg.LoadedProviders["my-config-id"].ID)
+		assert.Equal(t, "openai", arenaCfg.LoadedProviders["my-config-id"].Type)
+		assert.Equal(t, "gpt-4o", arenaCfg.LoadedProviders["my-config-id"].Model)
+		assert.Equal(t, "selfplay", arenaCfg.ProviderGroups["my-config-id"])
+
+		// Should NOT be keyed by the CRD name
+		assert.NotContains(t, arenaCfg.LoadedProviders, sanitizeID("my-provider"))
+	})
+}
+
+// ---------------------------------------------------------------------------
+// remapProviderIDs — skipped for map mode
+// ---------------------------------------------------------------------------
+
+func TestRemapProviderIDs_SkippedForMapMode(t *testing.T) {
+	writeConfig := func(t *testing.T, yamlContent string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.arena.yaml")
+		require.NoError(t, os.WriteFile(path, []byte(yamlContent), 0644))
+		return path
+	}
+
+	t.Run("no-op when expected IDs already present from map mode", func(t *testing.T) {
+		configPath := writeConfig(t, `spec:
+  providers:
+    - file: providers/sim.yaml
+      group: selfplay
+  self_play:
+    enabled: true
+    roles:
+      - id: user-sim
+        provider: selfplay`)
+
+		// Simulate map-mode resolution: the provider is already keyed as "selfplay"
+		// (the config provider ID), so remapProviderIDs should be a no-op.
+		arenaCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"selfplay": {ID: "selfplay", Type: "openai", Model: "gpt-4o"},
+			},
+			ProviderGroups: map[string]string{
+				"selfplay": "selfplay",
+			},
+		}
+
+		err := remapProviderIDs(testLog(), arenaCfg, configPath)
+		require.NoError(t, err)
+
+		// Should remain unchanged — no remapping needed
+		require.Contains(t, arenaCfg.LoadedProviders, "selfplay")
+		assert.Equal(t, "selfplay", arenaCfg.LoadedProviders["selfplay"].ID)
+		assert.Equal(t, "openai", arenaCfg.LoadedProviders["selfplay"].Type)
+		assert.Len(t, arenaCfg.LoadedProviders, 1)
 	})
 }

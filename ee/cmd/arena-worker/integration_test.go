@@ -1358,3 +1358,311 @@ spec:
 	t.Logf("Self-play remap result: status=%s, duration=%.0fms, metrics=%+v",
 		result.Status, result.DurationMs, result.Metrics)
 }
+
+// TestExecuteWorkItemWithMapModeProviders tests that map-mode provider groups
+// use the map key as the provider ID (no sanitizeID, no remapping).
+func TestExecuteWorkItemWithMapModeProviders(t *testing.T) {
+	bundleDir := t.TempDir()
+	makeTestBundle(t, bundleDir)
+
+	// Create a Provider CRD
+	provider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-crd-provider",
+			Namespace: integTestNamespace,
+		},
+		Spec: v1alpha1.ProviderSpec{
+			Type:  "mock",
+			Model: "mock-model",
+		},
+	}
+
+	// ArenaJob with map-mode "default" group: key "my-config-id" → providerRef "my-crd-provider"
+	arenaJob := integMakeArenaJob(integTestJobName, integTestNamespace, map[string]interface{}{
+		"default": map[string]interface{}{
+			"my-config-id": map[string]interface{}{
+				"providerRef": map[string]interface{}{
+					"name": "my-crd-provider",
+				},
+			},
+		},
+	})
+
+	scheme := k8s.Scheme()
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(provider).
+		WithObjects(arenaJob).
+		Build()
+
+	cfg := makeTestConfig(bundleDir, fakeClient)
+
+	// Provider ID should be the map key "my-config-id", not sanitizeID("my-crd-provider")
+	item := &queue.WorkItem{
+		ID:         "test-map-mode",
+		JobID:      integTestJobName,
+		ScenarioID: "test",
+		ProviderID: "my-config-id",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result, err := executeWorkItem(ctx, testLog(), cfg, item, bundleDir)
+	require.NoError(t, err, "map-mode provider should resolve successfully")
+
+	assert.NotNil(t, result)
+	assert.Equal(t, statusPass, result.Status, "mock provider via map mode should pass")
+
+	t.Logf("Map-mode result: status=%s, duration=%.0fms, metrics=%+v",
+		result.Status, result.DurationMs, result.Metrics)
+}
+
+// TestExecuteWorkItemWithMixedModeProviders tests that array-mode and map-mode
+// groups can coexist in the same ArenaJob.
+func TestExecuteWorkItemWithMixedModeProviders(t *testing.T) {
+	bundleDir := t.TempDir()
+	makeTestBundle(t, bundleDir)
+
+	// Create two Provider CRDs
+	defaultProvider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "array-provider",
+			Namespace: integTestNamespace,
+		},
+		Spec: v1alpha1.ProviderSpec{
+			Type:  "mock",
+			Model: "mock-model",
+		},
+	}
+	judgeProvider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "judge-crd",
+			Namespace: integTestNamespace,
+		},
+		Spec: v1alpha1.ProviderSpec{
+			Type:  "mock",
+			Model: "mock-model",
+		},
+	}
+
+	// Mixed: "default" is array-mode, "judges" is map-mode
+	arenaJob := integMakeArenaJob(integTestJobName, integTestNamespace, map[string]interface{}{
+		"default": []interface{}{
+			map[string]interface{}{
+				"providerRef": map[string]interface{}{
+					"name": "array-provider",
+				},
+			},
+		},
+		"judges": map[string]interface{}{
+			"quality-judge": map[string]interface{}{
+				"providerRef": map[string]interface{}{
+					"name": "judge-crd",
+				},
+			},
+		},
+	})
+
+	scheme := k8s.Scheme()
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(defaultProvider, judgeProvider).
+		WithObjects(arenaJob).
+		Build()
+
+	cfg := makeTestConfig(bundleDir, fakeClient)
+
+	// Target the array-mode provider (sanitizeID("array-provider") = "array-provider")
+	item := &queue.WorkItem{
+		ID:         "test-mixed-mode",
+		JobID:      integTestJobName,
+		ScenarioID: "test",
+		ProviderID: "array-provider",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result, err := executeWorkItem(ctx, testLog(), cfg, item, bundleDir)
+	require.NoError(t, err, "mixed-mode providers should resolve successfully")
+
+	assert.NotNil(t, result)
+	assert.Equal(t, statusPass, result.Status, "mock provider via mixed mode should pass")
+
+	t.Logf("Mixed-mode result: status=%s, duration=%.0fms, metrics=%+v",
+		result.Status, result.DurationMs, result.Metrics)
+}
+
+// TestExecuteWorkItemWithMapModeSelfPlay tests that map-mode providers for self-play
+// skip remapping because the map key already matches the expected config provider ID.
+func TestExecuteWorkItemWithMapModeSelfPlay(t *testing.T) {
+	bundleDir := t.TempDir()
+
+	// Arena config with self-play referencing provider "selfplay"
+	arenaConfig := `$schema: https://promptkit.altairalabs.ai/schemas/latest/arena.json
+apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Arena
+metadata:
+  name: map-selfplay-test
+spec:
+  prompt_configs:
+    - id: assistant
+      file: prompts/assistant.yaml
+
+  providers:
+    - file: providers/selfplay.provider.yaml
+      group: selfplay
+
+  self_play:
+    enabled: true
+    personas:
+      - file: prompts/persona.yaml
+    roles:
+      - id: user-sim
+        provider: selfplay
+
+  scenarios:
+    - file: scenarios/test.scenario.yaml
+
+  defaults:
+    temperature: 0.5
+    max_tokens: 500
+    seed: 42
+    output:
+      dir: out
+      formats:
+        - json
+`
+	require.NoError(t, os.WriteFile(filepath.Join(bundleDir, "config.arena.yaml"), []byte(arenaConfig), 0644))
+
+	promptsDir := filepath.Join(bundleDir, "prompts")
+	require.NoError(t, os.MkdirAll(promptsDir, 0755))
+
+	assistantPrompt := `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: PromptConfig
+metadata:
+  name: assistant
+spec:
+  task_type: assistant
+  version: v1.0.0
+  description: Assistant for map-mode self-play test
+  system_template: "You are a helpful assistant."
+`
+	require.NoError(t, os.WriteFile(filepath.Join(promptsDir, "assistant.yaml"), []byte(assistantPrompt), 0644))
+
+	personaYAML := `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Persona
+metadata:
+  name: curious-user
+spec:
+  description: A curious user who asks questions
+  system_prompt: "You are a curious user. Ask questions about the topic."
+`
+	require.NoError(t, os.WriteFile(filepath.Join(promptsDir, "persona.yaml"), []byte(personaYAML), 0644))
+
+	providersDir := filepath.Join(bundleDir, "providers")
+	require.NoError(t, os.MkdirAll(providersDir, 0755))
+
+	selfplayProviderYAML := `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: selfplay
+spec:
+  id: selfplay
+  type: mock
+  model: placeholder
+`
+	require.NoError(t, os.WriteFile(filepath.Join(providersDir, "selfplay.provider.yaml"), []byte(selfplayProviderYAML), 0644))
+
+	scenariosDir := filepath.Join(bundleDir, "scenarios")
+	require.NoError(t, os.MkdirAll(scenariosDir, 0755))
+
+	scenario := `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Scenario
+metadata:
+  name: test
+spec:
+  id: test
+  task_type: assistant
+  description: Test scenario
+  turns:
+    - role: user
+      content: "Hello"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(scenariosDir, "test.scenario.yaml"), []byte(scenario), 0644))
+
+	mockResponses := `defaultResponse: "Hello! How can I help you?"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(bundleDir, "mock-responses.yaml"), []byte(mockResponses), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(bundleDir, "out"), 0755))
+
+	// Create Provider CRDs
+	defaultProvider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      integTestProviderName,
+			Namespace: integTestNamespace,
+		},
+		Spec: v1alpha1.ProviderSpec{
+			Type:  "mock",
+			Model: "mock-model",
+		},
+	}
+	selfplayProvider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mock-selfplay-crd",
+			Namespace: integTestNamespace,
+		},
+		Spec: v1alpha1.ProviderSpec{
+			Type:  "mock",
+			Model: "mock-selfplay-model",
+		},
+	}
+
+	// Map-mode selfplay group: key "selfplay" → CRD "mock-selfplay-crd"
+	// The key "selfplay" matches the config reference exactly — no remapping needed.
+	arenaJob := integMakeArenaJob(integTestJobName, integTestNamespace, map[string]interface{}{
+		"default": []interface{}{
+			map[string]interface{}{
+				"providerRef": map[string]interface{}{
+					"name": integTestProviderName,
+				},
+			},
+		},
+		"selfplay": map[string]interface{}{
+			"selfplay": map[string]interface{}{
+				"providerRef": map[string]interface{}{
+					"name": "mock-selfplay-crd",
+				},
+			},
+		},
+	})
+
+	scheme := k8s.Scheme()
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(defaultProvider, selfplayProvider).
+		WithObjects(arenaJob).
+		Build()
+
+	cfg := makeTestConfig(bundleDir, fakeClient)
+
+	item := &queue.WorkItem{
+		ID:         "test-map-selfplay",
+		JobID:      integTestJobName,
+		ScenarioID: "test",
+		ProviderID: integTestProviderName,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result, err := executeWorkItem(ctx, testLog(), cfg, item, bundleDir)
+	require.NoError(t, err, "map-mode self-play should resolve without remapping")
+
+	assert.NotNil(t, result)
+	assert.Equal(t, statusPass, result.Status, "mock provider should pass with map-mode self-play")
+
+	t.Logf("Map-mode self-play result: status=%s, duration=%.0fms, metrics=%+v",
+		result.Status, result.DurationMs, result.Metrics)
+}

@@ -96,8 +96,8 @@ func (r *ArenaJobReconciler) validateProviderGroups(
 
 	var missing []string
 	for _, group := range requiredGroups {
-		entries, exists := arenaJob.Spec.Providers[group]
-		if !exists || len(entries) == 0 {
+		pg, exists := arenaJob.Spec.Providers[group]
+		if !exists || pg.Len() == 0 {
 			missing = append(missing, group)
 		}
 	}

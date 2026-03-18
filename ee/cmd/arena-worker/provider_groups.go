@@ -72,20 +72,12 @@ func resolveProvidersFromCRD(
 
 	var fleetProviders []*resolvedFleetProvider
 
-	for groupName, entries := range arenaJob.Providers {
-		for _, entry := range entries {
-			if entry.ProviderRef != nil {
-				if err := resolveProviderRefEntry(ctx, log, c, jobNamespace, *entry.ProviderRef, groupName, arenaCfg); err != nil {
-					return nil, err
-				}
-			} else if entry.AgentRef != nil {
-				fp, err := resolveAgentRefEntry(ctx, log, entry.AgentRef.Name, groupName, agentWSURLs, arenaCfg)
-				if err != nil {
-					return nil, err
-				}
-				fleetProviders = append(fleetProviders, fp)
-			}
+	for groupName, pg := range arenaJob.Providers {
+		fps, err := resolveProviderGroup(ctx, log, c, jobNamespace, groupName, &pg, agentWSURLs, arenaCfg)
+		if err != nil {
+			return nil, err
 		}
+		fleetProviders = append(fleetProviders, fps...)
 	}
 
 	log.Info("providers resolved from CRDs",
@@ -94,6 +86,69 @@ func resolveProvidersFromCRD(
 	)
 
 	return fleetProviders, nil
+}
+
+// resolveProviderGroup resolves a single provider group (array or map mode).
+func resolveProviderGroup(
+	ctx context.Context,
+	log logr.Logger,
+	c client.Client,
+	namespace, groupName string,
+	pg *arenaProviderGroup,
+	agentWSURLs map[string]string,
+	arenaCfg *config.Config,
+) ([]*resolvedFleetProvider, error) {
+	var fps []*resolvedFleetProvider
+
+	if pg.isMapMode() {
+		for configID, entry := range pg.mapping {
+			fp, err := resolveEntry(ctx, log, c, namespace, groupName, configID, &entry, agentWSURLs, arenaCfg)
+			if err != nil {
+				return nil, err
+			}
+			if fp != nil {
+				fps = append(fps, fp)
+			}
+		}
+	} else {
+		for _, entry := range pg.entries {
+			fp, err := resolveEntry(ctx, log, c, namespace, groupName, "", &entry, agentWSURLs, arenaCfg)
+			if err != nil {
+				return nil, err
+			}
+			if fp != nil {
+				fps = append(fps, fp)
+			}
+		}
+	}
+
+	return fps, nil
+}
+
+// resolveEntry resolves a single provider/agent entry. When configID is non-empty,
+// it is used as the provider ID (map mode); otherwise sanitizeID derives it (array mode).
+func resolveEntry(
+	ctx context.Context,
+	log logr.Logger,
+	c client.Client,
+	namespace, groupName, configID string,
+	entry *arenaProviderEntry,
+	agentWSURLs map[string]string,
+	arenaCfg *config.Config,
+) (*resolvedFleetProvider, error) {
+	if entry.ProviderRef != nil {
+		if configID != "" {
+			return nil, resolveProviderRefEntryWithID(ctx, log, c, namespace, *entry.ProviderRef, configID, groupName, arenaCfg)
+		}
+		return nil, resolveProviderRefEntry(ctx, log, c, namespace, *entry.ProviderRef, groupName, arenaCfg)
+	}
+	if entry.AgentRef != nil {
+		if configID != "" {
+			return resolveAgentRefEntryWithID(ctx, log, entry.AgentRef.Name, configID, groupName, agentWSURLs, arenaCfg)
+		}
+		return resolveAgentRefEntry(ctx, log, entry.AgentRef.Name, groupName, agentWSURLs, arenaCfg)
+	}
+	return nil, nil
 }
 
 // resolveProviderRefEntry resolves a single Provider CRD and adds it to LoadedProviders.
@@ -150,7 +205,7 @@ func resolveProviderRefEntry(
 
 // resolveAgentRefEntry resolves an AgentRuntime CRD and creates a fleet provider.
 func resolveAgentRefEntry(
-	ctx context.Context,
+	_ context.Context,
 	log logr.Logger,
 	agentName string,
 	groupName string,
@@ -188,6 +243,96 @@ func resolveAgentRefEntry(
 	return &resolvedFleetProvider{
 		wsURL: wsURL,
 		id:    providerID,
+		group: groupName,
+	}, nil
+}
+
+// resolveProviderRefEntryWithID resolves a Provider CRD using an explicit config provider ID
+// instead of deriving it from sanitizeID(provider.Name). Used in map mode.
+func resolveProviderRefEntryWithID(
+	ctx context.Context,
+	log logr.Logger,
+	c client.Client,
+	namespace string,
+	ref v1alpha1.ProviderRef,
+	configID string,
+	groupName string,
+	arenaCfg *config.Config,
+) error {
+	provider, err := k8s.GetProvider(ctx, c, ref, namespace)
+	if err != nil {
+		return fmt.Errorf("group %q: failed to get provider %s: %w", groupName, ref.Name, err)
+	}
+
+	pkProvider := &config.Provider{
+		ID:      configID,
+		Type:    string(provider.Spec.Type),
+		Model:   provider.Spec.Model,
+		BaseURL: provider.Spec.BaseURL,
+	}
+
+	credEnvVar := resolveProviderCredentialEnv(provider)
+	if credEnvVar != "" {
+		pkProvider.Credential = &config.CredentialConfig{
+			CredentialEnv: credEnvVar,
+		}
+	}
+
+	if provider.Spec.Defaults != nil {
+		pkProvider.Defaults = convertProviderDefaults(provider.Spec.Defaults)
+	}
+
+	arenaCfg.LoadedProviders[configID] = pkProvider
+	arenaCfg.ProviderGroups[configID] = groupName
+
+	log.V(1).Info("provider resolved from CRD (map mode)",
+		"configID", configID,
+		"crdName", provider.Name,
+		"type", pkProvider.Type,
+		"model", pkProvider.Model,
+		"group", groupName,
+	)
+
+	return nil
+}
+
+// resolveAgentRefEntryWithID resolves an AgentRuntime CRD using an explicit config provider ID.
+// Used in map mode where the key IS the config provider ID.
+func resolveAgentRefEntryWithID(
+	_ context.Context,
+	log logr.Logger,
+	agentName string,
+	configID string,
+	groupName string,
+	agentWSURLs map[string]string,
+	arenaCfg *config.Config,
+) (*resolvedFleetProvider, error) {
+	wsURL, ok := agentWSURLs[agentName]
+	if !ok {
+		return nil, fmt.Errorf(
+			"group %q: no WebSocket URL for agent %s (missing from ARENA_AGENT_WS_URLS)",
+			groupName, agentName)
+	}
+
+	arenaCfg.LoadedProviders[configID] = &config.Provider{
+		ID:   configID,
+		Type: "fleet",
+		AdditionalConfig: map[string]interface{}{
+			"ws_url": wsURL,
+		},
+	}
+	arenaCfg.ProviderGroups[configID] = groupName
+
+	log.Info("agent resolved from CRD (map mode)",
+		"configID", configID,
+		"agentName", agentName,
+		"wsURL", wsURL,
+		"group", groupName,
+	)
+
+	return &resolvedFleetProvider{
+		wsURL: wsURL,
+		id:    configID,
 		group: groupName,
 	}, nil
 }
@@ -485,7 +630,7 @@ func getArenaJob(
 // arenaJobSpec is a minimal representation of ArenaJob.spec for the worker.
 // We only need the providers and toolRegistries fields.
 type arenaJobSpec struct {
-	Providers      map[string][]arenaProviderEntry `json:"providers,omitempty"`
+	Providers      map[string]arenaProviderGroup   `json:"providers,omitempty"`
 	ToolRegistries []v1alpha1.LocalObjectReference `json:"toolRegistries,omitempty"`
 }
 
@@ -493,6 +638,56 @@ type arenaJobSpec struct {
 type arenaProviderEntry struct {
 	ProviderRef *v1alpha1.ProviderRef          `json:"providerRef,omitempty"`
 	AgentRef    *v1alpha1.LocalObjectReference `json:"agentRef,omitempty"`
+}
+
+// arenaProviderGroup is a polymorphic provider group value (worker-side mirror).
+// Array mode: []arenaProviderEntry (test provider pools).
+// Map mode: map[string]arenaProviderEntry (1:1 config-provider-ID → CRD mappings).
+type arenaProviderGroup struct {
+	entries []arenaProviderEntry
+	mapping map[string]arenaProviderEntry
+}
+
+// UnmarshalJSON detects array vs object and populates the correct field.
+func (g *arenaProviderGroup) UnmarshalJSON(data []byte) error {
+	for _, b := range data {
+		switch b {
+		case ' ', '\t', '\n', '\r':
+			continue
+		case '[':
+			return json.Unmarshal(data, &g.entries)
+		case '{':
+			return json.Unmarshal(data, &g.mapping)
+		default:
+			return json.Unmarshal(data, &g.entries)
+		}
+	}
+	return nil
+}
+
+// MarshalJSON serialises as object (map mode) or array (entries mode).
+func (g arenaProviderGroup) MarshalJSON() ([]byte, error) {
+	if g.mapping != nil {
+		return json.Marshal(g.mapping)
+	}
+	return json.Marshal(g.entries)
+}
+
+// isMapMode returns true when the group uses 1:1 config-provider-ID mapping.
+func (g *arenaProviderGroup) isMapMode() bool {
+	return g.mapping != nil
+}
+
+// allEntries returns every arenaProviderEntry regardless of mode.
+func (g *arenaProviderGroup) allEntries() []arenaProviderEntry {
+	if g.mapping != nil {
+		entries := make([]arenaProviderEntry, 0, len(g.mapping))
+		for _, e := range g.mapping {
+			entries = append(entries, e)
+		}
+		return entries
+	}
+	return g.entries
 }
 
 // unstructuredArenaJob is a minimal ArenaJob for unstructured deserialization.

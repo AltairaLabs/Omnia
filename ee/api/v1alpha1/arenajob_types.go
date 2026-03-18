@@ -258,14 +258,17 @@ type ArenaJobSpec struct {
 	// +optional
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
 
-	// providers maps group names to lists of provider/agent entries.
+	// providers maps group names to provider groups.
+	// Each group is either an array (pool of test providers) or an object
+	// (1:1 config-provider-ID → CRD mapping). Array mode is the default;
+	// map mode lets the wizard set the exact provider ID the arena config expects.
 	// Groups correspond to the arena config's provider groups (e.g., "default", "judge").
 	// When set, provider YAML files from the arena project are ignored
 	// and the worker resolves providers directly from CRDs.
 	// An agentRef can appear in any provider position — agents and LLM providers
 	// are interchangeable in the scenario × provider matrix.
 	// +optional
-	Providers map[string][]ArenaProviderEntry `json:"providers,omitempty"`
+	Providers map[string]ArenaProviderGroup `json:"providers,omitempty"`
 
 	// toolRegistries lists ToolRegistry CRDs whose discovered tools replace
 	// the arena config's tool/mcp_server file references.
