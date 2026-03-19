@@ -42,7 +42,7 @@ import (
 // on a separate port.
 func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.Provider) {
 	// Initialize session store
-	store, err := initSessionStore(cfg, log)
+	store, err := initSessionStore(log)
 	if err != nil {
 		log.Error(err, "failed to initialize session store")
 		os.Exit(1)

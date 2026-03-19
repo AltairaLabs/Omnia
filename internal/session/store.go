@@ -400,13 +400,13 @@ type Store interface {
 	// Returns ErrSessionExpired if the session has expired.
 	UpdateSessionStats(ctx context.Context, sessionID string, update SessionStatsUpdate) error
 
-	// RecordToolCall records or updates a tool call for the session.
-	// Uses upsert semantics: if a record with the same ID exists, it is updated.
+	// RecordToolCall appends a tool call lifecycle event (started, completed, failed).
+	// Each event is a separate row; rows sharing the same CallID represent one logical call.
 	// Returns ErrSessionNotFound if the session does not exist.
 	RecordToolCall(ctx context.Context, sessionID string, tc ToolCall) error
 
-	// RecordProviderCall records or updates a provider call for the session.
-	// Uses upsert semantics: if a record with the same ID exists, it is updated.
+	// RecordProviderCall appends a provider call lifecycle event (completed, failed).
+	// Each event is a separate row with a unique ID.
 	// Returns ErrSessionNotFound if the session does not exist.
 	RecordProviderCall(ctx context.Context, sessionID string, pc ProviderCall) error
 

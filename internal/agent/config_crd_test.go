@@ -88,9 +88,6 @@ func TestLoadFromCRD_HappyPath(t *testing.T) {
 	if cfg.FacadePort != 9090 {
 		t.Errorf("FacadePort = %d, want %d", cfg.FacadePort, 9090)
 	}
-	if cfg.SessionType != SessionTypeRedis {
-		t.Errorf("SessionType = %q, want %q", cfg.SessionType, SessionTypeRedis)
-	}
 	if cfg.SessionTTL != 2*time.Hour {
 		t.Errorf("SessionTTL = %v, want %v", cfg.SessionTTL, 2*time.Hour)
 	}
@@ -194,9 +191,6 @@ func TestLoadFromCRD_SessionNil(t *testing.T) {
 	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.SessionType != SessionTypeMemory {
-		t.Errorf("SessionType = %q, want %q", cfg.SessionType, SessionTypeMemory)
 	}
 	if cfg.SessionTTL != DefaultSessionTTL {
 		t.Errorf("SessionTTL = %v, want default %v", cfg.SessionTTL, DefaultSessionTTL)
@@ -394,29 +388,6 @@ func TestLoadFromCRD_TracingError(t *testing.T) {
 	}
 }
 
-func TestLoadFromCRD_SessionStoreURL(t *testing.T) {
-	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
-		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
-		Session: &v1alpha1.SessionConfig{
-			Type: v1alpha1.SessionStoreTypeRedis,
-			TTL:  ptr.To("1h"),
-		},
-	})
-
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
-
-	t.Setenv(EnvSessionStoreURL, "redis://localhost:6379")
-
-	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.SessionStoreURL != "redis://localhost:6379" {
-		t.Errorf("SessionStoreURL = %q, want %q", cfg.SessionStoreURL, "redis://localhost:6379")
-	}
-}
-
 func TestLoadFromCRD_HandlerModeFromEnv(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
@@ -475,8 +446,6 @@ func TestLoadConfig_FallbackToEnv(t *testing.T) {
 	t.Setenv(EnvHandlerMode, "demo")
 	t.Setenv(EnvFacadePort, "8080")
 	t.Setenv(EnvHealthPort, "8081")
-	t.Setenv(EnvSessionType, "memory")
-
 	cfg, err := LoadConfig(context.Background())
 	if err != nil {
 		t.Fatalf("expected fallback to succeed, got error: %v", err)
@@ -492,9 +461,6 @@ func TestLoadConfig_FallbackToEnv(t *testing.T) {
 	}
 	if cfg.FacadePort != 8080 {
 		t.Errorf("FacadePort = %d, want 8080", cfg.FacadePort)
-	}
-	if cfg.SessionType != SessionTypeMemory {
-		t.Errorf("SessionType = %q, want %q", cfg.SessionType, SessionTypeMemory)
 	}
 }
 
@@ -514,9 +480,6 @@ func TestLoadFromEnvFallback_Defaults(t *testing.T) {
 	}
 	if cfg.HealthPort != DefaultHealthPort {
 		t.Errorf("HealthPort = %d, want %d", cfg.HealthPort, DefaultHealthPort)
-	}
-	if cfg.SessionType != SessionTypeMemory {
-		t.Errorf("SessionType = %q, want %q", cfg.SessionType, SessionTypeMemory)
 	}
 	if cfg.MediaStorageType != MediaStorageTypeNone {
 		t.Errorf("MediaStorageType = %q, want %q", cfg.MediaStorageType, MediaStorageTypeNone)
@@ -673,7 +636,6 @@ func TestConfigValidate_A2AFacadeType(t *testing.T) {
 		PromptPackName:   "p",
 		FacadeType:       FacadeTypeA2A,
 		HandlerMode:      HandlerModeRuntime,
-		SessionType:      SessionTypeMemory,
 		MediaStorageType: MediaStorageTypeNone,
 	}
 	if err := cfg.Validate(); err != nil {

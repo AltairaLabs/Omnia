@@ -14,6 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// MemoryStore is an in-memory Store implementation for use in tests.
+// It is NOT used in production — all deployed binaries use httpclient.Store
+// backed by session-api. This exists solely as a lightweight test double
+// that avoids requiring external infrastructure (postgres, redis).
+
 package session
 
 import (
@@ -173,14 +178,11 @@ func (m *MemoryStore) AppendMessage(ctx context.Context, sessionID string, msg M
 	}
 
 	session.Messages = append(session.Messages, msg)
-	if msg.ToolCallID != "" && msg.Metadata["type"] == "tool_call" {
-		session.ToolCallCount++
-	} else if msg.ToolCallID == "" {
+	// Only increment message_count here. Token/cost counters are derived from
+	// RecordProviderCall; tool_call_count from RecordToolCall.
+	if msg.ToolCallID == "" {
 		session.MessageCount++
 	}
-	session.TotalInputTokens += int64(msg.InputTokens)
-	session.TotalOutputTokens += int64(msg.OutputTokens)
-	session.EstimatedCostUSD += msg.CostUSD
 	session.UpdatedAt = time.Now()
 
 	return nil
@@ -367,22 +369,12 @@ func (m *MemoryStore) RecordToolCall(ctx context.Context, sessionID string, tc T
 		return ErrSessionExpired
 	}
 
-	// Upsert: find existing by ID and replace, or append.
-	calls := m.toolCalls[sessionID]
-	found := false
-	for i, existing := range calls {
-		if existing.ID == tc.ID {
-			calls[i] = tc
-			found = true
-			break
-		}
-	}
-	if !found {
-		calls = append(calls, tc)
-		// Increment tool call count on initial insert.
+	// Each lifecycle event is a separate row. Only "pending" (the initial start)
+	// increments the tool call count.
+	m.toolCalls[sessionID] = append(m.toolCalls[sessionID], tc)
+	if tc.Status == ToolCallStatusPending {
 		session.ToolCallCount++
 	}
-	m.toolCalls[sessionID] = calls
 	session.UpdatedAt = time.Now()
 
 	return nil
@@ -408,26 +400,14 @@ func (m *MemoryStore) RecordProviderCall(ctx context.Context, sessionID string, 
 		return ErrSessionExpired
 	}
 
-	// Upsert: find existing by ID and replace, or append.
-	calls := m.providerCalls[sessionID]
-	found := false
-	for i, existing := range calls {
-		if existing.ID == pc.ID {
-			// On completion update, apply token/cost deltas to session.
-			if existing.Status == ProviderCallStatusPending && pc.Status == ProviderCallStatusCompleted {
-				session.TotalInputTokens += pc.InputTokens
-				session.TotalOutputTokens += pc.OutputTokens
-				session.EstimatedCostUSD += pc.CostUSD
-			}
-			calls[i] = pc
-			found = true
-			break
-		}
+	// Each lifecycle event is a separate row. Only completed calls add
+	// tokens/cost to session counters.
+	m.providerCalls[sessionID] = append(m.providerCalls[sessionID], pc)
+	if pc.Status == ProviderCallStatusCompleted {
+		session.TotalInputTokens += pc.InputTokens
+		session.TotalOutputTokens += pc.OutputTokens
+		session.EstimatedCostUSD += pc.CostUSD
 	}
-	if !found {
-		calls = append(calls, pc)
-	}
-	m.providerCalls[sessionID] = calls
 	session.UpdatedAt = time.Now()
 
 	return nil

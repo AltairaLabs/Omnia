@@ -244,16 +244,17 @@ func TestRecordingWriter_WriteDoneWithUsage(t *testing.T) {
 		t.Errorf("cost_usd = %q, want %q", msg.Metadata["cost_usd"], "0.005")
 	}
 
-	// Verify session stats were updated
+	// Session-level token/cost counters are derived from RecordProviderCall,
+	// not from AppendMessage. Verify they are NOT updated here.
 	updated, _ := store.GetSession(ctx, sess.ID)
-	if updated.TotalInputTokens != 100 {
-		t.Errorf("TotalInputTokens = %d, want 100", updated.TotalInputTokens)
+	if updated.TotalInputTokens != 0 {
+		t.Errorf("TotalInputTokens = %d, want 0 (derived from provider calls)", updated.TotalInputTokens)
 	}
-	if updated.TotalOutputTokens != 50 {
-		t.Errorf("TotalOutputTokens = %d, want 50", updated.TotalOutputTokens)
+	if updated.TotalOutputTokens != 0 {
+		t.Errorf("TotalOutputTokens = %d, want 0 (derived from provider calls)", updated.TotalOutputTokens)
 	}
-	if updated.EstimatedCostUSD != 0.005 {
-		t.Errorf("EstimatedCostUSD = %f, want 0.005", updated.EstimatedCostUSD)
+	if updated.EstimatedCostUSD != 0 {
+		t.Errorf("EstimatedCostUSD = %f, want 0 (derived from provider calls)", updated.EstimatedCostUSD)
 	}
 }
 
@@ -341,10 +342,11 @@ func TestRecordingWriter_WriteToolCall(t *testing.T) {
 		t.Errorf("content should contain tool name, got %q", messages[0].Content)
 	}
 
-	// Verify tool call count was incremented
+	// Session-level tool_call_count is derived from RecordToolCall,
+	// not from AppendMessage. Verify it is NOT updated here.
 	updated, _ := store.GetSession(ctx, sess.ID)
-	if updated.ToolCallCount != 1 {
-		t.Errorf("ToolCallCount = %d, want 1", updated.ToolCallCount)
+	if updated.ToolCallCount != 0 {
+		t.Errorf("ToolCallCount = %d, want 0 (derived from tool calls table)", updated.ToolCallCount)
 	}
 }
 

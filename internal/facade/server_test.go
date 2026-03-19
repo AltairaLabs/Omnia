@@ -1663,11 +1663,11 @@ func TestSessionStats_ClientToolCallFlow(t *testing.T) {
 	require.NoError(t, err)
 
 	// Expected: 1 user message + 1 assistant done = 2 messages
-	// 1 tool_call recorded by recording writer
-	// 1 tool_result recorded by recordClientToolResult
-	// Neither tool_call nor tool_result should count as messages
+	// Tool calls and tool results don't count as messages.
+	// tool_call_count is derived from RecordToolCall (runtime path), NOT
+	// from AppendMessage, so it stays 0 in this facade-only test.
 	assert.Equal(t, int32(2), sess.MessageCount, "messageCount: 1 user + 1 assistant")
-	assert.Equal(t, int32(1), sess.ToolCallCount, "toolCallCount: 1 tool_call")
+	assert.Equal(t, int32(0), sess.ToolCallCount, "toolCallCount: derived from RecordToolCall, not AppendMessage")
 
 	// Verify actual messages in store
 	msgs, err := store.GetMessages(context.Background(), sessionID)

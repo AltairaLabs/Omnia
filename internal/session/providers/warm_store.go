@@ -81,13 +81,11 @@ type WarmStoreProvider interface {
 	// DeleteSessionsBatch removes multiple sessions in a single operation.
 	DeleteSessionsBatch(ctx context.Context, sessionIDs []string) error
 
-	// RecordToolCall records or updates a tool call for the session.
-	// Uses upsert semantics (ON CONFLICT DO UPDATE).
+	// RecordToolCall appends a tool call lifecycle event (INSERT only).
 	// Returns session.ErrSessionNotFound if the session does not exist.
 	RecordToolCall(ctx context.Context, sessionID string, tc *session.ToolCall) error
 
-	// RecordProviderCall records or updates a provider call for the session.
-	// Uses upsert semantics (ON CONFLICT DO UPDATE).
+	// RecordProviderCall appends a provider call lifecycle event (INSERT only).
 	// Returns session.ErrSessionNotFound if the session does not exist.
 	RecordProviderCall(ctx context.Context, sessionID string, pc *session.ProviderCall) error
 

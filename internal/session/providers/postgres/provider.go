@@ -348,18 +348,14 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 		return err
 	}
 
-	// Auto-increment session counters from the message data.
-	// Only tool_call messages (not tool_result) increment tool_call_count.
-	// Messages with any ToolCallID don't increment message_count.
+	// Auto-increment message_count only. Token/cost counters are derived from
+	// provider_calls (via RecordProviderCall) and tool_call_count from tool_calls
+	// (via RecordToolCall) to avoid double-counting.
+	// Messages with a ToolCallID don't increment message_count.
 	hasToolCallID := msg.ToolCallID != ""
-	isToolCall := hasToolCallID && msg.Metadata["type"] == "tool_call"
 	messageIncr := int32(1)
-	toolCallIncr := int32(0)
 	if hasToolCallID {
 		messageIncr = 0
-	}
-	if isToolCall {
-		toolCallIncr = 1
 	}
 
 	mediaTypes := msg.MediaTypes
@@ -367,7 +363,7 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 		mediaTypes = []string{}
 	}
 
-	// Use a CTE to atomically insert the message and update session counters
+	// Use a CTE to atomically insert the message and update message_count
 	// in a single statement, preventing races between concurrent AppendMessage calls.
 	query := `WITH ins AS (
 		INSERT INTO messages (id, session_id, role, content, timestamp, input_tokens, output_tokens, cost_usd, tool_call_id, metadata, sequence_num, has_media, media_types)
@@ -376,11 +372,7 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 	)
 	UPDATE sessions SET
 		message_count = message_count + $14,
-		tool_call_count = tool_call_count + $15,
-		total_input_tokens = total_input_tokens + $16,
-		total_output_tokens = total_output_tokens + $17,
-		estimated_cost_usd = estimated_cost_usd + $18,
-		updated_at = $19
+		updated_at = $15
 	WHERE id = (SELECT session_id FROM ins)`
 
 	_, err := p.pool.Exec(ctx, query,
@@ -389,8 +381,7 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 		msg.CostUSD,
 		pgutil.NullString(msg.ToolCallID), pgutil.MarshalJSONB(msg.Metadata), msg.SequenceNum,
 		msg.HasMedia, mediaTypes,
-		messageIncr, toolCallIncr,
-		int64(msg.InputTokens), int64(msg.OutputTokens), msg.CostUSD,
+		messageIncr,
 		time.Now(),
 	)
 	if err != nil {
@@ -612,14 +603,25 @@ func (p *Provider) RecordToolCall(ctx context.Context, sessionID string, tc *ses
 		return err
 	}
 
-	query := `INSERT INTO tool_calls (id, session_id, call_id, name, arguments, result, status, duration_ms, execution, error_message, labels, created_at)
+	// Each tool call lifecycle event (started, completed, failed, client_request)
+	// is recorded as its own row. Rows sharing the same call_id represent the
+	// same logical tool invocation. Only "pending" events (the initial start)
+	// increment session.tool_call_count.
+	isStart := tc.Status == session.ToolCallStatusPending
+	toolCallIncr := int32(0)
+	if isStart {
+		toolCallIncr = 1
+	}
+
+	query := `WITH ins AS (
+		INSERT INTO tool_calls (id, session_id, call_id, name, arguments, result, status, duration_ms, execution, error_message, labels, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-		ON CONFLICT (id, created_at) DO UPDATE SET
-			result = EXCLUDED.result,
-			status = EXCLUDED.status,
-			duration_ms = EXCLUDED.duration_ms,
-			error_message = EXCLUDED.error_message,
-			labels = EXCLUDED.labels`
+		RETURNING session_id
+	)
+	UPDATE sessions SET
+		tool_call_count = tool_call_count + $13,
+		updated_at = $14
+	WHERE id = (SELECT session_id FROM ins)`
 
 	argsJSON, _ := json.Marshal(tc.Arguments)
 	var resultJSON []byte
@@ -633,6 +635,7 @@ func (p *Provider) RecordToolCall(ctx context.Context, sessionID string, tc *ses
 		string(tc.Status), pgutil.NullInt64(tc.DurationMs),
 		string(tc.Execution), pgutil.NullString(tc.ErrorMessage),
 		pgutil.MarshalJSONB(tc.Labels), tc.CreatedAt,
+		toolCallIncr, time.Now(),
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: record tool call: %w", err)
@@ -645,19 +648,28 @@ func (p *Provider) RecordProviderCall(ctx context.Context, sessionID string, pc 
 		return err
 	}
 
-	query := `INSERT INTO provider_calls (id, session_id, provider, model, status, input_tokens, output_tokens, cached_tokens, cost_usd, duration_ms, finish_reason, tool_call_count, error_message, labels, created_at)
+	// Each provider call lifecycle event (completed, failed) is its own row.
+	// Only completed calls add tokens/cost to session counters.
+	isCompleted := pc.Status == session.ProviderCallStatusCompleted
+	var inputIncr, outputIncr int64
+	var costIncr float64
+	if isCompleted {
+		inputIncr = pc.InputTokens
+		outputIncr = pc.OutputTokens
+		costIncr = pc.CostUSD
+	}
+
+	query := `WITH ins AS (
+		INSERT INTO provider_calls (id, session_id, provider, model, status, input_tokens, output_tokens, cached_tokens, cost_usd, duration_ms, finish_reason, tool_call_count, error_message, labels, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-		ON CONFLICT (id, created_at) DO UPDATE SET
-			status = EXCLUDED.status,
-			input_tokens = EXCLUDED.input_tokens,
-			output_tokens = EXCLUDED.output_tokens,
-			cached_tokens = EXCLUDED.cached_tokens,
-			cost_usd = EXCLUDED.cost_usd,
-			duration_ms = EXCLUDED.duration_ms,
-			finish_reason = EXCLUDED.finish_reason,
-			tool_call_count = EXCLUDED.tool_call_count,
-			error_message = EXCLUDED.error_message,
-			labels = EXCLUDED.labels`
+		RETURNING session_id
+	)
+	UPDATE sessions SET
+		total_input_tokens = total_input_tokens + $16,
+		total_output_tokens = total_output_tokens + $17,
+		estimated_cost_usd = estimated_cost_usd + $18,
+		updated_at = $19
+	WHERE id = (SELECT session_id FROM ins)`
 
 	_, err := p.pool.Exec(ctx, query,
 		pc.ID, sessionID, pc.Provider, pc.Model,
@@ -666,6 +678,7 @@ func (p *Provider) RecordProviderCall(ctx context.Context, sessionID string, pc 
 		pgutil.NullString(pc.FinishReason), pc.ToolCallCount,
 		pgutil.NullString(pc.ErrorMessage), pgutil.MarshalJSONB(pc.Labels),
 		pc.CreatedAt,
+		inputIncr, outputIncr, costIncr, time.Now(),
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: record provider call: %w", err)

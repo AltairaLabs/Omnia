@@ -156,7 +156,8 @@ func (w *recordingResponseWriter) WriteToolCall(toolCall *ToolCallInfo) error {
 		if storeErr := w.store.AppendMessage(ctx, w.sessionID, msg); storeErr != nil {
 			w.log.Error(storeErr, "failed to record tool call")
 		}
-		// Message and tool call counters are auto-incremented by AppendMessage in session-api.
+		// Tool call counters are derived from RecordToolCall in session-api.
+		// This message is recorded for backward-compat visibility only.
 	})
 
 	return err
@@ -300,7 +301,8 @@ func (w *recordingResponseWriter) recordDone(content string) {
 			w.log.Error(storeErr, "failed to record assistant message")
 		}
 
-		// Token/cost counters are auto-incremented by AppendMessage via the Message struct fields.
+		// Token/cost data is stored on the message for historical queries.
+		// Session-level counters are derived from provider_calls via RecordProviderCall.
 	})
 }
 

@@ -472,6 +472,11 @@ if [ -f coverage.out ]; then
             continue
         fi
 
+        # Skip cmd/ entrypoints (tested via integration/E2E, not unit tests)
+        if [[ "$file" == cmd/* ]]; then
+            continue
+        fi
+
         # Skip internal/api/server.go (logs endpoint requires real K8s clientset for integration testing)
         if [[ "$file" == "internal/api/server.go" ]]; then
             continue
@@ -492,8 +497,9 @@ if [ -f coverage.out ]; then
             continue
         fi
 
-        # Skip Redis session store (requires real Redis, tested in integration)
-        if [[ "$file" == "internal/session/redis.go" ]]; then
+        # Skip session package base files (store.go is types/interfaces,
+        # memory.go is a test-only utility)
+        if [[ "$file" == "internal/session/memory.go" ]] || [[ "$file" == "internal/session/store.go" ]]; then
             continue
         fi
 

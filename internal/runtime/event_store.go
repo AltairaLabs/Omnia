@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -46,13 +45,6 @@ type eventAction struct {
 	evalResult   *session.EvalResult
 	event        *session.RuntimeEvent
 	stats        session.SessionStatsUpdate
-}
-
-// callKey tracks a started call so that completed/failed events can upsert
-// the same row in the tool_calls or provider_calls table.
-type callKey struct {
-	id        string
-	createdAt time.Time
 }
 
 // Metadata key constants to avoid string duplication (SonarCloud go:S1192).
@@ -99,7 +91,6 @@ type OmniaEventStore struct {
 	agentMeta    AgentMeta
 	sem          chan struct{} // bounded concurrency for async writes
 	sessionID    string        // fallback sessionID for events missing it (PromptKit bug workaround)
-	toolCallKeys sync.Map      // callID → callKey (for tool call upsert correlation)
 }
 
 // NewOmniaEventStore creates a new event store that bridges to session-api.
@@ -458,7 +449,8 @@ func (s *OmniaEventStore) convertMessageUpdated(event *events.Event) (eventActio
 	msg.OutputTokens = int32(data.OutputTokens)
 	msg.CostUSD = data.TotalCost
 
-	// Token/cost counters are auto-incremented by AppendMessage via the Message struct fields.
+	// Token/cost data is stored on the message row for historical queries.
+	// Session-level counters are derived from provider_calls via RecordProviderCall.
 	return eventAction{
 		message: &msg,
 	}, true
@@ -497,10 +489,8 @@ func (s *OmniaEventStore) convertToolCallStarted(event *events.Event) (eventActi
 		return eventAction{}, false
 	}
 
-	// Build first-class ToolCall record.
-	tcID := uuid.New().String()
 	tc := session.ToolCall{
-		ID:        tcID,
+		ID:        uuid.New().String(),
 		CallID:    data.CallID,
 		Name:      data.ToolName,
 		Arguments: data.Args,
@@ -510,15 +500,11 @@ func (s *OmniaEventStore) convertToolCallStarted(event *events.Event) (eventActi
 	}
 	s.enrichToolCallLabels(&tc, data.ToolName)
 
-	// Store the key so completed/failed events can upsert the same row.
-	s.toolCallKeys.Store(data.CallID, callKey{id: tcID, createdAt: event.Timestamp})
-
-	return eventAction{
-		toolCall: &tc,
-	}, true
+	return eventAction{toolCall: &tc}, true
 }
 
-// convertToolCallCompleted creates an updated ToolCall record (upsert).
+// convertToolCallCompleted records a tool call completion as a new row.
+// Linked to the started record by CallID.
 func (s *OmniaEventStore) convertToolCallCompleted(event *events.Event) (eventAction, bool) {
 	data, ok := asPtr[events.ToolCallCompletedData](event.Data)
 	if !ok {
@@ -527,18 +513,25 @@ func (s *OmniaEventStore) convertToolCallCompleted(event *events.Event) (eventAc
 
 	resultBody := textFromParts(data.Parts)
 
-	// Build ToolCall upsert — reuse the ID from the started event.
-	tc := s.buildToolCallUpsert(data.CallID, data.ToolName, event.Timestamp)
-	tc.Status = session.ToolCallStatusSuccess
-	tc.DurationMs = data.Duration.Milliseconds()
+	tc := session.ToolCall{
+		ID:         uuid.New().String(),
+		CallID:     data.CallID,
+		Name:       data.ToolName,
+		Status:     session.ToolCallStatusSuccess,
+		DurationMs: data.Duration.Milliseconds(),
+		Execution:  session.ToolCallExecutionServer,
+		CreatedAt:  event.Timestamp,
+	}
 	if resultBody != "" {
 		tc.Result = resultBody
 	}
+	s.enrichToolCallLabels(&tc, data.ToolName)
 
 	return eventAction{toolCall: &tc}, true
 }
 
-// convertToolCallFailed creates an errored ToolCall record.
+// convertToolCallFailed records a tool call failure as a new row.
+// Linked to the started record by CallID.
 func (s *OmniaEventStore) convertToolCallFailed(event *events.Event) (eventAction, bool) {
 	data, ok := asPtr[events.ToolCallFailedData](event.Data)
 	if !ok {
@@ -550,31 +543,42 @@ func (s *OmniaEventStore) convertToolCallFailed(event *events.Event) (eventActio
 		errMsg = data.Error.Error()
 	}
 
-	tc := s.buildToolCallUpsert(data.CallID, data.ToolName, event.Timestamp)
-	tc.Status = session.ToolCallStatusError
-	tc.DurationMs = data.Duration.Milliseconds()
-	tc.ErrorMessage = errMsg
+	tc := session.ToolCall{
+		ID:           uuid.New().String(),
+		CallID:       data.CallID,
+		Name:         data.ToolName,
+		Status:       session.ToolCallStatusError,
+		DurationMs:   data.Duration.Milliseconds(),
+		ErrorMessage: errMsg,
+		Execution:    session.ToolCallExecutionServer,
+		CreatedAt:    event.Timestamp,
+	}
+	s.enrichToolCallLabels(&tc, data.ToolName)
 
 	return eventAction{toolCall: &tc}, true
 }
 
 // --- Client tool events ---
 
-// convertClientToolRequest updates an existing tool call to mark it as client-side.
-// The SDK emits ToolCallStarted (server) first, then ClientToolRequest when the tool
-// is delegated to the client. We upsert the same row but keep the key in toolCallKeys
-// so the eventual ToolCallCompleted can also find it.
+// convertClientToolRequest records a client tool request as a new row.
+// The SDK emits ToolCallStarted (server) first, then ClientToolRequest when the
+// tool is delegated to the client. Both rows share the same CallID.
 func (s *OmniaEventStore) convertClientToolRequest(event *events.Event) (eventAction, bool) {
 	data, ok := asPtr[events.ClientToolRequestData](event.Data)
 	if !ok {
 		return eventAction{}, false
 	}
 
-	// Load without deleting — the completed/failed event still needs this key.
-	tc := s.buildToolCallLookup(data.CallID, data.ToolName, event.Timestamp)
-	tc.Arguments = data.Args
-	tc.Status = session.ToolCallStatusPending
-	tc.Execution = session.ToolCallExecutionClient
+	tc := session.ToolCall{
+		ID:        uuid.New().String(),
+		CallID:    data.CallID,
+		Name:      data.ToolName,
+		Arguments: data.Args,
+		Status:    session.ToolCallStatusPending,
+		Execution: session.ToolCallExecutionClient,
+		CreatedAt: event.Timestamp,
+	}
+	s.enrichToolCallLabels(&tc, data.ToolName)
 
 	return eventAction{toolCall: &tc}, true
 }
@@ -614,8 +618,7 @@ func (s *OmniaEventStore) convertProviderCallCompleted(event *events.Event) (eve
 		CreatedAt:     event.Timestamp,
 	}
 
-	// Token/cost counters are auto-derived from AppendMessage on the message that
-	// carries the usage data (convertMessageUpdated). No stats update needed here.
+	// Token/cost counters are atomically updated by RecordProviderCall's CTE.
 	return eventAction{
 		providerCall: &pc,
 	}, true
@@ -823,53 +826,6 @@ func (s *OmniaEventStore) resolveEventType(action eventAction) string {
 		return "provider_call:" + action.providerCall.Provider
 	}
 	return "unknown"
-}
-
-// --- Dual-write helpers ---
-
-// buildToolCallUpsert creates a ToolCall for an upsert (completed/failed),
-// reusing the ID from the started event if available.
-// buildToolCallLookup creates a ToolCall reusing the started event's ID without
-// consuming the key. Used for intermediate events (ClientToolRequest) where the
-// key must remain for the eventual completed/failed event.
-func (s *OmniaEventStore) buildToolCallLookup(callID, toolName string, ts time.Time) session.ToolCall {
-	tc := session.ToolCall{
-		CallID:    callID,
-		Name:      toolName,
-		CreatedAt: ts,
-		Execution: session.ToolCallExecutionServer,
-	}
-
-	if v, ok := s.toolCallKeys.Load(callID); ok {
-		ck := v.(callKey)
-		tc.ID = ck.id
-		tc.CreatedAt = ck.createdAt
-	} else {
-		tc.ID = uuid.New().String()
-	}
-
-	s.enrichToolCallLabels(&tc, toolName)
-	return tc
-}
-
-func (s *OmniaEventStore) buildToolCallUpsert(callID, toolName string, ts time.Time) session.ToolCall {
-	tc := session.ToolCall{
-		CallID:    callID,
-		Name:      toolName,
-		CreatedAt: ts,
-		Execution: session.ToolCallExecutionServer,
-	}
-
-	if v, ok := s.toolCallKeys.LoadAndDelete(callID); ok {
-		ck := v.(callKey)
-		tc.ID = ck.id
-		tc.CreatedAt = ck.createdAt
-	} else {
-		tc.ID = uuid.New().String()
-	}
-
-	s.enrichToolCallLabels(&tc, toolName)
-	return tc
 }
 
 // enrichToolCallLabels adds tool registry metadata as labels on the ToolCall.
