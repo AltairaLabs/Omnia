@@ -373,12 +373,16 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 	}
 
 	// Auto-increment session counters from the message data.
-	// Tool call messages increment tool_call_count but not message_count.
-	isToolCall := msg.ToolCallID != ""
+	// Only tool_call messages (not tool_result) increment tool_call_count.
+	// Messages with any ToolCallID don't increment message_count.
+	hasToolCallID := msg.ToolCallID != ""
+	isToolCall := hasToolCallID && msg.Metadata["type"] == "tool_call"
 	messageIncr := int32(1)
 	toolCallIncr := int32(0)
-	if isToolCall {
+	if hasToolCallID {
 		messageIncr = 0
+	}
+	if isToolCall {
 		toolCallIncr = 1
 	}
 	incrQuery := `UPDATE sessions SET

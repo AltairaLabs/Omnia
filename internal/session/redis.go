@@ -273,12 +273,14 @@ func (r *RedisStore) AppendMessage(ctx context.Context, sessionID string, msg Me
 	}
 
 	// Auto-increment counters via Lua script for atomicity.
-	// Tool call messages increment toolCallCount but not messageCount.
-	isToolCall := msg.ToolCallID != ""
+	// Only tool_call messages (not tool_result) increment toolCallCount.
+	// Messages with any ToolCallID don't increment messageCount.
+	isToolCall := msg.ToolCallID != "" && msg.Metadata["type"] == "tool_call"
+	hasToolCallID := msg.ToolCallID != ""
 	incrResult, err := appendStatsScript.Run(ctx, r.client,
 		[]string{r.sessionKey(sessionID)},
-		boolToInt(!isToolCall), // addMessages (not for tool calls)
-		boolToInt(isToolCall),  // addToolCalls
+		boolToInt(!hasToolCallID), // addMessages (not for tool call/result)
+		boolToInt(isToolCall),     // addToolCalls (only tool_call, not tool_result)
 		int64(msg.InputTokens),
 		int64(msg.OutputTokens),
 		msg.CostUSD,
