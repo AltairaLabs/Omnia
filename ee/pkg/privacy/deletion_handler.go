@@ -15,6 +15,8 @@ import (
 	"strings"
 
 	"github.com/go-logr/logr"
+
+	"github.com/altairalabs/omnia/pkg/logging"
 )
 
 // DeletionHandler provides HTTP endpoints for GDPR/CCPA deletion requests.
@@ -95,7 +97,7 @@ func (h *DeletionHandler) handleList(w http.ResponseWriter, r *http.Request) {
 
 	requests, err := h.service.ListRequestsByUser(r.Context(), userID)
 	if err != nil {
-		h.log.Error(err, "listing deletion requests failed", "userID", userID)
+		h.log.Error(err, "listing deletion requests failed", "userHash", logging.HashID(userID))
 		writeJSONError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}

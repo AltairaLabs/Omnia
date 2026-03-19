@@ -27,6 +27,7 @@ import (
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 
 	"github.com/altairalabs/omnia/pkg/logctx"
+	"github.com/altairalabs/omnia/pkg/logging"
 )
 
 // resolveResponseParts converts PromptKit ContentParts to gRPC ContentParts,
@@ -101,7 +102,7 @@ func (s *Server) resolveMediaContent(ctx context.Context, media *types.MediaCont
 				}, nil
 			}
 
-			log.V(1).Info("resolved media URL", "url", url, "mimeType", mimeType, "dataSize", len(base64Data))
+			log.V(1).Info("resolved media URL", "urlHash", logging.HashID(url), "mimeType", mimeType, "dataSize", len(base64Data))
 			return &runtimev1.MediaContent{
 				Data:     base64Data,
 				MimeType: mimeType,
@@ -177,7 +178,7 @@ func processImageMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendO
 		return sdk.WithImageData(data, media.MimeType)
 	}
 	if media.Url != "" {
-		log.V(1).Info("adding image from URL", "url", media.Url)
+		log.V(1).Info("adding image from URL", "urlHash", logging.HashID(media.Url))
 		return sdk.WithImageURL(media.Url)
 	}
 	return nil
@@ -195,7 +196,7 @@ func processAudioMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendO
 		return sdk.WithAudioData(data, media.MimeType)
 	}
 	if media.Url != "" {
-		log.V(1).Info("adding audio from URL", "url", media.Url)
+		log.V(1).Info("adding audio from URL", "urlHash", logging.HashID(media.Url))
 		return sdk.WithAudioFile(media.Url)
 	}
 	return nil

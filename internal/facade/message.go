@@ -26,6 +26,8 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+
+	"github.com/altairalabs/omnia/pkg/logging"
 )
 
 // readMessageLoop reads and processes messages from the connection.
@@ -71,7 +73,7 @@ func (s *Server) logCloseError(err error, log logr.Logger) {
 func (s *Server) handleClientMessage(ctx context.Context, c *Connection, message []byte, log logr.Logger) {
 	var clientMsg ClientMessage
 	if err := json.Unmarshal(message, &clientMsg); err != nil {
-		log.Error(err, "failed to unmarshal message", "raw", string(message))
+		log.Error(err, "failed to unmarshal message", "contentLength", logging.ContentLength(string(message)))
 		s.sendError(c, "", ErrorCodeInvalidMessage, "invalid message format")
 		return
 	}
