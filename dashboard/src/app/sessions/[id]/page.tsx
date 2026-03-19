@@ -48,6 +48,7 @@ import { EvalResultsBadge } from "@/components/sessions/eval-results-badge";
 import { ToolCallBadge } from "@/components/sessions/tool-call-badge";
 import { DebugPanel } from "@/components/sessions/debug-panel";
 import { useDebugPanelStore } from "@/stores/debug-panel-store";
+import { collapseToolCalls } from "@/lib/sessions/collapse-tool-calls";
 import { format as formatDate, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import {
@@ -324,7 +325,8 @@ export default function SessionDetailPage({
   const defaultTab = searchParams.get("tab") ?? "conversation";
   const { data: session, isLoading, error } = useSessionDetail(id);
   const { data: evalResults } = useSessionEvalResults(id);
-  const { data: toolCalls } = useSessionToolCalls(id);
+  const { data: rawToolCalls } = useSessionToolCalls(id);
+  const toolCalls = rawToolCalls ? collapseToolCalls(rawToolCalls) : undefined;
   const { data: providerCalls } = useSessionProviderCalls(id);
   const { data: runtimeEvents } = useSessionRuntimeEvents(id);
   const grafana = useGrafana();
