@@ -348,30 +348,6 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 		return err
 	}
 
-	query := `INSERT INTO messages (id, session_id, role, content, timestamp, input_tokens, output_tokens, cost_usd, tool_call_id, metadata, sequence_num, has_media, media_types)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
-
-	mediaTypes := msg.MediaTypes
-	if mediaTypes == nil {
-		mediaTypes = []string{}
-	}
-
-	_, err := p.pool.Exec(ctx, query,
-		msg.ID, sessionID, msg.Role, msg.Content, msg.Timestamp,
-		pgutil.NullInt32(msg.InputTokens), pgutil.NullInt32(msg.OutputTokens),
-		msg.CostUSD,
-		pgutil.NullString(msg.ToolCallID), pgutil.MarshalJSONB(msg.Metadata), msg.SequenceNum,
-		msg.HasMedia, mediaTypes,
-	)
-	if err != nil {
-		// FK violation (code 23503) means the session_id does not exist.
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
-			return session.ErrSessionNotFound
-		}
-		return fmt.Errorf("postgres: append message: %w", err)
-	}
-
 	// Auto-increment session counters from the message data.
 	// Only tool_call messages (not tool_result) increment tool_call_count.
 	// Messages with any ToolCallID don't increment message_count.
@@ -385,24 +361,44 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 	if isToolCall {
 		toolCallIncr = 1
 	}
-	incrQuery := `UPDATE sessions SET
-		message_count = message_count + $2,
-		tool_call_count = tool_call_count + $3,
-		total_input_tokens = total_input_tokens + $4,
-		total_output_tokens = total_output_tokens + $5,
-		estimated_cost_usd = estimated_cost_usd + $6,
-		updated_at = $7
-	WHERE id = $1`
-	res, err := p.pool.Exec(ctx, incrQuery,
-		sessionID, messageIncr, toolCallIncr,
+
+	mediaTypes := msg.MediaTypes
+	if mediaTypes == nil {
+		mediaTypes = []string{}
+	}
+
+	// Use a CTE to atomically insert the message and update session counters
+	// in a single statement, preventing races between concurrent AppendMessage calls.
+	query := `WITH ins AS (
+		INSERT INTO messages (id, session_id, role, content, timestamp, input_tokens, output_tokens, cost_usd, tool_call_id, metadata, sequence_num, has_media, media_types)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		RETURNING session_id
+	)
+	UPDATE sessions SET
+		message_count = message_count + $14,
+		tool_call_count = tool_call_count + $15,
+		total_input_tokens = total_input_tokens + $16,
+		total_output_tokens = total_output_tokens + $17,
+		estimated_cost_usd = estimated_cost_usd + $18,
+		updated_at = $19
+	WHERE id = (SELECT session_id FROM ins)`
+
+	_, err := p.pool.Exec(ctx, query,
+		msg.ID, sessionID, msg.Role, msg.Content, msg.Timestamp,
+		pgutil.NullInt32(msg.InputTokens), pgutil.NullInt32(msg.OutputTokens),
+		msg.CostUSD,
+		pgutil.NullString(msg.ToolCallID), pgutil.MarshalJSONB(msg.Metadata), msg.SequenceNum,
+		msg.HasMedia, mediaTypes,
+		messageIncr, toolCallIncr,
 		int64(msg.InputTokens), int64(msg.OutputTokens), msg.CostUSD,
 		time.Now(),
 	)
 	if err != nil {
-		return fmt.Errorf("postgres: auto-increment session counters: %w", err)
-	}
-	if res.RowsAffected() == 0 {
-		return fmt.Errorf("postgres: session %s not found for counter increment", sessionID)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return session.ErrSessionNotFound
+		}
+		return fmt.Errorf("postgres: append message: %w", err)
 	}
 	return nil
 }
