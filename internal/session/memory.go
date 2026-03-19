@@ -173,9 +173,10 @@ func (m *MemoryStore) AppendMessage(ctx context.Context, sessionID string, msg M
 	}
 
 	session.Messages = append(session.Messages, msg)
-	session.MessageCount++
 	if msg.ToolCallID != "" {
 		session.ToolCallCount++
+	} else {
+		session.MessageCount++
 	}
 	session.TotalInputTokens += int64(msg.InputTokens)
 	session.TotalOutputTokens += int64(msg.OutputTokens)

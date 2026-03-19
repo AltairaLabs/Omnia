@@ -373,20 +373,24 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 	}
 
 	// Auto-increment session counters from the message data.
+	// Tool call messages increment tool_call_count but not message_count.
+	isToolCall := msg.ToolCallID != ""
+	messageIncr := int32(1)
 	toolCallIncr := int32(0)
-	if msg.ToolCallID != "" {
+	if isToolCall {
+		messageIncr = 0
 		toolCallIncr = 1
 	}
 	incrQuery := `UPDATE sessions SET
-		message_count = message_count + 1,
-		tool_call_count = tool_call_count + $2,
-		total_input_tokens = total_input_tokens + $3,
-		total_output_tokens = total_output_tokens + $4,
-		estimated_cost_usd = estimated_cost_usd + $5,
-		updated_at = $6
+		message_count = message_count + $2,
+		tool_call_count = tool_call_count + $3,
+		total_input_tokens = total_input_tokens + $4,
+		total_output_tokens = total_output_tokens + $5,
+		estimated_cost_usd = estimated_cost_usd + $6,
+		updated_at = $7
 	WHERE id = $1`
 	_, err = p.pool.Exec(ctx, incrQuery,
-		sessionID, toolCallIncr,
+		sessionID, messageIncr, toolCallIncr,
 		int64(msg.InputTokens), int64(msg.OutputTokens), msg.CostUSD,
 		time.Now(),
 	)
