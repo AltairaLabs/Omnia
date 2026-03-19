@@ -362,6 +362,18 @@ else
 fi
 
 #
+# 3b. PII log check
+#
+print_header "Checking Logs for PII"
+
+if "$REPO_ROOT/hack/check-log-pii.sh" 2>&1; then
+    print_success "PII log check passed"
+else
+    print_error "PII detected in log statements"
+    CHECKS_FAILED=1
+fi
+
+#
 # 4. Build check
 #
 print_header "Building"
