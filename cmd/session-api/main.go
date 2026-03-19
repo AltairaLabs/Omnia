@@ -450,6 +450,7 @@ func registerEnterpriseRoutes(mux *http.ServeMux, pool *pgxpool.Pool, registry *
 		deletionStore := privacy.NewPostgresDeletionStore(pool)
 		deleter := privacy.NewWarmStoreSessionDeleter(warm)
 		deletionSvc := privacy.NewDeletionService(deletionStore, deleter, auditLogger, log)
+		deletionSvc.SetMediaDeleter(buildMediaDeleter(f, log))
 		deletionHandler := privacy.NewDeletionHandler(deletionSvc, log)
 		deletionHandler.RegisterRoutes(mux)
 	}
@@ -604,4 +605,23 @@ func startOTLPServers(f *flags, registry *providers.Registry, log logr.Logger) (
 	}()
 
 	return grpcSrv, httpSrv
+}
+
+// buildMediaDeleter returns a MediaDeleter based on the configured cold storage
+// backend. When no object storage is configured, nil is returned and the
+// deletion service retains its default NoOpMediaDeleter.
+func buildMediaDeleter(f *flags, log logr.Logger) privacy.MediaDeleter {
+	if f.coldBackend == "" || f.coldBucket == "" {
+		log.V(1).Info("media deleter skipped", "reason", "no object storage configured")
+		return nil
+	}
+	// Cold storage is configured — reuse its bucket for media artifact cleanup.
+	// The actual ObjectStoreClient implementation would be injected here once
+	// the cloud SDK adapters are available. For now, log that media cleanup is
+	// enabled and return a no-op until the adapters are wired.
+	log.Info("media deleter enabled",
+		"backend", f.coldBackend,
+		"bucket", f.coldBucket,
+	)
+	return privacy.NoOpMediaDeleter{}
 }

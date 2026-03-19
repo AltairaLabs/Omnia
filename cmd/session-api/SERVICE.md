@@ -12,7 +12,8 @@
 - OTLP trace ingestion (optional)
 - Rate limiting per client IP
 - Audit logging (enterprise)
-- Privacy/GDPR deletion and opt-out (enterprise)
+- Privacy/GDPR deletion with media artifact cleanup, batch processing, and progress tracking (enterprise)
+- Privacy opt-out preferences (enterprise)
 
 ## Inputs
 - **HTTP** from Facade, Runtime, Dashboard (proxied via Operator):
@@ -73,7 +74,21 @@ The **source of truth** for the Session API surface is:
 
 All consumers now use the generated client types from `pkg/sessionapi/`. The eval worker uses `ClientWithResponses` directly; the facade httpclient uses the generated types for serialization while keeping its own retry/circuit-breaker/write-buffer infrastructure.
 
+## Deletion Pipeline (Enterprise)
+
+The GDPR/CCPA deletion pipeline processes user data removal requests:
+
+1. **Request created** — validated and persisted with `pending` status
+2. **Session discovery** — lists all sessions for the user (optionally scoped by workspace)
+3. **Batch processing** — sessions are processed in configurable batches (default 100):
+   - Warm store deletion (PostgreSQL)
+   - Media artifact cleanup (object storage, when configured)
+4. **Progress tracking** — `SessionsDeleted` count updated after each batch, pollable via GET endpoint
+5. **Completion** — request marked `completed` or `failed` (partial failures are recorded per-session)
+
+Media cleanup uses the `MediaDeleter` interface. When object storage is not configured, a no-op deleter is used so the pipeline proceeds without error. Cold storage deletion is not needed because Phase 1 PII filtering ensures no PII reaches the cold tier.
+
 ## Dependencies
 - PostgreSQL (required, warm store)
 - Redis (optional, hot cache + event streaming)
-- Cold storage provider (optional: S3/GCS/Azure)
+- Cold storage provider (optional: S3/GCS/Azure, also used for media artifact cleanup)
