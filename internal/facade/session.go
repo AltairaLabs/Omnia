@@ -159,8 +159,11 @@ func sessionIDToTraceID(sessionID string) trace.TraceID {
 
 // processRegularMessage stores the user message and dispatches to the handler.
 func (s *Server) processRegularMessage(ctx context.Context, c *Connection, sessionID string, msg *ClientMessage, writer *connResponseWriter, log logr.Logger) error {
-	// Store user message
-	if err := s.sessionStore.AppendMessage(ctx, sessionID, session.Message{
+	// Store user message with a detached context so it completes even if
+	// the WebSocket connection closes before the HTTP call returns.
+	storeCtx, storeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer storeCancel()
+	if err := s.sessionStore.AppendMessage(storeCtx, sessionID, session.Message{
 		ID:        uuid.New().String(),
 		Role:      session.RoleUser,
 		Content:   msg.Content,

@@ -393,13 +393,16 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 		estimated_cost_usd = estimated_cost_usd + $6,
 		updated_at = $7
 	WHERE id = $1`
-	_, err = p.pool.Exec(ctx, incrQuery,
+	res, err := p.pool.Exec(ctx, incrQuery,
 		sessionID, messageIncr, toolCallIncr,
 		int64(msg.InputTokens), int64(msg.OutputTokens), msg.CostUSD,
 		time.Now(),
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: auto-increment session counters: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return fmt.Errorf("postgres: session %s not found for counter increment", sessionID)
 	}
 	return nil
 }

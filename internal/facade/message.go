@@ -150,7 +150,7 @@ func (s *Server) recordClientToolResult(ctx context.Context, sessionID string, r
 		Timestamp:  time.Now(),
 		Metadata:   metadata,
 	}
-	storeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	storeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := s.sessionStore.AppendMessage(storeCtx, sessionID, msg); err != nil {
 		log.Error(err, "failed to record client tool result", "sessionID", sessionID, "callID", result.CallID)
