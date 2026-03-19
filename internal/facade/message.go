@@ -19,9 +19,12 @@ package facade
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
+	"github.com/altairalabs/omnia/internal/session"
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -83,12 +86,14 @@ func (s *Server) handleClientMessage(ctx context.Context, c *Connection, message
 
 	// Route tool call NACK — convert to a rejection tool_result
 	if clientMsg.Type == MessageTypeToolCallNack && clientMsg.ToolCallNack != nil {
-		if router, ok := s.handler.(ClientToolRouter); ok {
-			router.SendToolResult(c.sessionID, &ClientToolResultInfo{
-				CallID: clientMsg.ToolCallNack.CallID,
-				Error:  clientMsg.ToolCallNack.Reason,
-			})
+		result := &ClientToolResultInfo{
+			CallID: clientMsg.ToolCallNack.CallID,
+			Error:  clientMsg.ToolCallNack.Reason,
 		}
+		if router, ok := s.handler.(ClientToolRouter); ok {
+			router.SendToolResult(c.sessionID, result)
+		}
+		s.recordClientToolResult(ctx, c.sessionID, result, log)
 		return
 	}
 
@@ -96,6 +101,7 @@ func (s *Server) handleClientMessage(ctx context.Context, c *Connection, message
 	if clientMsg.Type == MessageTypeToolResult && clientMsg.ToolResult != nil {
 		if router, ok := s.handler.(ClientToolRouter); ok {
 			if router.SendToolResult(c.sessionID, clientMsg.ToolResult) {
+				s.recordClientToolResult(ctx, c.sessionID, clientMsg.ToolResult, log)
 				return
 			}
 		}
@@ -109,6 +115,46 @@ func (s *Server) handleClientMessage(ctx context.Context, c *Connection, message
 	// reading tool_result messages while HandleMessage blocks waiting
 	// for client tool responses.
 	go s.processAndRecordMessage(ctx, c, &clientMsg, log)
+}
+
+// recordClientToolResult persists a client-side tool result in the session store
+// so that tool calls always have a corresponding resolution in the session history.
+func (s *Server) recordClientToolResult(ctx context.Context, sessionID string, result *ClientToolResultInfo, log logr.Logger) {
+	if s.sessionStore == nil || sessionID == "" {
+		return
+	}
+	var content string
+	if result.Error != "" {
+		content = result.Error
+	} else if result.Result != nil {
+		data, err := json.Marshal(result.Result)
+		if err != nil {
+			content = fmt.Sprintf("%v", result.Result)
+		} else {
+			content = string(data)
+		}
+	}
+
+	metadata := map[string]string{
+		"type": "tool_result",
+	}
+	if result.Error != "" {
+		metadata["is_error"] = "true"
+	}
+
+	msg := session.Message{
+		ID:         uuid.New().String(),
+		Role:       session.RoleSystem,
+		Content:    content,
+		ToolCallID: result.CallID,
+		Timestamp:  time.Now(),
+		Metadata:   metadata,
+	}
+	storeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := s.sessionStore.AppendMessage(storeCtx, sessionID, msg); err != nil {
+		log.Error(err, "failed to record client tool result", "sessionID", sessionID, "callID", result.CallID)
+	}
 }
 
 // processAndRecordMessage processes a client message and records metrics.
