@@ -102,7 +102,6 @@ func MessageToAPI(m session.Message) Message {
 // ToolCallToAPI converts an internal ToolCall to a generated ToolCall.
 func ToolCallToAPI(tc session.ToolCall) ToolCall {
 	status := ToolCallStatus(tc.Status)
-	exec := ToolCallExecution(tc.Execution)
 	out := ToolCall{
 		Id:           ptr(tc.ID),
 		SessionId:    uuidPtr(tc.SessionID),
@@ -112,9 +111,6 @@ func ToolCallToAPI(tc session.ToolCall) ToolCall {
 		DurationMs:   ptrNonZeroInt64(tc.DurationMs),
 		ErrorMessage: ptrNonEmpty(tc.ErrorMessage),
 		CreatedAt:    timePtr(tc.CreatedAt),
-	}
-	if tc.Execution != "" {
-		out.Execution = &exec
 	}
 	if tc.Arguments != nil {
 		args := map[string]any{}
@@ -321,9 +317,6 @@ func ToolCallFromAPI(tc ToolCall) session.ToolCall {
 	}
 	if tc.Status != nil {
 		out.Status = session.ToolCallStatus(*tc.Status)
-	}
-	if tc.Execution != nil {
-		out.Execution = session.ToolCallExecution(*tc.Execution)
 	}
 	if tc.Arguments != nil {
 		out.Arguments = make(map[string]any, len(*tc.Arguments))

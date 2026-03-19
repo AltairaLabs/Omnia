@@ -9,7 +9,6 @@ export interface ToolCall {
   result?: unknown;
   status: "pending" | "success" | "error";
   durationMs?: number;
-  execution?: "server" | "client";
   errorMessage?: string;
   labels?: Record<string, string>;
   createdAt: string;

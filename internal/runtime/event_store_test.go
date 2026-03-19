@@ -332,9 +332,6 @@ func TestOmniaEventStore_AppendToolCallStarted(t *testing.T) {
 	if tcs[0].Status != session.ToolCallStatusPending {
 		t.Errorf("expected tool call status pending, got %s", tcs[0].Status)
 	}
-	if tcs[0].Execution != session.ToolCallExecutionServer {
-		t.Errorf("expected execution server, got %s", tcs[0].Execution)
-	}
 }
 
 func TestOmniaEventStore_AppendToolCallCompleted(t *testing.T) {

@@ -495,7 +495,6 @@ func (s *OmniaEventStore) convertToolCallStarted(event *events.Event) (eventActi
 		Name:      data.ToolName,
 		Arguments: data.Args,
 		Status:    session.ToolCallStatusPending,
-		Execution: session.ToolCallExecutionServer,
 		CreatedAt: event.Timestamp,
 	}
 	s.enrichToolCallLabels(&tc, data.ToolName)
@@ -519,7 +518,6 @@ func (s *OmniaEventStore) convertToolCallCompleted(event *events.Event) (eventAc
 		Name:       data.ToolName,
 		Status:     session.ToolCallStatusSuccess,
 		DurationMs: data.Duration.Milliseconds(),
-		Execution:  session.ToolCallExecutionServer,
 		CreatedAt:  event.Timestamp,
 	}
 	if resultBody != "" {
@@ -550,7 +548,6 @@ func (s *OmniaEventStore) convertToolCallFailed(event *events.Event) (eventActio
 		Status:       session.ToolCallStatusError,
 		DurationMs:   data.Duration.Milliseconds(),
 		ErrorMessage: errMsg,
-		Execution:    session.ToolCallExecutionServer,
 		CreatedAt:    event.Timestamp,
 	}
 	s.enrichToolCallLabels(&tc, data.ToolName)
@@ -560,27 +557,32 @@ func (s *OmniaEventStore) convertToolCallFailed(event *events.Event) (eventActio
 
 // --- Client tool events ---
 
-// convertClientToolRequest records a client tool request as a new row.
-// The SDK emits ToolCallStarted (server) first, then ClientToolRequest when the
-// tool is delegated to the client. Both rows share the same CallID.
+// convertClientToolRequest records a client tool delegation as a runtime event.
+// The SDK emits ToolCallStarted first (which creates the tool_call row), then
+// ClientToolRequest when the tool is delegated to the client. We record the
+// delegation as a runtime event (not a tool_call row) to avoid double-counting.
 func (s *OmniaEventStore) convertClientToolRequest(event *events.Event) (eventAction, bool) {
 	data, ok := asPtr[events.ClientToolRequestData](event.Data)
 	if !ok {
 		return eventAction{}, false
 	}
 
-	tc := session.ToolCall{
-		ID:        uuid.New().String(),
-		CallID:    data.CallID,
-		Name:      data.ToolName,
-		Arguments: data.Args,
-		Status:    session.ToolCallStatusPending,
-		Execution: session.ToolCallExecutionClient,
-		CreatedAt: event.Timestamp,
+	evtData := map[string]any{
+		"call_id":   data.CallID,
+		"tool_name": data.ToolName,
 	}
-	s.enrichToolCallLabels(&tc, data.ToolName)
+	if data.Args != nil {
+		evtData["arguments"] = data.Args
+	}
 
-	return eventAction{toolCall: &tc}, true
+	evt := session.RuntimeEvent{
+		ID:        uuid.New().String(),
+		EventType: string(event.Type),
+		Data:      evtData,
+		Timestamp: event.Timestamp,
+	}
+
+	return eventAction{event: &evt}, true
 }
 
 // NOTE: convertClientToolResolved will be added when the published PromptKit SDK

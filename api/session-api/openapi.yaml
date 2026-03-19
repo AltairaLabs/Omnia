@@ -644,11 +644,6 @@ components:
       type: string
       enum: [pending, success, error]
 
-    ToolCallExecution:
-      type: string
-      enum: [server, client]
-      x-enum-varnames: [ToolCallExecutionServer, ToolCallExecutionClient]
-
     ProviderCallStatus:
       type: string
       enum: [pending, completed, failed]
@@ -771,8 +766,6 @@ components:
         durationMs:
           type: integer
           format: int64
-        execution:
-          $ref: '#/components/schemas/ToolCallExecution'
         errorMessage:
           type: string
         labels:

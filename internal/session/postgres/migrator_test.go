@@ -374,8 +374,8 @@ func TestMigrator_DataOperations(t *testing.T) {
 	// Insert a tool call
 	toolCallID := "c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
 	_, err = db.Exec(`
-		INSERT INTO tool_calls (id, session_id, call_id, name, arguments, status, execution, created_at)
-		VALUES ($1, $2, 'call-1', 'kubectl_get', '{"resource": "pods"}', 'success', 'server', $3)`,
+		INSERT INTO tool_calls (id, session_id, call_id, name, arguments, status, created_at)
+		VALUES ($1, $2, 'call-1', 'kubectl_get', '{"resource": "pods"}', 'success', $3)`,
 		toolCallID, sessionID, now)
 	require.NoError(t, err)
 

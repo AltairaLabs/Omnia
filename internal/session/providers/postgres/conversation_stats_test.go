@@ -119,7 +119,6 @@ func TestConversationStats_FullConversationWithTools(t *testing.T) {
 		Name:      "get_weather",
 		Arguments: map[string]any{"location": "NYC"},
 		Status:    session.ToolCallStatusPending,
-		Execution: session.ToolCallExecutionServer,
 		CreatedAt: now.Add(3 * time.Second),
 	}))
 
@@ -132,7 +131,6 @@ func TestConversationStats_FullConversationWithTools(t *testing.T) {
 		Result:     "72°F, sunny",
 		Status:     session.ToolCallStatusSuccess,
 		DurationMs: 320,
-		Execution:  session.ToolCallExecutionServer,
 		CreatedAt:  now.Add(3500 * time.Millisecond),
 	}))
 
@@ -326,18 +324,18 @@ func TestConversationStats_MultipleToolCalls(t *testing.T) {
 	sess := makeSession("c0eebc99-9c0b-4ef8-bb6d-6bb9bd380c02", now)
 	require.NoError(t, p.CreateSession(ctx, sess))
 
-	// 3 tool calls: 2 server-side + 1 client-side. Each gets started + completed.
+	// 3 tool calls. Each gets started + completed. ClientToolRequest for tool C
+	// goes to runtime_events (not tool_calls), so it doesn't affect the count.
 	type toolDef struct {
 		startedID string
 		doneID    string
 		callID    string
 		name      string
-		execution session.ToolCallExecution
 	}
 	tools := []toolDef{
-		{uid(40), uid(43), "call_a", "search", session.ToolCallExecutionServer},
-		{uid(41), uid(44), "call_b", "calculator", session.ToolCallExecutionServer},
-		{uid(42), uid(45), "call_c", "get_location", session.ToolCallExecutionClient},
+		{uid(40), uid(43), "call_a", "search"},
+		{uid(41), uid(44), "call_b", "calculator"},
+		{uid(42), uid(45), "call_c", "get_location"},
 	}
 
 	for i, tc := range tools {
@@ -348,7 +346,6 @@ func TestConversationStats_MultipleToolCalls(t *testing.T) {
 			CallID:    tc.callID,
 			Name:      tc.name,
 			Status:    session.ToolCallStatusPending,
-			Execution: tc.execution,
 			CreatedAt: ts,
 		}))
 		// Completed → separate row, does NOT increment
@@ -358,7 +355,6 @@ func TestConversationStats_MultipleToolCalls(t *testing.T) {
 			Name:       tc.name,
 			Status:     session.ToolCallStatusSuccess,
 			DurationMs: 100,
-			Execution:  tc.execution,
 			CreatedAt:  ts.Add(500 * time.Millisecond),
 		}))
 	}

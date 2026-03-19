@@ -232,16 +232,6 @@ const (
 	ToolCallStatusError ToolCallStatus = "error"
 )
 
-// ToolCallExecution indicates where the tool call is executed.
-type ToolCallExecution string
-
-const (
-	// ToolCallExecutionServer indicates the tool runs on the server (runtime).
-	ToolCallExecutionServer ToolCallExecution = "server"
-	// ToolCallExecutionClient indicates the tool runs on the client (browser).
-	ToolCallExecutionClient ToolCallExecution = "client"
-)
-
 // ToolCall represents a single tool invocation within a session.
 type ToolCall struct {
 	// ID is the unique identifier for this tool call record.
@@ -260,8 +250,6 @@ type ToolCall struct {
 	Status ToolCallStatus `json:"status"`
 	// DurationMs is the execution duration in milliseconds.
 	DurationMs int64 `json:"durationMs,omitempty"`
-	// Execution indicates where the tool runs (server or client).
-	Execution ToolCallExecution `json:"execution,omitempty"`
 	// ErrorMessage contains the error details when status is error.
 	ErrorMessage string `json:"errorMessage,omitempty"`
 	// Labels contains arbitrary key-value pairs for categorization.

@@ -179,10 +179,6 @@ func TestOpenAPIEnumsMatchGoConstants(t *testing.T) {
 			string(session.ToolCallStatusSuccess),
 			string(session.ToolCallStatusError),
 		},
-		"ToolCallExecution": {
-			string(session.ToolCallExecutionServer),
-			string(session.ToolCallExecutionClient),
-		},
 		"ProviderCallStatus": {
 			string(session.ProviderCallStatusPending),
 			string(session.ProviderCallStatusCompleted),

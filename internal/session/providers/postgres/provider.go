@@ -180,7 +180,7 @@ func scanToolCall(row pgx.Row) (*session.ToolCall, error) {
 	err := row.Scan(
 		&tc.ID, &tc.SessionID, &tc.CallID, &tc.Name,
 		&argsJSON, &resultJSON,
-		&tc.Status, &durationMs, &tc.Execution,
+		&tc.Status, &durationMs,
 		&errorMessage, &labelsJSON, &tc.CreatedAt,
 	)
 	if err != nil {
@@ -614,13 +614,13 @@ func (p *Provider) RecordToolCall(ctx context.Context, sessionID string, tc *ses
 	}
 
 	query := `WITH ins AS (
-		INSERT INTO tool_calls (id, session_id, call_id, name, arguments, result, status, duration_ms, execution, error_message, labels, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		INSERT INTO tool_calls (id, session_id, call_id, name, arguments, result, status, duration_ms, error_message, labels, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING session_id
 	)
 	UPDATE sessions SET
-		tool_call_count = tool_call_count + $13,
-		updated_at = $14
+		tool_call_count = tool_call_count + $12,
+		updated_at = $13
 	WHERE id = (SELECT session_id FROM ins)`
 
 	argsJSON, _ := json.Marshal(tc.Arguments)
@@ -633,7 +633,7 @@ func (p *Provider) RecordToolCall(ctx context.Context, sessionID string, tc *ses
 		tc.ID, sessionID, tc.CallID, tc.Name,
 		argsJSON, resultJSON,
 		string(tc.Status), pgutil.NullInt64(tc.DurationMs),
-		string(tc.Execution), pgutil.NullString(tc.ErrorMessage),
+		pgutil.NullString(tc.ErrorMessage),
 		pgutil.MarshalJSONB(tc.Labels), tc.CreatedAt,
 		toolCallIncr, time.Now(),
 	)
@@ -691,7 +691,7 @@ func (p *Provider) GetToolCalls(ctx context.Context, sessionID string) ([]*sessi
 		return nil, err
 	}
 
-	query := `SELECT id, session_id, call_id, name, arguments, result, status, duration_ms, execution, error_message, labels, created_at
+	query := `SELECT id, session_id, call_id, name, arguments, result, status, duration_ms, error_message, labels, created_at
 		FROM tool_calls WHERE session_id=$1 ORDER BY created_at ASC`
 
 	rows, err := p.pool.Query(ctx, query, sessionID)
