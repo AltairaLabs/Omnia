@@ -1036,7 +1036,7 @@ export class MockDataService implements DataService {
       sources: {
         total: sources.length,
         ready: sources.filter((s) => s.status?.phase === "Ready").length,
-        failed: sources.filter((s) => s.status?.phase === "Failed").length,
+        failed: sources.filter((s) => s.status?.phase === "Error").length,
         active: sources.filter((s) => !s.spec.suspend).length,
       },
       jobs: {

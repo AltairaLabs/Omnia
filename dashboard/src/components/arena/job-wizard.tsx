@@ -369,23 +369,24 @@ export function JobWizard({
     [configPreview, totalProviderEntries, maxWorkerReplicas]
   );
 
-  // Determine which groups should be map-mode based on providerRefs
+  // Determine which groups should be map-mode based on providerRefs.
+  // Each provider ID becomes its own map-mode group — the arena-worker's
+  // remapProviderIDs expects the group name to equal the provider ID.
   const mapModeGroups = useMemo(() => {
     if (!configPreview.loaded) return new Map<string, ConfigProviderRef[]>();
-    // Group providerRefs by their source category to determine map-mode groups
     const grouped = new Map<string, ConfigProviderRef[]>();
     for (const ref of configPreview.providerRefs) {
-      // Use the source as the group name (judges, judge_specs, self_play → selfplay, judges)
-      const groupName = ref.source === "self_play" ? "selfplay" : ref.source;
-      if (!grouped.has(groupName)) {
-        grouped.set(groupName, []);
+      if (!grouped.has(ref.id)) {
+        grouped.set(ref.id, []);
       }
-      grouped.get(groupName)!.push(ref);
+      grouped.get(ref.id)!.push(ref);
     }
     return grouped;
   }, [configPreview.loaded, configPreview.providerRefs]);
 
-  // Auto-populate provider groups required by the arena config
+  // Auto-populate provider groups required by the arena config.
+  // When the config changes (different folder/file), rebuild groups from scratch
+  // so stale groups from the previous config are removed.
   const prevRequiredGroups = useRef<string[]>([]);
   const prevProviderRefs = useRef<ConfigProviderRef[]>([]);
   useEffect(() => {
@@ -405,27 +406,34 @@ export function JobWizard({
     prevProviderRefs.current = refs;
 
     setFormState((prev) => {
-      const updatedGroups = { ...prev.providerGroups };
-      const updatedMappings = { ...prev.providerMappings };
+      // Start fresh: only keep groups/mappings that the new config requires.
+      // User-added custom groups (not in required) are preserved.
+      const requiredSet = new Set(required);
+      const mapModeSet = new Set(mapModeGroups.keys());
 
-      for (const group of required) {
-        // Check if this group should be map-mode
-        const mapRefs = mapModeGroups.get(group);
-        if (mapRefs && mapRefs.length > 0) {
-          // Map-mode: create mapping entries for each provider ref
-          if (!(group in updatedMappings)) {
-            const mapping: Record<string, ProviderGroupEntry | null> = {};
-            for (const ref of mapRefs) {
-              mapping[ref.id] = null;
-            }
-            updatedMappings[group] = mapping;
-          }
-        } else {
-          // Array-mode: ensure group exists
-          if (!(group in updatedGroups)) {
-            updatedGroups[group] = [];
-          }
+      // Preserve user-added groups that aren't config-driven
+      const updatedGroups: Record<string, ProviderGroupEntry[]> = {};
+      for (const [group, entries] of Object.entries(prev.providerGroups)) {
+        if (!requiredSet.has(group) && !DEFAULT_PROVIDER_GROUPS.includes(group)) {
+          updatedGroups[group] = entries;
         }
+      }
+
+      // Array-mode groups from spec.providers[].group
+      for (const group of required) {
+        if (!mapModeSet.has(group)) {
+          updatedGroups[group] = prev.providerGroups[group] ?? [];
+        }
+      }
+
+      // Map-mode groups: each provider ID ref becomes its own mapping group
+      const updatedMappings: Record<string, Record<string, ProviderGroupEntry | null>> = {};
+      for (const [providerID, providerRefs] of mapModeGroups) {
+        const mapping: Record<string, ProviderGroupEntry | null> = {};
+        for (const ref of providerRefs) {
+          mapping[ref.id] = prev.providerMappings[providerID]?.[ref.id] ?? null;
+        }
+        updatedMappings[providerID] = mapping;
       }
 
       return { ...prev, providerGroups: updatedGroups, providerMappings: updatedMappings };
@@ -581,7 +589,12 @@ export function JobWizard({
     }
   };
 
-  const readySources = sources.filter((s) => s.status?.phase === "Ready");
+  // Sources are available when Ready or Fetching (re-syncing — previous content
+  // still accessible via HEAD). Pending/Initializing sources have no content yet.
+  const availableSources = sources.filter((s) => {
+    const phase = s.status?.phase;
+    return phase === "Ready" || phase === "Fetching";
+  });
 
   // Step rendering
   const renderStep = () => {
@@ -635,13 +648,13 @@ export function JobWizard({
             <SelectValue placeholder="Select a source" />
           </SelectTrigger>
           <SelectContent>
-            {readySources.length === 0 ? (
+            {availableSources.length === 0 ? (
               <div className="flex items-center gap-2 text-muted-foreground p-2 text-sm">
                 <Settings className="h-4 w-4" />
                 No ready sources available
               </div>
             ) : (
-              readySources.map((source) => (
+              availableSources.map((source) => (
                 <SelectItem
                   key={source.metadata?.name}
                   value={source.metadata?.name || "unknown"}
@@ -717,7 +730,7 @@ export function JobWizard({
   const activeMappingGroups = Object.keys(formState.providerMappings);
 
   const renderProvidersStep = () => (
-    <div className="space-y-4">
+    <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
       {(providersLoading || agentsLoading) && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />

@@ -193,15 +193,19 @@ type Artifact struct {
 }
 
 // ArenaSourcePhase represents the current phase of the ArenaSource.
-// +kubebuilder:validation:Enum=Pending;Ready;Fetching;Error
+// +kubebuilder:validation:Enum=Pending;Initializing;Ready;Fetching;Error
 type ArenaSourcePhase string
 
 const (
 	// ArenaSourcePhasePending indicates the source has not been fetched yet.
 	ArenaSourcePhasePending ArenaSourcePhase = "Pending"
+	// ArenaSourcePhaseInitializing indicates the first fetch is in progress.
+	// Content is not yet available.
+	ArenaSourcePhaseInitializing ArenaSourcePhase = "Initializing"
 	// ArenaSourcePhaseReady indicates the source has been successfully fetched.
 	ArenaSourcePhaseReady ArenaSourcePhase = "Ready"
-	// ArenaSourcePhaseFetching indicates the source is currently being fetched.
+	// ArenaSourcePhaseFetching indicates a re-sync is in progress.
+	// Previous content remains available via HEAD.
 	ArenaSourcePhaseFetching ArenaSourcePhase = "Fetching"
 	// ArenaSourcePhaseError indicates an error occurred while fetching the source.
 	ArenaSourcePhaseError ArenaSourcePhase = "Error"

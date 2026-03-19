@@ -172,7 +172,7 @@ function DeployStatusIndicator({ status, loading }: DeployStatusIndicatorProps) 
     );
   }
 
-  if (phase === "Failed") {
+  if (phase === "Error") {
     return (
       <span title="Deployment failed">
         <XCircle className="h-3 w-3 text-red-500" />

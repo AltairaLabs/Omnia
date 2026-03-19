@@ -111,8 +111,12 @@ func (r *RedisStore) stateKey(sessionID string) string {
 // CreateSession creates a new session and returns it.
 func (r *RedisStore) CreateSession(ctx context.Context, opts CreateSessionOptions) (*Session, error) {
 	now := time.Now()
+	id := opts.ID
+	if id == "" {
+		id = uuid.New().String()
+	}
 	session := &Session{
-		ID:        uuid.New().String(),
+		ID:        id,
 		AgentName: opts.AgentName,
 		Namespace: opts.Namespace,
 		CreatedAt: now,

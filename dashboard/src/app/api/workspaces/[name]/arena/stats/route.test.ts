@@ -66,7 +66,7 @@ const mockWorkspace = {
 const mockSources = [
   { metadata: { name: "source-1" }, status: { phase: "Ready" } },
   { metadata: { name: "source-2" }, status: { phase: "Ready" } },
-  { metadata: { name: "source-3" }, status: { phase: "Failed" } },
+  { metadata: { name: "source-3" }, status: { phase: "Error" } },
 ];
 
 const mockJobs = [

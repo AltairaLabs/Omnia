@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/AltairaLabs/PromptKit/runtime/logger"
 	"github.com/go-logr/zapr"
 	"go.opentelemetry.io/otel"
@@ -29,6 +30,11 @@ import (
 )
 
 func main() {
+	// Disable PromptKit JSON schema validation — the Go structs are the
+	// source of truth and the remote schema may lag behind.  This also
+	// avoids network fetches in air-gapped environments.
+	config.SchemaValidationDisabled.Store(true)
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 

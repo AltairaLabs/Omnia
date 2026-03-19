@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"golang.org/x/time/rate"
 
@@ -31,13 +32,14 @@ import (
 
 // Connection represents an active WebSocket connection.
 type Connection struct {
-	conn          *websocket.Conn
-	sessionID     string
-	agentName     string
-	namespace     string
-	binaryCapable bool // Client supports binary WebSocket frames
-	mu            sync.Mutex
-	closed        bool
+	conn             *websocket.Conn
+	sessionID        string
+	agentName        string
+	namespace        string
+	binaryCapable    bool // Client supports binary WebSocket frames
+	mu               sync.Mutex
+	closed           bool
+	sessionPersisted bool // true once the session has been written to the store
 
 	// User identity fields extracted from Istio-injected headers on WebSocket upgrade.
 	userID        string
@@ -59,13 +61,11 @@ func (s *Server) handleConnection(ctx context.Context, c *Connection) {
 		return
 	}
 
-	// Eagerly create a session and send "connected" so the client can start
-	// sending messages immediately without a handshake deadlock.
-	sessionID, err := s.ensureSession(ctx, c, "", log)
-	if err != nil {
-		log.Error(err, "failed to create session on connect")
-		return
-	}
+	// Generate a session ID and send "connected" immediately so the client can
+	// start sending messages without a handshake deadlock. The session is NOT
+	// persisted to the store here — it will be written on the first message via
+	// ensureSession, avoiding empty sessions from connections that never send data.
+	sessionID := uuid.New().String()
 	c.mu.Lock()
 	c.sessionID = sessionID
 	c.mu.Unlock()
@@ -100,7 +100,7 @@ func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 
 	s.metrics.ConnectionClosed()
 
-	if c.sessionID != "" {
+	if c.sessionID != "" && c.sessionPersisted {
 		s.submitCompletion(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()

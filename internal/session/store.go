@@ -185,6 +185,11 @@ func (s *Session) IsExpired() bool {
 
 // CreateSessionOptions contains options for creating a new session.
 type CreateSessionOptions struct {
+	// ID is an optional pre-generated session ID. When set, the store uses this
+	// ID instead of generating a new one. This supports deferred persistence:
+	// the facade generates a UUID on connect (for immediate client response) but
+	// only persists the session on the first message.
+	ID string
 	// AgentName is the name of the agent.
 	AgentName string
 	// Namespace is the Kubernetes namespace.

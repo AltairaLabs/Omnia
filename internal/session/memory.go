@@ -61,8 +61,12 @@ func (m *MemoryStore) CreateSession(ctx context.Context, opts CreateSessionOptio
 	}
 
 	now := time.Now()
+	id := opts.ID
+	if id == "" {
+		id = uuid.New().String()
+	}
 	session := &Session{
-		ID:        uuid.New().String(),
+		ID:        id,
 		AgentName: opts.AgentName,
 		Namespace: opts.Namespace,
 		CreatedAt: now,

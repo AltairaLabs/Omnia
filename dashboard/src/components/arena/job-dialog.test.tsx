@@ -8,7 +8,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { JobDialog } from "./job-dialog";
-import type { ArenaSource } from "@/types/arena";
+import type { ArenaSource, ArenaSourcePhase } from "@/types/arena";
 
 // Mock workspace context
 const mockCurrentWorkspace = {
@@ -78,7 +78,7 @@ function createMockSource(name: string, phase: string = "Ready"): ArenaSource {
       interval: "5m",
       git: { url: "https://github.com/test/repo" },
     },
-    status: { phase: phase as "Pending" | "Ready" | "Failed" },
+    status: { phase: phase as ArenaSourcePhase },
   };
 }
 

@@ -190,9 +190,10 @@ func TestCollectTurnResponse_RejectsToolCalls(t *testing.T) {
 	defer func() { _ = p.Close() }()
 
 	// Send a message to trigger the tool call flow
-	require.NoError(t, sendMessage(p.conn, p.sessionID, "do something"))
+	fb := p.fallback
+	require.NoError(t, sendMessage(fb.conn, fb.sessionID, "do something"))
 
-	msgs, err := collectTurnResponse(context.Background(), p.conn, p.sessionID)
+	msgs, err := collectTurnResponse(context.Background(), fb.conn, fb.sessionID)
 	require.NoError(t, err)
 
 	// Should have the tool_call in the transcript and the assistant done message
@@ -218,6 +219,5 @@ func TestConnect_WorksWithoutTraceContext(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = p.Close() }()
 
-	assert.Equal(t, "sess-no-trace", p.sessionID)
 	assert.Equal(t, "sess-no-trace", p.SessionID())
 }

@@ -60,6 +60,11 @@ var (
 )
 
 func main() {
+	// Disable PromptKit JSON schema validation — the Go structs are the
+	// source of truth and the remote schema may lag behind.  This also
+	// avoids network fetches in air-gapped environments.
+	config.SchemaValidationDisabled.Store(true)
+
 	flag.Parse()
 
 	// Initialize logger

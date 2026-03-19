@@ -64,11 +64,9 @@ function extractProviderRefs(parsed: ArenaConfigYaml): ConfigProviderRef[] {
     }
   };
 
-  if (parsed?.spec?.self_play?.enabled) {
-    for (const role of parsed.spec.self_play.roles ?? []) {
-      if (role.provider) {
-        add(role.provider, "self_play", `Self-play role "${role.id || "unknown"}"`);
-      }
+  for (const role of parsed?.spec?.self_play?.roles ?? []) {
+    if (role.provider) {
+      add(role.provider, "self_play", `Self-play role "${role.id || "unknown"}"`);
     }
   }
 
@@ -88,40 +86,15 @@ function extractProviderRefs(parsed: ArenaConfigYaml): ConfigProviderRef[] {
 }
 
 /**
- * Extract the unique provider group names referenced by the arena config.
- * Sources:
- *   - spec.providers[].group (default: "default")
- *   - spec.self_play.roles[].provider (when self_play is enabled)
- *   - spec.judges[].provider
- *   - spec.judge_specs.<key>.provider
+ * Extract the unique provider group names from spec.providers[].group.
+ * Only test-matrix provider groups belong here — self-play, judge, and
+ * judge_spec provider ID references are handled via providerRefs/map-mode.
  */
 function extractRequiredGroups(parsed: ArenaConfigYaml): string[] {
   const groups = new Set<string>();
-
   for (const p of parsed?.spec?.providers ?? []) {
     groups.add(p.group || "default");
   }
-
-  if (parsed?.spec?.self_play?.enabled) {
-    for (const role of parsed.spec.self_play.roles ?? []) {
-      if (role.provider) {
-        groups.add(role.provider);
-      }
-    }
-  }
-
-  for (const judge of parsed?.spec?.judges ?? []) {
-    if (judge.provider) {
-      groups.add(judge.provider);
-    }
-  }
-
-  for (const spec of Object.values(parsed?.spec?.judge_specs ?? {})) {
-    if (spec.provider) {
-      groups.add(spec.provider);
-    }
-  }
-
   return Array.from(groups);
 }
 

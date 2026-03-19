@@ -1036,12 +1036,12 @@ describe("JobWizard", () => {
 
   describe("Provider Mappings (map mode)", () => {
     it("shows mapping section when config has providerRefs", async () => {
-      // Set config preview to include providerRefs
+      // Provider refs are keyed by provider ID, not by source category
       mockConfigPreview.loaded = true;
-      mockConfigPreview.requiredGroups = ["default", "judges"];
+      mockConfigPreview.requiredGroups = ["default"];
       mockConfigPreview.providerRefs = [
-        { id: "judge-quality", source: "judges", label: 'Judge "quality"' },
-        { id: "judge-safety", source: "judges", label: 'Judge "safety"' },
+        { id: "quality-judge", source: "judges", label: 'Judge "quality"' },
+        { id: "safety-judge", source: "judges", label: 'Judge "safety"' },
       ];
 
       const user = userEvent.setup();
@@ -1050,16 +1050,16 @@ describe("JobWizard", () => {
 
       // Should see the Provider Mappings section
       expect(screen.getByText("Provider Mappings")).toBeInTheDocument();
-      // Should see the config provider IDs as labels
-      expect(screen.getByText("judge-quality")).toBeInTheDocument();
-      expect(screen.getByText("judge-safety")).toBeInTheDocument();
+      // Each provider ID becomes its own map-mode group (appears as group badge + config ID)
+      expect(screen.getAllByText("quality-judge").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("safety-judge").length).toBeGreaterThanOrEqual(1);
     });
 
     it("shows mapped badge for map-mode groups", async () => {
       mockConfigPreview.loaded = true;
-      mockConfigPreview.requiredGroups = ["judges"];
+      mockConfigPreview.requiredGroups = ["default"];
       mockConfigPreview.providerRefs = [
-        { id: "judge-quality", source: "judges", label: 'Judge "quality"' },
+        { id: "quality-judge", source: "judges", label: 'Judge "quality"' },
       ];
 
       const user = userEvent.setup();
@@ -1071,9 +1071,9 @@ describe("JobWizard", () => {
 
     it("selects a provider for a mapping entry", async () => {
       mockConfigPreview.loaded = true;
-      mockConfigPreview.requiredGroups = ["judges"];
+      mockConfigPreview.requiredGroups = [];
       mockConfigPreview.providerRefs = [
-        { id: "judge-quality", source: "judges", label: 'Judge "quality"' },
+        { id: "quality-judge", source: "judges", label: 'Judge "quality"' },
       ];
 
       const user = userEvent.setup();
@@ -1094,9 +1094,9 @@ describe("JobWizard", () => {
       await waitFor(() => {
         const spec = onSubmit.mock.calls[0][1];
         expect(spec.providers).toBeDefined();
-        // Map-mode group should be an object, not an array
-        expect(Array.isArray(spec.providers.judges)).toBe(false);
-        expect(spec.providers.judges["judge-quality"]).toEqual({
+        // Map-mode group keyed by provider ID
+        expect(Array.isArray(spec.providers["quality-judge"])).toBe(false);
+        expect(spec.providers["quality-judge"]["quality-judge"]).toEqual({
           providerRef: { name: "claude-prod", namespace: undefined },
         });
       });
@@ -1104,9 +1104,9 @@ describe("JobWizard", () => {
 
     it("shows mapping groups in review", async () => {
       mockConfigPreview.loaded = true;
-      mockConfigPreview.requiredGroups = ["judges"];
+      mockConfigPreview.requiredGroups = ["default"];
       mockConfigPreview.providerRefs = [
-        { id: "judge-quality", source: "judges", label: 'Judge "quality"' },
+        { id: "quality-judge", source: "judges", label: 'Judge "quality"' },
       ];
 
       const user = userEvent.setup();
@@ -1122,14 +1122,14 @@ describe("JobWizard", () => {
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
       expect(screen.getByText("Provider Groups")).toBeInTheDocument();
-      expect(screen.getByText("judges")).toBeInTheDocument();
+      expect(screen.getByText("quality-judge")).toBeInTheDocument();
     });
 
     it("validation fails when mapping entry has no selection", async () => {
       mockConfigPreview.loaded = true;
-      mockConfigPreview.requiredGroups = ["judges"];
+      mockConfigPreview.requiredGroups = [];
       mockConfigPreview.providerRefs = [
-        { id: "judge-quality", source: "judges", label: 'Judge "quality"' },
+        { id: "quality-judge", source: "judges", label: 'Judge "quality"' },
       ];
 
       const user = userEvent.setup();
@@ -1142,7 +1142,7 @@ describe("JobWizard", () => {
 
       await waitFor(() => {
         expect(screen.getByRole("alert")).toBeInTheDocument();
-        expect(screen.getByRole("alert").textContent).toContain("judge-quality");
+        expect(screen.getByRole("alert").textContent).toContain("quality-judge");
       });
 
       // onSubmit should NOT have been called
@@ -1151,9 +1151,9 @@ describe("JobWizard", () => {
 
     it("shows mixed array + map groups", async () => {
       mockConfigPreview.loaded = true;
-      mockConfigPreview.requiredGroups = ["default", "judges"];
+      mockConfigPreview.requiredGroups = ["default"];
       mockConfigPreview.providerRefs = [
-        { id: "judge-quality", source: "judges", label: 'Judge "quality"' },
+        { id: "quality-judge", source: "judges", label: 'Judge "quality"' },
       ];
 
       const user = userEvent.setup();
@@ -1165,6 +1165,8 @@ describe("JobWizard", () => {
       expect(screen.getByText("Test Providers")).toBeInTheDocument();
       // default group should be auto-populated as array-mode (required group)
       expect(screen.getByText("default")).toBeInTheDocument();
+      // quality-judge should be a map-mode group (appears as group badge + config ID)
+      expect(screen.getAllByText("quality-judge").length).toBeGreaterThanOrEqual(1);
     });
   });
 });

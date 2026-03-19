@@ -195,7 +195,10 @@ func (s *Store) notifyFlush(state gobreaker.State) {
 // CreateSession creates a new session via POST /api/v1/sessions.
 // This is NOT buffered — callers need the session ID synchronously.
 func (s *Store) CreateSession(ctx context.Context, opts session.CreateSessionOptions) (*session.Session, error) {
-	id := uuid.New().String()
+	id := opts.ID
+	if id == "" {
+		id = uuid.New().String()
+	}
 	reqBody := sessionapi.SessionToAPI(id, opts)
 
 	resp, err := s.doJSON(ctx, http.MethodPost, "/api/v1/sessions", reqBody)

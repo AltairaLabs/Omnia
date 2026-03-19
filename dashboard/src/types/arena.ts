@@ -14,7 +14,7 @@ import { ObjectMeta, Condition, LocalObjectReference } from "./common";
 // =============================================================================
 
 export type ArenaSourceType = "configmap" | "git" | "oci" | "s3";
-export type ArenaSourcePhase = "Pending" | "Ready" | "Failed";
+export type ArenaSourcePhase = "Pending" | "Initializing" | "Ready" | "Fetching" | "Error";
 
 /** Git repository reference configuration */
 export interface GitRef {
@@ -124,6 +124,12 @@ export interface ArenaSourceStatus {
   conditions?: Condition[];
   /** Observed generation */
   observedGeneration?: number;
+  /** Current HEAD version hash (set after first successful sync) */
+  headVersion?: string;
+  /** Version hash from last successful sync */
+  lastVersionCreated?: string;
+  /** Number of versions currently stored */
+  versionCount?: number;
 }
 
 /** ArenaSource resource - defines where PromptKit bundles come from */

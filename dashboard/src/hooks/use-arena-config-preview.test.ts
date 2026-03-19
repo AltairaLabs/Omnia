@@ -330,7 +330,7 @@ spec:
     expect(result.current.loaded).toBe(false);
   });
 
-  it("extracts required groups from provider groups and self-play roles", async () => {
+  it("extracts required groups only from spec.providers[].group", async () => {
     const { useWorkspace } = await import("@/contexts/workspace-context");
     vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
 
@@ -346,7 +346,7 @@ spec:
     enabled: true
     roles:
       - id: user-sim
-        provider: selfplay
+        provider: user-sim-provider
 `;
 
     mockFetch.mockResolvedValueOnce({
@@ -363,13 +363,16 @@ spec:
       expect(result.current.loaded).toBe(true);
     });
 
+    // Only spec.providers[].group values should appear in requiredGroups
     expect(result.current.requiredGroups).toContain("default");
     expect(result.current.requiredGroups).toContain("selfplay");
     expect(result.current.requiredGroups).toContain("judge");
     expect(result.current.requiredGroups).toHaveLength(3);
+    // Self-play provider ID should NOT be in requiredGroups
+    expect(result.current.requiredGroups).not.toContain("user-sim-provider");
   });
 
-  it("extracts required groups from judges", async () => {
+  it("does not include judge provider IDs in required groups", async () => {
     const { useWorkspace } = await import("@/contexts/workspace-context");
     vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
 
@@ -398,13 +401,16 @@ spec:
       expect(result.current.loaded).toBe(true);
     });
 
+    // Only spec.providers[].group — judges are provider ID refs, not groups
     expect(result.current.requiredGroups).toContain("default");
-    expect(result.current.requiredGroups).toContain("quality-judge");
-    expect(result.current.requiredGroups).toContain("safety-judge");
-    expect(result.current.requiredGroups).toHaveLength(3);
+    expect(result.current.requiredGroups).toHaveLength(1);
+    expect(result.current.requiredGroups).not.toContain("quality-judge");
+    expect(result.current.requiredGroups).not.toContain("safety-judge");
+    // But they should be in providerRefs
+    expect(result.current.providerRefs).toHaveLength(2);
   });
 
-  it("extracts required groups from judge_specs", async () => {
+  it("does not include judge_spec provider IDs in required groups", async () => {
     const { useWorkspace } = await import("@/contexts/workspace-context");
     vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
 
@@ -433,13 +439,16 @@ spec:
       expect(result.current.loaded).toBe(true);
     });
 
+    // Only spec.providers[].group — judge_specs are provider ID refs, not groups
     expect(result.current.requiredGroups).toContain("default");
-    expect(result.current.requiredGroups).toContain("safety-judge");
-    expect(result.current.requiredGroups).toContain("coherence-judge");
-    expect(result.current.requiredGroups).toHaveLength(3);
+    expect(result.current.requiredGroups).toHaveLength(1);
+    expect(result.current.requiredGroups).not.toContain("safety-judge");
+    expect(result.current.requiredGroups).not.toContain("coherence-judge");
+    // But they should be in providerRefs
+    expect(result.current.providerRefs).toHaveLength(2);
   });
 
-  it("deduplicates groups across providers, self-play, judges, and judge_specs", async () => {
+  it("separates provider groups from provider ID refs correctly", async () => {
     const { useWorkspace } = await import("@/contexts/workspace-context");
     vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
 
@@ -453,13 +462,13 @@ spec:
     enabled: true
     roles:
       - id: sim
-        provider: selfplay
+        provider: selfplay-provider
   judges:
     - name: quality
-      provider: judge
+      provider: judge-provider
   judge_specs:
     safety:
-      provider: judge
+      provider: judge-provider
 `;
 
     mockFetch.mockResolvedValueOnce({
@@ -476,11 +485,13 @@ spec:
       expect(result.current.loaded).toBe(true);
     });
 
-    // "judge" appears in providers group, judges, and judge_specs — should be deduplicated
+    // requiredGroups: only from spec.providers[].group
     expect(result.current.requiredGroups).toContain("default");
     expect(result.current.requiredGroups).toContain("judge");
-    expect(result.current.requiredGroups).toContain("selfplay");
-    expect(result.current.requiredGroups).toHaveLength(3);
+    expect(result.current.requiredGroups).toHaveLength(2);
+    // providerRefs: self-play, judges, judge_specs provider IDs
+    expect(result.current.providerRefs.map((r) => r.id)).toContain("selfplay-provider");
+    expect(result.current.providerRefs.map((r) => r.id)).toContain("judge-provider");
   });
 
   it("returns empty required groups when no providers or self-play", async () => {
@@ -636,6 +647,48 @@ spec:
       source: "self_play",
       label: 'Self-play role "adversary"',
     });
+  });
+
+  it("extracts self_play providerRefs without explicit enabled flag", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+    - file: providers/selfplay.provider.yaml
+  self_play:
+    personas:
+      - file: personas/detail-planner.persona.yaml
+    roles:
+      - id: gemini-user
+        provider: selfplay
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    expect(result.current.providerRefs).toHaveLength(1);
+    expect(result.current.providerRefs).toContainEqual({
+      id: "selfplay",
+      source: "self_play",
+      label: 'Self-play role "gemini-user"',
+    });
+    // selfplay is a provider ID ref, not a required group
+    expect(result.current.requiredGroups).not.toContain("selfplay");
+    expect(result.current.requiredGroups).toEqual(["default"]);
   });
 
   it("extracts providerRefs from all sources, deduplicated by source+id", async () => {

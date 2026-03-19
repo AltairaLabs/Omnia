@@ -5,6 +5,7 @@ import {
   AlertCircle,
   CheckCircle,
   Clock,
+  Loader,
   GitBranch,
   Box,
   Cloud,
@@ -115,10 +116,22 @@ export function getStatusBadge(phase?: string) {
           <CheckCircle className="h-3 w-3 mr-1" /> Ready
         </Badge>
       );
-    case "Failed":
+    case "Error":
       return (
         <Badge variant="destructive">
-          <AlertCircle className="h-3 w-3 mr-1" /> Failed
+          <AlertCircle className="h-3 w-3 mr-1" /> Error
+        </Badge>
+      );
+    case "Initializing":
+      return (
+        <Badge variant="secondary">
+          <Loader className="h-3 w-3 mr-1 animate-spin" /> Initializing
+        </Badge>
+      );
+    case "Fetching":
+      return (
+        <Badge variant="secondary">
+          <Loader className="h-3 w-3 mr-1 animate-spin" /> Fetching
         </Badge>
       );
     case "Pending":
