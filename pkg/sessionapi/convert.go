@@ -158,16 +158,10 @@ func ProviderCallToAPI(pc session.ProviderCall) ProviderCall {
 }
 
 // StatsUpdateToAPI converts an internal SessionStatsUpdate to a generated SessionStatsUpdate.
+// Only SetStatus and SetEndedAt are populated — counter fields (Add*) are auto-derived
+// from AppendMessage and are no longer set externally.
 func StatsUpdateToAPI(u session.SessionStatsUpdate) SessionStatsUpdate {
-	out := SessionStatsUpdate{
-		AddInputTokens:  ptrNonZero(u.AddInputTokens),
-		AddOutputTokens: ptrNonZero(u.AddOutputTokens),
-		AddToolCalls:    ptrNonZero(u.AddToolCalls),
-		AddMessages:     ptrNonZero(u.AddMessages),
-	}
-	if u.AddCostUSD != 0 {
-		out.AddCostUSD = &u.AddCostUSD
-	}
+	out := SessionStatsUpdate{}
 	if u.SetStatus != "" {
 		status := SessionStatus(u.SetStatus)
 		out.SetStatus = &status

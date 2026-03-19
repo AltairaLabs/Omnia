@@ -156,12 +156,7 @@ func (w *recordingResponseWriter) WriteToolCall(toolCall *ToolCallInfo) error {
 		if storeErr := w.store.AppendMessage(ctx, w.sessionID, msg); storeErr != nil {
 			w.log.Error(storeErr, "failed to record tool call")
 		}
-
-		if storeErr := w.store.UpdateSessionStats(ctx, w.sessionID, session.SessionStatsUpdate{
-			AddToolCalls: 1,
-		}); storeErr != nil {
-			w.log.Error(storeErr, "failed to update session stats for tool call")
-		}
+		// Message and tool call counters are auto-incremented by AppendMessage in session-api.
 	})
 
 	return err
@@ -281,9 +276,11 @@ func (w *recordingResponseWriter) recordDone(content string) {
 		}
 
 		var inputTokens, outputTokens int32
+		var costUSD float64
 		if usage != nil {
 			inputTokens = usage.InputTokens
 			outputTokens = usage.OutputTokens
+			costUSD = usage.CostUSD
 			metadata["cost_usd"] = strconv.FormatFloat(usage.CostUSD, 'f', -1, 64)
 		}
 
@@ -295,6 +292,7 @@ func (w *recordingResponseWriter) recordDone(content string) {
 			Metadata:     metadata,
 			InputTokens:  inputTokens,
 			OutputTokens: outputTokens,
+			CostUSD:      costUSD,
 		}
 		ctx, cancel := context.WithTimeout(w.traceCtx, storeTimeout)
 		defer cancel()
@@ -302,17 +300,7 @@ func (w *recordingResponseWriter) recordDone(content string) {
 			w.log.Error(storeErr, "failed to record assistant message")
 		}
 
-		statsUpdate := session.SessionStatsUpdate{
-			AddMessages: 1,
-		}
-		if usage != nil {
-			statsUpdate.AddInputTokens = usage.InputTokens
-			statsUpdate.AddOutputTokens = usage.OutputTokens
-			statsUpdate.AddCostUSD = usage.CostUSD
-		}
-		if storeErr := w.store.UpdateSessionStats(ctx, w.sessionID, statsUpdate); storeErr != nil {
-			w.log.Error(storeErr, "failed to update session stats for done")
-		}
+		// Token/cost counters are auto-incremented by AppendMessage via the Message struct fields.
 	})
 }
 

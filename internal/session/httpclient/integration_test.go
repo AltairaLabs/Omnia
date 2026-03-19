@@ -96,11 +96,6 @@ func (w *integrationWarmStore) UpdateSessionStats(_ context.Context, sessionID s
 	if !ok {
 		return session.ErrSessionNotFound
 	}
-	s.TotalInputTokens += int64(update.AddInputTokens)
-	s.TotalOutputTokens += int64(update.AddOutputTokens)
-	s.EstimatedCostUSD += update.AddCostUSD
-	s.ToolCallCount += update.AddToolCalls
-	s.MessageCount += update.AddMessages
 	if update.SetStatus != "" {
 		s.Status = update.SetStatus
 	}
@@ -268,11 +263,9 @@ func TestIntegration_FullRecordingChain(t *testing.T) {
 	})
 	require.NoError(t, err, "AppendMessage (assistant) should succeed")
 
-	// 4. Update session stats (as recordingResponseWriter.recordDone would)
+	// 4. Update session status (counters are now auto-derived by AppendMessage)
 	err = store.UpdateSessionStats(ctx, sess.ID, session.SessionStatsUpdate{
-		AddInputTokens:  10,
-		AddOutputTokens: 8,
-		AddMessages:     2,
+		SetStatus: session.SessionStatusActive,
 	})
 	require.NoError(t, err, "UpdateSessionStats should succeed")
 
@@ -288,11 +281,9 @@ func TestIntegration_FullRecordingChain(t *testing.T) {
 	assert.Equal(t, int32(10), msgs[1].InputTokens)
 	assert.Equal(t, int32(8), msgs[1].OutputTokens)
 
-	// 6. Verify session stats were updated
+	// 6. Verify session status was updated
 	updated := warmStore.getSession(sess.ID)
-	assert.Equal(t, int64(10), updated.TotalInputTokens)
-	assert.Equal(t, int64(8), updated.TotalOutputTokens)
-	assert.Equal(t, int32(2), updated.MessageCount)
+	assert.Equal(t, session.SessionStatusActive, updated.Status)
 
 	// 7. Refresh TTL (as facade.ensureSession would on reconnect)
 	expiresAtBefore := warmStore.getSession(sess.ID).ExpiresAt
@@ -338,12 +329,7 @@ func TestIntegration_ToolCallRecording(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Update stats for tool call
-	err = store.UpdateSessionStats(ctx, sess.ID, session.SessionStatsUpdate{
-		AddToolCalls: 1,
-		AddMessages:  2,
-	})
-	require.NoError(t, err)
+	// Counters are now auto-derived by AppendMessage; no separate stats update needed.
 
 	msgs := warmStore.getMessages(sess.ID)
 	require.Len(t, msgs, 2)
@@ -351,10 +337,6 @@ func TestIntegration_ToolCallRecording(t *testing.T) {
 	assert.Equal(t, "tool_call", msgs[0].Metadata["type"])
 	assert.Equal(t, "tc-1", msgs[1].ToolCallID)
 	assert.Equal(t, "tool_result", msgs[1].Metadata["type"])
-
-	updated := warmStore.getSession(sess.ID)
-	assert.Equal(t, int32(1), updated.ToolCallCount)
-	assert.Equal(t, int32(2), updated.MessageCount)
 }
 
 // TestIntegration_NoWarmStore verifies that the HTTP client gets meaningful

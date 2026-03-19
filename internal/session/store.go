@@ -84,6 +84,8 @@ type Message struct {
 	InputTokens int32 `json:"inputTokens,omitempty"`
 	// OutputTokens is the number of output tokens produced by this message.
 	OutputTokens int32 `json:"outputTokens,omitempty"`
+	// CostUSD is the estimated cost of this message in USD.
+	CostUSD float64 `json:"costUsd,omitempty"`
 	// ToolCallID links this message to a specific tool call.
 	ToolCallID string `json:"toolCallId,omitempty"`
 	// SequenceNum is the ordering position within the session.
@@ -206,18 +208,17 @@ type CreateSessionOptions struct {
 	PromptPackVersion string
 }
 
-// SessionStatsUpdate contains incremental updates to session-level counters.
-// All Add* fields are added to the current values; SetStatus is applied only if non-empty.
-// SetEndedAt, when non-zero, records when the session ended.
-type SessionStatsUpdate struct {
-	AddInputTokens  int32
-	AddOutputTokens int32
-	AddCostUSD      float64
-	AddToolCalls    int32
-	AddMessages     int32
-	SetStatus       SessionStatus // empty means no change
-	SetEndedAt      time.Time     // zero means no change
+// SessionStatusUpdate contains lifecycle state changes for a session.
+// Counter fields (messages, tool calls, tokens, cost) are auto-derived
+// from AppendMessage and should not be set externally.
+type SessionStatusUpdate struct {
+	SetStatus  SessionStatus // empty means no change
+	SetEndedAt time.Time     // zero means no change
 }
+
+// SessionStatsUpdate is an alias for backward compatibility during migration.
+// Deprecated: Use SessionStatusUpdate instead.
+type SessionStatsUpdate = SessionStatusUpdate
 
 // ToolCallStatus represents the lifecycle state of a tool call.
 type ToolCallStatus string

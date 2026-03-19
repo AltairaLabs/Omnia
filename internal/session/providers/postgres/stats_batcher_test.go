@@ -74,10 +74,9 @@ func TestStatsBatcher_AccumulatesDeltas(t *testing.T) {
 	b := NewStatsBatcher(w.write, logr.Discard(), 50*time.Millisecond)
 	defer b.Shutdown()
 
-	// Accumulate multiple increments for the same session.
-	b.IncrementStats("s1", session.SessionStatsUpdate{AddMessages: 1, AddInputTokens: 10})
-	b.IncrementStats("s1", session.SessionStatsUpdate{AddMessages: 2, AddOutputTokens: 20, AddCostUSD: 0.5})
-	b.IncrementStats("s1", session.SessionStatsUpdate{AddToolCalls: 3})
+	// Accumulate multiple status updates for the same session — last one wins.
+	b.IncrementStats("s1", session.SessionStatsUpdate{SetStatus: session.SessionStatusActive})
+	b.IncrementStats("s1", session.SessionStatsUpdate{SetStatus: session.SessionStatusCompleted})
 
 	assert.Equal(t, 1, b.Len(), "should have 1 pending session")
 
@@ -87,11 +86,7 @@ func TestStatsBatcher_AccumulatesDeltas(t *testing.T) {
 	calls := w.getCalls()
 	require.Len(t, calls, 1)
 	assert.Equal(t, "s1", calls[0].sessionID)
-	assert.Equal(t, int32(3), calls[0].update.AddMessages)
-	assert.Equal(t, int32(10), calls[0].update.AddInputTokens)
-	assert.Equal(t, int32(20), calls[0].update.AddOutputTokens)
-	assert.Equal(t, int32(3), calls[0].update.AddToolCalls)
-	assert.InDelta(t, 0.5, calls[0].update.AddCostUSD, 0.001)
+	assert.Equal(t, session.SessionStatusCompleted, calls[0].update.SetStatus)
 }
 
 func TestStatsBatcher_MultipleSessions(t *testing.T) {
@@ -99,8 +94,8 @@ func TestStatsBatcher_MultipleSessions(t *testing.T) {
 	b := NewStatsBatcher(w.write, logr.Discard(), 50*time.Millisecond)
 	defer b.Shutdown()
 
-	b.IncrementStats("s1", session.SessionStatsUpdate{AddMessages: 1})
-	b.IncrementStats("s2", session.SessionStatsUpdate{AddMessages: 2})
+	b.IncrementStats("s1", session.SessionStatsUpdate{SetStatus: session.SessionStatusActive})
+	b.IncrementStats("s2", session.SessionStatsUpdate{SetStatus: session.SessionStatusCompleted})
 
 	assert.Equal(t, 2, b.Len())
 
@@ -115,8 +110,8 @@ func TestStatsBatcher_MultipleSessions(t *testing.T) {
 	for _, c := range calls {
 		callMap[c.sessionID] = c.update
 	}
-	assert.Equal(t, int32(1), callMap["s1"].AddMessages)
-	assert.Equal(t, int32(2), callMap["s2"].AddMessages)
+	assert.Equal(t, session.SessionStatusActive, callMap["s1"].SetStatus)
+	assert.Equal(t, session.SessionStatusCompleted, callMap["s2"].SetStatus)
 }
 
 func TestStatsBatcher_ShutdownFlushesRemaining(t *testing.T) {
@@ -124,7 +119,7 @@ func TestStatsBatcher_ShutdownFlushesRemaining(t *testing.T) {
 	// Use a very long interval so flush only happens on shutdown.
 	b := NewStatsBatcher(w.write, logr.Discard(), time.Hour)
 
-	b.IncrementStats("s1", session.SessionStatsUpdate{AddMessages: 5})
+	b.IncrementStats("s1", session.SessionStatsUpdate{SetStatus: session.SessionStatusCompleted})
 
 	// Shutdown should flush.
 	b.Shutdown()
@@ -132,7 +127,7 @@ func TestStatsBatcher_ShutdownFlushesRemaining(t *testing.T) {
 	calls := w.getCalls()
 	require.Len(t, calls, 1)
 	assert.Equal(t, "s1", calls[0].sessionID)
-	assert.Equal(t, int32(5), calls[0].update.AddMessages)
+	assert.Equal(t, session.SessionStatusCompleted, calls[0].update.SetStatus)
 }
 
 func TestStatsBatcher_StatusAndEndedAt(t *testing.T) {
@@ -173,7 +168,7 @@ func TestStatsBatcher_ConcurrentAccess(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for range incrementsPerGoroutine {
-				b.IncrementStats("s1", session.SessionStatsUpdate{AddMessages: 1})
+				b.IncrementStats("s1", session.SessionStatsUpdate{SetStatus: session.SessionStatusActive})
 			}
 		}()
 	}
@@ -184,8 +179,8 @@ func TestStatsBatcher_ConcurrentAccess(t *testing.T) {
 
 	calls := w.getCalls()
 	require.Len(t, calls, 1)
-	expected := int32(goroutines * incrementsPerGoroutine)
-	assert.Equal(t, expected, calls[0].update.AddMessages)
+	// Last-write-wins for status; all goroutines wrote the same value.
+	assert.Equal(t, session.SessionStatusActive, calls[0].update.SetStatus)
 }
 
 func TestStatsBatcher_FlushErrorDoesNotLoseData(t *testing.T) {
@@ -195,7 +190,7 @@ func TestStatsBatcher_FlushErrorDoesNotLoseData(t *testing.T) {
 	b := NewStatsBatcher(w.write, logr.Discard(), 50*time.Millisecond)
 	defer b.Shutdown()
 
-	b.IncrementStats("s1", session.SessionStatsUpdate{AddMessages: 1})
+	b.IncrementStats("s1", session.SessionStatsUpdate{SetStatus: session.SessionStatusError})
 
 	// Wait for the failed flush attempt.
 	<-w.callsCh
@@ -203,7 +198,7 @@ func TestStatsBatcher_FlushErrorDoesNotLoseData(t *testing.T) {
 	// The data was attempted (writer was called) — verify it was called.
 	calls := w.getCalls()
 	require.Len(t, calls, 1)
-	assert.Equal(t, int32(1), calls[0].update.AddMessages)
+	assert.Equal(t, session.SessionStatusError, calls[0].update.SetStatus)
 }
 
 func TestStatsBatcher_EmptyFlushIsNoop(t *testing.T) {

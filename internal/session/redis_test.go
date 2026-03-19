@@ -437,51 +437,30 @@ func TestRedisStore_UpdateSessionStats_Atomic(t *testing.T) {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
 
-	// First update
+	// First update — set status
 	err = store.UpdateSessionStats(ctx, sess.ID, SessionStatsUpdate{
-		AddInputTokens:  100,
-		AddOutputTokens: 50,
-		AddCostUSD:      0.01,
-		AddToolCalls:    2,
-		AddMessages:     1,
-		SetStatus:       SessionStatusActive,
+		SetStatus: SessionStatusActive,
 	})
 	if err != nil {
 		t.Fatalf("UpdateSessionStats failed: %v", err)
 	}
 
-	// Second update (should accumulate)
+	// Second update — overwrite status
 	err = store.UpdateSessionStats(ctx, sess.ID, SessionStatsUpdate{
-		AddInputTokens:  200,
-		AddOutputTokens: 100,
-		AddCostUSD:      0.02,
-		AddToolCalls:    3,
-		AddMessages:     2,
+		SetStatus: SessionStatusCompleted,
 	})
 	if err != nil {
 		t.Fatalf("UpdateSessionStats (2nd) failed: %v", err)
 	}
 
-	// Verify accumulated stats
+	// Verify status was updated
 	got, err := store.GetSession(ctx, sess.ID)
 	if err != nil {
 		t.Fatalf("GetSession failed: %v", err)
 	}
 
-	if got.TotalInputTokens != 300 {
-		t.Errorf("TotalInputTokens = %d, want 300", got.TotalInputTokens)
-	}
-	if got.TotalOutputTokens != 150 {
-		t.Errorf("TotalOutputTokens = %d, want 150", got.TotalOutputTokens)
-	}
-	if got.ToolCallCount != 5 {
-		t.Errorf("ToolCallCount = %d, want 5", got.ToolCallCount)
-	}
-	if got.MessageCount != 3 {
-		t.Errorf("MessageCount = %d, want 3", got.MessageCount)
-	}
-	if got.Status != SessionStatusActive {
-		t.Errorf("Status = %q, want %q", got.Status, SessionStatusActive)
+	if got.Status != SessionStatusCompleted {
+		t.Errorf("Status = %q, want %q", got.Status, SessionStatusCompleted)
 	}
 }
 
@@ -490,7 +469,7 @@ func TestRedisStore_UpdateSessionStats_NotFound(t *testing.T) {
 	defer func() { _ = store.Close() }()
 
 	err := store.UpdateSessionStats(context.Background(), "nonexistent", SessionStatsUpdate{
-		AddInputTokens: 10,
+		SetStatus: SessionStatusActive,
 	})
 	if err != ErrSessionNotFound {
 		t.Errorf("expected ErrSessionNotFound, got: %v", err)
@@ -545,7 +524,7 @@ func TestRedisStore_UpdateSessionStats_Expired(t *testing.T) {
 	}
 
 	err = store.UpdateSessionStats(ctx, sess.ID, SessionStatsUpdate{
-		AddInputTokens: 10,
+		SetStatus: SessionStatusActive,
 	})
 	if err != ErrSessionExpired {
 		t.Errorf("expected ErrSessionExpired, got: %v", err)
@@ -567,7 +546,7 @@ func TestRedisStore_UpdateSessionStats_WithTTL(t *testing.T) {
 	}
 
 	err = store.UpdateSessionStats(ctx, sess.ID, SessionStatsUpdate{
-		AddInputTokens: 50,
+		SetStatus: SessionStatusActive,
 	})
 	if err != nil {
 		t.Fatalf("UpdateSessionStats failed: %v", err)
@@ -579,13 +558,13 @@ func TestRedisStore_UpdateSessionStats_WithTTL(t *testing.T) {
 		t.Error("expected TTL to be preserved after stats update")
 	}
 
-	// Verify stats were applied
+	// Verify status was applied
 	got, err := store.GetSession(ctx, sess.ID)
 	if err != nil {
 		t.Fatalf("GetSession failed: %v", err)
 	}
-	if got.TotalInputTokens != 50 {
-		t.Errorf("TotalInputTokens = %d, want 50", got.TotalInputTokens)
+	if got.Status != SessionStatusActive {
+		t.Errorf("Status = %q, want %q", got.Status, SessionStatusActive)
 	}
 }
 

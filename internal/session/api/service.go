@@ -281,6 +281,9 @@ func (s *SessionService) AppendMessage(ctx context.Context, sessionID string, ms
 	if err := warm.AppendMessage(ctx, sessionID, msg); err != nil {
 		return err
 	}
+
+	// Counter auto-increment is handled by the warm store's AppendMessage implementation.
+
 	// Write-through to hot cache (fire-and-forget per design doc).
 	s.pushToHotCache(func(ctx context.Context, hot providers.HotCacheProvider) {
 		if err := hot.AppendMessage(ctx, sessionID, msg); err != nil {

@@ -1,0 +1,1 @@
+ALTER TABLE messages DROP COLUMN IF EXISTS cost_usd;

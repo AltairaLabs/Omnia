@@ -149,7 +149,7 @@ func scanMessage(row pgx.Row) (*session.Message, error) {
 
 	err := row.Scan(
 		&m.ID, &m.Role, &m.Content, &m.Timestamp,
-		&inputTokens, &outputTokens,
+		&inputTokens, &outputTokens, &m.CostUSD,
 		&toolCallID, &metadataJSON, &m.SequenceNum,
 		&m.HasMedia, &m.MediaTypes,
 	)
@@ -348,8 +348,8 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 		return err
 	}
 
-	query := `INSERT INTO messages (id, session_id, role, content, timestamp, input_tokens, output_tokens, tool_call_id, metadata, sequence_num, has_media, media_types)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+	query := `INSERT INTO messages (id, session_id, role, content, timestamp, input_tokens, output_tokens, cost_usd, tool_call_id, metadata, sequence_num, has_media, media_types)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 
 	mediaTypes := msg.MediaTypes
 	if mediaTypes == nil {
@@ -359,6 +359,7 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 	_, err := p.pool.Exec(ctx, query,
 		msg.ID, sessionID, msg.Role, msg.Content, msg.Timestamp,
 		pgutil.NullInt32(msg.InputTokens), pgutil.NullInt32(msg.OutputTokens),
+		msg.CostUSD,
 		pgutil.NullString(msg.ToolCallID), pgutil.MarshalJSONB(msg.Metadata), msg.SequenceNum,
 		msg.HasMedia, mediaTypes,
 	)
@@ -369,6 +370,28 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 			return session.ErrSessionNotFound
 		}
 		return fmt.Errorf("postgres: append message: %w", err)
+	}
+
+	// Auto-increment session counters from the message data.
+	toolCallIncr := int32(0)
+	if msg.ToolCallID != "" {
+		toolCallIncr = 1
+	}
+	incrQuery := `UPDATE sessions SET
+		message_count = message_count + 1,
+		tool_call_count = tool_call_count + $2,
+		total_input_tokens = total_input_tokens + $3,
+		total_output_tokens = total_output_tokens + $4,
+		estimated_cost_usd = estimated_cost_usd + $5,
+		updated_at = $6
+	WHERE id = $1`
+	_, err = p.pool.Exec(ctx, incrQuery,
+		sessionID, toolCallIncr,
+		int64(msg.InputTokens), int64(msg.OutputTokens), msg.CostUSD,
+		time.Now(),
+	)
+	if err != nil {
+		return fmt.Errorf("postgres: auto-increment session counters: %w", err)
 	}
 	return nil
 }
@@ -396,7 +419,7 @@ func (p *Provider) GetMessages(ctx context.Context, sessionID string, opts provi
 		sort = "DESC"
 	}
 
-	query := `SELECT id, role, content, timestamp, input_tokens, output_tokens, tool_call_id, metadata, sequence_num, has_media, media_types
+	query := `SELECT id, role, content, timestamp, input_tokens, output_tokens, cost_usd, tool_call_id, metadata, sequence_num, has_media, media_types
 		FROM messages WHERE 1=1` + qb.Where() + ` ORDER BY sequence_num ` + sort
 	query = qb.AppendPagination(query, opts.Limit, opts.Offset)
 
@@ -547,30 +570,21 @@ func (p *Provider) applySessionFilters(qb *pgutil.QueryBuilder, opts providers.S
 	}
 }
 
-// UpdateSessionStats atomically increments session counters in a single UPDATE.
-// This avoids the read-modify-write race condition of a separate SELECT + UPDATE.
+// UpdateSessionStats atomically updates session status and ended_at.
+// Counter increments (messages, tool calls, tokens, cost) are auto-derived
+// from AppendMessage and should not be set via this method.
 func (p *Provider) UpdateSessionStats(ctx context.Context, sessionID string, update session.SessionStatsUpdate) error {
 	query := `UPDATE sessions SET
-		total_input_tokens = total_input_tokens + $2,
-		total_output_tokens = total_output_tokens + $3,
-		estimated_cost_usd = estimated_cost_usd + $4,
-		tool_call_count = tool_call_count + $5,
-		message_count = message_count + $6,
 		status = CASE
 			WHEN status IN ('completed','error','expired') THEN status
-			WHEN $7::text = '' THEN status
-			ELSE $7::text END,
-		updated_at = $8,
-		ended_at = CASE WHEN $9::timestamptz IS NULL THEN ended_at ELSE $9::timestamptz END
+			WHEN $2::text = '' THEN status
+			ELSE $2::text END,
+		updated_at = $3,
+		ended_at = CASE WHEN $4::timestamptz IS NULL THEN ended_at ELSE $4::timestamptz END
 	WHERE id = $1`
 
 	res, err := p.pool.Exec(ctx, query,
 		sessionID,
-		int64(update.AddInputTokens),
-		int64(update.AddOutputTokens),
-		update.AddCostUSD,
-		update.AddToolCalls,
-		update.AddMessages,
 		string(update.SetStatus),
 		time.Now(),
 		pgutil.NullTime(update.SetEndedAt),

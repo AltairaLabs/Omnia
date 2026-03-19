@@ -272,6 +272,23 @@ func (r *RedisStore) AppendMessage(ctx context.Context, sessionID string, msg Me
 		return fmt.Errorf("failed to append message: %w", err)
 	}
 
+	// Auto-increment counters via Lua script for atomicity.
+	incrResult, err := appendStatsScript.Run(ctx, r.client,
+		[]string{r.sessionKey(sessionID)},
+		1,                               // addMessages
+		boolToInt(msg.ToolCallID != ""), // addToolCalls
+		int64(msg.InputTokens),
+		int64(msg.OutputTokens),
+		msg.CostUSD,
+		time.Now().Format(time.RFC3339Nano),
+	).Int64()
+	if err != nil {
+		return fmt.Errorf("failed to update session stats: %w", err)
+	}
+	if incrResult == 0 {
+		return fmt.Errorf("failed to update session stats: %w", ErrSessionNotFound)
+	}
+
 	// Update session timestamp
 	if err := r.updateSessionTimestamp(ctx, sessionID); err != nil {
 		return err
@@ -448,9 +465,9 @@ end
 return 1
 `)
 
-// UpdateSessionStats atomically increments session-level counters.
-// This uses a Lua script to perform a read-modify-write in a single
-// atomic operation, preventing concurrent updates from overwriting each other.
+// UpdateSessionStats atomically updates session status and ended_at.
+// Counter increments (messages, tool calls, tokens, cost) are auto-derived
+// from AppendMessage and should not be set via this method.
 func (r *RedisStore) UpdateSessionStats(ctx context.Context, sessionID string, update SessionStatsUpdate) error {
 	if sessionID == "" {
 		return ErrInvalidSessionID
@@ -465,11 +482,6 @@ func (r *RedisStore) UpdateSessionStats(ctx context.Context, sessionID string, u
 
 	result, err := updateStatsScript.Run(ctx, r.client,
 		[]string{r.sessionKey(sessionID)},
-		update.AddInputTokens,
-		update.AddOutputTokens,
-		update.AddCostUSD,
-		update.AddToolCalls,
-		update.AddMessages,
 		string(update.SetStatus),
 		now,
 		endedAt,
@@ -488,11 +500,10 @@ func (r *RedisStore) UpdateSessionStats(ctx context.Context, sessionID string, u
 	return nil
 }
 
-// Lua script for atomic update of session stats.
+// Lua script for atomic update of session status/ended_at.
 // KEYS[1] = session key
-// ARGV[1] = addInputTokens, ARGV[2] = addOutputTokens, ARGV[3] = addCostUSD
-// ARGV[4] = addToolCalls, ARGV[5] = addMessages, ARGV[6] = setStatus (empty = no change)
-// ARGV[7] = now (RFC3339Nano), ARGV[8] = setEndedAt (RFC3339Nano, empty = no change)
+// ARGV[1] = setStatus (empty = no change)
+// ARGV[2] = now (RFC3339Nano), ARGV[3] = setEndedAt (RFC3339Nano, empty = no change)
 // Returns: 0 = not found, 1 = success, 2 = expired
 var updateStatsScript = redis.NewScript(`
 local data = redis.call('GET', KEYS[1])
@@ -505,31 +516,25 @@ local session = cjson.decode(data)
 -- Check expiry: if expiresAt is set (non-empty, non-zero-time) and in the past, return expired
 local expiresAt = session['expiresAt']
 if expiresAt and expiresAt ~= "" and string.sub(expiresAt, 1, 4) ~= "0001" then
-	local now = ARGV[7]
+	local now = ARGV[2]
 	if expiresAt < now then
 		return 2
 	end
 end
 
-session['totalInputTokens'] = (session['totalInputTokens'] or 0) + tonumber(ARGV[1])
-session['totalOutputTokens'] = (session['totalOutputTokens'] or 0) + tonumber(ARGV[2])
-session['estimatedCostUSD'] = (session['estimatedCostUSD'] or 0) + tonumber(ARGV[3])
-session['toolCallCount'] = (session['toolCallCount'] or 0) + tonumber(ARGV[4])
-session['messageCount'] = (session['messageCount'] or 0) + tonumber(ARGV[5])
-
 -- Only apply status if not already terminal
-if ARGV[6] ~= "" then
+if ARGV[1] ~= "" then
 	local cur = session['status'] or ''
 	if cur ~= 'completed' and cur ~= 'error' and cur ~= 'expired' then
-		session['status'] = ARGV[6]
+		session['status'] = ARGV[1]
 	end
 end
 
-if ARGV[8] ~= "" then
-	session['endedAt'] = ARGV[8]
+if ARGV[3] ~= "" then
+	session['endedAt'] = ARGV[3]
 end
 
-session['updatedAt'] = ARGV[7]
+session['updatedAt'] = ARGV[2]
 
 local encoded = cjson.encode(session)
 local ttl = redis.call('TTL', KEYS[1])
@@ -540,6 +545,44 @@ else
 end
 return 1
 `)
+
+// appendStatsScript atomically increments message/tool/token/cost counters on a session.
+// Used by AppendMessage to auto-derive counters from message data.
+// KEYS[1] = session key
+// ARGV[1] = addMessages, ARGV[2] = addToolCalls, ARGV[3] = addInputTokens,
+// ARGV[4] = addOutputTokens, ARGV[5] = addCostUSD, ARGV[6] = now (RFC3339Nano)
+// Returns: 0 = not found, 1 = success
+var appendStatsScript = redis.NewScript(`
+local data = redis.call('GET', KEYS[1])
+if not data then
+	return 0
+end
+
+local session = cjson.decode(data)
+session['messageCount'] = (session['messageCount'] or 0) + tonumber(ARGV[1])
+session['toolCallCount'] = (session['toolCallCount'] or 0) + tonumber(ARGV[2])
+session['totalInputTokens'] = (session['totalInputTokens'] or 0) + tonumber(ARGV[3])
+session['totalOutputTokens'] = (session['totalOutputTokens'] or 0) + tonumber(ARGV[4])
+session['estimatedCostUSD'] = (session['estimatedCostUSD'] or 0) + tonumber(ARGV[5])
+session['updatedAt'] = ARGV[6]
+
+local encoded = cjson.encode(session)
+local ttl = redis.call('TTL', KEYS[1])
+if ttl > 0 then
+	redis.call('SET', KEYS[1], encoded, 'EX', ttl)
+else
+	redis.call('SET', KEYS[1], encoded)
+end
+return 1
+`)
+
+// boolToInt converts a boolean to 0 or 1 for use in Redis Lua script arguments.
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
 
 // Close releases resources held by the store.
 func (r *RedisStore) Close() error {

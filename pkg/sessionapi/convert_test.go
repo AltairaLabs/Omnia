@@ -204,22 +204,12 @@ func TestProviderCallToAPI(t *testing.T) {
 func TestStatsUpdateToAPI(t *testing.T) {
 	endedAt := time.Now().Truncate(time.Second)
 	u := session.SessionStatsUpdate{
-		AddInputTokens:  100,
-		AddOutputTokens: 50,
-		AddCostUSD:      0.01,
-		AddToolCalls:    2,
-		AddMessages:     1,
-		SetStatus:       session.SessionStatusCompleted,
-		SetEndedAt:      endedAt,
+		SetStatus:  session.SessionStatusCompleted,
+		SetEndedAt: endedAt,
 	}
 
 	result := StatsUpdateToAPI(u)
 
-	assert.Equal(t, int32(100), deref(result.AddInputTokens))
-	assert.Equal(t, int32(50), deref(result.AddOutputTokens))
-	assert.Equal(t, 0.01, deref(result.AddCostUSD))
-	assert.Equal(t, int32(2), deref(result.AddToolCalls))
-	assert.Equal(t, int32(1), deref(result.AddMessages))
 	assert.Equal(t, SessionStatusCompleted, *result.SetStatus)
 	assert.Equal(t, endedAt, *result.SetEndedAt)
 }
@@ -227,10 +217,8 @@ func TestStatsUpdateToAPI(t *testing.T) {
 func TestStatsUpdateToAPI_NoChange(t *testing.T) {
 	result := StatsUpdateToAPI(session.SessionStatsUpdate{})
 
-	assert.Nil(t, result.AddInputTokens)
 	assert.Nil(t, result.SetStatus)
 	assert.Nil(t, result.SetEndedAt)
-	assert.Nil(t, result.AddCostUSD)
 }
 
 func TestEvalResultToAPI(t *testing.T) {
@@ -699,14 +687,10 @@ func TestEvalResultDetailsRoundTrip(t *testing.T) {
 }
 
 func TestStatsUpdateRoundTrip_EmptyStatus(t *testing.T) {
-	u := session.SessionStatsUpdate{
-		AddInputTokens: 100,
-		AddMessages:    1,
-	}
+	u := session.SessionStatsUpdate{}
 
 	result := StatsUpdateToAPI(u)
 
 	assert.Nil(t, result.SetStatus, "empty status should produce nil")
 	assert.Nil(t, result.SetEndedAt, "zero time should produce nil")
-	assert.Equal(t, int32(100), deref(result.AddInputTokens))
 }

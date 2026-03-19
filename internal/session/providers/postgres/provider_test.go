@@ -1077,25 +1077,15 @@ func TestUpdateSessionStats_Atomic(t *testing.T) {
 	}
 	require.NoError(t, p.CreateSession(ctx, s))
 
-	// Apply incremental update.
+	// Apply status update (counters are now auto-derived by AppendMessage).
 	update := session.SessionStatsUpdate{
-		AddInputTokens:  50,
-		AddOutputTokens: 30,
-		AddToolCalls:    2,
-		AddMessages:     1,
-		AddCostUSD:      0.01,
-		SetStatus:       session.SessionStatusCompleted,
+		SetStatus: session.SessionStatusCompleted,
 	}
 	require.NoError(t, p.UpdateSessionStats(ctx, s.ID, update))
 
-	// Verify the updates were applied.
+	// Verify the status was applied.
 	got, err := p.GetSession(ctx, s.ID)
 	require.NoError(t, err)
-	assert.Equal(t, int64(150), got.TotalInputTokens)
-	assert.Equal(t, int64(80), got.TotalOutputTokens)
-	assert.Equal(t, int32(5), got.ToolCallCount)
-	assert.Equal(t, int32(6), got.MessageCount)
-	assert.InDelta(t, 0.01, got.EstimatedCostUSD, 0.001)
 	assert.Equal(t, session.SessionStatusCompleted, got.Status)
 }
 
@@ -1107,7 +1097,7 @@ func TestUpdateSessionStats_NotFound(t *testing.T) {
 	p := newProvider(t)
 
 	err := p.UpdateSessionStats(ctx, "b0eebc99-9c0b-4ef8-bb6d-6bb9bd380b99", session.SessionStatsUpdate{
-		AddInputTokens: 10,
+		SetStatus: session.SessionStatusCompleted,
 	})
 	assert.ErrorIs(t, err, session.ErrSessionNotFound)
 }
@@ -1131,13 +1121,10 @@ func TestUpdateSessionStats_EmptyStatus(t *testing.T) {
 	require.NoError(t, p.CreateSession(ctx, s))
 
 	// Update without setting status should preserve existing status.
-	update := session.SessionStatsUpdate{
-		AddInputTokens: 10,
-	}
+	update := session.SessionStatsUpdate{}
 	require.NoError(t, p.UpdateSessionStats(ctx, s.ID, update))
 
 	got, err := p.GetSession(ctx, s.ID)
 	require.NoError(t, err)
 	assert.Equal(t, session.SessionStatusActive, got.Status)
-	assert.Equal(t, int64(10), got.TotalInputTokens)
 }

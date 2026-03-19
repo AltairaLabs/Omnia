@@ -417,9 +417,7 @@ func TestUpdateSessionStats_OK(t *testing.T) {
 	}
 
 	err = store.UpdateSessionStats(context.Background(), created.ID, session.SessionStatsUpdate{
-		AddInputTokens:  100,
-		AddOutputTokens: 50,
-		AddMessages:     1,
+		SetStatus: session.SessionStatusActive,
 	})
 	if err != nil {
 		t.Fatalf("update stats: %v", err)
@@ -434,7 +432,7 @@ func TestUpdateSessionStats_NotFound(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	err := store.UpdateSessionStats(context.Background(), "nonexistent", session.SessionStatsUpdate{
-		AddMessages: 1,
+		SetStatus: session.SessionStatusActive,
 	})
 	if err != session.ErrSessionNotFound {
 		t.Fatalf("expected ErrSessionNotFound, got %v", err)
@@ -452,7 +450,7 @@ func TestUpdateSessionStats_ServerError(t *testing.T) {
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
 	err := store.UpdateSessionStats(context.Background(), "x", session.SessionStatsUpdate{
-		AddMessages: 1,
+		SetStatus: session.SessionStatusActive,
 	})
 	if err == nil {
 		t.Fatal("expected error")
@@ -587,7 +585,7 @@ func TestServerErrorResponses(t *testing.T) {
 		t.Fatal("AppendMessage: expected error")
 	}
 
-	if err := store.UpdateSessionStats(ctx, "x", session.SessionStatsUpdate{AddMessages: 1}); err == nil {
+	if err := store.UpdateSessionStats(ctx, "x", session.SessionStatsUpdate{SetStatus: session.SessionStatusActive}); err == nil {
 		t.Fatal("UpdateSessionStats: expected error")
 	}
 

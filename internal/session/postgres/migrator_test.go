@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -187,10 +188,18 @@ func TestMigrator_UpDown(t *testing.T) {
 	err = mg.Up()
 	require.NoError(t, err)
 
-	// Verify version
+	// Verify version matches the number of migration files
+	entries, err := MigrationFS.ReadDir("migrations")
+	require.NoError(t, err)
+	var upCount uint
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".up.sql") {
+			upCount++
+		}
+	}
 	v, dirty, err := mg.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(17), v)
+	assert.Equal(t, upCount, v)
 	assert.False(t, dirty)
 
 	// Idempotent — running Up again should succeed

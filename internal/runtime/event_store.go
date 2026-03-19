@@ -304,12 +304,11 @@ func (s *OmniaEventStore) convertMessageCreated(event *events.Event) (eventActio
 	}
 
 	// Tool calls on assistant messages are recorded via the first-class tool_calls table
-	// (EventToolCallStarted events), so we only count them in stats here.
+	// (EventToolCallStarted events). Message/tool counters are auto-incremented by AppendMessage.
 	if len(data.ToolCalls) > 0 {
 		msg := s.buildMessage(role, content, event.Timestamp, metadata)
 		return eventAction{
 			message: &msg,
-			stats:   session.SessionStatsUpdate{AddMessages: 1, AddToolCalls: int32(len(data.ToolCalls))},
 		}, true
 	}
 
@@ -353,7 +352,6 @@ func (s *OmniaEventStore) convertMessageCreated(event *events.Event) (eventActio
 	msg.MediaTypes = mediaTypes
 	return eventAction{
 		message: &msg,
-		stats:   session.SessionStatsUpdate{AddMessages: 1},
 	}, true
 }
 
@@ -458,14 +456,11 @@ func (s *OmniaEventStore) convertMessageUpdated(event *events.Event) (eventActio
 	msg := s.buildMessage(session.RoleSystem, string(content), event.Timestamp, metadata)
 	msg.InputTokens = int32(data.InputTokens)
 	msg.OutputTokens = int32(data.OutputTokens)
+	msg.CostUSD = data.TotalCost
 
+	// Token/cost counters are auto-incremented by AppendMessage via the Message struct fields.
 	return eventAction{
 		message: &msg,
-		stats: session.SessionStatsUpdate{
-			AddInputTokens:  int32(data.InputTokens),
-			AddOutputTokens: int32(data.OutputTokens),
-			AddCostUSD:      data.TotalCost,
-		},
 	}, true
 }
 
@@ -619,14 +614,10 @@ func (s *OmniaEventStore) convertProviderCallCompleted(event *events.Event) (eve
 		CreatedAt:     event.Timestamp,
 	}
 
+	// Token/cost counters are auto-derived from AppendMessage on the message that
+	// carries the usage data (convertMessageUpdated). No stats update needed here.
 	return eventAction{
 		providerCall: &pc,
-		// Stats still needed — session counters for tokens/cost.
-		stats: session.SessionStatsUpdate{
-			AddInputTokens:  int32(data.InputTokens),
-			AddOutputTokens: int32(data.OutputTokens),
-			AddCostUSD:      data.Cost,
-		},
 	}, true
 }
 
@@ -801,11 +792,13 @@ func (s *OmniaEventStore) writeAction(traceCtx context.Context, sessionID string
 		}
 	}
 
-	// Update session stats (tokens, cost, message counts, etc.).
-	if err := s.sessionStore.UpdateSessionStats(ctx, sessionID, action.stats); err != nil {
-		log.Error(err, "failed to update session stats",
-			"sessionID", sessionID, "eventType", eventType)
-		return
+	// Update session status/ended_at if set.
+	if action.stats.SetStatus != "" || !action.stats.SetEndedAt.IsZero() {
+		if err := s.sessionStore.UpdateSessionStats(ctx, sessionID, action.stats); err != nil {
+			log.Error(err, "failed to update session stats",
+				"sessionID", sessionID, "eventType", eventType)
+			return
+		}
 	}
 
 	log.V(1).Info("event written to session-api",

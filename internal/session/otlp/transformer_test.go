@@ -178,9 +178,7 @@ func TestProcessExport_CurrentOTelFormat(t *testing.T) {
 	assert.Equal(t, session.RoleAssistant, msgs[0].Role)
 	assert.Equal(t, "Hello! How can I help?", msgs[0].Content)
 
-	stats := writer.stats["conv-123"]
-	assert.Equal(t, int32(50), stats.AddInputTokens)
-	assert.Equal(t, int32(20), stats.AddOutputTokens)
+	// Token counters are now auto-derived by AppendMessage; no separate stats update.
 }
 
 func TestProcessExport_LegacyOpenLLMetryFormat(t *testing.T) {
@@ -219,10 +217,7 @@ func TestProcessExport_LegacyOpenLLMetryFormat(t *testing.T) {
 	// Model metadata on messages.
 	assert.Equal(t, "gpt-4", msgs[0].Metadata["gen_ai.model"])
 
-	// Deprecated token names should work.
-	stats := writer.stats["conv-legacy"]
-	assert.Equal(t, int32(125), stats.AddInputTokens)
-	assert.Equal(t, int32(47), stats.AddOutputTokens)
+	// Token counters are now auto-derived by AppendMessage; no separate stats update.
 
 	// Session state should contain provider.
 	sess := writer.sessions["conv-legacy"]
@@ -356,18 +351,18 @@ func TestProcessExport_AppendMessageError(t *testing.T) {
 	assert.Equal(t, 0, processed)
 }
 
-func TestProcessExport_UpdateStatsError(t *testing.T) {
+func TestProcessExport_TokenOnlySpanSkipped(t *testing.T) {
+	// Token-only spans (no message content) no longer produce write actions
+	// because token/cost counters are auto-derived from AppendMessage.
 	writer := newMockWriter()
-	writer.updateStatsErr = errors.New("stats failed")
-
 	transformer := NewTransformer(writer, logr.Discard())
 
-	span := makeSpan("conv-stats-err", uint64(time.Now().UnixNano()), tokenAttrs(10, 5))
+	span := makeSpan("conv-token-only", uint64(time.Now().UnixNano()), tokenAttrs(10, 5))
 	rs := makeResourceSpans("default", "agent", span)
 
 	processed, err := transformer.ProcessExport(context.Background(), []*tracepb.ResourceSpans{rs})
-	assert.Error(t, err)
-	assert.Equal(t, 0, processed)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, processed)
 }
 
 func TestProcessExport_MultipleSpansSortedByTime(t *testing.T) {
@@ -712,10 +707,7 @@ func TestProcessExport_MixedSpans(t *testing.T) {
 	// Workflow completed.
 	assert.Equal(t, "workflow.completed", msgs[3].Metadata["type"])
 
-	// Token stats should only come from the GenAI span.
-	stats := writer.stats["conv-mixed"]
-	assert.Equal(t, int32(10), stats.AddInputTokens)
-	assert.Equal(t, int32(5), stats.AddOutputTokens)
+	// Token counters are now auto-derived by AppendMessage; no separate stats update.
 }
 
 func TestProcessExport_PromptPackAttributes(t *testing.T) {

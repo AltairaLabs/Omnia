@@ -178,11 +178,6 @@ func (m *mockWarmStore) UpdateSessionStats(_ context.Context, sessionID string, 
 	if !ok {
 		return session.ErrSessionNotFound
 	}
-	s.TotalInputTokens += int64(update.AddInputTokens)
-	s.TotalOutputTokens += int64(update.AddOutputTokens)
-	s.EstimatedCostUSD += update.AddCostUSD
-	s.ToolCallCount += update.AddToolCalls
-	s.MessageCount += update.AddMessages
 	if update.SetStatus != "" {
 		s.Status = update.SetStatus
 	}

@@ -29,15 +29,12 @@ import (
 // defaultFlushInterval is the default period between batch flushes.
 const defaultFlushInterval = 3 * time.Second
 
-// statsDelta accumulates incremental counter updates for a single session.
+// statsDelta accumulates status/ended_at updates for a single session.
+// Counter fields (messages, tool calls, tokens, cost) are auto-derived
+// from AppendMessage and are not batched here.
 type statsDelta struct {
-	addInputTokens  int64
-	addOutputTokens int64
-	addCostUSD      float64
-	addToolCalls    int32
-	addMessages     int32
-	setStatus       session.SessionStatus
-	setEndedAt      time.Time
+	setStatus  session.SessionStatus
+	setEndedAt time.Time
 }
 
 // statsWriter defines the method used to persist accumulated stats.
@@ -86,11 +83,6 @@ func (b *StatsBatcher) IncrementStats(sessionID string, update session.SessionSt
 		d = &statsDelta{}
 		b.pending[sessionID] = d
 	}
-	d.addInputTokens += int64(update.AddInputTokens)
-	d.addOutputTokens += int64(update.AddOutputTokens)
-	d.addCostUSD += update.AddCostUSD
-	d.addToolCalls += update.AddToolCalls
-	d.addMessages += update.AddMessages
 	applyStatusAndEndedAt(d, update)
 }
 
@@ -156,13 +148,8 @@ func (b *StatsBatcher) flush() {
 // flushOne writes a single session's accumulated delta to the database.
 func (b *StatsBatcher) flushOne(ctx context.Context, sid string, d *statsDelta) {
 	update := session.SessionStatsUpdate{
-		AddInputTokens:  int32(d.addInputTokens),
-		AddOutputTokens: int32(d.addOutputTokens),
-		AddCostUSD:      d.addCostUSD,
-		AddToolCalls:    d.addToolCalls,
-		AddMessages:     d.addMessages,
-		SetStatus:       d.setStatus,
-		SetEndedAt:      d.setEndedAt,
+		SetStatus:  d.setStatus,
+		SetEndedAt: d.setEndedAt,
 	}
 	if err := b.writer(ctx, sid, update); err != nil {
 		b.log.Error(err, "flush stats failed", "sessionID", sid)

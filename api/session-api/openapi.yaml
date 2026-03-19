@@ -735,6 +735,9 @@ components:
         outputTokens:
           type: integer
           format: int32
+        costUsd:
+          type: number
+          format: double
         toolCallId:
           type: string
         sequenceNum:
@@ -847,25 +850,12 @@ components:
           type: string
           format: date-time
 
-    # SessionStatsUpdate has no json tags in Go — uses Go field names.
+    # SessionStatsUpdate contains only lifecycle state changes.
+    # Counter fields (messages, tool calls, tokens, cost) are auto-derived
+    # from AppendMessage and should not be set externally.
     SessionStatsUpdate:
       type: object
       properties:
-        AddInputTokens:
-          type: integer
-          format: int32
-        AddOutputTokens:
-          type: integer
-          format: int32
-        AddCostUSD:
-          type: number
-          format: double
-        AddToolCalls:
-          type: integer
-          format: int32
-        AddMessages:
-          type: integer
-          format: int32
         SetStatus:
           $ref: '#/components/schemas/SessionStatus'
         SetEndedAt:

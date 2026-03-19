@@ -248,7 +248,7 @@ func TestBufferedWrite_StatsAndTTL(t *testing.T) {
 
 	// UpdateSessionStats should buffer.
 	err := store.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
-		AddMessages: 1,
+		SetStatus: session.SessionStatusActive,
 	})
 	if err != nil {
 		t.Fatalf("UpdateSessionStats: expected nil (buffered), got: %v", err)

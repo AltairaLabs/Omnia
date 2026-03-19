@@ -173,6 +173,13 @@ func (m *MemoryStore) AppendMessage(ctx context.Context, sessionID string, msg M
 	}
 
 	session.Messages = append(session.Messages, msg)
+	session.MessageCount++
+	if msg.ToolCallID != "" {
+		session.ToolCallCount++
+	}
+	session.TotalInputTokens += int64(msg.InputTokens)
+	session.TotalOutputTokens += int64(msg.OutputTokens)
+	session.EstimatedCostUSD += msg.CostUSD
 	session.UpdatedAt = time.Now()
 
 	return nil
@@ -325,12 +332,6 @@ func (m *MemoryStore) UpdateSessionStats(ctx context.Context, sessionID string, 
 	if session.IsExpired() {
 		return ErrSessionExpired
 	}
-
-	session.TotalInputTokens += int64(update.AddInputTokens)
-	session.TotalOutputTokens += int64(update.AddOutputTokens)
-	session.EstimatedCostUSD += update.AddCostUSD
-	session.ToolCallCount += update.AddToolCalls
-	session.MessageCount += update.AddMessages
 
 	if update.SetStatus != "" && !isTerminalStatus(session.Status) {
 		session.Status = update.SetStatus

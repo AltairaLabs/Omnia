@@ -580,15 +580,7 @@ func TestOmniaEventStore_AppendProviderCallCompleted(t *testing.T) {
 		t.Errorf("expected finishReason=end_turn, got %s", pcs[0].FinishReason)
 	}
 
-	// Stats should still be updated for session counters.
-	store.waitForStats(t, 1)
-	stats := store.getStats()
-	if stats[0].AddInputTokens != 100 {
-		t.Errorf("expected AddInputTokens=100, got %d", stats[0].AddInputTokens)
-	}
-	if stats[0].AddCostUSD != 0.005 {
-		t.Errorf("expected AddCostUSD=0.005, got %f", stats[0].AddCostUSD)
-	}
+	// Counters are now auto-derived by AppendMessage; no separate stats update for counters.
 }
 
 func TestOmniaEventStore_AppendProviderCallFailed(t *testing.T) {
@@ -726,12 +718,7 @@ func TestOmniaEventStore_AppendMessageCreated_WithToolCalls(t *testing.T) {
 		t.Error("expected no tool_calls metadata on message")
 	}
 
-	// Stats should still count tool calls.
-	store.waitForStats(t, 1)
-	stats := store.getStats()
-	if stats[0].AddToolCalls != 2 {
-		t.Errorf("expected AddToolCalls=2, got %d", stats[0].AddToolCalls)
-	}
+	// Tool call counts are now auto-derived by AppendMessage; no separate stats update for counters.
 }
 
 func TestOmniaEventStore_AppendMessageCreated_WithToolResult(t *testing.T) {
@@ -846,14 +833,7 @@ func TestOmniaEventStore_AppendMessageUpdated(t *testing.T) {
 		t.Errorf("expected outputTokens=200, got %d", msg.OutputTokens)
 	}
 
-	store.waitForStats(t, 1)
-	stats := store.getStats()
-	if stats[0].AddInputTokens != 100 {
-		t.Errorf("expected AddInputTokens=100, got %d", stats[0].AddInputTokens)
-	}
-	if stats[0].AddCostUSD != 0.003 {
-		t.Errorf("expected AddCostUSD=0.003, got %f", stats[0].AddCostUSD)
-	}
+	// Counters are now auto-derived by AppendMessage; no separate stats update for counters.
 }
 
 func TestOmniaEventStore_AppendConversationStarted(t *testing.T) {

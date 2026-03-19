@@ -148,11 +148,6 @@ func (m *mockWarmStore) UpdateSessionStats(_ context.Context, sessionID string, 
 	if !ok {
 		return session.ErrSessionNotFound
 	}
-	s.TotalInputTokens += int64(update.AddInputTokens)
-	s.TotalOutputTokens += int64(update.AddOutputTokens)
-	s.EstimatedCostUSD += update.AddCostUSD
-	s.ToolCallCount += update.AddToolCalls
-	s.MessageCount += update.AddMessages
 	if update.SetStatus != "" {
 		s.Status = update.SetStatus
 	}
@@ -1637,7 +1632,7 @@ func TestHandleUpdateStats_OK(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"addInputTokens":100,"addOutputTokens":50,"addMessages":1}`
+	body := `{"setStatus":"completed","setEndedAt":"2026-01-01T00:00:00Z"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/"+testSessionID+"/stats", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -1649,8 +1644,8 @@ func TestHandleUpdateStats_OK(t *testing.T) {
 		t.Fatalf("expected 1 updated session, got %d", len(warm.updatedSessions))
 	}
 	updated := warm.updatedSessions[0]
-	if updated.TotalInputTokens != 100 {
-		t.Fatalf("expected TotalInputTokens=100, got %d", updated.TotalInputTokens)
+	if updated.Status != session.SessionStatusCompleted {
+		t.Fatalf("expected Status=completed, got %s", updated.Status)
 	}
 }
 
@@ -1660,7 +1655,7 @@ func TestHandleUpdateStats_NotFound(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"addMessages":1}`
+	body := `{"setStatus":"completed"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/00000000-0000-0000-0000-000000000099/stats", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
