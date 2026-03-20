@@ -9,12 +9,17 @@ Functional Source License. See ee/LICENSE for details.
 package privacy
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
@@ -175,5 +180,134 @@ func TestFindByLevel_GlobalDefault(t *testing.T) {
 func TestFindByLevel_NoMatch(t *testing.T) {
 	global := newTestPolicy("global", omniav1alpha1.PolicyLevelGlobal)
 	result := findByLevel([]*omniav1alpha1.SessionPrivacyPolicy{global}, omniav1alpha1.PolicyLevelWorkspace, "ns", "")
+	assert.Nil(t, result)
+}
+
+func TestPolicyWatcher_OnDelete_Tombstone(t *testing.T) {
+	w := &PolicyWatcher{log: logr.Discard()}
+
+	p := newTestPolicy("tomb-policy", omniav1alpha1.PolicyLevelGlobal)
+	w.onAdd(p)
+
+	// Verify policy is cached
+	result := w.GetEffectivePolicy("ns", "agent")
+	require.NotNil(t, result)
+
+	// Delete via tombstone (DeletedFinalStateUnknown wraps the real object)
+	tombstone := cache.DeletedFinalStateUnknown{
+		Key: "/tomb-policy",
+		Obj: p,
+	}
+	w.onDelete(tombstone)
+
+	result = w.GetEffectivePolicy("ns", "agent")
+	assert.Nil(t, result)
+}
+
+func TestPolicyWatcher_OnDelete_TombstoneWrongInnerType(t *testing.T) {
+	w := &PolicyWatcher{log: logr.Discard()}
+
+	// Tombstone wrapping a non-policy object — should not panic
+	tombstone := cache.DeletedFinalStateUnknown{
+		Key: "bad-key",
+		Obj: "not-a-policy",
+	}
+	w.onDelete(tombstone)
+}
+
+func TestNewPolicyWatcher(t *testing.T) {
+	// Start a test HTTP server that responds to API discovery.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		resp := `{"kind":"SessionPrivacyPolicyList",` +
+			`"apiVersion":"omnia.altairalabs.com/v1alpha1",` +
+			`"metadata":{},"items":[]}`
+		_, _ = w.Write([]byte(resp))
+	}))
+	defer srv.Close()
+
+	cfg := &rest.Config{Host: srv.URL}
+	pw, err := NewPolicyWatcher(cfg, logr.Discard())
+	require.NoError(t, err)
+	require.NotNil(t, pw)
+	assert.NotNil(t, pw.informer)
+}
+
+func TestPolicyWatcher_Start_SyncFailure(t *testing.T) {
+	// Cancel the context immediately so cache sync fails.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Use a test server that will never respond (context already cancelled).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	cfg := &rest.Config{Host: srv.URL}
+	pw, err := NewPolicyWatcher(cfg, logr.Discard())
+	require.NoError(t, err)
+
+	err = pw.Start(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "cache sync failed")
+}
+
+func TestCollectPolicies_SkipsNonPolicyValues(t *testing.T) {
+	w := &PolicyWatcher{log: logr.Discard()}
+	w.policies.Store("valid", newTestPolicy("valid", omniav1alpha1.PolicyLevelGlobal))
+	w.policies.Store("invalid", "not-a-policy")
+
+	result := w.collectPolicies()
+	assert.Len(t, result, 1)
+	assert.Equal(t, "valid", result[0].Name)
+}
+
+func TestBuildPolicyChain_AgentWithoutNamespace(t *testing.T) {
+	agent := newTestPolicy("agent", omniav1alpha1.PolicyLevelAgent)
+	agent.Spec.AgentRef = &corev1alpha1.NamespacedObjectReference{
+		Name: "my-agent", Namespace: "ns",
+	}
+	// agentName set but namespace empty — agent policy should not be included
+	chain := buildPolicyChain([]*omniav1alpha1.SessionPrivacyPolicy{agent}, "", "my-agent")
+	assert.Len(t, chain, 0)
+}
+
+func TestFindByLevel_WorkspaceNilRef(t *testing.T) {
+	// Workspace-level policy with nil WorkspaceRef should not match.
+	ws := newTestPolicy("ws", omniav1alpha1.PolicyLevelWorkspace)
+	ws.Spec.WorkspaceRef = nil
+
+	result := findByLevel([]*omniav1alpha1.SessionPrivacyPolicy{ws}, omniav1alpha1.PolicyLevelWorkspace, "ns", "")
+	assert.Nil(t, result)
+}
+
+func TestFindByLevel_AgentNilRef(t *testing.T) {
+	// Agent-level policy with nil AgentRef should not match.
+	agent := newTestPolicy("agent", omniav1alpha1.PolicyLevelAgent)
+	agent.Spec.AgentRef = nil
+
+	result := findByLevel([]*omniav1alpha1.SessionPrivacyPolicy{agent}, omniav1alpha1.PolicyLevelAgent, "ns", "my-agent")
+	assert.Nil(t, result)
+}
+
+func TestFindByLevel_AgentNameMismatch(t *testing.T) {
+	agent := newTestPolicy("agent", omniav1alpha1.PolicyLevelAgent)
+	agent.Spec.AgentRef = &corev1alpha1.NamespacedObjectReference{
+		Name: "other-agent", Namespace: "ns",
+	}
+
+	result := findByLevel([]*omniav1alpha1.SessionPrivacyPolicy{agent}, omniav1alpha1.PolicyLevelAgent, "ns", "my-agent")
+	assert.Nil(t, result)
+}
+
+func TestFindByLevel_AgentNamespaceMismatch(t *testing.T) {
+	agent := newTestPolicy("agent", omniav1alpha1.PolicyLevelAgent)
+	agent.Spec.AgentRef = &corev1alpha1.NamespacedObjectReference{
+		Name: "my-agent", Namespace: "other-ns",
+	}
+
+	result := findByLevel([]*omniav1alpha1.SessionPrivacyPolicy{agent}, omniav1alpha1.PolicyLevelAgent, "ns", "my-agent")
 	assert.Nil(t, result)
 }

@@ -55,8 +55,7 @@ func NewPrivacyMiddleware(
 // to the next handler.
 func (m *PrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Only intercept write methods.
-		if r.Method != http.MethodPost && r.Method != http.MethodPatch && r.Method != http.MethodPut {
+		if !isWriteMethod(r.Method) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -87,20 +86,30 @@ func (m *PrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 			return // 204 already sent
 		}
 
-		// Apply PII redaction to request body.
-		if policy.Recording.PII != nil && policy.Recording.PII.Redact {
-			redactedBody, redactErr := redactRequestBody(
-				r.Body, r.URL.Path, m.redactor, policy.Recording.PII,
-			)
-			if redactErr != nil {
-				m.log.Error(redactErr, "body redaction failed", "sessionID", sessionID)
-			} else {
-				r.Body = redactedBody
-			}
-		}
+		m.applyRedaction(r, policy, sessionID)
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isWriteMethod returns true for HTTP methods that carry a request body.
+func isWriteMethod(method string) bool {
+	return method == http.MethodPost || method == http.MethodPatch || method == http.MethodPut
+}
+
+// applyRedaction redacts PII from the request body if the policy requires it.
+func (m *PrivacyMiddleware) applyRedaction(r *http.Request, policy *EffectivePolicy, sessionID string) {
+	if policy.Recording.PII == nil || !policy.Recording.PII.Redact {
+		return
+	}
+	redactedBody, err := redactRequestBody(
+		r.Body, r.URL.Path, m.redactor, policy.Recording.PII,
+	)
+	if err != nil {
+		m.log.Error(err, "body redaction failed", "sessionID", sessionID)
+		return
+	}
+	r.Body = redactedBody
 }
 
 // checkOptOut checks whether the user has opted out. Returns a non-nil error
