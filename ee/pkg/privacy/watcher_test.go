@@ -11,6 +11,7 @@ package privacy
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
@@ -313,4 +314,71 @@ func TestNewPolicyWatcher(t *testing.T) {
 	w := NewPolicyWatcher(fakeClient, logr.Discard())
 	require.NotNil(t, w)
 	assert.NotNil(t, w.client)
+}
+
+func TestStart_CancellationStopsPolling(t *testing.T) {
+	scheme := testScheme()
+	p := newTestPolicy("start-test", omniav1alpha1.PolicyLevelGlobal)
+	p.Namespace = testNamespace
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p).Build()
+
+	w := NewPolicyWatcher(fakeClient, logr.Discard())
+	w.SetPollInterval(50 * time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- w.Start(ctx) }()
+
+	// Wait for initial load
+	require.Eventually(t, func() bool {
+		return w.GetEffectivePolicy("", "") != nil
+	}, 2*time.Second, 10*time.Millisecond)
+
+	cancel()
+
+	err := <-errCh
+	assert.NoError(t, err)
+}
+
+func TestStart_InitialLoadError(t *testing.T) {
+	// A client with no scheme can't list SessionPrivacyPolicy — triggers error.
+	badClient := fake.NewClientBuilder().Build()
+
+	w := NewPolicyWatcher(badClient, logr.Discard())
+	err := w.Start(context.Background())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "initial policy load failed")
+}
+
+func TestStart_ReloadErrorLogged(t *testing.T) {
+	scheme := testScheme()
+	p := newTestPolicy("reload-test", omniav1alpha1.PolicyLevelGlobal)
+	p.Namespace = testNamespace
+
+	// Start with a working client.
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p).Build()
+
+	w := NewPolicyWatcher(fakeClient, logr.Discard())
+	w.SetPollInterval(50 * time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() { _ = w.Start(ctx) }()
+
+	// Wait for initial load to succeed.
+	require.Eventually(t, func() bool {
+		return w.GetEffectivePolicy("", "") != nil
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// Swap the client to one that will fail on List — simulates a reload error.
+	w.client = fake.NewClientBuilder().Build()
+
+	// Let a poll cycle run — the error is logged, not returned.
+	time.Sleep(100 * time.Millisecond)
+
+	// Watcher should still be running (not crashed).
+	// The old cached policy should still be present.
+	assert.NotNil(t, w.GetEffectivePolicy("", ""))
 }
