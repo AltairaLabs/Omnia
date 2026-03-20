@@ -132,7 +132,8 @@ func main() {
 func initSessionStore(log logr.Logger) (session.Store, error) {
 	url := os.Getenv("SESSION_API_URL")
 	if url == "" {
-		return nil, fmt.Errorf("SESSION_API_URL is required")
+		log.Info("SESSION_API_URL not set, using in-memory session store (sessions will not be persisted)")
+		return session.NewMemoryStore(), nil
 	}
 	log.Info("using session-api HTTP store", "url", url)
 	return httpclient.NewStore(url, log), nil
