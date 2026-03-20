@@ -731,13 +731,9 @@ sessionApi:
     dev:
       enabled: false
     # -- PgBouncer connection pooling (recommended for production)
-    # Deploy a PgBouncer sidecar or standalone proxy in front of PostgreSQL
-    # to reduce connection overhead and improve scalability. When enabled,
-    # session-api and compaction jobs connect through PgBouncer instead of
-    # directly to PostgreSQL.
-    # NOTE: This section defines configuration values only. The actual PgBouncer
-    # deployment template is not included — use an external PgBouncer operator
-    # or add a sidecar container to your PostgreSQL deployment.
+    # IMPORTANT: These values are NOT consumed by any Helm template. They exist
+    # as a reference for operators deploying an external PgBouncer (e.g., via
+    # PgBouncer operator or a sidecar). No chart-managed PgBouncer is created.
     pgbouncer:
       # -- Enable PgBouncer connection pooling
       enabled: false
@@ -814,6 +810,10 @@ sessionApi:
     targetMemoryUtilizationPercentage: 80
   # -- Additional environment variables for the session-api container
   extraEnv: []
+  # -- NetworkPolicy to restrict ingress to session-api (defense-in-depth)
+  networkPolicy:
+    # -- Enable NetworkPolicy for session-api (requires a CNI that supports NetworkPolicy)
+    enabled: false
 
 # ============================================================================
 # Session Privacy Configuration

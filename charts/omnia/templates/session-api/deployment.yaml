@@ -90,7 +90,7 @@ spec:
             {{- end }}
           ports:
             - name: api
-              containerPort: 8080
+              containerPort: {{ .Values.sessionApi.service.port }}
               protocol: TCP
             - name: health
               containerPort: 8081
