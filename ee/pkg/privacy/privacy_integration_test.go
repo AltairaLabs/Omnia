@@ -36,34 +36,34 @@ const (
 	bodyWithSSN = `{"content":"SSN is 123-45-6789","role":"user"}`
 )
 
-// policyKey identifies which policy to apply for a given session.
-type policyKey struct {
+// integrationPolicyKey identifies which policy to apply for a given session.
+type integrationPolicyKey struct {
 	namespace string
 	agent     string
 }
 
 // policyWatcher holds privacy policies in a sync.Map, keyed by scope.
-// The global policy is stored under policyKey{}.
+// The global policy is stored under integrationPolicyKey{}.
 type policyWatcher struct {
-	policies sync.Map // policyKey -> *omniav1alpha1.SessionPrivacyPolicySpec
+	policies sync.Map // integrationPolicyKey -> *omniav1alpha1.SessionPrivacyPolicySpec
 }
 
-func (pw *policyWatcher) store(key policyKey, spec *omniav1alpha1.SessionPrivacyPolicySpec) {
+func (pw *policyWatcher) store(key integrationPolicyKey, spec *omniav1alpha1.SessionPrivacyPolicySpec) {
 	pw.policies.Store(key, spec)
 }
 
 // resolve returns the most specific policy: agent > workspace > global.
 func (pw *policyWatcher) resolve(namespace, agent string) *omniav1alpha1.SessionPrivacyPolicySpec {
 	// Agent-level
-	if v, ok := pw.policies.Load(policyKey{namespace: namespace, agent: agent}); ok {
+	if v, ok := pw.policies.Load(integrationPolicyKey{namespace: namespace, agent: agent}); ok {
 		return v.(*omniav1alpha1.SessionPrivacyPolicySpec)
 	}
 	// Workspace (namespace) level
-	if v, ok := pw.policies.Load(policyKey{namespace: namespace}); ok {
+	if v, ok := pw.policies.Load(integrationPolicyKey{namespace: namespace}); ok {
 		return v.(*omniav1alpha1.SessionPrivacyPolicySpec)
 	}
 	// Global
-	if v, ok := pw.policies.Load(policyKey{}); ok {
+	if v, ok := pw.policies.Load(integrationPolicyKey{}); ok {
 		return v.(*omniav1alpha1.SessionPrivacyPolicySpec)
 	}
 	return nil
@@ -75,12 +75,12 @@ type sessionMetadata struct {
 	agent     string
 }
 
-// mockSessionLookup maps session IDs to their metadata (namespace + agent).
-type mockSessionLookup struct {
+// integrationSessionLookup maps session IDs to their metadata (namespace + agent).
+type integrationSessionLookup struct {
 	sessions map[string]sessionMetadata
 }
 
-func (m *mockSessionLookup) lookup(sessionID string) (string, string) {
+func (m *integrationSessionLookup) lookup(sessionID string) (string, string) {
 	if meta, ok := m.sessions[sessionID]; ok {
 		return meta.namespace, meta.agent
 	}
@@ -221,9 +221,9 @@ func postJSON(t *testing.T, url, body, sessionID, userID string) *http.Request {
 
 func TestPrivacyIntegration_MessageRedaction(t *testing.T) {
 	watcher := &policyWatcher{}
-	watcher.store(policyKey{}, globalPIIPolicy([]string{"ssn", "email"}))
+	watcher.store(integrationPolicyKey{}, globalPIIPolicy([]string{"ssn", "email"}))
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "default", agent: "my-agent"},
 		},
@@ -252,9 +252,9 @@ func TestPrivacyIntegration_MessageRedaction(t *testing.T) {
 
 func TestPrivacyIntegration_ToolCallRedaction(t *testing.T) {
 	watcher := &policyWatcher{}
-	watcher.store(policyKey{}, globalPIIPolicy([]string{"ssn", "email"}))
+	watcher.store(integrationPolicyKey{}, globalPIIPolicy([]string{"ssn", "email"}))
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "default", agent: "my-agent"},
 		},
@@ -281,9 +281,9 @@ func TestPrivacyIntegration_ToolCallRedaction(t *testing.T) {
 
 func TestPrivacyIntegration_ProviderCallRedaction(t *testing.T) {
 	watcher := &policyWatcher{}
-	watcher.store(policyKey{}, globalPIIPolicy([]string{"ssn", "email"}))
+	watcher.store(integrationPolicyKey{}, globalPIIPolicy([]string{"ssn", "email"}))
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "default", agent: "my-agent"},
 		},
@@ -310,9 +310,9 @@ func TestPrivacyIntegration_ProviderCallRedaction(t *testing.T) {
 
 func TestPrivacyIntegration_EventMetadataRedaction(t *testing.T) {
 	watcher := &policyWatcher{}
-	watcher.store(policyKey{}, globalPIIPolicy([]string{"email"}))
+	watcher.store(integrationPolicyKey{}, globalPIIPolicy([]string{"email"}))
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "default", agent: "my-agent"},
 		},
@@ -348,9 +348,9 @@ func TestPrivacyIntegration_EventMetadataRedaction(t *testing.T) {
 
 func TestPrivacyIntegration_EvalResultRedaction(t *testing.T) {
 	watcher := &policyWatcher{}
-	watcher.store(policyKey{}, globalPIIPolicy([]string{"ssn", "email"}))
+	watcher.store(integrationPolicyKey{}, globalPIIPolicy([]string{"ssn", "email"}))
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "default", agent: "my-agent"},
 		},
@@ -388,9 +388,9 @@ func TestPrivacyIntegration_EvalResultRedaction(t *testing.T) {
 
 func TestPrivacyIntegration_OptOutDropsWrite(t *testing.T) {
 	watcher := &policyWatcher{}
-	watcher.store(policyKey{}, optOutPolicy())
+	watcher.store(integrationPolicyKey{}, optOutPolicy())
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "default", agent: "my-agent"},
 		},
@@ -421,9 +421,9 @@ func TestPrivacyIntegration_OptOutDropsWrite(t *testing.T) {
 
 func TestPrivacyIntegration_OptOutNotTriggeredWithoutHeader(t *testing.T) {
 	watcher := &policyWatcher{}
-	watcher.store(policyKey{}, optOutPolicy())
+	watcher.store(integrationPolicyKey{}, optOutPolicy())
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "default", agent: "my-agent"},
 		},
@@ -455,9 +455,9 @@ func TestPrivacyIntegration_OptOutNotTriggeredWithoutHeader(t *testing.T) {
 
 func TestPrivacyIntegration_NonOptedOutUserPassesThrough(t *testing.T) {
 	watcher := &policyWatcher{}
-	watcher.store(policyKey{}, globalPIIPolicy([]string{"ssn"}))
+	watcher.store(integrationPolicyKey{}, globalPIIPolicy([]string{"ssn"}))
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "default", agent: "my-agent"},
 		},
@@ -510,12 +510,12 @@ func TestPrivacyIntegration_WorkspacePolicyOverridesGlobal(t *testing.T) {
 			},
 		},
 	}
-	watcher.store(policyKey{}, globalSpec)
+	watcher.store(integrationPolicyKey{}, globalSpec)
 
 	// Workspace "my-ns": redaction enabled with SSN pattern.
-	watcher.store(policyKey{namespace: "my-ns"}, workspacePIIPolicy([]string{"ssn"}))
+	watcher.store(integrationPolicyKey{namespace: "my-ns"}, workspacePIIPolicy([]string{"ssn"}))
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "my-ns", agent: "my-agent"},
 		},
@@ -541,7 +541,7 @@ func TestPrivacyIntegration_WorkspacePolicyOverridesGlobal(t *testing.T) {
 func TestPrivacyIntegration_NoPolicyMeansNoRedaction(t *testing.T) {
 	watcher := &policyWatcher{} // empty — no policies loaded
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "default", agent: "my-agent"},
 		},
@@ -565,9 +565,9 @@ func TestPrivacyIntegration_NoPolicyMeansNoRedaction(t *testing.T) {
 
 func TestPrivacyIntegration_OptOutWorkspaceScope(t *testing.T) {
 	watcher := &policyWatcher{}
-	watcher.store(policyKey{}, optOutPolicy())
+	watcher.store(integrationPolicyKey{}, optOutPolicy())
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "workspace-a", agent: "my-agent"},
 		},
@@ -599,9 +599,9 @@ func TestPrivacyIntegration_OptOutWorkspaceScope(t *testing.T) {
 
 func TestPrivacyIntegration_OptOutAgentScope(t *testing.T) {
 	watcher := &policyWatcher{}
-	watcher.store(policyKey{}, optOutPolicy())
+	watcher.store(integrationPolicyKey{}, optOutPolicy())
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "default", agent: "agent-x"},
 		},
@@ -633,9 +633,9 @@ func TestPrivacyIntegration_OptOutAgentScope(t *testing.T) {
 
 func TestPrivacyIntegration_PreferencesNotFoundAllowsRecording(t *testing.T) {
 	watcher := &policyWatcher{}
-	watcher.store(policyKey{}, globalPIIPolicy([]string{"ssn"}))
+	watcher.store(integrationPolicyKey{}, globalPIIPolicy([]string{"ssn"}))
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "default", agent: "my-agent"},
 		},
@@ -662,9 +662,9 @@ func TestPrivacyIntegration_PreferencesNotFoundAllowsRecording(t *testing.T) {
 
 func TestPrivacyIntegration_MultiplePatterns(t *testing.T) {
 	watcher := &policyWatcher{}
-	watcher.store(policyKey{}, globalPIIPolicy([]string{"ssn", "email", "credit_card", "ip_address"}))
+	watcher.store(integrationPolicyKey{}, globalPIIPolicy([]string{"ssn", "email", "credit_card", "ip_address"}))
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "default", agent: "my-agent"},
 		},
@@ -695,9 +695,9 @@ func TestPrivacyIntegration_MultiplePatterns(t *testing.T) {
 
 func TestPrivacyIntegration_RedactionPreservesJSONStructure(t *testing.T) {
 	watcher := &policyWatcher{}
-	watcher.store(policyKey{}, globalPIIPolicy([]string{"ssn"}))
+	watcher.store(integrationPolicyKey{}, globalPIIPolicy([]string{"ssn"}))
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "default", agent: "my-agent"},
 		},
@@ -743,7 +743,7 @@ func TestPrivacyIntegration_AgentPolicyOverridesWorkspace(t *testing.T) {
 			},
 		},
 	}
-	watcher.store(policyKey{namespace: "ns-1"}, wsSpec)
+	watcher.store(integrationPolicyKey{namespace: "ns-1"}, wsSpec)
 
 	// Agent: redaction enabled
 	agentSpec := &omniav1alpha1.SessionPrivacyPolicySpec{
@@ -757,9 +757,9 @@ func TestPrivacyIntegration_AgentPolicyOverridesWorkspace(t *testing.T) {
 			},
 		},
 	}
-	watcher.store(policyKey{namespace: "ns-1", agent: "agent-1"}, agentSpec)
+	watcher.store(integrationPolicyKey{namespace: "ns-1", agent: "agent-1"}, agentSpec)
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "ns-1", agent: "agent-1"},
 		},
@@ -799,9 +799,9 @@ func TestPrivacyIntegration_OptOutCombinedWithRedaction(t *testing.T) {
 			Enabled: true,
 		},
 	}
-	watcher.store(policyKey{}, spec)
+	watcher.store(integrationPolicyKey{}, spec)
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "default", agent: "my-agent"},
 		},
@@ -833,9 +833,9 @@ func TestPrivacyIntegration_OptOutCombinedWithRedaction(t *testing.T) {
 
 func TestPrivacyIntegration_EmptyBodyPassesThrough(t *testing.T) {
 	watcher := &policyWatcher{}
-	watcher.store(policyKey{}, globalPIIPolicy([]string{"ssn"}))
+	watcher.store(integrationPolicyKey{}, globalPIIPolicy([]string{"ssn"}))
 
-	lookup := &mockSessionLookup{
+	lookup := &integrationSessionLookup{
 		sessions: map[string]sessionMetadata{
 			"sess-1": {namespace: "default", agent: "my-agent"},
 		},
@@ -858,11 +858,11 @@ func TestPrivacyIntegration_EmptyBodyPassesThrough(t *testing.T) {
 
 func TestPrivacyIntegration_UnknownSessionPassesThrough(t *testing.T) {
 	watcher := &policyWatcher{}
-	watcher.store(policyKey{}, globalPIIPolicy([]string{"ssn"}))
+	watcher.store(integrationPolicyKey{}, globalPIIPolicy([]string{"ssn"}))
 
 	// No sessions registered in lookup — will return empty namespace/agent.
 	// Global policy should still apply.
-	lookup := &mockSessionLookup{sessions: map[string]sessionMetadata{}}
+	lookup := &integrationSessionLookup{sessions: map[string]sessionMetadata{}}
 
 	redactor := redaction.NewRedactor()
 	mw := privacyMiddleware(watcher, lookup.lookup, nil, redactor)

@@ -29,6 +29,12 @@ import (
 	"syscall"
 	"time"
 
+	gcsstorage "cloud.google.com/go/storage"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	s3sdk "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/go-logr/logr"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -623,15 +629,70 @@ func buildMediaDeleter(f *flags, log logr.Logger) privacy.MediaDeleter {
 		log.V(1).Info("media deleter skipped", "reason", "no object storage configured")
 		return nil
 	}
-	// Cold storage is configured — reuse its bucket for media artifact cleanup.
-	// The actual ObjectStoreClient implementation would be injected here once
-	// the cloud SDK adapters are available. For now, log that media cleanup is
-	// enabled and return a no-op until the adapters are wired.
-	log.Info("media deleter enabled",
-		"backend", f.coldBackend,
-		"bucket", f.coldBucket,
+
+	client, err := buildObjectStoreClient(f, log)
+	if err != nil {
+		log.Error(err, "media deleter creation failed, using no-op")
+		return privacy.NoOpMediaDeleter{}
+	}
+
+	log.Info("media deleter enabled", "backend", f.coldBackend, "bucket", f.coldBucket)
+	return privacy.NewObjectStoreMediaDeleter(client, f.coldBucket, "sessions/", log)
+}
+
+func buildObjectStoreClient(f *flags, log logr.Logger) (privacy.ObjectStoreClient, error) {
+	switch cold.BackendType(f.coldBackend) {
+	case cold.BackendS3:
+		return buildS3ObjectStoreClient(f, log)
+	case cold.BackendGCS:
+		return buildGCSObjectStoreClient(log)
+	case cold.BackendAzure:
+		return buildAzureObjectStoreClient(f, log)
+	default:
+		return nil, fmt.Errorf("unsupported cold backend for media deleter: %s", f.coldBackend)
+	}
+}
+
+func buildS3ObjectStoreClient(f *flags, log logr.Logger) (*privacy.S3ObjectStoreClient, error) {
+	cfg, err := awsconfig.LoadDefaultConfig(context.Background(),
+		awsconfig.WithRegion(f.coldRegion),
 	)
-	return privacy.NoOpMediaDeleter{}
+	if err != nil {
+		return nil, fmt.Errorf("loading AWS config: %w", err)
+	}
+	opts := []func(*s3sdk.Options){}
+	if f.coldEndpoint != "" {
+		opts = append(opts, func(o *s3sdk.Options) {
+			o.BaseEndpoint = aws.String(f.coldEndpoint)
+			o.UsePathStyle = true
+		})
+	}
+	client := s3sdk.NewFromConfig(cfg, opts...)
+	return privacy.NewS3ObjectStoreClient(client, log), nil
+}
+
+func buildGCSObjectStoreClient(log logr.Logger) (*privacy.GCSObjectStoreClient, error) {
+	client, err := gcsstorage.NewClient(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("creating GCS client: %w", err)
+	}
+	return privacy.NewGCSObjectStoreClient(client, log), nil
+}
+
+func buildAzureObjectStoreClient(f *flags, log logr.Logger) (*privacy.AzureObjectStoreClient, error) {
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating Azure credential: %w", err)
+	}
+	endpoint := f.coldEndpoint
+	if endpoint == "" {
+		endpoint = fmt.Sprintf("https://%s.blob.core.windows.net", f.coldBucket)
+	}
+	client, err := azblob.NewClient(endpoint, cred, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating Azure blob client: %w", err)
+	}
+	return privacy.NewAzureObjectStoreClient(client, log), nil
 }
 
 // wrapPrivacyMiddleware creates and returns the privacy middleware handler.
