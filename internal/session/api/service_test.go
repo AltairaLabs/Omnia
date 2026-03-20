@@ -18,6 +18,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -769,4 +770,230 @@ func TestUpdateSessionStatus_RefreshesTTLInHotCache(t *testing.T) {
 	defer hot.mu.Unlock()
 	require.Len(t, hot.refreshCalls, 1)
 	assert.Equal(t, "s1", hot.refreshCalls[0])
+}
+
+// --- mockWarmStoreWithUpdater implements StatusUpdaterWithResult ---
+
+// mockWarmStoreWithUpdater wraps mockWarmStore and implements StatusUpdaterWithResult
+// so the optimized path in UpdateSessionStatus is exercised.
+type mockWarmStoreWithUpdater struct {
+	mockWarmStore
+	result *providers.StatusUpdateResult
+	err    error
+	called bool
+}
+
+func newMockWarmStoreWithUpdater() *mockWarmStoreWithUpdater {
+	return &mockWarmStoreWithUpdater{
+		mockWarmStore: mockWarmStore{
+			sessions:     make(map[string]*session.Session),
+			messages:     make(map[string][]*session.Message),
+			appendedMsgs: make(map[string][]*session.Message),
+		},
+	}
+}
+
+func (m *mockWarmStoreWithUpdater) UpdateSessionStatusReturning(_ context.Context, _ string, _ session.SessionStatusUpdate) (*providers.StatusUpdateResult, error) {
+	m.called = true
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.result, nil
+}
+
+// --- updateStatusOptimized tests (via StatusUpdaterWithResult) ---
+
+func TestUpdateSessionStatus_Optimized_Applied(t *testing.T) {
+	warm := newMockWarmStoreWithUpdater()
+	warm.result = &providers.StatusUpdateResult{
+		Applied:           true,
+		PreviousStatus:    session.SessionStatusActive,
+		AgentName:         "test-agent",
+		Namespace:         "test-ns",
+		PromptPackName:    "pp1",
+		PromptPackVersion: "v1",
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{
+		SetStatus: session.SessionStatusCompleted,
+	})
+	require.NoError(t, err)
+	assert.True(t, warm.called)
+	// Verify fallback path was NOT used (no updatedSessions entries).
+	assert.Empty(t, warm.updatedSessions)
+}
+
+func TestUpdateSessionStatus_Optimized_Skipped(t *testing.T) {
+	warm := newMockWarmStoreWithUpdater()
+	warm.result = &providers.StatusUpdateResult{
+		Applied:        false,
+		PreviousStatus: session.SessionStatusCompleted,
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{
+		SetStatus: session.SessionStatusCompleted,
+	})
+	require.NoError(t, err)
+	assert.True(t, warm.called)
+}
+
+func TestUpdateSessionStatus_Optimized_Error(t *testing.T) {
+	warm := newMockWarmStoreWithUpdater()
+	warm.err = errors.New("db connection lost")
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{
+		SetStatus: session.SessionStatusCompleted,
+	})
+	assert.EqualError(t, err, "db connection lost")
+	assert.True(t, warm.called)
+}
+
+func TestUpdateSessionStatus_Optimized_CompletionPublishesEvent(t *testing.T) {
+	warm := newMockWarmStoreWithUpdater()
+	warm.result = &providers.StatusUpdateResult{
+		Applied:           true,
+		PreviousStatus:    session.SessionStatusActive,
+		AgentName:         "test-agent",
+		Namespace:         "test-ns",
+		PromptPackName:    "pp1",
+		PromptPackVersion: "v1",
+	}
+
+	pub := &mockEventPublisher{}
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	cfg := ServiceConfig{EventPublisher: pub}
+	svc := NewSessionService(registry, cfg, logr.Discard())
+
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{
+		SetStatus: session.SessionStatusCompleted,
+	})
+	require.NoError(t, err)
+
+	// publishSessionCompleted fires async — wait for the event.
+	events := pub.waitForEvents(t, 1, 2*time.Second)
+	require.Len(t, events, 1)
+	assert.Equal(t, "session.completed", events[0].EventType)
+	assert.Equal(t, "s1", events[0].SessionID)
+	assert.Equal(t, "test-agent", events[0].AgentName)
+	assert.Equal(t, "test-ns", events[0].Namespace)
+	assert.Equal(t, "pp1", events[0].PromptPackName)
+	assert.Equal(t, "v1", events[0].PromptPackVersion)
+}
+
+func TestUpdateSessionStatus_Optimized_AlreadyCompletedNoPublish(t *testing.T) {
+	warm := newMockWarmStoreWithUpdater()
+	warm.result = &providers.StatusUpdateResult{
+		Applied:        true,
+		PreviousStatus: session.SessionStatusCompleted,
+	}
+
+	pub := &mockEventPublisher{}
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	cfg := ServiceConfig{EventPublisher: pub}
+	svc := NewSessionService(registry, cfg, logr.Discard())
+
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{
+		SetStatus: session.SessionStatusCompleted,
+	})
+	require.NoError(t, err)
+
+	// No event should be published — already completed.
+	time.Sleep(50 * time.Millisecond)
+	assert.Empty(t, pub.getEvents())
+}
+
+func TestUpdateSessionStatus_Optimized_NonCompletedStatusNoPublish(t *testing.T) {
+	warm := newMockWarmStoreWithUpdater()
+	warm.result = &providers.StatusUpdateResult{
+		Applied:        true,
+		PreviousStatus: session.SessionStatusActive,
+	}
+
+	pub := &mockEventPublisher{}
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	cfg := ServiceConfig{EventPublisher: pub}
+	svc := NewSessionService(registry, cfg, logr.Discard())
+
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{
+		SetStatus: session.SessionStatusActive,
+	})
+	require.NoError(t, err)
+
+	// Non-completed status should not publish.
+	time.Sleep(50 * time.Millisecond)
+	assert.Empty(t, pub.getEvents())
+}
+
+func TestUpdateSessionStatus_Optimized_RefreshesTTLInHotCache(t *testing.T) {
+	hot := newTrackingHotCache()
+	warm := newMockWarmStoreWithUpdater()
+	warm.result = &providers.StatusUpdateResult{
+		Applied:        true,
+		PreviousStatus: session.SessionStatusActive,
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetHotCache(hot)
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{
+		SetStatus: session.SessionStatusActive,
+	})
+	require.NoError(t, err)
+
+	hot.waitOne()
+	hot.mu.Lock()
+	defer hot.mu.Unlock()
+	require.Len(t, hot.refreshCalls, 1)
+	assert.Equal(t, "s1", hot.refreshCalls[0])
+}
+
+// --- RecordRuntimeEvent service tests ---
+
+func TestRecordRuntimeEvent_EmptySessionID(t *testing.T) {
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(newMockWarmStore())
+	svc := newServiceWithRegistry(registry, nil)
+
+	err := svc.RecordRuntimeEvent(context.Background(), "", &session.RuntimeEvent{})
+	assert.ErrorIs(t, err, ErrMissingSessionID)
+}
+
+func TestRecordRuntimeEvent_NoWarmStore(t *testing.T) {
+	svc := newServiceWithRegistry(providers.NewRegistry(), nil)
+	err := svc.RecordRuntimeEvent(context.Background(), "s1", &session.RuntimeEvent{})
+	assert.ErrorIs(t, err, ErrWarmStoreRequired)
+}
+
+func TestRecordRuntimeEvent_Success(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = &session.Session{ID: "s1"}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	evt := &session.RuntimeEvent{
+		ID:        "evt1",
+		SessionID: "s1",
+		EventType: "pipeline.started",
+	}
+	err := svc.RecordRuntimeEvent(context.Background(), "s1", evt)
+	require.NoError(t, err)
 }
