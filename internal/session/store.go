@@ -62,10 +62,15 @@ const (
 	SessionStatusExpired SessionStatus = "expired"
 )
 
-// isTerminalStatus returns true if the status is a terminal state
+// IsTerminalStatus returns true if the status is a terminal state
 // that should not be overwritten by subsequent transitions.
-func isTerminalStatus(s SessionStatus) bool {
+func IsTerminalStatus(s SessionStatus) bool {
 	return s == SessionStatusCompleted || s == SessionStatusError || s == SessionStatusExpired
+}
+
+// isTerminalStatus is an unexported alias kept for internal callers.
+func isTerminalStatus(s SessionStatus) bool {
+	return IsTerminalStatus(s)
 }
 
 // Message represents a single message in a conversation.

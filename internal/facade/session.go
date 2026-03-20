@@ -231,6 +231,8 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 		return "", err
 	}
 
+	s.metrics.SessionCreated()
+
 	return sess.ID, nil
 }
 
