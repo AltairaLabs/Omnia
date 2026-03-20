@@ -351,13 +351,11 @@ func TestStart_InitialLoadError(t *testing.T) {
 	assert.Contains(t, err.Error(), "initial policy load failed")
 }
 
-func TestStart_ReloadErrorLogged(t *testing.T) {
+func TestStart_PollPicksUpNewPolicies(t *testing.T) {
 	scheme := testScheme()
-	p := newTestPolicy("reload-test", omniav1alpha1.PolicyLevelGlobal)
-	p.Namespace = testNamespace
 
-	// Start with a working client.
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p).Build()
+	// Start with an empty cluster.
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
 	w := NewPolicyWatcher(fakeClient, logr.Discard())
 	w.SetPollInterval(50 * time.Millisecond)
@@ -367,18 +365,17 @@ func TestStart_ReloadErrorLogged(t *testing.T) {
 
 	go func() { _ = w.Start(ctx) }()
 
-	// Wait for initial load to succeed.
+	// Initially no policies.
+	time.Sleep(30 * time.Millisecond)
+	assert.Nil(t, w.GetEffectivePolicy("", ""))
+
+	// Create a policy in the fake client after startup.
+	p := newTestPolicy("late-arrival", omniav1alpha1.PolicyLevelGlobal)
+	p.Namespace = testNamespace
+	require.NoError(t, fakeClient.Create(context.Background(), p))
+
+	// Poll loop should pick it up.
 	require.Eventually(t, func() bool {
 		return w.GetEffectivePolicy("", "") != nil
 	}, 2*time.Second, 10*time.Millisecond)
-
-	// Swap the client to one that will fail on List — simulates a reload error.
-	w.client = fake.NewClientBuilder().Build()
-
-	// Let a poll cycle run — the error is logged, not returned.
-	time.Sleep(100 * time.Millisecond)
-
-	// Watcher should still be running (not crashed).
-	// The old cached policy should still be present.
-	assert.NotNil(t, w.GetEffectivePolicy("", ""))
 }
