@@ -65,7 +65,8 @@ func (m *MockDeletionStore) GetRequest(_ context.Context, id string) (*DeletionR
 func (m *MockDeletionStore) UpdateRequest(_ context.Context, req *DeletionRequest) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.requests[req.ID] = req
+	cp := *req
+	m.requests[req.ID] = &cp
 	return nil
 }
 
