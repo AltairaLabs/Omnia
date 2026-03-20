@@ -146,6 +146,45 @@ type EvaluateAcceptedResponse struct {
 	Message   string `json:"message"`
 }
 
+// handleGetEvalResultSummary returns aggregate statistics for eval results.
+// GET /api/v1/sessions/{sessionID}/eval-results/summary
+func (h *Handler) handleGetEvalResultSummary(w http.ResponseWriter, r *http.Request) {
+	if h.evalService == nil {
+		writeEvalError(w, ErrMissingEvalStore)
+		return
+	}
+
+	sessionID, err := sessionIDFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	opts := parseSummaryOpts(r)
+	// Scope the summary to this session's agent/namespace by fetching the session first.
+	// For now, the route is session-scoped so we pass the filters from query params.
+	_ = sessionID // sessionID available for future per-session filtering
+
+	summaries, err := h.evalService.GetEvalResultSummary(r.Context(), opts)
+	if err != nil {
+		writeEvalError(w, err)
+		return
+	}
+
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
+	_ = json.NewEncoder(w).Encode(EvalResultSummaryResponse{Summaries: summaries})
+}
+
+// parseSummaryOpts extracts query parameters for eval result summary.
+func parseSummaryOpts(r *http.Request) EvalResultSummaryOpts {
+	q := r.URL.Query()
+	return EvalResultSummaryOpts{
+		AgentName: q.Get("agentName"),
+		Namespace: q.Get("namespace"),
+		EvalType:  q.Get("evalType"),
+	}
+}
+
 // parseEvalListOpts extracts query parameters for eval result listing.
 func parseEvalListOpts(r *http.Request) EvalResultListOpts {
 	q := r.URL.Query()

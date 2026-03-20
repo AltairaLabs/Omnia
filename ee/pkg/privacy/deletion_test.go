@@ -723,6 +723,12 @@ func (m *MockWarmStoreProvider) UpdateSessionStats(
 	return nil
 }
 
+func (m *MockWarmStoreProvider) RefreshTTL(
+	_ context.Context, _ string, _ time.Time,
+) error {
+	return nil
+}
+
 func (m *MockWarmStoreProvider) DeleteSession(
 	_ context.Context, id string,
 ) error {
@@ -833,11 +839,15 @@ func (m *MockWarmStoreProvider) RecordProviderCall(_ context.Context, _ string, 
 	return nil
 }
 
-func (m *MockWarmStoreProvider) GetToolCalls(_ context.Context, _ string) ([]*session.ToolCall, error) {
+func (m *MockWarmStoreProvider) GetToolCalls(
+	_ context.Context, _ string, _ providers.PaginationOpts,
+) ([]*session.ToolCall, error) {
 	return []*session.ToolCall{}, nil
 }
 
-func (m *MockWarmStoreProvider) GetProviderCalls(_ context.Context, _ string) ([]*session.ProviderCall, error) {
+func (m *MockWarmStoreProvider) GetProviderCalls(
+	_ context.Context, _ string, _ providers.PaginationOpts,
+) ([]*session.ProviderCall, error) {
 	return []*session.ProviderCall{}, nil
 }
 
@@ -845,7 +855,9 @@ func (m *MockWarmStoreProvider) RecordRuntimeEvent(_ context.Context, _ string, 
 	return nil
 }
 
-func (m *MockWarmStoreProvider) GetRuntimeEvents(_ context.Context, _ string) ([]*session.RuntimeEvent, error) {
+func (m *MockWarmStoreProvider) GetRuntimeEvents(
+	_ context.Context, _ string, _ providers.PaginationOpts,
+) ([]*session.RuntimeEvent, error) {
 	return nil, nil
 }
 

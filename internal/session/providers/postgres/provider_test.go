@@ -1128,3 +1128,40 @@ func TestUpdateSessionStats_EmptyStatus(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, session.SessionStatusActive, got.Status)
 }
+
+func TestRefreshTTL(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	s := &session.Session{
+		ID:        "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+		AgentName: "test", Namespace: "default",
+		Status: session.SessionStatusActive, CreatedAt: now,
+		ExpiresAt: now.Add(1 * time.Hour),
+	}
+	require.NoError(t, p.CreateSession(ctx, s))
+
+	newExpiry := now.Add(24 * time.Hour)
+	require.NoError(t, p.RefreshTTL(ctx, s.ID, newExpiry))
+
+	got, err := p.GetSession(ctx, s.ID)
+	require.NoError(t, err)
+	assert.Equal(t, newExpiry, got.ExpiresAt.UTC().Truncate(time.Microsecond))
+}
+
+func TestRefreshTTL_NotFound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+
+	err := p.RefreshTTL(ctx, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", time.Now())
+	assert.ErrorIs(t, err, session.ErrSessionNotFound)
+}

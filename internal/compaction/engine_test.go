@@ -88,6 +88,7 @@ func (m *mockWarmStore) UpdateSessionStats(context.Context, string, session.Sess
 	return nil
 }
 
+func (m *mockWarmStore) RefreshTTL(context.Context, string, time.Time) error           { return nil }
 func (m *mockWarmStore) DeleteSession(context.Context, string) error                   { return nil }
 func (m *mockWarmStore) AppendMessage(context.Context, string, *session.Message) error { return nil }
 
@@ -123,16 +124,16 @@ func (m *mockWarmStore) RecordToolCall(context.Context, string, *session.ToolCal
 func (m *mockWarmStore) RecordProviderCall(context.Context, string, *session.ProviderCall) error {
 	return nil
 }
-func (m *mockWarmStore) GetToolCalls(context.Context, string) ([]*session.ToolCall, error) {
+func (m *mockWarmStore) GetToolCalls(context.Context, string, providers.PaginationOpts) ([]*session.ToolCall, error) {
 	return nil, nil
 }
-func (m *mockWarmStore) GetProviderCalls(context.Context, string) ([]*session.ProviderCall, error) {
+func (m *mockWarmStore) GetProviderCalls(context.Context, string, providers.PaginationOpts) ([]*session.ProviderCall, error) {
 	return nil, nil
 }
 func (m *mockWarmStore) RecordRuntimeEvent(context.Context, string, *session.RuntimeEvent) error {
 	return nil
 }
-func (m *mockWarmStore) GetRuntimeEvents(context.Context, string) ([]*session.RuntimeEvent, error) {
+func (m *mockWarmStore) GetRuntimeEvents(context.Context, string, providers.PaginationOpts) ([]*session.RuntimeEvent, error) {
 	return nil, nil
 }
 func (m *mockWarmStore) Ping(context.Context) error { return nil }

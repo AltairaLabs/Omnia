@@ -232,7 +232,7 @@ func run() error {
 	}
 
 	// --- Build API mux ---
-	apiMux, auditCleanup := buildAPIMux(pool, registry, f, log)
+	apiMux, sessionService, auditCleanup := buildAPIMux(pool, registry, f, log)
 	defer auditCleanup()
 
 	// --- Servers ---
@@ -254,7 +254,7 @@ func run() error {
 	var grpcSrv *grpc.Server
 	var otlpHTTPSrv *http.Server
 	if f.otlpEnabled {
-		grpcSrv, otlpHTTPSrv = startOTLPServers(f, registry, log)
+		grpcSrv, otlpHTTPSrv = startOTLPServers(f, sessionService, log)
 	}
 
 	log.Info("session-api ready",
@@ -395,7 +395,7 @@ func runMigrations(connStr string, log logr.Logger) error {
 // buildAPIMux assembles the HTTP handler with all API routes, wrapped with
 // Prometheus metrics middleware. Returns the handler and a cleanup function
 // for the audit logger (no-op when enterprise is disabled).
-func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log logr.Logger) (http.Handler, func()) {
+func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log logr.Logger) (http.Handler, *api.SessionService, func()) {
 	svcCfg := api.ServiceConfig{}
 	cleanup := func() {}
 
@@ -450,7 +450,7 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 			return r.URL.Path != "/healthz"
 		}),
 	)
-	return rlMiddleware(api.MetricsMiddleware(httpMetrics, traced)), cleanup
+	return rlMiddleware(api.MetricsMiddleware(httpMetrics, traced)), sessionService, cleanup
 }
 
 // registerEnterpriseRoutes adds audit, GDPR deletion, and opt-out routes when
@@ -584,9 +584,8 @@ func initEventPublisher(registry *providers.Registry, log logr.Logger, httpMetri
 
 // startOTLPServers creates and starts the OTLP gRPC and HTTP servers.
 // Returns the servers for graceful shutdown.
-func startOTLPServers(f *flags, registry *providers.Registry, log logr.Logger) (*grpc.Server, *http.Server) {
-	sessionService := api.NewSessionService(registry, api.ServiceConfig{}, log)
-	transformer := otlp.NewTransformer(sessionService, log)
+func startOTLPServers(f *flags, svc *api.SessionService, log logr.Logger) (*grpc.Server, *http.Server) {
+	transformer := otlp.NewTransformer(svc, log)
 
 	// gRPC server.
 	grpcSrv := grpc.NewServer()

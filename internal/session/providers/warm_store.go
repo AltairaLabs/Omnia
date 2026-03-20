@@ -89,34 +89,43 @@ type WarmStoreProvider interface {
 	// Returns session.ErrSessionNotFound if the session does not exist.
 	RecordProviderCall(ctx context.Context, sessionID string, pc *session.ProviderCall) error
 
-	// GetToolCalls retrieves all tool calls for a session ordered by created_at.
+	// GetToolCalls retrieves tool calls for a session ordered by created_at.
 	// Returns session.ErrSessionNotFound if the session does not exist.
-	GetToolCalls(ctx context.Context, sessionID string) ([]*session.ToolCall, error)
+	GetToolCalls(ctx context.Context, sessionID string, opts PaginationOpts) ([]*session.ToolCall, error)
 
-	// GetProviderCalls retrieves all provider calls for a session ordered by created_at.
+	// GetProviderCalls retrieves provider calls for a session ordered by created_at.
 	// Returns session.ErrSessionNotFound if the session does not exist.
-	GetProviderCalls(ctx context.Context, sessionID string) ([]*session.ProviderCall, error)
+	GetProviderCalls(ctx context.Context, sessionID string, opts PaginationOpts) ([]*session.ProviderCall, error)
 
 	// RecordRuntimeEvent records a runtime lifecycle event for the session.
 	// Events are immutable (INSERT only, no upsert).
 	// Returns session.ErrSessionNotFound if the session does not exist.
 	RecordRuntimeEvent(ctx context.Context, sessionID string, evt *session.RuntimeEvent) error
 
-	// GetRuntimeEvents retrieves all runtime events for a session ordered by timestamp.
+	// GetRuntimeEvents retrieves runtime events for a session ordered by timestamp.
 	// Returns session.ErrSessionNotFound if the session does not exist.
-	GetRuntimeEvents(ctx context.Context, sessionID string) ([]*session.RuntimeEvent, error)
+	GetRuntimeEvents(ctx context.Context, sessionID string, opts PaginationOpts) ([]*session.RuntimeEvent, error)
 
 	// SaveArtifact persists a binary artifact reference.
+	// Reserved for future use — currently has no HTTP route in the session API.
 	SaveArtifact(ctx context.Context, artifact *session.Artifact) error
 
 	// GetArtifacts retrieves all artifacts for a message.
+	// Reserved for future use — currently has no HTTP route in the session API.
 	GetArtifacts(ctx context.Context, messageID string) ([]*session.Artifact, error)
 
 	// GetSessionArtifacts retrieves all artifacts for a session.
+	// Reserved for future use — currently has no HTTP route in the session API.
 	GetSessionArtifacts(ctx context.Context, sessionID string) ([]*session.Artifact, error)
 
 	// DeleteSessionArtifacts removes all artifacts for a session.
+	// Reserved for future use — currently has no HTTP route in the session API.
 	DeleteSessionArtifacts(ctx context.Context, sessionID string) error
+
+	// RefreshTTL updates the expires_at and updated_at fields in a single
+	// UPDATE without reading the full row first.
+	// Returns session.ErrSessionNotFound if the session does not exist.
+	RefreshTTL(ctx context.Context, sessionID string, expiresAt time.Time) error
 
 	// Ping checks connectivity to the underlying store.
 	Ping(ctx context.Context) error

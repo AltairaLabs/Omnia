@@ -155,6 +155,17 @@ func (m *mockWarmStore) UpdateSessionStats(_ context.Context, sessionID string, 
 	return nil
 }
 
+func (m *mockWarmStore) RefreshTTL(_ context.Context, id string, expiresAt time.Time) error {
+	s, ok := m.sessions[id]
+	if !ok {
+		return session.ErrSessionNotFound
+	}
+	s.ExpiresAt = expiresAt
+	s.UpdatedAt = time.Now()
+	m.updatedSessions = append(m.updatedSessions, s)
+	return nil
+}
+
 func (m *mockWarmStore) DeleteSession(_ context.Context, id string) error {
 	if _, ok := m.sessions[id]; !ok {
 		return session.ErrSessionNotFound
@@ -230,14 +241,14 @@ func (m *mockWarmStore) RecordProviderCall(_ context.Context, sessionID string, 
 	return nil
 }
 
-func (m *mockWarmStore) GetToolCalls(_ context.Context, sessionID string) ([]*session.ToolCall, error) {
+func (m *mockWarmStore) GetToolCalls(_ context.Context, sessionID string, _ providers.PaginationOpts) ([]*session.ToolCall, error) {
 	if _, ok := m.sessions[sessionID]; !ok {
 		return nil, session.ErrSessionNotFound
 	}
 	return []*session.ToolCall{}, nil
 }
 
-func (m *mockWarmStore) GetProviderCalls(_ context.Context, sessionID string) ([]*session.ProviderCall, error) {
+func (m *mockWarmStore) GetProviderCalls(_ context.Context, sessionID string, _ providers.PaginationOpts) ([]*session.ProviderCall, error) {
 	if _, ok := m.sessions[sessionID]; !ok {
 		return nil, session.ErrSessionNotFound
 	}
@@ -248,8 +259,11 @@ func (m *mockWarmStore) RecordRuntimeEvent(_ context.Context, _ string, _ *sessi
 	return nil
 }
 
-func (m *mockWarmStore) GetRuntimeEvents(_ context.Context, _ string) ([]*session.RuntimeEvent, error) {
-	return nil, nil
+func (m *mockWarmStore) GetRuntimeEvents(_ context.Context, sessionID string, _ providers.PaginationOpts) ([]*session.RuntimeEvent, error) {
+	if _, ok := m.sessions[sessionID]; !ok {
+		return nil, session.ErrSessionNotFound
+	}
+	return []*session.RuntimeEvent{}, nil
 }
 
 type mockColdArchive struct {
@@ -2705,6 +2719,66 @@ func TestHandleGetProviderCalls(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+}
+
+func TestHandleGetRuntimeEvents(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions[testSessionID] = &session.Session{
+		ID: testSessionID, AgentName: "a", Namespace: "n", Status: session.SessionStatusActive,
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions/"+testSessionID+"/events", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+}
+
+func TestHandleGetRuntimeEvents_InvalidSessionID(t *testing.T) {
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(newMockWarmStore())
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions/not-a-uuid/events", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleGetRuntimeEvents_NotFound(t *testing.T) {
+	warm := newMockWarmStore()
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions/"+testSessionID+"/events", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusNotFound)
 	}
 }
 

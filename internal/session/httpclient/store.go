@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -137,6 +138,12 @@ func NewStore(baseURL string, log logr.Logger, opts ...StoreOption) *Store {
 		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout: DefaultHTTPTimeout,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 50,
+				MaxConnsPerHost:     100,
+				IdleConnTimeout:     90 * time.Second,
+			},
 		},
 		log:           log.WithName("session-httpclient"),
 		bufCapacity:   defaultBufferCapacity,
@@ -412,25 +419,24 @@ func (s *Store) RecordRuntimeEvent(ctx context.Context, sessionID string, evt se
 }
 
 // GetRuntimeEvents retrieves runtime events via GET /api/v1/sessions/{sessionID}/events.
-func (s *Store) GetRuntimeEvents(ctx context.Context, sessionID string) ([]session.RuntimeEvent, error) {
-	resp, err := s.doWithRetry(ctx, http.MethodGet, fmt.Sprintf("/api/v1/sessions/%s/events", sessionID), nil)
-	if err != nil {
-		return nil, fmt.Errorf("get runtime events: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
+func (s *Store) GetRuntimeEvents(ctx context.Context, sessionID string, limit, offset int) ([]session.RuntimeEvent, error) {
+	return getPaginatedDetail[[]session.RuntimeEvent](s, ctx, sessionID, "events", "runtime events", limit, offset)
+}
 
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, session.ErrSessionNotFound
+// appendPaginationParams appends limit and offset query parameters to a URL path.
+func appendPaginationParams(path string, limit, offset int) string {
+	if limit <= 0 && offset <= 0 {
+		return path
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, s.readError(resp)
+	sep := "?"
+	if limit > 0 {
+		path += sep + "limit=" + strconv.Itoa(limit)
+		sep = "&"
 	}
-
-	var events []session.RuntimeEvent
-	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
-		return nil, fmt.Errorf("decode runtime events: %w", err)
+	if offset > 0 {
+		path += sep + "offset=" + strconv.Itoa(offset)
 	}
-	return events, nil
+	return path
 }
 
 // Ping checks session-api connectivity via a lightweight /healthz endpoint.
@@ -495,47 +501,41 @@ func (s *Store) GetMessages(_ context.Context, _ string) ([]session.Message, err
 }
 
 // GetToolCalls retrieves tool calls via GET /api/v1/sessions/{sessionID}/tool-calls.
-func (s *Store) GetToolCalls(ctx context.Context, sessionID string) ([]session.ToolCall, error) {
-	resp, err := s.doWithRetry(ctx, http.MethodGet, fmt.Sprintf("/api/v1/sessions/%s/tool-calls", sessionID), nil)
-	if err != nil {
-		return nil, fmt.Errorf("get tool calls: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, session.ErrSessionNotFound
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, s.readError(resp)
-	}
-
-	var calls []session.ToolCall
-	if err := json.NewDecoder(resp.Body).Decode(&calls); err != nil {
-		return nil, fmt.Errorf("decode tool calls: %w", err)
-	}
-	return calls, nil
+func (s *Store) GetToolCalls(ctx context.Context, sessionID string, limit, offset int) ([]session.ToolCall, error) {
+	return getPaginatedDetail[[]session.ToolCall](s, ctx, sessionID, "tool-calls", "tool calls", limit, offset)
 }
 
 // GetProviderCalls retrieves provider calls via GET /api/v1/sessions/{sessionID}/provider-calls.
-func (s *Store) GetProviderCalls(ctx context.Context, sessionID string) ([]session.ProviderCall, error) {
-	resp, err := s.doWithRetry(ctx, http.MethodGet, fmt.Sprintf("/api/v1/sessions/%s/provider-calls", sessionID), nil)
+func (s *Store) GetProviderCalls(ctx context.Context, sessionID string, limit, offset int) ([]session.ProviderCall, error) {
+	return getPaginatedDetail[[]session.ProviderCall](s, ctx, sessionID, "provider-calls", "provider calls", limit, offset)
+}
+
+// getPaginatedDetail is a generic helper for GET endpoints that return a
+// paginated list of session-scoped resources (tool calls, provider calls,
+// runtime events). It builds the URL, handles 404/error responses, and
+// decodes the JSON body into the target type T.
+func getPaginatedDetail[T any](s *Store, ctx context.Context, sessionID, resource, label string, limit, offset int) (T, error) {
+	var zero T
+	path := fmt.Sprintf("/api/v1/sessions/%s/%s", sessionID, resource)
+	path = appendPaginationParams(path, limit, offset)
+	resp, err := s.doWithRetry(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		return nil, fmt.Errorf("get provider calls: %w", err)
+		return zero, fmt.Errorf("get %s: %w", label, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, session.ErrSessionNotFound
+		return zero, session.ErrSessionNotFound
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, s.readError(resp)
+		return zero, s.readError(resp)
 	}
 
-	var calls []session.ProviderCall
-	if err := json.NewDecoder(resp.Body).Decode(&calls); err != nil {
-		return nil, fmt.Errorf("decode provider calls: %w", err)
+	var result T
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return zero, fmt.Errorf("decode %s: %w", label, err)
 	}
-	return calls, nil
+	return result, nil
 }
 
 // SetState is not used by the facade.

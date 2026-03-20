@@ -398,13 +398,15 @@ type Store interface {
 	// Returns ErrSessionNotFound if the session does not exist.
 	RecordProviderCall(ctx context.Context, sessionID string, pc ProviderCall) error
 
-	// GetToolCalls retrieves all tool calls for a session ordered by created_at.
+	// GetToolCalls retrieves tool calls for a session ordered by created_at.
+	// When limit is 0, a default limit is applied.
 	// Returns ErrSessionNotFound if the session does not exist.
-	GetToolCalls(ctx context.Context, sessionID string) ([]ToolCall, error)
+	GetToolCalls(ctx context.Context, sessionID string, limit, offset int) ([]ToolCall, error)
 
-	// GetProviderCalls retrieves all provider calls for a session ordered by created_at.
+	// GetProviderCalls retrieves provider calls for a session ordered by created_at.
+	// When limit is 0, a default limit is applied.
 	// Returns ErrSessionNotFound if the session does not exist.
-	GetProviderCalls(ctx context.Context, sessionID string) ([]ProviderCall, error)
+	GetProviderCalls(ctx context.Context, sessionID string, limit, offset int) ([]ProviderCall, error)
 
 	// RecordEvalResult records one or more eval results for the session.
 	// Both the runtime (inline evals) and the arena worker write through this method.
@@ -415,9 +417,10 @@ type Store interface {
 	// Returns ErrSessionNotFound if the session does not exist.
 	RecordRuntimeEvent(ctx context.Context, sessionID string, evt RuntimeEvent) error
 
-	// GetRuntimeEvents retrieves all runtime events for a session ordered by timestamp.
+	// GetRuntimeEvents retrieves runtime events for a session ordered by timestamp.
+	// When limit is 0, a default limit is applied.
 	// Returns ErrSessionNotFound if the session does not exist.
-	GetRuntimeEvents(ctx context.Context, sessionID string) ([]RuntimeEvent, error)
+	GetRuntimeEvents(ctx context.Context, sessionID string, limit, offset int) ([]RuntimeEvent, error)
 
 	// Close releases any resources held by the store.
 	Close() error

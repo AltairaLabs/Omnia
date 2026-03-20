@@ -39,6 +39,7 @@ var (
 	ErrMissingSessionID   = errors.New("session ID is required")
 	ErrInvalidSessionID   = errors.New("session ID must be a valid UUID")
 	ErrMissingBody        = errors.New("request body is required")
+	ErrMissingAgentName   = errors.New("agentName is required")
 	ErrMissingNamespace   = errors.New("namespace parameter is required")
 	ErrBodyTooLarge       = errors.New("request body too large")
 	ErrInvalidStatus      = errors.New("invalid session status")
@@ -349,15 +350,8 @@ func (s *SessionService) RefreshTTL(ctx context.Context, sessionID string, ttl t
 		return ErrWarmStoreRequired
 	}
 
-	sess, err := warm.GetSession(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-
-	sess.ExpiresAt = time.Now().Add(ttl)
-	sess.UpdatedAt = time.Now()
-
-	return warm.UpdateSession(ctx, sess)
+	expiresAt := time.Now().Add(ttl)
+	return warm.RefreshTTL(ctx, sessionID, expiresAt)
 }
 
 // RecordToolCall records a tool call via the warm store.
@@ -384,8 +378,8 @@ func (s *SessionService) RecordProviderCall(ctx context.Context, sessionID strin
 	return warm.RecordProviderCall(ctx, sessionID, pc)
 }
 
-// GetToolCalls retrieves all tool calls for a session via the warm store.
-func (s *SessionService) GetToolCalls(ctx context.Context, sessionID string) ([]*session.ToolCall, error) {
+// GetToolCalls retrieves tool calls for a session via the warm store.
+func (s *SessionService) GetToolCalls(ctx context.Context, sessionID string, opts providers.PaginationOpts) ([]*session.ToolCall, error) {
 	if sessionID == "" {
 		return nil, ErrMissingSessionID
 	}
@@ -393,11 +387,11 @@ func (s *SessionService) GetToolCalls(ctx context.Context, sessionID string) ([]
 	if err != nil {
 		return nil, ErrWarmStoreRequired
 	}
-	return warm.GetToolCalls(ctx, sessionID)
+	return warm.GetToolCalls(ctx, sessionID, opts)
 }
 
-// GetProviderCalls retrieves all provider calls for a session via the warm store.
-func (s *SessionService) GetProviderCalls(ctx context.Context, sessionID string) ([]*session.ProviderCall, error) {
+// GetProviderCalls retrieves provider calls for a session via the warm store.
+func (s *SessionService) GetProviderCalls(ctx context.Context, sessionID string, opts providers.PaginationOpts) ([]*session.ProviderCall, error) {
 	if sessionID == "" {
 		return nil, ErrMissingSessionID
 	}
@@ -405,7 +399,7 @@ func (s *SessionService) GetProviderCalls(ctx context.Context, sessionID string)
 	if err != nil {
 		return nil, ErrWarmStoreRequired
 	}
-	return warm.GetProviderCalls(ctx, sessionID)
+	return warm.GetProviderCalls(ctx, sessionID, opts)
 }
 
 // RecordRuntimeEvent records a runtime lifecycle event via the warm store.
@@ -420,8 +414,8 @@ func (s *SessionService) RecordRuntimeEvent(ctx context.Context, sessionID strin
 	return warm.RecordRuntimeEvent(ctx, sessionID, evt)
 }
 
-// GetRuntimeEvents retrieves all runtime events for a session via the warm store.
-func (s *SessionService) GetRuntimeEvents(ctx context.Context, sessionID string) ([]*session.RuntimeEvent, error) {
+// GetRuntimeEvents retrieves runtime events for a session via the warm store.
+func (s *SessionService) GetRuntimeEvents(ctx context.Context, sessionID string, opts providers.PaginationOpts) ([]*session.RuntimeEvent, error) {
 	if sessionID == "" {
 		return nil, ErrMissingSessionID
 	}
@@ -429,7 +423,7 @@ func (s *SessionService) GetRuntimeEvents(ctx context.Context, sessionID string)
 	if err != nil {
 		return nil, ErrWarmStoreRequired
 	}
-	return warm.GetRuntimeEvents(ctx, sessionID)
+	return warm.GetRuntimeEvents(ctx, sessionID, opts)
 }
 
 // getFromHot attempts to retrieve a session from the hot cache.

@@ -102,6 +102,18 @@ func (w *integrationWarmStore) UpdateSessionStats(_ context.Context, sessionID s
 	return nil
 }
 
+func (w *integrationWarmStore) RefreshTTL(_ context.Context, id string, expiresAt time.Time) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	s, ok := w.sessions[id]
+	if !ok {
+		return session.ErrSessionNotFound
+	}
+	s.ExpiresAt = expiresAt
+	s.UpdatedAt = time.Now()
+	return nil
+}
+
 func (w *integrationWarmStore) DeleteSession(_ context.Context, id string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -154,11 +166,11 @@ func (w *integrationWarmStore) RecordProviderCall(_ context.Context, _ string, _
 	return nil
 }
 
-func (w *integrationWarmStore) GetToolCalls(_ context.Context, _ string) ([]*session.ToolCall, error) {
+func (w *integrationWarmStore) GetToolCalls(_ context.Context, _ string, _ providers.PaginationOpts) ([]*session.ToolCall, error) {
 	return []*session.ToolCall{}, nil
 }
 
-func (w *integrationWarmStore) GetProviderCalls(_ context.Context, _ string) ([]*session.ProviderCall, error) {
+func (w *integrationWarmStore) GetProviderCalls(_ context.Context, _ string, _ providers.PaginationOpts) ([]*session.ProviderCall, error) {
 	return []*session.ProviderCall{}, nil
 }
 
@@ -166,7 +178,7 @@ func (w *integrationWarmStore) RecordRuntimeEvent(_ context.Context, _ string, _
 	return nil
 }
 
-func (w *integrationWarmStore) GetRuntimeEvents(_ context.Context, _ string) ([]*session.RuntimeEvent, error) {
+func (w *integrationWarmStore) GetRuntimeEvents(_ context.Context, _ string, _ providers.PaginationOpts) ([]*session.RuntimeEvent, error) {
 	return []*session.RuntimeEvent{}, nil
 }
 

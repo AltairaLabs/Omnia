@@ -108,11 +108,11 @@ func (m *mockSessionStore) RecordProviderCall(_ context.Context, _ string, pc se
 	return nil
 }
 
-func (m *mockSessionStore) GetToolCalls(_ context.Context, _ string) ([]session.ToolCall, error) {
+func (m *mockSessionStore) GetToolCalls(_ context.Context, _ string, _, _ int) ([]session.ToolCall, error) {
 	return nil, nil
 }
 
-func (m *mockSessionStore) GetProviderCalls(_ context.Context, _ string) ([]session.ProviderCall, error) {
+func (m *mockSessionStore) GetProviderCalls(_ context.Context, _ string, _, _ int) ([]session.ProviderCall, error) {
 	return nil, nil
 }
 
@@ -130,7 +130,7 @@ func (m *mockSessionStore) RecordRuntimeEvent(_ context.Context, _ string, evt s
 	return nil
 }
 
-func (m *mockSessionStore) GetRuntimeEvents(_ context.Context, _ string) ([]session.RuntimeEvent, error) {
+func (m *mockSessionStore) GetRuntimeEvents(_ context.Context, _ string, _, _ int) ([]session.RuntimeEvent, error) {
 	return nil, nil
 }
 

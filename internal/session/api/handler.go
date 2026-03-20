@@ -42,6 +42,8 @@ const (
 	maxListLimit        = 100
 	defaultMessageLimit = 50
 	maxMessageLimit     = 500
+	defaultDetailLimit  = 100
+	maxDetailLimit      = 500
 	maxStringParamLen   = 253 // K8s name limit
 	maxSearchQueryLen   = 500
 	maxOffsetLimit      = 10000
@@ -183,6 +185,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/sessions/{sessionID}/events", h.handleGetRuntimeEvents)
 
 	// Eval result endpoints
+	mux.HandleFunc("GET /api/v1/sessions/{sessionID}/eval-results/summary", h.handleGetEvalResultSummary)
 	mux.HandleFunc("GET /api/v1/sessions/{sessionID}/eval-results", h.handleGetSessionEvalResults)
 	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/evaluate", h.handleEvaluateSession)
 	mux.HandleFunc("POST /api/v1/eval-results", h.handleCreateEvalResults)
@@ -400,6 +403,15 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.AgentName == "" {
+		writeError(w, ErrMissingAgentName)
+		return
+	}
+	if req.Namespace == "" {
+		writeError(w, ErrMissingNamespace)
+		return
+	}
+
 	if req.ID != "" {
 		if _, err := uuid.Parse(req.ID); err != nil {
 			writeError(w, ErrInvalidSessionID)
@@ -588,25 +600,9 @@ func (h *Handler) handleRecordToolCall(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-// handleGetToolCalls returns all tool calls for a session.
+// handleGetToolCalls returns tool calls for a session with pagination.
 func (h *Handler) handleGetToolCalls(w http.ResponseWriter, r *http.Request) {
-	sessionID, err := sessionIDFromRequest(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-
-	ctx := withRequestContext(r.Context(), extractRequestContext(r))
-	calls, err := h.service.GetToolCalls(ctx, sessionID)
-	if err != nil {
-		if !errors.Is(err, session.ErrSessionNotFound) {
-			h.requestLog(r.Context()).Error(err, "GetToolCalls failed", "sessionID", sessionID)
-		}
-		writeError(w, err)
-		return
-	}
-
-	writeJSON(w, calls)
+	servePaginatedDetail(h, w, r, "GetToolCalls", h.service.GetToolCalls)
 }
 
 // handleRecordProviderCall records a provider call for a session.
@@ -641,25 +637,9 @@ func (h *Handler) handleRecordProviderCall(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusCreated)
 }
 
-// handleGetProviderCalls returns all provider calls for a session.
+// handleGetProviderCalls returns provider calls for a session with pagination.
 func (h *Handler) handleGetProviderCalls(w http.ResponseWriter, r *http.Request) {
-	sessionID, err := sessionIDFromRequest(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-
-	ctx := withRequestContext(r.Context(), extractRequestContext(r))
-	calls, err := h.service.GetProviderCalls(ctx, sessionID)
-	if err != nil {
-		if !errors.Is(err, session.ErrSessionNotFound) {
-			h.requestLog(r.Context()).Error(err, "GetProviderCalls failed", "sessionID", sessionID)
-		}
-		writeError(w, err)
-		return
-	}
-
-	writeJSON(w, calls)
+	servePaginatedDetail(h, w, r, "GetProviderCalls", h.service.GetProviderCalls)
 }
 
 // handleRecordRuntimeEvent records a runtime event for a session.
@@ -694,25 +674,33 @@ func (h *Handler) handleRecordRuntimeEvent(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusCreated)
 }
 
-// handleGetRuntimeEvents returns all runtime events for a session.
+// handleGetRuntimeEvents returns runtime events for a session with pagination.
 func (h *Handler) handleGetRuntimeEvents(w http.ResponseWriter, r *http.Request) {
+	servePaginatedDetail(h, w, r, "GetRuntimeEvents", h.service.GetRuntimeEvents)
+}
+
+// servePaginatedDetail is a generic handler for paginated detail endpoints
+// (tool calls, provider calls, runtime events). It extracts the session ID,
+// parses pagination params, calls the service function, and writes the result.
+func servePaginatedDetail[T any](h *Handler, w http.ResponseWriter, r *http.Request, opName string, fn func(context.Context, string, providers.PaginationOpts) (T, error)) {
 	sessionID, err := sessionIDFromRequest(r)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 
+	opts := parseDetailPagination(r)
 	ctx := withRequestContext(r.Context(), extractRequestContext(r))
-	events, err := h.service.GetRuntimeEvents(ctx, sessionID)
+	result, err := fn(ctx, sessionID, opts)
 	if err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
-			h.requestLog(r.Context()).Error(err, "GetRuntimeEvents failed", "sessionID", sessionID)
+			h.requestLog(r.Context()).Error(err, opName+" failed", "sessionID", sessionID)
 		}
 		writeError(w, err)
 		return
 	}
 
-	writeJSON(w, events)
+	writeJSON(w, result)
 }
 
 // parseListParams extracts common list/search query parameters from the request.
@@ -761,6 +749,17 @@ func parseListParams(r *http.Request) (providers.SessionListOpts, error) {
 	}
 
 	return opts, nil
+}
+
+// parseDetailPagination extracts limit/offset query params for detail endpoints
+// (tool calls, provider calls, runtime events). Default limit is 100, max 500.
+func parseDetailPagination(r *http.Request) providers.PaginationOpts {
+	limit := min(parseIntParam(r, "limit", defaultDetailLimit), maxDetailLimit)
+	offset := min(parseIntParam(r, "offset", 0), maxOffsetLimit)
+	return providers.PaginationOpts{
+		Limit:  limit,
+		Offset: offset,
+	}
 }
 
 // parseIntParam returns an integer query parameter or the default value.
@@ -817,6 +816,9 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrMissingBody):
 		status = http.StatusBadRequest
 		msg = ErrMissingBody.Error()
+	case errors.Is(err, ErrMissingAgentName):
+		status = http.StatusBadRequest
+		msg = ErrMissingAgentName.Error()
 	case errors.Is(err, ErrMissingNamespace):
 		status = http.StatusBadRequest
 		msg = ErrMissingNamespace.Error()
