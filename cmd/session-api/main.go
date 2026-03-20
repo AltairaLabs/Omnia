@@ -34,10 +34,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	goredis "github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
+	"k8s.io/client-go/rest"
 
 	"github.com/altairalabs/omnia/ee/pkg/audit"
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
+	"github.com/altairalabs/omnia/ee/pkg/redaction"
 	"github.com/altairalabs/omnia/internal/session/api"
 	"github.com/altairalabs/omnia/internal/session/otlp"
 	sessionpg "github.com/altairalabs/omnia/internal/session/postgres"
@@ -421,6 +423,12 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	handler.RegisterRoutes(mux)
 	registerEnterpriseRoutes(mux, pool, registry, auditLogger, f, log)
 
+	// Privacy middleware (enterprise only): PII redaction + user opt-out.
+	var apiHandler http.Handler = mux
+	if f.enterprise {
+		apiHandler = wrapPrivacyMiddleware(apiHandler, registry, pool, log)
+	}
+
 	// Rate limiting middleware (per-client-IP token bucket).
 	rlCfg := api.RateLimitConfigFromEnv()
 	rlMiddleware, rlStop := api.NewRateLimitMiddleware(rlCfg)
@@ -431,7 +439,7 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	}
 	log.V(1).Info("rate limiter initialized", "rps", rlCfg.RPS, "burst", rlCfg.Burst)
 
-	traced := otelhttp.NewHandler(api.TraceLogMiddleware(mux), "session-api",
+	traced := otelhttp.NewHandler(api.TraceLogMiddleware(apiHandler), "session-api",
 		otelhttp.WithFilter(func(r *http.Request) bool {
 			return r.URL.Path != "/healthz"
 		}),
@@ -624,4 +632,42 @@ func buildMediaDeleter(f *flags, log logr.Logger) privacy.MediaDeleter {
 		"bucket", f.coldBucket,
 	)
 	return privacy.NoOpMediaDeleter{}
+}
+
+// wrapPrivacyMiddleware creates and returns the privacy middleware handler.
+// When the K8s API is unreachable (e.g., in tests), the middleware is skipped
+// and the original handler is returned unchanged.
+func wrapPrivacyMiddleware(
+	next http.Handler,
+	registry *providers.Registry,
+	pool *pgxpool.Pool,
+	log logr.Logger,
+) http.Handler {
+	kubeConfig, err := rest.InClusterConfig()
+	if err != nil {
+		log.Info("privacy middleware skipped", "reason", "no in-cluster kubeconfig")
+		return next
+	}
+
+	watcher, err := privacy.NewPolicyWatcher(kubeConfig, log)
+	if err != nil {
+		log.Error(err, "privacy middleware skipped", "reason", "policy watcher creation failed")
+		return next
+	}
+
+	// Start the watcher asynchronously; it syncs the cache in the background.
+	go func() {
+		if startErr := watcher.Start(context.Background()); startErr != nil {
+			log.Error(startErr, "policy watcher start failed")
+		}
+	}()
+
+	sessionLookup := privacy.NewWarmStoreSessionLookup(registry)
+	sessionCache := privacy.NewSessionMetadataCache(sessionLookup, 10000)
+	redactor := redaction.NewRedactor()
+	prefStore := privacy.NewPreferencesStore(pool)
+
+	middleware := privacy.NewPrivacyMiddleware(watcher, sessionCache, redactor, prefStore, log)
+	log.Info("privacy middleware enabled")
+	return middleware.Wrap(next)
 }

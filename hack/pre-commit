@@ -525,6 +525,11 @@ if [ -f coverage.out ]; then
             continue
         fi
 
+        # Skip privacy watcher and session lookup adapter (require K8s API / real provider registry)
+        if [[ "$file" == ee/pkg/privacy/watcher.go ]] || [[ "$file" == ee/pkg/privacy/session_lookup_adapter.go ]]; then
+            continue
+        fi
+
         # Skip cold archive cloud blob store implementations (require external infrastructure: S3/MinIO, GCS, Azure)
         if [[ "$file" == internal/session/providers/cold/blobstore_s3.go ]] || [[ "$file" == internal/session/providers/cold/blobstore_gcs.go ]] || [[ "$file" == internal/session/providers/cold/blobstore_azure.go ]]; then
             continue

@@ -12,6 +12,9 @@
 - OTLP trace ingestion (optional)
 - Rate limiting per client IP
 - Audit logging (enterprise)
+- PII redaction middleware — intercepts all write requests and redacts PII from message content, tool call arguments/results, provider call payloads, event metadata, and eval results based on the effective SessionPrivacyPolicy (enterprise)
+- Privacy opt-out enforcement — silently drops writes (204 No Content) when the user has opted out via preferences (enterprise)
+- SessionPrivacyPolicy CRD watching — shared informer maintains an in-memory cache of policies and computes effective policy per namespace/agent using the global → workspace → agent inheritance chain (enterprise)
 - Privacy/GDPR deletion with media artifact cleanup, batch processing, and progress tracking (enterprise)
 - Privacy opt-out preferences (enterprise)
 
@@ -88,7 +91,21 @@ The GDPR/CCPA deletion pipeline processes user data removal requests:
 
 Media cleanup uses the `MediaDeleter` interface. When object storage is not configured, a no-op deleter is used so the pipeline proceeds without error. Cold storage deletion is not needed because Phase 1 PII filtering ensures no PII reaches the cold tier.
 
+## Privacy Architecture
+
+The session-api is the **single enforcement point** for PII redaction. All session data writers (facade, runtime, arena-worker) converge on the session-api, so placing redaction here catches every write path without requiring changes to originators.
+
+The privacy middleware sits in front of all write endpoints (POST/PATCH/PUT):
+1. Extracts session ID from the URL path
+2. Resolves session → namespace/agent via a bounded LRU cache backed by the warm store
+3. Computes the effective SessionPrivacyPolicy using the CRD watcher's policy inheritance chain
+4. Checks user opt-out preferences — returns 204 if the user has opted out
+5. Applies PII redaction to the request body based on the endpoint type and configured PII patterns
+
+The `X-Omnia-User-ID` header is propagated by the facade and runtime on all write requests, enabling per-user opt-out enforcement.
+
 ## Dependencies
 - PostgreSQL (required, warm store)
 - Redis (optional, hot cache + event streaming)
 - Cold storage provider (optional: S3/GCS/Azure, also used for media artifact cleanup)
+- Kubernetes API (enterprise: SessionPrivacyPolicy CRD watching via shared informer)

@@ -696,6 +696,9 @@ func (s *Store) doRequest(ctx context.Context, method, path string, body []byte)
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if uid := UserIDFromContext(ctx); uid != "" {
+		req.Header.Set("X-Omnia-User-ID", uid)
+	}
 
 	s.log.V(2).Info("session-api request",
 		"method", method, "path", path)
