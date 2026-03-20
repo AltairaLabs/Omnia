@@ -272,7 +272,10 @@ func (m *mockWarmStore) GetProviderCalls(_ context.Context, sessionID string, op
 	return applyPagination(items, opts), nil
 }
 
-func (m *mockWarmStore) RecordRuntimeEvent(_ context.Context, _ string, _ *session.RuntimeEvent) error {
+func (m *mockWarmStore) RecordRuntimeEvent(_ context.Context, sessionID string, _ *session.RuntimeEvent) error {
+	if _, ok := m.sessions[sessionID]; !ok {
+		return session.ErrSessionNotFound
+	}
 	return nil
 }
 
@@ -2966,5 +2969,148 @@ func TestHandleGetRuntimeEvents_Pagination(t *testing.T) {
 	}
 	if result[0].ID != "evt-1" {
 		t.Errorf("expected evt-1, got %s", result[0].ID)
+	}
+}
+
+func TestHandleRecordRuntimeEvent_OK(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions[testSessionID] = &session.Session{
+		ID: testSessionID, AgentName: "a", Namespace: "n", Status: session.SessionStatusActive,
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"id":"evt-1","eventType":"pipeline.started"}`
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/sessions/"+testSessionID+"/events",
+		strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusCreated)
+	}
+}
+
+func TestHandleRecordRuntimeEvent_InvalidBody(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions[testSessionID] = &session.Session{
+		ID: testSessionID, AgentName: "a", Namespace: "n", Status: session.SessionStatusActive,
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/sessions/"+testSessionID+"/events",
+		strings.NewReader(`not json`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleRecordRuntimeEvent_NotFound(t *testing.T) {
+	warm := newMockWarmStore()
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"id":"evt-1","eventType":"pipeline.started"}`
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/sessions/"+testSessionID+"/events",
+		strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandleRecordProviderCall_OK(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions[testSessionID] = &session.Session{
+		ID: testSessionID, AgentName: "a", Namespace: "n", Status: session.SessionStatusActive,
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"id":"pc-1","provider":"anthropic","model":"claude-sonnet-4-20250514","status":"completed"}`
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/sessions/"+testSessionID+"/provider-calls",
+		strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusCreated)
+	}
+}
+
+func TestHandleRecordProviderCall_InvalidBody(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions[testSessionID] = &session.Session{
+		ID: testSessionID, AgentName: "a", Namespace: "n", Status: session.SessionStatusActive,
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/sessions/"+testSessionID+"/provider-calls",
+		strings.NewReader(`not json`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleRecordToolCall_InvalidBody(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions[testSessionID] = &session.Session{
+		ID: testSessionID, AgentName: "a", Namespace: "n", Status: session.SessionStatusActive,
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/sessions/"+testSessionID+"/tool-calls",
+		strings.NewReader(`not json`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
 	}
 }

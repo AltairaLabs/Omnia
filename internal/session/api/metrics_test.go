@@ -234,6 +234,29 @@ func TestNormalizeRoute_UsesPattern(t *testing.T) {
 	assert.Equal(t, "GET /api/v1/sessions/{sessionID}", route)
 }
 
+func TestStatusCapture_Flush_Supported(t *testing.T) {
+	rr := httptest.NewRecorder()
+	sc := &statusCapture{ResponseWriter: rr, code: http.StatusOK}
+	// httptest.ResponseRecorder implements http.Flusher, so Flush should delegate.
+	sc.Flush()
+	assert.True(t, rr.Flushed)
+}
+
+func TestStatusCapture_Flush_NotSupported(t *testing.T) {
+	// Use a minimal ResponseWriter that does NOT implement http.Flusher.
+	w := &nonFlushWriter{}
+	sc := &statusCapture{ResponseWriter: w, code: http.StatusOK}
+	// Should not panic when underlying writer lacks Flusher.
+	sc.Flush()
+}
+
+// nonFlushWriter is an http.ResponseWriter that does not implement http.Flusher.
+type nonFlushWriter struct{}
+
+func (n *nonFlushWriter) Header() http.Header         { return http.Header{} }
+func (n *nonFlushWriter) Write(b []byte) (int, error) { return len(b), nil }
+func (n *nonFlushWriter) WriteHeader(_ int)           {}
+
 // newHTTPMetricsWithRegistry creates HTTPMetrics against a custom registry for testing.
 func newHTTPMetricsWithRegistry(reg prometheus.Registerer, cfg *HTTPMetricsConfig) *HTTPMetrics {
 	var buckets []float64
