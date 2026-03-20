@@ -20,7 +20,6 @@ package api
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"strconv"
 
@@ -59,19 +58,14 @@ func (h *Handler) handleCreateEvalResults(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, h.maxBodySize))
-	if err != nil {
-		w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(ErrorResponse{Error: "failed to read request body"})
-		return
-	}
-
+	h.limitBody(w, r)
 	var results []*EvalResult
-	if err := json.Unmarshal(body, &results); err != nil {
-		w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(ErrorResponse{Error: "invalid JSON body"})
+	if err := json.NewDecoder(r.Body).Decode(&results); err != nil {
+		if isMaxBytesError(err) {
+			writeError(w, ErrBodyTooLarge)
+			return
+		}
+		writeError(w, ErrMissingBody)
 		return
 	}
 

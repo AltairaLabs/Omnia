@@ -538,16 +538,6 @@ func getPaginatedDetail[T any](s *Store, ctx context.Context, sessionID, resourc
 	return result, nil
 }
 
-// SetState is not used by the facade.
-func (s *Store) SetState(_ context.Context, _, _, _ string) error {
-	return ErrNotImplemented
-}
-
-// GetState is not used by the facade.
-func (s *Store) GetState(_ context.Context, _, _ string) (string, error) {
-	return "", ErrNotImplemented
-}
-
 // --- Write buffer ---
 
 // bufferWrite enqueues a failed write for later retry. Returns nil so callers

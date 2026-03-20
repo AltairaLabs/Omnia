@@ -71,14 +71,6 @@ func (m *mockSessionStore) GetMessages(_ context.Context, _ string) ([]session.M
 	return nil, nil
 }
 
-func (m *mockSessionStore) SetState(_ context.Context, _, _, _ string) error {
-	return nil
-}
-
-func (m *mockSessionStore) GetState(_ context.Context, _, _ string) (string, error) {
-	return "", nil
-}
-
 func (m *mockSessionStore) RefreshTTL(_ context.Context, _ string, _ time.Duration) error {
 	return nil
 }

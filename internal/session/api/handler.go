@@ -719,10 +719,11 @@ func parseListParams(r *http.Request) (providers.SessionListOpts, error) {
 	}
 
 	opts := providers.SessionListOpts{
-		Limit:     limit,
-		Offset:    offset,
-		Namespace: truncateParam(ns, maxStringParamLen),
-		AgentName: truncateParam(q.Get("agent"), maxStringParamLen),
+		Limit:         limit,
+		Offset:        offset,
+		Namespace:     truncateParam(ns, maxStringParamLen),
+		WorkspaceName: truncateParam(ns, maxStringParamLen),
+		AgentName:     truncateParam(q.Get("agent"), maxStringParamLen),
 	}
 
 	if status := q.Get("status"); status != "" {

@@ -25,6 +25,12 @@ import (
 )
 
 // EvalResult represents a single evaluation result stored in the eval_results table.
+//
+// NOTE: A structurally similar type exists in internal/session/store.go
+// (session.EvalResult). That type is used by the facade-side Store interface
+// and has more omitempty JSON tags for the write path. This type is used by
+// the session-api HTTP layer and EvalStore interface, where required fields
+// (AgentName, Namespace, etc.) must always appear in API responses.
 type EvalResult struct {
 	ID                string          `json:"id"`
 	SessionID         string          `json:"sessionId"`
