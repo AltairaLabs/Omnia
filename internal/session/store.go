@@ -221,10 +221,6 @@ type SessionStatusUpdate struct {
 	SetEndedAt time.Time     // zero means no change
 }
 
-// SessionStatsUpdate is an alias for backward compatibility during migration.
-// Deprecated: Use SessionStatusUpdate instead.
-type SessionStatsUpdate = SessionStatusUpdate
-
 // ToolCallStatus represents the lifecycle state of a tool call.
 type ToolCallStatus string
 
@@ -388,10 +384,10 @@ type Store interface {
 	// Returns ErrSessionNotFound if the session does not exist.
 	RefreshTTL(ctx context.Context, sessionID string, ttl time.Duration) error
 
-	// UpdateSessionStats atomically increments session-level counters.
+	// UpdateSessionStatus atomically updates session lifecycle state.
 	// Returns ErrSessionNotFound if the session does not exist.
 	// Returns ErrSessionExpired if the session has expired.
-	UpdateSessionStats(ctx context.Context, sessionID string, update SessionStatsUpdate) error
+	UpdateSessionStatus(ctx context.Context, sessionID string, update SessionStatusUpdate) error
 
 	// RecordToolCall appends a tool call lifecycle event (started, completed, failed).
 	// Each event is a separate row; rows sharing the same CallID represent one logical call.

@@ -143,7 +143,7 @@ type AppendMessageRequest struct {
 
 // UpdateStatsRequest is the JSON body for PATCH /api/v1/sessions/{sessionID}/stats.
 type UpdateStatsRequest struct {
-	session.SessionStatsUpdate
+	session.SessionStatusUpdate
 }
 
 // RefreshTTLRequest is the JSON body for POST /api/v1/sessions/{sessionID}/ttl.
@@ -168,7 +168,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Write endpoints
 	mux.HandleFunc("POST /api/v1/sessions", h.handleCreateSession)
 	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/messages", h.handleAppendMessage)
-	mux.HandleFunc("PATCH /api/v1/sessions/{sessionID}/stats", h.handleUpdateStats)
+	mux.HandleFunc("PATCH /api/v1/sessions/{sessionID}/status", h.handleUpdateStats)
+	mux.HandleFunc("PATCH /api/v1/sessions/{sessionID}/stats", h.handleUpdateStats) // backward-compat alias
 	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/ttl", h.handleRefreshTTL)
 	mux.HandleFunc("DELETE /api/v1/sessions/{sessionID}", h.handleDeleteSession)
 
@@ -490,7 +491,7 @@ func (h *Handler) handleUpdateStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.limitBody(w, r)
-	var update session.SessionStatsUpdate
+	var update session.SessionStatusUpdate
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 		if isMaxBytesError(err) {
 			writeError(w, ErrBodyTooLarge)
@@ -501,15 +502,15 @@ func (h *Handler) handleUpdateStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log := h.requestLog(r.Context())
-	if err := h.service.UpdateSessionStats(r.Context(), sessionID, update); err != nil {
+	if err := h.service.UpdateSessionStatus(r.Context(), sessionID, update); err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
-			log.Error(err, "UpdateSessionStats failed", "sessionID", sessionID)
+			log.Error(err, "UpdateSessionStatus failed", "sessionID", sessionID)
 		}
 		writeError(w, err)
 		return
 	}
 
-	log.V(2).Info("session stats updated", "sessionID", sessionID)
+	log.V(2).Info("session status updated", "sessionID", sessionID)
 	w.WriteHeader(http.StatusOK)
 }
 

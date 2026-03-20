@@ -758,8 +758,8 @@ func (m *MockWarmStoreProvider) UpdateSession(
 	return nil
 }
 
-func (m *MockWarmStoreProvider) UpdateSessionStats(
-	_ context.Context, _ string, _ session.SessionStatsUpdate,
+func (m *MockWarmStoreProvider) UpdateSessionStatus(
+	_ context.Context, _ string, _ session.SessionStatusUpdate,
 ) error {
 	return nil
 }

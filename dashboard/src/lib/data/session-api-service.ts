@@ -158,6 +158,7 @@ export class SessionApiService {
     if (options?.to) params.set("to", options.to);
     if (options?.limit) params.set("limit", String(options.limit));
     if (options?.offset) params.set("offset", String(options.offset));
+    if (options?.count) params.set("count", "true");
 
     const queryString = params.toString();
     const suffix = queryString ? `?${queryString}` : "";
@@ -175,7 +176,7 @@ export class SessionApiService {
     const data = await response.json();
     return {
       sessions: (data.sessions || []).map(transformApiSessionSummary),
-      total: data.total || 0,
+      total: data.total ?? -1,
       hasMore: data.hasMore || false,
     };
   }
@@ -215,6 +216,7 @@ export class SessionApiService {
     if (options.to) params.set("to", options.to);
     if (options.limit) params.set("limit", String(options.limit));
     if (options.offset) params.set("offset", String(options.offset));
+    if (options.count) params.set("count", "true");
 
     const response = await fetch(
       `${SESSION_API_BASE}/${encodeURIComponent(workspace)}/sessions?${params.toString()}`
@@ -229,7 +231,7 @@ export class SessionApiService {
     const data = await response.json();
     return {
       sessions: (data.sessions || []).map(transformApiSessionSummary),
-      total: data.total || 0,
+      total: data.total ?? -1,
       hasMore: data.hasMore || false,
     };
   }

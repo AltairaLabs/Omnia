@@ -120,7 +120,7 @@ func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 				return
 			}
 
-			if err := s.sessionStore.UpdateSessionStats(ctx, c.sessionID, session.SessionStatsUpdate{
+			if err := s.sessionStore.UpdateSessionStatus(ctx, c.sessionID, session.SessionStatusUpdate{
 				SetStatus:  session.SessionStatusCompleted,
 				SetEndedAt: time.Now(),
 			}); err != nil {

@@ -115,6 +115,8 @@ export interface SessionListOptions {
   to?: string; // ISO date string
   limit?: number;
   offset?: number;
+  /** Request a total count from the server (triggers a separate COUNT query). */
+  count?: boolean;
 }
 
 // Options for searching sessions (extends list options with query)

@@ -143,7 +143,7 @@ func (m *mockWarmStore) UpdateSession(_ context.Context, s *session.Session) err
 	return nil
 }
 
-func (m *mockWarmStore) UpdateSessionStats(_ context.Context, sessionID string, update session.SessionStatsUpdate) error {
+func (m *mockWarmStore) UpdateSessionStatus(_ context.Context, sessionID string, update session.SessionStatusUpdate) error {
 	s, ok := m.sessions[sessionID]
 	if !ok {
 		return session.ErrSessionNotFound
@@ -1647,7 +1647,7 @@ func TestHandleUpdateStats_OK(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := `{"setStatus":"completed","setEndedAt":"2026-01-01T00:00:00Z"}`
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/"+testSessionID+"/stats", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/"+testSessionID+"/status", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1670,7 +1670,7 @@ func TestHandleUpdateStats_NotFound(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := `{"setStatus":"completed"}`
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/00000000-0000-0000-0000-000000000099/stats", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/00000000-0000-0000-0000-000000000099/status", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1863,7 +1863,7 @@ func TestHandleRegisterRoutes_WriteEndpoints(t *testing.T) {
 	}{
 		{http.MethodPost, "/api/v1/sessions", `{"id":"` + testSessionIDOther + `","agentName":"a","namespace":"ns"}`, http.StatusCreated},
 		{http.MethodPost, "/api/v1/sessions/" + testSessionID + "/messages", `{"id":"m","role":"user","content":"hi"}`, http.StatusCreated},
-		{http.MethodPatch, "/api/v1/sessions/" + testSessionID + "/stats", `{"addMessages":1}`, http.StatusOK},
+		{http.MethodPatch, "/api/v1/sessions/" + testSessionID + "/status", `{"addMessages":1}`, http.StatusOK},
 		{http.MethodPost, "/api/v1/sessions/" + testSessionID + "/ttl", `{"ttlSeconds":60}`, http.StatusOK},
 	}
 
@@ -1962,7 +1962,7 @@ func TestHandleUpdateStats_BodyTooLarge(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := `{"addInputTokens":100,"addOutputTokens":50,"addMessages":1}`
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/"+testSessionID+"/stats", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/"+testSessionID+"/status", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1977,7 +1977,7 @@ func TestHandleUpdateStats_NoBody(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/"+testSessionID+"/stats", nil)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/"+testSessionID+"/status", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -2164,9 +2164,9 @@ func TestHandleGetSession_GetMessagesError(t *testing.T) {
 }
 
 func TestHandleUpdateStats_InternalError(t *testing.T) {
-	// Test the path where UpdateSessionStats returns a non-NotFound error.
+	// Test the path where UpdateSessionStatus returns a non-NotFound error.
 	warm := newMockWarmStore()
-	// Don't add session - UpdateSessionStats will return ErrSessionNotFound.
+	// Don't add session - UpdateSessionStatus will return ErrSessionNotFound.
 	// We need to test the "!errors.Is(err, session.ErrSessionNotFound)" branch too.
 	// That branch logs and returns 500. For now, test the 404 path which
 	// covers the error return without logging.
@@ -2180,7 +2180,7 @@ func TestHandleUpdateStats_InternalError(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := strings.NewReader(`{"addInputTokens": 10}`)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/00000000-0000-0000-0000-000000000099/stats", body)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/00000000-0000-0000-0000-000000000099/status", body)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -2196,7 +2196,7 @@ func TestHandleUpdateStats_MissingSessionID(t *testing.T) {
 	h := NewHandler(svc, logr.Discard())
 
 	body := strings.NewReader(`{"addInputTokens": 10}`)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions//stats", body)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions//status", body)
 	rec := httptest.NewRecorder()
 
 	// Call directly to test empty sessionID path.

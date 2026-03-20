@@ -89,7 +89,7 @@ func (w *integrationWarmStore) AppendMessage(_ context.Context, sessionID string
 	return nil
 }
 
-func (w *integrationWarmStore) UpdateSessionStats(_ context.Context, sessionID string, update session.SessionStatsUpdate) error {
+func (w *integrationWarmStore) UpdateSessionStatus(_ context.Context, sessionID string, update session.SessionStatusUpdate) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	s, ok := w.sessions[sessionID]
@@ -276,10 +276,10 @@ func TestIntegration_FullRecordingChain(t *testing.T) {
 	require.NoError(t, err, "AppendMessage (assistant) should succeed")
 
 	// 4. Update session status (counters are now auto-derived by AppendMessage)
-	err = store.UpdateSessionStats(ctx, sess.ID, session.SessionStatsUpdate{
+	err = store.UpdateSessionStatus(ctx, sess.ID, session.SessionStatusUpdate{
 		SetStatus: session.SessionStatusActive,
 	})
-	require.NoError(t, err, "UpdateSessionStats should succeed")
+	require.NoError(t, err, "UpdateSessionStatus should succeed")
 
 	// 5. Verify messages landed in warm store
 	msgs := warmStore.getMessages(sess.ID)

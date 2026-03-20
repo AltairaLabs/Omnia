@@ -133,8 +133,8 @@ func mockSessionAPI(t *testing.T) *httptest.Server {
 		w.WriteHeader(http.StatusCreated)
 	})
 
-	// PATCH /api/v1/sessions/{sessionID}/stats
-	mux.HandleFunc("PATCH /api/v1/sessions/{sessionID}/stats", func(w http.ResponseWriter, r *http.Request) {
+	// PATCH /api/v1/sessions/{sessionID}/status
+	mux.HandleFunc("PATCH /api/v1/sessions/{sessionID}/status", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("sessionID")
 		if _, ok := sessions[id]; !ok {
 			w.Header().Set("Content-Type", "application/json")
@@ -401,7 +401,7 @@ func TestAppendMessage_ServerError(t *testing.T) {
 	}
 }
 
-func TestUpdateSessionStats_OK(t *testing.T) {
+func TestUpdateSessionStatus_OK(t *testing.T) {
 	srv := mockSessionAPI(t)
 	defer srv.Close()
 
@@ -416,7 +416,7 @@ func TestUpdateSessionStats_OK(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	err = store.UpdateSessionStats(context.Background(), created.ID, session.SessionStatsUpdate{
+	err = store.UpdateSessionStatus(context.Background(), created.ID, session.SessionStatusUpdate{
 		SetStatus: session.SessionStatusActive,
 	})
 	if err != nil {
@@ -424,14 +424,14 @@ func TestUpdateSessionStats_OK(t *testing.T) {
 	}
 }
 
-func TestUpdateSessionStats_NotFound(t *testing.T) {
+func TestUpdateSessionStatus_NotFound(t *testing.T) {
 	srv := mockSessionAPI(t)
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
 
-	err := store.UpdateSessionStats(context.Background(), "nonexistent", session.SessionStatsUpdate{
+	err := store.UpdateSessionStatus(context.Background(), "nonexistent", session.SessionStatusUpdate{
 		SetStatus: session.SessionStatusActive,
 	})
 	if err != session.ErrSessionNotFound {
@@ -439,7 +439,7 @@ func TestUpdateSessionStats_NotFound(t *testing.T) {
 	}
 }
 
-func TestUpdateSessionStats_ServerError(t *testing.T) {
+func TestUpdateSessionStatus_ServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -449,7 +449,7 @@ func TestUpdateSessionStats_ServerError(t *testing.T) {
 
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
-	err := store.UpdateSessionStats(context.Background(), "x", session.SessionStatsUpdate{
+	err := store.UpdateSessionStatus(context.Background(), "x", session.SessionStatusUpdate{
 		SetStatus: session.SessionStatusActive,
 	})
 	if err == nil {
@@ -585,8 +585,8 @@ func TestServerErrorResponses(t *testing.T) {
 		t.Fatal("AppendMessage: expected error")
 	}
 
-	if err := store.UpdateSessionStats(ctx, "x", session.SessionStatsUpdate{SetStatus: session.SessionStatusActive}); err == nil {
-		t.Fatal("UpdateSessionStats: expected error")
+	if err := store.UpdateSessionStatus(ctx, "x", session.SessionStatusUpdate{SetStatus: session.SessionStatusActive}); err == nil {
+		t.Fatal("UpdateSessionStatus: expected error")
 	}
 
 	if err := store.RefreshTTL(ctx, "x", time.Hour); err == nil {

@@ -139,24 +139,24 @@ func TestAppendMessage_Success(t *testing.T) {
 	assert.Len(t, warm.appendedMsgs["s1"], 1)
 }
 
-// --- UpdateSessionStats ---
+// --- UpdateSessionStatus ---
 
-func TestUpdateSessionStats_EmptySessionID(t *testing.T) {
+func TestUpdateSessionStatus_EmptySessionID(t *testing.T) {
 	registry := providers.NewRegistry()
 	registry.SetWarmStore(newMockWarmStore())
 	svc := newServiceWithRegistry(registry, nil)
 
-	err := svc.UpdateSessionStats(context.Background(), "", session.SessionStatsUpdate{})
+	err := svc.UpdateSessionStatus(context.Background(), "", session.SessionStatusUpdate{})
 	assert.ErrorIs(t, err, ErrMissingSessionID)
 }
 
-func TestUpdateSessionStats_NoWarmStore(t *testing.T) {
+func TestUpdateSessionStatus_NoWarmStore(t *testing.T) {
 	svc := newServiceWithRegistry(providers.NewRegistry(), nil)
-	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{})
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{})
 	assert.ErrorIs(t, err, ErrWarmStoreRequired)
 }
 
-func TestUpdateSessionStats_AppliesIncrements(t *testing.T) {
+func TestUpdateSessionStatus_AppliesIncrements(t *testing.T) {
 	warm := newMockWarmStore()
 	warm.sessions["s1"] = &session.Session{
 		ID:                "s1",
@@ -170,7 +170,7 @@ func TestUpdateSessionStats_AppliesIncrements(t *testing.T) {
 	registry.SetWarmStore(warm)
 	svc := newServiceWithRegistry(registry, nil)
 
-	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{
 		SetStatus: session.SessionStatusCompleted,
 	})
 	require.NoError(t, err)
@@ -179,17 +179,17 @@ func TestUpdateSessionStats_AppliesIncrements(t *testing.T) {
 	assert.Equal(t, session.SessionStatusCompleted, updated.Status)
 }
 
-func TestUpdateSessionStats_SessionNotFound(t *testing.T) {
+func TestUpdateSessionStatus_SessionNotFound(t *testing.T) {
 	warm := newMockWarmStore()
 	registry := providers.NewRegistry()
 	registry.SetWarmStore(warm)
 	svc := newServiceWithRegistry(registry, nil)
 
-	err := svc.UpdateSessionStats(context.Background(), "nonexistent", session.SessionStatsUpdate{})
+	err := svc.UpdateSessionStatus(context.Background(), "nonexistent", session.SessionStatusUpdate{})
 	assert.ErrorIs(t, err, session.ErrSessionNotFound)
 }
 
-func TestUpdateSessionStats_NoStatusChange(t *testing.T) {
+func TestUpdateSessionStatus_NoStatusChange(t *testing.T) {
 	warm := newMockWarmStore()
 	warm.sessions["s1"] = &session.Session{
 		ID:     "s1",
@@ -200,13 +200,13 @@ func TestUpdateSessionStats_NoStatusChange(t *testing.T) {
 	registry.SetWarmStore(warm)
 	svc := newServiceWithRegistry(registry, nil)
 
-	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{})
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{})
 	require.NoError(t, err)
 	require.Len(t, warm.updatedSessions, 1)
 	assert.Equal(t, session.SessionStatusActive, warm.updatedSessions[0].Status)
 }
 
-func TestUpdateSessionStats_CompletionTransitionPublishes(t *testing.T) {
+func TestUpdateSessionStatus_CompletionTransitionPublishes(t *testing.T) {
 	warm := newMockWarmStore()
 	warm.sessions["s1"] = &session.Session{
 		ID:     "s1",
@@ -217,7 +217,7 @@ func TestUpdateSessionStats_CompletionTransitionPublishes(t *testing.T) {
 	registry.SetWarmStore(warm)
 	svc := newServiceWithRegistry(registry, nil)
 
-	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{
 		SetStatus: session.SessionStatusCompleted,
 	})
 	require.NoError(t, err)
@@ -225,7 +225,7 @@ func TestUpdateSessionStats_CompletionTransitionPublishes(t *testing.T) {
 	assert.Equal(t, session.SessionStatusCompleted, warm.updatedSessions[0].Status)
 }
 
-func TestUpdateSessionStats_AlreadyCompletedNoRepublish(t *testing.T) {
+func TestUpdateSessionStatus_AlreadyCompletedNoRepublish(t *testing.T) {
 	warm := newMockWarmStore()
 	warm.sessions["s1"] = &session.Session{
 		ID:     "s1",
@@ -237,14 +237,14 @@ func TestUpdateSessionStats_AlreadyCompletedNoRepublish(t *testing.T) {
 	svc := newServiceWithRegistry(registry, nil)
 
 	// Updating a session that's already completed should still work
-	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{
 		SetStatus: session.SessionStatusCompleted,
 	})
 	require.NoError(t, err)
 	require.Len(t, warm.updatedSessions, 1)
 }
 
-func TestUpdateSessionStats_NonCompletedStatusSkipsLookup(t *testing.T) {
+func TestUpdateSessionStatus_NonCompletedStatusSkipsLookup(t *testing.T) {
 	warm := newMockWarmStore()
 	warm.sessions["s1"] = &session.Session{
 		ID:     "s1",
@@ -256,7 +256,7 @@ func TestUpdateSessionStats_NonCompletedStatusSkipsLookup(t *testing.T) {
 	svc := newServiceWithRegistry(registry, nil)
 
 	// Non-completed status should not trigger the completion lookup/publish path
-	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{})
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{})
 	require.NoError(t, err)
 	require.Len(t, warm.updatedSessions, 1)
 	assert.Equal(t, session.SessionStatusActive, warm.updatedSessions[0].Status)
@@ -750,7 +750,7 @@ func TestAppendMessage_WriteThroughToHotCache(t *testing.T) {
 	assert.Equal(t, "m1", hot.appendCalls[0].msg.ID)
 }
 
-func TestUpdateSessionStats_RefreshesTTLInHotCache(t *testing.T) {
+func TestUpdateSessionStatus_RefreshesTTLInHotCache(t *testing.T) {
 	hot := newTrackingHotCache()
 	warm := newMockWarmStore()
 	warm.sessions["s1"] = &session.Session{ID: "s1", Status: session.SessionStatusActive}
@@ -759,7 +759,7 @@ func TestUpdateSessionStats_RefreshesTTLInHotCache(t *testing.T) {
 	registry.SetWarmStore(warm)
 	svc := newServiceWithRegistry(registry, nil)
 
-	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{
 		SetStatus: session.SessionStatusActive,
 	})
 	require.NoError(t, err)

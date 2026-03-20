@@ -119,6 +119,7 @@ export default function SessionsPage() {
     const opts: SessionListOptions = {
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
+      count: true,
     };
     if (statusFilter !== "all") opts.status = statusFilter as Session["status"];
     if (agentFilter !== "all") opts.agent = agentFilter;

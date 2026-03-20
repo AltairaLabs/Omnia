@@ -227,11 +227,11 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /api/v1/sessions/{sessionID}/stats:
+  /api/v1/sessions/{sessionID}/status:
     patch:
-      tags: [stats]
-      summary: Incrementally update session statistics
-      operationId: updateStats
+      tags: [status]
+      summary: Update session lifecycle status
+      operationId: updateStatus
       parameters:
         - $ref: '#/components/parameters/SessionID'
       requestBody:
@@ -239,10 +239,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SessionStatsUpdate'
+              $ref: '#/components/schemas/SessionStatusUpdate'
       responses:
         '200':
-          description: Stats updated
+          description: Status updated
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -843,10 +843,10 @@ components:
           type: string
           format: date-time
 
-    # SessionStatsUpdate contains only lifecycle state changes.
+    # SessionStatusUpdate contains only lifecycle state changes.
     # Counter fields (messages, tool calls, tokens, cost) are auto-derived
     # from AppendMessage and should not be set externally.
-    SessionStatsUpdate:
+    SessionStatusUpdate:
       type: object
       properties:
         SetStatus:

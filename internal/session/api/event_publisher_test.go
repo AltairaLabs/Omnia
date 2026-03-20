@@ -184,9 +184,9 @@ func TestAppendMessage_PublishErrorDoesNotFailRequest(t *testing.T) {
 	require.NoError(t, err) // Must succeed even though publish fails.
 }
 
-// --- UpdateSessionStats event tests -----------------------------------------
+// --- UpdateSessionStatus event tests -----------------------------------------
 
-func TestUpdateSessionStats_CompletedPublishesEvent(t *testing.T) {
+func TestUpdateSessionStatus_CompletedPublishesEvent(t *testing.T) {
 	warm := newMockWarmStore()
 	warm.sessions["s1"] = &session.Session{
 		ID:        "s1",
@@ -200,7 +200,7 @@ func TestUpdateSessionStats_CompletedPublishesEvent(t *testing.T) {
 	pub := &mockEventPublisher{}
 	svc := newServiceWithPublisher(registry, pub)
 
-	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{
 		SetStatus: session.SessionStatusCompleted,
 	})
 	require.NoError(t, err)
@@ -213,7 +213,7 @@ func TestUpdateSessionStats_CompletedPublishesEvent(t *testing.T) {
 	assert.NotEmpty(t, events[0].Timestamp)
 }
 
-func TestUpdateSessionStats_NoEventOnNonCompletedStatus(t *testing.T) {
+func TestUpdateSessionStatus_NoEventOnNonCompletedStatus(t *testing.T) {
 	warm := newMockWarmStore()
 	warm.sessions["s1"] = &session.Session{
 		ID:     "s1",
@@ -225,14 +225,14 @@ func TestUpdateSessionStats_NoEventOnNonCompletedStatus(t *testing.T) {
 	pub := &mockEventPublisher{}
 	svc := newServiceWithPublisher(registry, pub)
 
-	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{})
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{})
 	require.NoError(t, err)
 
 	time.Sleep(50 * time.Millisecond)
 	assert.Empty(t, pub.getEvents())
 }
 
-func TestUpdateSessionStats_NoEventWhenAlreadyCompleted(t *testing.T) {
+func TestUpdateSessionStatus_NoEventWhenAlreadyCompleted(t *testing.T) {
 	warm := newMockWarmStore()
 	warm.sessions["s1"] = &session.Session{
 		ID:     "s1",
@@ -245,7 +245,7 @@ func TestUpdateSessionStats_NoEventWhenAlreadyCompleted(t *testing.T) {
 	svc := newServiceWithPublisher(registry, pub)
 
 	// Re-setting to completed when already completed should not publish.
-	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{
 		SetStatus: session.SessionStatusCompleted,
 	})
 	require.NoError(t, err)
@@ -254,7 +254,7 @@ func TestUpdateSessionStats_NoEventWhenAlreadyCompleted(t *testing.T) {
 	assert.Empty(t, pub.getEvents())
 }
 
-func TestUpdateSessionStats_NilPublisherDoesNotPanic(t *testing.T) {
+func TestUpdateSessionStatus_NilPublisherDoesNotPanic(t *testing.T) {
 	warm := newMockWarmStore()
 	warm.sessions["s1"] = &session.Session{
 		ID:     "s1",
@@ -265,7 +265,7 @@ func TestUpdateSessionStats_NilPublisherDoesNotPanic(t *testing.T) {
 	registry.SetWarmStore(warm)
 	svc := newServiceWithPublisher(registry, nil)
 
-	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{
 		SetStatus: session.SessionStatusCompleted,
 	})
 	require.NoError(t, err)
@@ -419,7 +419,7 @@ func TestAppendMessage_AssistantPublishesEventWithPromptPack(t *testing.T) {
 	assert.Equal(t, "v3", events[0].PromptPackVersion)
 }
 
-func TestUpdateSessionStats_CompletedPublishesEventWithPromptPack(t *testing.T) {
+func TestUpdateSessionStatus_CompletedPublishesEventWithPromptPack(t *testing.T) {
 	warm := newMockWarmStore()
 	warm.sessions["s1"] = &session.Session{
 		ID:                "s1",
@@ -435,7 +435,7 @@ func TestUpdateSessionStats_CompletedPublishesEventWithPromptPack(t *testing.T) 
 	pub := &mockEventPublisher{}
 	svc := newServiceWithPublisher(registry, pub)
 
-	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
+	err := svc.UpdateSessionStatus(context.Background(), "s1", session.SessionStatusUpdate{
 		SetStatus: session.SessionStatusCompleted,
 	})
 	require.NoError(t, err)

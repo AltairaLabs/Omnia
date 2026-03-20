@@ -44,7 +44,7 @@ type eventAction struct {
 	providerCall *session.ProviderCall
 	evalResult   *session.EvalResult
 	event        *session.RuntimeEvent
-	stats        session.SessionStatsUpdate
+	stats        session.SessionStatusUpdate
 }
 
 // Metadata key constants to avoid string duplication (SonarCloud go:S1192).
@@ -806,8 +806,8 @@ func (s *OmniaEventStore) writeMessageAndStats(ctx context.Context, sessionID st
 	}
 
 	if action.stats.SetStatus != "" || !action.stats.SetEndedAt.IsZero() {
-		if err := s.sessionStore.UpdateSessionStats(ctx, sessionID, action.stats); err != nil {
-			log.Error(err, "failed to update session stats",
+		if err := s.sessionStore.UpdateSessionStatus(ctx, sessionID, action.stats); err != nil {
+			log.Error(err, "failed to update session status",
 				"sessionID", sessionID, "eventType", eventType)
 		}
 	}

@@ -84,7 +84,7 @@ func (m *mockWarmStore) GetSession(context.Context, string) (*session.Session, e
 
 func (m *mockWarmStore) UpdateSession(context.Context, *session.Session) error { return nil }
 
-func (m *mockWarmStore) UpdateSessionStats(context.Context, string, session.SessionStatsUpdate) error {
+func (m *mockWarmStore) UpdateSessionStatus(context.Context, string, session.SessionStatusUpdate) error {
 	return nil
 }
 

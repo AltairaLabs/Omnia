@@ -116,7 +116,7 @@ func TestOpenAPISchemaMatchesGoTypes(t *testing.T) {
 		// Request/response types (internal/session/api/)
 		"CreateSessionRequest":      reflect.TypeOf(CreateSessionRequest{}),
 		"RefreshTTLRequest":         reflect.TypeOf(RefreshTTLRequest{}),
-		"SessionStatsUpdate":        reflect.TypeOf(session.SessionStatsUpdate{}),
+		"SessionStatusUpdate":       reflect.TypeOf(session.SessionStatusUpdate{}),
 		"SessionResponse":           reflect.TypeOf(SessionResponse{}),
 		"SessionListResponse":       reflect.TypeOf(SessionListResponse{}),
 		"MessagesResponse":          reflect.TypeOf(MessagesResponse{}),
@@ -225,7 +225,7 @@ func TestOpenAPIRoutesMatchHandler(t *testing.T) {
 		"GET /api/v1/sessions/{sessionID}/messages",
 		"POST /api/v1/sessions",
 		"POST /api/v1/sessions/{sessionID}/messages",
-		"PATCH /api/v1/sessions/{sessionID}/stats",
+		"PATCH /api/v1/sessions/{sessionID}/status",
 		"POST /api/v1/sessions/{sessionID}/ttl",
 		"DELETE /api/v1/sessions/{sessionID}",
 		"POST /api/v1/sessions/{sessionID}/tool-calls",

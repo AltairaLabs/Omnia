@@ -37,7 +37,7 @@ import (
 type mockSessionStore struct {
 	mu            sync.Mutex
 	messages      []session.Message
-	stats         []session.SessionStatsUpdate
+	stats         []session.SessionStatusUpdate
 	toolCalls     []session.ToolCall
 	providerCalls []session.ProviderCall
 	runtimeEvents []session.RuntimeEvent
@@ -83,7 +83,7 @@ func (m *mockSessionStore) RefreshTTL(_ context.Context, _ string, _ time.Durati
 	return nil
 }
 
-func (m *mockSessionStore) UpdateSessionStats(_ context.Context, _ string, update session.SessionStatsUpdate) error {
+func (m *mockSessionStore) UpdateSessionStatus(_ context.Context, _ string, update session.SessionStatusUpdate) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.stats = append(m.stats, update)
@@ -246,10 +246,10 @@ func (m *mockSessionStore) getMessages() []session.Message {
 	return result
 }
 
-func (m *mockSessionStore) getStats() []session.SessionStatsUpdate {
+func (m *mockSessionStore) getStats() []session.SessionStatusUpdate {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	result := make([]session.SessionStatsUpdate, len(m.stats))
+	result := make([]session.SessionStatusUpdate, len(m.stats))
 	copy(result, m.stats)
 	return result
 }
@@ -274,7 +274,7 @@ func (m *mockSessionStore) waitForMessages(t *testing.T, count int) {
 }
 
 // waitForStats waits until the expected number of stats updates is recorded.
-// UpdateSessionStats is called after AppendMessage in the same goroutine,
+// UpdateSessionStatus is called after AppendMessage in the same goroutine,
 // so waitForMessages alone is not sufficient to guarantee stats are available.
 func (m *mockSessionStore) waitForStats(t *testing.T, count int) {
 	t.Helper()

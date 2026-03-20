@@ -468,10 +468,15 @@ func (p *Provider) ListSessions(ctx context.Context, opts providers.SessionListO
 		sort = "ASC"
 	}
 
-	// Data query — no window function, uses index-backed LIMIT/OFFSET.
+	// Fetch limit+1 rows to determine HasMore without a separate COUNT(*).
+	fetchLimit := opts.Limit
+	if fetchLimit > 0 {
+		fetchLimit++
+	}
+
 	dataQuery := `SELECT ` + sessionColumns + ` FROM sessions WHERE 1=1` + qb.Where() +
 		` ORDER BY created_at ` + sort
-	dataQuery = qb.AppendPagination(dataQuery, opts.Limit, opts.Offset)
+	dataQuery = qb.AppendPagination(dataQuery, fetchLimit, opts.Offset)
 
 	rows, err := p.pool.Query(ctx, dataQuery, qb.Args()...)
 	if err != nil {
@@ -482,19 +487,23 @@ func (p *Provider) ListSessions(ctx context.Context, opts providers.SessionListO
 		return nil, err
 	}
 
-	// Separate count query — simple aggregate that can use index-only scans.
-	countQB := &pgutil.QueryBuilder{}
-	p.applySessionFilters(countQB, opts)
-	countQuery := `SELECT count(*) FROM sessions WHERE 1=1` + countQB.Where()
-	var totalCount int64
-	if err := p.pool.QueryRow(ctx, countQuery, countQB.Args()...).Scan(&totalCount); err != nil {
-		return nil, fmt.Errorf("postgres: count sessions: %w", err)
+	hasMore := opts.Limit > 0 && len(sessions) > opts.Limit
+	if hasMore {
+		sessions = sessions[:opts.Limit]
+	}
+
+	totalCount := int64(-1)
+	if opts.IncludeCount {
+		totalCount, err = p.countSessions(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &providers.SessionPage{
 		Sessions:   sessions,
 		TotalCount: totalCount,
-		HasMore:    int64(opts.Offset)+int64(len(sessions)) < totalCount,
+		HasMore:    hasMore,
 	}, nil
 }
 
@@ -510,10 +519,15 @@ func (p *Provider) SearchSessions(ctx context.Context, query string, opts provid
 		sort = "ASC"
 	}
 
-	// Data query.
+	// Fetch limit+1 rows to determine HasMore without a separate COUNT(*).
+	fetchLimit := opts.Limit
+	if fetchLimit > 0 {
+		fetchLimit++
+	}
+
 	dataSQL := `SELECT ` + sessionColumns + ` FROM sessions s WHERE 1=1` + qb.Where() +
 		` ORDER BY s.created_at ` + sort
-	dataSQL = qb.AppendPagination(dataSQL, opts.Limit, opts.Offset)
+	dataSQL = qb.AppendPagination(dataSQL, fetchLimit, opts.Offset)
 
 	rows, err := p.pool.Query(ctx, dataSQL, qb.Args()...)
 	if err != nil {
@@ -524,23 +538,49 @@ func (p *Provider) SearchSessions(ctx context.Context, query string, opts provid
 		return nil, err
 	}
 
-	// Separate count query.
-	countQB := &pgutil.QueryBuilder{}
-	countQB.Add("EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id AND m.search_vector @@ plainto_tsquery('english', $?))", query)
-	p.applySessionFilters(countQB, opts)
+	hasMore := opts.Limit > 0 && len(sessions) > opts.Limit
+	if hasMore {
+		sessions = sessions[:opts.Limit]
+	}
 
-	countSQL := `SELECT count(*) FROM sessions s WHERE 1=1` + countQB.Where()
-
-	var totalCount int64
-	if err := p.pool.QueryRow(ctx, countSQL, countQB.Args()...).Scan(&totalCount); err != nil {
-		return nil, fmt.Errorf("postgres: count search sessions: %w", err)
+	totalCount := int64(-1)
+	if opts.IncludeCount {
+		totalCount, err = p.countSearchSessions(ctx, query, opts)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &providers.SessionPage{
 		Sessions:   sessions,
 		TotalCount: totalCount,
-		HasMore:    int64(opts.Offset)+int64(len(sessions)) < totalCount,
+		HasMore:    hasMore,
 	}, nil
+}
+
+// countSessions runs a separate COUNT(*) query for ListSessions.
+func (p *Provider) countSessions(ctx context.Context, opts providers.SessionListOpts) (int64, error) {
+	countQB := &pgutil.QueryBuilder{}
+	p.applySessionFilters(countQB, opts)
+	countQuery := `SELECT count(*) FROM sessions WHERE 1=1` + countQB.Where()
+	var total int64
+	if err := p.pool.QueryRow(ctx, countQuery, countQB.Args()...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("postgres: count sessions: %w", err)
+	}
+	return total, nil
+}
+
+// countSearchSessions runs a separate COUNT(*) query for SearchSessions.
+func (p *Provider) countSearchSessions(ctx context.Context, query string, opts providers.SessionListOpts) (int64, error) {
+	countQB := &pgutil.QueryBuilder{}
+	countQB.Add("EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id AND m.search_vector @@ plainto_tsquery('english', $?))", query)
+	p.applySessionFilters(countQB, opts)
+	countSQL := `SELECT count(*) FROM sessions s WHERE 1=1` + countQB.Where()
+	var total int64
+	if err := p.pool.QueryRow(ctx, countSQL, countQB.Args()...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("postgres: count search sessions: %w", err)
+	}
+	return total, nil
 }
 
 func (p *Provider) applySessionFilters(qb *pgutil.QueryBuilder, opts providers.SessionListOpts) {
@@ -567,32 +607,63 @@ func (p *Provider) applySessionFilters(qb *pgutil.QueryBuilder, opts providers.S
 	}
 }
 
-// UpdateSessionStats atomically updates session status and ended_at.
-// Counter increments (messages, tool calls, tokens, cost) are auto-derived
-// from AppendMessage and should not be set via this method.
-func (p *Provider) UpdateSessionStats(ctx context.Context, sessionID string, update session.SessionStatsUpdate) error {
-	query := `UPDATE sessions SET
+// UpdateSessionStatus atomically updates session status and ended_at.
+// Delegates to UpdateSessionStatusReturning and discards the result metadata.
+func (p *Provider) UpdateSessionStatus(ctx context.Context, sessionID string, update session.SessionStatusUpdate) error {
+	_, err := p.UpdateSessionStatusReturning(ctx, sessionID, update)
+	return err
+}
+
+// Compile-time interface check for the optional StatusUpdaterWithResult.
+var _ providers.StatusUpdaterWithResult = (*Provider)(nil)
+
+// UpdateSessionStatusReturning atomically updates session status and ended_at,
+// returning the previous status and session metadata in the same query via a
+// CTE + RETURNING clause. This eliminates the need for separate pre-check and
+// post-read GetSession queries when detecting status transitions.
+func (p *Provider) UpdateSessionStatusReturning(ctx context.Context, sessionID string, update session.SessionStatusUpdate) (*providers.StatusUpdateResult, error) {
+	query := `WITH prev AS (
+		SELECT id, status, agent_name, namespace, prompt_pack_name, prompt_pack_version
+		FROM sessions WHERE id = $1 FOR UPDATE
+	)
+	UPDATE sessions SET
 		status = CASE
-			WHEN status IN ('completed','error','expired') THEN status
+			WHEN (SELECT status FROM prev) IN ('completed','error','expired') THEN status
 			WHEN $2::text = '' THEN status
 			ELSE $2::text END,
 		updated_at = $3,
 		ended_at = CASE WHEN $4::timestamptz IS NULL THEN ended_at ELSE $4::timestamptz END
-	WHERE id = $1`
+	WHERE id = $1
+	RETURNING
+		(SELECT status FROM prev) AS previous_status,
+		agent_name, namespace, prompt_pack_name, prompt_pack_version`
 
-	res, err := p.pool.Exec(ctx, query,
+	var prevStatus string
+	var agentName, namespace string
+	var promptPackName, promptPackVersion *string
+
+	err := p.pool.QueryRow(ctx, query,
 		sessionID,
 		string(update.SetStatus),
 		time.Now(),
 		pgutil.NullTime(update.SetEndedAt),
-	)
+	).Scan(&prevStatus, &agentName, &namespace, &promptPackName, &promptPackVersion)
 	if err != nil {
-		return fmt.Errorf("postgres: update session stats: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, session.ErrSessionNotFound
+		}
+		return nil, fmt.Errorf("postgres: update session status: %w", err)
 	}
-	if res.RowsAffected() == 0 {
-		return session.ErrSessionNotFound
-	}
-	return nil
+
+	applied := !session.IsTerminalStatus(session.SessionStatus(prevStatus)) && update.SetStatus != ""
+	return &providers.StatusUpdateResult{
+		Applied:           applied,
+		PreviousStatus:    session.SessionStatus(prevStatus),
+		AgentName:         agentName,
+		Namespace:         namespace,
+		PromptPackName:    pgutil.DerefString(promptPackName),
+		PromptPackVersion: pgutil.DerefString(promptPackVersion),
+	}, nil
 }
 
 // --- Tool call and provider call management ---------------------------------

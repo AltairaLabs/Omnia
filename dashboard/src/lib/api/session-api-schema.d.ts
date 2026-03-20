@@ -93,7 +93,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/sessions/{sessionID}/stats": {
+    "/api/v1/sessions/{sessionID}/status": {
         parameters: {
             query?: never;
             header?: never;
@@ -331,7 +331,7 @@ export interface components {
             /** Format: date-time */
             createdAt?: string;
         };
-        SessionStatsUpdate: {
+        SessionStatusUpdate: {
             /** Format: int32 */
             AddInputTokens?: number;
             /** Format: int32 */
@@ -731,7 +731,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["SessionStatsUpdate"];
+                "application/json": components["schemas"]["SessionStatusUpdate"];
             };
         };
         responses: {

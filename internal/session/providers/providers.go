@@ -92,6 +92,9 @@ type SessionListOpts struct {
 	CreatedBefore time.Time
 	// Tags filters sessions that have all of the specified tags.
 	Tags []string
+	// IncludeCount, when true, runs a separate COUNT(*) query to populate
+	// SessionPage.TotalCount. When false, TotalCount is set to -1.
+	IncludeCount bool
 }
 
 // SessionPage is a paginated result of sessions.
