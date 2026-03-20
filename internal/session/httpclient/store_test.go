@@ -1161,6 +1161,165 @@ func TestNewStore_TransportPropagatesTraceContext(t *testing.T) {
 	}
 }
 
+// --- getPaginatedDetail error tests ---
+
+func TestGetToolCalls_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(sessionapi.ErrorResponse{Error: "database error"})
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+	_, err := store.GetToolCalls(context.Background(), "x", 0, 0)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Fatalf("expected 500 error, got: %v", err)
+	}
+}
+
+func TestGetProviderCalls_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(sessionapi.ErrorResponse{Error: "database error"})
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+	_, err := store.GetProviderCalls(context.Background(), "x", 0, 0)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Fatalf("expected 500 error, got: %v", err)
+	}
+}
+
+func TestGetRuntimeEvents_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(sessionapi.ErrorResponse{Error: "database error"})
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+	_, err := store.GetRuntimeEvents(context.Background(), "x", 0, 0)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Fatalf("expected 500 error, got: %v", err)
+	}
+}
+
+func TestGetToolCalls_InvalidJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("not json"))
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+	_, err := store.GetToolCalls(context.Background(), "x", 0, 0)
+	if err == nil {
+		t.Fatal("expected decode error")
+	}
+	if !strings.Contains(err.Error(), "decode") {
+		t.Fatalf("expected decode error, got: %v", err)
+	}
+}
+
+func TestGetProviderCalls_InvalidJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("not json"))
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+	_, err := store.GetProviderCalls(context.Background(), "x", 0, 0)
+	if err == nil {
+		t.Fatal("expected decode error")
+	}
+	if !strings.Contains(err.Error(), "decode") {
+		t.Fatalf("expected decode error, got: %v", err)
+	}
+}
+
+func TestGetRuntimeEvents_InvalidJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("not json"))
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+	_, err := store.GetRuntimeEvents(context.Background(), "x", 0, 0)
+	if err == nil {
+		t.Fatal("expected decode error")
+	}
+	if !strings.Contains(err.Error(), "decode") {
+		t.Fatalf("expected decode error, got: %v", err)
+	}
+}
+
+func TestGetToolCalls_WithPagination(t *testing.T) {
+	var capturedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.String()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]session.ToolCall{})
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+	_, err := store.GetToolCalls(context.Background(), "sess-1", 10, 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedPath, "limit=10") || !strings.Contains(capturedPath, "offset=5") {
+		t.Errorf("expected pagination params in URL, got: %s", capturedPath)
+	}
+}
+
+// --- appendPaginationParams tests ---
+
+func TestAppendPaginationParams(t *testing.T) {
+	tests := []struct {
+		name          string
+		path          string
+		limit, offset int
+		want          string
+	}{
+		{"no params", "/api/v1/test", 0, 0, "/api/v1/test"},
+		{"limit only", "/api/v1/test", 10, 0, "/api/v1/test?limit=10"},
+		{"offset only", "/api/v1/test", 0, 5, "/api/v1/test?offset=5"},
+		{"both", "/api/v1/test", 10, 5, "/api/v1/test?limit=10&offset=5"},
+		{"negative ignored", "/api/v1/test", -1, -1, "/api/v1/test"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := appendPaginationParams(tt.path, tt.limit, tt.offset)
+			if got != tt.want {
+				t.Errorf("appendPaginationParams(%q, %d, %d) = %q, want %q",
+					tt.path, tt.limit, tt.offset, got, tt.want)
+			}
+		})
+	}
+}
+
 // --- RecordEvalResult tests ---
 
 func TestRecordEvalResult_OK(t *testing.T) {

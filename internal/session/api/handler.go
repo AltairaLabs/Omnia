@@ -602,24 +602,7 @@ func (h *Handler) handleRecordToolCall(w http.ResponseWriter, r *http.Request) {
 
 // handleGetToolCalls returns tool calls for a session with pagination.
 func (h *Handler) handleGetToolCalls(w http.ResponseWriter, r *http.Request) {
-	sessionID, err := sessionIDFromRequest(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-
-	opts := parseDetailPagination(r)
-	ctx := withRequestContext(r.Context(), extractRequestContext(r))
-	calls, err := h.service.GetToolCalls(ctx, sessionID, opts)
-	if err != nil {
-		if !errors.Is(err, session.ErrSessionNotFound) {
-			h.requestLog(r.Context()).Error(err, "GetToolCalls failed", "sessionID", sessionID)
-		}
-		writeError(w, err)
-		return
-	}
-
-	writeJSON(w, calls)
+	servePaginatedDetail(h, w, r, "GetToolCalls", h.service.GetToolCalls)
 }
 
 // handleRecordProviderCall records a provider call for a session.
@@ -656,24 +639,7 @@ func (h *Handler) handleRecordProviderCall(w http.ResponseWriter, r *http.Reques
 
 // handleGetProviderCalls returns provider calls for a session with pagination.
 func (h *Handler) handleGetProviderCalls(w http.ResponseWriter, r *http.Request) {
-	sessionID, err := sessionIDFromRequest(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-
-	opts := parseDetailPagination(r)
-	ctx := withRequestContext(r.Context(), extractRequestContext(r))
-	calls, err := h.service.GetProviderCalls(ctx, sessionID, opts)
-	if err != nil {
-		if !errors.Is(err, session.ErrSessionNotFound) {
-			h.requestLog(r.Context()).Error(err, "GetProviderCalls failed", "sessionID", sessionID)
-		}
-		writeError(w, err)
-		return
-	}
-
-	writeJSON(w, calls)
+	servePaginatedDetail(h, w, r, "GetProviderCalls", h.service.GetProviderCalls)
 }
 
 // handleRecordRuntimeEvent records a runtime event for a session.
@@ -710,6 +676,13 @@ func (h *Handler) handleRecordRuntimeEvent(w http.ResponseWriter, r *http.Reques
 
 // handleGetRuntimeEvents returns runtime events for a session with pagination.
 func (h *Handler) handleGetRuntimeEvents(w http.ResponseWriter, r *http.Request) {
+	servePaginatedDetail(h, w, r, "GetRuntimeEvents", h.service.GetRuntimeEvents)
+}
+
+// servePaginatedDetail is a generic handler for paginated detail endpoints
+// (tool calls, provider calls, runtime events). It extracts the session ID,
+// parses pagination params, calls the service function, and writes the result.
+func servePaginatedDetail[T any](h *Handler, w http.ResponseWriter, r *http.Request, opName string, fn func(context.Context, string, providers.PaginationOpts) (T, error)) {
 	sessionID, err := sessionIDFromRequest(r)
 	if err != nil {
 		writeError(w, err)
@@ -718,16 +691,16 @@ func (h *Handler) handleGetRuntimeEvents(w http.ResponseWriter, r *http.Request)
 
 	opts := parseDetailPagination(r)
 	ctx := withRequestContext(r.Context(), extractRequestContext(r))
-	events, err := h.service.GetRuntimeEvents(ctx, sessionID, opts)
+	result, err := fn(ctx, sessionID, opts)
 	if err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
-			h.requestLog(r.Context()).Error(err, "GetRuntimeEvents failed", "sessionID", sessionID)
+			h.requestLog(r.Context()).Error(err, opName+" failed", "sessionID", sessionID)
 		}
 		writeError(w, err)
 		return
 	}
 
-	writeJSON(w, events)
+	writeJSON(w, result)
 }
 
 // parseListParams extracts common list/search query parameters from the request.
