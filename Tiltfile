@@ -214,6 +214,7 @@ docker_build(
     only=[
         './cmd/session-api',
         './internal',
+        './ee/api',
         './ee/pkg',
         './ee/internal',
         './pkg',
