@@ -213,6 +213,7 @@ docker_build(
     dockerfile='./Dockerfile.session-api',
     only=[
         './cmd/session-api',
+        './api',
         './internal',
         './ee/api',
         './ee/pkg',
