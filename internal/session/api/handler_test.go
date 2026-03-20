@@ -155,6 +155,17 @@ func (m *mockWarmStore) UpdateSessionStats(_ context.Context, sessionID string, 
 	return nil
 }
 
+func (m *mockWarmStore) RefreshTTL(_ context.Context, id string, expiresAt time.Time) error {
+	s, ok := m.sessions[id]
+	if !ok {
+		return session.ErrSessionNotFound
+	}
+	s.ExpiresAt = expiresAt
+	s.UpdatedAt = time.Now()
+	m.updatedSessions = append(m.updatedSessions, s)
+	return nil
+}
+
 func (m *mockWarmStore) DeleteSession(_ context.Context, id string) error {
 	if _, ok := m.sessions[id]; !ok {
 		return session.ErrSessionNotFound

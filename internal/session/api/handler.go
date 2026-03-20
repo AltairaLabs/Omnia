@@ -402,6 +402,15 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.AgentName == "" {
+		writeError(w, ErrMissingAgentName)
+		return
+	}
+	if req.Namespace == "" {
+		writeError(w, ErrMissingNamespace)
+		return
+	}
+
 	if req.ID != "" {
 		if _, err := uuid.Parse(req.ID); err != nil {
 			writeError(w, ErrInvalidSessionID)
@@ -833,6 +842,9 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrMissingBody):
 		status = http.StatusBadRequest
 		msg = ErrMissingBody.Error()
+	case errors.Is(err, ErrMissingAgentName):
+		status = http.StatusBadRequest
+		msg = ErrMissingAgentName.Error()
 	case errors.Is(err, ErrMissingNamespace):
 		status = http.StatusBadRequest
 		msg = ErrMissingNamespace.Error()

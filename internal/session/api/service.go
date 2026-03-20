@@ -39,6 +39,7 @@ var (
 	ErrMissingSessionID   = errors.New("session ID is required")
 	ErrInvalidSessionID   = errors.New("session ID must be a valid UUID")
 	ErrMissingBody        = errors.New("request body is required")
+	ErrMissingAgentName   = errors.New("agentName is required")
 	ErrMissingNamespace   = errors.New("namespace parameter is required")
 	ErrBodyTooLarge       = errors.New("request body too large")
 	ErrInvalidStatus      = errors.New("invalid session status")
@@ -349,15 +350,8 @@ func (s *SessionService) RefreshTTL(ctx context.Context, sessionID string, ttl t
 		return ErrWarmStoreRequired
 	}
 
-	sess, err := warm.GetSession(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-
-	sess.ExpiresAt = time.Now().Add(ttl)
-	sess.UpdatedAt = time.Now()
-
-	return warm.UpdateSession(ctx, sess)
+	expiresAt := time.Now().Add(ttl)
+	return warm.RefreshTTL(ctx, sessionID, expiresAt)
 }
 
 // RecordToolCall records a tool call via the warm store.

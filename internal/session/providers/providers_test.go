@@ -184,6 +184,10 @@ func (m *mockWarmStore) UpdateSessionStats(_ context.Context, sessionID string, 
 	return nil
 }
 
+func (m *mockWarmStore) RefreshTTL(_ context.Context, _ string, _ time.Time) error {
+	return nil
+}
+
 func (m *mockWarmStore) DeleteSession(_ context.Context, sessionID string) error {
 	if _, ok := m.sessions[sessionID]; !ok {
 		return session.ErrSessionNotFound

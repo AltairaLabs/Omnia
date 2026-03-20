@@ -35,6 +35,7 @@ func (m *lookupMockWarm) UpdateSession(context.Context, *session.Session) error 
 func (m *lookupMockWarm) UpdateSessionStats(context.Context, string, session.SessionStatsUpdate) error {
 	return nil
 }
+func (m *lookupMockWarm) RefreshTTL(context.Context, string, time.Time) error           { return nil }
 func (m *lookupMockWarm) DeleteSession(context.Context, string) error                   { return nil }
 func (m *lookupMockWarm) AppendMessage(context.Context, string, *session.Message) error { return nil }
 func (m *lookupMockWarm) GetMessages(context.Context, string, providers.MessageQueryOpts) ([]*session.Message, error) {

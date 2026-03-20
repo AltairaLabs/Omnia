@@ -102,6 +102,18 @@ func (w *integrationWarmStore) UpdateSessionStats(_ context.Context, sessionID s
 	return nil
 }
 
+func (w *integrationWarmStore) RefreshTTL(_ context.Context, id string, expiresAt time.Time) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	s, ok := w.sessions[id]
+	if !ok {
+		return session.ErrSessionNotFound
+	}
+	s.ExpiresAt = expiresAt
+	s.UpdatedAt = time.Now()
+	return nil
+}
+
 func (w *integrationWarmStore) DeleteSession(_ context.Context, id string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()

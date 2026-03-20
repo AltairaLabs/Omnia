@@ -329,6 +329,18 @@ func (p *Provider) UpdateSession(ctx context.Context, s *session.Session) error 
 	return nil
 }
 
+func (p *Provider) RefreshTTL(ctx context.Context, sessionID string, expiresAt time.Time) error {
+	query := `UPDATE sessions SET expires_at = $2, updated_at = $3 WHERE id = $1`
+	res, err := p.pool.Exec(ctx, query, sessionID, expiresAt, time.Now())
+	if err != nil {
+		return fmt.Errorf("postgres: refresh TTL: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return session.ErrSessionNotFound
+	}
+	return nil
+}
+
 func (p *Provider) DeleteSession(ctx context.Context, sessionID string) error {
 	// Child rows (messages, tool_calls, message_artifacts, eval_results) are
 	// removed automatically by the trg_session_cascade_delete trigger added in

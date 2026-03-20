@@ -723,6 +723,12 @@ func (m *MockWarmStoreProvider) UpdateSessionStats(
 	return nil
 }
 
+func (m *MockWarmStoreProvider) RefreshTTL(
+	_ context.Context, _ string, _ time.Time,
+) error {
+	return nil
+}
+
 func (m *MockWarmStoreProvider) DeleteSession(
 	_ context.Context, id string,
 ) error {

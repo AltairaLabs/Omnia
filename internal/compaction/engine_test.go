@@ -88,6 +88,7 @@ func (m *mockWarmStore) UpdateSessionStats(context.Context, string, session.Sess
 	return nil
 }
 
+func (m *mockWarmStore) RefreshTTL(context.Context, string, time.Time) error           { return nil }
 func (m *mockWarmStore) DeleteSession(context.Context, string) error                   { return nil }
 func (m *mockWarmStore) AppendMessage(context.Context, string, *session.Message) error { return nil }
 

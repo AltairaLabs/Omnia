@@ -118,6 +118,11 @@ type WarmStoreProvider interface {
 	// DeleteSessionArtifacts removes all artifacts for a session.
 	DeleteSessionArtifacts(ctx context.Context, sessionID string) error
 
+	// RefreshTTL updates the expires_at and updated_at fields in a single
+	// UPDATE without reading the full row first.
+	// Returns session.ErrSessionNotFound if the session does not exist.
+	RefreshTTL(ctx context.Context, sessionID string, expiresAt time.Time) error
+
 	// Ping checks connectivity to the underlying store.
 	Ping(ctx context.Context) error
 
