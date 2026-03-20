@@ -375,12 +375,14 @@ func (s *Server) Converse(stream runtimev1.RuntimeService_ConverseServer) error 
 			s.log.Error(err, "failed to process message",
 				"sessionID", msg.GetSessionId())
 
-			// Send error to client
+			// Send a generic error to the client. The detailed error is
+			// logged above but must not be forwarded because it may contain
+			// sensitive information such as provider API keys.
 			_ = stream.Send(&runtimev1.ServerMessage{
 				Message: &runtimev1.ServerMessage_Error{
 					Error: &runtimev1.Error{
 						Code:    "INTERNAL_ERROR",
-						Message: err.Error(),
+						Message: "an internal error occurred while processing the message",
 					},
 				},
 			})

@@ -101,9 +101,25 @@ func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 	s.metrics.ConnectionClosed()
 
 	if c.sessionID != "" && c.sessionPersisted {
+		s.metrics.SessionClosed()
 		s.submitCompletion(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
+
+			// Read the session to check its current status. If the session
+			// already has a terminal status (e.g. "error"), do not overwrite
+			// it with "completed".
+			sess, err := s.sessionStore.GetSession(ctx, c.sessionID)
+			if err != nil {
+				log.Error(err, "session lookup for completion failed", "sessionID", c.sessionID)
+				return
+			}
+			if session.IsTerminalStatus(sess.Status) {
+				log.V(1).Info("session already terminal, skipping completion",
+					"sessionID", c.sessionID, "status", sess.Status)
+				return
+			}
+
 			if err := s.sessionStore.UpdateSessionStats(ctx, c.sessionID, session.SessionStatsUpdate{
 				SetStatus:  session.SessionStatusCompleted,
 				SetEndedAt: time.Now(),
