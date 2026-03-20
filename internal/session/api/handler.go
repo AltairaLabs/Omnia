@@ -191,6 +191,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/evaluate", h.handleEvaluateSession)
 	mux.HandleFunc("POST /api/v1/eval-results", h.handleCreateEvalResults)
 	mux.HandleFunc("GET /api/v1/eval-results", h.handleListEvalResults)
+
+	// API documentation
+	h.registerDocsRoutes(mux)
 }
 
 // extractRequestContext extracts client IP and User-Agent from the request.

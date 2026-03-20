@@ -704,6 +704,7 @@ k8s_resource(
 k8s_resource(
     'omnia-session-api',
     labels=['session-api'],
+    port_forwards=['8082:8080'],  # Session API (REST + /docs)
     resource_deps=['omnia-postgres'],
 )
 

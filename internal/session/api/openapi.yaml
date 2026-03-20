@@ -1,0 +1,994 @@
+openapi: 3.0.3
+info:
+  title: Omnia Session API
+  description: REST API for session storage, messaging, tool/provider call recording, and eval results
+  version: 1.0.0
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: http://localhost:8081
+    description: Local development
+  - url: http://omnia-session-api.omnia-system.svc.cluster.local:8081
+    description: In-cluster
+
+tags:
+  - name: health
+    description: Health check
+  - name: sessions
+    description: Session CRUD operations
+  - name: messages
+    description: Message operations
+  - name: stats
+    description: Session statistics
+  - name: tool-calls
+    description: Tool call recording
+  - name: provider-calls
+    description: Provider call recording
+  - name: runtime-events
+    description: Runtime lifecycle event recording
+  - name: eval-results
+    description: Eval result operations
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ok
+
+  /api/v1/sessions:
+    post:
+      tags: [sessions]
+      summary: Create a new session
+      operationId: createSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/BodyTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [sessions]
+      summary: List sessions
+      operationId: listSessions
+      parameters:
+        - $ref: '#/components/parameters/Workspace'
+        - $ref: '#/components/parameters/NamespaceQuery'
+        - $ref: '#/components/parameters/Agent'
+        - $ref: '#/components/parameters/StatusFilter'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated session list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/sessions/search:
+    get:
+      tags: [sessions]
+      summary: Full-text search across sessions
+      operationId: searchSessions
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query (max 500 characters)
+          schema:
+            type: string
+            maxLength: 500
+        - $ref: '#/components/parameters/Workspace'
+        - $ref: '#/components/parameters/NamespaceQuery'
+        - $ref: '#/components/parameters/Agent'
+        - $ref: '#/components/parameters/StatusFilter'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/sessions/{sessionID}:
+    get:
+      tags: [sessions]
+      summary: Get a session by ID (includes messages)
+      operationId: getSession
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      responses:
+        '200':
+          description: Session with messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [sessions]
+      summary: Delete a session
+      operationId: deleteSession
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      responses:
+        '204':
+          description: Session deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/sessions/{sessionID}/messages:
+    post:
+      tags: [messages]
+      summary: Append a message to a session
+      operationId: appendMessage
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Message'
+      responses:
+        '201':
+          description: Message appended
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/BodyTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [messages]
+      summary: Get messages for a session
+      operationId: getMessages
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+        - name: limit
+          in: query
+          description: Max messages to return (default 50, max 500)
+          schema:
+            type: integer
+            default: 50
+            maximum: 500
+        - name: before
+          in: query
+          description: Return messages before this sequence number
+          schema:
+            type: integer
+            format: int32
+        - name: after
+          in: query
+          description: Return messages after this sequence number
+          schema:
+            type: integer
+            format: int32
+      responses:
+        '200':
+          description: Messages list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/sessions/{sessionID}/status:
+    patch:
+      tags: [status]
+      summary: Update session lifecycle status
+      operationId: updateStatus
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionStatusUpdate'
+      responses:
+        '200':
+          description: Status updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/BodyTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/sessions/{sessionID}/ttl:
+    post:
+      tags: [sessions]
+      summary: Refresh session TTL
+      operationId: refreshTTL
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTTLRequest'
+      responses:
+        '200':
+          description: TTL refreshed
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/BodyTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/sessions/{sessionID}/tool-calls:
+    post:
+      tags: [tool-calls]
+      summary: Record a tool call
+      operationId: recordToolCall
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToolCall'
+      responses:
+        '201':
+          description: Tool call recorded
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/BodyTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [tool-calls]
+      summary: Get tool calls for a session
+      operationId: getToolCalls
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      responses:
+        '200':
+          description: Tool calls list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ToolCall'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/sessions/{sessionID}/provider-calls:
+    post:
+      tags: [provider-calls]
+      summary: Record a provider call
+      operationId: recordProviderCall
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderCall'
+      responses:
+        '201':
+          description: Provider call recorded
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/BodyTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [provider-calls]
+      summary: Get provider calls for a session
+      operationId: getProviderCalls
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      responses:
+        '200':
+          description: Provider calls list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProviderCall'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/sessions/{sessionID}/events:
+    post:
+      tags: [runtime-events]
+      summary: Record a runtime event for a session
+      operationId: recordRuntimeEvent
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeEvent'
+      responses:
+        '201':
+          description: Runtime event recorded
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/BodyTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [runtime-events]
+      summary: Get runtime events for a session
+      operationId: getRuntimeEvents
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      responses:
+        '200':
+          description: Runtime events list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RuntimeEvent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/eval-results:
+    post:
+      tags: [eval-results]
+      summary: Create eval results (batch)
+      operationId: createEvalResults
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/EvalResult'
+      responses:
+        '201':
+          description: Eval results created
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [eval-results]
+      summary: List eval results with filters
+      operationId: listEvalResults
+      parameters:
+        - name: agentName
+          in: query
+          description: Filter by agent name
+          schema:
+            type: string
+        - name: namespace
+          in: query
+          description: Filter by namespace
+          schema:
+            type: string
+        - name: evalId
+          in: query
+          description: Filter by eval ID
+          schema:
+            type: string
+        - name: evalType
+          in: query
+          description: Filter by eval type
+          schema:
+            type: string
+        - name: passed
+          in: query
+          description: Filter by pass/fail
+          schema:
+            type: boolean
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Eval results list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalResultListResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/sessions/{sessionID}/eval-results:
+    get:
+      tags: [eval-results]
+      summary: Get eval results for a session
+      operationId: getSessionEvalResults
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      responses:
+        '200':
+          description: Session eval results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalResultSessionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/sessions/{sessionID}/evaluate:
+    post:
+      tags: [eval-results]
+      summary: Trigger evaluation for a session
+      operationId: evaluateSession
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      responses:
+        '202':
+          description: Evaluation queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluateAcceptedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: Service not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  parameters:
+    SessionID:
+      name: sessionID
+      in: path
+      required: true
+      description: Session UUID
+      schema:
+        type: string
+        format: uuid
+
+    Workspace:
+      name: workspace
+      in: query
+      description: Kubernetes namespace (alias for namespace)
+      schema:
+        type: string
+
+    NamespaceQuery:
+      name: namespace
+      in: query
+      description: Kubernetes namespace
+      schema:
+        type: string
+
+    Agent:
+      name: agent
+      in: query
+      description: Filter by agent name
+      schema:
+        type: string
+
+    StatusFilter:
+      name: status
+      in: query
+      description: Filter by session status
+      schema:
+        $ref: '#/components/schemas/SessionStatus'
+
+    From:
+      name: from
+      in: query
+      description: Filter sessions created after this time (RFC3339)
+      schema:
+        type: string
+        format: date-time
+
+    To:
+      name: to
+      in: query
+      description: Filter sessions created before this time (RFC3339)
+      schema:
+        type: string
+        format: date-time
+
+    Limit:
+      name: limit
+      in: query
+      description: Maximum items to return (default 20, max 100)
+      schema:
+        type: integer
+        default: 20
+        maximum: 100
+
+    Offset:
+      name: offset
+      in: query
+      description: Number of items to skip (max 10000)
+      schema:
+        type: integer
+        default: 0
+        maximum: 10000
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    BodyTooLarge:
+      description: Request body too large
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    SessionStatus:
+      type: string
+      enum: [active, completed, error, expired]
+
+    MessageRole:
+      type: string
+      enum: [user, assistant, system]
+
+    ToolCallStatus:
+      type: string
+      enum: [pending, success, error]
+
+    ProviderCallStatus:
+      type: string
+      enum: [pending, completed, failed]
+
+    Session:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        agentName:
+          type: string
+        namespace:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        state:
+          type: object
+          additionalProperties:
+            type: string
+        workspaceName:
+          type: string
+        status:
+          $ref: '#/components/schemas/SessionStatus'
+        endedAt:
+          type: string
+          format: date-time
+        messageCount:
+          type: integer
+          format: int32
+        toolCallCount:
+          type: integer
+          format: int32
+        totalInputTokens:
+          type: integer
+          format: int64
+        totalOutputTokens:
+          type: integer
+          format: int64
+        estimatedCostUSD:
+          type: number
+          format: double
+        tags:
+          type: array
+          items:
+            type: string
+        lastMessagePreview:
+          type: string
+        promptPackName:
+          type: string
+        promptPackVersion:
+          type: string
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+        role:
+          $ref: '#/components/schemas/MessageRole'
+        content:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        inputTokens:
+          type: integer
+          format: int32
+        outputTokens:
+          type: integer
+          format: int32
+        costUsd:
+          type: number
+          format: double
+        toolCallId:
+          type: string
+        sequenceNum:
+          type: integer
+          format: int32
+        hasMedia:
+          type: boolean
+        mediaTypes:
+          type: array
+          items:
+            type: string
+
+    ToolCall:
+      type: object
+      properties:
+        id:
+          type: string
+        sessionId:
+          type: string
+          format: uuid
+        callId:
+          type: string
+        name:
+          type: string
+        arguments:
+          type: object
+          additionalProperties: true
+        result: {}
+        status:
+          $ref: '#/components/schemas/ToolCallStatus'
+        durationMs:
+          type: integer
+          format: int64
+        errorMessage:
+          type: string
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    ProviderCall:
+      type: object
+      properties:
+        id:
+          type: string
+        sessionId:
+          type: string
+          format: uuid
+        provider:
+          type: string
+        model:
+          type: string
+        status:
+          $ref: '#/components/schemas/ProviderCallStatus'
+        inputTokens:
+          type: integer
+          format: int64
+        outputTokens:
+          type: integer
+          format: int64
+        cachedTokens:
+          type: integer
+          format: int64
+        costUsd:
+          type: number
+          format: double
+        durationMs:
+          type: integer
+          format: int64
+        finishReason:
+          type: string
+        toolCallCount:
+          type: integer
+          format: int32
+        errorMessage:
+          type: string
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    RuntimeEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+        durationMs:
+          type: integer
+          format: int64
+        errorMessage:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    # SessionStatusUpdate contains only lifecycle state changes.
+    # Counter fields (messages, tool calls, tokens, cost) are auto-derived
+    # from AppendMessage and should not be set externally.
+    SessionStatusUpdate:
+      type: object
+      properties:
+        SetStatus:
+          $ref: '#/components/schemas/SessionStatus'
+        SetEndedAt:
+          type: string
+          format: date-time
+
+    EvalResult:
+      type: object
+      properties:
+        id:
+          type: string
+        sessionId:
+          type: string
+          format: uuid
+        messageId:
+          type: string
+        agentName:
+          type: string
+        namespace:
+          type: string
+        promptpackName:
+          type: string
+        promptpackVersion:
+          type: string
+        evalId:
+          type: string
+        evalType:
+          type: string
+        trigger:
+          type: string
+        passed:
+          type: boolean
+        score:
+          type: number
+          format: double
+          nullable: true
+        details: {}
+        durationMs:
+          type: integer
+          nullable: true
+        judgeTokens:
+          type: integer
+          nullable: true
+        judgeCostUsd:
+          type: number
+          format: double
+          nullable: true
+        source:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateSessionRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Optional pre-generated session UUID
+        agentName:
+          type: string
+        namespace:
+          type: string
+        workspaceName:
+          type: string
+        ttlSeconds:
+          type: integer
+          description: Session TTL in seconds (0 = no expiry)
+        promptPackName:
+          type: string
+        promptPackVersion:
+          type: string
+
+    RefreshTTLRequest:
+      type: object
+      required: [ttlSeconds]
+      properties:
+        ttlSeconds:
+          type: integer
+
+    SessionResponse:
+      type: object
+      properties:
+        session:
+          $ref: '#/components/schemas/Session'
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+
+    SessionListResponse:
+      type: object
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Session'
+        total:
+          type: integer
+          format: int64
+        hasMore:
+          type: boolean
+
+    MessagesResponse:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        hasMore:
+          type: boolean
+
+    EvalResultListResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvalResult'
+        total:
+          type: integer
+          format: int64
+        hasMore:
+          type: boolean
+
+    EvalResultSessionResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvalResult'
+
+    EvaluateAcceptedResponse:
+      type: object
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+        message:
+          type: string

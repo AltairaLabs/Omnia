@@ -16,6 +16,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
@@ -29,21 +31,29 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 	)
 
 	Context("When watching SessionPrivacyPolicy CRDs via a real API server", func() {
-		It("should create a PolicyWatcher with the envtest config", func() {
-			pw, err := privacy.NewPolicyWatcher(cfg, logr.Discard())
+		It("should create a PolicyWatcher with a controller-runtime client", func() {
+			k8s, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
 			Expect(err).NotTo(HaveOccurred())
+
+			pw := privacy.NewPolicyWatcher(k8s, logr.Discard())
+			pw.SetPollInterval(500 * time.Millisecond)
 			Expect(pw).NotTo(BeNil())
 		})
 
 		It("should sync cache and detect created policies", func() {
-			pw, err := privacy.NewPolicyWatcher(cfg, logr.Discard())
+			k8s, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
 			Expect(err).NotTo(HaveOccurred())
+
+			pw := privacy.NewPolicyWatcher(k8s, logr.Discard())
+			pw.SetPollInterval(500 * time.Millisecond)
 
 			watchCtx, watchCancel := context.WithCancel(ctx)
 			defer watchCancel()
 
-			err = pw.Start(watchCtx)
-			Expect(err).NotTo(HaveOccurred())
+			go func() {
+				defer GinkgoRecover()
+				_ = pw.Start(watchCtx)
+			}()
 
 			// Initially no policies — GetEffectivePolicy should return nil
 			Expect(pw.GetEffectivePolicy("default", "my-agent")).To(BeNil())
@@ -70,7 +80,7 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 				_ = k8sClient.Delete(ctx, policy)
 			})
 
-			// The informer should pick up the policy within a few seconds
+			// The poll loop should pick up the policy within a few seconds
 			Eventually(func(g Gomega) {
 				ep := pw.GetEffectivePolicy("default", "my-agent")
 				g.Expect(ep).NotTo(BeNil())
@@ -83,11 +93,11 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 		})
 
 		It("should detect policy deletion", func() {
-			pw, err := privacy.NewPolicyWatcher(cfg, logr.Discard())
+			k8s, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
 			Expect(err).NotTo(HaveOccurred())
 
-			watchCtx, watchCancel := context.WithCancel(ctx)
-			defer watchCancel()
+			pw := privacy.NewPolicyWatcher(k8s, logr.Discard())
+			pw.SetPollInterval(500 * time.Millisecond)
 
 			// Create the policy before starting the watcher
 			policy := &omniav1alpha1.SessionPrivacyPolicy{
@@ -103,8 +113,13 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 			}
 			Expect(k8sClient.Create(ctx, policy)).To(Succeed())
 
-			err = pw.Start(watchCtx)
-			Expect(err).NotTo(HaveOccurred())
+			watchCtx, watchCancel := context.WithCancel(ctx)
+			defer watchCancel()
+
+			go func() {
+				defer GinkgoRecover()
+				_ = pw.Start(watchCtx)
+			}()
 
 			// Wait until the policy appears in cache
 			Eventually(func() *privacy.EffectivePolicy {
@@ -121,14 +136,19 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 		})
 
 		It("should observe workspace-scoped policies", func() {
-			pw, err := privacy.NewPolicyWatcher(cfg, logr.Discard())
+			k8s, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
 			Expect(err).NotTo(HaveOccurred())
+
+			pw := privacy.NewPolicyWatcher(k8s, logr.Discard())
+			pw.SetPollInterval(500 * time.Millisecond)
 
 			watchCtx, watchCancel := context.WithCancel(ctx)
 			defer watchCancel()
 
-			err = pw.Start(watchCtx)
-			Expect(err).NotTo(HaveOccurred())
+			go func() {
+				defer GinkgoRecover()
+				_ = pw.Start(watchCtx)
+			}()
 
 			// Create a global policy as the parent
 			globalPolicy := &omniav1alpha1.SessionPrivacyPolicy{

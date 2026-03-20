@@ -16,6 +16,9 @@
 # Re-include SQL migration files for go:embed (session-api)
 !internal/session/postgres/migrations/*.sql
 
+# Re-include OpenAPI spec for go:embed (session-api docs)
+!internal/session/api/openapi.yaml
+
 # Re-include embedded license public key for go:embed
 !pkg/
 !pkg/license/
