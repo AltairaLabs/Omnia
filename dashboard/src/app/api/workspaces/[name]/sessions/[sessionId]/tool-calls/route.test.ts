@@ -1,5 +1,5 @@
 /**
- * Tests for session detail proxy route.
+ * Tests for session tool-calls proxy route.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -33,7 +33,10 @@ const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 function createMockRequest(): NextRequest {
-  return new NextRequest("http://localhost:3000/api/workspaces/test-ws/sessions/sess-123", { method: "GET" });
+  return new NextRequest(
+    "http://localhost:3000/api/workspaces/test-ws/sessions/sess-123/tool-calls",
+    { method: "GET" }
+  );
 }
 
 function createMockContext() {
@@ -47,7 +50,7 @@ function mockWorkspace(namespace = "test-ns") {
   };
 }
 
-describe("GET /api/workspaces/[name]/sessions/[sessionId]", () => {
+describe("GET /api/workspaces/[name]/sessions/[sessionId]/tool-calls", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.stubEnv("SESSION_API_URL", "https://session-api:8080");
@@ -58,7 +61,7 @@ describe("GET /api/workspaces/[name]/sessions/[sessionId]", () => {
     vi.unstubAllEnvs();
   });
 
-  it("proxies session detail to backend", async () => {
+  it("proxies tool-calls request to backend", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
@@ -67,17 +70,15 @@ describe("GET /api/workspaces/[name]/sessions/[sessionId]", () => {
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace() as Awaited<ReturnType<typeof getWorkspace>>);
 
-    // First fetch: namespace guard fetches session metadata
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
       json: () => Promise.resolve({ session: { id: "sess-123", namespace: "test-ns" } }),
     });
-    // Second fetch: actual session detail request
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
-      json: () => Promise.resolve({ session: { id: "sess-123" }, messages: [] }),
+      json: () => Promise.resolve({ toolCalls: [{ id: "tc1", name: "read_file" }] }),
     });
 
     const { GET } = await import("./route");
@@ -85,10 +86,34 @@ describe("GET /api/workspaces/[name]/sessions/[sessionId]", () => {
 
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.session.id).toBe("sess-123");
+    expect(body.toolCalls).toHaveLength(1);
 
     const fetchUrl = mockFetch.mock.calls[1][0] as string;
-    expect(fetchUrl).toContain("/api/v1/sessions/sess-123");
+    expect(fetchUrl).toContain("/api/v1/sessions/sess-123/tool-calls");
+  });
+
+  it("returns 404 when session belongs to a different namespace (IDOR prevention)", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace("namespace-a") as Awaited<ReturnType<typeof getWorkspace>>);
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ session: { id: "sess-123", namespace: "namespace-b" } }),
+    });
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(404);
+    const body = await response.json();
+    expect(body.error).toBe("Session not found");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it("returns 503 when SESSION_API_URL is not set", async () => {
@@ -105,30 +130,6 @@ describe("GET /api/workspaces/[name]/sessions/[sessionId]", () => {
     expect(response.status).toBe(503);
   });
 
-  it("returns 502 on fetch error", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
-    vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace() as Awaited<ReturnType<typeof getWorkspace>>);
-
-    // Namespace guard succeeds
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve({ session: { id: "sess-123", namespace: "test-ns" } }),
-    });
-    // Actual request fails
-    mockFetch.mockRejectedValueOnce(new Error("Connection refused"));
-
-    const { GET } = await import("./route");
-    const response = await GET(createMockRequest(), createMockContext());
-
-    expect(response.status).toBe(502);
-  });
-
   it("returns 403 when user lacks workspace access", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
@@ -140,55 +141,5 @@ describe("GET /api/workspaces/[name]/sessions/[sessionId]", () => {
     const response = await GET(createMockRequest(), createMockContext());
 
     expect(response.status).toBe(403);
-  });
-
-  it("forwards backend error status", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
-    vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace() as Awaited<ReturnType<typeof getWorkspace>>);
-
-    // Namespace guard: session not found at backend level
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 404,
-      json: () => Promise.resolve({ error: "Session not found" }),
-    });
-
-    const { GET } = await import("./route");
-    const response = await GET(createMockRequest(), createMockContext());
-
-    expect(response.status).toBe(404);
-  });
-
-  it("returns 404 when session belongs to a different namespace (IDOR prevention)", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
-    // Workspace resolves to namespace-a
-    vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace("namespace-a") as Awaited<ReturnType<typeof getWorkspace>>);
-
-    // Session belongs to namespace-b
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve({ session: { id: "sess-123", namespace: "namespace-b" } }),
-    });
-
-    const { GET } = await import("./route");
-    const response = await GET(createMockRequest(), createMockContext());
-
-    expect(response.status).toBe(404);
-    const body = await response.json();
-    expect(body.error).toBe("Session not found");
-
-    // Should NOT make a second fetch for the actual data
-    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });

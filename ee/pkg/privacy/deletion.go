@@ -27,6 +27,7 @@ var (
 	ErrInvalidScope      = errors.New("scope must be one of: all, workspace, date_range")
 	ErrRequestNotFound   = errors.New("deletion request not found")
 	ErrAlreadyProcessing = errors.New("deletion request is already being processed")
+	ErrMissingDateRange  = errors.New("at least one of dateFrom or dateTo is required for date_range scope")
 )
 
 // Status constants for deletion requests.
@@ -88,7 +89,10 @@ type DeletionStore interface {
 
 // SessionDeleter abstracts session lookup and deletion across storage tiers.
 type SessionDeleter interface {
-	ListSessionsByUser(ctx context.Context, userID string, workspace string) ([]string, error)
+	ListSessionsByUser(
+		ctx context.Context, userID, workspace string,
+		dateFrom, dateTo *time.Time,
+	) ([]string, error)
 	DeleteSession(ctx context.Context, sessionID string) error
 }
 
@@ -192,8 +196,8 @@ func (s *DeletionService) ProcessRequest(ctx context.Context, id string) error {
 		return fmt.Errorf("updating request status: %w", err)
 	}
 
-	// Find sessions for the user.
-	sessionIDs, err := s.deleter.ListSessionsByUser(ctx, req.UserID, req.Workspace)
+	// Find sessions for the user, applying date range when scope requires it.
+	sessionIDs, err := s.deleter.ListSessionsByUser(ctx, req.UserID, req.Workspace, req.DateFrom, req.DateTo)
 	if err != nil {
 		return s.failRequest(ctx, req, fmt.Sprintf("listing sessions: %v", err))
 	}
@@ -290,6 +294,9 @@ func validateInput(input *CreateDeletionRequest) error {
 	}
 	if !validScopes[input.Scope] {
 		return ErrInvalidScope
+	}
+	if input.Scope == "date_range" && input.DateFrom == nil && input.DateTo == nil {
+		return ErrMissingDateRange
 	}
 	return nil
 }

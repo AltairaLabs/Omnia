@@ -59,11 +59,17 @@ func (r *MediaResolver) ResolveURL(url string) (base64Data, mimeType string, isP
 	switch {
 	case strings.HasPrefix(url, schemeFile):
 		path := strings.TrimPrefix(url, schemeFile)
+		if err := r.validatePathContainment(path); err != nil {
+			return "", "", false, err
+		}
 		return r.resolveLocalFile(path)
 
 	case strings.HasPrefix(url, schemeMock):
 		filename := strings.TrimPrefix(url, schemeMock)
 		path := filepath.Join(r.mediaBasePath, filename)
+		if err := r.validatePathContainment(path); err != nil {
+			return "", "", false, err
+		}
 		return r.resolveLocalFile(path)
 
 	case strings.HasPrefix(url, schemeHTTP), strings.HasPrefix(url, schemeHTTPS):
@@ -74,6 +80,18 @@ func (r *MediaResolver) ResolveURL(url string) (base64Data, mimeType string, isP
 	default:
 		return "", "", false, fmt.Errorf("unsupported URL scheme: %s", url)
 	}
+}
+
+// validatePathContainment checks that the resolved path is within the media base directory,
+// preventing directory traversal attacks.
+func (r *MediaResolver) validatePathContainment(path string) error {
+	cleanBase := filepath.Clean(r.mediaBasePath)
+	cleanPath := filepath.Clean(path)
+	// The resolved path must be within the base directory (or be the base directory itself).
+	if !strings.HasPrefix(cleanPath, cleanBase+string(filepath.Separator)) && cleanPath != cleanBase {
+		return fmt.Errorf("path traversal attempt blocked: resolved path %s is outside base %s", cleanPath, cleanBase)
+	}
+	return nil
 }
 
 // resolveLocalFile reads a local file and returns its base64-encoded contents.

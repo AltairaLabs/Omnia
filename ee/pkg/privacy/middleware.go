@@ -86,7 +86,9 @@ func (m *PrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 			return // 204 already sent
 		}
 
-		m.applyRedaction(r, policy, sessionID)
+		if !m.applyRedaction(w, r, policy, sessionID) {
+			return // 500 already sent
+		}
 
 		next.ServeHTTP(w, r)
 	})
@@ -98,18 +100,23 @@ func isWriteMethod(method string) bool {
 }
 
 // applyRedaction redacts PII from the request body if the policy requires it.
-func (m *PrivacyMiddleware) applyRedaction(r *http.Request, policy *EffectivePolicy, sessionID string) {
+// Returns true if the request should continue, false if it was blocked.
+func (m *PrivacyMiddleware) applyRedaction(
+	w http.ResponseWriter, r *http.Request, policy *EffectivePolicy, sessionID string,
+) bool {
 	if policy.Recording.PII == nil || !policy.Recording.PII.Redact {
-		return
+		return true
 	}
 	redactedBody, err := redactRequestBody(
 		r.Body, r.URL.Path, m.redactor, policy.Recording.PII,
 	)
 	if err != nil {
-		m.log.Error(err, "body redaction failed", "sessionID", sessionID)
-		return
+		m.log.Error(err, "body redaction failed, blocking request", "sessionID", sessionID)
+		http.Error(w, "redaction failed", http.StatusInternalServerError)
+		return false
 	}
 	r.Body = redactedBody
+	return true
 }
 
 // checkOptOut checks whether the user has opted out. Returns a non-nil error

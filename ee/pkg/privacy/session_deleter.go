@@ -10,6 +10,7 @@ package privacy
 
 import (
 	"context"
+	"time"
 
 	"github.com/altairalabs/omnia/internal/session/providers"
 )
@@ -24,12 +25,18 @@ func NewWarmStoreSessionDeleter(warm providers.WarmStoreProvider) *WarmStoreSess
 	return &WarmStoreSessionDeleter{warm: warm}
 }
 
-// ListSessionsByUser lists session IDs for a user, optionally filtered by workspace.
+// ListSessionsByUser lists session IDs for a user, optionally filtered by workspace and date range.
 func (d *WarmStoreSessionDeleter) ListSessionsByUser(
-	ctx context.Context, userID string, workspace string,
+	ctx context.Context, userID string, workspace string, dateFrom *time.Time, dateTo *time.Time,
 ) ([]string, error) {
 	opts := providers.SessionListOpts{
 		WorkspaceName: workspace,
+	}
+	if dateFrom != nil {
+		opts.CreatedAfter = *dateFrom
+	}
+	if dateTo != nil {
+		opts.CreatedBefore = *dateTo
 	}
 	// Use a large limit to get all sessions. In production, this should
 	// be paginated, but for deletion workflows we need all IDs.

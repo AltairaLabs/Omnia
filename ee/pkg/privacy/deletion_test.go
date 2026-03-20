@@ -65,7 +65,8 @@ func (m *MockDeletionStore) GetRequest(_ context.Context, id string) (*DeletionR
 func (m *MockDeletionStore) UpdateRequest(_ context.Context, req *DeletionRequest) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.requests[req.ID] = req
+	cp := *req
+	m.requests[req.ID] = &cp
 	return nil
 }
 
@@ -83,9 +84,18 @@ func (m *MockDeletionStore) ListRequestsByUser(_ context.Context, userID string)
 
 // MockSessionDeleter is a mock for SessionDeleter.
 type MockSessionDeleter struct {
-	Sessions    map[string][]string // userID+workspace -> sessionIDs
-	DeleteError error               // error to return on delete
-	FailIDs     map[string]bool     // session IDs that should fail on delete
+	Sessions     map[string][]string // userID+workspace -> sessionIDs
+	DeleteError  error               // error to return on delete
+	FailIDs      map[string]bool     // session IDs that should fail on delete
+	LastDateFrom *time.Time          // captures the dateFrom arg from the last call
+	LastDateTo   *time.Time          // captures the dateTo arg from the last call
+	AllSessions  []*sessionWithDates // all sessions with dates for date-range filtering
+}
+
+// sessionWithDates is a test helper that pairs a session ID with a creation time.
+type sessionWithDates struct {
+	ID        string
+	CreatedAt time.Time
 }
 
 func NewMockSessionDeleter() *MockSessionDeleter {
@@ -95,7 +105,28 @@ func NewMockSessionDeleter() *MockSessionDeleter {
 	}
 }
 
-func (m *MockSessionDeleter) ListSessionsByUser(_ context.Context, userID string, workspace string) ([]string, error) {
+func (m *MockSessionDeleter) ListSessionsByUser(
+	_ context.Context, userID, workspace string,
+	dateFrom, dateTo *time.Time,
+) ([]string, error) {
+	m.LastDateFrom = dateFrom
+	m.LastDateTo = dateTo
+
+	// If AllSessions is set, filter by date range (for date_range scope tests).
+	if len(m.AllSessions) > 0 {
+		var result []string
+		for _, s := range m.AllSessions {
+			if dateFrom != nil && s.CreatedAt.Before(*dateFrom) {
+				continue
+			}
+			if dateTo != nil && s.CreatedAt.After(*dateTo) {
+				continue
+			}
+			result = append(result, s.ID)
+		}
+		return result, nil
+	}
+
 	key := userID + "|" + workspace
 	return m.Sessions[key], nil
 }
@@ -226,18 +257,27 @@ func TestCreateRequest_AllReasons(t *testing.T) {
 }
 
 func TestCreateRequest_AllScopes(t *testing.T) {
-	scopes := []string{"all", "workspace", "date_range"}
-	for _, scope := range scopes {
-		t.Run(scope, func(t *testing.T) {
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	scopes := []struct {
+		scope    string
+		dateFrom *time.Time
+	}{
+		{"all", nil},
+		{"workspace", nil},
+		{"date_range", &from},
+	}
+	for _, sc := range scopes {
+		t.Run(sc.scope, func(t *testing.T) {
 			store := NewMockDeletionStore()
 			svc := newTestService(store, NewMockSessionDeleter(), nil)
 			req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-				UserID: "user-1",
-				Reason: "gdpr_erasure",
-				Scope:  scope,
+				UserID:   "user-1",
+				Reason:   "gdpr_erasure",
+				Scope:    sc.scope,
+				DateFrom: sc.dateFrom,
 			})
 			require.NoError(t, err)
-			assert.Equal(t, scope, req.Scope)
+			assert.Equal(t, sc.scope, req.Scope)
 		})
 	}
 }
@@ -668,6 +708,7 @@ func TestMapErrorToStatus(t *testing.T) {
 		{"required field", ErrMissingUserID, http.StatusBadRequest},
 		{"invalid reason", ErrInvalidReason, http.StatusBadRequest},
 		{"already processing", ErrAlreadyProcessing, http.StatusConflict},
+		{"missing date range", ErrMissingDateRange, http.StatusBadRequest},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -867,7 +908,7 @@ func TestWarmStoreSessionDeleter_ListSessionsByUser(t *testing.T) {
 	}
 	deleter := NewWarmStoreSessionDeleter(mock)
 
-	ids, err := deleter.ListSessionsByUser(context.Background(), "user-1", "ws")
+	ids, err := deleter.ListSessionsByUser(context.Background(), "user-1", "ws", nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"s1", "s2"}, ids)
 }
@@ -876,7 +917,7 @@ func TestWarmStoreSessionDeleter_ListSessionsByUser_Error(t *testing.T) {
 	mock := &MockWarmStoreProvider{listErr: errors.New("list failed")}
 	deleter := NewWarmStoreSessionDeleter(mock)
 
-	_, err := deleter.ListSessionsByUser(context.Background(), "user-1", "")
+	_, err := deleter.ListSessionsByUser(context.Background(), "user-1", "", nil, nil)
 	assert.Error(t, err)
 }
 
@@ -884,7 +925,7 @@ func TestWarmStoreSessionDeleter_ListSessionsByUser_Empty(t *testing.T) {
 	mock := &MockWarmStoreProvider{sessions: []*session.Session{}}
 	deleter := NewWarmStoreSessionDeleter(mock)
 
-	ids, err := deleter.ListSessionsByUser(context.Background(), "user-1", "")
+	ids, err := deleter.ListSessionsByUser(context.Background(), "user-1", "", nil, nil)
 	require.NoError(t, err)
 	assert.Empty(t, ids)
 }
@@ -909,6 +950,98 @@ func TestWarmStoreSessionDeleter_DeleteSession_Error(t *testing.T) {
 func TestNewWarmStoreSessionDeleter(t *testing.T) {
 	deleter := NewWarmStoreSessionDeleter(&MockWarmStoreProvider{})
 	assert.NotNil(t, deleter)
+}
+
+// --- date_range scope tests -------------------------------------------------
+
+func TestCreateRequest_DateRangeScopeMissingDates(t *testing.T) {
+	store := NewMockDeletionStore()
+	svc := newTestService(store, NewMockSessionDeleter(), nil)
+
+	_, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
+		UserID: "user-1",
+		Reason: "gdpr_erasure",
+		Scope:  "date_range",
+		// No DateFrom or DateTo provided
+	})
+
+	assert.ErrorIs(t, err, ErrMissingDateRange)
+}
+
+func TestCreateRequest_DateRangeScopeWithDateFrom(t *testing.T) {
+	store := NewMockDeletionStore()
+	svc := newTestService(store, NewMockSessionDeleter(), nil)
+
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
+		UserID:   "user-1",
+		Reason:   "gdpr_erasure",
+		Scope:    "date_range",
+		DateFrom: &from,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "date_range", req.Scope)
+	assert.Equal(t, &from, req.DateFrom)
+}
+
+func TestProcessRequest_DateRangeOnlyDeletesMatchingSessions(t *testing.T) {
+	store := NewMockDeletionStore()
+	deleter := NewMockSessionDeleter()
+	svc := newTestService(store, deleter, nil)
+
+	// Set up sessions with different dates.
+	deleter.AllSessions = []*sessionWithDates{
+		{ID: "sess-old", CreatedAt: time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)},
+		{ID: "sess-in-range", CreatedAt: time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)},
+		{ID: "sess-recent", CreatedAt: time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)},
+	}
+
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
+		UserID:   "user-1",
+		Reason:   "gdpr_erasure",
+		Scope:    "date_range",
+		DateFrom: &from,
+		DateTo:   &to,
+	})
+	require.NoError(t, err)
+
+	err = svc.ProcessRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+
+	updated, err := store.GetRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", updated.Status)
+	// Only sess-in-range should be deleted (sess-old is before range, sess-recent is after).
+	assert.Equal(t, 1, updated.SessionsDeleted)
+
+	// Verify the date filters were passed through.
+	assert.Equal(t, &from, deleter.LastDateFrom)
+	assert.Equal(t, &to, deleter.LastDateTo)
+}
+
+func TestProcessRequest_AllScopePassesNilDates(t *testing.T) {
+	store := NewMockDeletionStore()
+	deleter := NewMockSessionDeleter()
+	svc := newTestService(store, deleter, nil)
+
+	deleter.Sessions["user-1|"] = []string{"sess-1"}
+
+	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
+		UserID: "user-1",
+		Reason: "gdpr_erasure",
+		Scope:  "all",
+	})
+	require.NoError(t, err)
+
+	err = svc.ProcessRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+
+	// All scope should not pass date filters.
+	assert.Nil(t, deleter.LastDateFrom)
+	assert.Nil(t, deleter.LastDateTo)
 }
 
 // --- failRequest tests ------------------------------------------------------
@@ -945,7 +1078,9 @@ type failingListDeleter struct {
 	listErr error
 }
 
-func (f *failingListDeleter) ListSessionsByUser(_ context.Context, _ string, _ string) ([]string, error) {
+func (f *failingListDeleter) ListSessionsByUser(
+	_ context.Context, _, _ string, _, _ *time.Time,
+) ([]string, error) {
 	return nil, f.listErr
 }
 
