@@ -260,7 +260,7 @@ func TestConversationStats_FullConversationWithTools(t *testing.T) {
 	// --- Cross-check: verify the child tables have the right data ---
 
 	// Tool calls — 2 rows for 1 logical call (started + completed), linked by CallID
-	toolCalls, err := p.GetToolCalls(ctx, sess.ID)
+	toolCalls, err := p.GetToolCalls(ctx, sess.ID, providers.PaginationOpts{})
 	require.NoError(t, err)
 	require.Len(t, toolCalls, 2, "2 tool call rows: started + completed")
 	assert.Equal(t, "get_weather", toolCalls[0].Name)
@@ -270,7 +270,7 @@ func TestConversationStats_FullConversationWithTools(t *testing.T) {
 	assert.Equal(t, int64(320), toolCalls[1].DurationMs)
 
 	// Provider calls
-	providerCalls, err := p.GetProviderCalls(ctx, sess.ID)
+	providerCalls, err := p.GetProviderCalls(ctx, sess.ID, providers.PaginationOpts{})
 	require.NoError(t, err)
 	require.Len(t, providerCalls, 3, "should have exactly 3 provider call records")
 
@@ -365,7 +365,7 @@ func TestConversationStats_MultipleToolCalls(t *testing.T) {
 		"3 logical tool calls: only pending events counted")
 
 	// 6 rows total: 3 started + 3 completed
-	toolCalls, err := p.GetToolCalls(ctx, sess.ID)
+	toolCalls, err := p.GetToolCalls(ctx, sess.ID, providers.PaginationOpts{})
 	require.NoError(t, err)
 	require.Len(t, toolCalls, 6, "6 rows: 3 started + 3 completed")
 }
@@ -416,7 +416,7 @@ func TestConversationStats_FailedProviderCallDoesNotAddTokens(t *testing.T) {
 		"only completed call's cost counted")
 
 	// Both rows exist.
-	calls, err := p.GetProviderCalls(ctx, sess.ID)
+	calls, err := p.GetProviderCalls(ctx, sess.ID, providers.PaginationOpts{})
 	require.NoError(t, err)
 	require.Len(t, calls, 2, "2 rows: 1 completed + 1 failed")
 }

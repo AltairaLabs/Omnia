@@ -433,11 +433,11 @@ func (m *mockWarmStore) RecordProviderCall(_ context.Context, _ string, _ *sessi
 	return nil
 }
 
-func (m *mockWarmStore) GetToolCalls(_ context.Context, _ string) ([]*session.ToolCall, error) {
+func (m *mockWarmStore) GetToolCalls(_ context.Context, _ string, _ PaginationOpts) ([]*session.ToolCall, error) {
 	return []*session.ToolCall{}, nil
 }
 
-func (m *mockWarmStore) GetProviderCalls(_ context.Context, _ string) ([]*session.ProviderCall, error) {
+func (m *mockWarmStore) GetProviderCalls(_ context.Context, _ string, _ PaginationOpts) ([]*session.ProviderCall, error) {
 	return []*session.ProviderCall{}, nil
 }
 
@@ -445,7 +445,7 @@ func (m *mockWarmStore) RecordRuntimeEvent(_ context.Context, _ string, _ *sessi
 	return nil
 }
 
-func (m *mockWarmStore) GetRuntimeEvents(_ context.Context, _ string) ([]*session.RuntimeEvent, error) {
+func (m *mockWarmStore) GetRuntimeEvents(_ context.Context, _ string, _ PaginationOpts) ([]*session.RuntimeEvent, error) {
 	return nil, nil
 }
 

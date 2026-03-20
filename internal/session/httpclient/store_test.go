@@ -1016,7 +1016,7 @@ func TestGetToolCalls_OK(t *testing.T) {
 		ID: "tc1", Name: "search", Status: session.ToolCallStatusSuccess,
 	})
 
-	calls, err := store.GetToolCalls(context.Background(), created.ID)
+	calls, err := store.GetToolCalls(context.Background(), created.ID, 0, 0)
 	if err != nil {
 		t.Fatalf("get tool calls: %v", err)
 	}
@@ -1032,7 +1032,7 @@ func TestGetToolCalls_NotFound(t *testing.T) {
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
 
-	_, err := store.GetToolCalls(context.Background(), "nonexistent")
+	_, err := store.GetToolCalls(context.Background(), "nonexistent", 0, 0)
 	if err != session.ErrSessionNotFound {
 		t.Fatalf("expected ErrSessionNotFound, got %v", err)
 	}
@@ -1094,7 +1094,7 @@ func TestGetProviderCalls_OK(t *testing.T) {
 		ID: "pc1", Provider: "anthropic", Status: session.ProviderCallStatusCompleted,
 	})
 
-	calls, err := store.GetProviderCalls(context.Background(), created.ID)
+	calls, err := store.GetProviderCalls(context.Background(), created.ID, 0, 0)
 	if err != nil {
 		t.Fatalf("get provider calls: %v", err)
 	}
@@ -1110,7 +1110,7 @@ func TestGetProviderCalls_NotFound(t *testing.T) {
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
 
-	_, err := store.GetProviderCalls(context.Background(), "nonexistent")
+	_, err := store.GetProviderCalls(context.Background(), "nonexistent", 0, 0)
 	if err != session.ErrSessionNotFound {
 		t.Fatalf("expected ErrSessionNotFound, got %v", err)
 	}
@@ -1275,7 +1275,7 @@ func TestGetRuntimeEvents_OK(t *testing.T) {
 	store := NewStore(srv.URL, logr.Discard(), WithBufferCapacity(0))
 	defer func() { _ = store.Close() }()
 
-	events, err := store.GetRuntimeEvents(context.Background(), "sess-1")
+	events, err := store.GetRuntimeEvents(context.Background(), "sess-1", 0, 0)
 	if err != nil {
 		t.Fatalf("GetRuntimeEvents() error = %v", err)
 	}
@@ -1294,7 +1294,7 @@ func TestGetRuntimeEvents_NotFound(t *testing.T) {
 	store := NewStore(srv.URL, logr.Discard(), WithBufferCapacity(0))
 	defer func() { _ = store.Close() }()
 
-	_, err := store.GetRuntimeEvents(context.Background(), "bad-id")
+	_, err := store.GetRuntimeEvents(context.Background(), "bad-id", 0, 0)
 	if err != session.ErrSessionNotFound {
 		t.Fatalf("expected ErrSessionNotFound, got %v", err)
 	}

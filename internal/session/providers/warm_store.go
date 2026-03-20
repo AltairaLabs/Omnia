@@ -89,22 +89,22 @@ type WarmStoreProvider interface {
 	// Returns session.ErrSessionNotFound if the session does not exist.
 	RecordProviderCall(ctx context.Context, sessionID string, pc *session.ProviderCall) error
 
-	// GetToolCalls retrieves all tool calls for a session ordered by created_at.
+	// GetToolCalls retrieves tool calls for a session ordered by created_at.
 	// Returns session.ErrSessionNotFound if the session does not exist.
-	GetToolCalls(ctx context.Context, sessionID string) ([]*session.ToolCall, error)
+	GetToolCalls(ctx context.Context, sessionID string, opts PaginationOpts) ([]*session.ToolCall, error)
 
-	// GetProviderCalls retrieves all provider calls for a session ordered by created_at.
+	// GetProviderCalls retrieves provider calls for a session ordered by created_at.
 	// Returns session.ErrSessionNotFound if the session does not exist.
-	GetProviderCalls(ctx context.Context, sessionID string) ([]*session.ProviderCall, error)
+	GetProviderCalls(ctx context.Context, sessionID string, opts PaginationOpts) ([]*session.ProviderCall, error)
 
 	// RecordRuntimeEvent records a runtime lifecycle event for the session.
 	// Events are immutable (INSERT only, no upsert).
 	// Returns session.ErrSessionNotFound if the session does not exist.
 	RecordRuntimeEvent(ctx context.Context, sessionID string, evt *session.RuntimeEvent) error
 
-	// GetRuntimeEvents retrieves all runtime events for a session ordered by timestamp.
+	// GetRuntimeEvents retrieves runtime events for a session ordered by timestamp.
 	// Returns session.ErrSessionNotFound if the session does not exist.
-	GetRuntimeEvents(ctx context.Context, sessionID string) ([]*session.RuntimeEvent, error)
+	GetRuntimeEvents(ctx context.Context, sessionID string, opts PaginationOpts) ([]*session.RuntimeEvent, error)
 
 	// SaveArtifact persists a binary artifact reference.
 	SaveArtifact(ctx context.Context, artifact *session.Artifact) error

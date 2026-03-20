@@ -230,14 +230,14 @@ func (m *mockWarmStore) RecordProviderCall(_ context.Context, sessionID string, 
 	return nil
 }
 
-func (m *mockWarmStore) GetToolCalls(_ context.Context, sessionID string) ([]*session.ToolCall, error) {
+func (m *mockWarmStore) GetToolCalls(_ context.Context, sessionID string, _ providers.PaginationOpts) ([]*session.ToolCall, error) {
 	if _, ok := m.sessions[sessionID]; !ok {
 		return nil, session.ErrSessionNotFound
 	}
 	return []*session.ToolCall{}, nil
 }
 
-func (m *mockWarmStore) GetProviderCalls(_ context.Context, sessionID string) ([]*session.ProviderCall, error) {
+func (m *mockWarmStore) GetProviderCalls(_ context.Context, sessionID string, _ providers.PaginationOpts) ([]*session.ProviderCall, error) {
 	if _, ok := m.sessions[sessionID]; !ok {
 		return nil, session.ErrSessionNotFound
 	}
@@ -248,7 +248,7 @@ func (m *mockWarmStore) RecordRuntimeEvent(_ context.Context, _ string, _ *sessi
 	return nil
 }
 
-func (m *mockWarmStore) GetRuntimeEvents(_ context.Context, _ string) ([]*session.RuntimeEvent, error) {
+func (m *mockWarmStore) GetRuntimeEvents(_ context.Context, _ string, _ providers.PaginationOpts) ([]*session.RuntimeEvent, error) {
 	return nil, nil
 }
 

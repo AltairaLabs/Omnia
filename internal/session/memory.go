@@ -413,8 +413,8 @@ func (m *MemoryStore) RecordProviderCall(ctx context.Context, sessionID string, 
 	return nil
 }
 
-// GetToolCalls retrieves all tool calls for a session ordered by created_at.
-func (m *MemoryStore) GetToolCalls(ctx context.Context, sessionID string) ([]ToolCall, error) {
+// GetToolCalls retrieves tool calls for a session ordered by created_at.
+func (m *MemoryStore) GetToolCalls(ctx context.Context, sessionID string, limit, offset int) ([]ToolCall, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -432,11 +432,11 @@ func (m *MemoryStore) GetToolCalls(ctx context.Context, sessionID string) ([]Too
 	calls := m.toolCalls[sessionID]
 	result := make([]ToolCall, len(calls))
 	copy(result, calls)
-	return result, nil
+	return paginateSlice(result, limit, offset), nil
 }
 
-// GetProviderCalls retrieves all provider calls for a session ordered by created_at.
-func (m *MemoryStore) GetProviderCalls(ctx context.Context, sessionID string) ([]ProviderCall, error) {
+// GetProviderCalls retrieves provider calls for a session ordered by created_at.
+func (m *MemoryStore) GetProviderCalls(ctx context.Context, sessionID string, limit, offset int) ([]ProviderCall, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -454,7 +454,7 @@ func (m *MemoryStore) GetProviderCalls(ctx context.Context, sessionID string) ([
 	calls := m.providerCalls[sessionID]
 	result := make([]ProviderCall, len(calls))
 	copy(result, calls)
-	return result, nil
+	return paginateSlice(result, limit, offset), nil
 }
 
 // RecordEvalResult records an eval result (no-op storage in memory store — eval results
@@ -490,8 +490,8 @@ func (m *MemoryStore) RecordRuntimeEvent(ctx context.Context, sessionID string, 
 	return nil
 }
 
-// GetRuntimeEvents retrieves all runtime events for a session ordered by timestamp.
-func (m *MemoryStore) GetRuntimeEvents(ctx context.Context, sessionID string) ([]RuntimeEvent, error) {
+// GetRuntimeEvents retrieves runtime events for a session ordered by timestamp.
+func (m *MemoryStore) GetRuntimeEvents(ctx context.Context, sessionID string, limit, offset int) ([]RuntimeEvent, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -509,7 +509,22 @@ func (m *MemoryStore) GetRuntimeEvents(ctx context.Context, sessionID string) ([
 	events := m.runtimeEvents[sessionID]
 	result := make([]RuntimeEvent, len(events))
 	copy(result, events)
-	return result, nil
+	return paginateSlice(result, limit, offset), nil
+}
+
+// paginateSlice applies offset and limit to a slice.
+// A zero limit returns all items after the offset.
+func paginateSlice[T any](items []T, limit, offset int) []T {
+	if offset > 0 {
+		if offset >= len(items) {
+			return items[:0]
+		}
+		items = items[offset:]
+	}
+	if limit > 0 && limit < len(items) {
+		items = items[:limit]
+	}
+	return items
 }
 
 // CleanupExpired removes all expired sessions.

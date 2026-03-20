@@ -42,6 +42,8 @@ const (
 	maxListLimit        = 100
 	defaultMessageLimit = 50
 	maxMessageLimit     = 500
+	defaultDetailLimit  = 100
+	maxDetailLimit      = 500
 	maxStringParamLen   = 253 // K8s name limit
 	maxSearchQueryLen   = 500
 	maxOffsetLimit      = 10000
@@ -588,7 +590,7 @@ func (h *Handler) handleRecordToolCall(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-// handleGetToolCalls returns all tool calls for a session.
+// handleGetToolCalls returns tool calls for a session with pagination.
 func (h *Handler) handleGetToolCalls(w http.ResponseWriter, r *http.Request) {
 	sessionID, err := sessionIDFromRequest(r)
 	if err != nil {
@@ -596,8 +598,9 @@ func (h *Handler) handleGetToolCalls(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	opts := parseDetailPagination(r)
 	ctx := withRequestContext(r.Context(), extractRequestContext(r))
-	calls, err := h.service.GetToolCalls(ctx, sessionID)
+	calls, err := h.service.GetToolCalls(ctx, sessionID, opts)
 	if err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
 			h.requestLog(r.Context()).Error(err, "GetToolCalls failed", "sessionID", sessionID)
@@ -641,7 +644,7 @@ func (h *Handler) handleRecordProviderCall(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusCreated)
 }
 
-// handleGetProviderCalls returns all provider calls for a session.
+// handleGetProviderCalls returns provider calls for a session with pagination.
 func (h *Handler) handleGetProviderCalls(w http.ResponseWriter, r *http.Request) {
 	sessionID, err := sessionIDFromRequest(r)
 	if err != nil {
@@ -649,8 +652,9 @@ func (h *Handler) handleGetProviderCalls(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	opts := parseDetailPagination(r)
 	ctx := withRequestContext(r.Context(), extractRequestContext(r))
-	calls, err := h.service.GetProviderCalls(ctx, sessionID)
+	calls, err := h.service.GetProviderCalls(ctx, sessionID, opts)
 	if err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
 			h.requestLog(r.Context()).Error(err, "GetProviderCalls failed", "sessionID", sessionID)
@@ -694,7 +698,7 @@ func (h *Handler) handleRecordRuntimeEvent(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusCreated)
 }
 
-// handleGetRuntimeEvents returns all runtime events for a session.
+// handleGetRuntimeEvents returns runtime events for a session with pagination.
 func (h *Handler) handleGetRuntimeEvents(w http.ResponseWriter, r *http.Request) {
 	sessionID, err := sessionIDFromRequest(r)
 	if err != nil {
@@ -702,8 +706,9 @@ func (h *Handler) handleGetRuntimeEvents(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	opts := parseDetailPagination(r)
 	ctx := withRequestContext(r.Context(), extractRequestContext(r))
-	events, err := h.service.GetRuntimeEvents(ctx, sessionID)
+	events, err := h.service.GetRuntimeEvents(ctx, sessionID, opts)
 	if err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
 			h.requestLog(r.Context()).Error(err, "GetRuntimeEvents failed", "sessionID", sessionID)
@@ -761,6 +766,17 @@ func parseListParams(r *http.Request) (providers.SessionListOpts, error) {
 	}
 
 	return opts, nil
+}
+
+// parseDetailPagination extracts limit/offset query params for detail endpoints
+// (tool calls, provider calls, runtime events). Default limit is 100, max 500.
+func parseDetailPagination(r *http.Request) providers.PaginationOpts {
+	limit := min(parseIntParam(r, "limit", defaultDetailLimit), maxDetailLimit)
+	offset := min(parseIntParam(r, "offset", 0), maxOffsetLimit)
+	return providers.PaginationOpts{
+		Limit:  limit,
+		Offset: offset,
+	}
 }
 
 // parseIntParam returns an integer query parameter or the default value.

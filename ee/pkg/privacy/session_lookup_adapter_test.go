@@ -63,16 +63,20 @@ func (m *lookupMockWarm) RecordToolCall(context.Context, string, *session.ToolCa
 func (m *lookupMockWarm) RecordProviderCall(context.Context, string, *session.ProviderCall) error {
 	return nil
 }
-func (m *lookupMockWarm) GetToolCalls(context.Context, string) ([]*session.ToolCall, error) {
+func (m *lookupMockWarm) GetToolCalls(context.Context, string, providers.PaginationOpts) ([]*session.ToolCall, error) {
 	return nil, nil
 }
-func (m *lookupMockWarm) GetProviderCalls(context.Context, string) ([]*session.ProviderCall, error) {
+func (m *lookupMockWarm) GetProviderCalls(
+	_ context.Context, _ string, _ providers.PaginationOpts,
+) ([]*session.ProviderCall, error) {
 	return nil, nil
 }
-func (m *lookupMockWarm) RecordRuntimeEvent(context.Context, string, *session.RuntimeEvent) error {
+func (m *lookupMockWarm) RecordRuntimeEvent(_ context.Context, _ string, _ *session.RuntimeEvent) error {
 	return nil
 }
-func (m *lookupMockWarm) GetRuntimeEvents(context.Context, string) ([]*session.RuntimeEvent, error) {
+func (m *lookupMockWarm) GetRuntimeEvents(
+	_ context.Context, _ string, _ providers.PaginationOpts,
+) ([]*session.RuntimeEvent, error) {
 	return nil, nil
 }
 func (m *lookupMockWarm) SaveArtifact(context.Context, *session.Artifact) error { return nil }

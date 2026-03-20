@@ -154,11 +154,11 @@ func (w *integrationWarmStore) RecordProviderCall(_ context.Context, _ string, _
 	return nil
 }
 
-func (w *integrationWarmStore) GetToolCalls(_ context.Context, _ string) ([]*session.ToolCall, error) {
+func (w *integrationWarmStore) GetToolCalls(_ context.Context, _ string, _ providers.PaginationOpts) ([]*session.ToolCall, error) {
 	return []*session.ToolCall{}, nil
 }
 
-func (w *integrationWarmStore) GetProviderCalls(_ context.Context, _ string) ([]*session.ProviderCall, error) {
+func (w *integrationWarmStore) GetProviderCalls(_ context.Context, _ string, _ providers.PaginationOpts) ([]*session.ProviderCall, error) {
 	return []*session.ProviderCall{}, nil
 }
 
@@ -166,7 +166,7 @@ func (w *integrationWarmStore) RecordRuntimeEvent(_ context.Context, _ string, _
 	return nil
 }
 
-func (w *integrationWarmStore) GetRuntimeEvents(_ context.Context, _ string) ([]*session.RuntimeEvent, error) {
+func (w *integrationWarmStore) GetRuntimeEvents(_ context.Context, _ string, _ providers.PaginationOpts) ([]*session.RuntimeEvent, error) {
 	return []*session.RuntimeEvent{}, nil
 }
 

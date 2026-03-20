@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/altairalabs/omnia/internal/pgutil"
@@ -344,10 +344,6 @@ func (p *Provider) DeleteSession(ctx context.Context, sessionID string) error {
 }
 
 func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *session.Message) error {
-	if err := p.sessionExists(ctx, sessionID); err != nil {
-		return err
-	}
-
 	// Auto-increment message_count only. Token/cost counters are derived from
 	// provider_calls (via RecordProviderCall) and tool_call_count from tool_calls
 	// (via RecordToolCall) to avoid double-counting.
@@ -363,11 +359,14 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 		mediaTypes = []string{}
 	}
 
-	// Use a CTE to atomically insert the message and update message_count
-	// in a single statement, preventing races between concurrent AppendMessage calls.
-	query := `WITH ins AS (
+	// Use a CTE to atomically verify the session exists, insert the message,
+	// and update message_count in a single round trip.
+	query := `WITH sess AS (
+		SELECT id FROM sessions WHERE id = $2
+	), ins AS (
 		INSERT INTO messages (id, session_id, role, content, timestamp, input_tokens, output_tokens, cost_usd, tool_call_id, metadata, sequence_num, has_media, media_types)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+		WHERE EXISTS (SELECT 1 FROM sess)
 		RETURNING session_id
 	)
 	UPDATE sessions SET
@@ -375,7 +374,7 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 		updated_at = $15
 	WHERE id = (SELECT session_id FROM ins)`
 
-	_, err := p.pool.Exec(ctx, query,
+	res, err := p.pool.Exec(ctx, query,
 		msg.ID, sessionID, msg.Role, msg.Content, msg.Timestamp,
 		pgutil.NullInt32(msg.InputTokens), pgutil.NullInt32(msg.OutputTokens),
 		msg.CostUSD,
@@ -385,11 +384,10 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 		time.Now(),
 	)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
-			return session.ErrSessionNotFound
-		}
 		return fmt.Errorf("postgres: append message: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return session.ErrSessionNotFound
 	}
 	return nil
 }
@@ -599,10 +597,6 @@ func (p *Provider) UpdateSessionStats(ctx context.Context, sessionID string, upd
 // --- Tool call and provider call management ---------------------------------
 
 func (p *Provider) RecordToolCall(ctx context.Context, sessionID string, tc *session.ToolCall) error {
-	if err := p.sessionExists(ctx, sessionID); err != nil {
-		return err
-	}
-
 	// Each tool call lifecycle event (started, completed, failed, client_request)
 	// is recorded as its own row. Rows sharing the same call_id represent the
 	// same logical tool invocation. Only "pending" events (the initial start)
@@ -613,9 +607,12 @@ func (p *Provider) RecordToolCall(ctx context.Context, sessionID string, tc *ses
 		toolCallIncr = 1
 	}
 
-	query := `WITH ins AS (
+	query := `WITH sess AS (
+		SELECT id FROM sessions WHERE id = $2
+	), ins AS (
 		INSERT INTO tool_calls (id, session_id, call_id, name, arguments, result, status, duration_ms, error_message, labels, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+		WHERE EXISTS (SELECT 1 FROM sess)
 		RETURNING session_id
 	)
 	UPDATE sessions SET
@@ -629,7 +626,7 @@ func (p *Provider) RecordToolCall(ctx context.Context, sessionID string, tc *ses
 		resultJSON, _ = json.Marshal(tc.Result)
 	}
 
-	_, err := p.pool.Exec(ctx, query,
+	res, err := p.pool.Exec(ctx, query,
 		tc.ID, sessionID, tc.CallID, tc.Name,
 		argsJSON, resultJSON,
 		string(tc.Status), pgutil.NullInt64(tc.DurationMs),
@@ -640,14 +637,13 @@ func (p *Provider) RecordToolCall(ctx context.Context, sessionID string, tc *ses
 	if err != nil {
 		return fmt.Errorf("postgres: record tool call: %w", err)
 	}
+	if res.RowsAffected() == 0 {
+		return session.ErrSessionNotFound
+	}
 	return nil
 }
 
 func (p *Provider) RecordProviderCall(ctx context.Context, sessionID string, pc *session.ProviderCall) error {
-	if err := p.sessionExists(ctx, sessionID); err != nil {
-		return err
-	}
-
 	// Each provider call lifecycle event (completed, failed) is its own row.
 	// Only completed calls add tokens/cost to session counters.
 	isCompleted := pc.Status == session.ProviderCallStatusCompleted
@@ -659,9 +655,12 @@ func (p *Provider) RecordProviderCall(ctx context.Context, sessionID string, pc 
 		costIncr = pc.CostUSD
 	}
 
-	query := `WITH ins AS (
+	query := `WITH sess AS (
+		SELECT id FROM sessions WHERE id = $2
+	), ins AS (
 		INSERT INTO provider_calls (id, session_id, provider, model, status, input_tokens, output_tokens, cached_tokens, cost_usd, duration_ms, finish_reason, tool_call_count, error_message, labels, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+		WHERE EXISTS (SELECT 1 FROM sess)
 		RETURNING session_id
 	)
 	UPDATE sessions SET
@@ -671,7 +670,7 @@ func (p *Provider) RecordProviderCall(ctx context.Context, sessionID string, pc 
 		updated_at = $19
 	WHERE id = (SELECT session_id FROM ins)`
 
-	_, err := p.pool.Exec(ctx, query,
+	res, err := p.pool.Exec(ctx, query,
 		pc.ID, sessionID, pc.Provider, pc.Model,
 		string(pc.Status), pc.InputTokens, pc.OutputTokens, pc.CachedTokens,
 		pc.CostUSD, pgutil.NullInt64(pc.DurationMs),
@@ -683,18 +682,25 @@ func (p *Provider) RecordProviderCall(ctx context.Context, sessionID string, pc 
 	if err != nil {
 		return fmt.Errorf("postgres: record provider call: %w", err)
 	}
+	if res.RowsAffected() == 0 {
+		return session.ErrSessionNotFound
+	}
 	return nil
 }
 
-func (p *Provider) GetToolCalls(ctx context.Context, sessionID string) ([]*session.ToolCall, error) {
+func (p *Provider) GetToolCalls(ctx context.Context, sessionID string, opts providers.PaginationOpts) ([]*session.ToolCall, error) {
 	if err := p.sessionExists(ctx, sessionID); err != nil {
 		return nil, err
 	}
 
-	query := `SELECT id, session_id, call_id, name, arguments, result, status, duration_ms, error_message, labels, created_at
-		FROM tool_calls WHERE session_id=$1 ORDER BY created_at ASC`
+	qb := &pgutil.QueryBuilder{}
+	qb.Add("session_id=$?", sessionID)
 
-	rows, err := p.pool.Query(ctx, query, sessionID)
+	query := `SELECT id, session_id, call_id, name, arguments, result, status, duration_ms, error_message, labels, created_at
+		FROM tool_calls WHERE 1=1` + qb.Where() + ` ORDER BY created_at ASC`
+	query = qb.AppendPagination(query, opts.Limit, opts.Offset)
+
+	rows, err := p.pool.Query(ctx, query, qb.Args()...)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: get tool calls: %w", err)
 	}
@@ -717,15 +723,19 @@ func (p *Provider) GetToolCalls(ctx context.Context, sessionID string) ([]*sessi
 	return calls, nil
 }
 
-func (p *Provider) GetProviderCalls(ctx context.Context, sessionID string) ([]*session.ProviderCall, error) {
+func (p *Provider) GetProviderCalls(ctx context.Context, sessionID string, opts providers.PaginationOpts) ([]*session.ProviderCall, error) {
 	if err := p.sessionExists(ctx, sessionID); err != nil {
 		return nil, err
 	}
 
-	query := `SELECT id, session_id, provider, model, status, input_tokens, output_tokens, cached_tokens, cost_usd, duration_ms, finish_reason, tool_call_count, error_message, labels, created_at
-		FROM provider_calls WHERE session_id=$1 ORDER BY created_at ASC`
+	qb := &pgutil.QueryBuilder{}
+	qb.Add("session_id=$?", sessionID)
 
-	rows, err := p.pool.Query(ctx, query, sessionID)
+	query := `SELECT id, session_id, provider, model, status, input_tokens, output_tokens, cached_tokens, cost_usd, duration_ms, finish_reason, tool_call_count, error_message, labels, created_at
+		FROM provider_calls WHERE 1=1` + qb.Where() + ` ORDER BY created_at ASC`
+	query = qb.AppendPagination(query, opts.Limit, opts.Offset)
+
+	rows, err := p.pool.Query(ctx, query, qb.Args()...)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: get provider calls: %w", err)
 	}
@@ -775,16 +785,13 @@ func scanRuntimeEvent(row pgx.Row) (*session.RuntimeEvent, error) {
 }
 
 func (p *Provider) RecordRuntimeEvent(ctx context.Context, sessionID string, evt *session.RuntimeEvent) error {
-	if err := p.sessionExists(ctx, sessionID); err != nil {
-		return err
-	}
-
 	query := `INSERT INTO runtime_events (id, session_id, event_type, data, duration_ms, error_message, timestamp)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`
+		SELECT $1, $2, $3, $4, $5, $6, $7
+		WHERE EXISTS (SELECT 1 FROM sessions WHERE id = $2)`
 
 	dataJSON, _ := json.Marshal(evt.Data)
 
-	_, err := p.pool.Exec(ctx, query,
+	res, err := p.pool.Exec(ctx, query,
 		evt.ID, sessionID, evt.EventType,
 		dataJSON, pgutil.NullInt64(evt.DurationMs),
 		pgutil.NullString(evt.ErrorMessage), evt.Timestamp,
@@ -792,18 +799,25 @@ func (p *Provider) RecordRuntimeEvent(ctx context.Context, sessionID string, evt
 	if err != nil {
 		return fmt.Errorf("postgres: record runtime event: %w", err)
 	}
+	if res.RowsAffected() == 0 {
+		return session.ErrSessionNotFound
+	}
 	return nil
 }
 
-func (p *Provider) GetRuntimeEvents(ctx context.Context, sessionID string) ([]*session.RuntimeEvent, error) {
+func (p *Provider) GetRuntimeEvents(ctx context.Context, sessionID string, opts providers.PaginationOpts) ([]*session.RuntimeEvent, error) {
 	if err := p.sessionExists(ctx, sessionID); err != nil {
 		return nil, err
 	}
 
-	query := `SELECT id, session_id, event_type, data, duration_ms, error_message, timestamp
-		FROM runtime_events WHERE session_id=$1 ORDER BY timestamp ASC`
+	qb := &pgutil.QueryBuilder{}
+	qb.Add("session_id=$?", sessionID)
 
-	rows, err := p.pool.Query(ctx, query, sessionID)
+	query := `SELECT id, session_id, event_type, data, duration_ms, error_message, timestamp
+		FROM runtime_events WHERE 1=1` + qb.Where() + ` ORDER BY timestamp ASC`
+	query = qb.AppendPagination(query, opts.Limit, opts.Offset)
+
+	rows, err := p.pool.Query(ctx, query, qb.Args()...)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: get runtime events: %w", err)
 	}

@@ -45,6 +45,15 @@ const (
 	SortDesc SortOrder = "desc"
 )
 
+// PaginationOpts provides simple limit/offset pagination for list queries.
+// A zero Limit uses the caller's default; a zero Offset starts from the beginning.
+type PaginationOpts struct {
+	// Limit is the maximum number of rows to return (0 = use default).
+	Limit int
+	// Offset is the number of rows to skip.
+	Offset int
+}
+
 // MessageQueryOpts configures message retrieval from a session.
 type MessageQueryOpts struct {
 	// Limit is the maximum number of messages to return (0 = no limit).
