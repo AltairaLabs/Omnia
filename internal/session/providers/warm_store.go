@@ -107,15 +107,19 @@ type WarmStoreProvider interface {
 	GetRuntimeEvents(ctx context.Context, sessionID string, opts PaginationOpts) ([]*session.RuntimeEvent, error)
 
 	// SaveArtifact persists a binary artifact reference.
+	// Reserved for future use — currently has no HTTP route in the session API.
 	SaveArtifact(ctx context.Context, artifact *session.Artifact) error
 
 	// GetArtifacts retrieves all artifacts for a message.
+	// Reserved for future use — currently has no HTTP route in the session API.
 	GetArtifacts(ctx context.Context, messageID string) ([]*session.Artifact, error)
 
 	// GetSessionArtifacts retrieves all artifacts for a session.
+	// Reserved for future use — currently has no HTTP route in the session API.
 	GetSessionArtifacts(ctx context.Context, sessionID string) ([]*session.Artifact, error)
 
 	// DeleteSessionArtifacts removes all artifacts for a session.
+	// Reserved for future use — currently has no HTTP route in the session API.
 	DeleteSessionArtifacts(ctx context.Context, sessionID string) error
 
 	// RefreshTTL updates the expires_at and updated_at fields in a single

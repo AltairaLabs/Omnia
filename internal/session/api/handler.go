@@ -185,6 +185,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/sessions/{sessionID}/events", h.handleGetRuntimeEvents)
 
 	// Eval result endpoints
+	mux.HandleFunc("GET /api/v1/sessions/{sessionID}/eval-results/summary", h.handleGetEvalResultSummary)
 	mux.HandleFunc("GET /api/v1/sessions/{sessionID}/eval-results", h.handleGetSessionEvalResults)
 	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/evaluate", h.handleEvaluateSession)
 	mux.HandleFunc("POST /api/v1/eval-results", h.handleCreateEvalResults)

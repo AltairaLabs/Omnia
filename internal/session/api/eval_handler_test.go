@@ -245,6 +245,46 @@ func TestHandleEvaluateSession_Success(t *testing.T) {
 	assert.Equal(t, "test-ns", events[0].Namespace)
 }
 
+func TestHandleGetEvalResultSummary(t *testing.T) {
+	store := &mockEvalStore{
+		summaryResults: []*EvalResultSummary{
+			{EvalID: "e1", Total: 10, Passed: 8},
+		},
+	}
+	mux := newTestEvalHandler(store)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/sessions/b0fda631-4057-4ba6-844c-3b4a6fe192dc/eval-results/summary",
+		nil,
+	)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp EvalResultSummaryResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Summaries, 1)
+	assert.Equal(t, "e1", resp.Summaries[0].EvalID)
+}
+
+func TestHandleGetEvalResultSummary_NoEvalService(t *testing.T) {
+	h := NewHandler(nil, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/sessions/b0fda631-4057-4ba6-844c-3b4a6fe192dc/eval-results/summary",
+		nil,
+	)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
 func TestHandleEvaluateSession_InvalidSessionID(t *testing.T) {
 	h := NewHandler(nil, logr.Discard())
 	mux := http.NewServeMux()

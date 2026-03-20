@@ -383,7 +383,8 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 	)
 	UPDATE sessions SET
 		message_count = message_count + $14,
-		updated_at = $15
+		updated_at = $15,
+		last_message_preview = CASE WHEN $9 IS NULL OR $9 = '' THEN LEFT($4, 200) ELSE last_message_preview END
 	WHERE id = (SELECT session_id FROM ins)`
 
 	res, err := p.pool.Exec(ctx, query,
@@ -496,30 +497,21 @@ func (p *Provider) ListSessions(ctx context.Context, opts providers.SessionListO
 func (p *Provider) SearchSessions(ctx context.Context, query string, opts providers.SessionListOpts) (*providers.SessionPage, error) {
 	qb := &pgutil.QueryBuilder{}
 
-	// CTE to find session IDs matching the FTS query.
-	qb.Add("search_vector @@ plainto_tsquery('english', $?)", query)
-	cteClauses := qb.Where()
-
-	// Continue accumulating args for session filters.
-	sessionQB := &pgutil.QueryBuilder{}
-	sessionQB.SetArgs(qb.Args())
-	p.applySessionFilters(sessionQB, opts)
+	// EXISTS subquery: short-circuits after the first matching message per session.
+	qb.Add("EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id AND m.search_vector @@ plainto_tsquery('english', $?))", query)
+	p.applySessionFilters(qb, opts)
 
 	sort := "DESC"
 	if opts.SortOrder == providers.SortAsc {
 		sort = "ASC"
 	}
 
-	// Data query — no window function.
-	dataSQL := `WITH matching AS (
-		SELECT DISTINCT session_id FROM messages WHERE 1=1` + cteClauses + `
-	) SELECT ` + sessionColumns + `
-	FROM sessions s JOIN matching ms ON ms.session_id = s.id
-	WHERE 1=1` + sessionQB.Where() +
+	// Data query.
+	dataSQL := `SELECT ` + sessionColumns + ` FROM sessions s WHERE 1=1` + qb.Where() +
 		` ORDER BY s.created_at ` + sort
-	dataSQL = sessionQB.AppendPagination(dataSQL, opts.Limit, opts.Offset)
+	dataSQL = qb.AppendPagination(dataSQL, opts.Limit, opts.Offset)
 
-	rows, err := p.pool.Query(ctx, dataSQL, sessionQB.Args()...)
+	rows, err := p.pool.Query(ctx, dataSQL, qb.Args()...)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: search sessions: %w", err)
 	}
@@ -530,20 +522,13 @@ func (p *Provider) SearchSessions(ctx context.Context, query string, opts provid
 
 	// Separate count query.
 	countQB := &pgutil.QueryBuilder{}
-	countQB.Add("search_vector @@ plainto_tsquery('english', $?)", query)
-	countCTE := countQB.Where()
-	countSessionQB := &pgutil.QueryBuilder{}
-	countSessionQB.SetArgs(countQB.Args())
-	p.applySessionFilters(countSessionQB, opts)
+	countQB.Add("EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id AND m.search_vector @@ plainto_tsquery('english', $?))", query)
+	p.applySessionFilters(countQB, opts)
 
-	countSQL := `WITH matching AS (
-		SELECT DISTINCT session_id FROM messages WHERE 1=1` + countCTE + `
-	) SELECT count(*)
-	FROM sessions s JOIN matching ms ON ms.session_id = s.id
-	WHERE 1=1` + countSessionQB.Where()
+	countSQL := `SELECT count(*) FROM sessions s WHERE 1=1` + countQB.Where()
 
 	var totalCount int64
-	if err := p.pool.QueryRow(ctx, countSQL, countSessionQB.Args()...).Scan(&totalCount); err != nil {
+	if err := p.pool.QueryRow(ctx, countSQL, countQB.Args()...).Scan(&totalCount); err != nil {
 		return nil, fmt.Errorf("postgres: count search sessions: %w", err)
 	}
 
