@@ -14,6 +14,8 @@ import (
 	"net/http"
 
 	"github.com/go-logr/logr"
+
+	"github.com/altairalabs/omnia/pkg/logging"
 )
 
 // OptOutHandler provides HTTP endpoints for user privacy opt-out management.
@@ -58,7 +60,7 @@ func (h *OptOutHandler) handleSetOptOut(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := h.store.SetOptOut(r.Context(), req.UserID, req.Scope, req.Target); err != nil {
-		h.log.Error(err, "SetOptOut failed", "userID", req.UserID)
+		h.log.Error(err, "SetOptOut failed", "userHash", logging.HashID(req.UserID))
 		writeErr(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
@@ -84,7 +86,7 @@ func (h *OptOutHandler) handleRemoveOptOut(w http.ResponseWriter, r *http.Reques
 			writeErr(w, http.StatusNotFound, "user preferences not found")
 			return
 		}
-		h.log.Error(err, "RemoveOptOut failed", "userID", req.UserID)
+		h.log.Error(err, "RemoveOptOut failed", "userHash", logging.HashID(req.UserID))
 		writeErr(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
@@ -106,7 +108,7 @@ func (h *OptOutHandler) handleGetPreferences(w http.ResponseWriter, r *http.Requ
 			writeErr(w, http.StatusNotFound, "user preferences not found")
 			return
 		}
-		h.log.Error(err, "GetPreferences failed", "userID", userID)
+		h.log.Error(err, "GetPreferences failed", "userHash", logging.HashID(userID))
 		writeErr(w, http.StatusInternalServerError, "internal server error")
 		return
 	}

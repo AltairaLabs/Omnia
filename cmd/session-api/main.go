@@ -29,15 +29,23 @@ import (
 	"syscall"
 	"time"
 
+	gcsstorage "cloud.google.com/go/storage"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	s3sdk "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/go-logr/logr"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	goredis "github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
+	"k8s.io/client-go/rest"
 
 	"github.com/altairalabs/omnia/ee/pkg/audit"
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
+	"github.com/altairalabs/omnia/ee/pkg/redaction"
 	"github.com/altairalabs/omnia/internal/session/api"
 	"github.com/altairalabs/omnia/internal/session/otlp"
 	sessionpg "github.com/altairalabs/omnia/internal/session/postgres"
@@ -421,6 +429,12 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	handler.RegisterRoutes(mux)
 	registerEnterpriseRoutes(mux, pool, registry, auditLogger, f, log)
 
+	// Privacy middleware (enterprise only): PII redaction + user opt-out.
+	var apiHandler http.Handler = mux
+	if f.enterprise {
+		apiHandler = wrapPrivacyMiddleware(apiHandler, registry, pool, log)
+	}
+
 	// Rate limiting middleware (per-client-IP token bucket).
 	rlCfg := api.RateLimitConfigFromEnv()
 	rlMiddleware, rlStop := api.NewRateLimitMiddleware(rlCfg)
@@ -431,7 +445,7 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	}
 	log.V(1).Info("rate limiter initialized", "rps", rlCfg.RPS, "burst", rlCfg.Burst)
 
-	traced := otelhttp.NewHandler(api.TraceLogMiddleware(mux), "session-api",
+	traced := otelhttp.NewHandler(api.TraceLogMiddleware(apiHandler), "session-api",
 		otelhttp.WithFilter(func(r *http.Request) bool {
 			return r.URL.Path != "/healthz"
 		}),
@@ -450,6 +464,7 @@ func registerEnterpriseRoutes(mux *http.ServeMux, pool *pgxpool.Pool, registry *
 		deletionStore := privacy.NewPostgresDeletionStore(pool)
 		deleter := privacy.NewWarmStoreSessionDeleter(warm)
 		deletionSvc := privacy.NewDeletionService(deletionStore, deleter, auditLogger, log)
+		deletionSvc.SetMediaDeleter(buildMediaDeleter(f, log))
 		deletionHandler := privacy.NewDeletionHandler(deletionSvc, log)
 		deletionHandler.RegisterRoutes(mux)
 	}
@@ -604,4 +619,116 @@ func startOTLPServers(f *flags, registry *providers.Registry, log logr.Logger) (
 	}()
 
 	return grpcSrv, httpSrv
+}
+
+// buildMediaDeleter returns a MediaDeleter based on the configured cold storage
+// backend. When no object storage is configured, nil is returned and the
+// deletion service retains its default NoOpMediaDeleter.
+func buildMediaDeleter(f *flags, log logr.Logger) privacy.MediaDeleter {
+	if f.coldBackend == "" || f.coldBucket == "" {
+		log.V(1).Info("media deleter skipped", "reason", "no object storage configured")
+		return nil
+	}
+
+	client, err := buildObjectStoreClient(f, log)
+	if err != nil {
+		log.Error(err, "media deleter creation failed, using no-op")
+		return privacy.NoOpMediaDeleter{}
+	}
+
+	log.Info("media deleter enabled", "backend", f.coldBackend, "bucket", f.coldBucket)
+	return privacy.NewObjectStoreMediaDeleter(client, f.coldBucket, "sessions/", log)
+}
+
+func buildObjectStoreClient(f *flags, log logr.Logger) (privacy.ObjectStoreClient, error) {
+	switch cold.BackendType(f.coldBackend) {
+	case cold.BackendS3:
+		return buildS3ObjectStoreClient(f, log)
+	case cold.BackendGCS:
+		return buildGCSObjectStoreClient(log)
+	case cold.BackendAzure:
+		return buildAzureObjectStoreClient(f, log)
+	default:
+		return nil, fmt.Errorf("unsupported cold backend for media deleter: %s", f.coldBackend)
+	}
+}
+
+func buildS3ObjectStoreClient(f *flags, log logr.Logger) (*privacy.S3ObjectStoreClient, error) {
+	cfg, err := awsconfig.LoadDefaultConfig(context.Background(),
+		awsconfig.WithRegion(f.coldRegion),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("loading AWS config: %w", err)
+	}
+	opts := []func(*s3sdk.Options){}
+	if f.coldEndpoint != "" {
+		opts = append(opts, func(o *s3sdk.Options) {
+			o.BaseEndpoint = aws.String(f.coldEndpoint)
+			o.UsePathStyle = true
+		})
+	}
+	client := s3sdk.NewFromConfig(cfg, opts...)
+	return privacy.NewS3ObjectStoreClient(client, log), nil
+}
+
+func buildGCSObjectStoreClient(log logr.Logger) (*privacy.GCSObjectStoreClient, error) {
+	client, err := gcsstorage.NewClient(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("creating GCS client: %w", err)
+	}
+	return privacy.NewGCSObjectStoreClient(client, log), nil
+}
+
+func buildAzureObjectStoreClient(f *flags, log logr.Logger) (*privacy.AzureObjectStoreClient, error) {
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating Azure credential: %w", err)
+	}
+	endpoint := f.coldEndpoint
+	if endpoint == "" {
+		endpoint = fmt.Sprintf("https://%s.blob.core.windows.net", f.coldBucket)
+	}
+	client, err := azblob.NewClient(endpoint, cred, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating Azure blob client: %w", err)
+	}
+	return privacy.NewAzureObjectStoreClient(client, log), nil
+}
+
+// wrapPrivacyMiddleware creates and returns the privacy middleware handler.
+// When the K8s API is unreachable (e.g., in tests), the middleware is skipped
+// and the original handler is returned unchanged.
+func wrapPrivacyMiddleware(
+	next http.Handler,
+	registry *providers.Registry,
+	pool *pgxpool.Pool,
+	log logr.Logger,
+) http.Handler {
+	kubeConfig, err := rest.InClusterConfig()
+	if err != nil {
+		log.Info("privacy middleware skipped", "reason", "no in-cluster kubeconfig")
+		return next
+	}
+
+	watcher, err := privacy.NewPolicyWatcher(kubeConfig, log)
+	if err != nil {
+		log.Error(err, "privacy middleware skipped", "reason", "policy watcher creation failed")
+		return next
+	}
+
+	// Start the watcher asynchronously; it syncs the cache in the background.
+	go func() {
+		if startErr := watcher.Start(context.Background()); startErr != nil {
+			log.Error(startErr, "policy watcher start failed")
+		}
+	}()
+
+	sessionLookup := privacy.NewWarmStoreSessionLookup(registry)
+	sessionCache := privacy.NewSessionMetadataCache(sessionLookup, 10000)
+	redactor := redaction.NewRedactor()
+	prefStore := privacy.NewPreferencesStore(pool)
+
+	middleware := privacy.NewPrivacyMiddleware(watcher, sessionCache, redactor, prefStore, log)
+	log.Info("privacy middleware enabled")
+	return middleware.Wrap(next)
 }

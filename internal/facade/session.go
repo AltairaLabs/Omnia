@@ -31,6 +31,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/internal/session/otlp"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logctx"
@@ -52,10 +53,14 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 	ctx, msgSpan = s.startMessageSpan(ctx, c, sessionID)
 	defer msgSpan.End()
 
-	// Enrich context with session ID, namespace, and trace ID for log↔trace correlation
+	// Enrich context with session ID, namespace, trace ID, and user ID for
+	// log↔trace correlation and privacy header propagation.
 	ctx = logctx.WithSessionID(ctx, sessionID)
 	ctx = logctx.WithNamespace(ctx, c.namespace)
 	ctx = logctx.WithTraceID(ctx, msgSpan.SpanContext().TraceID().String())
+	if c.userID != "" {
+		ctx = httpclient.WithUserID(ctx, c.userID)
+	}
 	log = logctx.LoggerWithContext(s.log, ctx)
 
 	// Update connection's session ID and mark as persisted

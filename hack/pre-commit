@@ -362,6 +362,18 @@ else
 fi
 
 #
+# 3b. PII log check
+#
+print_header "Checking Logs for PII"
+
+if "$REPO_ROOT/hack/check-log-pii.sh" 2>&1; then
+    print_success "PII log check passed"
+else
+    print_error "PII detected in log statements"
+    CHECKS_FAILED=1
+fi
+
+#
 # 4. Build check
 #
 print_header "Building"
@@ -505,6 +517,16 @@ if [ -f coverage.out ]; then
 
         # Skip Postgres session store (requires real Postgres via testcontainers, tested in integration)
         if [[ "$file" == "internal/session/postgres/migrator.go" ]] || [[ "$file" == internal/session/providers/postgres/*.go ]]; then
+            continue
+        fi
+
+        # Skip EE setup package (requires envtest control plane, tested in CI with KUBEBUILDER_ASSETS)
+        if [[ "$file" == ee/pkg/setup/*.go ]]; then
+            continue
+        fi
+
+        # Skip privacy watcher and session lookup adapter (require K8s API / real provider registry)
+        if [[ "$file" == ee/pkg/privacy/watcher.go ]] || [[ "$file" == ee/pkg/privacy/session_lookup_adapter.go ]]; then
             continue
         fi
 

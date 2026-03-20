@@ -8,7 +8,14 @@
   - Provider — validates LLM provider configuration
   - Workspace — manages tenant namespaces and storage
   - SessionRetentionPolicy — manages session cleanup/retention
-  - AgentPolicy, ToolPolicy — enforces policies
+  - AgentPolicy — enforces agent-level policies
+- Enterprise controllers (gated behind `--enterprise` flag, registered via `ee/pkg/setup`):
+  - SessionPrivacyPolicy — privacy policy inheritance and enforcement
+  - ToolPolicy — CEL-based tool call policy enforcement
+  - LicenseActivation — license activation and heartbeats (`--license-server-url`, `--cluster-name`)
+  - SessionAnalyticsSync — analytics export to Snowflake/BigQuery/ClickHouse (`--enable-analytics`)
+  - SessionStreamingConfig — event streaming to Kafka/Kinesis/Pulsar/NATS (`--enable-streaming`)
+  - SessionPrivacyPolicy webhook — validates inheritance rules (when webhook certs configured)
 - Dashboard server (embedded Next.js app via `dashboard/server.js`)
 - REST API for dashboard proxy routes
 - Webhook validation for CRDs
@@ -43,5 +50,7 @@
 ## Dependencies
 - controller-runtime / client-go (K8s interaction)
 - Omnia CRD types (`api/v1alpha1/`)
+- Enterprise CRD types (`ee/api/v1alpha1/`) — scheme always registered; controllers gated by `--enterprise`
+- Enterprise setup (`ee/pkg/setup`) — registers EE controllers and webhooks
 - Dashboard build output (`dashboard/`)
 - Schema validation (`internal/schema`)

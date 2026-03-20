@@ -471,13 +471,13 @@ func TestListRequestsByUser_Empty(t *testing.T) {
 
 // --- Handler HTTP tests -----------------------------------------------------
 
-func newTestHandler() (*DeletionHandler, *MockDeletionStore, *MockSessionDeleter) {
+func newTestHandler() (*DeletionHandler, *MockDeletionStore) {
 	store := NewMockDeletionStore()
 	deleter := NewMockSessionDeleter()
 	audit := &MockAuditLogger{}
 	svc := NewDeletionService(store, deleter, audit, logr.Discard())
 	handler := NewDeletionHandler(svc, logr.Discard())
-	return handler, store, deleter
+	return handler, store
 }
 
 func TestHandleCreate_Success(t *testing.T) {
@@ -513,7 +513,7 @@ func TestHandleCreate_Success(t *testing.T) {
 }
 
 func TestHandleCreate_InvalidBody(t *testing.T) {
-	handler, _, _ := newTestHandler()
+	handler, _ := newTestHandler()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/privacy/deletion-request", bytes.NewBufferString("{invalid"))
 	w := httptest.NewRecorder()
@@ -526,7 +526,7 @@ func TestHandleCreate_InvalidBody(t *testing.T) {
 }
 
 func TestHandleCreate_MissingUserID(t *testing.T) {
-	handler, _, _ := newTestHandler()
+	handler, _ := newTestHandler()
 
 	body := `{"reason":"gdpr_erasure","scope":"all"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/privacy/deletion-request", bytes.NewBufferString(body))
@@ -540,7 +540,7 @@ func TestHandleCreate_MissingUserID(t *testing.T) {
 }
 
 func TestHandleCreate_InvalidReason(t *testing.T) {
-	handler, _, _ := newTestHandler()
+	handler, _ := newTestHandler()
 
 	body := `{"userId":"user-1","reason":"bad","scope":"all"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/privacy/deletion-request", bytes.NewBufferString(body))
@@ -554,7 +554,7 @@ func TestHandleCreate_InvalidReason(t *testing.T) {
 }
 
 func TestHandleGet_Success(t *testing.T) {
-	handler, store, _ := newTestHandler()
+	handler, store := newTestHandler()
 
 	dr := &DeletionRequest{
 		ID:        "req-123",
@@ -584,7 +584,7 @@ func TestHandleGet_Success(t *testing.T) {
 }
 
 func TestHandleGet_NotFound(t *testing.T) {
-	handler, _, _ := newTestHandler()
+	handler, _ := newTestHandler()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/privacy/deletion-request/nonexistent", nil)
 	w := httptest.NewRecorder()
@@ -597,7 +597,7 @@ func TestHandleGet_NotFound(t *testing.T) {
 }
 
 func TestHandleList_Success(t *testing.T) {
-	handler, store, _ := newTestHandler()
+	handler, store := newTestHandler()
 
 	for i, id := range []string{"req-1", "req-2"} {
 		dr := &DeletionRequest{
@@ -628,7 +628,7 @@ func TestHandleList_Success(t *testing.T) {
 }
 
 func TestHandleList_MissingUserID(t *testing.T) {
-	handler, _, _ := newTestHandler()
+	handler, _ := newTestHandler()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/privacy/deletion-requests", nil)
 	w := httptest.NewRecorder()
@@ -641,7 +641,7 @@ func TestHandleList_MissingUserID(t *testing.T) {
 }
 
 func TestHandleList_Empty(t *testing.T) {
-	handler, _, _ := newTestHandler()
+	handler, _ := newTestHandler()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/privacy/deletion-requests?user_id=nobody", nil)
 	w := httptest.NewRecorder()
@@ -1277,3 +1277,294 @@ func (m *mockRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (m *mockRows) RawValues() [][]byte                          { return nil }
 func (m *mockRows) Values() ([]any, error)                       { return nil, nil }
 func (m *mockRows) Conn() *pgx.Conn                              { return nil }
+
+// --- MockMediaDeleter -------------------------------------------------------
+
+// MockMediaDeleter is a test double for MediaDeleter.
+type MockMediaDeleter struct {
+	mu         sync.Mutex
+	DeletedIDs []string
+	DeleteErr  error
+	FailIDs    map[string]bool
+}
+
+func NewMockMediaDeleter() *MockMediaDeleter {
+	return &MockMediaDeleter{FailIDs: make(map[string]bool)}
+}
+
+func (m *MockMediaDeleter) DeleteSessionMedia(_ context.Context, sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.DeleteErr != nil {
+		return m.DeleteErr
+	}
+	if m.FailIDs[sessionID] {
+		return errors.New("media delete failed")
+	}
+	m.DeletedIDs = append(m.DeletedIDs, sessionID)
+	return nil
+}
+
+// --- Media deletion in pipeline tests ---------------------------------------
+
+func TestProcessRequest_WithMediaDeletion(t *testing.T) {
+	store := NewMockDeletionStore()
+	deleter := NewMockSessionDeleter()
+	media := NewMockMediaDeleter()
+	audit := &MockAuditLogger{}
+	svc := newTestService(store, deleter, audit)
+	svc.SetMediaDeleter(media)
+
+	deleter.Sessions["user-1|"] = []string{"sess-1", "sess-2"}
+
+	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
+		UserID: "user-1",
+		Reason: "gdpr_erasure",
+		Scope:  "all",
+	})
+	require.NoError(t, err)
+
+	err = svc.ProcessRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+
+	// Verify media was deleted for both sessions.
+	assert.Equal(t, []string{"sess-1", "sess-2"}, media.DeletedIDs)
+
+	updated, err := store.GetRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", updated.Status)
+	assert.Equal(t, 2, updated.SessionsDeleted)
+}
+
+func TestProcessRequest_MediaFailure(t *testing.T) {
+	store := NewMockDeletionStore()
+	deleter := NewMockSessionDeleter()
+	media := NewMockMediaDeleter()
+	media.FailIDs["sess-2"] = true
+	svc := newTestService(store, deleter, nil)
+	svc.SetMediaDeleter(media)
+
+	deleter.Sessions["user-1|"] = []string{"sess-1", "sess-2", "sess-3"}
+
+	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
+		UserID: "user-1",
+		Reason: "gdpr_erasure",
+		Scope:  "all",
+	})
+	require.NoError(t, err)
+
+	err = svc.ProcessRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+
+	updated, err := store.GetRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "failed", updated.Status)
+	assert.Equal(t, 2, updated.SessionsDeleted)
+	assert.Len(t, updated.Errors, 1)
+	assert.Contains(t, updated.Errors[0], "sess-2")
+	assert.Contains(t, updated.Errors[0], "media")
+}
+
+func TestProcessRequest_NoOpMediaDeleter(t *testing.T) {
+	store := NewMockDeletionStore()
+	deleter := NewMockSessionDeleter()
+	svc := newTestService(store, deleter, nil)
+	// Default NoOpMediaDeleter should not cause issues.
+
+	deleter.Sessions["user-1|"] = []string{"sess-1"}
+
+	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
+		UserID: "user-1",
+		Reason: "gdpr_erasure",
+		Scope:  "all",
+	})
+	require.NoError(t, err)
+
+	err = svc.ProcessRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+
+	updated, err := store.GetRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", updated.Status)
+}
+
+// --- Batch processing tests -------------------------------------------------
+
+func TestProcessRequest_BatchProcessing(t *testing.T) {
+	store := NewMockDeletionStore()
+	deleter := NewMockSessionDeleter()
+	svc := newTestService(store, deleter, nil)
+	svc.SetBatchSize(3)
+
+	// 7 sessions should produce 3 batches: [3, 3, 1]
+	sessions := make([]string, 7)
+	for i := range sessions {
+		sessions[i] = fmt.Sprintf("sess-%d", i)
+	}
+	deleter.Sessions["user-1|"] = sessions
+
+	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
+		UserID: "user-1",
+		Reason: "gdpr_erasure",
+		Scope:  "all",
+	})
+	require.NoError(t, err)
+
+	err = svc.ProcessRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+
+	updated, err := store.GetRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", updated.Status)
+	assert.Equal(t, 7, updated.SessionsDeleted)
+}
+
+func TestProcessRequest_BatchWithPartialFailure(t *testing.T) {
+	store := NewMockDeletionStore()
+	deleter := NewMockSessionDeleter()
+	svc := newTestService(store, deleter, nil)
+	svc.SetBatchSize(2)
+
+	deleter.Sessions["user-1|"] = []string{"s1", "s2", "s3", "s4", "s5"}
+	deleter.FailIDs["s2"] = true
+	deleter.FailIDs["s4"] = true
+
+	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
+		UserID: "user-1",
+		Reason: "gdpr_erasure",
+		Scope:  "all",
+	})
+	require.NoError(t, err)
+
+	err = svc.ProcessRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+
+	updated, err := store.GetRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "failed", updated.Status)
+	assert.Equal(t, 3, updated.SessionsDeleted)
+	assert.Len(t, updated.Errors, 2)
+}
+
+func TestProcessRequest_SingleItemBatches(t *testing.T) {
+	store := NewMockDeletionStore()
+	deleter := NewMockSessionDeleter()
+	svc := newTestService(store, deleter, nil)
+	svc.SetBatchSize(1)
+
+	deleter.Sessions["user-1|"] = []string{"s1", "s2", "s3"}
+
+	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
+		UserID: "user-1",
+		Reason: "gdpr_erasure",
+		Scope:  "all",
+	})
+	require.NoError(t, err)
+
+	err = svc.ProcessRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+
+	updated, err := store.GetRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 3, updated.SessionsDeleted)
+}
+
+// --- Progress tracking tests ------------------------------------------------
+
+func TestGetProgress_InProgress(t *testing.T) {
+	store := NewMockDeletionStore()
+	now := time.Now().UTC()
+	req := &DeletionRequest{
+		ID:              "req-1",
+		UserID:          "user-1",
+		Status:          "in_progress",
+		StartedAt:       &now,
+		SessionsDeleted: 5,
+		Errors:          []string{"session s3: warm store: delete failed"},
+		CreatedAt:       now,
+	}
+	require.NoError(t, store.CreateRequest(context.Background(), req))
+
+	svc := newTestService(store, NewMockSessionDeleter(), nil)
+	progress, err := svc.GetProgress(context.Background(), "req-1")
+	require.NoError(t, err)
+	assert.Equal(t, 6, progress.TotalSessions)
+	assert.Equal(t, 5, progress.DeletedSessions)
+	assert.Equal(t, 1, progress.FailedSessions)
+	assert.Equal(t, "warm-store", progress.CurrentPhase)
+}
+
+func TestGetProgress_Completed(t *testing.T) {
+	store := NewMockDeletionStore()
+	now := time.Now().UTC()
+	req := &DeletionRequest{
+		ID:              "req-1",
+		UserID:          "user-1",
+		Status:          "completed",
+		CompletedAt:     &now,
+		SessionsDeleted: 10,
+		Errors:          []string{},
+		CreatedAt:       now,
+	}
+	require.NoError(t, store.CreateRequest(context.Background(), req))
+
+	svc := newTestService(store, NewMockSessionDeleter(), nil)
+	progress, err := svc.GetProgress(context.Background(), "req-1")
+	require.NoError(t, err)
+	assert.Equal(t, 10, progress.TotalSessions)
+	assert.Equal(t, 10, progress.DeletedSessions)
+	assert.Equal(t, 0, progress.FailedSessions)
+	assert.Equal(t, "complete", progress.CurrentPhase)
+}
+
+func TestGetProgress_Pending(t *testing.T) {
+	store := NewMockDeletionStore()
+	req := &DeletionRequest{
+		ID:        "req-1",
+		UserID:    "user-1",
+		Status:    "pending",
+		Errors:    []string{},
+		CreatedAt: time.Now().UTC(),
+	}
+	require.NoError(t, store.CreateRequest(context.Background(), req))
+
+	svc := newTestService(store, NewMockSessionDeleter(), nil)
+	progress, err := svc.GetProgress(context.Background(), "req-1")
+	require.NoError(t, err)
+	assert.Equal(t, "pending", progress.CurrentPhase)
+}
+
+func TestGetProgress_NotFound(t *testing.T) {
+	store := NewMockDeletionStore()
+	svc := newTestService(store, NewMockSessionDeleter(), nil)
+
+	_, err := svc.GetProgress(context.Background(), "nonexistent")
+	assert.ErrorIs(t, err, ErrRequestNotFound)
+}
+
+// --- SetMediaDeleter / SetBatchSize tests -----------------------------------
+
+func TestSetMediaDeleter_Nil(t *testing.T) {
+	svc := NewDeletionService(NewMockDeletionStore(), NewMockSessionDeleter(), nil, logr.Discard())
+	svc.SetMediaDeleter(nil)
+	// Should retain the default NoOpMediaDeleter (no panic).
+	assert.NotNil(t, svc.media)
+}
+
+func TestSetBatchSize_Zero(t *testing.T) {
+	svc := NewDeletionService(NewMockDeletionStore(), NewMockSessionDeleter(), nil, logr.Discard())
+	svc.SetBatchSize(0)
+	assert.Equal(t, DefaultBatchSize, svc.batchSize)
+}
+
+func TestSetBatchSize_Negative(t *testing.T) {
+	svc := NewDeletionService(NewMockDeletionStore(), NewMockSessionDeleter(), nil, logr.Discard())
+	svc.SetBatchSize(-5)
+	assert.Equal(t, DefaultBatchSize, svc.batchSize)
+}
+
+func TestSetBatchSize_Positive(t *testing.T) {
+	svc := NewDeletionService(NewMockDeletionStore(), NewMockSessionDeleter(), nil, logr.Discard())
+	svc.SetBatchSize(50)
+	assert.Equal(t, 50, svc.batchSize)
+}

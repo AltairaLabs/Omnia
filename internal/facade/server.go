@@ -36,6 +36,7 @@ import (
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logctx"
+	"github.com/altairalabs/omnia/pkg/logging"
 	"github.com/altairalabs/omnia/pkg/policy"
 )
 
@@ -274,7 +275,7 @@ func (s *Server) checkOrigin(r *http.Request) bool {
 	}
 
 	s.log.V(1).Info("rejected WebSocket connection from disallowed origin",
-		"origin", origin)
+		"originHash", logging.HashID(origin))
 	return false
 }
 
