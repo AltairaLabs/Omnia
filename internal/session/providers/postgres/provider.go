@@ -36,6 +36,10 @@ import (
 // Compile-time interface check.
 var _ providers.WarmStoreProvider = (*Provider)(nil)
 
+// qbSessionID is the QueryBuilder filter clause for session_id, extracted to
+// avoid SonarCloud S1192 (duplicated string literal).
+const qbSessionID = "session_id=$?"
+
 // Provider implements providers.WarmStoreProvider using PostgreSQL.
 type Provider struct {
 	pool     *pgxpool.Pool
@@ -411,7 +415,7 @@ func (p *Provider) GetMessages(ctx context.Context, sessionID string, opts provi
 	}
 
 	qb := &pgutil.QueryBuilder{}
-	qb.Add("session_id=$?", sessionID)
+	qb.Add(qbSessionID, sessionID)
 
 	if opts.AfterSeq > 0 {
 		qb.Add("sequence_num > $?", opts.AfterSeq)
@@ -691,7 +695,7 @@ func (p *Provider) GetToolCalls(ctx context.Context, sessionID string, opts prov
 	}
 
 	qb := &pgutil.QueryBuilder{}
-	qb.Add("session_id=$?", sessionID)
+	qb.Add(qbSessionID, sessionID)
 
 	query := `SELECT id, session_id, call_id, name, arguments, result, status, duration_ms, error_message, labels, created_at
 		FROM tool_calls WHERE 1=1` + qb.Where() + ` ORDER BY created_at ASC`
@@ -726,7 +730,7 @@ func (p *Provider) GetProviderCalls(ctx context.Context, sessionID string, opts 
 	}
 
 	qb := &pgutil.QueryBuilder{}
-	qb.Add("session_id=$?", sessionID)
+	qb.Add(qbSessionID, sessionID)
 
 	query := `SELECT id, session_id, provider, model, status, input_tokens, output_tokens, cached_tokens, cost_usd, duration_ms, finish_reason, tool_call_count, error_message, labels, created_at
 		FROM provider_calls WHERE 1=1` + qb.Where() + ` ORDER BY created_at ASC`
@@ -808,7 +812,7 @@ func (p *Provider) GetRuntimeEvents(ctx context.Context, sessionID string, opts 
 	}
 
 	qb := &pgutil.QueryBuilder{}
-	qb.Add("session_id=$?", sessionID)
+	qb.Add(qbSessionID, sessionID)
 
 	query := `SELECT id, session_id, event_type, data, duration_ms, error_message, timestamp
 		FROM runtime_events WHERE 1=1` + qb.Where() + ` ORDER BY timestamp ASC`
