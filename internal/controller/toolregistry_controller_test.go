@@ -1253,6 +1253,38 @@ var _ = Describe("ToolRegistry Controller", func() {
 			tools := reconciler.discoverToolsFromHandler(handler, "http://example.com")
 			Expect(tools).To(BeNil())
 		})
+
+		It("should discover tool from client handler with explicit tool definition", func() {
+			handler := &omniav1alpha1.HandlerDefinition{
+				Name: "client-handler",
+				Type: omniav1alpha1.HandlerTypeClient,
+				Tool: &omniav1alpha1.ToolDefinition{
+					Name:        "file_upload",
+					Description: "Upload a file from the browser",
+					InputSchema: apiextensionsv1.JSON{
+						Raw: []byte(`{"type":"object","properties":{"path":{"type":"string"}}}`),
+					},
+				},
+			}
+			tools := reconciler.discoverToolsFromHandler(handler, "client://browser")
+			Expect(tools).To(HaveLen(1))
+			Expect(tools[0].Name).To(Equal("file_upload"))
+			Expect(tools[0].HandlerName).To(Equal("client-handler"))
+			Expect(tools[0].Description).To(Equal("Upload a file from the browser"))
+			Expect(tools[0].Endpoint).To(Equal("client://browser"))
+			Expect(tools[0].Status).To(Equal(omniav1alpha1.ToolStatusAvailable))
+			Expect(tools[0].InputSchema).NotTo(BeNil())
+			Expect(tools[0].LastChecked).NotTo(BeNil())
+		})
+
+		It("should return nil for client handler without tool definition", func() {
+			handler := &omniav1alpha1.HandlerDefinition{
+				Name: "client-no-tool",
+				Type: omniav1alpha1.HandlerTypeClient,
+			}
+			tools := reconciler.discoverToolsFromHandler(handler, "client://browser")
+			Expect(tools).To(BeNil())
+		})
 	})
 })
 

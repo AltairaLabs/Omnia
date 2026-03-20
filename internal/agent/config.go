@@ -30,14 +30,11 @@ const (
 	EnvAgentName           = "OMNIA_AGENT_NAME"
 	EnvNamespace           = "OMNIA_NAMESPACE"
 	EnvPromptPackName      = "OMNIA_PROMPTPACK_NAME"
-	EnvPromptPackVersion   = "OMNIA_PROMPTPACK_VERSION"
 	EnvFacadeType          = "OMNIA_FACADE_TYPE"
 	EnvFacadePort          = "OMNIA_FACADE_PORT"
 	EnvHandlerMode         = "OMNIA_HANDLER_MODE"
 	EnvRuntimeAddress      = "OMNIA_RUNTIME_ADDRESS"
-	EnvProviderAPIKey      = "OMNIA_PROVIDER_API_KEY"
-	EnvSessionTTL          = "OMNIA_SESSION_TTL"
-	EnvPromptPackMountPath = "OMNIA_PROMPTPACK_MOUNT_PATH"
+	EnvPromptPackMountPath = "OMNIA_PROMPTPACK_PATH"
 	EnvHealthPort          = "OMNIA_HEALTH_PORT"
 	EnvMediaStorageType    = "OMNIA_MEDIA_STORAGE_TYPE"
 	EnvMediaStoragePath    = "OMNIA_MEDIA_STORAGE_PATH"
@@ -83,7 +80,7 @@ const (
 	DefaultHealthPort          = 8081
 	DefaultRuntimeAddress      = "localhost:9000"
 	DefaultSessionTTL          = 24 * time.Hour
-	DefaultPromptPackMountPath = "/etc/promptpack"
+	DefaultPromptPackMountPath = "/etc/omnia/pack"
 	DefaultMediaStoragePath    = "/var/lib/omnia/media"
 	DefaultMediaMaxFileSize    = 100 * 1024 * 1024 // 100MB
 	DefaultMediaDefaultTTL     = 24 * time.Hour
@@ -153,9 +150,6 @@ type Config struct {
 	HandlerMode    HandlerMode
 	RuntimeAddress string
 
-	// Provider configuration.
-	ProviderAPIKey string
-
 	// ToolRegistry configuration (optional).
 	ToolRegistryName      string
 	ToolRegistryNamespace string
@@ -213,7 +207,6 @@ var (
 	ErrMissingAgentName       = errors.New("OMNIA_AGENT_NAME is required")
 	ErrMissingNamespace       = errors.New("OMNIA_NAMESPACE is required")
 	ErrMissingPromptPack      = errors.New("OMNIA_PROMPTPACK_NAME is required")
-	ErrMissingProviderKey     = errors.New("OMNIA_PROVIDER_API_KEY is required for runtime handler mode")
 	ErrInvalidFacadeType      = errors.New("invalid facade type")
 	ErrInvalidHandlerMode     = errors.New("invalid handler mode")
 	ErrInvalidMediaStorageTyp = errors.New("invalid media storage type")

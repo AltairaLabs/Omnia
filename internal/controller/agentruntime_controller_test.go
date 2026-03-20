@@ -1391,11 +1391,11 @@ var _ = Describe("AgentRuntime Controller", func() {
 				envMap[env.Name] = env
 			}
 
-			Expect(envMap["OMNIA_SESSION_TYPE"].Value).To(Equal(string(omniav1alpha1.SessionStoreTypeRedis)))
-			Expect(envMap["OMNIA_SESSION_TTL"].Value).To(Equal("1h"))
-			Expect(envMap["OMNIA_SESSION_STORE_URL"].ValueFrom).NotTo(BeNil())
-			Expect(envMap["OMNIA_SESSION_STORE_URL"].ValueFrom.SecretKeyRef.Name).To(Equal("redis-secret"))
-			Expect(envMap["OMNIA_SESSION_STORE_URL"].ValueFrom.SecretKeyRef.Key).To(Equal("url"))
+			// Session env vars are no longer injected by the operator;
+			// the facade reads session config directly from the CRD.
+			Expect(envMap).NotTo(HaveKey("OMNIA_SESSION_TYPE"))
+			Expect(envMap).NotTo(HaveKey("OMNIA_SESSION_TTL"))
+			Expect(envMap).NotTo(HaveKey("OMNIA_SESSION_STORE_URL"))
 		})
 
 		It("should mount ConfigMap volume for PromptPack", func() {

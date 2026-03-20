@@ -464,6 +464,165 @@ func TestBuildA2AClientEnvVars_Empty(t *testing.T) {
 	}
 }
 
+// countRedisURLEnvVars returns how many OMNIA_A2A_REDIS_URL env vars exist.
+func countRedisURLEnvVars(envVars []corev1.EnvVar) int {
+	n := 0
+	for _, ev := range envVars {
+		if ev.Name == "OMNIA_A2A_REDIS_URL" {
+			n++
+		}
+	}
+	return n
+}
+
+func TestBuildA2AConfigEnvVars_RedisURL_BothSet(t *testing.T) {
+	redisSecretRef := &corev1.LocalObjectReference{Name: "redis-secret"}
+	a2a := &omniav1alpha1.A2AConfig{
+		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
+			Type:           omniav1alpha1.A2ATaskStoreRedis,
+			RedisURL:       "redis://localhost:6379",
+			RedisSecretRef: redisSecretRef,
+		},
+	}
+
+	envVars := buildA2AConfigEnvVars(a2a)
+
+	if c := countRedisURLEnvVars(envVars); c != 1 {
+		t.Errorf("expected exactly 1 OMNIA_A2A_REDIS_URL, got %d", c)
+	}
+	// Secret ref takes precedence — the env var must use ValueFrom.
+	for _, ev := range envVars {
+		if ev.Name == "OMNIA_A2A_REDIS_URL" {
+			if ev.ValueFrom == nil || ev.ValueFrom.SecretKeyRef == nil {
+				t.Error("expected OMNIA_A2A_REDIS_URL from secret ref, got plain value")
+			}
+			if ev.ValueFrom != nil && ev.ValueFrom.SecretKeyRef.Name != "redis-secret" {
+				t.Errorf("secret name = %q, want %q", ev.ValueFrom.SecretKeyRef.Name, "redis-secret")
+			}
+		}
+	}
+}
+
+func TestBuildA2AConfigEnvVars_RedisURL_OnlySecretRef(t *testing.T) {
+	redisSecretRef := &corev1.LocalObjectReference{Name: "redis-secret"}
+	a2a := &omniav1alpha1.A2AConfig{
+		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
+			Type:           omniav1alpha1.A2ATaskStoreRedis,
+			RedisSecretRef: redisSecretRef,
+		},
+	}
+
+	envVars := buildA2AConfigEnvVars(a2a)
+
+	if c := countRedisURLEnvVars(envVars); c != 1 {
+		t.Errorf("expected exactly 1 OMNIA_A2A_REDIS_URL, got %d", c)
+	}
+	for _, ev := range envVars {
+		if ev.Name == "OMNIA_A2A_REDIS_URL" {
+			if ev.ValueFrom == nil || ev.ValueFrom.SecretKeyRef == nil {
+				t.Error("expected OMNIA_A2A_REDIS_URL from secret ref")
+			}
+		}
+	}
+}
+
+func TestBuildA2AConfigEnvVars_RedisURL_OnlyPlainURL(t *testing.T) {
+	a2a := &omniav1alpha1.A2AConfig{
+		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
+			Type:     omniav1alpha1.A2ATaskStoreRedis,
+			RedisURL: "redis://localhost:6379",
+		},
+	}
+
+	envVars := buildA2AConfigEnvVars(a2a)
+
+	if c := countRedisURLEnvVars(envVars); c != 1 {
+		t.Errorf("expected exactly 1 OMNIA_A2A_REDIS_URL, got %d", c)
+	}
+	for _, ev := range envVars {
+		if ev.Name == "OMNIA_A2A_REDIS_URL" {
+			if ev.Value != "redis://localhost:6379" {
+				t.Errorf("plain URL = %q, want %q", ev.Value, "redis://localhost:6379")
+			}
+		}
+	}
+}
+
+func TestBuildA2ADualProtocolEnvVars_RedisURL_BothSet(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	redisSecretRef := &corev1.LocalObjectReference{Name: "redis-secret"}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Spec.A2A = &omniav1alpha1.A2AConfig{
+		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
+			Type:           omniav1alpha1.A2ATaskStoreRedis,
+			RedisURL:       "redis://localhost:6379",
+			RedisSecretRef: redisSecretRef,
+		},
+	}
+
+	envVars := r.buildA2ADualProtocolEnvVars(ar)
+
+	if c := countRedisURLEnvVars(envVars); c != 1 {
+		t.Errorf("expected exactly 1 OMNIA_A2A_REDIS_URL, got %d", c)
+	}
+	for _, ev := range envVars {
+		if ev.Name == "OMNIA_A2A_REDIS_URL" {
+			if ev.ValueFrom == nil || ev.ValueFrom.SecretKeyRef == nil {
+				t.Error("expected OMNIA_A2A_REDIS_URL from secret ref, got plain value")
+			}
+		}
+	}
+}
+
+func TestBuildA2ADualProtocolEnvVars_RedisURL_OnlySecretRef(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	redisSecretRef := &corev1.LocalObjectReference{Name: "redis-secret"}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Spec.A2A = &omniav1alpha1.A2AConfig{
+		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
+			Type:           omniav1alpha1.A2ATaskStoreRedis,
+			RedisSecretRef: redisSecretRef,
+		},
+	}
+
+	envVars := r.buildA2ADualProtocolEnvVars(ar)
+
+	if c := countRedisURLEnvVars(envVars); c != 1 {
+		t.Errorf("expected exactly 1 OMNIA_A2A_REDIS_URL, got %d", c)
+	}
+	for _, ev := range envVars {
+		if ev.Name == "OMNIA_A2A_REDIS_URL" {
+			if ev.ValueFrom == nil || ev.ValueFrom.SecretKeyRef == nil {
+				t.Error("expected OMNIA_A2A_REDIS_URL from secret ref")
+			}
+		}
+	}
+}
+
+func TestBuildA2ADualProtocolEnvVars_RedisURL_OnlyPlainURL(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Spec.A2A = &omniav1alpha1.A2AConfig{
+		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
+			Type:     omniav1alpha1.A2ATaskStoreRedis,
+			RedisURL: "redis://localhost:6379",
+		},
+	}
+
+	envVars := r.buildA2ADualProtocolEnvVars(ar)
+
+	if c := countRedisURLEnvVars(envVars); c != 1 {
+		t.Errorf("expected exactly 1 OMNIA_A2A_REDIS_URL, got %d", c)
+	}
+	for _, ev := range envVars {
+		if ev.Name == "OMNIA_A2A_REDIS_URL" {
+			if ev.Value != "redis://localhost:6379" {
+				t.Errorf("plain URL = %q, want %q", ev.Value, "redis://localhost:6379")
+			}
+		}
+	}
+}
+
 func TestBuildA2ADualProtocolEnvVars_NilA2A(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 
