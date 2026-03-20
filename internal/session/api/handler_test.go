@@ -113,13 +113,19 @@ type mockWarmStore struct {
 	appendedMsgs    map[string][]*session.Message
 	updatedSessions []*session.Session
 	getMessagesErr  error // if set, GetMessages returns this error for any session
+	toolCalls       map[string][]*session.ToolCall
+	providerCalls   map[string][]*session.ProviderCall
+	runtimeEvents   map[string][]*session.RuntimeEvent
 }
 
 func newMockWarmStore() *mockWarmStore {
 	return &mockWarmStore{
-		sessions:     make(map[string]*session.Session),
-		messages:     make(map[string][]*session.Message),
-		appendedMsgs: make(map[string][]*session.Message),
+		sessions:      make(map[string]*session.Session),
+		messages:      make(map[string][]*session.Message),
+		appendedMsgs:  make(map[string][]*session.Message),
+		toolCalls:     make(map[string][]*session.ToolCall),
+		providerCalls: make(map[string][]*session.ProviderCall),
+		runtimeEvents: make(map[string][]*session.RuntimeEvent),
 	}
 }
 
@@ -149,6 +155,11 @@ func (m *mockWarmStore) UpdateSessionStatus(_ context.Context, sessionID string,
 		return session.ErrSessionNotFound
 	}
 	if update.SetStatus != "" {
+		// Don't overwrite terminal status (matches production behavior).
+		if session.IsTerminalStatus(s.Status) {
+			m.updatedSessions = append(m.updatedSessions, s)
+			return nil
+		}
 		s.Status = update.SetStatus
 	}
 	m.updatedSessions = append(m.updatedSessions, s)
@@ -241,29 +252,32 @@ func (m *mockWarmStore) RecordProviderCall(_ context.Context, sessionID string, 
 	return nil
 }
 
-func (m *mockWarmStore) GetToolCalls(_ context.Context, sessionID string, _ providers.PaginationOpts) ([]*session.ToolCall, error) {
+func (m *mockWarmStore) GetToolCalls(_ context.Context, sessionID string, opts providers.PaginationOpts) ([]*session.ToolCall, error) {
 	if _, ok := m.sessions[sessionID]; !ok {
 		return nil, session.ErrSessionNotFound
 	}
-	return []*session.ToolCall{}, nil
+	items := m.toolCalls[sessionID]
+	return applyPagination(items, opts), nil
 }
 
-func (m *mockWarmStore) GetProviderCalls(_ context.Context, sessionID string, _ providers.PaginationOpts) ([]*session.ProviderCall, error) {
+func (m *mockWarmStore) GetProviderCalls(_ context.Context, sessionID string, opts providers.PaginationOpts) ([]*session.ProviderCall, error) {
 	if _, ok := m.sessions[sessionID]; !ok {
 		return nil, session.ErrSessionNotFound
 	}
-	return []*session.ProviderCall{}, nil
+	items := m.providerCalls[sessionID]
+	return applyPagination(items, opts), nil
 }
 
 func (m *mockWarmStore) RecordRuntimeEvent(_ context.Context, _ string, _ *session.RuntimeEvent) error {
 	return nil
 }
 
-func (m *mockWarmStore) GetRuntimeEvents(_ context.Context, sessionID string, _ providers.PaginationOpts) ([]*session.RuntimeEvent, error) {
+func (m *mockWarmStore) GetRuntimeEvents(_ context.Context, sessionID string, opts providers.PaginationOpts) ([]*session.RuntimeEvent, error) {
 	if _, ok := m.sessions[sessionID]; !ok {
 		return nil, session.ErrSessionNotFound
 	}
-	return []*session.RuntimeEvent{}, nil
+	items := m.runtimeEvents[sessionID]
+	return applyPagination(items, opts), nil
 }
 
 type mockColdArchive struct {
@@ -2818,5 +2832,135 @@ func TestHandleRecordToolCall_SessionNotFound(t *testing.T) {
 
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want %d", rr.Code, http.StatusNotFound)
+	}
+}
+
+// applyPagination applies limit/offset pagination to a slice.
+func applyPagination[T any](items []T, opts providers.PaginationOpts) []T {
+	if opts.Offset > 0 {
+		if opts.Offset >= len(items) {
+			return nil
+		}
+		items = items[opts.Offset:]
+	}
+	if opts.Limit > 0 && opts.Limit < len(items) {
+		items = items[:opts.Limit]
+	}
+	return items
+}
+
+// --- SA-24: Pagination on GetToolCalls / GetProviderCalls / GetRuntimeEvents ---
+
+func TestHandleGetToolCalls_Pagination(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions[testSessionID] = &session.Session{
+		ID: testSessionID, AgentName: "a", Namespace: "n", Status: session.SessionStatusActive,
+	}
+	warm.toolCalls[testSessionID] = []*session.ToolCall{
+		{ID: "tc-1", Name: "tool1"},
+		{ID: "tc-2", Name: "tool2"},
+		{ID: "tc-3", Name: "tool3"},
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions/"+testSessionID+"/tool-calls?limit=1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	var result []*session.ToolCall
+	if err := json.NewDecoder(rr.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(result))
+	}
+	if result[0].ID != "tc-1" {
+		t.Errorf("expected tc-1, got %s", result[0].ID)
+	}
+}
+
+func TestHandleGetProviderCalls_Pagination(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions[testSessionID] = &session.Session{
+		ID: testSessionID, AgentName: "a", Namespace: "n", Status: session.SessionStatusActive,
+	}
+	warm.providerCalls[testSessionID] = []*session.ProviderCall{
+		{ID: "pc-1", Provider: "anthropic"},
+		{ID: "pc-2", Provider: "openai"},
+		{ID: "pc-3", Provider: "anthropic"},
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions/"+testSessionID+"/provider-calls?limit=1&offset=1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	var result []*session.ProviderCall
+	if err := json.NewDecoder(rr.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 provider call, got %d", len(result))
+	}
+	if result[0].ID != "pc-2" {
+		t.Errorf("expected pc-2, got %s", result[0].ID)
+	}
+}
+
+func TestHandleGetRuntimeEvents_Pagination(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions[testSessionID] = &session.Session{
+		ID: testSessionID, AgentName: "a", Namespace: "n", Status: session.SessionStatusActive,
+	}
+	warm.runtimeEvents[testSessionID] = []*session.RuntimeEvent{
+		{ID: "evt-1", EventType: "pipeline.started"},
+		{ID: "evt-2", EventType: "pipeline.completed"},
+		{ID: "evt-3", EventType: "stage.started"},
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions/"+testSessionID+"/events?limit=1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	var result []*session.RuntimeEvent
+	if err := json.NewDecoder(rr.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 runtime event, got %d", len(result))
+	}
+	if result[0].ID != "evt-1" {
+		t.Errorf("expected evt-1, got %s", result[0].ID)
 	}
 }

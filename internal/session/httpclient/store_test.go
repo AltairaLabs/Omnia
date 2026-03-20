@@ -524,12 +524,6 @@ func TestNotImplementedMethods(t *testing.T) {
 	if _, err := store.GetMessages(ctx, "x"); err != ErrNotImplemented {
 		t.Fatalf("GetMessages: expected ErrNotImplemented, got %v", err)
 	}
-	if err := store.SetState(ctx, "x", "k", "v"); err != ErrNotImplemented {
-		t.Fatalf("SetState: expected ErrNotImplemented, got %v", err)
-	}
-	if _, err := store.GetState(ctx, "x", "k"); err != ErrNotImplemented {
-		t.Fatalf("GetState: expected ErrNotImplemented, got %v", err)
-	}
 }
 
 func TestClose(t *testing.T) {

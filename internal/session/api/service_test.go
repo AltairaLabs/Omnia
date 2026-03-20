@@ -964,6 +964,35 @@ func TestUpdateSessionStatus_Optimized_RefreshesTTLInHotCache(t *testing.T) {
 	assert.Equal(t, "s1", hot.refreshCalls[0])
 }
 
+// --- SA-25: Concurrent RefreshTTL ---
+
+func TestRefreshTTL_Concurrent(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = &session.Session{ID: "s1"}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	const goroutines = 10
+	var wg sync.WaitGroup
+	errs := make([]error, goroutines)
+	for i := range goroutines {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			errs[idx] = svc.RefreshTTL(context.Background(), "s1", time.Duration(idx+1)*time.Hour)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("goroutine %d: unexpected error: %v", i, err)
+		}
+	}
+}
+
 // --- RecordRuntimeEvent service tests ---
 
 func TestRecordRuntimeEvent_EmptySessionID(t *testing.T) {

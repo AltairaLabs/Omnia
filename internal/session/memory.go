@@ -216,63 +216,6 @@ func (m *MemoryStore) GetMessages(ctx context.Context, sessionID string) ([]Mess
 	return messages, nil
 }
 
-// SetState sets a state value for the session.
-func (m *MemoryStore) SetState(ctx context.Context, sessionID string, key, value string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	if sessionID == "" {
-		return ErrInvalidSessionID
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	session, exists := m.sessions[sessionID]
-	if !exists {
-		return ErrSessionNotFound
-	}
-
-	if session.IsExpired() {
-		return ErrSessionExpired
-	}
-
-	if session.State == nil {
-		session.State = make(map[string]string)
-	}
-
-	session.State[key] = value
-	session.UpdatedAt = time.Now()
-
-	return nil
-}
-
-// GetState retrieves a state value from the session.
-func (m *MemoryStore) GetState(ctx context.Context, sessionID string, key string) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-
-	if sessionID == "" {
-		return "", ErrInvalidSessionID
-	}
-
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	session, exists := m.sessions[sessionID]
-	if !exists {
-		return "", ErrSessionNotFound
-	}
-
-	if session.IsExpired() {
-		return "", ErrSessionExpired
-	}
-
-	return session.State[key], nil
-}
-
 // RefreshTTL extends the session's expiration time.
 func (m *MemoryStore) RefreshTTL(ctx context.Context, sessionID string, ttl time.Duration) error {
 	if err := ctx.Err(); err != nil {
@@ -562,6 +505,8 @@ func (m *MemoryStore) copySession(s *Session) *Session {
 		Messages:           make([]Message, len(s.Messages)),
 		State:              make(map[string]string),
 		WorkspaceName:      s.WorkspaceName,
+		PromptPackName:     s.PromptPackName,
+		PromptPackVersion:  s.PromptPackVersion,
 		Status:             s.Status,
 		EndedAt:            s.EndedAt,
 		MessageCount:       s.MessageCount,
