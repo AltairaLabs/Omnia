@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -105,6 +106,7 @@ func (m *mockHotCache) Ping(_ context.Context) error { return nil }
 func (m *mockHotCache) Close() error                 { return nil }
 
 type mockWarmStore struct {
+	mu              sync.Mutex // protects all fields for concurrent test use
 	sessions        map[string]*session.Session
 	messages        map[string][]*session.Message
 	listResult      *providers.SessionPage
@@ -167,6 +169,8 @@ func (m *mockWarmStore) UpdateSessionStatus(_ context.Context, sessionID string,
 }
 
 func (m *mockWarmStore) RefreshTTL(_ context.Context, id string, expiresAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	s, ok := m.sessions[id]
 	if !ok {
 		return session.ErrSessionNotFound

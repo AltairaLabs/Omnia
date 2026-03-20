@@ -19,6 +19,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -968,20 +969,24 @@ func TestUpdateSessionStatus_Optimized_RefreshesTTLInHotCache(t *testing.T) {
 
 func TestRefreshTTL_Concurrent(t *testing.T) {
 	warm := newMockWarmStore()
-	warm.sessions["s1"] = &session.Session{ID: "s1"}
+	const goroutines = 10
+	for i := range goroutines {
+		id := fmt.Sprintf("s%d", i)
+		warm.sessions[id] = &session.Session{ID: id}
+	}
 
 	registry := providers.NewRegistry()
 	registry.SetWarmStore(warm)
 	svc := newServiceWithRegistry(registry, nil)
 
-	const goroutines = 10
 	var wg sync.WaitGroup
 	errs := make([]error, goroutines)
 	for i := range goroutines {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			errs[idx] = svc.RefreshTTL(context.Background(), "s1", time.Duration(idx+1)*time.Hour)
+			id := fmt.Sprintf("s%d", idx)
+			errs[idx] = svc.RefreshTTL(context.Background(), id, time.Duration(idx+1)*time.Hour)
 		}(i)
 	}
 	wg.Wait()
