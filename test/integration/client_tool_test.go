@@ -243,15 +243,34 @@ func TestClientToolExecution(t *testing.T) {
 
 	t.Run("timeout", func(t *testing.T) {
 		writer := &concurrentMockWriter{}
+		sessionID := "ct-timeout-1"
 		handler.SetClientToolTimeout(500 * time.Millisecond)
 		defer handler.SetClientToolTimeout(60 * time.Second)
 
-		err := handler.HandleMessage(context.Background(), "ct-timeout-1", &facade.ClientMessage{
-			Content: "Where am I?",
-		}, writer)
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- handler.HandleMessage(context.Background(), sessionID, &facade.ClientMessage{
+				Content: "Where am I?",
+			}, writer)
+		}()
 
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "client tool timeout")
+		// Wait for the tool call to arrive, then ACK it so the handler
+		// enters Phase 2 (clientToolTimeout) instead of auto-rejecting.
+		require.Eventually(t, func() bool {
+			return len(writer.getToolCalls()) > 0
+		}, 5*time.Second, 50*time.Millisecond, "tool call never arrived at writer")
+
+		tc := writer.getToolCalls()[0]
+		handler.AckToolCall(sessionID, tc.ID)
+
+		// Phase 2 should timeout after 500ms
+		select {
+		case err := <-errCh:
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "client tool timeout")
+		case <-time.After(5 * time.Second):
+			t.Fatal("HandleMessage did not complete after timeout")
+		}
 	})
 
 	t.Run("no_active_handler", func(t *testing.T) {

@@ -50,6 +50,7 @@ export function collapseToolCalls(events: ToolCall[]): ToolCall[] {
       new Date(tc.createdAt).getTime() < new Date(earliest.createdAt).getTime()
         ? tc
         : earliest,
+      group[0],
     );
 
     result.push({

@@ -130,4 +130,198 @@ describe("ToolCallsTab", () => {
 
     expect(screen.queryByTestId("toolcall-registry-info")).not.toBeInTheDocument();
   });
+
+  it("shows result panel when result is present", () => {
+    useDebugPanelStore.setState({ selectedToolCallId: "call-1" });
+
+    const toolCalls: ToolCall[] = [
+      makeToolCall({
+        id: "tc1",
+        callId: "call-1",
+        name: "search",
+        arguments: { q: "test" },
+        result: { items: [1, 2, 3] },
+        status: "success",
+      }),
+    ];
+
+    render(<ToolCallsTab toolCalls={toolCalls} />);
+
+    expect(screen.getByText("Result")).toBeInTheDocument();
+    const jsonBlocks = screen.getAllByTestId("json-block");
+    expect(jsonBlocks.length).toBe(2); // arguments + result
+  });
+
+  it("shows Error heading when result has errorMessage", () => {
+    useDebugPanelStore.setState({ selectedToolCallId: "call-1" });
+
+    const toolCalls: ToolCall[] = [
+      makeToolCall({
+        id: "tc1",
+        callId: "call-1",
+        name: "failing-tool",
+        arguments: {},
+        result: "something went wrong",
+        errorMessage: "timeout exceeded",
+        status: "error",
+      }),
+    ];
+
+    render(<ToolCallsTab toolCalls={toolCalls} />);
+
+    // Should show "Error" heading (not "Result") when errorMessage is set
+    // "Error" also appears in the badge, so check the heading specifically
+    const errorHeadings = screen.getAllByText("Error");
+    const h4 = errorHeadings.find((el) => el.tagName === "H4");
+    expect(h4).toBeDefined();
+    expect(screen.queryByText("Result")).not.toBeInTheDocument();
+  });
+
+  it("shows error-only panel when result is absent but errorMessage exists", () => {
+    useDebugPanelStore.setState({ selectedToolCallId: "call-1" });
+
+    const toolCalls: ToolCall[] = [
+      makeToolCall({
+        id: "tc1",
+        callId: "call-1",
+        name: "broken-tool",
+        arguments: { cmd: "run" },
+        errorMessage: "connection refused",
+        status: "error",
+      }),
+    ];
+
+    render(<ToolCallsTab toolCalls={toolCalls} />);
+
+    // "Error" appears in both badge and heading — verify heading exists
+    const errorHeadings = screen.getAllByText("Error");
+    const h4 = errorHeadings.find((el) => el.tagName === "H4");
+    expect(h4).toBeDefined();
+  });
+
+  it("parses string result as JSON when valid", () => {
+    useDebugPanelStore.setState({ selectedToolCallId: "call-1" });
+
+    const toolCalls: ToolCall[] = [
+      makeToolCall({
+        id: "tc1",
+        callId: "call-1",
+        name: "json-tool",
+        arguments: {},
+        result: '{"key":"value"}',
+        status: "success",
+      }),
+    ];
+
+    render(<ToolCallsTab toolCalls={toolCalls} />);
+
+    const jsonBlocks = screen.getAllByTestId("json-block");
+    // The result JSON block should contain the parsed key
+    const resultBlock = jsonBlocks[1];
+    expect(resultBlock.textContent).toContain("key");
+    expect(resultBlock.textContent).toContain("value");
+  });
+
+  it("renders string result as-is when not valid JSON", () => {
+    useDebugPanelStore.setState({ selectedToolCallId: "call-1" });
+
+    const toolCalls: ToolCall[] = [
+      makeToolCall({
+        id: "tc1",
+        callId: "call-1",
+        name: "text-tool",
+        arguments: {},
+        result: "plain text output",
+        status: "success",
+      }),
+    ];
+
+    render(<ToolCallsTab toolCalls={toolCalls} />);
+
+    expect(screen.getByText("Result")).toBeInTheDocument();
+  });
+
+  it("falls back to tc.id when callId is empty", () => {
+    const toolCalls: ToolCall[] = [
+      makeToolCall({ id: "tc1", callId: "", name: "fallback-tool", status: "success" }),
+    ];
+
+    render(<ToolCallsTab toolCalls={toolCalls} />);
+
+    // Should use tc.id for data-testid when callId is empty
+    expect(screen.getByTestId("toolcall-item-tc1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("toolcall-item-tc1"));
+    expect(useDebugPanelStore.getState().selectedToolCallId).toBe("tc1");
+  });
+
+  it("selects tool call by id when callId does not match", () => {
+    useDebugPanelStore.setState({ selectedToolCallId: "tc1" });
+
+    const toolCalls: ToolCall[] = [
+      makeToolCall({ id: "tc1", callId: "call-1", name: "id-match", arguments: { x: 1 } }),
+    ];
+
+    render(<ToolCallsTab toolCalls={toolCalls} />);
+
+    // Should find the tool call via tc.id match and show detail
+    expect(screen.getByTestId("toolcall-detail")).toBeInTheDocument();
+    expect(screen.getByText("Arguments")).toBeInTheDocument();
+  });
+
+  it("shows only handler_type label without registry_name", () => {
+    useDebugPanelStore.setState({ selectedToolCallId: "call-1" });
+
+    const toolCalls: ToolCall[] = [
+      makeToolCall({
+        id: "tc1",
+        callId: "call-1",
+        name: "handler-only",
+        arguments: {},
+        labels: {
+          handler_name: "my-handler",
+          handler_type: "http",
+        },
+      }),
+    ];
+
+    render(<ToolCallsTab toolCalls={toolCalls} />);
+
+    expect(screen.getByTestId("toolcall-registry-info")).toBeInTheDocument();
+    expect(screen.getByText("my-handler (http)")).toBeInTheDocument();
+    expect(screen.queryByText("Registry")).not.toBeInTheDocument();
+  });
+
+  it("shows only registry_name label without handler_type", () => {
+    useDebugPanelStore.setState({ selectedToolCallId: "call-1" });
+
+    const toolCalls: ToolCall[] = [
+      makeToolCall({
+        id: "tc1",
+        callId: "call-1",
+        name: "registry-only",
+        arguments: {},
+        labels: {
+          registry_name: "tools-v2",
+        },
+      }),
+    ];
+
+    render(<ToolCallsTab toolCalls={toolCalls} />);
+
+    expect(screen.getByTestId("toolcall-registry-info")).toBeInTheDocument();
+    expect(screen.getByText("tools-v2")).toBeInTheDocument();
+    expect(screen.queryByText("Handler")).not.toBeInTheDocument();
+  });
+
+  it("does not show status badge when status is undefined", () => {
+    const toolCalls: ToolCall[] = [
+      makeToolCall({ id: "tc1", callId: "call-1", name: "no-status", status: undefined as unknown as ToolCall["status"] }),
+    ];
+
+    render(<ToolCallsTab toolCalls={toolCalls} />);
+
+    // The badge should not render when status is falsy
+    expect(screen.queryByTestId("tool-call-badge")).not.toBeInTheDocument();
+  });
 });

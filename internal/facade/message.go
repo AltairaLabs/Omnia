@@ -76,12 +76,27 @@ func (s *Server) handleClientMessage(ctx context.Context, c *Connection, message
 		return
 	}
 
+	if s.handleToolMessage(ctx, c, &clientMsg, log) {
+		return
+	}
+
+	s.metrics.RequestStarted()
+
+	// Process the message asynchronously so the read loop can continue
+	// reading tool_result messages while HandleMessage blocks waiting
+	// for client tool responses.
+	go s.processAndRecordMessage(ctx, c, &clientMsg, log)
+}
+
+// handleToolMessage routes tool-related messages (ACK, NACK, result) to the handler.
+// Returns true if the message was handled, false if it should be processed normally.
+func (s *Server) handleToolMessage(ctx context.Context, c *Connection, clientMsg *ClientMessage, log logr.Logger) bool {
 	// Route tool call ACK to the active handler
 	if clientMsg.Type == MessageTypeToolCallAck && clientMsg.ToolCallAck != nil {
 		if router, ok := s.handler.(ClientToolRouter); ok {
 			router.AckToolCall(c.sessionID, clientMsg.ToolCallAck.CallID)
 		}
-		return
+		return true
 	}
 
 	// Route tool call NACK — convert to a rejection tool_result
@@ -94,7 +109,7 @@ func (s *Server) handleClientMessage(ctx context.Context, c *Connection, message
 			router.SendToolResult(c.sessionID, result)
 		}
 		s.recordClientToolResult(ctx, c.sessionID, result, log)
-		return
+		return true
 	}
 
 	// Route client-side tool results to the active handler
@@ -102,19 +117,14 @@ func (s *Server) handleClientMessage(ctx context.Context, c *Connection, message
 		if router, ok := s.handler.(ClientToolRouter); ok {
 			if router.SendToolResult(c.sessionID, clientMsg.ToolResult) {
 				s.recordClientToolResult(ctx, c.sessionID, clientMsg.ToolResult, log)
-				return
+				return true
 			}
 		}
 		s.sendError(c, c.sessionID, ErrorCodeInvalidMessage, "no pending tool call")
-		return
+		return true
 	}
 
-	s.metrics.RequestStarted()
-
-	// Process the message asynchronously so the read loop can continue
-	// reading tool_result messages while HandleMessage blocks waiting
-	// for client tool responses.
-	go s.processAndRecordMessage(ctx, c, &clientMsg, log)
+	return false
 }
 
 // recordClientToolResult persists a client-side tool result in the session store
@@ -150,7 +160,7 @@ func (s *Server) recordClientToolResult(ctx context.Context, sessionID string, r
 		Timestamp:  time.Now(),
 		Metadata:   metadata,
 	}
-	storeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	storeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := s.sessionStore.AppendMessage(storeCtx, sessionID, msg); err != nil {
 		log.Error(err, "failed to record client tool result", "sessionID", sessionID, "callID", result.CallID)

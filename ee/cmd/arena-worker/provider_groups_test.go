@@ -17,6 +17,7 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
+	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -28,6 +29,32 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/arena/fleet"
 	"github.com/altairalabs/omnia/pkg/k8s"
 )
+
+// mockProvider implements pkproviders.Provider for testing connectFleetProviders
+// type assertion error path.
+type mockProvider struct {
+	id string
+}
+
+func (m *mockProvider) ID() string    { return m.id }
+func (m *mockProvider) Model() string { return "mock" }
+func (m *mockProvider) Predict(
+	_ context.Context, _ pkproviders.PredictionRequest,
+) (pkproviders.PredictionResponse, error) {
+	return pkproviders.PredictionResponse{}, nil
+}
+
+func (m *mockProvider) PredictStream(
+	_ context.Context, _ pkproviders.PredictionRequest,
+) (<-chan pkproviders.StreamChunk, error) {
+	return nil, nil
+}
+func (m *mockProvider) SupportsStreaming() bool      { return false }
+func (m *mockProvider) ShouldIncludeRawOutput() bool { return false }
+func (m *mockProvider) Close() error                 { return nil }
+func (m *mockProvider) CalculateCost(_, _, _ int) types.CostInfo {
+	return types.CostInfo{}
+}
 
 // ---------------------------------------------------------------------------
 // sanitizeID
@@ -325,6 +352,21 @@ func TestConnectFleetProviders(t *testing.T) {
 		registry := pkproviders.NewRegistry()
 		err := connectFleetProviders(context.Background(), testLog(), registry, nil)
 		require.NoError(t, err)
+	})
+
+	t.Run("returns error when provider is not a fleet provider", func(t *testing.T) {
+		registry := pkproviders.NewRegistry()
+		// Register a non-fleet provider under the ID
+		mockProv := &mockProvider{id: "not-fleet"}
+		registry.Register(mockProv)
+
+		fps := []*resolvedFleetProvider{
+			{id: "not-fleet", wsURL: "ws://fake:8080/ws", group: "default"},
+		}
+
+		err := connectFleetProviders(context.Background(), testLog(), registry, fps)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a fleet provider")
 	})
 }
 
@@ -638,6 +680,197 @@ func TestResolveAgentRefEntry(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "my-group")
 	})
+
+	t.Run("success populates LoadedProviders and returns fleet provider", func(t *testing.T) {
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+		agentWSURLs := map[string]string{
+			"my-agent": "ws://my-agent.default.svc:8080/ws",
+		}
+
+		fp, err := resolveAgentRefEntry(ctx, log, "my-agent", "fleet-group", agentWSURLs, arenaCfg)
+		require.NoError(t, err)
+		require.NotNil(t, fp)
+
+		providerID := sanitizeID("agent-my-agent")
+		assert.Equal(t, providerID, fp.id)
+		assert.Equal(t, "ws://my-agent.default.svc:8080/ws", fp.wsURL)
+		assert.Equal(t, "fleet-group", fp.group)
+
+		require.Contains(t, arenaCfg.LoadedProviders, providerID)
+		assert.Equal(t, "fleet", arenaCfg.LoadedProviders[providerID].Type)
+		assert.Equal(t, "ws://my-agent.default.svc:8080/ws", arenaCfg.LoadedProviders[providerID].AdditionalConfig["ws_url"])
+		assert.Equal(t, "fleet-group", arenaCfg.ProviderGroups[providerID])
+	})
+}
+
+// ---------------------------------------------------------------------------
+// resolveAgentRefEntryWithID
+// ---------------------------------------------------------------------------
+
+func TestResolveAgentRefEntryWithID(t *testing.T) {
+	ctx := context.Background()
+	log := testLog()
+
+	t.Run("returns error when agent not in WS URL map", func(t *testing.T) {
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+
+		_, err := resolveAgentRefEntryWithID(ctx, log, "missing-agent", "my-id", "group1", map[string]string{}, arenaCfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing-agent")
+		assert.Contains(t, err.Error(), "group1")
+	})
+
+	t.Run("success uses configID as provider ID", func(t *testing.T) {
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+		agentWSURLs := map[string]string{
+			"my-agent": "ws://my-agent.default.svc:8080/ws",
+		}
+
+		fp, err := resolveAgentRefEntryWithID(ctx, log, "my-agent", "custom-id", "selfplay", agentWSURLs, arenaCfg)
+		require.NoError(t, err)
+		require.NotNil(t, fp)
+
+		assert.Equal(t, "custom-id", fp.id)
+		assert.Equal(t, "ws://my-agent.default.svc:8080/ws", fp.wsURL)
+		assert.Equal(t, "selfplay", fp.group)
+
+		require.Contains(t, arenaCfg.LoadedProviders, "custom-id")
+		assert.Equal(t, "custom-id", arenaCfg.LoadedProviders["custom-id"].ID)
+		assert.Equal(t, "fleet", arenaCfg.LoadedProviders["custom-id"].Type)
+		assert.Equal(t, "ws://my-agent.default.svc:8080/ws", arenaCfg.LoadedProviders["custom-id"].AdditionalConfig["ws_url"])
+		assert.Equal(t, "selfplay", arenaCfg.ProviderGroups["custom-id"])
+	})
+}
+
+// ---------------------------------------------------------------------------
+// resolveProviderRefEntryWithID
+// ---------------------------------------------------------------------------
+
+func TestResolveProviderRefEntryWithID(t *testing.T) {
+	ctx := context.Background()
+	log := testLog()
+
+	t.Run("returns error when provider not found", func(t *testing.T) {
+		c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).Build()
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+
+		ref := v1alpha1.ProviderRef{Name: "nonexistent"}
+		err := resolveProviderRefEntryWithID(ctx, log, c, testNamespace, ref, "my-id", "grp", arenaCfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "nonexistent")
+	})
+
+	t.Run("sets credential and defaults when present", func(t *testing.T) {
+		maxTokens := int32(2000)
+		provider := &v1alpha1.Provider{
+			Spec: v1alpha1.ProviderSpec{
+				Type:  "openai",
+				Model: "gpt-4o",
+				Credential: &v1alpha1.CredentialConfig{
+					EnvVar: "CUSTOM_KEY",
+				},
+				Defaults: &v1alpha1.ProviderDefaults{
+					Temperature: ptr.To("0.8"),
+					MaxTokens:   &maxTokens,
+				},
+			},
+		}
+		provider.Name = "full-provider"
+		provider.Namespace = testNamespace
+
+		c := fake.NewClientBuilder().
+			WithScheme(k8s.Scheme()).
+			WithObjects(provider).
+			Build()
+
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+
+		ref := v1alpha1.ProviderRef{Name: "full-provider"}
+		err := resolveProviderRefEntryWithID(ctx, log, c, testNamespace, ref, "custom-id", "judge", arenaCfg)
+		require.NoError(t, err)
+
+		require.Contains(t, arenaCfg.LoadedProviders, "custom-id")
+		p := arenaCfg.LoadedProviders["custom-id"]
+		assert.Equal(t, "custom-id", p.ID)
+		assert.Equal(t, "openai", p.Type)
+		require.NotNil(t, p.Credential)
+		assert.Equal(t, "CUSTOM_KEY", p.Credential.CredentialEnv)
+		assert.InDelta(t, 0.8, p.Defaults.Temperature, 0.001)
+		assert.Equal(t, 2000, p.Defaults.MaxTokens)
+		assert.Equal(t, "judge", arenaCfg.ProviderGroups["custom-id"])
+	})
+}
+
+// ---------------------------------------------------------------------------
+// resolveEntry
+// ---------------------------------------------------------------------------
+
+func TestResolveEntry(t *testing.T) {
+	ctx := context.Background()
+	log := testLog()
+
+	t.Run("returns nil for entry with neither providerRef nor agentRef", func(t *testing.T) {
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+		entry := &arenaProviderEntry{}
+
+		fp, err := resolveEntry(ctx, log, nil, testNamespace, "group", "", entry, nil, arenaCfg)
+		require.NoError(t, err)
+		assert.Nil(t, fp)
+	})
+
+	t.Run("agentRef with configID delegates to resolveAgentRefEntryWithID", func(t *testing.T) {
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+		agentWSURLs := map[string]string{
+			"agent-a": "ws://agent-a:8080/ws",
+		}
+		entry := &arenaProviderEntry{
+			AgentRef: &v1alpha1.LocalObjectReference{Name: "agent-a"},
+		}
+
+		fp, err := resolveEntry(ctx, log, nil, testNamespace, "grp", "my-config-id", entry, agentWSURLs, arenaCfg)
+		require.NoError(t, err)
+		require.NotNil(t, fp)
+		assert.Equal(t, "my-config-id", fp.id)
+	})
+
+	t.Run("agentRef without configID delegates to resolveAgentRefEntry", func(t *testing.T) {
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+		agentWSURLs := map[string]string{
+			"agent-b": "ws://agent-b:8080/ws",
+		}
+		entry := &arenaProviderEntry{
+			AgentRef: &v1alpha1.LocalObjectReference{Name: "agent-b"},
+		}
+
+		fp, err := resolveEntry(ctx, log, nil, testNamespace, "grp", "", entry, agentWSURLs, arenaCfg)
+		require.NoError(t, err)
+		require.NotNil(t, fp)
+		assert.Equal(t, sanitizeID("agent-agent-b"), fp.id)
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -786,6 +1019,37 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 		_, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "nonexistent-provider")
+	})
+
+	t.Run("resolves agentRef entries and returns fleet providers", func(t *testing.T) {
+		t.Setenv("ARENA_AGENT_WS_URLS", `{"my-agent":"ws://my-agent.default.svc:8080/ws"}`)
+
+		spec := map[string]interface{}{
+			"providers": map[string]interface{}{
+				"fleet": []interface{}{
+					map[string]interface{}{
+						"agentRef": map[string]interface{}{
+							"name": "my-agent",
+						},
+					},
+				},
+			},
+		}
+		u := makeArenaJobUnstructured("agent-job", "default", spec)
+		c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithObjects(u).Build()
+
+		cfg := &Config{JobName: "agent-job", JobNamespace: testNamespace}
+		arenaCfg := &config.Config{}
+
+		fps, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
+		require.NoError(t, err)
+		require.Len(t, fps, 1)
+
+		providerID := sanitizeID("agent-my-agent")
+		assert.Equal(t, providerID, fps[0].id)
+		assert.Equal(t, "ws://my-agent.default.svc:8080/ws", fps[0].wsURL)
+		require.Contains(t, arenaCfg.LoadedProviders, providerID)
+		assert.Equal(t, "fleet", arenaCfg.LoadedProviders[providerID].Type)
 	})
 
 	t.Run("returns error when agentRef not in WS URLs", func(t *testing.T) {
@@ -1422,6 +1686,29 @@ func TestArenaProviderGroupUnmarshalJSON(t *testing.T) {
 		assert.Equal(t, "a1", pg.mapping["other-id"].AgentRef.Name)
 		assert.Nil(t, pg.entries)
 	})
+
+	t.Run("empty data returns no error", func(t *testing.T) {
+		var pg arenaProviderGroup
+		err := pg.UnmarshalJSON([]byte(""))
+		require.NoError(t, err)
+		assert.Nil(t, pg.entries)
+		assert.Nil(t, pg.mapping)
+	})
+
+	t.Run("whitespace-only data returns no error", func(t *testing.T) {
+		var pg arenaProviderGroup
+		err := pg.UnmarshalJSON([]byte("  \t\n"))
+		require.NoError(t, err)
+		assert.Nil(t, pg.entries)
+		assert.Nil(t, pg.mapping)
+	})
+
+	t.Run("non-array non-object falls through to default unmarshal", func(t *testing.T) {
+		var pg arenaProviderGroup
+		// A bare string like `"hello"` is neither array nor object
+		err := pg.UnmarshalJSON([]byte(`"hello"`))
+		require.Error(t, err) // cannot unmarshal string into []arenaProviderEntry
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -1472,12 +1759,113 @@ func TestArenaProviderGroupMarshalJSON(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// allEntries
+// ---------------------------------------------------------------------------
+
+func TestArenaProviderGroupAllEntries(t *testing.T) {
+	t.Run("returns entries in array mode", func(t *testing.T) {
+		pg := &arenaProviderGroup{
+			entries: []arenaProviderEntry{
+				{ProviderRef: &v1alpha1.ProviderRef{Name: "p1"}},
+				{AgentRef: &v1alpha1.LocalObjectReference{Name: "a1"}},
+			},
+		}
+		all := pg.allEntries()
+		assert.Len(t, all, 2)
+	})
+
+	t.Run("returns mapping values in map mode", func(t *testing.T) {
+		pg := &arenaProviderGroup{
+			mapping: map[string]arenaProviderEntry{
+				"id1": {ProviderRef: &v1alpha1.ProviderRef{Name: "p1"}},
+			},
+		}
+		all := pg.allEntries()
+		assert.Len(t, all, 1)
+		assert.Equal(t, "p1", all[0].ProviderRef.Name)
+	})
+
+	t.Run("returns nil for empty group", func(t *testing.T) {
+		pg := &arenaProviderGroup{}
+		all := pg.allEntries()
+		assert.Nil(t, all)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// extractProviderIDRefs — invalid YAML
+// ---------------------------------------------------------------------------
+
+func TestExtractProviderIDRefs_InvalidYAML(t *testing.T) {
+	t.Run("returns error for invalid YAML content", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "bad.yaml")
+		require.NoError(t, os.WriteFile(path, []byte(":\n  :\n    - [invalid yaml"), 0644))
+
+		_, err := extractProviderIDRefs(path)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "parse arena config")
+	})
+}
+
+// ---------------------------------------------------------------------------
+// remapProviderIDs — config read error
+// ---------------------------------------------------------------------------
+
+func TestRemapProviderIDs_ConfigReadError(t *testing.T) {
+	t.Run("returns error when config file does not exist", func(t *testing.T) {
+		arenaCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{},
+			ProviderGroups:  map[string]string{},
+		}
+
+		err := remapProviderIDs(testLog(), arenaCfg, "/nonexistent/config.yaml")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "extract provider ID refs")
+	})
+}
+
+// ---------------------------------------------------------------------------
 // resolveProvidersFromCRD — map mode
 // ---------------------------------------------------------------------------
 
 func TestResolveProvidersFromCRD_MapMode(t *testing.T) {
 	ctx := context.Background()
 	log := testLog()
+
+	t.Run("map mode agentRef uses map key as provider ID", func(t *testing.T) {
+		t.Setenv("ARENA_AGENT_WS_URLS", `{"my-agent":"ws://my-agent:8080/ws"}`)
+
+		spec := map[string]interface{}{
+			"providers": map[string]interface{}{
+				"selfplay": map[string]interface{}{
+					"agent-config-id": map[string]interface{}{
+						"agentRef": map[string]interface{}{
+							"name": "my-agent",
+						},
+					},
+				},
+			},
+		}
+		u := makeArenaJobUnstructured("map-agent-job", testNamespace, spec)
+
+		c := fake.NewClientBuilder().
+			WithScheme(k8s.Scheme()).
+			WithObjects(u).
+			Build()
+
+		cfg := &Config{JobName: "map-agent-job", JobNamespace: testNamespace}
+		arenaCfg := &config.Config{}
+
+		fps, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
+		require.NoError(t, err)
+		require.Len(t, fps, 1)
+
+		assert.Equal(t, "agent-config-id", fps[0].id)
+		assert.Equal(t, "ws://my-agent:8080/ws", fps[0].wsURL)
+		require.Contains(t, arenaCfg.LoadedProviders, "agent-config-id")
+		assert.Equal(t, "fleet", arenaCfg.LoadedProviders["agent-config-id"].Type)
+		assert.Equal(t, "selfplay", arenaCfg.ProviderGroups["agent-config-id"])
+	})
 
 	t.Run("map mode uses map key as provider ID", func(t *testing.T) {
 		// Create Provider CRD

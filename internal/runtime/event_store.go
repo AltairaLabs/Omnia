@@ -753,7 +753,15 @@ func (s *OmniaEventStore) writeAction(traceCtx context.Context, sessionID string
 	log.V(1).Info("writing event to session-api",
 		"sessionID", sessionID, "eventType", eventType)
 
-	// Write first-class records first (they update session counters atomically).
+	s.writeRecords(ctx, sessionID, action, log)
+	s.writeMessageAndStats(ctx, sessionID, action, eventType, log)
+
+	log.V(1).Info("event written to session-api",
+		"sessionID", sessionID, "eventType", eventType)
+}
+
+// writeRecords persists first-class records (tool calls, provider calls, evals, runtime events).
+func (s *OmniaEventStore) writeRecords(ctx context.Context, sessionID string, action eventAction, log logr.Logger) {
 	if action.toolCall != nil {
 		action.toolCall.SessionID = sessionID
 		if err := s.sessionStore.RecordToolCall(ctx, sessionID, *action.toolCall); err != nil {
@@ -770,7 +778,6 @@ func (s *OmniaEventStore) writeAction(traceCtx context.Context, sessionID string
 		}
 	}
 
-	// Write eval result (for eval completed/failed events).
 	if action.evalResult != nil {
 		action.evalResult.SessionID = sessionID
 		if err := s.sessionStore.RecordEvalResult(ctx, sessionID, *action.evalResult); err != nil {
@@ -779,7 +786,6 @@ func (s *OmniaEventStore) writeAction(traceCtx context.Context, sessionID string
 		}
 	}
 
-	// Write runtime event (for lifecycle events).
 	if action.event != nil {
 		action.event.SessionID = sessionID
 		if err := s.sessionStore.RecordRuntimeEvent(ctx, sessionID, *action.event); err != nil {
@@ -787,8 +793,10 @@ func (s *OmniaEventStore) writeAction(traceCtx context.Context, sessionID string
 				"sessionID", sessionID, "eventType", action.event.EventType)
 		}
 	}
+}
 
-	// Write message (for message/conversation events).
+// writeMessageAndStats persists messages and updates session stats.
+func (s *OmniaEventStore) writeMessageAndStats(ctx context.Context, sessionID string, action eventAction, eventType string, log logr.Logger) {
 	if action.message != nil {
 		if err := s.sessionStore.AppendMessage(ctx, sessionID, *action.message); err != nil {
 			log.Error(err, "failed to append event message",
@@ -797,17 +805,12 @@ func (s *OmniaEventStore) writeAction(traceCtx context.Context, sessionID string
 		}
 	}
 
-	// Update session status/ended_at if set.
 	if action.stats.SetStatus != "" || !action.stats.SetEndedAt.IsZero() {
 		if err := s.sessionStore.UpdateSessionStats(ctx, sessionID, action.stats); err != nil {
 			log.Error(err, "failed to update session stats",
 				"sessionID", sessionID, "eventType", eventType)
-			return
 		}
 	}
-
-	log.V(1).Info("event written to session-api",
-		"sessionID", sessionID, "eventType", eventType)
 }
 
 // resolveEventType returns a descriptive string for the action being written.
