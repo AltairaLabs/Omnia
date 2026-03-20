@@ -39,11 +39,11 @@ type WarmStoreProvider interface {
 	// Returns session.ErrSessionNotFound if the session does not exist.
 	UpdateSession(ctx context.Context, s *session.Session) error
 
-	// UpdateSessionStats atomically increments session-level counters.
+	// UpdateSessionStatus atomically updates session lifecycle state.
 	// Implementations should use a single atomic SQL statement to avoid
 	// read-modify-write race conditions. Returns session.ErrSessionNotFound
 	// if the session does not exist.
-	UpdateSessionStats(ctx context.Context, sessionID string, update session.SessionStatsUpdate) error
+	UpdateSessionStatus(ctx context.Context, sessionID string, update session.SessionStatusUpdate) error
 
 	// DeleteSession removes a session and all its associated data.
 	// Returns session.ErrSessionNotFound if the session does not exist.
@@ -132,4 +132,29 @@ type WarmStoreProvider interface {
 
 	// Close releases resources held by the provider.
 	Close() error
+}
+
+// StatusUpdateResult contains metadata returned by an optimized status update
+// so the caller can detect transitions and build events without extra queries.
+type StatusUpdateResult struct {
+	// Applied is true when the update modified the row (session existed and
+	// was not already in a terminal status).
+	Applied bool
+	// PreviousStatus is the session status before the update was applied.
+	PreviousStatus session.SessionStatus
+	// AgentName of the updated session.
+	AgentName string
+	// Namespace of the updated session.
+	Namespace string
+	// PromptPackName of the updated session.
+	PromptPackName string
+	// PromptPackVersion of the updated session.
+	PromptPackVersion string
+}
+
+// StatusUpdaterWithResult is an optional interface that WarmStoreProvider
+// implementations can satisfy to return metadata from status updates in a
+// single query, avoiding extra GetSession round-trips.
+type StatusUpdaterWithResult interface {
+	UpdateSessionStatusReturning(ctx context.Context, sessionID string, update session.SessionStatusUpdate) (*StatusUpdateResult, error)
 }

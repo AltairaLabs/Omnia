@@ -32,7 +32,7 @@ func (m *lookupMockWarm) GetSession(_ context.Context, _ string) (*session.Sessi
 	return m.sess, m.getErr
 }
 func (m *lookupMockWarm) UpdateSession(context.Context, *session.Session) error { return nil }
-func (m *lookupMockWarm) UpdateSessionStats(context.Context, string, session.SessionStatsUpdate) error {
+func (m *lookupMockWarm) UpdateSessionStatus(context.Context, string, session.SessionStatusUpdate) error {
 	return nil
 }
 func (m *lookupMockWarm) RefreshTTL(context.Context, string, time.Time) error           { return nil }

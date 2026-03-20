@@ -314,8 +314,8 @@ func (m *MemoryStore) Close() error {
 	return nil
 }
 
-// UpdateSessionStats atomically increments session-level counters.
-func (m *MemoryStore) UpdateSessionStats(ctx context.Context, sessionID string, update SessionStatsUpdate) error {
+// UpdateSessionStatus atomically increments session-level counters.
+func (m *MemoryStore) UpdateSessionStatus(ctx context.Context, sessionID string, update SessionStatusUpdate) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}

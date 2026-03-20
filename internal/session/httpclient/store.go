@@ -113,7 +113,7 @@ func WithBufferMaxAge(d time.Duration) StoreOption {
 // Store implements session.Store by calling the session-api over HTTP.
 // It is used by the facade's recordingResponseWriter for session persistence.
 //
-// Write operations (AppendMessage, UpdateSessionStats, RefreshTTL) are buffered
+// Write operations (AppendMessage, UpdateSessionStatus, RefreshTTL) are buffered
 // on transient failure and retried automatically when session-api recovers.
 type Store struct {
 	baseURL      string
@@ -277,13 +277,13 @@ func (s *Store) AppendMessage(ctx context.Context, sessionID string, msg session
 	return nil
 }
 
-// UpdateSessionStats sends incremental updates via PATCH /api/v1/sessions/{sessionID}/stats.
+// UpdateSessionStatus sends lifecycle status updates via PATCH /api/v1/sessions/{sessionID}/status.
 // On transient failure, the write is buffered and retried automatically.
-func (s *Store) UpdateSessionStats(ctx context.Context, sessionID string, update session.SessionStatsUpdate) error {
-	path := fmt.Sprintf("/api/v1/sessions/%s/stats", sessionID)
+func (s *Store) UpdateSessionStatus(ctx context.Context, sessionID string, update session.SessionStatusUpdate) error {
+	path := fmt.Sprintf("/api/v1/sessions/%s/status", sessionID)
 	body, err := json.Marshal(&update)
 	if err != nil {
-		return fmt.Errorf("update session stats: encode: %w", err)
+		return fmt.Errorf("update session status: encode: %w", err)
 	}
 
 	resp, err := s.doWithRetry(ctx, http.MethodPatch, path, body)

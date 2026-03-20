@@ -37,7 +37,7 @@ import (
 type MockSessionWriter struct {
 	sessions map[string]*session.Session
 	messages map[string][]*session.Message
-	stats    map[string]session.SessionStatsUpdate
+	stats    map[string]session.SessionStatusUpdate
 
 	getSessionErr   error
 	createErr       error
@@ -50,7 +50,7 @@ func newMockWriter() *MockSessionWriter {
 	return &MockSessionWriter{
 		sessions: make(map[string]*session.Session),
 		messages: make(map[string][]*session.Message),
-		stats:    make(map[string]session.SessionStatsUpdate),
+		stats:    make(map[string]session.SessionStatusUpdate),
 	}
 }
 
@@ -81,7 +81,7 @@ func (m *MockSessionWriter) AppendMessage(_ context.Context, sessionID string, m
 	return nil
 }
 
-func (m *MockSessionWriter) UpdateSessionStats(_ context.Context, sessionID string, update session.SessionStatsUpdate) error {
+func (m *MockSessionWriter) UpdateSessionStatus(_ context.Context, sessionID string, update session.SessionStatusUpdate) error {
 	if m.updateStatsErr != nil {
 		return m.updateStatsErr
 	}
@@ -609,7 +609,7 @@ func TestProcessExport_ToolSpan_NoTokenUpdate(t *testing.T) {
 
 	_, err := transformer.ProcessExport(context.Background(), []*tracepb.ResourceSpans{rs})
 	require.NoError(t, err)
-	assert.Empty(t, writer.stats, "tool spans should not trigger UpdateSessionStats")
+	assert.Empty(t, writer.stats, "tool spans should not trigger UpdateSessionStatus")
 
 	msgs := writer.messages["conv-tool-no-tokens"]
 	require.Len(t, msgs, 1)

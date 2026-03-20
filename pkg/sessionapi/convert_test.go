@@ -199,21 +199,21 @@ func TestProviderCallToAPI(t *testing.T) {
 	assert.Equal(t, int32(2), deref(result.ToolCallCount))
 }
 
-func TestStatsUpdateToAPI(t *testing.T) {
+func TestStatusUpdateToAPI(t *testing.T) {
 	endedAt := time.Now().Truncate(time.Second)
-	u := session.SessionStatsUpdate{
+	u := session.SessionStatusUpdate{
 		SetStatus:  session.SessionStatusCompleted,
 		SetEndedAt: endedAt,
 	}
 
-	result := StatsUpdateToAPI(u)
+	result := StatusUpdateToAPI(u)
 
 	assert.Equal(t, SessionStatusCompleted, *result.SetStatus)
 	assert.Equal(t, endedAt, *result.SetEndedAt)
 }
 
-func TestStatsUpdateToAPI_NoChange(t *testing.T) {
-	result := StatsUpdateToAPI(session.SessionStatsUpdate{})
+func TestStatusUpdateToAPI_NoChange(t *testing.T) {
+	result := StatusUpdateToAPI(session.SessionStatusUpdate{})
 
 	assert.Nil(t, result.SetStatus)
 	assert.Nil(t, result.SetEndedAt)
@@ -679,10 +679,10 @@ func TestEvalResultDetailsRoundTrip(t *testing.T) {
 	assert.Equal(t, "value", nested["key"])
 }
 
-func TestStatsUpdateRoundTrip_EmptyStatus(t *testing.T) {
-	u := session.SessionStatsUpdate{}
+func TestStatusUpdateRoundTrip_EmptyStatus(t *testing.T) {
+	u := session.SessionStatusUpdate{}
 
-	result := StatsUpdateToAPI(u)
+	result := StatusUpdateToAPI(u)
 
 	assert.Nil(t, result.SetStatus, "empty status should produce nil")
 	assert.Nil(t, result.SetEndedAt, "zero time should produce nil")

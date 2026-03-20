@@ -199,8 +199,8 @@ type SessionResponse struct {
 	Session  *Session   `json:"session,omitempty"`
 }
 
-// SessionStatsUpdate defines model for SessionStatsUpdate.
-type SessionStatsUpdate struct {
+// SessionStatusUpdate defines model for SessionStatusUpdate.
+type SessionStatusUpdate struct {
 	AddCostUSD      *float64       `json:"AddCostUSD,omitempty"`
 	AddInputTokens  *int32         `json:"AddInputTokens,omitempty"`
 	AddMessages     *int32         `json:"AddMessages,omitempty"`
@@ -382,8 +382,8 @@ type AppendMessageJSONRequestBody = Message
 // RecordProviderCallJSONRequestBody defines body for RecordProviderCall for application/json ContentType.
 type RecordProviderCallJSONRequestBody = ProviderCall
 
-// UpdateStatsJSONRequestBody defines body for UpdateStats for application/json ContentType.
-type UpdateStatsJSONRequestBody = SessionStatsUpdate
+// UpdateStatusJSONRequestBody defines body for UpdateStatus for application/json ContentType.
+type UpdateStatusJSONRequestBody = SessionStatusUpdate
 
 // RecordToolCallJSONRequestBody defines body for RecordToolCall for application/json ContentType.
 type RecordToolCallJSONRequestBody = ToolCall
@@ -511,10 +511,10 @@ type ClientInterface interface {
 
 	RecordProviderCall(ctx context.Context, sessionID SessionID, body RecordProviderCallJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// UpdateStatsWithBody request with any body
-	UpdateStatsWithBody(ctx context.Context, sessionID SessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// UpdateStatusWithBody request with any body
+	UpdateStatusWithBody(ctx context.Context, sessionID SessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	UpdateStats(ctx context.Context, sessionID SessionID, body UpdateStatsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	UpdateStatus(ctx context.Context, sessionID SessionID, body UpdateStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetToolCalls request
 	GetToolCalls(ctx context.Context, sessionID SessionID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -737,8 +737,8 @@ func (c *Client) RecordProviderCall(ctx context.Context, sessionID SessionID, bo
 	return c.Client.Do(req)
 }
 
-func (c *Client) UpdateStatsWithBody(ctx context.Context, sessionID SessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewUpdateStatsRequestWithBody(c.Server, sessionID, contentType, body)
+func (c *Client) UpdateStatusWithBody(ctx context.Context, sessionID SessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateStatusRequestWithBody(c.Server, sessionID, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -749,8 +749,8 @@ func (c *Client) UpdateStatsWithBody(ctx context.Context, sessionID SessionID, c
 	return c.Client.Do(req)
 }
 
-func (c *Client) UpdateStats(ctx context.Context, sessionID SessionID, body UpdateStatsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewUpdateStatsRequest(c.Server, sessionID, body)
+func (c *Client) UpdateStatus(ctx context.Context, sessionID SessionID, body UpdateStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateStatusRequest(c.Server, sessionID, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1744,19 +1744,19 @@ func NewRecordProviderCallRequestWithBody(server string, sessionID SessionID, co
 	return req, nil
 }
 
-// NewUpdateStatsRequest calls the generic UpdateStats builder with application/json body
-func NewUpdateStatsRequest(server string, sessionID SessionID, body UpdateStatsJSONRequestBody) (*http.Request, error) {
+// NewUpdateStatusRequest calls the generic UpdateStatus builder with application/json body
+func NewUpdateStatusRequest(server string, sessionID SessionID, body UpdateStatusJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewUpdateStatsRequestWithBody(server, sessionID, "application/json", bodyReader)
+	return NewUpdateStatusRequestWithBody(server, sessionID, "application/json", bodyReader)
 }
 
-// NewUpdateStatsRequestWithBody generates requests for UpdateStats with any type of body
-func NewUpdateStatsRequestWithBody(server string, sessionID SessionID, contentType string, body io.Reader) (*http.Request, error) {
+// NewUpdateStatusRequestWithBody generates requests for UpdateStatus with any type of body
+func NewUpdateStatusRequestWithBody(server string, sessionID SessionID, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -1771,7 +1771,7 @@ func NewUpdateStatsRequestWithBody(server string, sessionID SessionID, contentTy
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/api/v1/sessions/%s/stats", pathParam0)
+	operationPath := fmt.Sprintf("/api/v1/sessions/%s/status", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -2036,10 +2036,10 @@ type ClientWithResponsesInterface interface {
 
 	RecordProviderCallWithResponse(ctx context.Context, sessionID SessionID, body RecordProviderCallJSONRequestBody, reqEditors ...RequestEditorFn) (*RecordProviderCallResponse, error)
 
-	// UpdateStatsWithBodyWithResponse request with any body
-	UpdateStatsWithBodyWithResponse(ctx context.Context, sessionID SessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateStatsResponse, error)
+	// UpdateStatusWithBodyWithResponse request with any body
+	UpdateStatusWithBodyWithResponse(ctx context.Context, sessionID SessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateStatusResponse, error)
 
-	UpdateStatsWithResponse(ctx context.Context, sessionID SessionID, body UpdateStatsJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateStatsResponse, error)
+	UpdateStatusWithResponse(ctx context.Context, sessionID SessionID, body UpdateStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateStatusResponse, error)
 
 	// GetToolCallsWithResponse request
 	GetToolCallsWithResponse(ctx context.Context, sessionID SessionID, reqEditors ...RequestEditorFn) (*GetToolCallsResponse, error)
@@ -2377,7 +2377,7 @@ func (r RecordProviderCallResponse) StatusCode() int {
 	return 0
 }
 
-type UpdateStatsResponse struct {
+type UpdateStatusResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON400      *BadRequest
@@ -2387,7 +2387,7 @@ type UpdateStatsResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r UpdateStatsResponse) Status() string {
+func (r UpdateStatusResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -2395,7 +2395,7 @@ func (r UpdateStatsResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r UpdateStatsResponse) StatusCode() int {
+func (r UpdateStatusResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -2647,21 +2647,21 @@ func (c *ClientWithResponses) RecordProviderCallWithResponse(ctx context.Context
 	return ParseRecordProviderCallResponse(rsp)
 }
 
-// UpdateStatsWithBodyWithResponse request with arbitrary body returning *UpdateStatsResponse
-func (c *ClientWithResponses) UpdateStatsWithBodyWithResponse(ctx context.Context, sessionID SessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateStatsResponse, error) {
-	rsp, err := c.UpdateStatsWithBody(ctx, sessionID, contentType, body, reqEditors...)
+// UpdateStatusWithBodyWithResponse request with arbitrary body returning *UpdateStatusResponse
+func (c *ClientWithResponses) UpdateStatusWithBodyWithResponse(ctx context.Context, sessionID SessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateStatusResponse, error) {
+	rsp, err := c.UpdateStatusWithBody(ctx, sessionID, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseUpdateStatsResponse(rsp)
+	return ParseUpdateStatusResponse(rsp)
 }
 
-func (c *ClientWithResponses) UpdateStatsWithResponse(ctx context.Context, sessionID SessionID, body UpdateStatsJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateStatsResponse, error) {
-	rsp, err := c.UpdateStats(ctx, sessionID, body, reqEditors...)
+func (c *ClientWithResponses) UpdateStatusWithResponse(ctx context.Context, sessionID SessionID, body UpdateStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateStatusResponse, error) {
+	rsp, err := c.UpdateStatus(ctx, sessionID, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseUpdateStatsResponse(rsp)
+	return ParseUpdateStatusResponse(rsp)
 }
 
 // GetToolCallsWithResponse request returning *GetToolCallsResponse
@@ -3285,15 +3285,15 @@ func ParseRecordProviderCallResponse(rsp *http.Response) (*RecordProviderCallRes
 	return response, nil
 }
 
-// ParseUpdateStatsResponse parses an HTTP response from a UpdateStatsWithResponse call
-func ParseUpdateStatsResponse(rsp *http.Response) (*UpdateStatsResponse, error) {
+// ParseUpdateStatusResponse parses an HTTP response from a UpdateStatusWithResponse call
+func ParseUpdateStatusResponse(rsp *http.Response) (*UpdateStatusResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &UpdateStatsResponse{
+	response := &UpdateStatusResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

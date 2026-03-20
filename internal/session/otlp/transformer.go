@@ -39,7 +39,7 @@ type SessionWriter interface {
 	GetSession(ctx context.Context, sessionID string) (*session.Session, error)
 	CreateSession(ctx context.Context, sess *session.Session) error
 	AppendMessage(ctx context.Context, sessionID string, msg *session.Message) error
-	UpdateSessionStats(ctx context.Context, sessionID string, update session.SessionStatsUpdate) error
+	UpdateSessionStatus(ctx context.Context, sessionID string, update session.SessionStatusUpdate) error
 }
 
 // Transformer converts OTLP GenAI spans into session data.

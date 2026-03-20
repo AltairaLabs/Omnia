@@ -229,11 +229,11 @@ func (w *recordingResponseWriter) WriteError(code, message string) error {
 			w.log.Error(storeErr, "failed to record error message")
 		}
 
-		if storeErr := w.store.UpdateSessionStats(ctx, w.sessionID, session.SessionStatsUpdate{
+		if storeErr := w.store.UpdateSessionStatus(ctx, w.sessionID, session.SessionStatusUpdate{
 			SetStatus:  session.SessionStatusError,
 			SetEndedAt: time.Now(),
 		}); storeErr != nil {
-			w.log.Error(storeErr, "failed to update session stats for error")
+			w.log.Error(storeErr, "failed to update session status for error")
 		}
 	})
 

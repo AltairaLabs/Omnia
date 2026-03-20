@@ -297,10 +297,11 @@ func (s *SessionService) AppendMessage(ctx context.Context, sessionID string, ms
 	return nil
 }
 
-// UpdateSessionStats applies incremental counter updates to a session atomically.
-// The warm store performs the update in a single SQL statement to prevent
-// concurrent updates from overwriting each other.
-func (s *SessionService) UpdateSessionStats(ctx context.Context, sessionID string, update session.SessionStatsUpdate) error {
+// UpdateSessionStatus applies session lifecycle status updates atomically.
+// When the warm store supports StatusUpdaterWithResult (e.g. Postgres), the
+// update, previous-status check, and metadata lookup are done in a single
+// query. Otherwise, it falls back to separate queries.
+func (s *SessionService) UpdateSessionStatus(ctx context.Context, sessionID string, update session.SessionStatusUpdate) error {
 	if sessionID == "" {
 		return ErrMissingSessionID
 	}
@@ -309,7 +310,40 @@ func (s *SessionService) UpdateSessionStats(ctx context.Context, sessionID strin
 		return ErrWarmStoreRequired
 	}
 
-	// Check previous status before update so we only publish on actual transitions.
+	// Fast path: single query returning previous status + metadata.
+	if updater, ok := warm.(providers.StatusUpdaterWithResult); ok {
+		return s.updateStatusOptimized(ctx, sessionID, update, updater)
+	}
+
+	// Slow path: separate queries for stores without RETURNING support.
+	return s.updateStatusFallback(ctx, sessionID, update, warm)
+}
+
+// updateStatusOptimized performs the status update, transition check,
+// and metadata lookup in a single DB query via StatusUpdaterWithResult.
+func (s *SessionService) updateStatusOptimized(ctx context.Context, sessionID string, update session.SessionStatusUpdate, updater providers.StatusUpdaterWithResult) error {
+	result, err := updater.UpdateSessionStatusReturning(ctx, sessionID, update)
+	if err != nil {
+		return err
+	}
+
+	s.refreshHotCacheTTL(sessionID)
+
+	if result.Applied && update.SetStatus == session.SessionStatusCompleted &&
+		result.PreviousStatus != session.SessionStatusCompleted {
+		s.publishSessionCompleted(ctx, &session.Session{
+			ID:                sessionID,
+			AgentName:         result.AgentName,
+			Namespace:         result.Namespace,
+			PromptPackName:    result.PromptPackName,
+			PromptPackVersion: result.PromptPackVersion,
+		})
+	}
+	return nil
+}
+
+// updateStatusFallback uses separate queries for pre-check and post-read.
+func (s *SessionService) updateStatusFallback(ctx context.Context, sessionID string, update session.SessionStatusUpdate, warm providers.WarmStoreProvider) error {
 	var previousStatus session.SessionStatus
 	if update.SetStatus == session.SessionStatusCompleted {
 		if prev, getErr := warm.GetSession(ctx, sessionID); getErr == nil {
@@ -317,20 +351,12 @@ func (s *SessionService) UpdateSessionStats(ctx context.Context, sessionID strin
 		}
 	}
 
-	// Use atomic update to avoid read-modify-write race conditions.
-	if err := warm.UpdateSessionStats(ctx, sessionID, update); err != nil {
+	if err := warm.UpdateSessionStatus(ctx, sessionID, update); err != nil {
 		return err
 	}
 
-	// Refresh hot cache TTL on stats updates to keep active sessions cached.
-	s.pushToHotCache(func(ctx context.Context, hot providers.HotCacheProvider) {
-		if err := hot.RefreshTTL(ctx, sessionID, s.cacheTTL); err != nil {
-			// Session may not be in cache yet — that's fine.
-			s.log.V(2).Info("hot cache TTL refresh skipped", "sessionID", sessionID, "reason", err.Error())
-		}
-	})
+	s.refreshHotCacheTTL(sessionID)
 
-	// Only publish completion event when the status actually transitions to completed.
 	if update.SetStatus == session.SessionStatusCompleted && previousStatus != session.SessionStatusCompleted {
 		sess, getErr := warm.GetSession(ctx, sessionID)
 		if getErr == nil {
@@ -338,6 +364,15 @@ func (s *SessionService) UpdateSessionStats(ctx context.Context, sessionID strin
 		}
 	}
 	return nil
+}
+
+// refreshHotCacheTTL extends the hot cache TTL for an active session.
+func (s *SessionService) refreshHotCacheTTL(sessionID string) {
+	s.pushToHotCache(func(ctx context.Context, hot providers.HotCacheProvider) {
+		if err := hot.RefreshTTL(ctx, sessionID, s.cacheTTL); err != nil {
+			s.log.V(2).Info("hot cache TTL refresh skipped", "sessionID", sessionID, "reason", err.Error())
+		}
+	})
 }
 
 // RefreshTTL extends the expiry of a session.

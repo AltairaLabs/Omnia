@@ -572,7 +572,7 @@ func TestListSessions_All(t *testing.T) {
 		require.NoError(t, p.CreateSession(ctx, s))
 	}
 
-	page, err := p.ListSessions(ctx, providers.SessionListOpts{})
+	page, err := p.ListSessions(ctx, providers.SessionListOpts{IncludeCount: true})
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), page.TotalCount)
 	assert.Len(t, page.Sessions, 3)
@@ -595,7 +595,7 @@ func TestListSessions_FilterAgent(t *testing.T) {
 	require.NoError(t, p.CreateSession(ctx, s1))
 	require.NoError(t, p.CreateSession(ctx, s2))
 
-	page, err := p.ListSessions(ctx, providers.SessionListOpts{AgentName: "agent-a"})
+	page, err := p.ListSessions(ctx, providers.SessionListOpts{AgentName: "agent-a", IncludeCount: true})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), page.TotalCount)
 	assert.Equal(t, "agent-a", page.Sessions[0].AgentName)
@@ -617,7 +617,7 @@ func TestListSessions_FilterNamespace(t *testing.T) {
 	require.NoError(t, p.CreateSession(ctx, s1))
 	require.NoError(t, p.CreateSession(ctx, s2))
 
-	page, err := p.ListSessions(ctx, providers.SessionListOpts{Namespace: "ns-a"})
+	page, err := p.ListSessions(ctx, providers.SessionListOpts{Namespace: "ns-a", IncludeCount: true})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), page.TotalCount)
 	assert.Equal(t, "ns-a", page.Sessions[0].Namespace)
@@ -639,7 +639,7 @@ func TestListSessions_FilterStatus(t *testing.T) {
 	require.NoError(t, p.CreateSession(ctx, s1))
 	require.NoError(t, p.CreateSession(ctx, s2))
 
-	page, err := p.ListSessions(ctx, providers.SessionListOpts{Status: session.SessionStatusActive})
+	page, err := p.ListSessions(ctx, providers.SessionListOpts{Status: session.SessionStatusActive, IncludeCount: true})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), page.TotalCount)
 	assert.Equal(t, session.SessionStatusActive, page.Sessions[0].Status)
@@ -662,17 +662,17 @@ func TestListSessions_FilterTags(t *testing.T) {
 	require.NoError(t, p.CreateSession(ctx, s2))
 
 	// Filter for "alpha" — only s1
-	page, err := p.ListSessions(ctx, providers.SessionListOpts{Tags: []string{"alpha"}})
+	page, err := p.ListSessions(ctx, providers.SessionListOpts{Tags: []string{"alpha"}, IncludeCount: true})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), page.TotalCount)
 
 	// Filter for "beta" — both
-	page, err = p.ListSessions(ctx, providers.SessionListOpts{Tags: []string{"beta"}})
+	page, err = p.ListSessions(ctx, providers.SessionListOpts{Tags: []string{"beta"}, IncludeCount: true})
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), page.TotalCount)
 
 	// Filter for "alpha" AND "beta" — only s1
-	page, err = p.ListSessions(ctx, providers.SessionListOpts{Tags: []string{"alpha", "beta"}})
+	page, err = p.ListSessions(ctx, providers.SessionListOpts{Tags: []string{"alpha", "beta"}, IncludeCount: true})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), page.TotalCount)
 }
@@ -696,6 +696,7 @@ func TestListSessions_FilterDateRange(t *testing.T) {
 	page, err := p.ListSessions(ctx, providers.SessionListOpts{
 		CreatedAfter:  now.Add(-90 * time.Minute),
 		CreatedBefore: now.Add(-30 * time.Minute),
+		IncludeCount:  true,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), page.TotalCount)
@@ -716,12 +717,12 @@ func TestListSessions_SortOrder(t *testing.T) {
 	require.NoError(t, p.CreateSession(ctx, s2))
 
 	// Default (DESC)
-	page, err := p.ListSessions(ctx, providers.SessionListOpts{})
+	page, err := p.ListSessions(ctx, providers.SessionListOpts{IncludeCount: true})
 	require.NoError(t, err)
 	assert.Equal(t, s2.ID, page.Sessions[0].ID)
 
 	// ASC
-	page, err = p.ListSessions(ctx, providers.SessionListOpts{SortOrder: providers.SortAsc})
+	page, err = p.ListSessions(ctx, providers.SessionListOpts{SortOrder: providers.SortAsc, IncludeCount: true})
 	require.NoError(t, err)
 	assert.Equal(t, s1.ID, page.Sessions[0].ID)
 }
@@ -741,20 +742,20 @@ func TestListSessions_Pagination(t *testing.T) {
 	}
 
 	// Page 1
-	page, err := p.ListSessions(ctx, providers.SessionListOpts{Limit: 2})
+	page, err := p.ListSessions(ctx, providers.SessionListOpts{Limit: 2, IncludeCount: true})
 	require.NoError(t, err)
 	assert.Len(t, page.Sessions, 2)
 	assert.Equal(t, int64(5), page.TotalCount)
 	assert.True(t, page.HasMore)
 
 	// Page 2
-	page, err = p.ListSessions(ctx, providers.SessionListOpts{Limit: 2, Offset: 2})
+	page, err = p.ListSessions(ctx, providers.SessionListOpts{Limit: 2, Offset: 2, IncludeCount: true})
 	require.NoError(t, err)
 	assert.Len(t, page.Sessions, 2)
 	assert.True(t, page.HasMore)
 
 	// Last page
-	page, err = p.ListSessions(ctx, providers.SessionListOpts{Limit: 2, Offset: 4})
+	page, err = p.ListSessions(ctx, providers.SessionListOpts{Limit: 2, Offset: 4, IncludeCount: true})
 	require.NoError(t, err)
 	assert.Len(t, page.Sessions, 1)
 	assert.False(t, page.HasMore)
@@ -783,7 +784,7 @@ func TestSearchSessions_Basic(t *testing.T) {
 	require.NoError(t, p.AppendMessage(ctx, s2.ID, msg2))
 
 	// Search for "kubernetes"
-	page, err := p.SearchSessions(ctx, "kubernetes", providers.SessionListOpts{})
+	page, err := p.SearchSessions(ctx, "kubernetes", providers.SessionListOpts{IncludeCount: true})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), page.TotalCount)
 	assert.Equal(t, s1.ID, page.Sessions[0].ID)
@@ -804,7 +805,7 @@ func TestSearchSessions_NoResults(t *testing.T) {
 	msg := &session.Message{ID: "b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a01", Role: session.RoleUser, Content: "Hello world", Timestamp: now, SequenceNum: 1}
 	require.NoError(t, p.AppendMessage(ctx, s.ID, msg))
 
-	page, err := p.SearchSessions(ctx, "nonexistentterm", providers.SessionListOpts{})
+	page, err := p.SearchSessions(ctx, "nonexistentterm", providers.SessionListOpts{IncludeCount: true})
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), page.TotalCount)
 	assert.Empty(t, page.Sessions)
@@ -833,7 +834,7 @@ func TestSearchSessions_WithFilters(t *testing.T) {
 	require.NoError(t, p.AppendMessage(ctx, s2.ID, msg2))
 
 	// Search with agent filter.
-	page, err := p.SearchSessions(ctx, "kubernetes", providers.SessionListOpts{AgentName: "agent-a"})
+	page, err := p.SearchSessions(ctx, "kubernetes", providers.SessionListOpts{AgentName: "agent-a", IncludeCount: true})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), page.TotalCount)
 	assert.Equal(t, "agent-a", page.Sessions[0].AgentName)
@@ -1054,7 +1055,7 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Nil(t, cfg.TLS)
 }
 
-func TestUpdateSessionStats_Atomic(t *testing.T) {
+func TestUpdateSessionStatus_Atomic(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -1078,10 +1079,10 @@ func TestUpdateSessionStats_Atomic(t *testing.T) {
 	require.NoError(t, p.CreateSession(ctx, s))
 
 	// Apply status update (counters are now auto-derived by AppendMessage).
-	update := session.SessionStatsUpdate{
+	update := session.SessionStatusUpdate{
 		SetStatus: session.SessionStatusCompleted,
 	}
-	require.NoError(t, p.UpdateSessionStats(ctx, s.ID, update))
+	require.NoError(t, p.UpdateSessionStatus(ctx, s.ID, update))
 
 	// Verify the status was applied.
 	got, err := p.GetSession(ctx, s.ID)
@@ -1089,20 +1090,20 @@ func TestUpdateSessionStats_Atomic(t *testing.T) {
 	assert.Equal(t, session.SessionStatusCompleted, got.Status)
 }
 
-func TestUpdateSessionStats_NotFound(t *testing.T) {
+func TestUpdateSessionStatus_NotFound(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 	ctx := context.Background()
 	p := newProvider(t)
 
-	err := p.UpdateSessionStats(ctx, "b0eebc99-9c0b-4ef8-bb6d-6bb9bd380b99", session.SessionStatsUpdate{
+	err := p.UpdateSessionStatus(ctx, "b0eebc99-9c0b-4ef8-bb6d-6bb9bd380b99", session.SessionStatusUpdate{
 		SetStatus: session.SessionStatusCompleted,
 	})
 	assert.ErrorIs(t, err, session.ErrSessionNotFound)
 }
 
-func TestUpdateSessionStats_EmptyStatus(t *testing.T) {
+func TestUpdateSessionStatus_EmptyStatus(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -1121,8 +1122,8 @@ func TestUpdateSessionStats_EmptyStatus(t *testing.T) {
 	require.NoError(t, p.CreateSession(ctx, s))
 
 	// Update without setting status should preserve existing status.
-	update := session.SessionStatsUpdate{}
-	require.NoError(t, p.UpdateSessionStats(ctx, s.ID, update))
+	update := session.SessionStatusUpdate{}
+	require.NoError(t, p.UpdateSessionStatus(ctx, s.ID, update))
 
 	got, err := p.GetSession(ctx, s.ID)
 	require.NoError(t, err)

@@ -173,7 +173,7 @@ func (m *mockWarmStore) UpdateSession(_ context.Context, s *session.Session) err
 	return nil
 }
 
-func (m *mockWarmStore) UpdateSessionStats(_ context.Context, sessionID string, update session.SessionStatsUpdate) error {
+func (m *mockWarmStore) UpdateSessionStatus(_ context.Context, sessionID string, update session.SessionStatusUpdate) error {
 	s, ok := m.sessions[sessionID]
 	if !ok {
 		return session.ErrSessionNotFound
@@ -333,9 +333,14 @@ func (m *mockWarmStore) ListSessions(_ context.Context, opts SessionListOpts) (*
 		results = results[:opts.Limit]
 	}
 
+	totalCount := int64(-1)
+	if opts.IncludeCount {
+		totalCount = total
+	}
+
 	return &SessionPage{
 		Sessions:   results,
-		TotalCount: total,
+		TotalCount: totalCount,
 		HasMore:    hasMore,
 	}, nil
 }
@@ -362,9 +367,14 @@ func (m *mockWarmStore) SearchSessions(_ context.Context, query string, opts Ses
 		results = results[:opts.Limit]
 	}
 
+	totalCount := int64(-1)
+	if opts.IncludeCount {
+		totalCount = total
+	}
+
 	return &SessionPage{
 		Sessions:   results,
-		TotalCount: total,
+		TotalCount: totalCount,
 		HasMore:    hasMore,
 	}, nil
 }
@@ -943,7 +953,7 @@ func TestWarmStore_ListSessions(t *testing.T) {
 	}
 
 	t.Run("filter by namespace", func(t *testing.T) {
-		page, err := store.ListSessions(ctx, SessionListOpts{Namespace: "ns-1"})
+		page, err := store.ListSessions(ctx, SessionListOpts{Namespace: "ns-1", IncludeCount: true})
 		if err != nil {
 			t.Fatalf("ListSessions failed: %v", err)
 		}
@@ -953,7 +963,7 @@ func TestWarmStore_ListSessions(t *testing.T) {
 	})
 
 	t.Run("filter by agent", func(t *testing.T) {
-		page, err := store.ListSessions(ctx, SessionListOpts{AgentName: "agent-a"})
+		page, err := store.ListSessions(ctx, SessionListOpts{AgentName: "agent-a", IncludeCount: true})
 		if err != nil {
 			t.Fatalf("ListSessions failed: %v", err)
 		}
@@ -963,7 +973,7 @@ func TestWarmStore_ListSessions(t *testing.T) {
 	})
 
 	t.Run("filter by status", func(t *testing.T) {
-		page, err := store.ListSessions(ctx, SessionListOpts{Status: session.SessionStatusCompleted})
+		page, err := store.ListSessions(ctx, SessionListOpts{Status: session.SessionStatusCompleted, IncludeCount: true})
 		if err != nil {
 			t.Fatalf("ListSessions failed: %v", err)
 		}
@@ -973,7 +983,7 @@ func TestWarmStore_ListSessions(t *testing.T) {
 	})
 
 	t.Run("filter by tags", func(t *testing.T) {
-		page, err := store.ListSessions(ctx, SessionListOpts{Tags: []string{"prod"}})
+		page, err := store.ListSessions(ctx, SessionListOpts{Tags: []string{"prod"}, IncludeCount: true})
 		if err != nil {
 			t.Fatalf("ListSessions failed: %v", err)
 		}
@@ -983,7 +993,7 @@ func TestWarmStore_ListSessions(t *testing.T) {
 	})
 
 	t.Run("pagination", func(t *testing.T) {
-		page, err := store.ListSessions(ctx, SessionListOpts{Limit: 2})
+		page, err := store.ListSessions(ctx, SessionListOpts{Limit: 2, IncludeCount: true})
 		if err != nil {
 			t.Fatalf("ListSessions failed: %v", err)
 		}
@@ -1024,7 +1034,7 @@ func TestWarmStore_SearchSessions(t *testing.T) {
 		LastMessagePreview: "Build failed",
 	})
 
-	page, err := store.SearchSessions(ctx, "chatbot", SessionListOpts{})
+	page, err := store.SearchSessions(ctx, "chatbot", SessionListOpts{IncludeCount: true})
 	if err != nil {
 		t.Fatalf("SearchSessions failed: %v", err)
 	}
@@ -1032,7 +1042,7 @@ func TestWarmStore_SearchSessions(t *testing.T) {
 		t.Errorf("TotalCount = %d, want 1", page.TotalCount)
 	}
 
-	page, err = store.SearchSessions(ctx, "hello", SessionListOpts{})
+	page, err = store.SearchSessions(ctx, "hello", SessionListOpts{IncludeCount: true})
 	if err != nil {
 		t.Fatalf("SearchSessions failed: %v", err)
 	}
