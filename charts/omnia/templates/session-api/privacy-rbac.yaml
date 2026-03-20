@@ -1,0 +1,32 @@
+{{- if and .Values.sessionApi.enabled .Values.enterprise.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "omnia.sessionApi.fullname" . }}-privacy
+  labels:
+    {{- include "omnia.sessionApi.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - sessionprivacypolicies
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "omnia.sessionApi.fullname" . }}-privacy
+  labels:
+    {{- include "omnia.sessionApi.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "omnia.sessionApi.fullname" . }}-privacy
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "omnia.sessionApi.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
