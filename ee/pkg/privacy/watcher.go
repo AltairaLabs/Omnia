@@ -46,6 +46,7 @@ type PolicyWatcher struct {
 // It uses the provided REST config to communicate with the K8s API server.
 func NewPolicyWatcher(config *rest.Config, log logr.Logger) (*PolicyWatcher, error) {
 	scheme := runtime.NewScheme()
+	metav1.AddToGroupVersion(scheme, omniav1alpha1.GroupVersion)
 	if err := omniav1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("adding EE scheme: %w", err)
 	}
