@@ -15,12 +15,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/serializer"
-	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 )
@@ -34,83 +29,80 @@ type EffectivePolicy struct {
 	UserOptOut *omniav1alpha1.UserOptOutConfig
 }
 
-// PolicyWatcher uses a shared informer to watch SessionPrivacyPolicy CRDs
-// and maintains an in-memory cache of effective policies keyed by scope.
+// PolicyWatcher polls SessionPrivacyPolicy CRDs and maintains an in-memory
+// cache of policies for fast lookup by the privacy middleware.
 type PolicyWatcher struct {
-	informer cache.SharedIndexInformer
-	policies sync.Map // key: string (namespace/name) -> *omniav1alpha1.SessionPrivacyPolicy
-	log      logr.Logger
+	client       client.Client
+	policies     sync.Map // key: string (namespace/name) -> *omniav1alpha1.SessionPrivacyPolicy
+	pollInterval time.Duration
+	log          logr.Logger
 }
 
-// NewPolicyWatcher creates a watcher that observes SessionPrivacyPolicy CRDs.
-// It uses the provided REST config to communicate with the K8s API server.
-func NewPolicyWatcher(config *rest.Config, log logr.Logger) (*PolicyWatcher, error) {
-	scheme := runtime.NewScheme()
-	metav1.AddToGroupVersion(scheme, omniav1alpha1.GroupVersion)
-	if err := omniav1alpha1.AddToScheme(scheme); err != nil {
-		return nil, fmt.Errorf("adding EE scheme: %w", err)
+// NewPolicyWatcher creates a watcher that observes SessionPrivacyPolicy CRDs
+// using a controller-runtime client.
+func NewPolicyWatcher(k8sClient client.Client, log logr.Logger) *PolicyWatcher {
+	return &PolicyWatcher{
+		client:       k8sClient,
+		pollInterval: 30 * time.Second,
+		log:          log.WithName("policy-watcher"),
 	}
-
-	codecs := serializer.NewCodecFactory(scheme)
-	cfg := *config
-	cfg.APIPath = "/apis"
-	cfg.GroupVersion = &omniav1alpha1.GroupVersion
-	cfg.NegotiatedSerializer = codecs.WithoutConversion()
-
-	client, err := rest.RESTClientFor(&cfg)
-	if err != nil {
-		return nil, fmt.Errorf("creating REST client: %w", err)
-	}
-
-	listWatcher := &cache.ListWatch{
-		ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
-			result := &omniav1alpha1.SessionPrivacyPolicyList{}
-			err := client.Get().
-				Resource("sessionprivacypolicies").
-				VersionedParams(&opts, runtime.NewParameterCodec(scheme)).
-				Do(context.Background()).
-				Into(result)
-			return result, err
-		},
-		WatchFunc: func(opts metav1.ListOptions) (watch.Interface, error) {
-			return client.Get().
-				Resource("sessionprivacypolicies").
-				VersionedParams(&opts, runtime.NewParameterCodec(scheme)).
-				Watch(context.Background())
-		},
-	}
-
-	informer := cache.NewSharedIndexInformer(
-		listWatcher,
-		&omniav1alpha1.SessionPrivacyPolicy{},
-		10*time.Minute, // resync period
-		cache.Indexers{},
-	)
-
-	w := &PolicyWatcher{
-		informer: informer,
-		log:      log.WithName("policy-watcher"),
-	}
-
-	// Register event handlers to maintain the in-memory cache.
-	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(obj any) { w.onAdd(obj) },
-		UpdateFunc: func(_, newObj any) { w.onAdd(newObj) },
-		DeleteFunc: func(obj any) { w.onDelete(obj) },
-	})
-
-	return w, nil
 }
 
-// Start begins watching for SessionPrivacyPolicy changes. Blocks until ctx is
-// cancelled or the informer fails to sync.
+// SetPollInterval overrides the default poll interval (for testing).
+func (w *PolicyWatcher) SetPollInterval(d time.Duration) {
+	w.pollInterval = d
+}
+
+// Start begins watching for SessionPrivacyPolicy changes. It performs an
+// initial list, then polls periodically. Blocks until ctx is cancelled.
 func (w *PolicyWatcher) Start(ctx context.Context) error {
-	go w.informer.Run(ctx.Done())
-
-	if !cache.WaitForCacheSync(ctx.Done(), w.informer.HasSynced) {
-		return fmt.Errorf("policy watcher cache sync failed")
+	if err := w.loadPolicies(ctx); err != nil {
+		return fmt.Errorf("initial policy load failed: %w", err)
 	}
 	w.log.Info("policy watcher synced")
+
+	ticker := time.NewTicker(w.pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := w.loadPolicies(ctx); err != nil {
+				w.log.Error(err, "policy reload failed")
+			}
+		}
+	}
+}
+
+// loadPolicies lists all SessionPrivacyPolicy resources and updates the cache.
+func (w *PolicyWatcher) loadPolicies(ctx context.Context) error {
+	var list omniav1alpha1.SessionPrivacyPolicyList
+	if err := w.client.List(ctx, &list); err != nil {
+		return fmt.Errorf("listing policies: %w", err)
+	}
+
+	// Track which keys are still present.
+	seen := make(map[string]bool, len(list.Items))
+
+	for i := range list.Items {
+		p := &list.Items[i]
+		key := policyKey(p)
+		seen[key] = true
+		w.policies.Store(key, p.DeepCopy())
+		w.log.V(1).Info("policy cached", "name", p.Name, "level", p.Spec.Level)
+	}
+
+	// Remove policies no longer present.
+	w.policies.Range(func(k, _ any) bool {
+		if !seen[k.(string)] {
+			w.policies.Delete(k)
+			w.log.V(1).Info("policy removed", "key", k)
+		}
+		return true
+	})
+
 	return nil
 }
 
@@ -192,34 +184,6 @@ func findByLevel(
 		}
 	}
 	return nil
-}
-
-func (w *PolicyWatcher) onAdd(obj any) {
-	p, ok := obj.(*omniav1alpha1.SessionPrivacyPolicy)
-	if !ok {
-		return
-	}
-	key := policyKey(p)
-	w.policies.Store(key, p.DeepCopy())
-	w.log.V(1).Info("policy cached", "name", p.Name, "level", p.Spec.Level)
-}
-
-func (w *PolicyWatcher) onDelete(obj any) {
-	p, ok := obj.(*omniav1alpha1.SessionPrivacyPolicy)
-	if !ok {
-		// Handle DeletedFinalStateUnknown
-		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
-		if !ok {
-			return
-		}
-		p, ok = tombstone.Obj.(*omniav1alpha1.SessionPrivacyPolicy)
-		if !ok {
-			return
-		}
-	}
-	key := policyKey(p)
-	w.policies.Delete(key)
-	w.log.V(1).Info("policy removed", "name", p.Name)
 }
 
 func policyKey(p *omniav1alpha1.SessionPrivacyPolicy) string {

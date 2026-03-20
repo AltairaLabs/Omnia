@@ -40,8 +40,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	goredis "github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/audit"
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
@@ -709,11 +713,15 @@ func wrapPrivacyMiddleware(
 		return next
 	}
 
-	watcher, err := privacy.NewPolicyWatcher(kubeConfig, log)
+	scheme := runtime.NewScheme()
+	utilruntime.Must(omniav1alpha1.AddToScheme(scheme))
+	k8sClient, err := client.New(kubeConfig, client.Options{Scheme: scheme})
 	if err != nil {
-		log.Error(err, "privacy middleware skipped", "reason", "policy watcher creation failed")
+		log.Error(err, "privacy middleware skipped", "reason", "k8s client creation failed")
 		return next
 	}
+
+	watcher := privacy.NewPolicyWatcher(k8sClient, log)
 
 	// Start the watcher asynchronously; it syncs the cache in the background.
 	go func() {
