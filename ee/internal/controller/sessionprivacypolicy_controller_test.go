@@ -32,6 +32,7 @@ import (
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
+	"github.com/altairalabs/omnia/ee/pkg/privacy"
 )
 
 func setupPrivacyPolicyTest(t *testing.T, objects ...runtime.Object) (*SessionPrivacyPolicyReconciler, *record.FakeRecorder) {
@@ -467,7 +468,7 @@ func TestComputeEffectivePolicy_SinglePolicy(t *testing.T) {
 	p := newGlobalPolicy("test")
 	chain := []*omniav1alpha1.SessionPrivacyPolicy{p}
 
-	effective := computeEffectivePolicy(chain)
+	effective := privacy.ComputeEffectivePolicy(chain)
 
 	assert.True(t, effective.Recording.Enabled)
 	assert.True(t, effective.Recording.PII.Redact)
@@ -479,7 +480,7 @@ func TestComputeEffectivePolicy_MergesStricter(t *testing.T) {
 	ws := newWorkspacePolicy("ws", "workspace")
 
 	chain := []*omniav1alpha1.SessionPrivacyPolicy{global, ws}
-	effective := computeEffectivePolicy(chain)
+	effective := privacy.ComputeEffectivePolicy(chain)
 
 	// Workspace disables richData
 	assert.False(t, effective.Recording.RichData)
@@ -501,7 +502,7 @@ func TestComputeEffectivePolicy_RecordingDisabledByParent(t *testing.T) {
 	ws.Spec.Recording.Enabled = true // Tries to enable — should be overridden
 
 	chain := []*omniav1alpha1.SessionPrivacyPolicy{global, ws}
-	effective := computeEffectivePolicy(chain)
+	effective := privacy.ComputeEffectivePolicy(chain)
 
 	// Parent disables recording, child can't enable
 	assert.False(t, effective.Recording.Enabled)
@@ -520,7 +521,7 @@ func TestComputeEffectivePolicy_EncryptionTrueWins(t *testing.T) {
 	}
 
 	chain := []*omniav1alpha1.SessionPrivacyPolicy{global, ws}
-	effective := computeEffectivePolicy(chain)
+	effective := privacy.ComputeEffectivePolicy(chain)
 
 	assert.True(t, effective.Encryption.Enabled)
 	assert.Equal(t, omniav1alpha1.KMSProviderAWSKMS, effective.Encryption.KMSProvider)
@@ -540,14 +541,14 @@ func TestComputeEffectivePolicy_AuditLogTrueWins(t *testing.T) {
 	}
 
 	chain := []*omniav1alpha1.SessionPrivacyPolicy{global, ws}
-	effective := computeEffectivePolicy(chain)
+	effective := privacy.ComputeEffectivePolicy(chain)
 
 	assert.True(t, effective.AuditLog.Enabled)
 	assert.Equal(t, int32(90), *effective.AuditLog.RetentionDays) // min(365, 90) = 90
 }
 
 func TestComputeEffectivePolicy_EmptyChain(t *testing.T) {
-	effective := computeEffectivePolicy(nil)
+	effective := privacy.ComputeEffectivePolicy(nil)
 	assert.NotNil(t, effective)
 }
 
@@ -562,7 +563,7 @@ func TestComputeEffectivePolicy_RetentionMinimumWins(t *testing.T) {
 	}
 
 	chain := []*omniav1alpha1.SessionPrivacyPolicy{global, ws}
-	effective := computeEffectivePolicy(chain)
+	effective := privacy.ComputeEffectivePolicy(chain)
 
 	// Facade should keep global values since workspace doesn't override
 	assert.Equal(t, int32(90), *effective.Retention.Facade.WarmDays)
@@ -588,7 +589,7 @@ func TestComputeEffectivePolicy_PIIPatternsUnion(t *testing.T) {
 	}
 
 	chain := []*omniav1alpha1.SessionPrivacyPolicy{global, ws}
-	effective := computeEffectivePolicy(chain)
+	effective := privacy.ComputeEffectivePolicy(chain)
 
 	assert.True(t, effective.Recording.PII.Redact)
 	assert.True(t, effective.Recording.PII.Encrypt)
@@ -613,7 +614,7 @@ func TestMergeEncryption_NilBase(t *testing.T) {
 		Enabled:     true,
 		KMSProvider: omniav1alpha1.KMSProviderVault,
 	}
-	result := mergeEncryption(nil, override)
+	result := privacy.MergeEncryption(nil, override)
 	require.NotNil(t, result)
 	assert.True(t, result.Enabled)
 	assert.Equal(t, omniav1alpha1.KMSProviderVault, result.KMSProvider)
@@ -624,7 +625,7 @@ func TestMergeEncryption_NilOverride(t *testing.T) {
 		Enabled:     true,
 		KMSProvider: omniav1alpha1.KMSProviderAWSKMS,
 	}
-	result := mergeEncryption(base, nil)
+	result := privacy.MergeEncryption(base, nil)
 	require.NotNil(t, result)
 	assert.True(t, result.Enabled)
 	assert.Equal(t, omniav1alpha1.KMSProviderAWSKMS, result.KMSProvider)
@@ -639,7 +640,7 @@ func TestMergeEncryption_OverrideKMS(t *testing.T) {
 		Enabled:     false,
 		KMSProvider: omniav1alpha1.KMSProviderGCPKMS,
 	}
-	result := mergeEncryption(base, override)
+	result := privacy.MergeEncryption(base, override)
 	require.NotNil(t, result)
 	assert.True(t, result.Enabled) // true wins
 	assert.Equal(t, omniav1alpha1.KMSProviderGCPKMS, result.KMSProvider)
@@ -653,7 +654,7 @@ func TestMergeEncryption_BaseKMSNoOverride(t *testing.T) {
 	override := &omniav1alpha1.EncryptionConfig{
 		Enabled: true,
 	}
-	result := mergeEncryption(base, override)
+	result := privacy.MergeEncryption(base, override)
 	require.NotNil(t, result)
 	assert.Equal(t, omniav1alpha1.KMSProviderAWSKMS, result.KMSProvider)
 }
@@ -667,7 +668,7 @@ func TestMergeEncryption_KeyIDOverride(t *testing.T) {
 	override := &omniav1alpha1.EncryptionConfig{
 		KeyID: "child-key-2",
 	}
-	result := mergeEncryption(base, override)
+	result := privacy.MergeEncryption(base, override)
 	require.NotNil(t, result)
 	assert.True(t, result.Enabled)
 	assert.Equal(t, omniav1alpha1.KMSProviderAzureKeyVault, result.KMSProvider)
@@ -683,7 +684,7 @@ func TestMergeEncryption_KeyIDFromBase(t *testing.T) {
 	override := &omniav1alpha1.EncryptionConfig{
 		Enabled: true,
 	}
-	result := mergeEncryption(base, override)
+	result := privacy.MergeEncryption(base, override)
 	require.NotNil(t, result)
 	assert.Equal(t, omniav1alpha1.KMSProviderAWSKMS, result.KMSProvider)
 	assert.Equal(t, "parent-key", result.KeyID)
@@ -699,7 +700,7 @@ func TestMergeEncryption_ProviderOverrideIncludesKeyID(t *testing.T) {
 		KMSProvider: omniav1alpha1.KMSProviderAzureKeyVault,
 		KeyID:       "azure-key",
 	}
-	result := mergeEncryption(base, override)
+	result := privacy.MergeEncryption(base, override)
 	require.NotNil(t, result)
 	assert.True(t, result.Enabled)
 	assert.Equal(t, omniav1alpha1.KMSProviderAzureKeyVault, result.KMSProvider)
@@ -712,7 +713,7 @@ func TestMergeRetention_NilBase(t *testing.T) {
 			WarmDays: ptr.To(int32(30)),
 		},
 	}
-	result := mergeRetention(nil, override)
+	result := privacy.MergeRetention(nil, override)
 	require.NotNil(t, result)
 	assert.Equal(t, int32(30), *result.Facade.WarmDays)
 }
@@ -723,7 +724,7 @@ func TestMergeRetention_NilOverride(t *testing.T) {
 			WarmDays: ptr.To(int32(90)),
 		},
 	}
-	result := mergeRetention(base, nil)
+	result := privacy.MergeRetention(base, nil)
 	require.NotNil(t, result)
 	assert.Equal(t, int32(90), *result.Facade.WarmDays)
 }
@@ -733,7 +734,7 @@ func TestMergeRetentionTier_NilBase(t *testing.T) {
 		WarmDays: ptr.To(int32(15)),
 		ColdDays: ptr.To(int32(60)),
 	}
-	result := mergeRetentionTier(nil, override)
+	result := privacy.MergeRetentionTier(nil, override)
 	require.NotNil(t, result)
 	assert.Equal(t, int32(15), *result.WarmDays)
 	assert.Equal(t, int32(60), *result.ColdDays)
@@ -743,25 +744,25 @@ func TestMergeRetentionTier_NilOverride(t *testing.T) {
 	base := &omniav1alpha1.PrivacyRetentionTierConfig{
 		WarmDays: ptr.To(int32(30)),
 	}
-	result := mergeRetentionTier(base, nil)
+	result := privacy.MergeRetentionTier(base, nil)
 	require.NotNil(t, result)
 	assert.Equal(t, int32(30), *result.WarmDays)
 }
 
 func TestMinInt32Ptr_BothNil(t *testing.T) {
-	assert.Nil(t, minInt32Ptr(nil, nil))
+	assert.Nil(t, privacy.MinInt32Ptr(nil, nil))
 }
 
 func TestMinInt32Ptr_AOnly(t *testing.T) {
 	a := ptr.To(int32(10))
-	result := minInt32Ptr(a, nil)
+	result := privacy.MinInt32Ptr(a, nil)
 	require.NotNil(t, result)
 	assert.Equal(t, int32(10), *result)
 }
 
 func TestMinInt32Ptr_BOnly(t *testing.T) {
 	b := ptr.To(int32(20))
-	result := minInt32Ptr(nil, b)
+	result := privacy.MinInt32Ptr(nil, b)
 	require.NotNil(t, result)
 	assert.Equal(t, int32(20), *result)
 }
@@ -769,7 +770,7 @@ func TestMinInt32Ptr_BOnly(t *testing.T) {
 func TestMinInt32Ptr_BSmaller(t *testing.T) {
 	a := ptr.To(int32(20))
 	b := ptr.To(int32(10))
-	result := minInt32Ptr(a, b)
+	result := privacy.MinInt32Ptr(a, b)
 	require.NotNil(t, result)
 	assert.Equal(t, int32(10), *result)
 }
@@ -779,7 +780,7 @@ func TestMergeAuditLog_NilBase(t *testing.T) {
 		Enabled:       true,
 		RetentionDays: ptr.To(int32(90)),
 	}
-	result := mergeAuditLog(nil, override)
+	result := privacy.MergeAuditLog(nil, override)
 	require.NotNil(t, result)
 	assert.True(t, result.Enabled)
 	assert.Equal(t, int32(90), *result.RetentionDays)
@@ -790,7 +791,7 @@ func TestMergeAuditLog_NilOverride(t *testing.T) {
 		Enabled:       true,
 		RetentionDays: ptr.To(int32(365)),
 	}
-	result := mergeAuditLog(base, nil)
+	result := privacy.MergeAuditLog(base, nil)
 	require.NotNil(t, result)
 	assert.True(t, result.Enabled)
 	assert.Equal(t, int32(365), *result.RetentionDays)
@@ -801,7 +802,7 @@ func TestMergeUserOptOut_NilBase(t *testing.T) {
 		Enabled:          true,
 		DeleteWithinDays: ptr.To(int32(7)),
 	}
-	result := mergeUserOptOut(nil, override)
+	result := privacy.MergeUserOptOut(nil, override)
 	require.NotNil(t, result)
 	assert.True(t, result.Enabled)
 	assert.Equal(t, int32(7), *result.DeleteWithinDays)
@@ -812,7 +813,7 @@ func TestMergeUserOptOut_NilOverride(t *testing.T) {
 		Enabled:             true,
 		HonorDeleteRequests: true,
 	}
-	result := mergeUserOptOut(base, nil)
+	result := privacy.MergeUserOptOut(base, nil)
 	require.NotNil(t, result)
 	assert.True(t, result.Enabled)
 	assert.True(t, result.HonorDeleteRequests)
@@ -823,7 +824,7 @@ func TestMergePII_NilBase(t *testing.T) {
 		Redact:   true,
 		Patterns: []string{"ssn"},
 	}
-	result := mergePII(nil, override)
+	result := privacy.MergePII(nil, override)
 	require.NotNil(t, result)
 	assert.True(t, result.Redact)
 	assert.Equal(t, []string{"ssn"}, result.Patterns)
@@ -834,7 +835,7 @@ func TestMergePII_NilOverride(t *testing.T) {
 		Encrypt:  true,
 		Patterns: []string{"email"},
 	}
-	result := mergePII(base, nil)
+	result := privacy.MergePII(base, nil)
 	require.NotNil(t, result)
 	assert.True(t, result.Encrypt)
 	assert.Equal(t, []string{"email"}, result.Patterns)
@@ -1057,7 +1058,7 @@ func TestMergeStricter_NilSubfields(t *testing.T) {
 		},
 	}
 
-	result := mergeStricter(base, override)
+	result := privacy.MergeStricter(base, override)
 	assert.Nil(t, result.Retention)
 	assert.Nil(t, result.Encryption)
 	assert.Nil(t, result.AuditLog)
