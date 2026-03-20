@@ -327,6 +327,26 @@ func (r *ToolRegistryReconciler) discoverToolsFromHandler(h *omniav1alpha1.Handl
 				LastChecked: &now,
 			},
 		}
+
+	case omniav1alpha1.HandlerTypeClient:
+		// Client-side tools execute in the browser via WebSocket.
+		// They have explicit tool definitions like HTTP/gRPC handlers.
+		if h.Tool == nil {
+			return nil
+		}
+		tool := omniav1alpha1.DiscoveredTool{
+			Name:        h.Tool.Name,
+			HandlerName: h.Name,
+			Description: h.Tool.Description,
+			InputSchema: &h.Tool.InputSchema,
+			Endpoint:    endpoint,
+			Status:      omniav1alpha1.ToolStatusAvailable,
+			LastChecked: &now,
+		}
+		if h.Tool.OutputSchema != nil {
+			tool.OutputSchema = h.Tool.OutputSchema
+		}
+		return []omniav1alpha1.DiscoveredTool{tool}
 	}
 
 	return nil

@@ -97,12 +97,9 @@ const (
 
 // Eval environment variable name constants.
 const (
-	envEvalsEnabled       = "OMNIA_EVALS_ENABLED"
-	envEvalsSamplingDef   = "OMNIA_EVALS_SAMPLING_DEFAULT"
-	envEvalsSamplingJudge = "OMNIA_EVALS_SAMPLING_LLM_JUDGE"
-	envRedisAddr          = "REDIS_ADDR"
-	envSessionAPIURL      = "SESSION_API_URL"
-	envNamespace          = "NAMESPACE"
+	envRedisAddr     = "REDIS_ADDR"
+	envSessionAPIURL = "SESSION_API_URL"
+	envNamespace     = "NAMESPACE"
 )
 
 // Eval label constants.

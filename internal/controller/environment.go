@@ -27,42 +27,6 @@ import (
 	"github.com/altairalabs/omnia/pkg/k8s"
 )
 
-// buildSessionEnvVars creates environment variables for session configuration.
-// The urlEnvName parameter allows different env var names for different containers.
-func buildSessionEnvVars(session *omniav1alpha1.SessionConfig, urlEnvName string) []corev1.EnvVar {
-	if session == nil {
-		return nil
-	}
-
-	envVars := []corev1.EnvVar{
-		{
-			Name:  "OMNIA_SESSION_TYPE",
-			Value: string(session.Type),
-		},
-	}
-
-	if session.TTL != nil {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "OMNIA_SESSION_TTL",
-			Value: *session.TTL,
-		})
-	}
-
-	if session.StoreRef != nil {
-		envVars = append(envVars, corev1.EnvVar{
-			Name: urlEnvName,
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: *session.StoreRef,
-					Key:                  "url",
-				},
-			},
-		})
-	}
-
-	return envVars
-}
-
 // providerEnvConfig holds common provider configuration for building environment variables.
 type providerEnvConfig struct {
 	Type               omniav1alpha1.ProviderType
@@ -241,42 +205,6 @@ func buildSecretEnvVarsWithKey(secretRef *corev1.LocalObjectReference, providerT
 	}
 
 	return []corev1.EnvVar{buildSecretKeyEnvVar(secretRef, envVarName, key)}
-}
-
-// buildEvalEnvVars creates eval-related environment variables for the facade container.
-// Only called when evals are enabled and the framework is PromptKit.
-func buildEvalEnvVars(evalConfig *omniav1alpha1.EvalConfig) []corev1.EnvVar {
-	if evalConfig == nil || !evalConfig.Enabled {
-		return nil
-	}
-
-	envVars := []corev1.EnvVar{
-		{Name: envEvalsEnabled, Value: "true"},
-	}
-
-	envVars = append(envVars, buildEvalSamplingEnvVars(evalConfig.Sampling)...)
-
-	return envVars
-}
-
-// buildEvalSamplingEnvVars creates sampling rate env vars with defaults.
-func buildEvalSamplingEnvVars(sampling *omniav1alpha1.EvalSampling) []corev1.EnvVar {
-	defaultRate := int32(100)
-	extendedRate := int32(10)
-
-	if sampling != nil {
-		if sampling.DefaultRate != nil {
-			defaultRate = *sampling.DefaultRate
-		}
-		if sampling.ExtendedRate != nil {
-			extendedRate = *sampling.ExtendedRate
-		}
-	}
-
-	return []corev1.EnvVar{
-		{Name: envEvalsSamplingDef, Value: fmt.Sprintf("%d", defaultRate)},
-		{Name: envEvalsSamplingJudge, Value: fmt.Sprintf("%d", extendedRate)},
-	}
 }
 
 // isPromptKit returns true if the AgentRuntime uses the PromptKit framework.

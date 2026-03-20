@@ -85,35 +85,20 @@ type Config struct {
 
 // Environment variable names.
 const (
-	envAgentName              = "OMNIA_AGENT_NAME"
-	envNamespace              = "OMNIA_NAMESPACE"
-	envPromptPackPath         = "OMNIA_PROMPTPACK_PATH"
-	envPromptPackName         = "OMNIA_PROMPTPACK_NAME"
-	envPromptPackNamespace    = "OMNIA_PROMPTPACK_NAMESPACE"
-	envPromptName             = "OMNIA_PROMPT_NAME"
-	envSessionType            = "OMNIA_SESSION_TYPE"
-	envSessionURL             = "OMNIA_SESSION_URL"
-	envSessionTTL             = "OMNIA_SESSION_TTL"
-	envProviderType           = "OMNIA_PROVIDER_TYPE"
-	envProviderModel          = "OMNIA_PROVIDER_MODEL"
-	envProviderBaseURL        = "OMNIA_PROVIDER_BASE_URL"
-	envProviderRefName        = "OMNIA_PROVIDER_REF_NAME"
-	envProviderRefNamespace   = "OMNIA_PROVIDER_REF_NAMESPACE"
-	envContextWindow          = "OMNIA_CONTEXT_WINDOW"
-	envTruncationStrategy     = "OMNIA_TRUNCATION_STRATEGY"
-	envMockProvider           = "OMNIA_MOCK_PROVIDER"
-	envMockConfigPath         = "OMNIA_MOCK_CONFIG"
-	envProviderMockConfigPath = "OMNIA_PROVIDER_MOCK_CONFIG" // From additionalConfig
-	envMediaBasePath          = "OMNIA_MEDIA_BASE_PATH"
-	envToolsConfigPath        = "OMNIA_TOOLS_CONFIG"
-	envSessionAPIURL          = "SESSION_API_URL"
-	envEvalEnabled            = "OMNIA_EVAL_ENABLED"
-	envTracingEnabled         = "OMNIA_TRACING_ENABLED"
-	envTracingEndpoint        = "OMNIA_TRACING_ENDPOINT"
-	envTracingSampleRate      = "OMNIA_TRACING_SAMPLE_RATE"
-	envTracingInsecure        = "OMNIA_TRACING_INSECURE"
-	envGRPCPort               = "OMNIA_GRPC_PORT"
-	envHealthPort             = "OMNIA_HEALTH_PORT"
+	envAgentName         = "OMNIA_AGENT_NAME"
+	envNamespace         = "OMNIA_NAMESPACE"
+	envPromptPackPath    = "OMNIA_PROMPTPACK_PATH"
+	envPromptName        = "OMNIA_PROMPT_NAME"
+	envSessionURL        = "OMNIA_SESSION_URL"
+	envSessionTTL        = "OMNIA_SESSION_TTL"
+	envContextWindow     = "OMNIA_CONTEXT_WINDOW"
+	envSessionAPIURL     = "SESSION_API_URL"
+	envTracingEnabled    = "OMNIA_TRACING_ENABLED"
+	envTracingEndpoint   = "OMNIA_TRACING_ENDPOINT"
+	envTracingSampleRate = "OMNIA_TRACING_SAMPLE_RATE"
+	envTracingInsecure   = "OMNIA_TRACING_INSECURE"
+	envGRPCPort          = "OMNIA_GRPC_PORT"
+	envHealthPort        = "OMNIA_HEALTH_PORT"
 )
 
 // Default values.
@@ -122,9 +107,7 @@ const (
 	defaultPromptName      = "default"
 	defaultSessionType     = "memory"
 	defaultSessionTTL      = 24 * time.Hour
-	defaultProviderType    = "" // Provider type must be explicitly set
 	defaultMediaBasePath   = "/etc/omnia/media"
-	defaultToolsConfigPath = "" // Empty by default; set from CRD toolRegistryRef
 	defaultToolsMountPath  = "/etc/omnia/tools"
 	defaultToolsConfigFile = "tools.yaml"
 	defaultGRPCPort        = 9000

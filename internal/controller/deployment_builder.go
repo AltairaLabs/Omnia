@@ -535,13 +535,8 @@ func buildA2AConfigEnvVars(a2a *omniav1alpha1.A2AConfig) []corev1.EnvVar {
 			Name:  "OMNIA_A2A_TASK_STORE_TYPE",
 			Value: string(a2a.TaskStore.Type),
 		})
-		if a2a.TaskStore.RedisURL != "" {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_A2A_REDIS_URL",
-				Value: a2a.TaskStore.RedisURL,
-			})
-		}
 		if a2a.TaskStore.RedisSecretRef != nil {
+			// Secret ref takes precedence over plain-text URL.
 			envVars = append(envVars, corev1.EnvVar{
 				Name: "OMNIA_A2A_REDIS_URL",
 				ValueFrom: &corev1.EnvVarSource{
@@ -550,6 +545,11 @@ func buildA2AConfigEnvVars(a2a *omniav1alpha1.A2AConfig) []corev1.EnvVar {
 						Key:                  "url",
 					},
 				},
+			})
+		} else if a2a.TaskStore.RedisURL != "" {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "OMNIA_A2A_REDIS_URL",
+				Value: a2a.TaskStore.RedisURL,
 			})
 		}
 	}
@@ -727,9 +727,6 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 		})
 	}
 
-	// Add session config (facade needs this for session management)
-	envVars = append(envVars, buildSessionEnvVars(agentRuntime.Spec.Session, "OMNIA_SESSION_STORE_URL")...)
-
 	// Inject session-api URL so the facade uses httpclient.Store for session recording
 	if r.SessionAPIURL != "" {
 		envVars = append(envVars, corev1.EnvVar{
@@ -754,11 +751,6 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 				Value: "true",
 			},
 		)
-	}
-
-	// Add eval env vars for PromptKit agents with evals enabled
-	if hasEvalsEnabled(&agentRuntime.Spec) && isPromptKit(&agentRuntime.Spec) {
-		envVars = append(envVars, buildEvalEnvVars(agentRuntime.Spec.Evals)...)
 	}
 
 	// Add extra env vars from CRD
@@ -939,13 +931,8 @@ func (r *AgentRuntimeReconciler) buildA2ADualProtocolEnvVars(
 			Name:  "OMNIA_A2A_TASK_STORE_TYPE",
 			Value: string(agentRuntime.Spec.A2A.TaskStore.Type),
 		})
-		if agentRuntime.Spec.A2A.TaskStore.RedisURL != "" {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_A2A_REDIS_URL",
-				Value: agentRuntime.Spec.A2A.TaskStore.RedisURL,
-			})
-		}
 		if agentRuntime.Spec.A2A.TaskStore.RedisSecretRef != nil {
+			// Secret ref takes precedence over plain-text URL.
 			envVars = append(envVars, corev1.EnvVar{
 				Name: "OMNIA_A2A_REDIS_URL",
 				ValueFrom: &corev1.EnvVarSource{
@@ -954,6 +941,11 @@ func (r *AgentRuntimeReconciler) buildA2ADualProtocolEnvVars(
 						Key:                  "url",
 					},
 				},
+			})
+		} else if agentRuntime.Spec.A2A.TaskStore.RedisURL != "" {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "OMNIA_A2A_REDIS_URL",
+				Value: agentRuntime.Spec.A2A.TaskStore.RedisURL,
 			})
 		}
 	}
