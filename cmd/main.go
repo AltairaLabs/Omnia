@@ -37,6 +37,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
+	eesetup "github.com/altairalabs/omnia/ee/pkg/setup"
 	"github.com/altairalabs/omnia/internal/controller"
 	"github.com/altairalabs/omnia/internal/schema"
 	"github.com/altairalabs/omnia/internal/tooltest"
@@ -55,6 +57,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(omniav1alpha1.AddToScheme(scheme))
+	utilruntime.Must(eev1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -77,6 +80,11 @@ func main() {
 	var redisAddr string
 	var evalWorkerImage string
 	var apiBindAddress string
+	var enterpriseEnabled bool
+	var licenseServerURL string
+	var clusterName string
+	var enableAnalytics bool
+	var enableStreaming bool
 	var tlsOpts []func(*tls.Config)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -118,6 +126,16 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.BoolVar(&enterpriseEnabled, "enterprise", false,
+		"Enable enterprise edition controllers and webhooks")
+	flag.StringVar(&licenseServerURL, "license-server-url", "",
+		"URL of the license activation server for enterprise features")
+	flag.StringVar(&clusterName, "cluster-name", "",
+		"Human-readable name for this cluster in license records")
+	flag.BoolVar(&enableAnalytics, "enable-analytics", false,
+		"Enable the SessionAnalyticsSync controller (enterprise)")
+	flag.BoolVar(&enableStreaming, "enable-streaming", false,
+		"Enable the SessionStreamingConfig controller (enterprise)")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -260,6 +278,21 @@ func main() {
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
+
+	// Enterprise controllers — gated behind --enterprise flag
+	if enterpriseEnabled {
+		eeOpts := eesetup.EnterpriseOptions{
+			LicenseServerURL: licenseServerURL,
+			ClusterName:      clusterName,
+			EnableWebhooks:   len(webhookCertPath) > 0,
+			EnableAnalytics:  enableAnalytics,
+			EnableStreaming:  enableStreaming,
+		}
+		if err := eesetup.RegisterEnterpriseControllers(mgr, eeOpts); err != nil {
+			setupLog.Error(err, "unable to register enterprise controllers")
+			os.Exit(1)
+		}
+	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
