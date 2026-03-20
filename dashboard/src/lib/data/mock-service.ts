@@ -359,6 +359,10 @@ export class MockAgentConnection implements AgentConnection {
     this.simulateResponse(content);
   }
 
+  sendToolCallAck(_callId: string): void {
+    // No-op in mock mode
+  }
+
   sendToolResult(_callId: string, _result?: unknown, _error?: string): void {
     // No-op in mock mode
   }
@@ -1032,7 +1036,7 @@ export class MockDataService implements DataService {
       sources: {
         total: sources.length,
         ready: sources.filter((s) => s.status?.phase === "Ready").length,
-        failed: sources.filter((s) => s.status?.phase === "Failed").length,
+        failed: sources.filter((s) => s.status?.phase === "Error").length,
         active: sources.filter((s) => !s.spec.suspend).length,
       },
       jobs: {

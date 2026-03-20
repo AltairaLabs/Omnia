@@ -178,11 +178,6 @@ func (m *mockWarmStore) UpdateSessionStats(_ context.Context, sessionID string, 
 	if !ok {
 		return session.ErrSessionNotFound
 	}
-	s.TotalInputTokens += int64(update.AddInputTokens)
-	s.TotalOutputTokens += int64(update.AddOutputTokens)
-	s.EstimatedCostUSD += update.AddCostUSD
-	s.ToolCallCount += update.AddToolCalls
-	s.MessageCount += update.AddMessages
 	if update.SetStatus != "" {
 		s.Status = update.SetStatus
 	}
@@ -444,6 +439,14 @@ func (m *mockWarmStore) GetToolCalls(_ context.Context, _ string) ([]*session.To
 
 func (m *mockWarmStore) GetProviderCalls(_ context.Context, _ string) ([]*session.ProviderCall, error) {
 	return []*session.ProviderCall{}, nil
+}
+
+func (m *mockWarmStore) RecordRuntimeEvent(_ context.Context, _ string, _ *session.RuntimeEvent) error {
+	return nil
+}
+
+func (m *mockWarmStore) GetRuntimeEvents(_ context.Context, _ string) ([]*session.RuntimeEvent, error) {
+	return nil, nil
 }
 
 func (m *mockWarmStore) Ping(_ context.Context) error { return nil }

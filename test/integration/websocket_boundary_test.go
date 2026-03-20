@@ -148,6 +148,9 @@ func (h *clientToolHandler) HandleMessage(_ context.Context, _ string, _ *facade
 	return w.WriteDone("Tool result received")
 }
 
+// AckToolCall implements ClientToolRouter for the test handler (no-op).
+func (h *clientToolHandler) AckToolCall(_ string, _ string) {}
+
 // SendToolResult implements ClientToolRouter for the test handler.
 func (h *clientToolHandler) SendToolResult(_ string, result *facade.ClientToolResultInfo) bool {
 	select {

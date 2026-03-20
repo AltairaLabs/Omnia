@@ -214,7 +214,7 @@ metadata:
   name: greeting-eval-001
   namespace: default
 spec:
-  configRef:
+  sourceRef:
     name: greeting-eval
   type: evaluation
   evaluation:

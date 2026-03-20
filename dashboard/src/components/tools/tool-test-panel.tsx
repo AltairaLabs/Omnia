@@ -76,8 +76,19 @@ function getDefaultToolName(
  * Get a sample arguments JSON from a tool's input schema.
  */
 function getSampleArgs(tool?: DiscoveredTool | null, handler?: HandlerDefinition): string {
-  const schema = tool?.inputSchema ?? handler?.tool?.inputSchema;
-  if (!schema || typeof schema !== "object") return "{}";
+  let schema = tool?.inputSchema ?? handler?.tool?.inputSchema;
+  if (!schema) return "{}";
+
+  // Handle double-encoded JSON strings (schema stored as string instead of object)
+  if (typeof schema === "string") {
+    try {
+      schema = JSON.parse(schema);
+    } catch {
+      return "{}";
+    }
+  }
+
+  if (typeof schema !== "object") return "{}";
 
   const props = (schema as Record<string, unknown>).properties;
   if (!props || typeof props !== "object") return "{}";
@@ -184,12 +195,17 @@ export function ToolTestPanel({ registry, workspaceName }: Readonly<ToolTestPane
   );
 
   const handleRun = useCallback(async () => {
+    // Normalize: trim whitespace, strip BOM
+    const cleaned = args.trim().replace(/^\uFEFF/, "");
+
     // Validate JSON
+    let parsedArgs: unknown;
     try {
-      JSON.parse(args);
+      parsedArgs = JSON.parse(cleaned);
       setJsonError(null);
-    } catch {
-      setJsonError("Invalid JSON");
+    } catch (e) {
+      const detail = e instanceof SyntaxError ? `: ${e.message}` : "";
+      setJsonError(`Invalid JSON${detail}`);
       return;
     }
 
@@ -205,7 +221,7 @@ export function ToolTestPanel({ registry, workspaceName }: Readonly<ToolTestPane
           body: JSON.stringify({
             handlerName: selectedHandler,
             toolName: selectedTool || undefined,
-            arguments: JSON.parse(args),
+            arguments: parsedArgs,
           }),
         }
       );

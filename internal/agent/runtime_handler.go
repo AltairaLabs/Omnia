@@ -37,21 +37,30 @@ const defaultStreamInactivityTimeout = 120 * time.Second
 // defaultClientToolTimeout is the maximum time to wait for a client tool response.
 const defaultClientToolTimeout = 60 * time.Second
 
+// defaultToolCallAckTimeout is the maximum time to wait for a client to acknowledge
+// a tool call before auto-rejecting. Clients should send tool_call_ack within this
+// window to indicate they received the tool call and are working on it.
+const defaultToolCallAckTimeout = 5 * time.Second
+
 // RuntimeHandler delegates message handling to the runtime sidecar via gRPC.
 // It implements facade.ClientToolRouter to support client-side tool execution.
 type RuntimeHandler struct {
-	client            *facade.RuntimeClient
-	clientToolTimeout time.Duration
+	client             *facade.RuntimeClient
+	clientToolTimeout  time.Duration
+	toolCallAckTimeout time.Duration
 
 	// toolResultChannels maps sessionID → channel for receiving client tool results.
 	toolResultChannels sync.Map
+	// toolAckChannels maps sessionID → chan string for receiving tool call ACKs.
+	toolAckChannels sync.Map
 }
 
 // NewRuntimeHandler creates a new RuntimeHandler with the given client.
 func NewRuntimeHandler(client *facade.RuntimeClient) *RuntimeHandler {
 	return &RuntimeHandler{
-		client:            client,
-		clientToolTimeout: defaultClientToolTimeout,
+		client:             client,
+		clientToolTimeout:  defaultClientToolTimeout,
+		toolCallAckTimeout: defaultToolCallAckTimeout,
 	}
 }
 
@@ -63,6 +72,23 @@ func (h *RuntimeHandler) Name() string {
 // SetClientToolTimeout overrides the default timeout for client tool responses.
 func (h *RuntimeHandler) SetClientToolTimeout(d time.Duration) {
 	h.clientToolTimeout = d
+}
+
+// SetToolCallAckTimeout overrides the default timeout for tool call acknowledgements.
+func (h *RuntimeHandler) SetToolCallAckTimeout(d time.Duration) {
+	h.toolCallAckTimeout = d
+}
+
+// AckToolCall acknowledges receipt of a tool call, signaling the client is working on it.
+func (h *RuntimeHandler) AckToolCall(sessionID string, callID string) {
+	ch, ok := h.toolAckChannels.Load(sessionID)
+	if !ok {
+		return
+	}
+	select {
+	case ch.(chan string) <- callID:
+	default:
+	}
 }
 
 // SendToolResult delivers a client tool result to the handler waiting for it.
@@ -93,10 +119,14 @@ func (h *RuntimeHandler) HandleMessage(
 		return fmt.Errorf("failed to open stream to runtime: %w", err)
 	}
 
-	// Register a tool result channel for this session
+	// Register channels for this session
 	toolResultCh := make(chan *facade.ClientToolResultInfo, 1)
 	h.toolResultChannels.Store(sessionID, toolResultCh)
 	defer h.toolResultChannels.Delete(sessionID)
+
+	ackCh := make(chan string, 1)
+	h.toolAckChannels.Store(sessionID, ackCh)
+	defer h.toolAckChannels.Delete(sessionID)
 
 	// Defer CloseSend — stream stays open for client tool results
 	defer func() { _ = stream.CloseSend() }()
@@ -119,7 +149,7 @@ func (h *RuntimeHandler) HandleMessage(
 		return fmt.Errorf("failed to send message to runtime: %w", err)
 	}
 
-	return h.receiveResponses(ctx, stream, writer, toolResultCh)
+	return h.receiveResponses(ctx, stream, writer, toolResultCh, ackCh)
 }
 
 // recvResult holds the result of a single gRPC Recv call.
@@ -136,6 +166,7 @@ func (h *RuntimeHandler) receiveResponses(
 	stream runtimev1.RuntimeService_ConverseClient,
 	writer facade.ResponseWriter,
 	toolResultCh <-chan *facade.ClientToolResultInfo,
+	ackCh <-chan string,
 ) error {
 	inactivityTimer := time.NewTimer(defaultStreamInactivityTimeout)
 	defer inactivityTimer.Stop()
@@ -149,7 +180,7 @@ func (h *RuntimeHandler) receiveResponses(
 	for {
 		select {
 		case result := <-ch:
-			err := h.handleRecvResult(ctx, stream, writer, result, toolResultCh, inactivityTimer)
+			err := h.handleRecvResult(ctx, stream, writer, result, toolResultCh, ackCh, inactivityTimer)
 			if err == errStreamDone {
 				return nil
 			}
@@ -190,6 +221,7 @@ func (h *RuntimeHandler) handleRecvResult(
 	writer facade.ResponseWriter,
 	result recvResult,
 	toolResultCh <-chan *facade.ClientToolResultInfo,
+	ackCh <-chan string,
 	inactivityTimer *time.Timer,
 ) error {
 	if result.err == io.EOF {
@@ -201,7 +233,7 @@ func (h *RuntimeHandler) handleRecvResult(
 	resetTimer(inactivityTimer, defaultStreamInactivityTimeout)
 
 	if isClientToolCall(result.resp) {
-		return h.handleClientToolCall(ctx, stream, writer, result.resp, toolResultCh)
+		return h.handleClientToolCall(ctx, stream, writer, result.resp, toolResultCh, ackCh)
 	}
 
 	// Check if this is a Done message — the conversation turn is complete.
@@ -228,27 +260,59 @@ func isClientToolCall(resp *runtimev1.ServerMessage) bool {
 }
 
 // handleClientToolCall forwards a client tool call to the WebSocket client,
-// waits for the result, and sends it back on the gRPC stream.
+// waits for ACK or immediate result, then waits for the full result.
+//
+// Three client response paths:
+//   - ACK (tool_call_ack): client is working on it → wait for tool_result
+//   - Direct tool_result: immediate rejection or result → done
+//   - Silence: no response within ack timeout → auto-reject
 func (h *RuntimeHandler) handleClientToolCall(
 	ctx context.Context,
 	stream runtimev1.RuntimeService_ConverseClient,
 	writer facade.ResponseWriter,
 	resp *runtimev1.ServerMessage,
 	toolResultCh <-chan *facade.ClientToolResultInfo,
+	ackCh <-chan string,
 ) error {
 	// Forward the tool call to the WebSocket client with execution=client
 	if err := h.forwardResponse(resp, writer); err != nil {
 		return fmt.Errorf("error forwarding client tool call: %w", err)
 	}
 
-	// Wait for the client to send back a result
-	result, err := h.waitForToolResult(ctx, toolResultCh)
-	if err != nil {
-		return fmt.Errorf("error waiting for client tool result: %w", err)
-	}
+	callID := extractToolCallID(resp)
 
-	// Send the result back to the runtime on the gRPC stream
-	return h.sendToolResultToRuntime(stream, result)
+	// Phase 1: Wait briefly for ACK or immediate result/rejection
+	ackTimer := time.NewTimer(h.toolCallAckTimeout)
+	defer ackTimer.Stop()
+
+	select {
+	case result := <-toolResultCh:
+		// Client sent tool_result directly (rejection or result) — done
+		return h.sendToolResultToRuntime(stream, result)
+	case <-ackCh:
+		// Client ACKed — Phase 2: wait for the full result
+		result, err := h.waitForToolResult(ctx, toolResultCh)
+		if err != nil {
+			return fmt.Errorf("error waiting for client tool result: %w", err)
+		}
+		return h.sendToolResultToRuntime(stream, result)
+	case <-ackTimer.C:
+		// No response at all — auto-reject
+		return h.sendToolResultToRuntime(stream, &facade.ClientToolResultInfo{
+			CallID: callID,
+			Error:  "client did not acknowledge tool call within timeout",
+		})
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// extractToolCallID extracts the tool call ID from a gRPC ServerMessage.
+func extractToolCallID(resp *runtimev1.ServerMessage) string {
+	if tc, ok := resp.Message.(*runtimev1.ServerMessage_ToolCall); ok {
+		return tc.ToolCall.Id
+	}
+	return ""
 }
 
 // waitForToolResult waits for a client tool result with a configurable timeout.

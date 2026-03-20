@@ -3,7 +3,7 @@
 # Pre-commit hook for Omnia
 # Runs fast, developer-friendly checks on changed code only
 #
-# To skip this hook, include "[skip-pre-commit]" in your commit message
+# To skip this hook, use: git commit --no-verify
 #
 # Installation:
 #   ln -sf ../../hack/pre-commit .git/hooks/pre-commit
@@ -41,23 +41,6 @@ print_header() {
     echo -e "${BLUE}  $1${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════════${NC}"
 }
-
-# Check if commit message contains skip flag
-COMMIT_MSG_FILE=".git/COMMIT_EDITMSG"
-if [ -f "$COMMIT_MSG_FILE" ]; then
-    if grep -q "\[skip-pre-commit\]" "$COMMIT_MSG_FILE"; then
-        print_warning "Skipping pre-commit checks (found [skip-pre-commit] in commit message)"
-        exit 0
-    fi
-fi
-
-# Also check the commit message passed via -m flag
-for arg in "$@"; do
-    if [[ "$arg" == *"[skip-pre-commit]"* ]]; then
-        print_warning "Skipping pre-commit checks (found [skip-pre-commit] in commit message)"
-        exit 0
-    fi
-done
 
 print_header "Pre-Commit Checks"
 print_info "Running fast checks on changed code only..."
@@ -214,6 +197,9 @@ if [ -n "$STAGED_DASHBOARD_FILES" ]; then
                    [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/stats/* ]] || \
                    [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/arena/projects/* ]] || \
                    [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/arena/sources/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/sessions/\[sessionId\]/tool-calls/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/sessions/\[sessionId\]/provider-calls/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/sessions/\[sessionId\]/events/* ]] || \
                    [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/route.ts ]] || \
                    [[ "$REL_FILE" == src/app/api/workspaces/route.ts ]] || \
                    [[ "$REL_FILE" == src/app/api/providers/* ]] || \
@@ -316,7 +302,6 @@ if [ -z "$STAGED_GO_FILES" ]; then
         echo ""
         print_info "Options:"
         echo "  1. Fix the issues above and try again"
-        echo "  2. Use [skip-pre-commit] in commit message to bypass (not recommended)"
         echo ""
         exit 1
     fi
@@ -347,7 +332,8 @@ fi
 #
 print_header "Running go vet"
 
-if GOWORK=off go vet ./... 2>&1; then
+export GOWORK=off
+if go vet ./... 2>&1; then
     print_success "go vet passed"
 else
     print_error "go vet found issues"
@@ -367,7 +353,7 @@ if ! command -v golangci-lint &> /dev/null; then
     print_info "Skipping lint check..."
 else
     # Use --new-from-rev=HEAD to only check changes
-    if GOWORK=off golangci-lint run --new-from-rev=HEAD --timeout=3m ./... 2>&1; then
+    if golangci-lint run --new-from-rev=HEAD --timeout=3m ./... 2>&1; then
         print_success "Linting passed"
     else
         print_error "Linting failed"
@@ -380,7 +366,7 @@ fi
 #
 print_header "Building"
 
-if GOWORK=off go build ./... 2>&1; then
+if go build ./... 2>&1; then
     print_success "Build successful"
 else
     print_error "Build failed"
@@ -398,7 +384,7 @@ print_header "Running Tests with Coverage"
 # while all actual tests pass. The exit code handling below already accounts
 # for this by checking for "FAIL" in the output.
 set +e
-TEST_OUTPUT=$(GOWORK=off go test -short -timeout 120s -coverprofile=coverage.out ./... 2>&1)
+TEST_OUTPUT=$(go test -short -timeout 120s -coverprofile=coverage.out ./... 2>&1)
 TEST_EXIT_CODE=$?
 set -e
 
@@ -486,6 +472,11 @@ if [ -f coverage.out ]; then
             continue
         fi
 
+        # Skip cmd/ entrypoints (tested via integration/E2E, not unit tests)
+        if [[ "$file" == cmd/* ]]; then
+            continue
+        fi
+
         # Skip internal/api/server.go (logs endpoint requires real K8s clientset for integration testing)
         if [[ "$file" == "internal/api/server.go" ]]; then
             continue
@@ -506,8 +497,9 @@ if [ -f coverage.out ]; then
             continue
         fi
 
-        # Skip Redis session store (requires real Redis, tested in integration)
-        if [[ "$file" == "internal/session/redis.go" ]]; then
+        # Skip session package base files (store.go is types/interfaces,
+        # memory.go is a test-only utility)
+        if [[ "$file" == "internal/session/memory.go" ]] || [[ "$file" == "internal/session/store.go" ]]; then
             continue
         fi
 
@@ -518,6 +510,11 @@ if [ -f coverage.out ]; then
 
         # Skip cold archive cloud blob store implementations (require external infrastructure: S3/MinIO, GCS, Azure)
         if [[ "$file" == internal/session/providers/cold/blobstore_s3.go ]] || [[ "$file" == internal/session/providers/cold/blobstore_gcs.go ]] || [[ "$file" == internal/session/providers/cold/blobstore_azure.go ]]; then
+            continue
+        fi
+
+        # Skip EE setup package (requires envtest control plane, tested in CI with KUBEBUILDER_ASSETS)
+        if [[ "$file" == ee/pkg/setup/*.go ]]; then
             continue
         fi
 
@@ -719,7 +716,6 @@ else
     print_info "Options:"
     echo "  1. Fix the issues above and try again"
     echo "  2. Run 'make test' to see detailed test output"
-    echo "  3. Use [skip-pre-commit] in commit message to bypass (not recommended)"
     echo ""
     exit 1
 fi

@@ -161,9 +161,19 @@ describe("getStatusBadge", () => {
     expect(container.textContent).toContain("Ready");
   });
 
-  it("renders Failed badge with destructive styling", () => {
-    const { container } = render(<>{getStatusBadge("Failed")}</>);
-    expect(container.textContent).toContain("Failed");
+  it("renders Error badge with destructive styling", () => {
+    const { container } = render(<>{getStatusBadge("Error")}</>);
+    expect(container.textContent).toContain("Error");
+  });
+
+  it("renders Initializing badge", () => {
+    const { container } = render(<>{getStatusBadge("Initializing")}</>);
+    expect(container.textContent).toContain("Initializing");
+  });
+
+  it("renders Fetching badge", () => {
+    const { container } = render(<>{getStatusBadge("Fetching")}</>);
+    expect(container.textContent).toContain("Fetching");
   });
 
   it("renders Pending badge with outline styling", () => {

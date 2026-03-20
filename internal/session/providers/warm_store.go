@@ -81,13 +81,11 @@ type WarmStoreProvider interface {
 	// DeleteSessionsBatch removes multiple sessions in a single operation.
 	DeleteSessionsBatch(ctx context.Context, sessionIDs []string) error
 
-	// RecordToolCall records or updates a tool call for the session.
-	// Uses upsert semantics (ON CONFLICT DO UPDATE).
+	// RecordToolCall appends a tool call lifecycle event (INSERT only).
 	// Returns session.ErrSessionNotFound if the session does not exist.
 	RecordToolCall(ctx context.Context, sessionID string, tc *session.ToolCall) error
 
-	// RecordProviderCall records or updates a provider call for the session.
-	// Uses upsert semantics (ON CONFLICT DO UPDATE).
+	// RecordProviderCall appends a provider call lifecycle event (INSERT only).
 	// Returns session.ErrSessionNotFound if the session does not exist.
 	RecordProviderCall(ctx context.Context, sessionID string, pc *session.ProviderCall) error
 
@@ -98,6 +96,15 @@ type WarmStoreProvider interface {
 	// GetProviderCalls retrieves all provider calls for a session ordered by created_at.
 	// Returns session.ErrSessionNotFound if the session does not exist.
 	GetProviderCalls(ctx context.Context, sessionID string) ([]*session.ProviderCall, error)
+
+	// RecordRuntimeEvent records a runtime lifecycle event for the session.
+	// Events are immutable (INSERT only, no upsert).
+	// Returns session.ErrSessionNotFound if the session does not exist.
+	RecordRuntimeEvent(ctx context.Context, sessionID string, evt *session.RuntimeEvent) error
+
+	// GetRuntimeEvents retrieves all runtime events for a session ordered by timestamp.
+	// Returns session.ErrSessionNotFound if the session does not exist.
+	GetRuntimeEvents(ctx context.Context, sessionID string) ([]*session.RuntimeEvent, error)
 
 	// SaveArtifact persists a binary artifact reference.
 	SaveArtifact(ctx context.Context, artifact *session.Artifact) error

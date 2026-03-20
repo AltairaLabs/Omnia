@@ -59,7 +59,7 @@ export const GET = withWorkspaceAccess(
       const sourceStats = {
         total: sources.length,
         ready: sources.filter((s) => s.status?.phase === "Ready").length,
-        failed: sources.filter((s) => s.status?.phase === "Failed").length,
+        failed: sources.filter((s) => s.status?.phase === "Error").length,
         active: sources.filter((s) => s.status?.phase === "Ready").length, // Active = Ready sources
       };
 

@@ -158,22 +158,15 @@ func loadA2ATaskStoreFromCRD(cfg *Config, a2a *v1alpha1.A2AConfig) {
 
 // loadSessionConfigFromCRD populates session-related config fields from the AgentRuntime CRD.
 func loadSessionConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime, namespace string) error {
-	if ar.Spec.Session != nil {
-		cfg.SessionType = SessionType(ar.Spec.Session.Type)
-		if ar.Spec.Session.TTL != nil {
-			ttl, err := time.ParseDuration(*ar.Spec.Session.TTL)
-			if err != nil {
-				return fmt.Errorf("invalid session TTL %q: %w", *ar.Spec.Session.TTL, err)
-			}
-			cfg.SessionTTL = ttl
-		} else {
-			cfg.SessionTTL = DefaultSessionTTL
+	if ar.Spec.Session != nil && ar.Spec.Session.TTL != nil {
+		ttl, err := time.ParseDuration(*ar.Spec.Session.TTL)
+		if err != nil {
+			return fmt.Errorf("invalid session TTL %q: %w", *ar.Spec.Session.TTL, err)
 		}
+		cfg.SessionTTL = ttl
 	} else {
-		cfg.SessionType = SessionTypeMemory
 		cfg.SessionTTL = DefaultSessionTTL
 	}
-	cfg.SessionStoreURL = os.Getenv(EnvSessionStoreURL)
 
 	// ToolRegistry from CRD
 	if ar.Spec.ToolRegistryRef != nil {
@@ -243,14 +236,13 @@ func LoadConfig(ctx context.Context) (*Config, error) {
 // Used when running outside a Kubernetes cluster (demo mode, E2E tests).
 func loadFromEnvFallback(name, namespace string) (*Config, error) {
 	cfg := &Config{
-		AgentName:       name,
-		Namespace:       namespace,
-		PromptPackName:  os.Getenv(EnvPromptPackName),
-		PromptPackPath:  getEnvOrDefault(EnvPromptPackMountPath, DefaultPromptPackMountPath),
-		FacadeType:      FacadeType(getEnvOrDefault(EnvFacadeType, string(FacadeTypeWebSocket))),
-		HandlerMode:     HandlerMode(getEnvOrDefault(EnvHandlerMode, string(HandlerModeRuntime))),
-		RuntimeAddress:  getEnvOrDefault(EnvRuntimeAddress, DefaultRuntimeAddress),
-		SessionStoreURL: os.Getenv(EnvSessionStoreURL),
+		AgentName:      name,
+		Namespace:      namespace,
+		PromptPackName: os.Getenv(EnvPromptPackName),
+		PromptPackPath: getEnvOrDefault(EnvPromptPackMountPath, DefaultPromptPackMountPath),
+		FacadeType:     FacadeType(getEnvOrDefault(EnvFacadeType, string(FacadeTypeWebSocket))),
+		HandlerMode:    HandlerMode(getEnvOrDefault(EnvHandlerMode, string(HandlerModeRuntime))),
+		RuntimeAddress: getEnvOrDefault(EnvRuntimeAddress, DefaultRuntimeAddress),
 	}
 
 	facadePort, err := getEnvAsInt(EnvFacadePort, DefaultFacadePort)
@@ -265,8 +257,6 @@ func loadFromEnvFallback(name, namespace string) (*Config, error) {
 	}
 	cfg.HealthPort = healthPort
 
-	sessionType := getEnvOrDefault(EnvSessionType, string(SessionTypeMemory))
-	cfg.SessionType = SessionType(sessionType)
 	cfg.SessionTTL = DefaultSessionTTL
 
 	cfg.MediaStorageType = MediaStorageType(getEnvOrDefault(EnvMediaStorageType, string(MediaStorageTypeNone)))

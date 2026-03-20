@@ -306,7 +306,7 @@ metadata:
   name: evaluation-001
   namespace: arena
 spec:
-  configRef:
+  sourceRef:
     name: provider-comparison
 ```
 

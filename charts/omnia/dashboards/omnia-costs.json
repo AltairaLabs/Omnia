@@ -30,7 +30,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "sum by (model) (increase(omnia_llm_cost_usd_total[24h]))",
+          "expr": "sum by (model) (increase(omnia_provider_cost_total[24h]))",
           "legendFormat": "{{model}}",
           "refId": "A"
         }
@@ -60,7 +60,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "sum by (agent) (increase(omnia_llm_cost_usd_total[24h]))",
+          "expr": "sum by (agent) (increase(omnia_provider_cost_total[24h]))",
           "legendFormat": "{{agent}}",
           "refId": "A"
         }
@@ -92,7 +92,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "sum(increase(omnia_llm_cost_usd_total[7d]))",
+          "expr": "sum(increase(omnia_provider_cost_total[7d]))",
           "refId": "A"
         }
       ],
@@ -138,7 +138,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "sum by (agent) (increase(omnia_llm_cost_usd_total[1h]))",
+          "expr": "sum by (agent) (increase(omnia_provider_cost_total[1h]))",
           "legendFormat": "{{agent}}",
           "refId": "A"
         }
@@ -185,7 +185,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "sum by (model) (rate(omnia_llm_input_tokens_total[5m])) * 60",
+          "expr": "sum by (model) (rate(omnia_provider_input_tokens_total[5m])) * 60",
           "legendFormat": "{{model}} (input)",
           "refId": "A"
         }
@@ -232,7 +232,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "sum by (model) (rate(omnia_llm_output_tokens_total[5m])) * 60",
+          "expr": "sum by (model) (rate(omnia_provider_output_tokens_total[5m])) * 60",
           "legendFormat": "{{model}} (output)",
           "refId": "A"
         }

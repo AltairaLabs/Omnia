@@ -225,9 +225,7 @@ func TestUpdateSessionStats_NoEventOnNonCompletedStatus(t *testing.T) {
 	pub := &mockEventPublisher{}
 	svc := newServiceWithPublisher(registry, pub)
 
-	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
-		AddInputTokens: 10,
-	})
+	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{})
 	require.NoError(t, err)
 
 	time.Sleep(50 * time.Millisecond)

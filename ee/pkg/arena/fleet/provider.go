@@ -24,18 +24,33 @@ import (
 const (
 	// fleetModel is the model name reported by the fleet provider.
 	fleetModel = "fleet"
+
+	// metadataKeyConversationID is the PredictionRequest.Metadata key that the
+	// arena engine uses to pass the per-run conversation ID through the pipeline.
+	metadataKeyConversationID = "conversation_id"
 )
 
-// Provider implements providers.Provider by wrapping the facade WebSocket protocol.
-// It sends only the latest user message per turn (the agent maintains its own session state)
-// and collects the response, making fleet mode compatible with the PromptKit engine pipeline.
-type Provider struct {
-	id        string
-	wsURL     string
-	dialer    Dialer
+// connEntry holds a WebSocket connection and its facade-assigned session ID.
+// Each arena run (conversation) gets its own entry, enabling parallel execution.
+type connEntry struct {
 	conn      Conn
 	sessionID string
 	mu        sync.Mutex
+}
+
+// Provider implements providers.Provider by wrapping the facade WebSocket protocol.
+// It maintains a pool of WebSocket connections keyed by conversation ID so that
+// each arena run gets its own facade session and runs can execute in parallel.
+// For non-arena usage (no conversation_id in metadata), a default connection
+// established via Connect is used.
+type Provider struct {
+	id     string
+	wsURL  string
+	dialer Dialer
+
+	mu       sync.Mutex
+	conns    map[string]*connEntry // conversation_id → connection
+	fallback *connEntry            // default connection from Connect()
 }
 
 // NewProvider creates a new fleet provider targeting the given WebSocket URL.
@@ -48,31 +63,92 @@ func NewProvider(id, wsURL string, dialer Dialer) *Provider {
 		id:     id,
 		wsURL:  wsURL,
 		dialer: dialer,
+		conns:  make(map[string]*connEntry),
 	}
 }
 
 // Connect dials the agent's WebSocket and waits for the connected message.
-// It injects W3C trace context into the upgrade request headers so the
-// facade can correlate spans with the caller's trace.
+// This establishes the default (fallback) connection used when no conversation_id
+// is present in PredictionRequest metadata.
 func (p *Provider) Connect(ctx context.Context) error {
+	entry, err := p.dial(ctx)
+	if err != nil {
+		return err
+	}
+	p.mu.Lock()
+	p.fallback = entry
+	p.mu.Unlock()
+	return nil
+}
+
+// dial opens a new WebSocket connection and returns a connEntry.
+func (p *Provider) dial(ctx context.Context) (*connEntry, error) {
 	headers := traceHeaders(ctx)
 	conn, err := p.dialer.DialContext(ctx, p.wsURL, headers)
 	if err != nil {
-		return fmt.Errorf("failed to connect to agent: %w", err)
+		return nil, fmt.Errorf("failed to connect to agent: %w", err)
 	}
 
 	sessionID, err := waitForConnected(conn, defaultConnectTimeout)
 	if err != nil {
 		_ = conn.Close()
-		return fmt.Errorf("failed to receive connected message: %w", err)
+		return nil, fmt.Errorf("failed to receive connected message: %w", err)
 	}
 
-	// Clear read deadline set by waitForConnected so subsequent reads are not bounded.
 	_ = conn.SetReadDeadline(time.Time{})
 
-	p.conn = conn
-	p.sessionID = sessionID
-	return nil
+	return &connEntry{conn: conn, sessionID: sessionID}, nil
+}
+
+// getOrCreateConn returns the connection entry for a request.
+// If the request has a conversation_id, a per-conversation connection is used
+// (created on first access). Otherwise the fallback connection is returned.
+func (p *Provider) getOrCreateConn(ctx context.Context, req providers.PredictionRequest) (*connEntry, error) {
+	cid := conversationID(req)
+	if cid == "" {
+		p.mu.Lock()
+		fb := p.fallback
+		p.mu.Unlock()
+		if fb == nil {
+			return nil, fmt.Errorf("no connection established — call Connect first")
+		}
+		return fb, nil
+	}
+
+	p.mu.Lock()
+	entry, ok := p.conns[cid]
+	if ok {
+		p.mu.Unlock()
+		return entry, nil
+	}
+	p.mu.Unlock()
+
+	// Dial outside the lock to avoid holding it during network I/O.
+	newEntry, err := p.dial(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	p.mu.Lock()
+	// Check again — another goroutine may have created it while we were dialing.
+	if existing, ok := p.conns[cid]; ok {
+		p.mu.Unlock()
+		_ = newEntry.conn.Close()
+		return existing, nil
+	}
+	p.conns[cid] = newEntry
+	p.mu.Unlock()
+	return newEntry, nil
+}
+
+// conversationID extracts the conversation_id from request metadata.
+func conversationID(req providers.PredictionRequest) string {
+	if cid, ok := req.Metadata[metadataKeyConversationID]; ok {
+		if s, ok := cid.(string); ok {
+			return s
+		}
+	}
+	return ""
 }
 
 // ID returns the provider identifier.
@@ -82,10 +158,14 @@ func (p *Provider) ID() string { return p.id }
 func (p *Provider) Model() string { return fleetModel }
 
 // Predict sends the latest user message to the agent via WebSocket and returns the response.
-// Only the last user message from the request is sent — the agent maintains its own session state.
 func (p *Provider) Predict(ctx context.Context, req providers.PredictionRequest) (providers.PredictionResponse, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	entry, err := p.getOrCreateConn(ctx, req)
+	if err != nil {
+		return providers.PredictionResponse{}, err
+	}
+
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
 
 	start := time.Now()
 
@@ -94,48 +174,52 @@ func (p *Provider) Predict(ctx context.Context, req providers.PredictionRequest)
 		return providers.PredictionResponse{}, fmt.Errorf("no user message found in request")
 	}
 
-	if err := sendMessage(p.conn, p.sessionID, content); err != nil {
+	if err := sendMessage(entry.conn, entry.sessionID, content); err != nil {
 		return providers.PredictionResponse{}, fmt.Errorf("failed to send message: %w", err)
 	}
 
-	turnMsgs, err := collectTurnResponse(ctx, p.conn)
+	turnMsgs, err := collectTurnResponse(ctx, entry.conn, entry.sessionID)
 	if err != nil {
 		return providers.PredictionResponse{}, fmt.Errorf("agent error during turn: %w", err)
 	}
 
-	resp := buildPredictionResponse(turnMsgs, time.Since(start))
-	return resp, nil
+	return buildPredictionResponse(turnMsgs, time.Since(start)), nil
 }
 
 // PredictStream sends the latest user message and streams the response as chunks.
 func (p *Provider) PredictStream(
 	ctx context.Context, req providers.PredictionRequest,
 ) (<-chan providers.StreamChunk, error) {
-	p.mu.Lock()
+	entry, err := p.getOrCreateConn(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	entry.mu.Lock()
 
 	content := extractLastUserMessage(req.Messages)
 	if content == "" {
-		p.mu.Unlock()
+		entry.mu.Unlock()
 		return nil, fmt.Errorf("no user message found in request")
 	}
 
-	if err := sendMessage(p.conn, p.sessionID, content); err != nil {
-		p.mu.Unlock()
+	if err := sendMessage(entry.conn, entry.sessionID, content); err != nil {
+		entry.mu.Unlock()
 		return nil, fmt.Errorf("failed to send message: %w", err)
 	}
 
 	ch := make(chan providers.StreamChunk, 16)
-	go p.streamResponse(ctx, ch)
+	go streamResponse(ctx, entry, ch)
 
 	return ch, nil
 }
 
 // streamResponse reads WebSocket messages and sends them as stream chunks.
-func (p *Provider) streamResponse(ctx context.Context, ch chan<- providers.StreamChunk) {
-	defer p.mu.Unlock()
+func streamResponse(ctx context.Context, entry *connEntry, ch chan<- providers.StreamChunk) {
+	defer entry.mu.Unlock()
 	defer close(ch)
 
-	turnMsgs, err := collectTurnResponse(ctx, p.conn)
+	turnMsgs, err := collectTurnResponse(ctx, entry.conn, entry.sessionID)
 	if err != nil {
 		finishReason := "error"
 		ch <- providers.StreamChunk{
@@ -155,21 +239,56 @@ func (p *Provider) streamResponse(ctx context.Context, ch chan<- providers.Strea
 	}
 }
 
+// CloseConversation closes and removes the connection for a specific conversation.
+func (p *Provider) CloseConversation(conversationID string) {
+	p.mu.Lock()
+	entry, ok := p.conns[conversationID]
+	if ok {
+		delete(p.conns, conversationID)
+	}
+	p.mu.Unlock()
+	if entry != nil {
+		_ = entry.conn.Close()
+	}
+}
+
 // SupportsStreaming returns true.
 func (p *Provider) SupportsStreaming() bool { return true }
 
 // ShouldIncludeRawOutput returns false.
 func (p *Provider) ShouldIncludeRawOutput() bool { return false }
 
-// SessionID returns the session ID assigned by the facade after Connect.
-func (p *Provider) SessionID() string { return p.sessionID }
-
-// Close closes the WebSocket connection.
-func (p *Provider) Close() error {
-	if p.conn != nil {
-		return p.conn.Close()
+// SessionID returns the session ID of the fallback connection.
+func (p *Provider) SessionID() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.fallback != nil {
+		return p.fallback.sessionID
 	}
-	return nil
+	return ""
+}
+
+// Close closes all connections (pooled and fallback).
+func (p *Provider) Close() error {
+	p.mu.Lock()
+	entries := make([]*connEntry, 0, len(p.conns)+1)
+	for _, e := range p.conns {
+		entries = append(entries, e)
+	}
+	p.conns = make(map[string]*connEntry)
+	if p.fallback != nil {
+		entries = append(entries, p.fallback)
+		p.fallback = nil
+	}
+	p.mu.Unlock()
+
+	var firstErr error
+	for _, e := range entries {
+		if err := e.conn.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // CalculateCost returns zero cost — the agent handles its own LLM costs internally.

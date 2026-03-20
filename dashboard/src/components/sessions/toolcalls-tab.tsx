@@ -1,32 +1,15 @@
 "use client";
 
-import { useMemo } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useDebugPanelStore } from "@/stores/debug-panel-store";
 import { ToolCallBadge } from "./tool-call-badge";
 import { JsonBlock } from "@/components/ui/json-block";
 import { Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Message } from "@/types/session";
-
-/**
- * Extracted tool call info from a tool_call message, paired with its result.
- */
-interface ExtractedToolCall {
-  id: string;
-  name: string;
-  arguments: Record<string, unknown>;
-  result?: string;
-  resultIsError?: boolean;
-  status?: "success" | "error" | "pending";
-  duration?: number;
-  handlerName?: string;
-  handlerType?: string;
-  registryName?: string;
-}
+import type { ToolCall } from "@/types/session";
 
 interface ToolCallsTabProps {
-  readonly messages: Message[];
+  readonly toolCalls: ToolCall[];
 }
 
 function RenderValue({ value }: Readonly<{ value: unknown }>) {
@@ -41,66 +24,11 @@ function tryParseJSON(text: string): unknown {
   }
 }
 
-/**
- * Extract tool call data from a tool_call message.
- */
-function extractToolCall(msg: Message): ExtractedToolCall {
-  let name = "unknown";
-  let args: Record<string, unknown> = {};
-  try {
-    const parsed = JSON.parse(msg.content);
-    name = parsed.name || name;
-    args = parsed.arguments || args;
-  } catch {
-    // Content is not valid JSON
-  }
-
-  const durationStr = msg.metadata?.duration_ms;
-  const duration = durationStr ? Number.parseInt(durationStr, 10) : undefined;
-
-  return {
-    id: msg.toolCallId || msg.id,
-    name,
-    arguments: args,
-    status: (msg.metadata?.status as ExtractedToolCall["status"]) || undefined,
-    duration: duration && !Number.isNaN(duration) ? duration : undefined,
-    handlerName: msg.metadata?.handler_name || undefined,
-    handlerType: msg.metadata?.handler_type || undefined,
-    registryName: msg.metadata?.registry_name || undefined,
-  };
-}
-
-export function ToolCallsTab({ messages }: ToolCallsTabProps) {
+export function ToolCallsTab({ toolCalls }: ToolCallsTabProps) {
   const selectedToolCallId = useDebugPanelStore((s) => s.selectedToolCallId);
   const selectToolCall = useDebugPanelStore((s) => s.selectToolCall);
 
-  const toolCalls = useMemo(() => {
-    // Build a map of toolCallId → result content from tool_result messages.
-    const resultsByCallId = new Map<string, { content: string; isError: boolean }>();
-    for (const m of messages) {
-      const mType = m.metadata?.type;
-      if ((mType === "tool_result" || mType === "tool_call_completed" || m.role === "tool") && m.toolCallId) {
-        resultsByCallId.set(m.toolCallId, {
-          content: m.content,
-          isError: m.metadata?.is_error === "true" || m.metadata?.status === "error",
-        });
-      }
-    }
-
-    return messages
-      .filter((m) => m.metadata?.type === "tool_call")
-      .map((m) => {
-        const tc = extractToolCall(m);
-        const result = resultsByCallId.get(tc.id);
-        if (result) {
-          tc.result = result.content;
-          tc.resultIsError = result.isError;
-        }
-        return tc;
-      });
-  }, [messages]);
-
-  const selectedTc = toolCalls.find((tc) => tc.id === selectedToolCallId);
+  const selectedTc = toolCalls.find((tc) => tc.callId === selectedToolCallId || tc.id === selectedToolCallId);
 
   if (toolCalls.length === 0) {
     return (
@@ -119,20 +47,20 @@ export function ToolCallsTab({ messages }: ToolCallsTabProps) {
             <button
               key={tc.id}
               type="button"
-              onClick={() => selectToolCall(tc.id)}
+              onClick={() => selectToolCall(tc.callId || tc.id)}
               className={cn(
                 "flex items-center gap-2 w-full text-left px-3 py-2 rounded text-sm transition-colors",
                 "hover:bg-muted/50",
-                selectedToolCallId === tc.id && "bg-muted"
+                (selectedToolCallId === tc.callId || selectedToolCallId === tc.id) && "bg-muted"
               )}
-              data-testid={`toolcall-item-${tc.id}`}
+              data-testid={`toolcall-item-${tc.callId || tc.id}`}
             >
               <Wrench className="h-3.5 w-3.5 text-orange-500 shrink-0" />
               <span className="font-mono truncate flex-1">{tc.name}</span>
               <span className="flex items-center gap-1 shrink-0">
                 {tc.status && <ToolCallBadge status={tc.status} />}
-                {tc.duration !== undefined && (
-                  <span className="text-xs text-muted-foreground">{tc.duration}ms</span>
+                {tc.durationMs !== undefined && (
+                  <span className="text-xs text-muted-foreground">{tc.durationMs}ms</span>
                 )}
               </span>
             </button>
@@ -144,18 +72,18 @@ export function ToolCallsTab({ messages }: ToolCallsTabProps) {
       <div className="flex-1 flex flex-col min-h-0">
         {selectedTc ? (
           <div className="flex flex-col h-full p-4 gap-4" data-testid="toolcall-detail">
-            {(selectedTc.handlerType || selectedTc.registryName) && (
+            {(selectedTc.labels?.handler_type || selectedTc.labels?.registry_name) && (
               <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm shrink-0" data-testid="toolcall-registry-info">
-                {selectedTc.handlerType && (
+                {selectedTc.labels?.handler_type && (
                   <div className="contents">
                     <span className="font-medium text-muted-foreground">Handler</span>
-                    <span className="font-mono">{selectedTc.handlerName} ({selectedTc.handlerType})</span>
+                    <span className="font-mono">{selectedTc.labels.handler_name} ({selectedTc.labels.handler_type})</span>
                   </div>
                 )}
-                {selectedTc.registryName && (
+                {selectedTc.labels?.registry_name && (
                   <div className="contents">
                     <span className="font-medium text-muted-foreground">Registry</span>
-                    <span className="font-mono">{selectedTc.registryName}</span>
+                    <span className="font-mono">{selectedTc.labels.registry_name}</span>
                   </div>
                 )}
               </div>
@@ -171,12 +99,20 @@ export function ToolCallsTab({ messages }: ToolCallsTabProps) {
                 <div className="min-w-0 flex flex-col">
                   <h4 className={cn(
                     "text-sm font-medium mb-2 shrink-0",
-                    selectedTc.resultIsError ? "text-destructive" : "text-muted-foreground"
+                    selectedTc.errorMessage ? "text-destructive" : "text-muted-foreground"
                   )}>
-                    {selectedTc.resultIsError ? "Error" : "Result"}
+                    {selectedTc.errorMessage ? "Error" : "Result"}
                   </h4>
                   <div className="flex-1 min-h-0 overflow-auto rounded border bg-white dark:bg-zinc-950">
-                    <RenderValue value={tryParseJSON(selectedTc.result)} />
+                    <RenderValue value={typeof selectedTc.result === "string" ? tryParseJSON(selectedTc.result) : selectedTc.result} />
+                  </div>
+                </div>
+              )}
+              {!selectedTc.result && selectedTc.errorMessage && (
+                <div className="min-w-0 flex flex-col">
+                  <h4 className="text-sm font-medium mb-2 shrink-0 text-destructive">Error</h4>
+                  <div className="flex-1 min-h-0 overflow-auto rounded border bg-white dark:bg-zinc-950">
+                    <RenderValue value={selectedTc.errorMessage} />
                   </div>
                 </div>
               )}

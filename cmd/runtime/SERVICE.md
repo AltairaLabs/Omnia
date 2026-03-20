@@ -22,7 +22,13 @@
   - ToolCall — client-side tool call (execution=CLIENT only; server-side never sent)
   - Error — error response
   - MediaChunk — streaming audio/video
-- **HTTP** to Session API: event writes (messages, tool calls, eval results)
+- **HTTP** to Session API:
+  - Messages (user/assistant conversation only)
+  - Tool calls (first-class records with args, result, duration)
+  - Provider calls (first-class records with tokens, cost, duration)
+  - Runtime events (pipeline, stage, middleware, validation lifecycle)
+  - Eval results (inline eval scores with explanation, source="runtime")
+  - Session stats (token counts, message counts)
 
 ## Does NOT Own
 - WebSocket protocol (Facade's job)

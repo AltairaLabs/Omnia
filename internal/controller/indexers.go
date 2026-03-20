@@ -69,7 +69,7 @@ func SetupIndexers(ctx context.Context, mgr manager.Manager) error {
 }
 
 // extractProviderRefs returns the "namespace/name" keys for all Provider references
-// on an AgentRuntime. This covers spec.providers[].providerRef and the legacy spec.providerRef.
+// on an AgentRuntime from spec.providers[].providerRef.
 func extractProviderRefs(obj client.Object) []string {
 	ar := obj.(*omniav1alpha1.AgentRuntime)
 	var refs []string
@@ -80,13 +80,6 @@ func extractProviderRefs(obj client.Object) []string {
 		if !seen[key] {
 			refs = append(refs, key)
 			seen[key] = true
-		}
-	}
-
-	if ar.Spec.ProviderRef != nil {
-		key := providerRefKey(*ar.Spec.ProviderRef, ar.Namespace)
-		if !seen[key] {
-			refs = append(refs, key)
 		}
 	}
 

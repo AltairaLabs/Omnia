@@ -232,6 +232,7 @@ if USE_LOCAL_PROMPTKIT:
     local_resource(
         'sync-promptkit',
         cmd='rsync -a --delete ' +
+            '--exclude="examples/" ' +
             '--include="runtime/***" ' +
             '--include="sdk/***" ' +
             '--include="server/***" ' +
@@ -1129,5 +1130,5 @@ if ENABLE_DEMO:
         labels=['test'],
         auto_init=False,
         trigger_mode=TRIGGER_MODE_MANUAL,
-        resource_deps=['omnia-controller-manager', 'omnia-demos'],
+        resource_deps=['omnia-controller-manager'],
     )

@@ -34,9 +34,9 @@ spec:
     version: "1.0.0"  # Or use track: "canary"
 ```
 
-### `providers` (Recommended)
+### `providers`
 
-A list of named provider references. Each entry maps a logical name to a [Provider](/reference/provider/) CRD. This is the recommended approach as it enables centralized credential management, consistent configuration across agents, and explicit judge provider mapping for evals.
+A list of named provider references. Each entry maps a logical name to a [Provider](/reference/provider/) CRD. This enables centralized credential management, consistent configuration across agents, and explicit judge provider mapping for evals.
 
 | Field | Type | Required |
 |-------|------|----------|
@@ -64,121 +64,7 @@ spec:
         namespace: shared-providers  # Optional cross-namespace reference
 ```
 
-### `providerRef` (Deprecated)
-
-Reference to a Provider resource. Use `providers` instead. When `providers` is set, this field is ignored.
-
-| Field | Type | Required |
-|-------|------|----------|
-| `providerRef.name` | string | Yes |
-| `providerRef.namespace` | string | No (defaults to same namespace) |
-
-```yaml
-# Deprecated — use providers instead
-spec:
-  providerRef:
-    name: claude-provider
-```
-
-### `provider` (Inline Configuration — Deprecated)
-
-Inline provider configuration. Use `providers` with a Provider CRD instead. When `providers` is set, this field is ignored.
-
-| Field | Type | Required |
-|-------|------|----------|
-| `provider.type` | string | Yes |
-| `provider.model` | string | No |
-| `provider.secretRef.name` | string | Depends on type |
-| `provider.secretRef.key` | string | No |
-| `provider.baseURL` | string | No (required for `ollama`) |
-| `provider.defaults.temperature` | string | No |
-| `provider.defaults.topP` | string | No |
-| `provider.defaults.maxTokens` | integer | No |
-| `provider.additionalConfig` | map[string]string | No |
-
-#### Provider Types
-
-| Type | Description | Requires Secret |
-|------|-------------|-----------------|
-| `auto` | Auto-detect from available credentials | Yes |
-| `claude` | Anthropic Claude models | Yes |
-| `openai` | OpenAI GPT models | Yes |
-| `gemini` | Google Gemini models | Yes |
-| `ollama` | Local Ollama models (for development) | No |
-| `mock` | Mock provider (for testing) | No |
-
-#### Cloud Provider Example
-
-```yaml
-spec:
-  provider:
-    type: claude
-    model: claude-sonnet-4-20250514
-    secretRef:
-      name: llm-credentials
-    config:
-      temperature: "0.7"
-```
-
-The secret should contain the appropriate API key:
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: llm-credentials
-stringData:
-  ANTHROPIC_API_KEY: "sk-ant-..."  # For Claude
-  # Or: OPENAI_API_KEY: "sk-..."   # For OpenAI
-  # Or: GEMINI_API_KEY: "..."      # For Gemini
-```
-
-#### Ollama Provider Example
-
-For local development with [Ollama](https://ollama.ai), no API key is required:
-
-```yaml
-spec:
-  provider:
-    type: ollama
-    model: llava:13b                              # Vision-capable model
-    baseURL: http://ollama.ollama-system:11434    # Required for Ollama
-    additionalConfig:
-      keep_alive: "5m"                            # Keep model loaded between requests
-```
-
-Ollama is ideal for:
-- Local development without API keys
-- Testing vision/multimodal features with models like `llava`
-- Privacy-sensitive environments where data can't leave the cluster
-
-#### Mock Provider Example
-
-For automated testing with deterministic responses:
-
-```yaml
-spec:
-  provider:
-    type: mock
-    model: mock-model
-    additionalConfig:
-      mock_config: "/config/mock-responses.yaml"  # Path to canned responses
-```
-
-The mock provider returns pre-configured responses based on scenario ID and turn number, enabling fast, deterministic E2E tests without LLM API calls.
-
-#### `additionalConfig`
-
-Provider-specific settings passed as environment variables to PromptKit:
-
-| Provider | Key | Description |
-|----------|-----|-------------|
-| `ollama` | `keep_alive` | Duration to keep model loaded (e.g., "5m", "1h") |
-| `mock` | `mock_config` | Path to mock responses YAML file |
-
-Keys are converted to environment variables with `OMNIA_PROVIDER_` prefix (e.g., `keep_alive` → `OMNIA_PROVIDER_KEEP_ALIVE`).
-
-> **Note**: When `providers` is set, both `providerRef` and `provider` are ignored. If only the deprecated fields are used, `providerRef` takes precedence over `provider`.
+See the [Provider](/reference/provider/) reference for details on configuring Provider CRDs (types, secrets, defaults, etc.).
 
 ### `framework`
 

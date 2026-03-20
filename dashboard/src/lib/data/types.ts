@@ -490,6 +490,9 @@ export interface AgentConnection {
    */
   getMaxPayloadSize(): number | null;
 
+  /** Acknowledge receipt of a tool call (signals the facade to keep waiting) */
+  sendToolCallAck?(callId: string): void;
+
   /** Send a client-side tool result back to the agent */
   sendToolResult?(callId: string, result?: unknown, error?: string): void;
 }

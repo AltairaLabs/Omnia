@@ -129,27 +129,14 @@ func main() {
 	}
 }
 
-func initSessionStore(cfg *agent.Config, log logr.Logger) (session.Store, error) {
-	// Cluster-level session-api takes precedence over per-agent session type
-	if url := os.Getenv("SESSION_API_URL"); url != "" {
-		log.Info("using session-api HTTP store", "url", url)
-		return httpclient.NewStore(url, log), nil
-	}
-
-	switch cfg.SessionType {
-	case agent.SessionTypeMemory:
-		log.Info("using in-memory session store")
+func initSessionStore(log logr.Logger) (session.Store, error) {
+	url := os.Getenv("SESSION_API_URL")
+	if url == "" {
+		log.Info("SESSION_API_URL not set, using in-memory session store (sessions will not be persisted)")
 		return session.NewMemoryStore(), nil
-	case agent.SessionTypeRedis:
-		log.Info("using Redis session store", "url", redactURL(cfg.SessionStoreURL))
-		redisCfg, err := session.ParseRedisURL(cfg.SessionStoreURL)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse Redis URL: %w", err)
-		}
-		return session.NewRedisStore(redisCfg)
-	default:
-		return nil, fmt.Errorf("unsupported session type: %s", cfg.SessionType)
 	}
+	log.Info("using session-api HTTP store", "url", url)
+	return httpclient.NewStore(url, log), nil
 }
 
 func closeStore(store session.Store, log logr.Logger) {
@@ -210,15 +197,6 @@ func readyzHandler(store session.Store, handler facade.MessageHandler) http.Hand
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}
-}
-
-// redactURL redacts sensitive parts of URLs for logging.
-func redactURL(url string) string {
-	// Simple redaction - in production, use a proper URL parser
-	if len(url) > 20 {
-		return url[:10] + "..." + url[len(url)-5:]
-	}
-	return "***"
 }
 
 // createHandler creates the appropriate message handler based on configuration.

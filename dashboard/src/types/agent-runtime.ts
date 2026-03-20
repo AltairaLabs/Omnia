@@ -94,6 +94,11 @@ export interface ProviderRef {
   namespace?: string;
 }
 
+export interface NamedProviderRef {
+  name: string;
+  providerRef: ProviderRef;
+}
+
 export interface FrameworkConfig {
   type: FrameworkType;
   version?: string;
@@ -191,8 +196,7 @@ export interface AgentRuntimeSpec {
   toolRegistryRef?: ToolRegistryRef;
   session?: SessionConfig;
   runtime?: RuntimeConfig;
-  provider?: ProviderConfig;
-  providerRef?: ProviderRef;
+  providers?: NamedProviderRef[];
   console?: ConsoleConfig;
   evals?: EvalConfig;
 }
@@ -225,6 +229,13 @@ export interface AgentRuntimeStatus {
   activeVersion?: string;
   conditions?: Condition[];
   observedGeneration?: number;
+}
+
+/** Get the default (or first) provider ref from an AgentRuntimeSpec */
+export function getDefaultProviderRef(spec: AgentRuntimeSpec): ProviderRef | undefined {
+  if (!spec.providers?.length) return undefined;
+  const defaultProvider = spec.providers.find(p => p.name === "default");
+  return defaultProvider?.providerRef ?? spec.providers[0].providerRef;
 }
 
 // Full resource

@@ -306,8 +306,13 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{RequeueAfter: nextCheck}, nil
 	}
 
-	// Set phase to fetching
-	source.Status.Phase = omniav1alpha1.ArenaSourcePhaseFetching
+	// Set phase: Initializing for first fetch, Fetching for re-syncs.
+	// This distinction lets consumers know whether previous content is available.
+	if source.Status.Artifact == nil {
+		source.Status.Phase = omniav1alpha1.ArenaSourcePhaseInitializing
+	} else {
+		source.Status.Phase = omniav1alpha1.ArenaSourcePhaseFetching
+	}
 	SetCondition(&source.Status.Conditions, source.Generation, ArenaSourceConditionTypeFetching, metav1.ConditionTrue,
 		"FetchInProgress", "Fetching artifact from source")
 	now := metav1.Now()

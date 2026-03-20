@@ -58,9 +58,10 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 	ctx = logctx.WithTraceID(ctx, msgSpan.SpanContext().TraceID().String())
 	log = logctx.LoggerWithContext(s.log, ctx)
 
-	// Update connection's session ID
+	// Update connection's session ID and mark as persisted
 	c.mu.Lock()
 	c.sessionID = sessionID
+	c.sessionPersisted = true
 	c.mu.Unlock()
 
 	// Send connected message if this is a new session
@@ -158,8 +159,11 @@ func sessionIDToTraceID(sessionID string) trace.TraceID {
 
 // processRegularMessage stores the user message and dispatches to the handler.
 func (s *Server) processRegularMessage(ctx context.Context, c *Connection, sessionID string, msg *ClientMessage, writer *connResponseWriter, log logr.Logger) error {
-	// Store user message
-	if err := s.sessionStore.AppendMessage(ctx, sessionID, session.Message{
+	// Store user message with a detached context so it completes even if
+	// the WebSocket connection closes before the HTTP call returns.
+	storeCtx, storeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer storeCancel()
+	if err := s.sessionStore.AppendMessage(storeCtx, sessionID, session.Message{
 		ID:        uuid.New().String(),
 		Role:      session.RoleUser,
 		Content:   msg.Content,
@@ -189,6 +193,10 @@ func (s *Server) processRegularMessage(ctx context.Context, c *Connection, sessi
 }
 
 // ensureSession gets an existing session or creates a new one.
+// When sessionID is non-empty, the store is checked first; if not found the
+// session is created with that same ID. This supports deferred persistence:
+// handleConnection generates a UUID on connect (for the "connected" message)
+// but does not persist — the first processMessage call triggers the actual write.
 func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID string, log logr.Logger) (string, error) {
 	if sessionID != "" {
 		// Try to resume existing session
@@ -200,12 +208,14 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 			}
 			return sess.ID, nil
 		}
-		// Session not found or expired, create new one
-		log.Info("session not found, creating new", "requested_id", sessionID)
+		// Session not found or expired — create with the requested ID so the
+		// client-visible session ID stays stable.
+		log.V(1).Info("session not found, creating", "sessionID", sessionID)
 	}
 
-	// Create new session
+	// Create new session, preserving the requested ID when provided.
 	sess, err := s.sessionStore.CreateSession(ctx, session.CreateSessionOptions{
+		ID:                sessionID,
 		AgentName:         c.agentName,
 		Namespace:         c.namespace,
 		TTL:               s.config.SessionTTL,

@@ -195,7 +195,10 @@ func (s *Store) notifyFlush(state gobreaker.State) {
 // CreateSession creates a new session via POST /api/v1/sessions.
 // This is NOT buffered — callers need the session ID synchronously.
 func (s *Store) CreateSession(ctx context.Context, opts session.CreateSessionOptions) (*session.Session, error) {
-	id := uuid.New().String()
+	id := opts.ID
+	if id == "" {
+		id = uuid.New().String()
+	}
 	reqBody := sessionapi.SessionToAPI(id, opts)
 
 	resp, err := s.doJSON(ctx, http.MethodPost, "/api/v1/sessions", reqBody)
@@ -361,6 +364,73 @@ func (s *Store) RecordProviderCall(ctx context.Context, sessionID string, pc ses
 		return s.readError(resp)
 	}
 	return nil
+}
+
+// RecordEvalResult sends an eval result via POST /api/v1/eval-results.
+// Uses the existing batch endpoint with a single-element array.
+func (s *Store) RecordEvalResult(ctx context.Context, sessionID string, result session.EvalResult) error {
+	result.SessionID = sessionID
+	body, err := json.Marshal([]session.EvalResult{result})
+	if err != nil {
+		return fmt.Errorf("record eval result: encode: %w", err)
+	}
+
+	resp, err := s.doWithRetry(ctx, http.MethodPost, "/api/v1/eval-results", body)
+	if err != nil {
+		return s.bufferWrite(err, http.MethodPost, "/api/v1/eval-results", body)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusCreated {
+		return s.readError(resp)
+	}
+	return nil
+}
+
+// RecordRuntimeEvent sends a runtime event via POST /api/v1/sessions/{sessionID}/events.
+// On transient failure, the write is buffered and retried automatically.
+func (s *Store) RecordRuntimeEvent(ctx context.Context, sessionID string, evt session.RuntimeEvent) error {
+	path := fmt.Sprintf("/api/v1/sessions/%s/events", sessionID)
+	body, err := json.Marshal(&evt)
+	if err != nil {
+		return fmt.Errorf("record runtime event: encode: %w", err)
+	}
+
+	resp, err := s.doWithRetry(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return s.bufferWrite(err, http.MethodPost, path, body)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return session.ErrSessionNotFound
+	}
+	if resp.StatusCode != http.StatusCreated {
+		return s.readError(resp)
+	}
+	return nil
+}
+
+// GetRuntimeEvents retrieves runtime events via GET /api/v1/sessions/{sessionID}/events.
+func (s *Store) GetRuntimeEvents(ctx context.Context, sessionID string) ([]session.RuntimeEvent, error) {
+	resp, err := s.doWithRetry(ctx, http.MethodGet, fmt.Sprintf("/api/v1/sessions/%s/events", sessionID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("get runtime events: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, session.ErrSessionNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, s.readError(resp)
+	}
+
+	var events []session.RuntimeEvent
+	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
+		return nil, fmt.Errorf("decode runtime events: %w", err)
+	}
+	return events, nil
 }
 
 // Ping checks session-api connectivity via a lightweight /healthz endpoint.

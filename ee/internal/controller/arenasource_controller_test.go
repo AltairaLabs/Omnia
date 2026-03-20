@@ -1180,8 +1180,9 @@ var _ = Describe("ArenaSource Controller", func() {
 				Namespace: arenaSourceNamespace,
 			}, updatedSource)).To(Succeed())
 
-			// After first reconcile, should be Fetching (if async) or Ready (if sync completed)
+			// After first reconcile, should be Initializing (first fetch), Fetching (re-sync), or Ready (sync completed)
 			Expect(updatedSource.Status.Phase).To(BeElementOf(
+				omniav1alpha1.ArenaSourcePhaseInitializing,
 				omniav1alpha1.ArenaSourcePhaseFetching,
 				omniav1alpha1.ArenaSourcePhaseReady,
 			))

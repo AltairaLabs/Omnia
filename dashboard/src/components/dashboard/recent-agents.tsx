@@ -7,6 +7,7 @@ import { useAgents } from "@/hooks/agents";
 import { useProvider } from "@/hooks/resources";
 import { cn } from "@/lib/utils";
 import type { AgentRuntime, AgentRuntimePhase } from "@/types";
+import { getDefaultProviderRef } from "@/types/agent-runtime";
 
 const phaseColors: Record<AgentRuntimePhase, string> = {
   Running: "bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/20",
@@ -16,10 +17,11 @@ const phaseColors: Record<AgentRuntimePhase, string> = {
 
 function RecentAgentItem({ agent }: Readonly<{ agent: AgentRuntime }>) {
   const namespace = agent.metadata.namespace || "default";
-  const { data: provider } = useProvider(agent.spec.providerRef?.name, namespace);
+  const defaultProviderRef = getDefaultProviderRef(agent.spec);
+  const { data: provider } = useProvider(defaultProviderRef?.name, namespace);
 
-  // Get model from resolved provider, fallback to inline spec, then providerRef name
-  const model = provider?.spec?.model || agent.spec.provider?.model || agent.spec.providerRef?.name || "-";
+  // Get model from resolved provider, fallback to provider ref name
+  const model = provider?.spec?.model || defaultProviderRef?.name || "-";
 
   return (
     <div className="flex items-center gap-4">

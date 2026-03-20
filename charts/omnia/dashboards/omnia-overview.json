@@ -63,7 +63,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(omnia_llm_request_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(omnia_provider_request_duration_seconds_bucket[5m])) by (le))",
           "refId": "A"
         }
       ],
@@ -94,7 +94,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "sum(increase(omnia_llm_cost_usd_total[24h]))",
+          "expr": "sum(increase(omnia_provider_cost_total[24h]))",
           "refId": "A"
         }
       ],
@@ -125,7 +125,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "sum(increase(omnia_llm_input_tokens_total[5m]) + increase(omnia_llm_output_tokens_total[5m])) / 5",
+          "expr": "sum(increase(omnia_provider_input_tokens_total[5m]) + increase(omnia_provider_output_tokens_total[5m])) / 5",
           "refId": "A"
         }
       ],
@@ -218,17 +218,17 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(omnia_llm_request_duration_seconds_bucket[5m])) by (le, agent))",
+          "expr": "histogram_quantile(0.50, sum(rate(omnia_provider_request_duration_seconds_bucket[5m])) by (le, agent))",
           "legendFormat": "p50 {{agent}}",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(omnia_llm_request_duration_seconds_bucket[5m])) by (le, agent))",
+          "expr": "histogram_quantile(0.95, sum(rate(omnia_provider_request_duration_seconds_bucket[5m])) by (le, agent))",
           "legendFormat": "p95 {{agent}}",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(omnia_llm_request_duration_seconds_bucket[5m])) by (le, agent))",
+          "expr": "histogram_quantile(0.99, sum(rate(omnia_provider_request_duration_seconds_bucket[5m])) by (le, agent))",
           "legendFormat": "p99 {{agent}}",
           "refId": "C"
         }
@@ -275,12 +275,12 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "sum by (agent) (rate(omnia_llm_input_tokens_total[5m])) * 60",
+          "expr": "sum by (agent) (rate(omnia_provider_input_tokens_total[5m])) * 60",
           "legendFormat": "{{agent}} (input)",
           "refId": "A"
         },
         {
-          "expr": "sum by (agent) (rate(omnia_llm_output_tokens_total[5m])) * 60",
+          "expr": "sum by (agent) (rate(omnia_provider_output_tokens_total[5m])) * 60",
           "legendFormat": "{{agent}} (output)",
           "refId": "B"
         }
@@ -327,7 +327,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "sum by (agent, tool, status) (rate(omnia_runtime_tool_calls_total[5m])) * 60 or vector(0)",
+          "expr": "sum by (agent, tool, status) (rate(omnia_tool_calls_total[5m])) * 60 or vector(0)",
           "legendFormat": "{{agent}} - {{tool}} ({{status}})",
           "refId": "A"
         }

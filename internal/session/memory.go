@@ -14,6 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// MemoryStore is an in-memory Store implementation for use in tests.
+// It is NOT used in production — all deployed binaries use httpclient.Store
+// backed by session-api. This exists solely as a lightweight test double
+// that avoids requiring external infrastructure (postgres, redis).
+
 package session
 
 import (
@@ -34,6 +39,7 @@ type MemoryStore struct {
 	closed        bool
 	toolCalls     map[string][]ToolCall     // keyed by sessionID
 	providerCalls map[string][]ProviderCall // keyed by sessionID
+	runtimeEvents map[string][]RuntimeEvent // keyed by sessionID
 }
 
 // NewMemoryStore creates a new in-memory session store.
@@ -42,6 +48,7 @@ func NewMemoryStore() *MemoryStore {
 		sessions:      make(map[string]*Session),
 		toolCalls:     make(map[string][]ToolCall),
 		providerCalls: make(map[string][]ProviderCall),
+		runtimeEvents: make(map[string][]RuntimeEvent),
 	}
 }
 
@@ -59,8 +66,12 @@ func (m *MemoryStore) CreateSession(ctx context.Context, opts CreateSessionOptio
 	}
 
 	now := time.Now()
+	id := opts.ID
+	if id == "" {
+		id = uuid.New().String()
+	}
 	session := &Session{
-		ID:        uuid.New().String(),
+		ID:        id,
 		AgentName: opts.AgentName,
 		Namespace: opts.Namespace,
 		CreatedAt: now,
@@ -130,6 +141,7 @@ func (m *MemoryStore) DeleteSession(ctx context.Context, sessionID string) error
 	delete(m.sessions, sessionID)
 	delete(m.toolCalls, sessionID)
 	delete(m.providerCalls, sessionID)
+	delete(m.runtimeEvents, sessionID)
 	return nil
 }
 
@@ -166,6 +178,11 @@ func (m *MemoryStore) AppendMessage(ctx context.Context, sessionID string, msg M
 	}
 
 	session.Messages = append(session.Messages, msg)
+	// Only increment message_count here. Token/cost counters are derived from
+	// RecordProviderCall; tool_call_count from RecordToolCall.
+	if msg.ToolCallID == "" {
+		session.MessageCount++
+	}
 	session.UpdatedAt = time.Now()
 
 	return nil
@@ -293,6 +310,7 @@ func (m *MemoryStore) Close() error {
 	m.sessions = nil
 	m.toolCalls = nil
 	m.providerCalls = nil
+	m.runtimeEvents = nil
 	return nil
 }
 
@@ -317,12 +335,6 @@ func (m *MemoryStore) UpdateSessionStats(ctx context.Context, sessionID string, 
 	if session.IsExpired() {
 		return ErrSessionExpired
 	}
-
-	session.TotalInputTokens += int64(update.AddInputTokens)
-	session.TotalOutputTokens += int64(update.AddOutputTokens)
-	session.EstimatedCostUSD += update.AddCostUSD
-	session.ToolCallCount += update.AddToolCalls
-	session.MessageCount += update.AddMessages
 
 	if update.SetStatus != "" && !isTerminalStatus(session.Status) {
 		session.Status = update.SetStatus
@@ -357,22 +369,12 @@ func (m *MemoryStore) RecordToolCall(ctx context.Context, sessionID string, tc T
 		return ErrSessionExpired
 	}
 
-	// Upsert: find existing by ID and replace, or append.
-	calls := m.toolCalls[sessionID]
-	found := false
-	for i, existing := range calls {
-		if existing.ID == tc.ID {
-			calls[i] = tc
-			found = true
-			break
-		}
-	}
-	if !found {
-		calls = append(calls, tc)
-		// Increment tool call count on initial insert.
+	// Each lifecycle event is a separate row. Only "pending" (the initial start)
+	// increments the tool call count.
+	m.toolCalls[sessionID] = append(m.toolCalls[sessionID], tc)
+	if tc.Status == ToolCallStatusPending {
 		session.ToolCallCount++
 	}
-	m.toolCalls[sessionID] = calls
 	session.UpdatedAt = time.Now()
 
 	return nil
@@ -398,26 +400,14 @@ func (m *MemoryStore) RecordProviderCall(ctx context.Context, sessionID string, 
 		return ErrSessionExpired
 	}
 
-	// Upsert: find existing by ID and replace, or append.
-	calls := m.providerCalls[sessionID]
-	found := false
-	for i, existing := range calls {
-		if existing.ID == pc.ID {
-			// On completion update, apply token/cost deltas to session.
-			if existing.Status == ProviderCallStatusPending && pc.Status == ProviderCallStatusCompleted {
-				session.TotalInputTokens += pc.InputTokens
-				session.TotalOutputTokens += pc.OutputTokens
-				session.EstimatedCostUSD += pc.CostUSD
-			}
-			calls[i] = pc
-			found = true
-			break
-		}
+	// Each lifecycle event is a separate row. Only completed calls add
+	// tokens/cost to session counters.
+	m.providerCalls[sessionID] = append(m.providerCalls[sessionID], pc)
+	if pc.Status == ProviderCallStatusCompleted {
+		session.TotalInputTokens += pc.InputTokens
+		session.TotalOutputTokens += pc.OutputTokens
+		session.EstimatedCostUSD += pc.CostUSD
 	}
-	if !found {
-		calls = append(calls, pc)
-	}
-	m.providerCalls[sessionID] = calls
 	session.UpdatedAt = time.Now()
 
 	return nil
@@ -464,6 +454,61 @@ func (m *MemoryStore) GetProviderCalls(ctx context.Context, sessionID string) ([
 	calls := m.providerCalls[sessionID]
 	result := make([]ProviderCall, len(calls))
 	copy(result, calls)
+	return result, nil
+}
+
+// RecordEvalResult records an eval result (no-op storage in memory store — eval results
+// are persisted via the session-api eval_results table in production).
+func (m *MemoryStore) RecordEvalResult(_ context.Context, _ string, _ EvalResult) error {
+	return nil
+}
+
+// RecordRuntimeEvent records a runtime lifecycle event for the session.
+func (m *MemoryStore) RecordRuntimeEvent(ctx context.Context, sessionID string, evt RuntimeEvent) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if sessionID == "" {
+		return ErrInvalidSessionID
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.sessions[sessionID]; !exists {
+		return ErrSessionNotFound
+	}
+
+	if evt.ID == "" {
+		evt.ID = uuid.New().String()
+	}
+	if evt.Timestamp.IsZero() {
+		evt.Timestamp = time.Now()
+	}
+
+	m.runtimeEvents[sessionID] = append(m.runtimeEvents[sessionID], evt)
+	return nil
+}
+
+// GetRuntimeEvents retrieves all runtime events for a session ordered by timestamp.
+func (m *MemoryStore) GetRuntimeEvents(ctx context.Context, sessionID string) ([]RuntimeEvent, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if sessionID == "" {
+		return nil, ErrInvalidSessionID
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if _, exists := m.sessions[sessionID]; !exists {
+		return nil, ErrSessionNotFound
+	}
+
+	events := m.runtimeEvents[sessionID]
+	result := make([]RuntimeEvent, len(events))
+	copy(result, events)
 	return result, nil
 }
 

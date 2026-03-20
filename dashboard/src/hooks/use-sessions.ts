@@ -10,6 +10,9 @@ import type {
   SessionSearchOptions,
   SessionMessageOptions,
   Message,
+  ToolCall,
+  ProviderCall,
+  RuntimeEvent,
 } from "@/types/session";
 
 /**
@@ -190,6 +193,60 @@ export function useSessionAllMessages(sessionId: string, enabled = true) {
     fetchMore: query.fetchNextPage,
     error: query.error,
   };
+}
+
+/**
+ * Fetch tool calls for a session from the first-class tool_calls table.
+ */
+export function useSessionToolCalls(sessionId: string) {
+  const { currentWorkspace } = useWorkspace();
+
+  return useQuery({
+    queryKey: ["session-tool-calls", currentWorkspace?.name, sessionId],
+    queryFn: async (): Promise<ToolCall[]> => {
+      if (!currentWorkspace) return [];
+      const service = new SessionApiService();
+      return service.getToolCalls(currentWorkspace.name, sessionId);
+    },
+    enabled: !!currentWorkspace && !!sessionId,
+    staleTime: 10000,
+  });
+}
+
+/**
+ * Fetch provider calls for a session from the first-class provider_calls table.
+ */
+export function useSessionProviderCalls(sessionId: string) {
+  const { currentWorkspace } = useWorkspace();
+
+  return useQuery({
+    queryKey: ["session-provider-calls", currentWorkspace?.name, sessionId],
+    queryFn: async (): Promise<ProviderCall[]> => {
+      if (!currentWorkspace) return [];
+      const service = new SessionApiService();
+      return service.getProviderCalls(currentWorkspace.name, sessionId);
+    },
+    enabled: !!currentWorkspace && !!sessionId,
+    staleTime: 10000,
+  });
+}
+
+/**
+ * Fetch runtime events for a session from the first-class runtime_events table.
+ */
+export function useSessionRuntimeEvents(sessionId: string) {
+  const { currentWorkspace } = useWorkspace();
+
+  return useQuery({
+    queryKey: ["session-runtime-events", currentWorkspace?.name, sessionId],
+    queryFn: async (): Promise<RuntimeEvent[]> => {
+      if (!currentWorkspace) return [];
+      const service = new SessionApiService();
+      return service.getEvents(currentWorkspace.name, sessionId);
+    },
+    enabled: !!currentWorkspace && !!sessionId,
+    staleTime: 10000,
+  });
 }
 
 /**

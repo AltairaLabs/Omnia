@@ -96,50 +96,6 @@ spec:
                       type: string
                     type: array
                 type: object
-              execution:
-                description: |-
-                  execution configures the execution mode and target.
-                  If not specified, defaults to direct provider execution.
-                properties:
-                  mode:
-                    default: direct
-                    description: |-
-                      mode selects the execution strategy.
-                      "direct" calls LLM providers directly (existing behavior).
-                      "fleet" connects to a deployed agent via WebSocket.
-                    enum:
-                    - direct
-                    - fleet
-                    type: string
-                  target:
-                    description: |-
-                      target specifies the agent to test against.
-                      Required when mode is "fleet".
-                    properties:
-                      agentRuntimeRef:
-                        description: |-
-                          agentRuntimeRef references the AgentRuntime CRD to connect to.
-                          The controller resolves this to a WebSocket endpoint.
-                        properties:
-                          name:
-                            description: name is the name of the object.
-                            minLength: 1
-                            type: string
-                        required:
-                        - name
-                        type: object
-                      namespace:
-                        description: |-
-                          namespace is the namespace of the AgentRuntime.
-                          If not specified, defaults to the ArenaJob's namespace.
-                        type: string
-                    required:
-                    - agentRuntimeRef
-                    type: object
-                type: object
-                x-kubernetes-validations:
-                - message: target is required when execution mode is fleet
-                  rule: self.mode != 'fleet' || has(self.target)
               loadTest:
                 description: |-
                   loadTest configures load testing settings.
@@ -220,67 +176,24 @@ spec:
                 required:
                 - type
                 type: object
-              providerOverrides:
+              providers:
                 additionalProperties:
-                  description: ProviderGroupSelector defines how to select Provider
-                    CRDs for a specific group.
-                  properties:
-                    selector:
-                      description: |-
-                        selector is a label selector to match Provider CRDs in the workspace namespace.
-                        All matching providers will be used for the group, with scenarios run against each.
-                      properties:
-                        matchExpressions:
-                          description: matchExpressions is a list of label selector
-                            requirements. The requirements are ANDed.
-                          items:
-                            description: |-
-                              A label selector requirement is a selector that contains values, a key, and an operator that
-                              relates the key and values.
-                            properties:
-                              key:
-                                description: key is the label key that the selector
-                                  applies to.
-                                type: string
-                              operator:
-                                description: |-
-                                  operator represents a key's relationship to a set of values.
-                                  Valid operators are In, NotIn, Exists and DoesNotExist.
-                                type: string
-                              values:
-                                description: |-
-                                  values is an array of string values. If the operator is In or NotIn,
-                                  the values array must be non-empty. If the operator is Exists or DoesNotExist,
-                                  the values array must be empty. This array is replaced during a strategic
-                                  merge patch.
-                                items:
-                                  type: string
-                                type: array
-                                x-kubernetes-list-type: atomic
-                            required:
-                            - key
-                            - operator
-                            type: object
-                          type: array
-                          x-kubernetes-list-type: atomic
-                        matchLabels:
-                          additionalProperties:
-                            type: string
-                          description: |-
-                            matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
-                            map is equivalent to an element of matchExpressions, whose key field is "key", the
-                            operator is "In", and the values array contains only "value". The requirements are ANDed.
-                          type: object
-                      type: object
-                      x-kubernetes-map-type: atomic
-                  required:
-                  - selector
-                  type: object
+                  description: |-
+                    ArenaProviderGroup is a polymorphic provider group value.
+                    Array mode: []ArenaProviderEntry (test provider pools).
+                    Map mode: map[string]ArenaProviderEntry (1:1 config-provider-ID → CRD mappings).
+                    JSON auto-detects: arrays → Entries, objects → Mapping.
+                  x-kubernetes-preserve-unknown-fields: true
                 description: |-
-                  providerOverrides allows overriding provider groups defined in the arena config file.
-                  Keys are group names from the arena config file (e.g., "default", "judge").
-                  Use "*" as a catch-all for groups not explicitly specified.
-                  Provider CRDs matching the label selector provide credentials for the matched groups.
+                  providers maps group names to provider groups.
+                  Each group is either an array (pool of test providers) or an object
+                  (1:1 config-provider-ID → CRD mapping). Array mode is the default;
+                  map mode lets the wizard set the exact provider ID the arena config expects.
+                  Groups correspond to the arena config's provider groups (e.g., "default", "judge").
+                  When set, provider YAML files from the arena project are ignored
+                  and the worker resolves providers directly from CRDs.
+                  An agentRef can appear in any provider position — agents and LLM providers
+                  are interchangeable in the scenario × provider matrix.
                 type: object
               scenarios:
                 description: |-
@@ -340,63 +253,23 @@ spec:
                 required:
                 - name
                 type: object
-              toolRegistryOverride:
+              toolRegistries:
                 description: |-
-                  toolRegistryOverride allows overriding tools/mcp_servers defined in the arena config file
-                  with handlers from ToolRegistry CRDs. All tools from matching registries will
-                  override tools with matching names in the arena config.
-                properties:
-                  selector:
-                    description: |-
-                      selector is a label selector to match ToolRegistry CRDs in the workspace namespace.
-                      All tools from matching registries will override tools/mcp_servers defined in arena.config.yaml.
-                    properties:
-                      matchExpressions:
-                        description: matchExpressions is a list of label selector
-                          requirements. The requirements are ANDed.
-                        items:
-                          description: |-
-                            A label selector requirement is a selector that contains values, a key, and an operator that
-                            relates the key and values.
-                          properties:
-                            key:
-                              description: key is the label key that the selector
-                                applies to.
-                              type: string
-                            operator:
-                              description: |-
-                                operator represents a key's relationship to a set of values.
-                                Valid operators are In, NotIn, Exists and DoesNotExist.
-                              type: string
-                            values:
-                              description: |-
-                                values is an array of string values. If the operator is In or NotIn,
-                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
-                                the values array must be empty. This array is replaced during a strategic
-                                merge patch.
-                              items:
-                                type: string
-                              type: array
-                              x-kubernetes-list-type: atomic
-                          required:
-                          - key
-                          - operator
-                          type: object
-                        type: array
-                        x-kubernetes-list-type: atomic
-                      matchLabels:
-                        additionalProperties:
-                          type: string
-                        description: |-
-                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
-                          map is equivalent to an element of matchExpressions, whose key field is "key", the
-                          operator is "In", and the values array contains only "value". The requirements are ANDed.
-                        type: object
-                    type: object
-                    x-kubernetes-map-type: atomic
-                required:
-                - selector
-                type: object
+                  toolRegistries lists ToolRegistry CRDs whose discovered tools replace
+                  the arena config's tool/mcp_server file references.
+                  When set, tool YAML files from the arena project are ignored.
+                items:
+                  description: LocalObjectReference contains enough information to
+                    let you locate the referenced object.
+                  properties:
+                    name:
+                      description: name is the name of the object.
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
               ttlSecondsAfterFinished:
                 description: ttlSecondsAfterFinished specifies how long to keep completed
                   jobs.

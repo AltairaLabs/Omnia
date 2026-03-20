@@ -524,8 +524,10 @@ spec:
     name: demo-prompts
   toolRegistryRef:
     name: demo-tools
-  providerRef:
-    name: claude-provider
+  providers:
+    - name: default
+      providerRef:
+        name: claude-provider
   facade:
     type: websocket
     port: 8080
@@ -560,8 +562,10 @@ spec:
     name: demo-prompts
   toolRegistryRef:
     name: demo-tools
-  providerRef:
-    name: mock-provider
+  providers:
+    - name: default
+      providerRef:
+        name: mock-provider
   facade:
     type: websocket
     port: 8080
@@ -594,8 +598,10 @@ metadata:
 spec:
   promptPackRef:
     name: demo-prompts
-  providerRef:
-    name: mock-openai-provider
+  providers:
+    - name: default
+      providerRef:
+        name: mock-openai-provider
   facade:
     type: websocket
     port: 8080

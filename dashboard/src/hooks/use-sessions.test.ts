@@ -9,8 +9,12 @@ const mockGetSessionById = vi.fn();
 const mockSearchSessions = vi.fn();
 const mockGetSessionMessages = vi.fn();
 
-const { mockGetSessionEvalResults } = vi.hoisted(() => {
-  return { mockGetSessionEvalResults: vi.fn() };
+const { mockGetSessionEvalResults, mockGetToolCalls, mockGetProviderCalls } = vi.hoisted(() => {
+  return {
+    mockGetSessionEvalResults: vi.fn(),
+    mockGetToolCalls: vi.fn(),
+    mockGetProviderCalls: vi.fn(),
+  };
 });
 
 vi.mock("@/lib/data", () => ({
@@ -32,11 +36,13 @@ vi.mock("@/contexts/workspace-context", () => ({
 vi.mock("@/lib/data/session-api-service", () => ({
   SessionApiService: class MockSessionApiService {
     getSessionEvalResults = mockGetSessionEvalResults;
+    getToolCalls = mockGetToolCalls;
+    getProviderCalls = mockGetProviderCalls;
   },
 }));
 
 // Import after mocks
-import { useSessions, useSessionDetail, useSessionSearch, useSessionMessages, useSessionAllMessages, useSessionEvalResults } from "./use-sessions";
+import { useSessions, useSessionDetail, useSessionSearch, useSessionMessages, useSessionAllMessages, useSessionToolCalls, useSessionProviderCalls, useSessionEvalResults } from "./use-sessions";
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -258,6 +264,60 @@ describe("useSessionEvalResults", () => {
 
   it("is disabled when sessionId is empty", () => {
     const { result } = renderHook(() => useSessionEvalResults(""), { wrapper: createWrapper() });
+    expect(result.current.fetchStatus).toBe("idle");
+  });
+});
+
+describe("useSessionToolCalls", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetToolCalls.mockResolvedValue([
+      { id: "tc1", callId: "call-1", sessionId: "s1", name: "search", status: "success", createdAt: "2024-01-01T00:00:00Z" },
+    ]);
+  });
+
+  it("fetches tool calls for a session", async () => {
+    const { result } = renderHook(() => useSessionToolCalls("s1"), { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(result.current.isPending).toBe(false);
+    });
+
+    expect(result.current.isSuccess).toBe(true);
+    expect(mockGetToolCalls).toHaveBeenCalledWith("test-workspace", "s1");
+    expect(result.current.data).toHaveLength(1);
+    expect(result.current.data![0].name).toBe("search");
+  });
+
+  it("is disabled when sessionId is empty", () => {
+    const { result } = renderHook(() => useSessionToolCalls(""), { wrapper: createWrapper() });
+    expect(result.current.fetchStatus).toBe("idle");
+  });
+});
+
+describe("useSessionProviderCalls", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetProviderCalls.mockResolvedValue([
+      { id: "pc1", sessionId: "s1", provider: "claude", model: "sonnet", status: "completed", createdAt: "2024-01-01T00:00:00Z" },
+    ]);
+  });
+
+  it("fetches provider calls for a session", async () => {
+    const { result } = renderHook(() => useSessionProviderCalls("s1"), { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(result.current.isPending).toBe(false);
+    });
+
+    expect(result.current.isSuccess).toBe(true);
+    expect(mockGetProviderCalls).toHaveBeenCalledWith("test-workspace", "s1");
+    expect(result.current.data).toHaveLength(1);
+    expect(result.current.data![0].provider).toBe("claude");
+  });
+
+  it("is disabled when sessionId is empty", () => {
+    const { result } = renderHook(() => useSessionProviderCalls(""), { wrapper: createWrapper() });
     expect(result.current.fetchStatus).toBe("idle");
   });
 });

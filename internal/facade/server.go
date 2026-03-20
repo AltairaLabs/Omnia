@@ -103,6 +103,8 @@ type ClientToolRouter interface {
 	// SendToolResult delivers a client tool result to the handler waiting for it.
 	// Returns true if the result was routed to an active handler, false otherwise.
 	SendToolResult(sessionID string, result *ClientToolResultInfo) bool
+	// AckToolCall acknowledges receipt of a tool call, signaling the client is working on it.
+	AckToolCall(sessionID string, callID string)
 }
 
 // ResponseWriter allows sending responses back to the client.

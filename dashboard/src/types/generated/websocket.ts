@@ -113,6 +113,8 @@ export type MessageType = string;
  */
 export const MessageTypeMessage: MessageType = "message";
 export const MessageTypeUploadRequest: MessageType = "upload_request";
+export const MessageTypeToolCallAck: MessageType = "tool_call_ack";
+export const MessageTypeToolCallNack: MessageType = "tool_call_nack";
 /**
  * Bidirectional message types
  * Server → Client: tool execution result (informational)
@@ -130,6 +132,30 @@ export const MessageTypeConnected: MessageType = "connected";
 export const MessageTypeUploadReady: MessageType = "upload_ready";
 export const MessageTypeUploadComplete: MessageType = "upload_complete";
 export const MessageTypeMediaChunk: MessageType = "media_chunk";
+/**
+ * ToolCallAckInfo contains acknowledgement of a client-side tool call.
+ * Sent by the client to indicate it received the tool call and is working on it.
+ */
+export interface ToolCallAckInfo {
+  /**
+   * CallID matches the ToolCallInfo.ID being acknowledged.
+   */
+  call_id: string;
+}
+/**
+ * ToolCallNackInfo contains rejection of a client-side tool call.
+ * Sent by the client to indicate it cannot or will not handle the tool call.
+ */
+export interface ToolCallNackInfo {
+  /**
+   * CallID matches the ToolCallInfo.ID being rejected.
+   */
+  call_id: string;
+  /**
+   * Reason explains why the tool call was rejected (e.g. "tool not supported").
+   */
+  reason: string;
+}
 /**
  * ClientToolResultInfo contains the client's response to a client-side tool call.
  */
@@ -181,6 +207,14 @@ export interface ClientMessage {
    * ToolResult contains the client's response to a client-side tool call.
    */
   tool_result?: ClientToolResultInfo;
+  /**
+   * ToolCallAck acknowledges receipt of a client-side tool call.
+   */
+  tool_call_ack?: ToolCallAckInfo;
+  /**
+   * ToolCallNack rejects a client-side tool call.
+   */
+  tool_call_nack?: ToolCallNackInfo;
 }
 /**
  * ServerMessage represents a message sent from server to client.

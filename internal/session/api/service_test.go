@@ -171,20 +171,11 @@ func TestUpdateSessionStats_AppliesIncrements(t *testing.T) {
 	svc := newServiceWithRegistry(registry, nil)
 
 	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
-		AddInputTokens:  50,
-		AddOutputTokens: 30,
-		AddToolCalls:    2,
-		AddMessages:     1,
-		AddCostUSD:      0.01,
-		SetStatus:       session.SessionStatusCompleted,
+		SetStatus: session.SessionStatusCompleted,
 	})
 	require.NoError(t, err)
 	require.Len(t, warm.updatedSessions, 1)
 	updated := warm.updatedSessions[0]
-	assert.Equal(t, int64(150), updated.TotalInputTokens)
-	assert.Equal(t, int64(80), updated.TotalOutputTokens)
-	assert.Equal(t, int32(5), updated.ToolCallCount)
-	assert.Equal(t, int32(6), updated.MessageCount)
 	assert.Equal(t, session.SessionStatusCompleted, updated.Status)
 }
 
@@ -209,9 +200,7 @@ func TestUpdateSessionStats_NoStatusChange(t *testing.T) {
 	registry.SetWarmStore(warm)
 	svc := newServiceWithRegistry(registry, nil)
 
-	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
-		AddInputTokens: 10,
-	})
+	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{})
 	require.NoError(t, err)
 	require.Len(t, warm.updatedSessions, 1)
 	assert.Equal(t, session.SessionStatusActive, warm.updatedSessions[0].Status)
@@ -229,8 +218,7 @@ func TestUpdateSessionStats_CompletionTransitionPublishes(t *testing.T) {
 	svc := newServiceWithRegistry(registry, nil)
 
 	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
-		AddInputTokens: 50,
-		SetStatus:      session.SessionStatusCompleted,
+		SetStatus: session.SessionStatusCompleted,
 	})
 	require.NoError(t, err)
 	require.Len(t, warm.updatedSessions, 1)
@@ -250,8 +238,7 @@ func TestUpdateSessionStats_AlreadyCompletedNoRepublish(t *testing.T) {
 
 	// Updating a session that's already completed should still work
 	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
-		AddInputTokens: 10,
-		SetStatus:      session.SessionStatusCompleted,
+		SetStatus: session.SessionStatusCompleted,
 	})
 	require.NoError(t, err)
 	require.Len(t, warm.updatedSessions, 1)
@@ -269,9 +256,7 @@ func TestUpdateSessionStats_NonCompletedStatusSkipsLookup(t *testing.T) {
 	svc := newServiceWithRegistry(registry, nil)
 
 	// Non-completed status should not trigger the completion lookup/publish path
-	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
-		AddInputTokens: 10,
-	})
+	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{})
 	require.NoError(t, err)
 	require.Len(t, warm.updatedSessions, 1)
 	assert.Equal(t, session.SessionStatusActive, warm.updatedSessions[0].Status)
@@ -775,7 +760,7 @@ func TestUpdateSessionStats_RefreshesTTLInHotCache(t *testing.T) {
 	svc := newServiceWithRegistry(registry, nil)
 
 	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
-		AddInputTokens: 10,
+		SetStatus: session.SessionStatusActive,
 	})
 	require.NoError(t, err)
 

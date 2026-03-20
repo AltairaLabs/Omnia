@@ -135,20 +135,8 @@ func loadRuntimeSessionFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) {
 // loadProviderFromCRD resolves the provider from the AgentRuntime CRD and sets
 // the API key environment variable for the PromptKit SDK.
 func loadProviderFromCRD(ctx context.Context, c client.Client, cfg *Config, ar *v1alpha1.AgentRuntime, namespace string) error {
-	// 1. Try spec.providers (named providers map)
 	if len(ar.Spec.Providers) > 0 {
 		return loadFromNamedProviders(ctx, c, cfg, ar.Spec.Providers, namespace)
-	}
-
-	// 2. Try spec.providerRef (legacy CRD reference)
-	if ar.Spec.ProviderRef != nil {
-		return loadFromProviderRef(ctx, c, cfg, *ar.Spec.ProviderRef, namespace)
-	}
-
-	// 3. Try spec.provider (legacy inline config — no secret reading needed)
-	if ar.Spec.Provider != nil {
-		loadFromInlineProvider(cfg, ar.Spec.Provider)
-		return nil
 	}
 
 	return nil
@@ -205,22 +193,6 @@ func loadProviderDefaults(cfg *Config, defaults *v1alpha1.ProviderDefaults) {
 	}
 	if defaults.TruncationStrategy != "" {
 		cfg.TruncationStrategy = string(defaults.TruncationStrategy)
-	}
-}
-
-// loadFromInlineProvider loads config from an inline ProviderConfig.
-func loadFromInlineProvider(cfg *Config, provider *v1alpha1.ProviderConfig) {
-	cfg.ProviderType = string(provider.Type)
-	cfg.Model = provider.Model
-	cfg.BaseURL = provider.BaseURL
-
-	if provider.Config != nil {
-		if provider.Config.ContextWindow != nil {
-			cfg.ContextWindow = int(*provider.Config.ContextWindow)
-		}
-		if provider.Config.TruncationStrategy != "" {
-			cfg.TruncationStrategy = string(provider.Config.TruncationStrategy)
-		}
 	}
 }
 

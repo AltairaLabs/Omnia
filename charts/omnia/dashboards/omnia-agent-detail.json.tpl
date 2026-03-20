@@ -74,7 +74,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(omnia_llm_request_duration_seconds_bucket{agent=\"$agent\", namespace=\"$namespace\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(omnia_provider_request_duration_seconds_bucket{agent=\"$agent\", namespace=\"$namespace\"}[5m])) by (le))",
           "refId": "A"
         }
       ],
@@ -234,17 +234,17 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(omnia_llm_request_duration_seconds_bucket{agent=\"$agent\", namespace=\"$namespace\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(omnia_provider_request_duration_seconds_bucket{agent=\"$agent\", namespace=\"$namespace\"}[5m])) by (le))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(omnia_llm_request_duration_seconds_bucket{agent=\"$agent\", namespace=\"$namespace\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(omnia_provider_request_duration_seconds_bucket{agent=\"$agent\", namespace=\"$namespace\"}[5m])) by (le))",
           "legendFormat": "p95",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(omnia_llm_request_duration_seconds_bucket{agent=\"$agent\", namespace=\"$namespace\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(omnia_provider_request_duration_seconds_bucket{agent=\"$agent\", namespace=\"$namespace\"}[5m])) by (le))",
           "legendFormat": "p99",
           "refId": "C"
         }
@@ -291,12 +291,12 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "sum(rate(omnia_llm_input_tokens_total{agent=\"$agent\", namespace=\"$namespace\"}[5m])) * 60",
+          "expr": "sum(rate(omnia_provider_input_tokens_total{agent=\"$agent\", namespace=\"$namespace\"}[5m])) * 60",
           "legendFormat": "input",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(omnia_llm_output_tokens_total{agent=\"$agent\", namespace=\"$namespace\"}[5m])) * 60",
+          "expr": "sum(rate(omnia_provider_output_tokens_total{agent=\"$agent\", namespace=\"$namespace\"}[5m])) * 60",
           "legendFormat": "output",
           "refId": "B"
         }
@@ -343,7 +343,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "sum by (tool, status) (rate(omnia_runtime_tool_calls_total{agent=\"$agent\", namespace=\"$namespace\"}[5m])) * 60 or vector(0)",
+          "expr": "sum by (tool, status) (rate(omnia_tool_calls_total{agent=\"$agent\", namespace=\"$namespace\"}[5m])) * 60 or vector(0)",
           "legendFormat": "{{`{{tool}}`}} ({{`{{status}}`}})",
           "refId": "A"
         }

@@ -42,12 +42,13 @@ import {
   XCircle,
   Shield,
 } from "lucide-react";
-import { useSessionDetail, useSessionAllMessages, useSessionEvalResults } from "@/hooks/sessions";
-import type { Message, Session, EvalResult } from "@/types";
+import { useSessionDetail, useSessionAllMessages, useSessionEvalResults, useSessionToolCalls, useSessionProviderCalls, useSessionRuntimeEvents } from "@/hooks/sessions";
+import type { Message, Session, ToolCall, ProviderCall, RuntimeEvent, EvalResult } from "@/types";
 import { EvalResultsBadge } from "@/components/sessions/eval-results-badge";
 import { ToolCallBadge } from "@/components/sessions/tool-call-badge";
 import { DebugPanel } from "@/components/sessions/debug-panel";
 import { useDebugPanelStore } from "@/stores/debug-panel-store";
+import { collapseToolCalls } from "@/lib/sessions/collapse-tool-calls";
 import { format as formatDate, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import {
@@ -66,24 +67,9 @@ function getStatusBadge(status: Session["status"]) {
   return <Badge variant={variant}>{label}</Badge>;
 }
 
-/**
- * Parse a tool_call message's content to extract name and arguments.
- */
-function parseToolCallContent(content: string): { name: string; arguments: Record<string, unknown> } {
-  try {
-    const parsed = JSON.parse(content);
-    return { name: parsed.name || "unknown", arguments: parsed.arguments || {} };
-  } catch {
-    return { name: "unknown", arguments: {} };
-  }
-}
-
-function ToolCallMessage({ message }: Readonly<{ message: Message }>) {
+/** Inline tool call indicator rendered from a first-class ToolCall record. */
+function ToolCallIndicator({ toolCall }: Readonly<{ toolCall: ToolCall }>) {
   const openToolCall = useDebugPanelStore((s) => s.openToolCall);
-  const { name } = parseToolCallContent(message.content);
-  const durationStr = message.metadata?.duration_ms;
-  const duration = durationStr ? Number.parseInt(durationStr, 10) : undefined;
-  const status = message.metadata?.status as "success" | "error" | undefined;
 
   return (
     <div className="flex gap-3">
@@ -92,12 +78,12 @@ function ToolCallMessage({ message }: Readonly<{ message: Message }>) {
       </div>
       <button
         className="flex items-center gap-2 border rounded-lg bg-muted/30 px-3 py-1.5 text-left hover:bg-muted/50 transition-colors"
-        onClick={() => message.toolCallId && openToolCall(message.toolCallId)}
+        onClick={() => openToolCall(toolCall.callId || toolCall.id)}
       >
-        <span className="font-mono text-sm font-medium truncate">{name}</span>
-        {status && <ToolCallBadge status={status} />}
-        {duration !== undefined && !Number.isNaN(duration) && (
-          <span className="text-xs text-muted-foreground">{duration}ms</span>
+        <span className="font-mono text-sm font-medium truncate">{toolCall.name}</span>
+        {toolCall.status && <ToolCallBadge status={toolCall.status} />}
+        {toolCall.durationMs !== undefined && (
+          <span className="text-xs text-muted-foreground">{toolCall.durationMs}ms</span>
         )}
         <span className="text-xs text-muted-foreground ml-auto shrink-0">View details &gt;</span>
       </button>
@@ -132,71 +118,10 @@ function getBubbleClassName(isUser: boolean, isSystem: boolean): string {
   return "bg-muted";
 }
 
-/** Compact expandable badge for inline eval results attached to assistant messages. */
-function InlineEvalsBadge({ evals }: Readonly<{ evals: ParsedEval[] }>) {
-  const [expanded, setExpanded] = useState(false);
-  const passed = evals.filter((e) => e.passed).length;
-  const failed = evals.length - passed;
-  const allPassed = failed === 0;
-
-  return (
-    <div className="mt-1">
-      <button
-        className="inline-flex items-center gap-1"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <Badge
-          variant={allPassed ? "secondary" : "destructive"}
-          className={cn(
-            "gap-1 text-xs cursor-pointer",
-            allPassed && "bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400"
-          )}
-        >
-          <Shield className="h-3 w-3" />
-          {allPassed
-            ? `${passed} eval${passed === 1 ? "" : "s"} passed`
-            : `${failed} of ${evals.length} eval${evals.length === 1 ? "" : "s"} failed`}
-        </Badge>
-      </button>
-      {expanded && (
-        <div className="mt-2 space-y-1 max-w-md">
-          {evals.map((e) => (
-            <div key={e.evalID} className="border rounded p-2 text-xs space-y-0.5">
-              <div className="flex items-center gap-2">
-                {e.passed
-                  ? <CheckCircle2 className="h-3 w-3 text-green-500" />
-                  : <XCircle className="h-3 w-3 text-red-500" />
-                }
-                <span className="font-medium font-mono">{e.evalID}</span>
-                <Badge variant="outline" className="text-[10px] px-1 py-0">
-                  {evalTypeLabel(e.evalType)}
-                </Badge>
-                {e.score !== undefined && e.score !== null && (
-                  <span className="text-muted-foreground">{(e.score * 100).toFixed(0)}%</span>
-                )}
-                {e.durationMs !== undefined && e.durationMs > 0 && (
-                  <span className="text-muted-foreground">{e.durationMs}ms</span>
-                )}
-              </div>
-              {e.explanation && <p className="text-muted-foreground pl-5">{e.explanation}</p>}
-              {e.error && <p className="text-red-500 pl-5">{e.error}</p>}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MessageBubble({ message, showTimestamp, evalResults, inlineEvals }: Readonly<{ message: Message; showTimestamp?: boolean; evalResults?: EvalResult[]; inlineEvals?: ParsedEval[] }>) {
+function MessageBubble({ message, showTimestamp, evalResults }: Readonly<{ message: Message; showTimestamp?: boolean; evalResults?: EvalResult[] }>) {
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
   const isSystem = message.role === "system";
-
-  // Tool call messages get their own compact rendering
-  if (message.metadata?.type === "tool_call") {
-    return <ToolCallMessage message={message} />;
-  }
 
   return (
     <div className={cn("flex gap-3", isUser ? "flex-row-reverse" : "flex-row")}>
@@ -224,11 +149,6 @@ function MessageBubble({ message, showTimestamp, evalResults, inlineEvals }: Rea
           <EvalResultsBadge results={evalResults} />
         )}
 
-        {/* Inline eval results from message events */}
-        {inlineEvals && inlineEvals.length > 0 && (
-          <InlineEvalsBadge evals={inlineEvals} />
-        )}
-
         {/* Timestamp and tokens */}
         <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
           {showTimestamp && (
@@ -247,75 +167,16 @@ function MessageBubble({ message, showTimestamp, evalResults, inlineEvals }: Rea
 }
 
 /**
- * Returns true if a message is an eval result event.
- */
-function isEvalMessage(m: Message): boolean {
-  const t = m.metadata?.type;
-  return t === "eval_completed" || t === "eval_failed";
-}
-
-/**
  * Returns true if a message belongs in the conversation view.
  *
- * Conversation messages are: user/assistant messages without a metadata.type,
- * plus tool_call messages (rendered as compact indicators).
- * Everything else (pipeline events, eval events, provider calls, etc.) goes to the Debug panel.
+ * Conversation messages are: user/assistant messages without a metadata.type.
+ * Everything else (pipeline events, eval events, provider calls, tool events, etc.) goes to the Debug panel.
  */
 function isConversationMessage(m: Message): boolean {
   if (m.role === "tool") return false;
-  if (m.metadata?.type === "tool_call") return true;
   if (m.metadata?.type) return false;
   if (m.metadata?.source === "runtime") return false;
   return true;
-}
-
-/** Parsed eval content from a message. */
-interface ParsedEval {
-  evalID: string;
-  evalType: string;
-  trigger: string;
-  passed: boolean;
-  score?: number;
-  durationMs?: number;
-  explanation?: string;
-  message?: string;
-  error?: string;
-}
-
-/** Parse the JSON content of an eval message into structured data. */
-function parseEvalContent(content: string): ParsedEval {
-  try {
-    return JSON.parse(content);
-  } catch {
-    return { evalID: "unknown", evalType: "unknown", trigger: "", passed: false };
-  }
-}
-
-/**
- * Collect eval messages that follow each assistant message.
- * Returns a map from assistant message ID to the parsed eval results.
- */
-function collectEvalsForAssistantMessages(messages: Message[]): Map<string, ParsedEval[]> {
-  const sorted = [...messages].sort(
-    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-  );
-  const evalMap = new Map<string, ParsedEval[]>();
-  let lastAssistantId: string | null = null;
-
-  for (const m of sorted) {
-    if (m.role === "assistant" && !m.metadata?.type) {
-      lastAssistantId = m.id;
-    } else if (isEvalMessage(m) && lastAssistantId) {
-      const existing = evalMap.get(lastAssistantId);
-      const parsed = parseEvalContent(m.content);
-      if (existing) {
-        existing.push(parsed);
-      } else {
-        evalMap.set(lastAssistantId, [parsed]);
-      }
-    }
-  }
-  return evalMap;
 }
 
 const INITIAL_MESSAGE_WINDOW = 50;
@@ -325,30 +186,42 @@ const INITIAL_MESSAGE_WINDOW = 50;
  * Uses windowed rendering for the visible portion, plus server-side pagination
  * via "Load more" to fetch additional pages from the API.
  */
+/** A unified item for interleaving messages and tool calls by timestamp. */
+type ConversationItem =
+  | { kind: "message"; message: Message; id: string; timestamp: string }
+  | { kind: "toolCall"; toolCall: ToolCall; id: string; timestamp: string };
+
 function ConversationMessages({
   messages,
   evalResults,
+  toolCalls,
   hasMore,
   isFetchingMore,
   onLoadMore,
 }: Readonly<{
   messages: Message[];
   evalResults: EvalResult[];
+  toolCalls: ToolCall[];
   hasMore?: boolean;
   isFetchingMore?: boolean;
   onLoadMore?: () => void;
 }>) {
   const [visibleCount, setVisibleCount] = useState(INITIAL_MESSAGE_WINDOW);
   const evalsByMessage = groupEvalResultsByMessageId(evalResults);
-  const inlineEvalsByMessage = collectEvalsForAssistantMessages(messages);
 
-  const sorted = messages
-    .filter(isConversationMessage)
-    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  // Merge messages and tool calls into a single timeline
+  const items: ConversationItem[] = [];
+  for (const m of messages.filter(isConversationMessage)) {
+    items.push({ kind: "message", message: m, id: m.id, timestamp: m.timestamp });
+  }
+  for (const tc of toolCalls) {
+    items.push({ kind: "toolCall", toolCall: tc, id: `tc-${tc.id}`, timestamp: tc.createdAt });
+  }
+  items.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-  const total = sorted.length;
+  const total = items.length;
   const startIndex = Math.max(0, total - visibleCount);
-  const visible = sorted.slice(startIndex);
+  const visible = items.slice(startIndex);
   const remaining = startIndex;
 
   return (
@@ -378,15 +251,18 @@ function ConversationMessages({
           </Button>
         </div>
       )}
-      {visible.map((message) => (
-        <MessageBubble
-          key={message.id}
-          message={message}
-          showTimestamp
-          evalResults={evalsByMessage.get(message.id)}
-          inlineEvals={inlineEvalsByMessage.get(message.id)}
-        />
-      ))}
+      {visible.map((item) =>
+        item.kind === "message" ? (
+          <MessageBubble
+            key={item.id}
+            message={item.message}
+            showTimestamp
+            evalResults={evalsByMessage.get(item.message.id)}
+          />
+        ) : (
+          <ToolCallIndicator key={item.id} toolCall={item.toolCall} />
+        )
+      )}
     </div>
   );
 }
@@ -449,6 +325,10 @@ export default function SessionDetailPage({
   const defaultTab = searchParams.get("tab") ?? "conversation";
   const { data: session, isLoading, error } = useSessionDetail(id);
   const { data: evalResults } = useSessionEvalResults(id);
+  const { data: rawToolCalls } = useSessionToolCalls(id);
+  const toolCalls = rawToolCalls ? collapseToolCalls(rawToolCalls) : undefined;
+  const { data: providerCalls } = useSessionProviderCalls(id);
+  const { data: runtimeEvents } = useSessionRuntimeEvents(id);
   const grafana = useGrafana();
   const sessionDashboardUrl = grafana.enabled && session
     ? buildSessionDashboardUrl(grafana, id, session.agentName, session.agentNamespace)
@@ -521,24 +401,34 @@ export default function SessionDetailPage({
         "",
       ];
 
-      session.messages
-        .filter(isConversationMessage)
-        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-        .forEach((msg) => {
-          if (msg.metadata?.type === "tool_call") {
-            const { name, arguments: args } = parseToolCallContent(msg.content);
+      // Interleave messages and tool calls for export
+      const exportItems: { timestamp: string; render: () => void }[] = [];
+      for (const msg of session.messages.filter(isConversationMessage)) {
+        exportItems.push({
+          timestamp: msg.timestamp,
+          render: () => {
+            const roleLabel = msg.role.charAt(0).toUpperCase() + msg.role.slice(1);
+            lines.push(`### ${roleLabel}`, "", msg.content, "");
+          },
+        });
+      }
+      for (const tc of toolCalls || []) {
+        exportItems.push({
+          timestamp: tc.createdAt,
+          render: () => {
             lines.push(
-              `**Tool Call:** \`${name}\``,
+              `**Tool Call:** \`${tc.name}\``,
               "```json",
-              JSON.stringify(args, null, 2),
+              JSON.stringify(tc.arguments, null, 2),
               "```",
               ""
             );
-          } else {
-            const roleLabel = msg.role.charAt(0).toUpperCase() + msg.role.slice(1);
-            lines.push(`### ${roleLabel}`, "", msg.content, "");
-          }
+          },
         });
+      }
+      exportItems
+        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+        .forEach((item) => item.render());
 
       content = lines.join("\n");
       filename = `session-${session.id}.md`;
@@ -620,18 +510,14 @@ export default function SessionDetailPage({
               <Shield className="h-3.5 w-3.5" />
               Evals
               {(() => {
-                const hasTableResults = evalResults && evalResults.length > 0;
-                const hasMsgResults = session.messages.some(isEvalMessage);
-                if (!hasTableResults && !hasMsgResults) return null;
-                const msgFailed = session.messages.filter((m) => m.metadata?.type === "eval_failed").length;
-                const tableFailed = evalResults?.filter((r) => !r.passed).length ?? 0;
-                const totalFailed = tableFailed + msgFailed;
+                if (!evalResults || evalResults.length === 0) return null;
+                const failed = evalResults.filter((r) => !r.passed).length;
                 return (
                   <Badge
-                    variant={totalFailed > 0 ? "destructive" : "secondary"}
+                    variant={failed > 0 ? "destructive" : "secondary"}
                     className="ml-1 px-1.5 py-0 text-[10px] leading-4"
                   >
-                    {totalFailed > 0 ? `${totalFailed} failed` : "pass"}
+                    {failed > 0 ? `${failed} failed` : "pass"}
                   </Badge>
                 );
               })()}
@@ -641,7 +527,7 @@ export default function SessionDetailPage({
           </TabsList>
 
           <TabsContent value="conversation" className="flex-1 min-h-0 mt-4">
-            <ConversationWithDebugPanel session={session} evalResults={evalResults || []} />
+            <ConversationWithDebugPanel session={session} evalResults={evalResults || []} toolCalls={toolCalls || []} providerCalls={providerCalls || []} runtimeEvents={runtimeEvents || []} />
           </TabsContent>
 
           <TabsContent value="evals" className="mt-4">
@@ -816,10 +702,10 @@ interface AggregatedEval {
   details?: Record<string, unknown>;
 }
 
-/** Extract and aggregate eval items from both sources. Turn evals are averaged by evalId. */
+/** Extract and aggregate eval items from the eval_results table. Turn evals are averaged by evalId. */
 function aggregateEvals(
   results: EvalResult[],
-  messages: Message[],
+  _messages: Message[],
 ): { turnEvals: AggregatedEval[]; sessionEvals: AggregatedEval[] } {
   // Collect all raw items
   interface RawItem {
@@ -838,14 +724,6 @@ function aggregateEvals(
     rawItems.push({
       evalId: r.evalId, evalType: r.evalType, trigger: r.trigger,
       passed: r.passed, score: r.score, durationMs: r.durationMs, details: r.details,
-    });
-  }
-
-  for (const m of messages.filter(isEvalMessage)) {
-    const data = parseEvalContent(m.content);
-    rawItems.push({
-      evalId: data.evalID, evalType: data.evalType, trigger: data.trigger,
-      passed: data.passed, score: data.score, durationMs: data.durationMs,
     });
   }
 
@@ -1042,7 +920,10 @@ function AggregatedEvalRow({ eval_ }: Readonly<{ eval_: AggregatedEval }>) {
 function ConversationWithDebugPanel({
   session,
   evalResults,
-}: Readonly<{ session: Session; evalResults: EvalResult[] }>) {
+  toolCalls,
+  providerCalls,
+  runtimeEvents,
+}: Readonly<{ session: Session; evalResults: EvalResult[]; toolCalls: ToolCall[]; providerCalls: ProviderCall[]; runtimeEvents: RuntimeEvent[] }>) {
   const debugOpen = useDebugPanelStore((s) => s.isOpen);
 
   // Use paginated message loading. Falls back to session.messages while loading.
@@ -1060,6 +941,7 @@ function ConversationWithDebugPanel({
     <ConversationMessages
       messages={messages}
       evalResults={evalResults}
+      toolCalls={toolCalls}
       hasMore={hasMore}
       isFetchingMore={isFetchingMore}
       onLoadMore={fetchMore}
@@ -1074,7 +956,7 @@ function ConversationWithDebugPanel({
             {conversationContent}
           </ScrollArea>
         </Card>
-        <DebugPanel messages={messages} session={session} />
+        <DebugPanel messages={messages} session={session} toolCalls={toolCalls} providerCalls={providerCalls} runtimeEvents={runtimeEvents} evalResults={evalResults} />
       </div>
     );
   }
@@ -1090,7 +972,7 @@ function ConversationWithDebugPanel({
       </ResizablePanel>
       <ResizableHandle withHandle />
       <ResizablePanel defaultSize={30} minSize={15}>
-        <DebugPanel messages={messages} session={session} />
+        <DebugPanel messages={messages} session={session} toolCalls={toolCalls} providerCalls={providerCalls} runtimeEvents={runtimeEvents} evalResults={evalResults} />
       </ResizablePanel>
     </ResizablePanelGroup>
   );

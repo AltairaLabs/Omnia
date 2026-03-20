@@ -2,11 +2,55 @@
 
 export interface ToolCall {
   id: string;
+  callId: string;
+  sessionId: string;
   name: string;
   arguments: Record<string, unknown>;
   result?: unknown;
   status: "pending" | "success" | "error";
+  durationMs?: number;
+  errorMessage?: string;
+  labels?: Record<string, string>;
+  createdAt: string;
+}
+
+export interface ProviderCall {
+  id: string;
+  sessionId: string;
+  provider: string;
+  model: string;
+  status: "pending" | "completed" | "failed";
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedTokens?: number;
+  costUsd?: number;
+  durationMs?: number;
+  finishReason?: string;
+  toolCallCount?: number;
+  errorMessage?: string;
+  labels?: Record<string, string>;
+  createdAt: string;
+}
+
+export interface RuntimeEvent {
+  id: string;
+  sessionId: string;
+  eventType: string;
+  data?: Record<string, unknown>;
+  durationMs?: number;
+  errorMessage?: string;
+  timestamp: string;
+}
+
+/** Inline tool call embedded in a message (live console WebSocket path). */
+export interface MessageToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  result?: unknown;
+  status: string;
   duration?: number; // ms
+  error?: string;
 }
 
 export interface Message {
@@ -14,7 +58,7 @@ export interface Message {
   role: "user" | "assistant" | "system" | "tool";
   content: string;
   timestamp: string; // ISO date string
-  toolCalls?: ToolCall[];
+  toolCalls?: MessageToolCall[];
   toolCallId?: string; // for tool response messages
   metadata?: Record<string, string>;
   tokens?: {
@@ -22,6 +66,8 @@ export interface Message {
     output?: number;
   };
   sequenceNum?: number; // ordering within session, used for pagination cursors
+  hasMedia?: boolean;
+  mediaTypes?: string[];
 }
 
 export interface Session {

@@ -49,7 +49,7 @@ metadata:
   name: nightly-eval
   namespace: default
 spec:
-  configRef:
+  sourceRef:
     name: my-eval-config
   type: evaluation
   evaluation:
@@ -122,7 +122,7 @@ kind: ArenaJob
 metadata:
   name: nightly-eval
 spec:
-  configRef:
+  sourceRef:
     name: my-eval-config
   output:
     type: s3
@@ -159,7 +159,7 @@ kind: ArenaJob
 metadata:
   name: local-eval
 spec:
-  configRef:
+  sourceRef:
     name: my-eval-config
   output:
     type: s3

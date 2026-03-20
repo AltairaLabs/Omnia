@@ -13,9 +13,11 @@ package fleet
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -71,7 +73,7 @@ func TestProvider_Connect(t *testing.T) {
 		p := NewProvider("test", wsURL, nil)
 		err := p.Connect(context.Background())
 		require.NoError(t, err)
-		assert.Equal(t, "sess-connect", p.sessionID)
+		assert.Equal(t, "sess-connect", p.SessionID())
 		_ = p.Close()
 	})
 
@@ -280,7 +282,15 @@ func TestProvider_Predict_AgentError(t *testing.T) {
 }
 
 func TestProvider_Predict_NoUserMessage(t *testing.T) {
-	p := NewProvider("test", "ws://unused", nil)
+	p := providerTestServer(t, func(conn *websocket.Conn) {
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeConnected,
+			SessionID: "sess-no-user",
+			Timestamp: time.Now(),
+		})
+		time.Sleep(time.Second)
+	})
+
 	_, err := p.Predict(context.Background(), providers.PredictionRequest{
 		Messages: []types.Message{
 			{Role: "assistant", Content: "I'm an assistant"},
@@ -399,7 +409,15 @@ func TestProvider_PredictStream_Error(t *testing.T) {
 }
 
 func TestProvider_PredictStream_NoUserMessage(t *testing.T) {
-	p := NewProvider("test", "ws://unused", nil)
+	p := providerTestServer(t, func(conn *websocket.Conn) {
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeConnected,
+			SessionID: "sess-no-user",
+			Timestamp: time.Now(),
+		})
+		time.Sleep(time.Second)
+	})
+
 	_, err := p.PredictStream(context.Background(), providers.PredictionRequest{
 		Messages: []types.Message{
 			{Role: "system", Content: "System prompt"},
@@ -412,6 +430,169 @@ func TestProvider_PredictStream_NoUserMessage(t *testing.T) {
 func TestProvider_Close_NilConn(t *testing.T) {
 	p := NewProvider("test", "ws://unused", nil)
 	assert.NoError(t, p.Close())
+}
+
+func TestProvider_ConversationID_CreatesPerRunSessions(t *testing.T) {
+	var mu sync.Mutex
+	sessionIDs := map[string]bool{}
+
+	wsURL := testServer(t, func(conn *websocket.Conn) {
+		sid := fmt.Sprintf("sess-%d", time.Now().UnixNano())
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeConnected,
+			SessionID: sid,
+			Timestamp: time.Now(),
+		})
+		mu.Lock()
+		sessionIDs[sid] = true
+		mu.Unlock()
+
+		// Echo-respond to each message until connection closes
+		for {
+			_, _, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			writeServerMsg(t, conn, facade.ServerMessage{
+				Type:      facade.MessageTypeDone,
+				SessionID: sid,
+				Content:   "ok",
+				Timestamp: time.Now(),
+			})
+		}
+	})
+
+	p := NewProvider("test-fleet", wsURL, nil)
+	t.Cleanup(func() { _ = p.Close() })
+
+	// Run 1 — conversation_id "run-1"
+	_, err := p.Predict(context.Background(), providers.PredictionRequest{
+		Messages: []types.Message{{Role: "user", Content: "hello"}},
+		Metadata: map[string]any{"conversation_id": "run-1"},
+	})
+	require.NoError(t, err)
+
+	// Run 2 — conversation_id "run-2" (should get a different connection/session)
+	_, err = p.Predict(context.Background(), providers.PredictionRequest{
+		Messages: []types.Message{{Role: "user", Content: "hello"}},
+		Metadata: map[string]any{"conversation_id": "run-2"},
+	})
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Len(t, sessionIDs, 2, "each conversation_id should get its own WebSocket session")
+}
+
+func TestProvider_ConversationID_ReusesSameConnection(t *testing.T) {
+	connectCount := 0
+
+	wsURL := testServer(t, func(conn *websocket.Conn) {
+		connectCount++
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeConnected,
+			SessionID: "sess-reuse",
+			Timestamp: time.Now(),
+		})
+
+		// Echo-respond to each message until connection closes
+		for {
+			_, _, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			writeServerMsg(t, conn, facade.ServerMessage{
+				Type:      facade.MessageTypeDone,
+				SessionID: "sess-reuse",
+				Content:   "ok",
+				Timestamp: time.Now(),
+			})
+		}
+	})
+
+	p := NewProvider("test-fleet", wsURL, nil)
+	t.Cleanup(func() { _ = p.Close() })
+
+	// Two turns in the same conversation
+	for i := range 2 {
+		_, err := p.Predict(context.Background(), providers.PredictionRequest{
+			Messages: []types.Message{{Role: "user", Content: fmt.Sprintf("turn %d", i)}},
+			Metadata: map[string]any{"conversation_id": "same-run"},
+		})
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, 1, connectCount, "same conversation_id should reuse the same connection")
+}
+
+func TestProvider_CloseConversation(t *testing.T) {
+	wsURL := testServer(t, func(conn *websocket.Conn) {
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeConnected,
+			SessionID: "sess-close",
+			Timestamp: time.Now(),
+		})
+		readClientMsg(t, conn)
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeDone,
+			SessionID: "sess-close",
+			Content:   "ok",
+			Timestamp: time.Now(),
+		})
+		time.Sleep(time.Second)
+	})
+
+	p := NewProvider("test-fleet", wsURL, nil)
+	t.Cleanup(func() { _ = p.Close() })
+
+	_, err := p.Predict(context.Background(), providers.PredictionRequest{
+		Messages: []types.Message{{Role: "user", Content: "hello"}},
+		Metadata: map[string]any{"conversation_id": "conv-1"},
+	})
+	require.NoError(t, err)
+
+	p.mu.Lock()
+	assert.Len(t, p.conns, 1)
+	p.mu.Unlock()
+
+	p.CloseConversation("conv-1")
+
+	p.mu.Lock()
+	assert.Len(t, p.conns, 0)
+	p.mu.Unlock()
+}
+
+func TestProvider_FallbackWithoutConversationID(t *testing.T) {
+	p := providerTestServer(t, func(conn *websocket.Conn) {
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeConnected,
+			SessionID: "sess-fallback",
+			Timestamp: time.Now(),
+		})
+		readClientMsg(t, conn)
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeDone,
+			SessionID: "sess-fallback",
+			Content:   "ok",
+			Timestamp: time.Now(),
+		})
+	})
+
+	// No conversation_id in metadata — should use fallback connection
+	resp, err := p.Predict(context.Background(), providers.PredictionRequest{
+		Messages: []types.Message{{Role: "user", Content: "hello"}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "ok", resp.Content)
+}
+
+func TestProvider_NoConnectionNorConversationID(t *testing.T) {
+	p := NewProvider("test", "ws://unused", nil)
+	_, err := p.Predict(context.Background(), providers.PredictionRequest{
+		Messages: []types.Message{{Role: "user", Content: "hello"}},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no connection established")
 }
 
 func TestExtractLastUserMessage(t *testing.T) {

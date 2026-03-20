@@ -26,10 +26,10 @@ vi.mock("@/lib/prometheus-queries", () => ({
       `sum(increase(cost{provider="${filter.provider}"}[${interval}]))`,
   },
   LLM_METRICS: {
-    REQUESTS_TOTAL: "omnia_llm_requests_total",
-    INPUT_TOKENS: "omnia_llm_input_tokens_total",
-    OUTPUT_TOKENS: "omnia_llm_output_tokens_total",
-    COST_USD: "omnia_llm_cost_usd_total",
+    REQUESTS_TOTAL: "omnia_provider_requests_total",
+    INPUT_TOKENS: "omnia_provider_input_tokens_total",
+    OUTPUT_TOKENS: "omnia_provider_output_tokens_total",
+    COST_USD: "omnia_provider_cost_total",
   },
   buildFilter: (filter: { provider: string }) => `provider="${filter.provider}"`,
 }));

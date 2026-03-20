@@ -13,23 +13,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
-import { useAgents } from "@/hooks/agents";
 import { useToast } from "@/hooks/core";
 import { useProjectJobsWithRun, type QuickRunRequest, useProjectDeployment } from "@/hooks/arena";
-import type { ExecutionMode } from "@/types/arena";
 
 export interface QuickRunInitialValues {
   name?: string;
-  executionMode?: ExecutionMode;
-  targetAgent?: string;
   includePatterns?: string;
   excludePatterns?: string;
   verbose?: boolean;
@@ -78,16 +67,11 @@ export function QuickRunDialog({
   const { deployed, running, run } = useProjectJobsWithRun(projectId);
   const { status: deploymentStatus, deploying, deploy } = useProjectDeployment(projectId);
 
-  // Agent list for fleet mode
-  const { data: agents } = useAgents({ phase: "Running" });
-
   // Form state
   const [name, setName] = useState(initialValues?.name ?? "");
   const [includePatterns, setIncludePatterns] = useState(initialValues?.includePatterns ?? "");
   const [excludePatterns, setExcludePatterns] = useState(initialValues?.excludePatterns ?? "");
   const [verbose, setVerbose] = useState(initialValues?.verbose ?? false);
-  const [executionMode, setExecutionMode] = useState<ExecutionMode>(initialValues?.executionMode ?? "direct");
-  const [targetAgent, setTargetAgent] = useState(initialValues?.targetAgent ?? "");
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -123,13 +107,6 @@ export function QuickRunDialog({
         verbose,
         name: trimmedName || undefined,
         scenarios: scenarioFilter,
-        execution:
-          executionMode === "fleet" && targetAgent
-            ? {
-                mode: "fleet",
-                target: { agentRuntimeRef: { name: targetAgent } },
-              }
-            : undefined,
       };
 
       try {
@@ -146,8 +123,6 @@ export function QuickRunDialog({
         setIncludePatterns("");
         setExcludePatterns("");
         setVerbose(false);
-        setExecutionMode("direct");
-        setTargetAgent("");
       } catch (err) {
         toast({
           title: "Run Failed",
@@ -166,8 +141,6 @@ export function QuickRunDialog({
       includePatterns,
       excludePatterns,
       verbose,
-      executionMode,
-      targetAgent,
       toast,
       onOpenChange,
       onJobCreated,
@@ -239,65 +212,6 @@ export function QuickRunDialog({
             </Label>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="execution-mode">Execution Mode</Label>
-            <Select
-              value={executionMode}
-              onValueChange={(value) => {
-                setExecutionMode(value as ExecutionMode);
-                if (value === "direct") setTargetAgent("");
-              }}
-              disabled={isSubmitting}
-            >
-              <SelectTrigger id="execution-mode">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="direct">Direct</SelectItem>
-                <SelectItem value="fleet">Fleet (Against Agent)</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              {executionMode === "direct"
-                ? "Run scenarios directly using configured providers."
-                : "Run scenarios against a deployed agent over WebSocket."}
-            </p>
-          </div>
-
-          {executionMode === "fleet" && (
-            <div className="space-y-2">
-              <Label htmlFor="target-agent">Target Agent</Label>
-              <Select
-                value={targetAgent}
-                onValueChange={setTargetAgent}
-                disabled={isSubmitting}
-              >
-                <SelectTrigger id="target-agent">
-                  <SelectValue placeholder="Select an agent..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {agents && agents.length > 0 ? (
-                    agents.map((agent) => (
-                      <SelectItem
-                        key={agent.metadata.name}
-                        value={agent.metadata.name}
-                      >
-                        {agent.metadata.name}
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <SelectItem value="_none" disabled>
-                      No running agents found
-                    </SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Select a running AgentRuntime to evaluate against.
-              </p>
-            </div>
-          )}
-
           {!deployed && !deploymentStatus?.deployed && (
             <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm">
               <p className="font-medium text-amber-800">Project Not Deployed</p>
@@ -318,7 +232,7 @@ export function QuickRunDialog({
             </Button>
             <Button
               type="submit"
-              disabled={isSubmitting || (executionMode === "fleet" && !targetAgent)}
+              disabled={isSubmitting}
             >
               {isSubmitting ? (
                 <>

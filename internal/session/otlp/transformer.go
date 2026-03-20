@@ -170,7 +170,9 @@ func (t *Transformer) processSpan(ctx context.Context, sc spanContext, span *tra
 		}
 	}
 
-	return t.updateTokenUsage(ctx, sessionID, attrs)
+	// Token usage is auto-derived from the Message.InputTokens/OutputTokens
+	// fields when AppendMessage is called. No separate stats update needed.
+	return nil
 }
 
 // ensureSession creates the session if it does not already exist.
@@ -339,20 +341,8 @@ func applyMessageDefaults(msgs []*session.Message, model string) {
 	}
 }
 
-// updateTokenUsage extracts token counts and applies them as a stats update.
-func (t *Transformer) updateTokenUsage(ctx context.Context, sessionID string, attrs []*commonpb.KeyValue) error {
-	inputTokens, outputTokens := extractTokenUsage(attrs)
-	if inputTokens == 0 && outputTokens == 0 {
-		return nil
-	}
-
-	update := session.SessionStatsUpdate{
-		AddInputTokens:  int32(inputTokens),
-		AddOutputTokens: int32(outputTokens),
-	}
-
-	return t.writer.UpdateSessionStats(ctx, sessionID, update)
-}
+// updateTokenUsage is no longer needed — token counters are auto-derived
+// from Message.InputTokens/OutputTokens in AppendMessage.
 
 // processToolSpan converts a tool.* span into a session message matching
 // the metadata format used by event_store.go handleToolCallCompleted.

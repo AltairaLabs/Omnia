@@ -21,7 +21,6 @@ import (
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -1449,7 +1448,7 @@ var _ = Describe("ArenaJob Controller", func() {
 				RedisAddr: "", // No Redis configured
 			}
 
-			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, nil)
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(count).To(Equal(0))
 		})
@@ -1479,13 +1478,18 @@ var _ = Describe("ArenaJob Controller", func() {
 				{ObjectMeta: metav1.ObjectMeta{Name: "provider-3"}},
 			}
 
+			// Build resolvedGroups so enqueueWorkItems can derive provider IDs
+			resolvedGroups := map[string]*resolvedProviderGroup{
+				"default": {providers: providerCRDs},
+			}
+
 			reconciler := &ArenaJobReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 				Queue:  memQueue,
 			}
 
-			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs, resolvedGroups)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(count).To(Equal(3))
 
@@ -1581,7 +1585,7 @@ spec:
 			// Update WorkspaceContentPath to parent of the workspace tree
 			reconciler.WorkspaceContentPath = filepath.Join(dir, "..")
 
-			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs, nil)
 			Expect(err).NotTo(HaveOccurred())
 			// 2 scenarios × 2 providers = 4 work items
 			Expect(count).To(Equal(4))
@@ -1629,6 +1633,10 @@ spec:
 				{ObjectMeta: metav1.ObjectMeta{Name: "provider-2"}},
 			}
 
+			resolvedGroups := map[string]*resolvedProviderGroup{
+				"default": {providers: providerCRDs},
+			}
+
 			reconciler := &ArenaJobReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
@@ -1636,7 +1644,7 @@ spec:
 				// No WorkspaceContentPath — filesystem unavailable
 			}
 
-			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs, resolvedGroups)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(count).To(Equal(2))
 
@@ -1711,7 +1719,7 @@ spec:
 				WorkspaceContentPath: dir,
 			}
 
-			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs, nil)
 			Expect(err).NotTo(HaveOccurred())
 			// 2 scenarios (wip-test excluded) × 1 provider = 2 items
 			Expect(count).To(Equal(2))
@@ -1751,7 +1759,7 @@ spec:
 				Queue:  memQueue,
 			}
 
-			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, nil)
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(count).To(Equal(1))
 
@@ -1795,6 +1803,10 @@ spec:
 				{ObjectMeta: metav1.ObjectMeta{Name: "provider-2", Namespace: "default"}},
 			}
 
+			resolvedGroups := map[string]*resolvedProviderGroup{
+				"default": {providers: providerCRDs},
+			}
+
 			reconciler := &ArenaJobReconciler{
 				Client:               k8sClient,
 				Scheme:               k8sClient.Scheme(),
@@ -1802,7 +1814,7 @@ spec:
 				WorkspaceContentPath: dir,
 			}
 
-			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs, resolvedGroups)
 			Expect(err).NotTo(HaveOccurred())
 			// Falls back to per-provider: 2 items with ScenarioID "default"
 			Expect(count).To(Equal(2))
@@ -1812,6 +1824,185 @@ spec:
 				Expect(popErr).NotTo(HaveOccurred())
 				Expect(item.ScenarioID).To(Equal("default"))
 			}
+		})
+	})
+
+	Context("When extracting provider IDs for work item matrix", func() {
+		It("should exclude map-mode groups from provider IDs", func() {
+			// Map-mode groups (judges, self-play) are 1:1 config references.
+			// They should NOT create work items in the scenario × provider matrix.
+			testProvider := &corev1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-provider"},
+			}
+			judgeProvider := &corev1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{Name: "judge-haiku"},
+			}
+			resolvedGroups := map[string]*resolvedProviderGroup{
+				"default": {
+					providers: []*corev1alpha1.Provider{testProvider},
+					mapMode:   false,
+				},
+				"judges": {
+					providers: []*corev1alpha1.Provider{judgeProvider},
+					mapMode:   true,
+				},
+			}
+			ids := getProviderIDsFromGroups(resolvedGroups)
+			Expect(ids).To(ContainElement("test-provider"))
+			Expect(ids).NotTo(ContainElement("judge-haiku"))
+			Expect(ids).To(HaveLen(1))
+		})
+
+		It("should exclude map-mode agent groups from provider IDs", func() {
+			resolvedGroups := map[string]*resolvedProviderGroup{
+				"default": {
+					agentWSURLs: map[string]string{"my-agent": "ws://agent:8080"},
+					mapMode:     false,
+				},
+				"selfplay": {
+					agentWSURLs: map[string]string{"sim-agent": "ws://sim:8080"},
+					mapMode:     true,
+				},
+			}
+			ids := getProviderIDsFromGroups(resolvedGroups)
+			Expect(ids).To(ContainElement("agent-my-agent"))
+			Expect(ids).NotTo(ContainElement("agent-sim-agent"))
+			Expect(ids).To(HaveLen(1))
+		})
+
+		It("should include all providers when no map-mode groups exist", func() {
+			p1 := &corev1alpha1.Provider{ObjectMeta: metav1.ObjectMeta{Name: "p1"}}
+			p2 := &corev1alpha1.Provider{ObjectMeta: metav1.ObjectMeta{Name: "p2"}}
+			resolvedGroups := map[string]*resolvedProviderGroup{
+				"default": {
+					providers: []*corev1alpha1.Provider{p1, p2},
+					mapMode:   false,
+				},
+			}
+			ids := getProviderIDsFromGroups(resolvedGroups)
+			Expect(ids).To(HaveLen(2))
+			Expect(ids).To(ContainElement("p1"))
+			Expect(ids).To(ContainElement("p2"))
+		})
+	})
+
+	Context("When resolving provider groups with map mode", func() {
+		It("should set mapMode flag on map-mode groups", func() {
+			// Create an ArenaJob with mixed groups
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "map-mode-test",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{
+					SourceRef: corev1alpha1.LocalObjectReference{Name: "src"},
+					Providers: map[string]omniav1alpha1.ArenaProviderGroup{
+						"default": {
+							Entries: []omniav1alpha1.ArenaProviderEntry{
+								{ProviderRef: &corev1alpha1.ProviderRef{Name: "test-provider"}},
+							},
+						},
+						"judges": {
+							Mapping: map[string]omniav1alpha1.ArenaProviderEntry{
+								"judge-quality": {ProviderRef: &corev1alpha1.ProviderRef{Name: "judge-provider"}},
+							},
+						},
+					},
+				},
+			}
+
+			// Create the provider CRDs
+			testProv := &corev1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-provider",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: corev1alpha1.ProviderSpec{Type: "mock", Model: "mock-model"},
+			}
+			judgeProv := &corev1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "judge-provider",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: corev1alpha1.ProviderSpec{Type: "mock", Model: "mock-model"},
+			}
+			Expect(k8sClient.Create(ctx, testProv)).To(Succeed())
+			Expect(k8sClient.Create(ctx, judgeProv)).To(Succeed())
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			groups, _, err := reconciler.resolveProviderGroups(ctx, arenaJob)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(groups["default"].mapMode).To(BeFalse())
+			Expect(groups["judges"].mapMode).To(BeTrue())
+
+			// Only default group providers should appear in IDs
+			ids := getProviderIDsFromGroups(groups)
+			Expect(ids).To(ContainElement("test-provider"))
+			Expect(ids).NotTo(ContainElement("judge-provider"))
+		})
+	})
+
+	Context("When enqueueing work items with mixed array/map groups", func() {
+		It("should only create work items for array-mode providers", func() {
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mixed-enqueue-test",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{
+					SourceRef: corev1alpha1.LocalObjectReference{Name: "test-source"},
+				},
+			}
+
+			arenaSource := &omniav1alpha1.ArenaSource{
+				Status: omniav1alpha1.ArenaSourceStatus{
+					Artifact: &omniav1alpha1.Artifact{Revision: "v1.0.0"},
+				},
+			}
+
+			testProvider := &corev1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-provider", Namespace: arenaJobNamespace},
+			}
+			judgeProvider := &corev1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{Name: "judge-haiku", Namespace: arenaJobNamespace},
+			}
+
+			// All provider CRDs (flat list from resolveProviderGroups)
+			allProviderCRDs := []*corev1alpha1.Provider{testProvider, judgeProvider}
+
+			// Resolved groups: default is array-mode, judges is map-mode
+			resolvedGroups := map[string]*resolvedProviderGroup{
+				"default": {
+					providers: []*corev1alpha1.Provider{testProvider},
+					mapMode:   false,
+				},
+				"judges": {
+					providers: []*corev1alpha1.Provider{judgeProvider},
+					mapMode:   true,
+				},
+			}
+
+			memQueue := queue.NewMemoryQueueWithDefaults()
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				Queue:  memQueue,
+			}
+
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, allProviderCRDs, resolvedGroups)
+			Expect(err).NotTo(HaveOccurred())
+			// Fallback mode: 1 work item per array-mode provider (NOT 2)
+			Expect(count).To(Equal(1))
+
+			item, popErr := memQueue.Pop(ctx, "mixed-enqueue-test")
+			Expect(popErr).NotTo(HaveOccurred())
+			// Provider ID should be from the array-mode group only
+			Expect(item.ProviderID).To(Equal("test-provider"))
 		})
 	})
 
@@ -2170,771 +2361,6 @@ spec:
 			}
 			result := GetWorkspaceForNamespace(ctx, reconciler.Client, "non-existent-namespace")
 			Expect(result).To(Equal("non-existent-namespace"))
-		})
-	})
-
-	Context("Provider Override Functions", func() {
-		It("should resolve provider overrides using label selectors", func() {
-			By("creating provider CRDs with labels")
-			provider1 := &corev1alpha1.Provider{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-provider-1",
-					Namespace: "default",
-					Labels: map[string]string{
-						"tier": "production",
-						"team": "ml",
-					},
-				},
-				Spec: corev1alpha1.ProviderSpec{
-					Type:  "openai",
-					Model: "gpt-4",
-				},
-			}
-			Expect(k8sClient.Create(ctx, provider1)).To(Succeed())
-			DeferCleanup(func() {
-				_ = k8sClient.Delete(ctx, provider1)
-			})
-
-			provider2 := &corev1alpha1.Provider{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-provider-2",
-					Namespace: "default",
-					Labels: map[string]string{
-						"tier": "staging",
-						"team": "ml",
-					},
-				},
-				Spec: corev1alpha1.ProviderSpec{
-					Type:  "claude",
-					Model: "claude-3-sonnet",
-				},
-			}
-			Expect(k8sClient.Create(ctx, provider2)).To(Succeed())
-			DeferCleanup(func() {
-				_ = k8sClient.Delete(ctx, provider2)
-			})
-
-			By("creating an ArenaJob with provider overrides")
-			arenaJob := &omniav1alpha1.ArenaJob{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "job-with-overrides",
-					Namespace: "default",
-				},
-				Spec: omniav1alpha1.ArenaJobSpec{
-					ProviderOverrides: map[string]omniav1alpha1.ProviderGroupSelector{
-						"default": {
-							Selector: metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"tier": "production",
-								},
-							},
-						},
-					},
-				},
-			}
-
-			reconciler := &ArenaJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			By("resolving provider overrides")
-			providersByGroup, err := reconciler.resolveProviderOverrides(ctx, arenaJob)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(providersByGroup).To(HaveLen(1))
-			Expect(providersByGroup["default"]).To(HaveLen(1))
-			Expect(providersByGroup["default"][0].Name).To(Equal("test-provider-1"))
-		})
-
-		It("should return nil when no provider overrides specified", func() {
-			arenaJob := &omniav1alpha1.ArenaJob{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "job-without-overrides",
-					Namespace: "default",
-				},
-				Spec: omniav1alpha1.ArenaJobSpec{},
-			}
-
-			reconciler := &ArenaJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			providers, err := reconciler.resolveProviderOverrides(ctx, arenaJob)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(providers).To(BeNil())
-		})
-
-		It("should build env vars from provider CRDs with secretRef", func() {
-			providerCRDs := []*corev1alpha1.Provider{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "openai-provider",
-						Namespace: "default",
-					},
-					Spec: corev1alpha1.ProviderSpec{
-						Type:  "openai",
-						Model: "gpt-4",
-						SecretRef: &corev1alpha1.SecretKeyRef{
-							Name: "custom-openai-secret",
-						},
-					},
-				},
-			}
-
-			reconciler := &ArenaJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			envVars := reconciler.buildProviderEnvVarsFromCRDs(providerCRDs)
-			Expect(envVars).NotTo(BeEmpty())
-
-			// Find the OPENAI_API_KEY env var
-			var foundOpenAI bool
-			for _, env := range envVars {
-				if env.Name == "OPENAI_API_KEY" {
-					foundOpenAI = true
-					Expect(env.ValueFrom).NotTo(BeNil())
-					Expect(env.ValueFrom.SecretKeyRef.Name).To(Equal("custom-openai-secret"))
-				}
-			}
-			Expect(foundOpenAI).To(BeTrue())
-		})
-
-		It("should build env vars from provider CRDs without secretRef", func() {
-			providerCRDs := []*corev1alpha1.Provider{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "claude-provider",
-						Namespace: "default",
-					},
-					Spec: corev1alpha1.ProviderSpec{
-						Type:  "claude",
-						Model: "claude-3-opus",
-					},
-				},
-			}
-
-			reconciler := &ArenaJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			envVars := reconciler.buildProviderEnvVarsFromCRDs(providerCRDs)
-			Expect(envVars).NotTo(BeEmpty())
-
-			// Find the ANTHROPIC_API_KEY env var (claude provider uses ANTHROPIC_API_KEY)
-			var foundAnthropic bool
-			for _, env := range envVars {
-				if env.Name == "ANTHROPIC_API_KEY" {
-					foundAnthropic = true
-					Expect(env.ValueFrom).NotTo(BeNil())
-					// Should use default secret naming convention: ANTHROPIC_API_KEY -> anthropic-api-key
-					Expect(env.ValueFrom.SecretKeyRef.Name).To(Equal("anthropic-api-key"))
-				}
-			}
-			Expect(foundAnthropic).To(BeTrue())
-		})
-
-		It("should extract provider IDs from CRDs", func() {
-			providerCRDs := []*corev1alpha1.Provider{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "provider-alpha",
-						Namespace: "default",
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "provider-beta",
-						Namespace: "default",
-					},
-				},
-			}
-
-			reconciler := &ArenaJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			ids := reconciler.getProviderIDsFromCRDs(providerCRDs)
-			Expect(ids).To(Equal([]string{"provider-alpha", "provider-beta"}))
-		})
-
-		It("should deduplicate providers resolved from multiple groups", func() {
-			By("creating a provider that matches multiple selectors")
-			provider := &corev1alpha1.Provider{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "shared-provider",
-					Namespace: "default",
-					Labels: map[string]string{
-						"tier": "production",
-						"role": "judge",
-					},
-				},
-				Spec: corev1alpha1.ProviderSpec{
-					Type:  "openai",
-					Model: "gpt-4",
-				},
-			}
-			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
-			DeferCleanup(func() {
-				_ = k8sClient.Delete(ctx, provider)
-			})
-
-			By("creating an ArenaJob with multiple groups selecting same provider")
-			arenaJob := &omniav1alpha1.ArenaJob{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "job-with-multi-group-overrides",
-					Namespace: "default",
-				},
-				Spec: omniav1alpha1.ArenaJobSpec{
-					ProviderOverrides: map[string]omniav1alpha1.ProviderGroupSelector{
-						"default": {
-							Selector: metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"tier": "production",
-								},
-							},
-						},
-						"judge": {
-							Selector: metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"role": "judge",
-								},
-							},
-						},
-					},
-				},
-			}
-
-			reconciler := &ArenaJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			By("resolving provider overrides - should return per-group")
-			providersByGroup, err := reconciler.resolveProviderOverrides(ctx, arenaJob)
-			Expect(err).NotTo(HaveOccurred())
-			// Should have two groups (default and judge) each with the same provider
-			Expect(providersByGroup).To(HaveLen(2))
-			Expect(providersByGroup["default"]).To(HaveLen(1))
-			Expect(providersByGroup["judge"]).To(HaveLen(1))
-			Expect(providersByGroup["default"][0].Name).To(Equal("shared-provider"))
-			Expect(providersByGroup["judge"][0].Name).To(Equal("shared-provider"))
-		})
-	})
-
-	Context("Tool Registry Overrides", func() {
-		It("should return nil when no tool registry override is specified", func() {
-			arenaJob := &omniav1alpha1.ArenaJob{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "job-without-tool-override",
-					Namespace: "default",
-				},
-				Spec: omniav1alpha1.ArenaJobSpec{},
-			}
-
-			reconciler := &ArenaJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			toolOverrides, err := reconciler.resolveToolRegistryOverride(ctx, arenaJob)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(toolOverrides).To(BeNil())
-		})
-
-		It("should resolve tools from matching ToolRegistry CRDs", func() {
-			By("creating a ToolRegistry with a tool")
-			endpoint := "http://weather-service:8080"
-			toolRegistry := &corev1alpha1.ToolRegistry{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-tool-registry",
-					Namespace: "default",
-					Labels: map[string]string{
-						"environment": "production",
-					},
-				},
-				Spec: corev1alpha1.ToolRegistrySpec{
-					Handlers: []corev1alpha1.HandlerDefinition{
-						{
-							Name: "weather-handler",
-							Type: corev1alpha1.HandlerTypeHTTP,
-							Tool: &corev1alpha1.ToolDefinition{
-								Name:        "get_weather",
-								Description: "Get weather data",
-								InputSchema: apiextensionsv1.JSON{Raw: []byte(`{"type":"object","properties":{"city":{"type":"string"}}}`)},
-							},
-							HTTPConfig: &corev1alpha1.HTTPConfig{
-								Endpoint: endpoint,
-							},
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, toolRegistry)).To(Succeed())
-			DeferCleanup(func() {
-				_ = k8sClient.Delete(ctx, toolRegistry)
-			})
-
-			By("creating an ArenaJob with tool registry override")
-			arenaJob := &omniav1alpha1.ArenaJob{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "job-with-tool-override",
-					Namespace: "default",
-				},
-				Spec: omniav1alpha1.ArenaJobSpec{
-					ToolRegistryOverride: &omniav1alpha1.ToolRegistrySelector{
-						Selector: metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"environment": "production",
-							},
-						},
-					},
-				},
-			}
-
-			reconciler := &ArenaJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			By("resolving tool registry override")
-			toolOverrides, err := reconciler.resolveToolRegistryOverride(ctx, arenaJob)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(toolOverrides).To(HaveLen(1))
-			Expect(toolOverrides).To(HaveKey("get_weather"))
-			Expect(toolOverrides["get_weather"].Endpoint).To(Equal(endpoint))
-			Expect(toolOverrides["get_weather"].RegistryName).To(Equal("test-tool-registry"))
-		})
-
-		It("should return empty map when no registries match selector", func() {
-			By("creating an ArenaJob with non-matching selector")
-			arenaJob := &omniav1alpha1.ArenaJob{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "job-with-nonmatching-override",
-					Namespace: "default",
-				},
-				Spec: omniav1alpha1.ArenaJobSpec{
-					ToolRegistryOverride: &omniav1alpha1.ToolRegistrySelector{
-						Selector: metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"environment": "nonexistent",
-							},
-						},
-					},
-				},
-			}
-
-			reconciler := &ArenaJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			toolOverrides, err := reconciler.resolveToolRegistryOverride(ctx, arenaJob)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(toolOverrides).To(BeNil())
-		})
-	})
-
-	Context("convertProviderToOverride with platform and auth config", func() {
-		It("should pass through platform configuration", func() {
-			provider := &corev1alpha1.Provider{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "bedrock-provider",
-					Namespace: "default",
-				},
-				Spec: corev1alpha1.ProviderSpec{
-					Type:  corev1alpha1.ProviderTypeBedrock,
-					Model: "anthropic.claude-3-sonnet-20240229-v1:0",
-					Platform: &corev1alpha1.PlatformConfig{
-						Type:   corev1alpha1.PlatformTypeAWS,
-						Region: "us-east-1",
-					},
-				},
-			}
-
-			override := convertProviderToOverride(provider)
-
-			Expect(override.ID).To(Equal("bedrock-provider"))
-			Expect(override.Type).To(Equal("bedrock"))
-			Expect(override.Platform).NotTo(BeNil())
-			Expect(override.Platform.Type).To(Equal("aws"))
-			Expect(override.Platform.Region).To(Equal("us-east-1"))
-		})
-
-		It("should pass through auth configuration", func() {
-			provider := &corev1alpha1.Provider{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "bedrock-wi-provider",
-					Namespace: "default",
-				},
-				Spec: corev1alpha1.ProviderSpec{
-					Type:  corev1alpha1.ProviderTypeBedrock,
-					Model: "anthropic.claude-3-sonnet-20240229-v1:0",
-					Platform: &corev1alpha1.PlatformConfig{
-						Type:   corev1alpha1.PlatformTypeAWS,
-						Region: "us-east-1",
-					},
-					Auth: &corev1alpha1.AuthConfig{
-						Type:    corev1alpha1.AuthMethodWorkloadIdentity,
-						RoleArn: "arn:aws:iam::123456789012:role/my-role",
-					},
-				},
-			}
-
-			override := convertProviderToOverride(provider)
-
-			Expect(override.AuthMethod).To(Equal("workloadIdentity"))
-			Expect(override.RoleARN).To(Equal("arn:aws:iam::123456789012:role/my-role"))
-			Expect(override.Platform).NotTo(BeNil())
-		})
-
-		It("should pass through GCP auth with serviceAccountEmail", func() {
-			provider := &corev1alpha1.Provider{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "vertex-wi-provider",
-					Namespace: "default",
-				},
-				Spec: corev1alpha1.ProviderSpec{
-					Type:  corev1alpha1.ProviderTypeVertex,
-					Model: "gemini-1.5-pro",
-					Platform: &corev1alpha1.PlatformConfig{
-						Type:    corev1alpha1.PlatformTypeGCP,
-						Region:  "us-central1",
-						Project: "my-project",
-					},
-					Auth: &corev1alpha1.AuthConfig{
-						Type:                corev1alpha1.AuthMethodWorkloadIdentity,
-						ServiceAccountEmail: "my-sa@my-project.iam.gserviceaccount.com",
-					},
-				},
-			}
-
-			override := convertProviderToOverride(provider)
-
-			Expect(override.AuthMethod).To(Equal("workloadIdentity"))
-			Expect(override.ServiceAccountEmail).To(Equal("my-sa@my-project.iam.gserviceaccount.com"))
-			Expect(override.Platform).NotTo(BeNil())
-			Expect(override.Platform.Project).To(Equal("my-project"))
-		})
-
-		It("should not set auth fields when auth is nil", func() {
-			provider := &corev1alpha1.Provider{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "claude-noauth",
-					Namespace: "default",
-				},
-				Spec: corev1alpha1.ProviderSpec{
-					Type:  corev1alpha1.ProviderTypeClaude,
-					Model: "claude-sonnet-4-20250514",
-				},
-			}
-
-			override := convertProviderToOverride(provider)
-
-			Expect(override.AuthMethod).To(BeEmpty())
-			Expect(override.RoleARN).To(BeEmpty())
-			Expect(override.ServiceAccountEmail).To(BeEmpty())
-			Expect(override.Platform).To(BeNil())
-		})
-	})
-
-	Context("getWorkerServiceAccountName", func() {
-		It("should return empty when WorkerServiceAccountName is not configured", func() {
-			reconciler := &ArenaJobReconciler{
-				Client:                   k8sClient,
-				Scheme:                   k8sClient.Scheme(),
-				WorkerServiceAccountName: "",
-			}
-
-			providerCRDs := []*corev1alpha1.Provider{
-				{
-					Spec: corev1alpha1.ProviderSpec{
-						Type: corev1alpha1.ProviderTypeBedrock,
-						Auth: &corev1alpha1.AuthConfig{
-							Type: corev1alpha1.AuthMethodWorkloadIdentity,
-						},
-					},
-				},
-			}
-
-			Expect(reconciler.getWorkerServiceAccountName(providerCRDs)).To(BeEmpty())
-		})
-
-		It("should return SA name when a provider uses workload identity", func() {
-			reconciler := &ArenaJobReconciler{
-				Client:                   k8sClient,
-				Scheme:                   k8sClient.Scheme(),
-				WorkerServiceAccountName: "my-arena-worker",
-			}
-
-			providerCRDs := []*corev1alpha1.Provider{
-				{
-					Spec: corev1alpha1.ProviderSpec{
-						Type: corev1alpha1.ProviderTypeBedrock,
-						Auth: &corev1alpha1.AuthConfig{
-							Type: corev1alpha1.AuthMethodWorkloadIdentity,
-						},
-					},
-				},
-			}
-
-			Expect(reconciler.getWorkerServiceAccountName(providerCRDs)).To(Equal("my-arena-worker"))
-		})
-
-		It("should return empty when no provider uses workload identity", func() {
-			reconciler := &ArenaJobReconciler{
-				Client:                   k8sClient,
-				Scheme:                   k8sClient.Scheme(),
-				WorkerServiceAccountName: "my-arena-worker",
-			}
-
-			providerCRDs := []*corev1alpha1.Provider{
-				{
-					Spec: corev1alpha1.ProviderSpec{
-						Type: corev1alpha1.ProviderTypeClaude,
-						// No auth config
-					},
-				},
-				{
-					Spec: corev1alpha1.ProviderSpec{
-						Type: corev1alpha1.ProviderTypeBedrock,
-						Auth: &corev1alpha1.AuthConfig{
-							Type: corev1alpha1.AuthMethodAccessKey,
-						},
-					},
-				},
-			}
-
-			Expect(reconciler.getWorkerServiceAccountName(providerCRDs)).To(BeEmpty())
-		})
-
-		It("should return SA name when at least one provider uses workload identity among multiple", func() {
-			reconciler := &ArenaJobReconciler{
-				Client:                   k8sClient,
-				Scheme:                   k8sClient.Scheme(),
-				WorkerServiceAccountName: "my-arena-worker",
-			}
-
-			providerCRDs := []*corev1alpha1.Provider{
-				{
-					Spec: corev1alpha1.ProviderSpec{
-						Type: corev1alpha1.ProviderTypeClaude,
-					},
-				},
-				{
-					Spec: corev1alpha1.ProviderSpec{
-						Type: corev1alpha1.ProviderTypeBedrock,
-						Auth: &corev1alpha1.AuthConfig{
-							Type: corev1alpha1.AuthMethodWorkloadIdentity,
-						},
-					},
-				},
-			}
-
-			Expect(reconciler.getWorkerServiceAccountName(providerCRDs)).To(Equal("my-arena-worker"))
-		})
-
-		It("should return empty when providers list is empty", func() {
-			reconciler := &ArenaJobReconciler{
-				Client:                   k8sClient,
-				Scheme:                   k8sClient.Scheme(),
-				WorkerServiceAccountName: "my-arena-worker",
-			}
-
-			Expect(reconciler.getWorkerServiceAccountName([]*corev1alpha1.Provider{})).To(BeEmpty())
-		})
-	})
-
-	Context("When testing fleet mode helpers", func() {
-		It("should detect fleet mode correctly", func() {
-			// Not fleet mode when execution is nil
-			arenaJob := &omniav1alpha1.ArenaJob{}
-			Expect(isFleetMode(arenaJob)).To(BeFalse())
-
-			// Not fleet mode when mode is direct
-			arenaJob.Spec.Execution = &omniav1alpha1.ExecutionConfig{
-				Mode: omniav1alpha1.ExecutionModeDirect,
-			}
-			Expect(isFleetMode(arenaJob)).To(BeFalse())
-
-			// Fleet mode when mode is fleet
-			arenaJob.Spec.Execution = &omniav1alpha1.ExecutionConfig{
-				Mode: omniav1alpha1.ExecutionModeFleet,
-			}
-			Expect(isFleetMode(arenaJob)).To(BeTrue())
-		})
-
-		It("should build fleet work items per scenario", func() {
-			scenarios := []partitioner.Scenario{
-				{ID: "billing", Name: "Billing Test", Path: "billing.scenario.yaml"},
-				{ID: "auth", Name: "Auth Test", Path: "auth.scenario.yaml"},
-			}
-
-			items := buildFleetWorkItems("fleet-job", "bundle-url", scenarios)
-			Expect(items).To(HaveLen(2))
-			Expect(items[0].ScenarioID).To(Equal("billing"))
-			Expect(items[0].ProviderID).To(BeEmpty())
-			Expect(items[0].JobID).To(Equal("fleet-job"))
-			Expect(items[1].ScenarioID).To(Equal("auth"))
-			Expect(items[1].ProviderID).To(BeEmpty())
-		})
-
-		It("should build single default fleet work item when no scenarios", func() {
-			items := buildFleetWorkItems("fleet-job", "bundle-url", nil)
-			Expect(items).To(HaveLen(1))
-			Expect(items[0].ScenarioID).To(Equal("default"))
-			Expect(items[0].ProviderID).To(BeEmpty())
-		})
-
-		It("should enqueue fleet work items without provider dimension", func() {
-			// Set up filesystem content with proper workspace/namespace structure
-			baseDir := GinkgoT().TempDir()
-			contentDir := filepath.Join(baseDir, "default", arenaJobNamespace, "content")
-			Expect(os.MkdirAll(contentDir, 0o755)).To(Succeed())
-
-			Expect(os.WriteFile(filepath.Join(contentDir, "billing.scenario.yaml"), []byte(`
-metadata:
-  name: Billing Test
-spec:
-  id: billing
-`), 0o644)).To(Succeed())
-
-			Expect(os.WriteFile(filepath.Join(contentDir, "config.arena.yaml"), []byte(`
-spec:
-  scenarios:
-    - file: billing.scenario.yaml
-`), 0o644)).To(Succeed())
-
-			memQueue := queue.NewMemoryQueueWithDefaults()
-			arenaJob := &omniav1alpha1.ArenaJob{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "fleet-enqueue-job",
-					Namespace: arenaJobNamespace,
-				},
-				Spec: omniav1alpha1.ArenaJobSpec{
-					SourceRef: corev1alpha1.LocalObjectReference{Name: arenaSourceName},
-					Execution: &omniav1alpha1.ExecutionConfig{
-						Mode: omniav1alpha1.ExecutionModeFleet,
-					},
-				},
-			}
-
-			arenaSource := &omniav1alpha1.ArenaSource{
-				Status: omniav1alpha1.ArenaSourceStatus{
-					Artifact: &omniav1alpha1.Artifact{
-						Revision:    "v1.0.0",
-						Checksum:    "sha256:abc123",
-						ContentPath: "content",
-					},
-				},
-			}
-
-			reconciler := &ArenaJobReconciler{
-				Client:               k8sClient,
-				Scheme:               k8sClient.Scheme(),
-				Queue:                memQueue,
-				WorkspaceContentPath: baseDir,
-			}
-
-			// Even with providers, fleet mode should create scenario-only items
-			providerCRDs := []*corev1alpha1.Provider{
-				{ObjectMeta: metav1.ObjectMeta{Name: "provider-1"}},
-			}
-
-			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(count).To(Equal(1))
-
-			item, err := memQueue.Pop(ctx, "fleet-enqueue-job")
-			Expect(err).NotTo(HaveOccurred())
-			Expect(item.ScenarioID).To(Equal("billing"))
-			Expect(item.ProviderID).To(BeEmpty())
-		})
-
-		It("should resolve fleet target from AgentRuntime", func() {
-			By("creating an AgentRuntime with service endpoint")
-			agentRuntime := &corev1alpha1.AgentRuntime{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-agent-runtime",
-					Namespace: arenaJobNamespace,
-				},
-				Spec: corev1alpha1.AgentRuntimeSpec{
-					Facade: corev1alpha1.FacadeConfig{
-						Type: corev1alpha1.FacadeTypeWebSocket,
-					},
-					PromptPackRef: corev1alpha1.PromptPackRef{
-						Name: "test-prompt-pack",
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
-
-			// Update status with service endpoint
-			agentRuntime.Status.ServiceEndpoint = "test-agent-runtime.default.svc.cluster.local:8080"
-			Expect(k8sClient.Status().Update(ctx, agentRuntime)).To(Succeed())
-
-			arenaJob := &omniav1alpha1.ArenaJob{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "fleet-resolve-job",
-					Namespace: arenaJobNamespace,
-				},
-				Spec: omniav1alpha1.ArenaJobSpec{
-					SourceRef: corev1alpha1.LocalObjectReference{Name: arenaSourceName},
-					Execution: &omniav1alpha1.ExecutionConfig{
-						Mode: omniav1alpha1.ExecutionModeFleet,
-						Target: &omniav1alpha1.FleetTarget{
-							AgentRuntimeRef: corev1alpha1.LocalObjectReference{
-								Name: "test-agent-runtime",
-							},
-						},
-					},
-				},
-			}
-
-			reconciler := &ArenaJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			wsURL, err := reconciler.resolveFleetTarget(ctx, arenaJob)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(wsURL).To(Equal("ws://test-agent-runtime.default.svc.cluster.local:8080/ws?agent=test-agent-runtime&namespace=" + arenaJobNamespace))
-
-			// Cleanup
-			Expect(k8sClient.Delete(ctx, agentRuntime)).To(Succeed())
-		})
-
-		It("should fail to resolve fleet target when AgentRuntime not found", func() {
-			arenaJob := &omniav1alpha1.ArenaJob{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "fleet-notfound-job",
-					Namespace: arenaJobNamespace,
-				},
-				Spec: omniav1alpha1.ArenaJobSpec{
-					SourceRef: corev1alpha1.LocalObjectReference{Name: arenaSourceName},
-					Execution: &omniav1alpha1.ExecutionConfig{
-						Mode: omniav1alpha1.ExecutionModeFleet,
-						Target: &omniav1alpha1.FleetTarget{
-							AgentRuntimeRef: corev1alpha1.LocalObjectReference{
-								Name: "nonexistent-agent",
-							},
-						},
-					},
-				},
-			}
-
-			reconciler := &ArenaJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			_, err := reconciler.resolveFleetTarget(ctx, arenaJob)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("not found"))
 		})
 	})
 

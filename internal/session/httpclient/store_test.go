@@ -417,9 +417,7 @@ func TestUpdateSessionStats_OK(t *testing.T) {
 	}
 
 	err = store.UpdateSessionStats(context.Background(), created.ID, session.SessionStatsUpdate{
-		AddInputTokens:  100,
-		AddOutputTokens: 50,
-		AddMessages:     1,
+		SetStatus: session.SessionStatusActive,
 	})
 	if err != nil {
 		t.Fatalf("update stats: %v", err)
@@ -434,7 +432,7 @@ func TestUpdateSessionStats_NotFound(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	err := store.UpdateSessionStats(context.Background(), "nonexistent", session.SessionStatsUpdate{
-		AddMessages: 1,
+		SetStatus: session.SessionStatusActive,
 	})
 	if err != session.ErrSessionNotFound {
 		t.Fatalf("expected ErrSessionNotFound, got %v", err)
@@ -452,7 +450,7 @@ func TestUpdateSessionStats_ServerError(t *testing.T) {
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
 	err := store.UpdateSessionStats(context.Background(), "x", session.SessionStatsUpdate{
-		AddMessages: 1,
+		SetStatus: session.SessionStatusActive,
 	})
 	if err == nil {
 		t.Fatal("expected error")
@@ -587,7 +585,7 @@ func TestServerErrorResponses(t *testing.T) {
 		t.Fatal("AppendMessage: expected error")
 	}
 
-	if err := store.UpdateSessionStats(ctx, "x", session.SessionStatsUpdate{AddMessages: 1}); err == nil {
+	if err := store.UpdateSessionStats(ctx, "x", session.SessionStatsUpdate{SetStatus: session.SessionStatusActive}); err == nil {
 		t.Fatal("UpdateSessionStats: expected error")
 	}
 
@@ -1160,5 +1158,144 @@ func TestNewStore_TransportPropagatesTraceContext(t *testing.T) {
 	if !strings.Contains(capturedTraceparent, span.SpanContext().TraceID().String()) {
 		t.Errorf("traceparent %q does not contain trace ID %s",
 			capturedTraceparent, span.SpanContext().TraceID())
+	}
+}
+
+// --- RecordEvalResult tests ---
+
+func TestRecordEvalResult_OK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/eval-results" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		body, _ := io.ReadAll(r.Body)
+		var results []session.EvalResult
+		if err := json.Unmarshal(body, &results); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if len(results) != 1 || results[0].EvalID != "accuracy" {
+			t.Errorf("expected 1 result with evalID=accuracy, got %+v", results)
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard(), WithBufferCapacity(0))
+	defer func() { _ = store.Close() }()
+
+	err := store.RecordEvalResult(context.Background(), "sess-1", session.EvalResult{
+		EvalID:   "accuracy",
+		EvalType: "regex",
+		Trigger:  "every_turn",
+		Passed:   true,
+		Source:   "runtime",
+	})
+	if err != nil {
+		t.Fatalf("RecordEvalResult() error = %v", err)
+	}
+}
+
+func TestRecordEvalResult_BuffersOnFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard(), WithBufferCapacity(100))
+	defer func() { _ = store.Close() }()
+
+	err := store.RecordEvalResult(context.Background(), "sess-1", session.EvalResult{
+		EvalID: "test", EvalType: "regex", Trigger: "every_turn", Source: "runtime",
+	})
+	// Should not return an error — buffered for retry.
+	if err != nil {
+		t.Fatalf("RecordEvalResult() should buffer, got error = %v", err)
+	}
+	if store.Buffered() != 1 {
+		t.Errorf("expected 1 buffered write, got %d", store.Buffered())
+	}
+}
+
+// --- RecordRuntimeEvent tests ---
+
+func TestRecordRuntimeEvent_OK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/sessions/sess-1/events" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard(), WithBufferCapacity(0))
+	defer func() { _ = store.Close() }()
+
+	err := store.RecordRuntimeEvent(context.Background(), "sess-1", session.RuntimeEvent{
+		EventType: "pipeline.started",
+		Timestamp: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("RecordRuntimeEvent() error = %v", err)
+	}
+}
+
+func TestRecordRuntimeEvent_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"session not found"}`))
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard(), WithBufferCapacity(0))
+	defer func() { _ = store.Close() }()
+
+	err := store.RecordRuntimeEvent(context.Background(), "bad-id", session.RuntimeEvent{
+		EventType: "pipeline.started",
+	})
+	if err != session.ErrSessionNotFound {
+		t.Fatalf("expected ErrSessionNotFound, got %v", err)
+	}
+}
+
+// --- GetRuntimeEvents tests ---
+
+func TestGetRuntimeEvents_OK(t *testing.T) {
+	ts := time.Now().Truncate(time.Second)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/sessions/sess-1/events" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]session.RuntimeEvent{
+			{ID: "re-1", EventType: "pipeline.started", Timestamp: ts},
+		})
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard(), WithBufferCapacity(0))
+	defer func() { _ = store.Close() }()
+
+	events, err := store.GetRuntimeEvents(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatalf("GetRuntimeEvents() error = %v", err)
+	}
+	if len(events) != 1 || events[0].EventType != "pipeline.started" {
+		t.Errorf("expected 1 event with type=pipeline.started, got %+v", events)
+	}
+}
+
+func TestGetRuntimeEvents_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"session not found"}`))
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard(), WithBufferCapacity(0))
+	defer func() { _ = store.Close() }()
+
+	_, err := store.GetRuntimeEvents(context.Background(), "bad-id")
+	if err != session.ErrSessionNotFound {
+		t.Fatalf("expected ErrSessionNotFound, got %v", err)
 	}
 }

@@ -1,6 +1,5 @@
 "use client";
 
-import { useMemo } from "react";
 import { useDebugPanelStore } from "@/stores/debug-panel-store";
 import { DebugPanelTabs } from "./debug-panel-tabs";
 import { TimelineTab } from "./timeline-tab";
@@ -9,23 +8,26 @@ import { RawTab } from "./raw-tab";
 import { Button } from "@/components/ui/button";
 import { ChevronUp, ChevronDown, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Message, Session } from "@/types/session";
+import type { Message, Session, ToolCall, ProviderCall, RuntimeEvent } from "@/types/session";
+import type { EvalResult } from "@/types/eval";
 
 interface DebugPanelProps {
   readonly messages: Message[];
   readonly session: Session;
+  readonly toolCalls?: ToolCall[];
+  readonly providerCalls?: ProviderCall[];
+  readonly runtimeEvents?: RuntimeEvent[];
+  readonly evalResults?: EvalResult[];
   readonly className?: string;
 }
 
-export function DebugPanel({ messages, session, className }: DebugPanelProps) {
+export function DebugPanel({ messages, session, toolCalls, providerCalls, runtimeEvents, evalResults, className }: DebugPanelProps) {
   const isOpen = useDebugPanelStore((s) => s.isOpen);
   const activeTab = useDebugPanelStore((s) => s.activeTab);
   const toggle = useDebugPanelStore((s) => s.toggle);
   const close = useDebugPanelStore((s) => s.close);
 
-  const toolCallCount = useMemo(() => {
-    return messages.filter((m) => m.metadata?.type === "tool_call").length;
-  }, [messages]);
+  const toolCallCount = toolCalls?.length ?? 0;
 
   if (!isOpen) {
     return (
@@ -63,9 +65,9 @@ export function DebugPanel({ messages, session, className }: DebugPanelProps) {
         </div>
       </div>
       <div className="flex-1 min-h-0">
-        {activeTab === "timeline" && <TimelineTab messages={messages} />}
-        {activeTab === "toolcalls" && <ToolCallsTab messages={messages} />}
-        {activeTab === "raw" && <RawTab session={session} />}
+        {activeTab === "timeline" && <TimelineTab messages={messages} toolCalls={toolCalls} providerCalls={providerCalls} runtimeEvents={runtimeEvents} />}
+        {activeTab === "toolcalls" && <ToolCallsTab toolCalls={toolCalls || []} />}
+        {activeTab === "raw" && <RawTab session={session} toolCalls={toolCalls} providerCalls={providerCalls} runtimeEvents={runtimeEvents} evalResults={evalResults} />}
       </div>
     </div>
   );

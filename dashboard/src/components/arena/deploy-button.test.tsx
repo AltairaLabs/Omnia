@@ -177,13 +177,13 @@ describe("DeployButton", () => {
     expect(button.querySelector(".text-green-500")).toBeInTheDocument();
   });
 
-  it("should show deploy status indicator when deployed and Failed", () => {
+  it("should show deploy status indicator when deployed and Error", () => {
     mockStatus = {
       deployed: true,
       source: {
         metadata: { name: "test-source" },
         spec: { interval: "5m" },
-        status: { phase: "Failed" },
+        status: { phase: "Error" },
       },
     };
     render(<DeployButton projectId="test-project" />);

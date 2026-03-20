@@ -54,6 +54,8 @@ type Server struct {
 	log               logr.Logger
 	sdkLogger         *slog.Logger
 	packPath          string
+	agentName         string
+	namespace         string
 	promptPackName    string
 	promptPackVersion string
 	promptName        string
@@ -123,6 +125,14 @@ func WithPackPath(path string) ServerOption {
 func WithPromptName(name string) ServerOption {
 	return func(s *Server) {
 		s.promptName = name
+	}
+}
+
+// WithAgentIdentity sets the agent name and namespace for eval result enrichment.
+func WithAgentIdentity(agentName, namespace string) ServerOption {
+	return func(s *Server) {
+		s.agentName = agentName
+		s.namespace = namespace
 	}
 }
 

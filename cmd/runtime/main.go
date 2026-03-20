@@ -231,6 +231,7 @@ func main() {
 		pkruntime.WithSlogLogger(sdkLogger),
 		pkruntime.WithPackPath(cfg.PromptPackPath),
 		pkruntime.WithPromptName(cfg.PromptName),
+		pkruntime.WithAgentIdentity(cfg.AgentName, cfg.Namespace),
 		pkruntime.WithPromptPackName(cfg.PromptPackName),
 		pkruntime.WithStateStore(store),
 		pkruntime.WithModel(cfg.Model),

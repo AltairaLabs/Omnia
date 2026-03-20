@@ -471,8 +471,10 @@ components:
           $ref: '#/components/schemas/LocalObjectReference'
         toolRegistryRef:
           $ref: '#/components/schemas/LocalObjectReference'
-        providerRef:
-          $ref: '#/components/schemas/LocalObjectReference'
+        providers:
+          type: array
+          items:
+            $ref: '#/components/schemas/NamedProviderRef'
         facade:
           $ref: '#/components/schemas/FacadeConfig'
         session:
@@ -489,6 +491,15 @@ components:
           type: string
         namespace:
           type: string
+
+    NamedProviderRef:
+      type: object
+      required: [name, providerRef]
+      properties:
+        name:
+          type: string
+        providerRef:
+          $ref: '#/components/schemas/LocalObjectReference'
 
     FacadeConfig:
       type: object

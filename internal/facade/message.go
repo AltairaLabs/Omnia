@@ -19,9 +19,12 @@ package facade
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
+	"github.com/altairalabs/omnia/internal/session"
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -73,14 +76,7 @@ func (s *Server) handleClientMessage(ctx context.Context, c *Connection, message
 		return
 	}
 
-	// Route client-side tool results to the active handler
-	if clientMsg.Type == MessageTypeToolResult && clientMsg.ToolResult != nil {
-		if router, ok := s.handler.(ClientToolRouter); ok {
-			if router.SendToolResult(c.sessionID, clientMsg.ToolResult) {
-				return
-			}
-		}
-		s.sendError(c, c.sessionID, ErrorCodeInvalidMessage, "no pending tool call")
+	if s.handleToolMessage(ctx, c, &clientMsg, log) {
 		return
 	}
 
@@ -90,6 +86,85 @@ func (s *Server) handleClientMessage(ctx context.Context, c *Connection, message
 	// reading tool_result messages while HandleMessage blocks waiting
 	// for client tool responses.
 	go s.processAndRecordMessage(ctx, c, &clientMsg, log)
+}
+
+// handleToolMessage routes tool-related messages (ACK, NACK, result) to the handler.
+// Returns true if the message was handled, false if it should be processed normally.
+func (s *Server) handleToolMessage(ctx context.Context, c *Connection, clientMsg *ClientMessage, log logr.Logger) bool {
+	// Route tool call ACK to the active handler
+	if clientMsg.Type == MessageTypeToolCallAck && clientMsg.ToolCallAck != nil {
+		if router, ok := s.handler.(ClientToolRouter); ok {
+			router.AckToolCall(c.sessionID, clientMsg.ToolCallAck.CallID)
+		}
+		return true
+	}
+
+	// Route tool call NACK — convert to a rejection tool_result
+	if clientMsg.Type == MessageTypeToolCallNack && clientMsg.ToolCallNack != nil {
+		result := &ClientToolResultInfo{
+			CallID: clientMsg.ToolCallNack.CallID,
+			Error:  clientMsg.ToolCallNack.Reason,
+		}
+		if router, ok := s.handler.(ClientToolRouter); ok {
+			router.SendToolResult(c.sessionID, result)
+		}
+		s.recordClientToolResult(ctx, c.sessionID, result, log)
+		return true
+	}
+
+	// Route client-side tool results to the active handler
+	if clientMsg.Type == MessageTypeToolResult && clientMsg.ToolResult != nil {
+		if router, ok := s.handler.(ClientToolRouter); ok {
+			if router.SendToolResult(c.sessionID, clientMsg.ToolResult) {
+				s.recordClientToolResult(ctx, c.sessionID, clientMsg.ToolResult, log)
+				return true
+			}
+		}
+		s.sendError(c, c.sessionID, ErrorCodeInvalidMessage, "no pending tool call")
+		return true
+	}
+
+	return false
+}
+
+// recordClientToolResult persists a client-side tool result in the session store
+// so that tool calls always have a corresponding resolution in the session history.
+func (s *Server) recordClientToolResult(ctx context.Context, sessionID string, result *ClientToolResultInfo, log logr.Logger) {
+	if s.sessionStore == nil || sessionID == "" {
+		return
+	}
+	var content string
+	if result.Error != "" {
+		content = result.Error
+	} else if result.Result != nil {
+		data, err := json.Marshal(result.Result)
+		if err != nil {
+			content = fmt.Sprintf("%v", result.Result)
+		} else {
+			content = string(data)
+		}
+	}
+
+	metadata := map[string]string{
+		"type": "tool_result",
+	}
+	if result.Error != "" {
+		metadata["is_error"] = "true"
+	}
+
+	msg := session.Message{
+		ID:         uuid.New().String(),
+		Role:       session.RoleSystem,
+		Content:    content,
+		ToolCallID: result.CallID,
+		Timestamp:  time.Now(),
+		Metadata:   metadata,
+	}
+	storeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := s.sessionStore.AppendMessage(storeCtx, sessionID, msg); err != nil {
+		log.Error(err, "failed to record client tool result", "sessionID", sessionID, "callID", result.CallID)
+	}
 }
 
 // processAndRecordMessage processes a client message and records metrics.

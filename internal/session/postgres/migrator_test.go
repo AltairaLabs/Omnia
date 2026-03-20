@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -187,10 +188,18 @@ func TestMigrator_UpDown(t *testing.T) {
 	err = mg.Up()
 	require.NoError(t, err)
 
-	// Verify version
+	// Verify version matches the number of migration files
+	entries, err := MigrationFS.ReadDir("migrations")
+	require.NoError(t, err)
+	var upCount uint
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".up.sql") {
+			upCount++
+		}
+	}
 	v, dirty, err := mg.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(17), v)
+	assert.Equal(t, upCount, v)
 	assert.False(t, dirty)
 
 	// Idempotent — running Up again should succeed
@@ -365,8 +374,8 @@ func TestMigrator_DataOperations(t *testing.T) {
 	// Insert a tool call
 	toolCallID := "c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
 	_, err = db.Exec(`
-		INSERT INTO tool_calls (id, session_id, call_id, name, arguments, status, execution, created_at)
-		VALUES ($1, $2, 'call-1', 'kubectl_get', '{"resource": "pods"}', 'success', 'server', $3)`,
+		INSERT INTO tool_calls (id, session_id, call_id, name, arguments, status, created_at)
+		VALUES ($1, $2, 'call-1', 'kubectl_get', '{"resource": "pods"}', 'success', $3)`,
 		toolCallID, sessionID, now)
 	require.NoError(t, err)
 

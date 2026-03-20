@@ -245,6 +245,8 @@ export function useAgentConsole({
 
       case "tool_call": {
         if (!message.tool_call) break;
+        // ACK immediately so the facade knows we received it
+        connectionRef.current?.sendToolCallAck?.(message.tool_call.id);
         const entry = buildToolCallEntry(message.tool_call);
         // Ensure there's a streaming assistant message to attach the tool call to
         if (!isLastMessageStreamingAssistant(messagesRef.current)) {

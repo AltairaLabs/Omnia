@@ -33,18 +33,18 @@ ArenaJob provides:
 
 ## Spec Fields
 
-### `configRef`
+### `sourceRef`
 
-Reference to the ArenaConfig containing the test configuration.
+Reference to the ArenaSource containing test scenarios and configuration.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Name of the ArenaConfig |
+| `name` | string | Yes | Name of the ArenaSource |
 
 ```yaml
 spec:
-  configRef:
-    name: my-evaluation-config
+  sourceRef:
+    name: my-evaluation-source
 ```
 
 ### `type`
@@ -158,167 +158,148 @@ spec:
     maxReplicas: 20
 ```
 
-### `providerOverrides`
+### `providers`
 
-Override providers for specific groups using Kubernetes label selectors. This allows dynamic provider selection at runtime based on Provider CRD labels.
+Map of group names to lists of provider/agent entries. Groups correspond to the arena config's provider groups (e.g., `"default"`, `"judge"`, `"selfplay"`). When set, provider YAML files from the arena project are ignored and the worker resolves providers directly from CRDs.
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `<groupName>` | object | - | Override for a specific group |
-| `<groupName>.selector` | LabelSelector | Yes | Kubernetes label selector for Provider CRDs |
-
-Groups are defined in the ArenaConfig's pack configuration. Use `*` as a catch-all for groups not explicitly specified.
-
-```yaml
-spec:
-  providerOverrides:
-    default:
-      selector:
-        matchLabels:
-          tier: production
-          team: ml
-    judge:
-      selector:
-        matchLabels:
-          role: evaluator
-        matchExpressions:
-          - key: model-size
-            operator: In
-            values: ["large", "xlarge"]
-```
-
-#### Label Selector Fields
-
-The selector follows standard Kubernetes label selector syntax:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `matchLabels` | map[string]string | Exact label matches (AND logic) |
-| `matchExpressions` | []LabelSelectorRequirement | Advanced matching rules |
-
-**matchExpressions operators:**
-
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `In` | Value in set | `values: ["a", "b"]` |
-| `NotIn` | Value not in set | `values: ["test"]` |
-| `Exists` | Label key exists | (no values needed) |
-| `DoesNotExist` | Label key absent | (no values needed) |
-
-#### Example: Multi-Provider Evaluation
-
-```yaml
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: Provider
-metadata:
-  name: gpt4-prod
-  labels:
-    tier: production
-    provider-type: openai
-spec:
-  type: openai
-  model: gpt-4
----
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: Provider
-metadata:
-  name: claude-judge
-  labels:
-    role: evaluator
-    provider-type: anthropic
-spec:
-  type: claude
-  model: claude-3-opus
----
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: ArenaJob
-metadata:
-  name: eval-with-overrides
-spec:
-  configRef:
-    name: my-config
-  providerOverrides:
-    default:
-      selector:
-        matchLabels:
-          tier: production
-    judge:
-      selector:
-        matchLabels:
-          role: evaluator
-```
-
-### `toolRegistryOverride`
-
-Override tools defined in `arena.config.yaml` with handlers from ToolRegistry CRDs. This allows dynamic tool endpoint resolution at runtime based on Kubernetes label selectors.
+Each entry is an `ArenaProviderEntry` with exactly one of the following fields:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `selector` | LabelSelector | Yes | Kubernetes label selector for ToolRegistry CRDs |
+| `providerRef` | object | Conditional | Reference to a Provider CRD |
+| `providerRef.name` | string | Yes | Name of the Provider resource |
+| `providerRef.namespace` | string | No | Namespace (defaults to the ArenaJob's namespace) |
+| `agentRef` | object | Conditional | Reference to an AgentRuntime CRD |
+| `agentRef.name` | string | Yes | Name of the AgentRuntime resource |
 
-When specified, all tools from matching ToolRegistry CRDs will override tools with matching names in the arena config file. This is useful for:
+A CEL validation rule enforces that exactly one of `providerRef` or `agentRef` is set on each entry. Setting both or neither will be rejected at admission time.
 
-- Switching between mock and real tool implementations
-- Routing tool calls to different endpoints per environment
-- Dynamic service discovery for tool handlers
+Agents and LLM providers are interchangeable in the scenario x provider matrix. An `agentRef` entry causes the worker to connect to the agent over WebSocket instead of making direct LLM API calls.
+
+#### Example: Single Provider Group
 
 ```yaml
 spec:
-  toolRegistryOverride:
-    selector:
-      matchLabels:
-        environment: production
+  providers:
+    default:
+      - providerRef:
+          name: gpt4-prod
 ```
 
-#### How Tool Overrides Work
+#### Example: Multiple Providers in a Group
 
-1. The controller finds all ToolRegistry CRDs matching the label selector
-2. Tools are extracted from each registry's handlers and discovered tools
-3. These tools override any tools with the same name in `arena.config.yaml`
+When a group contains multiple entries, each provider is evaluated against every scenario:
+
+```yaml
+spec:
+  providers:
+    default:
+      - providerRef:
+          name: gpt4-prod
+      - providerRef:
+          name: claude-sonnet
+      - providerRef:
+          name: gemini-pro
+```
+
+#### Example: Separate Judge Provider
+
+Use a dedicated provider group for the judge (evaluator) model:
+
+```yaml
+spec:
+  providers:
+    default:
+      - providerRef:
+          name: gpt4-prod
+      - providerRef:
+          name: claude-sonnet
+    judge:
+      - providerRef:
+          name: claude-opus
+```
+
+#### Example: Agent Entry
+
+Reference a deployed AgentRuntime instead of a raw LLM provider. The worker connects to the agent's WebSocket endpoint:
+
+```yaml
+spec:
+  providers:
+    default:
+      - agentRef:
+          name: my-support-agent
+```
+
+#### Example: Self-Play with Mixed Types
+
+Mix LLM providers and agents in a self-play evaluation:
+
+```yaml
+spec:
+  providers:
+    selfplay:
+      - providerRef:
+          name: gpt4-prod
+      - agentRef:
+          name: my-agent-v2
+    judge:
+      - providerRef:
+          name: claude-opus
+```
+
+#### Example: Cross-Namespace Provider
+
+Reference a Provider in a different namespace:
+
+```yaml
+spec:
+  providers:
+    default:
+      - providerRef:
+          name: shared-gpt4
+          namespace: shared-providers
+```
+
+### `toolRegistries`
+
+List of ToolRegistry CRD references whose discovered tools replace the arena config's tool and MCP server file references. When set, tool YAML files from the arena project are ignored.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Name of the ToolRegistry resource |
+
+```yaml
+spec:
+  toolRegistries:
+    - name: production-tools
+```
+
+#### How Tool Registries Work
+
+1. The controller reads each referenced ToolRegistry CRD
+2. Discovered tools from each registry's status are extracted
+3. These tools replace any tools defined in the arena config files
 4. The worker receives the resolved tool endpoints via configuration
 
-#### Example: Override Mock Tools with Real Implementations
+This is useful for:
+
+- Switching between mock and real tool implementations per environment
+- Routing tool calls to different endpoints
+- Dynamic service discovery for tool handlers
+
+#### Example: Multiple Tool Registries
 
 ```yaml
-# ToolRegistry with real tool implementations
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: ToolRegistry
-metadata:
-  name: production-tools
-  labels:
-    environment: production
 spec:
-  handlers:
-    - name: weather-handler
-      type: http
-      tool:
-        name: get_weather
-        description: Get real weather data
-        inputSchema:
-          type: object
-          properties:
-            city:
-              type: string
-      httpConfig:
-        endpoint: http://weather-api.prod.svc:8080/weather
----
-# ArenaJob using real tools
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: ArenaJob
-metadata:
-  name: eval-with-real-tools
-spec:
-  configRef:
-    name: my-config
-  toolRegistryOverride:
-    selector:
-      matchLabels:
-        environment: production
+  toolRegistries:
+    - name: core-tools
+    - name: billing-tools
 ```
 
-#### Combining with Provider Overrides
+#### Combining Providers and Tool Registries
 
-You can use both `providerOverrides` and `toolRegistryOverride` together for complete runtime configuration:
+You can use both `providers` and `toolRegistries` together for complete CRD-based runtime configuration:
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -326,17 +307,26 @@ kind: ArenaJob
 metadata:
   name: production-eval
 spec:
-  configRef:
-    name: my-config
-  providerOverrides:
+  sourceRef:
+    name: my-source
+  providers:
     default:
-      selector:
-        matchLabels:
-          tier: production
-  toolRegistryOverride:
-    selector:
-      matchLabels:
-        environment: production
+      - providerRef:
+          name: gpt4-prod
+      - providerRef:
+          name: claude-sonnet
+    judge:
+      - providerRef:
+          name: claude-opus
+  toolRegistries:
+    - name: production-tools
+  workers:
+    replicas: 5
+  output:
+    type: s3
+    s3:
+      bucket: arena-results
+      prefix: "evals/"
 ```
 
 ### `output`
@@ -479,7 +469,7 @@ metadata:
   name: basic-eval
   namespace: arena
 spec:
-  configRef:
+  sourceRef:
     name: my-config
 ```
 
@@ -492,7 +482,7 @@ metadata:
   name: parallel-eval
   namespace: arena
 spec:
-  configRef:
+  sourceRef:
     name: provider-comparison
   type: evaluation
   evaluation:
@@ -517,7 +507,7 @@ metadata:
   name: nightly-eval
   namespace: arena
 spec:
-  configRef:
+  sourceRef:
     name: production-tests
   type: evaluation
   workers:
@@ -542,7 +532,7 @@ metadata:
   name: provider-loadtest
   namespace: arena
 spec:
-  configRef:
+  sourceRef:
     name: load-test-config
   type: loadtest
   loadTest:
@@ -568,7 +558,7 @@ metadata:
   name: synthetic-data
   namespace: arena
 spec:
-  configRef:
+  sourceRef:
     name: datagen-config
   type: datagen
   dataGen:

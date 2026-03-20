@@ -159,7 +159,7 @@ describe("ArenaSourcesPage", () => {
         {
           metadata: { name: "s3-source-1" },
           spec: { type: "s3", interval: "1h", s3: { bucket: "my-bucket", prefix: "prompts/" } },
-          status: { phase: "Failed" },
+          status: { phase: "Error" },
         },
       ] as any,
       loading: false,
@@ -183,7 +183,7 @@ describe("ArenaSourcesPage", () => {
 
     // Check status badges
     expect(screen.getByText("Ready")).toBeInTheDocument();
-    expect(screen.getByText("Failed")).toBeInTheDocument();
+    expect(screen.getByText("Error")).toBeInTheDocument();
   });
 
   it("renders Create Source button when user has edit permission", async () => {
@@ -325,7 +325,7 @@ describe("ArenaSourcesPage", () => {
     vi.mocked(useArenaSources).mockReturnValue({
       sources: [
         { metadata: { name: "src-1" }, spec: { type: "configmap", configMap: { name: "cm1" } }, status: { phase: "Ready" } },
-        { metadata: { name: "src-2" }, spec: { type: "configmap", configMap: { name: "cm2" } }, status: { phase: "Failed" } },
+        { metadata: { name: "src-2" }, spec: { type: "configmap", configMap: { name: "cm2" } }, status: { phase: "Error" } },
         { metadata: { name: "src-3" }, spec: { type: "configmap", configMap: { name: "cm3" } }, status: { phase: "Pending" } },
       ] as any,
       loading: false,
@@ -344,7 +344,7 @@ describe("ArenaSourcesPage", () => {
     render(<ArenaSourcesPage />);
 
     expect(screen.getByText("Ready")).toBeInTheDocument();
-    expect(screen.getByText("Failed")).toBeInTheDocument();
+    expect(screen.getByText("Error")).toBeInTheDocument();
     expect(screen.getByText("Pending")).toBeInTheDocument();
   });
 
@@ -774,7 +774,7 @@ describe("ArenaSourcesPage", () => {
     vi.mocked(useArenaSources).mockReturnValue({
       sources: [
         { metadata: { name: "ready-src" }, spec: { type: "configmap", configMap: { name: "cm1" } }, status: { phase: "Ready" } },
-        { metadata: { name: "failed-src" }, spec: { type: "configmap", configMap: { name: "cm2" } }, status: { phase: "Failed" } },
+        { metadata: { name: "failed-src" }, spec: { type: "configmap", configMap: { name: "cm2" } }, status: { phase: "Error" } },
       ] as any,
       loading: false,
       error: null,
@@ -799,6 +799,6 @@ describe("ArenaSourcesPage", () => {
     expect(screen.getByText("ready-src")).toBeInTheDocument();
     expect(screen.getByText("failed-src")).toBeInTheDocument();
     expect(screen.getByText("Ready")).toBeInTheDocument();
-    expect(screen.getByText("Failed")).toBeInTheDocument();
+    expect(screen.getByText("Error")).toBeInTheDocument();
   });
 });

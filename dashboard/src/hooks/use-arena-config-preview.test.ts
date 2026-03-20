@@ -30,6 +30,8 @@ describe("estimateWorkItems", () => {
   ): ArenaConfigPreview => ({
     scenarioCount,
     configProviderCount,
+    requiredGroups: [],
+    providerRefs: [],
     loaded: true,
     loading: false,
     error: null,
@@ -38,6 +40,8 @@ describe("estimateWorkItems", () => {
   const unloadedConfig: ArenaConfigPreview = {
     scenarioCount: 0,
     configProviderCount: 0,
+    requiredGroups: [],
+    providerRefs: [],
     loaded: false,
     loading: false,
     error: null,
@@ -45,7 +49,7 @@ describe("estimateWorkItems", () => {
 
   describe("when config is not loaded", () => {
     it("returns 1 work item and 1 worker", () => {
-      const result = estimateWorkItems(unloadedConfig, "direct", false, 0, 0);
+      const result = estimateWorkItems(unloadedConfig, 0, 0);
 
       expect(result.workItems).toBe(1);
       expect(result.recommendedWorkers).toBe(1);
@@ -53,173 +57,18 @@ describe("estimateWorkItems", () => {
     });
   });
 
-  describe("direct mode without provider overrides", () => {
-    it("returns 1 work item regardless of scenario count", () => {
-      const result = estimateWorkItems(
-        loadedConfig(5, 2),
-        "direct",
-        false,
-        0,
-        0
-      );
-
-      expect(result.workItems).toBe(1);
-      expect(result.recommendedWorkers).toBe(1);
-      expect(result.description).toContain("5 scenarios");
-      expect(result.description).toContain("single work item");
-    });
-
-    it("handles 1 scenario", () => {
-      const result = estimateWorkItems(
-        loadedConfig(1, 0),
-        "direct",
-        false,
-        0,
-        0
-      );
-
-      expect(result.workItems).toBe(1);
-      expect(result.description).toContain("1 scenario");
-    });
-  });
-
-  describe("direct mode with provider overrides", () => {
+  describe("with providers specified", () => {
     it("returns scenarios x providers matrix", () => {
-      const result = estimateWorkItems(
-        loadedConfig(3, 2),
-        "direct",
-        true,
-        4,
-        0
-      );
+      const result = estimateWorkItems(loadedConfig(3, 2), 4, 0);
 
-      expect(result.workItems).toBe(12); // 3 scenarios x 4 override providers
+      expect(result.workItems).toBe(12); // 3 scenarios x 4 providers
       expect(result.recommendedWorkers).toBe(12);
       expect(result.description).toContain("3 scenarios");
       expect(result.description).toContain("4 providers");
     });
 
-    it("treats 0 override providers as 1 work item", () => {
-      // Provider overrides enabled but no providers match the selector
-      const result = estimateWorkItems(
-        loadedConfig(3, 2),
-        "direct",
-        true,
-        0,
-        0
-      );
-
-      // Falls into "no overrides" path since overrideProviderCount is 0
-      expect(result.workItems).toBe(1);
-    });
-
-    it("caps workers at maxWorkerReplicas", () => {
-      const result = estimateWorkItems(
-        loadedConfig(10, 0),
-        "direct",
-        true,
-        5,
-        3
-      );
-
-      expect(result.workItems).toBe(50);
-      expect(result.recommendedWorkers).toBe(3);
-    });
-  });
-
-  describe("fleet mode", () => {
-    it("returns 1 work item per scenario", () => {
-      const result = estimateWorkItems(
-        loadedConfig(5, 3),
-        "fleet",
-        false,
-        0,
-        0
-      );
-
-      expect(result.workItems).toBe(5);
-      expect(result.recommendedWorkers).toBe(5);
-      expect(result.description).toContain("5 scenarios");
-    });
-
-    it("handles 1 scenario", () => {
-      const result = estimateWorkItems(
-        loadedConfig(1, 0),
-        "fleet",
-        false,
-        0,
-        0
-      );
-
-      expect(result.workItems).toBe(1);
-      expect(result.description).toBe("1 scenario");
-    });
-
-    it("caps workers at maxWorkerReplicas", () => {
-      const result = estimateWorkItems(
-        loadedConfig(10, 0),
-        "fleet",
-        false,
-        0,
-        3
-      );
-
-      expect(result.workItems).toBe(10);
-      expect(result.recommendedWorkers).toBe(3);
-    });
-
-    it("ignores provider overrides", () => {
-      const result = estimateWorkItems(
-        loadedConfig(4, 0),
-        "fleet",
-        true,
-        5,
-        0
-      );
-
-      // Fleet mode ignores providers — always 1 item per scenario
-      expect(result.workItems).toBe(4);
-      expect(result.recommendedWorkers).toBe(4);
-    });
-  });
-
-  describe("edge cases", () => {
-    it("uses minimum of 1 scenario when config has 0", () => {
-      const result = estimateWorkItems(
-        loadedConfig(0, 0),
-        "fleet",
-        false,
-        0,
-        0
-      );
-
-      expect(result.workItems).toBe(1);
-      expect(result.recommendedWorkers).toBe(1);
-    });
-
-    it("does not cap when maxWorkerReplicas is 0 (unlimited)", () => {
-      const result = estimateWorkItems(
-        loadedConfig(20, 0),
-        "fleet",
-        false,
-        0,
-        0
-      );
-
-      expect(result.workItems).toBe(20);
-      expect(result.recommendedWorkers).toBe(20);
-    });
-  });
-
-  describe("plural helper coverage", () => {
-    it("uses singular for 1 scenario in direct mode with overrides", () => {
-      const result = estimateWorkItems(
-        loadedConfig(1, 0),
-        "direct",
-        true,
-        1,
-        0
-      );
+    it("handles 1 scenario and 1 provider", () => {
+      const result = estimateWorkItems(loadedConfig(1, 0), 1, 0);
 
       expect(result.workItems).toBe(1);
       expect(result.description).toContain("1 scenario");
@@ -227,6 +76,58 @@ describe("estimateWorkItems", () => {
       // Should not have trailing "s"
       expect(result.description).not.toMatch(/1 scenarios/);
       expect(result.description).not.toMatch(/1 providers/);
+    });
+
+    it("caps workers at maxWorkerReplicas", () => {
+      const result = estimateWorkItems(loadedConfig(10, 0), 5, 3);
+
+      expect(result.workItems).toBe(50);
+      expect(result.recommendedWorkers).toBe(3);
+    });
+  });
+
+  describe("without providers (zero entries)", () => {
+    it("returns 1 fallback work item", () => {
+      const result = estimateWorkItems(loadedConfig(5, 2), 0, 0);
+
+      expect(result.workItems).toBe(1);
+      expect(result.recommendedWorkers).toBe(1);
+      expect(result.description).toContain("no providers specified");
+    });
+  });
+
+  describe("with providers but no scenarios in config", () => {
+    it("returns providers count as work items", () => {
+      const result = estimateWorkItems(loadedConfig(0, 0), 3, 0);
+
+      expect(result.workItems).toBe(3);
+      expect(result.recommendedWorkers).toBe(3);
+      expect(result.description).toContain("3 providers");
+      expect(result.description).toContain("scenarios enumerated at runtime");
+    });
+
+    it("handles 1 provider with no scenarios", () => {
+      const result = estimateWorkItems(loadedConfig(0, 0), 1, 0);
+
+      expect(result.workItems).toBe(1);
+      expect(result.description).toContain("1 provider");
+      expect(result.description).not.toMatch(/1 providers/);
+    });
+  });
+
+  describe("edge cases", () => {
+    it("does not cap when maxWorkerReplicas is 0 (unlimited)", () => {
+      const result = estimateWorkItems(loadedConfig(5, 0), 4, 0);
+
+      expect(result.workItems).toBe(20);
+      expect(result.recommendedWorkers).toBe(20);
+    });
+
+    it("caps workers at maxWorkerReplicas when set", () => {
+      const result = estimateWorkItems(loadedConfig(5, 0), 4, 2);
+
+      expect(result.workItems).toBe(20);
+      expect(result.recommendedWorkers).toBe(2);
     });
   });
 });
@@ -427,6 +328,437 @@ spec:
     });
 
     expect(result.current.loaded).toBe(false);
+  });
+
+  it("extracts required groups only from spec.providers[].group", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+    - file: providers/selfplay.provider.yaml
+      group: selfplay
+    - file: providers/judge.provider.yaml
+      group: judge
+  self_play:
+    enabled: true
+    roles:
+      - id: user-sim
+        provider: user-sim-provider
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    // Only spec.providers[].group values should appear in requiredGroups
+    expect(result.current.requiredGroups).toContain("default");
+    expect(result.current.requiredGroups).toContain("selfplay");
+    expect(result.current.requiredGroups).toContain("judge");
+    expect(result.current.requiredGroups).toHaveLength(3);
+    // Self-play provider ID should NOT be in requiredGroups
+    expect(result.current.requiredGroups).not.toContain("user-sim-provider");
+  });
+
+  it("does not include judge provider IDs in required groups", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+  judges:
+    - name: quality
+      provider: quality-judge
+    - name: safety
+      provider: safety-judge
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    // Only spec.providers[].group — judges are provider ID refs, not groups
+    expect(result.current.requiredGroups).toContain("default");
+    expect(result.current.requiredGroups).toHaveLength(1);
+    expect(result.current.requiredGroups).not.toContain("quality-judge");
+    expect(result.current.requiredGroups).not.toContain("safety-judge");
+    // But they should be in providerRefs
+    expect(result.current.providerRefs).toHaveLength(2);
+  });
+
+  it("does not include judge_spec provider IDs in required groups", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+  judge_specs:
+    safety:
+      provider: safety-judge
+    coherence:
+      provider: coherence-judge
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    // Only spec.providers[].group — judge_specs are provider ID refs, not groups
+    expect(result.current.requiredGroups).toContain("default");
+    expect(result.current.requiredGroups).toHaveLength(1);
+    expect(result.current.requiredGroups).not.toContain("safety-judge");
+    expect(result.current.requiredGroups).not.toContain("coherence-judge");
+    // But they should be in providerRefs
+    expect(result.current.providerRefs).toHaveLength(2);
+  });
+
+  it("separates provider groups from provider ID refs correctly", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+    - file: providers/judge.provider.yaml
+      group: judge
+  self_play:
+    enabled: true
+    roles:
+      - id: sim
+        provider: selfplay-provider
+  judges:
+    - name: quality
+      provider: judge-provider
+  judge_specs:
+    safety:
+      provider: judge-provider
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    // requiredGroups: only from spec.providers[].group
+    expect(result.current.requiredGroups).toContain("default");
+    expect(result.current.requiredGroups).toContain("judge");
+    expect(result.current.requiredGroups).toHaveLength(2);
+    // providerRefs: self-play, judges, judge_specs provider IDs
+    expect(result.current.providerRefs.map((r) => r.id)).toContain("selfplay-provider");
+    expect(result.current.providerRefs.map((r) => r.id)).toContain("judge-provider");
+  });
+
+  it("returns empty required groups when no providers or self-play", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  scenarios:
+    - file: scenario1.yaml
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    expect(result.current.requiredGroups).toHaveLength(0);
+  });
+
+  it("extracts providerRefs from judges", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+  judges:
+    - name: quality
+      provider: quality-judge
+    - name: safety
+      provider: safety-judge
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    expect(result.current.providerRefs).toHaveLength(2);
+    expect(result.current.providerRefs).toContainEqual({
+      id: "quality-judge",
+      source: "judges",
+      label: 'Judge "quality"',
+    });
+    expect(result.current.providerRefs).toContainEqual({
+      id: "safety-judge",
+      source: "judges",
+      label: 'Judge "safety"',
+    });
+  });
+
+  it("extracts providerRefs from judge_specs", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+  judge_specs:
+    safety:
+      provider: safety-judge
+    coherence:
+      provider: coherence-judge
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    expect(result.current.providerRefs).toHaveLength(2);
+    expect(result.current.providerRefs).toContainEqual({
+      id: "safety-judge",
+      source: "judge_specs",
+      label: 'Judge spec "safety"',
+    });
+    expect(result.current.providerRefs).toContainEqual({
+      id: "coherence-judge",
+      source: "judge_specs",
+      label: 'Judge spec "coherence"',
+    });
+  });
+
+  it("extracts providerRefs from self_play roles", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+  self_play:
+    enabled: true
+    roles:
+      - id: user-sim
+        provider: selfplay
+      - id: adversary
+        provider: adversary-provider
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    expect(result.current.providerRefs).toHaveLength(2);
+    expect(result.current.providerRefs).toContainEqual({
+      id: "selfplay",
+      source: "self_play",
+      label: 'Self-play role "user-sim"',
+    });
+    expect(result.current.providerRefs).toContainEqual({
+      id: "adversary-provider",
+      source: "self_play",
+      label: 'Self-play role "adversary"',
+    });
+  });
+
+  it("extracts self_play providerRefs without explicit enabled flag", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+    - file: providers/selfplay.provider.yaml
+  self_play:
+    personas:
+      - file: personas/detail-planner.persona.yaml
+    roles:
+      - id: gemini-user
+        provider: selfplay
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    expect(result.current.providerRefs).toHaveLength(1);
+    expect(result.current.providerRefs).toContainEqual({
+      id: "selfplay",
+      source: "self_play",
+      label: 'Self-play role "gemini-user"',
+    });
+    // selfplay is a provider ID ref, not a required group
+    expect(result.current.requiredGroups).not.toContain("selfplay");
+    expect(result.current.requiredGroups).toEqual(["default"]);
+  });
+
+  it("extracts providerRefs from all sources, deduplicated by source+id", async () => {
+    const { useWorkspace } = await import("@/contexts/workspace-context");
+    vi.mocked(useWorkspace).mockReturnValue(mockWorkspaceContext);
+
+    const yamlContent = `
+spec:
+  providers:
+    - file: providers/target.provider.yaml
+  self_play:
+    enabled: true
+    roles:
+      - id: user-sim
+        provider: shared-provider
+  judges:
+    - name: quality
+      provider: shared-provider
+    - name: safety
+      provider: safety-judge
+  judge_specs:
+    coherence:
+      provider: shared-provider
+    tone:
+      provider: tone-judge
+`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: yamlContent }),
+    });
+
+    const { result } = renderHook(() =>
+      useArenaConfigPreview("my-source", "config.arena.yaml")
+    );
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    // "shared-provider" appears in all three sources — each source+id combo is unique
+    const refs = result.current.providerRefs;
+    expect(refs).toContainEqual({
+      id: "shared-provider",
+      source: "self_play",
+      label: 'Self-play role "user-sim"',
+    });
+    expect(refs).toContainEqual({
+      id: "shared-provider",
+      source: "judges",
+      label: 'Judge "quality"',
+    });
+    expect(refs).toContainEqual({
+      id: "shared-provider",
+      source: "judge_specs",
+      label: 'Judge spec "coherence"',
+    });
+    expect(refs).toContainEqual({
+      id: "safety-judge",
+      source: "judges",
+      label: 'Judge "safety"',
+    });
+    expect(refs).toContainEqual({
+      id: "tone-judge",
+      source: "judge_specs",
+      label: 'Judge spec "tone"',
+    });
+    // Total: 3 (shared-provider x 3 sources) + safety-judge + tone-judge = 5
+    expect(refs).toHaveLength(5);
   });
 
   it("handles config YAML with empty spec", async () => {

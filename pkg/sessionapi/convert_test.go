@@ -149,7 +149,6 @@ func TestToolCallToAPI(t *testing.T) {
 		Result:       "found it",
 		Status:       session.ToolCallStatusSuccess,
 		DurationMs:   150,
-		Execution:    session.ToolCallExecutionServer,
 		ErrorMessage: "",
 		Labels:       map[string]string{"env": "test"},
 		CreatedAt:    now,
@@ -163,7 +162,6 @@ func TestToolCallToAPI(t *testing.T) {
 	assert.Equal(t, "search", deref(result.Name))
 	assert.Equal(t, Success, *result.Status)
 	assert.Equal(t, int64(150), deref(result.DurationMs))
-	assert.Equal(t, ToolCallExecutionServer, *result.Execution)
 	assert.Nil(t, result.ErrorMessage)
 	assert.Equal(t, map[string]string{"env": "test"}, derefMap(result.Labels))
 	require.NotNil(t, result.Arguments)
@@ -204,22 +202,12 @@ func TestProviderCallToAPI(t *testing.T) {
 func TestStatsUpdateToAPI(t *testing.T) {
 	endedAt := time.Now().Truncate(time.Second)
 	u := session.SessionStatsUpdate{
-		AddInputTokens:  100,
-		AddOutputTokens: 50,
-		AddCostUSD:      0.01,
-		AddToolCalls:    2,
-		AddMessages:     1,
-		SetStatus:       session.SessionStatusCompleted,
-		SetEndedAt:      endedAt,
+		SetStatus:  session.SessionStatusCompleted,
+		SetEndedAt: endedAt,
 	}
 
 	result := StatsUpdateToAPI(u)
 
-	assert.Equal(t, int32(100), deref(result.AddInputTokens))
-	assert.Equal(t, int32(50), deref(result.AddOutputTokens))
-	assert.Equal(t, 0.01, deref(result.AddCostUSD))
-	assert.Equal(t, int32(2), deref(result.AddToolCalls))
-	assert.Equal(t, int32(1), deref(result.AddMessages))
 	assert.Equal(t, SessionStatusCompleted, *result.SetStatus)
 	assert.Equal(t, endedAt, *result.SetEndedAt)
 }
@@ -227,10 +215,8 @@ func TestStatsUpdateToAPI(t *testing.T) {
 func TestStatsUpdateToAPI_NoChange(t *testing.T) {
 	result := StatsUpdateToAPI(session.SessionStatsUpdate{})
 
-	assert.Nil(t, result.AddInputTokens)
 	assert.Nil(t, result.SetStatus)
 	assert.Nil(t, result.SetEndedAt)
-	assert.Nil(t, result.AddCostUSD)
 }
 
 func TestEvalResultToAPI(t *testing.T) {
@@ -420,7 +406,6 @@ func TestToolCallFromAPI(t *testing.T) {
 	u := id
 	now := time.Now().Truncate(time.Second)
 	status := Success
-	exec := ToolCallExecutionClient
 	args := map[string]any{"q": "test"}
 	var result any = "found"
 
@@ -432,7 +417,6 @@ func TestToolCallFromAPI(t *testing.T) {
 		Arguments:  &args,
 		Result:     &result,
 		Status:     &status,
-		Execution:  &exec,
 		DurationMs: ptr(int64(100)),
 		Labels:     &map[string]string{"env": "test"},
 		CreatedAt:  &now,
@@ -444,7 +428,6 @@ func TestToolCallFromAPI(t *testing.T) {
 	assert.Equal(t, id.String(), out.SessionID)
 	assert.Equal(t, "search", out.Name)
 	assert.Equal(t, session.ToolCallStatusSuccess, out.Status)
-	assert.Equal(t, session.ToolCallExecutionClient, out.Execution)
 	assert.Equal(t, "test", out.Arguments["q"])
 	assert.Equal(t, "found", out.Result)
 	assert.Equal(t, int64(100), out.DurationMs)
@@ -609,7 +592,6 @@ func TestToolCallRoundTrip(t *testing.T) {
 		Arguments:  map[string]any{"q": "test"},
 		Status:     session.ToolCallStatusSuccess,
 		DurationMs: 150,
-		Execution:  session.ToolCallExecutionServer,
 		Labels:     map[string]string{"env": "test"},
 		CreatedAt:  now,
 	}
@@ -622,7 +604,6 @@ func TestToolCallRoundTrip(t *testing.T) {
 	assert.Equal(t, original.CallID, roundTripped.CallID)
 	assert.Equal(t, original.Name, roundTripped.Name)
 	assert.Equal(t, original.Status, roundTripped.Status)
-	assert.Equal(t, original.Execution, roundTripped.Execution)
 	assert.Equal(t, original.DurationMs, roundTripped.DurationMs)
 	assert.Equal(t, original.Labels, roundTripped.Labels)
 	assert.Equal(t, original.CreatedAt, roundTripped.CreatedAt)
@@ -699,14 +680,10 @@ func TestEvalResultDetailsRoundTrip(t *testing.T) {
 }
 
 func TestStatsUpdateRoundTrip_EmptyStatus(t *testing.T) {
-	u := session.SessionStatsUpdate{
-		AddInputTokens: 100,
-		AddMessages:    1,
-	}
+	u := session.SessionStatsUpdate{}
 
 	result := StatsUpdateToAPI(u)
 
 	assert.Nil(t, result.SetStatus, "empty status should produce nil")
 	assert.Nil(t, result.SetEndedAt, "zero time should produce nil")
-	assert.Equal(t, int32(100), deref(result.AddInputTokens))
 }

@@ -14,6 +14,7 @@ import { FrameworkBadge } from "./framework-badge";
 import { CostBadge } from "@/components/cost";
 import { useAgentCost } from "@/hooks/agents";
 import type { AgentRuntime } from "@/types";
+import { getDefaultProviderRef } from "@/types/agent-runtime";
 
 interface AgentTableProps {
   agents: AgentRuntime[];
@@ -94,7 +95,7 @@ export function AgentTable({ agents }: Readonly<AgentTableProps>) {
                 {agent.status?.replicas?.desired ?? agent.spec.runtime?.replicas ?? 1}
               </TableCell>
               <TableCell className="capitalize">
-                {agent.spec.providerRef?.name || agent.spec.provider?.type || "-"}
+                {getDefaultProviderRef(agent.spec)?.name || "-"}
               </TableCell>
               <TableCell>
                 <AgentCostCell

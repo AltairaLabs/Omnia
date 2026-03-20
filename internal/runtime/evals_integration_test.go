@@ -520,8 +520,8 @@ func TestEvalIntegration_ResultWriterCapture(t *testing.T) {
 	writer := newTestResultWriter()
 
 	results := []evals.EvalResult{
-		{EvalID: "e1", Type: "contains", Passed: true},
-		{EvalID: "e2", Type: "regex", Passed: false},
+		{EvalID: "e1", Type: "contains", Value: true},
+		{EvalID: "e2", Type: "regex", Value: false},
 	}
 
 	err := writer.WriteResults(context.Background(), results)

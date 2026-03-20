@@ -123,25 +123,16 @@ func sendMessage(conn Conn, sessionID, content string) error {
 
 // collectTurnResponse reads server messages until a "done" message is received,
 // accumulating assistant text, tool calls, and tool results into the transcript.
-func collectTurnResponse(ctx context.Context, conn Conn) ([]Message, error) {
+// When a tool_call is received, it immediately sends a rejection since arena fleet
+// clients don't execute client tools.
+func collectTurnResponse(ctx context.Context, conn Conn, sessionID string) ([]Message, error) {
 	var messages []Message
 	var assistantText string
 
 	for {
-		select {
-		case <-ctx.Done():
-			return messages, ctx.Err()
-		default:
-		}
-
-		_, data, err := conn.ReadMessage()
+		msg, err := readServerMessage(ctx, conn)
 		if err != nil {
-			return messages, fmt.Errorf("read error during turn: %w", err)
-		}
-
-		var msg facade.ServerMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return messages, fmt.Errorf("failed to parse server message: %w", err)
+			return messages, err
 		}
 
 		switch msg.Type {
@@ -149,26 +140,16 @@ func collectTurnResponse(ctx context.Context, conn Conn) ([]Message, error) {
 			assistantText += msg.GetTextContent()
 
 		case facade.MessageTypeDone:
-			// Append any final content from the done message
-			if doneText := msg.GetTextContent(); doneText != "" {
-				assistantText += doneText
-			}
-			if assistantText != "" {
-				messages = append(messages, Message{
-					Role:      "assistant",
-					Content:   assistantText,
-					Timestamp: msg.Timestamp,
-				})
-			}
+			messages = appendDoneMessage(messages, &assistantText, msg)
 			return messages, nil
 
 		case facade.MessageTypeToolCall:
-			messages = append(messages, Message{
-				Role:      "tool_call",
-				Content:   msg.ToolCall.Name,
-				ToolCall:  msg.ToolCall,
-				Timestamp: msg.Timestamp,
-			})
+			messages = appendToolCallMessage(messages, msg)
+			if msg.ToolCall != nil {
+				if err := rejectToolCall(conn, sessionID, msg.ToolCall.ID); err != nil {
+					return messages, err
+				}
+			}
 
 		case facade.MessageTypeToolResult:
 			messages = append(messages, Message{
@@ -178,11 +159,81 @@ func collectTurnResponse(ctx context.Context, conn Conn) ([]Message, error) {
 			})
 
 		case facade.MessageTypeError:
-			errMsg := "unknown error"
-			if msg.Error != nil {
-				errMsg = msg.Error.Message
-			}
-			return messages, fmt.Errorf("agent error: %s", errMsg)
+			return messages, agentError(msg)
 		}
 	}
+}
+
+// readServerMessage reads and parses the next server message, checking for context cancellation.
+func readServerMessage(ctx context.Context, conn Conn) (*facade.ServerMessage, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	_, data, err := conn.ReadMessage()
+	if err != nil {
+		return nil, fmt.Errorf("read error during turn: %w", err)
+	}
+
+	var msg facade.ServerMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return nil, fmt.Errorf("failed to parse server message: %w", err)
+	}
+	return &msg, nil
+}
+
+// appendDoneMessage finalizes the assistant text and appends it to the transcript.
+func appendDoneMessage(messages []Message, assistantText *string, msg *facade.ServerMessage) []Message {
+	if doneText := msg.GetTextContent(); doneText != "" {
+		*assistantText += doneText
+	}
+	if *assistantText != "" {
+		messages = append(messages, Message{
+			Role:      "assistant",
+			Content:   *assistantText,
+			Timestamp: msg.Timestamp,
+		})
+	}
+	return messages
+}
+
+// appendToolCallMessage adds a tool_call entry to the transcript.
+func appendToolCallMessage(messages []Message, msg *facade.ServerMessage) []Message {
+	return append(messages, Message{
+		Role:      "tool_call",
+		Content:   msg.ToolCall.Name,
+		ToolCall:  msg.ToolCall,
+		Timestamp: msg.Timestamp,
+	})
+}
+
+// agentError extracts an error from an error-type server message.
+func agentError(msg *facade.ServerMessage) error {
+	errMsg := "unknown error"
+	if msg.Error != nil {
+		errMsg = msg.Error.Message
+	}
+	return fmt.Errorf("agent error: %s", errMsg)
+}
+
+// rejectToolCall sends an immediate tool_result rejection over the WebSocket.
+func rejectToolCall(conn Conn, sessionID, callID string) error {
+	rejection := facade.ClientMessage{
+		Type:      facade.MessageTypeToolResult,
+		SessionID: sessionID,
+		ToolResult: &facade.ClientToolResultInfo{
+			CallID: callID,
+			Error:  "tool execution not available in arena evaluation mode",
+		},
+	}
+	data, err := json.Marshal(rejection)
+	if err != nil {
+		return fmt.Errorf("failed to marshal tool rejection: %w", err)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		return fmt.Errorf("failed to reject tool call: %w", err)
+	}
+	return nil
 }

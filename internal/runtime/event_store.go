@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -35,20 +34,17 @@ import (
 )
 
 // eventAction holds the outputs of converting a single PromptKit event.
-// The message field is always set (backward compatibility); toolCall and
-// providerCall are set only for tool/provider events (dual-write path).
+// For tool/provider events, only the first-class record is set (no legacy message).
+// For eval events, the evalResult field carries the data.
+// For runtime lifecycle events, the event field carries the data.
+// For message events, the message field carries the data.
 type eventAction struct {
 	message      *session.Message
 	toolCall     *session.ToolCall
 	providerCall *session.ProviderCall
+	evalResult   *session.EvalResult
+	event        *session.RuntimeEvent
 	stats        session.SessionStatsUpdate
-}
-
-// callKey tracks a started call so that completed/failed events can upsert
-// the same row in the tool_calls or provider_calls table.
-type callKey struct {
-	id        string
-	createdAt time.Time
 }
 
 // Metadata key constants to avoid string duplication (SonarCloud go:S1192).
@@ -89,13 +85,12 @@ func asPtr[T any](data any) (*T, bool) {
 const defaultWriteConcurrency = 100
 
 type OmniaEventStore struct {
-	sessionStore     session.Store
-	log              logr.Logger
-	toolMetaFn       func(string) (tools.ToolMeta, bool)
-	sem              chan struct{} // bounded concurrency for async writes
-	sessionID        string        // fallback sessionID for events missing it (PromptKit bug workaround)
-	toolCallKeys     sync.Map      // callID → callKey (for tool call upsert correlation)
-	providerCallKeys sync.Map      // callID → callKey (for provider call upsert correlation)
+	sessionStore session.Store
+	log          logr.Logger
+	toolMetaFn   func(string) (tools.ToolMeta, bool)
+	agentMeta    AgentMeta
+	sem          chan struct{} // bounded concurrency for async writes
+	sessionID    string        // fallback sessionID for events missing it (PromptKit bug workaround)
 }
 
 // NewOmniaEventStore creates a new event store that bridges to session-api.
@@ -113,6 +108,19 @@ func NewOmniaEventStore(store session.Store, log logr.Logger) *OmniaEventStore {
 // emitter is created without a session ID (see PromptKit#705).
 func (s *OmniaEventStore) SetSessionID(id string) {
 	s.sessionID = id
+}
+
+// AgentMeta holds agent identity fields for enriching eval results.
+type AgentMeta struct {
+	AgentName         string
+	Namespace         string
+	PromptPackName    string
+	PromptPackVersion string
+}
+
+// SetAgentMeta sets agent identity metadata used to enrich eval results.
+func (s *OmniaEventStore) SetAgentMeta(meta AgentMeta) {
+	s.agentMeta = meta
 }
 
 // SetToolMetaFn sets the function used to look up registry/handler metadata for tools.
@@ -150,6 +158,19 @@ func (s *OmniaEventStore) Append(ctx context.Context, event *events.Event) error
 		s.writeAction(traceCtx, event.SessionID, action)
 	}()
 	return nil
+}
+
+// OnEvent is a Listener-compatible method for wiring the store as a bus subscriber.
+// Events without a SessionID are silently skipped.
+func (s *OmniaEventStore) OnEvent(event *events.Event) {
+	if event.SessionID == "" {
+		if s.sessionID != "" {
+			event.SessionID = s.sessionID
+		} else {
+			return
+		}
+	}
+	_ = s.Append(context.Background(), event)
 }
 
 // Query is a no-op — OmniaEventStore is write-only (session-api is the read path).
@@ -273,22 +294,13 @@ func (s *OmniaEventStore) convertMessageCreated(event *events.Event) (eventActio
 		"index":       strconv.Itoa(data.Index),
 	}
 
-	// Enrich with tool call data if present on assistant messages
+	// Tool calls on assistant messages are recorded via the first-class tool_calls table
+	// (EventToolCallStarted events). Message/tool counters are auto-incremented by AppendMessage.
 	if len(data.ToolCalls) > 0 {
-		metadata[metaKeyType] = "tool_call"
-		toolCallJSON, err := json.Marshal(data.ToolCalls)
-		if err == nil {
-			metadata["tool_calls"] = string(toolCallJSON)
-		}
-		// Use the first tool call ID for linking
-		if data.ToolCalls[0].ID != "" {
-			msg := s.buildMessage(role, content, event.Timestamp, metadata)
-			msg.ToolCallID = data.ToolCalls[0].ID
-			return eventAction{
-				message: &msg,
-				stats:   session.SessionStatsUpdate{AddMessages: 1, AddToolCalls: int32(len(data.ToolCalls))},
-			}, true
-		}
+		msg := s.buildMessage(role, content, event.Timestamp, metadata)
+		return eventAction{
+			message: &msg,
+		}, true
 	}
 
 	// Enrich with tool result data if present on tool messages
@@ -310,6 +322,8 @@ func (s *OmniaEventStore) convertMessageCreated(event *events.Event) (eventActio
 	}
 
 	// Enrich with multimodal content metadata (not the blob data itself)
+	var hasMedia bool
+	var mediaTypes []string
 	if len(data.Parts) > 0 {
 		partsMeta := extractPartsMetadata(data.Parts)
 		if len(partsMeta) > 0 {
@@ -319,13 +333,16 @@ func (s *OmniaEventStore) convertMessageCreated(event *events.Event) (eventActio
 				metadata["multimodal"] = "true"
 				metadata["part_count"] = strconv.Itoa(len(data.Parts))
 			}
+			hasMedia = true
+			mediaTypes = extractMediaTypes(partsMeta)
 		}
 	}
 
 	msg := s.buildMessage(role, content, event.Timestamp, metadata)
+	msg.HasMedia = hasMedia
+	msg.MediaTypes = mediaTypes
 	return eventAction{
 		message: &msg,
-		stats:   session.SessionStatsUpdate{AddMessages: 1},
 	}, true
 }
 
@@ -344,6 +361,19 @@ type partMetadata struct {
 	Caption  string `json:"caption,omitempty"`   // Optional caption
 	Detail   string `json:"detail,omitempty"`    // Vision model detail level
 	HasData  bool   `json:"has_data,omitempty"`  // Whether blob data was present (but stripped)
+}
+
+// extractMediaTypes returns distinct media types from part metadata.
+func extractMediaTypes(metas []partMetadata) []string {
+	seen := make(map[string]struct{})
+	var types []string
+	for _, m := range metas {
+		if _, ok := seen[m.Type]; !ok {
+			seen[m.Type] = struct{}{}
+			types = append(types, m.Type)
+		}
+	}
+	return types
 }
 
 // textFromParts returns concatenated text content from content parts.
@@ -417,14 +447,12 @@ func (s *OmniaEventStore) convertMessageUpdated(event *events.Event) (eventActio
 	msg := s.buildMessage(session.RoleSystem, string(content), event.Timestamp, metadata)
 	msg.InputTokens = int32(data.InputTokens)
 	msg.OutputTokens = int32(data.OutputTokens)
+	msg.CostUSD = data.TotalCost
 
+	// Token/cost data is stored on the message row for historical queries.
+	// Session-level counters are derived from provider_calls via RecordProviderCall.
 	return eventAction{
 		message: &msg,
-		stats: session.SessionStatsUpdate{
-			AddInputTokens:  int32(data.InputTokens),
-			AddOutputTokens: int32(data.OutputTokens),
-			AddCostUSD:      data.TotalCost,
-		},
 	}, true
 }
 
@@ -452,73 +480,30 @@ const (
 	metaKeyRegistryNamespace = "registry_namespace"
 )
 
-// enrichToolMeta adds registry/handler metadata to the map if available.
-func (s *OmniaEventStore) enrichToolMeta(metadata map[string]string, toolName string) {
-	if s.toolMetaFn == nil {
-		return
-	}
-	meta, ok := s.toolMetaFn(toolName)
-	if !ok {
-		return
-	}
-	metadata[metaKeyHandlerName] = meta.HandlerName
-	metadata[metaKeyHandlerType] = meta.HandlerType
-	metadata[metaKeyRegistryName] = meta.RegistryName
-	metadata[metaKeyRegistryNamespace] = meta.RegistryNamespace
-}
-
 // --- Tool call events ---
 
-// convertToolCallStarted creates a tool_call message AND a ToolCall record (dual-write).
+// convertToolCallStarted creates a first-class ToolCall record.
 func (s *OmniaEventStore) convertToolCallStarted(event *events.Event) (eventAction, bool) {
 	data, ok := asPtr[events.ToolCallStartedData](event.Data)
 	if !ok {
 		return eventAction{}, false
 	}
 
-	content, err := json.Marshal(map[string]interface{}{
-		"name":      data.ToolName,
-		"arguments": data.Args,
-	})
-	if err != nil {
-		s.log.Error(err, "failed to marshal tool call")
-		return eventAction{}, false
-	}
-
-	metadata := map[string]string{
-		metaKeyType:   "tool_call",
-		metaKeySource: metaValueSource,
-	}
-	s.enrichToolMeta(metadata, data.ToolName)
-
-	msg := s.buildMessage(session.RoleAssistant, string(content), event.Timestamp, metadata)
-	msg.ToolCallID = data.CallID
-
-	// Build first-class ToolCall record.
-	tcID := uuid.New().String()
 	tc := session.ToolCall{
-		ID:        tcID,
+		ID:        uuid.New().String(),
 		CallID:    data.CallID,
 		Name:      data.ToolName,
 		Arguments: data.Args,
 		Status:    session.ToolCallStatusPending,
-		Execution: session.ToolCallExecutionServer,
 		CreatedAt: event.Timestamp,
 	}
 	s.enrichToolCallLabels(&tc, data.ToolName)
 
-	// Store the key so completed/failed events can upsert the same row.
-	s.toolCallKeys.Store(data.CallID, callKey{id: tcID, createdAt: event.Timestamp})
-
-	return eventAction{
-		message:  &msg,
-		toolCall: &tc,
-		// No AddToolCalls in stats — RecordToolCall handles the session counter.
-		stats: session.SessionStatsUpdate{},
-	}, true
+	return eventAction{toolCall: &tc}, true
 }
 
-// convertToolCallCompleted creates a tool_result message AND an updated ToolCall record.
+// convertToolCallCompleted records a tool call completion as a new row.
+// Linked to the started record by CallID.
 func (s *OmniaEventStore) convertToolCallCompleted(event *events.Event) (eventAction, bool) {
 	data, ok := asPtr[events.ToolCallCompletedData](event.Data)
 	if !ok {
@@ -527,41 +512,24 @@ func (s *OmniaEventStore) convertToolCallCompleted(event *events.Event) (eventAc
 
 	resultBody := textFromParts(data.Parts)
 
-	payload := map[string]interface{}{
-		"toolName":   data.ToolName,
-		"callID":     data.CallID,
-		"status":     data.Status,
-		"durationMs": data.Duration.Milliseconds(),
+	tc := session.ToolCall{
+		ID:         uuid.New().String(),
+		CallID:     data.CallID,
+		Name:       data.ToolName,
+		Status:     session.ToolCallStatusSuccess,
+		DurationMs: data.Duration.Milliseconds(),
+		CreatedAt:  event.Timestamp,
 	}
-	if resultBody != "" {
-		payload["result"] = resultBody
-	}
-	content, _ := json.Marshal(payload)
-
-	metadata := map[string]string{
-		metaKeyType:       "tool_call_completed",
-		metaKeySource:     metaValueSource,
-		metaKeyToolName:   data.ToolName,
-		metaKeyDurationMs: strconv.FormatInt(data.Duration.Milliseconds(), 10),
-		"status":          data.Status,
-	}
-	s.enrichToolMeta(metadata, data.ToolName)
-
-	msg := s.buildMessage(session.RoleSystem, string(content), event.Timestamp, metadata)
-	msg.ToolCallID = data.CallID
-
-	// Build ToolCall upsert — reuse the ID from the started event.
-	tc := s.buildToolCallUpsert(data.CallID, data.ToolName, event.Timestamp)
-	tc.Status = session.ToolCallStatusSuccess
-	tc.DurationMs = data.Duration.Milliseconds()
 	if resultBody != "" {
 		tc.Result = resultBody
 	}
+	s.enrichToolCallLabels(&tc, data.ToolName)
 
-	return eventAction{message: &msg, toolCall: &tc}, true
+	return eventAction{toolCall: &tc}, true
 }
 
-// convertToolCallFailed creates a tool_result message AND an errored ToolCall record.
+// convertToolCallFailed records a tool call failure as a new row.
+// Linked to the started record by CallID.
 func (s *OmniaEventStore) convertToolCallFailed(event *events.Event) (eventAction, bool) {
 	data, ok := asPtr[events.ToolCallFailedData](event.Data)
 	if !ok {
@@ -573,69 +541,48 @@ func (s *OmniaEventStore) convertToolCallFailed(event *events.Event) (eventActio
 		errMsg = data.Error.Error()
 	}
 
-	metadata := map[string]string{
-		metaKeyType:       "tool_result",
-		metaKeyIsError:    "true",
-		metaKeySource:     metaValueSource,
-		metaKeyToolName:   data.ToolName,
-		metaKeyDurationMs: strconv.FormatInt(data.Duration.Milliseconds(), 10),
+	tc := session.ToolCall{
+		ID:           uuid.New().String(),
+		CallID:       data.CallID,
+		Name:         data.ToolName,
+		Status:       session.ToolCallStatusError,
+		DurationMs:   data.Duration.Milliseconds(),
+		ErrorMessage: errMsg,
+		CreatedAt:    event.Timestamp,
 	}
-	s.enrichToolMeta(metadata, data.ToolName)
+	s.enrichToolCallLabels(&tc, data.ToolName)
 
-	msg := s.buildMessage(session.RoleSystem, errMsg, event.Timestamp, metadata)
-	msg.ToolCallID = data.CallID
-
-	tc := s.buildToolCallUpsert(data.CallID, data.ToolName, event.Timestamp)
-	tc.Status = session.ToolCallStatusError
-	tc.DurationMs = data.Duration.Milliseconds()
-	tc.ErrorMessage = errMsg
-
-	return eventAction{message: &msg, toolCall: &tc}, true
+	return eventAction{toolCall: &tc}, true
 }
 
 // --- Client tool events ---
 
-// convertClientToolRequest records a client-side tool request (dual-write).
+// convertClientToolRequest records a client tool delegation as a runtime event.
+// The SDK emits ToolCallStarted first (which creates the tool_call row), then
+// ClientToolRequest when the tool is delegated to the client. We record the
+// delegation as a runtime event (not a tool_call row) to avoid double-counting.
 func (s *OmniaEventStore) convertClientToolRequest(event *events.Event) (eventAction, bool) {
 	data, ok := asPtr[events.ClientToolRequestData](event.Data)
 	if !ok {
 		return eventAction{}, false
 	}
 
-	content, err := json.Marshal(map[string]interface{}{
-		"name":      data.ToolName,
-		"arguments": data.Args,
-		"execution": "client",
-	})
-	if err != nil {
-		s.log.Error(err, "failed to marshal client tool request")
-		return eventAction{}, false
+	evtData := map[string]any{
+		"call_id":   data.CallID,
+		"tool_name": data.ToolName,
+	}
+	if data.Args != nil {
+		evtData["arguments"] = data.Args
 	}
 
-	metadata := map[string]string{
-		metaKeyType:   "tool_call",
-		metaKeySource: metaValueSource,
-		"execution":   "client",
+	evt := session.RuntimeEvent{
+		ID:        uuid.New().String(),
+		EventType: string(event.Type),
+		Data:      evtData,
+		Timestamp: event.Timestamp,
 	}
-	s.enrichToolMeta(metadata, data.ToolName)
 
-	msg := s.buildMessage(session.RoleAssistant, string(content), event.Timestamp, metadata)
-	msg.ToolCallID = data.CallID
-
-	tcID := uuid.New().String()
-	tc := session.ToolCall{
-		ID:        tcID,
-		CallID:    data.CallID,
-		Name:      data.ToolName,
-		Arguments: data.Args,
-		Status:    session.ToolCallStatusPending,
-		Execution: session.ToolCallExecutionClient,
-		CreatedAt: event.Timestamp,
-	}
-	s.enrichToolCallLabels(&tc, data.ToolName)
-	s.toolCallKeys.Store(data.CallID, callKey{id: tcID, createdAt: event.Timestamp})
-
-	return eventAction{message: &msg, toolCall: &tc}, true
+	return eventAction{event: &evt}, true
 }
 
 // NOTE: convertClientToolResolved will be added when the published PromptKit SDK
@@ -643,95 +590,43 @@ func (s *OmniaEventStore) convertClientToolRequest(event *events.Event) (eventAc
 
 // --- Provider call events ---
 
-// convertProviderCallStarted records the start of a provider call (dual-write).
-func (s *OmniaEventStore) convertProviderCallStarted(event *events.Event) (eventAction, bool) {
-	data, ok := asPtr[events.ProviderCallStartedData](event.Data)
-	if !ok {
-		return eventAction{}, false
-	}
-
-	content, _ := json.Marshal(map[string]interface{}{
-		"provider":     data.Provider,
-		"model":        data.Model,
-		"messageCount": data.MessageCount,
-		"toolCount":    data.ToolCount,
-	})
-
-	msg := s.buildMessage(session.RoleSystem, string(content), event.Timestamp, map[string]string{
-		metaKeyType:   "provider_call_started",
-		metaKeySource: metaValueSource,
-		"provider":    data.Provider,
-		"model":       data.Model,
-	})
-
-	pcID := uuid.New().String()
-	pc := session.ProviderCall{
-		ID:        pcID,
-		Provider:  data.Provider,
-		Model:     data.Model,
-		Status:    session.ProviderCallStatusPending,
-		CreatedAt: event.Timestamp,
-	}
-
-	// Build a stable call key. ProviderCallStartedData has no CallID,
-	// so we key on "provider:model:timestamp" to correlate with completed/failed.
-	key := data.Provider + ":" + data.Model + ":" + event.Timestamp.Format(time.RFC3339Nano)
-	s.providerCallKeys.Store(key, callKey{id: pcID, createdAt: event.Timestamp})
-
-	return eventAction{message: &msg, providerCall: &pc}, true
+// convertProviderCallStarted is a no-op — we only record provider calls on
+// completion/failure when we have tokens, cost, and duration. The started event
+// has no useful data and creating a "pending" row causes duplicates since
+// ProviderCallStartedData has no CallID for upsert correlation.
+func (s *OmniaEventStore) convertProviderCallStarted(_ *events.Event) (eventAction, bool) {
+	return eventAction{}, false
 }
 
-// convertProviderCallCompleted records provider call completion (dual-write).
+// convertProviderCallCompleted records provider call completion.
 func (s *OmniaEventStore) convertProviderCallCompleted(event *events.Event) (eventAction, bool) {
 	data, ok := asPtr[events.ProviderCallCompletedData](event.Data)
 	if !ok {
 		return eventAction{}, false
 	}
 
-	content, err := json.Marshal(map[string]interface{}{
-		"provider":     data.Provider,
-		"model":        data.Model,
-		"inputTokens":  data.InputTokens,
-		"outputTokens": data.OutputTokens,
-		"cachedTokens": data.CachedTokens,
-		"cost":         data.Cost,
-		"finishReason": data.FinishReason,
-		"durationMs":   data.Duration.Milliseconds(),
-	})
-	if err != nil {
-		s.log.Error(err, "failed to marshal provider call data")
-		return eventAction{}, false
+	pc := session.ProviderCall{
+		ID:            uuid.New().String(),
+		Provider:      data.Provider,
+		Model:         data.Model,
+		Status:        session.ProviderCallStatusCompleted,
+		InputTokens:   int64(data.InputTokens),
+		OutputTokens:  int64(data.OutputTokens),
+		CachedTokens:  int64(data.CachedTokens),
+		CostUSD:       data.Cost,
+		DurationMs:    data.Duration.Milliseconds(),
+		FinishReason:  data.FinishReason,
+		ToolCallCount: int32(data.ToolCallCount),
+		CreatedAt:     event.Timestamp,
 	}
 
-	msg := s.buildMessage(session.RoleSystem, string(content), event.Timestamp, map[string]string{
-		metaKeyType:   "provider_call",
-		metaKeySource: metaValueSource,
-	})
-	msg.InputTokens = int32(data.InputTokens)
-	msg.OutputTokens = int32(data.OutputTokens)
-
-	pc := s.buildProviderCallUpsert(data.Provider, data.Model, event.Timestamp)
-	pc.Status = session.ProviderCallStatusCompleted
-	pc.InputTokens = int64(data.InputTokens)
-	pc.OutputTokens = int64(data.OutputTokens)
-	pc.CachedTokens = int64(data.CachedTokens)
-	pc.CostUSD = data.Cost
-	pc.DurationMs = data.Duration.Milliseconds()
-	pc.FinishReason = data.FinishReason
-
+	// Token/cost counters are atomically updated by RecordProviderCall's CTE.
 	return eventAction{
-		message:      &msg,
 		providerCall: &pc,
-		// Keep stats on message path for backward compat during dual-write.
-		stats: session.SessionStatsUpdate{
-			AddInputTokens:  int32(data.InputTokens),
-			AddOutputTokens: int32(data.OutputTokens),
-			AddCostUSD:      data.Cost,
-		},
 	}, true
 }
 
-// convertProviderCallFailed records a provider call failure (dual-write).
+// convertProviderCallFailed records a provider call failure.
 func (s *OmniaEventStore) convertProviderCallFailed(event *events.Event) (eventAction, bool) {
 	data, ok := asPtr[events.ProviderCallFailedData](event.Data)
 	if !ok {
@@ -743,99 +638,84 @@ func (s *OmniaEventStore) convertProviderCallFailed(event *events.Event) (eventA
 		errMsg = data.Error.Error()
 	}
 
-	content, _ := json.Marshal(map[string]interface{}{
-		"provider":   data.Provider,
-		"model":      data.Model,
-		"error":      errMsg,
-		"durationMs": data.Duration.Milliseconds(),
-	})
+	pc := session.ProviderCall{
+		ID:           uuid.New().String(),
+		Provider:     data.Provider,
+		Model:        data.Model,
+		Status:       session.ProviderCallStatusFailed,
+		DurationMs:   data.Duration.Milliseconds(),
+		ErrorMessage: errMsg,
+		CreatedAt:    event.Timestamp,
+	}
 
-	msg := s.buildMessage(session.RoleSystem, string(content), event.Timestamp, map[string]string{
-		metaKeyType:    "provider_call_failed",
-		metaKeyIsError: "true",
-		metaKeySource:  metaValueSource,
-		"provider":     data.Provider,
-		"model":        data.Model,
-	})
-
-	pc := s.buildProviderCallUpsert(data.Provider, data.Model, event.Timestamp)
-	pc.Status = session.ProviderCallStatusFailed
-	pc.DurationMs = data.Duration.Milliseconds()
-	pc.ErrorMessage = errMsg
-
-	return eventAction{message: &msg, providerCall: &pc}, true
+	return eventAction{providerCall: &pc}, true
 }
 
 // --- Eval events ---
 
-// convertEvalEvent creates a session message from an eval completed/failed event.
+// convertEvalEvent records an eval completed/failed event as an EvalResult.
+// Both the runtime (inline evals) and the arena eval worker write to the
+// same eval_results table so all results are in one place.
 func (s *OmniaEventStore) convertEvalEvent(event *events.Event) (eventAction, bool) {
 	data, ok := asPtr[events.EvalEventData](event.Data)
 	if !ok {
 		return eventAction{}, false
 	}
 
-	evtType := "eval_completed"
-	if event.Type == events.EventEvalFailed {
-		evtType = "eval_failed"
-	}
-
-	metadata := map[string]string{
-		metaKeyType:   evtType,
-		metaKeySource: metaValueSource,
-		"eval_id":     data.EvalID,
-		"eval_type":   data.EvalType,
-		"trigger":     data.Trigger,
-		"passed":      strconv.FormatBool(data.Passed),
-	}
-	if data.DurationMs > 0 {
-		metadata[metaKeyDurationMs] = strconv.FormatInt(data.DurationMs, 10)
-	}
-	if data.Error != "" {
-		metadata[metaKeyIsError] = "true"
-	}
-	if data.Skipped {
-		metadata["skipped"] = "true"
-		metadata["skip_reason"] = data.SkipReason
-	}
-
-	content, _ := json.Marshal(map[string]interface{}{
-		"evalID":      data.EvalID,
-		"evalType":    data.EvalType,
-		"trigger":     data.Trigger,
-		"passed":      data.Passed,
-		"score":       data.Score,
-		"durationMs":  data.DurationMs,
+	// Build details JSON with the textual fields (explanation, message, violations).
+	details, _ := json.Marshal(map[string]any{
 		"explanation": data.Explanation,
 		"message":     data.Message,
 		"violations":  data.Violations,
+		"error":       data.Error,
 		"skipped":     data.Skipped,
 		"skipReason":  data.SkipReason,
-		"error":       data.Error,
 	})
 
-	msg := s.buildMessage(session.RoleSystem, string(content), event.Timestamp, metadata)
-	return eventAction{message: &msg}, true
+	durationMs := int(data.DurationMs)
+	result := session.EvalResult{
+		EvalID:            data.EvalID,
+		EvalType:          data.EvalType,
+		Trigger:           data.Trigger,
+		Passed:            data.Passed,
+		Score:             data.Score,
+		Details:           details,
+		AgentName:         s.agentMeta.AgentName,
+		Namespace:         s.agentMeta.Namespace,
+		PromptPackName:    s.agentMeta.PromptPackName,
+		PromptPackVersion: s.agentMeta.PromptPackVersion,
+		Source:            metaValueSource,
+		CreatedAt:         event.Timestamp,
+	}
+	if durationMs > 0 {
+		result.DurationMs = &durationMs
+	}
+
+	return eventAction{evalResult: &result}, true
 }
 
 // --- Generic event handler ---
 
-// convertGenericEvent records any event type by serializing its Data as JSON.
+// convertGenericEvent records any event type as a first-class RuntimeEvent.
 // This ensures full recording fidelity — no events are silently dropped.
 func (s *OmniaEventStore) convertGenericEvent(event *events.Event) (eventAction, bool) {
-	content := "{}"
+	var data map[string]any
 	if event.Data != nil {
-		if data, err := json.Marshal(event.Data); err == nil {
-			content = string(data)
+		// Round-trip through JSON to convert typed structs to map[string]any.
+		raw, err := json.Marshal(event.Data)
+		if err == nil {
+			_ = json.Unmarshal(raw, &data)
 		}
 	}
 
-	msg := s.buildMessage(session.RoleSystem, content, event.Timestamp, map[string]string{
-		metaKeyType:   string(event.Type),
-		metaKeySource: metaValueSource,
-	})
+	evt := session.RuntimeEvent{
+		ID:        uuid.New().String(),
+		EventType: string(event.Type),
+		Data:      data,
+		Timestamp: event.Timestamp,
+	}
 
-	return eventAction{message: &msg}, true
+	return eventAction{event: &evt}, true
 }
 
 // --- Helpers ---
@@ -856,8 +736,8 @@ func (s *OmniaEventStore) buildMessage(
 	}
 }
 
-// writeAction persists an eventAction to session-api: the legacy message (backward
-// compat) plus optional first-class tool/provider call records (dual-write).
+// writeAction persists an eventAction to session-api: first-class tool/provider call records,
+// runtime events, and/or legacy messages.
 // Errors are logged but never propagated, matching the facade's fire-and-forget pattern.
 func (s *OmniaEventStore) writeAction(traceCtx context.Context, sessionID string, action eventAction) {
 	if s.sessionStore == nil {
@@ -868,15 +748,20 @@ func (s *OmniaEventStore) writeAction(traceCtx context.Context, sessionID string
 	defer cancel()
 	log := logctx.LoggerWithContext(s.log, traceCtx)
 
-	msgType := ""
-	if action.message != nil {
-		msgType = action.message.Metadata[metaKeyType]
-	}
+	eventType := s.resolveEventType(action)
 
 	log.V(1).Info("writing event to session-api",
-		"sessionID", sessionID, "messageType", msgType)
+		"sessionID", sessionID, "eventType", eventType)
 
-	// Write first-class records first (they update session counters atomically).
+	s.writeRecords(ctx, sessionID, action, log)
+	s.writeMessageAndStats(ctx, sessionID, action, eventType, log)
+
+	log.V(1).Info("event written to session-api",
+		"sessionID", sessionID, "eventType", eventType)
+}
+
+// writeRecords persists first-class records (tool calls, provider calls, evals, runtime events).
+func (s *OmniaEventStore) writeRecords(ctx context.Context, sessionID string, action eventAction, log logr.Logger) {
 	if action.toolCall != nil {
 		action.toolCall.SessionID = sessionID
 		if err := s.sessionStore.RecordToolCall(ctx, sessionID, *action.toolCall); err != nil {
@@ -893,69 +778,59 @@ func (s *OmniaEventStore) writeAction(traceCtx context.Context, sessionID string
 		}
 	}
 
-	// Write legacy message (backward compat).
+	if action.evalResult != nil {
+		action.evalResult.SessionID = sessionID
+		if err := s.sessionStore.RecordEvalResult(ctx, sessionID, *action.evalResult); err != nil {
+			log.Error(err, "failed to record eval result",
+				"sessionID", sessionID, "evalID", action.evalResult.EvalID)
+		}
+	}
+
+	if action.event != nil {
+		action.event.SessionID = sessionID
+		if err := s.sessionStore.RecordRuntimeEvent(ctx, sessionID, *action.event); err != nil {
+			log.Error(err, "failed to record runtime event",
+				"sessionID", sessionID, "eventType", action.event.EventType)
+		}
+	}
+}
+
+// writeMessageAndStats persists messages and updates session stats.
+func (s *OmniaEventStore) writeMessageAndStats(ctx context.Context, sessionID string, action eventAction, eventType string, log logr.Logger) {
 	if action.message != nil {
 		if err := s.sessionStore.AppendMessage(ctx, sessionID, *action.message); err != nil {
 			log.Error(err, "failed to append event message",
-				"sessionID", sessionID, "messageType", msgType)
+				"sessionID", sessionID, "eventType", eventType)
 			return
 		}
 	}
 
-	// Update session stats (tokens, cost, etc.) — still needed for backward compat.
-	if err := s.sessionStore.UpdateSessionStats(ctx, sessionID, action.stats); err != nil {
-		log.Error(err, "failed to update session stats",
-			"sessionID", sessionID, "messageType", msgType)
-		return
+	if action.stats.SetStatus != "" || !action.stats.SetEndedAt.IsZero() {
+		if err := s.sessionStore.UpdateSessionStats(ctx, sessionID, action.stats); err != nil {
+			log.Error(err, "failed to update session stats",
+				"sessionID", sessionID, "eventType", eventType)
+		}
 	}
-
-	log.V(1).Info("event written to session-api",
-		"sessionID", sessionID, "messageType", msgType)
 }
 
-// --- Dual-write helpers ---
-
-// buildToolCallUpsert creates a ToolCall for an upsert (completed/failed),
-// reusing the ID from the started event if available.
-func (s *OmniaEventStore) buildToolCallUpsert(callID, toolName string, ts time.Time) session.ToolCall {
-	tc := session.ToolCall{
-		CallID:    callID,
-		Name:      toolName,
-		CreatedAt: ts,
-		Execution: session.ToolCallExecutionServer,
+// resolveEventType returns a descriptive string for the action being written.
+func (s *OmniaEventStore) resolveEventType(action eventAction) string {
+	if action.evalResult != nil {
+		return "eval:" + action.evalResult.EvalID
 	}
-
-	if v, ok := s.toolCallKeys.LoadAndDelete(callID); ok {
-		ck := v.(callKey)
-		tc.ID = ck.id
-		tc.CreatedAt = ck.createdAt
-	} else {
-		tc.ID = uuid.New().String()
+	if action.event != nil {
+		return action.event.EventType
 	}
-
-	s.enrichToolCallLabels(&tc, toolName)
-	return tc
-}
-
-// buildProviderCallUpsert creates a ProviderCall for an upsert (completed/failed),
-// reusing the ID from the started event if available.
-func (s *OmniaEventStore) buildProviderCallUpsert(provider, model string, ts time.Time) session.ProviderCall {
-	pc := session.ProviderCall{
-		Provider:  provider,
-		Model:     model,
-		CreatedAt: ts,
+	if action.message != nil {
+		return action.message.Metadata[metaKeyType]
 	}
-
-	key := provider + ":" + model + ":" + ts.Format(time.RFC3339Nano)
-	if v, ok := s.providerCallKeys.LoadAndDelete(key); ok {
-		ck := v.(callKey)
-		pc.ID = ck.id
-		pc.CreatedAt = ck.createdAt
-	} else {
-		pc.ID = uuid.New().String()
+	if action.toolCall != nil {
+		return "tool_call:" + action.toolCall.Name
 	}
-
-	return pc
+	if action.providerCall != nil {
+		return "provider_call:" + action.providerCall.Provider
+	}
+	return "unknown"
 }
 
 // enrichToolCallLabels adds tool registry metadata as labels on the ToolCall.

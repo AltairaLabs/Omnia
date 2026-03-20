@@ -35,7 +35,6 @@ import (
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/altairalabs/omnia/ee/cmd/arena-dev-console/server"
 	"github.com/altairalabs/omnia/internal/facade"
-	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
@@ -60,6 +59,11 @@ var (
 )
 
 func main() {
+	// Disable PromptKit JSON schema validation — the Go structs are the
+	// source of truth and the remote schema may lag behind.  This also
+	// avoids network fetches in air-gapped environments.
+	config.SchemaValidationDisabled.Store(true)
+
 	flag.Parse()
 
 	// Initialize logger
@@ -85,20 +89,17 @@ func main() {
 		"workspacePath", *workspacePath,
 	)
 
-	// Initialize session store — use HTTP client to session-api when available,
-	// fall back to in-memory store for local development.
-	var store session.Store
+	// Initialize session store via session-api.
 	apiURL := *sessionAPIURL
 	if apiURL == "" {
 		apiURL = os.Getenv("SESSION_API_URL")
 	}
-	if apiURL != "" {
-		store = httpclient.NewStore(apiURL, log)
-		log.Info("session recording enabled via session-api", "url", apiURL)
-	} else {
-		store = session.NewMemoryStore()
-		log.Info("session recording disabled: no session-api URL configured")
+	if apiURL == "" {
+		log.Error(nil, "SESSION_API_URL is required for session recording")
+		os.Exit(1)
 	}
+	store := httpclient.NewStore(apiURL, log)
+	log.Info("session recording enabled via session-api", "url", apiURL)
 
 	// Create the PromptKit handler
 	handler, cleanup, err := createHandler(log, *configFile)

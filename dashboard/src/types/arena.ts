@@ -14,7 +14,7 @@ import { ObjectMeta, Condition, LocalObjectReference } from "./common";
 // =============================================================================
 
 export type ArenaSourceType = "configmap" | "git" | "oci" | "s3";
-export type ArenaSourcePhase = "Pending" | "Ready" | "Failed";
+export type ArenaSourcePhase = "Pending" | "Initializing" | "Ready" | "Fetching" | "Error";
 
 /** Git repository reference configuration */
 export interface GitRef {
@@ -124,6 +124,12 @@ export interface ArenaSourceStatus {
   conditions?: Condition[];
   /** Observed generation */
   observedGeneration?: number;
+  /** Current HEAD version hash (set after first successful sync) */
+  headVersion?: string;
+  /** Version hash from last successful sync */
+  lastVersionCreated?: string;
+  /** Number of versions currently stored */
+  versionCount?: number;
 }
 
 /** ArenaSource resource - defines where PromptKit bundles come from */
@@ -155,31 +161,22 @@ export interface ScenarioFilter {
   exclude?: string[];
 }
 
-/** Provider group selector using Kubernetes label selectors */
-export interface ProviderGroupSelector {
-  /** Label selector to match Provider CRDs */
-  selector: {
-    matchLabels?: Record<string, string>;
-    matchExpressions?: Array<{
-      key: string;
-      operator: "In" | "NotIn" | "Exists" | "DoesNotExist";
-      values?: string[];
-    }>;
-  };
+/** Provider or agent entry in a provider group */
+export interface ArenaProviderEntry {
+  /** Reference to a Provider CRD */
+  providerRef?: { name: string; namespace?: string };
+  /** Reference to an AgentRuntime CRD */
+  agentRef?: { name: string };
 }
 
-/** ToolRegistry selector using Kubernetes label selectors */
-export interface ToolRegistrySelector {
-  /** Label selector to match ToolRegistry CRDs */
-  selector: {
-    matchLabels?: Record<string, string>;
-    matchExpressions?: Array<{
-      key: string;
-      operator: "In" | "NotIn" | "Exists" | "DoesNotExist";
-      values?: string[];
-    }>;
-  };
-}
+/**
+ * Polymorphic provider group value.
+ * Array mode: pool of test providers (ArenaProviderEntry[]).
+ * Map mode: 1:1 config-provider-ID → CRD mapping (Record<string, ArenaProviderEntry>).
+ */
+export type ArenaProviderGroup =
+  | ArenaProviderEntry[]
+  | Record<string, ArenaProviderEntry>;
 
 // =============================================================================
 // ArenaJob - Execution of evaluation/loadtest/datagen
@@ -269,22 +266,6 @@ export interface ScheduleConfig {
   concurrencyPolicy?: "Allow" | "Forbid" | "Replace";
 }
 
-// =============================================================================
-// Execution Config - Direct vs Fleet mode
-// =============================================================================
-
-export type ExecutionMode = "direct" | "fleet";
-
-export interface FleetTarget {
-  agentRuntimeRef: { name: string };
-  namespace?: string;
-}
-
-export interface ExecutionConfig {
-  mode?: ExecutionMode;
-  target?: FleetTarget;
-}
-
 /** ArenaJob specification */
 export interface ArenaJobSpec {
   /** Reference to ArenaSource containing test scenarios and configuration */
@@ -295,10 +276,10 @@ export interface ArenaJobSpec {
   type: ArenaJobType;
   /** Scenario filtering - filters which scenarios to run from the arena file */
   scenarios?: ScenarioFilter;
-  /** Provider overrides - use label selectors to match Provider CRDs for each group */
-  providerOverrides?: Record<string, ProviderGroupSelector>;
-  /** Tool registry override - use label selectors to match ToolRegistry CRDs */
-  toolRegistryOverride?: ToolRegistrySelector;
+  /** Provider groups - map of group names to provider groups (array or map mode) */
+  providers?: Record<string, ArenaProviderGroup>;
+  /** Tool registries - list of ToolRegistry CRD refs */
+  toolRegistries?: { name: string }[];
   /** Worker configuration */
   workers?: WorkerConfig;
   /** Queue configuration */
@@ -319,8 +300,6 @@ export interface ArenaJobSpec {
   suspend?: boolean;
   /** Enable verbose/debug logging for promptarena */
   verbose?: boolean;
-  /** Execution mode configuration (direct or fleet) */
-  execution?: ExecutionConfig;
 }
 
 /** Job progress tracking (work item level) */

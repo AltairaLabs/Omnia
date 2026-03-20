@@ -157,8 +157,10 @@ metadata:
 spec:
   promptPackRef:
     name: demo-vision-prompts
-  providerRef:
-    name: ollama
+  providers:
+    - name: default
+      providerRef:
+        name: ollama
   evals:
     enabled: true
   facade:
@@ -348,8 +350,10 @@ metadata:
 spec:
   promptPackRef:
     name: demo-audio-prompts
-  providerRef:
-    name: gemini
+  providers:
+    - name: default
+      providerRef:
+        name: gemini
   facade:
     type: websocket
     port: 8080
@@ -834,8 +838,10 @@ metadata:
 spec:
   promptPackRef:
     name: demo-tools-prompts
-  providerRef:
-    name: ollama-tools
+  providers:
+    - name: default
+      providerRef:
+        name: ollama-tools
   toolRegistryRef:
     name: demo-tools
   evals:
@@ -884,8 +890,10 @@ spec:
     {{- end }}
   promptPackRef:
     name: demo-vision-prompts
-  providerRef:
-    name: ollama
+  providers:
+    - name: default
+      providerRef:
+        name: ollama
   facade:
     type: websocket
     port: 8080
@@ -941,8 +949,10 @@ spec:
     {{- end }}
   promptPackRef:
     name: demo-tools-prompts
-  providerRef:
-    name: ollama-tools
+  providers:
+    - name: default
+      providerRef:
+        name: ollama-tools
   toolRegistryRef:
     name: demo-tools
   facade:

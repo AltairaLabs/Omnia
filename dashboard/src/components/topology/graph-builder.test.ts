@@ -147,10 +147,10 @@ describe("buildTopologyGraph", () => {
       });
     });
 
-    it("creates edges from agents to providers via providerRef", () => {
+    it("creates edges from agents to providers via providers list", () => {
       const agents = [
         createAgent("agent1", "ns1", {
-          providerRef: { name: "claude-prod" },
+          providers: [{ name: "default", providerRef: { name: "claude-prod" } }],
         }),
       ];
       const providers = [createProvider("claude-prod", "ns1", "claude")];
@@ -171,64 +171,29 @@ describe("buildTopologyGraph", () => {
       });
     });
 
-    it("creates synthetic provider nodes for inline provider configs", () => {
+    it("creates edges for multiple providers in providers list", () => {
       const agents = [
         createAgent("agent1", "ns1", {
-          provider: { type: "openai", model: "gpt-4" },
+          providers: [
+            { name: "default", providerRef: { name: "claude-prod" } },
+            { name: "fallback", providerRef: { name: "openai-prod" } },
+          ],
         }),
+      ];
+      const providers = [
+        createProvider("claude-prod", "ns1", "claude"),
+        createProvider("openai-prod", "ns1", "openai"),
       ];
 
       const result = buildTopologyGraph({
         agents,
         promptPacks: [],
         toolRegistries: [],
-        providers: [],
+        providers,
       });
 
-      // Agent + synthetic provider
-      expect(result.nodes).toHaveLength(2);
-
-      const syntheticProvider = result.nodes.find((n) => n.id.includes("synthetic"));
-      expect(syntheticProvider).toMatchObject({
-        type: "provider",
-        data: {
-          label: "openai",
-          namespace: "(inline)",
-          providerType: "openai",
-          model: "gpt-4",
-        },
-      });
-
-      // Edge from agent to synthetic provider
-      expect(result.edges).toHaveLength(1);
-      expect(result.edges[0]).toMatchObject({
-        source: "agent-ns1-agent1",
-        label: "powered by",
-      });
-    });
-
-    it("reuses synthetic provider node for multiple agents with same inline config", () => {
-      const agents = [
-        createAgent("agent1", "ns1", {
-          provider: { type: "mock" },
-        }),
-        createAgent("agent2", "ns1", {
-          provider: { type: "mock" },
-        }),
-      ];
-
-      const result = buildTopologyGraph({
-        agents,
-        promptPacks: [],
-        toolRegistries: [],
-        providers: [],
-      });
-
-      // 2 agents + 1 synthetic provider (reused)
+      // 1 agent + 2 providers
       expect(result.nodes).toHaveLength(3);
-      expect(result.nodes.filter((n) => n.type === "provider")).toHaveLength(1);
-
-      // Both agents connect to the same synthetic provider
       expect(result.edges).toHaveLength(2);
     });
   });
@@ -259,7 +224,7 @@ describe("buildTopologyGraph", () => {
       const agents = [
         createAgent("agent1", "ns1", {
           promptPackRef: { name: "pack1" },
-          providerRef: { name: "provider1" },
+          providers: [{ name: "default", providerRef: { name: "provider1" } }],
         }),
       ];
       const promptPacks = [createPromptPack("pack1", "ns1")];
@@ -336,10 +301,10 @@ describe("buildTopologyGraph", () => {
   });
 
   describe("cross-namespace references", () => {
-    it("handles providerRef with explicit namespace", () => {
+    it("handles providers with explicit namespace", () => {
       const agents = [
         createAgent("agent1", "ns1", {
-          providerRef: { name: "shared-provider", namespace: "shared" },
+          providers: [{ name: "default", providerRef: { name: "shared-provider", namespace: "shared" } }],
         }),
       ];
       const providers = [createProvider("shared-provider", "shared", "claude")];

@@ -36,9 +36,7 @@ const (
 	EnvHandlerMode         = "OMNIA_HANDLER_MODE"
 	EnvRuntimeAddress      = "OMNIA_RUNTIME_ADDRESS"
 	EnvProviderAPIKey      = "OMNIA_PROVIDER_API_KEY"
-	EnvSessionType         = "OMNIA_SESSION_TYPE"
 	EnvSessionTTL          = "OMNIA_SESSION_TTL"
-	EnvSessionStoreURL     = "OMNIA_SESSION_STORE_URL"
 	EnvPromptPackMountPath = "OMNIA_PROMPTPACK_MOUNT_PATH"
 	EnvHealthPort          = "OMNIA_HEALTH_PORT"
 	EnvMediaStorageType    = "OMNIA_MEDIA_STORAGE_TYPE"
@@ -108,14 +106,6 @@ const (
 	FacadeTypeA2A       FacadeType = "a2a"
 )
 
-// SessionType represents the type of session store.
-type SessionType string
-
-const (
-	SessionTypeMemory SessionType = "memory"
-	SessionTypeRedis  SessionType = "redis"
-)
-
 // MediaStorageType represents the type of media storage backend.
 type MediaStorageType string
 
@@ -171,9 +161,7 @@ type Config struct {
 	ToolRegistryNamespace string
 
 	// Session configuration.
-	SessionType     SessionType
-	SessionTTL      time.Duration
-	SessionStoreURL string
+	SessionTTL time.Duration
 
 	// Media storage configuration.
 	MediaStorageType MediaStorageType
@@ -228,8 +216,6 @@ var (
 	ErrMissingProviderKey     = errors.New("OMNIA_PROVIDER_API_KEY is required for runtime handler mode")
 	ErrInvalidFacadeType      = errors.New("invalid facade type")
 	ErrInvalidHandlerMode     = errors.New("invalid handler mode")
-	ErrInvalidSessionType     = errors.New("invalid session type")
-	ErrMissingSessionStore    = errors.New("OMNIA_SESSION_STORE_URL is required for redis session type")
 	ErrInvalidMediaStorageTyp = errors.New("invalid media storage type")
 	ErrMissingS3Bucket        = errors.New("OMNIA_MEDIA_S3_BUCKET is required for s3 storage type")
 	ErrMissingS3Region        = errors.New("OMNIA_MEDIA_S3_REGION is required for s3 storage type")
@@ -264,18 +250,6 @@ func (c *Config) Validate() error {
 		// Valid
 	default:
 		return fmt.Errorf(errWithValueFmt, ErrInvalidFacadeType, c.FacadeType)
-	}
-
-	// Validate session type
-	switch c.SessionType {
-	case SessionTypeMemory:
-		// Valid, no additional config needed
-	case SessionTypeRedis:
-		if c.SessionStoreURL == "" {
-			return ErrMissingSessionStore
-		}
-	default:
-		return fmt.Errorf(errWithValueFmt, ErrInvalidSessionType, c.SessionType)
 	}
 
 	// Validate media storage type

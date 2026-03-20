@@ -5,15 +5,27 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { JsonBlock } from "@/components/ui/json-block";
 import { Copy, Check } from "lucide-react";
-import type { Session } from "@/types/session";
+import type { Session, ToolCall, ProviderCall, RuntimeEvent } from "@/types/session";
+import type { EvalResult } from "@/types/eval";
 
 interface RawTabProps {
   readonly session: Session;
+  readonly toolCalls?: ToolCall[];
+  readonly providerCalls?: ProviderCall[];
+  readonly runtimeEvents?: RuntimeEvent[];
+  readonly evalResults?: EvalResult[];
 }
 
-export function RawTab({ session }: RawTabProps) {
+export function RawTab({ session, toolCalls, providerCalls, runtimeEvents, evalResults }: RawTabProps) {
   const [copied, setCopied] = useState(false);
-  const json = JSON.stringify(session, null, 2);
+  const fullData = {
+    ...session,
+    toolCalls: toolCalls ?? [],
+    providerCalls: providerCalls ?? [],
+    runtimeEvents: runtimeEvents ?? [],
+    evalResults: evalResults ?? [],
+  };
+  const json = JSON.stringify(fullData, null, 2);
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(json);
@@ -38,7 +50,7 @@ export function RawTab({ session }: RawTabProps) {
       </Button>
       <ScrollArea className="h-full">
         <div className="p-4" data-testid="raw-json">
-          <JsonBlock data={session} defaultExpandDepth={1} defaultCollapsed={["messages", "metadata"]} />
+          <JsonBlock data={fullData} defaultExpandDepth={1} defaultCollapsed={["messages", "metadata", "toolCalls", "providerCalls", "runtimeEvents", "evalResults"]} />
         </div>
       </ScrollArea>
     </div>

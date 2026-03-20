@@ -29,46 +29,6 @@ const (
 	ArenaJobTypeDataGen ArenaJobType = "datagen"
 )
 
-// ExecutionMode defines how the arena worker executes scenarios.
-// +kubebuilder:validation:Enum=direct;fleet
-type ExecutionMode string
-
-const (
-	// ExecutionModeDirect calls LLM providers directly (existing behavior).
-	ExecutionModeDirect ExecutionMode = "direct"
-	// ExecutionModeFleet connects to a deployed agent via WebSocket.
-	ExecutionModeFleet ExecutionMode = "fleet"
-)
-
-// FleetTarget identifies the deployed agent to test against.
-type FleetTarget struct {
-	// agentRuntimeRef references the AgentRuntime CRD to connect to.
-	// The controller resolves this to a WebSocket endpoint.
-	// +kubebuilder:validation:Required
-	AgentRuntimeRef corev1alpha1.LocalObjectReference `json:"agentRuntimeRef"`
-
-	// namespace is the namespace of the AgentRuntime.
-	// If not specified, defaults to the ArenaJob's namespace.
-	// +optional
-	Namespace string `json:"namespace,omitempty"`
-}
-
-// ExecutionConfig configures how scenarios are executed.
-// +kubebuilder:validation:XValidation:rule="self.mode != 'fleet' || has(self.target)",message="target is required when execution mode is fleet"
-type ExecutionConfig struct {
-	// mode selects the execution strategy.
-	// "direct" calls LLM providers directly (existing behavior).
-	// "fleet" connects to a deployed agent via WebSocket.
-	// +kubebuilder:default="direct"
-	// +optional
-	Mode ExecutionMode `json:"mode,omitempty"`
-
-	// target specifies the agent to test against.
-	// Required when mode is "fleet".
-	// +optional
-	Target *FleetTarget `json:"target,omitempty"`
-}
-
 // ScenarioFilter defines include/exclude patterns for scenario selection.
 type ScenarioFilter struct {
 	// include specifies glob patterns for scenarios to include.
@@ -209,22 +169,6 @@ type OutputConfig struct {
 	PVC *PVCOutputConfig `json:"pvc,omitempty"`
 }
 
-// ProviderGroupSelector defines how to select Provider CRDs for a specific group.
-type ProviderGroupSelector struct {
-	// selector is a label selector to match Provider CRDs in the workspace namespace.
-	// All matching providers will be used for the group, with scenarios run against each.
-	// +kubebuilder:validation:Required
-	Selector metav1.LabelSelector `json:"selector"`
-}
-
-// ToolRegistrySelector defines how to select ToolRegistry CRDs.
-type ToolRegistrySelector struct {
-	// selector is a label selector to match ToolRegistry CRDs in the workspace namespace.
-	// All tools from matching registries will override tools/mcp_servers defined in arena.config.yaml.
-	// +kubebuilder:validation:Required
-	Selector metav1.LabelSelector `json:"selector"`
-}
-
 // ScheduleConfig configures job scheduling.
 type ScheduleConfig struct {
 	// cron is a cron expression for scheduled execution.
@@ -243,6 +187,20 @@ type ScheduleConfig struct {
 	// +kubebuilder:default="Forbid"
 	// +optional
 	ConcurrencyPolicy string `json:"concurrencyPolicy,omitempty"`
+}
+
+// ArenaProviderEntry references either a Provider CRD or an AgentRuntime CRD.
+// Exactly one of providerRef or agentRef must be set.
+// +kubebuilder:validation:XValidation:rule="has(self.providerRef) != has(self.agentRef)",message="exactly one of providerRef or agentRef must be set"
+type ArenaProviderEntry struct {
+	// providerRef references a Provider CRD for LLM access.
+	// +optional
+	ProviderRef *corev1alpha1.ProviderRef `json:"providerRef,omitempty"`
+
+	// agentRef references an AgentRuntime CRD.
+	// The worker connects via WebSocket (fleet mode).
+	// +optional
+	AgentRef *corev1alpha1.LocalObjectReference `json:"agentRef,omitempty"`
 }
 
 // ArenaJobSpec defines the desired state of ArenaJob.
@@ -300,28 +258,28 @@ type ArenaJobSpec struct {
 	// +optional
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
 
-	// execution configures the execution mode and target.
-	// If not specified, defaults to direct provider execution.
+	// providers maps group names to provider groups.
+	// Each group is either an array (pool of test providers) or an object
+	// (1:1 config-provider-ID → CRD mapping). Array mode is the default;
+	// map mode lets the wizard set the exact provider ID the arena config expects.
+	// Groups correspond to the arena config's provider groups (e.g., "default", "judge").
+	// When set, provider YAML files from the arena project are ignored
+	// and the worker resolves providers directly from CRDs.
+	// An agentRef can appear in any provider position — agents and LLM providers
+	// are interchangeable in the scenario × provider matrix.
 	// +optional
-	Execution *ExecutionConfig `json:"execution,omitempty"`
+	Providers map[string]ArenaProviderGroup `json:"providers,omitempty"`
+
+	// toolRegistries lists ToolRegistry CRDs whose discovered tools replace
+	// the arena config's tool/mcp_server file references.
+	// When set, tool YAML files from the arena project are ignored.
+	// +optional
+	ToolRegistries []corev1alpha1.LocalObjectReference `json:"toolRegistries,omitempty"`
 
 	// verbose enables verbose/debug logging for promptarena execution.
 	// When enabled, workers will pass --verbose to promptarena for detailed output.
 	// +optional
 	Verbose bool `json:"verbose,omitempty"`
-
-	// providerOverrides allows overriding provider groups defined in the arena config file.
-	// Keys are group names from the arena config file (e.g., "default", "judge").
-	// Use "*" as a catch-all for groups not explicitly specified.
-	// Provider CRDs matching the label selector provide credentials for the matched groups.
-	// +optional
-	ProviderOverrides map[string]ProviderGroupSelector `json:"providerOverrides,omitempty"`
-
-	// toolRegistryOverride allows overriding tools/mcp_servers defined in the arena config file
-	// with handlers from ToolRegistry CRDs. All tools from matching registries will
-	// override tools with matching names in the arena config.
-	// +optional
-	ToolRegistryOverride *ToolRegistrySelector `json:"toolRegistryOverride,omitempty"`
 }
 
 // ArenaJobPhase represents the current phase of the ArenaJob.

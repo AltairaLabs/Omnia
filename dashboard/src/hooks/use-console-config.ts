@@ -8,10 +8,11 @@ import {
   type AttachmentConfig,
 } from "@/components/console/attachment-utils";
 import { getMediaRequirements } from "@/lib/provider-media-defaults";
-import type {
-  ConsoleConfig,
-  MediaRequirements,
-  ProviderType,
+import {
+  getDefaultProviderRef,
+  type ConsoleConfig,
+  type MediaRequirements,
+  type ProviderType,
 } from "@/types/agent-runtime";
 
 export interface ConsoleConfigResult {
@@ -43,21 +44,21 @@ export function useConsoleConfig(
 ): ConsoleConfigResult {
   const { data: agent, isLoading: agentLoading, error: agentError } = useAgent(agentName);
 
-  // Resolve provider from ProviderRef if specified
-  const providerRefName = agent?.spec?.providerRef?.name;
-  const { data: providerCRD, isLoading: providerLoading } = useProvider(providerRefName);
+  // Resolve provider from providers list if specified
+  const defaultProviderRef = agent?.spec ? getDefaultProviderRef(agent.spec) : undefined;
+  const { data: providerCRD, isLoading: providerLoading } = useProvider(defaultProviderRef?.name);
 
   const attachmentConfig: AttachmentConfig = useMemo(() => {
     return buildAttachmentConfig(agent?.spec?.console);
   }, [agent?.spec?.console]);
 
-  // Resolve provider type: ProviderRef takes precedence over inline provider
+  // Resolve provider type from the resolved Provider CRD
   const providerType: ProviderType | undefined = useMemo(() => {
     if (providerCRD?.spec?.type) {
       return providerCRD.spec.type as ProviderType;
     }
-    return agent?.spec?.provider?.type;
-  }, [providerCRD, agent]);
+    return undefined;
+  }, [providerCRD]);
 
   // Get media requirements based on provider type and any CRD overrides
   const mediaRequirements: MediaRequirements = useMemo(() => {

@@ -149,8 +149,9 @@ func scanMessage(row pgx.Row) (*session.Message, error) {
 
 	err := row.Scan(
 		&m.ID, &m.Role, &m.Content, &m.Timestamp,
-		&inputTokens, &outputTokens,
+		&inputTokens, &outputTokens, &m.CostUSD,
 		&toolCallID, &metadataJSON, &m.SequenceNum,
+		&m.HasMedia, &m.MediaTypes,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: scan message: %w", err)
@@ -164,6 +165,9 @@ func scanMessage(row pgx.Row) (*session.Message, error) {
 	if outputTokens != nil {
 		m.OutputTokens = *outputTokens
 	}
+	if m.MediaTypes == nil {
+		m.MediaTypes = []string{}
+	}
 	return &m, nil
 }
 
@@ -176,7 +180,7 @@ func scanToolCall(row pgx.Row) (*session.ToolCall, error) {
 	err := row.Scan(
 		&tc.ID, &tc.SessionID, &tc.CallID, &tc.Name,
 		&argsJSON, &resultJSON,
-		&tc.Status, &durationMs, &tc.Execution,
+		&tc.Status, &durationMs,
 		&errorMessage, &labelsJSON, &tc.CreatedAt,
 	)
 	if err != nil {
@@ -344,16 +348,43 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 		return err
 	}
 
-	query := `INSERT INTO messages (id, session_id, role, content, timestamp, input_tokens, output_tokens, tool_call_id, metadata, sequence_num)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+	// Auto-increment message_count only. Token/cost counters are derived from
+	// provider_calls (via RecordProviderCall) and tool_call_count from tool_calls
+	// (via RecordToolCall) to avoid double-counting.
+	// Messages with a ToolCallID don't increment message_count.
+	hasToolCallID := msg.ToolCallID != ""
+	messageIncr := int32(1)
+	if hasToolCallID {
+		messageIncr = 0
+	}
+
+	mediaTypes := msg.MediaTypes
+	if mediaTypes == nil {
+		mediaTypes = []string{}
+	}
+
+	// Use a CTE to atomically insert the message and update message_count
+	// in a single statement, preventing races between concurrent AppendMessage calls.
+	query := `WITH ins AS (
+		INSERT INTO messages (id, session_id, role, content, timestamp, input_tokens, output_tokens, cost_usd, tool_call_id, metadata, sequence_num, has_media, media_types)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		RETURNING session_id
+	)
+	UPDATE sessions SET
+		message_count = message_count + $14,
+		updated_at = $15
+	WHERE id = (SELECT session_id FROM ins)`
 
 	_, err := p.pool.Exec(ctx, query,
 		msg.ID, sessionID, msg.Role, msg.Content, msg.Timestamp,
 		pgutil.NullInt32(msg.InputTokens), pgutil.NullInt32(msg.OutputTokens),
+		msg.CostUSD,
 		pgutil.NullString(msg.ToolCallID), pgutil.MarshalJSONB(msg.Metadata), msg.SequenceNum,
+		msg.HasMedia, mediaTypes,
+		messageIncr,
+		time.Now(),
 	)
 	if err != nil {
-		// FK violation (code 23503) means the session_id does not exist.
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
 			return session.ErrSessionNotFound
@@ -386,7 +417,7 @@ func (p *Provider) GetMessages(ctx context.Context, sessionID string, opts provi
 		sort = "DESC"
 	}
 
-	query := `SELECT id, role, content, timestamp, input_tokens, output_tokens, tool_call_id, metadata, sequence_num
+	query := `SELECT id, role, content, timestamp, input_tokens, output_tokens, cost_usd, tool_call_id, metadata, sequence_num, has_media, media_types
 		FROM messages WHERE 1=1` + qb.Where() + ` ORDER BY sequence_num ` + sort
 	query = qb.AppendPagination(query, opts.Limit, opts.Offset)
 
@@ -537,30 +568,21 @@ func (p *Provider) applySessionFilters(qb *pgutil.QueryBuilder, opts providers.S
 	}
 }
 
-// UpdateSessionStats atomically increments session counters in a single UPDATE.
-// This avoids the read-modify-write race condition of a separate SELECT + UPDATE.
+// UpdateSessionStats atomically updates session status and ended_at.
+// Counter increments (messages, tool calls, tokens, cost) are auto-derived
+// from AppendMessage and should not be set via this method.
 func (p *Provider) UpdateSessionStats(ctx context.Context, sessionID string, update session.SessionStatsUpdate) error {
 	query := `UPDATE sessions SET
-		total_input_tokens = total_input_tokens + $2,
-		total_output_tokens = total_output_tokens + $3,
-		estimated_cost_usd = estimated_cost_usd + $4,
-		tool_call_count = tool_call_count + $5,
-		message_count = message_count + $6,
 		status = CASE
 			WHEN status IN ('completed','error','expired') THEN status
-			WHEN $7::text = '' THEN status
-			ELSE $7::text END,
-		updated_at = $8,
-		ended_at = CASE WHEN $9::timestamptz IS NULL THEN ended_at ELSE $9::timestamptz END
+			WHEN $2::text = '' THEN status
+			ELSE $2::text END,
+		updated_at = $3,
+		ended_at = CASE WHEN $4::timestamptz IS NULL THEN ended_at ELSE $4::timestamptz END
 	WHERE id = $1`
 
 	res, err := p.pool.Exec(ctx, query,
 		sessionID,
-		int64(update.AddInputTokens),
-		int64(update.AddOutputTokens),
-		update.AddCostUSD,
-		update.AddToolCalls,
-		update.AddMessages,
 		string(update.SetStatus),
 		time.Now(),
 		pgutil.NullTime(update.SetEndedAt),
@@ -581,14 +603,25 @@ func (p *Provider) RecordToolCall(ctx context.Context, sessionID string, tc *ses
 		return err
 	}
 
-	query := `INSERT INTO tool_calls (id, session_id, call_id, name, arguments, result, status, duration_ms, execution, error_message, labels, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-		ON CONFLICT (id, created_at) DO UPDATE SET
-			result = EXCLUDED.result,
-			status = EXCLUDED.status,
-			duration_ms = EXCLUDED.duration_ms,
-			error_message = EXCLUDED.error_message,
-			labels = EXCLUDED.labels`
+	// Each tool call lifecycle event (started, completed, failed, client_request)
+	// is recorded as its own row. Rows sharing the same call_id represent the
+	// same logical tool invocation. Only "pending" events (the initial start)
+	// increment session.tool_call_count.
+	isStart := tc.Status == session.ToolCallStatusPending
+	toolCallIncr := int32(0)
+	if isStart {
+		toolCallIncr = 1
+	}
+
+	query := `WITH ins AS (
+		INSERT INTO tool_calls (id, session_id, call_id, name, arguments, result, status, duration_ms, error_message, labels, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		RETURNING session_id
+	)
+	UPDATE sessions SET
+		tool_call_count = tool_call_count + $12,
+		updated_at = $13
+	WHERE id = (SELECT session_id FROM ins)`
 
 	argsJSON, _ := json.Marshal(tc.Arguments)
 	var resultJSON []byte
@@ -600,8 +633,9 @@ func (p *Provider) RecordToolCall(ctx context.Context, sessionID string, tc *ses
 		tc.ID, sessionID, tc.CallID, tc.Name,
 		argsJSON, resultJSON,
 		string(tc.Status), pgutil.NullInt64(tc.DurationMs),
-		string(tc.Execution), pgutil.NullString(tc.ErrorMessage),
+		pgutil.NullString(tc.ErrorMessage),
 		pgutil.MarshalJSONB(tc.Labels), tc.CreatedAt,
+		toolCallIncr, time.Now(),
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: record tool call: %w", err)
@@ -614,19 +648,28 @@ func (p *Provider) RecordProviderCall(ctx context.Context, sessionID string, pc 
 		return err
 	}
 
-	query := `INSERT INTO provider_calls (id, session_id, provider, model, status, input_tokens, output_tokens, cached_tokens, cost_usd, duration_ms, finish_reason, tool_call_count, error_message, labels, created_at)
+	// Each provider call lifecycle event (completed, failed) is its own row.
+	// Only completed calls add tokens/cost to session counters.
+	isCompleted := pc.Status == session.ProviderCallStatusCompleted
+	var inputIncr, outputIncr int64
+	var costIncr float64
+	if isCompleted {
+		inputIncr = pc.InputTokens
+		outputIncr = pc.OutputTokens
+		costIncr = pc.CostUSD
+	}
+
+	query := `WITH ins AS (
+		INSERT INTO provider_calls (id, session_id, provider, model, status, input_tokens, output_tokens, cached_tokens, cost_usd, duration_ms, finish_reason, tool_call_count, error_message, labels, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-		ON CONFLICT (id, created_at) DO UPDATE SET
-			status = EXCLUDED.status,
-			input_tokens = EXCLUDED.input_tokens,
-			output_tokens = EXCLUDED.output_tokens,
-			cached_tokens = EXCLUDED.cached_tokens,
-			cost_usd = EXCLUDED.cost_usd,
-			duration_ms = EXCLUDED.duration_ms,
-			finish_reason = EXCLUDED.finish_reason,
-			tool_call_count = EXCLUDED.tool_call_count,
-			error_message = EXCLUDED.error_message,
-			labels = EXCLUDED.labels`
+		RETURNING session_id
+	)
+	UPDATE sessions SET
+		total_input_tokens = total_input_tokens + $16,
+		total_output_tokens = total_output_tokens + $17,
+		estimated_cost_usd = estimated_cost_usd + $18,
+		updated_at = $19
+	WHERE id = (SELECT session_id FROM ins)`
 
 	_, err := p.pool.Exec(ctx, query,
 		pc.ID, sessionID, pc.Provider, pc.Model,
@@ -635,6 +678,7 @@ func (p *Provider) RecordProviderCall(ctx context.Context, sessionID string, pc 
 		pgutil.NullString(pc.FinishReason), pc.ToolCallCount,
 		pgutil.NullString(pc.ErrorMessage), pgutil.MarshalJSONB(pc.Labels),
 		pc.CreatedAt,
+		inputIncr, outputIncr, costIncr, time.Now(),
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: record provider call: %w", err)
@@ -647,7 +691,7 @@ func (p *Provider) GetToolCalls(ctx context.Context, sessionID string) ([]*sessi
 		return nil, err
 	}
 
-	query := `SELECT id, session_id, call_id, name, arguments, result, status, duration_ms, execution, error_message, labels, created_at
+	query := `SELECT id, session_id, call_id, name, arguments, result, status, duration_ms, error_message, labels, created_at
 		FROM tool_calls WHERE session_id=$1 ORDER BY created_at ASC`
 
 	rows, err := p.pool.Query(ctx, query, sessionID)
@@ -704,12 +748,91 @@ func (p *Provider) GetProviderCalls(ctx context.Context, sessionID string) ([]*s
 	return calls, nil
 }
 
+// --- Runtime event management -----------------------------------------------
+
+func scanRuntimeEvent(row pgx.Row) (*session.RuntimeEvent, error) {
+	var evt session.RuntimeEvent
+	var durationMs *int64
+	var errorMessage *string
+	var dataJSON []byte
+
+	err := row.Scan(
+		&evt.ID, &evt.SessionID, &evt.EventType,
+		&dataJSON, &durationMs, &errorMessage, &evt.Timestamp,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: scan runtime event: %w", err)
+	}
+
+	if len(dataJSON) > 0 {
+		_ = json.Unmarshal(dataJSON, &evt.Data)
+	}
+	if durationMs != nil {
+		evt.DurationMs = *durationMs
+	}
+	evt.ErrorMessage = pgutil.DerefString(errorMessage)
+	return &evt, nil
+}
+
+func (p *Provider) RecordRuntimeEvent(ctx context.Context, sessionID string, evt *session.RuntimeEvent) error {
+	if err := p.sessionExists(ctx, sessionID); err != nil {
+		return err
+	}
+
+	query := `INSERT INTO runtime_events (id, session_id, event_type, data, duration_ms, error_message, timestamp)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`
+
+	dataJSON, _ := json.Marshal(evt.Data)
+
+	_, err := p.pool.Exec(ctx, query,
+		evt.ID, sessionID, evt.EventType,
+		dataJSON, pgutil.NullInt64(evt.DurationMs),
+		pgutil.NullString(evt.ErrorMessage), evt.Timestamp,
+	)
+	if err != nil {
+		return fmt.Errorf("postgres: record runtime event: %w", err)
+	}
+	return nil
+}
+
+func (p *Provider) GetRuntimeEvents(ctx context.Context, sessionID string) ([]*session.RuntimeEvent, error) {
+	if err := p.sessionExists(ctx, sessionID); err != nil {
+		return nil, err
+	}
+
+	query := `SELECT id, session_id, event_type, data, duration_ms, error_message, timestamp
+		FROM runtime_events WHERE session_id=$1 ORDER BY timestamp ASC`
+
+	rows, err := p.pool.Query(ctx, query, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: get runtime events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []*session.RuntimeEvent
+	for rows.Next() {
+		evt, err := scanRuntimeEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, evt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres: iterate runtime events: %w", err)
+	}
+	if events == nil {
+		events = []*session.RuntimeEvent{}
+	}
+	return events, nil
+}
+
 // --- Artifact management ----------------------------------------------------
 
 func (p *Provider) SaveArtifact(ctx context.Context, artifact *session.Artifact) error {
 	query := `INSERT INTO message_artifacts (id, message_id, session_id, artifact_type, mime_type,
-		storage_uri, size_bytes, filename, checksum_sha256, metadata, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+		storage_uri, size_bytes, filename, checksum_sha256, metadata, created_at,
+		width, height, duration_ms, channels, sample_rate)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
 
 	_, err := p.pool.Exec(ctx, query,
 		artifact.ID, artifact.MessageID, artifact.SessionID,
@@ -717,6 +840,9 @@ func (p *Provider) SaveArtifact(ctx context.Context, artifact *session.Artifact)
 		pgutil.NullInt64(artifact.SizeBytes), pgutil.NullString(artifact.Filename),
 		pgutil.NullString(artifact.Checksum), pgutil.MarshalJSONB(artifact.Metadata),
 		artifact.CreatedAt,
+		pgutil.NullInt32(artifact.Width), pgutil.NullInt32(artifact.Height),
+		pgutil.NullInt32(artifact.DurationMs), pgutil.NullInt32(artifact.Channels),
+		pgutil.NullInt32(artifact.SampleRate),
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: save artifact: %w", err)
@@ -726,7 +852,8 @@ func (p *Provider) SaveArtifact(ctx context.Context, artifact *session.Artifact)
 
 func (p *Provider) GetArtifacts(ctx context.Context, messageID string) ([]*session.Artifact, error) {
 	query := `SELECT id, message_id, session_id, artifact_type, mime_type, storage_uri,
-		size_bytes, filename, checksum_sha256, metadata, created_at
+		size_bytes, filename, checksum_sha256, metadata, created_at,
+		width, height, duration_ms, channels, sample_rate
 		FROM message_artifacts WHERE message_id=$1 ORDER BY created_at ASC`
 
 	rows, err := p.pool.Query(ctx, query, messageID)
@@ -739,7 +866,8 @@ func (p *Provider) GetArtifacts(ctx context.Context, messageID string) ([]*sessi
 func (p *Provider) GetSessionArtifacts(ctx context.Context, sessionID string) ([]*session.Artifact, error) {
 	const maxSessionArtifacts = 1000
 	query := `SELECT id, message_id, session_id, artifact_type, mime_type, storage_uri,
-		size_bytes, filename, checksum_sha256, metadata, created_at
+		size_bytes, filename, checksum_sha256, metadata, created_at,
+		width, height, duration_ms, channels, sample_rate
 		FROM message_artifacts WHERE session_id=$1 ORDER BY created_at ASC LIMIT $2`
 
 	rows, err := p.pool.Query(ctx, query, sessionID, maxSessionArtifacts)
@@ -762,10 +890,12 @@ func scanArtifact(row pgx.Row) (*session.Artifact, error) {
 	var sizeBytes *int64
 	var filename, checksum *string
 	var metadataJSON []byte
+	var width, height, durationMs, channels, sampleRate *int32
 
 	err := row.Scan(
 		&a.ID, &a.MessageID, &a.SessionID, &a.Type, &a.MIMEType, &a.StorageURI,
 		&sizeBytes, &filename, &checksum, &metadataJSON, &a.CreatedAt,
+		&width, &height, &durationMs, &channels, &sampleRate,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -780,6 +910,21 @@ func scanArtifact(row pgx.Row) (*session.Artifact, error) {
 	a.Filename = pgutil.DerefString(filename)
 	a.Checksum = pgutil.DerefString(checksum)
 	a.Metadata = pgutil.UnmarshalJSONB(metadataJSON)
+	if width != nil {
+		a.Width = *width
+	}
+	if height != nil {
+		a.Height = *height
+	}
+	if durationMs != nil {
+		a.DurationMs = *durationMs
+	}
+	if channels != nil {
+		a.Channels = *channels
+	}
+	if sampleRate != nil {
+		a.SampleRate = *sampleRate
+	}
 	return &a, nil
 }
 
@@ -804,7 +949,7 @@ func collectArtifacts(rows pgx.Rows) ([]*session.Artifact, error) {
 
 // --- Partition management ---------------------------------------------------
 
-var partitionTables = []string{"sessions", "messages", "tool_calls", "provider_calls", "message_artifacts", "audit_log"}
+var partitionTables = []string{"sessions", "messages", "tool_calls", "provider_calls", "runtime_events", "message_artifacts", "audit_log"}
 
 func (p *Provider) CreatePartition(ctx context.Context, date time.Time) error {
 	// Align to ISO week boundary (Monday).
@@ -856,7 +1001,7 @@ func (p *Provider) DropPartition(ctx context.Context, date time.Time) error {
 	}
 
 	// Drop all table partitions in reverse dependency order.
-	for _, table := range []string{"audit_log", "message_artifacts", "provider_calls", "tool_calls", "messages", "sessions"} {
+	for _, table := range []string{"audit_log", "message_artifacts", "runtime_events", "provider_calls", "tool_calls", "messages", "sessions"} {
 		name := pgx.Identifier{table + "_" + suffix}.Sanitize()
 		_, err := tx.Exec(ctx, "DROP TABLE IF EXISTS "+name)
 		if err != nil {

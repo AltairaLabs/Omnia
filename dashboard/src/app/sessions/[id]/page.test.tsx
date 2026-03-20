@@ -12,6 +12,9 @@ import SessionDetailPage from "./page";
 vi.mock("@/hooks/sessions", () => ({
   useSessionDetail: vi.fn(),
   useSessionEvalResults: vi.fn(),
+  useSessionToolCalls: vi.fn(() => ({ data: [] })),
+  useSessionProviderCalls: vi.fn(() => ({ data: [] })),
+  useSessionRuntimeEvents: vi.fn(() => ({ data: [] })),
   useSessionAllMessages: vi.fn(() => ({
     messages: [],
     totalLoaded: 0,
@@ -112,9 +115,24 @@ async function renderPage(id = "sess-123") {
 describe("SessionDetailPage", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    // Default mock for useSessionEvalResults to avoid errors in tests that don't set it
-    const { useSessionEvalResults } = await import("@/hooks");
+    // Default mocks to avoid errors in tests that don't set them
+    const { useSessionEvalResults, useSessionToolCalls, useSessionProviderCalls, useSessionRuntimeEvents } = await import("@/hooks");
     vi.mocked(useSessionEvalResults).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+    } as any);
+    vi.mocked(useSessionToolCalls).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+    } as any);
+    vi.mocked(useSessionProviderCalls).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+    } as any);
+    vi.mocked(useSessionRuntimeEvents).mockReturnValue({
       data: [],
       isLoading: false,
       error: null,
@@ -210,10 +228,26 @@ describe("SessionDetailPage", () => {
     expect(screen.getByText("Export JSON")).toBeInTheDocument();
   });
 
-  it("renders tool call card in assistant message", async () => {
-    const { useSessionDetail } = await import("@/hooks");
+  it("renders tool call indicator from first-class tool calls", async () => {
+    const { useSessionDetail, useSessionToolCalls } = await import("@/hooks");
     vi.mocked(useSessionDetail).mockReturnValue({
       data: mockSession,
+      isLoading: false,
+      error: null,
+    } as any);
+    vi.mocked(useSessionToolCalls).mockReturnValue({
+      data: [
+        {
+          id: "tc1",
+          callId: "call-1",
+          sessionId: "sess-123",
+          name: "search_docs",
+          arguments: { query: "help" },
+          status: "success" as const,
+          durationMs: 250,
+          createdAt: new Date(Date.now() - 59 * 60 * 1000).toISOString(),
+        },
+      ],
       isLoading: false,
       error: null,
     } as any);

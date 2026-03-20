@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -18,14 +19,9 @@ import {
 import { cn } from "@/lib/utils";
 import { generateName } from "@/lib/name-generator";
 import { FolderBrowser } from "./folder-browser";
-import {
-  K8sLabelSelector,
-  type LabelSelectorValue,
-} from "@/components/ui/k8s-label-selector";
 import { useArenaSourceContent, useArenaConfigPreview, estimateWorkItems } from "@/hooks/arena";
 import { useAgents } from "@/hooks/agents";
-import { useProviderPreview, useToolRegistryPreview } from "@/hooks/resources";
-import { useWorkspace } from "@/contexts/workspace-context";
+import { useProviders, useToolRegistries } from "@/hooks/resources";
 import {
   ChevronLeft,
   ChevronRight,
@@ -45,73 +41,33 @@ import type {
   ArenaSource,
   ArenaJob,
   ArenaJobSpec,
-  ExecutionMode,
-  ProviderGroupSelector,
-  ToolRegistrySelector,
 } from "@/types/arena";
+import type { ConfigProviderRef } from "@/hooks/use-arena-config-preview";
+import {
+  validateForm,
+  buildSpec,
+  buildArenaFilePath,
+  countTotalEntries,
+  groupSummary,
+  getStepIndicatorClassName,
+  getInitialFormState,
+  type ProviderGroupEntry,
+  type JobWizardFormState,
+} from "./job-wizard-utils";
 
 // =============================================================================
 // Types
 // =============================================================================
 
-const ALL_STEPS = [
+const WIZARD_STEPS = [
   { key: "basic", title: "Basic Info", description: "Job name" },
   { key: "source", title: "Source", description: "Source and configuration" },
-  { key: "execution", title: "Execution", description: "Direct or fleet mode" },
-  { key: "providers", title: "Providers", description: "Provider overrides" },
-  { key: "tools", title: "Tools", description: "Tool registry" },
-  { key: "options", title: "Options", description: "Workers and settings" },
-  { key: "review", title: "Review", description: "Create job" },
+  { key: "providers", title: "Providers", description: "Provider groups" },
+  { key: "tools", title: "Tools", description: "Tool registries" },
+  { key: "options", title: "Options & Review", description: "Workers and settings" },
 ];
 
-const DEFAULT_PROVIDER_GROUPS = ["default", "evaluation", "judge", "selfplay"];
-
-interface JobWizardFormState {
-  // Step 0: Basic Info
-  name: string;
-
-  // Step 1: Source
-  sourceRef: string;
-  rootPath: string;
-  arenaFileName: string;
-
-  // Step 2: Execution Mode
-  executionMode: ExecutionMode;
-  targetAgent: string;
-  targetNamespace: string;
-
-  // Step 3: Providers (direct mode only)
-  providerOverridesEnabled: boolean;
-  providerOverrides: Record<string, LabelSelectorValue>;
-  activeProviderGroups: string[];
-
-  // Step 4: Tools (direct mode only)
-  toolRegistryOverrideEnabled: boolean;
-  toolRegistryOverride: LabelSelectorValue;
-
-  // Step 5: Options
-  workers: string;
-  verbose: boolean;
-}
-
-function getInitialFormState(preselectedSource?: string): JobWizardFormState {
-  return {
-    name: generateName(),
-    sourceRef: preselectedSource || "",
-    rootPath: "",
-    arenaFileName: "config.arena.yaml",
-    executionMode: "direct",
-    targetAgent: "",
-    targetNamespace: "",
-    providerOverridesEnabled: false,
-    providerOverrides: {},
-    activeProviderGroups: [],
-    toolRegistryOverrideEnabled: false,
-    toolRegistryOverride: {},
-    workers: "1",
-    verbose: false,
-  };
-}
+const DEFAULT_PROVIDER_GROUPS = ["default", "judge", "selfplay"];
 
 export interface JobWizardProps {
   sources: ArenaSource[];
@@ -124,152 +80,59 @@ export interface JobWizardProps {
   onClose?: () => void;
 }
 
-// =============================================================================
-// Helper Functions
-// =============================================================================
 
-function validateForm(
-  form: JobWizardFormState,
-  maxWorkerReplicas: number
-): string | null {
-  if (!form.name.trim()) {
-    return "Name is required";
-  }
-  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(form.name)) {
-    return "Name must be lowercase alphanumeric and may contain hyphens";
-  }
-  if (!form.sourceRef) {
-    return "Source is required";
-  }
-
-  if (form.executionMode === "fleet" && !form.targetAgent) {
-    return "Target agent is required for fleet mode";
-  }
-
-  const workers = Number.parseInt(form.workers, 10);
-  if (Number.isNaN(workers) || workers < 1) {
-    return "Workers must be a positive integer";
-  }
-
-  if (maxWorkerReplicas > 0 && workers > maxWorkerReplicas) {
-    return `Open Core is limited to ${maxWorkerReplicas} worker(s)`;
-  }
-
-  return null;
-}
-
-function buildArenaFilePath(rootPath: string, fileName: string): string | undefined {
-  if (!rootPath && !fileName) return undefined;
-  if (!rootPath) return fileName;
-  if (!fileName) return `${rootPath}/config.arena.yaml`;
-  return `${rootPath}/${fileName}`;
-}
-
-function buildProviderOverrides(
-  form: JobWizardFormState
-): Record<string, ProviderGroupSelector> | undefined {
-  if (!form.providerOverridesEnabled) return undefined;
-  if (form.activeProviderGroups.length === 0) return undefined;
-
-  const overrides: Record<string, ProviderGroupSelector> = {};
-
-  for (const group of form.activeProviderGroups) {
-    const selector = form.providerOverrides[group] || {};
-    // Build clean selector object (omit empty fields)
-    const cleanSelector: ProviderGroupSelector["selector"] = {};
-
-    if (selector.matchLabels && Object.keys(selector.matchLabels).length > 0) {
-      cleanSelector.matchLabels = selector.matchLabels;
-    }
-    if (selector.matchExpressions && selector.matchExpressions.length > 0) {
-      cleanSelector.matchExpressions = selector.matchExpressions;
-    }
-
-    // Include the group even with an empty selector (matches all providers)
-    overrides[group] = { selector: cleanSelector };
-  }
-
-  return overrides;
-}
-
-function buildToolRegistryOverride(
-  form: JobWizardFormState
-): ToolRegistrySelector | undefined {
-  if (!form.toolRegistryOverrideEnabled) return undefined;
-
-  const selector = form.toolRegistryOverride || {};
-  // Build clean selector object (omit empty fields)
-  const cleanSelector: ToolRegistrySelector["selector"] = {};
-
-  if (selector.matchLabels && Object.keys(selector.matchLabels).length > 0) {
-    cleanSelector.matchLabels = selector.matchLabels;
-  }
-  if (selector.matchExpressions && selector.matchExpressions.length > 0) {
-    cleanSelector.matchExpressions = selector.matchExpressions;
-  }
-
-  // Include override even with empty selector (matches all registries)
-  return { selector: cleanSelector };
-}
-
-function buildSpec(form: JobWizardFormState): ArenaJobSpec {
-  const arenaFile = buildArenaFilePath(form.rootPath, form.arenaFileName);
-  const isFleet = form.executionMode === "fleet";
-
-  const spec: ArenaJobSpec = {
-    sourceRef: { name: form.sourceRef },
-    arenaFile: arenaFile || undefined,
-    type: "evaluation",
-    workers: {
-      replicas: Number.parseInt(form.workers, 10),
-    },
-    verbose: form.verbose || undefined,
-    providerOverrides: isFleet ? undefined : buildProviderOverrides(form),
-    toolRegistryOverride: isFleet ? undefined : buildToolRegistryOverride(form),
-    evaluation: {
-      outputFormats: ["json", "junit"],
-    },
-  };
-
-  if (isFleet) {
-    spec.execution = {
-      mode: "fleet",
-      target: {
-        agentRuntimeRef: { name: form.targetAgent },
-        namespace: form.targetNamespace || undefined,
-      },
-    };
-  }
-
-  return spec;
-}
-
-function getStepIndicatorClassName(stepIndex: number, currentStep: number): string {
-  if (stepIndex < currentStep) return "bg-primary text-primary-foreground";
-  if (stepIndex === currentStep) return "border-2 border-primary";
-  return "border border-muted-foreground/30";
-}
 
 // =============================================================================
 // Subcomponents
 // =============================================================================
 
-interface ProviderGroupSelectorEditorProps {
-  group: string;
-  selector: LabelSelectorValue;
-  onChange: (selector: LabelSelectorValue) => void;
-  onRemove: () => void;
-  availableLabels: Record<string, string[]>;
+interface ProviderGroupEditorProps {
+  readonly group: string;
+  readonly entries: ProviderGroupEntry[];
+  readonly required: boolean;
+  readonly onAddEntry: (entry: ProviderGroupEntry) => void;
+  readonly onRemoveEntry: (index: number) => void;
+  readonly onRemoveGroup: () => void;
+  readonly availableProviders: { name: string }[];
+  readonly availableAgents: { name: string }[];
 }
 
-function ProviderGroupSelectorEditor({
+function ProviderGroupEditor({
   group,
-  selector,
-  onChange,
-  onRemove,
-  availableLabels,
-}: ProviderGroupSelectorEditorProps) {
-  const { matchCount, totalCount, isLoading } = useProviderPreview(selector);
+  entries,
+  required,
+  onAddEntry,
+  onRemoveEntry,
+  onRemoveGroup,
+  availableProviders,
+  availableAgents,
+}: ProviderGroupEditorProps) {
+  // Build combined picker options, excluding already-added entries
+  const pickerOptions = useMemo(() => {
+    const addedNames = new Set(entries.map((e) => `${e.type}:${e.name}`));
+    const opts: { type: "provider" | "agent"; name: string }[] = [];
+    for (const p of availableProviders) {
+      if (!addedNames.has(`provider:${p.name}`)) {
+        opts.push({ type: "provider", name: p.name });
+      }
+    }
+    for (const a of availableAgents) {
+      if (!addedNames.has(`agent:${a.name}`)) {
+        opts.push({ type: "agent", name: a.name });
+      }
+    }
+    return opts;
+  }, [availableProviders, availableAgents, entries]);
+
+  const handleAdd = useCallback(
+    (value: string) => {
+      const [type, name] = value.split(":") as ["provider" | "agent", string];
+      if (type && name) {
+        onAddEntry({ type, name });
+      }
+    },
+    [onAddEntry]
+  );
 
   return (
     <div className="space-y-2 rounded-md border p-3">
@@ -278,236 +141,170 @@ function ProviderGroupSelectorEditor({
           <Badge variant="outline" className="font-mono">
             {group}
           </Badge>
-          {isLoading ? (
-            <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+          {required && (
+            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+              required
+            </Badge>
+          )}
+          {entries.length === 0 ? (
+            required ? (
+              <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                <AlertCircle className="h-3 w-3 mr-0.5" />
+                empty
+              </Badge>
+            ) : (
+              <span className="text-xs text-muted-foreground">No entries</span>
+            )
           ) : (
             <span className="text-xs text-muted-foreground">
-              {matchCount} of {totalCount} providers match
+              {groupSummary(entries)}
             </span>
           )}
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={onRemove}
-          className="h-6 w-6 p-0"
-        >
-          <X className="h-4 w-4" />
-        </Button>
+        {!required && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onRemoveGroup}
+            className="h-6 w-6 p-0"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        )}
       </div>
-      <K8sLabelSelector
-        value={selector}
-        onChange={onChange}
-        availableLabels={availableLabels}
-        description={`Select providers to use for the "${group}" provider group`}
-      />
+
+      {/* Existing entries */}
+      {entries.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {entries.map((entry, i) => (
+            <Badge
+              key={`${entry.type}-${entry.name}`}
+              variant="secondary"
+              className="flex items-center gap-1"
+            >
+              {entry.type === "agent" ? (
+                <Network className="h-3 w-3 text-blue-500" />
+              ) : (
+                <Zap className="h-3 w-3 text-amber-500" />
+              )}
+              {entry.name}
+              <button
+                type="button"
+                onClick={() => onRemoveEntry(i)}
+                className="ml-1 hover:text-destructive"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
+
+      {/* Add entry picker */}
+      {pickerOptions.length > 0 && (
+        <Select value="" onValueChange={handleAdd}>
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="Add provider or agent..." />
+          </SelectTrigger>
+          <SelectContent>
+            {pickerOptions.map((opt) => (
+              <SelectItem
+                key={`${opt.type}:${opt.name}`}
+                value={`${opt.type}:${opt.name}`}
+              >
+                <span className="flex items-center gap-2">
+                  {opt.type === "agent" ? (
+                    <Network className="h-3.5 w-3.5 text-blue-500" />
+                  ) : (
+                    <Zap className="h-3.5 w-3.5 text-amber-500" />
+                  )}
+                  {opt.name}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
     </div>
   );
 }
 
-interface ToolRegistryPreviewBadgeProps {
-  selector: LabelSelectorValue | undefined;
+interface ProviderMappingEditorProps {
+  readonly group: string;
+  readonly mapping: Record<string, ProviderGroupEntry | null>;
+  readonly availableProviders: { name: string }[];
+  readonly availableAgents: { name: string }[];
+  readonly onSetMapping: (group: string, configID: string, entry: ProviderGroupEntry | null) => void;
 }
 
-function ToolRegistryPreviewBadge({ selector }: ToolRegistryPreviewBadgeProps) {
-  const { matchCount, totalToolsCount, isLoading } = useToolRegistryPreview(selector);
-
-  if (isLoading) {
-    return (
-      <Badge variant="secondary">
-        <Loader2 className="h-3 w-3 animate-spin mr-1" />
-        Loading...
-      </Badge>
-    );
-  }
-
-  return (
-    <Badge variant={matchCount > 0 ? "default" : "secondary"}>
-      {matchCount} registries ({totalToolsCount} tools)
-    </Badge>
+function ProviderMappingEditor({
+  group,
+  mapping,
+  availableProviders,
+  availableAgents,
+  onSetMapping,
+}: ProviderMappingEditorProps) {
+  const handleChange = useCallback(
+    (configID: string, v: string) => {
+      if (!v) {
+        onSetMapping(group, configID, null);
+        return;
+      }
+      const [type, name] = v.split(":") as ["provider" | "agent", string];
+      if (type && name) {
+        onSetMapping(group, configID, { type, name });
+      }
+    },
+    [group, onSetMapping]
   );
-}
-
-interface ExecutionStepProps {
-  readonly formState: JobWizardFormState;
-  readonly setFormState: React.Dispatch<React.SetStateAction<JobWizardFormState>>;
-  readonly updateField: <K extends keyof JobWizardFormState>(
-    field: K,
-    value: JobWizardFormState[K]
-  ) => void;
-}
-
-function ExecutionStep({
-  formState,
-  setFormState,
-  updateField,
-}: ExecutionStepProps) {
-  const { workspaces, currentWorkspace } = useWorkspace();
-
-  // Build unique namespace list from available workspaces
-  const namespaces = useMemo(() => {
-    const ns = workspaces.map((w) => w.namespace).filter(Boolean);
-    return [...new Set(ns)];
-  }, [workspaces]);
-
-  const singleNamespace = namespaces.length <= 1;
-
-  // Default targetNamespace to current workspace's namespace when entering fleet mode
-  const effectiveNamespace = formState.targetNamespace || currentWorkspace?.namespace || "";
-
-  // Find workspace name for the selected namespace so we can fetch its agents
-  const workspaceForNamespace = useMemo(() => {
-    return workspaces.find((w) => w.namespace === effectiveNamespace)?.name;
-  }, [workspaces, effectiveNamespace]);
-
-  // Fetch agents for the selected namespace's workspace
-  const { data: agents, isLoading: agentsLoading } = useAgents({
-    workspaceName: workspaceForNamespace,
-  });
-
-  const runningAgents = useMemo(() => {
-    return (agents || []).filter((a) => a.status?.phase === "Running");
-  }, [agents]);
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-2">
-        <Label>Execution Mode</Label>
-        <p className="text-xs text-muted-foreground">
-          Choose how the job executes scenarios against LLMs
-        </p>
+    <div className="space-y-2 rounded-md border p-3">
+      <div className="flex items-center gap-2">
+        <Badge variant="outline" className="font-mono">
+          {group}
+        </Badge>
+        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+          mapped
+        </Badge>
       </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <button
-          type="button"
-          className={cn(
-            "flex flex-col items-start gap-2 rounded-lg border p-4 text-left transition-colors",
-            formState.executionMode === "direct"
-              ? "border-primary bg-primary/5"
-              : "hover:bg-muted/50"
+      {Object.entries(mapping).map(([configID, entry]) => (
+        <div key={configID} className="flex items-center gap-2">
+          <code className="text-xs bg-muted px-2 py-1 rounded min-w-[120px]">
+            {configID}
+          </code>
+          <Select
+            value={entry ? `${entry.type}:${entry.name}` : ""}
+            onValueChange={(v) => handleChange(configID, v)}
+          >
+            <SelectTrigger className="flex-1">
+              <SelectValue placeholder="Select provider or agent..." />
+            </SelectTrigger>
+            <SelectContent>
+              {availableProviders.map((p) => (
+                <SelectItem key={`provider:${p.name}`} value={`provider:${p.name}`}>
+                  <span className="flex items-center gap-2">
+                    <Zap className="h-3.5 w-3.5 text-amber-500" />
+                    {p.name}
+                  </span>
+                </SelectItem>
+              ))}
+              {availableAgents.map((a) => (
+                <SelectItem key={`agent:${a.name}`} value={`agent:${a.name}`}>
+                  <span className="flex items-center gap-2">
+                    <Network className="h-3.5 w-3.5 text-blue-500" />
+                    {a.name}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {!entry && (
+            <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
           )}
-          onClick={() => {
-            setFormState((prev) => ({
-              ...prev,
-              executionMode: "direct",
-              targetAgent: "",
-              targetNamespace: "",
-            }));
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <Zap className="h-5 w-5 text-amber-500" />
-            <span className="font-medium">Direct</span>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Workers call LLM providers directly. You can configure provider
-            and tool registry overrides.
-          </p>
-        </button>
-
-        <button
-          type="button"
-          className={cn(
-            "flex flex-col items-start gap-2 rounded-lg border p-4 text-left transition-colors",
-            formState.executionMode === "fleet"
-              ? "border-primary bg-primary/5"
-              : "hover:bg-muted/50"
-          )}
-          onClick={() => {
-            setFormState((prev) => ({
-              ...prev,
-              executionMode: "fleet",
-              targetNamespace: currentWorkspace?.namespace || "",
-              providerOverridesEnabled: false,
-              providerOverrides: {},
-              activeProviderGroups: [],
-              toolRegistryOverrideEnabled: false,
-              toolRegistryOverride: {},
-            }));
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <Network className="h-5 w-5 text-blue-500" />
-            <span className="font-medium">Fleet</span>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Workers connect to a deployed agent via WebSocket. The agent uses its
-            own providers and tools.
-          </p>
-        </button>
-      </div>
-
-      {formState.executionMode === "fleet" && (
-        <div className="space-y-4 pt-2 border-t">
-          <div className="space-y-2">
-            <Label htmlFor="targetNamespace">Namespace</Label>
-            <Select
-              value={effectiveNamespace}
-              onValueChange={(v) => {
-                setFormState((prev) => ({
-                  ...prev,
-                  targetNamespace: v,
-                  targetAgent: "",
-                }));
-              }}
-              disabled={singleNamespace}
-            >
-              <SelectTrigger id="targetNamespace">
-                <SelectValue placeholder="Select namespace" />
-              </SelectTrigger>
-              <SelectContent>
-                {namespaces.map((ns) => (
-                  <SelectItem key={ns} value={ns}>
-                    {ns}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Namespace of the target agent
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="targetAgent">Target Agent</Label>
-            <Select
-              value={formState.targetAgent}
-              onValueChange={(v) => updateField("targetAgent", v)}
-              disabled={agentsLoading}
-            >
-              <SelectTrigger id="targetAgent">
-                <SelectValue
-                  placeholder={
-                    agentsLoading ? "Loading agents..." : "Select an agent"
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {runningAgents.length === 0 ? (
-                  <div className="flex items-center gap-2 text-muted-foreground p-2 text-sm">
-                    <AlertTriangle className="h-4 w-4" />
-                    No running agents available
-                  </div>
-                ) : (
-                  runningAgents.map((agent) => (
-                    <SelectItem
-                      key={agent.metadata?.uid || agent.metadata?.name}
-                      value={agent.metadata?.name || "unknown"}
-                    >
-                      {agent.metadata?.name}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Select a running AgentRuntime to test against
-            </p>
-          </div>
         </div>
-      )}
+      ))}
     </div>
   );
 }
@@ -527,21 +324,13 @@ export function JobWizard({
 }: Readonly<JobWizardProps>) {
   const [step, setStep] = useState(0);
   const [formState, setFormState] = useState<JobWizardFormState>(() =>
-    getInitialFormState(preselectedSource)
+    getInitialFormState(preselectedSource, generateName())
   );
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Compute visible steps — fleet mode hides providers/tools
-  const isFleetMode = formState.executionMode === "fleet";
-  const steps = useMemo(() => {
-    if (isFleetMode) {
-      return ALL_STEPS.filter((s) => s.key !== "providers" && s.key !== "tools");
-    }
-    return ALL_STEPS;
-  }, [isFleetMode]);
-
+  const steps = WIZARD_STEPS;
   const effectiveStep = Math.min(step, steps.length - 1);
   const currentStepKey = steps[effectiveStep]?.key ?? "basic";
 
@@ -552,9 +341,20 @@ export function JobWizard({
     error: contentError,
   } = useArenaSourceContent(formState.sourceRef || undefined);
 
-  // Get available labels for providers and tool registries
-  const { availableLabels: providerLabels, totalCount: totalProviderCount } = useProviderPreview(undefined);
-  const { availableLabels: toolRegistryLabels } = useToolRegistryPreview(undefined);
+  // Fetch providers and agents for picker
+  const { data: providerList, isLoading: providersLoading } = useProviders();
+  const { data: agentList, isLoading: agentsLoading } = useAgents({});
+  const { data: toolRegistryList, isLoading: toolRegistriesLoading } = useToolRegistries();
+
+  const availableProviders = useMemo(
+    () => (providerList || []).map((p) => ({ name: p.metadata.name })),
+    [providerList]
+  );
+
+  const availableAgents = useMemo(
+    () => (agentList || []).map((a) => ({ name: a.metadata?.name || "" })).filter((a) => a.name),
+    [agentList]
+  );
 
   // Fetch arena config for work item estimation
   const arenaFilePath = buildArenaFilePath(formState.rootPath, formState.arenaFileName);
@@ -562,17 +362,83 @@ export function JobWizard({
     formState.sourceRef || undefined,
     arenaFilePath
   );
+
+  const totalProviderEntries = countTotalEntries(formState.providerGroups);
   const workEstimate = useMemo(
-    () =>
-      estimateWorkItems(
-        configPreview,
-        formState.executionMode,
-        formState.providerOverridesEnabled,
-        totalProviderCount,
-        maxWorkerReplicas
-      ),
-    [configPreview, formState.executionMode, formState.providerOverridesEnabled, totalProviderCount, maxWorkerReplicas]
+    () => estimateWorkItems(configPreview, totalProviderEntries, maxWorkerReplicas),
+    [configPreview, totalProviderEntries, maxWorkerReplicas]
   );
+
+  // Determine which groups should be map-mode based on providerRefs.
+  // Each provider ID becomes its own map-mode group — the arena-worker's
+  // remapProviderIDs expects the group name to equal the provider ID.
+  const mapModeGroups = useMemo(() => {
+    if (!configPreview.loaded) return new Map<string, ConfigProviderRef[]>();
+    const grouped = new Map<string, ConfigProviderRef[]>();
+    for (const ref of configPreview.providerRefs) {
+      if (!grouped.has(ref.id)) {
+        grouped.set(ref.id, []);
+      }
+      grouped.get(ref.id)!.push(ref);
+    }
+    return grouped;
+  }, [configPreview.loaded, configPreview.providerRefs]);
+
+  // Auto-populate provider groups required by the arena config.
+  // When the config changes (different folder/file), rebuild groups from scratch
+  // so stale groups from the previous config are removed.
+  const prevRequiredGroups = useRef<string[]>([]);
+  const prevProviderRefs = useRef<ConfigProviderRef[]>([]);
+  useEffect(() => {
+    if (!configPreview.loaded) return;
+
+    const required = configPreview.requiredGroups;
+    const refs = configPreview.providerRefs;
+
+    // Skip if nothing changed
+    const refsChanged = refs.length !== prevProviderRefs.current.length ||
+      refs.some((r, i) => r.id !== prevProviderRefs.current[i]?.id);
+    const groupsChanged = required.length !== prevRequiredGroups.current.length ||
+      !required.every((g) => prevRequiredGroups.current.includes(g));
+
+    if (!refsChanged && !groupsChanged) return;
+    prevRequiredGroups.current = required;
+    prevProviderRefs.current = refs;
+
+    setFormState((prev) => {
+      // Start fresh: only keep groups/mappings that the new config requires.
+      // User-added custom groups (not in required) are preserved.
+      const requiredSet = new Set(required);
+      const mapModeSet = new Set(mapModeGroups.keys());
+
+      // Preserve user-added groups that aren't config-driven
+      const updatedGroups: Record<string, ProviderGroupEntry[]> = {};
+      for (const [group, entries] of Object.entries(prev.providerGroups)) {
+        if (!requiredSet.has(group) && !DEFAULT_PROVIDER_GROUPS.includes(group)) {
+          updatedGroups[group] = entries;
+        }
+      }
+
+      // Array-mode groups from spec.providers[].group
+      for (const group of required) {
+        if (!mapModeSet.has(group)) {
+          updatedGroups[group] = prev.providerGroups[group] ?? [];
+        }
+      }
+
+      // Map-mode groups: each provider ID ref becomes its own mapping group
+      const updatedMappings: Record<string, Record<string, ProviderGroupEntry | null>> = {};
+      for (const [providerID, providerRefs] of mapModeGroups) {
+        const mapping: Record<string, ProviderGroupEntry | null> = {};
+        for (const ref of providerRefs) {
+          mapping[ref.id] = prev.providerMappings[providerID]?.[ref.id] ?? null;
+        }
+        updatedMappings[providerID] = mapping;
+      }
+
+      return { ...prev, providerGroups: updatedGroups, providerMappings: updatedMappings };
+    });
+  }, [configPreview.loaded, configPreview.requiredGroups, configPreview.providerRefs, mapModeGroups]);
 
   // Auto-update workers when the recommended count changes
   const prevRecommended = useRef(workEstimate.recommendedWorkers);
@@ -588,8 +454,6 @@ export function JobWizard({
       }));
     }
   }, [configPreview.loaded, workEstimate.recommendedWorkers]);
-
-  // Agents are fetched inside ExecutionStep based on selected namespace
 
   const updateField = useCallback(<K extends keyof JobWizardFormState>(
     field: K,
@@ -628,50 +492,60 @@ export function JobWizard({
   const handleAddProviderGroup = useCallback((group: string) => {
     setFormState((prev) => ({
       ...prev,
-      activeProviderGroups: [...prev.activeProviderGroups, group],
-      providerOverrides: {
-        ...prev.providerOverrides,
-        [group]: {},
+      providerGroups: {
+        ...prev.providerGroups,
+        [group]: [],
       },
     }));
   }, []);
 
   const handleRemoveProviderGroup = useCallback((group: string) => {
     setFormState((prev) => {
-      const newGroups = prev.activeProviderGroups.filter((g) => g !== group);
-      const newOverrides = { ...prev.providerOverrides };
-      delete newOverrides[group];
+      const newGroups = { ...prev.providerGroups };
+      delete newGroups[group];
+      return { ...prev, providerGroups: newGroups };
+    });
+  }, []);
+
+  const handleAddEntryToGroup = useCallback((group: string, entry: ProviderGroupEntry) => {
+    setFormState((prev) => ({
+      ...prev,
+      providerGroups: {
+        ...prev.providerGroups,
+        [group]: [...(prev.providerGroups[group] || []), entry],
+      },
+    }));
+  }, []);
+
+  const handleRemoveEntryFromGroup = useCallback((group: string, index: number) => {
+    setFormState((prev) => {
+      const entries = [...(prev.providerGroups[group] || [])];
+      entries.splice(index, 1);
       return {
         ...prev,
-        activeProviderGroups: newGroups,
-        providerOverrides: newOverrides,
+        providerGroups: {
+          ...prev.providerGroups,
+          [group]: entries,
+        },
       };
     });
   }, []);
 
-  const handleProviderGroupSelectorChange = useCallback(
-    (group: string, selector: LabelSelectorValue) => {
-      setFormState((prev) => ({
-        ...prev,
-        providerOverrides: {
-          ...prev.providerOverrides,
-          [group]: selector,
-        },
-      }));
-    },
-    []
-  );
+  // Tool registry selection
+  const handleToggleToolRegistry = useCallback((name: string) => {
+    setFormState((prev) => {
+      const selected = prev.selectedToolRegistries.includes(name)
+        ? prev.selectedToolRegistries.filter((n) => n !== name)
+        : [...prev.selectedToolRegistries, name];
+      return { ...prev, selectedToolRegistries: selected };
+    });
+  }, []);
 
   // Available groups for adding (exclude already active ones)
-  const availableProviderGroups = useMemo(() => {
-    const allGroups = new Set([
-      ...DEFAULT_PROVIDER_GROUPS,
-      ...formState.activeProviderGroups,
-    ]);
-    return Array.from(allGroups).filter(
-      (g) => !formState.activeProviderGroups.includes(g)
-    );
-  }, [formState.activeProviderGroups]);
+  const activeGroupNames = Object.keys(formState.providerGroups);
+  const availableGroupNames = useMemo(() => {
+    return DEFAULT_PROVIDER_GROUPS.filter((g) => !activeGroupNames.includes(g));
+  }, [activeGroupNames]);
 
   const [newGroupName, setNewGroupName] = useState("");
 
@@ -681,18 +555,11 @@ export function JobWizard({
         return formState.name.length > 0 && /^[a-z0-9-]+$/.test(formState.name);
       case "source":
         return formState.sourceRef.length > 0;
-      case "execution":
-        if (formState.executionMode === "fleet") {
-          return formState.targetAgent.length > 0;
-        }
-        return true;
       case "providers":
         return true; // Optional step
       case "tools":
         return true; // Optional step
       case "options":
-        return true;
-      case "review":
         return true;
       default:
         return false;
@@ -704,7 +571,7 @@ export function JobWizard({
       setError(null);
       setIsSubmitting(true);
 
-      const validationError = validateForm(formState, maxWorkerReplicas);
+      const validationError = validateForm(formState, maxWorkerReplicas, configPreview.requiredGroups);
       if (validationError) {
         setError(validationError);
         setIsSubmitting(false);
@@ -722,414 +589,480 @@ export function JobWizard({
     }
   };
 
-  const readySources = sources.filter((s) => s.status?.phase === "Ready");
+  // Sources are available when Ready or Fetching (re-syncing — previous content
+  // still accessible via HEAD). Pending/Initializing sources have no content yet.
+  const availableSources = sources.filter((s) => {
+    const phase = s.status?.phase;
+    return phase === "Ready" || phase === "Fetching";
+  });
 
   // Step rendering
   const renderStep = () => {
     switch (currentStepKey) {
-      case "basic": // Basic Info
-        return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Job Name</Label>
-              <Input
-                id="name"
-                placeholder="my-job"
-                value={formState.name}
-                onChange={(e) =>
-                  updateField(
-                    "name",
-                    e.target.value.toLowerCase().replaceAll(/[^a-z0-9-]/g, "-")
-                  )
-                }
-              />
-              <p className="text-xs text-muted-foreground">
-                Lowercase letters, numbers, and hyphens only
-              </p>
-            </div>
-          </div>
-        );
-
-      case "source": // Source
-        return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="source">Source</Label>
-              <Select
-                value={formState.sourceRef}
-                onValueChange={handleSourceChange}
-              >
-                <SelectTrigger id="source">
-                  <SelectValue placeholder="Select a source" />
-                </SelectTrigger>
-                <SelectContent>
-                  {readySources.length === 0 ? (
-                    <div className="flex items-center gap-2 text-muted-foreground p-2 text-sm">
-                      <Settings className="h-4 w-4" />
-                      No ready sources available
-                    </div>
-                  ) : (
-                    readySources.map((source) => (
-                      <SelectItem
-                        key={source.metadata?.name}
-                        value={source.metadata?.name || "unknown"}
-                      >
-                        {source.metadata?.name}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Select the source containing arena configuration and scenarios
-              </p>
-            </div>
-
-            {formState.sourceRef && (
-              <div className="space-y-2">
-                <Label>Root Folder</Label>
-                <FolderBrowser
-                  tree={sourceTree}
-                  loading={contentLoading}
-                  error={contentError?.message}
-                  selectedPath={formState.rootPath}
-                  onSelectFolder={handleFolderSelect}
-                  onSelectFile={handleFileSelect}
-                  maxHeight="180px"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Select a root folder or click an arena config file to auto-fill both
-                </p>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label htmlFor="arenaFileName">Arena Config File</Label>
-              <div className="flex items-center gap-2">
-                {formState.rootPath && (
-                  <code className="text-xs bg-muted px-2 py-1 rounded text-muted-foreground">
-                    {formState.rootPath}/
-                  </code>
-                )}
-                <Input
-                  id="arenaFileName"
-                  placeholder="config.arena.yaml"
-                  value={formState.arenaFileName}
-                  onChange={(e) => updateField("arenaFileName", e.target.value)}
-                  className="flex-1"
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Full path:{" "}
-                {buildArenaFilePath(formState.rootPath, formState.arenaFileName) ||
-                  "config.arena.yaml"}
-              </p>
-            </div>
-          </div>
-        );
-
-      case "execution": // Execution Mode
-        return (
-          <ExecutionStep
-            formState={formState}
-            setFormState={setFormState}
-            updateField={updateField}
-          />
-        );
-
-      case "providers": // Providers
-        return (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Provider Overrides</Label>
-                <p className="text-xs text-muted-foreground">
-                  Override which providers to use for each provider group
-                </p>
-              </div>
-              <Switch
-                checked={formState.providerOverridesEnabled}
-                onCheckedChange={(checked) =>
-                  updateField("providerOverridesEnabled", checked)
-                }
-              />
-            </div>
-
-            {formState.providerOverridesEnabled && (
-              <div className="space-y-4">
-                {/* Active provider groups */}
-                {formState.activeProviderGroups.map((group) => (
-                  <ProviderGroupSelectorEditor
-                    key={group}
-                    group={group}
-                    selector={formState.providerOverrides[group] || {}}
-                    onChange={(selector) =>
-                      handleProviderGroupSelectorChange(group, selector)
-                    }
-                    onRemove={() => handleRemoveProviderGroup(group)}
-                    availableLabels={providerLabels}
-                  />
-                ))}
-
-                {/* Add new group */}
-                <div className="flex items-center gap-2">
-                  <Select
-                    value=""
-                    onValueChange={(v) => {
-                      if (v === "__custom__") {
-                        // Do nothing, handled by custom input
-                      } else {
-                        handleAddProviderGroup(v);
-                      }
-                    }}
-                  >
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Add provider group" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableProviderGroups.map((group) => (
-                        <SelectItem key={group} value={group}>
-                          {group}
-                        </SelectItem>
-                      ))}
-                      <SelectItem value="__custom__">Custom...</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  <Input
-                    value={newGroupName}
-                    onChange={(e) => setNewGroupName(e.target.value)}
-                    placeholder="Custom group name"
-                    className="w-[160px]"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (newGroupName.trim()) {
-                        handleAddProviderGroup(newGroupName.trim());
-                        setNewGroupName("");
-                      }
-                    }}
-                    disabled={!newGroupName.trim()}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </div>
-
-                {formState.activeProviderGroups.length === 0 && (
-                  <p className="text-xs text-muted-foreground italic">
-                    No provider groups configured. Add a group to override its
-                    provider selection.
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        );
-
-      case "tools": // Tools
-        return (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Tool Registry Override</Label>
-                <p className="text-xs text-muted-foreground">
-                  Override which tool registries to use for this job
-                </p>
-              </div>
-              <Switch
-                checked={formState.toolRegistryOverrideEnabled}
-                onCheckedChange={(checked) =>
-                  updateField("toolRegistryOverrideEnabled", checked)
-                }
-              />
-            </div>
-
-            {formState.toolRegistryOverrideEnabled && (
-              <div className="space-y-4">
-                <K8sLabelSelector
-                  value={formState.toolRegistryOverride}
-                  onChange={(selector) =>
-                    updateField("toolRegistryOverride", selector)
-                  }
-                  availableLabels={toolRegistryLabels}
-                  description="Select tool registries by labels"
-                  previewComponent={
-                    <ToolRegistryPreviewBadge
-                      selector={formState.toolRegistryOverride}
-                    />
-                  }
-                />
-              </div>
-            )}
-          </div>
-        );
-
-      case "options": // Options
-        return (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="workers">Workers</Label>
-                <Input
-                  id="workers"
-                  type="number"
-                  min="1"
-                  max={maxWorkerReplicas > 0 ? maxWorkerReplicas : undefined}
-                  value={formState.workers}
-                  onChange={(e) => updateField("workers", e.target.value)}
-                />
-                {maxWorkerReplicas > 0 && (
-                  <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <AlertTriangle className="h-3 w-3" />
-                    Limited to {maxWorkerReplicas} worker
-                    {maxWorkerReplicas === 1 ? "" : "s"} (upgrade for more)
-                  </p>
-                )}
-                {configPreview.loaded && workEstimate.description && (
-                  <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Info className="h-3 w-3 shrink-0" />
-                    {workEstimate.workItems === 1
-                      ? `${workEstimate.description}. Additional workers won\u2019t improve speed.`
-                      : `${workEstimate.workItems} work items (${workEstimate.description}). Workers beyond ${workEstimate.workItems} won\u2019t improve speed.`}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label htmlFor="verbose">Verbose Logging</Label>
-                <p className="text-xs text-muted-foreground">
-                  Enable debug output from promptarena for troubleshooting
-                </p>
-              </div>
-              <Switch
-                id="verbose"
-                checked={formState.verbose}
-                onCheckedChange={(checked) => updateField("verbose", checked)}
-              />
-            </div>
-
-          </div>
-        );
-
-      case "review": // Review
-        return (
-          <div className="space-y-4">
-            {success ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <div className="rounded-full bg-green-500/10 p-3 mb-4">
-                  <Check className="h-8 w-8 text-green-500" />
-                </div>
-                <h3 className="text-lg font-semibold">Job Created!</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {formState.name} is being created
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center justify-between">
-                  <h3 className="font-medium">Review Configuration</h3>
-                  <Badge variant="outline">{formState.name}</Badge>
-                </div>
-
-                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                  <div className="text-muted-foreground">Source</div>
-                  <div>{formState.sourceRef}</div>
-
-                  <div className="text-muted-foreground">Arena File</div>
-                  <div className="font-mono text-xs">
-                    {buildArenaFilePath(
-                      formState.rootPath,
-                      formState.arenaFileName
-                    ) || "config.arena.yaml"}
-                  </div>
-
-                  <div className="text-muted-foreground">Execution Mode</div>
-                  <div className="flex items-center gap-2">
-                    {formState.executionMode === "fleet" ? (
-                      <>
-                        <Network className="h-3.5 w-3.5 text-blue-500" />
-                        Fleet
-                      </>
-                    ) : (
-                      <>
-                        <Zap className="h-3.5 w-3.5 text-amber-500" />
-                        Direct
-                      </>
-                    )}
-                  </div>
-
-                  {formState.executionMode === "fleet" && (
-                    <>
-                      <div className="text-muted-foreground">Target Agent</div>
-                      <div>{formState.targetAgent}</div>
-                      {formState.targetNamespace && (
-                        <>
-                          <div className="text-muted-foreground">
-                            Target Namespace
-                          </div>
-                          <div>{formState.targetNamespace}</div>
-                        </>
-                      )}
-                    </>
-                  )}
-
-                  <div className="text-muted-foreground">Workers</div>
-                  <div>{formState.workers}</div>
-
-                  {formState.providerOverridesEnabled &&
-                    formState.activeProviderGroups.length > 0 && (
-                      <>
-                        <div className="text-muted-foreground">
-                          Provider Overrides
-                        </div>
-                        <div>
-                          {formState.activeProviderGroups.map((group) => (
-                            <Badge
-                              key={group}
-                              variant="secondary"
-                              className="mr-1 mb-1"
-                            >
-                              {group}
-                            </Badge>
-                          ))}
-                        </div>
-                      </>
-                    )}
-
-                  {formState.toolRegistryOverrideEnabled && (
-                    <>
-                      <div className="text-muted-foreground">
-                        Tool Registry Override
-                      </div>
-                      <div>
-                        <ToolRegistryPreviewBadge
-                          selector={formState.toolRegistryOverride}
-                        />
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {error && (
-                  <Alert variant="destructive">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertDescription>{error}</AlertDescription>
-                  </Alert>
-                )}
-              </>
-            )}
-          </div>
-        );
-
+      case "basic":
+        return renderBasicStep();
+      case "source":
+        return renderSourceStep();
+      case "providers":
+        return renderProvidersStep();
+      case "tools":
+        return renderToolsStep();
+      case "options":
+        return renderOptionsAndReviewStep();
       default:
         return null;
     }
   };
+
+  const renderBasicStep = () => (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="name">Job Name</Label>
+        <Input
+          id="name"
+          placeholder="my-job"
+          value={formState.name}
+          onChange={(e) =>
+            updateField(
+              "name",
+              e.target.value.toLowerCase().replaceAll(/[^a-z0-9-]/g, "-")
+            )
+          }
+        />
+        <p className="text-xs text-muted-foreground">
+          Lowercase letters, numbers, and hyphens only
+        </p>
+      </div>
+    </div>
+  );
+
+  const renderSourceStep = () => (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="source">Source</Label>
+        <Select
+          value={formState.sourceRef}
+          onValueChange={handleSourceChange}
+        >
+          <SelectTrigger id="source">
+            <SelectValue placeholder="Select a source" />
+          </SelectTrigger>
+          <SelectContent>
+            {availableSources.length === 0 ? (
+              <div className="flex items-center gap-2 text-muted-foreground p-2 text-sm">
+                <Settings className="h-4 w-4" />
+                No ready sources available
+              </div>
+            ) : (
+              availableSources.map((source) => (
+                <SelectItem
+                  key={source.metadata?.name}
+                  value={source.metadata?.name || "unknown"}
+                >
+                  {source.metadata?.name}
+                </SelectItem>
+              ))
+            )}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          Select the source containing arena configuration and scenarios
+        </p>
+      </div>
+
+      {formState.sourceRef && (
+        <div className="space-y-2">
+          <Label>Root Folder</Label>
+          <FolderBrowser
+            tree={sourceTree}
+            loading={contentLoading}
+            error={contentError?.message}
+            selectedPath={formState.rootPath}
+            onSelectFolder={handleFolderSelect}
+            onSelectFile={handleFileSelect}
+            maxHeight="180px"
+          />
+          <p className="text-xs text-muted-foreground">
+            Select a root folder or click an arena config file to auto-fill both
+          </p>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <Label htmlFor="arenaFileName">Arena Config File</Label>
+        <div className="flex items-center gap-2">
+          {formState.rootPath && (
+            <code className="text-xs bg-muted px-2 py-1 rounded text-muted-foreground">
+              {formState.rootPath}/
+            </code>
+          )}
+          <Input
+            id="arenaFileName"
+            placeholder="config.arena.yaml"
+            value={formState.arenaFileName}
+            onChange={(e) => updateField("arenaFileName", e.target.value)}
+            className="flex-1"
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Full path:{" "}
+          {buildArenaFilePath(formState.rootPath, formState.arenaFileName) ||
+            "config.arena.yaml"}
+        </p>
+      </div>
+    </div>
+  );
+
+  // Provider mapping management
+  const handleSetMapping = useCallback((group: string, configID: string, entry: ProviderGroupEntry | null) => {
+    setFormState((prev) => ({
+      ...prev,
+      providerMappings: {
+        ...prev.providerMappings,
+        [group]: {
+          ...prev.providerMappings[group],
+          [configID]: entry,
+        },
+      },
+    }));
+  }, []);
+
+  const activeMappingGroups = Object.keys(formState.providerMappings);
+
+  const renderProvidersStep = () => (
+    <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+      {(providersLoading || agentsLoading) && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading providers and agents...
+        </div>
+      )}
+
+      {/* Map-mode groups: Provider Mappings */}
+      {activeMappingGroups.length > 0 && (
+        <>
+          <div className="space-y-0.5">
+            <Label>Provider Mappings</Label>
+            <p className="text-xs text-muted-foreground">
+              Select a CRD provider or agent for each config-referenced provider ID.
+            </p>
+          </div>
+
+          {activeMappingGroups.map((group) => (
+            <ProviderMappingEditor
+              key={group}
+              group={group}
+              mapping={formState.providerMappings[group]}
+              availableProviders={availableProviders}
+              availableAgents={availableAgents}
+              onSetMapping={handleSetMapping}
+            />
+          ))}
+        </>
+      )}
+
+      {/* Array-mode groups: Test Providers */}
+      <div className="space-y-0.5">
+        <Label>Test Providers</Label>
+        <p className="text-xs text-muted-foreground">
+          Configure which providers and agents to use for each group.
+          Leave empty to use defaults from the arena config.
+        </p>
+      </div>
+
+      {/* Active provider groups */}
+      {activeGroupNames.map((group) => (
+        <ProviderGroupEditor
+          key={group}
+          group={group}
+          entries={formState.providerGroups[group] || []}
+          required={configPreview.requiredGroups.includes(group)}
+          onAddEntry={(entry) => handleAddEntryToGroup(group, entry)}
+          onRemoveEntry={(index) => handleRemoveEntryFromGroup(group, index)}
+          onRemoveGroup={() => handleRemoveProviderGroup(group)}
+          availableProviders={availableProviders}
+          availableAgents={availableAgents}
+        />
+      ))}
+
+      {/* Add new group */}
+      <div className="flex items-center gap-2">
+        <Select
+          value=""
+          onValueChange={(v) => {
+            if (v !== "__custom__") {
+              handleAddProviderGroup(v);
+            }
+          }}
+        >
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Add group" />
+          </SelectTrigger>
+          <SelectContent>
+            {availableGroupNames.map((group) => (
+              <SelectItem key={group} value={group}>
+                {group}
+              </SelectItem>
+            ))}
+            <SelectItem value="__custom__">Custom...</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Input
+          value={newGroupName}
+          onChange={(e) => setNewGroupName(e.target.value)}
+          placeholder="Custom group name"
+          className="w-[160px]"
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            if (newGroupName.trim()) {
+              handleAddProviderGroup(newGroupName.trim());
+              setNewGroupName("");
+            }
+          }}
+          disabled={!newGroupName.trim()}
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {activeGroupNames.length === 0 && activeMappingGroups.length === 0 && (
+        <p className="text-xs text-muted-foreground italic">
+          No provider groups configured. The arena config defaults will be used.
+        </p>
+      )}
+    </div>
+  );
+
+  const renderToolsStep = () => (
+    <div className="space-y-4">
+      <div className="space-y-0.5">
+        <Label>Tool Registries</Label>
+        <p className="text-xs text-muted-foreground">
+          Select ToolRegistry CRDs to include in this job.
+          Leave empty to use defaults from the arena config.
+        </p>
+      </div>
+
+      {toolRegistriesLoading && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading tool registries...
+        </div>
+      )}
+
+      {!toolRegistriesLoading && toolRegistryList && toolRegistryList.length === 0 && (
+        <p className="text-xs text-muted-foreground italic">
+          No tool registries found in this workspace.
+        </p>
+      )}
+
+      {toolRegistryList && toolRegistryList.length > 0 && (
+        <div className="space-y-2">
+          {toolRegistryList.map((registry) => {
+            const regName = registry.metadata.name;
+            const toolCount = registry.status?.discoveredToolsCount ?? 0;
+            const checked = formState.selectedToolRegistries.includes(regName);
+            return (
+              <div
+                key={regName}
+                className="flex items-center space-x-3 rounded-md border p-3"
+              >
+                <Checkbox
+                  id={`tr-${regName}`}
+                  checked={checked}
+                  onCheckedChange={() => handleToggleToolRegistry(regName)}
+                />
+                <div className="flex-1">
+                  <Label
+                    htmlFor={`tr-${regName}`}
+                    className="text-sm font-medium cursor-pointer"
+                  >
+                    {regName}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    {toolCount} tool{toolCount === 1 ? "" : "s"} discovered
+                  </p>
+                </div>
+                <Badge variant={registry.status?.phase === "Ready" ? "default" : "secondary"}>
+                  {registry.status?.phase || "Unknown"}
+                </Badge>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {formState.selectedToolRegistries.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {formState.selectedToolRegistries.length} registr{formState.selectedToolRegistries.length === 1 ? "y" : "ies"} selected
+        </p>
+      )}
+    </div>
+  );
+
+  const renderOptionsAndReviewStep = () => (
+    <div className="space-y-4">
+      {success ? (
+        <div className="flex flex-col items-center justify-center py-8 text-center">
+          <div className="rounded-full bg-green-500/10 p-3 mb-4">
+            <Check className="h-8 w-8 text-green-500" />
+          </div>
+          <h3 className="text-lg font-semibold">Job Created!</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            {formState.name} is being created
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Workers & verbose */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="workers">Workers</Label>
+              <Input
+                id="workers"
+                type="number"
+                min="1"
+                max={maxWorkerReplicas > 0 ? maxWorkerReplicas : undefined}
+                value={formState.workers}
+                onChange={(e) => updateField("workers", e.target.value)}
+              />
+              {maxWorkerReplicas > 0 && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <AlertTriangle className="h-3 w-3" />
+                  Limited to {maxWorkerReplicas} worker
+                  {maxWorkerReplicas === 1 ? "" : "s"} (upgrade for more)
+                </p>
+              )}
+              {configPreview.loaded && workEstimate.description && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Info className="h-3 w-3 shrink-0" />
+                  {workEstimate.workItems === 1
+                    ? `${workEstimate.description}. Additional workers won\u2019t improve speed.`
+                    : `${workEstimate.workItems} work items (${workEstimate.description}). Workers beyond ${workEstimate.workItems} won\u2019t improve speed.`}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label htmlFor="verbose">Verbose Logging</Label>
+              <p className="text-xs text-muted-foreground">
+                Enable debug output from promptarena for troubleshooting
+              </p>
+            </div>
+            <Switch
+              id="verbose"
+              checked={formState.verbose}
+              onCheckedChange={(checked) => updateField("verbose", checked)}
+            />
+          </div>
+
+          {/* Review summary */}
+          <div className="border-t pt-4 mt-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-medium">Review Configuration</h3>
+              <Badge variant="outline">{formState.name}</Badge>
+            </div>
+
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <div className="text-muted-foreground">Source</div>
+              <div>{formState.sourceRef}</div>
+
+              <div className="text-muted-foreground">Arena File</div>
+              <div className="font-mono text-xs">
+                {buildArenaFilePath(
+                  formState.rootPath,
+                  formState.arenaFileName
+                ) || "config.arena.yaml"}
+              </div>
+
+              <div className="text-muted-foreground">Workers</div>
+              <div>{formState.workers}</div>
+
+              {(activeGroupNames.length > 0 || activeMappingGroups.length > 0) && (
+                <>
+                  <div className="text-muted-foreground">Provider Groups</div>
+                  <div className="space-y-1">
+                    {activeMappingGroups.map((group) => {
+                      const mapping = formState.providerMappings[group];
+                      return (
+                        <div key={group} className="flex items-center gap-1 flex-wrap">
+                          <Badge variant="outline" className="font-mono text-xs">
+                            {group}
+                          </Badge>
+                          <Badge variant="secondary" className="text-[10px] px-1 py-0">
+                            mapped
+                          </Badge>
+                          {Object.entries(mapping).map(([configID, entry]) => (
+                            <span key={configID} className="text-xs">
+                              {configID}→{entry ? entry.name : "?"}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    })}
+                    {activeGroupNames.map((group) => {
+                      const entries = formState.providerGroups[group] || [];
+                      return (
+                        <div key={group} className="flex items-center gap-1 flex-wrap">
+                          <Badge variant="outline" className="font-mono text-xs">
+                            {group}
+                          </Badge>
+                          {entries.map((entry) => (
+                            <Badge
+                              key={`${entry.type}-${entry.name}`}
+                              variant="secondary"
+                              className="text-xs flex items-center gap-0.5"
+                            >
+                              {entry.type === "agent" ? (
+                                <Network className="h-2.5 w-2.5" />
+                              ) : (
+                                <Zap className="h-2.5 w-2.5" />
+                              )}
+                              {entry.name}
+                            </Badge>
+                          ))}
+                          {entries.length === 0 && (
+                            <span className="text-xs text-muted-foreground">empty</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {formState.selectedToolRegistries.length > 0 && (
+                <>
+                  <div className="text-muted-foreground">Tool Registries</div>
+                  <div className="flex flex-wrap gap-1">
+                    {formState.selectedToolRegistries.map((name) => (
+                      <Badge key={name} variant="secondary" className="text-xs">
+                        {name}
+                      </Badge>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+        </>
+      )}
+    </div>
+  );
 
   return (
     <div className="flex flex-col h-full">

@@ -373,7 +373,7 @@ describe("POST /api/workspaces/[name]/arena/projects/[id]/run", () => {
     );
   });
 
-  it("creates fleet mode evaluation with execution config", async () => {
+  it("creates evaluation job ignoring unknown fields in request body", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
@@ -402,7 +402,6 @@ describe("POST /api/workspaces/[name]/arena/projects/[id]/run", () => {
       spec: {
         type: "evaluation",
         sourceRef: { name: "project-project-1" },
-        execution: { mode: "fleet", target: { agentRuntimeRef: { name: "echo-agent" } } },
       },
     });
 
@@ -410,10 +409,7 @@ describe("POST /api/workspaces/[name]/arena/projects/[id]/run", () => {
     const response = await POST(
       createMockRequest({
         type: "evaluation",
-        execution: {
-          mode: "fleet",
-          target: { agentRuntimeRef: { name: "echo-agent" } },
-        },
+        verbose: true,
       }),
       createMockContext()
     );
@@ -425,10 +421,7 @@ describe("POST /api/workspaces/[name]/arena/projects/[id]/run", () => {
       expect.objectContaining({
         spec: expect.objectContaining({
           type: "evaluation",
-          execution: {
-            mode: "fleet",
-            target: { agentRuntimeRef: { name: "echo-agent" } },
-          },
+          verbose: true,
         }),
       })
     );

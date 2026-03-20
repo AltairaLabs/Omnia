@@ -991,21 +991,10 @@ type AgentRuntimeSpec struct {
 	// providers is a list of named provider references.
 	// Each entry maps a logical name to a Provider CRD.
 	// The "default" name is used as the primary provider for the runtime.
-	// Deprecates providerRef and provider fields.
 	// +optional
 	// +listType=map
 	// +listMapKey=name
 	Providers []NamedProviderRef `json:"providers,omitempty"`
-
-	// providerRef references a Provider resource for LLM configuration.
-	// Deprecated: Use providers instead. When providers is set, this field is ignored.
-	// +optional
-	ProviderRef *ProviderRef `json:"providerRef,omitempty"`
-
-	// provider configures the LLM provider inline (type, model, credentials, tuning).
-	// Deprecated: Use providers with a Provider CRD instead. When providers is set, this field is ignored.
-	// +optional
-	Provider *ProviderConfig `json:"provider,omitempty"`
 
 	// evals configures realtime eval execution for this agent's sessions.
 	// +optional

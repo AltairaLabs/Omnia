@@ -157,6 +157,12 @@ func (r *ToolRegistryReconciler) processHandlers(ctx context.Context, toolRegist
 
 // validateHandler validates a handler configuration.
 func (r *ToolRegistryReconciler) validateHandler(h *omniav1alpha1.HandlerDefinition) error {
+	// Reject unknown handler types using the authoritative set from the API types.
+	if !omniav1alpha1.ValidHandlerTypes[h.Type] {
+		return fmt.Errorf("unknown handler type: %s", h.Type)
+	}
+
+	// Type-specific config validation.
 	switch h.Type {
 	case omniav1alpha1.HandlerTypeHTTP:
 		if h.HTTPConfig == nil {
@@ -186,8 +192,6 @@ func (r *ToolRegistryReconciler) validateHandler(h *omniav1alpha1.HandlerDefinit
 		if h.OpenAPIConfig == nil {
 			return fmt.Errorf("openAPIConfig is required for openapi handlers")
 		}
-	default:
-		return fmt.Errorf("unknown handler type: %s", h.Type)
 	}
 	return nil
 }
@@ -216,6 +220,9 @@ func (r *ToolRegistryReconciler) resolveEndpoint(ctx context.Context, toolRegist
 		return "", fmt.Errorf("no endpoint configured for MCP handler")
 	case omniav1alpha1.HandlerTypeOpenAPI:
 		return h.OpenAPIConfig.SpecURL, nil
+	case omniav1alpha1.HandlerTypeClient:
+		// Client-side tools have no server endpoint — they execute in the browser.
+		return "client://browser", nil
 	}
 
 	return "", fmt.Errorf("cannot determine endpoint for handler type %s", h.Type)

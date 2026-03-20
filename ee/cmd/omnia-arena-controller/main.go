@@ -78,7 +78,6 @@ func main() {
 	var redisPassword string
 	var redisPasswordSecret string
 	var redisDB int
-	var workerServiceAccountName string
 	var enableWebhooks bool
 	var enableLicenseWebhooks bool
 	var devMode bool
@@ -112,8 +111,6 @@ func main() {
 			"When set, workers receive the password via secretKeyRef instead of plain text.")
 	flag.IntVar(&redisDB, "redis-db", 0,
 		"Redis database number for Arena work queue.")
-	flag.StringVar(&workerServiceAccountName, "worker-service-account-name", "",
-		"ServiceAccount name for worker pods (for workload identity).")
 	flag.StringVar(&sessionAPIURL, "session-api-url", "",
 		"URL of session-api service for session recording in dev console pods.")
 	flag.BoolVar(&enableWebhooks, "enable-webhooks", false,
@@ -271,24 +268,23 @@ func main() {
 
 	// ArenaJob controller
 	if err := (&controller.ArenaJobReconciler{
-		Client:                   mgr.GetClient(),
-		Scheme:                   mgr.GetScheme(),
-		Recorder:                 mgr.GetEventRecorderFor("arenajob-controller"),
-		WorkerImage:              arenaWorkerImage,
-		WorkerImagePullPolicy:    corev1.PullPolicy(arenaWorkerImagePullPolicy),
-		LicenseValidator:         licenseValidator,
-		Aggregator:               arenaAggregator,
-		RedisAddr:                redisAddr,
-		RedisPassword:            redisPassword,
-		RedisPasswordSecret:      redisPasswordSecret,
-		RedisDB:                  redisDB,
-		WorkspaceContentPath:     workspaceContentPath,
-		NFSServer:                nfsServer,
-		NFSPath:                  nfsPath,
-		StorageManager:           storageManager,
-		WorkerServiceAccountName: workerServiceAccountName,
-		TracingEnabled:           tracingEnabled,
-		TracingEndpoint:          tracingEndpoint,
+		Client:                mgr.GetClient(),
+		Scheme:                mgr.GetScheme(),
+		Recorder:              mgr.GetEventRecorderFor("arenajob-controller"),
+		WorkerImage:           arenaWorkerImage,
+		WorkerImagePullPolicy: corev1.PullPolicy(arenaWorkerImagePullPolicy),
+		LicenseValidator:      licenseValidator,
+		Aggregator:            arenaAggregator,
+		RedisAddr:             redisAddr,
+		RedisPassword:         redisPassword,
+		RedisPasswordSecret:   redisPasswordSecret,
+		RedisDB:               redisDB,
+		WorkspaceContentPath:  workspaceContentPath,
+		NFSServer:             nfsServer,
+		NFSPath:               nfsPath,
+		StorageManager:        storageManager,
+		TracingEnabled:        tracingEnabled,
+		TracingEndpoint:       tracingEndpoint,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaJob")
 		os.Exit(1)

@@ -294,8 +294,8 @@ kubectl logs -l arena.omnia.altairalabs.ai/job=my-job | grep -i "error\|failed"
 
 ```yaml
 spec:
-  configRef:
-    name: my-config
+  sourceRef:
+    name: my-source
   # Reduce concurrency and increase timeout
 evaluation:
   timeout: "10m"

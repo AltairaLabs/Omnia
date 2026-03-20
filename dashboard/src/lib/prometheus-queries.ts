@@ -50,22 +50,25 @@ export const FACADE_METRICS = {
 } as const;
 
 /**
- * LLM metrics - emitted by the runtime container.
- * Prefix: omnia_llm_*
+ * LLM/provider metrics - emitted by the runtime container via PromptKit SDK Collector.
+ * Prefix: omnia_provider_*
+ *
+ * The SDK registers metrics with a "provider_" prefix under the "omnia" namespace,
+ * resulting in "omnia_provider_*" metric names in Prometheus.
  */
 export const LLM_METRICS = {
-  /** Total cache hits (counter) */
-  CACHE_HITS: "omnia_llm_cache_hits_total",
+  /** Total cached tokens (counter) */
+  CACHE_HITS: "omnia_provider_cached_tokens_total",
   /** Total cost in USD (counter) */
-  COST_USD: "omnia_llm_cost_usd_total",
+  COST_USD: "omnia_provider_cost_total",
   /** Total input tokens (counter) */
-  INPUT_TOKENS: "omnia_llm_input_tokens_total",
+  INPUT_TOKENS: "omnia_provider_input_tokens_total",
   /** Total output tokens (counter) */
-  OUTPUT_TOKENS: "omnia_llm_output_tokens_total",
-  /** LLM request duration histogram (histogram) */
-  REQUEST_DURATION: "omnia_llm_request_duration_seconds",
-  /** Total LLM requests (counter) */
-  REQUESTS_TOTAL: "omnia_llm_requests_total",
+  OUTPUT_TOKENS: "omnia_provider_output_tokens_total",
+  /** Provider request duration histogram (histogram) */
+  REQUEST_DURATION: "omnia_provider_request_duration_seconds",
+  /** Total provider requests (counter) */
+  REQUESTS_TOTAL: "omnia_provider_requests_total",
 } as const;
 
 // =============================================================================

@@ -111,6 +111,7 @@ func TestOpenAPISchemaMatchesGoTypes(t *testing.T) {
 		"Message":      reflect.TypeOf(session.Message{}),
 		"ToolCall":     reflect.TypeOf(session.ToolCall{}),
 		"ProviderCall": reflect.TypeOf(session.ProviderCall{}),
+		"RuntimeEvent": reflect.TypeOf(session.RuntimeEvent{}),
 
 		// Request/response types (internal/session/api/)
 		"CreateSessionRequest":      reflect.TypeOf(CreateSessionRequest{}),
@@ -178,10 +179,6 @@ func TestOpenAPIEnumsMatchGoConstants(t *testing.T) {
 			string(session.ToolCallStatusSuccess),
 			string(session.ToolCallStatusError),
 		},
-		"ToolCallExecution": {
-			string(session.ToolCallExecutionServer),
-			string(session.ToolCallExecutionClient),
-		},
 		"ProviderCallStatus": {
 			string(session.ProviderCallStatusPending),
 			string(session.ProviderCallStatusCompleted),
@@ -235,6 +232,8 @@ func TestOpenAPIRoutesMatchHandler(t *testing.T) {
 		"GET /api/v1/sessions/{sessionID}/tool-calls",
 		"POST /api/v1/sessions/{sessionID}/provider-calls",
 		"GET /api/v1/sessions/{sessionID}/provider-calls",
+		"POST /api/v1/sessions/{sessionID}/events",
+		"GET /api/v1/sessions/{sessionID}/events",
 		"GET /api/v1/sessions/{sessionID}/eval-results",
 		"POST /api/v1/sessions/{sessionID}/evaluate",
 		"POST /api/v1/eval-results",
