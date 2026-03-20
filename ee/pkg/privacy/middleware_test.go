@@ -256,6 +256,43 @@ func TestPrivacyMiddleware_OptOutNoUserID(t *testing.T) {
 	assert.True(t, called, "should pass through when no user ID header")
 }
 
+func TestPrivacyMiddleware_RedactionFailureReturns500(t *testing.T) {
+	called := false
+	handler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		called = true
+	})
+
+	lookup := &mockSessionLookup{ns: "default", agent: "test-agent"}
+	cache := NewSessionMetadataCache(lookup, 100)
+
+	watcher := &PolicyWatcher{}
+	watcher.policies.Store("test", &omniav1alpha1.SessionPrivacyPolicy{
+		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
+			Level: omniav1alpha1.PolicyLevelGlobal,
+			Recording: omniav1alpha1.RecordingConfig{
+				Enabled: true,
+				PII: &omniav1alpha1.PIIConfig{
+					Redact:   true,
+					Patterns: []string{"ssn"},
+					Strategy: omniav1alpha1.RedactionStrategyReplace,
+				},
+			},
+		},
+	})
+
+	r := redaction.NewRedactor()
+	mw := NewPrivacyMiddleware(watcher, cache, r, nil, logr.Discard())
+
+	// Send invalid JSON to a /messages endpoint — redaction will fail on unmarshal.
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/abc-123/messages",
+		strings.NewReader(`not valid json`))
+	rr := httptest.NewRecorder()
+	mw.Wrap(handler).ServeHTTP(rr, req)
+
+	assert.False(t, called, "handler should not be called when redaction fails")
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
 func TestSessionMetadataCache_Eviction(t *testing.T) {
 	lookup := &mockSessionLookup{ns: "ns1", agent: "agent1"}
 	cache := NewSessionMetadataCache(lookup, 2)

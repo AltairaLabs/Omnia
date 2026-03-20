@@ -101,9 +101,10 @@ func TestMediaResolver_ResolveURL_HTTPPassthrough(t *testing.T) {
 }
 
 func TestMediaResolver_ResolveURL_MissingFile(t *testing.T) {
-	resolver := NewMediaResolver("/test/media")
+	tmpDir := t.TempDir()
+	resolver := NewMediaResolver(tmpDir)
 
-	_, _, _, err := resolver.ResolveURL("file:///nonexistent/file.png")
+	_, _, _, err := resolver.ResolveURL("file://" + filepath.Join(tmpDir, "nonexistent.png"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
@@ -210,6 +211,53 @@ func TestIsResolvableURL(t *testing.T) {
 			assert.Equal(t, tc.expected, result)
 		})
 	}
+}
+
+func TestMediaResolver_ResolveURL_PathTraversal(t *testing.T) {
+	tmpDir := t.TempDir()
+	resolver := NewMediaResolver(tmpDir)
+
+	testCases := []struct {
+		name string
+		url  string
+	}{
+		{"mock traversal with dot-dot", "mock://../../etc/passwd"},
+		{"mock traversal with nested dot-dot", "mock://subdir/../../../etc/passwd"},
+		{"file traversal with dot-dot", "file://" + filepath.Join(tmpDir, "../../etc/passwd")},
+		{"file traversal absolute outside base", "file:///etc/passwd"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, err := resolver.ResolveURL(tc.url)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "path traversal attempt blocked")
+		})
+	}
+}
+
+func TestMediaResolver_ResolveURL_PathTraversal_ValidPaths(t *testing.T) {
+	// Ensure legitimate subdirectory paths still work
+	tmpDir := t.TempDir()
+	subDir := filepath.Join(tmpDir, "subdir")
+	err := os.MkdirAll(subDir, 0755)
+	require.NoError(t, err)
+
+	testFile := filepath.Join(subDir, "image.png")
+	err = os.WriteFile(testFile, []byte("fake png"), 0644)
+	require.NoError(t, err)
+
+	resolver := NewMediaResolver(tmpDir)
+
+	// Subdirectory path should work
+	_, mimeType, _, err := resolver.ResolveURL("mock://subdir/image.png")
+	require.NoError(t, err)
+	assert.Equal(t, "image/png", mimeType)
+
+	// file:// within base should work
+	_, mimeType, _, err = resolver.ResolveURL("file://" + testFile)
+	require.NoError(t, err)
+	assert.Equal(t, "image/png", mimeType)
 }
 
 func TestMediaResolver_ResolveURL_AudioFiles(t *testing.T) {

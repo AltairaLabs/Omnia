@@ -44,8 +44,7 @@ func redactRequestBody(
 
 	redacted, err := redactByEndpoint(data, path, redactor, pii)
 	if err != nil {
-		// On redaction error, return original body to avoid data loss.
-		return io.NopCloser(bytes.NewReader(data)), nil
+		return nil, fmt.Errorf("redacting request body: %w", err)
 	}
 
 	return io.NopCloser(bytes.NewReader(redacted)), nil
