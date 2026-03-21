@@ -301,6 +301,9 @@ type ProviderCall struct {
 	ErrorMessage string `json:"errorMessage,omitempty"`
 	// Labels contains arbitrary key-value pairs for categorization.
 	Labels map[string]string `json:"labels,omitempty"`
+	// Source identifies what initiated this provider call (e.g., "agent", "judge", "selfplay").
+	// Empty string is treated as "agent" for backward compatibility.
+	Source string `json:"source,omitempty"`
 	// CreatedAt is when the provider call was initiated.
 	CreatedAt time.Time `json:"createdAt"`
 }

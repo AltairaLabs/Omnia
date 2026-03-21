@@ -55,6 +55,7 @@ func (s *Server) subscribeToEventBusLogging(sessionID string, conv *sdk.Conversa
 			"cost", data.Cost,
 			"finishReason", data.FinishReason,
 			"durationMs", data.Duration.Milliseconds(),
+			"source", data.Labels["source"], // TODO: use data.Source when PromptKit publishes the field
 		)
 	}))
 

@@ -29,6 +29,7 @@ export interface ProviderCall {
   toolCallCount?: number;
   errorMessage?: string;
   labels?: Record<string, string>;
+  source?: string;
   createdAt: string;
 }
 
