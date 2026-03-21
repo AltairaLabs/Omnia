@@ -160,7 +160,7 @@ jobs:
           helm push dist/omnia-${VERSION}.tgz oci://${{ env.CHART_REGISTRY }}
 
       - name: Upload chart artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: helm-chart
           path: dist/omnia-*.tgz
