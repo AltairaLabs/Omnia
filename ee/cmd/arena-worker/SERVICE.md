@@ -39,6 +39,7 @@
 | `ARENA_VERBOSE` | no | — | `"true"` for debug logging |
 | `REDIS_ADDR` | no | `redis:6379` | Redis address |
 | `REDIS_PASSWORD` | no | — | Redis password |
+| `SESSION_API_URL` | no | — | Session-api URL for recording arena sessions (opt-in) |
 | `TRACING_ENABLED` | no | — | `"true"` to enable OTel tracing |
 | `TRACING_ENDPOINT` | no | — | OTLP gRPC endpoint |
 
@@ -46,6 +47,7 @@
 - **Redis Streams**: work item status updates (pass/fail, duration, metrics, assertions)
 - **Filesystem**: evaluation output (JUnit XML, JSON reports) written to `/tmp/arena-output`
 - **OTel traces**: spans for work item execution, fleet session links
+- **HTTP** to Session API (optional): session creation, provider call recording, tool call recording via OmniaEventStore
 
 ## Does NOT Own
 - Work item creation or partitioning (Arena Controller's job)

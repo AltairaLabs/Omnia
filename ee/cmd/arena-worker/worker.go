@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
+	"github.com/AltairaLabs/PromptKit/runtime/events"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
 	arenastatestore "github.com/AltairaLabs/PromptKit/tools/arena/statestore"
@@ -35,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
+	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/pkg/k8s"
 )
 
@@ -98,6 +100,9 @@ type Config struct {
 	RedisPassword string
 	RedisDB       int
 
+	// Session recording
+	SessionAPIURL string // Optional session-api URL for recording arena sessions
+
 	// Worker configuration
 	WorkDir       string
 	PollInterval  time.Duration
@@ -147,6 +152,7 @@ func loadConfig() (*Config, error) {
 		ContentPath:    os.Getenv("ARENA_CONTENT_PATH"),
 		ContentVersion: os.Getenv("ARENA_CONTENT_VERSION"),
 		ConfigFile:     os.Getenv("ARENA_CONFIG_FILE"), // Config file name in content path
+		SessionAPIURL:  os.Getenv("SESSION_API_URL"),
 		RedisAddr:      getEnvOrDefault("REDIS_ADDR", "redis:6379"),
 		RedisPassword:  os.Getenv("REDIS_PASSWORD"),
 		RedisDB:        0,
@@ -477,6 +483,26 @@ func executeWorkItem(
 			log.Error(closeErr, "failed to close engine")
 		}
 	}()
+
+	// Wire session recording if session-api is configured.
+	// Events from all engine runs are forwarded to session-api via OmniaEventStore.
+	if cfg.SessionAPIURL != "" {
+		sessionMgr := newArenaSessionManager(
+			httpclient.NewStore(cfg.SessionAPIURL, log),
+			log,
+			arenaSessionMetadata{
+				JobName:    cfg.JobName,
+				Namespace:  cfg.JobNamespace,
+				Scenario:   item.ScenarioID,
+				ProviderID: item.ProviderID,
+				JobType:    cfg.JobType,
+			},
+		)
+		bus := events.NewEventBus()
+		bus.SubscribeAll(sessionMgr.OnEvent)
+		eng.SetEventBus(bus)
+		defer sessionMgr.CompleteAll(ctx)
+	}
 
 	// Determine scenario filter
 	scenarioFilter := []string{}
