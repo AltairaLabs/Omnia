@@ -608,6 +608,65 @@ func TestOmniaEventStore_AppendProviderCallFailed(t *testing.T) {
 	}
 }
 
+func TestOmniaEventStore_AppendProviderCallCompleted_Source(t *testing.T) {
+	store := &mockSessionStore{}
+	es := NewOmniaEventStore(store, logr.Discard())
+
+	event := &events.Event{
+		Type:      events.EventProviderCallCompleted,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: &events.ProviderCallCompletedData{
+			Provider:     "openai",
+			Model:        "gpt-4o",
+			InputTokens:  50,
+			OutputTokens: 100,
+			Cost:         0.003,
+			FinishReason: "end_turn",
+			Duration:     1 * time.Second,
+			Labels:       map[string]string{"source": "judge"},
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	store.waitForProviderCalls(t, 1)
+	pcs := store.getProviderCalls()
+	if pcs[0].Source != "judge" {
+		t.Errorf("expected source=judge, got %q", pcs[0].Source)
+	}
+}
+
+func TestOmniaEventStore_AppendProviderCallFailed_Source(t *testing.T) {
+	store := &mockSessionStore{}
+	es := NewOmniaEventStore(store, logr.Discard())
+
+	event := &events.Event{
+		Type:      events.EventProviderCallFailed,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: &events.ProviderCallFailedData{
+			Provider: "openai",
+			Model:    "gpt-4o",
+			Error:    errors.New("timeout"),
+			Duration: 1 * time.Second,
+			Labels:   map[string]string{"source": "selfplay"},
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	store.waitForProviderCalls(t, 1)
+	pcs := store.getProviderCalls()
+	if pcs[0].Source != "selfplay" {
+		t.Errorf("expected source=selfplay, got %q", pcs[0].Source)
+	}
+}
+
 // --- Message events ---
 
 func TestOmniaEventStore_AppendMessageCreated_User(t *testing.T) {

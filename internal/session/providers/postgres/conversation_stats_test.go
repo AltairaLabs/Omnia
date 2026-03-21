@@ -421,6 +421,96 @@ func TestConversationStats_FailedProviderCallDoesNotAddTokens(t *testing.T) {
 	require.Len(t, calls, 2, "2 rows: 1 completed + 1 failed")
 }
 
+// TestConversationStats_NonAgentSourceDoesNotAddTokens verifies that provider
+// calls with source "judge" or "selfplay" are recorded but do NOT increment
+// the session-level token/cost counters. Only agent calls (source="" or "agent")
+// should inflate session totals.
+func TestConversationStats_NonAgentSourceDoesNotAddTokens(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	sess := makeSession("c0eebc99-9c0b-4ef8-bb6d-6bb9bd380c10", now)
+	require.NoError(t, p.CreateSession(ctx, sess))
+
+	// Agent call (empty source) — adds tokens/cost.
+	require.NoError(t, p.RecordProviderCall(ctx, sess.ID, &session.ProviderCall{
+		ID:           uid(60),
+		Provider:     "anthropic",
+		Model:        "claude-sonnet-4-20250514",
+		Status:       session.ProviderCallStatusCompleted,
+		InputTokens:  200,
+		OutputTokens: 80,
+		CostUSD:      0.004,
+		CreatedAt:    now,
+	}))
+
+	// Judge call — should NOT add tokens/cost.
+	require.NoError(t, p.RecordProviderCall(ctx, sess.ID, &session.ProviderCall{
+		ID:           uid(61),
+		Provider:     "openai",
+		Model:        "gpt-4o",
+		Status:       session.ProviderCallStatusCompleted,
+		InputTokens:  50,
+		OutputTokens: 100,
+		CostUSD:      0.003,
+		Source:       "judge",
+		CreatedAt:    now.Add(time.Second),
+	}))
+
+	// Self-play call — should NOT add tokens/cost.
+	require.NoError(t, p.RecordProviderCall(ctx, sess.ID, &session.ProviderCall{
+		ID:           uid(62),
+		Provider:     "openai",
+		Model:        "gpt-4o",
+		Status:       session.ProviderCallStatusCompleted,
+		InputTokens:  75,
+		OutputTokens: 120,
+		CostUSD:      0.005,
+		Source:       "selfplay",
+		CreatedAt:    now.Add(2 * time.Second),
+	}))
+
+	// Explicit "agent" source — SHOULD add tokens/cost.
+	require.NoError(t, p.RecordProviderCall(ctx, sess.ID, &session.ProviderCall{
+		ID:           uid(63),
+		Provider:     "anthropic",
+		Model:        "claude-sonnet-4-20250514",
+		Status:       session.ProviderCallStatusCompleted,
+		InputTokens:  100,
+		OutputTokens: 40,
+		CostUSD:      0.002,
+		Source:       "agent",
+		CreatedAt:    now.Add(3 * time.Second),
+	}))
+
+	got, err := p.GetSession(ctx, sess.ID)
+	require.NoError(t, err)
+
+	// Only agent calls: 200 + 100 = 300 input, 80 + 40 = 120 output, 0.004 + 0.002 = 0.006 cost
+	assert.Equal(t, int64(300), got.TotalInputTokens,
+		"only agent source calls counted: 200 + 100")
+	assert.Equal(t, int64(120), got.TotalOutputTokens,
+		"only agent source calls counted: 80 + 40")
+	assert.InDelta(t, 0.006, got.EstimatedCostUSD, 1e-9,
+		"only agent source calls counted: 0.004 + 0.002")
+
+	// All 4 rows exist.
+	calls, err := p.GetProviderCalls(ctx, sess.ID, providers.PaginationOpts{})
+	require.NoError(t, err)
+	require.Len(t, calls, 4, "4 rows: 2 agent + 1 judge + 1 selfplay")
+
+	// Verify source field is persisted and readable.
+	assert.Equal(t, "", calls[0].Source, "first call: empty source (agent)")
+	assert.Equal(t, "judge", calls[1].Source, "second call: judge")
+	assert.Equal(t, "selfplay", calls[2].Source, "third call: selfplay")
+	assert.Equal(t, "agent", calls[3].Source, "fourth call: explicit agent")
+}
+
 // TestConversationStats_AppendMessageDoesNotAffectTokenCounters verifies that
 // messages with token/cost data (written by both facade and runtime) do NOT
 // inflate session-level counters. Only RecordProviderCall updates those.
