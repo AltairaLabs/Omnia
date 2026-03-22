@@ -285,6 +285,7 @@ func main() {
 		StorageManager:        storageManager,
 		TracingEnabled:        tracingEnabled,
 		TracingEndpoint:       tracingEndpoint,
+		SessionAPIURL:         sessionAPIURL,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaJob")
 		os.Exit(1)
