@@ -123,6 +123,9 @@ type ArenaJobReconciler struct {
 	TracingEnabled bool
 	// TracingEndpoint is the OTLP gRPC endpoint for arena worker tracing.
 	TracingEndpoint string
+	// SessionAPIURL is the session-api URL for recording arena sessions.
+	// When set, worker pods receive SESSION_API_URL and record provider calls to PostgreSQL.
+	SessionAPIURL string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs,verbs=get;list;watch;create;update;patch;delete
@@ -669,6 +672,14 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		}, corev1.EnvVar{
 			Name:  "LOG_LEVEL",
 			Value: "debug",
+		})
+	}
+
+	// Inject SESSION_API_URL for session recording if configured
+	if r.SessionAPIURL != "" {
+		env = append(env, corev1.EnvVar{
+			Name:  "SESSION_API_URL",
+			Value: r.SessionAPIURL,
 		})
 	}
 
