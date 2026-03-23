@@ -64,6 +64,32 @@ function getTimeRangeFrom(value: string): string | undefined {
   return new Date(now - (ms[value] || 0)).toISOString();
 }
 
+/** Deterministic color for a tag string, Grafana-style. */
+const TAG_COLORS = [
+  "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+  "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+  "bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-200",
+  "bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200",
+  "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
+  "bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200",
+];
+
+function tagColor(tag: string): string {
+  let hash = 0;
+  for (let i = 0; i < tag.length; i++) {
+    hash = ((hash << 5) - hash + tag.charCodeAt(i)) | 0;
+  }
+  return TAG_COLORS[Math.abs(hash) % TAG_COLORS.length];
+}
+
+function formatCost(cost?: number): string {
+  if (cost == null || cost === 0) return "-";
+  if (cost < 0.01) return `$${cost.toFixed(4)}`;
+  return `$${cost.toFixed(2)}`;
+}
+
 function getStatusBadge(status: SessionSummary["status"]) {
   const variants: Record<Session["status"], { variant: "default" | "secondary" | "destructive" | "outline"; label: string }> = {
     active: { variant: "default", label: "Active" },
@@ -94,11 +120,13 @@ function TableRowSkeleton() {
     <TableRow>
       <TableCell><Skeleton className="h-4 w-24" /></TableCell>
       <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+      <TableCell><Skeleton className="h-4 w-24" /></TableCell>
       <TableCell><Skeleton className="h-5 w-16" /></TableCell>
       <TableCell><Skeleton className="h-4 w-16" /></TableCell>
       <TableCell className="text-right"><Skeleton className="h-4 w-8 ml-auto" /></TableCell>
       <TableCell className="text-right"><Skeleton className="h-4 w-8 ml-auto" /></TableCell>
       <TableCell className="text-right"><Skeleton className="h-4 w-12 ml-auto" /></TableCell>
+      <TableCell className="text-right"><Skeleton className="h-4 w-10 ml-auto" /></TableCell>
       <TableCell><Skeleton className="h-4 w-32" /></TableCell>
     </TableRow>
   );
@@ -110,6 +138,7 @@ export default function SessionsPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>("all");
   const [timeRange, setTimeRange] = useState<string>("all");
+  const [tagFilters, setTagFilters] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
 
   const debouncedSearch = useDebounce(search, 300);
@@ -150,8 +179,27 @@ export default function SessionsPage() {
     return [...new Set(agentsQuery.data.map((a) => a.metadata?.name).filter(Boolean))] as string[];
   }, [agentsQuery.data]);
 
-  // Stats from current data
-  const sessions = data?.sessions || [];
+  const addTagFilter = (tag: string) => {
+    setTagFilters((prev) => new Set([...prev, tag]));
+    resetPage();
+  };
+  const removeTagFilter = (tag: string) => {
+    setTagFilters((prev) => {
+      const next = new Set(prev);
+      next.delete(tag);
+      return next;
+    });
+    resetPage();
+  };
+
+  // Stats from current data — filter by tags client-side
+  const allSessions = data?.sessions || [];
+  const sessions = tagFilters.size > 0
+    ? allSessions.filter((s) => {
+        const sTags = s.tags || [];
+        return [...tagFilters].every((t) => sTags.includes(t));
+      })
+    : allSessions;
   const stats = {
     total: data?.total || 0,
     active: sessions.filter((s) => s.status === "active").length,
@@ -282,6 +330,34 @@ export default function SessionsPage() {
           </Select>
         </div>
 
+        {/* Active tag filters */}
+        {tagFilters.size > 0 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm text-muted-foreground">Filtering by:</span>
+            {[...tagFilters].map((tag) => (
+              <span
+                key={tag}
+                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${tagColor(tag)}`}
+              >
+                {tag}
+                <button
+                  onClick={() => removeTagFilter(tag)}
+                  className="ml-0.5 hover:opacity-70"
+                  aria-label={`Remove ${tag} filter`}
+                >
+                  &times;
+                </button>
+              </span>
+            ))}
+            <button
+              onClick={() => { setTagFilters(new Set()); resetPage(); }}
+              className="text-xs text-muted-foreground hover:text-foreground underline"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
+
         {/* Sessions Table */}
         <Card>
           <Table>
@@ -289,11 +365,13 @@ export default function SessionsPage() {
               <TableRow>
                 <TableHead>Session ID</TableHead>
                 <TableHead>Agent</TableHead>
+                <TableHead>Tags</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Started</TableHead>
                 <TableHead className="text-right">Messages</TableHead>
                 <TableHead className="text-right">Tools</TableHead>
                 <TableHead className="text-right">Tokens</TableHead>
+                <TableHead className="text-right">Cost</TableHead>
                 <TableHead>Last Message</TableHead>
               </TableRow>
             </TableHeader>
@@ -309,7 +387,7 @@ export default function SessionsPage() {
               )}
               {!isLoading && sessions.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                     No sessions found
                   </TableCell>
                 </TableRow>
@@ -327,6 +405,22 @@ export default function SessionsPage() {
                       <span>{session.agentName}</span>
                     </div>
                   </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {session.tags?.map((tag) => (
+                        <button
+                          key={tag}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            addTagFilter(tag);
+                          }}
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium cursor-pointer hover:opacity-80 transition-opacity ${tagColor(tag)}`}
+                        >
+                          {tag}
+                        </button>
+                      ))}
+                    </div>
+                  </TableCell>
                   <TableCell>{getStatusBadge(session.status)}</TableCell>
                   <TableCell className="text-muted-foreground">
                     {formatDistanceToNow(new Date(session.startedAt), { addSuffix: true })}
@@ -334,6 +428,7 @@ export default function SessionsPage() {
                   <TableCell className="text-right">{session.messageCount}</TableCell>
                   <TableCell className="text-right">{session.toolCallCount}</TableCell>
                   <TableCell className="text-right">{session.totalTokens.toLocaleString()}</TableCell>
+                  <TableCell className="text-right text-muted-foreground">{formatCost(session.estimatedCost)}</TableCell>
                   <TableCell className="max-w-[200px] truncate text-muted-foreground text-sm">
                     {session.lastMessage}
                   </TableCell>
