@@ -30,8 +30,8 @@ github.com/99designs/keyring v1.2.2 h1:pZd3neh/EmUzWONb35LxQfvuY7kiSXAq3HQd97+XB
 github.com/99designs/keyring v1.2.2/go.mod h1:wes/FrByc8j7lFOAGLGSNEg8f/PaI3cgTBqhFkHUrPk=
 github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6 h1:He8afgbRMd7mFxO99hRNu+6tazq8nFF9lIwo9JFroBk=
 github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6/go.mod h1:8o94RPi1/7XTJvwPpRSzSUedZrtlirdB3r9Z20bi2f8=
-github.com/AltairaLabs/PromptKit/pkg v1.3.18 h1:19dK8wPLU2MjwMp8zFb8Bx0zKToMs8VsQDKLithK8CY=
-github.com/AltairaLabs/PromptKit/pkg v1.3.18/go.mod h1:JAErFTu3q05l7brzu96Ge6ri543dwvx1Pz5iWkgp+OE=
+github.com/AltairaLabs/PromptKit/pkg v1.4.0 h1:qmb1ErzMLV/hKzR/DEVtI5lp7/M0iPrKHLCOnFHAwik=
+github.com/AltairaLabs/PromptKit/pkg v1.4.0/go.mod h1:eOWMO2xkZVybhiSbIjBULngitGHbOG4r0yxPJsT6c1Q=
 github.com/AltairaLabs/PromptKit/runtime v1.3.18 h1:FVB0v+8ymCFGhgCBtpgvn3a0raThXqJykbYRhQXSjrc=
 github.com/AltairaLabs/PromptKit/runtime v1.3.18/go.mod h1:BVKJ/+yfCzvGq4md5yeioOla4jH0QMIjVAy0pI3nBx0=
 github.com/AltairaLabs/PromptKit/sdk v1.3.18 h1:Lq4DU+8dDrD03i1lka4sf+2e1MgLuz0XhlyJOEWLXAQ=

@@ -5,7 +5,7 @@ go 1.25.6
 require (
 	cloud.google.com/go/kms v1.26.0
 	cloud.google.com/go/storage v1.60.0
-	github.com/AltairaLabs/PromptKit/pkg v1.3.18
+	github.com/AltairaLabs/PromptKit/pkg v1.4.0
 	github.com/AltairaLabs/PromptKit/runtime v1.3.18
 	github.com/AltairaLabs/PromptKit/sdk v1.3.18
 	github.com/AltairaLabs/PromptKit/server/a2a v1.3.18
