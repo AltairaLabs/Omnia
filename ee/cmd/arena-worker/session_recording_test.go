@@ -177,8 +177,12 @@ func TestArenaSessionManager_OnEvent_CreatesSession(t *testing.T) {
 
 	expectedUUID := runIDToUUID("run-001")
 	assert.Equal(t, expectedUUID, sessions[0].ID, "session ID should be UUID5 of runID")
-	assert.Equal(t, "openai-gpt4", sessions[0].AgentName)
+	assert.Equal(t, "test-job", sessions[0].AgentName)
 	assert.Equal(t, "default", sessions[0].Namespace)
+	assert.Contains(t, sessions[0].Tags, "source:arena")
+	assert.Contains(t, sessions[0].Tags, "arena-job:test-job")
+	assert.Contains(t, sessions[0].Tags, "scenario:customer-support")
+	assert.Contains(t, sessions[0].Tags, "provider:openai-gpt4")
 	assert.Equal(t, "test-job", sessions[0].InitialState["arena.job"])
 	assert.Equal(t, "customer-support", sessions[0].InitialState["arena.scenario"])
 	assert.Equal(t, "run-001", sessions[0].InitialState["arena.run_id"])

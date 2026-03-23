@@ -211,6 +211,8 @@ type CreateSessionOptions struct {
 	PromptPackName string
 	// PromptPackVersion is the version of the PromptPack at session creation.
 	PromptPackVersion string
+	// Tags are optional labels for categorizing sessions (e.g., "source:arena").
+	Tags []string
 }
 
 // SessionStatusUpdate contains lifecycle state changes for a session.

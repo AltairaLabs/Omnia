@@ -19,6 +19,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -60,6 +61,31 @@ const (
 
 	metaValueSource = "runtime"
 )
+
+// extractProviderCallSource reads the Source field from provider call event data
+// via reflection, so it works with both the published SDK (no Source field) and
+// the local PromptKit checkout (has Source field). TODO: use data.Source directly
+// once the PromptKit release includes it.
+func extractProviderCallSource(event *events.Event) string {
+	v := reflect.ValueOf(event.Data)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return ""
+	}
+	// Prefer the Source field (set by PromptKit emitter).
+	if f := v.FieldByName("Source"); f.IsValid() && f.Kind() == reflect.String && f.String() != "" {
+		return f.String()
+	}
+	// Fall back to Labels["source"] for backward compatibility.
+	if f := v.FieldByName("Labels"); f.IsValid() && !f.IsNil() && f.Kind() == reflect.Map {
+		if val := f.MapIndex(reflect.ValueOf("source")); val.IsValid() {
+			return val.String()
+		}
+	}
+	return ""
+}
 
 // asPtr extracts event data as a pointer, handling both value and pointer types.
 // The PromptKit emitter may pass either T or *T depending on the event method.
@@ -617,7 +643,7 @@ func (s *OmniaEventStore) convertProviderCallCompleted(event *events.Event) (eve
 		DurationMs:    data.Duration.Milliseconds(),
 		FinishReason:  data.FinishReason,
 		ToolCallCount: int32(data.ToolCallCount),
-		Source:        data.Labels["source"], // TODO: use data.Source when PromptKit publishes the field
+		Source:        extractProviderCallSource(event),
 		CreatedAt:     event.Timestamp,
 	}
 
@@ -647,7 +673,7 @@ func (s *OmniaEventStore) convertProviderCallFailed(event *events.Event) (eventA
 		Status:       session.ProviderCallStatusFailed,
 		DurationMs:   data.Duration.Milliseconds(),
 		ErrorMessage: errMsg,
-		Source:       data.Labels["source"], // TODO: use data.Source when PromptKit publishes the field
+		Source:       extractProviderCallSource(event),
 		CreatedAt:    event.Timestamp,
 	}
 

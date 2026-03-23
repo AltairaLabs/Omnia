@@ -75,6 +75,9 @@ type Config struct {
 
 	// Insecure disables TLS for the OTLP connection.
 	Insecure bool
+
+	// ExtraAttributes are additional resource attributes to include in traces.
+	ExtraAttributes []attribute.KeyValue
 }
 
 // Provider wraps the OpenTelemetry TracerProvider.
@@ -127,12 +130,13 @@ func NewProvider(ctx context.Context, cfg Config) (*Provider, error) {
 	// Note: We avoid resource.Merge with resource.Default() because different OTel
 	// package versions (e.g., PromptKit vs Omnia) may use different schema URLs,
 	// causing "conflicting Schema URL" errors. Instead, we create a standalone resource.
-	res := resource.NewWithAttributes(
-		semconv.SchemaURL,
+	attrs := []attribute.KeyValue{
 		semconv.ServiceName(cfg.ServiceName),
 		semconv.ServiceVersion(cfg.ServiceVersion),
 		semconv.DeploymentEnvironment(cfg.Environment),
-	)
+	}
+	attrs = append(attrs, cfg.ExtraAttributes...)
+	res := resource.NewWithAttributes(semconv.SchemaURL, attrs...)
 
 	// Create sampler — wrapped in ParentBased so that remote parents with
 	// the Sampled flag (e.g. arena worker deterministic traces) are always

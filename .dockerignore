@@ -33,5 +33,30 @@
 !ee/*/*/*/*
 !ee/*/*/*/*/*
 
-# Re-include local PromptKit source for development builds
-!promptkit-local/**
+# Re-include local PromptKit source for development builds (Go source only)
+# The !**/*.go and !go.mod/!go.sum patterns above already match promptkit-local,
+# but we need explicit directory includes so Docker copies the directory structure.
+# WARNING: When a new module is added to promptkit-local (new go.mod), add its
+# *.go, go.mod, and go.sum patterns here — otherwise Docker builds will fail
+# with "no such file or directory" errors for the missing module.
+!promptkit-local/pkg/**/*.go
+!promptkit-local/pkg/go.mod
+!promptkit-local/pkg/go.sum
+!promptkit-local/runtime/**/*.go
+!promptkit-local/runtime/go.mod
+!promptkit-local/runtime/go.sum
+!promptkit-local/sdk/**/*.go
+!promptkit-local/sdk/go.mod
+!promptkit-local/sdk/go.sum
+!promptkit-local/runtime/prompt/schema/*.json
+!promptkit-local/server/a2a/**/*.go
+!promptkit-local/server/a2a/go.mod
+!promptkit-local/server/a2a/go.sum
+!promptkit-local/tools/arena/**/*.go
+!promptkit-local/tools/arena/go.mod
+!promptkit-local/tools/arena/go.sum
+!promptkit-local/tools/packc/**/*.go
+!promptkit-local/tools/packc/go.mod
+!promptkit-local/tools/packc/go.sum
+!promptkit-local/tools/arena/templates/builtin/*
+!promptkit-local/tools/arena/render/templates/*.tmpl

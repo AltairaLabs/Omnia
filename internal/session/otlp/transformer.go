@@ -59,6 +59,7 @@ func NewTransformer(writer SessionWriter, log logr.Logger) *Transformer {
 // spanContext holds resource-level attributes extracted once per ResourceSpans.
 type spanContext struct {
 	namespace         string
+	workspaceName     string
 	agentName         string
 	promptPackName    string
 	promptPackVersion string
@@ -91,6 +92,7 @@ func (t *Transformer) processResourceSpans(ctx context.Context, rs *tracepb.Reso
 
 	sc := spanContext{
 		namespace:         getStringAttr(resourceAttrs, AttrServiceNamespace),
+		workspaceName:     getStringAttr(resourceAttrs, AttrOmniaWorkspaceName),
 		agentName:         getStringAttr(resourceAttrs, AttrServiceName),
 		promptPackName:    getStringAttr(resourceAttrs, AttrOmniaPromptPackName),
 		promptPackVersion: getStringAttr(resourceAttrs, AttrOmniaPromptPackVersion),
@@ -201,6 +203,7 @@ func (t *Transformer) ensureSession(ctx context.Context, sessionID string, sc sp
 		ID:                sessionID,
 		AgentName:         sc.agentName,
 		Namespace:         sc.namespace,
+		WorkspaceName:     sc.workspaceName,
 		PromptPackName:    ppName,
 		PromptPackVersion: ppVersion,
 		CreatedAt:         now,

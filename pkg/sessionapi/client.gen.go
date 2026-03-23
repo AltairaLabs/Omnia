@@ -40,12 +40,6 @@ const (
 	SessionStatusExpired   SessionStatus = "expired"
 )
 
-// Defines values for ToolCallExecution.
-const (
-	ToolCallExecutionClient ToolCallExecution = "client"
-	ToolCallExecutionServer ToolCallExecution = "server"
-)
-
 // Defines values for ToolCallStatus.
 const (
 	Error   ToolCallStatus = "error"
@@ -58,10 +52,16 @@ type CreateSessionRequest struct {
 	AgentName *string `json:"agentName,omitempty"`
 
 	// Id Optional pre-generated session UUID
-	Id                *openapi_types.UUID `json:"id,omitempty"`
-	Namespace         *string             `json:"namespace,omitempty"`
-	PromptPackName    *string             `json:"promptPackName,omitempty"`
-	PromptPackVersion *string             `json:"promptPackVersion,omitempty"`
+	Id *openapi_types.UUID `json:"id,omitempty"`
+
+	// InitialState Optional initial key-value state for the session
+	InitialState      *map[string]string `json:"initialState,omitempty"`
+	Namespace         *string            `json:"namespace,omitempty"`
+	PromptPackName    *string            `json:"promptPackName,omitempty"`
+	PromptPackVersion *string            `json:"promptPackVersion,omitempty"`
+
+	// Tags Optional labels for categorizing sessions
+	Tags *[]string `json:"tags,omitempty"`
 
 	// TtlSeconds Session TTL in seconds (0 = no expiry)
 	TtlSeconds    *int    `json:"ttlSeconds,omitempty"`
@@ -116,8 +116,11 @@ type EvaluateAcceptedResponse struct {
 // Message defines model for Message.
 type Message struct {
 	Content      *string            `json:"content,omitempty"`
+	CostUsd      *float64           `json:"costUsd,omitempty"`
+	HasMedia     *bool              `json:"hasMedia,omitempty"`
 	Id           *string            `json:"id,omitempty"`
 	InputTokens  *int32             `json:"inputTokens,omitempty"`
+	MediaTypes   *[]string          `json:"mediaTypes,omitempty"`
 	Metadata     *map[string]string `json:"metadata,omitempty"`
 	OutputTokens *int32             `json:"outputTokens,omitempty"`
 	Role         *MessageRole       `json:"role,omitempty"`
@@ -150,6 +153,7 @@ type ProviderCall struct {
 	OutputTokens  *int64              `json:"outputTokens,omitempty"`
 	Provider      *string             `json:"provider,omitempty"`
 	SessionId     *openapi_types.UUID `json:"sessionId,omitempty"`
+	Source        *string             `json:"source,omitempty"`
 	Status        *ProviderCallStatus `json:"status,omitempty"`
 	ToolCallCount *int32              `json:"toolCallCount,omitempty"`
 }
@@ -160,6 +164,17 @@ type ProviderCallStatus string
 // RefreshTTLRequest defines model for RefreshTTLRequest.
 type RefreshTTLRequest struct {
 	TtlSeconds int `json:"ttlSeconds"`
+}
+
+// RuntimeEvent defines model for RuntimeEvent.
+type RuntimeEvent struct {
+	Data         *map[string]interface{} `json:"data,omitempty"`
+	DurationMs   *int64                  `json:"durationMs,omitempty"`
+	ErrorMessage *string                 `json:"errorMessage,omitempty"`
+	EventType    *string                 `json:"eventType,omitempty"`
+	Id           *openapi_types.UUID     `json:"id,omitempty"`
+	SessionId    *openapi_types.UUID     `json:"sessionId,omitempty"`
+	Timestamp    *time.Time              `json:"timestamp,omitempty"`
 }
 
 // Session defines model for Session.
@@ -199,19 +214,14 @@ type SessionResponse struct {
 	Session  *Session   `json:"session,omitempty"`
 }
 
-// SessionStatusUpdate defines model for SessionStatusUpdate.
-type SessionStatusUpdate struct {
-	AddCostUSD      *float64       `json:"AddCostUSD,omitempty"`
-	AddInputTokens  *int32         `json:"AddInputTokens,omitempty"`
-	AddMessages     *int32         `json:"AddMessages,omitempty"`
-	AddOutputTokens *int32         `json:"AddOutputTokens,omitempty"`
-	AddToolCalls    *int32         `json:"AddToolCalls,omitempty"`
-	SetEndedAt      *time.Time     `json:"SetEndedAt,omitempty"`
-	SetStatus       *SessionStatus `json:"SetStatus,omitempty"`
-}
-
 // SessionStatus defines model for SessionStatus.
 type SessionStatus string
+
+// SessionStatusUpdate defines model for SessionStatusUpdate.
+type SessionStatusUpdate struct {
+	SetEndedAt *time.Time     `json:"SetEndedAt,omitempty"`
+	SetStatus  *SessionStatus `json:"SetStatus,omitempty"`
+}
 
 // ToolCall defines model for ToolCall.
 type ToolCall struct {
@@ -220,7 +230,6 @@ type ToolCall struct {
 	CreatedAt    *time.Time              `json:"createdAt,omitempty"`
 	DurationMs   *int64                  `json:"durationMs,omitempty"`
 	ErrorMessage *string                 `json:"errorMessage,omitempty"`
-	Execution    *ToolCallExecution      `json:"execution,omitempty"`
 	Id           *string                 `json:"id,omitempty"`
 	Labels       *map[string]string      `json:"labels,omitempty"`
 	Name         *string                 `json:"name,omitempty"`
@@ -228,9 +237,6 @@ type ToolCall struct {
 	SessionId    *openapi_types.UUID     `json:"sessionId,omitempty"`
 	Status       *ToolCallStatus         `json:"status,omitempty"`
 }
-
-// ToolCallExecution defines model for ToolCallExecution.
-type ToolCallExecution string
 
 // ToolCallStatus defines model for ToolCallStatus.
 type ToolCallStatus string
@@ -376,6 +382,9 @@ type CreateEvalResultsJSONRequestBody = CreateEvalResultsJSONBody
 // CreateSessionJSONRequestBody defines body for CreateSession for application/json ContentType.
 type CreateSessionJSONRequestBody = CreateSessionRequest
 
+// RecordRuntimeEventJSONRequestBody defines body for RecordRuntimeEvent for application/json ContentType.
+type RecordRuntimeEventJSONRequestBody = RuntimeEvent
+
 // AppendMessageJSONRequestBody defines body for AppendMessage for application/json ContentType.
 type AppendMessageJSONRequestBody = Message
 
@@ -494,6 +503,14 @@ type ClientInterface interface {
 
 	// EvaluateSession request
 	EvaluateSession(ctx context.Context, sessionID SessionID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetRuntimeEvents request
+	GetRuntimeEvents(ctx context.Context, sessionID SessionID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RecordRuntimeEventWithBody request with any body
+	RecordRuntimeEventWithBody(ctx context.Context, sessionID SessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	RecordRuntimeEvent(ctx context.Context, sessionID SessionID, body RecordRuntimeEventJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetMessages request
 	GetMessages(ctx context.Context, sessionID SessionID, params *GetMessagesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -655,6 +672,42 @@ func (c *Client) GetSessionEvalResults(ctx context.Context, sessionID SessionID,
 
 func (c *Client) EvaluateSession(ctx context.Context, sessionID SessionID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewEvaluateSessionRequest(c.Server, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetRuntimeEvents(ctx context.Context, sessionID SessionID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetRuntimeEventsRequest(c.Server, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RecordRuntimeEventWithBody(ctx context.Context, sessionID SessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRecordRuntimeEventRequestWithBody(c.Server, sessionID, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RecordRuntimeEvent(ctx context.Context, sessionID SessionID, body RecordRuntimeEventJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRecordRuntimeEventRequest(c.Server, sessionID, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1528,6 +1581,87 @@ func NewEvaluateSessionRequest(server string, sessionID SessionID) (*http.Reques
 	return req, nil
 }
 
+// NewGetRuntimeEventsRequest generates requests for GetRuntimeEvents
+func NewGetRuntimeEventsRequest(server string, sessionID SessionID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "sessionID", runtime.ParamLocationPath, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/sessions/%s/events", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRecordRuntimeEventRequest calls the generic RecordRuntimeEvent builder with application/json body
+func NewRecordRuntimeEventRequest(server string, sessionID SessionID, body RecordRuntimeEventJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRecordRuntimeEventRequestWithBody(server, sessionID, "application/json", bodyReader)
+}
+
+// NewRecordRuntimeEventRequestWithBody generates requests for RecordRuntimeEvent with any type of body
+func NewRecordRuntimeEventRequestWithBody(server string, sessionID SessionID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "sessionID", runtime.ParamLocationPath, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/sessions/%s/events", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetMessagesRequest generates requests for GetMessages
 func NewGetMessagesRequest(server string, sessionID SessionID, params *GetMessagesParams) (*http.Request, error) {
 	var err error
@@ -2020,6 +2154,14 @@ type ClientWithResponsesInterface interface {
 	// EvaluateSessionWithResponse request
 	EvaluateSessionWithResponse(ctx context.Context, sessionID SessionID, reqEditors ...RequestEditorFn) (*EvaluateSessionResponse, error)
 
+	// GetRuntimeEventsWithResponse request
+	GetRuntimeEventsWithResponse(ctx context.Context, sessionID SessionID, reqEditors ...RequestEditorFn) (*GetRuntimeEventsResponse, error)
+
+	// RecordRuntimeEventWithBodyWithResponse request with any body
+	RecordRuntimeEventWithBodyWithResponse(ctx context.Context, sessionID SessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RecordRuntimeEventResponse, error)
+
+	RecordRuntimeEventWithResponse(ctx context.Context, sessionID SessionID, body RecordRuntimeEventJSONRequestBody, reqEditors ...RequestEditorFn) (*RecordRuntimeEventResponse, error)
+
 	// GetMessagesWithResponse request
 	GetMessagesWithResponse(ctx context.Context, sessionID SessionID, params *GetMessagesParams, reqEditors ...RequestEditorFn) (*GetMessagesResponse, error)
 
@@ -2271,6 +2413,56 @@ func (r EvaluateSessionResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r EvaluateSessionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetRuntimeEventsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]RuntimeEvent
+	JSON400      *BadRequest
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetRuntimeEventsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetRuntimeEventsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RecordRuntimeEventResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON400      *BadRequest
+	JSON404      *NotFound
+	JSON413      *BodyTooLarge
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r RecordRuntimeEventResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RecordRuntimeEventResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -2593,6 +2785,32 @@ func (c *ClientWithResponses) EvaluateSessionWithResponse(ctx context.Context, s
 		return nil, err
 	}
 	return ParseEvaluateSessionResponse(rsp)
+}
+
+// GetRuntimeEventsWithResponse request returning *GetRuntimeEventsResponse
+func (c *ClientWithResponses) GetRuntimeEventsWithResponse(ctx context.Context, sessionID SessionID, reqEditors ...RequestEditorFn) (*GetRuntimeEventsResponse, error) {
+	rsp, err := c.GetRuntimeEvents(ctx, sessionID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetRuntimeEventsResponse(rsp)
+}
+
+// RecordRuntimeEventWithBodyWithResponse request with arbitrary body returning *RecordRuntimeEventResponse
+func (c *ClientWithResponses) RecordRuntimeEventWithBodyWithResponse(ctx context.Context, sessionID SessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RecordRuntimeEventResponse, error) {
+	rsp, err := c.RecordRuntimeEventWithBody(ctx, sessionID, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRecordRuntimeEventResponse(rsp)
+}
+
+func (c *ClientWithResponses) RecordRuntimeEventWithResponse(ctx context.Context, sessionID SessionID, body RecordRuntimeEventJSONRequestBody, reqEditors ...RequestEditorFn) (*RecordRuntimeEventResponse, error) {
+	rsp, err := c.RecordRuntimeEvent(ctx, sessionID, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRecordRuntimeEventResponse(rsp)
 }
 
 // GetMessagesWithResponse request returning *GetMessagesResponse
@@ -3091,6 +3309,100 @@ func ParseEvaluateSessionResponse(rsp *http.Response) (*EvaluateSessionResponse,
 			return nil, err
 		}
 		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetRuntimeEventsResponse parses an HTTP response from a GetRuntimeEventsWithResponse call
+func ParseGetRuntimeEventsResponse(rsp *http.Response) (*GetRuntimeEventsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetRuntimeEventsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []RuntimeEvent
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRecordRuntimeEventResponse parses an HTTP response from a RecordRuntimeEventWithResponse call
+func ParseRecordRuntimeEventResponse(rsp *http.Response) (*RecordRuntimeEventResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RecordRuntimeEventResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest BodyTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
 
 	}
 

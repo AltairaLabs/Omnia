@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -1972,6 +1973,79 @@ func TestOmniaEventStore_EvalPersistsAsEvalResult(t *testing.T) {
 	}
 	if !er.Passed {
 		t.Errorf("expected Passed true, got false")
+	}
+}
+
+func TestExtractProviderCallSource_StructWithSource(t *testing.T) {
+	data := &events.ProviderCallCompletedData{
+		Provider: "openai",
+		Model:    "gpt-4o",
+	}
+	// Set Source via reflection — field exists in local SDK but not published SDK.
+	// This tests the reflection path used by extractProviderCallSource itself.
+	v := reflect.ValueOf(data).Elem()
+	if f := v.FieldByName("Source"); f.IsValid() && f.CanSet() {
+		f.SetString("judge")
+	} else {
+		t.Skip("Source field not present in published SDK")
+	}
+	event := &events.Event{Data: data}
+	got := extractProviderCallSource(event)
+	if got != "judge" {
+		t.Errorf("expected 'judge', got %q", got)
+	}
+}
+
+func TestExtractProviderCallSource_StructWithoutSourceField(t *testing.T) {
+	// ToolCallStartedData does not have a Source field
+	event := &events.Event{
+		Data: &events.ToolCallStartedData{
+			ToolName: "search",
+			CallID:   "call-1",
+		},
+	}
+	got := extractProviderCallSource(event)
+	if got != "" {
+		t.Errorf("expected empty string, got %q", got)
+	}
+}
+
+func TestExtractProviderCallSource_NilData(t *testing.T) {
+	event := &events.Event{
+		Data: nil,
+	}
+	got := extractProviderCallSource(event)
+	if got != "" {
+		t.Errorf("expected empty string, got %q", got)
+	}
+}
+
+func TestExtractProviderCallSource_ProviderCallFailed(t *testing.T) {
+	// ProviderCallFailedData also has Source (via reflection)
+	event := &events.Event{
+		Data: &events.ProviderCallFailedData{
+			Provider: "anthropic",
+		},
+	}
+	// Source defaults to empty in published SDK (field may not exist),
+	// reflection returns "" which is correct.
+	got := extractProviderCallSource(event)
+	if got != "" {
+		t.Errorf("expected empty string for default, got %q", got)
+	}
+}
+
+func TestExtractProviderCallSource_EmptySource(t *testing.T) {
+	// No Source set — default is empty string
+	event := &events.Event{
+		Data: &events.ProviderCallCompletedData{
+			Provider: "openai",
+			Model:    "gpt-4o",
+		},
+	}
+	got := extractProviderCallSource(event)
+	if got != "" {
+		t.Errorf("expected empty string, got %q", got)
 	}
 }
 

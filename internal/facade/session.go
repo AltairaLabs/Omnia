@@ -223,6 +223,7 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 		ID:                sessionID,
 		AgentName:         c.agentName,
 		Namespace:         c.namespace,
+		WorkspaceName:     c.workspaceName,
 		TTL:               s.config.SessionTTL,
 		PromptPackName:    s.config.PromptPackName,
 		PromptPackVersion: s.config.PromptPackVersion,

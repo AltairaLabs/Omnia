@@ -102,6 +102,7 @@ type Config struct {
 
 	// Session recording
 	SessionAPIURL string // Optional session-api URL for recording arena sessions
+	WorkspaceName string // Workspace name (resolved from namespace label)
 
 	// Worker configuration
 	WorkDir       string
@@ -153,6 +154,7 @@ func loadConfig() (*Config, error) {
 		ContentVersion: os.Getenv("ARENA_CONTENT_VERSION"),
 		ConfigFile:     os.Getenv("ARENA_CONFIG_FILE"), // Config file name in content path
 		SessionAPIURL:  os.Getenv("SESSION_API_URL"),
+		WorkspaceName:  os.Getenv("ARENA_WORKSPACE_NAME"),
 		RedisAddr:      getEnvOrDefault("REDIS_ADDR", "redis:6379"),
 		RedisPassword:  os.Getenv("REDIS_PASSWORD"),
 		RedisDB:        0,
@@ -491,11 +493,12 @@ func executeWorkItem(
 			httpclient.NewStore(cfg.SessionAPIURL, log),
 			log,
 			arenaSessionMetadata{
-				JobName:    cfg.JobName,
-				Namespace:  cfg.JobNamespace,
-				Scenario:   item.ScenarioID,
-				ProviderID: item.ProviderID,
-				JobType:    cfg.JobType,
+				JobName:       cfg.JobName,
+				Namespace:     cfg.JobNamespace,
+				WorkspaceName: cfg.WorkspaceName,
+				Scenario:      item.ScenarioID,
+				ProviderID:    item.ProviderID,
+				JobType:       cfg.JobType,
 			},
 		)
 		bus := events.NewEventBus()

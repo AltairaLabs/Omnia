@@ -139,6 +139,9 @@ type Config struct {
 	// Namespace is the Kubernetes namespace.
 	Namespace string
 
+	// WorkspaceName is the workspace this agent belongs to.
+	WorkspaceName string
+
 	// PromptPack configuration.
 	PromptPackName    string
 	PromptPackVersion string

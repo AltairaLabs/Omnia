@@ -42,6 +42,7 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	cfg := &Config{
 		AgentName:      name,
 		Namespace:      namespace,
+		WorkspaceName:  k8s.ResolveWorkspaceName(ctx, c, ar.Labels, namespace),
 		PromptPackPath: getEnvOrDefault(envPromptPackPath, defaultPromptPackPath),
 		PromptName:     getEnvOrDefault(envPromptName, defaultPromptName),
 		GRPCPort:       defaultGRPCPort,

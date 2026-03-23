@@ -43,9 +43,10 @@ export const GET = withWorkspaceAccess(
     }
     const namespace = workspace.spec.namespace.name;
 
-    // Forward query params to the backend — filter by k8s namespace
+    // Forward query params to the backend — filter by k8s namespace and workspace
     const params = new URLSearchParams();
     params.set("namespace", namespace);
+    params.set("workspace", name);
 
     const forwardParams = ["agent", "status", "from", "to", "limit", "offset", "q", "count"];
     for (const key of forwardParams) {

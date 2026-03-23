@@ -38,8 +38,9 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	}
 
 	cfg := &Config{
-		AgentName: name,
-		Namespace: namespace,
+		AgentName:     name,
+		Namespace:     namespace,
+		WorkspaceName: k8s.ResolveWorkspaceName(ctx, c, ar.Labels, namespace),
 	}
 
 	// PromptPack info from CRD

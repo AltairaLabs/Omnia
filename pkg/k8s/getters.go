@@ -109,3 +109,24 @@ func DetermineSecretKey(ref *omniav1alpha1.SecretKeyRef, providerType omniav1alp
 	}
 	return "api-key"
 }
+
+// GetNamespaceLabel reads a single label from a Namespace object.
+// Returns empty string if the namespace or label is not found.
+func GetNamespaceLabel(ctx context.Context, c client.Client, namespace, label string) string {
+	ns := &corev1.Namespace{}
+	if err := c.Get(ctx, types.NamespacedName{Name: namespace}, ns); err != nil {
+		return ""
+	}
+	return ns.Labels[label]
+}
+
+const workspaceLabel = "omnia.altairalabs.ai/workspace"
+
+// ResolveWorkspaceName returns the workspace name for a resource.
+// Checks the resource's own labels first, then falls back to the namespace label.
+func ResolveWorkspaceName(ctx context.Context, c client.Client, labels map[string]string, namespace string) string {
+	if ws := labels[workspaceLabel]; ws != "" {
+		return ws
+	}
+	return GetNamespaceLabel(ctx, c, namespace, workspaceLabel)
+}

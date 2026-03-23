@@ -13,10 +13,11 @@ spec:
     spec:
       restartPolicy: Never
       securityContext:
-        # Run as root to write to workspace-content PVC (consistent with arena controller)
-        runAsNonRoot: false
-        runAsUser: 0
-        runAsGroup: 0
+        # Run as same user as arena controller (65532) so created dirs are writable
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:

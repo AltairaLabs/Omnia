@@ -127,13 +127,15 @@ func (h *Handler) requestLog(ctx context.Context) logr.Logger {
 
 // CreateSessionRequest is the JSON body for POST /api/v1/sessions.
 type CreateSessionRequest struct {
-	ID                string `json:"id"`
-	AgentName         string `json:"agentName"`
-	Namespace         string `json:"namespace"`
-	WorkspaceName     string `json:"workspaceName,omitempty"`
-	TTLSeconds        int    `json:"ttlSeconds,omitempty"`
-	PromptPackName    string `json:"promptPackName,omitempty"`
-	PromptPackVersion string `json:"promptPackVersion,omitempty"`
+	ID                string            `json:"id"`
+	AgentName         string            `json:"agentName"`
+	Namespace         string            `json:"namespace"`
+	WorkspaceName     string            `json:"workspaceName,omitempty"`
+	TTLSeconds        int               `json:"ttlSeconds,omitempty"`
+	PromptPackName    string            `json:"promptPackName,omitempty"`
+	PromptPackVersion string            `json:"promptPackVersion,omitempty"`
+	Tags              []string          `json:"tags,omitempty"`
+	InitialState      map[string]string `json:"initialState,omitempty"`
 }
 
 // AppendMessageRequest is the JSON body for POST /api/v1/sessions/{sessionID}/messages.
@@ -431,6 +433,8 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		WorkspaceName:     req.WorkspaceName,
 		PromptPackName:    req.PromptPackName,
 		PromptPackVersion: req.PromptPackVersion,
+		Tags:              req.Tags,
+		State:             req.InitialState,
 		Status:            session.SessionStatusActive,
 		CreatedAt:         now,
 		UpdatedAt:         now,
@@ -714,19 +718,15 @@ func parseListParams(r *http.Request) (providers.SessionListOpts, error) {
 	limit := min(parseIntParam(r, "limit", defaultListLimit), maxListLimit)
 	offset := min(parseIntParam(r, "offset", 0), maxOffsetLimit)
 
-	// The "workspace" query param carries the Kubernetes namespace that scopes sessions.
-	// Accept both "workspace" and "namespace" for backwards compatibility.
-	ns := q.Get("workspace")
-	if ns == "" {
-		ns = q.Get("namespace")
-	}
-
+	// "namespace" scopes by k8s namespace, "workspace" scopes by workspace name.
+	// Both are sent by the dashboard proxy.
 	opts := providers.SessionListOpts{
 		Limit:         limit,
 		Offset:        offset,
-		Namespace:     truncateParam(ns, maxStringParamLen),
-		WorkspaceName: truncateParam(ns, maxStringParamLen),
+		Namespace:     truncateParam(q.Get("namespace"), maxStringParamLen),
+		WorkspaceName: truncateParam(q.Get("workspace"), maxStringParamLen),
 		AgentName:     truncateParam(q.Get("agent"), maxStringParamLen),
+		IncludeCount:  q.Get("count") == "true",
 	}
 
 	if status := q.Get("status"); status != "" {

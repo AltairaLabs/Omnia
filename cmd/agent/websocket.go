@@ -97,6 +97,7 @@ func buildWebSocketServer(
 	wsConfig.SessionTTL = cfg.SessionTTL
 	wsConfig.PromptPackName = cfg.PromptPackName
 	wsConfig.PromptPackVersion = cfg.PromptPackVersion
+	wsConfig.WorkspaceName = cfg.WorkspaceName
 	recordingPool := facade.NewRecordingPool(
 		facade.DefaultRecordingPoolSize,
 		facade.DefaultRecordingQueueSize,
