@@ -160,7 +160,7 @@ func loadConfig() (*Config, error) {
 		RedisDB:        0,
 		WorkDir:        getEnvOrDefault("ARENA_WORK_DIR", "/tmp/arena"),
 		PollInterval:   getDurationEnv("ARENA_POLL_INTERVAL", 100*time.Millisecond),
-		ShutdownDelay:  getDurationEnv("ARENA_SHUTDOWN_DELAY", 5*time.Second),
+		ShutdownDelay:  getDurationEnv("ARENA_SHUTDOWN_DELAY", 65*time.Second),
 		Verbose:        os.Getenv("ARENA_VERBOSE") == "true",
 	}
 

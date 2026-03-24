@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/AltairaLabs/PromptKit/runtime/logger"
@@ -139,7 +140,16 @@ func run(ctx context.Context) error {
 	go startMetricsServer(metricsAddr, log)
 
 	// Process work items
-	return processWorkItems(ctx, log, cfg, q, bundlePath, workerMetrics)
+	err = processWorkItems(ctx, log, cfg, q, bundlePath, workerMetrics)
+
+	// Wait after processing completes so Prometheus can scrape final metrics.
+	// Without this, the pod exits immediately and the last scrape never happens.
+	if cfg.ShutdownDelay > 0 {
+		log.Info("waiting for final metrics scrape", "delay", cfg.ShutdownDelay)
+		time.Sleep(cfg.ShutdownDelay)
+	}
+
+	return err
 }
 
 // configureSDKLogging sets up PromptKit SDK logging via the slog bridge.
