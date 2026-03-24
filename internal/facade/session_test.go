@@ -331,3 +331,77 @@ func TestProcessMessage_NoTracingProvider(t *testing.T) {
 		t.Errorf("Content = %q, want %q", doneMsg.Content, "echo: hello")
 	}
 }
+
+func TestBuildSessionTags_Anonymous(t *testing.T) {
+	c := &Connection{agentName: "agent-1"}
+	tags := buildSessionTags(c)
+	if len(tags) != 1 || tags[0] != "source:interactive" {
+		t.Errorf("expected [source:interactive], got %v", tags)
+	}
+}
+
+func TestBuildSessionTags_Authenticated(t *testing.T) {
+	c := &Connection{agentName: "agent-1", userID: "alice"}
+	tags := buildSessionTags(c)
+	if len(tags) != 2 {
+		t.Fatalf("expected 2 tags, got %d", len(tags))
+	}
+	if tags[0] != "source:interactive" {
+		t.Errorf("tags[0] = %q, want source:interactive", tags[0])
+	}
+	if tags[1] != "user:alice" {
+		t.Errorf("tags[1] = %q, want user:alice", tags[1])
+	}
+}
+
+func TestBuildSessionState_Empty(t *testing.T) {
+	c := &Connection{}
+	cfg := ServerConfig{}
+	state := buildSessionState(c, cfg)
+	if len(state) != 0 {
+		t.Errorf("expected empty state, got %v", state)
+	}
+}
+
+func TestBuildSessionState_Full(t *testing.T) {
+	c := &Connection{
+		userID:    "alice",
+		userEmail: "alice@example.com",
+		userRoles: "admin,editor",
+	}
+	cfg := ServerConfig{
+		PromptPackName:    "my-pack",
+		PromptPackVersion: "v2",
+	}
+	state := buildSessionState(c, cfg)
+	if state["user.id"] != "alice" {
+		t.Errorf("user.id = %q, want alice", state["user.id"])
+	}
+	if state["user.email"] != "alice@example.com" {
+		t.Errorf("user.email = %q", state["user.email"])
+	}
+	if state["user.roles"] != "admin,editor" {
+		t.Errorf("user.roles = %q", state["user.roles"])
+	}
+	if state["promptpack.name"] != "my-pack" {
+		t.Errorf("promptpack.name = %q", state["promptpack.name"])
+	}
+	if state["promptpack.version"] != "v2" {
+		t.Errorf("promptpack.version = %q", state["promptpack.version"])
+	}
+}
+
+func TestBuildSessionState_PartialUser(t *testing.T) {
+	c := &Connection{userID: "bob"}
+	cfg := ServerConfig{PromptPackName: "pack-1"}
+	state := buildSessionState(c, cfg)
+	if len(state) != 2 {
+		t.Errorf("expected 2 entries, got %d: %v", len(state), state)
+	}
+	if state["user.id"] != "bob" {
+		t.Errorf("user.id = %q", state["user.id"])
+	}
+	if state["promptpack.name"] != "pack-1" {
+		t.Errorf("promptpack.name = %q", state["promptpack.name"])
+	}
+}
