@@ -162,47 +162,17 @@ func TestDemoHandler_HandleMessage_Default(t *testing.T) {
 	}
 }
 
-func TestEstimateTokens(t *testing.T) {
-	tests := []struct {
-		name     string
-		text     string
-		expected int
-	}{
-		{name: "empty string", text: "", expected: 0},
-		{name: "short text", text: "hello", expected: 1},                                           // 5 / 4 = 1
-		{name: "medium text", text: "hello world", expected: 2},                                    // 11 / 4 = 2
-		{name: "longer text", text: "This is a longer sentence for testing tokens.", expected: 11}, // 46 / 4 = 11
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := estimateTokens(tt.text)
-			if result != tt.expected {
-				t.Errorf("estimateTokens(%q) = %d, want %d", tt.text, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestNewDemoHandlerWithMetrics(t *testing.T) {
-	// Note: NewDemoLLMMetrics and Record are tested indirectly through this test
-	// because promauto registers metrics globally and re-registration would panic.
-	handler := NewDemoHandlerWithMetrics(DemoMetricsConfig{
-		AgentName: "test-agent",
-		Namespace: "test-namespace",
-	})
+func TestNewDemoHandler(t *testing.T) {
+	handler := NewDemoHandler()
 	if handler == nil {
-		t.Fatal("NewDemoHandlerWithMetrics() returned nil")
-	}
-	if handler.metrics == nil {
-		t.Error("NewDemoHandlerWithMetrics() should set metrics")
+		t.Fatal("NewDemoHandler() returned nil")
 	}
 	// Verify the name still works
 	if handler.Name() != "demo" {
 		t.Errorf("Name() = %q, want %q", handler.Name(), "demo")
 	}
 
-	// Test HandleMessage with metrics enabled - this exercises Record()
+	// Test HandleMessage
 	writer := &mockResponseWriter{}
 	msg := &facade.ClientMessage{Content: "hello"}
 
@@ -212,9 +182,16 @@ func TestNewDemoHandlerWithMetrics(t *testing.T) {
 		return
 	}
 
-	// Should produce response even with metrics enabled
+	// Should produce response
 	if len(writer.chunks) == 0 {
 		t.Error("HandleMessage() produced no chunks")
+	}
+}
+
+func TestWithDemoTracing(t *testing.T) {
+	handler := NewDemoHandler(WithDemoTracing(nil))
+	if handler == nil {
+		t.Fatal("NewDemoHandler(WithDemoTracing(nil)) returned nil")
 	}
 }
 

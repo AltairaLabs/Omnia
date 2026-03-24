@@ -211,15 +211,12 @@ func createHandler(cfg *agent.Config, log logr.Logger, tp *tracing.Provider) (fa
 		log.Info("using echo handler mode")
 		return agent.NewEchoHandler(), nil
 	case agent.HandlerModeDemo:
-		log.Info("using demo handler mode with LLM metrics")
+		log.Info("using demo handler mode")
 		var demoOpts []agent.DemoHandlerOption
 		if tp != nil {
 			demoOpts = append(demoOpts, agent.WithDemoTracing(tp))
 		}
-		return agent.NewDemoHandlerWithMetrics(agent.DemoMetricsConfig{
-			AgentName: cfg.AgentName,
-			Namespace: cfg.Namespace,
-		}, demoOpts...), nil
+		return agent.NewDemoHandler(demoOpts...), nil
 	case agent.HandlerModeRuntime:
 		log.Info("using runtime handler mode", "address", cfg.RuntimeAddress)
 

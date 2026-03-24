@@ -25,17 +25,12 @@ import (
 
 	"github.com/altairalabs/omnia/internal/facade"
 	"github.com/altairalabs/omnia/internal/tracing"
-	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
 // Demo mode configuration.
-// Uses "mock" provider since this handler doesn't call any real LLM.
-// Simulated pricing is intentionally low to make demo data obvious.
 const (
-	demoProvider         = "mock"
-	demoModel            = "mock-llm"
-	demoInputPricePer1M  = 0.10 // $0.10 per 1M input tokens (very cheap, obviously demo)
-	demoOutputPricePer1M = 0.30 // $0.30 per 1M output tokens
+	demoProvider = "mock"
+	demoModel    = "mock-llm"
 )
 
 // Test media for multi-modal E2E testing.
@@ -57,67 +52,15 @@ const (
 	testVideoMP4 = "AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAAhtZGF0"
 )
 
-// demoDurationBuckets are histogram buckets for demo mode (shorter than production).
-var demoDurationBuckets = []float64{0.5, 1, 2, 5, 10, 30, 60}
-
-// DemoMetricsConfig holds configuration for demo mode metrics.
-type DemoMetricsConfig struct {
-	AgentName            string
-	Namespace            string
-	PromptPackName       string
-	PromptPackNamespace  string
-	ProviderRefName      string
-	ProviderRefNamespace string
-}
-
-// newDemoLLMMetrics creates LLM metrics for demo mode using the shared metrics package.
-func newDemoLLMMetrics(cfg DemoMetricsConfig) *metrics.LLMMetrics {
-	return metrics.NewLLMMetrics(metrics.LLMMetricsConfig{
-		AgentName:            cfg.AgentName,
-		Namespace:            cfg.Namespace,
-		PromptPackName:       cfg.PromptPackName,
-		PromptPackNamespace:  cfg.PromptPackNamespace,
-		ProviderRefName:      cfg.ProviderRefName,
-		ProviderRefNamespace: cfg.ProviderRefNamespace,
-		DurationBuckets:      demoDurationBuckets,
-	})
-}
-
-// recordDemoRequest records metrics for a simulated LLM request.
-func recordDemoRequest(m *metrics.LLMMetrics, inputTokens, outputTokens int, durationSeconds float64) {
-	// Calculate cost
-	inputCost := (float64(inputTokens) / 1_000_000) * demoInputPricePer1M
-	outputCost := (float64(outputTokens) / 1_000_000) * demoOutputPricePer1M
-
-	m.RecordRequest(metrics.LLMRequestMetrics{
-		Provider:        demoProvider,
-		Model:           demoModel,
-		InputTokens:     inputTokens,
-		OutputTokens:    outputTokens,
-		CacheHits:       0,
-		CostUSD:         inputCost + outputCost,
-		DurationSeconds: durationSeconds,
-		Success:         true,
-	})
-}
-
-// estimateTokens estimates token count from text (roughly 4 chars per token).
-func estimateTokens(text string) int {
-	return len(text) / 4
-}
-
 // DemoHandler provides canned responses with streaming simulation.
 // Useful for demos and screenshots.
 type DemoHandler struct {
-	metrics *metrics.LLMMetrics
-	tracer  *tracing.Provider
+	tracer *tracing.Provider
 }
 
-// NewDemoHandlerWithMetrics creates a DemoHandler with LLM metrics.
-func NewDemoHandlerWithMetrics(cfg DemoMetricsConfig, opts ...DemoHandlerOption) *DemoHandler {
-	h := &DemoHandler{
-		metrics: newDemoLLMMetrics(cfg),
-	}
+// NewDemoHandler creates a DemoHandler with optional configuration.
+func NewDemoHandler(opts ...DemoHandlerOption) *DemoHandler {
+	h := &DemoHandler{}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -154,7 +97,6 @@ func (h *DemoHandler) HandleMessage(
 	}
 
 	content := strings.ToLower(msg.Content)
-	startTime := time.Now()
 
 	// Start LLM span
 	if h.tracer != nil {
@@ -166,40 +108,31 @@ func (h *DemoHandler) HandleMessage(
 	// Simulate thinking delay
 	time.Sleep(200 * time.Millisecond)
 
-	var response string
 	var err error
 
 	// Multi-modal responses for E2E testing
 	if strings.Contains(content, "show image") || strings.Contains(content, "send image") {
-		response, err = h.handleImageResponse(ctx, writer)
+		_, err = h.handleImageResponse(ctx, writer)
 	} else if strings.Contains(content, "play audio") || strings.Contains(content, "send audio") {
-		response, err = h.handleAudioResponse(ctx, writer)
+		_, err = h.handleAudioResponse(ctx, writer)
 	} else if strings.Contains(content, "play video") || strings.Contains(content, "send video") {
-		response, err = h.handleVideoResponse(ctx, writer)
+		_, err = h.handleVideoResponse(ctx, writer)
 	} else if strings.Contains(content, "show document") || strings.Contains(content, "send document") || strings.Contains(content, "send pdf") {
-		response, err = h.handleDocumentResponse(ctx, writer)
+		_, err = h.handleDocumentResponse(ctx, writer)
 	} else if strings.Contains(content, "multimodal") || strings.Contains(content, "mixed content") {
-		response, err = h.handleMultiModalResponse(ctx, writer)
+		_, err = h.handleMultiModalResponse(ctx, writer)
 	} else if strings.Contains(content, "password") {
 		// Password reset flow - demonstrates tool calls
-		response, err = h.handlePasswordReset(ctx, sessionID, writer)
+		_, err = h.handlePasswordReset(ctx, sessionID, writer)
 	} else if strings.Contains(content, "weather") {
 		// Weather query - demonstrates tool calls
-		response, err = h.handleWeatherQuery(ctx, sessionID, writer)
+		_, err = h.handleWeatherQuery(ctx, sessionID, writer)
 	} else if strings.Contains(content, "help") || strings.Contains(content, "hello") || strings.Contains(content, "hi") {
 		// Help/greeting - demonstrates streaming
-		response, err = h.handleGreeting(ctx, sessionID, writer)
+		_, err = h.handleGreeting(ctx, sessionID, writer)
 	} else {
 		// Default response
-		response, err = h.handleDefault(ctx, sessionID, msg.Content, writer)
-	}
-
-	// Record metrics if enabled
-	if h.metrics != nil {
-		inputTokens := estimateTokens(msg.Content)
-		outputTokens := estimateTokens(response)
-		duration := time.Since(startTime).Seconds()
-		recordDemoRequest(h.metrics, inputTokens, outputTokens, duration)
+		_, err = h.handleDefault(ctx, sessionID, msg.Content, writer)
 	}
 
 	return err
