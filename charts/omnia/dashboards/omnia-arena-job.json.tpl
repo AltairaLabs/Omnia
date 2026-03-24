@@ -97,74 +97,48 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 80 }
-            ]
-          },
           "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Passed" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Failed" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+          }
+        ]
       },
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 25 },
       "id": 3,
       "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
+        "displayLabels": ["percent"],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": ["value"]
+        },
+        "pieType": "donut",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "auto"
+        "tooltip": { "mode": "single", "sort": "none" }
       },
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "last_over_time(omnia_arena_work_items_total{job_name=\"$job_name\", status=\"pass\"}[$__range])",
+          "expr": "last_over_time(omnia_arena_work_items_total{job_name=\"$job_name\", status=\"pass\"}[$__range]) or vector(0)",
           "legendFormat": "Passed",
           "refId": "A"
-        }
-      ],
-      "title": "Passed Work Items",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 1 }
-            ]
-          },
-          "unit": "short"
         },
-        "overrides": []
-      },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 25 },
-      "id": 4,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "auto"
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
         {
-          "expr": "last_over_time(omnia_arena_work_items_total{job_name=\"$job_name\", status=\"fail\"}[$__range])",
+          "expr": "last_over_time(omnia_arena_work_items_total{job_name=\"$job_name\", status=\"fail\"}[$__range]) or vector(0)",
           "legendFormat": "Failed",
-          "refId": "A"
+          "refId": "B"
         }
       ],
-      "title": "Failed Work Items",
-      "type": "stat"
+      "title": "Work Items Pass/Fail",
+      "type": "piechart"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
@@ -181,7 +155,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 25 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 25 },
       "id": 5,
       "options": {
         "colorMode": "value",
@@ -219,7 +193,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 25 },
       "id": 6,
       "options": {
         "barRadius": 0,
@@ -261,7 +235,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 33 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 33 },
       "id": 7,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom" },
