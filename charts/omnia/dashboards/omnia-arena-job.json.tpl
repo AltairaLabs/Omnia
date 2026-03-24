@@ -121,7 +121,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "arena_work_items_total{job_name=\"$job_name\", status=\"completed\"}",
+          "expr": "omnia_arena_work_items_total{job_name=\"$job_name\", status=\"pass\"}",
           "legendFormat": "Completed",
           "refId": "A"
         }
@@ -158,7 +158,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "arena_work_items_total{job_name=\"$job_name\", status=\"failed\"}",
+          "expr": "omnia_arena_work_items_total{job_name=\"$job_name\", status=\"fail\"}",
           "legendFormat": "Failed",
           "refId": "A"
         }
@@ -194,7 +194,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, rate(arena_work_item_duration_seconds_bucket{job_name=\"$job_name\"}[$__rate_interval]))",
+          "expr": "histogram_quantile(0.95, rate(omnia_arena_work_item_duration_seconds_bucket{job_name=\"$job_name\"}[$__rate_interval]))",
           "legendFormat": "p95",
           "refId": "A"
         }
@@ -233,12 +233,12 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "arena_eval_results_total{job_name=\"$job_name\"}",
-          "legendFormat": "{{ "{{eval_id}}" }} ({{ "{{status}}" }})",
+          "expr": "omnia_arena_queue_operations_total{job_name=\"$job_name\"}",
+          "legendFormat": "{{ "{{operation}}" }} ({{ "{{status}}" }})",
           "refId": "A"
         }
       ],
-      "title": "Eval Results by Type",
+      "title": "Queue Operations",
       "type": "barchart"
     },
     {
@@ -270,7 +270,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "rate(arena_work_items_total{job_name=\"$job_name\"}[$__rate_interval])",
+          "expr": "rate(omnia_arena_work_items_total{job_name=\"$job_name\"}[$__rate_interval])",
           "legendFormat": "{{ "{{status}}" }}",
           "refId": "A"
         }

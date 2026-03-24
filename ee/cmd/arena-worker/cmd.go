@@ -111,7 +111,7 @@ func run(ctx context.Context) error {
 	log.V(1).Info("content path resolved", "bundlePath", bundlePath)
 
 	// Connect to Redis queue
-	q, err := queue.NewRedisQueue(queue.RedisOptions{
+	rawQ, err := queue.NewRedisQueue(queue.RedisOptions{
 		Addr:     cfg.RedisAddr,
 		Password: cfg.RedisPassword,
 		DB:       cfg.RedisDB,
@@ -121,15 +121,25 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to connect to queue: %w", err)
 	}
 	defer func() {
-		if closeErr := q.Close(); closeErr != nil {
+		if closeErr := rawQ.Close(); closeErr != nil {
 			log.Error(closeErr, "failed to close queue")
 		}
 	}()
 
 	log.Info("connected to redis", "addr", cfg.RedisAddr)
 
+	// Initialize metrics and wrap queue with instrumentation
+	queueMetrics := queue.NewQueueMetrics(queue.QueueMetricsConfig{})
+	queueMetrics.Initialize()
+	q := queue.NewInstrumentedQueue(rawQ, queueMetrics)
+
+	workerMetrics := NewWorkerMetrics()
+
+	metricsAddr := getEnvOrDefault("METRICS_ADDR", defaultMetricsAddr)
+	go startMetricsServer(metricsAddr, log)
+
 	// Process work items
-	return processWorkItems(ctx, log, cfg, q, bundlePath)
+	return processWorkItems(ctx, log, cfg, q, bundlePath, workerMetrics)
 }
 
 // configureSDKLogging sets up PromptKit SDK logging via the slog bridge.

@@ -27,11 +27,17 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // testLog returns a no-op logger for tests.
 func testLog() logr.Logger {
 	return logr.Discard()
+}
+
+// testWorkerMetrics creates WorkerMetrics with an isolated registry for tests.
+func testWorkerMetrics() *WorkerMetrics {
+	return newWorkerMetricsWithRegisterer(prometheus.NewRegistry())
 }
 
 func TestGetEnvOrDefault(t *testing.T) {
@@ -183,7 +189,7 @@ func TestProcessWorkItems(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		err := processWorkItems(ctx, testLog(), cfg, q, tmpDir)
+		err := processWorkItems(ctx, testLog(), cfg, q, tmpDir, testWorkerMetrics())
 		if err != nil {
 			t.Fatalf("processWorkItems() with cancelled context should return nil, got %v", err)
 		}
@@ -766,7 +772,7 @@ func TestProcessWorkItemsComplete(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		defer cancel()
 
-		err := processWorkItems(ctx, testLog(), cfg, q, tmpDir)
+		err := processWorkItems(ctx, testLog(), cfg, q, tmpDir, testWorkerMetrics())
 		if err != nil {
 			t.Fatalf("processWorkItems() error = %v", err)
 		}
@@ -940,7 +946,7 @@ func TestProcessWorkItemsTracing(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		defer cancel()
 
-		err = processWorkItems(ctx, testLog(), cfg, q, t.TempDir())
+		err = processWorkItems(ctx, testLog(), cfg, q, t.TempDir(), testWorkerMetrics())
 		require.NoError(t, err)
 
 		// Force flush
@@ -1013,7 +1019,7 @@ func TestProcessWorkItemsTracing(t *testing.T) {
 		defer cancel()
 
 		// Will return error because no arena config file exists.
-		_ = processWorkItems(ctx, testLog(), cfg, q, tmpDir)
+		_ = processWorkItems(ctx, testLog(), cfg, q, tmpDir, testWorkerMetrics())
 
 		_ = tp.ForceFlush(context.Background())
 

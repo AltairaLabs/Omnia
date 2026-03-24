@@ -1190,6 +1190,29 @@ prometheus:
           target_label: namespace
         - source_labels: [__meta_kubernetes_pod_name]
           target_label: pod
+    # Scrape Omnia arena-worker Job pods (work item execution, queue operations)
+    - job_name: 'omnia-arena-worker'
+      kubernetes_sd_configs:
+        - role: pod
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_omnia_altairalabs_ai_component]
+          action: keep
+          regex: arena-worker
+        - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+          action: replace
+          regex: ([^:]+)(?::\d+)?;(\d+)
+          replacement: $1:$2
+          target_label: __address__
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod
+        - source_labels: [__meta_kubernetes_pod_label_omnia_altairalabs_ai_job]
+          target_label: job_name
 
 # Grafana configuration (dashboards)
 # See: https://github.com/grafana/helm-charts/tree/main/charts/grafana

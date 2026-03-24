@@ -840,10 +840,16 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"app.kubernetes.io/name":      "arena-worker",
-						"app.kubernetes.io/instance":  arenaJob.Name,
-						"app.kubernetes.io/component": "worker",
-						"omnia.altairalabs.ai/job":    arenaJob.Name,
+						"app.kubernetes.io/name":         "arena-worker",
+						"app.kubernetes.io/instance":     arenaJob.Name,
+						"app.kubernetes.io/component":    "worker",
+						"omnia.altairalabs.ai/job":       arenaJob.Name,
+						"omnia.altairalabs.ai/component": "arena-worker",
+					},
+					Annotations: map[string]string{
+						"prometheus.io/scrape": "true",
+						"prometheus.io/port":   "9090",
+						"prometheus.io/path":   "/metrics",
 					},
 				},
 				Spec: corev1.PodSpec{

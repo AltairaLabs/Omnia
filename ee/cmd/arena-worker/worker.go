@@ -206,7 +206,10 @@ func getContentPath(cfg *Config) (string, error) {
 	return cfg.ContentPath, nil
 }
 
-func processWorkItems(ctx context.Context, log logr.Logger, cfg *Config, q queue.WorkQueue, bundlePath string) error {
+func processWorkItems(
+	ctx context.Context, log logr.Logger, cfg *Config,
+	q queue.WorkQueue, bundlePath string, wm *WorkerMetrics,
+) error {
 	jobID := cfg.JobName
 	emptyCount := 0
 	maxEmptyPolls := 10 // Exit after this many consecutive empty polls
@@ -271,6 +274,7 @@ func processWorkItems(ctx context.Context, log logr.Logger, cfg *Config, q queue
 				attribute.String("arena.provider", item.ProviderID),
 			),
 		)
+		itemStart := time.Now()
 		result, execErr := executeWorkItem(itemCtx, log, cfg, item, bundlePath)
 		if execErr != nil {
 			span.RecordError(execErr)
@@ -284,6 +288,14 @@ func processWorkItems(ctx context.Context, log logr.Logger, cfg *Config, q queue
 		ackCtx := trace.ContextWithSpan(ctx, span)
 		reportWorkItemResult(ackCtx, log, q, jobID, item, result, execErr)
 		span.End()
+
+		// Record work item metrics
+		itemDuration := time.Since(itemStart).Seconds()
+		if execErr != nil || (result != nil && result.Status == statusFail) {
+			wm.RecordWorkItem(jobID, statusFail, itemDuration)
+		} else {
+			wm.RecordWorkItem(jobID, statusPass, itemDuration)
+		}
 	}
 }
 
