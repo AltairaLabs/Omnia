@@ -1192,6 +1192,7 @@ prometheus:
           target_label: pod
     # Scrape Omnia arena-worker Job pods (work item execution, queue operations)
     - job_name: 'omnia-arena-worker'
+      honor_labels: true
       kubernetes_sd_configs:
         - role: pod
       relabel_configs:

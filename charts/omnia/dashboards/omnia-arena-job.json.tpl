@@ -122,11 +122,11 @@
       "targets": [
         {
           "expr": "omnia_arena_work_items_total{job_name=\"$job_name\", status=\"pass\"}",
-          "legendFormat": "Completed",
+          "legendFormat": "Passed",
           "refId": "A"
         }
       ],
-      "title": "Completed Work Items",
+      "title": "Passed Work Items",
       "type": "stat"
     },
     {
