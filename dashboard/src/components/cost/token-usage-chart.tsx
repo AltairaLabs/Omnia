@@ -12,6 +12,7 @@ import {
   Legend,
 } from "recharts";
 import { formatTokens } from "@/lib/pricing";
+import { BarChart3 } from "lucide-react";
 
 interface TokenDataPoint {
   timestamp: string;
@@ -61,6 +62,12 @@ export function TokenUsageChart({
       </CardHeader>
       <CardContent>
         <div style={{ height }}>
+          {data.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+              <BarChart3 className="h-8 w-8 mb-2 opacity-50" />
+              <span className="text-sm">No token usage data available</span>
+            </div>
+          ) : (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={chartData}>
               <defs>
@@ -122,6 +129,7 @@ export function TokenUsageChart({
               />
             </AreaChart>
           </ResponsiveContainer>
+          )}
         </div>
       </CardContent>
     </Card>
