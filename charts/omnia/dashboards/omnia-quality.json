@@ -207,8 +207,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "continuous-GrYlRd",
-            "fixedColor": "green"
+            "mode": "continuous-GrYlRd"
           },
           "mappings": [],
           "thresholds": {
@@ -398,7 +397,7 @@
         {
           "id": "organize",
           "options": {
-            "excludeByName": { "Time": true },
+            "excludeByName": { "Time": true, "instance": true, "job": true },
             "renameByName": {
               "__name__": "Eval",
               "agent": "Agent",
