@@ -42,7 +42,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "avg({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"})",
+          "expr": "avg(last_over_time({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"}[$__range]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -83,7 +83,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "min({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"})",
+          "expr": "min(last_over_time({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"}[$__range]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -114,7 +114,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "count({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"})",
+          "expr": "count(last_over_time({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"}[$__range]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -145,7 +145,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "count(count by(__name__)({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"}))",
+          "expr": "count(count by(__name__)(last_over_time({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"}[$__range])))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -238,7 +238,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "avg by(__name__)({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"})",
+          "expr": "avg by(__name__)(last_over_time({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"}[$__range]))",
           "legendFormat": "{{__name__}}",
           "refId": "A"
         }
@@ -384,7 +384,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "{__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"}",
+          "expr": "last_over_time({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"}[$__range])",
           "format": "table",
           "instant": true,
           "legendFormat": "",

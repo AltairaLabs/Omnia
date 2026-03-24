@@ -306,40 +306,44 @@ describe("prometheus-queries", () => {
   });
 
   describe("EvalQueries", () => {
-    it("discoverMetrics returns regex selector", () => {
+    it("discoverMetrics returns regex selector with lookback", () => {
       const query = EvalQueries.discoverMetrics();
       expect(query).toContain(EVAL_METRIC_PATTERN);
       expect(query).toContain("__name__=~");
+      expect(query).toContain("last_over_time(");
+      expect(query).toContain("[24h]");
     });
 
     it("discoverMetrics with filter includes labels", () => {
       const query = EvalQueries.discoverMetrics({ agent: "test" });
       expect(query).toContain('agent="test"');
+      expect(query).toContain("last_over_time(");
     });
 
-    it("metricValue returns metric name", () => {
-      expect(EvalQueries.metricValue("omnia_eval_foo")).toBe("omnia_eval_foo");
+    it("metricValue wraps in last_over_time", () => {
+      const query = EvalQueries.metricValue("omnia_eval_foo");
+      expect(query).toBe("last_over_time(omnia_eval_foo[24h])");
     });
 
     it("metricValue with filter adds labels", () => {
       const query = EvalQueries.metricValue("omnia_eval_foo", {
         agent: "a",
       });
-      expect(query).toBe('omnia_eval_foo{agent="a"}');
+      expect(query).toBe('last_over_time(omnia_eval_foo{agent="a"}[24h])');
     });
 
-    it("metricSum wraps in sum()", () => {
+    it("metricSum wraps in sum(last_over_time())", () => {
       const query = EvalQueries.metricSum("omnia_eval_foo");
-      expect(query).toBe("sum(omnia_eval_foo)");
+      expect(query).toBe("sum(last_over_time(omnia_eval_foo[24h]))");
     });
 
-    it("metricAvgOverTime uses default window", () => {
+    it("metricAvgOverTime wraps metricValue in avg_over_time", () => {
       const query = EvalQueries.metricAvgOverTime("omnia_eval_foo");
       expect(query).toContain("avg_over_time(");
       expect(query).toContain("[1h]");
     });
 
-    it("metricRate uses custom window", () => {
+    it("metricRate wraps metricValue in rate", () => {
       const query = EvalQueries.metricRate("omnia_eval_foo", "10m");
       expect(query).toContain("rate(");
       expect(query).toContain("[10m]");

@@ -366,19 +366,24 @@ export function buildEvalSelector(filter?: EvalFilter): string {
 export const EvalQueries = {
   /**
    * Discover all eval metrics. Returns one result per metric name.
+   * Uses last_over_time to include metrics that haven't been updated recently —
+   * eval gauges are only emitted when evals run and go stale between runs.
    */
   discoverMetrics(filter?: EvalFilter): string {
     const sel = buildEvalSelector(filter);
     const labels = sel ? `,${sel}` : "";
-    return `{__name__=~"${EVAL_METRIC_PATTERN}"${labels}}`;
+    return `last_over_time({__name__=~"${EVAL_METRIC_PATTERN}"${labels}}[24h])`;
   },
 
   /**
    * Current value of a specific eval metric (instant query).
+   * Uses last_over_time with a lookback window because eval gauges go stale
+   * between eval runs — without this, metrics disappear after 5 minutes.
    */
-  metricValue(metricName: string, filter?: EvalFilter): string {
+  metricValue(metricName: string, filter?: EvalFilter, lookback = "24h"): string {
     const sel = buildEvalSelector(filter);
-    return sel ? `${metricName}{${sel}}` : metricName;
+    const inner = sel ? `${metricName}{${sel}}` : metricName;
+    return `last_over_time(${inner}[${lookback}])`;
   },
 
   /**
