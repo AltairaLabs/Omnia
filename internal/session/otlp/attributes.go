@@ -19,7 +19,6 @@ limitations under the License.
 package otlp
 
 import (
-	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -158,16 +157,16 @@ func getIntAttrMulti(attrs []*commonpb.KeyValue, keys ...string) int64 {
 }
 
 // extractSessionID resolves a session identifier from span and resource attributes.
-// Priority: gen_ai.conversation.id → session.id → langfuse.session.id → traceID hex.
-func extractSessionID(spanAttrs, resourceAttrs []*commonpb.KeyValue, traceID []byte) string {
+// Priority: gen_ai.conversation.id → session.id → langfuse.session.id.
+// Returns "" if no explicit session ID is found — the traceID is NOT used as a
+// fallback because it creates ghost sessions from services that don't produce
+// sessions (e.g., eval-worker, session-api).
+func extractSessionID(spanAttrs, resourceAttrs []*commonpb.KeyValue, _ []byte) string {
 	if id := getStringAttrMulti(spanAttrs, AttrGenAIConversationID, AttrSessionID, AttrLangfuseSessionID); id != "" {
 		return id
 	}
 	if id := getStringAttrMulti(resourceAttrs, AttrSessionID, AttrLangfuseSessionID); id != "" {
 		return id
-	}
-	if len(traceID) > 0 {
-		return fmt.Sprintf("%x", traceID)
 	}
 	return ""
 }

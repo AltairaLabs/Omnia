@@ -250,11 +250,12 @@ func TestProcessExport_SpanEvents(t *testing.T) {
 	assert.Equal(t, "From event", msgs[0].Content)
 }
 
-func TestProcessExport_SessionIDFallbackToTraceID(t *testing.T) {
+func TestProcessExport_SkipsSpanWithOnlyTraceID(t *testing.T) {
 	writer := newMockWriter()
 	transformer := NewTransformer(writer, logr.Discard())
 
-	// Span with no conversation ID — should use trace ID.
+	// Span with trace ID but no explicit session ID — should NOT create a session.
+	// This prevents ghost sessions from services like eval-worker.
 	span := &tracepb.Span{
 		TraceId:           []byte{0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89},
 		SpanId:            []byte{0x01},
@@ -269,8 +270,8 @@ func TestProcessExport_SessionIDFallbackToTraceID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, processed)
 
-	// Session should be created with hex trace ID.
-	assert.Contains(t, writer.sessions, "abcdef0123456789")
+	// No session should be created — trace ID alone is not sufficient.
+	assert.Empty(t, writer.sessions)
 }
 
 func TestProcessExport_ExistingSession(t *testing.T) {
