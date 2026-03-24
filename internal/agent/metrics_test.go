@@ -17,12 +17,14 @@ limitations under the License.
 package agent
 
 import (
+	"context"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // newMetricsWithRegistry creates metrics registered with a custom registry (for testing).
@@ -231,14 +233,60 @@ func TestMetricsRequestTracking(t *testing.T) {
 	assert.Equal(t, float64(1), getGaugeValue(t, m.RequestsInflight))
 
 	// Complete the request
-	m.RequestCompleted("success", 1.5, "demo")
+	m.RequestCompleted(context.Background(), "success", 1.5, "demo")
 	assert.Equal(t, float64(0), getGaugeValue(t, m.RequestsInflight))
 
 	// Start and complete another request with error
 	m.RequestStarted()
 	assert.Equal(t, float64(1), getGaugeValue(t, m.RequestsInflight))
-	m.RequestCompleted("error", 0.5, "demo")
+	m.RequestCompleted(context.Background(), "error", 0.5, "demo")
 	assert.Equal(t, float64(0), getGaugeValue(t, m.RequestsInflight))
+}
+
+func TestMetricsRequestExemplar(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newMetricsWithRegistry("test-agent", "test-namespace", reg)
+
+	// With a valid trace context, exemplar should be attached
+	traceID, _ := trace.TraceIDFromHex("0af7651916cd43dd8448eb211c80319c")
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     trace.SpanID{0x01},
+		TraceFlags: trace.FlagsSampled,
+	})
+	ctx := trace.ContextWithSpanContext(context.Background(), sc)
+
+	m.RequestStarted()
+	m.RequestCompleted(ctx, "success", 1.5, "demo")
+
+	// Verify the counter was incremented (exemplar is internal to prometheus)
+	assert.Equal(t, float64(0), getGaugeValue(t, m.RequestsInflight))
+
+	// Without trace context, should still work (no exemplar attached)
+	m.RequestStarted()
+	m.RequestCompleted(context.Background(), "success", 0.5, "demo")
+	assert.Equal(t, float64(0), getGaugeValue(t, m.RequestsInflight))
+}
+
+func TestTraceExemplar(t *testing.T) {
+	t.Run("no span context returns nil", func(t *testing.T) {
+		labels := traceExemplar(context.Background())
+		assert.Nil(t, labels)
+	})
+
+	t.Run("valid span context returns trace_id", func(t *testing.T) {
+		traceID, _ := trace.TraceIDFromHex("0af7651916cd43dd8448eb211c80319c")
+		sc := trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID:    traceID,
+			SpanID:     trace.SpanID{0x01},
+			TraceFlags: trace.FlagsSampled,
+		})
+		ctx := trace.ContextWithSpanContext(context.Background(), sc)
+
+		labels := traceExemplar(ctx)
+		require.NotNil(t, labels)
+		assert.Equal(t, "0af7651916cd43dd8448eb211c80319c", labels["trace_id"])
+	})
 }
 
 func TestMetricsMessageTracking(t *testing.T) {

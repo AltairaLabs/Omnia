@@ -16,7 +16,10 @@ limitations under the License.
 
 package facade
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestNoOpMetrics_ConnectionOpened(t *testing.T) {
 	m := &NoOpMetrics{}
@@ -45,7 +48,7 @@ func TestNoOpMetrics_RequestStarted(t *testing.T) {
 
 func TestNoOpMetrics_RequestCompleted(t *testing.T) {
 	m := &NoOpMetrics{}
-	m.RequestCompleted("success", 1.5, "demo") // Should not panic
+	m.RequestCompleted(context.Background(), "success", 1.5, "demo") // Should not panic
 }
 
 func TestNoOpMetrics_MessageReceived(t *testing.T) {
@@ -68,7 +71,7 @@ func TestServerMetricsInterface(t *testing.T) {
 	metrics.SessionCreated()
 	metrics.SessionClosed()
 	metrics.RequestStarted()
-	metrics.RequestCompleted("error", 0.5, "echo")
+	metrics.RequestCompleted(context.Background(), "error", 0.5, "echo")
 	metrics.MessageReceived()
 	metrics.MessageSent()
 }
