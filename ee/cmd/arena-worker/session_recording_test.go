@@ -290,6 +290,49 @@ func TestArenaSessionManager_CompleteAll(t *testing.T) {
 	assert.False(t, updates[uuid1].SetEndedAt.IsZero(), "should set ended_at")
 }
 
+func TestArenaSessionManager_CompleteAll_FailedRun(t *testing.T) {
+	store := newMockStore()
+	mgr := newArenaSessionManager(store, logr.Discard(), arenaSessionMetadata{
+		JobName:    "test-job",
+		Namespace:  "default",
+		ProviderID: "openai",
+	})
+
+	// Create a session that succeeds
+	mgr.OnEvent(&events.Event{
+		Type:      events.EventProviderCallCompleted,
+		SessionID: "run-pass",
+		Timestamp: time.Now(),
+		Data:      &events.ProviderCallCompletedData{Provider: "openai"},
+	})
+
+	// Create a session that fails
+	mgr.OnEvent(&events.Event{
+		Type:      events.EventProviderCallCompleted,
+		SessionID: "run-fail",
+		Timestamp: time.Now(),
+		Data:      &events.ProviderCallCompletedData{Provider: "openai"},
+	})
+	mgr.OnEvent(&events.Event{
+		Type:      events.EventType("arena.run.failed"),
+		SessionID: "run-fail",
+		Timestamp: time.Now(),
+	})
+
+	time.Sleep(100 * time.Millisecond)
+
+	mgr.CompleteAll(context.Background())
+
+	updates := store.getStatusUpdates()
+	uuidPass := runIDToUUID("run-pass")
+	uuidFail := runIDToUUID("run-fail")
+
+	require.Contains(t, updates, uuidPass)
+	require.Contains(t, updates, uuidFail)
+	assert.Equal(t, session.SessionStatusCompleted, updates[uuidPass].SetStatus, "passed run should be completed")
+	assert.Equal(t, session.SessionStatusError, updates[uuidFail].SetStatus, "failed run should be error")
+}
+
 func TestArenaSessionManager_OnEvent_CreateSessionError(t *testing.T) {
 	store := &failingSessionStore{}
 	mgr := newArenaSessionManager(store, logr.Discard(), arenaSessionMetadata{

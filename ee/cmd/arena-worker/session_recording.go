@@ -48,6 +48,7 @@ type arenaSessionManager struct {
 type managedSession struct {
 	pgSessionID string
 	eventStore  *runtime.OmniaEventStore
+	failed      bool // set when an arena.run.failed event is observed
 }
 
 func newArenaSessionManager(store session.Store, log logr.Logger, meta arenaSessionMetadata) *arenaSessionManager {
@@ -76,6 +77,9 @@ func (m *arenaSessionManager) OnEvent(event *events.Event) {
 	// Fast path: session already exists.
 	if v, ok := m.sessions.Load(runSessionID); ok {
 		ms := v.(*managedSession)
+		if isRunFailedEvent(event) {
+			ms.failed = true
+		}
 		event.SessionID = ms.pgSessionID
 		ms.eventStore.OnEvent(event)
 		return
@@ -124,6 +128,9 @@ func (m *arenaSessionManager) OnEvent(event *events.Event) {
 	es := runtime.NewOmniaEventStore(m.store, m.log)
 	es.SetSessionID(pgID)
 	ms.eventStore = es
+	if isRunFailedEvent(event) {
+		ms.failed = true
+	}
 
 	m.log.Info("arena session created",
 		"runID", runSessionID, "pgSessionID", pgID)
@@ -132,15 +139,20 @@ func (m *arenaSessionManager) OnEvent(event *events.Event) {
 	es.OnEvent(event)
 }
 
-// CompleteAll marks all lazily created sessions as completed.
+// CompleteAll marks all lazily created sessions as completed or errored
+// based on whether an arena.run.failed event was observed for the session.
 func (m *arenaSessionManager) CompleteAll(ctx context.Context) {
 	m.sessions.Range(func(key, value any) bool {
 		ms := value.(*managedSession)
 		if ms.eventStore == nil {
 			return true
 		}
+		status := session.SessionStatusCompleted
+		if ms.failed {
+			status = session.SessionStatusError
+		}
 		if err := m.store.UpdateSessionStatus(ctx, ms.pgSessionID, session.SessionStatusUpdate{
-			SetStatus:  session.SessionStatusCompleted,
+			SetStatus:  status,
 			SetEndedAt: time.Now(),
 		}); err != nil {
 			m.log.Error(err, "failed to complete arena session",
@@ -148,4 +160,10 @@ func (m *arenaSessionManager) CompleteAll(ctx context.Context) {
 		}
 		return true
 	})
+}
+
+// isRunFailedEvent checks if the event indicates a failed arena run.
+func isRunFailedEvent(event *events.Event) bool {
+	return event.Type == events.EventType("arena.run.failed") ||
+		event.Type == events.EventType("arena.turn.failed")
 }
