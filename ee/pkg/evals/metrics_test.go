@@ -111,9 +111,9 @@ func TestWorkerMetrics_RecordSamplingDecision(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := newWorkerMetricsWithRegistry(reg, nil)
 
-	m.RecordSamplingDecision("llm_judge", "sampled")
+	m.RecordSamplingDecision("llm_judge", MetricStatusSampled)
 	m.RecordSamplingDecision("llm_judge", MetricStatusSkipped)
-	m.RecordSamplingDecision("rule", "sampled")
+	m.RecordSamplingDecision("rule", MetricStatusSampled)
 
 	families, err := reg.Gather()
 	require.NoError(t, err)
@@ -192,7 +192,7 @@ func TestNoOpWorkerMetrics(t *testing.T) {
 	// Verify no panics.
 	m.RecordEventReceived("test")
 	m.RecordEvalExecuted("type", "trigger", "status", 1.0)
-	m.RecordSamplingDecision("type", "sampled")
+	m.RecordSamplingDecision("type", MetricStatusSampled)
 	m.RecordEventProcessing("test", 0.5)
 	m.RecordResultsWritten(1, true)
 	m.SetStreamLag("stream", 10)

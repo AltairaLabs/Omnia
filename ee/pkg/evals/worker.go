@@ -115,6 +115,11 @@ type EvalWorker struct {
 
 // NewEvalWorker creates a new eval worker for the given namespace(s).
 func NewEvalWorker(config WorkerConfig) *EvalWorker {
+	metricsRecorder := config.Metrics
+	if metricsRecorder == nil {
+		metricsRecorder = &NoOpWorkerMetrics{}
+	}
+
 	evalCollector := config.EvalCollector
 	if evalCollector == nil {
 		evalCollector = sdkmetrics.NewEvalOnlyCollector(sdkmetrics.CollectorOpts{
@@ -132,6 +137,7 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 			runnerOpts = append(runnerOpts, WithLogger(config.Logger))
 		}
 		runnerOpts = append(runnerOpts, WithEvalCollector(evalCollector))
+		runnerOpts = append(runnerOpts, WithMetrics(metricsRecorder))
 		sdkRunner = NewSDKRunner(runnerOpts...)
 	}
 
@@ -153,11 +159,6 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 	var resolver *ProviderResolver
 	if config.K8sClient != nil {
 		resolver = NewProviderResolver(config.K8sClient)
-	}
-
-	metricsRecorder := config.Metrics
-	if metricsRecorder == nil {
-		metricsRecorder = &NoOpWorkerMetrics{}
 	}
 
 	namespaces := resolveNamespaces(config)
@@ -292,6 +293,7 @@ func (w *EvalWorker) consumeLoop(ctx context.Context) error {
 		}
 
 		w.processStreams(ctx, streams)
+		w.reportStreamLag(ctx)
 	}
 }
 
@@ -305,6 +307,18 @@ func (w *EvalWorker) readFromStreams(ctx context.Context) ([]goredis.XStream, er
 		Count:    streamReadBatchSize,
 		Block:    blockTimeout,
 	}).Result()
+}
+
+// reportStreamLag queries XPENDING for each stream to report consumer lag.
+func (w *EvalWorker) reportStreamLag(ctx context.Context) {
+	for _, key := range w.streamKeys {
+		pending, err := w.redisClient.XPending(ctx, key, w.consumerGroup).Result()
+		if err != nil {
+			w.logger.Debug("failed to get stream pending count", "stream", key, "error", err)
+			continue
+		}
+		w.getMetrics().SetStreamLag(key, float64(pending.Count))
+	}
 }
 
 // processStreams iterates over stream results and processes each message.

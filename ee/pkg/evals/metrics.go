@@ -18,6 +18,7 @@ const (
 	MetricStatusSuccess = "success"
 	MetricStatusError   = "error"
 	MetricStatusSkipped = "skipped"
+	MetricStatusSampled = "sampled"
 )
 
 // DefaultEvalDurationBuckets are histogram buckets for eval execution duration.
