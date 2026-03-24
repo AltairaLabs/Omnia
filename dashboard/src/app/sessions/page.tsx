@@ -79,7 +79,7 @@ const TAG_COLORS = [
 function tagColor(tag: string): string {
   let hash = 0;
   for (let i = 0; i < tag.length; i++) {
-    hash = ((hash << 5) - hash + tag.charCodeAt(i)) | 0;
+    hash = Math.trunc((hash << 5) - hash + (tag.codePointAt(i) ?? 0));
   }
   return TAG_COLORS[Math.abs(hash) % TAG_COLORS.length];
 }
