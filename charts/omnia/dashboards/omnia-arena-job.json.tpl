@@ -118,7 +118,7 @@
           "displayMode": "table",
           "placement": "right",
           "showLegend": true,
-          "values": ["value"]
+          "values": ["value", "percent"]
         },
         "pieType": "donut",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
@@ -127,17 +127,17 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "last_over_time(omnia_arena_work_items_total{job_name=\"$job_name\", status=\"pass\"}[$__range]) or vector(0)",
+          "expr": "last_over_time(omnia_arena_work_items_total{job_name=\"$job_name\", status=\"pass\"}[$__range])",
           "legendFormat": "Passed",
           "refId": "A"
         },
         {
-          "expr": "last_over_time(omnia_arena_work_items_total{job_name=\"$job_name\", status=\"fail\"}[$__range]) or vector(0)",
+          "expr": "last_over_time(omnia_arena_work_items_total{job_name=\"$job_name\", status=\"fail\"}[$__range])",
           "legendFormat": "Failed",
           "refId": "B"
         }
       ],
-      "title": "Work Items Pass/Fail",
+      "title": "Work Items",
       "type": "piechart"
     },
     {
