@@ -670,6 +670,23 @@ spec:
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create provider secret")
 
+			By("creating a Provider CRD for mock provider")
+			providerManifest := `
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: test-provider
+  namespace: test-agents
+spec:
+  type: mock
+  secretRef:
+    name: test-provider
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(providerManifest)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create Provider")
+
 			By("creating the AgentRuntime with mock provider annotation")
 			// Note: The agent image is configured on the operator via --facade-image/--framework-image flags,
 			// not in the CRD spec. The operator was patched in BeforeAll to use the test images.
@@ -702,10 +719,10 @@ spec:
       limits:
         cpu: "200m"
         memory: "128Mi"
-  provider:
-    type: mock
-    secretRef:
-      name: test-provider
+  providers:
+    - name: default
+      providerRef:
+        name: test-provider
 `
 
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
