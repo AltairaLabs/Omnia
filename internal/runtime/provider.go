@@ -54,6 +54,14 @@ func (s *Server) createProviderFromConfig() (providers.Provider, error) {
 		BaseURL: s.baseURL,
 	}
 
+	// Pass CRD pricing to PromptKit so providers use it for cost calculation
+	if s.inputCostPer1K > 0 && s.outputCostPer1K > 0 {
+		spec.Defaults.Pricing = providers.Pricing{
+			InputCostPer1K:  s.inputCostPer1K,
+			OutputCostPer1K: s.outputCostPer1K,
+		}
+	}
+
 	s.log.Info("creating explicit provider from config",
 		"type", s.providerType,
 		"model", s.model,

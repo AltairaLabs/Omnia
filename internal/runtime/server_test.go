@@ -147,6 +147,14 @@ func TestServerOptions(t *testing.T) {
 		assert.Equal(t, "", server2.baseURL)
 	})
 
+	t.Run("WithPricing", func(t *testing.T) {
+		server := NewServer(
+			WithPricing(0.003, 0.015),
+		)
+		assert.InDelta(t, 0.003, server.inputCostPer1K, 1e-9)
+		assert.InDelta(t, 0.015, server.outputCostPer1K, 1e-9)
+	})
+
 	t.Run("WithStateStore", func(t *testing.T) {
 		// Create a mock state store (just test the option sets the field)
 		server := NewServer(
@@ -1281,6 +1289,22 @@ func TestServer_CreateProviderFromConfig(t *testing.T) {
 		assert.NotNil(t, provider, "gemini provider should create explicit provider")
 		assert.Equal(t, "gemini", provider.ID())
 	})
+}
+
+func TestCreateProviderFromConfig_WithPricing(t *testing.T) {
+	server := NewServer(
+		WithLogger(logr.Discard()),
+		WithProviderInfo("ollama", "llama3"),
+		WithBaseURL("http://ollama.localhost:11434"),
+		WithPricing(0.001, 0.002),
+	)
+
+	provider, err := server.createProviderFromConfig()
+	assert.NoError(t, err)
+	assert.NotNil(t, provider)
+	assert.Equal(t, "ollama", provider.ID())
+	// Pricing is passed via ProviderSpec.Defaults.Pricing to PromptKit.
+	// The provider uses it in CalculateCost() — verified by integration test.
 }
 
 func TestProcessAudioMedia(t *testing.T) {
