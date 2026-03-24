@@ -288,13 +288,18 @@
     "list": [
       {
         "current": {},
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(last_over_time(omnia_arena_work_items_total[7d]), job_name)",
         "hide": 0,
+        "includeAll": false,
         "label": "Job Name",
+        "multi": false,
         "name": "job_name",
-        "options": [],
-        "query": "",
-        "skipUrlSync": false,
-        "type": "textbox"
+        "query": { "query": "label_values(last_over_time(omnia_arena_work_items_total[7d]), job_name)", "refId": "job_name" },
+        "refresh": 2,
+        "regex": "",
+        "sort": 2,
+        "type": "query"
       },
       {
         "current": {},
