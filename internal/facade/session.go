@@ -227,6 +227,8 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 		TTL:               s.config.SessionTTL,
 		PromptPackName:    s.config.PromptPackName,
 		PromptPackVersion: s.config.PromptPackVersion,
+		Tags:              buildSessionTags(c),
+		InitialState:      buildSessionState(c, s.config),
 	})
 	if err != nil {
 		return "", err
@@ -235,6 +237,36 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 	s.metrics.SessionCreated()
 
 	return sess.ID, nil
+}
+
+// buildSessionTags creates tags for a new interactive session.
+func buildSessionTags(c *Connection) []string {
+	tags := []string{"source:interactive"}
+	if c.userID != "" {
+		tags = append(tags, "user:"+c.userID)
+	}
+	return tags
+}
+
+// buildSessionState creates initial state metadata for a new interactive session.
+func buildSessionState(c *Connection, cfg ServerConfig) map[string]string {
+	state := make(map[string]string)
+	if c.userID != "" {
+		state["user.id"] = c.userID
+	}
+	if c.userEmail != "" {
+		state["user.email"] = c.userEmail
+	}
+	if c.userRoles != "" {
+		state["user.roles"] = c.userRoles
+	}
+	if cfg.PromptPackName != "" {
+		state["promptpack.name"] = cfg.PromptPackName
+	}
+	if cfg.PromptPackVersion != "" {
+		state["promptpack.version"] = cfg.PromptPackVersion
+	}
+	return state
 }
 
 // handleUploadRequest processes an upload_request message from the client.
