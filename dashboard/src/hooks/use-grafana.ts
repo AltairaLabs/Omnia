@@ -48,8 +48,6 @@ export const GRAFANA_DASHBOARDS = {
   COSTS: "omnia-costs",
   /** Per-agent detail with template variables */
   AGENT_DETAIL: "omnia-agent-detail",
-  /** Logs explorer (Loki) */
-  LOGS: "omnia-logs",
   /** Eval quality metrics */
   QUALITY: "omnia-quality",
   /** Session detail: traces + logs filtered by session ID */
@@ -86,15 +84,15 @@ export const AGENT_DETAIL_PANELS = {
 
 // Panel IDs within the Quality dashboard
 export const QUALITY_PANELS = {
-  OVERALL_PASS_RATE: 1,
-  TOTAL_EVALS_EXECUTED: 2,
-  TOTAL_FAILURES: 3,
-  AVG_EVAL_DURATION: 4,
-  PASS_RATE_BY_EVAL: 5,
-  EVAL_SCORE_OVER_TIME: 6,
-  EVAL_EXECUTIONS_OVER_TIME: 7,
-  PASS_VS_FAIL_BY_EVAL: 8,
-  EVAL_DURATION_P95: 9,
+  AVERAGE_SCORE: 1,
+  LOWEST_SCORE: 2,
+  ACTIVE_EVAL_METRICS: 3,
+  DISTINCT_EVAL_TYPES: 4,
+  EVAL_SCORES_OVER_TIME: 5,
+  CURRENT_SCORES_BY_EVAL: 6,
+  AVERAGE_SCORE_BY_AGENT: 7,
+  AVERAGE_SCORE_BY_PACK: 8,
+  EVAL_SCORE_DETAILS: 9,
 } as const;
 
 // Panel IDs within the Costs dashboard
