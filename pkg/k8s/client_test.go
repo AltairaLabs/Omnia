@@ -375,3 +375,114 @@ func TestEffectiveSecretRef_None(t *testing.T) {
 		t.Errorf("expected nil, got %v", ref)
 	}
 }
+
+func TestGetNamespaceLabel_Found(t *testing.T) {
+	s := Scheme()
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "test-ns",
+			Labels: map[string]string{"omnia.altairalabs.ai/workspace": "my-ws"},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(ns).Build()
+
+	got := GetNamespaceLabel(context.Background(), c, "test-ns", "omnia.altairalabs.ai/workspace")
+	if got != "my-ws" {
+		t.Errorf("expected my-ws, got %s", got)
+	}
+}
+
+func TestGetNamespaceLabel_LabelNotFound(t *testing.T) {
+	s := Scheme()
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "test-ns",
+			Labels: map[string]string{"other-label": "value"},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(ns).Build()
+
+	got := GetNamespaceLabel(context.Background(), c, "test-ns", "omnia.altairalabs.ai/workspace")
+	if got != "" {
+		t.Errorf("expected empty string, got %s", got)
+	}
+}
+
+func TestGetNamespaceLabel_NamespaceNotFound(t *testing.T) {
+	s := Scheme()
+	c := fake.NewClientBuilder().WithScheme(s).Build()
+
+	got := GetNamespaceLabel(context.Background(), c, "nonexistent", "omnia.altairalabs.ai/workspace")
+	if got != "" {
+		t.Errorf("expected empty string, got %s", got)
+	}
+}
+
+func TestGetNamespaceLabel_NilLabels(t *testing.T) {
+	s := Scheme()
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-ns",
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(ns).Build()
+
+	got := GetNamespaceLabel(context.Background(), c, "test-ns", "omnia.altairalabs.ai/workspace")
+	if got != "" {
+		t.Errorf("expected empty string, got %s", got)
+	}
+}
+
+func TestResolveWorkspaceName_FromResourceLabels(t *testing.T) {
+	s := Scheme()
+	c := fake.NewClientBuilder().WithScheme(s).Build()
+
+	labels := map[string]string{"omnia.altairalabs.ai/workspace": "resource-ws"}
+	got := ResolveWorkspaceName(context.Background(), c, labels, "default")
+	if got != "resource-ws" {
+		t.Errorf("expected resource-ws, got %s", got)
+	}
+}
+
+func TestResolveWorkspaceName_FallbackToNamespace(t *testing.T) {
+	s := Scheme()
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "test-ns",
+			Labels: map[string]string{"omnia.altairalabs.ai/workspace": "ns-ws"},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(ns).Build()
+
+	labels := map[string]string{"other": "value"}
+	got := ResolveWorkspaceName(context.Background(), c, labels, "test-ns")
+	if got != "ns-ws" {
+		t.Errorf("expected ns-ws, got %s", got)
+	}
+}
+
+func TestResolveWorkspaceName_NilLabels(t *testing.T) {
+	s := Scheme()
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "test-ns",
+			Labels: map[string]string{"omnia.altairalabs.ai/workspace": "ns-ws"},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(ns).Build()
+
+	got := ResolveWorkspaceName(context.Background(), c, nil, "test-ns")
+	if got != "ns-ws" {
+		t.Errorf("expected ns-ws, got %s", got)
+	}
+}
+
+func TestResolveWorkspaceName_NotFound(t *testing.T) {
+	s := Scheme()
+	c := fake.NewClientBuilder().WithScheme(s).Build()
+
+	got := ResolveWorkspaceName(context.Background(), c, nil, "nonexistent")
+	if got != "" {
+		t.Errorf("expected empty string, got %s", got)
+	}
+}

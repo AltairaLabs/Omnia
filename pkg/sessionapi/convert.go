@@ -77,6 +77,12 @@ func SessionToAPI(id string, opts session.CreateSessionOptions) CreateSessionReq
 	if opts.TTL > 0 {
 		req.TtlSeconds = ptr(int(opts.TTL.Seconds()))
 	}
+	if len(opts.Tags) > 0 {
+		req.Tags = &opts.Tags
+	}
+	if len(opts.InitialState) > 0 {
+		req.InitialState = &opts.InitialState
+	}
 	return req
 }
 

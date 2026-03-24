@@ -922,6 +922,16 @@ components:
           type: string
         promptPackVersion:
           type: string
+        tags:
+          type: array
+          items:
+            type: string
+          description: Optional labels for categorizing sessions
+        initialState:
+          type: object
+          additionalProperties:
+            type: string
+          description: Optional initial key-value state for the session
 
     RefreshTTLRequest:
       type: object

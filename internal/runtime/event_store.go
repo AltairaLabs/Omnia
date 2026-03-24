@@ -617,7 +617,7 @@ func (s *OmniaEventStore) convertProviderCallCompleted(event *events.Event) (eve
 		DurationMs:    data.Duration.Milliseconds(),
 		FinishReason:  data.FinishReason,
 		ToolCallCount: int32(data.ToolCallCount),
-		Source:        data.Labels["source"], // TODO: use data.Source when PromptKit publishes the field
+		Source:        data.Source,
 		CreatedAt:     event.Timestamp,
 	}
 
@@ -647,7 +647,7 @@ func (s *OmniaEventStore) convertProviderCallFailed(event *events.Event) (eventA
 		Status:       session.ProviderCallStatusFailed,
 		DurationMs:   data.Duration.Milliseconds(),
 		ErrorMessage: errMsg,
-		Source:       data.Labels["source"], // TODO: use data.Source when PromptKit publishes the field
+		Source:       data.Source,
 		CreatedAt:    event.Timestamp,
 	}
 

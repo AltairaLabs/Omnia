@@ -27,11 +27,12 @@ var arenaSessionNamespace = uuid.MustParse("a0e1c2d3-b4f5-6789-abcd-ef0123456789
 
 // arenaSessionMetadata carries arena context written to session InitialState.
 type arenaSessionMetadata struct {
-	JobName    string
-	Namespace  string
-	Scenario   string
-	ProviderID string
-	JobType    string
+	JobName       string
+	Namespace     string
+	WorkspaceName string
+	Scenario      string
+	ProviderID    string
+	JobType       string
 }
 
 // arenaSessionManager lazily creates PostgreSQL sessions for arena engine runs.
@@ -95,9 +96,16 @@ func (m *arenaSessionManager) OnEvent(event *events.Event) {
 	defer cancel()
 
 	_, err := m.store.CreateSession(ctx, session.CreateSessionOptions{
-		ID:        pgID,
-		AgentName: m.meta.ProviderID,
-		Namespace: m.meta.Namespace,
+		ID:            pgID,
+		AgentName:     m.meta.JobName,
+		Namespace:     m.meta.Namespace,
+		WorkspaceName: m.meta.WorkspaceName,
+		Tags: []string{
+			"source:arena",
+			"arena-job:" + m.meta.JobName,
+			"scenario:" + m.meta.Scenario,
+			"provider:" + m.meta.ProviderID,
+		},
 		InitialState: map[string]string{
 			"arena.job":      m.meta.JobName,
 			"arena.scenario": m.meta.Scenario,

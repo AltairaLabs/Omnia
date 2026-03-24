@@ -631,6 +631,9 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		arenaFile = "config.arena.yaml"
 	}
 
+	// Resolve workspace name for session recording metadata.
+	workspaceName := GetWorkspaceForNamespace(ctx, r.Client, arenaJob.Namespace)
+
 	// Build environment variables
 	env := []corev1.EnvVar{
 		{
@@ -640,6 +643,10 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		{
 			Name:  "ARENA_JOB_NAMESPACE",
 			Value: arenaJob.Namespace,
+		},
+		{
+			Name:  "ARENA_WORKSPACE_NAME",
+			Value: workspaceName,
 		},
 		{
 			Name:  "ARENA_SOURCE_NAME",

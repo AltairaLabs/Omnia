@@ -70,6 +70,7 @@ const (
 const (
 	AttrOmniaAgentName           = "omnia.agent.name"
 	AttrOmniaAgentNamespace      = "omnia.agent.namespace"
+	AttrOmniaWorkspaceName       = "omnia.workspace.name"
 	AttrOmniaPromptPackName      = "omnia.promptpack.name"
 	AttrOmniaPromptPackVersion   = "omnia.promptpack.version"
 	AttrOmniaPromptPackNamespace = "omnia.promptpack.namespace"

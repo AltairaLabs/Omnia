@@ -5,11 +5,11 @@ go 1.25.6
 require (
 	cloud.google.com/go/kms v1.26.0
 	cloud.google.com/go/storage v1.60.0
-	github.com/AltairaLabs/PromptKit/pkg v1.3.18
-	github.com/AltairaLabs/PromptKit/runtime v1.3.18
-	github.com/AltairaLabs/PromptKit/sdk v1.3.18
-	github.com/AltairaLabs/PromptKit/server/a2a v1.3.18
-	github.com/AltairaLabs/PromptKit/tools/arena v1.3.18
+	github.com/AltairaLabs/PromptKit/pkg v1.3.20
+	github.com/AltairaLabs/PromptKit/runtime v1.3.20
+	github.com/AltairaLabs/PromptKit/sdk v1.3.20
+	github.com/AltairaLabs/PromptKit/server/a2a v1.3.20
+	github.com/AltairaLabs/PromptKit/tools/arena v1.3.20
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1
 	github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azkeys v1.4.0
@@ -65,7 +65,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.35.2
 	k8s.io/apiextensions-apiserver v0.35.2
-	k8s.io/apimachinery v0.35.2
+	k8s.io/apimachinery v0.35.3
 	k8s.io/client-go v0.35.2
 	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4
 	sigs.k8s.io/controller-runtime v0.23.1

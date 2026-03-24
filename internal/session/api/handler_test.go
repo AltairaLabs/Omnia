@@ -836,7 +836,7 @@ func TestHandleListSessions_OK(t *testing.T) {
 		HasMore:    false,
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions?workspace=test-workspace", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions?namespace=test-ns&workspace=test-workspace", nil)
 	rec := httptest.NewRecorder()
 	h.handleListSessions(rec, req)
 
@@ -876,7 +876,7 @@ func TestHandleListSessions_WithFilters(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet,
-		"/api/v1/sessions?workspace=ws&agent=myagent&status=active&limit=10&offset=5", nil)
+		"/api/v1/sessions?namespace=ws&workspace=ws&agent=myagent&status=active&limit=10&offset=5", nil)
 	rec := httptest.NewRecorder()
 	h.handleListSessions(rec, req)
 
@@ -893,7 +893,7 @@ func TestHandleListSessions_Pagination(t *testing.T) {
 		HasMore:    true,
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions?workspace=ws&limit=10&offset=0", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions?namespace=ws&workspace=ws&limit=10&offset=0", nil)
 	rec := httptest.NewRecorder()
 	h.handleListSessions(rec, req)
 
@@ -916,7 +916,7 @@ func TestHandleSearchSessions_OK(t *testing.T) {
 		TotalCount: 1,
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/search?workspace=ws&q=hello", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/search?namespace=ws&workspace=ws&q=hello", nil)
 	rec := httptest.NewRecorder()
 	h.handleSearchSessions(rec, req)
 
@@ -932,7 +932,7 @@ func TestHandleSearchSessions_OK(t *testing.T) {
 func TestHandleSearchSessions_MissingQ(t *testing.T) {
 	h, _, _ := setupHandler(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/search?workspace=ws", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/search?namespace=ws&workspace=ws", nil)
 	rec := httptest.NewRecorder()
 	h.handleSearchSessions(rec, req)
 
@@ -1039,8 +1039,8 @@ func TestHandleRegisterRoutes(t *testing.T) {
 		path   string
 		want   int
 	}{
-		{http.MethodGet, "/api/v1/sessions?workspace=ws", http.StatusOK},
-		{http.MethodGet, "/api/v1/sessions/search?workspace=ws&q=test", http.StatusOK},
+		{http.MethodGet, "/api/v1/sessions?namespace=ws&workspace=ws", http.StatusOK},
+		{http.MethodGet, "/api/v1/sessions/search?namespace=ws&workspace=ws&q=test", http.StatusOK},
 		{http.MethodGet, "/api/v1/sessions/" + testSessionID, http.StatusOK},
 		{http.MethodGet, "/api/v1/sessions/" + testSessionID + "/messages", http.StatusOK},
 	}
@@ -1095,13 +1095,14 @@ func TestParseListParams(t *testing.T) {
 	}{
 		{
 			name: "all params",
-			url:  "/api/v1/sessions?workspace=ws&agent=ag&status=active&limit=10&offset=5",
+			url:  "/api/v1/sessions?namespace=ns&workspace=ws&agent=ag&status=active&limit=10&offset=5",
 			want: providers.SessionListOpts{
-				Limit:     10,
-				Offset:    5,
-				AgentName: "ag",
-				Namespace: "ws",
-				Status:    session.SessionStatusActive,
+				Limit:         10,
+				Offset:        5,
+				AgentName:     "ag",
+				Namespace:     "ns",
+				WorkspaceName: "ws",
+				Status:        session.SessionStatusActive,
 			},
 		},
 		{
@@ -1191,7 +1192,7 @@ func TestParseIntParam(t *testing.T) {
 func TestHandleListSessions_InvalidFromTime(t *testing.T) {
 	h, _, _ := setupHandler(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions?workspace=ws&from=bad-time", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions?namespace=ws&workspace=ws&from=bad-time", nil)
 	rec := httptest.NewRecorder()
 	h.handleListSessions(rec, req)
 
@@ -1206,7 +1207,7 @@ func TestHandleListSessions_ServiceError(t *testing.T) {
 	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
 	h := NewHandler(svc, logr.Discard())
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions?workspace=ws", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions?namespace=ws&workspace=ws", nil)
 	rec := httptest.NewRecorder()
 	h.handleListSessions(rec, req)
 
@@ -1232,7 +1233,7 @@ func TestHandleSearchSessions_ServiceError(t *testing.T) {
 	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
 	h := NewHandler(svc, logr.Discard())
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/search?workspace=ws&q=hello", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/search?namespace=ws&workspace=ws&q=hello", nil)
 	rec := httptest.NewRecorder()
 	h.handleSearchSessions(rec, req)
 
@@ -1288,7 +1289,7 @@ func TestHandleGetMessages_HasMore(t *testing.T) {
 func TestHandleSearchSessions_InvalidFromTime(t *testing.T) {
 	h, _, _ := setupHandler(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/search?workspace=ws&q=hello&from=bad", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/search?namespace=ws&workspace=ws&q=hello&from=bad", nil)
 	rec := httptest.NewRecorder()
 	h.handleSearchSessions(rec, req)
 
@@ -1572,6 +1573,57 @@ func TestHandleCreateSession_OK(t *testing.T) {
 	}
 	if resp.Session.ExpiresAt.IsZero() {
 		t.Fatal("expected non-zero ExpiresAt with ttlSeconds")
+	}
+}
+
+func TestHandleCreateSession_WithTagsAndInitialState(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","tags":["prod","v2"],"initialState":{"lang":"en","mode":"chat"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", rec.Code)
+	}
+	resp := decodeJSON[SessionResponse](t, rec)
+	if len(resp.Session.Tags) != 2 {
+		t.Fatalf("expected 2 tags, got %d", len(resp.Session.Tags))
+	}
+	if resp.Session.Tags[0] != "prod" || resp.Session.Tags[1] != "v2" {
+		t.Fatalf("unexpected tags: %v", resp.Session.Tags)
+	}
+	if resp.Session.State["lang"] != "en" || resp.Session.State["mode"] != "chat" {
+		t.Fatalf("unexpected state: %v", resp.Session.State)
+	}
+}
+
+func TestHandleCreateSession_EmptyTagsAndState(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", rec.Code)
+	}
+	resp := decodeJSON[SessionResponse](t, rec)
+	if resp.Session.Tags != nil {
+		t.Fatalf("expected nil tags, got %v", resp.Session.Tags)
+	}
+	if resp.Session.State != nil {
+		t.Fatalf("expected nil state, got %v", resp.Session.State)
 	}
 }
 
@@ -2113,7 +2165,7 @@ func TestIsMaxBytesError(t *testing.T) {
 func TestParseListParams_WithNamespace(t *testing.T) {
 	// "workspace" param takes priority over "namespace" for backwards compat
 	req := httptest.NewRequest(http.MethodGet,
-		"/api/v1/sessions?workspace=ws&namespace=test-ns", nil)
+		"/api/v1/sessions?namespace=ws&workspace=ws&namespace=test-ns", nil)
 	opts, err := parseListParams(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2465,7 +2517,7 @@ func TestHandleCreateSession_EmptyID(t *testing.T) {
 
 func TestParseListParams_InvalidStatus(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet,
-		"/api/v1/sessions?workspace=ws&status=invalid-status", nil)
+		"/api/v1/sessions?namespace=ws&workspace=ws&status=invalid-status", nil)
 	_, err := parseListParams(req)
 	if err == nil {
 		t.Fatal("expected error for invalid status")
@@ -2479,7 +2531,7 @@ func TestHandleListSessions_InvalidStatus(t *testing.T) {
 	h, _, _ := setupHandler(t)
 
 	req := httptest.NewRequest(http.MethodGet,
-		"/api/v1/sessions?workspace=ws&status=bogus", nil)
+		"/api/v1/sessions?namespace=ws&workspace=ws&status=bogus", nil)
 	rec := httptest.NewRecorder()
 	h.handleListSessions(rec, req)
 
@@ -2497,7 +2549,7 @@ func TestHandleSearchSessions_QueryTooLong(t *testing.T) {
 
 	longQ := strings.Repeat("a", maxSearchQueryLen+1)
 	req := httptest.NewRequest(http.MethodGet,
-		"/api/v1/sessions/search?workspace=ws&q="+longQ, nil)
+		"/api/v1/sessions/search?namespace=ws&workspace=ws&q="+longQ, nil)
 	rec := httptest.NewRecorder()
 	h.handleSearchSessions(rec, req)
 
@@ -2513,7 +2565,7 @@ func TestHandleSearchSessions_QueryTooLong(t *testing.T) {
 func TestParseListParams_TruncatesLongParams(t *testing.T) {
 	longVal := strings.Repeat("x", maxStringParamLen+50)
 	req := httptest.NewRequest(http.MethodGet,
-		"/api/v1/sessions?workspace="+longVal+"&agent="+longVal, nil)
+		"/api/v1/sessions?namespace="+longVal+"&workspace="+longVal+"&agent="+longVal, nil)
 	opts, err := parseListParams(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2521,8 +2573,47 @@ func TestParseListParams_TruncatesLongParams(t *testing.T) {
 	if len(opts.Namespace) != maxStringParamLen {
 		t.Errorf("Namespace length: got %d, want %d", len(opts.Namespace), maxStringParamLen)
 	}
+	if len(opts.WorkspaceName) != maxStringParamLen {
+		t.Errorf("WorkspaceName length: got %d, want %d", len(opts.WorkspaceName), maxStringParamLen)
+	}
 	if len(opts.AgentName) != maxStringParamLen {
 		t.Errorf("AgentName length: got %d, want %d", len(opts.AgentName), maxStringParamLen)
+	}
+}
+
+func TestParseListParams_IncludeCountTrue(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions?namespace=ws&workspace=ws&count=true", nil)
+	opts, err := parseListParams(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !opts.IncludeCount {
+		t.Error("expected IncludeCount=true")
+	}
+}
+
+func TestParseListParams_IncludeCountFalse(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions?namespace=ws&workspace=ws&count=false", nil)
+	opts, err := parseListParams(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.IncludeCount {
+		t.Error("expected IncludeCount=false")
+	}
+}
+
+func TestParseListParams_IncludeCountAbsent(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions?namespace=ws&workspace=ws", nil)
+	opts, err := parseListParams(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.IncludeCount {
+		t.Error("expected IncludeCount=false when absent")
 	}
 }
 

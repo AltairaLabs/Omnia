@@ -4,6 +4,12 @@ import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Header } from "@/components/layout";
 import { useArenaJob, useArenaJobMutations } from "@/hooks/arena";
+import dynamic from "next/dynamic";
+
+const SourceExplorer = dynamic(
+  () => import("@/components/arena").then((m) => m.SourceExplorer),
+  { ssr: false }
+);
 import { useWorkspace } from "@/contexts/workspace-context";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -42,6 +48,7 @@ import {
   Copy,
   Zap,
   Network,
+  FolderOpen,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -922,6 +929,8 @@ function LoadingSkeleton() {
   );
 }
 
+// --- Explorer Tab ---
+
 export default function ArenaJobDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -1030,7 +1039,7 @@ export default function ArenaJobDetailPage() {
         description="Arena job execution"
       />
 
-      <div className="flex-1 p-6 space-y-6 overflow-auto">
+      <div className="flex-1 flex flex-col min-h-0 p-6 space-y-6">
         {/* Breadcrumb and Actions */}
         <div className="flex items-center justify-between">
           <ArenaBreadcrumb
@@ -1109,7 +1118,7 @@ export default function ArenaJobDetailPage() {
         )}
 
         {/* Tabs */}
-        <Tabs defaultValue="overview" className="space-y-4">
+        <Tabs defaultValue="overview" className="flex-1 flex flex-col min-h-0 space-y-4">
           <TabsList>
             <TabsTrigger value="overview">
               <Info className="h-4 w-4 mr-2" />
@@ -1122,6 +1131,10 @@ export default function ArenaJobDetailPage() {
             <TabsTrigger value="results">
               <BarChart3 className="h-4 w-4 mr-2" />
               Results
+            </TabsTrigger>
+            <TabsTrigger value="explorer">
+              <FolderOpen className="h-4 w-4 mr-2" />
+              Explorer
             </TabsTrigger>
           </TabsList>
 
@@ -1142,6 +1155,17 @@ export default function ArenaJobDetailPage() {
 
           <TabsContent value="results">
             <ResultsTab job={job} />
+          </TabsContent>
+
+          <TabsContent value="explorer" className="flex-1 min-h-0">
+            {job?.spec?.sourceRef?.name ? (
+              <SourceExplorer sourceName={job.spec.sourceRef.name} />
+            ) : (
+              <div className="text-center py-12 text-muted-foreground">
+                <FolderOpen className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No source configured</p>
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </div>

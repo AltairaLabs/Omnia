@@ -624,7 +624,7 @@ func TestOmniaEventStore_AppendProviderCallCompleted_Source(t *testing.T) {
 			Cost:         0.003,
 			FinishReason: "end_turn",
 			Duration:     1 * time.Second,
-			Labels:       map[string]string{"source": "judge"},
+			Source:       "judge",
 		},
 	}
 
@@ -652,7 +652,7 @@ func TestOmniaEventStore_AppendProviderCallFailed_Source(t *testing.T) {
 			Model:    "gpt-4o",
 			Error:    errors.New("timeout"),
 			Duration: 1 * time.Second,
-			Labels:   map[string]string{"source": "selfplay"},
+			Source:   "selfplay",
 		},
 	}
 

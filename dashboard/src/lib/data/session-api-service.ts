@@ -80,6 +80,8 @@ function transformApiSessionSummary(api: ApiSession): SessionSummary {
     messageCount: api.messageCount || 0,
     toolCallCount: api.toolCallCount || 0,
     totalTokens: inputTokens + outputTokens,
+    estimatedCost: api.estimatedCostUSD,
+    tags: api.tags,
     lastMessage: api.lastMessagePreview,
   };
 }

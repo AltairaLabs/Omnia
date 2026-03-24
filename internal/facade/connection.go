@@ -36,6 +36,7 @@ type Connection struct {
 	sessionID        string
 	agentName        string
 	namespace        string
+	workspaceName    string
 	binaryCapable    bool // Client supports binary WebSocket frames
 	mu               sync.Mutex
 	closed           bool

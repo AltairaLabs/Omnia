@@ -30,8 +30,9 @@ import (
 // Config holds runtime configuration loaded from environment variables.
 type Config struct {
 	// Agent identification
-	AgentName string
-	Namespace string
+	AgentName     string
+	Namespace     string
+	WorkspaceName string
 
 	// PromptPack configuration
 	PromptPackPath      string // Path to the compiled .pack.json file

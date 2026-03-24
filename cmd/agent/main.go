@@ -25,6 +25,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
 
 	"github.com/altairalabs/omnia/internal/agent"
@@ -92,6 +93,9 @@ func main() {
 			Environment:    cfg.Namespace,
 			SampleRate:     cfg.TracingSampleRate,
 			Insecure:       cfg.TracingInsecure,
+			ExtraAttributes: []attribute.KeyValue{
+				attribute.String("omnia.workspace.name", cfg.WorkspaceName),
+			},
 		}
 
 		initCtx, initCancel := context.WithTimeout(context.Background(), 10*time.Second)

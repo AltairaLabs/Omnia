@@ -105,6 +105,8 @@ export interface SessionSummary {
   messageCount: number;
   toolCallCount: number;
   totalTokens: number;
+  estimatedCost?: number;
+  tags?: string[];
   lastMessage?: string;
 }
 

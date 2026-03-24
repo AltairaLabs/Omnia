@@ -96,6 +96,54 @@ func TestSessionToAPI_Minimal(t *testing.T) {
 	assert.Equal(t, "a", deref(result.AgentName))
 	assert.Nil(t, result.WorkspaceName)
 	assert.Nil(t, result.TtlSeconds)
+	assert.Nil(t, result.Tags)
+	assert.Nil(t, result.InitialState)
+}
+
+func TestSessionToAPI_WithTags(t *testing.T) {
+	id := uuid.New().String()
+	result := SessionToAPI(id, session.CreateSessionOptions{
+		AgentName: "a",
+		Namespace: "ns",
+		Tags:      []string{"tag1", "tag2"},
+	})
+
+	require.NotNil(t, result.Tags)
+	assert.Equal(t, []string{"tag1", "tag2"}, *result.Tags)
+}
+
+func TestSessionToAPI_EmptyTags(t *testing.T) {
+	id := uuid.New().String()
+	result := SessionToAPI(id, session.CreateSessionOptions{
+		AgentName: "a",
+		Namespace: "ns",
+		Tags:      []string{},
+	})
+
+	assert.Nil(t, result.Tags)
+}
+
+func TestSessionToAPI_WithInitialState(t *testing.T) {
+	id := uuid.New().String()
+	result := SessionToAPI(id, session.CreateSessionOptions{
+		AgentName:    "a",
+		Namespace:    "ns",
+		InitialState: map[string]string{"key": "value", "foo": "bar"},
+	})
+
+	require.NotNil(t, result.InitialState)
+	assert.Equal(t, map[string]string{"key": "value", "foo": "bar"}, *result.InitialState)
+}
+
+func TestSessionToAPI_EmptyInitialState(t *testing.T) {
+	id := uuid.New().String()
+	result := SessionToAPI(id, session.CreateSessionOptions{
+		AgentName:    "a",
+		Namespace:    "ns",
+		InitialState: map[string]string{},
+	})
+
+	assert.Nil(t, result.InitialState)
 }
 
 func TestMessageToAPI(t *testing.T) {

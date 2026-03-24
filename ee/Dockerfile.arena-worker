@@ -18,7 +18,9 @@ RUN if [ -d "/workspace/promptkit-local/tools/arena" ]; then \
         echo "    ./promptkit-local/pkg" >> go.work && \
         echo "    ./promptkit-local/runtime" >> go.work && \
         echo "    ./promptkit-local/sdk" >> go.work && \
+        echo "    ./promptkit-local/server/a2a" >> go.work && \
         echo "    ./promptkit-local/tools/arena" >> go.work && \
+        echo "    ./promptkit-local/tools/packc" >> go.work && \
         echo ")" >> go.work && \
         cat go.work; \
     fi

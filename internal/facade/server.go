@@ -71,6 +71,8 @@ type ServerConfig struct {
 	MessageRateLimit float64
 	// MessageRateBurst is the maximum burst size for per-connection rate limiting.
 	MessageRateBurst int
+	// WorkspaceName is the workspace this agent belongs to (for session metadata).
+	WorkspaceName string
 }
 
 // DefaultServerConfig returns a ServerConfig with default values.
@@ -341,6 +343,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if namespace == "" {
 		namespace = "default"
 	}
+	workspaceName := r.URL.Query().Get("workspace")
+	if workspaceName == "" {
+		workspaceName = s.config.WorkspaceName
+	}
 
 	// Check if client requests binary frame support
 	binaryCapable := r.URL.Query().Get("binary") == "true"
@@ -367,6 +373,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		conn:          conn,
 		agentName:     agentName,
 		namespace:     namespace,
+		workspaceName: workspaceName,
 		binaryCapable: binaryCapable,
 		userID:        userID,
 		userRoles:     userRoles,
