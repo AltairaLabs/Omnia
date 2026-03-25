@@ -121,9 +121,9 @@ func TestExtractSessionID(t *testing.T) {
 		assert.Equal(t, "res-sess", extractSessionID(nil, resAttrs, nil))
 	})
 
-	t.Run("fallback to trace ID", func(t *testing.T) {
+	t.Run("trace ID alone does not create session", func(t *testing.T) {
 		traceID := []byte{0xab, 0xcd, 0xef, 0x01}
-		assert.Equal(t, "abcdef01", extractSessionID(nil, nil, traceID))
+		assert.Equal(t, "", extractSessionID(nil, nil, traceID))
 	})
 
 	t.Run("empty when nothing available", func(t *testing.T) {
