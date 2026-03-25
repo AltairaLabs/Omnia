@@ -79,6 +79,9 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	if mock, ok := ar.Annotations["omnia.altairalabs.ai/mock-provider"]; ok && mock == "true" {
 		cfg.MockProvider = true
 	}
+	if mockCfg, ok := ar.Annotations["omnia.altairalabs.ai/mock-config-path"]; ok && mockCfg != "" {
+		cfg.MockConfigPath = mockCfg
+	}
 
 	// Auto-enable mock provider when provider type is "mock"
 	if cfg.ProviderType == string(pkgprovider.TypeMock) {

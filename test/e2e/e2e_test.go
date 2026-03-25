@@ -1456,10 +1456,10 @@ spec:
       limits:
         cpu: "200m"
         memory: "128Mi"
-  provider:
-    type: mock
-    secretRef:
-      name: test-provider
+  providers:
+    - name: default
+      providerRef:
+        name: test-provider
 `
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(agentManifest)
@@ -1568,10 +1568,10 @@ spec:
       requests:
         cpu: "50m"
         memory: "64Mi"
-  provider:
-    type: mock
-    secretRef:
-      name: test-provider
+  providers:
+    - name: default
+      providerRef:
+        name: test-provider
 `, customFacadeImage, customRuntimeImage)
 
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
@@ -1644,10 +1644,10 @@ spec:
       requests:
         cpu: "50m"
         memory: "64Mi"
-  provider:
-    type: mock
-    secretRef:
-      name: test-provider
+  providers:
+    - name: default
+      providerRef:
+        name: test-provider
 `
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(noOverrideAgentManifest)
@@ -1716,10 +1716,10 @@ spec:
       requests:
         cpu: "50m"
         memory: "64Mi"
-  provider:
-    type: mock
-    secretRef:
-      name: test-provider
+  providers:
+    - name: default
+      providerRef:
+        name: test-provider
 `, customFacadeImage)
 
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
@@ -1789,10 +1789,10 @@ spec:
       limits:
         cpu: "200m"
         memory: "128Mi"
-  provider:
-    type: mock
-    secretRef:
-      name: test-provider
+  providers:
+    - name: default
+      providerRef:
+        name: test-provider
 `
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(toolTestAgentManifest)
@@ -2063,6 +2063,9 @@ kind: AgentRuntime
 metadata:
   name: client-tool-agent
   namespace: test-agents
+  annotations:
+    omnia.altairalabs.ai/mock-provider: "true"
+    omnia.altairalabs.ai/mock-config-path: "/etc/omnia/mock/mock-responses.yaml"
 spec:
   promptPackRef:
     name: client-tool-prompts
@@ -2088,12 +2091,10 @@ spec:
     volumeMounts:
     - name: mock-config
       mountPath: /etc/omnia/mock
-  provider:
-    type: mock
-    secretRef:
-      name: test-provider
-    additionalConfig:
-      mock_config: "/etc/omnia/mock/mock-responses.yaml"
+  providers:
+    - name: default
+      providerRef:
+        name: test-provider
 `
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(clientToolAgentManifest)

@@ -210,6 +210,30 @@ func TestLoadFromCRD_MockProviderAnnotation(t *testing.T) {
 	assert.True(t, cfg.MockProvider)
 }
 
+func TestLoadFromCRD_MockConfigPathAnnotation(t *testing.T) {
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "test-ns",
+			Annotations: map[string]string{
+				"omnia.altairalabs.ai/mock-provider":    "true",
+				"omnia.altairalabs.ai/mock-config-path": "/etc/omnia/mock/responses.yaml",
+			},
+		},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
+			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		},
+	}
+
+	c := buildTestClient(ar)
+	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
+	require.NoError(t, err)
+
+	assert.True(t, cfg.MockProvider)
+	assert.Equal(t, "/etc/omnia/mock/responses.yaml", cfg.MockConfigPath)
+}
+
 func TestLoadFromCRD_MockProviderType(t *testing.T) {
 	provider := &v1alpha1.Provider{
 		ObjectMeta: metav1.ObjectMeta{
