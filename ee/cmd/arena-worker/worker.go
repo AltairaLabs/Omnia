@@ -515,7 +515,7 @@ func executeWorkItem(
 		)
 		bus := events.NewEventBus()
 		bus.SubscribeAll(sessionMgr.OnEvent)
-		eng.SetEventBus(bus)
+		eng.SetEventBus(bus, engine.WithMessageEvents())
 		defer sessionMgr.CompleteAll(ctx)
 	}
 
