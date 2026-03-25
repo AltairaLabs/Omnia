@@ -240,6 +240,7 @@ func main() {
 		pkruntime.WithToolsConfig(cfg.ToolsConfigPath),
 		pkruntime.WithProviderInfo(cfg.ProviderType, cfg.Model),
 		pkruntime.WithBaseURL(cfg.BaseURL),
+		pkruntime.WithPricing(cfg.InputCostPer1K, cfg.OutputCostPer1K),
 		pkruntime.WithContextWindow(cfg.ContextWindow),
 		pkruntime.WithTruncationStrategy(cfg.TruncationStrategy),
 	}

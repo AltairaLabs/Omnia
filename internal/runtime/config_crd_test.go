@@ -210,6 +210,30 @@ func TestLoadFromCRD_MockProviderAnnotation(t *testing.T) {
 	assert.True(t, cfg.MockProvider)
 }
 
+func TestLoadFromCRD_MockConfigPathAnnotation(t *testing.T) {
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "test-ns",
+			Annotations: map[string]string{
+				"omnia.altairalabs.ai/mock-provider":    "true",
+				"omnia.altairalabs.ai/mock-config-path": "/etc/omnia/mock/responses.yaml",
+			},
+		},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
+			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		},
+	}
+
+	c := buildTestClient(ar)
+	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
+	require.NoError(t, err)
+
+	assert.True(t, cfg.MockProvider)
+	assert.Equal(t, "/etc/omnia/mock/responses.yaml", cfg.MockConfigPath)
+}
+
 func TestLoadFromCRD_MockProviderType(t *testing.T) {
 	provider := &v1alpha1.Provider{
 		ObjectMeta: metav1.ObjectMeta{
@@ -582,6 +606,84 @@ func TestLoadFromCRD_NoToolRegistryRef(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Empty(t, cfg.ToolsConfigPath)
+}
+
+func TestLoadProviderPricing(t *testing.T) {
+	t.Run("nil pricing", func(t *testing.T) {
+		cfg := &Config{}
+		loadProviderPricing(cfg, nil)
+		assert.Equal(t, 0.0, cfg.InputCostPer1K)
+		assert.Equal(t, 0.0, cfg.OutputCostPer1K)
+	})
+
+	t.Run("both rates set", func(t *testing.T) {
+		cfg := &Config{}
+		loadProviderPricing(cfg, &v1alpha1.ProviderPricing{
+			InputCostPer1K:  strPtr("0.003"),
+			OutputCostPer1K: strPtr("0.015"),
+		})
+		assert.InDelta(t, 0.003, cfg.InputCostPer1K, 1e-9)
+		assert.InDelta(t, 0.015, cfg.OutputCostPer1K, 1e-9)
+	})
+
+	t.Run("only input set", func(t *testing.T) {
+		cfg := &Config{}
+		loadProviderPricing(cfg, &v1alpha1.ProviderPricing{
+			InputCostPer1K: strPtr("0.003"),
+		})
+		assert.InDelta(t, 0.003, cfg.InputCostPer1K, 1e-9)
+		assert.Equal(t, 0.0, cfg.OutputCostPer1K)
+	})
+
+	t.Run("invalid string ignored", func(t *testing.T) {
+		cfg := &Config{}
+		loadProviderPricing(cfg, &v1alpha1.ProviderPricing{
+			InputCostPer1K:  strPtr("not-a-number"),
+			OutputCostPer1K: strPtr("0.015"),
+		})
+		assert.Equal(t, 0.0, cfg.InputCostPer1K)
+		assert.InDelta(t, 0.015, cfg.OutputCostPer1K, 1e-9)
+	})
+}
+
+func TestLoadFromCRD_ProviderPricing(t *testing.T) {
+	provider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ollama-provider",
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.ProviderSpec{
+			Type:    v1alpha1.ProviderTypeOllama,
+			Model:   "llama3",
+			BaseURL: "http://ollama:11434",
+			Pricing: &v1alpha1.ProviderPricing{
+				InputCostPer1K:  strPtr("0.001"),
+				OutputCostPer1K: strPtr("0.002"),
+			},
+		},
+	}
+
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
+			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Providers: []v1alpha1.NamedProviderRef{
+				{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "ollama-provider"}},
+			},
+		},
+	}
+
+	c := buildTestClient(ar, provider)
+	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
+	require.NoError(t, err)
+
+	assert.Equal(t, "ollama", cfg.ProviderType)
+	assert.InDelta(t, 0.001, cfg.InputCostPer1K, 1e-9)
+	assert.InDelta(t, 0.002, cfg.OutputCostPer1K, 1e-9)
 }
 
 func strPtr(s string) *string {

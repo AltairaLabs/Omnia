@@ -240,7 +240,7 @@ describe("GRAFANA_DASHBOARDS", () => {
     expect(GRAFANA_DASHBOARDS.OVERVIEW).toBe("omnia-overview");
     expect(GRAFANA_DASHBOARDS.COSTS).toBe("omnia-costs");
     expect(GRAFANA_DASHBOARDS.AGENT_DETAIL).toBe("omnia-agent-detail");
-    expect(GRAFANA_DASHBOARDS.LOGS).toBe("omnia-logs");
+    expect(GRAFANA_DASHBOARDS.QUALITY).toBe("omnia-quality");
     expect(GRAFANA_DASHBOARDS.SESSION_DETAIL).toBe("omnia-session-detail");
   });
 });

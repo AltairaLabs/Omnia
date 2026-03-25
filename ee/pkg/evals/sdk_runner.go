@@ -28,6 +28,7 @@ type SDKRunner struct {
 	tracerProvider trace.TracerProvider
 	logger         *slog.Logger
 	evalCollector  *sdkmetrics.Collector
+	metrics        WorkerMetricsRecorder
 }
 
 // NewSDKRunner creates an SDKRunner. Options can configure tracing and logging.
@@ -56,6 +57,12 @@ func WithLogger(l *slog.Logger) SDKRunnerOption {
 // records per-eval Prometheus metrics (e.g., omnia_eval_helpfulness).
 func WithEvalCollector(c *sdkmetrics.Collector) SDKRunnerOption {
 	return func(r *SDKRunner) { r.evalCollector = c }
+}
+
+// WithMetrics sets the WorkerMetricsRecorder for recording operational metrics
+// (eval executions, sampling decisions) from within the SDK evaluation loop.
+func WithMetrics(m WorkerMetricsRecorder) SDKRunnerOption {
+	return func(r *SDKRunner) { r.metrics = m }
 }
 
 // EvalCollector returns the unified metrics Collector, if any.
@@ -144,6 +151,8 @@ func (s *SDKRunner) evaluate(
 		return nil
 	}
 
+	s.recordEvalMetrics(results, trigger)
+
 	return convertSDKResults(results, trigger)
 }
 
@@ -213,6 +222,28 @@ func buildDetailsJSON(r runtimeevals.EvalResult) json.RawMessage {
 		return nil
 	}
 	return data
+}
+
+// recordEvalMetrics records operational metrics for all eval results,
+// including both executed and skipped evals.
+func (s *SDKRunner) recordEvalMetrics(results []runtimeevals.EvalResult, trigger runtimeevals.EvalTrigger) {
+	if s.metrics == nil {
+		return
+	}
+	triggerStr := string(trigger)
+	for _, r := range results {
+		if r.Skipped {
+			s.metrics.RecordSamplingDecision(r.Type, MetricStatusSkipped)
+			continue
+		}
+		s.metrics.RecordSamplingDecision(r.Type, MetricStatusSampled)
+		status := MetricStatusSuccess
+		if r.Error != "" {
+			status = MetricStatusError
+		}
+		durationSec := float64(r.DurationMs) / 1000.0
+		s.metrics.RecordEvalExecuted(r.Type, triggerStr, status, durationSec)
+	}
 }
 
 // toAnyMap converts a typed map to map[string]any for SDK compatibility.

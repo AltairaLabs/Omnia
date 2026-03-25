@@ -83,7 +83,8 @@ describe("CostOverTimeChart", () => {
     render(<CostOverTimeChart data={[]} />);
 
     expect(screen.getByText("Cost Over Time")).toBeInTheDocument();
-    expect(screen.getByTestId("area-chart")).toBeInTheDocument();
+    expect(screen.getByText("No cost data available")).toBeInTheDocument();
+    expect(screen.queryByTestId("area-chart")).not.toBeInTheDocument();
   });
 
   it("extracts and sorts providers alphabetically using localeCompare", () => {

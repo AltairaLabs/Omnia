@@ -53,6 +53,10 @@ type Config struct {
 	ProviderRefName      string // Name of the Provider CRD (for metrics, if using providerRef)
 	ProviderRefNamespace string // Namespace of the Provider CRD (for metrics)
 
+	// Provider pricing (from CRD, passed to PromptKit for cost calculation)
+	InputCostPer1K  float64 // Cost per 1000 input tokens (0 = use provider built-in pricing)
+	OutputCostPer1K float64 // Cost per 1000 output tokens (0 = use provider built-in pricing)
+
 	// Context management
 	ContextWindow      int    // Token budget for conversation context (0 = no limit)
 	TruncationStrategy string // How to handle context overflow: "sliding", "summarize", "custom"

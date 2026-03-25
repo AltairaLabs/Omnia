@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { formatCost } from "@/lib/pricing";
 import { getProviderColor, getProviderDisplayName } from "@/lib/provider-utils";
+import { BarChart3 } from "lucide-react";
 
 interface ModelCostData {
   model: string;
@@ -47,6 +48,12 @@ export function CostByModelChart({
       </CardHeader>
       <CardContent>
         <div className="h-[300px]">
+          {chartData.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+              <BarChart3 className="h-8 w-8 mb-2 opacity-50" />
+              <span className="text-sm">No model cost data available</span>
+            </div>
+          ) : (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData} layout="vertical" margin={{ left: 20 }}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-muted" horizontal={true} vertical={false} />
@@ -87,6 +94,7 @@ export function CostByModelChart({
               </Bar>
             </BarChart>
           </ResponsiveContainer>
+          )}
         </div>
         {/* Legend - dynamically generated from providers in data */}
         <div className="flex justify-center gap-6 mt-4 flex-wrap">

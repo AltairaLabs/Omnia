@@ -17,8 +17,11 @@ limitations under the License.
 package agent
 
 import (
+	"context"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Metrics holds all Prometheus metrics for the agent.
@@ -203,10 +206,45 @@ func (m *Metrics) RequestStarted() {
 }
 
 // RequestCompleted records the completion of a request.
-func (m *Metrics) RequestCompleted(status string, durationSeconds float64, handler string) {
+// Attaches trace_id as a Prometheus exemplar when a span context is active,
+// enabling metric → trace drill-down in Grafana.
+func (m *Metrics) RequestCompleted(ctx context.Context, status string, durationSeconds float64, handler string) {
 	m.RequestsInflight.Dec()
-	m.RequestsTotal.WithLabelValues(status).Inc()
-	m.RequestDuration.WithLabelValues(handler).Observe(durationSeconds)
+	exemplar := traceExemplar(ctx)
+	incWithExemplar(m.RequestsTotal.WithLabelValues(status), exemplar)
+	observeWithExemplar(m.RequestDuration.WithLabelValues(handler), durationSeconds, exemplar)
+}
+
+// traceExemplar extracts the trace_id from the span context for use as a Prometheus exemplar.
+func traceExemplar(ctx context.Context) prometheus.Labels {
+	sc := trace.SpanFromContext(ctx).SpanContext()
+	tid := sc.TraceID()
+	if !tid.IsValid() {
+		return nil
+	}
+	return prometheus.Labels{"trace_id": tid.String()}
+}
+
+// observeWithExemplar records a histogram observation with an optional trace exemplar.
+func observeWithExemplar(observer prometheus.Observer, value float64, exemplar prometheus.Labels) {
+	if exemplar != nil {
+		if eo, ok := observer.(prometheus.ExemplarObserver); ok {
+			eo.ObserveWithExemplar(value, exemplar)
+			return
+		}
+	}
+	observer.Observe(value)
+}
+
+// incWithExemplar increments a counter with an optional trace exemplar.
+func incWithExemplar(counter prometheus.Counter, exemplar prometheus.Labels) {
+	if exemplar != nil {
+		if ea, ok := counter.(prometheus.ExemplarAdder); ok {
+			ea.AddWithExemplar(1, exemplar)
+			return
+		}
+	}
+	counter.Inc()
 }
 
 // MessageReceived records a received message.

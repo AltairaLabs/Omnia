@@ -22,6 +22,65 @@ import (
 	"github.com/altairalabs/omnia/internal/session"
 )
 
+// spyMetrics records metric calls for testing.
+type spyMetrics struct {
+	NoOpWorkerMetrics
+	evalExecuted     []evalExecutedCall
+	samplingDecision []samplingDecisionCall
+	streamLag        []streamLagCall
+	eventsReceived   []string
+	resultsWritten   []resultsWrittenCall
+	eventProcessing  []eventProcessingCall
+}
+
+type evalExecutedCall struct {
+	evalType, trigger, status string
+	durationSec               float64
+}
+
+type samplingDecisionCall struct {
+	evalType, decision string
+}
+
+type streamLagCall struct {
+	stream string
+	lag    float64
+}
+
+type resultsWrittenCall struct {
+	count   int
+	success bool
+}
+
+type eventProcessingCall struct {
+	eventType   string
+	durationSec float64
+}
+
+func (s *spyMetrics) RecordEventReceived(eventType string) {
+	s.eventsReceived = append(s.eventsReceived, eventType)
+}
+
+func (s *spyMetrics) RecordEvalExecuted(evalType, trigger, status string, durationSec float64) {
+	s.evalExecuted = append(s.evalExecuted, evalExecutedCall{evalType, trigger, status, durationSec})
+}
+
+func (s *spyMetrics) RecordSamplingDecision(evalType, decision string) {
+	s.samplingDecision = append(s.samplingDecision, samplingDecisionCall{evalType, decision})
+}
+
+func (s *spyMetrics) RecordEventProcessing(eventType string, durationSec float64) {
+	s.eventProcessing = append(s.eventProcessing, eventProcessingCall{eventType, durationSec})
+}
+
+func (s *spyMetrics) RecordResultsWritten(count int, success bool) {
+	s.resultsWritten = append(s.resultsWritten, resultsWrittenCall{count, success})
+}
+
+func (s *spyMetrics) SetStreamLag(stream string, lag float64) {
+	s.streamLag = append(s.streamLag, streamLagCall{stream, lag})
+}
+
 // testPackData builds a minimal pack.json with the given eval definitions.
 func testPackData(defs []runtimeevals.EvalDef) []byte {
 	pack := map[string]any{
@@ -245,4 +304,81 @@ func TestSDKRunner_RunTurnEvals_SkipsMismatchedTrigger(t *testing.T) {
 	// RunTurnEvals should skip on_session_complete triggers.
 	items := runner.RunTurnEvals(context.Background(), packData, messages, "sess-1", 1, nil, EvalLabels{})
 	assert.Empty(t, items)
+}
+
+func TestRecordEvalMetrics_MixedResults(t *testing.T) {
+	spy := &spyMetrics{}
+	runner := &SDKRunner{metrics: spy}
+
+	results := []runtimeevals.EvalResult{
+		{EvalID: "e1", Type: "contains", DurationMs: 5},
+		{EvalID: "e2", Type: "llm_judge", Error: "timeout", DurationMs: 3000},
+		{EvalID: "e3", Type: "regex", Skipped: true, SkipReason: "sampling"},
+	}
+
+	runner.recordEvalMetrics(results, runtimeevals.TriggerEveryTurn)
+
+	// Two executed, one skipped.
+	require.Len(t, spy.evalExecuted, 2)
+	assert.Equal(t, evalExecutedCall{"contains", "every_turn", MetricStatusSuccess, 0.005}, spy.evalExecuted[0])
+	assert.Equal(t, evalExecutedCall{"llm_judge", "every_turn", MetricStatusError, 3.0}, spy.evalExecuted[1])
+
+	// Three sampling decisions total.
+	require.Len(t, spy.samplingDecision, 3)
+	assert.Equal(t, samplingDecisionCall{"contains", MetricStatusSampled}, spy.samplingDecision[0])
+	assert.Equal(t, samplingDecisionCall{"llm_judge", MetricStatusSampled}, spy.samplingDecision[1])
+	assert.Equal(t, samplingDecisionCall{"regex", MetricStatusSkipped}, spy.samplingDecision[2])
+}
+
+func TestRecordEvalMetrics_NilMetrics(t *testing.T) {
+	runner := &SDKRunner{} // no metrics set
+	results := []runtimeevals.EvalResult{
+		{EvalID: "e1", Type: "contains"},
+	}
+	// Should not panic.
+	runner.recordEvalMetrics(results, runtimeevals.TriggerEveryTurn)
+}
+
+func TestRecordEvalMetrics_EmptyResults(t *testing.T) {
+	spy := &spyMetrics{}
+	runner := &SDKRunner{metrics: spy}
+	runner.recordEvalMetrics(nil, runtimeevals.TriggerEveryTurn)
+	assert.Empty(t, spy.evalExecuted)
+	assert.Empty(t, spy.samplingDecision)
+}
+
+func TestWithMetrics_Option(t *testing.T) {
+	spy := &spyMetrics{}
+	runner := NewSDKRunner(WithMetrics(spy))
+	assert.Equal(t, spy, runner.metrics)
+}
+
+func TestSDKRunner_RunTurnEvals_RecordsMetrics(t *testing.T) {
+	spy := &spyMetrics{}
+	runner := NewSDKRunner(WithMetrics(spy))
+
+	packData := testPackData([]runtimeevals.EvalDef{
+		{
+			ID:      "e1",
+			Type:    "contains",
+			Trigger: runtimeevals.TriggerEveryTurn,
+			Params:  map[string]any{"patterns": []any{"hello"}},
+		},
+	})
+	messages := []session.Message{
+		{ID: "m1", Role: session.RoleUser, Content: "say hello"},
+		{ID: "m2", Role: session.RoleAssistant, Content: "hello world"},
+	}
+
+	items := runner.RunTurnEvals(context.Background(), packData, messages, "sess-1", 1, nil, EvalLabels{})
+	require.Len(t, items, 1)
+
+	// Verify metrics were recorded.
+	require.Len(t, spy.evalExecuted, 1)
+	assert.Equal(t, "contains", spy.evalExecuted[0].evalType)
+	assert.Equal(t, "every_turn", spy.evalExecuted[0].trigger)
+	assert.Equal(t, MetricStatusSuccess, spy.evalExecuted[0].status)
+
+	require.Len(t, spy.samplingDecision, 1)
+	assert.Equal(t, samplingDecisionCall{"contains", MetricStatusSampled}, spy.samplingDecision[0])
 }

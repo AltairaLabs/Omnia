@@ -16,6 +16,8 @@ limitations under the License.
 
 package facade
 
+import "context"
+
 // ServerMetrics defines the interface for server metrics.
 // This allows the metrics implementation to be optional and testable.
 type ServerMetrics interface {
@@ -30,7 +32,8 @@ type ServerMetrics interface {
 	// RequestStarted records the start of a request.
 	RequestStarted()
 	// RequestCompleted records the completion of a request.
-	RequestCompleted(status string, durationSeconds float64, handler string)
+	// The context is used to extract trace ID for Prometheus exemplars.
+	RequestCompleted(ctx context.Context, status string, durationSeconds float64, handler string)
 	// MessageReceived records a received message.
 	MessageReceived()
 	// MessageSent records a sent message.
@@ -73,7 +76,8 @@ func (n *NoOpMetrics) SessionClosed() { /* no-op: null object pattern */ }
 func (n *NoOpMetrics) RequestStarted() { /* no-op: null object pattern */ }
 
 // RequestCompleted is a no-op - metrics are disabled.
-func (n *NoOpMetrics) RequestCompleted(string, float64, string) { /* no-op: null object pattern */ }
+func (n *NoOpMetrics) RequestCompleted(context.Context, string, float64, string) { /* no-op: null object pattern */
+}
 
 // MessageReceived is a no-op - metrics are disabled.
 func (n *NoOpMetrics) MessageReceived() { /* no-op: null object pattern */ }

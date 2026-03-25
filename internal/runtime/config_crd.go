@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -77,6 +78,9 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	// Mock provider annotation (dev/test mode)
 	if mock, ok := ar.Annotations["omnia.altairalabs.ai/mock-provider"]; ok && mock == "true" {
 		cfg.MockProvider = true
+	}
+	if mockCfg, ok := ar.Annotations["omnia.altairalabs.ai/mock-config-path"]; ok && mockCfg != "" {
+		cfg.MockConfigPath = mockCfg
 	}
 
 	// Auto-enable mock provider when provider type is "mock"
@@ -183,6 +187,9 @@ func loadFromProviderRef(ctx context.Context, c client.Client, cfg *Config, ref 
 		loadProviderDefaults(cfg, provider.Spec.Defaults)
 	}
 
+	// Load pricing from Provider CRD
+	loadProviderPricing(cfg, provider.Spec.Pricing)
+
 	// Inject API key from secret
 	return injectAPIKey(ctx, c, cfg, provider)
 }
@@ -194,6 +201,23 @@ func loadProviderDefaults(cfg *Config, defaults *v1alpha1.ProviderDefaults) {
 	}
 	if defaults.TruncationStrategy != "" {
 		cfg.TruncationStrategy = string(defaults.TruncationStrategy)
+	}
+}
+
+// loadProviderPricing extracts pricing from the Provider CRD and converts to float64.
+func loadProviderPricing(cfg *Config, pricing *v1alpha1.ProviderPricing) {
+	if pricing == nil {
+		return
+	}
+	if pricing.InputCostPer1K != nil {
+		if v, err := strconv.ParseFloat(*pricing.InputCostPer1K, 64); err == nil {
+			cfg.InputCostPer1K = v
+		}
+	}
+	if pricing.OutputCostPer1K != nil {
+		if v, err := strconv.ParseFloat(*pricing.OutputCostPer1K, 64); err == nil {
+			cfg.OutputCostPer1K = v
+		}
 	}
 }
 

@@ -531,6 +531,9 @@ if ENABLE_OBSERVABILITY:
         'prometheus.prometheus-pushgateway.enabled=false',
         'prometheus.prometheus-node-exporter.enabled=false',
         'prometheus.kube-state-metrics.enabled=false',
+        # Disable TLS on operator metrics so Prometheus can scrape without certs
+        'metrics.secure=false',
+        'metrics.port=8080',
         # Enable Grafana for dashboards
         'grafana.enabled=true',
         'grafana.adminPassword=admin',

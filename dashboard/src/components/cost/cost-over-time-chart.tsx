@@ -15,7 +15,7 @@ import {
 } from "recharts";
 import { formatCost } from "@/lib/pricing";
 import { getProviderColor, getProviderDisplayName } from "@/lib/provider-utils";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, BarChart3 } from "lucide-react";
 import type { CostTimeSeriesPoint } from "@/lib/data/types";
 
 interface CostOverTimeChartProps {
@@ -82,6 +82,12 @@ export function CostOverTimeChart({
       </CardHeader>
       <CardContent>
         <div style={{ height }}>
+          {data.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+              <BarChart3 className="h-8 w-8 mb-2 opacity-50" />
+              <span className="text-sm">No cost data available</span>
+            </div>
+          ) : (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={chartData}>
               <defs>
@@ -151,6 +157,7 @@ export function CostOverTimeChart({
               })}
             </AreaChart>
           </ResponsiveContainer>
+          )}
         </div>
       </CardContent>
     </Card>

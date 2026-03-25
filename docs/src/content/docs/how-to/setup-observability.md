@@ -86,16 +86,15 @@ Connection and session metrics from the WebSocket facade:
 
 ### LLM Metrics
 
-Token usage and cost metrics from LLM provider calls:
+Token usage and cost metrics from LLM provider calls (via PromptKit SDK collector):
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `omnia_llm_input_tokens_total` | Counter | provider, model | Input tokens sent to LLMs |
-| `omnia_llm_output_tokens_total` | Counter | provider, model | Output tokens received |
-| `omnia_llm_cache_hits_total` | Counter | provider, model | Prompt cache hits |
-| `omnia_llm_requests_total` | Counter | provider, model, status | Total LLM requests |
-| `omnia_llm_cost_usd_total` | Counter | provider, model | Estimated cost in USD |
-| `omnia_llm_request_duration_seconds` | Histogram | provider, model | LLM request duration |
+| `omnia_provider_input_tokens_total` | Counter | provider, model | Input tokens sent to LLMs |
+| `omnia_provider_output_tokens_total` | Counter | provider, model | Output tokens received |
+| `omnia_provider_requests_total` | Counter | provider, model, status | Total LLM requests |
+| `omnia_provider_cost_total` | Counter | provider, model | Estimated cost in USD |
+| `omnia_provider_request_duration_seconds` | Histogram | provider, model | LLM request duration |
 
 ### Runtime Metrics
 
@@ -185,10 +184,10 @@ rate(omnia_agent_requests_total[5m])
 histogram_quantile(0.95, rate(omnia_agent_request_duration_seconds_bucket[5m]))
 
 # LLM cost per model (last hour)
-sum by (model) (increase(omnia_llm_cost_usd_total[1h]))
+sum by (model) (increase(omnia_provider_cost_total[1h]))
 
 # Token usage rate by provider
-sum by (provider) (rate(omnia_llm_input_tokens_total[5m] + omnia_llm_output_tokens_total[5m]))
+sum by (provider) (rate(omnia_provider_input_tokens_total[5m]) + rate(omnia_provider_output_tokens_total[5m]))
 
 # Tool call error rate
 sum(rate(omnia_runtime_tool_calls_total{status="error"}[5m])) / sum(rate(omnia_runtime_tool_calls_total[5m]))

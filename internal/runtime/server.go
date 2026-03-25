@@ -82,10 +82,12 @@ type Server struct {
 	evalCollector *pkmetrics.Collector
 	evalDefs      []evals.EvalDef
 
-	// Provider info (for logging)
-	providerType string
-	model        string
-	baseURL      string // Custom base URL for provider (e.g., Ollama endpoint)
+	// Provider info (for logging and provider creation)
+	providerType    string
+	model           string
+	baseURL         string  // Custom base URL for provider (e.g., Ollama endpoint)
+	inputCostPer1K  float64 // CRD pricing: cost per 1K input tokens
+	outputCostPer1K float64 // CRD pricing: cost per 1K output tokens
 
 	// Session recording (Pattern C)
 	sessionStore session.Store
@@ -214,6 +216,15 @@ func WithProviderInfo(providerType, model string) ServerOption {
 func WithBaseURL(baseURL string) ServerOption {
 	return func(s *Server) {
 		s.baseURL = baseURL
+	}
+}
+
+// WithPricing sets the provider pricing from the CRD for cost calculation.
+// When set, PromptKit uses these rates instead of its built-in pricing tables.
+func WithPricing(inputCostPer1K, outputCostPer1K float64) ServerOption {
+	return func(s *Server) {
+		s.inputCostPer1K = inputCostPer1K
+		s.outputCostPer1K = outputCostPer1K
 	}
 }
 

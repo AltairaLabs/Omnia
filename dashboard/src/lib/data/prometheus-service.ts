@@ -79,16 +79,16 @@ export class PrometheusService {
       const now = new Date();
       const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-      // Query current totals (instant queries)
-      // Using centralized metric names from prometheus-queries.ts
+      // Query 24h totals using increase() to handle counter resets and staleness.
+      // Raw instant queries fail when runtime pods restart (counters reset, old data goes stale).
       const byLabels = `${LABELS.AGENT}, ${LABELS.NAMESPACE}, ${LABELS.PROVIDER}, ${LABELS.MODEL}`;
       const [inputTokensResult, outputTokensResult, cacheHitsResult, requestsResult, costResult] =
         await Promise.all([
-          queryPrometheus(`sum by (${byLabels}) (${LLM_METRICS.INPUT_TOKENS}${labelSelector})`),
-          queryPrometheus(`sum by (${byLabels}) (${LLM_METRICS.OUTPUT_TOKENS}${labelSelector})`),
-          queryPrometheus(`sum by (${byLabels}) (${LLM_METRICS.CACHE_HITS}${labelSelector})`),
-          queryPrometheus(`sum by (${byLabels}) (${LLM_METRICS.REQUESTS_TOTAL}${labelSelector})`),
-          queryPrometheus(`sum by (${byLabels}) (${LLM_METRICS.COST_USD}${labelSelector})`),
+          queryPrometheus(`sum by (${byLabels}) (increase(${LLM_METRICS.INPUT_TOKENS}${labelSelector}[24h]))`),
+          queryPrometheus(`sum by (${byLabels}) (increase(${LLM_METRICS.OUTPUT_TOKENS}${labelSelector}[24h]))`),
+          queryPrometheus(`sum by (${byLabels}) (increase(${LLM_METRICS.CACHE_HITS}${labelSelector}[24h]))`),
+          queryPrometheus(`sum by (${byLabels}) (increase(${LLM_METRICS.REQUESTS_TOTAL}${labelSelector}[24h]))`),
+          queryPrometheus(`sum by (${byLabels}) (increase(${LLM_METRICS.COST_USD}${labelSelector}[24h]))`),
         ]);
 
       // Query time series for charts (last 24h, hourly resolution)

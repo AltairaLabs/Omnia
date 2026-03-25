@@ -1603,5 +1603,132 @@ func TestIsEvaluateEvent(t *testing.T) {
 	assert.False(t, isEvaluateEvent(api.SessionEvent{EventType: eventTypeSessionDone}))
 }
 
+func TestReportStreamLag(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	streamKey := "omnia:session-events:ns"
+	group := "omnia-eval-workers-ns"
+
+	// Create consumer group, add messages, then read (without ACK) to create pending entries.
+	client.XGroupCreateMkStream(context.Background(), streamKey, group, "0")
+	for i := 0; i < 3; i++ {
+		client.XAdd(context.Background(), &goredis.XAddArgs{
+			Stream: streamKey,
+			Values: map[string]any{streamPayloadField: `{"eventType":"message.assistant"}`},
+		})
+	}
+	// Read messages to make them pending (not ACKed).
+	_, err = client.XReadGroup(context.Background(), &goredis.XReadGroupArgs{
+		Group:    group,
+		Consumer: "test-consumer",
+		Streams:  []string{streamKey, ">"},
+		Count:    10,
+		Block:    time.Second,
+	}).Result()
+	require.NoError(t, err)
+
+	spy := &spyMetrics{}
+	w := &EvalWorker{
+		redisClient:   client,
+		streamKeys:    []string{streamKey},
+		consumerGroup: group,
+		logger:        testLogger(),
+		metrics:       spy,
+	}
+
+	w.reportStreamLag(context.Background())
+
+	require.Len(t, spy.streamLag, 1)
+	assert.Equal(t, streamKey, spy.streamLag[0].stream)
+	assert.Equal(t, float64(3), spy.streamLag[0].lag)
+}
+
+func TestReportStreamLag_NoMessages(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	streamKey := "omnia:session-events:ns"
+	group := "omnia-eval-workers-ns"
+	client.XGroupCreateMkStream(context.Background(), streamKey, group, "0")
+
+	spy := &spyMetrics{}
+	w := &EvalWorker{
+		redisClient:   client,
+		streamKeys:    []string{streamKey},
+		consumerGroup: group,
+		logger:        testLogger(),
+		metrics:       spy,
+	}
+
+	w.reportStreamLag(context.Background())
+
+	require.Len(t, spy.streamLag, 1)
+	assert.Equal(t, float64(0), spy.streamLag[0].lag)
+}
+
+func TestProcessAssistantMessage_RecordsEvalMetrics(t *testing.T) {
+	packLoader := newTestPackLoader([]runtimeevals.EvalDef{
+		containsEvalDef("e1", runtimeevals.TriggerEveryTurn, "hello"),
+	})
+
+	spy := &spyMetrics{}
+	rw := &mockResultWriter{}
+	store := &mockMessageStore{
+		sess: &session.Session{ID: "s1", AgentName: "test-agent", Namespace: "ns"},
+		messages: toMessagePtrs([]session.Message{
+			{ID: "m1", Role: session.RoleUser, Content: "say hello"},
+			{ID: "m2", Role: session.RoleAssistant, Content: "hello world"},
+		}),
+	}
+
+	runner := NewSDKRunner(WithMetrics(spy))
+	w := &EvalWorker{
+		messageStore: store,
+		resultWriter: rw,
+		namespaces:   []string{"ns"},
+		logger:       testLogger(),
+		packLoader:   packLoader,
+		sdkRunner:    runner,
+		metrics:      spy,
+	}
+
+	event := api.SessionEvent{
+		EventType:         eventTypeMessage,
+		SessionID:         "s1",
+		AgentName:         "test-agent",
+		Namespace:         "ns",
+		MessageID:         "m2",
+		MessageRole:       "assistant",
+		PromptPackName:    "test-pack",
+		PromptPackVersion: "v1",
+	}
+
+	err := w.processEvent(context.Background(), event)
+	require.NoError(t, err)
+
+	// Verify eval execution metrics were recorded.
+	require.Len(t, spy.evalExecuted, 1)
+	assert.Equal(t, "contains", spy.evalExecuted[0].evalType)
+	assert.Equal(t, "every_turn", spy.evalExecuted[0].trigger)
+	assert.Equal(t, MetricStatusSuccess, spy.evalExecuted[0].status)
+
+	// Verify sampling decision was recorded.
+	require.Len(t, spy.samplingDecision, 1)
+	assert.Equal(t, "contains", spy.samplingDecision[0].evalType)
+	assert.Equal(t, MetricStatusSampled, spy.samplingDecision[0].decision)
+
+	// Verify results were also written.
+	require.NotEmpty(t, rw.written)
+}
+
 // Ensure unused import suppressors compile.
 var _ = v1alpha1.GroupVersion

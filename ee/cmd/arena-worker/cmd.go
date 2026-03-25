@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/AltairaLabs/PromptKit/runtime/logger"
@@ -111,7 +112,7 @@ func run(ctx context.Context) error {
 	log.V(1).Info("content path resolved", "bundlePath", bundlePath)
 
 	// Connect to Redis queue
-	q, err := queue.NewRedisQueue(queue.RedisOptions{
+	rawQ, err := queue.NewRedisQueue(queue.RedisOptions{
 		Addr:     cfg.RedisAddr,
 		Password: cfg.RedisPassword,
 		DB:       cfg.RedisDB,
@@ -121,15 +122,34 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to connect to queue: %w", err)
 	}
 	defer func() {
-		if closeErr := q.Close(); closeErr != nil {
+		if closeErr := rawQ.Close(); closeErr != nil {
 			log.Error(closeErr, "failed to close queue")
 		}
 	}()
 
 	log.Info("connected to redis", "addr", cfg.RedisAddr)
 
+	// Initialize metrics and wrap queue with instrumentation
+	queueMetrics := queue.NewQueueMetrics(queue.QueueMetricsConfig{})
+	queueMetrics.Initialize()
+	q := queue.NewInstrumentedQueue(rawQ, queueMetrics)
+
+	workerMetrics := NewWorkerMetrics()
+
+	metricsAddr := getEnvOrDefault("METRICS_ADDR", defaultMetricsAddr)
+	go startMetricsServer(metricsAddr, log)
+
 	// Process work items
-	return processWorkItems(ctx, log, cfg, q, bundlePath)
+	err = processWorkItems(ctx, log, cfg, q, bundlePath, workerMetrics)
+
+	// Wait after processing completes so Prometheus can scrape final metrics.
+	// Without this, the pod exits immediately and the last scrape never happens.
+	if cfg.ShutdownDelay > 0 {
+		log.Info("waiting for final metrics scrape", "delay", cfg.ShutdownDelay)
+		time.Sleep(cfg.ShutdownDelay)
+	}
+
+	return err
 }
 
 // configureSDKLogging sets up PromptKit SDK logging via the slog bridge.

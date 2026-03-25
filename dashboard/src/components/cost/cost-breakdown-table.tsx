@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { formatCost, formatTokens } from "@/lib/pricing";
 import { getProviderDisplayName, getProviderColor } from "@/lib/provider-utils";
+import { TableProperties } from "lucide-react";
 import type { CostAllocationItem } from "@/lib/data/types";
 
 interface CostBreakdownTableProps {
@@ -48,6 +49,12 @@ export function CostBreakdownTable({
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
+        {sortedData.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+            <TableProperties className="h-8 w-8 mb-2 opacity-50" />
+            <span className="text-sm">No cost breakdown data available</span>
+          </div>
+        ) : (
         <Table>
           <TableHeader>
             <TableRow>
@@ -119,6 +126,7 @@ export function CostBreakdownTable({
             </TableRow>
           </TableBody>
         </Table>
+        )}
       </CardContent>
     </Card>
   );

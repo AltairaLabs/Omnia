@@ -1456,10 +1456,10 @@ spec:
       limits:
         cpu: "200m"
         memory: "128Mi"
-  provider:
-    type: mock
-    secretRef:
-      name: test-provider
+  providers:
+    - name: default
+      providerRef:
+        name: test-provider
 `
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(agentManifest)
@@ -1568,10 +1568,10 @@ spec:
       requests:
         cpu: "50m"
         memory: "64Mi"
-  provider:
-    type: mock
-    secretRef:
-      name: test-provider
+  providers:
+    - name: default
+      providerRef:
+        name: test-provider
 `, customFacadeImage, customRuntimeImage)
 
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
@@ -1644,10 +1644,10 @@ spec:
       requests:
         cpu: "50m"
         memory: "64Mi"
-  provider:
-    type: mock
-    secretRef:
-      name: test-provider
+  providers:
+    - name: default
+      providerRef:
+        name: test-provider
 `
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(noOverrideAgentManifest)
@@ -1716,10 +1716,10 @@ spec:
       requests:
         cpu: "50m"
         memory: "64Mi"
-  provider:
-    type: mock
-    secretRef:
-      name: test-provider
+  providers:
+    - name: default
+      providerRef:
+        name: test-provider
 `, customFacadeImage)
 
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
@@ -1789,10 +1789,10 @@ spec:
       limits:
         cpu: "200m"
         memory: "128Mi"
-  provider:
-    type: mock
-    secretRef:
-      name: test-provider
+  providers:
+    - name: default
+      providerRef:
+        name: test-provider
 `
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(toolTestAgentManifest)
@@ -1993,18 +1993,10 @@ data:
         "get_location": {
           "name": "get_location",
           "description": "Get user GPS location",
-          "mode": "client",
           "parameters": {
             "type": "object",
             "properties": {
               "accuracy": {"type": "string", "enum": ["high", "low"]}
-            }
-          },
-          "client": {
-            "consent": {
-              "required": true,
-              "message": "Allow location access?",
-              "decline_strategy": "graceful"
             }
           }
         }
@@ -2056,6 +2048,35 @@ data:
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create client-tool mock config")
 
+			By("creating a ToolRegistry with client-side tool")
+			clientToolRegistryManifest := `
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ToolRegistry
+metadata:
+  name: client-tools
+  namespace: test-agents
+spec:
+  handlers:
+  - name: get_location
+    type: client
+    clientConfig:
+      consentMessage: "Allow location access?"
+      categories: ["location"]
+    tool:
+      name: get_location
+      description: Get user GPS location
+      inputSchema:
+        type: object
+        properties:
+          accuracy:
+            type: string
+            enum: ["high", "low"]
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(clientToolRegistryManifest)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create client ToolRegistry")
+
 			By("creating an AgentRuntime with runtime handler for client tool testing")
 			clientToolAgentManifest := `
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -2063,9 +2084,14 @@ kind: AgentRuntime
 metadata:
   name: client-tool-agent
   namespace: test-agents
+  annotations:
+    omnia.altairalabs.ai/mock-provider: "true"
+    omnia.altairalabs.ai/mock-config-path: "/etc/omnia/mock/mock-responses.yaml"
 spec:
   promptPackRef:
     name: client-tool-prompts
+  toolRegistryRef:
+    name: client-tools
   facade:
     type: websocket
     port: 8080
@@ -2088,12 +2114,10 @@ spec:
     volumeMounts:
     - name: mock-config
       mountPath: /etc/omnia/mock
-  provider:
-    type: mock
-    secretRef:
-      name: test-provider
-    additionalConfig:
-      mock_config: "/etc/omnia/mock/mock-responses.yaml"
+  providers:
+    - name: default
+      providerRef:
+        name: test-provider
 `
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(clientToolAgentManifest)
@@ -2325,6 +2349,9 @@ spec:
 				"-n", agentsNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 			cmd = exec.Command("kubectl", "delete", "configmap", "client-tool-mock-config",
+				"-n", agentsNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "toolregistry", "client-tools",
 				"-n", agentsNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		})

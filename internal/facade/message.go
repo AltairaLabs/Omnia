@@ -187,7 +187,7 @@ func (s *Server) processAndRecordMessage(ctx context.Context, c *Connection, msg
 	if s.handler != nil {
 		handlerName = s.handler.Name()
 	}
-	s.metrics.RequestCompleted(status, duration, handlerName)
+	s.metrics.RequestCompleted(ctx, status, duration, handlerName)
 }
 
 // handleBinaryMessage decodes and processes a binary WebSocket frame.

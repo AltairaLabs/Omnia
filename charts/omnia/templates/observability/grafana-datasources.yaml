@@ -18,6 +18,10 @@ data:
         url: http://{{ .Release.Name }}-prometheus-server.{{ .Release.Namespace }}:80/prometheus
         isDefault: true
         editable: false
+        jsonData:
+          exemplarTraceIdDestinations:
+            - datasourceUid: tempo
+              name: trace_id
       {{- end }}
       {{- if .Values.loki.enabled }}
       - name: Loki

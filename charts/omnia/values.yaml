@@ -1092,6 +1092,17 @@ prometheus:
   # -- Disable kube-state-metrics (usually already present)
   kube-state-metrics:
     enabled: false
+  # Override the default self-scrape job to use the /prometheus path prefix.
+  # Without this, the auto-generated job targets localhost:9090/metrics which
+  # fails because Prometheus is configured with baseURL=/prometheus.
+  serverFiles:
+    prometheus.yml:
+      scrape_configs:
+        - job_name: prometheus
+          metrics_path: /prometheus/metrics
+          static_configs:
+            - targets:
+              - localhost:9090
   # -- Extra scrape configs for Omnia agent metrics
   extraScrapeConfigs: |
     # Scrape Omnia facade containers (WebSocket connections, media uploads)
@@ -1177,6 +1188,51 @@ prometheus:
         - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
           action: keep
           regex: eval-worker
+        - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+          action: replace
+          regex: ([^:]+)(?::\d+)?;(\d+)
+          replacement: $1:$2
+          target_label: __address__
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod
+    # Scrape Omnia arena-worker Job pods (work item execution, queue operations)
+    - job_name: 'omnia-arena-worker'
+      honor_labels: true
+      kubernetes_sd_configs:
+        - role: pod
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_omnia_altairalabs_ai_component]
+          action: keep
+          regex: arena-worker
+        - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+          action: replace
+          regex: ([^:]+)(?::\d+)?;(\d+)
+          replacement: $1:$2
+          target_label: __address__
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod
+        - source_labels: [__meta_kubernetes_pod_label_omnia_altairalabs_ai_job]
+          target_label: job_name
+    # Scrape Omnia compaction CronJob pods (session data compaction metrics)
+    - job_name: 'omnia-compaction'
+      kubernetes_sd_configs:
+        - role: pod
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+          action: keep
+          regex: compaction
         - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
           action: replace
           regex: ([^:]+)(?::\d+)?;(\d+)

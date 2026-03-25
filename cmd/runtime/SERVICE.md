@@ -39,10 +39,9 @@
 
 ## Observability
 
-**Metrics** (Prometheus, prefix `omnia_llm_` and `omnia_runtime_`):
-- LLM usage: `llm_input_tokens_total`, `llm_output_tokens_total`, `llm_cost_usd_total` (by provider, model)
-- LLM requests: `llm_requests_total` (by status), `llm_request_duration_seconds`
-- Cache: `llm_cache_hits_total` (prompt caching)
+**Metrics** (Prometheus, prefix `omnia_provider_` and `omnia_runtime_`):
+- LLM usage: `provider_input_tokens_total`, `provider_output_tokens_total`, `provider_cost_total` (by provider, model)
+- LLM requests: `provider_requests_total` (by status), `provider_request_duration_seconds`
 - Runtime info: `runtime_info` gauge with agent/namespace labels
 - PromptKit SDK metrics exported via isolated registry on `/metrics`
 

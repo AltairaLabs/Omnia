@@ -11,6 +11,7 @@ import {
 } from "recharts";
 import { formatCost } from "@/lib/pricing";
 import { getProviderColor } from "@/lib/provider-utils";
+import { PieChartIcon } from "lucide-react";
 
 interface ProviderCostData {
   name: string;
@@ -54,6 +55,12 @@ export function CostByProviderChart({
       </CardHeader>
       <CardContent>
         <div className="h-[300px]">
+          {data.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+              <PieChartIcon className="h-8 w-8 mb-2 opacity-50" />
+              <span className="text-sm">No provider cost data available</span>
+            </div>
+          ) : (
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
@@ -92,6 +99,7 @@ export function CostByProviderChart({
               />
             </PieChart>
           </ResponsiveContainer>
+          )}
         </div>
       </CardContent>
     </Card>

@@ -97,74 +97,48 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 80 }
-            ]
-          },
           "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Passed" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Failed" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+          }
+        ]
       },
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 25 },
       "id": 3,
       "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "auto"
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "expr": "arena_work_items_total{job_name=\"$job_name\", status=\"completed\"}",
-          "legendFormat": "Completed",
-          "refId": "A"
-        }
-      ],
-      "title": "Completed Work Items",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 1 }
-            ]
-          },
-          "unit": "short"
+        "displayLabels": ["percent"],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": ["value", "percent"]
         },
-        "overrides": []
-      },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 25 },
-      "id": 4,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
+        "pieType": "donut",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "auto"
+        "tooltip": { "mode": "single", "sort": "none" }
       },
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "arena_work_items_total{job_name=\"$job_name\", status=\"failed\"}",
-          "legendFormat": "Failed",
+          "expr": "last_over_time(omnia_arena_work_items_total{job_name=\"$job_name\", status=\"pass\"}[$__range])",
+          "legendFormat": "Passed",
           "refId": "A"
+        },
+        {
+          "expr": "last_over_time(omnia_arena_work_items_total{job_name=\"$job_name\", status=\"fail\"}[$__range])",
+          "legendFormat": "Failed",
+          "refId": "B"
         }
       ],
-      "title": "Failed Work Items",
-      "type": "stat"
+      "title": "Work Items",
+      "type": "piechart"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
@@ -181,7 +155,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 25 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 25 },
       "id": 5,
       "options": {
         "colorMode": "value",
@@ -194,7 +168,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, rate(arena_work_item_duration_seconds_bucket{job_name=\"$job_name\"}[$__rate_interval]))",
+          "expr": "histogram_quantile(0.95, last_over_time(omnia_arena_work_item_duration_seconds_bucket{job_name=\"$job_name\"}[$__range]))",
           "legendFormat": "p95",
           "refId": "A"
         }
@@ -219,7 +193,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 25 },
       "id": 6,
       "options": {
         "barRadius": 0,
@@ -233,12 +207,12 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "arena_eval_results_total{job_name=\"$job_name\"}",
-          "legendFormat": "{{ "{{eval_id}}" }} ({{ "{{status}}" }})",
+          "expr": "last_over_time(omnia_arena_queue_operations_total{job_name=\"$job_name\"}[$__range])",
+          "legendFormat": "{{ "{{operation}}" }} ({{ "{{status}}" }})",
           "refId": "A"
         }
       ],
-      "title": "Eval Results by Type",
+      "title": "Queue Operations",
       "type": "barchart"
     },
     {
@@ -261,7 +235,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 33 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 33 },
       "id": 7,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom" },
@@ -270,7 +244,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "rate(arena_work_items_total{job_name=\"$job_name\"}[$__rate_interval])",
+          "expr": "last_over_time(omnia_arena_work_items_total{job_name=\"$job_name\"}[$__range])",
           "legendFormat": "{{ "{{status}}" }}",
           "refId": "A"
         }
@@ -288,13 +262,18 @@
     "list": [
       {
         "current": {},
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(omnia_arena_work_items_total, job_name)",
         "hide": 0,
+        "includeAll": false,
         "label": "Job Name",
+        "multi": false,
         "name": "job_name",
-        "options": [],
-        "query": "",
-        "skipUrlSync": false,
-        "type": "textbox"
+        "query": { "query": "label_values(omnia_arena_work_items_total, job_name)", "refId": "job_name" },
+        "refresh": 2,
+        "regex": "",
+        "sort": 2,
+        "type": "query"
       },
       {
         "current": {},

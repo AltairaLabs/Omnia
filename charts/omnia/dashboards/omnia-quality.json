@@ -2,9 +2,10 @@
   "annotations": {
     "list": []
   },
+  "description": "Eval quality scores from PromptKit's per-eval dynamic gauges. Each eval defined in a PromptPack creates a metric like omnia_eval_<eval_name>.",
   "editable": true,
   "fiscalYearStartMonth": 0,
-  "graphTooltip": 0,
+  "graphTooltip": 1,
   "id": null,
   "links": [],
   "panels": [
@@ -17,11 +18,14 @@
             "mode": "absolute",
             "steps": [
               { "color": "red", "value": null },
-              { "color": "yellow", "value": 70 },
-              { "color": "green", "value": 90 }
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 0.8 }
             ]
           },
-          "unit": "percent"
+          "unit": "short",
+          "min": 0,
+          "max": 1,
+          "decimals": 2
         },
         "overrides": []
       },
@@ -38,12 +42,12 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "sum(omnia_eval_passed_total{agent=~\"$agent\", namespace=~\"$namespace\", eval_id=~\"$eval_id\"}) / sum(omnia_eval_executed_total{agent=~\"$agent\", namespace=~\"$namespace\", eval_id=~\"$eval_id\"}) * 100",
+          "expr": "avg(last_over_time({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"}[$__range]))",
           "legendFormat": "",
           "refId": "A"
         }
       ],
-      "title": "Overall Pass Rate",
+      "title": "Average Score",
       "type": "stat"
     },
     {
@@ -51,8 +55,18 @@
       "fieldConfig": {
         "defaults": {
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
-          "unit": "short"
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.3 },
+              { "color": "green", "value": 0.5 }
+            ]
+          },
+          "unit": "short",
+          "min": 0,
+          "max": 1,
+          "decimals": 2
         },
         "overrides": []
       },
@@ -69,50 +83,12 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "sum(omnia_eval_executed_total{agent=~\"$agent\", namespace=~\"$namespace\", eval_id=~\"$eval_id\"})",
+          "expr": "min(last_over_time({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"}[$__range]))",
           "legendFormat": "",
           "refId": "A"
         }
       ],
-      "title": "Total Evals Executed",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 5 },
-              { "color": "red", "value": 20 }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
-      "id": 3,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "auto"
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "expr": "sum(omnia_eval_failed_total{agent=~\"$agent\", namespace=~\"$namespace\", eval_id=~\"$eval_id\"})",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "title": "Total Failures",
+      "title": "Lowest Score",
       "type": "stat"
     },
     {
@@ -121,15 +97,15 @@
         "defaults": {
           "mappings": [],
           "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
-          "unit": "s"
+          "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
-      "id": 4,
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
@@ -138,12 +114,43 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "avg(omnia_eval_duration_seconds_sum{agent=~\"$agent\", namespace=~\"$namespace\", eval_id=~\"$eval_id\"} / omnia_eval_duration_seconds_count{agent=~\"$agent\", namespace=~\"$namespace\", eval_id=~\"$eval_id\"})",
+          "expr": "count(last_over_time({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"}[$__range]))",
           "legendFormat": "",
           "refId": "A"
         }
       ],
-      "title": "Avg Eval Duration",
+      "title": "Active Eval Metrics",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "purple", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "expr": "count(count by(__name__)(last_over_time({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"}[$__range])))",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "Distinct Eval Types",
       "type": "stat"
     },
     {
@@ -154,68 +161,19 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "",
+            "axisLabel": "Score",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": { "legend": false, "tooltip": false, "viz": false },
-            "lineInterpolation": "linear",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 5,
             "scaleDistribution": { "type": "linear" },
             "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": { "group": "A", "mode": "none" },
-            "thresholdsStyle": { "mode": "off" }
-          },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
-          "unit": "percent",
-          "max": 100,
-          "min": 0
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
-      "id": 5,
-      "options": {
-        "legend": { "calcs": ["mean", "lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "single", "sort": "none" }
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "expr": "sum by(eval_id)(rate(omnia_eval_passed_total{agent=~\"$agent\", namespace=~\"$namespace\", eval_id=~\"$eval_id\"}[$__rate_interval])) / sum by(eval_id)(rate(omnia_eval_executed_total{agent=~\"$agent\", namespace=~\"$namespace\", eval_id=~\"$eval_id\"}[$__rate_interval])) * 100",
-          "legendFormat": "{{eval_id}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Pass Rate by Eval",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 5,
-            "scaleDistribution": { "type": "linear" },
-            "showPoints": "auto",
-            "spanNulls": false,
+            "spanNulls": true,
             "stacking": { "group": "A", "mode": "none" },
             "thresholdsStyle": { "mode": "off" }
           },
@@ -227,117 +185,66 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
-      "id": 6,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 5,
       "options": {
         "legend": { "calcs": ["mean", "lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "single", "sort": "none" }
+        "tooltip": { "mode": "multi", "sort": "desc" }
       },
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "avg by(eval_id)(omnia_eval_score{agent=~\"$agent\", namespace=~\"$namespace\", eval_id=~\"$eval_id\"})",
-          "legendFormat": "{{eval_id}}",
+          "expr": "avg by(__name__)({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"})",
+          "legendFormat": "{{__name__}}",
           "refId": "A"
         }
       ],
-      "title": "Eval Score Over Time",
+      "title": "Eval Scores Over Time",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 30,
-            "gradientMode": "none",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": { "type": "linear" },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": { "group": "A", "mode": "normal" },
-            "thresholdsStyle": { "mode": "off" }
+          "color": {
+            "mode": "continuous-GrYlRd"
           },
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
-          "unit": "ops"
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 0.8 }
+            ]
+          },
+          "unit": "short",
+          "min": 0,
+          "max": 1
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
-      "id": 7,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 6,
       "options": {
-        "legend": { "calcs": ["mean"], "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "single", "sort": "none" }
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "expr": "sum by(eval_id)(rate(omnia_eval_executed_total{agent=~\"$agent\", namespace=~\"$namespace\", eval_id=~\"$eval_id\"}[$__rate_interval]))",
-          "legendFormat": "{{eval_id}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Eval Executions Over Time",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
-          "unit": "short"
-        },
-        "overrides": [
-          {
-            "matcher": { "id": "byName", "options": "Failed" },
-            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "Passed" },
-            "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }]
-          }
-        ]
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
-      "id": 8,
-      "options": {
-        "barWidth": 0.8,
-        "groupWidth": 0.7,
-        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "displayMode": "gradient",
+        "minVizHeight": 16,
+        "minVizWidth": 0,
         "orientation": "horizontal",
-        "showValue": "auto",
-        "stacking": "none",
-        "tooltip": { "mode": "single", "sort": "none" },
-        "xTickLabelRotation": 0
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true,
+        "valueMode": "color"
       },
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "sum by(eval_id)(omnia_eval_passed_total{agent=~\"$agent\", namespace=~\"$namespace\", eval_id=~\"$eval_id\"})",
-          "legendFormat": "Passed",
+          "expr": "avg by(__name__)(last_over_time({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"}[$__range]))",
+          "legendFormat": "{{__name__}}",
           "refId": "A"
-        },
-        {
-          "expr": "sum by(eval_id)(omnia_eval_failed_total{agent=~\"$agent\", namespace=~\"$namespace\", eval_id=~\"$eval_id\"})",
-          "legendFormat": "Failed",
-          "refId": "B"
         }
       ],
-      "title": "Pass vs Fail by Eval",
-      "type": "barchart"
+      "title": "Current Scores by Eval",
+      "type": "bargauge"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
@@ -347,44 +254,160 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "",
+            "axisLabel": "Score",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": { "legend": false, "tooltip": false, "viz": false },
-            "lineInterpolation": "linear",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 5,
             "scaleDistribution": { "type": "linear" },
             "showPoints": "auto",
-            "spanNulls": false,
+            "spanNulls": true,
             "stacking": { "group": "A", "mode": "none" },
             "thresholdsStyle": { "mode": "off" }
           },
           "mappings": [],
           "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
-          "unit": "s"
+          "unit": "short",
+          "min": 0,
+          "max": 1
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
-      "id": 9,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "id": 7,
       "options": {
-        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "single", "sort": "none" }
+        "legend": { "calcs": ["mean", "lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
       },
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by(le, eval_id)(rate(omnia_eval_duration_seconds_bucket{agent=~\"$agent\", namespace=~\"$namespace\", eval_id=~\"$eval_id\"}[$__rate_interval])))",
-          "legendFormat": "p95 {{eval_id}}",
+          "expr": "avg by(agent)({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"})",
+          "legendFormat": "{{agent}}",
           "refId": "A"
         }
       ],
-      "title": "Eval Duration (p95)",
+      "title": "Average Score by Agent",
       "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Score",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "id": 8,
+      "options": {
+        "legend": { "calcs": ["mean", "lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "expr": "avg by(promptpack_name)({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"})",
+          "legendFormat": "{{promptpack_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Average Score by PromptPack",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "color-text" },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 0.8 }
+            ]
+          },
+          "unit": "short",
+          "decimals": 3
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Time" },
+            "properties": [{ "id": "custom.hidden", "value": true }]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+      "id": 9,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "fields": "", "reducer": ["mean"], "show": true },
+        "showHeader": true,
+        "sortBy": [{ "desc": false, "displayName": "Value" }]
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "expr": "last_over_time({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\", agent=~\"$agent\", namespace=~\"$namespace\"}[$__range])",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "Eval Score Details",
+      "type": "table",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "instance": true, "job": true },
+            "renameByName": {
+              "__name__": "Eval",
+              "agent": "Agent",
+              "namespace": "Namespace",
+              "promptpack_name": "PromptPack",
+              "Value": "Score"
+            }
+          }
+        }
+      ]
     }
   ],
   "refresh": "30s",
@@ -397,11 +420,11 @@
         "allValue": ".*",
         "current": { "selected": true, "text": "All", "value": "$__all" },
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "definition": "label_values(omnia_eval_executed_total, agent)",
+        "definition": "label_values({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\"}, agent)",
         "includeAll": true,
         "multi": true,
         "name": "agent",
-        "query": { "query": "label_values(omnia_eval_executed_total, agent)", "refId": "agent" },
+        "query": { "query": "label_values({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\"}, agent)", "refId": "agent" },
         "refresh": 2,
         "regex": "",
         "sort": 1,
@@ -411,25 +434,11 @@
         "allValue": ".*",
         "current": { "selected": true, "text": "All", "value": "$__all" },
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "definition": "label_values(omnia_eval_executed_total, namespace)",
+        "definition": "label_values({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\"}, namespace)",
         "includeAll": true,
         "multi": true,
         "name": "namespace",
-        "query": { "query": "label_values(omnia_eval_executed_total, namespace)", "refId": "namespace" },
-        "refresh": 2,
-        "regex": "",
-        "sort": 1,
-        "type": "query"
-      },
-      {
-        "allValue": ".*",
-        "current": { "selected": true, "text": "All", "value": "$__all" },
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "definition": "label_values(omnia_eval_executed_total, eval_id)",
-        "includeAll": true,
-        "multi": true,
-        "name": "eval_id",
-        "query": { "query": "label_values(omnia_eval_executed_total, eval_id)", "refId": "eval_id" },
+        "query": { "query": "label_values({__name__=~\"omnia_eval_.*\", __name__!~\"omnia_eval_worker_.*\"}, namespace)", "refId": "namespace" },
         "refresh": 2,
         "regex": "",
         "sort": 1,
@@ -442,5 +451,5 @@
   "timezone": "browser",
   "title": "Omnia - Eval Quality",
   "uid": "omnia-quality",
-  "version": 1
+  "version": 2
 }
