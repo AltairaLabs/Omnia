@@ -12,11 +12,16 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
+	"github.com/AltairaLabs/PromptKit/runtime/events"
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+
+	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 )
 
 func TestApplyToolOverrides(t *testing.T) {
@@ -479,6 +484,118 @@ spec:
 		// Just verify it doesn't error with verbose mode
 		err := applyToolOverrides(testLog(), cfg, overrides)
 		require.NoError(t, err)
+	})
+}
+
+func TestToItemResult_CopiesSessionID(t *testing.T) {
+	t.Run("copies session ID when present", func(t *testing.T) {
+		result := &ExecutionResult{
+			Status:     statusPass,
+			DurationMs: 1234.5,
+			Metrics:    map[string]float64{"tokens": 100},
+			SessionID:  "abc-123-def",
+		}
+		ir := toItemResult(result)
+		assert.Equal(t, "abc-123-def", ir.SessionID)
+		assert.Equal(t, statusPass, ir.Status)
+		assert.Equal(t, 1234.5, ir.DurationMs)
+	})
+
+	t.Run("empty session ID when not set", func(t *testing.T) {
+		result := &ExecutionResult{
+			Status:     statusFail,
+			DurationMs: 500,
+			Error:      "something failed",
+		}
+		ir := toItemResult(result)
+		assert.Empty(t, ir.SessionID)
+		assert.Equal(t, statusFail, ir.Status)
+		assert.Equal(t, "something failed", ir.Error)
+	})
+
+	t.Run("copies assertions alongside session ID", func(t *testing.T) {
+		result := &ExecutionResult{
+			Status:    statusPass,
+			SessionID: "session-456",
+			Assertions: []AssertionResult{
+				{Name: "a1", Passed: true, Message: "ok"},
+				{Name: "a2", Passed: false, Message: "failed"},
+			},
+		}
+		ir := toItemResult(result)
+		assert.Equal(t, "session-456", ir.SessionID)
+		require.Len(t, ir.Assertions, 2)
+		assert.Equal(t, "a1", ir.Assertions[0].Name)
+		assert.True(t, ir.Assertions[0].Passed)
+		assert.Equal(t, "a2", ir.Assertions[1].Name)
+		assert.False(t, ir.Assertions[1].Passed)
+	})
+}
+
+func TestExtractTrialIndex(t *testing.T) {
+	t.Run("extracts trial index from config", func(t *testing.T) {
+		item := &queue.WorkItem{
+			Config: []byte(`{"trialIndex": 2, "totalTrials": 5}`),
+		}
+		assert.Equal(t, "2", extractTrialIndex(item))
+	})
+
+	t.Run("returns empty for nil config", func(t *testing.T) {
+		item := &queue.WorkItem{}
+		assert.Empty(t, extractTrialIndex(item))
+	})
+
+	t.Run("returns empty for empty config", func(t *testing.T) {
+		item := &queue.WorkItem{Config: []byte{}}
+		assert.Empty(t, extractTrialIndex(item))
+	})
+
+	t.Run("returns empty when trialIndex not present", func(t *testing.T) {
+		item := &queue.WorkItem{
+			Config: []byte(`{"totalTrials": 5}`),
+		}
+		assert.Empty(t, extractTrialIndex(item))
+	})
+
+	t.Run("returns empty for invalid JSON", func(t *testing.T) {
+		item := &queue.WorkItem{
+			Config: []byte(`not json`),
+		}
+		assert.Empty(t, extractTrialIndex(item))
+	})
+
+	t.Run("handles zero trial index", func(t *testing.T) {
+		item := &queue.WorkItem{
+			Config: []byte(`{"trialIndex": 0}`),
+		}
+		assert.Equal(t, "0", extractTrialIndex(item))
+	})
+}
+
+func TestExtractSessionID(t *testing.T) {
+	t.Run("returns empty when no sources available", func(t *testing.T) {
+		assert.Empty(t, extractSessionID(nil, nil, nil))
+	})
+
+	t.Run("returns session ID from session manager", func(t *testing.T) {
+		store := newMockStore()
+		mgr := newArenaSessionManager(store, logr.Discard(), arenaSessionMetadata{
+			JobName:   "test-job",
+			Namespace: "default",
+		})
+
+		// Create a session via event
+		mgr.OnEvent(&events.Event{
+			Type:      events.EventProviderCallCompleted,
+			SessionID: "run-001",
+			Timestamp: time.Now(),
+			Data:      &events.ProviderCallCompletedData{Provider: "openai"},
+		})
+		time.Sleep(50 * time.Millisecond)
+
+		sid := extractSessionID(mgr, nil, nil)
+		assert.NotEmpty(t, sid)
+		assert.Equal(t, runIDToUUID("run-001"), sid)
 	})
 }
 

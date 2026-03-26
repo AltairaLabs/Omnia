@@ -364,6 +364,122 @@ func TestArenaSessionManager_OnEvent_CreateSessionError(t *testing.T) {
 	assert.Empty(t, store.getCreatedSessions(), "no sessions created when store fails")
 }
 
+func TestArenaSessionManager_SessionIDs(t *testing.T) {
+	t.Run("returns empty for no sessions", func(t *testing.T) {
+		store := newMockStore()
+		mgr := newArenaSessionManager(store, logr.Discard(), arenaSessionMetadata{})
+		assert.Empty(t, mgr.SessionIDs())
+	})
+
+	t.Run("returns all created session IDs", func(t *testing.T) {
+		store := newMockStore()
+		mgr := newArenaSessionManager(store, logr.Discard(), arenaSessionMetadata{
+			JobName:   "test-job",
+			Namespace: "default",
+		})
+
+		mgr.OnEvent(&events.Event{
+			Type:      events.EventProviderCallCompleted,
+			SessionID: "run-a",
+			Timestamp: time.Now(),
+			Data:      &events.ProviderCallCompletedData{Provider: "openai"},
+		})
+		mgr.OnEvent(&events.Event{
+			Type:      events.EventProviderCallCompleted,
+			SessionID: "run-b",
+			Timestamp: time.Now(),
+			Data:      &events.ProviderCallCompletedData{Provider: "openai"},
+		})
+
+		time.Sleep(100 * time.Millisecond)
+
+		ids := mgr.SessionIDs()
+		assert.Len(t, ids, 2)
+		assert.Contains(t, ids, runIDToUUID("run-a"))
+		assert.Contains(t, ids, runIDToUUID("run-b"))
+	})
+}
+
+func TestArenaSessionManager_MetadataTags(t *testing.T) {
+	t.Run("includes arena job metadata in tags and initial state", func(t *testing.T) {
+		store := newMockStore()
+		mgr := newArenaSessionManager(store, logr.Discard(), arenaSessionMetadata{
+			JobName:       "my-arena-job",
+			Namespace:     "prod-ns",
+			WorkspaceName: "my-workspace",
+			Scenario:      "support-scenario",
+			ProviderID:    "gpt-4o",
+			JobType:       "arena",
+			TrialIndex:    "3",
+		})
+
+		mgr.OnEvent(&events.Event{
+			Type:      events.EventProviderCallCompleted,
+			SessionID: "run-meta",
+			Timestamp: time.Now(),
+			Data:      &events.ProviderCallCompletedData{Provider: "openai"},
+		})
+
+		time.Sleep(100 * time.Millisecond)
+
+		sessions := store.getCreatedSessions()
+		require.Len(t, sessions, 1)
+
+		s := sessions[0]
+
+		// Verify tags
+		assert.Contains(t, s.Tags, "source:arena")
+		assert.Contains(t, s.Tags, "arena-job:my-arena-job")
+		assert.Contains(t, s.Tags, "scenario:support-scenario")
+		assert.Contains(t, s.Tags, "provider:gpt-4o")
+		assert.Contains(t, s.Tags, "trial:3")
+
+		// Verify initial state includes new metadata keys
+		assert.Equal(t, "my-arena-job", s.InitialState["arena.job.name"])
+		assert.Equal(t, "prod-ns", s.InitialState["arena.job.namespace"])
+		assert.Equal(t, "support-scenario", s.InitialState["arena.scenario.id"])
+		assert.Equal(t, "gpt-4o", s.InitialState["arena.provider.id"])
+		assert.Equal(t, "3", s.InitialState["arena.trial.index"])
+
+		// Verify backward-compatible keys still present
+		assert.Equal(t, "my-arena-job", s.InitialState["arena.job"])
+		assert.Equal(t, "support-scenario", s.InitialState["arena.scenario"])
+		assert.Equal(t, "gpt-4o", s.InitialState["arena.provider"])
+		assert.Equal(t, "arena", s.InitialState["arena.type"])
+		assert.Equal(t, "run-meta", s.InitialState["arena.run_id"])
+	})
+
+	t.Run("omits trial tag and state when trial index is empty", func(t *testing.T) {
+		store := newMockStore()
+		mgr := newArenaSessionManager(store, logr.Discard(), arenaSessionMetadata{
+			JobName:    "job-no-trial",
+			Namespace:  "default",
+			Scenario:   "s1",
+			ProviderID: "p1",
+			JobType:    "arena",
+		})
+
+		mgr.OnEvent(&events.Event{
+			Type:      events.EventProviderCallCompleted,
+			SessionID: "run-no-trial",
+			Timestamp: time.Now(),
+			Data:      &events.ProviderCallCompletedData{Provider: "openai"},
+		})
+
+		time.Sleep(100 * time.Millisecond)
+
+		sessions := store.getCreatedSessions()
+		require.Len(t, sessions, 1)
+
+		s := sessions[0]
+		for _, tag := range s.Tags {
+			assert.NotContains(t, tag, "trial:")
+		}
+		_, hasTrial := s.InitialState["arena.trial.index"]
+		assert.False(t, hasTrial)
+	})
+}
+
 func TestArenaSessionManager_CompleteAll_UpdateError(t *testing.T) {
 	store := &mockSessionStore{
 		statusUpdates: make(map[string]session.SessionStatusUpdate),

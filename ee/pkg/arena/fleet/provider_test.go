@@ -747,3 +747,37 @@ func TestProvider_Predict_SendsOnlyLastUserMessage(t *testing.T) {
 	// Verify only the last user message was sent over the wire
 	assert.Equal(t, "second message", receivedContent)
 }
+
+func TestProvider_ConversationSessionIDs(t *testing.T) {
+	t.Run("empty when no conversations", func(t *testing.T) {
+		p := NewProvider("test", "ws://unused", nil)
+		ids := p.ConversationSessionIDs()
+		assert.Empty(t, ids)
+	})
+
+	t.Run("returns session IDs for pooled connections", func(t *testing.T) {
+		p := NewProvider("test", "ws://unused", nil)
+		// Manually populate conns map for testing
+		p.mu.Lock()
+		p.conns["conv-1"] = &connEntry{sessionID: "session-aaa"}
+		p.conns["conv-2"] = &connEntry{sessionID: "session-bbb"}
+		p.mu.Unlock()
+
+		ids := p.ConversationSessionIDs()
+		assert.Len(t, ids, 2)
+		assert.Equal(t, "session-aaa", ids["conv-1"])
+		assert.Equal(t, "session-bbb", ids["conv-2"])
+	})
+
+	t.Run("does not include fallback connection", func(t *testing.T) {
+		p := NewProvider("test", "ws://unused", nil)
+		p.mu.Lock()
+		p.fallback = &connEntry{sessionID: "fallback-session"}
+		p.conns["conv-1"] = &connEntry{sessionID: "session-ccc"}
+		p.mu.Unlock()
+
+		ids := p.ConversationSessionIDs()
+		assert.Len(t, ids, 1)
+		assert.Equal(t, "session-ccc", ids["conv-1"])
+	})
+}

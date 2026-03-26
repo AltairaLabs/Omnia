@@ -14,6 +14,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -143,6 +144,7 @@ type ExecutionResult struct {
 	Error      string             `json:"error,omitempty"`
 	Metrics    map[string]float64 `json:"metrics,omitempty"`
 	Assertions []AssertionResult  `json:"assertions,omitempty"`
+	SessionID  string             `json:"sessionId,omitempty"`
 }
 
 // AssertionResult represents a single assertion result.
@@ -466,6 +468,7 @@ func toItemResult(result *ExecutionResult) *queue.ItemResult {
 		Error:      result.Error,
 		Metrics:    result.Metrics,
 		Assertions: assertions,
+		SessionID:  result.SessionID,
 	}
 }
 
@@ -574,8 +577,9 @@ func executeWorkItem(
 
 	// Wire session recording if session-api is configured.
 	// Events from all engine runs are forwarded to session-api via OmniaEventStore.
+	var sessionMgr *arenaSessionManager
 	if cfg.SessionAPIURL != "" {
-		sessionMgr := newArenaSessionManager(
+		sessionMgr = newArenaSessionManager(
 			httpclient.NewStore(cfg.SessionAPIURL, log),
 			log,
 			arenaSessionMetadata{
@@ -585,6 +589,7 @@ func executeWorkItem(
 				Scenario:      item.ScenarioID,
 				ProviderID:    item.ProviderID,
 				JobType:       cfg.JobType,
+				TrialIndex:    extractTrialIndex(item),
 			},
 		)
 		bus := events.NewEventBus()
@@ -658,6 +663,9 @@ func executeWorkItem(
 	// so we read it directly from the provider after execution completes.
 	extractFleetTTFT(providerRegistry, crdFleetProviders, result)
 
+	// Extract session ID for job-to-session correlation.
+	result.SessionID = extractSessionID(sessionMgr, providerRegistry, crdFleetProviders)
+
 	return result, nil
 }
 
@@ -690,6 +698,57 @@ func extractFleetTTFT(
 			return // use the first non-zero value
 		}
 	}
+}
+
+// extractSessionID returns the first available session ID from the session manager
+// (direct providers) or fleet provider connections.
+func extractSessionID(
+	sessionMgr *arenaSessionManager,
+	registry *pkproviders.Registry,
+	fleetProviders []*resolvedFleetProvider,
+) string {
+	// Prefer session IDs from the session manager (direct providers with recording).
+	if sessionMgr != nil {
+		if ids := sessionMgr.SessionIDs(); len(ids) > 0 {
+			return ids[0]
+		}
+	}
+
+	// Fall back to fleet provider session IDs.
+	for _, fp := range fleetProviders {
+		prov, ok := registry.Get(fp.id)
+		if !ok {
+			continue
+		}
+		fleetProv, ok := prov.(*fleet.Provider)
+		if !ok {
+			continue
+		}
+		if sid := fleetProv.SessionID(); sid != "" {
+			return sid
+		}
+		for _, sid := range fleetProv.ConversationSessionIDs() {
+			if sid != "" {
+				return sid
+			}
+		}
+	}
+	return ""
+}
+
+// extractTrialIndex parses the trialIndex from a work item's Config JSON.
+func extractTrialIndex(item *queue.WorkItem) string {
+	if len(item.Config) == 0 {
+		return ""
+	}
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(item.Config, &cfg); err != nil {
+		return ""
+	}
+	if v, ok := cfg["trialIndex"]; ok {
+		return fmt.Sprintf("%v", v)
+	}
+	return ""
 }
 
 // findArenaConfigFile looks for the arena config file in the bundle directory.
