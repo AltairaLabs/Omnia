@@ -464,8 +464,11 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
                   SLO Thresholds
                 </p>
                 <div className="space-y-1">
-                  {spec.loadTest.thresholds.map((t, i) => (
-                    <p key={i} className="text-sm font-mono">
+                  {spec.loadTest.thresholds.map((t) => (
+                    <p
+                      key={`${t.metric}-${t.operator}-${t.value}`}
+                      className="text-sm font-mono"
+                    >
                       {t.metric} {t.operator} {t.value}
                     </p>
                   ))}
