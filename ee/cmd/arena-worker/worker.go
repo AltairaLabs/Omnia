@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -110,6 +111,10 @@ type Config struct {
 	ShutdownDelay time.Duration
 	Verbose       bool // Enable verbose/debug output from promptarena
 
+	// VU pool configuration
+	VUsPerWorker int // Number of virtual users (goroutines) per worker, default 1
+	Concurrency  int // Global concurrency limit (0 = unlimited)
+
 	// Override configurations (resolved from CRDs)
 	ToolOverrides map[string]ToolOverrideConfig // Tool name -> override config
 
@@ -164,6 +169,9 @@ func loadConfig() (*Config, error) {
 		Verbose:        os.Getenv("ARENA_VERBOSE") == "true",
 	}
 
+	cfg.VUsPerWorker = getIntEnvOrDefault("ARENA_VUS_PER_WORKER", 1)
+	cfg.Concurrency = getIntEnvOrDefault("ARENA_CONCURRENCY", 0)
+
 	if cfg.JobName == "" {
 		return nil, errors.New("ARENA_JOB_NAME is required")
 	}
@@ -177,6 +185,15 @@ func loadConfig() (*Config, error) {
 func getEnvOrDefault(key, defaultValue string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return defaultValue
+}
+
+func getIntEnvOrDefault(key string, defaultValue int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
 	}
 	return defaultValue
 }
@@ -211,8 +228,6 @@ func processWorkItems(
 	q queue.WorkQueue, bundlePath string, wm *WorkerMetrics,
 ) error {
 	jobID := cfg.JobName
-	emptyCount := 0
-	maxEmptyPolls := 10 // Exit after this many consecutive empty polls
 
 	// Derive a deterministic trace ID from the job name so traces are easy
 	// to look up in Tempo without searching by span attribute.
@@ -234,6 +249,35 @@ func processWorkItems(
 	)
 	defer rootSpan.End()
 
+	// Use VU pool for concurrent processing when configured.
+	if cfg.VUsPerWorker > 1 || cfg.Concurrency > 1 {
+		pool := NewVUPool(VUPoolConfig{
+			Size:         cfg.VUsPerWorker,
+			Concurrency:  cfg.Concurrency,
+			Queue:        q,
+			JobID:        jobID,
+			Log:          log,
+			Metrics:      wm,
+			PollInterval: cfg.PollInterval,
+			Execute: func(ctx context.Context, item *queue.WorkItem) (*ExecutionResult, error) {
+				return executeWorkItem(ctx, log, cfg, item, bundlePath)
+			},
+		})
+		return pool.Run(ctx)
+	}
+
+	// Single-VU mode: existing sequential loop (backward compatible).
+	return processSingleVU(ctx, log, cfg, q, jobID, bundlePath, wm)
+}
+
+// processSingleVU is the original single-threaded work item processing loop.
+func processSingleVU(
+	ctx context.Context, log logr.Logger, cfg *Config,
+	q queue.WorkQueue, jobID, bundlePath string, wm *WorkerMetrics,
+) error {
+	emptyCount := 0
+	maxEmptyPolls := 10
+
 	log.Info("processing work items", "jobID", jobID)
 
 	for {
@@ -241,7 +285,6 @@ func processWorkItems(
 			return nil
 		}
 
-		// Pop next work item
 		item, err := q.Pop(ctx, jobID)
 		if err != nil {
 			done, resetCount, retErr := handlePopError(ctx, log, err, emptyCount, maxEmptyPolls, cfg, q, jobID)
@@ -255,47 +298,49 @@ func processWorkItems(
 			continue
 		}
 
-		emptyCount = 0 // Reset on successful pop
-
+		emptyCount = 0
 		log.Info("work item popped",
 			"itemID", item.ID,
 			"scenarioID", item.ScenarioID,
 			"providerID", item.ProviderID,
 		)
 
-		// Execute with per-item timeout, wrapped in a trace span.
-		// The span covers the full lifecycle: execute → ack/nack so that
-		// Redis operations are correlated under the work-item span.
-		itemCtx, itemCancel := context.WithTimeout(ctx, maxItemTimeout)
-		itemCtx, span := otel.Tracer("omnia-arena-worker").Start(itemCtx, "arena.work-item",
-			trace.WithAttributes(
-				attribute.String("arena.job", jobID),
-				attribute.String("arena.scenario", item.ScenarioID),
-				attribute.String("arena.provider", item.ProviderID),
-			),
-		)
-		itemStart := time.Now()
-		result, execErr := executeWorkItem(itemCtx, log, cfg, item, bundlePath)
-		if execErr != nil {
-			span.RecordError(execErr)
-		}
-		itemCancel()
-		if itemCtx.Err() == context.DeadlineExceeded {
-			execErr = fmt.Errorf("work item timed out after %v", maxItemTimeout)
-		}
-		// Ack/Nack uses the root ctx (not the timed-out itemCtx) but carries
-		// the work-item span so Redis operations are children of this item.
-		ackCtx := trace.ContextWithSpan(ctx, span)
-		reportWorkItemResult(ackCtx, log, q, jobID, item, result, execErr)
-		span.End()
+		executeAndReport(ctx, log, cfg, q, jobID, item, bundlePath, wm)
+	}
+}
 
-		// Record work item metrics
-		itemDuration := time.Since(itemStart).Seconds()
-		if execErr != nil || (result != nil && result.Status == statusFail) {
-			wm.RecordWorkItem(jobID, statusFail, itemDuration)
-		} else {
-			wm.RecordWorkItem(jobID, statusPass, itemDuration)
-		}
+// executeAndReport runs a work item and reports the result via Ack/Nack.
+func executeAndReport(
+	ctx context.Context, log logr.Logger, cfg *Config,
+	q queue.WorkQueue, jobID string, item *queue.WorkItem,
+	bundlePath string, wm *WorkerMetrics,
+) {
+	itemCtx, itemCancel := context.WithTimeout(ctx, maxItemTimeout)
+	itemCtx, span := otel.Tracer("omnia-arena-worker").Start(itemCtx, "arena.work-item",
+		trace.WithAttributes(
+			attribute.String("arena.job", jobID),
+			attribute.String("arena.scenario", item.ScenarioID),
+			attribute.String("arena.provider", item.ProviderID),
+		),
+	)
+	itemStart := time.Now()
+	result, execErr := executeWorkItem(itemCtx, log, cfg, item, bundlePath)
+	if execErr != nil {
+		span.RecordError(execErr)
+	}
+	itemCancel()
+	if itemCtx.Err() == context.DeadlineExceeded {
+		execErr = fmt.Errorf("work item timed out after %v", maxItemTimeout)
+	}
+	ackCtx := trace.ContextWithSpan(ctx, span)
+	reportWorkItemResult(ackCtx, log, q, jobID, item, result, execErr)
+	span.End()
+
+	itemDuration := time.Since(itemStart).Seconds()
+	if execErr != nil || (result != nil && result.Status == statusFail) {
+		wm.RecordWorkItem(jobID, statusFail, itemDuration)
+	} else {
+		wm.RecordWorkItem(jobID, statusPass, itemDuration)
 	}
 }
 

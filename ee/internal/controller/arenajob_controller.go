@@ -685,6 +685,17 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		})
 	}
 
+	// Add VU pool configuration from loadTest settings
+	if arenaJob.Spec.LoadTest != nil {
+		env = append(env, corev1.EnvVar{
+			Name:  "ARENA_VUS_PER_WORKER",
+			Value: fmt.Sprintf("%d", arenaJob.Spec.LoadTest.VUsPerWorker),
+		}, corev1.EnvVar{
+			Name:  "ARENA_CONCURRENCY",
+			Value: fmt.Sprintf("%d", arenaJob.Spec.LoadTest.Concurrency),
+		})
+	}
+
 	// Inject SESSION_API_URL for session recording if configured
 	if r.SessionAPIURL != "" {
 		env = append(env, corev1.EnvVar{
