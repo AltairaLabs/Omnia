@@ -328,6 +328,35 @@ func TestExtractTokensAndCost(t *testing.T) {
 	assertFloat64(t, "TotalCost", stats.TotalCost, 0.15)
 }
 
+func TestExtractTokensSeparateInputOutput(t *testing.T) {
+	q := NewMemoryQueueWithDefaults()
+	ctx := context.Background()
+
+	items := []WorkItem{
+		{ID: "item-1", ScenarioID: "scen-a", ProviderID: "prov-x"},
+	}
+	mustPush(t, q, ctx, items)
+	mustPop(t, q, ctx)
+
+	// Worker writes separate input/output token keys (no "totalTokens" key).
+	result := &ItemResult{
+		Status:     "pass",
+		DurationMs: 100,
+		Metrics:    map[string]float64{"totalInputTokens": 500, "totalOutputTokens": 200},
+	}
+	if err := q.CompleteItem(ctx, completeTestJobID, "item-1", result); err != nil {
+		t.Fatalf("CompleteItem() error = %v", err)
+	}
+
+	stats, err := q.GetStats(ctx, completeTestJobID)
+	if err != nil {
+		t.Fatalf("GetStats() error = %v", err)
+	}
+
+	// Should sum input + output tokens.
+	assertInt64(t, "TotalTokens", stats.TotalTokens, 700)
+}
+
 func TestFailItemScenarioAndProviderStats(t *testing.T) {
 	q := NewMemoryQueueWithDefaults()
 	ctx := context.Background()
