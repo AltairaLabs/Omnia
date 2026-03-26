@@ -442,7 +442,36 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
                   {spec.loadTest.ramp?.up ?? "-"}
                 </p>
               </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Ramp Down</p>
+                <p className="mt-1 font-medium">
+                  {spec.loadTest.ramp?.down ?? "-"}
+                </p>
+              </div>
+              {spec.loadTest.budgetLimit && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Budget Limit</p>
+                  <p className="mt-1 font-medium">
+                    {spec.loadTest.budgetLimit}{" "}
+                    {spec.loadTest.budgetCurrency ?? "USD"}
+                  </p>
+                </div>
+              )}
             </div>
+            {spec.loadTest.thresholds && spec.loadTest.thresholds.length > 0 && (
+              <div className="mt-4">
+                <p className="text-sm text-muted-foreground mb-2">
+                  SLO Thresholds
+                </p>
+                <div className="space-y-1">
+                  {spec.loadTest.thresholds.map((t, i) => (
+                    <p key={i} className="text-sm font-mono">
+                      {t.metric} {t.operator} {t.value}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

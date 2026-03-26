@@ -124,9 +124,33 @@ type ProviderRateLimit struct {
 // +kubebuilder:validation:Enum=latency_avg;latency_p50;latency_p90;latency_p95;latency_p99;ttft_avg;ttft_p50;ttft_p90;ttft_p95;ttft_p99;error_rate;pass_rate;total_cost;rate_limit_rate
 type LoadThresholdMetric string
 
+const (
+	LoadThresholdMetricLatencyAvg LoadThresholdMetric = "latency_avg"
+	LoadThresholdMetricLatencyP50 LoadThresholdMetric = "latency_p50"
+	LoadThresholdMetricLatencyP90 LoadThresholdMetric = "latency_p90"
+	LoadThresholdMetricLatencyP95 LoadThresholdMetric = "latency_p95"
+	LoadThresholdMetricLatencyP99 LoadThresholdMetric = "latency_p99"
+	LoadThresholdMetricTTFTAvg    LoadThresholdMetric = "ttft_avg"
+	LoadThresholdMetricTTFTP50    LoadThresholdMetric = "ttft_p50"
+	LoadThresholdMetricTTFTP90    LoadThresholdMetric = "ttft_p90"
+	LoadThresholdMetricTTFTP95    LoadThresholdMetric = "ttft_p95"
+	LoadThresholdMetricTTFTP99    LoadThresholdMetric = "ttft_p99"
+	LoadThresholdMetricErrorRate  LoadThresholdMetric = "error_rate"
+	LoadThresholdMetricPassRate   LoadThresholdMetric = "pass_rate"
+	LoadThresholdMetricTotalCost  LoadThresholdMetric = "total_cost"
+	LoadThresholdMetricRateLimit  LoadThresholdMetric = "rate_limit_rate"
+)
+
 // LoadThresholdOperator defines the allowed comparison operators for thresholds.
 // +kubebuilder:validation:Enum="<";">";"<=";">="
 type LoadThresholdOperator string
+
+const (
+	LoadThresholdOperatorLT  LoadThresholdOperator = "<"
+	LoadThresholdOperatorGT  LoadThresholdOperator = ">"
+	LoadThresholdOperatorLTE LoadThresholdOperator = "<="
+	LoadThresholdOperatorGTE LoadThresholdOperator = ">="
+)
 
 // LoadThreshold defines a single SLO threshold for load test pass/fail evaluation.
 type LoadThreshold struct {
