@@ -117,63 +117,6 @@ func TestJobProgressIsComplete(t *testing.T) {
 	}
 }
 
-func TestJobProgressSuccessRate(t *testing.T) {
-	tests := []struct {
-		name     string
-		progress JobProgress
-		want     float64
-	}{
-		{
-			name: "all successful",
-			progress: JobProgress{
-				Completed: 10,
-				Failed:    0,
-			},
-			want: 100.0,
-		},
-		{
-			name: "all failed",
-			progress: JobProgress{
-				Completed: 0,
-				Failed:    10,
-			},
-			want: 0.0,
-		},
-		{
-			name: "50% success",
-			progress: JobProgress{
-				Completed: 5,
-				Failed:    5,
-			},
-			want: 50.0,
-		},
-		{
-			name: "no finished items",
-			progress: JobProgress{
-				Completed: 0,
-				Failed:    0,
-			},
-			want: 0.0,
-		},
-		{
-			name: "80% success",
-			progress: JobProgress{
-				Completed: 8,
-				Failed:    2,
-			},
-			want: 80.0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.progress.SuccessRate(); got != tt.want {
-				t.Errorf("SuccessRate() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestDefaultOptions(t *testing.T) {
 	opts := DefaultOptions()
 

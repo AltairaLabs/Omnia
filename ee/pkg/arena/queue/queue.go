@@ -127,15 +127,6 @@ func (p *JobProgress) IsComplete() bool {
 	return p.Pending == 0 && p.Processing == 0
 }
 
-// SuccessRate returns the success rate as a percentage (0-100).
-func (p *JobProgress) SuccessRate() float64 {
-	finished := p.Completed + p.Failed
-	if finished == 0 {
-		return 0
-	}
-	return float64(p.Completed) / float64(finished) * 100
-}
-
 // WorkQueue defines the interface for distributing work items to Arena workers.
 type WorkQueue interface {
 	// Push adds work items to the queue for the specified job.

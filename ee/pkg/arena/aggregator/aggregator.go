@@ -32,6 +32,81 @@ func New(q queue.WorkQueue) *Aggregator {
 	}
 }
 
+// StatsToResult converts queue.JobStats (O(1) accumulators) to an AggregatedResult.
+// This avoids loading individual work items and is the preferred path for summary
+// data. It does not include error details or assertion breakdowns — use Aggregate()
+// when those are needed.
+func StatsToResult(stats *queue.JobStats) *AggregatedResult {
+	if stats == nil {
+		return &AggregatedResult{}
+	}
+
+	totalDuration := time.Duration(stats.TotalDurationMs * float64(time.Millisecond))
+	total := stats.Passed + stats.Failed
+
+	result := &AggregatedResult{
+		TotalItems:    int(total),
+		PassedItems:   int(stats.Passed),
+		FailedItems:   int(stats.Failed),
+		TotalDuration: totalDuration,
+		TotalTokens:   stats.TotalTokens,
+		TotalCost:     stats.TotalCost,
+	}
+
+	if total > 0 {
+		result.PassRate = float64(stats.Passed) / float64(total) * 100
+		result.AvgDuration = totalDuration / time.Duration(total)
+	}
+
+	result.ByScenario = convertGroupStats(stats.ByScenario, func(name string, gs *queue.GroupStats) *ScenarioStats {
+		s := &ScenarioStats{
+			Total:         int(gs.Total),
+			Passed:        int(gs.Passed),
+			Failed:        int(gs.Failed),
+			TotalDuration: time.Duration(gs.TotalDurationMs * float64(time.Millisecond)),
+			TotalTokens:   gs.TotalTokens,
+			TotalCost:     gs.TotalCost,
+		}
+		if gs.Total > 0 {
+			s.PassRate = float64(gs.Passed) / float64(gs.Total) * 100
+			s.AvgDuration = s.TotalDuration / time.Duration(gs.Total)
+		}
+		return s
+	})
+
+	result.ByProvider = convertGroupStats(stats.ByProvider, func(name string, gs *queue.GroupStats) *ProviderStats {
+		p := &ProviderStats{
+			Total:         int(gs.Total),
+			Passed:        int(gs.Passed),
+			Failed:        int(gs.Failed),
+			TotalDuration: time.Duration(gs.TotalDurationMs * float64(time.Millisecond)),
+			TotalTokens:   gs.TotalTokens,
+			TotalCost:     gs.TotalCost,
+		}
+		if gs.Total > 0 {
+			p.PassRate = float64(gs.Passed) / float64(gs.Total) * 100
+			p.AvgDuration = p.TotalDuration / time.Duration(gs.Total)
+		}
+		return p
+	})
+
+	return result
+}
+
+// convertGroupStats converts a map of queue.GroupStats into a typed map using the given converter.
+func convertGroupStats[T any](
+	groups map[string]*queue.GroupStats, convert func(string, *queue.GroupStats) T,
+) map[string]T {
+	if len(groups) == 0 {
+		return nil
+	}
+	result := make(map[string]T, len(groups))
+	for name, gs := range groups {
+		result[name] = convert(name, gs)
+	}
+	return result
+}
+
 // Aggregate collects and summarizes results for a completed job.
 // It retrieves all completed and failed work items from the queue,
 // parses their results, and produces an aggregated summary.

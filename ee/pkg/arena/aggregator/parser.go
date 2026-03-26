@@ -12,7 +12,6 @@ package aggregator
 
 import (
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"time"
 
@@ -23,12 +22,6 @@ import (
 var (
 	// ErrNilWorkItem is returned when a nil work item is passed to a parser.
 	ErrNilWorkItem = errors.New("work item is nil")
-
-	// ErrEmptyResult is returned when the work item has no result data.
-	ErrEmptyResult = errors.New("work item has no result data")
-
-	// ErrInvalidFormat is returned when the result data cannot be parsed.
-	ErrInvalidFormat = errors.New("invalid result format")
 )
 
 // jsonResult represents the expected JSON structure from worker results.
@@ -178,153 +171,4 @@ func copyAssertions(result *ExecutionResult, assertions []struct {
 			Message: a.Message,
 		}
 	}
-}
-
-// JUnitTestSuites represents a collection of JUnit test suites.
-type JUnitTestSuites struct {
-	XMLName    xml.Name         `xml:"testsuites"`
-	TestSuites []JUnitTestSuite `xml:"testsuite"`
-}
-
-// JUnitTestSuite represents a single JUnit test suite.
-type JUnitTestSuite struct {
-	XMLName   xml.Name        `xml:"testsuite"`
-	Name      string          `xml:"name,attr"`
-	Tests     int             `xml:"tests,attr"`
-	Failures  int             `xml:"failures,attr"`
-	Errors    int             `xml:"errors,attr"`
-	Skipped   int             `xml:"skipped,attr"`
-	Time      float64         `xml:"time,attr"`
-	TestCases []JUnitTestCase `xml:"testcase"`
-}
-
-// JUnitTestCase represents a single JUnit test case.
-type JUnitTestCase struct {
-	XMLName   xml.Name      `xml:"testcase"`
-	Name      string        `xml:"name,attr"`
-	ClassName string        `xml:"classname,attr"`
-	Time      float64       `xml:"time,attr"`
-	Failure   *JUnitFailure `xml:"failure,omitempty"`
-	Error     *JUnitError   `xml:"error,omitempty"`
-	Skipped   *JUnitSkipped `xml:"skipped,omitempty"`
-}
-
-// JUnitFailure represents a test case failure.
-type JUnitFailure struct {
-	Message string `xml:"message,attr"`
-	Type    string `xml:"type,attr"`
-	Content string `xml:",chardata"`
-}
-
-// JUnitError represents a test case error.
-type JUnitError struct {
-	Message string `xml:"message,attr"`
-	Type    string `xml:"type,attr"`
-	Content string `xml:",chardata"`
-}
-
-// JUnitSkipped represents a skipped test case.
-type JUnitSkipped struct {
-	Message string `xml:"message,attr"`
-}
-
-// ParseJUnitXML parses JUnit XML format into an ExecutionResult.
-// This is useful when outputFormats includes "junit".
-func ParseJUnitXML(data []byte) (*ExecutionResult, error) {
-	if len(data) == 0 {
-		return nil, ErrEmptyResult
-	}
-
-	// Try parsing as test suites first
-	var suites JUnitTestSuites
-	if err := xml.Unmarshal(data, &suites); err == nil && len(suites.TestSuites) > 0 {
-		return parseJUnitSuites(&suites)
-	}
-
-	// Try parsing as single test suite
-	var suite JUnitTestSuite
-	if err := xml.Unmarshal(data, &suite); err == nil && suite.Tests > 0 {
-		return parseJUnitSuite(&suite)
-	}
-
-	return nil, ErrInvalidFormat
-}
-
-// parseJUnitSuites converts multiple test suites into an ExecutionResult.
-func parseJUnitSuites(suites *JUnitTestSuites) (*ExecutionResult, error) {
-	result := &ExecutionResult{
-		Metrics:    make(map[string]float64),
-		Assertions: []AssertionResult{},
-	}
-
-	var totalTests, totalFailures, totalErrors int
-	var totalTime float64
-
-	for _, suite := range suites.TestSuites {
-		totalTests += suite.Tests
-		totalFailures += suite.Failures
-		totalErrors += suite.Errors
-		totalTime += suite.Time
-
-		for _, tc := range suite.TestCases {
-			assertion := AssertionResult{
-				Name:   tc.ClassName + "." + tc.Name,
-				Passed: tc.Failure == nil && tc.Error == nil,
-			}
-			if tc.Failure != nil {
-				assertion.Message = tc.Failure.Message
-			} else if tc.Error != nil {
-				assertion.Message = tc.Error.Message
-			}
-			result.Assertions = append(result.Assertions, assertion)
-		}
-	}
-
-	if totalFailures > 0 || totalErrors > 0 {
-		result.Status = StatusFail
-	} else {
-		result.Status = StatusPass
-	}
-
-	result.Duration = time.Duration(totalTime * float64(time.Second))
-	result.Metrics["tests"] = float64(totalTests)
-	result.Metrics["failures"] = float64(totalFailures)
-	result.Metrics["errors"] = float64(totalErrors)
-
-	return result, nil
-}
-
-// parseJUnitSuite converts a single test suite into an ExecutionResult.
-func parseJUnitSuite(suite *JUnitTestSuite) (*ExecutionResult, error) {
-	result := &ExecutionResult{
-		Metrics:    make(map[string]float64),
-		Assertions: make([]AssertionResult, 0, len(suite.TestCases)),
-	}
-
-	for _, tc := range suite.TestCases {
-		assertion := AssertionResult{
-			Name:   tc.ClassName + "." + tc.Name,
-			Passed: tc.Failure == nil && tc.Error == nil,
-		}
-		if tc.Failure != nil {
-			assertion.Message = tc.Failure.Message
-		} else if tc.Error != nil {
-			assertion.Message = tc.Error.Message
-		}
-		result.Assertions = append(result.Assertions, assertion)
-	}
-
-	if suite.Failures > 0 || suite.Errors > 0 {
-		result.Status = StatusFail
-	} else {
-		result.Status = StatusPass
-	}
-
-	result.Duration = time.Duration(suite.Time * float64(time.Second))
-	result.Metrics["tests"] = float64(suite.Tests)
-	result.Metrics["failures"] = float64(suite.Failures)
-	result.Metrics["errors"] = float64(suite.Errors)
-	result.Metrics["skipped"] = float64(suite.Skipped)
-
-	return result, nil
 }

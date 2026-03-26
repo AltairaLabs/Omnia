@@ -498,6 +498,118 @@ func TestAggregator_Aggregate_JobNotFound(t *testing.T) {
 	}
 }
 
+func TestStatsToResult_Nil(t *testing.T) {
+	result := StatsToResult(nil)
+	if result == nil {
+		t.Fatal("StatsToResult(nil) returned nil")
+	}
+	if result.TotalItems != 0 {
+		t.Errorf("TotalItems = %d, want 0", result.TotalItems)
+	}
+}
+
+func TestStatsToResult_Basic(t *testing.T) {
+	stats := &queue.JobStats{
+		Total:           100,
+		Passed:          85,
+		Failed:          15,
+		TotalDurationMs: 50000, // 50s total
+		TotalTokens:     25000,
+		TotalCost:       1.50,
+	}
+
+	result := StatsToResult(stats)
+
+	if result.TotalItems != 100 {
+		t.Errorf("TotalItems = %d, want 100", result.TotalItems)
+	}
+	if result.PassedItems != 85 {
+		t.Errorf("PassedItems = %d, want 85", result.PassedItems)
+	}
+	if result.FailedItems != 15 {
+		t.Errorf("FailedItems = %d, want 15", result.FailedItems)
+	}
+	if result.PassRate != 85 {
+		t.Errorf("PassRate = %f, want 85", result.PassRate)
+	}
+	if result.TotalDuration != 50*time.Second {
+		t.Errorf("TotalDuration = %v, want 50s", result.TotalDuration)
+	}
+	if result.AvgDuration != 500*time.Millisecond {
+		t.Errorf("AvgDuration = %v, want 500ms", result.AvgDuration)
+	}
+	if result.TotalTokens != 25000 {
+		t.Errorf("TotalTokens = %d, want 25000", result.TotalTokens)
+	}
+	if result.TotalCost != 1.50 {
+		t.Errorf("TotalCost = %f, want 1.50", result.TotalCost)
+	}
+}
+
+func TestStatsToResult_WithGroups(t *testing.T) {
+	stats := &queue.JobStats{
+		Total:           4,
+		Passed:          3,
+		Failed:          1,
+		TotalDurationMs: 4000,
+		ByScenario: map[string]*queue.GroupStats{
+			"greeting": {Total: 2, Passed: 2, Failed: 0, TotalDurationMs: 2000, TotalTokens: 100},
+			"billing":  {Total: 2, Passed: 1, Failed: 1, TotalDurationMs: 2000, TotalCost: 0.05},
+		},
+		ByProvider: map[string]*queue.GroupStats{
+			"openai":    {Total: 2, Passed: 2, Failed: 0, TotalDurationMs: 1500},
+			"anthropic": {Total: 2, Passed: 1, Failed: 1, TotalDurationMs: 2500},
+		},
+	}
+
+	result := StatsToResult(stats)
+
+	if len(result.ByScenario) != 2 {
+		t.Fatalf("ByScenario count = %d, want 2", len(result.ByScenario))
+	}
+	greeting := result.ByScenario["greeting"]
+	if greeting.Total != 2 || greeting.Passed != 2 || greeting.PassRate != 100 {
+		t.Errorf("greeting stats = %+v", greeting)
+	}
+	if greeting.TotalTokens != 100 {
+		t.Errorf("greeting TotalTokens = %d, want 100", greeting.TotalTokens)
+	}
+
+	billing := result.ByScenario["billing"]
+	if billing.Total != 2 || billing.Passed != 1 || billing.Failed != 1 || billing.PassRate != 50 {
+		t.Errorf("billing stats = %+v", billing)
+	}
+
+	if len(result.ByProvider) != 2 {
+		t.Fatalf("ByProvider count = %d, want 2", len(result.ByProvider))
+	}
+	openai := result.ByProvider["openai"]
+	if openai.Total != 2 || openai.PassRate != 100 {
+		t.Errorf("openai stats = %+v", openai)
+	}
+	anthropic := result.ByProvider["anthropic"]
+	if anthropic.Total != 2 || anthropic.PassRate != 50 {
+		t.Errorf("anthropic stats = %+v", anthropic)
+	}
+}
+
+func TestStatsToResult_ZeroItems(t *testing.T) {
+	stats := &queue.JobStats{}
+	result := StatsToResult(stats)
+	if result.TotalItems != 0 {
+		t.Errorf("TotalItems = %d, want 0", result.TotalItems)
+	}
+	if result.PassRate != 0 {
+		t.Errorf("PassRate = %f, want 0", result.PassRate)
+	}
+	if result.ByScenario != nil {
+		t.Error("ByScenario should be nil for empty stats")
+	}
+	if result.ByProvider != nil {
+		t.Error("ByProvider should be nil for empty stats")
+	}
+}
+
 // testError is a simple error type for testing
 type testError struct {
 	msg string

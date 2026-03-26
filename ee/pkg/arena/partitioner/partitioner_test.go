@@ -13,8 +13,6 @@ package partitioner
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 )
 
 func TestPartition(t *testing.T) {
@@ -344,110 +342,6 @@ func TestFilter(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestEstimateWorkItems(t *testing.T) {
-	tests := []struct {
-		scenarios int
-		providers int
-		trials    int
-		want      int
-	}{
-		{10, 5, 1, 50},
-		{1, 1, 1, 1},
-		{100, 10, 1, 1000},
-		{0, 5, 1, 0},
-		{5, 0, 1, 0},
-		{10, 5, 3, 150},
-		{2, 2, 0, 4},  // trials < 1 defaults to 1
-		{2, 2, -1, 4}, // negative trials defaults to 1
-	}
-
-	for _, tt := range tests {
-		got := EstimateWorkItems(tt.scenarios, tt.providers, tt.trials)
-		if got != tt.want {
-			t.Errorf("EstimateWorkItems(%d, %d, %d) = %d, want %d",
-				tt.scenarios, tt.providers, tt.trials, got, tt.want)
-		}
-	}
-}
-
-func TestBatch(t *testing.T) {
-	// Create 10 work items
-	items := make([]queue.WorkItem, 10)
-	for i := range items {
-		items[i].ID = string(rune('A' + i))
-	}
-
-	tests := []struct {
-		name      string
-		batchSize int
-		wantCount int
-		wantSizes []int
-	}{
-		{
-			name:      "batch of 3",
-			batchSize: 3,
-			wantCount: 4,
-			wantSizes: []int{3, 3, 3, 1},
-		},
-		{
-			name:      "batch of 5",
-			batchSize: 5,
-			wantCount: 2,
-			wantSizes: []int{5, 5},
-		},
-		{
-			name:      "batch larger than items",
-			batchSize: 20,
-			wantCount: 1,
-			wantSizes: []int{10},
-		},
-		{
-			name:      "batch of 1",
-			batchSize: 1,
-			wantCount: 10,
-			wantSizes: []int{1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
-		},
-		{
-			name:      "zero batch size returns all",
-			batchSize: 0,
-			wantCount: 1,
-			wantSizes: []int{10},
-		},
-		{
-			name:      "negative batch size returns all",
-			batchSize: -1,
-			wantCount: 1,
-			wantSizes: []int{10},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			batches := Batch(items, tt.batchSize)
-
-			if len(batches) != tt.wantCount {
-				t.Errorf("len(batches) = %d, want %d", len(batches), tt.wantCount)
-				return
-			}
-
-			for i, batch := range batches {
-				if len(batch) != tt.wantSizes[i] {
-					t.Errorf("len(batches[%d]) = %d, want %d", i, len(batch), tt.wantSizes[i])
-				}
-			}
-		})
-	}
-}
-
-func TestBatchEmpty(t *testing.T) {
-	var items []queue.WorkItem
-	batches := Batch(items, 5)
-
-	if len(batches) != 0 {
-		t.Errorf("len(batches) = %d, want 0 for empty input", len(batches))
 	}
 }
 
