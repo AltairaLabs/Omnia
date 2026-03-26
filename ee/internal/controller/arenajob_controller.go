@@ -38,6 +38,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/arena/partitioner"
 	"github.com/altairalabs/omnia/ee/pkg/arena/providers"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
+	"github.com/altairalabs/omnia/ee/pkg/arena/threshold"
 	"github.com/altairalabs/omnia/ee/pkg/license"
 	"github.com/altairalabs/omnia/ee/pkg/workspace"
 )
@@ -1265,6 +1266,11 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 					log.V(1).Info("aggregator not available, skipping result aggregation")
 				}
 
+				// Evaluate SLO thresholds for load tests
+				if r.evaluateLoadTestThresholds(ctx, arenaJob) {
+					hasTestFailures = true
+				}
+
 				// Set phase based on aggregated test results, not just K8s job completion
 				if hasTestFailures {
 					arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseFailed
@@ -1329,6 +1335,60 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 		SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeProgressing, metav1.ConditionTrue,
 			"JobRunning", fmt.Sprintf("Job running: %d/%d completed", job.Status.Succeeded, completions))
 	}
+}
+
+// evaluateLoadTestThresholds checks SLO thresholds for load test jobs.
+// Returns true if any threshold was violated.
+func (r *ArenaJobReconciler) evaluateLoadTestThresholds(
+	ctx context.Context, arenaJob *omniav1alpha1.ArenaJob,
+) bool {
+	log := logf.FromContext(ctx)
+
+	if arenaJob.Spec.LoadTest == nil || len(arenaJob.Spec.LoadTest.Thresholds) == 0 {
+		return false
+	}
+	if r.Queue == nil {
+		log.V(1).Info("queue not available, skipping threshold evaluation")
+		return false
+	}
+
+	stats, err := r.Queue.GetStats(ctx, arenaJob.Name)
+	if err != nil {
+		log.Error(err, "threshold evaluation failed to get stats")
+		return false
+	}
+
+	results, allPassed := threshold.Evaluate(arenaJob.Spec.LoadTest.Thresholds, stats)
+	r.writeThresholdResults(arenaJob, results)
+
+	if !allPassed {
+		log.Info("SLO thresholds violated",
+			"summary", threshold.SummaryLine(results))
+	} else {
+		log.V(1).Info("SLO thresholds passed",
+			"summary", threshold.SummaryLine(results))
+	}
+
+	return !allPassed
+}
+
+// writeThresholdResults adds threshold evaluation results to the job status summary.
+func (r *ArenaJobReconciler) writeThresholdResults(
+	arenaJob *omniav1alpha1.ArenaJob, results []threshold.Result,
+) {
+	if arenaJob.Status.Result == nil {
+		arenaJob.Status.Result = &omniav1alpha1.JobResult{}
+	}
+	if arenaJob.Status.Result.Summary == nil {
+		arenaJob.Status.Result.Summary = make(map[string]string)
+	}
+	summary := arenaJob.Status.Result.Summary
+
+	for _, r := range results {
+		key := "threshold:" + r.Metric
+		summary[key] = r.String()
+	}
+	summary["thresholds_passed"] = threshold.SummaryLine(results)
 }
 
 // handleValidationError handles errors during validation.
