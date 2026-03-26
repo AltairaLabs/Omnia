@@ -121,18 +121,31 @@ func sendMessage(conn Conn, sessionID, content string) error {
 	return conn.WriteMessage(websocket.TextMessage, data)
 }
 
+// TurnResult holds the outcome of a single turn, including TTFT measurement.
+type TurnResult struct {
+	Messages []Message
+	TTFT     time.Duration // Time to first token (zero if no messages received)
+}
+
 // collectTurnResponse reads server messages until a "done" message is received,
 // accumulating assistant text, tool calls, and tool results into the transcript.
 // When a tool_call is received, it immediately sends a rejection since arena fleet
 // clients don't execute client tools.
-func collectTurnResponse(ctx context.Context, conn Conn, sessionID string) ([]Message, error) {
-	var messages []Message
+// It also measures TTFT (time to first token) from the call start to the first message.
+func collectTurnResponse(ctx context.Context, conn Conn, sessionID string, turnStart time.Time) (*TurnResult, error) {
+	result := &TurnResult{}
 	var assistantText string
+	firstMessage := true
 
 	for {
 		msg, err := readServerMessage(ctx, conn)
 		if err != nil {
-			return messages, err
+			return result, err
+		}
+
+		if firstMessage {
+			result.TTFT = time.Since(turnStart)
+			firstMessage = false
 		}
 
 		switch msg.Type {
@@ -140,26 +153,26 @@ func collectTurnResponse(ctx context.Context, conn Conn, sessionID string) ([]Me
 			assistantText += msg.GetTextContent()
 
 		case facade.MessageTypeDone:
-			messages = appendDoneMessage(messages, &assistantText, msg)
-			return messages, nil
+			result.Messages = appendDoneMessage(result.Messages, &assistantText, msg)
+			return result, nil
 
 		case facade.MessageTypeToolCall:
-			messages = appendToolCallMessage(messages, msg)
+			result.Messages = appendToolCallMessage(result.Messages, msg)
 			if msg.ToolCall != nil {
 				if err := rejectToolCall(conn, sessionID, msg.ToolCall.ID); err != nil {
-					return messages, err
+					return result, err
 				}
 			}
 
 		case facade.MessageTypeToolResult:
-			messages = append(messages, Message{
+			result.Messages = append(result.Messages, Message{
 				Role:       "tool_result",
 				ToolResult: msg.ToolResult,
 				Timestamp:  msg.Timestamp,
 			})
 
 		case facade.MessageTypeError:
-			return messages, agentError(msg)
+			return result, agentError(msg)
 		}
 	}
 }

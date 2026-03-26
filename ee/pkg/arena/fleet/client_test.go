@@ -193,14 +193,84 @@ func TestCollectTurnResponse_RejectsToolCalls(t *testing.T) {
 	fb := p.fallback
 	require.NoError(t, sendMessage(fb.conn, fb.sessionID, "do something"))
 
-	msgs, err := collectTurnResponse(context.Background(), fb.conn, fb.sessionID)
+	turnResult, err := collectTurnResponse(context.Background(), fb.conn, fb.sessionID, time.Now())
 	require.NoError(t, err)
 
 	// Should have the tool_call in the transcript and the assistant done message
-	require.Len(t, msgs, 2)
-	assert.Equal(t, "tool_call", msgs[0].Role)
-	assert.Equal(t, "assistant", msgs[1].Role)
-	assert.Equal(t, "Tool was rejected", msgs[1].Content)
+	require.Len(t, turnResult.Messages, 2)
+	assert.Equal(t, "tool_call", turnResult.Messages[0].Role)
+	assert.Equal(t, "assistant", turnResult.Messages[1].Role)
+	assert.Equal(t, "Tool was rejected", turnResult.Messages[1].Content)
+}
+
+func TestCollectTurnResponse_MeasuresTTFT(t *testing.T) {
+	wsURL := testServer(t, func(conn *websocket.Conn) {
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeConnected,
+			SessionID: "sess-ttft",
+			Timestamp: time.Now(),
+		})
+
+		// Read user message
+		readClientMsg(t, conn)
+
+		// Add a small delay before sending the first chunk to make TTFT measurable
+		time.Sleep(20 * time.Millisecond)
+
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeChunk,
+			SessionID: "sess-ttft",
+			Content:   "Hello ",
+			Timestamp: time.Now(),
+		})
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeDone,
+			SessionID: "sess-ttft",
+			Content:   "world!",
+			Timestamp: time.Now(),
+		})
+	})
+
+	p := NewProvider("test-fleet", wsURL, nil)
+	require.NoError(t, p.Connect(context.Background()))
+	defer func() { _ = p.Close() }()
+
+	fb := p.fallback
+	require.NoError(t, sendMessage(fb.conn, fb.sessionID, "hi"))
+
+	turnResult, err := collectTurnResponse(context.Background(), fb.conn, fb.sessionID, time.Now())
+	require.NoError(t, err)
+
+	assert.True(t, turnResult.TTFT > 0, "TTFT should be positive")
+	assert.True(t, turnResult.TTFT >= 20*time.Millisecond, "TTFT should be at least 20ms (server delay)")
+	require.Len(t, turnResult.Messages, 1)
+	assert.Equal(t, "assistant", turnResult.Messages[0].Role)
+	assert.Equal(t, "Hello world!", turnResult.Messages[0].Content)
+}
+
+func TestCollectTurnResponse_TTFTZeroOnError(t *testing.T) {
+	wsURL := testServer(t, func(conn *websocket.Conn) {
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeConnected,
+			SessionID: "sess-ttft-err",
+			Timestamp: time.Now(),
+		})
+
+		// Read user message, then close connection to trigger error
+		readClientMsg(t, conn)
+		_ = conn.Close()
+	})
+
+	p := NewProvider("test-fleet", wsURL, nil)
+	require.NoError(t, p.Connect(context.Background()))
+	defer func() { _ = p.Close() }()
+
+	fb := p.fallback
+	require.NoError(t, sendMessage(fb.conn, fb.sessionID, "hi"))
+
+	turnResult, err := collectTurnResponse(context.Background(), fb.conn, fb.sessionID, time.Now())
+	require.Error(t, err)
+	assert.Equal(t, time.Duration(0), turnResult.TTFT, "TTFT should be zero when no messages received")
 }
 
 func TestConnect_WorksWithoutTraceContext(t *testing.T) {
