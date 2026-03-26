@@ -8,6 +8,19 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ---
 
+## 2026-03-26
+- **ArenaJob CRD** (Enterprise): Replaced `LoadTestSettings` and added `spec.trials` for load testing support (#661)
+  - **Added** `spec.trials` — number of times to repeat each scenario × provider combination
+  - **Replaced** `spec.loadTest` — old fields (`rampUp`, `duration`, `targetRPS`) replaced with scenario-driven model:
+    - `concurrency` — max in-flight work items globally
+    - `vusPerWorker` — concurrent goroutines per worker pod
+    - `ramp` — linear ramp-up/down configuration (`up`, `down` duration strings)
+    - `budgetLimit` / `budgetCurrency` — cost safety limit
+    - `rateLimits` — per-provider concurrency caps
+    - `thresholds` — SLO pass/fail gating (metric, operator, value)
+  - **Added** `RampConfig`, `ProviderRateLimit`, `LoadThreshold`, `LoadThresholdMetric`, `LoadThresholdOperator` types
+  - Old `LoadTestSettings` fields were never wired up, so this is a safe breaking change
+
 ## 2026-03-17
 - **ArenaJob CRD** (Enterprise): Replaced provider/tool override pipeline with CRD-based provider groups
   - **Added** `spec.providers` — map of group names to lists of `ArenaProviderEntry` (providerRef or agentRef)

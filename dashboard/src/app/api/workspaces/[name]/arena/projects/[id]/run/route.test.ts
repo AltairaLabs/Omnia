@@ -273,8 +273,8 @@ describe("POST /api/workspaces/[name]/arena/projects/[id]/run", () => {
         spec: expect.objectContaining({
           type: "loadtest",
           loadTest: expect.objectContaining({
-            rampUp: "30s",
-            duration: "1m",
+            concurrency: 1,
+            vusPerWorker: 1,
           }),
         }),
       })

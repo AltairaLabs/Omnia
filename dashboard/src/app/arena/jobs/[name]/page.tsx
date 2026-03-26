@@ -425,24 +425,56 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <div>
+                <p className="text-sm text-muted-foreground">Concurrency</p>
+                <p className="mt-1 font-medium">
+                  {spec.loadTest.concurrency ?? 1}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">VUs per Worker</p>
+                <p className="mt-1 font-medium">
+                  {spec.loadTest.vusPerWorker ?? 1}
+                </p>
+              </div>
+              <div>
                 <p className="text-sm text-muted-foreground">Ramp Up</p>
                 <p className="mt-1 font-medium">
-                  {spec.loadTest.rampUp ?? "30s"}
+                  {spec.loadTest.ramp?.up ?? "-"}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Duration</p>
+                <p className="text-sm text-muted-foreground">Ramp Down</p>
                 <p className="mt-1 font-medium">
-                  {spec.loadTest.duration ?? "-"}
+                  {spec.loadTest.ramp?.down ?? "-"}
                 </p>
               </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Target RPS</p>
-                <p className="mt-1 font-medium">
-                  {spec.loadTest.targetRPS ?? "-"}
-                </p>
-              </div>
+              {spec.loadTest.budgetLimit && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Budget Limit</p>
+                  <p className="mt-1 font-medium">
+                    {spec.loadTest.budgetLimit}{" "}
+                    {spec.loadTest.budgetCurrency ?? "USD"}
+                  </p>
+                </div>
+              )}
             </div>
+            {spec.loadTest.thresholds && spec.loadTest.thresholds.length > 0 && (
+              <div className="mt-4">
+                <p className="text-sm text-muted-foreground mb-2">
+                  SLO Thresholds
+                </p>
+                <div className="space-y-1">
+                  {spec.loadTest.thresholds.map((t) => (
+                    <p
+                      key={`${t.metric}-${t.operator}-${t.value}`}
+                      className="text-sm font-mono"
+                    >
+                      {t.metric} {t.operator} {t.value}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
