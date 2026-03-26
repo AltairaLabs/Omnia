@@ -279,14 +279,25 @@ type Options struct {
 	MaxRetries int
 }
 
-// extractTokens returns the token count from a metrics map,
-// checking both "totalTokens" and "tokens" keys.
+// extractTokens returns the token count from a metrics map.
+// Checks "totalTokens", "tokens", and the sum of "totalInputTokens" + "totalOutputTokens".
 func extractTokens(metrics map[string]float64) int64 {
 	if v, ok := metrics["totalTokens"]; ok {
 		return int64(v)
 	}
 	if v, ok := metrics["tokens"]; ok {
 		return int64(v)
+	}
+	// Sum input + output tokens if reported separately.
+	var total float64
+	if v, ok := metrics["totalInputTokens"]; ok {
+		total += v
+	}
+	if v, ok := metrics["totalOutputTokens"]; ok {
+		total += v
+	}
+	if total > 0 {
+		return int64(total)
 	}
 	return 0
 }
