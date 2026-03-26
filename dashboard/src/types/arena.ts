@@ -238,14 +238,68 @@ export interface EvaluationConfig {
   outputFormats?: ("json" | "junit" | "csv")[];
 }
 
+/** Allowed metric names for load test thresholds */
+export type LoadThresholdMetric =
+  | "latency_avg"
+  | "latency_p50"
+  | "latency_p90"
+  | "latency_p95"
+  | "latency_p99"
+  | "ttft_avg"
+  | "ttft_p50"
+  | "ttft_p90"
+  | "ttft_p95"
+  | "ttft_p99"
+  | "error_rate"
+  | "pass_rate"
+  | "total_cost"
+  | "rate_limit_rate";
+
+/** Comparison operators for load test thresholds */
+export type LoadThresholdOperator = "<" | ">" | "<=" | ">=";
+
+/** SLO threshold for load test pass/fail evaluation */
+export interface LoadThreshold {
+  /** Metric to evaluate */
+  metric: LoadThresholdMetric;
+  /** Comparison operator */
+  operator: LoadThresholdOperator;
+  /** Target value (duration string, float, or cost) */
+  value: string;
+}
+
+/** Per-provider concurrency limit */
+export interface ProviderRateLimit {
+  /** Provider or AgentRuntime CRD name */
+  provider: string;
+  /** Maximum in-flight work items for this provider */
+  maxConcurrency: number;
+}
+
+/** Ramp configuration for concurrency changes over time */
+export interface RampConfig {
+  /** Duration to ramp from 0 to target concurrency (e.g., "2m") */
+  up?: string;
+  /** Duration to ramp from target concurrency to 0 (e.g., "30s") */
+  down?: string;
+}
+
 /** Load test-specific configuration — matches LoadTestSettings in CRD */
 export interface LoadTestConfig {
-  /** Ramp-up duration to target concurrency (e.g., "30s") */
-  rampUp?: string;
-  /** Total duration of the load test (e.g., "5m") */
-  duration?: string;
-  /** Target requests per second */
-  targetRPS?: number;
+  /** Maximum in-flight work items across all workers */
+  concurrency?: number;
+  /** Number of virtual users (concurrent goroutines) per worker pod */
+  vusPerWorker?: number;
+  /** Linear concurrency ramp-up/down */
+  ramp?: RampConfig;
+  /** Maximum cost before the job is stopped */
+  budgetLimit?: string;
+  /** Currency for budgetLimit (default: "USD") */
+  budgetCurrency?: string;
+  /** Per-provider concurrency limits */
+  rateLimits?: ProviderRateLimit[];
+  /** SLO thresholds for pass/fail gating */
+  thresholds?: LoadThreshold[];
 }
 
 /** Data generation-specific configuration — matches DataGenSettings in CRD */
@@ -274,6 +328,8 @@ export interface ArenaJobSpec {
   arenaFile?: string;
   /** Job type */
   type: ArenaJobType;
+  /** Number of times to repeat each scenario × provider combination */
+  trials?: number;
   /** Scenario filtering - filters which scenarios to run from the arena file */
   scenarios?: ScenarioFilter;
   /** Provider groups - map of group names to provider groups (array or map mode) */

@@ -160,8 +160,8 @@ export const POST = withWorkspaceAccess<{ name: string; id: string }>(
         };
       } else if (body.type === "loadtest") {
         jobSpec.loadTest = {
-          rampUp: "30s",
-          duration: "1m",
+          concurrency: 1,
+          vusPerWorker: 1,
         };
       } else if (body.type === "datagen") {
         jobSpec.dataGen = {

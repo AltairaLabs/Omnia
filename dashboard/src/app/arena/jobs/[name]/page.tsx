@@ -425,21 +425,21 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <div>
+                <p className="text-sm text-muted-foreground">Concurrency</p>
+                <p className="mt-1 font-medium">
+                  {spec.loadTest.concurrency ?? 1}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">VUs per Worker</p>
+                <p className="mt-1 font-medium">
+                  {spec.loadTest.vusPerWorker ?? 1}
+                </p>
+              </div>
+              <div>
                 <p className="text-sm text-muted-foreground">Ramp Up</p>
                 <p className="mt-1 font-medium">
-                  {spec.loadTest.rampUp ?? "30s"}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Duration</p>
-                <p className="mt-1 font-medium">
-                  {spec.loadTest.duration ?? "-"}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Target RPS</p>
-                <p className="mt-1 font-medium">
-                  {spec.loadTest.targetRPS ?? "-"}
+                  {spec.loadTest.ramp?.up ?? "-"}
                 </p>
               </div>
             </div>

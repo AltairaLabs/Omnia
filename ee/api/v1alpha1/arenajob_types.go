@@ -54,22 +54,97 @@ type EvaluationSettings struct {
 
 // LoadTestSettings configures load testing settings.
 type LoadTestSettings struct {
-	// rampUp is the duration to ramp up to target concurrency.
-	// Format: duration string (e.g., "1m", "30s").
-	// +kubebuilder:default="30s"
-	// +optional
-	RampUp string `json:"rampUp,omitempty"`
-
-	// duration is the total duration of the load test.
-	// Format: duration string (e.g., "5m", "1h").
-	// +kubebuilder:default="5m"
-	// +optional
-	Duration string `json:"duration,omitempty"`
-
-	// targetRPS is the target requests per second.
+	// concurrency is the maximum number of work items in flight across all workers.
+	// Workers check the global in-flight count before popping new items.
 	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=1
 	// +optional
-	TargetRPS int32 `json:"targetRPS,omitempty"`
+	Concurrency int32 `json:"concurrency,omitempty"`
+
+	// vusPerWorker is the number of virtual users (concurrent goroutines) per worker pod.
+	// Each VU independently pops, executes, and reports work items.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=1
+	// +optional
+	VUsPerWorker int32 `json:"vusPerWorker,omitempty"`
+
+	// ramp configures linear concurrency ramp-up and ramp-down.
+	// +optional
+	Ramp *RampConfig `json:"ramp,omitempty"`
+
+	// budgetLimit is the maximum cost (in budgetCurrency) before the job is stopped.
+	// The controller checks the cost accumulator periodically and cancels
+	// remaining work if this limit is exceeded.
+	// +optional
+	BudgetLimit *string `json:"budgetLimit,omitempty"`
+
+	// budgetCurrency is the currency for budgetLimit (e.g., "USD").
+	// +kubebuilder:default="USD"
+	// +optional
+	BudgetCurrency string `json:"budgetCurrency,omitempty"`
+
+	// rateLimits configures per-provider concurrency limits.
+	// Prevents overwhelming a single provider even when global concurrency allows more.
+	// +optional
+	RateLimits []ProviderRateLimit `json:"rateLimits,omitempty"`
+
+	// thresholds define SLO targets evaluated after the load test completes.
+	// The job fails if any threshold is violated, enabling CI/CD gating.
+	// +optional
+	Thresholds []LoadThreshold `json:"thresholds,omitempty"`
+}
+
+// RampConfig controls how concurrency changes over the course of a load test.
+type RampConfig struct {
+	// up is the duration to linearly ramp from 0 to target concurrency at the start.
+	// Format: duration string (e.g., "2m", "30s").
+	// +optional
+	Up string `json:"up,omitempty"`
+
+	// down is the duration to linearly ramp from target concurrency to 0 at the end.
+	// Ramp-down is triggered when remaining pending items falls below concurrency × 2.
+	// Format: duration string (e.g., "30s").
+	// +optional
+	Down string `json:"down,omitempty"`
+}
+
+// ProviderRateLimit sets a concurrency ceiling for a specific provider.
+type ProviderRateLimit struct {
+	// provider is the name of the Provider or AgentRuntime CRD.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Provider string `json:"provider"`
+
+	// maxConcurrency is the maximum in-flight work items for this provider.
+	// +kubebuilder:validation:Minimum=1
+	MaxConcurrency int32 `json:"maxConcurrency"`
+}
+
+// LoadThresholdMetric defines the allowed metric names for load test thresholds.
+// +kubebuilder:validation:Enum=latency_avg;latency_p50;latency_p90;latency_p95;latency_p99;ttft_avg;ttft_p50;ttft_p90;ttft_p95;ttft_p99;error_rate;pass_rate;total_cost;rate_limit_rate
+type LoadThresholdMetric string
+
+// LoadThresholdOperator defines the allowed comparison operators for thresholds.
+// +kubebuilder:validation:Enum="<";">";"<=";">="
+type LoadThresholdOperator string
+
+// LoadThreshold defines a single SLO threshold for load test pass/fail evaluation.
+type LoadThreshold struct {
+	// metric is the metric to evaluate (e.g., "latency_p95", "error_rate").
+	// +kubebuilder:validation:Required
+	Metric LoadThresholdMetric `json:"metric"`
+
+	// operator is the comparison operator.
+	// +kubebuilder:validation:Required
+	Operator LoadThresholdOperator `json:"operator"`
+
+	// value is the target value to compare against.
+	// For latency metrics: a duration string (e.g., "3s", "500ms").
+	// For rate metrics: a float string (e.g., "0.01", "0.95").
+	// For cost metrics: a numeric string (e.g., "50.00").
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Value string `json:"value"`
 }
 
 // DataGenSettings configures data generation settings.
@@ -219,6 +294,14 @@ type ArenaJobSpec struct {
 	// +kubebuilder:default="evaluation"
 	// +optional
 	Type ArenaJobType `json:"type,omitempty"`
+
+	// trials is the number of times to repeat each scenario × provider combination.
+	// For evaluation jobs: provides statistical confidence (pass rate, flakiness score).
+	// For load test jobs: defines total load volume, consumed under concurrency control.
+	// Overrides per-scenario trials from scenario YAML files.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	Trials *int32 `json:"trials,omitempty"`
 
 	// scenarios filters which scenarios to run from the arena file.
 	// If not specified, runs all scenarios defined in the arena file.

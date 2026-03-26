@@ -100,20 +100,118 @@ spec:
                   loadTest configures load testing settings.
                   Used when type is "loadtest".
                 properties:
-                  duration:
-                    default: 5m
-                    description: |-
-                      duration is the total duration of the load test.
-                      Format: duration string (e.g., "5m", "1h").
+                  budgetCurrency:
+                    default: USD
+                    description: budgetCurrency is the currency for budgetLimit (e.g.,
+                      "USD").
                     type: string
-                  rampUp:
-                    default: 30s
+                  budgetLimit:
                     description: |-
-                      rampUp is the duration to ramp up to target concurrency.
-                      Format: duration string (e.g., "1m", "30s").
+                      budgetLimit is the maximum cost (in budgetCurrency) before the job is stopped.
+                      The controller checks the cost accumulator periodically and cancels
+                      remaining work if this limit is exceeded.
                     type: string
-                  targetRPS:
-                    description: targetRPS is the target requests per second.
+                  concurrency:
+                    default: 1
+                    description: |-
+                      concurrency is the maximum number of work items in flight across all workers.
+                      Workers check the global in-flight count before popping new items.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  ramp:
+                    description: ramp configures linear concurrency ramp-up and ramp-down.
+                    properties:
+                      down:
+                        description: |-
+                          down is the duration to linearly ramp from target concurrency to 0 at the end.
+                          Ramp-down is triggered when remaining pending items falls below concurrency × 2.
+                          Format: duration string (e.g., "30s").
+                        type: string
+                      up:
+                        description: |-
+                          up is the duration to linearly ramp from 0 to target concurrency at the start.
+                          Format: duration string (e.g., "2m", "30s").
+                        type: string
+                    type: object
+                  rateLimits:
+                    description: |-
+                      rateLimits configures per-provider concurrency limits.
+                      Prevents overwhelming a single provider even when global concurrency allows more.
+                    items:
+                      description: ProviderRateLimit sets a concurrency ceiling for
+                        a specific provider.
+                      properties:
+                        maxConcurrency:
+                          description: maxConcurrency is the maximum in-flight work
+                            items for this provider.
+                          format: int32
+                          minimum: 1
+                          type: integer
+                        provider:
+                          description: provider is the name of the Provider or AgentRuntime
+                            CRD.
+                          minLength: 1
+                          type: string
+                      required:
+                      - maxConcurrency
+                      - provider
+                      type: object
+                    type: array
+                  thresholds:
+                    description: |-
+                      thresholds define SLO targets evaluated after the load test completes.
+                      The job fails if any threshold is violated, enabling CI/CD gating.
+                    items:
+                      description: LoadThreshold defines a single SLO threshold for
+                        load test pass/fail evaluation.
+                      properties:
+                        metric:
+                          description: metric is the metric to evaluate (e.g., "latency_p95",
+                            "error_rate").
+                          enum:
+                          - latency_avg
+                          - latency_p50
+                          - latency_p90
+                          - latency_p95
+                          - latency_p99
+                          - ttft_avg
+                          - ttft_p50
+                          - ttft_p90
+                          - ttft_p95
+                          - ttft_p99
+                          - error_rate
+                          - pass_rate
+                          - total_cost
+                          - rate_limit_rate
+                          type: string
+                        operator:
+                          description: operator is the comparison operator.
+                          enum:
+                          - <
+                          - '>'
+                          - <=
+                          - '>='
+                          type: string
+                        value:
+                          description: |-
+                            value is the target value to compare against.
+                            For latency metrics: a duration string (e.g., "3s", "500ms").
+                            For rate metrics: a float string (e.g., "0.01", "0.95").
+                            For cost metrics: a numeric string (e.g., "50.00").
+                          minLength: 1
+                          type: string
+                      required:
+                      - metric
+                      - operator
+                      - value
+                      type: object
+                    type: array
+                  vusPerWorker:
+                    default: 1
+                    description: |-
+                      vusPerWorker is the number of virtual users (concurrent goroutines) per worker pod.
+                      Each VU independently pops, executes, and reports work items.
                     format: int32
                     minimum: 1
                     type: integer
@@ -269,6 +367,15 @@ spec:
                   - name
                   type: object
                 type: array
+              trials:
+                description: |-
+                  trials is the number of times to repeat each scenario × provider combination.
+                  For evaluation jobs: provides statistical confidence (pass rate, flakiness score).
+                  For load test jobs: defines total load volume, consumed under concurrency control.
+                  Overrides per-scenario trials from scenario YAML files.
+                format: int32
+                minimum: 1
+                type: integer
               ttlSecondsAfterFinished:
                 description: ttlSecondsAfterFinished specifies how long to keep completed
                   jobs.
