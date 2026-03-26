@@ -35,6 +35,7 @@ type VUPoolConfig struct {
 	Log          logr.Logger
 	Metrics      *WorkerMetrics
 	PollInterval time.Duration
+	Profile      *LoadProfile // Optional load profile for ramp-up/down
 	Execute      func(ctx context.Context, item *queue.WorkItem) (*ExecutionResult, error)
 }
 
@@ -47,6 +48,7 @@ type VUPool struct {
 	log          logr.Logger
 	metrics      *WorkerMetrics
 	pollInterval time.Duration
+	profile      *LoadProfile
 	execute      func(ctx context.Context, item *queue.WorkItem) (*ExecutionResult, error)
 }
 
@@ -68,6 +70,7 @@ func NewVUPool(cfg VUPoolConfig) *VUPool {
 		log:          cfg.Log,
 		metrics:      cfg.Metrics,
 		pollInterval: pollInterval,
+		profile:      cfg.Profile,
 		execute:      cfg.Execute,
 	}
 }
@@ -76,9 +79,14 @@ func NewVUPool(cfg VUPoolConfig) *VUPool {
 // Each VU independently pops, executes, and reports work items.
 // Returns the first fatal error encountered, or nil on clean shutdown.
 func (p *VUPool) Run(ctx context.Context) error {
+	if p.profile != nil {
+		p.profile.Start()
+	}
+
 	p.log.Info("VU pool starting",
 		"vus", p.size,
 		"concurrency", p.concurrency,
+		"hasProfile", p.profile != nil,
 		"jobID", p.jobID,
 	)
 
@@ -178,7 +186,14 @@ func (p *VUPool) atConcurrencyLimit(ctx context.Context) (bool, error) {
 		}
 		return false, fmt.Errorf("failed to check concurrency: %w", err)
 	}
-	return progress.Processing >= p.concurrency, nil
+
+	limit := p.concurrency
+	if p.profile != nil {
+		elapsed := time.Since(p.profile.startTime)
+		limit = p.profile.AllowedConcurrency(elapsed, progress.Pending)
+	}
+
+	return progress.Processing >= limit, nil
 }
 
 // handleVUPopError handles errors from queue.Pop within a VU loop.

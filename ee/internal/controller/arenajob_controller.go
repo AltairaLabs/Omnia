@@ -694,6 +694,20 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 			Name:  "ARENA_CONCURRENCY",
 			Value: fmt.Sprintf("%d", arenaJob.Spec.LoadTest.Concurrency),
 		})
+		if arenaJob.Spec.LoadTest.Ramp != nil {
+			if arenaJob.Spec.LoadTest.Ramp.Up != "" {
+				env = append(env, corev1.EnvVar{
+					Name:  "ARENA_RAMP_UP",
+					Value: arenaJob.Spec.LoadTest.Ramp.Up,
+				})
+			}
+			if arenaJob.Spec.LoadTest.Ramp.Down != "" {
+				env = append(env, corev1.EnvVar{
+					Name:  "ARENA_RAMP_DOWN",
+					Value: arenaJob.Spec.LoadTest.Ramp.Down,
+				})
+			}
+		}
 	}
 
 	// Inject SESSION_API_URL for session recording if configured

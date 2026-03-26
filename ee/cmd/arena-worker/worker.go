@@ -112,8 +112,10 @@ type Config struct {
 	Verbose       bool // Enable verbose/debug output from promptarena
 
 	// VU pool configuration
-	VUsPerWorker int // Number of virtual users (goroutines) per worker, default 1
-	Concurrency  int // Global concurrency limit (0 = unlimited)
+	VUsPerWorker int           // Number of virtual users (goroutines) per worker, default 1
+	Concurrency  int           // Global concurrency limit (0 = unlimited)
+	RampUp       time.Duration // Ramp-up duration (0 = no ramp-up)
+	RampDown     time.Duration // Ramp-down duration (0 = no ramp-down)
 
 	// Override configurations (resolved from CRDs)
 	ToolOverrides map[string]ToolOverrideConfig // Tool name -> override config
@@ -171,6 +173,8 @@ func loadConfig() (*Config, error) {
 
 	cfg.VUsPerWorker = getIntEnvOrDefault("ARENA_VUS_PER_WORKER", 1)
 	cfg.Concurrency = getIntEnvOrDefault("ARENA_CONCURRENCY", 0)
+	cfg.RampUp = getDurationEnv("ARENA_RAMP_UP", 0)
+	cfg.RampDown = getDurationEnv("ARENA_RAMP_DOWN", 0)
 
 	if cfg.JobName == "" {
 		return nil, errors.New("ARENA_JOB_NAME is required")
@@ -251,6 +255,10 @@ func processWorkItems(
 
 	// Use VU pool for concurrent processing when configured.
 	if cfg.VUsPerWorker > 1 || cfg.Concurrency > 1 {
+		var profile *LoadProfile
+		if cfg.RampUp > 0 || cfg.RampDown > 0 {
+			profile = NewLoadProfile(cfg.Concurrency, cfg.RampUp, cfg.RampDown)
+		}
 		pool := NewVUPool(VUPoolConfig{
 			Size:         cfg.VUsPerWorker,
 			Concurrency:  cfg.Concurrency,
@@ -259,6 +267,7 @@ func processWorkItems(
 			Log:          log,
 			Metrics:      wm,
 			PollInterval: cfg.PollInterval,
+			Profile:      profile,
 			Execute: func(ctx context.Context, item *queue.WorkItem) (*ExecutionResult, error) {
 				return executeWorkItem(ctx, log, cfg, item, bundlePath)
 			},
