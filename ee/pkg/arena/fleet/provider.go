@@ -287,6 +287,18 @@ func (p *Provider) SessionID() string {
 	return ""
 }
 
+// ConversationSessionIDs returns a map of conversation ID to facade session ID
+// for all pooled connections. This enables correlating arena runs with sessions.
+func (p *Provider) ConversationSessionIDs() map[string]string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	result := make(map[string]string, len(p.conns))
+	for cid, entry := range p.conns {
+		result[cid] = entry.sessionID
+	}
+	return result
+}
+
 // Close closes all connections (pooled and fallback).
 func (p *Provider) Close() error {
 	p.mu.Lock()

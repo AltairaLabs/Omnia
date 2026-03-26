@@ -33,6 +33,7 @@ type arenaSessionMetadata struct {
 	Scenario      string
 	ProviderID    string
 	JobType       string
+	TrialIndex    string
 }
 
 // arenaSessionManager lazily creates PostgreSQL sessions for arena engine runs.
@@ -99,24 +100,38 @@ func (m *arenaSessionManager) OnEvent(event *events.Event) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	tags := []string{
+		"source:arena",
+		"arena-job:" + m.meta.JobName,
+		"scenario:" + m.meta.Scenario,
+		"provider:" + m.meta.ProviderID,
+	}
+	if m.meta.TrialIndex != "" {
+		tags = append(tags, "trial:"+m.meta.TrialIndex)
+	}
+
+	initialState := map[string]string{
+		"arena.job":           m.meta.JobName,
+		"arena.job.name":      m.meta.JobName,
+		"arena.job.namespace": m.meta.Namespace,
+		"arena.scenario":      m.meta.Scenario,
+		"arena.scenario.id":   m.meta.Scenario,
+		"arena.provider":      m.meta.ProviderID,
+		"arena.provider.id":   m.meta.ProviderID,
+		"arena.type":          m.meta.JobType,
+		"arena.run_id":        runSessionID,
+	}
+	if m.meta.TrialIndex != "" {
+		initialState["arena.trial.index"] = m.meta.TrialIndex
+	}
+
 	_, err := m.store.CreateSession(ctx, session.CreateSessionOptions{
 		ID:            pgID,
 		AgentName:     m.meta.JobName,
 		Namespace:     m.meta.Namespace,
 		WorkspaceName: m.meta.WorkspaceName,
-		Tags: []string{
-			"source:arena",
-			"arena-job:" + m.meta.JobName,
-			"scenario:" + m.meta.Scenario,
-			"provider:" + m.meta.ProviderID,
-		},
-		InitialState: map[string]string{
-			"arena.job":      m.meta.JobName,
-			"arena.scenario": m.meta.Scenario,
-			"arena.provider": m.meta.ProviderID,
-			"arena.type":     m.meta.JobType,
-			"arena.run_id":   runSessionID,
-		},
+		Tags:          tags,
+		InitialState:  initialState,
 	})
 	if err != nil {
 		m.log.Error(err, "failed to create arena session",
@@ -137,6 +152,19 @@ func (m *arenaSessionManager) OnEvent(event *events.Event) {
 
 	event.SessionID = pgID
 	es.OnEvent(event)
+}
+
+// SessionIDs returns all PostgreSQL session IDs created by this manager.
+func (m *arenaSessionManager) SessionIDs() []string {
+	var ids []string
+	m.sessions.Range(func(_, value any) bool {
+		ms := value.(*managedSession)
+		if ms.pgSessionID != "" {
+			ids = append(ids, ms.pgSessionID)
+		}
+		return true
+	})
+	return ids
 }
 
 // CompleteAll marks all lazily created sessions as completed or errored
