@@ -27,6 +27,7 @@ import (
 
 	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
+	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -580,7 +581,7 @@ func TestPopulateMetrics(t *testing.T) {
 			totalDuration: 1500 * time.Millisecond,
 		}
 
-		populateMetrics(result, agg, 7)
+		populateMetrics(result, agg, 7, nil)
 
 		if result.Metrics["totalDurationMs"] != 1500 {
 			t.Errorf("expected totalDurationMs=1500, got %v", result.Metrics["totalDurationMs"])
@@ -606,7 +607,7 @@ func TestPopulateMetrics_Tokens(t *testing.T) {
 			outputTokens: 50,
 		}
 
-		populateMetrics(result, agg, 1)
+		populateMetrics(result, agg, 1, nil)
 
 		assert.Equal(t, float64(100), result.Metrics[metricKeyInputTokens])
 		assert.Equal(t, float64(50), result.Metrics[metricKeyOutputTokens])
@@ -616,12 +617,131 @@ func TestPopulateMetrics_Tokens(t *testing.T) {
 		result := &ExecutionResult{Metrics: make(map[string]float64)}
 		agg := &runAggregator{passCount: 1}
 
-		populateMetrics(result, agg, 1)
+		populateMetrics(result, agg, 1, nil)
 
 		_, hasInput := result.Metrics[metricKeyInputTokens]
 		_, hasOutput := result.Metrics[metricKeyOutputTokens]
 		assert.False(t, hasInput, "should not set input tokens when zero")
 		assert.False(t, hasOutput, "should not set output tokens when zero")
+	})
+}
+
+func TestComputeCost(t *testing.T) {
+	t.Run("calculates cost from input and output tokens", func(t *testing.T) {
+		p := &providerPricing{inputCostPer1K: 0.003, outputCostPer1K: 0.015}
+		// 1000 input tokens * 0.003/1000 = 0.003
+		// 500 output tokens * 0.015/1000 = 0.0075
+		cost := p.computeCost(1000, 500)
+		assert.InDelta(t, 0.0105, cost, 1e-9)
+	})
+
+	t.Run("handles zero tokens", func(t *testing.T) {
+		p := &providerPricing{inputCostPer1K: 0.003, outputCostPer1K: 0.015}
+		assert.Equal(t, 0.0, p.computeCost(0, 0))
+	})
+
+	t.Run("handles input-only pricing", func(t *testing.T) {
+		p := &providerPricing{inputCostPer1K: 0.01}
+		cost := p.computeCost(2000, 500)
+		assert.InDelta(t, 0.02, cost, 1e-9)
+	})
+
+	t.Run("handles output-only pricing", func(t *testing.T) {
+		p := &providerPricing{outputCostPer1K: 0.06}
+		cost := p.computeCost(1000, 2000)
+		assert.InDelta(t, 0.12, cost, 1e-9)
+	})
+}
+
+func TestParsePricing(t *testing.T) {
+	t.Run("returns nil when pricing is nil", func(t *testing.T) {
+		assert.Nil(t, parsePricing(nil))
+	})
+
+	t.Run("returns nil when all values are zero", func(t *testing.T) {
+		zero := "0"
+		p := parsePricing(&v1alpha1.ProviderPricing{
+			InputCostPer1K:  &zero,
+			OutputCostPer1K: &zero,
+		})
+		assert.Nil(t, p)
+	})
+
+	t.Run("parses valid pricing", func(t *testing.T) {
+		input := "0.003"
+		output := "0.015"
+		p := parsePricing(&v1alpha1.ProviderPricing{
+			InputCostPer1K:  &input,
+			OutputCostPer1K: &output,
+		})
+		require.NotNil(t, p)
+		assert.InDelta(t, 0.003, p.inputCostPer1K, 1e-9)
+		assert.InDelta(t, 0.015, p.outputCostPer1K, 1e-9)
+	})
+
+	t.Run("ignores invalid strings", func(t *testing.T) {
+		bad := "notanumber"
+		output := "0.015"
+		p := parsePricing(&v1alpha1.ProviderPricing{
+			InputCostPer1K:  &bad,
+			OutputCostPer1K: &output,
+		})
+		require.NotNil(t, p)
+		assert.Equal(t, 0.0, p.inputCostPer1K)
+		assert.InDelta(t, 0.015, p.outputCostPer1K, 1e-9)
+	})
+
+	t.Run("parses partial pricing (input only)", func(t *testing.T) {
+		input := "0.005"
+		p := parsePricing(&v1alpha1.ProviderPricing{
+			InputCostPer1K: &input,
+		})
+		require.NotNil(t, p)
+		assert.InDelta(t, 0.005, p.inputCostPer1K, 1e-9)
+		assert.Equal(t, 0.0, p.outputCostPer1K)
+	})
+}
+
+func TestPopulateMetrics_Cost(t *testing.T) {
+	t.Run("writes cost when pricing and tokens are present", func(t *testing.T) {
+		result := &ExecutionResult{Metrics: make(map[string]float64)}
+		agg := &runAggregator{
+			passCount:    1,
+			inputTokens:  1000,
+			outputTokens: 500,
+		}
+		pricing := &providerPricing{inputCostPer1K: 0.003, outputCostPer1K: 0.015}
+
+		populateMetrics(result, agg, 1, pricing)
+
+		cost, ok := result.Metrics[metricKeyCost]
+		assert.True(t, ok, "cost metric should be present")
+		assert.InDelta(t, 0.0105, cost, 1e-9)
+	})
+
+	t.Run("omits cost when pricing is nil", func(t *testing.T) {
+		result := &ExecutionResult{Metrics: make(map[string]float64)}
+		agg := &runAggregator{
+			passCount:    1,
+			inputTokens:  1000,
+			outputTokens: 500,
+		}
+
+		populateMetrics(result, agg, 1, nil)
+
+		_, ok := result.Metrics[metricKeyCost]
+		assert.False(t, ok, "cost metric should not be present without pricing")
+	})
+
+	t.Run("omits cost when tokens are zero", func(t *testing.T) {
+		result := &ExecutionResult{Metrics: make(map[string]float64)}
+		agg := &runAggregator{passCount: 1}
+		pricing := &providerPricing{inputCostPer1K: 0.003, outputCostPer1K: 0.015}
+
+		populateMetrics(result, agg, 1, pricing)
+
+		_, ok := result.Metrics[metricKeyCost]
+		assert.False(t, ok, "cost metric should not be present with zero tokens")
 	})
 }
 
@@ -851,7 +971,7 @@ func TestBuildExecutionResult(t *testing.T) {
 		runIDs := []string{"run-1"}
 		startTime := time.Now()
 
-		result := buildExecutionResult(testLog(), mockStore, runIDs, startTime)
+		result := buildExecutionResult(testLog(), mockStore, runIDs, startTime, nil)
 
 		// Should return fail — unable to read run state means results are unknown
 		if result.Status != statusFail {
@@ -867,7 +987,7 @@ func TestBuildExecutionResult(t *testing.T) {
 		runIDs := []string{}
 		startTime := time.Now()
 
-		result := buildExecutionResult(testLog(), mockStore, runIDs, startTime)
+		result := buildExecutionResult(testLog(), mockStore, runIDs, startTime, nil)
 
 		if result.Status != statusFail {
 			t.Errorf("expected status %s, got %s", statusFail, result.Status)

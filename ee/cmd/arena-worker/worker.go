@@ -37,6 +37,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/fleet"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 	"github.com/altairalabs/omnia/internal/session/httpclient"
@@ -519,7 +520,8 @@ func executeWorkItem(
 	}
 
 	var crdFleetProviders []*resolvedFleetProvider
-	crdFleetProviders, err = resolveProvidersFromCRD(ctx, log, k8sClient, cfg, arenaCfg)
+	var pricingMap map[string]*providerPricing
+	crdFleetProviders, pricingMap, err = resolveProvidersFromCRD(ctx, log, k8sClient, cfg, arenaCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve providers from CRDs: %w", err)
 	}
@@ -656,8 +658,8 @@ func executeWorkItem(
 		return nil, fmt.Errorf("execution failed: %w", err)
 	}
 
-	// Build result from state store
-	result = buildExecutionResult(log, eng.GetStateStore(), runIDs, start)
+	// Build result from state store, with cost calculation from provider pricing.
+	result = buildExecutionResult(log, eng.GetStateStore(), runIDs, start, pricingMap[item.ProviderID])
 
 	// Extract TTFT from fleet providers — the engine doesn't propagate this,
 	// so we read it directly from the provider after execution completes.
@@ -852,8 +854,10 @@ func (a *runAggregator) processAssertions(runID string, assertions []arenastates
 }
 
 // buildExecutionResult constructs an ExecutionResult from the engine's state store.
+// If pricing is non-nil, cost is computed from token counts and written to metrics.
 func buildExecutionResult(
 	log logr.Logger, store statestore.Store, runIDs []string, startTime time.Time,
+	pricing *providerPricing,
 ) *ExecutionResult {
 	result := &ExecutionResult{
 		DurationMs: float64(time.Since(startTime).Milliseconds()),
@@ -878,7 +882,7 @@ func buildExecutionResult(
 	}
 
 	result.Assertions = agg.assertions
-	populateMetrics(result, agg, len(runIDs))
+	populateMetrics(result, agg, len(runIDs), pricing)
 	setResultStatus(result, agg)
 
 	return result
@@ -896,7 +900,8 @@ func buildFallbackResult(result *ExecutionResult, runIDs []string) *ExecutionRes
 }
 
 // populateMetrics sets the metrics on the result from aggregated data.
-func populateMetrics(result *ExecutionResult, agg *runAggregator, totalRuns int) {
+// If pricing is non-nil, it also computes and writes the total cost.
+func populateMetrics(result *ExecutionResult, agg *runAggregator, totalRuns int, pricing *providerPricing) {
 	result.Metrics["totalDurationMs"] = float64(agg.totalDuration.Milliseconds())
 	result.Metrics["runsExecuted"] = float64(totalRuns)
 	result.Metrics["runsPassed"] = float64(agg.passCount)
@@ -907,6 +912,13 @@ func populateMetrics(result *ExecutionResult, agg *runAggregator, totalRuns int)
 	}
 	if agg.outputTokens > 0 {
 		result.Metrics[metricKeyOutputTokens] = float64(agg.outputTokens)
+	}
+
+	if pricing != nil && (agg.inputTokens > 0 || agg.outputTokens > 0) {
+		cost := pricing.computeCost(agg.inputTokens, agg.outputTokens)
+		if cost > 0 {
+			result.Metrics[metricKeyCost] = cost
+		}
 	}
 }
 
@@ -929,8 +941,45 @@ func setResultStatus(result *ExecutionResult, agg *runAggregator) {
 const (
 	metricKeyInputTokens  = "totalInputTokens"
 	metricKeyOutputTokens = "totalOutputTokens"
+	metricKeyCost         = "totalCost"
 	metricKeyTTFT         = "ttftSeconds"
 )
+
+// providerPricing holds parsed pricing from a Provider CRD.
+type providerPricing struct {
+	inputCostPer1K  float64
+	outputCostPer1K float64
+}
+
+// computeCost calculates the total cost from token counts and pricing.
+func (p *providerPricing) computeCost(inputTokens, outputTokens int) float64 {
+	return float64(inputTokens)*p.inputCostPer1K/1000 + float64(outputTokens)*p.outputCostPer1K/1000
+}
+
+// parsePricing extracts pricing from a Provider CRD's spec.pricing field.
+// Returns nil if pricing is not configured or has no valid values.
+func parsePricing(pricing *v1alpha1.ProviderPricing) *providerPricing {
+	if pricing == nil {
+		return nil
+	}
+
+	p := &providerPricing{}
+	if pricing.InputCostPer1K != nil {
+		if v, err := strconv.ParseFloat(*pricing.InputCostPer1K, 64); err == nil {
+			p.inputCostPer1K = v
+		}
+	}
+	if pricing.OutputCostPer1K != nil {
+		if v, err := strconv.ParseFloat(*pricing.OutputCostPer1K, 64); err == nil {
+			p.outputCostPer1K = v
+		}
+	}
+
+	if p.inputCostPer1K == 0 && p.outputCostPer1K == 0 {
+		return nil
+	}
+	return p
+}
 
 // recordDetailedMetrics emits per-trial Prometheus metrics from an execution result.
 func recordDetailedMetrics(

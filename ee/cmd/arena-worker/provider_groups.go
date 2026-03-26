@@ -42,24 +42,25 @@ type resolvedFleetProvider struct {
 // resolveProvidersFromCRD resolves providers from CRD refs when ARENA_PROVIDER_GROUPS is set.
 // It reads each Provider/AgentRuntime CRD, builds PromptKit provider configs, and populates
 // LoadedProviders. Fleet providers are connected and returned for post-engine registration.
+// The returned pricing map contains parsed pricing for providers that have spec.pricing set.
 func resolveProvidersFromCRD(
 	ctx context.Context,
 	log logr.Logger,
 	c client.Client,
 	cfg *Config,
 	arenaCfg *config.Config,
-) ([]*resolvedFleetProvider, error) {
+) ([]*resolvedFleetProvider, map[string]*providerPricing, error) {
 	// Read the ArenaJob CRD to get spec.Providers
 	jobName := cfg.JobName
 	jobNamespace := cfg.JobNamespace
 
 	arenaJob, err := getArenaJob(ctx, c, jobName, jobNamespace)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read ArenaJob %s/%s: %w", jobNamespace, jobName, err)
+		return nil, nil, fmt.Errorf("failed to read ArenaJob %s/%s: %w", jobNamespace, jobName, err)
 	}
 
 	if len(arenaJob.Providers) == 0 {
-		return nil, fmt.Errorf("ArenaJob %s/%s has no providers", jobNamespace, jobName)
+		return nil, nil, fmt.Errorf("ArenaJob %s/%s has no providers", jobNamespace, jobName)
 	}
 
 	// Clear providers loaded from arena config file references.
@@ -71,21 +72,26 @@ func resolveProvidersFromCRD(
 	agentWSURLs := parseAgentWSURLs()
 
 	var fleetProviders []*resolvedFleetProvider
+	pricingMap := make(map[string]*providerPricing)
 
 	for groupName, pg := range arenaJob.Providers {
-		fps, err := resolveProviderGroup(ctx, log, c, jobNamespace, groupName, &pg, agentWSURLs, arenaCfg)
+		fps, groupPricing, err := resolveProviderGroup(ctx, log, c, jobNamespace, groupName, &pg, agentWSURLs, arenaCfg)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		fleetProviders = append(fleetProviders, fps...)
+		for id, p := range groupPricing {
+			pricingMap[id] = p
+		}
 	}
 
 	log.Info("providers resolved from CRDs",
 		"providerCount", len(arenaCfg.LoadedProviders),
 		"fleetCount", len(fleetProviders),
+		"hasPricing", len(pricingMap) > 0,
 	)
 
-	return fleetProviders, nil
+	return fleetProviders, pricingMap, nil
 }
 
 // resolveProviderGroup resolves a single provider group (array or map mode).
@@ -97,32 +103,61 @@ func resolveProviderGroup(
 	pg *arenaProviderGroup,
 	agentWSURLs map[string]string,
 	arenaCfg *config.Config,
-) ([]*resolvedFleetProvider, error) {
-	var fps []*resolvedFleetProvider
-
+) ([]*resolvedFleetProvider, map[string]*providerPricing, error) {
 	if pg.isMapMode() {
-		for configID, entry := range pg.mapping {
-			fp, err := resolveEntry(ctx, log, c, namespace, groupName, configID, &entry, agentWSURLs, arenaCfg)
-			if err != nil {
-				return nil, err
-			}
-			if fp != nil {
-				fps = append(fps, fp)
-			}
+		return resolveMapModeGroup(ctx, log, c, namespace, groupName, pg.mapping, agentWSURLs, arenaCfg)
+	}
+	return resolveArrayModeGroup(ctx, log, c, namespace, groupName, pg.entries, agentWSURLs, arenaCfg)
+}
+
+// resolveMapModeGroup resolves providers in map mode (configID -> entry).
+func resolveMapModeGroup(
+	ctx context.Context, log logr.Logger, c client.Client,
+	namespace, groupName string,
+	mapping map[string]arenaProviderEntry,
+	agentWSURLs map[string]string, arenaCfg *config.Config,
+) ([]*resolvedFleetProvider, map[string]*providerPricing, error) {
+	var fps []*resolvedFleetProvider
+	pricing := make(map[string]*providerPricing)
+
+	for configID, entry := range mapping {
+		fp, p, err := resolveEntry(ctx, log, c, namespace, groupName, configID, &entry, agentWSURLs, arenaCfg)
+		if err != nil {
+			return nil, nil, err
 		}
-	} else {
-		for _, entry := range pg.entries {
-			fp, err := resolveEntry(ctx, log, c, namespace, groupName, "", &entry, agentWSURLs, arenaCfg)
-			if err != nil {
-				return nil, err
-			}
-			if fp != nil {
-				fps = append(fps, fp)
-			}
+		if fp != nil {
+			fps = append(fps, fp)
+		}
+		if p != nil {
+			pricing[configID] = p
 		}
 	}
+	return fps, pricing, nil
+}
 
-	return fps, nil
+// resolveArrayModeGroup resolves providers in array mode (sequential entries).
+func resolveArrayModeGroup(
+	ctx context.Context, log logr.Logger, c client.Client,
+	namespace, groupName string,
+	entries []arenaProviderEntry,
+	agentWSURLs map[string]string, arenaCfg *config.Config,
+) ([]*resolvedFleetProvider, map[string]*providerPricing, error) {
+	var fps []*resolvedFleetProvider
+	pricing := make(map[string]*providerPricing)
+
+	for _, entry := range entries {
+		fp, p, err := resolveEntry(ctx, log, c, namespace, groupName, "", &entry, agentWSURLs, arenaCfg)
+		if err != nil {
+			return nil, nil, err
+		}
+		if fp != nil {
+			fps = append(fps, fp)
+		}
+		if p != nil && entry.ProviderRef != nil {
+			pricing[sanitizeID(entry.ProviderRef.Name)] = p
+		}
+	}
+	return fps, pricing, nil
 }
 
 // resolveEntry resolves a single provider/agent entry. When configID is non-empty,
@@ -135,23 +170,28 @@ func resolveEntry(
 	entry *arenaProviderEntry,
 	agentWSURLs map[string]string,
 	arenaCfg *config.Config,
-) (*resolvedFleetProvider, error) {
+) (*resolvedFleetProvider, *providerPricing, error) {
 	if entry.ProviderRef != nil {
 		if configID != "" {
-			return nil, resolveProviderRefEntryWithID(ctx, log, c, namespace, *entry.ProviderRef, configID, groupName, arenaCfg)
+			p, err := resolveProviderRefEntryWithID(ctx, log, c, namespace, *entry.ProviderRef, configID, groupName, arenaCfg)
+			return nil, p, err
 		}
-		return nil, resolveProviderRefEntry(ctx, log, c, namespace, *entry.ProviderRef, groupName, arenaCfg)
+		p, err := resolveProviderRefEntry(ctx, log, c, namespace, *entry.ProviderRef, groupName, arenaCfg)
+		return nil, p, err
 	}
 	if entry.AgentRef != nil {
 		if configID != "" {
-			return resolveAgentRefEntryWithID(ctx, log, entry.AgentRef.Name, configID, groupName, agentWSURLs, arenaCfg)
+			fp, err := resolveAgentRefEntryWithID(ctx, log, entry.AgentRef.Name, configID, groupName, agentWSURLs, arenaCfg)
+			return fp, nil, err
 		}
-		return resolveAgentRefEntry(ctx, log, entry.AgentRef.Name, groupName, agentWSURLs, arenaCfg)
+		fp, err := resolveAgentRefEntry(ctx, log, entry.AgentRef.Name, groupName, agentWSURLs, arenaCfg)
+		return fp, nil, err
 	}
-	return nil, nil
+	return nil, nil, nil
 }
 
 // resolveProviderRefEntry resolves a single Provider CRD and adds it to LoadedProviders.
+// Returns parsed pricing if the provider has spec.pricing configured.
 func resolveProviderRefEntry(
 	ctx context.Context,
 	log logr.Logger,
@@ -160,10 +200,10 @@ func resolveProviderRefEntry(
 	ref v1alpha1.ProviderRef,
 	groupName string,
 	arenaCfg *config.Config,
-) error {
+) (*providerPricing, error) {
 	provider, err := k8s.GetProvider(ctx, c, ref, namespace)
 	if err != nil {
-		return fmt.Errorf("group %q: failed to get provider %s: %w", groupName, ref.Name, err)
+		return nil, fmt.Errorf("group %q: failed to get provider %s: %w", groupName, ref.Name, err)
 	}
 
 	providerID := sanitizeID(provider.Name)
@@ -200,7 +240,7 @@ func resolveProviderRefEntry(
 		"hasCreds", credEnvVar != "" && os.Getenv(credEnvVar) != "",
 	)
 
-	return nil
+	return parsePricing(provider.Spec.Pricing), nil
 }
 
 // resolveAgentRefEntry resolves an AgentRuntime CRD and creates a fleet provider.
@@ -249,6 +289,7 @@ func resolveAgentRefEntry(
 
 // resolveProviderRefEntryWithID resolves a Provider CRD using an explicit config provider ID
 // instead of deriving it from sanitizeID(provider.Name). Used in map mode.
+// Returns parsed pricing if the provider has spec.pricing configured.
 func resolveProviderRefEntryWithID(
 	ctx context.Context,
 	log logr.Logger,
@@ -258,10 +299,10 @@ func resolveProviderRefEntryWithID(
 	configID string,
 	groupName string,
 	arenaCfg *config.Config,
-) error {
+) (*providerPricing, error) {
 	provider, err := k8s.GetProvider(ctx, c, ref, namespace)
 	if err != nil {
-		return fmt.Errorf("group %q: failed to get provider %s: %w", groupName, ref.Name, err)
+		return nil, fmt.Errorf("group %q: failed to get provider %s: %w", groupName, ref.Name, err)
 	}
 
 	pkProvider := &config.Provider{
@@ -293,7 +334,7 @@ func resolveProviderRefEntryWithID(
 		"group", groupName,
 	)
 
-	return nil
+	return parsePricing(provider.Spec.Pricing), nil
 }
 
 // resolveAgentRefEntryWithID resolves an AgentRuntime CRD using an explicit config provider ID.
