@@ -12,6 +12,7 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"time"
 )
@@ -36,6 +37,7 @@ type jobState struct {
 	completed  map[string]*WorkItem // Successfully completed items
 	failed     map[string]*WorkItem // Failed items
 	startedAt  *time.Time
+	stats      *JobStats // Accumulated statistics
 }
 
 // NewMemoryQueue creates a new in-memory work queue with the given options.
@@ -287,6 +289,10 @@ func (q *MemoryQueue) getOrCreateJobState(jobID string) *jobState {
 			processing: make(map[string]*WorkItem),
 			completed:  make(map[string]*WorkItem),
 			failed:     make(map[string]*WorkItem),
+			stats: &JobStats{
+				ByScenario: make(map[string]*GroupStats),
+				ByProvider: make(map[string]*GroupStats),
+			},
 		}
 		q.jobs[jobID] = state
 	}
@@ -347,6 +353,194 @@ func (q *MemoryQueue) GetFailedItems(ctx context.Context, jobID string) ([]*Work
 	}
 
 	return items, nil
+}
+
+// CompleteItem acknowledges a work item and updates accumulators atomically.
+func (q *MemoryQueue) CompleteItem(ctx context.Context, jobID string, itemID string, result *ItemResult) error {
+	// Marshal result to JSON for the Ack path
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+
+	// Do normal Ack bookkeeping
+	if err := q.Ack(ctx, jobID, itemID, resultJSON); err != nil {
+		return err
+	}
+
+	// Update accumulators
+	q.mu.RLock()
+	state := q.jobs[jobID]
+	q.mu.RUnlock()
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	// Get item to extract scenarioID/providerID
+	item := state.completed[itemID]
+	q.updateMemoryStats(state.stats, item, result)
+
+	return nil
+}
+
+// FailItem marks an item as terminally failed and updates failure accumulators.
+func (q *MemoryQueue) FailItem(ctx context.Context, jobID string, itemID string, failErr error) error {
+	q.mu.RLock()
+	if q.closed {
+		q.mu.RUnlock()
+		return ErrQueueClosed
+	}
+
+	state, exists := q.jobs[jobID]
+	q.mu.RUnlock()
+
+	if !exists {
+		return ErrJobNotFound
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	item, exists := state.processing[itemID]
+	if !exists {
+		return ErrItemNotFound
+	}
+
+	// Mark as terminally failed (no retry)
+	now := time.Now()
+	item.Status = ItemStatusFailed
+	item.CompletedAt = &now
+	if failErr != nil {
+		item.Error = failErr.Error()
+	}
+
+	delete(state.processing, itemID)
+	state.failed[itemID] = item
+
+	// Update failure accumulators
+	q.incrementFailureStats(state.stats, item)
+
+	return nil
+}
+
+// GetStats returns the current accumulator statistics for a job.
+func (q *MemoryQueue) GetStats(_ context.Context, jobID string) (*JobStats, error) {
+	q.mu.RLock()
+	if q.closed {
+		q.mu.RUnlock()
+		return nil, ErrQueueClosed
+	}
+
+	state, exists := q.jobs[jobID]
+	q.mu.RUnlock()
+
+	if !exists {
+		// Return zero stats for unknown jobs
+		return &JobStats{
+			ByScenario: make(map[string]*GroupStats),
+			ByProvider: make(map[string]*GroupStats),
+		}, nil
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	// Return a deep copy
+	return q.copyJobStats(state.stats), nil
+}
+
+// updateMemoryStats updates accumulated stats for a completed item.
+func (q *MemoryQueue) updateMemoryStats(stats *JobStats, item *WorkItem, result *ItemResult) {
+	stats.Total++
+	stats.TotalDurationMs += result.DurationMs
+
+	if result.Status == "pass" {
+		stats.Passed++
+	} else {
+		stats.Failed++
+	}
+
+	tokens := extractTokens(result.Metrics)
+	cost := extractCost(result.Metrics)
+	stats.TotalTokens += tokens
+	stats.TotalCost += cost
+
+	// Update scenario stats
+	if item.ScenarioID != "" {
+		gs := q.getOrCreateGroupStats(stats.ByScenario, item.ScenarioID)
+		q.updateGroupStats(gs, result, tokens, cost)
+	}
+
+	// Update provider stats
+	if item.ProviderID != "" {
+		gs := q.getOrCreateGroupStats(stats.ByProvider, item.ProviderID)
+		q.updateGroupStats(gs, result, tokens, cost)
+	}
+}
+
+// incrementFailureStats updates accumulated stats for a failed item.
+func (q *MemoryQueue) incrementFailureStats(stats *JobStats, item *WorkItem) {
+	stats.Total++
+	stats.Failed++
+
+	if item.ScenarioID != "" {
+		gs := q.getOrCreateGroupStats(stats.ByScenario, item.ScenarioID)
+		gs.Total++
+		gs.Failed++
+	}
+
+	if item.ProviderID != "" {
+		gs := q.getOrCreateGroupStats(stats.ByProvider, item.ProviderID)
+		gs.Total++
+		gs.Failed++
+	}
+}
+
+// getOrCreateGroupStats returns or creates a GroupStats entry in the given map.
+func (q *MemoryQueue) getOrCreateGroupStats(m map[string]*GroupStats, key string) *GroupStats {
+	gs, ok := m[key]
+	if !ok {
+		gs = &GroupStats{}
+		m[key] = gs
+	}
+	return gs
+}
+
+// updateGroupStats updates a GroupStats from an ItemResult.
+func (q *MemoryQueue) updateGroupStats(gs *GroupStats, result *ItemResult, tokens int64, cost float64) {
+	gs.Total++
+	gs.TotalDurationMs += result.DurationMs
+	gs.TotalTokens += tokens
+	gs.TotalCost += cost
+
+	if result.Status == "pass" {
+		gs.Passed++
+	} else {
+		gs.Failed++
+	}
+}
+
+// copyJobStats returns a deep copy of JobStats.
+func (q *MemoryQueue) copyJobStats(src *JobStats) *JobStats {
+	dst := &JobStats{
+		Total:           src.Total,
+		Passed:          src.Passed,
+		Failed:          src.Failed,
+		TotalDurationMs: src.TotalDurationMs,
+		TotalTokens:     src.TotalTokens,
+		TotalCost:       src.TotalCost,
+		ByScenario:      make(map[string]*GroupStats, len(src.ByScenario)),
+		ByProvider:      make(map[string]*GroupStats, len(src.ByProvider)),
+	}
+	for k, v := range src.ByScenario {
+		cp := *v
+		dst.ByScenario[k] = &cp
+	}
+	for k, v := range src.ByProvider {
+		cp := *v
+		dst.ByProvider[k] = &cp
+	}
+	return dst
 }
 
 // Ensure MemoryQueue implements WorkQueue interface.

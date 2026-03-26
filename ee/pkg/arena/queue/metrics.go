@@ -23,10 +23,12 @@ const (
 
 // Operation name constants.
 const (
-	OpPush = "push"
-	OpPop  = "pop"
-	OpAck  = "ack"
-	OpNack = "nack"
+	OpPush         = "push"
+	OpPop          = "pop"
+	OpAck          = "ack"
+	OpNack         = "nack"
+	OpCompleteItem = "complete_item"
+	OpFailItem     = "fail_item"
 )
 
 // QueueMetrics holds Prometheus metrics for arena queue operations.
@@ -117,7 +119,7 @@ func (m *QueueMetrics) Initialize() {
 	m.JobsActive.Set(0)
 
 	// Initialize operation counters for known operations
-	for _, op := range []string{OpPush, OpPop, OpAck, OpNack} {
+	for _, op := range []string{OpPush, OpPop, OpAck, OpNack, OpCompleteItem, OpFailItem} {
 		m.OperationsTotal.WithLabelValues(op, StatusSuccess).Add(0)
 		m.OperationsTotal.WithLabelValues(op, StatusError).Add(0)
 		m.OperationDuration.WithLabelValues(op)
