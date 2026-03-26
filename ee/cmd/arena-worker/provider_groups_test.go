@@ -514,7 +514,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 		}
 
 		ref := v1alpha1.ProviderRef{Name: "my-openai"}
-		err := resolveProviderRefEntry(ctx, log, c, "default", ref, "judge", arenaCfg)
+		_, err := resolveProviderRefEntry(ctx, log, c, "default", ref, "judge", arenaCfg)
 		require.NoError(t, err)
 
 		providerID := sanitizeID("my-openai")
@@ -548,7 +548,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 		}
 
 		ref := v1alpha1.ProviderRef{Name: "provider-with-cred"}
-		err := resolveProviderRefEntry(ctx, log, c, "default", ref, "default", arenaCfg)
+		_, err := resolveProviderRefEntry(ctx, log, c, "default", ref, "default", arenaCfg)
 		require.NoError(t, err)
 
 		providerID := sanitizeID("provider-with-cred")
@@ -583,7 +583,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 		}
 
 		ref := v1alpha1.ProviderRef{Name: "provider-with-defaults"}
-		err := resolveProviderRefEntry(ctx, log, c, "default", ref, "default", arenaCfg)
+		_, err := resolveProviderRefEntry(ctx, log, c, "default", ref, "default", arenaCfg)
 		require.NoError(t, err)
 
 		providerID := sanitizeID("provider-with-defaults")
@@ -601,7 +601,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 		}
 
 		ref := v1alpha1.ProviderRef{Name: "nonexistent"}
-		err := resolveProviderRefEntry(ctx, log, c, "default", ref, "group1", arenaCfg)
+		_, err := resolveProviderRefEntry(ctx, log, c, "default", ref, "group1", arenaCfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "group1")
 		assert.Contains(t, err.Error(), "nonexistent")
@@ -628,11 +628,69 @@ func TestResolveProviderRefEntry(t *testing.T) {
 		}
 
 		ref := v1alpha1.ProviderRef{Name: "cross-ns-provider", Namespace: ptr.To("other-ns")}
-		err := resolveProviderRefEntry(ctx, log, c, "default", ref, "default", arenaCfg)
+		_, err := resolveProviderRefEntry(ctx, log, c, "default", ref, "default", arenaCfg)
 		require.NoError(t, err)
 
 		providerID := sanitizeID("cross-ns-provider")
 		assert.Contains(t, arenaCfg.LoadedProviders, providerID)
+	})
+
+	t.Run("returns pricing when provider has spec.pricing", func(t *testing.T) {
+		provider := &v1alpha1.Provider{
+			Spec: v1alpha1.ProviderSpec{
+				Type:  "openai",
+				Model: "gpt-4o",
+				Pricing: &v1alpha1.ProviderPricing{
+					InputCostPer1K:  ptr.To("0.003"),
+					OutputCostPer1K: ptr.To("0.015"),
+				},
+			},
+		}
+		provider.Name = "priced-provider"
+		provider.Namespace = testNamespace
+
+		c := fake.NewClientBuilder().
+			WithScheme(k8s.Scheme()).
+			WithObjects(provider).
+			Build()
+
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+
+		ref := v1alpha1.ProviderRef{Name: "priced-provider"}
+		pricing, err := resolveProviderRefEntry(ctx, log, c, testNamespace, ref, "default", arenaCfg)
+		require.NoError(t, err)
+		require.NotNil(t, pricing)
+		assert.InDelta(t, 0.003, pricing.inputCostPer1K, 1e-9)
+		assert.InDelta(t, 0.015, pricing.outputCostPer1K, 1e-9)
+	})
+
+	t.Run("returns nil pricing when provider has no spec.pricing", func(t *testing.T) {
+		provider := &v1alpha1.Provider{
+			Spec: v1alpha1.ProviderSpec{
+				Type:  "openai",
+				Model: "gpt-4o",
+			},
+		}
+		provider.Name = "no-pricing-provider"
+		provider.Namespace = testNamespace
+
+		c := fake.NewClientBuilder().
+			WithScheme(k8s.Scheme()).
+			WithObjects(provider).
+			Build()
+
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+
+		ref := v1alpha1.ProviderRef{Name: "no-pricing-provider"}
+		pricing, err := resolveProviderRefEntry(ctx, log, c, testNamespace, ref, "default", arenaCfg)
+		require.NoError(t, err)
+		assert.Nil(t, pricing)
 	})
 }
 
@@ -767,7 +825,7 @@ func TestResolveProviderRefEntryWithID(t *testing.T) {
 		}
 
 		ref := v1alpha1.ProviderRef{Name: "nonexistent"}
-		err := resolveProviderRefEntryWithID(ctx, log, c, testNamespace, ref, "my-id", "grp", arenaCfg)
+		_, err := resolveProviderRefEntryWithID(ctx, log, c, testNamespace, ref, "my-id", "grp", arenaCfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "nonexistent")
 	})
@@ -801,7 +859,7 @@ func TestResolveProviderRefEntryWithID(t *testing.T) {
 		}
 
 		ref := v1alpha1.ProviderRef{Name: "full-provider"}
-		err := resolveProviderRefEntryWithID(ctx, log, c, testNamespace, ref, "custom-id", "judge", arenaCfg)
+		_, err := resolveProviderRefEntryWithID(ctx, log, c, testNamespace, ref, "custom-id", "judge", arenaCfg)
 		require.NoError(t, err)
 
 		require.Contains(t, arenaCfg.LoadedProviders, "custom-id")
@@ -831,7 +889,7 @@ func TestResolveEntry(t *testing.T) {
 		}
 		entry := &arenaProviderEntry{}
 
-		fp, err := resolveEntry(ctx, log, nil, testNamespace, "group", "", entry, nil, arenaCfg)
+		fp, _, err := resolveEntry(ctx, log, nil, testNamespace, "group", "", entry, nil, arenaCfg)
 		require.NoError(t, err)
 		assert.Nil(t, fp)
 	})
@@ -848,7 +906,7 @@ func TestResolveEntry(t *testing.T) {
 			AgentRef: &v1alpha1.LocalObjectReference{Name: "agent-a"},
 		}
 
-		fp, err := resolveEntry(ctx, log, nil, testNamespace, "grp", "my-config-id", entry, agentWSURLs, arenaCfg)
+		fp, _, err := resolveEntry(ctx, log, nil, testNamespace, "grp", "my-config-id", entry, agentWSURLs, arenaCfg)
 		require.NoError(t, err)
 		require.NotNil(t, fp)
 		assert.Equal(t, "my-config-id", fp.id)
@@ -866,7 +924,7 @@ func TestResolveEntry(t *testing.T) {
 			AgentRef: &v1alpha1.LocalObjectReference{Name: "agent-b"},
 		}
 
-		fp, err := resolveEntry(ctx, log, nil, testNamespace, "grp", "", entry, agentWSURLs, arenaCfg)
+		fp, _, err := resolveEntry(ctx, log, nil, testNamespace, "grp", "", entry, agentWSURLs, arenaCfg)
 		require.NoError(t, err)
 		require.NotNil(t, fp)
 		assert.Equal(t, sanitizeID("agent-agent-b"), fp.id)
@@ -886,7 +944,7 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 		cfg := &Config{JobName: "missing", JobNamespace: testNamespace}
 		arenaCfg := &config.Config{}
 
-		_, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
+		_, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to read ArenaJob")
 	})
@@ -898,7 +956,7 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 		cfg := &Config{JobName: "empty-job", JobNamespace: testNamespace}
 		arenaCfg := &config.Config{}
 
-		_, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
+		_, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no providers")
 	})
@@ -944,7 +1002,7 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 			},
 		}
 
-		_, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
+		_, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.NoError(t, err)
 
 		// Arena config providers must be gone — only CRD providers remain
@@ -988,7 +1046,7 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 		cfg := &Config{JobName: "test-job", JobNamespace: testNamespace}
 		arenaCfg := &config.Config{}
 
-		fps, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
+		fps, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.NoError(t, err)
 		assert.Empty(t, fps) // no fleet providers — only CRD providers
 
@@ -1016,7 +1074,7 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 		cfg := &Config{JobName: "test-job", JobNamespace: testNamespace}
 		arenaCfg := &config.Config{}
 
-		_, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
+		_, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "nonexistent-provider")
 	})
@@ -1041,7 +1099,7 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 		cfg := &Config{JobName: "agent-job", JobNamespace: testNamespace}
 		arenaCfg := &config.Config{}
 
-		fps, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
+		fps, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.NoError(t, err)
 		require.Len(t, fps, 1)
 
@@ -1072,7 +1130,7 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 		cfg := &Config{JobName: "agent-job", JobNamespace: testNamespace}
 		arenaCfg := &config.Config{}
 
-		_, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
+		_, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "my-agent")
 	})
@@ -1109,7 +1167,7 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 		// arenaCfg has nil maps — function should initialise them
 		arenaCfg := &config.Config{}
 
-		_, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
+		_, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.NoError(t, err)
 		assert.NotNil(t, arenaCfg.LoadedProviders)
 		assert.NotNil(t, arenaCfg.ProviderGroups)
@@ -1856,7 +1914,7 @@ func TestResolveProvidersFromCRD_MapMode(t *testing.T) {
 		cfg := &Config{JobName: "map-agent-job", JobNamespace: testNamespace}
 		arenaCfg := &config.Config{}
 
-		fps, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
+		fps, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.NoError(t, err)
 		require.Len(t, fps, 1)
 
@@ -1900,7 +1958,7 @@ func TestResolveProvidersFromCRD_MapMode(t *testing.T) {
 		cfg := &Config{JobName: "map-job", JobNamespace: testNamespace}
 		arenaCfg := &config.Config{}
 
-		fps, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
+		fps, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.NoError(t, err)
 		assert.Empty(t, fps)
 
