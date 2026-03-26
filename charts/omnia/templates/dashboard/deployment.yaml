@@ -107,6 +107,24 @@ spec:
               value: {{ .Values.dashboard.builtin.admin.password | quote }}
             {{- end }}
             {{- end }}
+            {{- if and .Values.enterprise.enabled .Values.enterprise.arena.queue (eq .Values.enterprise.arena.queue.type "redis") }}
+            {{- if .Values.redis.enabled }}
+            - name: ARENA_REDIS_ADDR
+              value: "{{ include "omnia.fullname" . }}-redis-master.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.enterprise.arena.queue.redis.port | default 6379 }}"
+            {{- else if .Values.enterprise.arena.queue.redis.host }}
+            - name: ARENA_REDIS_ADDR
+              value: "{{ .Values.enterprise.arena.queue.redis.host }}:{{ .Values.enterprise.arena.queue.redis.port | default 6379 }}"
+            {{- end }}
+            {{- if .Values.enterprise.arena.queue.redis.passwordSecret }}
+            - name: ARENA_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.enterprise.arena.queue.redis.passwordSecret }}
+                  key: redis-password
+            {{- end }}
+            - name: ARENA_REDIS_DB
+              value: "{{ .Values.enterprise.arena.queue.redis.db | default 0 }}"
+            {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           {{- with .Values.dashboard.startupProbe }}

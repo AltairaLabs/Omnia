@@ -28,6 +28,7 @@ export default defineConfig({
         "**/*.d.ts", // Type definitions
         "**/index.ts", // Barrel re-exports
         "**/index.tsx",
+        "src/hooks/arena.ts", // Barrel re-exports for arena hooks
 
         // Generated code
         "src/types/generated/", // Generated CRD types
@@ -87,6 +88,7 @@ export default defineConfig({
         // Arena project/source API routes - require K8s infrastructure
         "src/app/api/workspaces/[name]/arena/projects/**",
         "src/app/api/workspaces/[name]/arena/sources/[sourceName]/file/**",
+        "src/app/api/workspaces/[name]/arena/jobs/[jobName]/live-stats/**",
 
         // Other API routes that require K8s infrastructure
         "src/app/api/workspaces/[name]/agents/**",
@@ -107,6 +109,7 @@ export default defineConfig({
         "src/hooks/use-job-logs-stream.ts", // Job logs streaming client
 
         // Requires external infrastructure (K8s, Prometheus, etc.)
+        // Redis client is now tested via mock — see client.test.ts
         "src/lib/data/live-service.ts", // K8s API
         "src/lib/data/operator-service.ts", // Operator API
         "src/lib/data/prometheus-service.ts", // Prometheus
