@@ -14,7 +14,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -25,6 +24,7 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/AltairaLabs/PromptKit/runtime/events"
+	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
 	arenastatestore "github.com/AltairaLabs/PromptKit/tools/arena/statestore"
@@ -36,6 +36,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/altairalabs/omnia/ee/pkg/arena/fleet"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/pkg/k8s"
@@ -433,7 +434,6 @@ func reportWorkItemResult(
 		return
 	}
 
-	resultJSON, _ := json.Marshal(result)
 	log.Info("work item completed",
 		"itemID", item.ID,
 		"status", result.Status,
@@ -445,8 +445,27 @@ func reportWorkItemResult(
 			"error", result.Error,
 		)
 	}
-	if err := q.Ack(ctx, jobID, item.ID, resultJSON); err != nil {
-		log.Error(err, "failed to ack item", "itemID", item.ID)
+	if err := q.CompleteItem(ctx, jobID, item.ID, toItemResult(result)); err != nil {
+		log.Error(err, "failed to complete item", "itemID", item.ID)
+	}
+}
+
+// toItemResult converts an ExecutionResult to a queue.ItemResult for accumulator updates.
+func toItemResult(result *ExecutionResult) *queue.ItemResult {
+	assertions := make([]queue.AssertionResult, len(result.Assertions))
+	for i, a := range result.Assertions {
+		assertions[i] = queue.AssertionResult{
+			Name:    a.Name,
+			Passed:  a.Passed,
+			Message: a.Message,
+		}
+	}
+	return &queue.ItemResult{
+		Status:     result.Status,
+		DurationMs: result.DurationMs,
+		Error:      result.Error,
+		Metrics:    result.Metrics,
+		Assertions: assertions,
 	}
 }
 
@@ -634,7 +653,43 @@ func executeWorkItem(
 
 	// Build result from state store
 	result = buildExecutionResult(log, eng.GetStateStore(), runIDs, start)
+
+	// Extract TTFT from fleet providers — the engine doesn't propagate this,
+	// so we read it directly from the provider after execution completes.
+	extractFleetTTFT(providerRegistry, crdFleetProviders, result)
+
 	return result, nil
+}
+
+// extractFleetTTFT reads LastTTFT from fleet providers and stores the value
+// in result.Metrics so that recordDetailedMetrics can emit the Prometheus histogram.
+func extractFleetTTFT(
+	registry *pkproviders.Registry,
+	fleetProviders []*resolvedFleetProvider,
+	result *ExecutionResult,
+) {
+	if result == nil || result.Metrics == nil {
+		return
+	}
+	// Already set (e.g. by a non-fleet provider that natively reports TTFT).
+	if _, ok := result.Metrics[metricKeyTTFT]; ok {
+		return
+	}
+	for _, fp := range fleetProviders {
+		prov, ok := registry.Get(fp.id)
+		if !ok {
+			continue
+		}
+		fleetProv, ok := prov.(*fleet.Provider)
+		if !ok {
+			continue
+		}
+		ttft := fleetProv.LastTTFT()
+		if ttft > 0 {
+			result.Metrics[metricKeyTTFT] = ttft.Seconds()
+			return // use the first non-zero value
+		}
+	}
 }
 
 // findArenaConfigFile looks for the arena config file in the bundle directory.
@@ -677,6 +732,8 @@ type runAggregator struct {
 	errors        []string
 	totalDuration time.Duration
 	assertions    []AssertionResult
+	inputTokens   int
+	outputTokens  int
 	log           logr.Logger
 }
 
@@ -688,6 +745,14 @@ func (a *runAggregator) processRun(runID string, state *arenastatestore.ArenaCon
 	}
 	meta := state.RunMetadata
 	a.totalDuration += meta.Duration
+
+	// Accumulate token counts from message CostInfo.
+	for _, msg := range state.Messages {
+		if msg.CostInfo != nil {
+			a.inputTokens += msg.CostInfo.InputTokens
+			a.outputTokens += msg.CostInfo.OutputTokens
+		}
+	}
 
 	if meta.Error != "" {
 		a.errors = append(a.errors, fmt.Sprintf("run %s: %s", runID, meta.Error))
@@ -777,6 +842,13 @@ func populateMetrics(result *ExecutionResult, agg *runAggregator, totalRuns int)
 	result.Metrics["runsExecuted"] = float64(totalRuns)
 	result.Metrics["runsPassed"] = float64(agg.passCount)
 	result.Metrics["runsFailed"] = float64(agg.failCount)
+
+	if agg.inputTokens > 0 {
+		result.Metrics[metricKeyInputTokens] = float64(agg.inputTokens)
+	}
+	if agg.outputTokens > 0 {
+		result.Metrics[metricKeyOutputTokens] = float64(agg.outputTokens)
+	}
 }
 
 // setResultStatus determines the overall status based on aggregated counts.
