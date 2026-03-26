@@ -35,7 +35,8 @@ type scenarioFile struct {
 		Name string `yaml:"name"`
 	} `yaml:"metadata"`
 	Spec struct {
-		ID string `yaml:"id"`
+		ID     string `yaml:"id"`
+		Trials int    `yaml:"trials"`
 	} `yaml:"spec"`
 }
 
@@ -110,9 +111,10 @@ func readScenarioFile(absPath, relativePath string) (*Scenario, error) {
 	}
 
 	return &Scenario{
-		ID:   id,
-		Name: name,
-		Path: relativePath,
+		ID:     id,
+		Name:   name,
+		Path:   relativePath,
+		Trials: sf.Spec.Trials,
 	}, nil
 }
 

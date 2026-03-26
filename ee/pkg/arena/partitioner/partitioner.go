@@ -38,6 +38,10 @@ type Scenario struct {
 
 	// Tags are optional labels for categorization.
 	Tags []string `json:"tags,omitempty"`
+
+	// Trials is the number of times to execute this scenario for statistical evaluation.
+	// When > 1, each scenario × provider combination produces N work items.
+	Trials int `json:"trials,omitempty"`
 }
 
 // Provider represents a provider configuration for work items.
@@ -71,6 +75,11 @@ type PartitionInput struct {
 
 	// Config is optional configuration to include in work items.
 	Config map[string]any
+
+	// JobTrials is a job-level trial count override.
+	// If > 0, overrides per-scenario Trials for all scenarios.
+	// If 0, per-scenario Trials is used (defaulting to 1 if unset).
+	JobTrials int
 }
 
 // PartitionResult contains the result of partitioning.
@@ -78,7 +87,7 @@ type PartitionResult struct {
 	// Items is the list of generated work items.
 	Items []queue.WorkItem
 
-	// TotalCombinations is the total number of scenario × provider combinations.
+	// TotalCombinations is the total number of scenario × provider × trial combinations.
 	TotalCombinations int
 
 	// ScenarioCount is the number of scenarios.
@@ -86,9 +95,12 @@ type PartitionResult struct {
 
 	// ProviderCount is the number of providers.
 	ProviderCount int
+
+	// TrialCount is the total number of trials across all scenarios.
+	TrialCount int
 }
 
-// Partition creates work items for each scenario × provider combination.
+// Partition creates work items for each scenario × provider × trial combination.
 // Each work item represents a single evaluation that can be independently executed.
 func Partition(input PartitionInput) (*PartitionResult, error) {
 	if len(input.Scenarios) == 0 {
@@ -98,37 +110,54 @@ func Partition(input PartitionInput) (*PartitionResult, error) {
 		return nil, fmt.Errorf("no providers provided")
 	}
 
-	totalCombinations := len(input.Scenarios) * len(input.Providers)
-	items := make([]queue.WorkItem, 0, totalCombinations)
+	totalTrials := 0
+	items := make([]queue.WorkItem, 0, len(input.Scenarios)*len(input.Providers)*max(input.JobTrials, 1))
 
-	// Create work item for each scenario × provider combination
 	for _, scenario := range input.Scenarios {
-		for _, provider := range input.Providers {
-			config, err := buildConfig(input.Config, scenario, provider)
-			if err != nil {
-				return nil, fmt.Errorf("failed to build config for %s/%s: %w",
-					scenario.ID, provider.ID, err)
-			}
+		trialCount := resolveTrialCount(input.JobTrials, scenario.Trials)
+		totalTrials += trialCount
 
-			item := queue.WorkItem{
-				ID:          generateItemID(input.JobID, scenario.ID, provider.ID),
-				JobID:       input.JobID,
-				ScenarioID:  scenario.ID,
-				ProviderID:  provider.ID,
-				BundleURL:   input.BundleURL,
-				Config:      config,
-				MaxAttempts: input.MaxRetries,
+		for _, provider := range input.Providers {
+			for trial := 0; trial < trialCount; trial++ {
+				config, err := buildTrialConfig(input.Config, scenario, provider, trial, trialCount)
+				if err != nil {
+					return nil, fmt.Errorf("failed to build config for %s/%s trial %d: %w",
+						scenario.ID, provider.ID, trial, err)
+				}
+
+				item := queue.WorkItem{
+					ID:          generateItemID(input.JobID, scenario.ID, provider.ID),
+					JobID:       input.JobID,
+					ScenarioID:  scenario.ID,
+					ProviderID:  provider.ID,
+					BundleURL:   input.BundleURL,
+					Config:      config,
+					MaxAttempts: input.MaxRetries,
+				}
+				items = append(items, item)
 			}
-			items = append(items, item)
 		}
 	}
 
 	return &PartitionResult{
 		Items:             items,
-		TotalCombinations: totalCombinations,
+		TotalCombinations: len(items),
 		ScenarioCount:     len(input.Scenarios),
 		ProviderCount:     len(input.Providers),
+		TrialCount:        totalTrials,
 	}, nil
+}
+
+// resolveTrialCount returns the effective trial count using the priority:
+// jobTrials (if > 0) > scenarioTrials (if > 0) > 1.
+func resolveTrialCount(jobTrials, scenarioTrials int) int {
+	if jobTrials > 0 {
+		return jobTrials
+	}
+	if scenarioTrials > 0 {
+		return scenarioTrials
+	}
+	return 1
 }
 
 // Filter applies include/exclude patterns to a list of scenarios.
@@ -186,8 +215,11 @@ func generateItemID(_, scenarioID, _ string) string {
 	return fmt.Sprintf("%s-%s", scenarioID[:min(8, len(scenarioID))], uuid.New().String()[:8])
 }
 
-// buildConfig creates the config JSON for a work item.
-func buildConfig(base map[string]any, scenario Scenario, provider Provider) ([]byte, error) {
+// buildTrialConfig creates the config JSON for a work item including trial metadata.
+func buildTrialConfig(
+	base map[string]any, scenario Scenario, provider Provider,
+	trialIndex, totalTrials int,
+) ([]byte, error) {
 	config := make(map[string]any)
 
 	// Copy base config
@@ -211,13 +243,21 @@ func buildConfig(base map[string]any, scenario Scenario, provider Provider) ([]b
 		"namespace": provider.Namespace,
 	}
 
+	// Add trial metadata
+	config["trialIndex"] = trialIndex
+	config["totalTrials"] = totalTrials
+
 	return json.Marshal(config)
 }
 
 // EstimateWorkItems returns the estimated number of work items without creating them.
 // Useful for progress tracking and resource planning.
-func EstimateWorkItems(scenarioCount, providerCount int) int {
-	return scenarioCount * providerCount
+// The trials parameter is the average trial count per scenario (use 1 for backward compatibility).
+func EstimateWorkItems(scenarioCount, providerCount, trials int) int {
+	if trials < 1 {
+		trials = 1
+	}
+	return scenarioCount * providerCount * trials
 }
 
 // Batch splits work items into batches of the specified size.

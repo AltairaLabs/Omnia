@@ -45,8 +45,11 @@ import (
 // Workspace label for namespace association
 const labelWorkspace = "omnia.altairalabs.ai/workspace"
 
-// maxWorkItems is the maximum number of scenario x provider work items allowed.
-const maxWorkItems = 10000
+// maxWorkItems limits per job type to prevent runaway matrix expansion.
+const (
+	maxWorkItemsEvaluation = 10000
+	maxWorkItemsLoadTest   = 100000
+)
 
 // ArenaJob condition types
 const (
@@ -1004,9 +1007,14 @@ func (r *ArenaJobReconciler) listScenarios(ctx context.Context, arenaJob *omniav
 	return scenarios, nil
 }
 
-// buildMatrixWorkItems creates scenario × provider work items using the partitioner.
+// buildMatrixWorkItems creates scenario × provider × trial work items using the partitioner.
 // Returns nil if partitioning fails or inputs are empty.
-func (r *ArenaJobReconciler) buildMatrixWorkItems(ctx context.Context, jobName, bundleURL string, scenarios []partitioner.Scenario, providerCRDs []*corev1alpha1.Provider) []queue.WorkItem {
+func (r *ArenaJobReconciler) buildMatrixWorkItems(
+	ctx context.Context, jobName, bundleURL string,
+	scenarios []partitioner.Scenario,
+	providerCRDs []*corev1alpha1.Provider,
+	jobTrials int, jobType omniav1alpha1.ArenaJobType,
+) []queue.WorkItem {
 	log := logf.FromContext(ctx)
 
 	partProviders := make([]partitioner.Provider, len(providerCRDs))
@@ -1024,16 +1032,18 @@ func (r *ArenaJobReconciler) buildMatrixWorkItems(ctx context.Context, jobName, 
 		Scenarios:  scenarios,
 		Providers:  partProviders,
 		MaxRetries: 3,
+		JobTrials:  jobTrials,
 	})
 	if err != nil {
 		log.Error(err, "partitioning failed, falling back to per-provider mode")
 		return nil
 	}
 
-	if result.TotalCombinations > maxWorkItems {
+	limit := maxWorkItemsForJobType(jobType)
+	if result.TotalCombinations > limit {
 		log.Error(nil, "work item matrix exceeds limit, falling back to per-provider mode",
 			"totalCombinations", result.TotalCombinations,
-			"maxWorkItems", maxWorkItems)
+			"maxWorkItems", limit)
 		return nil
 	}
 
@@ -1043,11 +1053,20 @@ func (r *ArenaJobReconciler) buildMatrixWorkItems(ctx context.Context, jobName, 
 		result.Items[i].Attempt = 1
 		result.Items[i].CreatedAt = now
 	}
-	log.Info("created scenario × provider work items",
+	log.Info("created scenario × provider × trial work items",
 		"scenarios", result.ScenarioCount,
 		"providers", result.ProviderCount,
+		"trials", result.TrialCount,
 		"items", result.TotalCombinations)
 	return result.Items
+}
+
+// maxWorkItemsForJobType returns the work item limit for a given job type.
+func maxWorkItemsForJobType(jobType omniav1alpha1.ArenaJobType) int {
+	if jobType == omniav1alpha1.ArenaJobTypeLoadTest {
+		return maxWorkItemsLoadTest
+	}
+	return maxWorkItemsEvaluation
 }
 
 // buildFallbackWorkItems creates per-provider work items (or a single default item).
@@ -1139,11 +1158,20 @@ func (r *ArenaJobReconciler) enqueueWorkItems(
 	matrixProviders := filterArrayModeProviders(providerCRDs, resolvedGroups)
 	log.V(1).Info("building work items", "providerIDs", providerIDs, "matrixProviders", len(matrixProviders))
 
+	// Resolve job-level trials override (nil pointer = 0 = use per-scenario defaults)
+	jobTrials := 0
+	if arenaJob.Spec.Trials != nil {
+		jobTrials = int(*arenaJob.Spec.Trials)
+	}
+
 	var items []queue.WorkItem
 	if len(scenarios) > 0 && len(matrixProviders) > 0 {
-		items = r.buildMatrixWorkItems(ctx, arenaJob.Name, bundleURL, scenarios, matrixProviders)
+		items = r.buildMatrixWorkItems(ctx, arenaJob.Name, bundleURL, scenarios, matrixProviders, jobTrials, arenaJob.Spec.Type)
 	}
 	if len(items) == 0 {
+		if jobTrials > 0 {
+			log.Info("trial configuration ignored in fallback mode", "trials", jobTrials)
+		}
 		items = buildFallbackWorkItems(arenaJob.Name, bundleURL, providerIDs)
 	}
 
