@@ -678,6 +678,35 @@ func testServerRaw(t *testing.T, handler func(*websocket.Conn)) string {
 	return "ws" + strings.TrimPrefix(srv.URL, "http")
 }
 
+func TestProvider_Predict_RecordsTTFT(t *testing.T) {
+	p := providerTestServer(t, func(conn *websocket.Conn) {
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeConnected,
+			SessionID: "sess-ttft",
+			Timestamp: time.Now(),
+		})
+
+		readClientMsg(t, conn)
+
+		// Small delay before first response to make TTFT measurable
+		time.Sleep(10 * time.Millisecond)
+
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeDone,
+			SessionID: "sess-ttft",
+			Content:   "ok",
+			Timestamp: time.Now(),
+		})
+	})
+
+	resp, err := p.Predict(context.Background(), providers.PredictionRequest{
+		Messages: []types.Message{{Role: "user", Content: "hello"}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "ok", resp.Content)
+	assert.True(t, p.LastTTFT() > 0, "LastTTFT should be positive after Predict")
+}
+
 func TestProvider_Predict_SendsOnlyLastUserMessage(t *testing.T) {
 	var receivedContent string
 	wsURL := testServerRaw(t, func(conn *websocket.Conn) {

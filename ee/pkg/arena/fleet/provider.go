@@ -51,6 +51,7 @@ type Provider struct {
 	mu       sync.Mutex
 	conns    map[string]*connEntry // conversation_id → connection
 	fallback *connEntry            // default connection from Connect()
+	lastTTFT time.Duration         // TTFT from the most recent Predict call
 }
 
 // NewProvider creates a new fleet provider targeting the given WebSocket URL.
@@ -178,12 +179,23 @@ func (p *Provider) Predict(ctx context.Context, req providers.PredictionRequest)
 		return providers.PredictionResponse{}, fmt.Errorf("failed to send message: %w", err)
 	}
 
-	turnMsgs, err := collectTurnResponse(ctx, entry.conn, entry.sessionID)
+	turnResult, err := collectTurnResponse(ctx, entry.conn, entry.sessionID, start)
 	if err != nil {
 		return providers.PredictionResponse{}, fmt.Errorf("agent error during turn: %w", err)
 	}
 
-	return buildPredictionResponse(turnMsgs, time.Since(start)), nil
+	p.mu.Lock()
+	p.lastTTFT = turnResult.TTFT
+	p.mu.Unlock()
+
+	return buildPredictionResponse(turnResult.Messages, time.Since(start)), nil
+}
+
+// LastTTFT returns the time-to-first-token duration from the most recent Predict call.
+func (p *Provider) LastTTFT() time.Duration {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lastTTFT
 }
 
 // PredictStream sends the latest user message and streams the response as chunks.
@@ -209,17 +221,17 @@ func (p *Provider) PredictStream(
 	}
 
 	ch := make(chan providers.StreamChunk, 16)
-	go streamResponse(ctx, entry, ch)
+	go streamResponse(ctx, entry, ch, time.Now())
 
 	return ch, nil
 }
 
 // streamResponse reads WebSocket messages and sends them as stream chunks.
-func streamResponse(ctx context.Context, entry *connEntry, ch chan<- providers.StreamChunk) {
+func streamResponse(ctx context.Context, entry *connEntry, ch chan<- providers.StreamChunk, turnStart time.Time) {
 	defer entry.mu.Unlock()
 	defer close(ch)
 
-	turnMsgs, err := collectTurnResponse(ctx, entry.conn, entry.sessionID)
+	turnResult, err := collectTurnResponse(ctx, entry.conn, entry.sessionID, turnStart)
 	if err != nil {
 		finishReason := "error"
 		ch <- providers.StreamChunk{
@@ -229,7 +241,7 @@ func streamResponse(ctx context.Context, entry *connEntry, ch chan<- providers.S
 		return
 	}
 
-	resp := buildPredictionResponse(turnMsgs, 0)
+	resp := buildPredictionResponse(turnResult.Messages, 0)
 	finishReason := "stop"
 	ch <- providers.StreamChunk{
 		Content:      resp.Content,

@@ -230,11 +230,12 @@ func (p *VUPool) executeAndReport(ctx context.Context, log logr.Logger, item *qu
 	span.End()
 
 	itemDuration := time.Since(itemStart).Seconds()
+	status := statusPass
 	if execErr != nil || (result != nil && result.Status == statusFail) {
-		p.metrics.RecordWorkItem(p.jobID, statusFail, itemDuration)
-	} else {
-		p.metrics.RecordWorkItem(p.jobID, statusPass, itemDuration)
+		status = statusFail
 	}
+	p.metrics.RecordWorkItem(p.jobID, status, itemDuration)
+	recordDetailedMetrics(p.metrics, p.jobID, item, result, execErr, itemDuration)
 }
 
 // reportResult reports the work item result via Ack or Nack.

@@ -337,11 +337,12 @@ func executeAndReport(
 	span.End()
 
 	itemDuration := time.Since(itemStart).Seconds()
+	status := statusPass
 	if execErr != nil || (result != nil && result.Status == statusFail) {
-		wm.RecordWorkItem(jobID, statusFail, itemDuration)
-	} else {
-		wm.RecordWorkItem(jobID, statusPass, itemDuration)
+		status = statusFail
 	}
+	wm.RecordWorkItem(jobID, status, itemDuration)
+	recordDetailedMetrics(wm, jobID, item, result, execErr, itemDuration)
 }
 
 // checkContextDone returns true if the context is cancelled.
@@ -781,6 +782,56 @@ func setResultStatus(result *ExecutionResult, agg *runAggregator) {
 	} else {
 		result.Status = statusFail
 		result.Error = "no runs completed successfully"
+	}
+}
+
+// Token metric keys extracted from ExecutionResult.Metrics.
+const (
+	metricKeyInputTokens  = "totalInputTokens"
+	metricKeyOutputTokens = "totalOutputTokens"
+	metricKeyTTFT         = "ttftSeconds"
+)
+
+// recordDetailedMetrics emits per-trial Prometheus metrics from an execution result.
+func recordDetailedMetrics(
+	wm *WorkerMetrics, jobID string, item *queue.WorkItem,
+	result *ExecutionResult, execErr error, durationSec float64,
+) {
+	scenario := item.ScenarioID
+	provider := item.ProviderID
+
+	// Record turn latency (always available).
+	wm.RecordTurnLatency(jobID, scenario, provider, durationSec)
+
+	// Record trial outcome.
+	status := statusPass
+	if execErr != nil || (result != nil && result.Status == statusFail) {
+		status = statusFail
+	}
+	wm.RecordTrial(jobID, scenario, provider, status)
+
+	// Record error if applicable.
+	if execErr != nil {
+		wm.RecordError(jobID, provider, "execution")
+	} else if result != nil && result.Status == statusFail {
+		wm.RecordError(jobID, provider, "assertion")
+	}
+
+	if result == nil || result.Metrics == nil {
+		return
+	}
+
+	// Record TTFT if present.
+	if ttft, ok := result.Metrics[metricKeyTTFT]; ok && ttft > 0 {
+		wm.RecordTTFT(jobID, scenario, provider, ttft)
+	}
+
+	// Record tokens.
+	if inputTokens, ok := result.Metrics[metricKeyInputTokens]; ok {
+		wm.RecordTokens(jobID, provider, "input", inputTokens)
+	}
+	if outputTokens, ok := result.Metrics[metricKeyOutputTokens]; ok {
+		wm.RecordTokens(jobID, provider, "output", outputTokens)
 	}
 }
 

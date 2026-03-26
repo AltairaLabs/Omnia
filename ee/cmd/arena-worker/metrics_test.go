@@ -26,6 +26,12 @@ func TestNewWorkerMetrics(t *testing.T) {
 	m := testWorkerMetrics()
 	require.NotNil(t, m.WorkItemsTotal)
 	require.NotNil(t, m.WorkItemDuration)
+	require.NotNil(t, m.TurnLatency)
+	require.NotNil(t, m.TTFTDuration)
+	require.NotNil(t, m.ActiveVUs)
+	require.NotNil(t, m.TrialsTotal)
+	require.NotNil(t, m.ErrorsTotal)
+	require.NotNil(t, m.TokensTotal)
 }
 
 func TestRecordWorkItem_Pass(t *testing.T) {
@@ -70,6 +76,97 @@ func TestRecordWorkItem_Pass(t *testing.T) {
 	// Should have 1 label combo (job_name=job-1)
 	assert.Len(t, durationFamily.GetMetric(), 1)
 	assert.Equal(t, uint64(3), durationFamily.GetMetric()[0].GetHistogram().GetSampleCount())
+}
+
+func TestRecordTurnLatency(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newWorkerMetricsWithRegisterer(reg)
+
+	m.RecordTurnLatency("job-1", "scenario-a", "provider-x", 1.5)
+	m.RecordTurnLatency("job-1", "scenario-a", "provider-x", 2.5)
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+
+	family := findMetricFamily(families, "omnia_arena_turn_latency_seconds")
+	require.NotNil(t, family, "turn_latency metric should exist")
+	require.Len(t, family.GetMetric(), 1)
+	assert.Equal(t, uint64(2), family.GetMetric()[0].GetHistogram().GetSampleCount())
+}
+
+func TestRecordTTFT(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newWorkerMetricsWithRegisterer(reg)
+
+	m.RecordTTFT("job-1", "scenario-a", "provider-x", 0.25)
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+
+	family := findMetricFamily(families, "omnia_arena_ttft_seconds")
+	require.NotNil(t, family, "ttft metric should exist")
+	require.Len(t, family.GetMetric(), 1)
+	assert.Equal(t, uint64(1), family.GetMetric()[0].GetHistogram().GetSampleCount())
+}
+
+func TestRecordTrialAndError(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newWorkerMetricsWithRegisterer(reg)
+
+	m.RecordTrial("job-1", "scenario-a", "provider-x", statusPass)
+	m.RecordTrial("job-1", "scenario-a", "provider-x", statusFail)
+	m.RecordError("job-1", "provider-x", "execution")
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+
+	trialsFamily := findMetricFamily(families, "omnia_arena_trials_total")
+	require.NotNil(t, trialsFamily, "trials_total metric should exist")
+	assert.Len(t, trialsFamily.GetMetric(), 2, "should have pass and fail label combos")
+
+	errorsFamily := findMetricFamily(families, "omnia_arena_errors_total")
+	require.NotNil(t, errorsFamily, "errors_total metric should exist")
+	assert.Len(t, errorsFamily.GetMetric(), 1)
+}
+
+func TestRecordTokens(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newWorkerMetricsWithRegisterer(reg)
+
+	m.RecordTokens("job-1", "provider-x", "input", 100)
+	m.RecordTokens("job-1", "provider-x", "output", 50)
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+
+	family := findMetricFamily(families, "omnia_arena_tokens_total")
+	require.NotNil(t, family, "tokens_total metric should exist")
+	assert.Len(t, family.GetMetric(), 2, "should have input and output direction")
+}
+
+func TestSetActiveVUs(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newWorkerMetricsWithRegisterer(reg)
+
+	m.SetActiveVUs(5)
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+
+	family := findMetricFamily(families, "omnia_arena_active_vus")
+	require.NotNil(t, family, "active_vus metric should exist")
+	require.Len(t, family.GetMetric(), 1)
+	assert.Equal(t, float64(5), family.GetMetric()[0].GetGauge().GetValue())
+}
+
+// findMetricFamily finds a metric family by name in the gathered output.
+func findMetricFamily(families []*dto.MetricFamily, name string) *dto.MetricFamily {
+	for _, f := range families {
+		if f.GetName() == name {
+			return f
+		}
+	}
+	return nil
 }
 
 func TestStartMetricsServer(t *testing.T) {
