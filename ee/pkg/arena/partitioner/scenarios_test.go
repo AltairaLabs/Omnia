@@ -270,6 +270,49 @@ func TestDeriveIDFromFilename(t *testing.T) {
 	}
 }
 
+func TestListScenariosFromConfigReadsTrials(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "load.scenario.yaml"), `
+metadata:
+  name: Load Test
+spec:
+  id: load-test
+  trials: 50
+`)
+
+	writeFile(t, filepath.Join(dir, "simple.scenario.yaml"), `
+metadata:
+  name: Simple Test
+spec:
+  id: simple-test
+`)
+
+	configPath := filepath.Join(dir, "config.arena.yaml")
+	writeFile(t, configPath, `
+spec:
+  scenarios:
+    - file: load.scenario.yaml
+    - file: simple.scenario.yaml
+`)
+
+	scenarios, err := ListScenariosFromConfig(configPath)
+	if err != nil {
+		t.Fatalf("ListScenariosFromConfig() error = %v", err)
+	}
+
+	if len(scenarios) != 2 {
+		t.Fatalf("len(scenarios) = %d, want 2", len(scenarios))
+	}
+
+	if scenarios[0].Trials != 50 {
+		t.Errorf("scenarios[0].Trials = %d, want 50", scenarios[0].Trials)
+	}
+	if scenarios[1].Trials != 0 {
+		t.Errorf("scenarios[1].Trials = %d, want 0 (unset)", scenarios[1].Trials)
+	}
+}
+
 func TestListScenariosFromConfigEmptyFileEntry(t *testing.T) {
 	dir := t.TempDir()
 

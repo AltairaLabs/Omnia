@@ -519,6 +519,13 @@ func executeWorkItem(
 		defer sessionMgr.CompleteAll(ctx)
 	}
 
+	// Override trials to 1 on all loaded scenarios — the partitioner has already
+	// expanded trial repetitions into separate work items, so PromptKit must not
+	// do its own internal trial expansion.
+	for _, scenario := range arenaCfg.LoadedScenarios {
+		scenario.Trials = 1
+	}
+
 	// Determine scenario filter
 	scenarioFilter := []string{}
 	if item.ScenarioID != "" && item.ScenarioID != defaultScenarioID {

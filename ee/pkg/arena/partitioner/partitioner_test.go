@@ -115,6 +115,131 @@ func TestPartitionWithConfig(t *testing.T) {
 	if provider["name"] != "provider" {
 		t.Errorf("config[provider][name] = %v, want provider", provider["name"])
 	}
+
+	// Verify trial metadata is present
+	if config["trialIndex"] != float64(0) {
+		t.Errorf("config[trialIndex] = %v, want 0", config["trialIndex"])
+	}
+	if config["totalTrials"] != float64(1) {
+		t.Errorf("config[totalTrials] = %v, want 1", config["totalTrials"])
+	}
+}
+
+func TestPartitionWithTrials(t *testing.T) {
+	input := PartitionInput{
+		JobID:     "job-1",
+		BundleURL: "http://example.com/bundle.tar.gz",
+		Scenarios: []Scenario{
+			{ID: "s1", Name: "S1", Path: "s1.yaml", Trials: 3},
+			{ID: "s2", Name: "S2", Path: "s2.yaml"},
+		},
+		Providers: []Provider{
+			{ID: "p1", Name: "p1", Namespace: "ns"},
+		},
+	}
+
+	result, err := Partition(input)
+	if err != nil {
+		t.Fatalf("Partition() error = %v", err)
+	}
+
+	// s1 has 3 trials, s2 has 0 (defaults to 1) → (3+1) × 1 provider = 4 items
+	if len(result.Items) != 4 {
+		t.Errorf("len(Items) = %d, want 4", len(result.Items))
+	}
+	if result.TotalCombinations != 4 {
+		t.Errorf("TotalCombinations = %d, want 4", result.TotalCombinations)
+	}
+	if result.TrialCount != 4 {
+		t.Errorf("TrialCount = %d, want 4", result.TrialCount)
+	}
+
+	// Verify trial indices in config for s1 (first 3 items)
+	for i := 0; i < 3; i++ {
+		var cfg map[string]any
+		if err := json.Unmarshal(result.Items[i].Config, &cfg); err != nil {
+			t.Fatalf("unmarshal config[%d]: %v", i, err)
+		}
+		if cfg["trialIndex"] != float64(i) {
+			t.Errorf("item[%d] trialIndex = %v, want %d", i, cfg["trialIndex"], i)
+		}
+		if cfg["totalTrials"] != float64(3) {
+			t.Errorf("item[%d] totalTrials = %v, want 3", i, cfg["totalTrials"])
+		}
+	}
+
+	// s2's single trial should have trialIndex=0, totalTrials=1
+	var cfg map[string]any
+	if err := json.Unmarshal(result.Items[3].Config, &cfg); err != nil {
+		t.Fatalf("unmarshal config[3]: %v", err)
+	}
+	if cfg["trialIndex"] != float64(0) {
+		t.Errorf("item[3] trialIndex = %v, want 0", cfg["trialIndex"])
+	}
+	if cfg["totalTrials"] != float64(1) {
+		t.Errorf("item[3] totalTrials = %v, want 1", cfg["totalTrials"])
+	}
+}
+
+func TestPartitionJobTrialsOverride(t *testing.T) {
+	input := PartitionInput{
+		JobID:     "job-1",
+		BundleURL: "http://example.com/bundle.tar.gz",
+		Scenarios: []Scenario{
+			{ID: "s1", Name: "S1", Path: "s1.yaml", Trials: 3},
+			{ID: "s2", Name: "S2", Path: "s2.yaml", Trials: 5},
+		},
+		Providers: []Provider{
+			{ID: "p1", Name: "p1", Namespace: "ns"},
+		},
+		JobTrials: 10,
+	}
+
+	result, err := Partition(input)
+	if err != nil {
+		t.Fatalf("Partition() error = %v", err)
+	}
+
+	// JobTrials=10 overrides per-scenario → 2 scenarios × 1 provider × 10 trials = 20
+	if len(result.Items) != 20 {
+		t.Errorf("len(Items) = %d, want 20", len(result.Items))
+	}
+	if result.TrialCount != 20 {
+		t.Errorf("TrialCount = %d, want 20", result.TrialCount)
+	}
+
+	// All items should have totalTrials=10
+	var cfg map[string]any
+	if err := json.Unmarshal(result.Items[0].Config, &cfg); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if cfg["totalTrials"] != float64(10) {
+		t.Errorf("totalTrials = %v, want 10", cfg["totalTrials"])
+	}
+}
+
+func TestResolveTrialCount(t *testing.T) {
+	tests := []struct {
+		name           string
+		jobTrials      int
+		scenarioTrials int
+		want           int
+	}{
+		{"job overrides scenario", 5, 3, 5},
+		{"scenario used when no job override", 0, 3, 3},
+		{"defaults to 1 when both zero", 0, 0, 1},
+		{"job overrides even when scenario is zero", 5, 0, 5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveTrialCount(tt.jobTrials, tt.scenarioTrials)
+			if got != tt.want {
+				t.Errorf("resolveTrialCount(%d, %d) = %d, want %d",
+					tt.jobTrials, tt.scenarioTrials, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestPartitionNoScenarios(t *testing.T) {
@@ -226,20 +351,24 @@ func TestEstimateWorkItems(t *testing.T) {
 	tests := []struct {
 		scenarios int
 		providers int
+		trials    int
 		want      int
 	}{
-		{10, 5, 50},
-		{1, 1, 1},
-		{100, 10, 1000},
-		{0, 5, 0},
-		{5, 0, 0},
+		{10, 5, 1, 50},
+		{1, 1, 1, 1},
+		{100, 10, 1, 1000},
+		{0, 5, 1, 0},
+		{5, 0, 1, 0},
+		{10, 5, 3, 150},
+		{2, 2, 0, 4},  // trials < 1 defaults to 1
+		{2, 2, -1, 4}, // negative trials defaults to 1
 	}
 
 	for _, tt := range tests {
-		got := EstimateWorkItems(tt.scenarios, tt.providers)
+		got := EstimateWorkItems(tt.scenarios, tt.providers, tt.trials)
 		if got != tt.want {
-			t.Errorf("EstimateWorkItems(%d, %d) = %d, want %d",
-				tt.scenarios, tt.providers, got, tt.want)
+			t.Errorf("EstimateWorkItems(%d, %d, %d) = %d, want %d",
+				tt.scenarios, tt.providers, tt.trials, got, tt.want)
 		}
 	}
 }

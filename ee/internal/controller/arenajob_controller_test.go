@@ -2440,7 +2440,7 @@ spec:
 				}
 			}
 
-			items := reconciler.buildMatrixWorkItems(ctx, "test-job", "bundle-url", scenarios, providerCRDs)
+			items := reconciler.buildMatrixWorkItems(ctx, "test-job", "bundle-url", scenarios, providerCRDs, 0, omniav1alpha1.ArenaJobTypeEvaluation)
 			Expect(items).To(BeNil())
 		})
 
@@ -2460,7 +2460,7 @@ spec:
 				{ObjectMeta: metav1.ObjectMeta{Name: "p2", Namespace: "default"}},
 			}
 
-			items := reconciler.buildMatrixWorkItems(ctx, "test-job", "bundle-url", scenarios, providerCRDs)
+			items := reconciler.buildMatrixWorkItems(ctx, "test-job", "bundle-url", scenarios, providerCRDs, 0, omniav1alpha1.ArenaJobTypeEvaluation)
 			Expect(items).To(HaveLen(4)) // 2 scenarios x 2 providers
 		})
 	})
