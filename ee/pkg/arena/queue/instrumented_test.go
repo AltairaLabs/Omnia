@@ -590,3 +590,164 @@ func TestInstrumentedQueueGetFailedItems(t *testing.T) {
 		t.Errorf("Expected 0 operations, got %d", len(metrics.operations))
 	}
 }
+
+func TestInstrumentedQueueCompleteItem(t *testing.T) {
+	innerQueue := NewMemoryQueueWithDefaults()
+	metrics := newMockMetrics()
+	q := NewInstrumentedQueue(innerQueue, metrics)
+
+	ctx := context.Background()
+	items := []WorkItem{{ID: "item-1", ScenarioID: "scen-a", ProviderID: "prov-x"}}
+	_ = innerQueue.Push(ctx, testJobID, items)
+	_, _ = innerQueue.Pop(ctx, testJobID)
+
+	// Clear metrics from push/pop
+	metrics.operations = nil
+	metrics.statusChanges = nil
+
+	result := &ItemResult{
+		Status:     "pass",
+		DurationMs: 150,
+		Metrics:    map[string]float64{"tokens": 100},
+	}
+	err := q.CompleteItem(ctx, testJobID, "item-1", result)
+	if err != nil {
+		t.Fatalf("CompleteItem() error = %v", err)
+	}
+
+	// Verify operation was recorded
+	if len(metrics.operations) != 1 {
+		t.Fatalf("Expected 1 operation, got %d", len(metrics.operations))
+	}
+	op := metrics.operations[0]
+	if op.operation != OpCompleteItem {
+		t.Errorf("Operation = %s, want %s", op.operation, OpCompleteItem)
+	}
+	if !op.success {
+		t.Error("Success = false, want true")
+	}
+
+	// Verify status change
+	if len(metrics.statusChanges) != 1 {
+		t.Fatalf("Expected 1 status change, got %d", len(metrics.statusChanges))
+	}
+	sc := metrics.statusChanges[0]
+	if sc.oldStatus != ItemStatusProcessing {
+		t.Errorf("OldStatus = %s, want %s", sc.oldStatus, ItemStatusProcessing)
+	}
+	if sc.newStatus != ItemStatusCompleted {
+		t.Errorf("NewStatus = %s, want %s", sc.newStatus, ItemStatusCompleted)
+	}
+}
+
+func TestInstrumentedQueueCompleteItemError(t *testing.T) {
+	innerQueue := NewMemoryQueueWithDefaults()
+	metrics := newMockMetrics()
+	q := NewInstrumentedQueue(innerQueue, metrics)
+
+	ctx := context.Background()
+
+	// CompleteItem on nonexistent item
+	result := &ItemResult{Status: "pass", DurationMs: 100}
+	err := q.CompleteItem(ctx, testJobID, "nonexistent", result)
+	if err != ErrJobNotFound {
+		t.Fatalf("CompleteItem() error = %v, want ErrJobNotFound", err)
+	}
+
+	if len(metrics.operations) != 1 {
+		t.Fatalf("Expected 1 operation, got %d", len(metrics.operations))
+	}
+	if metrics.operations[0].success {
+		t.Error("Success = true, want false")
+	}
+	if len(metrics.statusChanges) != 0 {
+		t.Errorf("Expected 0 status changes, got %d", len(metrics.statusChanges))
+	}
+}
+
+func TestInstrumentedQueueFailItem(t *testing.T) {
+	innerQueue := NewMemoryQueueWithDefaults()
+	metrics := newMockMetrics()
+	q := NewInstrumentedQueue(innerQueue, metrics)
+
+	ctx := context.Background()
+	items := []WorkItem{{ID: "item-1", ScenarioID: "scen-a", ProviderID: "prov-x"}}
+	_ = innerQueue.Push(ctx, testJobID, items)
+	_, _ = innerQueue.Pop(ctx, testJobID)
+
+	// Clear metrics
+	metrics.operations = nil
+	metrics.statusChanges = nil
+
+	err := q.FailItem(ctx, testJobID, "item-1", errors.New("crash"))
+	if err != nil {
+		t.Fatalf("FailItem() error = %v", err)
+	}
+
+	if len(metrics.operations) != 1 {
+		t.Fatalf("Expected 1 operation, got %d", len(metrics.operations))
+	}
+	op := metrics.operations[0]
+	if op.operation != OpFailItem {
+		t.Errorf("Operation = %s, want %s", op.operation, OpFailItem)
+	}
+	if !op.success {
+		t.Error("Success = false, want true")
+	}
+
+	// Verify status change
+	if len(metrics.statusChanges) != 1 {
+		t.Fatalf("Expected 1 status change, got %d", len(metrics.statusChanges))
+	}
+	sc := metrics.statusChanges[0]
+	if sc.oldStatus != ItemStatusProcessing {
+		t.Errorf("OldStatus = %s, want %s", sc.oldStatus, ItemStatusProcessing)
+	}
+	if sc.newStatus != ItemStatusFailed {
+		t.Errorf("NewStatus = %s, want %s", sc.newStatus, ItemStatusFailed)
+	}
+}
+
+func TestInstrumentedQueueFailItemError(t *testing.T) {
+	innerQueue := NewMemoryQueueWithDefaults()
+	metrics := newMockMetrics()
+	q := NewInstrumentedQueue(innerQueue, metrics)
+
+	ctx := context.Background()
+
+	err := q.FailItem(ctx, testJobID, "nonexistent", errors.New("crash"))
+	if err != ErrJobNotFound {
+		t.Fatalf("FailItem() error = %v, want ErrJobNotFound", err)
+	}
+
+	if len(metrics.operations) != 1 {
+		t.Fatalf("Expected 1 operation, got %d", len(metrics.operations))
+	}
+	if metrics.operations[0].success {
+		t.Error("Success = true, want false")
+	}
+	if len(metrics.statusChanges) != 0 {
+		t.Errorf("Expected 0 status changes, got %d", len(metrics.statusChanges))
+	}
+}
+
+func TestInstrumentedQueueGetStats(t *testing.T) {
+	innerQueue := NewMemoryQueueWithDefaults()
+	metrics := newMockMetrics()
+	q := NewInstrumentedQueue(innerQueue, metrics)
+
+	ctx := context.Background()
+
+	stats, err := q.GetStats(ctx, "nonexistent-job")
+	if err != nil {
+		t.Fatalf("GetStats() error = %v", err)
+	}
+	if stats.Total != 0 {
+		t.Errorf("Total = %d, want 0", stats.Total)
+	}
+
+	// Read-only operations should not record metrics
+	if len(metrics.operations) != 0 {
+		t.Errorf("Expected 0 operations, got %d", len(metrics.operations))
+	}
+}

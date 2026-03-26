@@ -169,9 +169,102 @@ type WorkQueue interface {
 	// Returns ErrJobNotFound if the job doesn't exist.
 	GetFailedItems(ctx context.Context, jobID string) ([]*WorkItem, error)
 
+	// CompleteItem acknowledges a work item and updates accumulators atomically.
+	// This is the preferred path over Ack for typed result handling.
+	CompleteItem(ctx context.Context, jobID string, itemID string, result *ItemResult) error
+
+	// FailItem marks an item as terminally failed and updates failure accumulators.
+	// Unlike Nack, this does not retry — the item is marked as permanently failed.
+	FailItem(ctx context.Context, jobID string, itemID string, err error) error
+
+	// GetStats returns the current accumulator statistics for a job.
+	// Returns zero-value stats for a new or unknown job.
+	GetStats(ctx context.Context, jobID string) (*JobStats, error)
+
 	// Close releases any resources held by the queue.
 	// After Close is called, all other methods will return ErrQueueClosed.
 	Close() error
+}
+
+// ItemResult is the typed execution result shared between worker and aggregator.
+type ItemResult struct {
+	// Status indicates the execution outcome: "pass" or "fail".
+	Status string `json:"status"`
+
+	// DurationMs is the execution time in milliseconds.
+	DurationMs float64 `json:"durationMs"`
+
+	// Error contains the error message if execution failed.
+	Error string `json:"error,omitempty"`
+
+	// Metrics contains additional numeric metrics like tokens, cost.
+	Metrics map[string]float64 `json:"metrics,omitempty"`
+
+	// Assertions contains individual assertion outcomes.
+	Assertions []AssertionResult `json:"assertions,omitempty"`
+
+	// SessionID is the optional session identifier for this execution.
+	SessionID string `json:"sessionId,omitempty"`
+}
+
+// AssertionResult represents a single assertion outcome.
+type AssertionResult struct {
+	// Name is the assertion identifier or description.
+	Name string `json:"name"`
+
+	// Passed indicates whether the assertion passed.
+	Passed bool `json:"passed"`
+
+	// Message contains additional details about the assertion result.
+	Message string `json:"message,omitempty"`
+}
+
+// JobStats contains accumulated statistics readable at any time during or after execution.
+type JobStats struct {
+	// Total is the total number of completed or failed items.
+	Total int64 `json:"total"`
+
+	// Passed is the number of items that passed.
+	Passed int64 `json:"passed"`
+
+	// Failed is the number of items that failed.
+	Failed int64 `json:"failed"`
+
+	// TotalDurationMs is the sum of all execution durations in milliseconds.
+	TotalDurationMs float64 `json:"totalDurationMs"`
+
+	// TotalTokens is the total token count across all executions.
+	TotalTokens int64 `json:"totalTokens"`
+
+	// TotalCost is the total cost across all executions.
+	TotalCost float64 `json:"totalCost"`
+
+	// ByScenario contains per-scenario statistics.
+	ByScenario map[string]*GroupStats `json:"byScenario,omitempty"`
+
+	// ByProvider contains per-provider statistics.
+	ByProvider map[string]*GroupStats `json:"byProvider,omitempty"`
+}
+
+// GroupStats contains accumulated statistics for a scenario or provider group.
+type GroupStats struct {
+	// Total is the total number of completed or failed items in this group.
+	Total int64 `json:"total"`
+
+	// Passed is the number of items that passed.
+	Passed int64 `json:"passed"`
+
+	// Failed is the number of items that failed.
+	Failed int64 `json:"failed"`
+
+	// TotalDurationMs is the sum of all execution durations in milliseconds.
+	TotalDurationMs float64 `json:"totalDurationMs"`
+
+	// TotalTokens is the total token count.
+	TotalTokens int64 `json:"totalTokens"`
+
+	// TotalCost is the total cost.
+	TotalCost float64 `json:"totalCost"`
 }
 
 // Options contains configuration options for WorkQueue implementations.
@@ -184,6 +277,30 @@ type Options struct {
 	// MaxRetries is the maximum number of times an item can be retried.
 	// Default: 3.
 	MaxRetries int
+}
+
+// extractTokens returns the token count from a metrics map,
+// checking both "totalTokens" and "tokens" keys.
+func extractTokens(metrics map[string]float64) int64 {
+	if v, ok := metrics["totalTokens"]; ok {
+		return int64(v)
+	}
+	if v, ok := metrics["tokens"]; ok {
+		return int64(v)
+	}
+	return 0
+}
+
+// extractCost returns the cost from a metrics map,
+// checking both "totalCost" and "cost" keys.
+func extractCost(metrics map[string]float64) float64 {
+	if v, ok := metrics["totalCost"]; ok {
+		return v
+	}
+	if v, ok := metrics["cost"]; ok {
+		return v
+	}
+	return 0
 }
 
 // DefaultOptions returns the default queue options.

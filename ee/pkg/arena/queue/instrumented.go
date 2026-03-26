@@ -133,5 +133,45 @@ func (q *InstrumentedQueue) GetFailedItems(ctx context.Context, jobID string) ([
 	return q.queue.GetFailedItems(ctx, jobID)
 }
 
+// CompleteItem acknowledges a work item and updates accumulators atomically.
+// Records operation metrics and item completion.
+func (q *InstrumentedQueue) CompleteItem(ctx context.Context, jobID string, itemID string, result *ItemResult) error {
+	start := time.Now()
+
+	err := q.queue.CompleteItem(ctx, jobID, itemID, result)
+
+	duration := time.Since(start).Seconds()
+	q.metrics.RecordOperation(OpCompleteItem, duration, err == nil)
+
+	if err == nil {
+		q.metrics.RecordItemStatusChange(jobID, ItemStatusProcessing, ItemStatusCompleted)
+	}
+
+	return err
+}
+
+// FailItem marks an item as terminally failed and updates failure accumulators.
+// Records operation metrics and item failure.
+func (q *InstrumentedQueue) FailItem(ctx context.Context, jobID string, itemID string, err error) error {
+	start := time.Now()
+
+	failErr := q.queue.FailItem(ctx, jobID, itemID, err)
+
+	duration := time.Since(start).Seconds()
+	q.metrics.RecordOperation(OpFailItem, duration, failErr == nil)
+
+	if failErr == nil {
+		q.metrics.RecordItemStatusChange(jobID, ItemStatusProcessing, ItemStatusFailed)
+	}
+
+	return failErr
+}
+
+// GetStats returns the current accumulator statistics for a job.
+// This is a read-only operation and does not record operation metrics.
+func (q *InstrumentedQueue) GetStats(ctx context.Context, jobID string) (*JobStats, error) {
+	return q.queue.GetStats(ctx, jobID)
+}
+
 // Ensure InstrumentedQueue implements WorkQueue interface.
 var _ WorkQueue = (*InstrumentedQueue)(nil)

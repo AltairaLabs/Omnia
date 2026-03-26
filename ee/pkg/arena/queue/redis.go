@@ -721,5 +721,306 @@ func (q *RedisQueue) batchGetItems(ctx context.Context, ids []string) []*WorkIte
 	return allItems
 }
 
+// Redis key constants for accumulator stats.
+const (
+	statsKeySuffix          = ":stats"
+	statsScenarioKeyInfix   = ":stats:scenario:"
+	statsProviderKeyInfix   = ":stats:provider:"
+	statsFieldTotal         = "total"
+	statsFieldPassed        = "passed"
+	statsFieldFailed        = "failed"
+	statsFieldTotalDuration = "totalDurationMs"
+	statsFieldTotalTokens   = "totalTokens"
+	statsFieldTotalCost     = "totalCost"
+)
+
+func (q *RedisQueue) statsKey(jobID string) string {
+	return jobKeyPrefix + jobID + statsKeySuffix
+}
+
+func (q *RedisQueue) statsScenarioKey(jobID, scenarioID string) string {
+	return jobKeyPrefix + jobID + statsScenarioKeyInfix + scenarioID
+}
+
+func (q *RedisQueue) statsProviderKey(jobID, providerID string) string {
+	return jobKeyPrefix + jobID + statsProviderKeyInfix + providerID
+}
+
+// CompleteItem acknowledges a work item and updates accumulators atomically.
+func (q *RedisQueue) CompleteItem(ctx context.Context, jobID string, itemID string, result *ItemResult) error {
+	q.mu.RLock()
+	if q.closed {
+		q.mu.RUnlock()
+		return ErrQueueClosed
+	}
+	q.mu.RUnlock()
+
+	// Remove from processing zset
+	removed, err := q.client.ZRem(ctx, q.processingZSetKey(jobID), itemID).Result()
+	if err != nil {
+		return fmt.Errorf("failed to remove from processing: %w", err)
+	}
+	if removed == 0 {
+		return ErrItemNotFound
+	}
+
+	// Remove from processing list
+	q.client.LRem(ctx, q.processingKey(jobID), 1, itemID)
+
+	// Get the item for scenarioID/providerID
+	item, err := q.getItem(ctx, itemID)
+	if err != nil {
+		return fmt.Errorf("failed to get item: %w", err)
+	}
+
+	// Marshal result JSON and update item
+	resultJSON, marshalErr := json.Marshal(result)
+	if marshalErr != nil {
+		return fmt.Errorf("failed to marshal result: %w", marshalErr)
+	}
+
+	now := time.Now()
+	item.Status = ItemStatusCompleted
+	item.CompletedAt = &now
+	item.Result = resultJSON
+
+	// Build and execute the accumulator pipeline
+	pipe := q.client.Pipeline()
+	q.saveItemPipe(ctx, pipe, item)
+	q.addToCompletedSetPipe(ctx, pipe, jobID, itemID)
+	q.incrementStatsPipe(ctx, pipe, jobID, item, result)
+	_, err = pipe.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to execute complete pipeline: %w", err)
+	}
+
+	return nil
+}
+
+// FailItem marks an item as terminally failed and updates failure accumulators.
+func (q *RedisQueue) FailItem(ctx context.Context, jobID string, itemID string, failErr error) error {
+	q.mu.RLock()
+	if q.closed {
+		q.mu.RUnlock()
+		return ErrQueueClosed
+	}
+	q.mu.RUnlock()
+
+	// Remove from processing zset
+	removed, err := q.client.ZRem(ctx, q.processingZSetKey(jobID), itemID).Result()
+	if err != nil {
+		return fmt.Errorf("failed to remove from processing: %w", err)
+	}
+	if removed == 0 {
+		return ErrItemNotFound
+	}
+
+	// Remove from processing list
+	q.client.LRem(ctx, q.processingKey(jobID), 1, itemID)
+
+	// Get the item for scenarioID/providerID
+	item, err := q.getItem(ctx, itemID)
+	if err != nil {
+		return fmt.Errorf("failed to get item: %w", err)
+	}
+
+	now := time.Now()
+	item.Status = ItemStatusFailed
+	item.CompletedAt = &now
+	if failErr != nil {
+		item.Error = failErr.Error()
+	}
+
+	// Build and execute the failure pipeline
+	pipe := q.client.Pipeline()
+	q.saveItemPipe(ctx, pipe, item)
+	q.addToFailedSetPipe(ctx, pipe, jobID, itemID)
+	q.incrementFailureStatsPipe(ctx, pipe, jobID, item)
+	_, err = pipe.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to execute fail pipeline: %w", err)
+	}
+
+	return nil
+}
+
+// GetStats returns the current accumulator statistics for a job.
+func (q *RedisQueue) GetStats(ctx context.Context, jobID string) (*JobStats, error) {
+	q.mu.RLock()
+	if q.closed {
+		q.mu.RUnlock()
+		return nil, ErrQueueClosed
+	}
+	q.mu.RUnlock()
+
+	stats := &JobStats{
+		ByScenario: make(map[string]*GroupStats),
+		ByProvider: make(map[string]*GroupStats),
+	}
+
+	// Read main stats hash
+	mainStats, err := q.client.HGetAll(ctx, q.statsKey(jobID)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stats: %w", err)
+	}
+
+	parseStatsHash(mainStats, stats)
+
+	// Scan for scenario sub-keys
+	q.scanGroupStats(ctx, jobID, statsScenarioKeyInfix, stats.ByScenario)
+
+	// Scan for provider sub-keys
+	q.scanGroupStats(ctx, jobID, statsProviderKeyInfix, stats.ByProvider)
+
+	return stats, nil
+}
+
+// scanGroupStats scans for group stat keys matching the pattern and populates the map.
+func (q *RedisQueue) scanGroupStats(
+	ctx context.Context, jobID string, infix string, target map[string]*GroupStats,
+) {
+	pattern := jobKeyPrefix + jobID + infix + "*"
+	prefixLen := len(jobKeyPrefix + jobID + infix)
+	var cursor uint64
+	for {
+		keys, nextCursor, err := q.client.Scan(ctx, cursor, pattern, sscanCount).Result()
+		if err != nil {
+			return
+		}
+		for _, key := range keys {
+			groupID := key[prefixLen:]
+			data, hErr := q.client.HGetAll(ctx, key).Result()
+			if hErr != nil {
+				continue
+			}
+			gs := &GroupStats{}
+			parseGroupStatsHash(data, gs)
+			target[groupID] = gs
+		}
+		cursor = nextCursor
+		if cursor == 0 {
+			return
+		}
+	}
+}
+
+// incrementStatsPipe adds accumulator increment commands to a pipeline for a completed item.
+func (q *RedisQueue) incrementStatsPipe(
+	ctx context.Context, pipe redis.Pipeliner, jobID string, item *WorkItem, result *ItemResult,
+) {
+	mainKey := q.statsKey(jobID)
+	tokens := extractTokens(result.Metrics)
+	cost := extractCost(result.Metrics)
+
+	q.incrStatsFields(ctx, pipe, mainKey, result.Status, result.DurationMs, tokens, cost)
+
+	if item.ScenarioID != "" {
+		scenKey := q.statsScenarioKey(jobID, item.ScenarioID)
+		q.incrStatsFields(ctx, pipe, scenKey, result.Status, result.DurationMs, tokens, cost)
+	}
+
+	if item.ProviderID != "" {
+		provKey := q.statsProviderKey(jobID, item.ProviderID)
+		q.incrStatsFields(ctx, pipe, provKey, result.Status, result.DurationMs, tokens, cost)
+	}
+}
+
+// incrStatsFields adds HINCRBY/HINCRBYFLOAT commands for a stats hash.
+func (q *RedisQueue) incrStatsFields(
+	ctx context.Context, pipe redis.Pipeliner, key, status string,
+	durationMs float64, tokens int64, cost float64,
+) {
+	pipe.HIncrBy(ctx, key, statsFieldTotal, 1)
+	if status == "pass" {
+		pipe.HIncrBy(ctx, key, statsFieldPassed, 1)
+	} else {
+		pipe.HIncrBy(ctx, key, statsFieldFailed, 1)
+	}
+	pipe.HIncrByFloat(ctx, key, statsFieldTotalDuration, durationMs)
+	pipe.HIncrBy(ctx, key, statsFieldTotalTokens, tokens)
+	pipe.HIncrByFloat(ctx, key, statsFieldTotalCost, cost)
+	pipe.Expire(ctx, key, q.itemTTL)
+}
+
+// incrementFailureStatsPipe adds failure accumulator increment commands to a pipeline.
+func (q *RedisQueue) incrementFailureStatsPipe(
+	ctx context.Context, pipe redis.Pipeliner, jobID string, item *WorkItem,
+) {
+	mainKey := q.statsKey(jobID)
+	q.incrFailureFields(ctx, pipe, mainKey)
+
+	if item.ScenarioID != "" {
+		scenKey := q.statsScenarioKey(jobID, item.ScenarioID)
+		q.incrFailureFields(ctx, pipe, scenKey)
+	}
+
+	if item.ProviderID != "" {
+		provKey := q.statsProviderKey(jobID, item.ProviderID)
+		q.incrFailureFields(ctx, pipe, provKey)
+	}
+}
+
+// incrFailureFields adds HINCRBY commands for failure counters only.
+func (q *RedisQueue) incrFailureFields(
+	ctx context.Context, pipe redis.Pipeliner, key string,
+) {
+	pipe.HIncrBy(ctx, key, statsFieldTotal, 1)
+	pipe.HIncrBy(ctx, key, statsFieldFailed, 1)
+	pipe.Expire(ctx, key, q.itemTTL)
+}
+
+// saveItemPipe adds a SET command to a pipeline for saving a work item.
+func (q *RedisQueue) saveItemPipe(ctx context.Context, pipe redis.Pipeliner, item *WorkItem) {
+	data, err := json.Marshal(item)
+	if err != nil {
+		return
+	}
+	pipe.Set(ctx, q.itemKey(item.ID), data, q.itemTTL)
+}
+
+// addToCompletedSetPipe adds SADD + EXPIRE commands for the completed set.
+func (q *RedisQueue) addToCompletedSetPipe(ctx context.Context, pipe redis.Pipeliner, jobID, itemID string) {
+	completedSetKey := q.completedKey(jobID)
+	pipe.SAdd(ctx, completedSetKey, itemID)
+	pipe.Expire(ctx, completedSetKey, q.itemTTL)
+}
+
+// addToFailedSetPipe adds SADD + EXPIRE commands for the failed set.
+func (q *RedisQueue) addToFailedSetPipe(ctx context.Context, pipe redis.Pipeliner, jobID, itemID string) {
+	failedSetKey := q.failedKey(jobID)
+	pipe.SAdd(ctx, failedSetKey, itemID)
+	pipe.Expire(ctx, failedSetKey, q.itemTTL)
+}
+
+// parseStatsHash parses a Redis hash into a JobStats struct.
+func parseStatsHash(data map[string]string, stats *JobStats) {
+	stats.Total = parseInt64(data[statsFieldTotal])
+	stats.Passed = parseInt64(data[statsFieldPassed])
+	stats.Failed = parseInt64(data[statsFieldFailed])
+	stats.TotalDurationMs = parseFloat64(data[statsFieldTotalDuration])
+	stats.TotalTokens = parseInt64(data[statsFieldTotalTokens])
+	stats.TotalCost = parseFloat64(data[statsFieldTotalCost])
+}
+
+// parseGroupStatsHash parses a Redis hash into a GroupStats struct.
+func parseGroupStatsHash(data map[string]string, gs *GroupStats) {
+	gs.Total = parseInt64(data[statsFieldTotal])
+	gs.Passed = parseInt64(data[statsFieldPassed])
+	gs.Failed = parseInt64(data[statsFieldFailed])
+	gs.TotalDurationMs = parseFloat64(data[statsFieldTotalDuration])
+	gs.TotalTokens = parseInt64(data[statsFieldTotalTokens])
+	gs.TotalCost = parseFloat64(data[statsFieldTotalCost])
+}
+
+func parseInt64(s string) int64 {
+	v, _ := strconv.ParseInt(s, 10, 64)
+	return v
+}
+
+func parseFloat64(s string) float64 {
+	v, _ := strconv.ParseFloat(s, 64)
+	return v
+}
+
 // Ensure RedisQueue implements WorkQueue interface.
 var _ WorkQueue = (*RedisQueue)(nil)
