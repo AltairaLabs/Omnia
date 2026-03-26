@@ -11,6 +11,7 @@ const SourceExplorer = dynamic(
   { ssr: false }
 );
 import { useWorkspace } from "@/contexts/workspace-context";
+import { useArenaLiveStats } from "@/hooks/use-arena-live-stats";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -49,6 +50,7 @@ import {
   Zap,
   Network,
   FolderOpen,
+  Radio,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -65,6 +67,7 @@ import type {
   ArenaJobType,
   ArenaProviderEntry,
 } from "@/types/arena";
+import type { ArenaLiveStats, ProviderLiveStats } from "@/lib/redis/arena-stats";
 import type { Condition } from "@/types/common";
 
 const formatDate = (dateString?: string) => formatDateBase(dateString, true);
@@ -944,6 +947,280 @@ function buildCloneInitialValues(job: ArenaJob): QuickRunInitialValues {
   };
 }
 
+// ---- Load Test tab helpers ----
+
+function formatPercent(rate: number): string {
+  return `${(rate * 100).toFixed(1)}%`;
+}
+
+function formatLatency(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function formatLiveCost(cost: number): string {
+  return `$${cost.toFixed(4)}`;
+}
+
+function passRateColor(rate: number): string {
+  if (rate >= 0.95) return "text-green-600";
+  if (rate >= 0.8) return "text-yellow-600";
+  return "text-red-600";
+}
+
+function errorRateColor(rate: number): string {
+  if (rate <= 0.02) return "text-green-600";
+  if (rate <= 0.1) return "text-yellow-600";
+  return "text-red-600";
+}
+
+function LiveIndicator({ connected }: Readonly<{ connected: boolean }>) {
+  if (!connected) return null;
+  return (
+    <Badge variant="outline" className="gap-1 text-green-600 border-green-300">
+      <Radio className="h-3 w-3 animate-pulse" />
+      Live
+    </Badge>
+  );
+}
+
+function StatsCards({ stats }: Readonly<{ stats: ArenaLiveStats }>) {
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <Card>
+        <CardContent className="pt-6">
+          <p className="text-sm text-muted-foreground">Pass Rate</p>
+          <p className={`text-2xl font-bold ${passRateColor(stats.passRate)}`}>
+            {formatPercent(stats.passRate)}
+          </p>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="pt-6">
+          <p className="text-sm text-muted-foreground">Avg Latency</p>
+          <p className="text-2xl font-bold">{formatLatency(stats.avgLatencyMs)}</p>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="pt-6">
+          <p className="text-sm text-muted-foreground">Total Cost</p>
+          <p className="text-2xl font-bold">{formatLiveCost(stats.totalCost)}</p>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="pt-6">
+          <p className="text-sm text-muted-foreground">Error Rate</p>
+          <p className={`text-2xl font-bold ${errorRateColor(stats.errorRate)}`}>
+            {formatPercent(stats.errorRate)}
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function ProviderRow({ name, stats: p }: Readonly<{ name: string; stats: ProviderLiveStats }>) {
+  const providerPassRate = p.total > 0 ? p.passed / p.total : 0;
+  return (
+    <tr className="border-b last:border-0">
+      <td className="py-2 font-medium">{name}</td>
+      <td className="py-2 text-right">{p.total}</td>
+      <td className="py-2 text-right text-green-600">{p.passed}</td>
+      <td className="py-2 text-right text-red-600">{p.failed > 0 ? p.failed : "-"}</td>
+      <td className="py-2 text-right">{formatPercent(providerPassRate)}</td>
+      <td className="py-2 text-right">{formatLatency(p.avgLatencyMs)}</td>
+      <td className="py-2 text-right">{p.totalTokens.toLocaleString()}</td>
+      <td className="py-2 text-right">{formatLiveCost(p.totalCost)}</td>
+    </tr>
+  );
+}
+
+function ProviderTable({ byProvider }: Readonly<{ byProvider: Record<string, ProviderLiveStats> }>) {
+  const entries = Object.entries(byProvider);
+  if (entries.length === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Provider Comparison</CardTitle>
+        <CardDescription>Per-provider breakdown</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-muted-foreground">
+                <th className="pb-2 font-medium">Provider</th>
+                <th className="pb-2 font-medium text-right">Trials</th>
+                <th className="pb-2 font-medium text-right">Passed</th>
+                <th className="pb-2 font-medium text-right">Failed</th>
+                <th className="pb-2 font-medium text-right">Pass Rate</th>
+                <th className="pb-2 font-medium text-right">Avg Latency</th>
+                <th className="pb-2 font-medium text-right">Tokens</th>
+                <th className="pb-2 font-medium text-right">Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map(([providerName, provStats]) => (
+                <ProviderRow key={providerName} name={providerName} stats={provStats} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ThresholdsSection({ job }: Readonly<{ job: ArenaJob }>) {
+  const thresholds = job.spec?.loadTest?.thresholds;
+  if (!thresholds || thresholds.length === 0) return null;
+
+  const isFinished = job.status?.phase === "Succeeded" || job.status?.phase === "Failed";
+  const summary = job.status?.result?.summary;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">SLO Thresholds</CardTitle>
+        <CardDescription>
+          {isFinished ? "Threshold evaluation results" : "Configured thresholds"}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          {thresholds.map((t) => {
+            const thresholdKey = `threshold:${t.metric}`;
+            const actual = summary?.[thresholdKey];
+            const passed = actual ? summary?.[`${thresholdKey}:passed`] === "true" : undefined;
+
+            return (
+              <div key={`${t.metric}-${t.operator}-${t.value}`} className="flex items-center gap-3 text-sm">
+                {isFinished && passed !== undefined && (
+                  passed
+                    ? <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
+                    : <XCircle className="h-4 w-4 text-red-500 shrink-0" />
+                )}
+                <span className="font-mono">
+                  {t.metric} {t.operator} {t.value}
+                </span>
+                {isFinished && actual && (
+                  <span className="text-muted-foreground">(actual: {actual})</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function LoadTestTab({
+  job,
+  liveStats,
+  connected,
+}: Readonly<{
+  job: ArenaJob;
+  liveStats: ArenaLiveStats | null;
+  connected: boolean;
+}>) {
+  const isRunning = job.status?.phase === "Running";
+  const isFinished = job.status?.phase === "Succeeded" || job.status?.phase === "Failed";
+
+  // Progress from CRD status
+  const total = job.status?.progress?.total ?? 0;
+  const completed = job.status?.progress?.completed ?? 0;
+  const failed = job.status?.progress?.failed ?? 0;
+  const progressPct = total > 0 ? Math.round(((completed + failed) / total) * 100) : 0;
+
+  // Decide which stats to show: live when running, final when finished
+  const showLive = isRunning && liveStats !== null;
+  const resultSummary = job.status?.result?.summary;
+  const hasFinalStats = isFinished && !!resultSummary;
+
+  // Build ArenaLiveStats from final summary for consistent display
+  const displayStats = buildDisplayStats(showLive, liveStats, hasFinalStats, resultSummary);
+
+  if (!showLive && !hasFinalStats) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        <Gauge className="h-12 w-12 mx-auto mb-4 opacity-50" />
+        <p className="text-lg font-medium mb-1">
+          {isRunning ? "Waiting for results..." : "No load test data available"}
+        </p>
+        <p className="text-sm">
+          {isRunning
+            ? "Live stats will appear once the first work items complete."
+            : "Run this job to see load test metrics."}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Live indicator */}
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Load Test Dashboard</h3>
+        {isRunning && <LiveIndicator connected={connected} />}
+      </div>
+
+      {/* Progress bar */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-4">
+            <Progress value={progressPct} className="flex-1" />
+            <span className="text-sm font-medium whitespace-nowrap">
+              {completed + failed} / {total} ({progressPct}%)
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Stats cards */}
+      {displayStats && <StatsCards stats={displayStats} />}
+
+      {/* Provider comparison table */}
+      {displayStats && <ProviderTable byProvider={displayStats.byProvider} />}
+
+      {/* SLO Thresholds */}
+      <ThresholdsSection job={job} />
+    </div>
+  );
+}
+
+function buildDisplayStats(
+  showLive: boolean,
+  liveStats: ArenaLiveStats | null,
+  hasFinalStats: boolean,
+  resultSummary: Record<string, string> | undefined
+): ArenaLiveStats | null {
+  if (showLive && liveStats) return liveStats;
+  if (!hasFinalStats || !resultSummary) return null;
+
+  const totalItems = Number.parseInt(resultSummary.totalItems || "0", 10);
+  const passedItems = Number.parseInt(resultSummary.passedItems || "0", 10);
+  const failedItems = Number.parseInt(resultSummary.failedItems || "0", 10);
+  const passRate = totalItems > 0 ? passedItems / totalItems : 0;
+  const avgDurationMs = Number.parseFloat(resultSummary.avgDurationMs || "0");
+  const totalTokens = Number.parseInt(resultSummary.totalTokens || "0", 10);
+  const totalCost = Number.parseFloat(resultSummary.totalCost || "0");
+  const errorRate = totalItems > 0 ? failedItems / totalItems : 0;
+
+  return {
+    total: totalItems,
+    passed: passedItems,
+    failed: failedItems,
+    passRate,
+    avgLatencyMs: Math.round(avgDurationMs),
+    totalTokens,
+    totalCost,
+    errorRate,
+    byProvider: {},
+  };
+}
+
 function LoadingSkeleton() {
   return (
     <div className="flex flex-col h-full">
@@ -980,6 +1257,14 @@ export default function ArenaJobDetailPage() {
 
   const isRunning = job?.status?.phase === "Running" || job?.status?.phase === "Pending";
   const isFinished = job?.status?.phase === "Succeeded" || job?.status?.phase === "Failed" || job?.status?.phase === "Cancelled";
+  const isLoadTest = job?.spec?.type === "loadtest";
+
+  // Live stats via SSE — only active for running load tests
+  const { data: liveStats, connected: liveConnected } = useArenaLiveStats(
+    currentWorkspace?.name || "",
+    jobName,
+    isLoadTest && job?.status?.phase === "Running" && !!currentWorkspace?.name
+  );
   const projectId = job?.metadata?.labels?.["arena.omnia.altairalabs.ai/project-id"];
 
   const handleCancel = async () => {
@@ -1164,6 +1449,12 @@ export default function ArenaJobDetailPage() {
               <BarChart3 className="h-4 w-4 mr-2" />
               Results
             </TabsTrigger>
+            {isLoadTest && (
+              <TabsTrigger value="loadtest">
+                <Gauge className="h-4 w-4 mr-2" />
+                Load Test
+              </TabsTrigger>
+            )}
             <TabsTrigger value="explorer">
               <FolderOpen className="h-4 w-4 mr-2" />
               Explorer
@@ -1188,6 +1479,12 @@ export default function ArenaJobDetailPage() {
           <TabsContent value="results">
             <ResultsTab job={job} />
           </TabsContent>
+
+          {isLoadTest && (
+            <TabsContent value="loadtest">
+              <LoadTestTab job={job} liveStats={liveStats} connected={liveConnected} />
+            </TabsContent>
+          )}
 
           <TabsContent value="explorer" className="flex-1 min-h-0">
             {job?.spec?.sourceRef?.name ? (

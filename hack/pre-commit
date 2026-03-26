@@ -197,6 +197,8 @@ if [ -n "$STAGED_DASHBOARD_FILES" ]; then
                    [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/stats/* ]] || \
                    [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/arena/projects/* ]] || \
                    [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/arena/sources/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/arena/jobs/\[jobName\]/live-stats/* ]] || \
+                   [[ "$REL_FILE" == src/lib/redis/client.ts ]] || \
                    [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/sessions/\[sessionId\]/tool-calls/* ]] || \
                    [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/sessions/\[sessionId\]/provider-calls/* ]] || \
                    [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/sessions/\[sessionId\]/events/* ]] || \

@@ -36,3 +36,5 @@ export { useProviderBindingStatus } from "./use-provider-binding-status";
 export type { ProviderBindingInfo } from "./use-provider-binding-status";
 export { useTemplateSources, useTemplateSourceMutations, useAllTemplates, useTemplateRendering } from "./use-template-sources";
 export { useDevSession } from "./use-dev-session";
+export { useArenaLiveStats } from "./use-arena-live-stats";
+export { useEventSource } from "./use-event-source";
