@@ -1330,7 +1330,12 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 		}
 	}
 
-	// If job is still running
+	// If job is still running, check budget and update progress
+	if arenaJob.Status.Phase == omniav1alpha1.ArenaJobPhaseRunning {
+		r.checkBudgetLimit(ctx, arenaJob)
+	}
+
+	// Update progress condition (unless budget breach already set phase to Failed)
 	if arenaJob.Status.Phase == omniav1alpha1.ArenaJobPhaseRunning {
 		SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeProgressing, metav1.ConditionTrue,
 			"JobRunning", fmt.Sprintf("Job running: %d/%d completed", job.Status.Succeeded, completions))
@@ -1389,6 +1394,71 @@ func (r *ArenaJobReconciler) writeThresholdResults(
 		summary[key] = r.String()
 	}
 	summary["thresholds_passed"] = threshold.SummaryLine(results)
+}
+
+// checkBudgetLimit checks if a running load test has exceeded its budget limit.
+// When the cost accumulator exceeds the configured budgetLimit, the job phase is
+// set to Failed and summary details are populated with cost information.
+// This is a no-op for non-loadtest jobs or jobs without a budget limit configured.
+func (r *ArenaJobReconciler) checkBudgetLimit(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob) {
+	if arenaJob.Spec.LoadTest == nil || arenaJob.Spec.LoadTest.BudgetLimit == nil {
+		return
+	}
+	if r.Queue == nil {
+		return
+	}
+
+	log := logf.FromContext(ctx)
+	stats, err := r.Queue.GetStats(ctx, arenaJob.Name)
+	if err != nil {
+		log.V(1).Info("budget check skipped",
+			"reason", "failed to get stats",
+			"error", err)
+		return
+	}
+
+	currency := arenaJob.Spec.LoadTest.BudgetCurrency
+	if currency == "" {
+		currency = "USD"
+	}
+
+	result := checkBudget(*arenaJob.Spec.LoadTest.BudgetLimit, currency, stats)
+	if !result.Breached {
+		return
+	}
+
+	log.Info("budget limit exceeded",
+		"totalCost", stats.TotalCost,
+		"budgetLimit", *arenaJob.Spec.LoadTest.BudgetLimit,
+		"budgetCurrency", currency)
+
+	now := metav1.Now()
+	arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseFailed
+	arenaJob.Status.CompletionTime = &now
+
+	if arenaJob.Status.Result == nil {
+		arenaJob.Status.Result = &omniav1alpha1.JobResult{}
+	}
+	if arenaJob.Status.Result.Summary == nil {
+		arenaJob.Status.Result.Summary = make(map[string]string)
+	}
+	for k, v := range result.Details {
+		arenaJob.Status.Result.Summary[k] = v
+	}
+
+	SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation,
+		ArenaJobConditionTypeProgressing, metav1.ConditionFalse,
+		"BudgetExceeded", fmt.Sprintf("Cost %.2f %s exceeds budget limit %s %s",
+			stats.TotalCost, currency, *arenaJob.Spec.LoadTest.BudgetLimit, currency))
+	SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation,
+		ArenaJobConditionTypeReady, metav1.ConditionFalse,
+		"BudgetExceeded", "Job stopped: budget limit exceeded")
+
+	if r.Recorder != nil {
+		r.Recorder.Event(arenaJob, corev1.EventTypeWarning, "BudgetExceeded",
+			fmt.Sprintf("Load test stopped: cost %.2f %s exceeds budget limit %s %s",
+				stats.TotalCost, currency, *arenaJob.Spec.LoadTest.BudgetLimit, currency))
+	}
 }
 
 // handleValidationError handles errors during validation.
