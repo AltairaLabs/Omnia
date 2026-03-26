@@ -249,31 +249,3 @@ func buildTrialConfig(
 
 	return json.Marshal(config)
 }
-
-// EstimateWorkItems returns the estimated number of work items without creating them.
-// Useful for progress tracking and resource planning.
-// The trials parameter is the average trial count per scenario (use 1 for backward compatibility).
-func EstimateWorkItems(scenarioCount, providerCount, trials int) int {
-	if trials < 1 {
-		trials = 1
-	}
-	return scenarioCount * providerCount * trials
-}
-
-// Batch splits work items into batches of the specified size.
-// Useful for rate limiting or chunked processing.
-func Batch(items []queue.WorkItem, batchSize int) [][]queue.WorkItem {
-	if batchSize <= 0 {
-		return [][]queue.WorkItem{items}
-	}
-
-	var batches [][]queue.WorkItem
-	for i := 0; i < len(items); i += batchSize {
-		end := i + batchSize
-		if end > len(items) {
-			end = len(items)
-		}
-		batches = append(batches, items[i:end])
-	}
-	return batches
-}

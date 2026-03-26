@@ -1246,18 +1246,15 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 				var hasAggregation bool
 				var passedItems, failedItems int
 				if r.Aggregator != nil {
-					log.V(1).Info("aggregating results from queue", "jobID", arenaJob.Name)
-					result, err := r.Aggregator.Aggregate(ctx, arenaJob.Name)
-					if err != nil {
-						log.Error(err, "failed to aggregate results")
-					} else {
+					log.V(1).Info("aggregating results", "jobID", arenaJob.Name)
+					result := r.aggregateJobResults(ctx, arenaJob.Name)
+					if result != nil {
 						hasAggregation = true
 						log.V(1).Info("aggregation complete",
 							"totalItems", result.TotalItems,
 							"passedItems", result.PassedItems,
 							"failedItems", result.FailedItems)
 						arenaJob.Status.Result = r.Aggregator.ToJobResult(result)
-						// Check if any tests actually failed
 						hasTestFailures = result.FailedItems > 0
 						passedItems = result.PassedItems
 						failedItems = result.FailedItems
@@ -1394,6 +1391,35 @@ func (r *ArenaJobReconciler) writeThresholdResults(
 		summary[key] = r.String()
 	}
 	summary["thresholds_passed"] = threshold.SummaryLine(results)
+}
+
+// aggregateJobResults tries stats-based aggregation first (O(1)), then falls
+// back to item-level Aggregate when stats are unavailable.
+func (r *ArenaJobReconciler) aggregateJobResults(
+	ctx context.Context, jobID string,
+) *aggregator.AggregatedResult {
+	log := logf.FromContext(ctx)
+
+	// Prefer stats-based path (O(1) — reads accumulators, not individual items)
+	if r.Queue != nil {
+		stats, err := r.Queue.GetStats(ctx, jobID)
+		if err == nil && stats.Passed+stats.Failed > 0 {
+			log.V(1).Info("using stats-based aggregation", "jobID", jobID)
+			return aggregator.StatsToResult(stats)
+		}
+		if err != nil {
+			log.V(1).Info("stats unavailable, falling back to item-level aggregation",
+				"jobID", jobID, "error", err)
+		}
+	}
+
+	// Fall back to item-level aggregation for detailed error/assertion data
+	result, err := r.Aggregator.Aggregate(ctx, jobID)
+	if err != nil {
+		log.Error(err, "failed to aggregate results")
+		return nil
+	}
+	return result
 }
 
 // checkBudgetLimit checks if a running load test has exceeded its budget limit.
