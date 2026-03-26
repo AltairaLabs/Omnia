@@ -25,6 +25,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
+	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 	"github.com/prometheus/client_golang/prometheus"
@@ -593,6 +594,142 @@ func TestPopulateMetrics(t *testing.T) {
 		if result.Metrics["runsFailed"] != 2 {
 			t.Errorf("expected runsFailed=2, got %v", result.Metrics["runsFailed"])
 		}
+	})
+}
+
+func TestPopulateMetrics_Tokens(t *testing.T) {
+	t.Run("includes token counts when present", func(t *testing.T) {
+		result := &ExecutionResult{Metrics: make(map[string]float64)}
+		agg := &runAggregator{
+			passCount:    1,
+			inputTokens:  100,
+			outputTokens: 50,
+		}
+
+		populateMetrics(result, agg, 1)
+
+		assert.Equal(t, float64(100), result.Metrics[metricKeyInputTokens])
+		assert.Equal(t, float64(50), result.Metrics[metricKeyOutputTokens])
+	})
+
+	t.Run("omits token counts when zero", func(t *testing.T) {
+		result := &ExecutionResult{Metrics: make(map[string]float64)}
+		agg := &runAggregator{passCount: 1}
+
+		populateMetrics(result, agg, 1)
+
+		_, hasInput := result.Metrics[metricKeyInputTokens]
+		_, hasOutput := result.Metrics[metricKeyOutputTokens]
+		assert.False(t, hasInput, "should not set input tokens when zero")
+		assert.False(t, hasOutput, "should not set output tokens when zero")
+	})
+}
+
+func TestToItemResult(t *testing.T) {
+	t.Run("converts all fields", func(t *testing.T) {
+		exec := &ExecutionResult{
+			Status:     statusPass,
+			DurationMs: 250,
+			Error:      "",
+			Metrics:    map[string]float64{"totalDurationMs": 250},
+			Assertions: []AssertionResult{
+				{Name: "response_valid", Passed: true, Message: "ok"},
+				{Name: "latency_check", Passed: false, Message: "too slow"},
+			},
+		}
+
+		ir := toItemResult(exec)
+
+		assert.Equal(t, statusPass, ir.Status)
+		assert.Equal(t, float64(250), ir.DurationMs)
+		assert.Empty(t, ir.Error)
+		assert.Equal(t, float64(250), ir.Metrics["totalDurationMs"])
+		require.Len(t, ir.Assertions, 2)
+		assert.Equal(t, "response_valid", ir.Assertions[0].Name)
+		assert.True(t, ir.Assertions[0].Passed)
+		assert.Equal(t, "latency_check", ir.Assertions[1].Name)
+		assert.False(t, ir.Assertions[1].Passed)
+	})
+
+	t.Run("handles nil assertions", func(t *testing.T) {
+		exec := &ExecutionResult{
+			Status:     statusFail,
+			DurationMs: 100,
+			Error:      "timeout",
+			Metrics:    map[string]float64{},
+		}
+
+		ir := toItemResult(exec)
+
+		assert.Equal(t, statusFail, ir.Status)
+		assert.Equal(t, "timeout", ir.Error)
+		assert.Empty(t, ir.Assertions)
+	})
+}
+
+func TestReportWorkItemResult_UpdatesAccumulators(t *testing.T) {
+	q := queue.NewMemoryQueueWithDefaults()
+	jobID := "test-accum"
+
+	items := []queue.WorkItem{{ID: "item-1", ScenarioID: "s1", ProviderID: "p1"}}
+	require.NoError(t, q.Push(context.Background(), jobID, items))
+	item, err := q.Pop(context.Background(), jobID)
+	require.NoError(t, err)
+
+	result := &ExecutionResult{
+		Status:     statusPass,
+		DurationMs: 200,
+		Metrics:    map[string]float64{"totalTokens": 500},
+		Assertions: []AssertionResult{{Name: "check", Passed: true}},
+	}
+
+	reportWorkItemResult(context.Background(), testLog(), q, jobID, item, result, nil)
+
+	stats, err := q.GetStats(context.Background(), jobID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), stats.Total)
+	assert.Equal(t, int64(1), stats.Passed)
+	assert.Equal(t, float64(200), stats.TotalDurationMs)
+	assert.Equal(t, int64(500), stats.TotalTokens)
+}
+
+func TestExtractFleetTTFT(t *testing.T) {
+	t.Run("no-op when result is nil", func(t *testing.T) {
+		registry := pkproviders.NewRegistry()
+		extractFleetTTFT(registry, nil, nil) // should not panic
+	})
+
+	t.Run("no-op when metrics is nil", func(t *testing.T) {
+		registry := pkproviders.NewRegistry()
+		result := &ExecutionResult{}
+		extractFleetTTFT(registry, nil, result)
+		assert.Nil(t, result.Metrics)
+	})
+
+	t.Run("skips when TTFT already set", func(t *testing.T) {
+		registry := pkproviders.NewRegistry()
+		result := &ExecutionResult{
+			Metrics: map[string]float64{metricKeyTTFT: 1.5},
+		}
+		extractFleetTTFT(registry, []*resolvedFleetProvider{{id: "p1"}}, result)
+		assert.Equal(t, 1.5, result.Metrics[metricKeyTTFT])
+	})
+
+	t.Run("no-op when no fleet providers", func(t *testing.T) {
+		registry := pkproviders.NewRegistry()
+		result := &ExecutionResult{Metrics: make(map[string]float64)}
+		extractFleetTTFT(registry, nil, result)
+		_, hasTTFT := result.Metrics[metricKeyTTFT]
+		assert.False(t, hasTTFT)
+	})
+
+	t.Run("no-op when provider not found in registry", func(t *testing.T) {
+		registry := pkproviders.NewRegistry()
+		result := &ExecutionResult{Metrics: make(map[string]float64)}
+		fps := []*resolvedFleetProvider{{id: "missing"}}
+		extractFleetTTFT(registry, fps, result)
+		_, hasTTFT := result.Metrics[metricKeyTTFT]
+		assert.False(t, hasTTFT)
 	})
 }
 

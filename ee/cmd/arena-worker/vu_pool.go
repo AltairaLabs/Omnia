@@ -12,7 +12,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -90,6 +89,10 @@ func (p *VUPool) Run(ctx context.Context) error {
 		"jobID", p.jobID,
 	)
 
+	if p.metrics != nil {
+		p.metrics.SetActiveVUs(float64(p.size))
+	}
+
 	var wg sync.WaitGroup
 	errCh := make(chan error, p.size)
 
@@ -111,6 +114,10 @@ func (p *VUPool) Run(ctx context.Context) error {
 
 	wg.Wait()
 	close(errCh)
+
+	if p.metrics != nil {
+		p.metrics.SetActiveVUs(0)
+	}
 
 	// Return the first error, if any.
 	for err := range errCh {
@@ -253,7 +260,7 @@ func (p *VUPool) executeAndReport(ctx context.Context, log logr.Logger, item *qu
 	recordDetailedMetrics(p.metrics, p.jobID, item, result, execErr, itemDuration)
 }
 
-// reportResult reports the work item result via Ack or Nack.
+// reportResult reports the work item result via CompleteItem or Nack.
 func (p *VUPool) reportResult(
 	ctx context.Context, log logr.Logger, item *queue.WorkItem,
 	result *ExecutionResult, execErr error,
@@ -275,13 +282,12 @@ func (p *VUPool) reportResult(
 		return
 	}
 
-	resultJSON, _ := json.Marshal(result)
 	log.Info("work item completed",
 		"itemID", item.ID,
 		"status", result.Status,
 		"durationMs", result.DurationMs,
 	)
-	if err := p.queue.Ack(reportCtx, p.jobID, item.ID, resultJSON); err != nil {
-		log.Error(err, "failed to ack item", "itemID", item.ID)
+	if err := p.queue.CompleteItem(reportCtx, p.jobID, item.ID, toItemResult(result)); err != nil {
+		log.Error(err, "failed to complete item", "itemID", item.ID)
 	}
 }

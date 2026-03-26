@@ -221,13 +221,16 @@ func (p *Provider) PredictStream(
 	}
 
 	ch := make(chan providers.StreamChunk, 16)
-	go streamResponse(ctx, entry, ch, time.Now())
+	go p.streamResponse(ctx, entry, ch, time.Now())
 
 	return ch, nil
 }
 
 // streamResponse reads WebSocket messages and sends them as stream chunks.
-func streamResponse(ctx context.Context, entry *connEntry, ch chan<- providers.StreamChunk, turnStart time.Time) {
+// It is a method on Provider so it can record TTFT like Predict does.
+func (p *Provider) streamResponse(
+	ctx context.Context, entry *connEntry, ch chan<- providers.StreamChunk, turnStart time.Time,
+) {
 	defer entry.mu.Unlock()
 	defer close(ch)
 
@@ -240,6 +243,10 @@ func streamResponse(ctx context.Context, entry *connEntry, ch chan<- providers.S
 		}
 		return
 	}
+
+	p.mu.Lock()
+	p.lastTTFT = turnResult.TTFT
+	p.mu.Unlock()
 
 	resp := buildPredictionResponse(turnResult.Messages, 0)
 	finishReason := "stop"
