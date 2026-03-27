@@ -229,10 +229,21 @@ func (p *VUPool) handleVUPopError(
 
 // executeAndReport runs a single work item and reports the result.
 func (p *VUPool) executeAndReport(ctx context.Context, log logr.Logger, item *queue.WorkItem) {
-	itemCtx, itemCancel := context.WithTimeout(ctx, maxItemTimeout)
+	// Each work item gets its own trace (not a child of a job-level root).
+	// This keeps traces small and queryable via arena.job attribute.
+	traceID := workItemToTraceID(p.jobID, item.ID)
+	spanID := workItemToSpanID(item.ID)
+	remoteCtx := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: trace.FlagsSampled,
+	})
+	itemCtx := trace.ContextWithRemoteSpanContext(context.Background(), remoteCtx)
+	itemCtx, itemCancel := context.WithTimeout(itemCtx, maxItemTimeout)
 	itemCtx, span := otel.Tracer("omnia-arena-worker").Start(itemCtx, "arena.work-item",
 		trace.WithAttributes(
 			attribute.String("arena.job", p.jobID),
+			attribute.String("arena.item.id", item.ID),
 			attribute.String("arena.scenario", item.ScenarioID),
 			attribute.String("arena.provider", item.ProviderID),
 		),
