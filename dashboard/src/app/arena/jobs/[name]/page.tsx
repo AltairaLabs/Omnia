@@ -1488,7 +1488,15 @@ export default function ArenaJobDetailPage() {
 
           <TabsContent value="explorer" className="flex-1 min-h-0">
             {job?.spec?.sourceRef?.name ? (
-              <SourceExplorer sourceName={job.spec.sourceRef.name} />
+              <SourceExplorer
+                sourceName={job.spec.sourceRef.name}
+                rootPath={job.spec.arenaFile?.includes("/")
+                  ? job.spec.arenaFile.substring(0, job.spec.arenaFile.lastIndexOf("/"))
+                  : undefined}
+                defaultFile={job.spec.arenaFile?.includes("/")
+                  ? job.spec.arenaFile.substring(job.spec.arenaFile.lastIndexOf("/") + 1)
+                  : job.spec.arenaFile}
+              />
             ) : (
               <div className="text-center py-12 text-muted-foreground">
                 <FolderOpen className="h-12 w-12 mx-auto mb-4 opacity-50" />
