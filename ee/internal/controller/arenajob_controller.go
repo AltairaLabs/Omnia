@@ -1254,11 +1254,19 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 					log.V(1).Info("aggregator not available, skipping result aggregation")
 				}
 
-				// Set final progress counts from aggregation
-				if hasAggregation && arenaJob.Status.Progress != nil {
-					arenaJob.Status.Progress.Completed = int32(passedItems)
-					arenaJob.Status.Progress.Failed = int32(failedItems)
-					arenaJob.Status.Progress.Pending = 0
+				// Set final progress counts from aggregation or queue stats
+				if arenaJob.Status.Progress != nil {
+					if hasAggregation {
+						arenaJob.Status.Progress.Completed = int32(passedItems)
+						arenaJob.Status.Progress.Failed = int32(failedItems)
+						arenaJob.Status.Progress.Pending = 0
+					} else if r.Queue != nil {
+						if stats, err := r.Queue.GetStats(ctx, arenaJob.Name); err == nil && stats != nil {
+							arenaJob.Status.Progress.Completed = int32(stats.Passed)
+							arenaJob.Status.Progress.Failed = int32(stats.Failed)
+							arenaJob.Status.Progress.Pending = 0
+						}
+					}
 				}
 
 				// Evaluate SLO thresholds for load tests
