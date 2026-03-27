@@ -14,8 +14,10 @@ spec:
           name: claude-sonnet
       - providerRef:
           name: gpt-4o
+    # Map mode: keys map 1:1 to config provider IDs (for judges, selfplay)
     judge:
-      - providerRef:
+      judge:
+        providerRef:
           name: claude-haiku
   evaluation:
     outputFormats:
@@ -39,8 +41,10 @@ spec:
     default:
       - agentRef:
           name: support-agent
+    # Map mode: "selfplay-mock" key matches the arena config's self_play.roles[].provider
     selfplay:
-      - providerRef:
+      selfplay-mock:
+        providerRef:
           name: gpt-4o-mini
   workers:
     replicas: 1
@@ -120,8 +124,10 @@ spec:
     default:
       - agentRef:
           name: support-agent
+    # Map mode: key must match the arena config's self_play.roles[].provider ID
     selfplay:
-      - providerRef:
+      selfplay:
+        providerRef:
           name: gpt-4o-mini
   loadTest:
     concurrency: 10

@@ -357,15 +357,187 @@ func TestProvider_PredictStream(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	chunks := make([]providers.StreamChunk, 0, 1)
+	chunks := make([]providers.StreamChunk, 0, 2)
 	for chunk := range ch {
 		chunks = append(chunks, chunk)
 	}
 
-	require.Len(t, chunks, 1)
-	assert.Equal(t, "Hello world!", chunks[0].Content)
-	assert.NotNil(t, chunks[0].FinishReason)
-	assert.Equal(t, "stop", *chunks[0].FinishReason)
+	require.Len(t, chunks, 2)
+
+	// First chunk: delta from "chunk" message
+	assert.Equal(t, "Hello ", chunks[0].Delta)
+	assert.Equal(t, "Hello ", chunks[0].Content)
+	assert.Nil(t, chunks[0].FinishReason)
+
+	// Second chunk: delta from "done" message with finish reason
+	assert.Equal(t, "world!", chunks[1].Delta)
+	assert.Equal(t, "Hello world!", chunks[1].Content)
+	require.NotNil(t, chunks[1].FinishReason)
+	assert.Equal(t, "stop", *chunks[1].FinishReason)
+}
+
+func TestProvider_PredictStream_MultipleChunks(t *testing.T) {
+	p := providerTestServer(t, func(conn *websocket.Conn) {
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeConnected,
+			SessionID: "sess-multi",
+			Timestamp: time.Now(),
+		})
+
+		readClientMsg(t, conn)
+
+		for _, text := range []string{"The ", "quick ", "brown "} {
+			writeServerMsg(t, conn, facade.ServerMessage{
+				Type:      facade.MessageTypeChunk,
+				SessionID: "sess-multi",
+				Content:   text,
+				Timestamp: time.Now(),
+			})
+		}
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeDone,
+			SessionID: "sess-multi",
+			Content:   "fox",
+			Timestamp: time.Now(),
+		})
+	})
+
+	ch, err := p.PredictStream(context.Background(), providers.PredictionRequest{
+		Messages: []types.Message{
+			{Role: "user", Content: "Hi"},
+		},
+	})
+	require.NoError(t, err)
+
+	chunks := make([]providers.StreamChunk, 0, 4)
+	for chunk := range ch {
+		chunks = append(chunks, chunk)
+	}
+
+	require.Len(t, chunks, 4)
+
+	assert.Equal(t, "The ", chunks[0].Delta)
+	assert.Equal(t, "The ", chunks[0].Content)
+	assert.Nil(t, chunks[0].FinishReason)
+
+	assert.Equal(t, "quick ", chunks[1].Delta)
+	assert.Equal(t, "The quick ", chunks[1].Content)
+	assert.Nil(t, chunks[1].FinishReason)
+
+	assert.Equal(t, "brown ", chunks[2].Delta)
+	assert.Equal(t, "The quick brown ", chunks[2].Content)
+	assert.Nil(t, chunks[2].FinishReason)
+
+	assert.Equal(t, "fox", chunks[3].Delta)
+	assert.Equal(t, "The quick brown fox", chunks[3].Content)
+	require.NotNil(t, chunks[3].FinishReason)
+	assert.Equal(t, "stop", *chunks[3].FinishReason)
+}
+
+func TestProvider_PredictStream_WithToolCall(t *testing.T) {
+	p := providerTestServer(t, func(conn *websocket.Conn) {
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeConnected,
+			SessionID: "sess-tool",
+			Timestamp: time.Now(),
+		})
+
+		readClientMsg(t, conn)
+
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeChunk,
+			SessionID: "sess-tool",
+			Content:   "Let me search ",
+			Timestamp: time.Now(),
+		})
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeToolCall,
+			SessionID: "sess-tool",
+			ToolCall: &facade.ToolCallInfo{
+				ID:   "call-1",
+				Name: "search",
+			},
+			Timestamp: time.Now(),
+		})
+
+		// Read the tool rejection
+		rejMsg := readClientMsg(t, conn)
+		assert.Equal(t, string(facade.MessageTypeToolResult), string(rejMsg.Type))
+
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeDone,
+			SessionID: "sess-tool",
+			Content:   "for that.",
+			Timestamp: time.Now(),
+		})
+	})
+
+	ch, err := p.PredictStream(context.Background(), providers.PredictionRequest{
+		Messages: []types.Message{
+			{Role: "user", Content: "Search for AI"},
+		},
+	})
+	require.NoError(t, err)
+
+	chunks := make([]providers.StreamChunk, 0, 3)
+	for chunk := range ch {
+		chunks = append(chunks, chunk)
+	}
+
+	require.Len(t, chunks, 3)
+
+	// Chunk 1: text delta
+	assert.Equal(t, "Let me search ", chunks[0].Delta)
+	assert.Nil(t, chunks[0].FinishReason)
+
+	// Chunk 2: tool call
+	require.Len(t, chunks[1].ToolCalls, 1)
+	assert.Equal(t, "search", chunks[1].ToolCalls[0].Name)
+	assert.Equal(t, "call-1", chunks[1].ToolCalls[0].ID)
+	assert.Nil(t, chunks[1].FinishReason)
+
+	// Chunk 3: done
+	assert.Equal(t, "for that.", chunks[2].Delta)
+	assert.Equal(t, "Let me search for that.", chunks[2].Content)
+	require.NotNil(t, chunks[2].FinishReason)
+	assert.Equal(t, "stop", *chunks[2].FinishReason)
+}
+
+func TestProvider_PredictStream_RecordsTTFT(t *testing.T) {
+	p := providerTestServer(t, func(conn *websocket.Conn) {
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeConnected,
+			SessionID: "sess-ttft",
+			Timestamp: time.Now(),
+		})
+
+		readClientMsg(t, conn)
+
+		time.Sleep(10 * time.Millisecond)
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeChunk,
+			SessionID: "sess-ttft",
+			Content:   "Hello",
+			Timestamp: time.Now(),
+		})
+		writeServerMsg(t, conn, facade.ServerMessage{
+			Type:      facade.MessageTypeDone,
+			SessionID: "sess-ttft",
+			Timestamp: time.Now(),
+		})
+	})
+
+	ch, err := p.PredictStream(context.Background(), providers.PredictionRequest{
+		Messages: []types.Message{
+			{Role: "user", Content: "Hi"},
+		},
+	})
+	require.NoError(t, err)
+
+	for range ch {
+	}
+
+	assert.Greater(t, p.LastTTFT(), time.Duration(0))
 }
 
 func TestProvider_PredictStream_Error(t *testing.T) {
