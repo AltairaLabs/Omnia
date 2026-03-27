@@ -582,7 +582,7 @@ func TestExtractSessionID(t *testing.T) {
 		mgr := newArenaSessionManager(store, logr.Discard(), arenaSessionMetadata{
 			JobName:   "test-job",
 			Namespace: "default",
-		})
+		}, "test-item")
 
 		// Create a session via event
 		mgr.OnEvent(&events.Event{
@@ -595,7 +595,7 @@ func TestExtractSessionID(t *testing.T) {
 
 		sid := extractSessionID(mgr, nil, nil)
 		assert.NotEmpty(t, sid)
-		assert.Equal(t, runIDToUUID("run-001"), sid)
+		assert.Equal(t, runIDToUUID("test-item:run-001"), sid)
 	})
 }
 

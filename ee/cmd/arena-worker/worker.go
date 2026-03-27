@@ -593,6 +593,7 @@ func executeWorkItem(
 				JobType:       cfg.JobType,
 				TrialIndex:    extractTrialIndex(item),
 			},
+			item.ID,
 		)
 		bus := events.NewEventBus()
 		bus.SubscribeAll(sessionMgr.OnEvent)

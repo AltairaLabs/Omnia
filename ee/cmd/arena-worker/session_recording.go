@@ -40,10 +40,11 @@ type arenaSessionMetadata struct {
 // Each unique event.SessionID (= PromptKit runID) gets its own session and
 // OmniaEventStore instance. Safe for concurrent use by multiple engine runs.
 type arenaSessionManager struct {
-	store    session.Store
-	log      logr.Logger
-	meta     arenaSessionMetadata
-	sessions sync.Map // runSessionID (string) → *managedSession
+	store      session.Store
+	log        logr.Logger
+	meta       arenaSessionMetadata
+	workItemID string   // unique per trial — used to derive deterministic session UUIDs
+	sessions   sync.Map // runSessionID (string) → *managedSession
 }
 
 type managedSession struct {
@@ -52,11 +53,14 @@ type managedSession struct {
 	failed      bool // set when an arena.run.failed event is observed
 }
 
-func newArenaSessionManager(store session.Store, log logr.Logger, meta arenaSessionMetadata) *arenaSessionManager {
+func newArenaSessionManager(
+	store session.Store, log logr.Logger, meta arenaSessionMetadata, workItemID string,
+) *arenaSessionManager {
 	return &arenaSessionManager{
-		store: store,
-		log:   log.WithName("arena-session-mgr"),
-		meta:  meta,
+		store:      store,
+		log:        log.WithName("arena-session-mgr"),
+		meta:       meta,
+		workItemID: workItemID,
 	}
 }
 
@@ -73,7 +77,9 @@ func (m *arenaSessionManager) OnEvent(event *events.Event) {
 	}
 
 	runSessionID := event.SessionID
-	pgID := runIDToUUID(runSessionID)
+	// Derive session UUID from work item ID (unique per trial) rather than
+	// PromptKit run ID (which can collide across concurrent workers).
+	pgID := runIDToUUID(m.workItemID + ":" + runSessionID)
 
 	// Fast path: session already exists.
 	if v, ok := m.sessions.Load(runSessionID); ok {

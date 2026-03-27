@@ -151,7 +151,7 @@ func TestArenaSessionManager_OnEvent_CreatesSession(t *testing.T) {
 		Scenario:   "customer-support",
 		ProviderID: "openai-gpt4",
 		JobType:    "arena",
-	})
+	}, "test-item")
 
 	event := &events.Event{
 		Type:      events.EventProviderCallCompleted,
@@ -175,7 +175,7 @@ func TestArenaSessionManager_OnEvent_CreatesSession(t *testing.T) {
 	sessions := store.getCreatedSessions()
 	require.Len(t, sessions, 1, "should create exactly one session")
 
-	expectedUUID := runIDToUUID("run-001")
+	expectedUUID := runIDToUUID("test-item:run-001")
 	assert.Equal(t, expectedUUID, sessions[0].ID, "session ID should be UUID5 of runID")
 	assert.Equal(t, "test-job", sessions[0].AgentName)
 	assert.Equal(t, "default", sessions[0].Namespace)
@@ -194,7 +194,7 @@ func TestArenaSessionManager_OnEvent_DeduplicatesSessions(t *testing.T) {
 		JobName:    "test-job",
 		Namespace:  "default",
 		ProviderID: "openai",
-	})
+	}, "test-item")
 
 	for i := 0; i < 5; i++ {
 		mgr.OnEvent(&events.Event{
@@ -217,7 +217,7 @@ func TestArenaSessionManager_OnEvent_MultipleRuns(t *testing.T) {
 		JobName:    "test-job",
 		Namespace:  "default",
 		ProviderID: "openai",
-	})
+	}, "test-item")
 
 	mgr.OnEvent(&events.Event{
 		Type:      events.EventProviderCallCompleted,
@@ -240,7 +240,7 @@ func TestArenaSessionManager_OnEvent_MultipleRuns(t *testing.T) {
 
 func TestArenaSessionManager_OnEvent_SkipsEmptySessionID(t *testing.T) {
 	store := newMockStore()
-	mgr := newArenaSessionManager(store, logr.Discard(), arenaSessionMetadata{})
+	mgr := newArenaSessionManager(store, logr.Discard(), arenaSessionMetadata{}, "test-item")
 
 	mgr.OnEvent(&events.Event{
 		Type:      events.EventProviderCallCompleted,
@@ -259,7 +259,7 @@ func TestArenaSessionManager_CompleteAll(t *testing.T) {
 		JobName:    "test-job",
 		Namespace:  "default",
 		ProviderID: "openai",
-	})
+	}, "test-item")
 
 	// Create two sessions
 	mgr.OnEvent(&events.Event{
@@ -280,8 +280,8 @@ func TestArenaSessionManager_CompleteAll(t *testing.T) {
 	mgr.CompleteAll(context.Background())
 
 	updates := store.getStatusUpdates()
-	uuid1 := runIDToUUID("run-001")
-	uuid2 := runIDToUUID("run-002")
+	uuid1 := runIDToUUID("test-item:run-001")
+	uuid2 := runIDToUUID("test-item:run-002")
 
 	require.Contains(t, updates, uuid1, "should complete run-001 session")
 	require.Contains(t, updates, uuid2, "should complete run-002 session")
@@ -296,7 +296,7 @@ func TestArenaSessionManager_CompleteAll_FailedRun(t *testing.T) {
 		JobName:    "test-job",
 		Namespace:  "default",
 		ProviderID: "openai",
-	})
+	}, "test-item")
 
 	// Create a session that succeeds
 	mgr.OnEvent(&events.Event{
@@ -324,8 +324,8 @@ func TestArenaSessionManager_CompleteAll_FailedRun(t *testing.T) {
 	mgr.CompleteAll(context.Background())
 
 	updates := store.getStatusUpdates()
-	uuidPass := runIDToUUID("run-pass")
-	uuidFail := runIDToUUID("run-fail")
+	uuidPass := runIDToUUID("test-item:run-pass")
+	uuidFail := runIDToUUID("test-item:run-fail")
 
 	require.Contains(t, updates, uuidPass)
 	require.Contains(t, updates, uuidFail)
@@ -339,7 +339,7 @@ func TestArenaSessionManager_OnEvent_CreateSessionError(t *testing.T) {
 		JobName:    "test-job",
 		Namespace:  "default",
 		ProviderID: "openai",
-	})
+	}, "test-item")
 
 	// Should not panic on CreateSession error
 	mgr.OnEvent(&events.Event{
@@ -367,7 +367,7 @@ func TestArenaSessionManager_OnEvent_CreateSessionError(t *testing.T) {
 func TestArenaSessionManager_SessionIDs(t *testing.T) {
 	t.Run("returns empty for no sessions", func(t *testing.T) {
 		store := newMockStore()
-		mgr := newArenaSessionManager(store, logr.Discard(), arenaSessionMetadata{})
+		mgr := newArenaSessionManager(store, logr.Discard(), arenaSessionMetadata{}, "test-item")
 		assert.Empty(t, mgr.SessionIDs())
 	})
 
@@ -376,7 +376,7 @@ func TestArenaSessionManager_SessionIDs(t *testing.T) {
 		mgr := newArenaSessionManager(store, logr.Discard(), arenaSessionMetadata{
 			JobName:   "test-job",
 			Namespace: "default",
-		})
+		}, "test-item")
 
 		mgr.OnEvent(&events.Event{
 			Type:      events.EventProviderCallCompleted,
@@ -395,8 +395,8 @@ func TestArenaSessionManager_SessionIDs(t *testing.T) {
 
 		ids := mgr.SessionIDs()
 		assert.Len(t, ids, 2)
-		assert.Contains(t, ids, runIDToUUID("run-a"))
-		assert.Contains(t, ids, runIDToUUID("run-b"))
+		assert.Contains(t, ids, runIDToUUID("test-item:run-a"))
+		assert.Contains(t, ids, runIDToUUID("test-item:run-b"))
 	})
 }
 
@@ -411,7 +411,7 @@ func TestArenaSessionManager_MetadataTags(t *testing.T) {
 			ProviderID:    "gpt-4o",
 			JobType:       "arena",
 			TrialIndex:    "3",
-		})
+		}, "test-item")
 
 		mgr.OnEvent(&events.Event{
 			Type:      events.EventProviderCallCompleted,
@@ -457,7 +457,7 @@ func TestArenaSessionManager_MetadataTags(t *testing.T) {
 			Scenario:   "s1",
 			ProviderID: "p1",
 			JobType:    "arena",
-		})
+		}, "test-item")
 
 		mgr.OnEvent(&events.Event{
 			Type:      events.EventProviderCallCompleted,
@@ -490,7 +490,7 @@ func TestArenaSessionManager_CompleteAll_UpdateError(t *testing.T) {
 		JobName:    "test-job",
 		Namespace:  "default",
 		ProviderID: "openai",
-	})
+	}, "test-item")
 
 	// Create a session
 	mgr.OnEvent(&events.Event{
@@ -506,6 +506,6 @@ func TestArenaSessionManager_CompleteAll_UpdateError(t *testing.T) {
 	mgr.CompleteAll(context.Background())
 
 	updates := store.getStatusUpdates()
-	uuid := runIDToUUID("run-err")
+	uuid := runIDToUUID("test-item:run-err")
 	assert.Equal(t, session.SessionStatusCompleted, updates[uuid].SetStatus)
 }
