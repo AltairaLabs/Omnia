@@ -2428,17 +2428,12 @@ spec:
 				}
 			}
 
-			providerCRDs := make([]*corev1alpha1.Provider, 51)
-			for i := range providerCRDs {
-				providerCRDs[i] = &corev1alpha1.Provider{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      fmt.Sprintf("provider-%d", i),
-						Namespace: "default",
-					},
-				}
+			providerIDs := make([]string, 51)
+			for i := range providerIDs {
+				providerIDs[i] = fmt.Sprintf("provider-%d", i)
 			}
 
-			items := reconciler.buildMatrixWorkItems(ctx, "test-job", "bundle-url", scenarios, providerCRDs, 0, omniav1alpha1.ArenaJobTypeEvaluation)
+			items := reconciler.buildMatrixWorkItems(ctx, "test-job", "bundle-url", scenarios, providerIDs, 0, omniav1alpha1.ArenaJobTypeEvaluation)
 			Expect(items).To(BeNil())
 		})
 
@@ -2453,12 +2448,9 @@ spec:
 				{ID: "s2", Name: "Scenario 2", Path: "s2.yaml"},
 			}
 
-			providerCRDs := []*corev1alpha1.Provider{
-				{ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "p2", Namespace: "default"}},
-			}
+			providerIDs := []string{"p1", "p2"}
 
-			items := reconciler.buildMatrixWorkItems(ctx, "test-job", "bundle-url", scenarios, providerCRDs, 0, omniav1alpha1.ArenaJobTypeEvaluation)
+			items := reconciler.buildMatrixWorkItems(ctx, "test-job", "bundle-url", scenarios, providerIDs, 0, omniav1alpha1.ArenaJobTypeEvaluation)
 			Expect(items).To(HaveLen(4)) // 2 scenarios x 2 providers
 		})
 	})

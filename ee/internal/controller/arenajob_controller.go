@@ -1036,21 +1036,21 @@ func (r *ArenaJobReconciler) listScenarios(ctx context.Context, arenaJob *omniav
 }
 
 // buildMatrixWorkItems creates scenario × provider × trial work items using the partitioner.
+// providerIDs are the array-mode provider IDs (from both providerRef and agentRef entries).
 // Returns nil if partitioning fails or inputs are empty.
 func (r *ArenaJobReconciler) buildMatrixWorkItems(
 	ctx context.Context, jobName, bundleURL string,
 	scenarios []partitioner.Scenario,
-	providerCRDs []*corev1alpha1.Provider,
+	providerIDs []string,
 	jobTrials int, jobType omniav1alpha1.ArenaJobType,
 ) []queue.WorkItem {
 	log := logf.FromContext(ctx)
 
-	partProviders := make([]partitioner.Provider, len(providerCRDs))
-	for i, p := range providerCRDs {
+	partProviders := make([]partitioner.Provider, len(providerIDs))
+	for i, id := range providerIDs {
 		partProviders[i] = partitioner.Provider{
-			ID:        p.Name,
-			Name:      p.Name,
-			Namespace: p.Namespace,
+			ID:   id,
+			Name: id,
 		}
 	}
 
@@ -1180,11 +1180,16 @@ func (r *ArenaJobReconciler) enqueueWorkItems(
 	}
 
 	// Build work items: unified scenario × provider matrix
-	// Filter to only array-mode providers — map-mode groups (judges, self-play)
-	// are 1:1 config references and don't participate in the work item matrix.
-	providerIDs := getProviderIDsFromGroups(resolvedGroups)
-	matrixProviders := filterArrayModeProviders(providerCRDs, resolvedGroups)
-	log.V(1).Info("building work items", "providerIDs", providerIDs, "matrixProviders", len(matrixProviders))
+	// getProviderIDsFromGroups returns array-mode provider IDs only (both providerRef
+	// and agentRef). Map-mode groups (judges, self-play) don't participate in the matrix.
+	// When resolvedGroups is nil (no CRD-based providers), fall back to providerCRD names.
+	matrixProviderIDs := getProviderIDsFromGroups(resolvedGroups)
+	if len(matrixProviderIDs) == 0 && len(providerCRDs) > 0 {
+		for _, p := range providerCRDs {
+			matrixProviderIDs = append(matrixProviderIDs, p.Name)
+		}
+	}
+	log.V(1).Info("building work items", "matrixProviderIDs", matrixProviderIDs)
 
 	// Resolve job-level trials override (nil pointer = 0 = use per-scenario defaults)
 	jobTrials := 0
@@ -1193,14 +1198,14 @@ func (r *ArenaJobReconciler) enqueueWorkItems(
 	}
 
 	var items []queue.WorkItem
-	if len(scenarios) > 0 && len(matrixProviders) > 0 {
-		items = r.buildMatrixWorkItems(ctx, arenaJob.Name, bundleURL, scenarios, matrixProviders, jobTrials, arenaJob.Spec.Type)
+	if len(scenarios) > 0 && len(matrixProviderIDs) > 0 {
+		items = r.buildMatrixWorkItems(ctx, arenaJob.Name, bundleURL, scenarios, matrixProviderIDs, jobTrials, arenaJob.Spec.Type)
 	}
 	if len(items) == 0 {
 		if jobTrials > 0 {
 			log.Info("trial configuration ignored in fallback mode", "trials", jobTrials)
 		}
-		items = buildFallbackWorkItems(arenaJob.Name, bundleURL, providerIDs)
+		items = buildFallbackWorkItems(arenaJob.Name, bundleURL, matrixProviderIDs)
 	}
 
 	log.Info("enqueueing work items", "count", len(items))
