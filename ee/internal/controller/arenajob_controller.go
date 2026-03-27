@@ -523,49 +523,6 @@ func getProviderIDsFromGroups(groups map[string]*resolvedProviderGroup) []string
 	return ids
 }
 
-// filterArrayModeProviders returns only providers that belong to array-mode groups.
-// Map-mode groups (judges, self-play) don't participate in the work item matrix.
-// When resolvedGroups is nil or has no map-mode groups, all providers are returned.
-func filterArrayModeProviders(
-	allProviders []*corev1alpha1.Provider,
-	resolvedGroups map[string]*resolvedProviderGroup,
-) []*corev1alpha1.Provider {
-	if len(resolvedGroups) == 0 {
-		return allProviders
-	}
-
-	// Check if any group is map-mode; if not, return all providers unchanged
-	hasMapMode := false
-	for _, grp := range resolvedGroups {
-		if grp.mapMode {
-			hasMapMode = true
-			break
-		}
-	}
-	if !hasMapMode {
-		return allProviders
-	}
-
-	// Build set of provider names from array-mode groups only
-	arrayModeNames := make(map[string]bool)
-	for _, grp := range resolvedGroups {
-		if grp.mapMode {
-			continue
-		}
-		for _, p := range grp.providers {
-			arrayModeNames[p.Name] = true
-		}
-	}
-
-	var filtered []*corev1alpha1.Provider
-	for _, p := range allProviders {
-		if arrayModeNames[p.Name] {
-			filtered = append(filtered, p)
-		}
-	}
-	return filtered
-}
-
 // buildProviderEnvVarsFromCRDs builds environment variables for Provider CRDs.
 // This extracts credentials from each provider's secretRef.
 // Delegates to the shared providers.BuildEnvVarsFromProviders function.
