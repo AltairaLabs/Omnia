@@ -283,14 +283,11 @@ func (r *ArenaJobReconciler) validateSource(ctx context.Context, arenaJob *omnia
 		return nil, fmt.Errorf("failed to get arenaSource %s: %w", arenaJob.Spec.SourceRef.Name, err)
 	}
 
-	// Check if source is ready
-	if source.Status.Phase != omniav1alpha1.ArenaSourcePhaseReady {
-		return nil, fmt.Errorf("arenaSource %s is not ready (phase: %s)", arenaJob.Spec.SourceRef.Name, source.Status.Phase)
-	}
-
-	// Verify source has an artifact
+	// Source must have a fetched artifact. We don't require phase=Ready because
+	// the source may be mid-refetch (phase=Fetching) while a valid artifact
+	// from the previous fetch still exists on disk.
 	if source.Status.Artifact == nil {
-		return nil, fmt.Errorf("arenaSource %s has no artifact", arenaJob.Spec.SourceRef.Name)
+		return nil, fmt.Errorf("arenaSource %s has no artifact (phase: %s)", arenaJob.Spec.SourceRef.Name, source.Status.Phase)
 	}
 
 	return source, nil
