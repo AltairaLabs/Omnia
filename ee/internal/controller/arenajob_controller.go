@@ -212,16 +212,6 @@ func (r *ArenaJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	// Validate the referenced ArenaSource
-	source, err := r.validateSource(ctx, arenaJob)
-	if err != nil {
-		log.Error(err, "failed to validate ArenaSource")
-		r.handleValidationError(ctx, arenaJob, ArenaJobConditionTypeSourceValid, err)
-		return ctrl.Result{}, nil
-	}
-	SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeSourceValid, metav1.ConditionTrue,
-		"SourceValid", fmt.Sprintf("ArenaSource %s is valid and ready", arenaJob.Spec.SourceRef.Name))
-
 	// Check if we already have a K8s Job
 	existingJob, err := r.getExistingJob(ctx, arenaJob)
 	if err != nil {
@@ -230,6 +220,18 @@ func (r *ArenaJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if existingJob == nil {
+		// Validate the referenced ArenaSource only when creating a new job.
+		// Once workers are running, the content is pinned to a specific version
+		// via the volume subPath — re-validating would race with periodic refetches.
+		source, err := r.validateSource(ctx, arenaJob)
+		if err != nil {
+			log.Error(err, "failed to validate ArenaSource")
+			r.handleValidationError(ctx, arenaJob, ArenaJobConditionTypeSourceValid, err)
+			return ctrl.Result{}, nil
+		}
+		SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeSourceValid, metav1.ConditionTrue,
+			"SourceValid", fmt.Sprintf("ArenaSource %s is valid and ready", arenaJob.Spec.SourceRef.Name))
+
 		// Create the K8s Job
 		if err := r.createWorkerJob(ctx, arenaJob, source); err != nil {
 			log.Error(err, "failed to create worker job")

@@ -1348,10 +1348,8 @@ var _ = Describe("ArenaJob Controller", func() {
 				Namespace: arenaJobNamespace,
 			}, updatedJob)).To(Succeed())
 
-			// Should have SourceValid condition
-			sourceCondition := meta.FindStatusCondition(updatedJob.Status.Conditions, ArenaJobConditionTypeSourceValid)
-			Expect(sourceCondition).NotTo(BeNil())
-			Expect(sourceCondition.Status).To(Equal(metav1.ConditionTrue))
+			// SourceValid is set on initial creation, not on re-reconcile —
+			// the source is only validated when creating the worker job.
 
 			// Should have progress tracking
 			Expect(updatedJob.Status.Progress).NotTo(BeNil())
