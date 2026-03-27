@@ -317,6 +317,24 @@ func TestFilter(t *testing.T) {
 			exclude: nil,
 			wantIDs: []string{"s1"},
 		},
+		{
+			name:    "include by scenario ID",
+			include: []string{"s2"},
+			exclude: nil,
+			wantIDs: []string{"s2"},
+		},
+		{
+			name:    "include multiple by ID",
+			include: []string{"s1", "s4"},
+			exclude: nil,
+			wantIDs: []string{"s1", "s4"},
+		},
+		{
+			name:    "exclude by ID",
+			include: nil,
+			exclude: []string{"s3"},
+			wantIDs: []string{"s1", "s2", "s4", "s5"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -345,27 +363,39 @@ func TestFilter(t *testing.T) {
 	}
 }
 
-func TestMatchesAny(t *testing.T) {
+func TestScenarioMatches(t *testing.T) {
 	tests := []struct {
-		path     string
+		name     string
+		scenario Scenario
 		patterns []string
 		want     bool
 	}{
-		{"scenarios/test.yaml", []string{"scenarios/*.yaml"}, true},
-		{"scenarios/test.yaml", []string{"tests/*.yaml"}, false},
-		{"scenarios/test.yaml", []string{"*.yaml"}, true},
-		{"scenarios/test.yaml", []string{"test.yaml"}, true},
-		{"scenarios/test.yaml", []string{"other.yaml"}, false},
-		{"test.yaml", []string{"*.yaml"}, true},
-		{"test.yaml", []string{"*.json"}, false},
+		{"glob against path", Scenario{ID: "test", Path: "scenarios/test.yaml"}, []string{"scenarios/*.yaml"}, true},
+		{"glob against wrong dir", Scenario{ID: "test", Path: "scenarios/test.yaml"}, []string{"tests/*.yaml"}, false},
+		{"glob against filename", Scenario{ID: "test", Path: "scenarios/test.yaml"}, []string{"*.yaml"}, true},
+		{"exact filename match", Scenario{ID: "test", Path: "scenarios/test.yaml"}, []string{"test.yaml"}, true},
+		{"wrong filename", Scenario{ID: "test", Path: "scenarios/test.yaml"}, []string{"other.yaml"}, false},
+		{"bare filename glob", Scenario{ID: "test", Path: "test.yaml"}, []string{"*.yaml"}, true},
+		{"wrong extension", Scenario{ID: "test", Path: "test.yaml"}, []string{"*.json"}, false},
+		// ID matching — the primary use case for scenario filtering
+		{"exact ID match", Scenario{ID: "simple-qa", Path: "scenarios/simple-qa.scenario.yaml"}, []string{"simple-qa"}, true},
+		{"ID glob match", Scenario{ID: "simple-qa", Path: "scenarios/simple-qa.scenario.yaml"}, []string{"simple-*"}, true},
+		{"ID no match", Scenario{ID: "simple-qa", Path: "scenarios/simple-qa.scenario.yaml"}, []string{"deep-*"}, false},
+		{
+			"ID match among multiple patterns",
+			Scenario{ID: "tool-usage", Path: "scenarios/tool-usage.scenario.yaml"},
+			[]string{"simple-qa", "tool-usage"}, true,
+		},
 	}
 
 	for _, tt := range tests {
-		got := matchesAny(tt.path, tt.patterns)
-		if got != tt.want {
-			t.Errorf("matchesAny(%q, %v) = %v, want %v",
-				tt.path, tt.patterns, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			got := scenarioMatches(tt.scenario, tt.patterns)
+			if got != tt.want {
+				t.Errorf("scenarioMatches(%q, %v) = %v, want %v",
+					tt.scenario.ID, tt.patterns, got, tt.want)
+			}
+		})
 	}
 }
 
