@@ -1222,34 +1222,9 @@ func (r *ArenaJobReconciler) enqueueWorkItems(
 func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, job *batchv1.Job) {
 	log := logf.FromContext(ctx)
 
-	// Update active workers count
+	// Only update ActiveWorkers when it changes to avoid unnecessary CRD writes.
+	// Live work-item progress is served via SSE from Redis stats.
 	arenaJob.Status.ActiveWorkers = job.Status.Active
-
-	// Update progress. Prefer queue stats (work item level) when available;
-	// fall back to K8s Job completions (worker pod level) otherwise.
-	if arenaJob.Status.Progress == nil {
-		arenaJob.Status.Progress = &omniav1alpha1.JobProgress{}
-	}
-	if r.Queue != nil {
-		stats, err := r.Queue.GetStats(ctx, arenaJob.Name)
-		if err == nil && stats != nil {
-			completed := int32(stats.Passed + stats.Failed)
-			arenaJob.Status.Progress.Completed = int32(stats.Passed)
-			arenaJob.Status.Progress.Failed = int32(stats.Failed)
-			if arenaJob.Status.Progress.Total > 0 {
-				arenaJob.Status.Progress.Pending = arenaJob.Status.Progress.Total - completed
-			}
-		}
-	} else {
-		completions := int32(1)
-		if job.Spec.Completions != nil {
-			completions = *job.Spec.Completions
-		}
-		arenaJob.Status.Progress.Total = completions
-		arenaJob.Status.Progress.Completed = job.Status.Succeeded
-		arenaJob.Status.Progress.Failed = job.Status.Failed
-		arenaJob.Status.Progress.Pending = completions - job.Status.Succeeded - job.Status.Failed
-	}
 
 	// Check job conditions
 	for _, condition := range job.Status.Conditions {
@@ -1280,6 +1255,13 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 					}
 				} else {
 					log.V(1).Info("aggregator not available, skipping result aggregation")
+				}
+
+				// Set final progress counts from aggregation
+				if hasAggregation && arenaJob.Status.Progress != nil {
+					arenaJob.Status.Progress.Completed = int32(passedItems)
+					arenaJob.Status.Progress.Failed = int32(failedItems)
+					arenaJob.Status.Progress.Pending = 0
 				}
 
 				// Evaluate SLO thresholds for load tests
@@ -1351,13 +1333,9 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 		r.checkBudgetLimit(ctx, arenaJob)
 	}
 
-	// Update progress condition (unless budget breach already set phase to Failed)
-	if arenaJob.Status.Phase == omniav1alpha1.ArenaJobPhaseRunning {
-		SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeProgressing, metav1.ConditionTrue,
-			"JobRunning", fmt.Sprintf("Job running: %d/%d completed",
-				arenaJob.Status.Progress.Completed+arenaJob.Status.Progress.Failed,
-				arenaJob.Status.Progress.Total))
-	}
+	// The Progressing condition is set at creation ("Job is running") and
+	// updated only on completion or budget breach. Live progress comes from
+	// SSE/Redis — we don't rewrite the condition message on every reconcile.
 }
 
 // evaluateLoadTestThresholds checks SLO thresholds for load test jobs.
