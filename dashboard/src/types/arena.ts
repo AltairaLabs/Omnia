@@ -268,14 +268,6 @@ export interface LoadThreshold {
   value: string;
 }
 
-/** Per-provider concurrency limit */
-export interface ProviderRateLimit {
-  /** Provider or AgentRuntime CRD name */
-  provider: string;
-  /** Maximum in-flight work items for this provider */
-  maxConcurrency: number;
-}
-
 /** Ramp configuration for concurrency changes over time */
 export interface RampConfig {
   /** Duration to ramp from 0 to target concurrency (e.g., "2m") */
@@ -296,8 +288,6 @@ export interface LoadTestConfig {
   budgetLimit?: string;
   /** Currency for budgetLimit (default: "USD") */
   budgetCurrency?: string;
-  /** Per-provider concurrency limits */
-  rateLimits?: ProviderRateLimit[];
   /** SLO thresholds for pass/fail gating */
   thresholds?: LoadThreshold[];
 }

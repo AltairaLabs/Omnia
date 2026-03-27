@@ -83,11 +83,6 @@ type LoadTestSettings struct {
 	// +optional
 	BudgetCurrency string `json:"budgetCurrency,omitempty"`
 
-	// rateLimits configures per-provider concurrency limits.
-	// Prevents overwhelming a single provider even when global concurrency allows more.
-	// +optional
-	RateLimits []ProviderRateLimit `json:"rateLimits,omitempty"`
-
 	// thresholds define SLO targets evaluated after the load test completes.
 	// The job fails if any threshold is violated, enabling CI/CD gating.
 	// +optional
@@ -106,18 +101,6 @@ type RampConfig struct {
 	// Format: duration string (e.g., "30s").
 	// +optional
 	Down string `json:"down,omitempty"`
-}
-
-// ProviderRateLimit sets a concurrency ceiling for a specific provider.
-type ProviderRateLimit struct {
-	// provider is the name of the Provider or AgentRuntime CRD.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	Provider string `json:"provider"`
-
-	// maxConcurrency is the maximum in-flight work items for this provider.
-	// +kubebuilder:validation:Minimum=1
-	MaxConcurrency int32 `json:"maxConcurrency"`
 }
 
 // LoadThresholdMetric defines the allowed metric names for load test thresholds.
