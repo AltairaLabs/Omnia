@@ -65,6 +65,12 @@ func NewPostgresMemoryStore(pool *pgxpool.Pool) *PostgresMemoryStore {
 	return &PostgresMemoryStore{pool: pool}
 }
 
+// Pool returns the underlying connection pool. Used by retrieval strategies that
+// need direct pool access (e.g. OmniaRetriever delegating to RetrievalStrategy).
+func (s *PostgresMemoryStore) Pool() *pgxpool.Pool {
+	return s.pool
+}
+
 // Save persists a memory. When Memory.ID is empty a new entity and observation are
 // inserted. When Memory.ID is set the entity metadata is updated and a new observation
 // is appended (upsert pattern). The Memory is mutated in place: ID and CreatedAt are
