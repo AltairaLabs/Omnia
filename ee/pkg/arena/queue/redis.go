@@ -784,11 +784,20 @@ func (q *RedisQueue) CompleteItem(ctx context.Context, jobID string, itemID stri
 	item.CompletedAt = &now
 	item.Result = resultJSON
 
+	// Check idempotency: skip stats increment if this item was already counted
+	// (e.g., due to re-enqueue after partial failure or duplicate processing).
+	alreadyCounted, markErr := q.markStatsCounted(ctx, jobID, itemID)
+	if markErr != nil {
+		// Non-fatal: if we can't check, increment anyway to avoid lost stats.
+		// This is the pre-fix behavior and only triggers on Redis errors.
+		alreadyCounted = false
+	}
+
 	// Build and execute the accumulator pipeline
 	pipe := q.client.Pipeline()
 	q.saveItemPipe(ctx, pipe, item)
 	q.addToCompletedSetPipe(ctx, pipe, jobID, itemID)
-	q.incrementStatsPipe(ctx, pipe, jobID, item, result)
+	q.incrementStatsPipe(ctx, pipe, jobID, item, result, alreadyCounted)
 	_, err = pipe.Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to execute complete pipeline: %w", err)
@@ -831,11 +840,18 @@ func (q *RedisQueue) FailItem(ctx context.Context, jobID string, itemID string, 
 		item.Error = failErr.Error()
 	}
 
+	alreadyCounted, markErr := q.markStatsCounted(ctx, jobID, itemID)
+	if markErr != nil {
+		alreadyCounted = false
+	}
+
 	// Build and execute the failure pipeline
 	pipe := q.client.Pipeline()
 	q.saveItemPipe(ctx, pipe, item)
 	q.addToFailedSetPipe(ctx, pipe, jobID, itemID)
-	q.incrementFailureStatsPipe(ctx, pipe, jobID, item)
+	if !alreadyCounted {
+		q.incrementFailureStatsPipe(ctx, pipe, jobID, item)
+	}
 	_, err = pipe.Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to execute fail pipeline: %w", err)
@@ -904,10 +920,22 @@ func (q *RedisQueue) scanGroupStats(
 	}
 }
 
+// statsCountedKey returns the Redis key for the set of item IDs that have been counted in stats.
+func (q *RedisQueue) statsCountedKey(jobID string) string {
+	return jobKeyPrefix + jobID + ":stats:counted"
+}
+
 // incrementStatsPipe adds accumulator increment commands to a pipeline for a completed item.
+// Idempotent: only increments if the item has not already been counted.
+// The caller must call markStatsCounted first and pass alreadyCounted=true to skip.
 func (q *RedisQueue) incrementStatsPipe(
 	ctx context.Context, pipe redis.Pipeliner, jobID string, item *WorkItem, result *ItemResult,
+	alreadyCounted bool,
 ) {
+	if alreadyCounted {
+		return
+	}
+
 	mainKey := q.statsKey(jobID)
 	tokens := extractTokens(result.Metrics)
 	cost := extractCost(result.Metrics)
@@ -923,6 +951,18 @@ func (q *RedisQueue) incrementStatsPipe(
 		provKey := q.statsProviderKey(jobID, item.ProviderID)
 		q.incrStatsFields(ctx, pipe, provKey, result.Status, result.DurationMs, tokens, cost)
 	}
+}
+
+// markStatsCounted atomically adds the item ID to the stats-counted set.
+// Returns true if the item was already counted (SADD returned 0).
+func (q *RedisQueue) markStatsCounted(ctx context.Context, jobID, itemID string) (bool, error) {
+	countedKey := q.statsCountedKey(jobID)
+	added, err := q.client.SAdd(ctx, countedKey, itemID).Result()
+	if err != nil {
+		return false, err
+	}
+	q.client.Expire(ctx, countedKey, q.itemTTL)
+	return added == 0, nil
 }
 
 // incrStatsFields adds HINCRBY/HINCRBYFLOAT commands for a stats hash.

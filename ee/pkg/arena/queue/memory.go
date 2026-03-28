@@ -31,13 +31,14 @@ type MemoryQueue struct {
 
 // jobState holds the state for a single job's work items.
 type jobState struct {
-	mu         sync.Mutex
-	pending    []*WorkItem          // Items waiting to be processed
-	processing map[string]*WorkItem // Items currently being processed (by itemID)
-	completed  map[string]*WorkItem // Successfully completed items
-	failed     map[string]*WorkItem // Failed items
-	startedAt  *time.Time
-	stats      *JobStats // Accumulated statistics
+	mu           sync.Mutex
+	pending      []*WorkItem          // Items waiting to be processed
+	processing   map[string]*WorkItem // Items currently being processed (by itemID)
+	completed    map[string]*WorkItem // Successfully completed items
+	failed       map[string]*WorkItem // Failed items
+	statsCounted map[string]bool      // Item IDs already counted in stats (idempotency guard)
+	startedAt    *time.Time
+	stats        *JobStats // Accumulated statistics
 }
 
 // NewMemoryQueue creates a new in-memory work queue with the given options.
@@ -285,10 +286,11 @@ func (q *MemoryQueue) getOrCreateJobState(jobID string) *jobState {
 	state, exists := q.jobs[jobID]
 	if !exists {
 		state = &jobState{
-			pending:    make([]*WorkItem, 0),
-			processing: make(map[string]*WorkItem),
-			completed:  make(map[string]*WorkItem),
-			failed:     make(map[string]*WorkItem),
+			pending:      make([]*WorkItem, 0),
+			processing:   make(map[string]*WorkItem),
+			completed:    make(map[string]*WorkItem),
+			failed:       make(map[string]*WorkItem),
+			statsCounted: make(map[string]bool),
 			stats: &JobStats{
 				ByScenario: make(map[string]*GroupStats),
 				ByProvider: make(map[string]*GroupStats),
@@ -376,7 +378,12 @@ func (q *MemoryQueue) CompleteItem(ctx context.Context, jobID string, itemID str
 	state.mu.Lock()
 	defer state.mu.Unlock()
 
-	// Get item to extract scenarioID/providerID
+	// Idempotent: skip stats if this item was already counted.
+	if state.statsCounted[itemID] {
+		return nil
+	}
+	state.statsCounted[itemID] = true
+
 	item := state.completed[itemID]
 	q.updateMemoryStats(state.stats, item, result)
 
@@ -417,8 +424,11 @@ func (q *MemoryQueue) FailItem(ctx context.Context, jobID string, itemID string,
 	delete(state.processing, itemID)
 	state.failed[itemID] = item
 
-	// Update failure accumulators
-	q.incrementFailureStats(state.stats, item)
+	// Idempotent: skip stats if this item was already counted.
+	if !state.statsCounted[itemID] {
+		state.statsCounted[itemID] = true
+		q.incrementFailureStats(state.stats, item)
+	}
 
 	return nil
 }

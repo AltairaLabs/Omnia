@@ -13,6 +13,7 @@ package queue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -859,4 +860,223 @@ func TestRedisQueue_GetItems_Closed(t *testing.T) {
 
 	_, err = q.GetFailedItems(ctx, "job-1")
 	assert.Equal(t, ErrQueueClosed, err)
+}
+
+// TestRedisQueue_NackRetryDoubleCount reproduces issue #682:
+// an item that is Nack'd (requeued) and then completed on retry
+// should be counted exactly once in the stats accumulators.
+func TestRedisQueue_NackRetryDoubleCount(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	q := NewRedisQueueFromClient(client, Options{
+		VisibilityTimeout: 5 * time.Minute,
+		MaxRetries:        3,
+	})
+	defer func() { _ = q.Close() }()
+
+	ctx := context.Background()
+	jobID := "test-double-count"
+
+	// Push a single item
+	items := []WorkItem{{ID: "item-1", ScenarioID: "simple-qa", ProviderID: "tools-demo"}}
+	require.NoError(t, q.Push(ctx, jobID, items))
+
+	// Pop → Nack (simulates session-api failure causing retry)
+	item1, err := q.Pop(ctx, jobID)
+	require.NoError(t, err)
+	assert.Equal(t, "item-1", item1.ID)
+
+	require.NoError(t, q.Nack(ctx, jobID, "item-1", errors.New("session-api timeout")))
+
+	// Pop again (retried item)
+	item2, err := q.Pop(ctx, jobID)
+	require.NoError(t, err)
+	assert.Equal(t, "item-1", item2.ID)
+	assert.Equal(t, 2, item2.Attempt) // second attempt
+
+	// Complete on retry
+	result := &ItemResult{Status: "pass", DurationMs: 100}
+	require.NoError(t, q.CompleteItem(ctx, jobID, "item-1", result))
+
+	// Stats should show 1 item, not 2
+	stats, err := q.GetStats(ctx, jobID)
+	require.NoError(t, err)
+
+	t.Logf("Stats: total=%d, passed=%d, failed=%d", stats.Total, stats.Passed, stats.Failed)
+	t.Logf("ByScenario: %+v", stats.ByScenario)
+	t.Logf("ByProvider: %+v", stats.ByProvider)
+
+	assert.Equal(t, int64(1), stats.Passed+stats.Failed,
+		"item completed once should count as 1 total, not %d", stats.Passed+stats.Failed)
+
+	scenStats := stats.ByScenario["simple-qa"]
+	if scenStats != nil {
+		assert.Equal(t, int64(1), scenStats.Total,
+			"scenario should count 1, not %d", scenStats.Total)
+	}
+}
+
+// TestRedisQueue_MultipleNackRetryStats tests that multiple retries
+// don't accumulate stats beyond the expected count.
+func TestRedisQueue_MultipleNackRetryStats(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	q := NewRedisQueueFromClient(client, Options{
+		VisibilityTimeout: 5 * time.Minute,
+		MaxRetries:        3,
+	})
+	defer func() { _ = q.Close() }()
+
+	ctx := context.Background()
+	jobID := "test-multi-retry"
+
+	const numItems = 10
+	items := make([]WorkItem, numItems)
+	for i := range numItems {
+		items[i] = WorkItem{
+			ID:         fmt.Sprintf("item-%d", i),
+			ScenarioID: "simple-qa",
+			ProviderID: "tools-demo",
+		}
+	}
+	require.NoError(t, q.Push(ctx, jobID, items))
+
+	// Pop all → Nack all (simulate transient failure)
+	for i := range numItems {
+		item, err := q.Pop(ctx, jobID)
+		require.NoError(t, err)
+		require.NoError(t, q.Nack(ctx, jobID, item.ID, errors.New("transient")))
+		_ = i
+	}
+
+	// Pop all again → Complete all (retry succeeds)
+	for range numItems {
+		item, err := q.Pop(ctx, jobID)
+		require.NoError(t, err)
+		result := &ItemResult{Status: "pass", DurationMs: 50}
+		require.NoError(t, q.CompleteItem(ctx, jobID, item.ID, result))
+	}
+
+	stats, err := q.GetStats(ctx, jobID)
+	require.NoError(t, err)
+
+	total := stats.Passed + stats.Failed
+	t.Logf("Stats after retry: total=%d (expected %d)", total, numItems)
+	assert.Equal(t, int64(numItems), total,
+		"stats should count %d items, not %d (double-count bug)", numItems, total)
+}
+
+// TestRedisQueue_DoubleCompleteViaRequeue reproduces the exact failure mode
+// from issue #682: an item is completed successfully, but due to a race
+// (e.g., CompleteItem pipeline partially fails, visibility timeout requeues),
+// the item ends up being completed a second time. Stats must not double-count.
+func TestRedisQueue_DoubleCompleteViaRequeue(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	q := NewRedisQueueFromClient(client, Options{
+		VisibilityTimeout: 100 * time.Millisecond, // short timeout for test
+		MaxRetries:        3,
+	})
+	defer func() { _ = q.Close() }()
+
+	ctx := context.Background()
+	jobID := "test-double-complete"
+
+	items := []WorkItem{
+		{ID: "item-1", ScenarioID: "simple-qa", ProviderID: "tools-demo"},
+	}
+	require.NoError(t, q.Push(ctx, jobID, items))
+
+	// Pop the item (moves to processing ZSET with short visibility timeout)
+	item, err := q.Pop(ctx, jobID)
+	require.NoError(t, err)
+	assert.Equal(t, "item-1", item.ID)
+
+	// Complete the item → stats should be 1
+	result := &ItemResult{Status: "pass", DurationMs: 100}
+	require.NoError(t, q.CompleteItem(ctx, jobID, "item-1", result))
+
+	stats, err := q.GetStats(ctx, jobID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), stats.Passed, "first completion: passed=1")
+
+	// Simulate the race: re-push the same item (as if requeued after timeout)
+	// This is what happens when Push is called again or RequeueTimedOutItems fires
+	require.NoError(t, q.Push(ctx, jobID, items))
+
+	// Pop and complete again
+	item2, err := q.Pop(ctx, jobID)
+	require.NoError(t, err)
+	assert.Equal(t, "item-1", item2.ID)
+
+	result2 := &ItemResult{Status: "pass", DurationMs: 50}
+	require.NoError(t, q.CompleteItem(ctx, jobID, "item-1", result2))
+
+	// Stats should STILL be 1, not 2
+	stats2, err := q.GetStats(ctx, jobID)
+	require.NoError(t, err)
+	total := stats2.Passed + stats2.Failed
+	t.Logf("Stats after double-complete: total=%d, passed=%d (want 1)", total, stats2.Passed)
+	assert.Equal(t, int64(1), stats2.Passed,
+		"double-complete should not inflate stats: got passed=%d, want 1", stats2.Passed)
+}
+
+// TestRedisQueue_VisibilityTimeoutRequeueDoubleCount simulates the visibility
+// timeout path: item is popped, takes too long, gets requeued by
+// RequeueTimedOutItems, then completed by both the original and retry workers.
+func TestRedisQueue_VisibilityTimeoutRequeueDoubleCount(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	q := NewRedisQueueFromClient(client, Options{
+		VisibilityTimeout: 100 * time.Millisecond, // very short
+		MaxRetries:        3,
+	})
+	defer func() { _ = q.Close() }()
+
+	ctx := context.Background()
+	jobID := "test-visibility-double"
+
+	items := []WorkItem{
+		{ID: "item-1", ScenarioID: "simple-qa", ProviderID: "tools-demo"},
+	}
+	require.NoError(t, q.Push(ctx, jobID, items))
+
+	// Worker A pops the item
+	item, err := q.Pop(ctx, jobID)
+	require.NoError(t, err)
+
+	// Wait for visibility timeout to expire
+	time.Sleep(200 * time.Millisecond)
+
+	// Controller/maintenance requeues timed-out items
+	requeued, err := q.RequeueTimedOutItems(ctx, jobID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, requeued, "should requeue 1 timed-out item")
+
+	// Worker B pops the requeued item
+	item2, err := q.Pop(ctx, jobID)
+	require.NoError(t, err)
+	assert.Equal(t, item.ID, item2.ID)
+
+	// Worker B completes first
+	result := &ItemResult{Status: "pass", DurationMs: 50}
+	require.NoError(t, q.CompleteItem(ctx, jobID, item2.ID, result))
+
+	// Worker A tries to complete (stale) — should get ErrItemNotFound
+	err = q.CompleteItem(ctx, jobID, item.ID, result)
+	assert.Equal(t, ErrItemNotFound, err, "stale worker should get ErrItemNotFound")
+
+	// Stats should be 1, not 2
+	stats, err := q.GetStats(ctx, jobID)
+	require.NoError(t, err)
+	t.Logf("Stats after visibility timeout race: total=%d, passed=%d", stats.Passed+stats.Failed, stats.Passed)
+	assert.Equal(t, int64(1), stats.Passed, "visibility timeout race should not double-count")
 }
