@@ -155,10 +155,3 @@ func TestShouldRemember_NoOptOut(t *testing.T) {
 	result := ShouldRemember(context.Background(), store, "user1", "ws1", "agent1")
 	assert.True(t, result)
 }
-
-func TestContainsStr(t *testing.T) {
-	assert.True(t, containsStr([]string{"a", "b", "c"}, "b"))
-	assert.False(t, containsStr([]string{"a", "b", "c"}, "d"))
-	assert.False(t, containsStr(nil, "a"))
-	assert.False(t, containsStr([]string{}, "a"))
-}

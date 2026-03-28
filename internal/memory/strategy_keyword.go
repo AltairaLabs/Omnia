@@ -38,7 +38,7 @@ func (k *KeywordStrategy) Name() string { return "keyword" }
 // scope and an ILIKE match on content, ordered by observed_at DESC.
 func (k *KeywordStrategy) Retrieve(ctx context.Context, pool *pgxpool.Pool, scope map[string]string, query string, limit int) ([]*Memory, error) {
 	if scope[ScopeWorkspaceID] == "" {
-		return nil, fmt.Errorf("memory: workspace_id scope is required")
+		return nil, fmt.Errorf(errWorkspaceRequired)
 	}
 
 	sql, qb := buildKeywordQuery(scope, query, limit)
@@ -54,28 +54,11 @@ func (k *KeywordStrategy) Retrieve(ctx context.Context, pool *pgxpool.Pool, scop
 
 // buildKeywordQuery constructs the SQL and arguments for a keyword Retrieve call.
 func buildKeywordQuery(scope map[string]string, query string, limit int) (string, *pgutil.QueryBuilder) {
-	var qb pgutil.QueryBuilder
-	qb.Add(colWorkspaceID, scope[ScopeWorkspaceID])
-	addScopeFilters(&qb, scope)
+	qb := buildBaseMemoryQuery(scope, nil)
 
 	if query != "" {
 		qb.Add("o.content ILIKE $?", "%"+query+"%")
 	}
 
-	if limit <= 0 {
-		limit = 50
-	}
-
-	sql := fmt.Sprintf(`
-		SELECT DISTINCT ON (e.id) %s, %s
-		FROM memory_entities %s%s
-		WHERE %s%s
-		ORDER BY e.id, o.observed_at DESC`,
-		selectEntityCols, selectObserveCols,
-		entityTableAlias, observationJoin,
-		colEntityForgot, qb.Where())
-
-	sql = qb.AppendPagination(sql, limit, 0)
-
-	return sql, &qb
+	return formatMemorySQL(qb, limit, 0), qb
 }

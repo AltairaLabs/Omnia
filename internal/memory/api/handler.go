@@ -100,23 +100,21 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 // handleListMemories returns a paginated list of memories.
 func (h *Handler) handleListMemories(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	workspace := truncateParam(q.Get("workspace"))
-	if workspace == "" {
-		writeError(w, ErrMissingWorkspace)
+	scope, err := parseWorkspaceScope(r)
+	if err != nil {
+		writeError(w, err)
 		return
 	}
 
-	scope := buildScope(q)
 	opts := memory.ListOptions{
-		Types:  parseTypes(q.Get("type")),
+		Types:  parseTypes(r.URL.Query().Get("type")),
 		Limit:  min(max(parseIntParam(r, "limit", defaultListLimit), 1), maxListLimit),
 		Offset: parseIntParam(r, "offset", 0),
 	}
 
 	memories, err := h.service.ListMemories(r.Context(), scope, opts)
 	if err != nil {
-		h.log.Error(err, "ListMemories failed", "workspace", workspace)
+		h.log.Error(err, "ListMemories failed", "workspace", scope[memory.ScopeWorkspaceID])
 		writeError(w, err)
 		return
 	}
@@ -129,20 +127,19 @@ func (h *Handler) handleListMemories(w http.ResponseWriter, r *http.Request) {
 
 // handleSearchMemories searches memories by query.
 func (h *Handler) handleSearchMemories(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	workspace := truncateParam(q.Get("workspace"))
-	if workspace == "" {
-		writeError(w, ErrMissingWorkspace)
+	scope, err := parseWorkspaceScope(r)
+	if err != nil {
+		writeError(w, err)
 		return
 	}
 
+	q := r.URL.Query()
 	query := q.Get("q")
 	if query == "" {
 		writeError(w, ErrMissingQuery)
 		return
 	}
 
-	scope := buildScope(q)
 	opts := memory.RetrieveOptions{
 		Types:         parseTypes(q.Get("type")),
 		Limit:         min(max(parseIntParam(r, "limit", defaultListLimit), 1), maxListLimit),
@@ -151,7 +148,7 @@ func (h *Handler) handleSearchMemories(w http.ResponseWriter, r *http.Request) {
 
 	memories, err := h.service.SearchMemories(r.Context(), scope, query, opts)
 	if err != nil {
-		h.log.Error(err, "SearchMemories failed", "workspace", workspace, "query", query)
+		h.log.Error(err, "SearchMemories failed", "workspace", scope[memory.ScopeWorkspaceID], "query", query)
 		writeError(w, err)
 		return
 	}
@@ -206,13 +203,11 @@ func (h *Handler) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	q := r.URL.Query()
-	workspace := truncateParam(q.Get("workspace"))
-	if workspace == "" {
-		writeError(w, ErrMissingWorkspace)
+	scope, err := parseWorkspaceScope(r)
+	if err != nil {
+		writeError(w, err)
 		return
 	}
-	scope := map[string]string{memory.ScopeWorkspaceID: workspace}
 
 	if err := h.service.DeleteMemory(r.Context(), scope, id); err != nil {
 		h.log.Error(err, "DeleteMemory failed", "memoryID", id)
@@ -226,26 +221,33 @@ func (h *Handler) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 
 // handleDeleteAllMemories deletes all memories for a scope (DSAR).
 func (h *Handler) handleDeleteAllMemories(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	workspace := truncateParam(q.Get("workspace"))
-	if workspace == "" {
-		writeError(w, ErrMissingWorkspace)
-		return
-	}
-
-	scope := buildScope(q)
-
-	if err := h.service.DeleteAllMemories(r.Context(), scope); err != nil {
-		h.log.Error(err, "DeleteAllMemories failed", "workspace", workspace)
+	scope, err := parseWorkspaceScope(r)
+	if err != nil {
 		writeError(w, err)
 		return
 	}
 
-	h.log.V(1).Info("all memories deleted", "workspace", workspace)
+	if err := h.service.DeleteAllMemories(r.Context(), scope); err != nil {
+		h.log.Error(err, "DeleteAllMemories failed", "workspace", scope[memory.ScopeWorkspaceID])
+		writeError(w, err)
+		return
+	}
+
+	h.log.V(1).Info("all memories deleted", "workspace", scope[memory.ScopeWorkspaceID])
 	w.WriteHeader(http.StatusOK)
 }
 
 // --- helpers -----------------------------------------------------------------
+
+// parseWorkspaceScope extracts and validates the workspace parameter, then builds the full scope.
+func parseWorkspaceScope(r *http.Request) (map[string]string, error) {
+	q := r.URL.Query()
+	workspace := truncateParam(q.Get("workspace"))
+	if workspace == "" {
+		return nil, ErrMissingWorkspace
+	}
+	return buildScope(q), nil
+}
 
 // buildScope constructs a scope map from query parameters.
 func buildScope(q interface{ Get(string) string }) map[string]string {

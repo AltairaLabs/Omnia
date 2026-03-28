@@ -41,6 +41,9 @@ const (
 	ScopeAgentID     = "agent_id"
 )
 
+// Error message constants (SonarCloud S1192).
+const errWorkspaceRequired = "memory: workspace_id scope is required"
+
 // SQL column/filter constants to avoid duplication (SonarCloud S1192).
 const (
 	colWorkspaceID    = "workspace_id=$?"
@@ -77,7 +80,7 @@ func (s *PostgresMemoryStore) Pool() *pgxpool.Pool {
 // populated on return.
 func (s *PostgresMemoryStore) Save(ctx context.Context, mem *Memory) error {
 	if mem.Scope[ScopeWorkspaceID] == "" {
-		return fmt.Errorf("memory: workspace_id scope is required")
+		return fmt.Errorf(errWorkspaceRequired)
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -182,7 +185,7 @@ func insertObservation(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 // Results are ordered by observed_at DESC and limited to opts.Limit (default 50).
 func (s *PostgresMemoryStore) Retrieve(ctx context.Context, scope map[string]string, query string, opts RetrieveOptions) ([]*Memory, error) {
 	if scope[ScopeWorkspaceID] == "" {
-		return nil, fmt.Errorf("memory: workspace_id scope is required")
+		return nil, fmt.Errorf(errWorkspaceRequired)
 	}
 
 	sql, qb := buildRetrieveQuery(scope, query, opts)
@@ -198,10 +201,7 @@ func (s *PostgresMemoryStore) Retrieve(ctx context.Context, scope map[string]str
 
 // buildRetrieveQuery constructs the SQL and arguments for a Retrieve call.
 func buildRetrieveQuery(scope map[string]string, query string, opts RetrieveOptions) (string, *pgutil.QueryBuilder) {
-	var qb pgutil.QueryBuilder
-	qb.Add(colWorkspaceID, scope[ScopeWorkspaceID])
-	addScopeFilters(&qb, scope)
-	addTypeFilters(&qb, opts.Types)
+	qb := buildBaseMemoryQuery(scope, opts.Types)
 
 	if opts.MinConfidence > 0 {
 		qb.Add(confidenceFilter, opts.MinConfidence)
@@ -210,29 +210,13 @@ func buildRetrieveQuery(scope map[string]string, query string, opts RetrieveOpti
 		qb.Add("o.content ILIKE $?", "%"+query+"%")
 	}
 
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = 50
-	}
-
-	sql := fmt.Sprintf(`
-		SELECT DISTINCT ON (e.id) %s, %s
-		FROM memory_entities %s%s
-		WHERE %s%s
-		ORDER BY e.id, o.observed_at DESC`,
-		selectEntityCols, selectObserveCols,
-		entityTableAlias, observationJoin,
-		colEntityForgot, qb.Where())
-
-	sql = qb.AppendPagination(sql, limit, 0)
-
-	return sql, &qb
+	return formatMemorySQL(qb, opts.Limit, 0), qb
 }
 
 // List returns memories filtered by scope and options with pagination.
 func (s *PostgresMemoryStore) List(ctx context.Context, scope map[string]string, opts ListOptions) ([]*Memory, error) {
 	if scope[ScopeWorkspaceID] == "" {
-		return nil, fmt.Errorf("memory: workspace_id scope is required")
+		return nil, fmt.Errorf(errWorkspaceRequired)
 	}
 
 	sql, qb := buildListQuery(scope, opts)
@@ -248,34 +232,14 @@ func (s *PostgresMemoryStore) List(ctx context.Context, scope map[string]string,
 
 // buildListQuery constructs the SQL and arguments for a List call.
 func buildListQuery(scope map[string]string, opts ListOptions) (string, *pgutil.QueryBuilder) {
-	var qb pgutil.QueryBuilder
-	qb.Add(colWorkspaceID, scope[ScopeWorkspaceID])
-	addScopeFilters(&qb, scope)
-	addTypeFilters(&qb, opts.Types)
-
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = 50
-	}
-
-	sql := fmt.Sprintf(`
-		SELECT DISTINCT ON (e.id) %s, %s
-		FROM memory_entities %s%s
-		WHERE %s%s
-		ORDER BY e.id, o.observed_at DESC`,
-		selectEntityCols, selectObserveCols,
-		entityTableAlias, observationJoin,
-		colEntityForgot, qb.Where())
-
-	sql = qb.AppendPagination(sql, limit, opts.Offset)
-
-	return sql, &qb
+	qb := buildBaseMemoryQuery(scope, opts.Types)
+	return formatMemorySQL(qb, opts.Limit, opts.Offset), qb
 }
 
 // Delete performs a soft delete by setting forgotten = true on the entity.
 func (s *PostgresMemoryStore) Delete(ctx context.Context, scope map[string]string, memoryID string) error {
 	if scope[ScopeWorkspaceID] == "" {
-		return fmt.Errorf("memory: workspace_id scope is required")
+		return fmt.Errorf(errWorkspaceRequired)
 	}
 
 	tag, err := s.pool.Exec(ctx, `
@@ -294,7 +258,7 @@ func (s *PostgresMemoryStore) Delete(ctx context.Context, scope map[string]strin
 // DeleteAll hard-deletes all entities (and cascading observations/relations) for the scope.
 func (s *PostgresMemoryStore) DeleteAll(ctx context.Context, scope map[string]string) error {
 	if scope[ScopeWorkspaceID] == "" {
-		return fmt.Errorf("memory: workspace_id scope is required")
+		return fmt.Errorf(errWorkspaceRequired)
 	}
 
 	sql, qb := buildDeleteAllQuery(scope)
@@ -321,6 +285,37 @@ func buildDeleteAllQuery(scope map[string]string) (string, *pgutil.QueryBuilder)
 }
 
 // --- helpers -----------------------------------------------------------------
+
+// defaultMemoryLimit is applied when no explicit limit is provided.
+const defaultMemoryLimit = 50
+
+// buildBaseMemoryQuery creates the common query builder for memory entity queries.
+// It applies workspace, scope, and type filters.
+func buildBaseMemoryQuery(scope map[string]string, types []string) *pgutil.QueryBuilder {
+	var qb pgutil.QueryBuilder
+	qb.Add(colWorkspaceID, scope[ScopeWorkspaceID])
+	addScopeFilters(&qb, scope)
+	addTypeFilters(&qb, types)
+	return &qb
+}
+
+// formatMemorySQL formats the standard memory SELECT with the given WHERE conditions and pagination.
+func formatMemorySQL(qb *pgutil.QueryBuilder, limit, offset int) string {
+	if limit <= 0 {
+		limit = defaultMemoryLimit
+	}
+
+	sql := fmt.Sprintf(`
+		SELECT DISTINCT ON (e.id) %s, %s
+		FROM memory_entities %s%s
+		WHERE %s%s
+		ORDER BY e.id, o.observed_at DESC`,
+		selectEntityCols, selectObserveCols,
+		entityTableAlias, observationJoin,
+		colEntityForgot, qb.Where())
+
+	return qb.AppendPagination(sql, limit, offset)
+}
 
 // addScopeFilters appends optional user_id and agent_id filters.
 func addScopeFilters(qb *pgutil.QueryBuilder, scope map[string]string) {
