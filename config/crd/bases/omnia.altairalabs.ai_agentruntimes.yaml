@@ -776,6 +776,67 @@ spec:
                       Defaults to /etc/omnia/media if not specified.
                     type: string
                 type: object
+              memory:
+                description: memory configures cross-session memory for this agent.
+                properties:
+                  enabled:
+                    description: |-
+                      Enabled controls whether cross-session memory is active.
+                      Memory is disabled by default.
+                    type: boolean
+                  extraction:
+                    description: Extraction configures automatic memory extraction
+                      from conversations.
+                    properties:
+                      enabled:
+                        description: Enabled controls whether extraction runs post-conversation.
+                        type: boolean
+                      model:
+                        description: Model overrides the extraction model. Empty uses
+                          the conversation model.
+                        type: string
+                    type: object
+                  purpose:
+                    description: |-
+                      Purpose defines the platform-enforced purpose tag for memories.
+                      Must be one of: personalisation, support_continuity, safety.
+                    enum:
+                    - personalisation
+                    - support_continuity
+                    - safety
+                    type: string
+                  retention:
+                    description: Retention configures memory TTL.
+                    properties:
+                      defaultTTL:
+                        description: DefaultTTL is the default time-to-live for memories
+                          (e.g., "720h" for 30 days).
+                        type: string
+                      maxTTL:
+                        description: MaxTTL is the maximum allowed TTL (e.g., "8760h"
+                          for 365 days).
+                        type: string
+                    type: object
+                  retrieval:
+                    description: Retrieval configures memory retrieval behavior.
+                    properties:
+                      limit:
+                        description: Limit is the maximum number of memories injected
+                          per turn.
+                        format: int32
+                        maximum: 50
+                        minimum: 1
+                        type: integer
+                      strategy:
+                        description: Strategy selects the retrieval mode.
+                        enum:
+                        - keyword
+                        - semantic
+                        - graph
+                        - composite
+                        type: string
+                    type: object
+                type: object
               promptPackRef:
                 description: promptPackRef references the PromptPack containing agent
                   prompts and configuration.

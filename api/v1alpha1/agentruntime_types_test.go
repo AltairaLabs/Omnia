@@ -718,3 +718,113 @@ func TestGroupVersionInfo(t *testing.T) {
 		t.Errorf("GroupVersion.Version = %q, want %q", GroupVersion.Version, "v1alpha1")
 	}
 }
+
+func TestAgentRuntimeMemoryConfig(t *testing.T) {
+	limit := int32(10)
+	ar := &AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "memory-agent",
+			Namespace: "default",
+		},
+		Spec: AgentRuntimeSpec{
+			PromptPackRef: PromptPackRef{Name: testPromptPack},
+			Facade:        FacadeConfig{Type: FacadeTypeWebSocket},
+			Providers: []NamedProviderRef{
+				{Name: "default", ProviderRef: ProviderRef{Name: testCredentials}},
+			},
+			Memory: &MemoryConfig{
+				Enabled: true,
+				Purpose: "personalisation",
+				Extraction: &MemoryExtractionConfig{
+					Enabled: true,
+					Model:   "claude-sonnet-4-20250514",
+				},
+				Retention: &MemoryRetentionConfig{
+					DefaultTTL: "720h",
+					MaxTTL:     "8760h",
+				},
+				Retrieval: &MemoryRetrievalConfig{
+					Strategy: "keyword",
+					Limit:    &limit,
+				},
+			},
+		},
+	}
+
+	mem := ar.Spec.Memory
+	if mem == nil {
+		t.Fatal("Memory should not be nil")
+	}
+	if !mem.Enabled {
+		t.Error("Memory.Enabled should be true")
+	}
+	if mem.Purpose != "personalisation" {
+		t.Errorf("Memory.Purpose = %q, want %q", mem.Purpose, "personalisation")
+	}
+
+	if mem.Extraction == nil {
+		t.Fatal("Memory.Extraction should not be nil")
+	}
+	if !mem.Extraction.Enabled {
+		t.Error("Memory.Extraction.Enabled should be true")
+	}
+	if mem.Extraction.Model != "claude-sonnet-4-20250514" {
+		t.Errorf("Memory.Extraction.Model = %q, want %q", mem.Extraction.Model, "claude-sonnet-4-20250514")
+	}
+
+	if mem.Retention == nil {
+		t.Fatal("Memory.Retention should not be nil")
+	}
+	if mem.Retention.DefaultTTL != "720h" {
+		t.Errorf("Memory.Retention.DefaultTTL = %q, want %q", mem.Retention.DefaultTTL, "720h")
+	}
+	if mem.Retention.MaxTTL != "8760h" {
+		t.Errorf("Memory.Retention.MaxTTL = %q, want %q", mem.Retention.MaxTTL, "8760h")
+	}
+
+	if mem.Retrieval == nil {
+		t.Fatal("Memory.Retrieval should not be nil")
+	}
+	if mem.Retrieval.Strategy != "keyword" {
+		t.Errorf("Memory.Retrieval.Strategy = %q, want %q", mem.Retrieval.Strategy, "keyword")
+	}
+	if *mem.Retrieval.Limit != 10 {
+		t.Errorf("Memory.Retrieval.Limit = %d, want %d", *mem.Retrieval.Limit, 10)
+	}
+
+	// Test deep copy independence
+	copied := ar.DeepCopy()
+	if copied.Spec.Memory == nil {
+		t.Fatal("copied.Spec.Memory should not be nil")
+	}
+	// Mutate copy and verify original is unchanged
+	copied.Spec.Memory.Purpose = "safety"
+	if ar.Spec.Memory.Purpose != "personalisation" {
+		t.Errorf("original Memory.Purpose was modified, got %q, want %q", ar.Spec.Memory.Purpose, "personalisation")
+	}
+	newLimit := int32(20)
+	copied.Spec.Memory.Retrieval.Limit = &newLimit
+	if *ar.Spec.Memory.Retrieval.Limit != 10 {
+		t.Errorf("original Memory.Retrieval.Limit was modified, got %d, want %d", *ar.Spec.Memory.Retrieval.Limit, 10)
+	}
+}
+
+func TestAgentRuntimeMemoryConfigNil(t *testing.T) {
+	ar := &AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "no-memory-agent",
+			Namespace: "default",
+		},
+		Spec: AgentRuntimeSpec{
+			PromptPackRef: PromptPackRef{Name: testPromptPack},
+			Facade:        FacadeConfig{Type: FacadeTypeWebSocket},
+			Providers: []NamedProviderRef{
+				{Name: "default", ProviderRef: ProviderRef{Name: testCredentials}},
+			},
+		},
+	}
+
+	if ar.Spec.Memory != nil {
+		t.Error("Memory should be nil when not configured")
+	}
+}

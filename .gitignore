@@ -46,6 +46,8 @@ charts/*/Chart.lock
 docs/local-backlog/
 
 .mcp.json
+.worktrees/
+.superpowers/
 # Compiled binaries (only at root level)
 /arena-worker
 /main

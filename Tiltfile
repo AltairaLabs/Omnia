@@ -225,6 +225,27 @@ docker_build(
 )
 
 # ============================================================================
+# Memory API Server - Memory store backend for cross-session memory
+# ============================================================================
+
+docker_build(
+    'omnia-memory-api-dev',
+    context='.',
+    dockerfile='./Dockerfile.memory-api',
+    only=[
+        './cmd/memory-api',
+        './api',
+        './internal',
+        './ee/api',
+        './ee/pkg',
+        './ee/internal',
+        './pkg',
+        './go.mod',
+        './go.sum',
+    ],
+)
+
+# ============================================================================
 # Local PromptKit Sync — rsync source into promptkit-local/ for Docker builds
 # ============================================================================
 # Docker COPY does not follow symlinks, so we rsync the actual PromptKit source
@@ -453,6 +474,15 @@ helm_set = [
     'sessionApi.postgres.dev.enabled=true',  # Deploy dev Postgres
     'sessionApi.extraEnv[0].name=LOG_LEVEL',
     'sessionApi.extraEnv[0].value=debug',
+    # Memory API
+    'memoryApi.enabled=true',
+    'memoryApi.image.repository=omnia-memory-api-dev',
+    'memoryApi.image.tag=latest',
+    'memoryApi.image.pullPolicy=Never',
+    'memoryApi.replicaCount=1',
+    'memoryApi.podDisruptionBudget.enabled=false',
+    'memoryApi.postgres.secretName=omnia-postgres',
+    'memoryApi.postgres.secretKey=connection-string',
     # LangChain runtime image (used when framework.type=langchain)
     'langchainRuntime.image.repository=omnia-langchain-runtime-dev',
     'langchainRuntime.image.tag=latest',
@@ -514,6 +544,8 @@ if ENABLE_ENTERPRISE:
         'enterprise.evalWorker.namespaces={dev-agents,omnia-demo,omnia-system}',
         # Wire session-api to Redis so it publishes eval events to streams
         'sessionApi.redis.addrs=omnia-redis-master:6379',
+        # Wire memory-api to Redis for caching
+        'memoryApi.redis.addrs=omnia-redis-master:6379',
     ])
 else:
     # Disable enterprise features
@@ -708,6 +740,13 @@ k8s_resource(
     'omnia-session-api',
     labels=['session-api'],
     port_forwards=['8082:8080'],  # Session API (REST + /docs)
+    resource_deps=['omnia-postgres'],
+)
+
+k8s_resource(
+    'omnia-memory-api',
+    labels=['memory-api'],
+    port_forwards=['8083:8080'],
     resource_deps=['omnia-postgres'],
 )
 

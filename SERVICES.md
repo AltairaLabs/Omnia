@@ -66,6 +66,7 @@ This document maps every deployable service, how they communicate, and where to 
 | **Facade** | `cmd/agent/` | [cmd/agent/SERVICE.md](cmd/agent/SERVICE.md) | WebSocket server, protocol translation to gRPC |
 | **Runtime** | `cmd/runtime/` | [cmd/runtime/SERVICE.md](cmd/runtime/SERVICE.md) | LLM interaction via PromptKit SDK, tool execution |
 | **Session API** | `cmd/session-api/` | [cmd/session-api/SERVICE.md](cmd/session-api/SERVICE.md) | Session CRUD, tiered storage (Redis/Postgres/cold) |
+| **Memory API** | `cmd/memory-api/` | — | Cross-session memory CRUD, entity-relation-observation store (Postgres+pgvector) |
 | **Compaction** | `cmd/compaction/` | [cmd/compaction/SERVICE.md](cmd/compaction/SERVICE.md) | Tiered storage compaction (hot→warm→cold) |
 | **Dashboard** | `dashboard/` | [dashboard/SERVICE.md](dashboard/SERVICE.md) | Next.js UI, WebSocket proxy to facade/LSP/dev-console |
 
@@ -100,6 +101,7 @@ This document maps every deployable service, how they communicate, and where to 
 | Arena Eval Worker | Redis Streams | Redis | Event consumption |
 | Arena Eval Worker | Session API | HTTP | Eval result storage |
 | Compaction | PostgreSQL/Redis/Cold | Direct | Data lifecycle management |
+| Runtime | Memory API | HTTP | Memory retrieval and extraction (when memory enabled) |
 | Policy Proxy | K8s API | K8s client | Policy watching |
 
 ## Distributed Tracing
@@ -135,6 +137,7 @@ Browser ──WebSocket──▶ Facade ──gRPC──▶ Runtime ──HTTP�
 - **Session API**: Inherits trace context from HTTP requests. Optional OTLP ingestion endpoint transforms traces into session-linked records for dashboard display.
 - **Arena Worker**: Derives trace ID from job name. Spans: `arena.worker` (root), `arena.work-item` (per item), `arena.engine.execute`, `arena.fleet.session` (links to agent session trace).
 - **Eval Worker**: Inherits trace context from session events when available.
+- **Memory API**: Inherits trace context from HTTP requests. Records memory retrieval/extraction latency as spans.
 - **Operator, Compaction, Policy Proxy, LSP**: No OTel spans.
 
 ## Key Architectural Rules

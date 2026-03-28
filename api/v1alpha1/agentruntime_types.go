@@ -956,6 +956,68 @@ type SessionCompletionConfig struct {
 	InactivityTimeout *string `json:"inactivityTimeout,omitempty"`
 }
 
+// MemoryConfig defines the memory settings for an AgentRuntime.
+type MemoryConfig struct {
+	// Enabled controls whether cross-session memory is active.
+	// Memory is disabled by default.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Purpose defines the platform-enforced purpose tag for memories.
+	// Must be one of: personalisation, support_continuity, safety.
+	// +kubebuilder:validation:Enum=personalisation;support_continuity;safety
+	// +optional
+	Purpose string `json:"purpose,omitempty"`
+
+	// Extraction configures automatic memory extraction from conversations.
+	// +optional
+	Extraction *MemoryExtractionConfig `json:"extraction,omitempty"`
+
+	// Retention configures memory TTL.
+	// +optional
+	Retention *MemoryRetentionConfig `json:"retention,omitempty"`
+
+	// Retrieval configures memory retrieval behavior.
+	// +optional
+	Retrieval *MemoryRetrievalConfig `json:"retrieval,omitempty"`
+}
+
+// MemoryExtractionConfig controls how memories are extracted from conversations.
+type MemoryExtractionConfig struct {
+	// Enabled controls whether extraction runs post-conversation.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Model overrides the extraction model. Empty uses the conversation model.
+	// +optional
+	Model string `json:"model,omitempty"`
+}
+
+// MemoryRetentionConfig controls memory lifecycle.
+type MemoryRetentionConfig struct {
+	// DefaultTTL is the default time-to-live for memories (e.g., "720h" for 30 days).
+	// +optional
+	DefaultTTL string `json:"defaultTTL,omitempty"`
+
+	// MaxTTL is the maximum allowed TTL (e.g., "8760h" for 365 days).
+	// +optional
+	MaxTTL string `json:"maxTTL,omitempty"`
+}
+
+// MemoryRetrievalConfig controls memory retrieval behavior.
+type MemoryRetrievalConfig struct {
+	// Strategy selects the retrieval mode.
+	// +kubebuilder:validation:Enum=keyword;semantic;graph;composite
+	// +optional
+	Strategy string `json:"strategy,omitempty"`
+
+	// Limit is the maximum number of memories injected per turn.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=50
+	// +optional
+	Limit *int32 `json:"limit,omitempty"`
+}
+
 // AgentRuntimeSpec defines the desired state of AgentRuntime.
 type AgentRuntimeSpec struct {
 	// framework specifies which agent framework to use.
@@ -1011,6 +1073,10 @@ type AgentRuntimeSpec struct {
 	// A2A as an additional endpoint on a separate port (default 9999).
 	// +optional
 	A2A *A2AConfig `json:"a2a,omitempty"`
+
+	// memory configures cross-session memory for this agent.
+	// +optional
+	Memory *MemoryConfig `json:"memory,omitempty"`
 
 	// extraPodAnnotations defines additional annotations to add to the agent pods.
 	// Use this for integrations like service meshes, logging agents, or monitoring tools.

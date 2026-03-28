@@ -817,6 +817,86 @@ sessionApi:
     enabled: false
 
 # ============================================================================
+# Memory API Configuration
+# Long-term memory service for agent conversation history retrieval
+# ============================================================================
+
+memoryApi:
+  # -- Enable the memory API server deployment
+  enabled: false
+  # -- Number of replicas (2+ recommended for fault tolerance)
+  replicaCount: 2
+  image:
+    # -- Memory API image repository
+    repository: ghcr.io/altairalabs/omnia-memory-api
+    # -- Memory API image tag (defaults to Chart.AppVersion)
+    tag: ""
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+  service:
+    # -- Service type
+    type: ClusterIP
+    # -- Service port
+    port: 8080
+  postgres:
+    # -- Name of the Secret containing the Postgres connection string
+    secretName: omnia-postgres
+    # -- Key in the Secret for the connection string
+    secretKey: connection-string
+  redis:
+    # -- Comma-separated Redis addresses for warm cache (optional)
+    addrs: ""
+  serviceAccount:
+    # -- Annotations for the memory-api ServiceAccount (e.g., IRSA, Workload Identity)
+    annotations: {}
+  resources:
+    limits:
+      cpu: "1"
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  # -- PodDisruptionBudget for high availability
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  # -- Additional pod annotations
+  podAnnotations: {}
+  # -- Node selector for pod scheduling
+  nodeSelector: {}
+  # -- Tolerations for pod scheduling
+  tolerations: []
+  # -- Affinity rules for pod scheduling
+  affinity: {}
+  # -- Topology spread constraints for distributing pods across failure domains
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: omnia
+          app.kubernetes.io/component: memory-api
+  # -- Autoscaling configuration for the memory-api deployment
+  autoscaling:
+    # -- Enable HorizontalPodAutoscaler (disables static replicaCount)
+    enabled: true
+    # -- Minimum number of replicas
+    minReplicas: 2
+    # -- Maximum number of replicas
+    maxReplicas: 10
+    # -- Target CPU utilization percentage
+    targetCPUUtilizationPercentage: 70
+    # -- Target memory utilization percentage
+    targetMemoryUtilizationPercentage: 80
+  # -- Additional environment variables for the memory-api container
+  extraEnv: []
+  # -- NetworkPolicy to restrict ingress to memory-api (defense-in-depth)
+  networkPolicy:
+    # -- Enable NetworkPolicy for memory-api (requires a CNI that supports NetworkPolicy)
+    enabled: false
+
+# ============================================================================
 # Session Privacy Configuration
 # Privacy policies for session data: PII handling, encryption, opt-out
 # ============================================================================
