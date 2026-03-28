@@ -250,14 +250,63 @@ describe("JobWizard", () => {
       expect(screen.getByText(/All 3 scenarios will run/)).toBeInTheDocument();
     });
 
-    it("shows review with load test badge when type is loadtest", async () => {
+    it("renders load test fields on options step", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+
+      // Select Load Test type
+      await user.click(screen.getByText("Load Test"));
+
+      // Navigate to step 4
+      await navigateToStep(user, 4);
+
+      // Load test fields should be visible
+      expect(screen.getByText("Load Profile")).toBeInTheDocument();
+      expect(screen.getByLabelText("Trials per scenario")).toBeInTheDocument();
+      expect(screen.getByLabelText("Concurrency")).toBeInTheDocument();
+      expect(screen.getByLabelText("VUs per Worker")).toBeInTheDocument();
+      expect(screen.getByLabelText("Ramp Up")).toBeInTheDocument();
+      expect(screen.getByLabelText("Ramp Down")).toBeInTheDocument();
+      expect(screen.getByLabelText(/Budget Limit/)).toBeInTheDocument();
+      expect(screen.getByText("SLO Thresholds")).toBeInTheDocument();
+    });
+
+    it("does not show load test fields for evaluation type on options step", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+      await navigateToStep(user, 4);
+
+      expect(screen.queryByText("Load Profile")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Concurrency")).not.toBeInTheDocument();
+    });
+
+    it("can add and remove threshold rows", async () => {
       const user = userEvent.setup();
       renderWizard();
       await user.click(screen.getByText("Load Test"));
+      await navigateToStep(user, 4);
 
-      // The review section on step 5 shows "Load Test" badge
-      // We can't navigate there easily, but the type toggle works
-      expect(screen.getByText(/Stress-test providers/)).toBeInTheDocument();
+      // Add a threshold
+      await user.click(screen.getByRole("button", { name: /add/i }));
+      expect(screen.getAllByPlaceholderText("Value")).toHaveLength(1);
+
+      // Add another
+      await user.click(screen.getByRole("button", { name: /add/i }));
+      expect(screen.getAllByPlaceholderText("Value")).toHaveLength(2);
+    });
+
+    it("shows load test review details", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+      await user.click(screen.getByText("Load Test"));
+      await navigateToStep(user, 4);
+
+      // Fill in load test fields
+      await user.type(screen.getByLabelText("Trials per scenario"), "100");
+      await user.type(screen.getByLabelText("Concurrency"), "20");
+
+      // Review section shows load test badge and values
+      expect(screen.getByText("Load Test")).toBeInTheDocument();
     });
 
     it("switches job type description on toggle", async () => {
