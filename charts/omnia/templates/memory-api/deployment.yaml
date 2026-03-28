@@ -1,0 +1,125 @@
+{{- if .Values.memoryApi.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "omnia.memoryApi.fullname" . }}
+  labels:
+    {{- include "omnia.memoryApi.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.memoryApi.autoscaling.enabled }}
+  replicas: {{ .Values.memoryApi.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "omnia.memoryApi.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "omnia.memoryApi.selectorLabels" . | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+        {{- with .Values.memoryApi.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "omnia.memoryApi.fullname" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      terminationGracePeriodSeconds: 35
+      containers:
+        - name: memory-api
+          image: {{ include "omnia.memoryApi.image" . }}
+          imagePullPolicy: {{ .Values.memoryApi.image.pullPolicy }}
+          env:
+            - name: POSTGRES_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.memoryApi.postgres.secretName }}
+                  key: {{ .Values.memoryApi.postgres.secretKey }}
+            {{- if .Values.memoryApi.redis.addrs }}
+            - name: REDIS_ADDRS
+              value: {{ .Values.memoryApi.redis.addrs | quote }}
+            {{- end }}
+            {{- if .Values.enterprise.enabled }}
+            - name: ENTERPRISE_ENABLED
+              value: "true"
+            {{- end }}
+            {{- $tracingEndpoint := include "omnia.tracing.endpoint" . | trim }}
+            {{- if and .Values.tracing.enabled $tracingEndpoint }}
+            - name: TRACING_ENABLED
+              value: "true"
+            - name: TRACING_ENDPOINT
+              value: {{ $tracingEndpoint | quote }}
+            - name: TRACING_INSECURE
+              value: "true"
+            {{- end }}
+            {{- with .Values.memoryApi.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: api
+              containerPort: {{ .Values.memoryApi.service.port }}
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.memoryApi.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      {{- with .Values.memoryApi.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.memoryApi.affinity }}
+      affinity:
+        {{- toYaml .Values.memoryApi.affinity | nindent 8 }}
+      {{- else if gt (int .Values.memoryApi.replicaCount) 1 }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "omnia.memoryApi.selectorLabels" . | nindent 20 }}
+                topologyKey: kubernetes.io/hostname
+      {{- end }}
+      {{- with .Values.memoryApi.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.memoryApi.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

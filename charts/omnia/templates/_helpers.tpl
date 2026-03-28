@@ -162,6 +162,42 @@ Session API image
 {{- end }}
 
 {{/*
+Memory API fullname
+*/}}
+{{- define "omnia.memoryApi.fullname" -}}
+{{- printf "%s-memory-api" (include "omnia.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Memory API labels
+*/}}
+{{- define "omnia.memoryApi.labels" -}}
+helm.sh/chart: {{ include "omnia.chart" . }}
+{{ include "omnia.memoryApi.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{/*
+Memory API selector labels
+*/}}
+{{- define "omnia.memoryApi.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "omnia.name" . }}-memory-api
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: memory-api
+{{- end }}
+
+{{/*
+Memory API image
+*/}}
+{{- define "omnia.memoryApi.image" -}}
+{{- $tag := default .Chart.AppVersion .Values.memoryApi.image.tag }}
+{{- printf "%s:%s" .Values.memoryApi.image.repository $tag }}
+{{- end }}
+
+{{/*
 Eval Worker fullname
 */}}
 {{- define "omnia.evalWorker.fullname" -}}

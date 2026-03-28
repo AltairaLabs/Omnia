@@ -1,0 +1,31 @@
+{{- if and .Values.memoryApi.enabled .Values.memoryApi.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "omnia.memoryApi.fullname" . }}
+  labels:
+    {{- include "omnia.memoryApi.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "omnia.memoryApi.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow ingress from the operator (proxy routes)
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "omnia.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: {{ .Values.memoryApi.service.port }}
+          protocol: TCP
+    # Allow ingress from the dashboard (proxy routes)
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "omnia.dashboard.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: {{ .Values.memoryApi.service.port }}
+          protocol: TCP
+{{- end }}
