@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1283,4 +1284,50 @@ func TestConcurrentMixedLoad(t *testing.T) {
 		assert.Equal(t, "arena-worker", s.AgentName)
 	}
 	t.Logf("mixed load: %d sessions created, written, and completed", sessions)
+}
+
+// TestConcurrentSessionCreation_ScaleLimit pushes concurrency to find the
+// breaking point of the Postgres connection pool (default pgxpool: 4 conns).
+func TestConcurrentSessionCreation_ScaleLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	for _, n := range []int{100, 500, 1000, 5000} {
+		t.Run(fmt.Sprintf("%d_VUs", n), func(t *testing.T) {
+			p := newProvider(t)
+			ctx := context.Background()
+
+			var wg sync.WaitGroup
+			var succeeded, failed atomic.Int32
+
+			start := time.Now()
+			wg.Add(n)
+			for i := range n {
+				go func(idx int) {
+					defer wg.Done()
+					id := fmt.Sprintf("d3ffbc99-9c0b-4ef8-%04x-%012d", n, idx)
+					s := &session.Session{
+						ID:        id,
+						AgentName: "arena-worker",
+						Namespace: "default",
+						Status:    session.SessionStatusActive,
+						CreatedAt: time.Now(),
+						UpdatedAt: time.Now(),
+					}
+					if err := p.CreateSession(ctx, s); err != nil {
+						failed.Add(1)
+					} else {
+						succeeded.Add(1)
+					}
+				}(i)
+			}
+			wg.Wait()
+			elapsed := time.Since(start)
+
+			t.Logf("%d VUs: %d succeeded, %d failed in %s (%.0f sessions/sec)",
+				n, succeeded.Load(), failed.Load(), elapsed, float64(succeeded.Load())/elapsed.Seconds())
+			assert.Equal(t, int32(0), failed.Load(), "no session creation should fail")
+		})
+	}
 }
