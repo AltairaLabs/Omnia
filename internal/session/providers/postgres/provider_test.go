@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -1165,4 +1166,121 @@ func TestRefreshTTL_NotFound(t *testing.T) {
 
 	err := p.RefreshTTL(ctx, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", time.Now())
 	assert.ErrorIs(t, err, session.ErrSessionNotFound)
+}
+
+// TestConcurrentSessionCreation_100VU simulates the arena load test scenario:
+// 100 goroutines creating sessions against real Postgres simultaneously.
+// This is the exact pattern that caused Postgres to crash in issue #683.
+func TestConcurrentSessionCreation_100VU(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+
+	const concurrency = 100
+	var wg sync.WaitGroup
+	results := make([]error, concurrency)
+
+	wg.Add(concurrency)
+	for i := range concurrency {
+		go func(idx int) {
+			defer wg.Done()
+			id := fmt.Sprintf("a0eebc99-9c0b-4ef8-bb6d-%012d", idx)
+			s := &session.Session{
+				ID:        id,
+				AgentName: "arena-worker",
+				Namespace: "default",
+				Status:    session.SessionStatusActive,
+				Tags:      []string{"source:arena", fmt.Sprintf("vu:%d", idx)},
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+			results[idx] = p.CreateSession(ctx, s)
+		}(i)
+	}
+	wg.Wait()
+
+	var succeeded, failed int
+	for _, err := range results {
+		if err != nil {
+			failed++
+			t.Logf("create failed: %v", err)
+		} else {
+			succeeded++
+		}
+	}
+
+	t.Logf("100 VU session creation: %d succeeded, %d failed", succeeded, failed)
+	assert.Equal(t, concurrency, succeeded, "all 100 sessions should be created")
+	assert.Equal(t, 0, failed)
+}
+
+// TestConcurrentMixedLoad simulates a realistic load test workload:
+// create sessions, append messages, and update status concurrently.
+func TestConcurrentMixedLoad(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+
+	const sessions = 50
+
+	// Phase 1: Create all sessions concurrently.
+	ids := make([]string, sessions)
+	var wg sync.WaitGroup
+	wg.Add(sessions)
+	for i := range sessions {
+		ids[i] = fmt.Sprintf("b1ffbc99-9c0b-4ef8-bb6d-%012d", i)
+		go func(idx int) {
+			defer wg.Done()
+			s := &session.Session{
+				ID:        ids[idx],
+				AgentName: "arena-worker",
+				Namespace: "default",
+				Status:    session.SessionStatusActive,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+			require.NoError(t, p.CreateSession(ctx, s))
+		}(i)
+	}
+	wg.Wait()
+
+	// Phase 2: Mixed operations — messages + status updates concurrently.
+	wg.Add(sessions * 2)
+	for i := range sessions {
+		go func(idx int) {
+			defer wg.Done()
+			msg := &session.Message{
+				ID:        fmt.Sprintf("c2ffbc99-9c0b-4ef8-bb6d-%012d", idx),
+				Role:      session.RoleUser,
+				Content:   fmt.Sprintf("hello from vu %d", idx),
+				Timestamp: time.Now(),
+			}
+			assert.NoError(t, p.AppendMessage(ctx, ids[idx], msg))
+		}(i)
+		go func(idx int) {
+			defer wg.Done()
+			assert.NoError(t, p.UpdateSession(ctx, &session.Session{
+				ID:        ids[idx],
+				AgentName: "arena-worker",
+				Namespace: "default",
+				Status:    session.SessionStatusCompleted,
+				UpdatedAt: time.Now(),
+			}))
+		}(i)
+	}
+	wg.Wait()
+
+	// Verify all sessions exist and have messages.
+	for i, id := range ids {
+		s, err := p.GetSession(ctx, id)
+		require.NoErrorf(t, err, "session %d should exist", i)
+		assert.Equal(t, "arena-worker", s.AgentName)
+	}
+	t.Logf("mixed load: %d sessions created, written, and completed", sessions)
 }
