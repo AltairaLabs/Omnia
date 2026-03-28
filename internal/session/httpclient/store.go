@@ -706,8 +706,14 @@ func (s *Store) doRequest(ctx context.Context, method, path string, body []byte)
 }
 
 // isRetryableStatus returns true for HTTP status codes that indicate a transient server issue.
+// Includes 500 because database restarts (e.g., Postgres pool exhaustion under load)
+// return 500 but are recoverable after a short wait.
 func isRetryableStatus(code int) bool {
-	return code == http.StatusBadGateway || code == http.StatusServiceUnavailable || code == http.StatusGatewayTimeout
+	return code == http.StatusInternalServerError ||
+		code == http.StatusBadGateway ||
+		code == http.StatusServiceUnavailable ||
+		code == http.StatusGatewayTimeout ||
+		code == http.StatusTooManyRequests
 }
 
 // drainAndClose reads remaining body bytes and closes it.

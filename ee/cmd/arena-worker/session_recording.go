@@ -103,9 +103,6 @@ func (m *arenaSessionManager) OnEvent(event *events.Event) {
 	}
 
 	// We won the race — create the session and event store.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
 	tags := []string{
 		"source:arena",
 		"arena-job:" + m.meta.JobName,
@@ -131,14 +128,16 @@ func (m *arenaSessionManager) OnEvent(event *events.Event) {
 		initialState["arena.trial.index"] = m.meta.TrialIndex
 	}
 
-	_, err := m.store.CreateSession(ctx, session.CreateSessionOptions{
+	opts := session.CreateSessionOptions{
 		ID:            pgID,
 		AgentName:     m.meta.JobName,
 		Namespace:     m.meta.Namespace,
 		WorkspaceName: m.meta.WorkspaceName,
 		Tags:          tags,
 		InitialState:  initialState,
-	})
+	}
+
+	_, err := m.createSessionWithRetry(opts)
 	if err != nil {
 		m.log.Error(err, "failed to create arena session",
 			"runID", runSessionID, "pgSessionID", pgID)
@@ -158,6 +157,36 @@ func (m *arenaSessionManager) OnEvent(event *events.Event) {
 
 	event.SessionID = pgID
 	es.OnEvent(event)
+}
+
+const (
+	sessionCreateMaxRetries = 3
+	sessionCreateBaseWait   = 500 * time.Millisecond
+	sessionCreateTimeout    = 10 * time.Second
+)
+
+// createSessionWithRetry attempts to create a session with exponential backoff.
+// Transient errors (timeouts, server errors) are retried up to sessionCreateMaxRetries times.
+func (m *arenaSessionManager) createSessionWithRetry(opts session.CreateSessionOptions) (*session.Session, error) {
+	var lastErr error
+	for attempt := range sessionCreateMaxRetries {
+		if attempt > 0 {
+			wait := sessionCreateBaseWait << uint(attempt-1)
+			m.log.V(1).Info("retrying session creation",
+				"pgSessionID", opts.ID, "attempt", attempt+1, "backoff", wait.String())
+			time.Sleep(wait)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), sessionCreateTimeout)
+		sess, err := m.store.CreateSession(ctx, opts)
+		cancel()
+
+		if err == nil {
+			return sess, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
 }
 
 // SessionIDs returns all PostgreSQL session IDs created by this manager.

@@ -129,6 +129,27 @@ func (f *failingSessionStore) CreateSession(
 	return nil, errors.New("connection refused")
 }
 
+// failThenSucceedStore fails the first N calls, then succeeds.
+type failThenSucceedStore struct {
+	mockSessionStore
+	mu        sync.Mutex
+	failCount int
+	calls     int
+}
+
+func (f *failThenSucceedStore) CreateSession(
+	ctx context.Context, opts session.CreateSessionOptions,
+) (*session.Session, error) {
+	f.mu.Lock()
+	f.calls++
+	shouldFail := f.calls <= f.failCount
+	f.mu.Unlock()
+	if shouldFail {
+		return nil, errors.New("connection refused")
+	}
+	return f.mockSessionStore.CreateSession(ctx, opts)
+}
+
 func TestRunIDToUUID(t *testing.T) {
 	// Deterministic: same input → same output
 	id1 := runIDToUUID("2026-03-21T15-04-05Z_openai_us-east_support_a1b2c3d4_0001")
@@ -362,6 +383,31 @@ func TestArenaSessionManager_OnEvent_CreateSessionError(t *testing.T) {
 
 	// No sessions should have been created since CreateSession always fails
 	assert.Empty(t, store.getCreatedSessions(), "no sessions created when store fails")
+}
+
+func TestArenaSessionManager_OnEvent_RetriesAndSucceeds(t *testing.T) {
+	store := &failThenSucceedStore{
+		mockSessionStore: *newMockStore(),
+		failCount:        2, // fail first 2 attempts, succeed on 3rd
+	}
+	mgr := newArenaSessionManager(store, logr.Discard(), arenaSessionMetadata{
+		JobName:    "test-job",
+		Namespace:  "default",
+		ProviderID: "openai",
+	}, "test-item")
+
+	mgr.OnEvent(&events.Event{
+		Type:      events.EventProviderCallCompleted,
+		SessionID: "run-retry",
+		Timestamp: time.Now(),
+		Data:      &events.ProviderCallCompletedData{Provider: "openai"},
+	})
+
+	time.Sleep(100 * time.Millisecond)
+
+	sessions := store.getCreatedSessions()
+	require.Len(t, sessions, 1, "should succeed after retries")
+	assert.Equal(t, 3, store.calls, "should have attempted 3 times")
 }
 
 func TestArenaSessionManager_SessionIDs(t *testing.T) {

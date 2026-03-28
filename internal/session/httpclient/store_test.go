@@ -318,8 +318,10 @@ func TestGetSession_NotFound(t *testing.T) {
 }
 
 func TestGetSession_ServerError(t *testing.T) {
-	// Server returns 500 with valid JSON error.
+	// Server returns 500 with valid JSON error — retried then fails.
+	var attempts atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(sessionapi.ErrorResponse{Error: "database down"})
@@ -335,8 +337,8 @@ func TestGetSession_ServerError(t *testing.T) {
 	if !strings.Contains(err.Error(), "500") {
 		t.Fatalf("expected error with status 500, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "database down") {
-		t.Fatalf("expected error message, got: %v", err)
+	if attempts.Load() != maxRetries {
+		t.Fatalf("expected %d attempts (500 is retryable), got %d", maxRetries, attempts.Load())
 	}
 }
 
@@ -381,7 +383,10 @@ func TestAppendMessage_NotFound(t *testing.T) {
 }
 
 func TestAppendMessage_ServerError(t *testing.T) {
+	// 500 is retried; after exhausting retries, buffered writes absorb the error.
+	var attempts atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(sessionapi.ErrorResponse{Error: "internal error"})
@@ -393,11 +398,12 @@ func TestAppendMessage_ServerError(t *testing.T) {
 	err := store.AppendMessage(context.Background(), "x", session.Message{
 		ID: "m1", Role: session.RoleUser, Content: "hi",
 	})
-	if err == nil {
-		t.Fatal("expected error")
+	// After retries exhaust, the write is buffered (returns nil).
+	if err != nil {
+		t.Fatalf("expected nil (buffered), got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "500") {
-		t.Fatalf("expected 500 error, got: %v", err)
+	if attempts.Load() != maxRetries {
+		t.Fatalf("expected %d attempts, got %d", maxRetries, attempts.Load())
 	}
 }
 
@@ -440,7 +446,10 @@ func TestUpdateSessionStatus_NotFound(t *testing.T) {
 }
 
 func TestUpdateSessionStatus_ServerError(t *testing.T) {
+	// 500 is retried; after exhausting retries, buffered writes absorb the error.
+	var attempts atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(sessionapi.ErrorResponse{Error: "internal error"})
@@ -452,11 +461,11 @@ func TestUpdateSessionStatus_ServerError(t *testing.T) {
 	err := store.UpdateSessionStatus(context.Background(), "x", session.SessionStatusUpdate{
 		SetStatus: session.SessionStatusActive,
 	})
-	if err == nil {
-		t.Fatal("expected error")
+	if err != nil {
+		t.Fatalf("expected nil (buffered), got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "500") {
-		t.Fatalf("expected 500 error, got: %v", err)
+	if attempts.Load() != maxRetries {
+		t.Fatalf("expected %d attempts, got %d", maxRetries, attempts.Load())
 	}
 }
 
@@ -495,7 +504,10 @@ func TestRefreshTTL_NotFound(t *testing.T) {
 }
 
 func TestRefreshTTL_ServerError(t *testing.T) {
+	// 500 is retried; after exhausting retries, buffered writes absorb the error.
+	var attempts atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(sessionapi.ErrorResponse{Error: "internal error"})
@@ -505,11 +517,11 @@ func TestRefreshTTL_ServerError(t *testing.T) {
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
 	err := store.RefreshTTL(context.Background(), "x", time.Hour)
-	if err == nil {
-		t.Fatal("expected error")
+	if err != nil {
+		t.Fatalf("expected nil (buffered), got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "500") {
-		t.Fatalf("expected 500 error, got: %v", err)
+	if attempts.Load() != maxRetries {
+		t.Fatalf("expected %d attempts, got %d", maxRetries, attempts.Load())
 	}
 }
 
@@ -575,16 +587,17 @@ func TestServerErrorResponses(t *testing.T) {
 		t.Fatal("GetSession: expected error")
 	}
 
-	if err := store.AppendMessage(ctx, "x", session.Message{ID: "m1", Role: session.RoleUser, Content: "hi"}); err == nil {
-		t.Fatal("AppendMessage: expected error")
+	// Buffered writes return nil after retries exhaust (error absorbed by buffer).
+	if err := store.AppendMessage(ctx, "x", session.Message{ID: "m1", Role: session.RoleUser, Content: "hi"}); err != nil {
+		t.Fatalf("AppendMessage: expected nil (buffered), got: %v", err)
 	}
 
-	if err := store.UpdateSessionStatus(ctx, "x", session.SessionStatusUpdate{SetStatus: session.SessionStatusActive}); err == nil {
-		t.Fatal("UpdateSessionStatus: expected error")
+	if err := store.UpdateSessionStatus(ctx, "x", session.SessionStatusUpdate{SetStatus: session.SessionStatusActive}); err != nil {
+		t.Fatalf("UpdateSessionStatus: expected nil (buffered), got: %v", err)
 	}
 
-	if err := store.RefreshTTL(ctx, "x", time.Hour); err == nil {
-		t.Fatal("RefreshTTL: expected error")
+	if err := store.RefreshTTL(ctx, "x", time.Hour); err != nil {
+		t.Fatalf("RefreshTTL: expected nil (buffered), got: %v", err)
 	}
 }
 
@@ -832,8 +845,7 @@ func TestCircuitBreaker_OpensAfterRepeatedFailures(t *testing.T) {
 	var attempts atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		attempts.Add(1)
-		// Use a retryable status so doWithRetryInner returns an error
-		// (non-retryable statuses like 500 return (resp, nil) which gobreaker counts as success).
+		// Use a retryable status so doWithRetryInner returns an error.
 		w.WriteHeader(http.StatusBadGateway)
 	}))
 	defer srv.Close()
