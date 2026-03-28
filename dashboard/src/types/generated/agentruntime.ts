@@ -351,6 +351,36 @@ export interface AgentRuntimeSpec {
      * Defaults to /etc/omnia/media if not specified. */
     basePath?: string;
   };
+  /** memory configures cross-session memory for this agent. */
+  memory?: {
+    /** Enabled controls whether cross-session memory is active.
+     * Memory is disabled by default. */
+    enabled?: boolean;
+    /** Extraction configures automatic memory extraction from conversations. */
+    extraction?: {
+      /** Enabled controls whether extraction runs post-conversation. */
+      enabled?: boolean;
+      /** Model overrides the extraction model. Empty uses the conversation model. */
+      model?: string;
+    };
+    /** Purpose defines the platform-enforced purpose tag for memories.
+     * Must be one of: personalisation, support_continuity, safety. */
+    purpose?: "personalisation" | "support_continuity" | "safety";
+    /** Retention configures memory TTL. */
+    retention?: {
+      /** DefaultTTL is the default time-to-live for memories (e.g., "720h" for 30 days). */
+      defaultTTL?: string;
+      /** MaxTTL is the maximum allowed TTL (e.g., "8760h" for 365 days). */
+      maxTTL?: string;
+    };
+    /** Retrieval configures memory retrieval behavior. */
+    retrieval?: {
+      /** Limit is the maximum number of memories injected per turn. */
+      limit?: number;
+      /** Strategy selects the retrieval mode. */
+      strategy?: "keyword" | "semantic" | "graph" | "composite";
+    };
+  };
   /** promptPackRef references the PromptPack containing agent prompts and configuration. */
   promptPackRef: {
     /** name is the name of the PromptPack resource. */
