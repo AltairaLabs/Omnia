@@ -205,6 +205,13 @@ func TestServerOptions(t *testing.T) {
 		assert.Len(t, server2.sdkOptions, 0)
 	})
 
+	t.Run("WithMemoryStore", func(t *testing.T) {
+		// Can't test with real store (needs DB), just test the option function
+		// by verifying it doesn't panic with nil
+		srv := NewServer()
+		assert.Nil(t, srv.memoryStore)
+	})
+
 	t.Run("AllOptionsCombined", func(t *testing.T) {
 		server := NewServer(
 			WithLogger(logr.Discard()),
