@@ -250,6 +250,30 @@ describe("JobWizard", () => {
       expect(screen.getByText(/All 3 scenarios will run/)).toBeInTheDocument();
     });
 
+    it("renders session recording toggle on options step", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+      await navigateToStep(user, 4);
+
+      expect(screen.getByText("Session Recording")).toBeInTheDocument();
+      // Default is off
+      const toggle = screen.getByRole("switch", { name: /session recording/i });
+      expect(toggle).not.toBeChecked();
+    });
+
+    it("toggles session recording on and off", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+      await navigateToStep(user, 4);
+
+      const toggle = screen.getByRole("switch", { name: /session recording/i });
+      await user.click(toggle);
+      expect(toggle).toBeChecked();
+
+      await user.click(toggle);
+      expect(toggle).not.toBeChecked();
+    });
+
     it("renders load test fields on options step", async () => {
       const user = userEvent.setup();
       renderWizard();

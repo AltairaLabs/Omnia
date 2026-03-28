@@ -355,6 +355,61 @@ var _ = Describe("ArenaJob Controller", func() {
 			Expect(k8sJob.Spec.Template.Spec.Containers[0].Name).To(Equal("worker"))
 			Expect(k8sJob.Labels["omnia.altairalabs.ai/job"]).To(Equal(arenaJobName))
 		})
+
+		It("should inject SESSION_API_URL only when sessionRecording is true", func() {
+			By("creating a new ArenaJob with sessionRecording enabled")
+			sessionJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "session-recording-job",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{
+					SourceRef: corev1alpha1.LocalObjectReference{
+						Name: arenaSourceName,
+					},
+					Type:             omniav1alpha1.ArenaJobTypeEvaluation,
+					SessionRecording: true,
+					Workers: &omniav1alpha1.WorkerConfig{
+						Replicas: 1,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, sessionJob)).To(Succeed())
+
+			reconciler := &ArenaJobReconciler{
+				Client:        k8sClient,
+				Scheme:        k8sClient.Scheme(),
+				Recorder:      record.NewFakeRecorder(10),
+				SessionAPIURL: "http://session-api:8080",
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "session-recording-job",
+					Namespace: arenaJobNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			k8sJob := &batchv1.Job{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "session-recording-job-worker",
+				Namespace: arenaJobNamespace,
+			}, k8sJob)).To(Succeed())
+
+			envVars := k8sJob.Spec.Template.Spec.Containers[0].Env
+			var found bool
+			for _, e := range envVars {
+				if e.Name == "SESSION_API_URL" {
+					found = true
+					Expect(e.Value).To(Equal("http://session-api:8080"))
+				}
+			}
+			Expect(found).To(BeTrue(), "SESSION_API_URL should be injected when sessionRecording is true")
+
+			Expect(k8sClient.Delete(ctx, sessionJob)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, k8sJob)).To(Succeed())
+		})
 	})
 
 	Context("When ArenaJob is already completed", func() {

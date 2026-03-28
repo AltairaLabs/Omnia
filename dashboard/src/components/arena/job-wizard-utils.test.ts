@@ -30,6 +30,7 @@ function makeForm(overrides: Partial<JobWizardFormState> = {}): JobWizardFormSta
     selectedToolRegistries: [],
     workers: "1",
     verbose: false,
+    sessionRecording: false,
     trials: "",
     concurrency: "",
     vusPerWorker: "",
@@ -258,6 +259,16 @@ describe("buildSpec", () => {
   it("omits verbose when false", () => {
     const spec = buildSpec(makeForm({ verbose: false }));
     expect(spec.verbose).toBeUndefined();
+  });
+
+  it("includes sessionRecording when true", () => {
+    const spec = buildSpec(makeForm({ sessionRecording: true }));
+    expect(spec.sessionRecording).toBe(true);
+  });
+
+  it("omits sessionRecording when false", () => {
+    const spec = buildSpec(makeForm({ sessionRecording: false }));
+    expect(spec.sessionRecording).toBeUndefined();
   });
 });
 

@@ -370,6 +370,13 @@ type ArenaJobSpec struct {
 	// When enabled, workers will pass --verbose to promptarena for detailed output.
 	// +optional
 	Verbose bool `json:"verbose,omitempty"`
+
+	// sessionRecording enables writing session data to session-api during execution.
+	// When false (default), no sessions are created and no events are recorded,
+	// reducing session-api load during high-volume load tests.
+	// Telemetry and traces are unaffected.
+	// +optional
+	SessionRecording bool `json:"sessionRecording,omitempty"`
 }
 
 // ArenaJobPhase represents the current phase of the ArenaJob.
