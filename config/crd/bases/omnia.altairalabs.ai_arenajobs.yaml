@@ -315,6 +315,13 @@ spec:
                     description: timezone specifies the timezone for the cron schedule.
                     type: string
                 type: object
+              sessionRecording:
+                description: |-
+                  sessionRecording enables writing session data to session-api during execution.
+                  When false (default), no sessions are created and no events are recorded,
+                  reducing session-api load during high-volume load tests.
+                  Telemetry and traces are unaffected.
+                type: boolean
               sourceRef:
                 description: sourceRef references the ArenaSource containing test
                   scenarios and configuration.

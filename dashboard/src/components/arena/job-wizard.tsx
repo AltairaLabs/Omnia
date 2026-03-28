@@ -1097,6 +1097,20 @@ export function JobWizard({
             />
           </div>
 
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label htmlFor="sessionRecording">Session Recording</Label>
+              <p className="text-xs text-muted-foreground">
+                Record session transcripts to session-api. Off by default to reduce load during tests.
+              </p>
+            </div>
+            <Switch
+              id="sessionRecording"
+              checked={formState.sessionRecording}
+              onCheckedChange={(checked) => updateField("sessionRecording", checked)}
+            />
+          </div>
+
           {formState.jobType === "loadtest" && (
             <>
               {/* Load Profile */}

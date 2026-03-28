@@ -37,6 +37,7 @@ export interface JobWizardFormState {
   selectedToolRegistries: string[];
   workers: string;
   verbose: boolean;
+  sessionRecording: boolean;
   // Load test fields
   trials: string;
   concurrency: string;
@@ -63,6 +64,7 @@ export function getInitialFormState(
     selectedToolRegistries: [],
     workers: "1",
     verbose: false,
+    sessionRecording: false,
     trials: "",
     concurrency: "",
     vusPerWorker: "",
@@ -189,6 +191,7 @@ export function buildSpec(form: JobWizardFormState): ArenaJobSpec {
       replicas: Number.parseInt(form.workers, 10),
     },
     verbose: form.verbose || undefined,
+    sessionRecording: form.sessionRecording || undefined,
   };
 
   // Scenario filter

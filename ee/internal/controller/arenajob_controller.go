@@ -667,8 +667,9 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		}
 	}
 
-	// Inject SESSION_API_URL for session recording if configured
-	if r.SessionAPIURL != "" {
+	// Inject SESSION_API_URL only when session recording is explicitly enabled.
+	// Default is off to avoid overwhelming session-api during load tests.
+	if r.SessionAPIURL != "" && arenaJob.Spec.SessionRecording {
 		env = append(env, corev1.EnvVar{
 			Name:  "SESSION_API_URL",
 			Value: r.SessionAPIURL,

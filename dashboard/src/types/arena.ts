@@ -346,6 +346,8 @@ export interface ArenaJobSpec {
   suspend?: boolean;
   /** Enable verbose/debug logging for promptarena */
   verbose?: boolean;
+  /** Enable session recording to session-api (default: false) */
+  sessionRecording?: boolean;
 }
 
 /** Job progress tracking (work item level) */

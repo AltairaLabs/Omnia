@@ -30,6 +30,7 @@ function makeForm(overrides: Partial<JobWizardFormState> = {}): JobWizardFormSta
     selectedToolRegistries: [],
     workers: "1",
     verbose: false,
+    sessionRecording: false,
     trials: "",
     concurrency: "",
     vusPerWorker: "",
