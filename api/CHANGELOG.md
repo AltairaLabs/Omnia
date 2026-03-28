@@ -8,6 +8,11 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ---
 
+## 2026-03-28
+- **ArenaJob CRD** (Enterprise): Added `spec.sessionRecording` boolean (default: false)
+  - **Breaking**: Session recording was previously always enabled when `SESSION_API_URL` was configured on the controller. Now requires explicit `sessionRecording: true` on the ArenaJob spec. Existing ArenaJobs without this field will stop recording sessions after upgrade.
+  - **Migration**: Add `sessionRecording: true` to any ArenaJob that needs session transcripts.
+
 ## 2026-03-26
 - **ArenaJob CRD** (Enterprise): Replaced `LoadTestSettings` and added `spec.trials` for load testing support (#661)
   - **Added** `spec.trials` — number of times to repeat each scenario × provider combination
