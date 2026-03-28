@@ -19,6 +19,10 @@ const (
 	EventSessionDeleted      = "session_deleted"
 	EventPIIRedacted         = "pii_redacted"
 	EventDecryptionRequested = "decryption_requested"
+	EventMemoryCreated       = "memory_created"
+	EventMemoryAccessed      = "memory_accessed"
+	EventMemoryDeleted       = "memory_deleted"
+	EventMemoryExported      = "memory_exported"
 )
 
 // Entry represents a single audit log row in the database.

@@ -101,6 +101,61 @@ func TestShouldRecord_EmptyWorkspaceAndAgent(t *testing.T) {
 	assert.True(t, result)
 }
 
+func TestShouldRemember_NoPreferences(t *testing.T) {
+	store := &mockPreferencesStore{err: ErrPreferencesNotFound}
+	result := ShouldRemember(context.Background(), store, "user1", "ws1", "agent1")
+	assert.True(t, result)
+}
+
+func TestShouldRemember_UnexpectedError(t *testing.T) {
+	store := &mockPreferencesStore{err: errors.New("db error")}
+	result := ShouldRemember(context.Background(), store, "user1", "ws1", "agent1")
+	assert.True(t, result, "should default to allowing memory storage on unexpected errors")
+}
+
+func TestShouldRemember_OptOutAll(t *testing.T) {
+	store := &mockPreferencesStore{prefs: &Preferences{
+		OptOutAll:        true,
+		OptOutWorkspaces: []string{},
+		OptOutAgents:     []string{},
+	}}
+	result := ShouldRemember(context.Background(), store, "user1", "ws1", "agent1")
+	assert.False(t, result)
+}
+
+func TestShouldRemember_OptOutWorkspace(t *testing.T) {
+	store := &mockPreferencesStore{prefs: &Preferences{
+		OptOutAll:        false,
+		OptOutWorkspaces: []string{"ws1", "ws2"},
+		OptOutAgents:     []string{},
+	}}
+
+	assert.False(t, ShouldRemember(context.Background(), store, "user1", "ws1", "agent1"))
+	got := ShouldRemember(context.Background(), store, "user1", "ws3", "agent1")
+	assert.True(t, got, "unrelated workspace opt-out should allow") //nolint:lll
+}
+
+func TestShouldRemember_OptOutAgent(t *testing.T) {
+	store := &mockPreferencesStore{prefs: &Preferences{
+		OptOutAll:        false,
+		OptOutWorkspaces: []string{},
+		OptOutAgents:     []string{"agent1"},
+	}}
+
+	assert.False(t, ShouldRemember(context.Background(), store, "user1", "ws1", "agent1"))
+	assert.True(t, ShouldRemember(context.Background(), store, "user1", "ws1", "agent2"))
+}
+
+func TestShouldRemember_NoOptOut(t *testing.T) {
+	store := &mockPreferencesStore{prefs: &Preferences{
+		OptOutAll:        false,
+		OptOutWorkspaces: []string{},
+		OptOutAgents:     []string{},
+	}}
+	result := ShouldRemember(context.Background(), store, "user1", "ws1", "agent1")
+	assert.True(t, result)
+}
+
 func TestContainsStr(t *testing.T) {
 	assert.True(t, containsStr([]string{"a", "b", "c"}, "b"))
 	assert.False(t, containsStr([]string{"a", "b", "c"}, "d"))

@@ -42,6 +42,35 @@ func ShouldRecord(ctx context.Context, store PreferencesStore, userID, workspace
 	return true
 }
 
+// ShouldRemember checks whether memory storage should proceed for a given user.
+// Uses the same three-level hierarchy as ShouldRecord: global opt-out,
+// workspace opt-out, agent opt-out. Returns true if no opt-out applies.
+func ShouldRemember(ctx context.Context, store PreferencesStore, userID, workspace, agent string) bool {
+	prefs, err := store.GetPreferences(ctx, userID)
+	if err != nil {
+		// If the user has no preferences, memory storage is allowed.
+		if errors.Is(err, ErrPreferencesNotFound) {
+			return true
+		}
+		// On unexpected errors, default to allowing memory storage to avoid data loss.
+		return true
+	}
+
+	if prefs.OptOutAll {
+		return false
+	}
+
+	if workspace != "" && containsStr(prefs.OptOutWorkspaces, workspace) {
+		return false
+	}
+
+	if agent != "" && containsStr(prefs.OptOutAgents, agent) {
+		return false
+	}
+
+	return true
+}
+
 // containsStr reports whether s is present in the slice.
 func containsStr(slice []string, s string) bool {
 	for _, v := range slice {
