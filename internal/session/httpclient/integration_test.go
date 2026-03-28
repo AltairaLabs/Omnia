@@ -18,6 +18,7 @@ package httpclient_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -349,6 +350,129 @@ func TestIntegration_ToolCallRecording(t *testing.T) {
 	assert.Equal(t, "tool_call", msgs[0].Metadata["type"])
 	assert.Equal(t, "tc-1", msgs[1].ToolCallID)
 	assert.Equal(t, "tool_result", msgs[1].Metadata["type"])
+}
+
+// TestIntegration_ConcurrentSessionCreation simulates the arena load test
+// scenario: 100 concurrent goroutines all creating sessions simultaneously.
+// This is the exact pattern that caused Postgres to crash in issue #683.
+func TestIntegration_ConcurrentSessionCreation(t *testing.T) {
+	warmStore := newIntegrationWarmStore()
+	store := startIntegrationServer(t, warmStore)
+	ctx := context.Background()
+
+	const concurrency = 100
+	var wg sync.WaitGroup
+	errors := make([]error, concurrency)
+	sessionIDs := make([]string, concurrency)
+
+	wg.Add(concurrency)
+	for i := range concurrency {
+		go func(idx int) {
+			defer wg.Done()
+			sess, err := store.CreateSession(ctx, session.CreateSessionOptions{
+				AgentName: "arena-worker",
+				Namespace: "default",
+				Tags:      []string{"source:arena", fmt.Sprintf("vu:%d", idx)},
+				InitialState: map[string]string{
+					"arena.job": "load-test",
+					"arena.vu":  fmt.Sprintf("%d", idx),
+				},
+			})
+			errors[idx] = err
+			if sess != nil {
+				sessionIDs[idx] = sess.ID
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	// Count successes and failures.
+	var succeeded, failed int
+	for _, err := range errors {
+		if err != nil {
+			failed++
+		} else {
+			succeeded++
+		}
+	}
+
+	t.Logf("concurrent session creation: %d/%d succeeded, %d failed", succeeded, concurrency, failed)
+	assert.Equal(t, concurrency, succeeded, "all sessions should be created successfully")
+	assert.Equal(t, 0, failed, "no session creation should fail")
+	assert.Equal(t, concurrency, warmStore.getSessionCount(), "warm store should have all sessions")
+
+	// Verify each session has a unique ID.
+	idSet := make(map[string]bool)
+	for _, id := range sessionIDs {
+		if id != "" {
+			idSet[id] = true
+		}
+	}
+	assert.Equal(t, concurrency, len(idSet), "all session IDs should be unique")
+}
+
+// TestIntegration_ConcurrentMixedOperations simulates a load test where
+// sessions are being created, written to, and completed concurrently.
+func TestIntegration_ConcurrentMixedOperations(t *testing.T) {
+	warmStore := newIntegrationWarmStore()
+	store := startIntegrationServer(t, warmStore)
+	ctx := context.Background()
+
+	const sessions = 50
+	var wg sync.WaitGroup
+
+	// Phase 1: Create all sessions concurrently.
+	ids := make([]string, sessions)
+	createErrors := make([]error, sessions)
+	wg.Add(sessions)
+	for i := range sessions {
+		go func(idx int) {
+			defer wg.Done()
+			sess, err := store.CreateSession(ctx, session.CreateSessionOptions{
+				AgentName: "arena-worker",
+				Namespace: "default",
+			})
+			createErrors[idx] = err
+			if sess != nil {
+				ids[idx] = sess.ID
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	var createFailed int
+	for _, err := range createErrors {
+		if err != nil {
+			createFailed++
+		}
+	}
+	require.Equal(t, 0, createFailed, "all session creates should succeed")
+
+	// Phase 2: Append messages and update status concurrently.
+	wg.Add(sessions * 2) // 1 message + 1 status update per session
+	for i := range sessions {
+		go func(idx int) {
+			defer wg.Done()
+			_ = store.AppendMessage(ctx, ids[idx], session.Message{
+				Role:    session.RoleUser,
+				Content: fmt.Sprintf("message from vu %d", idx),
+			})
+		}(i)
+		go func(idx int) {
+			defer wg.Done()
+			_ = store.UpdateSessionStatus(ctx, ids[idx], session.SessionStatusUpdate{
+				SetStatus: session.SessionStatusCompleted,
+			})
+		}(i)
+	}
+	wg.Wait()
+
+	// Verify all sessions exist and were updated.
+	for i, id := range ids {
+		s := warmStore.getSession(id)
+		require.NotNilf(t, s, "session %d should exist", i)
+	}
+	t.Logf("concurrent mixed operations: %d sessions created, written, and completed", sessions)
 }
 
 // TestIntegration_NoWarmStore verifies that the HTTP client gets meaningful
