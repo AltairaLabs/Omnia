@@ -730,13 +730,14 @@ sessionApi:
     # -- Deploy a dev-only single-node Postgres (NOT for production)
     dev:
       enabled: false
-    # -- PgBouncer connection pooling (recommended for production)
-    # IMPORTANT: These values are NOT consumed by any Helm template. They exist
-    # as a reference for operators deploying an external PgBouncer (e.g., via
-    # PgBouncer operator or a sidecar). No chart-managed PgBouncer is created.
+    # -- PgBouncer connection pooling sidecar for the dev Postgres.
+    # When dev.enabled=true and pgbouncer.enabled=true, a PgBouncer sidecar is
+    # added to the dev Postgres StatefulSet. The connection string in the Secret
+    # points to PgBouncer (port 6432) instead of Postgres directly.
+    # For production, use your cloud provider's connection pooling (RDS Proxy, etc.).
     pgbouncer:
-      # -- Enable PgBouncer connection pooling
-      enabled: false
+      # -- Enable PgBouncer sidecar (only applies when dev.enabled=true)
+      enabled: true
       # -- PgBouncer pool mode (session, transaction, or statement)
       poolMode: transaction
       # -- Default pool size per user/database pair

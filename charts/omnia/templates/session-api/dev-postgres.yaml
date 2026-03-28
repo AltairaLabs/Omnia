@@ -1,8 +1,11 @@
 {{- if and .Values.sessionApi.enabled .Values.sessionApi.postgres.dev.enabled }}
+{{- $pgbouncerEnabled := .Values.sessionApi.postgres.pgbouncer.enabled }}
+{{- $clientPort := ternary 6432 5432 $pgbouncerEnabled }}
 # =============================================================================
 # Dev-only Postgres — NOT for production use.
 # Provides the omnia-postgres Secret and a single-node Postgres StatefulSet
 # so that session-api can start without external infrastructure.
+# When pgbouncer.enabled=true, a PgBouncer sidecar pools connections.
 # =============================================================================
 apiVersion: v1
 kind: Secret
@@ -11,7 +14,40 @@ metadata:
   labels:
     {{- include "omnia.sessionApi.labels" . | nindent 4 }}
 stringData:
-  {{ .Values.sessionApi.postgres.secretKey }}: "postgres://omnia:omnia@{{ include "omnia.fullname" . }}-postgres:5432/omnia?sslmode=disable"
+  {{ .Values.sessionApi.postgres.secretKey }}: "postgres://omnia:omnia@{{ include "omnia.fullname" . }}-postgres:{{ $clientPort }}/omnia?sslmode=disable"
+{{- if $pgbouncerEnabled }}
+---
+# PgBouncer configuration for the dev Postgres sidecar.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "omnia.fullname" . }}-pgbouncer
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+data:
+  pgbouncer.ini: |
+    [databases]
+    omnia = host=127.0.0.1 port=5432 dbname=omnia
+
+    [pgbouncer]
+    listen_addr = 0.0.0.0
+    listen_port = 6432
+    auth_type = md5
+    auth_file = /etc/pgbouncer/userlist.txt
+    pool_mode = {{ .Values.sessionApi.postgres.pgbouncer.poolMode }}
+    default_pool_size = {{ .Values.sessionApi.postgres.pgbouncer.defaultPoolSize }}
+    max_client_conn = {{ .Values.sessionApi.postgres.pgbouncer.maxClientConn }}
+    max_db_connections = {{ .Values.sessionApi.postgres.pgbouncer.maxDbConnections }}
+    ignore_startup_parameters = extra_float_digits
+    # Log connections/disconnections for debugging
+    log_connections = 1
+    log_disconnections = 1
+    # Stats available via SHOW STATS
+    stats_period = 60
+  userlist.txt: |
+    "omnia" "md55b67425b5ec6058d90ce3e21f576a7cf"
+{{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -23,10 +59,10 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-    - port: 5432
-      targetPort: 5432
+    - port: {{ $clientPort }}
+      targetPort: {{ $clientPort }}
       protocol: TCP
-      name: postgres
+      name: {{ ternary "pgbouncer" "postgres" $pgbouncerEnabled }}
   selector:
     app.kubernetes.io/name: {{ include "omnia.name" . }}-postgres
     app.kubernetes.io/instance: {{ .Release.Name }}
@@ -82,6 +118,33 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+{{- if $pgbouncerEnabled }}
+        - name: pgbouncer
+          image: bitnami/pgbouncer:1
+          ports:
+            - containerPort: 6432
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: 6432
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: 200m
+              memory: 128Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          volumeMounts:
+            - name: pgbouncer-config
+              mountPath: /etc/pgbouncer
+              readOnly: true
+      volumes:
+        - name: pgbouncer-config
+          configMap:
+            name: {{ include "omnia.fullname" . }}-pgbouncer
+{{- end }}
   volumeClaimTemplates:
     - metadata:
         name: data
