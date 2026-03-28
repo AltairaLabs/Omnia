@@ -295,18 +295,62 @@ describe("JobWizard", () => {
       expect(screen.getAllByPlaceholderText("Value")).toHaveLength(2);
     });
 
-    it("shows load test review details", async () => {
+    it("shows load test review with trials, concurrency, ramp, and budget", async () => {
       const user = userEvent.setup();
       renderWizard();
       await user.click(screen.getByText("Load Test"));
       await navigateToStep(user, 4);
 
-      // Fill in load test fields
+      // Fill in all load test fields
       await user.type(screen.getByLabelText("Trials per scenario"), "100");
       await user.type(screen.getByLabelText("Concurrency"), "20");
+      await user.type(screen.getByLabelText("VUs per Worker"), "5");
+      await user.type(screen.getByLabelText("Ramp Up"), "2m");
+      await user.type(screen.getByLabelText("Ramp Down"), "30s");
+      await user.type(screen.getByLabelText(/Budget Limit/), "50.00");
 
-      // Review section shows load test badge and values
-      expect(screen.getByText("Load Test")).toBeInTheDocument();
+      // Add a threshold
+      await user.click(screen.getByRole("button", { name: /add/i }));
+
+      // Review section shows load test details
+      expect(screen.getByText("Review Configuration")).toBeInTheDocument();
+      expect(screen.getByText("Trials")).toBeInTheDocument();
+      expect(screen.getByText("↑2m ↓30s")).toBeInTheDocument();
+      expect(screen.getByText("$50.00 USD")).toBeInTheDocument();
+      expect(screen.getByText("1 SLO gate")).toBeInTheDocument();
+    });
+
+    it("shows evaluation review without load test fields", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+      await navigateToStep(user, 4);
+
+      expect(screen.getByText("Review Configuration")).toBeInTheDocument();
+      expect(screen.getByText("Evaluation")).toBeInTheDocument();
+      expect(screen.queryByText("Trials")).not.toBeInTheDocument();
+      expect(screen.queryByText("Concurrency")).not.toBeInTheDocument();
+    });
+
+    it("shows scenario filter in review when scenarios selected", async () => {
+      const user = userEvent.setup();
+      mockConfigPreview.loaded = true;
+      mockConfigPreview.scenarioCount = 3;
+      mockConfigPreview.scenarioIds = ["billing", "auth", "support"];
+      renderWizard();
+
+      // Navigate to source step and uncheck one scenario
+      await navigateToStep(user, 1);
+      const authCheckbox = screen.getByText("auth").closest("label")?.querySelector("button");
+      if (authCheckbox) await user.click(authCheckbox);
+
+      // Navigate to options step
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+      // Review should show selected scenarios
+      expect(screen.getByText("billing")).toBeInTheDocument();
+      expect(screen.getByText("support")).toBeInTheDocument();
     });
 
     it("switches job type description on toggle", async () => {
