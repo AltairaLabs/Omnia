@@ -46,7 +46,7 @@ func TestMain(m *testing.M) {
 
 	ctx := context.Background()
 
-	container, err := tcpostgres.Run(ctx, "postgres:16-alpine",
+	container, err := tcpostgres.Run(ctx, "pgvector/pgvector:pg16",
 		tcpostgres.WithDatabase("omnia_test"),
 		tcpostgres.WithUsername("test"),
 		tcpostgres.WithPassword("test"),
