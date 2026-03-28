@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -394,9 +395,7 @@ func scanMemory(row pgx.Rows, scope map[string]string) (*Memory, error) {
 // copyScope returns a shallow copy of the scope map.
 func copyScope(scope map[string]string) map[string]string {
 	out := make(map[string]string, len(scope))
-	for k, v := range scope {
-		out[k] = v
-	}
+	maps.Copy(out, scope)
 	return out
 }
 

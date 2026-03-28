@@ -522,11 +522,6 @@ if [ -f coverage.out ]; then
             continue
         fi
 
-        # Skip memory package (requires real Postgres via testcontainers, tested in integration)
-        if [[ "$file" == "internal/memory/"*.go ]]; then
-            continue
-        fi
-
         # Skip EE setup package (requires envtest control plane, tested in CI with KUBEBUILDER_ASSETS)
         if [[ "$file" == ee/pkg/setup/*.go ]]; then
             continue

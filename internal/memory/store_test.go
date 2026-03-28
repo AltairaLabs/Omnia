@@ -44,10 +44,6 @@ var testConnStr string
 func TestMain(m *testing.M) {
 	flag.Parse()
 
-	if testing.Short() {
-		os.Exit(m.Run())
-	}
-
 	ctx := context.Background()
 
 	container, err := tcpostgres.Run(ctx, "pgvector/pgvector:pg16",
@@ -155,9 +151,6 @@ func testScope(workspaceID string) map[string]string {
 }
 
 func TestPostgresMemoryStore_Save(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
 
 	store := newStore(t)
 	ctx := context.Background()
@@ -177,9 +170,6 @@ func TestPostgresMemoryStore_Save(t *testing.T) {
 }
 
 func TestPostgresMemoryStore_Save_MissingWorkspace(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
 
 	store := newStore(t)
 	ctx := context.Background()
@@ -196,9 +186,6 @@ func TestPostgresMemoryStore_Save_MissingWorkspace(t *testing.T) {
 }
 
 func TestPostgresMemoryStore_SaveUpsert(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
 
 	store := newStore(t)
 	ctx := context.Background()
@@ -230,9 +217,6 @@ func TestPostgresMemoryStore_SaveUpsert(t *testing.T) {
 }
 
 func TestPostgresMemoryStore_Retrieve(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
 
 	store := newStore(t)
 	ctx := context.Background()
@@ -270,9 +254,6 @@ func TestPostgresMemoryStore_Retrieve(t *testing.T) {
 }
 
 func TestPostgresMemoryStore_Retrieve_MissingWorkspace(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
 
 	store := newStore(t)
 	ctx := context.Background()
@@ -283,15 +264,12 @@ func TestPostgresMemoryStore_Retrieve_MissingWorkspace(t *testing.T) {
 }
 
 func TestPostgresMemoryStore_List(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
 
 	store := newStore(t)
 	ctx := context.Background()
 	scope := testScope(testWorkspace1)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		mem := &Memory{
 			Type:       "fact",
 			Content:    fmt.Sprintf("fact number %d", i),
@@ -316,9 +294,6 @@ func TestPostgresMemoryStore_List(t *testing.T) {
 }
 
 func TestPostgresMemoryStore_List_MissingWorkspace(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
 
 	store := newStore(t)
 	ctx := context.Background()
@@ -329,9 +304,6 @@ func TestPostgresMemoryStore_List_MissingWorkspace(t *testing.T) {
 }
 
 func TestPostgresMemoryStore_Delete(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
 
 	store := newStore(t)
 	ctx := context.Background()
@@ -356,9 +328,6 @@ func TestPostgresMemoryStore_Delete(t *testing.T) {
 }
 
 func TestPostgresMemoryStore_Delete_NotFound(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
 
 	store := newStore(t)
 	ctx := context.Background()
@@ -369,9 +338,6 @@ func TestPostgresMemoryStore_Delete_NotFound(t *testing.T) {
 }
 
 func TestPostgresMemoryStore_Delete_MissingWorkspace(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
 
 	store := newStore(t)
 	ctx := context.Background()
@@ -382,15 +348,12 @@ func TestPostgresMemoryStore_Delete_MissingWorkspace(t *testing.T) {
 }
 
 func TestPostgresMemoryStore_DeleteAll(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
 
 	store := newStore(t)
 	ctx := context.Background()
 	scope := testScope(testWorkspace1)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		mem := &Memory{
 			Type:       "fact",
 			Content:    fmt.Sprintf("fact %d", i),
@@ -416,9 +379,6 @@ func TestPostgresMemoryStore_DeleteAll(t *testing.T) {
 }
 
 func TestPostgresMemoryStore_DeleteAll_MissingWorkspace(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
 
 	store := newStore(t)
 	ctx := context.Background()
@@ -429,9 +389,6 @@ func TestPostgresMemoryStore_DeleteAll_MissingWorkspace(t *testing.T) {
 }
 
 func TestPostgresMemoryStore_WorkspaceIsolation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
 
 	store := newStore(t)
 	ctx := context.Background()
@@ -440,7 +397,7 @@ func TestPostgresMemoryStore_WorkspaceIsolation(t *testing.T) {
 	scope2 := testScope(testWorkspace2)
 
 	// Save in workspace 1.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		mem := &Memory{
 			Type:       "fact",
 			Content:    fmt.Sprintf("ws1 fact %d", i),
@@ -467,9 +424,6 @@ func TestPostgresMemoryStore_WorkspaceIsolation(t *testing.T) {
 }
 
 func TestPostgresMemoryStore_Save_WithSessionAndTurnRange(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
 
 	store := newStore(t)
 	ctx := context.Background()
@@ -493,9 +447,6 @@ func TestPostgresMemoryStore_Save_WithSessionAndTurnRange(t *testing.T) {
 }
 
 func TestPostgresMemoryStore_Save_NilMetadata(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
 
 	store := newStore(t)
 	ctx := context.Background()
