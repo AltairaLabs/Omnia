@@ -208,6 +208,10 @@ func (h *Handler) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 
 	q := r.URL.Query()
 	workspace := truncateParam(q.Get("workspace"))
+	if workspace == "" {
+		writeError(w, ErrMissingWorkspace)
+		return
+	}
 	scope := map[string]string{memory.ScopeWorkspaceID: workspace}
 
 	if err := h.service.DeleteMemory(r.Context(), scope, id); err != nil {

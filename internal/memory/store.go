@@ -322,10 +322,13 @@ func buildDeleteAllQuery(scope map[string]string) (string, *pgutil.QueryBuilder)
 
 // --- helpers -----------------------------------------------------------------
 
-// addScopeFilters appends optional user_id filter.
+// addScopeFilters appends optional user_id and agent_id filters.
 func addScopeFilters(qb *pgutil.QueryBuilder, scope map[string]string) {
 	if uid := scope[ScopeUserID]; uid != "" {
 		qb.Add(colVirtualUserID, uid)
+	}
+	if aid := scope[ScopeAgentID]; aid != "" {
+		qb.Add("e.agent_id=$?", aid)
 	}
 }
 
@@ -369,12 +372,13 @@ func scanMemory(row pgx.Rows, scope map[string]string) (*Memory, error) {
 		expiresAt    *time.Time
 		sessionID    *string
 		turnRange    []int
+		observedAt   *time.Time
 		accessedAt   *time.Time
 	)
 
 	err := row.Scan(
 		&mem.ID, &mem.Type, &metadataJSON, &mem.CreatedAt, &expiresAt,
-		&mem.Content, &mem.Confidence, &sessionID, &turnRange, &mem.AccessedAt, &accessedAt,
+		&mem.Content, &mem.Confidence, &sessionID, &turnRange, &observedAt, &accessedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("memory: scan row: %w", err)

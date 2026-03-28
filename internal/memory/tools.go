@@ -153,7 +153,7 @@ func buildRelatedQuery(p relatedParams) (string, []any) {
 		SELECT e.id, e.name, e.kind, r.relation_type, r.weight
 		FROM memory_relations r
 		JOIN memory_entities e ON e.id = r.target_entity_id
-		WHERE r.source_entity_id = $1`
+		WHERE r.source_entity_id = $1 AND e.forgotten = false`
 
 	if len(p.RelationTypes) > 0 {
 		args = append(args, p.RelationTypes)
