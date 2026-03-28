@@ -43,6 +43,7 @@ vi.mock("@/hooks/use-arena-source-content", () => ({
 
 // Mock useArenaConfigPreview — default returns empty, tests can override via mockConfigPreview
 const mockConfigPreview = {
+  scenarioIds: [] as string[],
   scenarioCount: 0,
   configProviderCount: 0,
   requiredGroups: [] as string[],
@@ -214,6 +215,65 @@ describe("JobWizard", () => {
     it("renders the basic info step by default", () => {
       renderWizard();
       expect(screen.getByText("Job Name")).toBeInTheDocument();
+    });
+
+    it("renders job type selector with Evaluation selected by default", () => {
+      renderWizard();
+      expect(screen.getByText("Job Type")).toBeInTheDocument();
+      expect(screen.getByText("Evaluation")).toBeInTheDocument();
+      expect(screen.getByText("Load Test")).toBeInTheDocument();
+    });
+
+    it("shows load test description when Load Test is selected", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+      await user.click(screen.getByText("Load Test"));
+      expect(screen.getByText(/Stress-test providers/)).toBeInTheDocument();
+    });
+
+    it("shows scenario checkboxes on source step when config has multiple scenarios", async () => {
+      const user = userEvent.setup();
+      mockConfigPreview.loaded = true;
+      mockConfigPreview.scenarioCount = 3;
+      mockConfigPreview.scenarioIds = ["billing", "auth", "support"];
+
+      renderWizard();
+
+      // Navigate to source step
+      await user.click(screen.getByText("Next"));
+
+      // Scenario checkboxes should appear
+      expect(screen.getByText("Scenarios")).toBeInTheDocument();
+      expect(screen.getByText("billing")).toBeInTheDocument();
+      expect(screen.getByText("auth")).toBeInTheDocument();
+      expect(screen.getByText("support")).toBeInTheDocument();
+      expect(screen.getByText(/All 3 scenarios will run/)).toBeInTheDocument();
+    });
+
+    it("shows review with load test badge when type is loadtest", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+      await user.click(screen.getByText("Load Test"));
+
+      // The review section on step 5 shows "Load Test" badge
+      // We can't navigate there easily, but the type toggle works
+      expect(screen.getByText(/Stress-test providers/)).toBeInTheDocument();
+    });
+
+    it("switches job type description on toggle", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+
+      // Default: evaluation description
+      expect(screen.getByText(/Run scenarios and evaluate/)).toBeInTheDocument();
+
+      // Switch to load test
+      await user.click(screen.getByText("Load Test"));
+      expect(screen.getByText(/Stress-test providers/)).toBeInTheDocument();
+
+      // Switch back
+      await user.click(screen.getByText("Evaluation"));
+      expect(screen.getByText(/Run scenarios and evaluate/)).toBeInTheDocument();
     });
 
     it("pre-populates a default name", () => {

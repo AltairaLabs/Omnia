@@ -28,6 +28,7 @@ describe("estimateWorkItems", () => {
     scenarioCount: number,
     configProviderCount: number
   ): ArenaConfigPreview => ({
+    scenarioIds: [],
     scenarioCount,
     configProviderCount,
     requiredGroups: [],
@@ -38,6 +39,7 @@ describe("estimateWorkItems", () => {
   });
 
   const unloadedConfig: ArenaConfigPreview = {
+    scenarioIds: [],
     scenarioCount: 0,
     configProviderCount: 0,
     requiredGroups: [],

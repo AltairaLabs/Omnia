@@ -62,7 +62,7 @@ export function JobDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-y-auto">
           <JobWizard
             key={formResetKey}
             sources={sources}

@@ -51,8 +51,11 @@ import {
   groupSummary,
   getStepIndicatorClassName,
   getInitialFormState,
+  THRESHOLD_METRICS,
+  THRESHOLD_OPERATORS,
   type ProviderGroupEntry,
   type JobWizardFormState,
+  type ThresholdRow,
 } from "./job-wizard-utils";
 
 // =============================================================================
@@ -68,6 +71,56 @@ const WIZARD_STEPS = [
 ];
 
 const DEFAULT_PROVIDER_GROUPS = ["default", "judge", "selfplay"];
+
+function ThresholdRowEditor({
+  row,
+  onChange,
+  onRemove,
+}: Readonly<{
+  row: ThresholdRow;
+  onChange: (updated: ThresholdRow) => void;
+  onRemove: () => void;
+}>) {
+  return (
+    <div className="flex gap-2 items-center">
+      <Select
+        value={row.metric}
+        onValueChange={(v) => onChange({ ...row, metric: v as ThresholdRow["metric"] })}
+      >
+        <SelectTrigger className="flex-1">
+          <SelectValue placeholder="Metric" />
+        </SelectTrigger>
+        <SelectContent>
+          {THRESHOLD_METRICS.map((m) => (
+            <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        value={row.operator}
+        onValueChange={(v) => onChange({ ...row, operator: v as ThresholdRow["operator"] })}
+      >
+        <SelectTrigger className="w-16">
+          <SelectValue placeholder="Op" />
+        </SelectTrigger>
+        <SelectContent>
+          {THRESHOLD_OPERATORS.map((o) => (
+            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Input
+        placeholder="Value"
+        className="w-24"
+        value={row.value}
+        onChange={(e) => onChange({ ...row, value: e.target.value })}
+      />
+      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={onRemove}>
+        <X className="h-3 w-3" />
+      </Button>
+    </div>
+  );
+}
 
 export interface JobWizardProps {
   sources: ArenaSource[];
@@ -463,6 +516,35 @@ export function JobWizard({
   }, []);
 
   // Handle source change - reset paths when source changes
+  const handleThresholdChange = useCallback((index: number, updated: ThresholdRow) => {
+    setFormState((prev) => {
+      const next = [...prev.thresholds];
+      next[index] = updated;
+      return { ...prev, thresholds: next };
+    });
+  }, []);
+
+  const handleThresholdRemove = useCallback((index: number) => {
+    setFormState((prev) => ({
+      ...prev,
+      thresholds: prev.thresholds.filter((_, j) => j !== index),
+    }));
+  }, []);
+
+  const handleScenarioToggle = useCallback((id: string, checked: boolean) => {
+    setFormState((prev) => {
+      const allIds = configPreview.scenarioIds;
+      if (prev.scenarioInclude.length === 0) {
+        return { ...prev, scenarioInclude: allIds.filter((s) => s !== id) };
+      }
+      if (checked) {
+        const next = [...prev.scenarioInclude, id];
+        return { ...prev, scenarioInclude: next.length === allIds.length ? [] : next };
+      }
+      return { ...prev, scenarioInclude: prev.scenarioInclude.filter((s) => s !== id) };
+    });
+  }, [configPreview.scenarioIds]);
+
   const handleSourceChange = useCallback((newSourceRef: string) => {
     setFormState((prev) => ({
       ...prev,
@@ -633,6 +715,28 @@ export function JobWizard({
           Lowercase letters, numbers, and hyphens only
         </p>
       </div>
+
+      <div className="space-y-2">
+        <Label>Job Type</Label>
+        <div className="flex gap-2">
+          {(["evaluation", "loadtest"] as const).map((t) => (
+            <Button
+              key={t}
+              type="button"
+              variant={formState.jobType === t ? "default" : "outline"}
+              size="sm"
+              onClick={() => updateField("jobType", t)}
+            >
+              {t === "evaluation" ? "Evaluation" : "Load Test"}
+            </Button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {formState.jobType === "evaluation"
+            ? "Run scenarios and evaluate assertions against providers"
+            : "Stress-test providers with concurrent traffic and SLO thresholds"}
+        </p>
+      </div>
     </div>
   );
 
@@ -710,6 +814,36 @@ export function JobWizard({
             "config.arena.yaml"}
         </p>
       </div>
+
+      {configPreview.loaded && configPreview.scenarioIds.length > 1 && (
+        <div className="space-y-2">
+          <Label>Scenarios</Label>
+          <p className="text-xs text-muted-foreground">
+            {formState.scenarioInclude.length === 0
+              ? `All ${configPreview.scenarioIds.length} scenarios will run`
+              : `${formState.scenarioInclude.length} of ${configPreview.scenarioIds.length} selected`}
+          </p>
+          <div className="grid grid-cols-2 gap-1">
+            {configPreview.scenarioIds.map((id) => {
+              const checked =
+                formState.scenarioInclude.length === 0 ||
+                formState.scenarioInclude.includes(id);
+              return (
+                <label
+                  key={id}
+                  className="flex items-center gap-2 px-2 py-1 rounded hover:bg-muted cursor-pointer text-sm"
+                >
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={(c) => handleScenarioToggle(id, Boolean(c))}
+                  />
+                  <span className="font-mono text-xs">{id}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -963,6 +1097,116 @@ export function JobWizard({
             />
           </div>
 
+          {formState.jobType === "loadtest" && (
+            <>
+              {/* Load Profile */}
+              <div className="border-t pt-4 mt-2">
+                <h3 className="font-medium mb-3">Load Profile</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label htmlFor="trials">Trials per scenario</Label>
+                    <Input
+                      id="trials"
+                      type="number"
+                      min="1"
+                      placeholder="100"
+                      value={formState.trials}
+                      onChange={(e) => updateField("trials", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="concurrency">Concurrency</Label>
+                    <Input
+                      id="concurrency"
+                      type="number"
+                      min="1"
+                      placeholder="20"
+                      value={formState.concurrency}
+                      onChange={(e) => updateField("concurrency", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="vusPerWorker">VUs per Worker</Label>
+                    <Input
+                      id="vusPerWorker"
+                      type="number"
+                      min="1"
+                      placeholder="5"
+                      value={formState.vusPerWorker}
+                      onChange={(e) => updateField("vusPerWorker", e.target.value)}
+                    />
+                  </div>
+                  <div />
+                  <div className="space-y-1">
+                    <Label htmlFor="rampUp">Ramp Up</Label>
+                    <Input
+                      id="rampUp"
+                      placeholder="2m"
+                      value={formState.rampUp}
+                      onChange={(e) => updateField("rampUp", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="rampDown">Ramp Down</Label>
+                    <Input
+                      id="rampDown"
+                      placeholder="30s"
+                      value={formState.rampDown}
+                      onChange={(e) => updateField("rampDown", e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Budget */}
+              <div className="space-y-2">
+                <Label htmlFor="budgetLimit">Budget Limit (USD)</Label>
+                <Input
+                  id="budgetLimit"
+                  placeholder="50.00"
+                  value={formState.budgetLimit}
+                  onChange={(e) => updateField("budgetLimit", e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Stop the test if cost exceeds this amount. Leave empty for no limit.
+                </p>
+              </div>
+
+              {/* SLO Thresholds */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>SLO Thresholds</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      updateField("thresholds", [
+                        ...formState.thresholds,
+                        { metric: "", operator: "", value: "" },
+                      ])
+                    }
+                  >
+                    <Plus className="h-3 w-3 mr-1" /> Add
+                  </Button>
+                </div>
+                {formState.thresholds.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    No thresholds — job will always succeed regardless of metrics
+                  </p>
+                )}
+                {formState.thresholds.map((t, i) => (
+                  <ThresholdRowEditor
+                    key={`threshold-${t.metric || i}`}
+                    row={t}
+                    onChange={(u) => handleThresholdChange(i, u)}
+                    onRemove={() => handleThresholdRemove(i)}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
           {/* Review summary */}
           <div className="border-t pt-4 mt-4">
             <div className="flex items-center justify-between mb-3">
@@ -971,6 +1215,13 @@ export function JobWizard({
             </div>
 
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <div className="text-muted-foreground">Type</div>
+              <div>
+                <Badge variant={formState.jobType === "loadtest" ? "default" : "secondary"}>
+                  {formState.jobType === "loadtest" ? "Load Test" : "Evaluation"}
+                </Badge>
+              </div>
+
               <div className="text-muted-foreground">Source</div>
               <div>{formState.sourceRef}</div>
 
@@ -982,8 +1233,58 @@ export function JobWizard({
                 ) || "config.arena.yaml"}
               </div>
 
+              {formState.scenarioInclude.length > 0 && (
+                <>
+                  <div className="text-muted-foreground">Scenarios</div>
+                  <div className="flex flex-wrap gap-1">
+                    {formState.scenarioInclude.map((s) => (
+                      <Badge key={s} variant="outline" className="text-xs font-mono">
+                        {s}
+                      </Badge>
+                    ))}
+                  </div>
+                </>
+              )}
+
               <div className="text-muted-foreground">Workers</div>
               <div>{formState.workers}</div>
+
+              {formState.jobType === "loadtest" && (
+                <>
+                  {formState.trials && (
+                    <>
+                      <div className="text-muted-foreground">Trials</div>
+                      <div>{formState.trials}</div>
+                    </>
+                  )}
+                  <div className="text-muted-foreground">Concurrency</div>
+                  <div>{formState.concurrency || "1"}</div>
+                  <div className="text-muted-foreground">VUs/Worker</div>
+                  <div>{formState.vusPerWorker || "1"}</div>
+                  {(formState.rampUp || formState.rampDown) && (
+                    <>
+                      <div className="text-muted-foreground">Ramp</div>
+                      <div>
+                        {formState.rampUp && `↑${formState.rampUp}`}
+                        {formState.rampUp && formState.rampDown && " "}
+                        {formState.rampDown && `↓${formState.rampDown}`}
+                      </div>
+                    </>
+                  )}
+                  {formState.budgetLimit && (
+                    <>
+                      <div className="text-muted-foreground">Budget</div>
+                      <div>${formState.budgetLimit} USD</div>
+                    </>
+                  )}
+                  {formState.thresholds.length > 0 && (
+                    <>
+                      <div className="text-muted-foreground">Thresholds</div>
+                      <div>{formState.thresholds.length} SLO gate{formState.thresholds.length === 1 ? "" : "s"}</div>
+                    </>
+                  )}
+                </>
+              )}
 
               {(activeGroupNames.length > 0 || activeMappingGroups.length > 0) && (
                 <>
