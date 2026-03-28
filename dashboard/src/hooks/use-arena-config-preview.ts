@@ -15,6 +15,8 @@ export interface ConfigProviderRef {
 }
 
 export interface ArenaConfigPreview {
+  /** Scenario IDs derived from the arena config scenario file entries */
+  scenarioIds: string[];
   /** Number of scenarios declared in the arena config */
   scenarioCount: number;
   /** Number of providers declared in the arena config */
@@ -113,6 +115,7 @@ export function useArenaConfigPreview(
   const workspace = currentWorkspace?.name;
 
   const emptyState: ArenaConfigPreview = {
+    scenarioIds: [],
     scenarioCount: 0,
     configProviderCount: 0,
     requiredGroups: [],
@@ -149,12 +152,22 @@ export function useArenaConfigPreview(
 
       const scenarios = parsed?.spec?.scenarios ?? [];
       const providers = parsed?.spec?.providers ?? [];
-      const scenarioCount = scenarios.filter((s) => s?.file || s).length;
+      const validScenarios = scenarios.filter((s) => s?.file || s);
+      const scenarioCount = validScenarios.length;
+      const scenarioIds = validScenarios
+        .map((s) => {
+          if (!s?.file) return "";
+          // Derive ID from filename: "scenarios/simple-qa.scenario.yaml" → "simple-qa"
+          const base = s.file.split("/").pop() || s.file;
+          return base.replace(/\.scenario\.yaml$/, "").replace(/\.yaml$/, "");
+        })
+        .filter(Boolean);
       const configProviderCount = providers.filter((p) => p?.file || p?.name || p).length;
       const requiredGroups = extractRequiredGroups(parsed);
       const providerRefs = extractProviderRefs(parsed);
 
       setState({
+        scenarioIds,
         scenarioCount,
         configProviderCount,
         requiredGroups,

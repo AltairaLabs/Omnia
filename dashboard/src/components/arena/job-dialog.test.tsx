@@ -352,9 +352,9 @@ describe("JobDialog", () => {
         </TestWrapper>
       );
 
-      // Job wizard shows name field but no type selector
+      // Job wizard shows name field and job type selector
       expect(screen.getByText("Job Name")).toBeInTheDocument();
-      expect(screen.queryByText("Job Type")).not.toBeInTheDocument();
+      expect(screen.getByText("Job Type")).toBeInTheDocument();
     });
   });
 

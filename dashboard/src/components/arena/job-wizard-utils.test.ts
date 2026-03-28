@@ -20,14 +20,23 @@ import {
 function makeForm(overrides: Partial<JobWizardFormState> = {}): JobWizardFormState {
   return {
     name: "test-job",
+    jobType: "evaluation",
     sourceRef: "my-source",
     rootPath: "",
     arenaFileName: "config.arena.yaml",
+    scenarioInclude: [],
     providerGroups: {},
     providerMappings: {},
     selectedToolRegistries: [],
     workers: "1",
     verbose: false,
+    trials: "",
+    concurrency: "",
+    vusPerWorker: "",
+    rampUp: "",
+    rampDown: "",
+    budgetLimit: "",
+    thresholds: [],
     ...overrides,
   };
 }
@@ -346,5 +355,138 @@ describe("getInitialFormState", () => {
   it("uses default name", () => {
     const state = getInitialFormState(undefined, "swift-falcon");
     expect(state.name).toBe("swift-falcon");
+  });
+
+  it("initializes load test fields", () => {
+    const state = getInitialFormState();
+    expect(state.jobType).toBe("evaluation");
+    expect(state.trials).toBe("");
+    expect(state.concurrency).toBe("");
+    expect(state.thresholds).toEqual([]);
+    expect(state.scenarioInclude).toEqual([]);
+  });
+});
+
+// =============================================================================
+// buildSpec — load test
+// =============================================================================
+
+describe("buildSpec load test", () => {
+  it("builds loadtest spec with all fields", () => {
+    const spec = buildSpec(makeForm({
+      jobType: "loadtest",
+      trials: "100",
+      concurrency: "20",
+      vusPerWorker: "5",
+      rampUp: "2m",
+      rampDown: "30s",
+      budgetLimit: "50.00",
+      thresholds: [
+        { metric: "latency_p95", operator: "<", value: "3s" },
+        { metric: "error_rate", operator: "<", value: "0.05" },
+      ],
+    }));
+
+    expect(spec.type).toBe("loadtest");
+    expect(spec.trials).toBe(100);
+    expect(spec.loadTest).toBeDefined();
+    expect(spec.loadTest!.concurrency).toBe(20);
+    expect(spec.loadTest!.vusPerWorker).toBe(5);
+    expect(spec.loadTest!.ramp).toEqual({ up: "2m", down: "30s" });
+    expect(spec.loadTest!.budgetLimit).toBe("50.00");
+    expect(spec.loadTest!.budgetCurrency).toBe("USD");
+    expect(spec.loadTest!.thresholds).toHaveLength(2);
+    expect(spec.evaluation).toBeUndefined();
+  });
+
+  it("builds loadtest spec with minimal fields", () => {
+    const spec = buildSpec(makeForm({ jobType: "loadtest" }));
+
+    expect(spec.type).toBe("loadtest");
+    expect(spec.trials).toBeUndefined();
+    expect(spec.loadTest!.concurrency).toBe(1);
+    expect(spec.loadTest!.vusPerWorker).toBe(1);
+    expect(spec.loadTest!.ramp).toBeUndefined();
+    expect(spec.loadTest!.budgetLimit).toBeUndefined();
+    expect(spec.loadTest!.thresholds).toBeUndefined();
+  });
+
+  it("builds evaluation spec by default", () => {
+    const spec = buildSpec(makeForm());
+    expect(spec.type).toBe("evaluation");
+    expect(spec.evaluation).toBeDefined();
+    expect(spec.loadTest).toBeUndefined();
+  });
+
+  it("includes scenario filter when set", () => {
+    const spec = buildSpec(makeForm({
+      scenarioInclude: ["simple-qa", "billing"],
+    }));
+    expect(spec.scenarios).toEqual({ include: ["simple-qa", "billing"] });
+  });
+
+  it("omits scenario filter when empty", () => {
+    const spec = buildSpec(makeForm({ scenarioInclude: [] }));
+    expect(spec.scenarios).toBeUndefined();
+  });
+
+  it("skips incomplete thresholds", () => {
+    const spec = buildSpec(makeForm({
+      jobType: "loadtest",
+      thresholds: [
+        { metric: "latency_p95", operator: "<", value: "3s" },
+        { metric: "", operator: "", value: "" },
+      ],
+    }));
+    expect(spec.loadTest!.thresholds).toHaveLength(1);
+  });
+});
+
+// =============================================================================
+// validateForm — load test
+// =============================================================================
+
+describe("validateForm load test", () => {
+  it("accepts valid load test form", () => {
+    const result = validateForm(
+      makeForm({ jobType: "loadtest", concurrency: "10", vusPerWorker: "5" }),
+      0, []
+    );
+    expect(result).toBeNull();
+  });
+
+  it("rejects invalid ramp up duration", () => {
+    const result = validateForm(
+      makeForm({ jobType: "loadtest", rampUp: "abc" }),
+      0, []
+    );
+    expect(result).toContain("Ramp up");
+  });
+
+  it("rejects invalid budget limit", () => {
+    const result = validateForm(
+      makeForm({ jobType: "loadtest", budgetLimit: "-5" }),
+      0, []
+    );
+    expect(result).toContain("Budget");
+  });
+
+  it("rejects partial threshold", () => {
+    const result = validateForm(
+      makeForm({
+        jobType: "loadtest",
+        thresholds: [{ metric: "latency_p95", operator: "", value: "" }],
+      }),
+      0, []
+    );
+    expect(result).toContain("threshold");
+  });
+
+  it("skips load test validation for evaluation jobs", () => {
+    const result = validateForm(
+      makeForm({ jobType: "evaluation", rampUp: "invalid" }),
+      0, []
+    );
+    expect(result).toBeNull();
   });
 });

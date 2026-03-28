@@ -43,6 +43,7 @@ vi.mock("@/hooks/use-arena-source-content", () => ({
 
 // Mock useArenaConfigPreview — default returns empty, tests can override via mockConfigPreview
 const mockConfigPreview = {
+  scenarioIds: [] as string[],
   scenarioCount: 0,
   configProviderCount: 0,
   requiredGroups: [] as string[],
@@ -214,6 +215,158 @@ describe("JobWizard", () => {
     it("renders the basic info step by default", () => {
       renderWizard();
       expect(screen.getByText("Job Name")).toBeInTheDocument();
+    });
+
+    it("renders job type selector with Evaluation selected by default", () => {
+      renderWizard();
+      expect(screen.getByText("Job Type")).toBeInTheDocument();
+      expect(screen.getByText("Evaluation")).toBeInTheDocument();
+      expect(screen.getByText("Load Test")).toBeInTheDocument();
+    });
+
+    it("shows load test description when Load Test is selected", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+      await user.click(screen.getByText("Load Test"));
+      expect(screen.getByText(/Stress-test providers/)).toBeInTheDocument();
+    });
+
+    it("shows scenario checkboxes on source step when config has multiple scenarios", async () => {
+      const user = userEvent.setup();
+      mockConfigPreview.loaded = true;
+      mockConfigPreview.scenarioCount = 3;
+      mockConfigPreview.scenarioIds = ["billing", "auth", "support"];
+
+      renderWizard();
+
+      // Navigate to source step
+      await user.click(screen.getByText("Next"));
+
+      // Scenario checkboxes should appear
+      expect(screen.getByText("Scenarios")).toBeInTheDocument();
+      expect(screen.getByText("billing")).toBeInTheDocument();
+      expect(screen.getByText("auth")).toBeInTheDocument();
+      expect(screen.getByText("support")).toBeInTheDocument();
+      expect(screen.getByText(/All 3 scenarios will run/)).toBeInTheDocument();
+    });
+
+    it("renders load test fields on options step", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+
+      // Select Load Test type
+      await user.click(screen.getByText("Load Test"));
+
+      // Navigate to step 4
+      await navigateToStep(user, 4);
+
+      // Load test fields should be visible
+      expect(screen.getByText("Load Profile")).toBeInTheDocument();
+      expect(screen.getByLabelText("Trials per scenario")).toBeInTheDocument();
+      expect(screen.getByLabelText("Concurrency")).toBeInTheDocument();
+      expect(screen.getByLabelText("VUs per Worker")).toBeInTheDocument();
+      expect(screen.getByLabelText("Ramp Up")).toBeInTheDocument();
+      expect(screen.getByLabelText("Ramp Down")).toBeInTheDocument();
+      expect(screen.getByLabelText(/Budget Limit/)).toBeInTheDocument();
+      expect(screen.getByText("SLO Thresholds")).toBeInTheDocument();
+    });
+
+    it("does not show load test fields for evaluation type on options step", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+      await navigateToStep(user, 4);
+
+      expect(screen.queryByText("Load Profile")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Concurrency")).not.toBeInTheDocument();
+    });
+
+    it("can add and remove threshold rows", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+      await user.click(screen.getByText("Load Test"));
+      await navigateToStep(user, 4);
+
+      // Add a threshold
+      await user.click(screen.getByRole("button", { name: /add/i }));
+      expect(screen.getAllByPlaceholderText("Value")).toHaveLength(1);
+
+      // Add another
+      await user.click(screen.getByRole("button", { name: /add/i }));
+      expect(screen.getAllByPlaceholderText("Value")).toHaveLength(2);
+    });
+
+    it("shows load test review with trials, concurrency, ramp, and budget", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+      await user.click(screen.getByText("Load Test"));
+      await navigateToStep(user, 4);
+
+      // Fill in all load test fields
+      await user.type(screen.getByLabelText("Trials per scenario"), "100");
+      await user.type(screen.getByLabelText("Concurrency"), "20");
+      await user.type(screen.getByLabelText("VUs per Worker"), "5");
+      await user.type(screen.getByLabelText("Ramp Up"), "2m");
+      await user.type(screen.getByLabelText("Ramp Down"), "30s");
+      await user.type(screen.getByLabelText(/Budget Limit/), "50.00");
+
+      // Add a threshold
+      await user.click(screen.getByRole("button", { name: /add/i }));
+
+      // Review section shows load test details
+      expect(screen.getByText("Review Configuration")).toBeInTheDocument();
+      expect(screen.getByText("Trials")).toBeInTheDocument();
+      expect(screen.getByText("↑2m ↓30s")).toBeInTheDocument();
+      expect(screen.getByText("$50.00 USD")).toBeInTheDocument();
+      expect(screen.getByText("1 SLO gate")).toBeInTheDocument();
+    });
+
+    it("shows evaluation review without load test fields", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+      await navigateToStep(user, 4);
+
+      expect(screen.getByText("Review Configuration")).toBeInTheDocument();
+      expect(screen.getByText("Evaluation")).toBeInTheDocument();
+      expect(screen.queryByText("Trials")).not.toBeInTheDocument();
+      expect(screen.queryByText("Concurrency")).not.toBeInTheDocument();
+    });
+
+    it("shows scenario filter in review when scenarios selected", async () => {
+      const user = userEvent.setup();
+      mockConfigPreview.loaded = true;
+      mockConfigPreview.scenarioCount = 3;
+      mockConfigPreview.scenarioIds = ["billing", "auth", "support"];
+      renderWizard();
+
+      // Navigate to source step and uncheck one scenario
+      await navigateToStep(user, 1);
+      const authCheckbox = screen.getByText("auth").closest("label")?.querySelector("button");
+      if (authCheckbox) await user.click(authCheckbox);
+
+      // Navigate to options step
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+      // Review should show selected scenarios
+      expect(screen.getByText("billing")).toBeInTheDocument();
+      expect(screen.getByText("support")).toBeInTheDocument();
+    });
+
+    it("switches job type description on toggle", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+
+      // Default: evaluation description
+      expect(screen.getByText(/Run scenarios and evaluate/)).toBeInTheDocument();
+
+      // Switch to load test
+      await user.click(screen.getByText("Load Test"));
+      expect(screen.getByText(/Stress-test providers/)).toBeInTheDocument();
+
+      // Switch back
+      await user.click(screen.getByText("Evaluation"));
+      expect(screen.getByText(/Run scenarios and evaluate/)).toBeInTheDocument();
     });
 
     it("pre-populates a default name", () => {
