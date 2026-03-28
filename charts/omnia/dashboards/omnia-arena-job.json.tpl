@@ -40,14 +40,14 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "limit": 100,
-          "query": "$trace_id",
+          "limit": 200,
+          "query": "{ span.arena.job = \"$job_name\" }",
           "queryType": "traceql",
           "refId": "A",
           "tableType": "traces"
         }
       ],
-      "title": "Job Traces",
+      "title": "Work Item Traces",
       "type": "traces"
     }
     {{- end }},
@@ -278,8 +278,8 @@
       {
         "current": {},
         "hide": 2,
-        "label": "Trace ID",
-        "name": "trace_id",
+        "label": "Scenario",
+        "name": "scenario",
         "options": [],
         "query": "",
         "skipUrlSync": false,

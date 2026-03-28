@@ -135,30 +135,6 @@ spec:
                           Format: duration string (e.g., "2m", "30s").
                         type: string
                     type: object
-                  rateLimits:
-                    description: |-
-                      rateLimits configures per-provider concurrency limits.
-                      Prevents overwhelming a single provider even when global concurrency allows more.
-                    items:
-                      description: ProviderRateLimit sets a concurrency ceiling for
-                        a specific provider.
-                      properties:
-                        maxConcurrency:
-                          description: maxConcurrency is the maximum in-flight work
-                            items for this provider.
-                          format: int32
-                          minimum: 1
-                          type: integer
-                        provider:
-                          description: provider is the name of the Provider or AgentRuntime
-                            CRD.
-                          minLength: 1
-                          type: string
-                      required:
-                      - maxConcurrency
-                      - provider
-                      type: object
-                    type: array
                   thresholds:
                     description: |-
                       thresholds define SLO targets evaluated after the load test completes.

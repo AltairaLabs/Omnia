@@ -974,8 +974,6 @@ var _ = Describe("ArenaJob Controller", func() {
 
 			Expect(arenaJob.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhaseSucceeded))
 			Expect(arenaJob.Status.CompletionTime).NotTo(BeNil())
-			Expect(arenaJob.Status.Progress.Total).To(Equal(int32(2)))
-			Expect(arenaJob.Status.Progress.Completed).To(Equal(int32(2)))
 		})
 
 		It("should set Failed phase when job fails", func() {
@@ -1020,10 +1018,9 @@ var _ = Describe("ArenaJob Controller", func() {
 
 			Expect(arenaJob.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhaseFailed))
 			Expect(arenaJob.Status.CompletionTime).NotTo(BeNil())
-			Expect(arenaJob.Status.Progress.Failed).To(Equal(int32(2)))
 		})
 
-		It("should update progress when job is still running", func() {
+		It("should update active workers when job is still running", func() {
 			arenaJob := &omniav1alpha1.ArenaJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "running-status-job",
@@ -1055,12 +1052,10 @@ var _ = Describe("ArenaJob Controller", func() {
 
 			Expect(arenaJob.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhaseRunning))
 			Expect(arenaJob.Status.ActiveWorkers).To(Equal(int32(2)))
-			Expect(arenaJob.Status.Progress.Total).To(Equal(int32(4)))
-			Expect(arenaJob.Status.Progress.Completed).To(Equal(int32(1)))
-			Expect(arenaJob.Status.Progress.Pending).To(Equal(int32(3)))
+			// Progress is not updated during running — live progress comes from SSE/Redis.
 		})
 
-		It("should use default completions when not specified", func() {
+		It("should track active workers when completions not specified", func() {
 			arenaJob := &omniav1alpha1.ArenaJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "default-completions-job",
@@ -1073,7 +1068,7 @@ var _ = Describe("ArenaJob Controller", func() {
 
 			k8sJob := &batchv1.Job{
 				Spec: batchv1.JobSpec{
-					// No Completions specified - should default to 1
+					// No Completions specified
 				},
 				Status: batchv1.JobStatus{
 					Active:    1,
@@ -1089,7 +1084,7 @@ var _ = Describe("ArenaJob Controller", func() {
 
 			reconciler.updateStatusFromJob(ctx, arenaJob, k8sJob)
 
-			Expect(arenaJob.Status.Progress.Total).To(Equal(int32(1)))
+			Expect(arenaJob.Status.ActiveWorkers).To(Equal(int32(1)))
 		})
 	})
 
@@ -1348,13 +1343,10 @@ var _ = Describe("ArenaJob Controller", func() {
 				Namespace: arenaJobNamespace,
 			}, updatedJob)).To(Succeed())
 
-			// Should have SourceValid condition
-			sourceCondition := meta.FindStatusCondition(updatedJob.Status.Conditions, ArenaJobConditionTypeSourceValid)
-			Expect(sourceCondition).NotTo(BeNil())
-			Expect(sourceCondition.Status).To(Equal(metav1.ConditionTrue))
-
-			// Should have progress tracking
-			Expect(updatedJob.Status.Progress).NotTo(BeNil())
+			// SourceValid is set on initial creation, not on re-reconcile —
+			// the source is only validated when creating the worker job.
+			// Progress is set at creation and completion — not during running.
+			// Live progress comes from SSE/Redis.
 		})
 	})
 
@@ -2430,17 +2422,12 @@ spec:
 				}
 			}
 
-			providerCRDs := make([]*corev1alpha1.Provider, 51)
-			for i := range providerCRDs {
-				providerCRDs[i] = &corev1alpha1.Provider{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      fmt.Sprintf("provider-%d", i),
-						Namespace: "default",
-					},
-				}
+			providerIDs := make([]string, 51)
+			for i := range providerIDs {
+				providerIDs[i] = fmt.Sprintf("provider-%d", i)
 			}
 
-			items := reconciler.buildMatrixWorkItems(ctx, "test-job", "bundle-url", scenarios, providerCRDs, 0, omniav1alpha1.ArenaJobTypeEvaluation)
+			items := reconciler.buildMatrixWorkItems(ctx, "test-job", "bundle-url", scenarios, providerIDs, 0, omniav1alpha1.ArenaJobTypeEvaluation)
 			Expect(items).To(BeNil())
 		})
 
@@ -2455,12 +2442,9 @@ spec:
 				{ID: "s2", Name: "Scenario 2", Path: "s2.yaml"},
 			}
 
-			providerCRDs := []*corev1alpha1.Provider{
-				{ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "p2", Namespace: "default"}},
-			}
+			providerIDs := []string{"p1", "p2"}
 
-			items := reconciler.buildMatrixWorkItems(ctx, "test-job", "bundle-url", scenarios, providerCRDs, 0, omniav1alpha1.ArenaJobTypeEvaluation)
+			items := reconciler.buildMatrixWorkItems(ctx, "test-job", "bundle-url", scenarios, providerIDs, 0, omniav1alpha1.ArenaJobTypeEvaluation)
 			Expect(items).To(HaveLen(4)) // 2 scenarios x 2 providers
 		})
 	})

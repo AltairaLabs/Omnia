@@ -19,6 +19,8 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
+
+	"github.com/altairalabs/omnia/internal/facade"
 )
 
 const (
@@ -226,35 +228,88 @@ func (p *Provider) PredictStream(
 	return ch, nil
 }
 
-// streamResponse reads WebSocket messages and sends them as stream chunks.
-// It is a method on Provider so it can record TTFT like Predict does.
+// streamResponse reads WebSocket messages and emits StreamChunks as they arrive,
+// enabling real-time streaming through the pipeline. This keeps the pipeline active
+// on each chunk, preventing ExecutionTimeout from firing during slow responses.
 func (p *Provider) streamResponse(
 	ctx context.Context, entry *connEntry, ch chan<- providers.StreamChunk, turnStart time.Time,
 ) {
 	defer entry.mu.Unlock()
 	defer close(ch)
 
-	turnResult, err := collectTurnResponse(ctx, entry.conn, entry.sessionID, turnStart)
-	if err != nil {
-		finishReason := "error"
-		ch <- providers.StreamChunk{
-			Error:        err,
-			FinishReason: &finishReason,
+	var accumulated strings.Builder
+	firstMessage := true
+
+	for {
+		msg, err := readServerMessage(ctx, entry.conn)
+		if err != nil {
+			finishReason := "error"
+			ch <- providers.StreamChunk{
+				Error:        err,
+				FinishReason: &finishReason,
+			}
+			return
 		}
-		return
-	}
 
-	p.mu.Lock()
-	p.lastTTFT = turnResult.TTFT
-	p.mu.Unlock()
+		if firstMessage {
+			p.mu.Lock()
+			p.lastTTFT = time.Since(turnStart)
+			p.mu.Unlock()
+			firstMessage = false
+		}
 
-	resp := buildPredictionResponse(turnResult.Messages, 0)
-	finishReason := "stop"
-	ch <- providers.StreamChunk{
-		Content:      resp.Content,
-		Delta:        resp.Content,
-		ToolCalls:    resp.ToolCalls,
-		FinishReason: &finishReason,
+		switch msg.Type {
+		case facade.MessageTypeChunk:
+			delta := msg.GetTextContent()
+			accumulated.WriteString(delta)
+			ch <- providers.StreamChunk{
+				Delta:   delta,
+				Content: accumulated.String(),
+			}
+
+		case facade.MessageTypeDone:
+			delta := msg.GetTextContent()
+			if delta != "" {
+				accumulated.WriteString(delta)
+			}
+			finishReason := "stop"
+			ch <- providers.StreamChunk{
+				Delta:        delta,
+				Content:      accumulated.String(),
+				FinishReason: &finishReason,
+			}
+			return
+
+		case facade.MessageTypeToolCall:
+			if msg.ToolCall != nil {
+				ch <- providers.StreamChunk{
+					Content: accumulated.String(),
+					ToolCalls: []types.MessageToolCall{{
+						ID:   msg.ToolCall.ID,
+						Name: msg.ToolCall.Name,
+					}},
+				}
+				if err := rejectToolCall(entry.conn, entry.sessionID, msg.ToolCall.ID); err != nil {
+					finishReason := "error"
+					ch <- providers.StreamChunk{
+						Error:        err,
+						FinishReason: &finishReason,
+					}
+					return
+				}
+			}
+
+		case facade.MessageTypeToolResult:
+			// Tool results are internal bookkeeping; no chunk emitted.
+
+		case facade.MessageTypeError:
+			finishReason := "error"
+			ch <- providers.StreamChunk{
+				Error:        agentError(msg),
+				FinishReason: &finishReason,
+			}
+			return
+		}
 	}
 }
 

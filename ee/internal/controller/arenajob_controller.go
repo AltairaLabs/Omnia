@@ -212,16 +212,6 @@ func (r *ArenaJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	// Validate the referenced ArenaSource
-	source, err := r.validateSource(ctx, arenaJob)
-	if err != nil {
-		log.Error(err, "failed to validate ArenaSource")
-		r.handleValidationError(ctx, arenaJob, ArenaJobConditionTypeSourceValid, err)
-		return ctrl.Result{}, nil
-	}
-	SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeSourceValid, metav1.ConditionTrue,
-		"SourceValid", fmt.Sprintf("ArenaSource %s is valid and ready", arenaJob.Spec.SourceRef.Name))
-
 	// Check if we already have a K8s Job
 	existingJob, err := r.getExistingJob(ctx, arenaJob)
 	if err != nil {
@@ -230,6 +220,18 @@ func (r *ArenaJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if existingJob == nil {
+		// Validate the referenced ArenaSource only when creating a new job.
+		// Once workers are running, the content is pinned to a specific version
+		// via the volume subPath — re-validating would race with periodic refetches.
+		source, err := r.validateSource(ctx, arenaJob)
+		if err != nil {
+			log.Error(err, "failed to validate ArenaSource")
+			r.handleValidationError(ctx, arenaJob, ArenaJobConditionTypeSourceValid, err)
+			return ctrl.Result{}, nil
+		}
+		SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeSourceValid, metav1.ConditionTrue,
+			"SourceValid", fmt.Sprintf("ArenaSource %s is valid and ready", arenaJob.Spec.SourceRef.Name))
+
 		// Create the K8s Job
 		if err := r.createWorkerJob(ctx, arenaJob, source); err != nil {
 			log.Error(err, "failed to create worker job")
@@ -281,14 +283,11 @@ func (r *ArenaJobReconciler) validateSource(ctx context.Context, arenaJob *omnia
 		return nil, fmt.Errorf("failed to get arenaSource %s: %w", arenaJob.Spec.SourceRef.Name, err)
 	}
 
-	// Check if source is ready
-	if source.Status.Phase != omniav1alpha1.ArenaSourcePhaseReady {
-		return nil, fmt.Errorf("arenaSource %s is not ready (phase: %s)", arenaJob.Spec.SourceRef.Name, source.Status.Phase)
-	}
-
-	// Verify source has an artifact
+	// Source must have a fetched artifact. We don't require phase=Ready because
+	// the source may be mid-refetch (phase=Fetching) while a valid artifact
+	// from the previous fetch still exists on disk.
 	if source.Status.Artifact == nil {
-		return nil, fmt.Errorf("arenaSource %s has no artifact", arenaJob.Spec.SourceRef.Name)
+		return nil, fmt.Errorf("arenaSource %s has no artifact (phase: %s)", arenaJob.Spec.SourceRef.Name, source.Status.Phase)
 	}
 
 	return source, nil
@@ -522,49 +521,6 @@ func getProviderIDsFromGroups(groups map[string]*resolvedProviderGroup) []string
 	}
 
 	return ids
-}
-
-// filterArrayModeProviders returns only providers that belong to array-mode groups.
-// Map-mode groups (judges, self-play) don't participate in the work item matrix.
-// When resolvedGroups is nil or has no map-mode groups, all providers are returned.
-func filterArrayModeProviders(
-	allProviders []*corev1alpha1.Provider,
-	resolvedGroups map[string]*resolvedProviderGroup,
-) []*corev1alpha1.Provider {
-	if len(resolvedGroups) == 0 {
-		return allProviders
-	}
-
-	// Check if any group is map-mode; if not, return all providers unchanged
-	hasMapMode := false
-	for _, grp := range resolvedGroups {
-		if grp.mapMode {
-			hasMapMode = true
-			break
-		}
-	}
-	if !hasMapMode {
-		return allProviders
-	}
-
-	// Build set of provider names from array-mode groups only
-	arrayModeNames := make(map[string]bool)
-	for _, grp := range resolvedGroups {
-		if grp.mapMode {
-			continue
-		}
-		for _, p := range grp.providers {
-			arrayModeNames[p.Name] = true
-		}
-	}
-
-	var filtered []*corev1alpha1.Provider
-	for _, p := range allProviders {
-		if arrayModeNames[p.Name] {
-			filtered = append(filtered, p)
-		}
-	}
-	return filtered
 }
 
 // buildProviderEnvVarsFromCRDs builds environment variables for Provider CRDs.
@@ -1034,21 +990,21 @@ func (r *ArenaJobReconciler) listScenarios(ctx context.Context, arenaJob *omniav
 }
 
 // buildMatrixWorkItems creates scenario × provider × trial work items using the partitioner.
+// providerIDs are the array-mode provider IDs (from both providerRef and agentRef entries).
 // Returns nil if partitioning fails or inputs are empty.
 func (r *ArenaJobReconciler) buildMatrixWorkItems(
 	ctx context.Context, jobName, bundleURL string,
 	scenarios []partitioner.Scenario,
-	providerCRDs []*corev1alpha1.Provider,
+	providerIDs []string,
 	jobTrials int, jobType omniav1alpha1.ArenaJobType,
 ) []queue.WorkItem {
 	log := logf.FromContext(ctx)
 
-	partProviders := make([]partitioner.Provider, len(providerCRDs))
-	for i, p := range providerCRDs {
+	partProviders := make([]partitioner.Provider, len(providerIDs))
+	for i, id := range providerIDs {
 		partProviders[i] = partitioner.Provider{
-			ID:        p.Name,
-			Name:      p.Name,
-			Namespace: p.Namespace,
+			ID:   id,
+			Name: id,
 		}
 	}
 
@@ -1178,11 +1134,16 @@ func (r *ArenaJobReconciler) enqueueWorkItems(
 	}
 
 	// Build work items: unified scenario × provider matrix
-	// Filter to only array-mode providers — map-mode groups (judges, self-play)
-	// are 1:1 config references and don't participate in the work item matrix.
-	providerIDs := getProviderIDsFromGroups(resolvedGroups)
-	matrixProviders := filterArrayModeProviders(providerCRDs, resolvedGroups)
-	log.V(1).Info("building work items", "providerIDs", providerIDs, "matrixProviders", len(matrixProviders))
+	// getProviderIDsFromGroups returns array-mode provider IDs only (both providerRef
+	// and agentRef). Map-mode groups (judges, self-play) don't participate in the matrix.
+	// When resolvedGroups is nil (no CRD-based providers), fall back to providerCRD names.
+	matrixProviderIDs := getProviderIDsFromGroups(resolvedGroups)
+	if len(matrixProviderIDs) == 0 && len(providerCRDs) > 0 {
+		for _, p := range providerCRDs {
+			matrixProviderIDs = append(matrixProviderIDs, p.Name)
+		}
+	}
+	log.V(1).Info("building work items", "matrixProviderIDs", matrixProviderIDs)
 
 	// Resolve job-level trials override (nil pointer = 0 = use per-scenario defaults)
 	jobTrials := 0
@@ -1191,14 +1152,14 @@ func (r *ArenaJobReconciler) enqueueWorkItems(
 	}
 
 	var items []queue.WorkItem
-	if len(scenarios) > 0 && len(matrixProviders) > 0 {
-		items = r.buildMatrixWorkItems(ctx, arenaJob.Name, bundleURL, scenarios, matrixProviders, jobTrials, arenaJob.Spec.Type)
+	if len(scenarios) > 0 && len(matrixProviderIDs) > 0 {
+		items = r.buildMatrixWorkItems(ctx, arenaJob.Name, bundleURL, scenarios, matrixProviderIDs, jobTrials, arenaJob.Spec.Type)
 	}
 	if len(items) == 0 {
 		if jobTrials > 0 {
 			log.Info("trial configuration ignored in fallback mode", "trials", jobTrials)
 		}
-		items = buildFallbackWorkItems(arenaJob.Name, bundleURL, providerIDs)
+		items = buildFallbackWorkItems(arenaJob.Name, bundleURL, matrixProviderIDs)
 	}
 
 	log.Info("enqueueing work items", "count", len(items))
@@ -1215,22 +1176,9 @@ func (r *ArenaJobReconciler) enqueueWorkItems(
 func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, job *batchv1.Job) {
 	log := logf.FromContext(ctx)
 
-	// Update active workers count
+	// Only update ActiveWorkers when it changes to avoid unnecessary CRD writes.
+	// Live work-item progress is served via SSE from Redis stats.
 	arenaJob.Status.ActiveWorkers = job.Status.Active
-
-	// Update progress
-	if arenaJob.Status.Progress == nil {
-		arenaJob.Status.Progress = &omniav1alpha1.JobProgress{}
-	}
-
-	completions := int32(1)
-	if job.Spec.Completions != nil {
-		completions = *job.Spec.Completions
-	}
-	arenaJob.Status.Progress.Total = completions
-	arenaJob.Status.Progress.Completed = job.Status.Succeeded
-	arenaJob.Status.Progress.Failed = job.Status.Failed
-	arenaJob.Status.Progress.Pending = completions - job.Status.Succeeded - job.Status.Failed
 
 	// Check job conditions
 	for _, condition := range job.Status.Conditions {
@@ -1261,6 +1209,21 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 					}
 				} else {
 					log.V(1).Info("aggregator not available, skipping result aggregation")
+				}
+
+				// Set final progress counts from aggregation or queue stats
+				if arenaJob.Status.Progress != nil {
+					if hasAggregation {
+						arenaJob.Status.Progress.Completed = int32(passedItems)
+						arenaJob.Status.Progress.Failed = int32(failedItems)
+						arenaJob.Status.Progress.Pending = 0
+					} else if r.Queue != nil {
+						if stats, err := r.Queue.GetStats(ctx, arenaJob.Name); err == nil && stats != nil {
+							arenaJob.Status.Progress.Completed = int32(stats.Passed)
+							arenaJob.Status.Progress.Failed = int32(stats.Failed)
+							arenaJob.Status.Progress.Pending = 0
+						}
+					}
 				}
 
 				// Evaluate SLO thresholds for load tests
@@ -1332,11 +1295,9 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 		r.checkBudgetLimit(ctx, arenaJob)
 	}
 
-	// Update progress condition (unless budget breach already set phase to Failed)
-	if arenaJob.Status.Phase == omniav1alpha1.ArenaJobPhaseRunning {
-		SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeProgressing, metav1.ConditionTrue,
-			"JobRunning", fmt.Sprintf("Job running: %d/%d completed", job.Status.Succeeded, completions))
-	}
+	// The Progressing condition is set at creation ("Job is running") and
+	// updated only on completion or budget breach. Live progress comes from
+	// SSE/Redis — we don't rewrite the condition message on every reconcile.
 }
 
 // evaluateLoadTestThresholds checks SLO thresholds for load test jobs.

@@ -171,9 +171,9 @@ func Filter(scenarios []Scenario, include, exclude []string) ([]Scenario, error)
 		result = make([]Scenario, len(scenarios))
 		copy(result, scenarios)
 	} else {
-		// Apply include patterns
+		// Apply include patterns — match against path, filename, or scenario ID
 		for _, scenario := range scenarios {
-			if matchesAny(scenario.Path, include) {
+			if scenarioMatches(scenario, include) {
 				result = append(result, scenario)
 			}
 		}
@@ -183,7 +183,7 @@ func Filter(scenarios []Scenario, include, exclude []string) ([]Scenario, error)
 	if len(exclude) > 0 {
 		filtered := make([]Scenario, 0, len(result))
 		for _, scenario := range result {
-			if !matchesAny(scenario.Path, exclude) {
+			if !scenarioMatches(scenario, exclude) {
 				filtered = append(filtered, scenario)
 			}
 		}
@@ -193,16 +193,24 @@ func Filter(scenarios []Scenario, include, exclude []string) ([]Scenario, error)
 	return result, nil
 }
 
-// matchesAny returns true if the path matches any of the glob patterns.
-func matchesAny(path string, patterns []string) bool {
+// scenarioMatches returns true if the scenario matches any of the patterns.
+// Patterns are matched against the scenario ID, full path, and filename.
+func scenarioMatches(scenario Scenario, patterns []string) bool {
 	for _, pattern := range patterns {
-		matched, err := filepath.Match(pattern, path)
-		if err == nil && matched {
+		// Exact ID match (most common: "simple-qa")
+		if pattern == scenario.ID {
 			return true
 		}
-		// Also try matching against just the filename
-		matched, err = filepath.Match(pattern, filepath.Base(path))
-		if err == nil && matched {
+		// Glob against ID
+		if matched, err := filepath.Match(pattern, scenario.ID); err == nil && matched {
+			return true
+		}
+		// Glob against full path (e.g., "scenarios/simple-qa.scenario.yaml")
+		if matched, err := filepath.Match(pattern, scenario.Path); err == nil && matched {
+			return true
+		}
+		// Glob against filename only
+		if matched, err := filepath.Match(pattern, filepath.Base(scenario.Path)); err == nil && matched {
 			return true
 		}
 	}

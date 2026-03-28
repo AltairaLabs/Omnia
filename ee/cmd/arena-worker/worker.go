@@ -50,22 +50,20 @@ const (
 	statusFail = "fail"
 )
 
-// jobNameToTraceID derives a deterministic trace ID from a job name by hashing it.
-// This makes traces easy to look up in Tempo by job name without searching.
-func jobNameToTraceID(jobName string) trace.TraceID {
-	h := sha256.Sum256([]byte(jobName))
+// workItemToTraceID derives a deterministic trace ID from a job + item ID.
+// Each work item gets its own trace so load tests don't produce a single massive trace.
+func workItemToTraceID(jobName, itemID string) trace.TraceID {
+	h := sha256.Sum256([]byte(jobName + ":" + itemID))
 	var tid trace.TraceID
-	copy(tid[:], h[:16]) // trace ID is 128 bits = 16 bytes
+	copy(tid[:], h[:16])
 	return tid
 }
 
-// jobNameToSpanID derives a deterministic span ID from a job name.
-// Uses bytes 16–24 of the SHA-256 hash (the half not used for the trace ID).
-// A non-zero SpanID is required for SpanContext.IsValid() to return true.
-func jobNameToSpanID(jobName string) trace.SpanID {
-	h := sha256.Sum256([]byte(jobName))
+// workItemToSpanID derives a deterministic span ID from an item ID.
+func workItemToSpanID(itemID string) trace.SpanID {
+	h := sha256.Sum256([]byte(itemID))
 	var sid trace.SpanID
-	copy(sid[:], h[16:24]) // span ID is 64 bits = 8 bytes
+	copy(sid[:], h[16:24])
 	return sid
 }
 
@@ -237,25 +235,9 @@ func processWorkItems(
 ) error {
 	jobID := cfg.JobName
 
-	// Derive a deterministic trace ID from the job name so traces are easy
-	// to look up in Tempo without searching by span attribute.
-	traceID := jobNameToTraceID(jobID)
-	spanID := jobNameToSpanID(jobID)
-	remoteCtx := trace.NewSpanContext(trace.SpanContextConfig{
-		TraceID:    traceID,
-		SpanID:     spanID,
-		TraceFlags: trace.FlagsSampled,
-	})
-	ctx = trace.ContextWithRemoteSpanContext(ctx, remoteCtx)
-
-	// Root span for the entire worker lifecycle so all Redis/fleet operations
-	// are correlated under a common parent trace.
-	ctx, rootSpan := otel.Tracer("omnia-arena-worker").Start(ctx, "arena.worker",
-		trace.WithAttributes(
-			attribute.String("arena.job", jobID),
-		),
-	)
-	defer rootSpan.End()
+	// No job-level root span — each work item gets its own trace.
+	// This prevents massive traces for load tests with 100+ items.
+	// Traces are correlated back to the job via the arena.job attribute.
 
 	// Use VU pool for concurrent processing when configured.
 	if cfg.VUsPerWorker > 1 || cfg.Concurrency > 1 {
@@ -328,10 +310,20 @@ func executeAndReport(
 	q queue.WorkQueue, jobID string, item *queue.WorkItem,
 	bundlePath string, wm *WorkerMetrics,
 ) {
-	itemCtx, itemCancel := context.WithTimeout(ctx, maxItemTimeout)
+	// Each work item gets its own trace (not a child of a job-level root).
+	traceID := workItemToTraceID(jobID, item.ID)
+	spanID := workItemToSpanID(item.ID)
+	remoteCtx := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: trace.FlagsSampled,
+	})
+	itemCtx := trace.ContextWithRemoteSpanContext(context.Background(), remoteCtx)
+	itemCtx, itemCancel := context.WithTimeout(itemCtx, maxItemTimeout)
 	itemCtx, span := otel.Tracer("omnia-arena-worker").Start(itemCtx, "arena.work-item",
 		trace.WithAttributes(
 			attribute.String("arena.job", jobID),
+			attribute.String("arena.item.id", item.ID),
 			attribute.String("arena.scenario", item.ScenarioID),
 			attribute.String("arena.provider", item.ProviderID),
 		),
@@ -593,6 +585,7 @@ func executeWorkItem(
 				JobType:       cfg.JobType,
 				TrialIndex:    extractTrialIndex(item),
 			},
+			item.ID,
 		)
 		bus := events.NewEventBus()
 		bus.SubscribeAll(sessionMgr.OnEvent)

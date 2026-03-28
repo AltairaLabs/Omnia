@@ -293,4 +293,51 @@ describe("SourceExplorer", () => {
     fireEvent.click(screen.getByText("prompts"));
     expect(screen.queryByText("main.yaml")).not.toBeInTheDocument();
   });
+
+  it("scopes tree to rootPath when provided", () => {
+    const nestedTree: ArenaSourceContentNode[] = [
+      {
+        name: "load-testing",
+        path: "load-testing",
+        isDirectory: true,
+        children: [
+          { name: "config.arena.yaml", path: "load-testing/config.arena.yaml", isDirectory: false, size: 100 },
+          { name: "scenarios", path: "load-testing/scenarios", isDirectory: true, children: [] },
+        ],
+      },
+      { name: "other-dir", path: "other-dir", isDirectory: true, children: [] },
+    ];
+    mockContentResult.tree = nestedTree;
+    mockContentResult.fileCount = 1;
+
+    render(<SourceExplorer sourceName="test-source" rootPath="load-testing" />);
+
+    // Should show contents of load-testing, not the root
+    expect(screen.getByText("config.arena.yaml")).toBeInTheDocument();
+    expect(screen.getByText("scenarios")).toBeInTheDocument();
+    // Should not show sibling directories
+    expect(screen.queryByText("other-dir")).not.toBeInTheDocument();
+  });
+
+  it("falls back to full tree when rootPath not found", () => {
+    mockContentResult.tree = sampleTree;
+    mockContentResult.fileCount = 3;
+
+    render(<SourceExplorer sourceName="test-source" rootPath="nonexistent" />);
+
+    // Should show full tree as fallback
+    expect(screen.getByText("prompts")).toBeInTheDocument();
+    expect(screen.getByText("config.arena.yaml")).toBeInTheDocument();
+  });
+
+  it("shows rootPath label in header", () => {
+    mockContentResult.tree = sampleTree;
+    mockContentResult.fileCount = 3;
+
+    render(
+      <SourceExplorer sourceName="test-source" rootPath="load-testing" />
+    );
+
+    expect(screen.getByText("/load-testing")).toBeInTheDocument();
+  });
 });

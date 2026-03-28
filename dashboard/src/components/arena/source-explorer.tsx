@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { useArenaSourceContent } from "@/hooks/arena";
 import { useWorkspace } from "@/contexts/workspace-context";
@@ -26,6 +26,10 @@ import type { ArenaSourceContentNode } from "@/types/arena";
 
 interface SourceExplorerProps {
   readonly sourceName: string;
+  /** Root path to scope the explorer (e.g., "load-testing"). Omit for full source. */
+  readonly rootPath?: string;
+  /** Default file to open on mount (e.g., "config.arena.yaml"). */
+  readonly defaultFile?: string;
 }
 
 /** Infer Monaco language from file extension */
@@ -162,14 +166,40 @@ function ReadOnlyTreeNode({
  * Read-only file explorer for ArenaSource content.
  * Split-pane layout: file tree on left, Monaco viewer on right.
  */
-export function SourceExplorer({ sourceName }: SourceExplorerProps) {
+export function SourceExplorer({ sourceName, rootPath, defaultFile }: SourceExplorerProps) {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
   const { tree, fileCount, loading, error } = useArenaSourceContent(sourceName);
 
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  // Scope tree to rootPath if provided (e.g., "load-testing" shows only that subdirectory)
+  const scopedTree = useMemo(() => {
+    if (!rootPath || !tree.length) return tree;
+    const parts = rootPath.split("/").filter(Boolean);
+    let current = tree;
+    for (const part of parts) {
+      const found = current.find((n) => n.name === part && n.isDirectory);
+      if (!found?.children) return tree; // fallback to full tree if path not found
+      current = found.children;
+    }
+    return current;
+  }, [tree, rootPath]);
+
+  // Build initial expanded paths and default selection from defaultFile
+  const initialExpanded = useMemo(() => {
+    if (!defaultFile) return new Set<string>();
+    const fullPath = rootPath ? `${rootPath}/${defaultFile}` : defaultFile;
+    const parts = fullPath.split("/");
+    const paths = new Set<string>();
+    for (let i = 1; i < parts.length; i++) {
+      paths.add(parts.slice(0, i).join("/"));
+    }
+    return paths;
+  }, [rootPath, defaultFile]);
+
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(initialExpanded);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [selectedName, setSelectedName] = useState<string | null>(null);
+  const [hasAutoSelected, setHasAutoSelected] = useState(false);
   const [fileContent, setFileContent] = useState<string>("");
   const [fileLoading, setFileLoading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
@@ -217,6 +247,15 @@ export function SourceExplorer({ sourceName }: SourceExplorerProps) {
     [workspace, sourceName]
   );
 
+  // Auto-select default file once tree is loaded
+  useEffect(() => {
+    if (hasAutoSelected || !defaultFile || !scopedTree.length || !workspace) return;
+    const fullPath = rootPath ? `${rootPath}/${defaultFile}` : defaultFile;
+    const fileName = defaultFile.split("/").pop() || defaultFile;
+    setHasAutoSelected(true);
+    handleSelectFile(fullPath, fileName);
+  }, [hasAutoSelected, defaultFile, rootPath, scopedTree, workspace, handleSelectFile]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -256,11 +295,14 @@ export function SourceExplorer({ sourceName }: SourceExplorerProps) {
           <div className="p-2 border-b bg-muted/30">
             <h3 className="text-sm font-medium truncate">
               Files
+              {rootPath && (
+                <span className="text-xs text-muted-foreground ml-1">/{rootPath}</span>
+              )}
               <span className="text-xs text-muted-foreground ml-2">({fileCount})</span>
             </h3>
           </div>
           <div className="py-1">
-            {tree.map((node) => (
+            {scopedTree.map((node) => (
               <ReadOnlyTreeNode
                 key={node.path}
                 node={node}

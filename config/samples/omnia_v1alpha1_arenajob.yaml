@@ -14,8 +14,10 @@ spec:
           name: claude-sonnet
       - providerRef:
           name: gpt-4o
+    # Map mode: keys map 1:1 to config provider IDs (for judges, selfplay)
     judge:
-      - providerRef:
+      judge:
+        providerRef:
           name: claude-haiku
   evaluation:
     outputFormats:
@@ -39,8 +41,10 @@ spec:
     default:
       - agentRef:
           name: support-agent
+    # Map mode: "selfplay-mock" key matches the arena config's self_play.roles[].provider
     selfplay:
-      - providerRef:
+      selfplay-mock:
+        providerRef:
           name: gpt-4o-mini
   workers:
     replicas: 1
@@ -67,3 +71,75 @@ spec:
     cron: "0 2 * * *"
     timezone: "UTC"
     concurrencyPolicy: Forbid
+---
+# Sample ArenaJob - Load test against an agent with budget safety and SLO thresholds
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaJob
+metadata:
+  name: agent-loadtest
+  namespace: omnia-system
+spec:
+  sourceRef:
+    name: assertions-eval
+  type: loadtest
+  trials: 100
+  providers:
+    default:
+      - agentRef:
+          name: support-agent
+  loadTest:
+    concurrency: 20
+    vusPerWorker: 5
+    ramp:
+      up: "1m"
+      down: "30s"
+    budgetLimit: "50.00"
+    budgetCurrency: "USD"
+    thresholds:
+      - metric: latency_p95
+        operator: "<"
+        value: "5s"
+      - metric: error_rate
+        operator: "<"
+        value: "0.05"
+      - metric: total_cost
+        operator: "<"
+        value: "50.00"
+  workers:
+    replicas: 4
+  ttlSecondsAfterFinished: 3600
+---
+# Sample ArenaJob - Load test with self-play (agent vs synthetic user)
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaJob
+metadata:
+  name: selfplay-loadtest
+  namespace: omnia-system
+spec:
+  sourceRef:
+    name: assertions-eval
+  type: loadtest
+  trials: 50
+  providers:
+    default:
+      - agentRef:
+          name: support-agent
+    # Map mode: key must match the arena config's self_play.roles[].provider ID
+    selfplay:
+      selfplay:
+        providerRef:
+          name: gpt-4o-mini
+  loadTest:
+    concurrency: 10
+    vusPerWorker: 5
+    budgetLimit: "25.00"
+    thresholds:
+      - metric: latency_p95
+        operator: "<"
+        value: "10s"
+      - metric: error_rate
+        operator: "<"
+        value: "0.05"
+  workers:
+    replicas: 2
+  ttlSecondsAfterFinished: 3600

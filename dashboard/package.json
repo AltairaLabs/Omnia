@@ -103,6 +103,7 @@
     "@types/bcrypt": "^6.0.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/ioredis": "^4.28.10",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.19.27",
     "@types/pg": "^8.16.0",
