@@ -43,6 +43,7 @@ const docsHTML = `<!DOCTYPE html>
   <title>Omnia Memory API</title>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpolygon points='16,4 26,10 26,22 16,28 6,22 6,10' stroke='%238b5cf6' stroke-width='2' fill='none'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23f97316'/%3E%3Ccircle cx='16' cy='4' r='2' fill='%238b5cf6'/%3E%3Ccircle cx='26' cy='10' r='2' fill='%238b5cf6'/%3E%3Ccircle cx='26' cy='22' r='2' fill='%238b5cf6'/%3E%3Ccircle cx='16' cy='28' r='2' fill='%238b5cf6'/%3E%3Ccircle cx='6' cy='22' r='2' fill='%238b5cf6'/%3E%3Ccircle cx='6' cy='10' r='2' fill='%238b5cf6'/%3E%3C/svg%3E" />
   <style>
     body { margin: 0; }
     .custom-header {
