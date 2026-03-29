@@ -169,6 +169,14 @@ func run() error {
 	// --- Memory store ---
 	store := memory.NewPostgresMemoryStore(pool)
 
+	// --- Embedding service ---
+	var embeddingSvc *memory.EmbeddingService
+	if f.embeddingProvider != "" {
+		// Provider creation (OpenAI/Gemini/Voyage) will be wired when
+		// PromptKit embedding providers are imported.
+		log.Info("embedding provider configured", "provider", f.embeddingProvider, "model", f.embeddingModel)
+	}
+
 	// --- Tracing ---
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
@@ -193,7 +201,7 @@ func run() error {
 	}
 
 	// --- Build API mux ---
-	apiMux, cleanup := buildAPIMux(store, log)
+	apiMux, cleanup := buildAPIMux(store, embeddingSvc, log)
 	defer cleanup()
 
 	// --- Servers ---
@@ -229,10 +237,10 @@ func run() error {
 // buildAPIMux assembles the HTTP handler with all memory-api routes, wrapped
 // with rate limiting, metrics, and tracing middleware. Returns the handler and
 // a cleanup function.
-func buildAPIMux(store memory.Store, log logr.Logger) (http.Handler, func()) {
+func buildAPIMux(store memory.Store, embeddingSvc *memory.EmbeddingService, log logr.Logger) (http.Handler, func()) {
 	httpMetrics := memoryapi.NewHTTPMetrics(nil)
 
-	svc := memoryapi.NewMemoryService(store, log)
+	svc := memoryapi.NewMemoryService(store, embeddingSvc, log)
 	handler := memoryapi.NewHandler(svc, log)
 
 	mux := http.NewServeMux()

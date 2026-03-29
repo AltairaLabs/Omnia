@@ -79,7 +79,7 @@ func (m *mockStore) DeleteAll(_ context.Context, _ map[string]string) error {
 }
 
 func newTestHandler(store memory.Store) *Handler {
-	svc := NewMemoryService(store, logr.Discard())
+	svc := NewMemoryService(store, nil, logr.Discard())
 	return NewHandler(svc, logr.Discard())
 }
 
@@ -272,7 +272,7 @@ func TestHandleSaveMemory_StoreError(t *testing.T) {
 
 func TestHandleSaveMemory_BodyTooLarge(t *testing.T) {
 	store := &mockStore{}
-	svc := NewMemoryService(store, logr.Discard())
+	svc := NewMemoryService(store, nil, logr.Discard())
 	h := &Handler{
 		service:     svc,
 		log:         logr.Discard(),

@@ -21,6 +21,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -142,8 +143,34 @@ func newTestService(t *testing.T) *MemoryService {
 	t.Helper()
 	pool := freshDB(t)
 	store := memory.NewPostgresMemoryStore(pool)
-	return NewMemoryService(store, logr.Discard())
+	return NewMemoryService(store, nil, logr.Discard())
 }
+
+// mockEmbeddingProvider is a test double for memory.EmbeddingProvider.
+// It records calls via a channel so tests can synchronize on async embedding.
+type mockEmbeddingProvider struct {
+	embedCh chan []string // receives the text slice on each Embed call
+	err     error         // if non-nil, Embed returns this error
+}
+
+func newMockEmbeddingProvider(bufSize int) *mockEmbeddingProvider {
+	return &mockEmbeddingProvider{embedCh: make(chan []string, bufSize)}
+}
+
+func (m *mockEmbeddingProvider) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	if m.err != nil {
+		m.embedCh <- texts
+		return nil, m.err
+	}
+	result := make([][]float32, len(texts))
+	for i := range texts {
+		result[i] = []float32{0.1, 0.2, 0.3}
+	}
+	m.embedCh <- texts
+	return result, nil
+}
+
+func (m *mockEmbeddingProvider) Dimensions() int { return 3 }
 
 func TestServiceSaveMemory(t *testing.T) {
 	svc := newTestService(t)
@@ -286,4 +313,81 @@ func TestServiceDeleteAllMemories_MissingWorkspace(t *testing.T) {
 	err := svc.DeleteAllMemories(ctx, map[string]string{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "workspace_id")
+}
+
+func TestMemoryService_SaveWithEmbedding(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	provider := newMockEmbeddingProvider(1)
+	logger := zap.New(zap.UseDevMode(true))
+	embSvc := memory.NewEmbeddingService(store, provider, logger)
+	svc := NewMemoryService(store, embSvc, logr.Discard())
+
+	ctx := context.Background()
+	mem := &memory.Memory{
+		Type:       "preference",
+		Content:    "likes Go",
+		Confidence: 0.9,
+		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID},
+	}
+
+	err := svc.SaveMemory(ctx, mem)
+	require.NoError(t, err)
+	assert.NotEmpty(t, mem.ID)
+
+	// Confirm embedding was attempted asynchronously.
+	select {
+	case texts := <-provider.embedCh:
+		assert.Equal(t, []string{"likes Go"}, texts)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for async embedding call")
+	}
+}
+
+func TestMemoryService_SaveWithEmbedding_EmbedError(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	provider := newMockEmbeddingProvider(1)
+	provider.err = errors.New("provider unavailable")
+	logger := zap.New(zap.UseDevMode(true))
+	embSvc := memory.NewEmbeddingService(store, provider, logger)
+	svc := NewMemoryService(store, embSvc, logr.Discard())
+
+	ctx := context.Background()
+	mem := &memory.Memory{
+		Type:       "fact",
+		Content:    "something",
+		Confidence: 0.8,
+		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID},
+	}
+
+	// Save should succeed even when embedding fails.
+	err := svc.SaveMemory(ctx, mem)
+	require.NoError(t, err)
+	assert.NotEmpty(t, mem.ID)
+
+	// Embedding was attempted (error is logged, not propagated).
+	select {
+	case <-provider.embedCh:
+		// received — embedding was attempted
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for async embedding call")
+	}
+}
+
+func TestMemoryService_SaveWithoutEmbedding(t *testing.T) {
+	// nil embeddingSvc — save works normally, no panic.
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	mem := &memory.Memory{
+		Type:       "preference",
+		Content:    "no embedding configured",
+		Confidence: 0.7,
+		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID},
+	}
+
+	err := svc.SaveMemory(ctx, mem)
+	require.NoError(t, err)
+	assert.NotEmpty(t, mem.ID)
 }
