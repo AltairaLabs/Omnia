@@ -15,10 +15,10 @@ import (
 	"testing"
 )
 
-func TestSchemaDDL_ReturnsFourStatements(t *testing.T) {
+func TestSchemaDDL_ReturnsSixStatements(t *testing.T) {
 	ddl := SchemaDDL()
-	if len(ddl) != 4 {
-		t.Fatalf("expected 4 DDL statements, got %d", len(ddl))
+	if len(ddl) != 6 {
+		t.Fatalf("expected 6 DDL statements, got %d", len(ddl))
 	}
 }
 
@@ -92,8 +92,8 @@ func TestSchemaDDL_WatermarksTable(t *testing.T) {
 }
 
 func TestAllTables(t *testing.T) {
-	if len(AllTables) != 3 {
-		t.Fatalf("expected 3 tables in AllTables, got %d", len(AllTables))
+	if len(AllTables) != 5 {
+		t.Fatalf("expected 5 tables in AllTables, got %d", len(AllTables))
 	}
 	if AllTables[0] != TableSessions {
 		t.Errorf("expected AllTables[0] = %q, got %q", TableSessions, AllTables[0])
@@ -103,6 +103,12 @@ func TestAllTables(t *testing.T) {
 	}
 	if AllTables[2] != TableEvalResults {
 		t.Errorf("expected AllTables[2] = %q, got %q", TableEvalResults, AllTables[2])
+	}
+	if AllTables[3] != TableMemoryEntities {
+		t.Errorf("expected AllTables[3] = %q, got %q", TableMemoryEntities, AllTables[3])
+	}
+	if AllTables[4] != TableMemoryObservations {
+		t.Errorf("expected AllTables[4] = %q, got %q", TableMemoryObservations, AllTables[4])
 	}
 }
 
@@ -115,6 +121,12 @@ func TestTableConstants(t *testing.T) {
 	}
 	if TableEvalResults != "omnia_eval_results" {
 		t.Errorf("unexpected TableEvalResults: %q", TableEvalResults)
+	}
+	if TableMemoryEntities != "omnia_memory_entities" {
+		t.Errorf("unexpected TableMemoryEntities: %q", TableMemoryEntities)
+	}
+	if TableMemoryObservations != "omnia_memory_observations" {
+		t.Errorf("unexpected TableMemoryObservations: %q", TableMemoryObservations)
 	}
 	if TableWatermarks != "_omnia_sync_watermarks" {
 		t.Errorf("unexpected TableWatermarks: %q", TableWatermarks)

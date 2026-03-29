@@ -12,14 +12,16 @@ package snowflake
 
 // Table name constants.
 const (
-	TableSessions    = "omnia_sessions"
-	TableMessages    = "omnia_messages"
-	TableEvalResults = "omnia_eval_results"
-	TableWatermarks  = "_omnia_sync_watermarks"
+	TableSessions           = "omnia_sessions"
+	TableMessages           = "omnia_messages"
+	TableEvalResults        = "omnia_eval_results"
+	TableMemoryEntities     = "omnia_memory_entities"
+	TableMemoryObservations = "omnia_memory_observations"
+	TableWatermarks         = "_omnia_sync_watermarks"
 )
 
 // AllTables lists all destination tables managed by this provider.
-var AllTables = []string{TableSessions, TableMessages, TableEvalResults}
+var AllTables = []string{TableSessions, TableMessages, TableEvalResults, TableMemoryEntities, TableMemoryObservations}
 
 // DDL statements for creating the Snowflake analytics tables.
 const createSessionsTable = `CREATE TABLE IF NOT EXISTS omnia_sessions (
@@ -77,6 +79,33 @@ const createWatermarksTable = `CREATE TABLE IF NOT EXISTS _omnia_sync_watermarks
     updated_at TIMESTAMP_TZ DEFAULT CURRENT_TIMESTAMP()
 )`
 
+const createMemoryEntitiesTable = `CREATE TABLE IF NOT EXISTS omnia_memory_entities (
+    id VARCHAR(36) PRIMARY KEY,
+    workspace_id VARCHAR(36),
+    virtual_user_id VARCHAR,
+    agent_id VARCHAR(36),
+    name VARCHAR,
+    kind VARCHAR,
+    source_type VARCHAR,
+    trust_model VARCHAR,
+    purpose VARCHAR,
+    forgotten BOOLEAN,
+    created_at TIMESTAMP_TZ,
+    updated_at TIMESTAMP_TZ
+)`
+
+const createMemoryObservationsTable = `CREATE TABLE IF NOT EXISTS omnia_memory_observations (
+    id VARCHAR(36) PRIMARY KEY,
+    entity_id VARCHAR(36),
+    content VARCHAR,
+    confidence FLOAT,
+    source_type VARCHAR,
+    session_id VARCHAR(36),
+    observed_at TIMESTAMP_TZ,
+    created_at TIMESTAMP_TZ,
+    access_count INTEGER
+)`
+
 // SchemaDDL returns all DDL statements needed to initialize the schema.
 func SchemaDDL() []string {
 	return []string{
@@ -84,5 +113,7 @@ func SchemaDDL() []string {
 		createMessagesTable,
 		createEvalResultsTable,
 		createWatermarksTable,
+		createMemoryEntitiesTable,
+		createMemoryObservationsTable,
 	}
 }
