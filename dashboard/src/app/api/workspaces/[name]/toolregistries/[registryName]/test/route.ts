@@ -43,7 +43,21 @@ export const POST = withWorkspaceAccess<{
       if (!result.ok) return result.response;
 
       const namespace = result.workspace.spec.namespace.name;
-      const body = await request.json();
+      const rawBody = await request.text();
+      let body: unknown;
+      try {
+        body = JSON.parse(rawBody);
+      } catch (parseErr) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Invalid request body: ${parseErr instanceof Error ? parseErr.message : "invalid JSON"}`,
+            durationMs: 0,
+            handlerType: "unknown",
+          },
+          { status: 400 }
+        );
+      }
 
       let response: Response;
       try {
