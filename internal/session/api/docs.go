@@ -45,11 +45,11 @@ const docsHTML = `<!DOCTYPE html>
   <title>Omnia Session API</title>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpolygon points='16,4 26,10 26,22 16,28 6,22 6,10' stroke='%238b5cf6' stroke-width='2' fill='none'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23f97316'/%3E%3Ccircle cx='16' cy='4' r='2' fill='%238b5cf6'/%3E%3Ccircle cx='26' cy='10' r='2' fill='%238b5cf6'/%3E%3Ccircle cx='26' cy='22' r='2' fill='%238b5cf6'/%3E%3Ccircle cx='16' cy='28' r='2' fill='%238b5cf6'/%3E%3Ccircle cx='6' cy='22' r='2' fill='%238b5cf6'/%3E%3Ccircle cx='6' cy='10' r='2' fill='%238b5cf6'/%3E%3C/svg%3E" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><polygon points='16,2 20,12 16,10 12,12' fill='%233B82F6'/><polygon points='16,10 24,16 16,14 8,16' fill='%2306B6D4'/><polygon points='16,14 28,22 16,18 4,22' fill='%238B5CF6'/></svg>" />
   <style>
     body { margin: 0; }
     .custom-header {
-      background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+      background: linear-gradient(135deg, #3B82F6 0%, #06B6D4 50%, #8B5CF6 100%);
       color: white;
       padding: 16px 24px;
       font-family: system-ui, -apple-system, sans-serif;

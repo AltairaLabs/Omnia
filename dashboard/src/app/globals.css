@@ -92,14 +92,14 @@
   --chart-3: #06B6D4;
   --chart-4: #10B981;
   --chart-5: #F59E0B;
-  /* Sidebar */
-  --sidebar: #FFFFFF;
-  --sidebar-foreground: #0F172A;
+  /* Sidebar - Deep Space blue to match website nav */
+  --sidebar: #0F172A;
+  --sidebar-foreground: #E2E8F0;
   --sidebar-primary: #3B82F6;
   --sidebar-primary-foreground: #FFFFFF;
-  --sidebar-accent: #F1F5F9;
-  --sidebar-accent-foreground: #0F172A;
-  --sidebar-border: #E2E8F0;
+  --sidebar-accent: #1E293B;
+  --sidebar-accent-foreground: #F8FAFC;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
   --sidebar-ring: #3B82F6;
 }
 
@@ -132,12 +132,12 @@
   --chart-3: #22D3EE;
   --chart-4: #34D399;
   --chart-5: #FBBF24;
-  /* Sidebar - dark */
-  --sidebar: #1E293B;
-  --sidebar-foreground: #F8FAFC;
+  /* Sidebar - Deep Space blue (same in dark mode) */
+  --sidebar: #0F172A;
+  --sidebar-foreground: #E2E8F0;
   --sidebar-primary: #3B82F6;
   --sidebar-primary-foreground: #FFFFFF;
-  --sidebar-accent: #334155;
+  --sidebar-accent: #1E293B;
   --sidebar-accent-foreground: #F8FAFC;
   --sidebar-border: rgba(255, 255, 255, 0.1);
   --sidebar-ring: #3B82F6;
