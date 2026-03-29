@@ -102,6 +102,7 @@ This document maps every deployable service, how they communicate, and where to 
 | Arena Eval Worker | Session API | HTTP | Eval result storage |
 | Compaction | PostgreSQL/Redis/Cold | Direct | Data lifecycle management |
 | Runtime | Memory API | HTTP | Memory retrieval and extraction (when memory enabled) |
+| Memory API | Redis Streams | Redis | Memory event publishing (create/delete) |
 | Policy Proxy | K8s API | K8s client | Policy watching |
 
 ## Distributed Tracing

@@ -456,6 +456,42 @@ export interface DataService {
   createAgentConnection(namespace: string, name: string): AgentConnection;
 }
 
+// ============================================================
+// Memory types
+// ============================================================
+
+export interface MemoryEntity {
+  id: string;
+  type: string;
+  content: string;
+  confidence: number;
+  scope: Record<string, string>;
+  metadata?: Record<string, unknown>;
+  sessionId?: string;
+  createdAt: string;
+  accessedAt?: string;
+  expiresAt?: string;
+}
+
+export interface MemoryListResponse {
+  memories: MemoryEntity[];
+  total: number;
+}
+
+export interface MemoryListOptions {
+  workspace: string;
+  userId?: string;
+  type?: string;
+  purpose?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface MemorySearchOptions extends MemoryListOptions {
+  query: string;
+  minConfidence?: number;
+}
+
 /**
  * Agent WebSocket connection interface.
  * Provides a unified interface for communicating with agents

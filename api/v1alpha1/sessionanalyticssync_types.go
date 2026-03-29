@@ -218,6 +218,14 @@ type TablesConfig struct {
 	// artifacts defines the mapping for the artifacts table.
 	// +optional
 	Artifacts *TableMapping `json:"artifacts,omitempty"`
+
+	// MemoryEntities configures the memory entities table mapping.
+	// +optional
+	MemoryEntities *TableMapping `json:"memoryEntities,omitempty"`
+
+	// MemoryObservations configures the memory observations table mapping.
+	// +optional
+	MemoryObservations *TableMapping `json:"memoryObservations,omitempty"`
 }
 
 // SessionAnalyticsSyncSpec defines the desired state of SessionAnalyticsSync.

@@ -84,9 +84,11 @@ func (m *MockDB) Close() error {
 
 // MockSourceReader implements analytics.SourceReader for testing.
 type MockSourceReader struct {
-	ReadSessionsFunc    func(ctx context.Context, after time.Time, limit int) ([]analytics.SessionRow, error)
-	ReadMessagesFunc    func(ctx context.Context, after time.Time, limit int) ([]analytics.MessageRow, error)
-	ReadEvalResultsFunc func(ctx context.Context, after time.Time, limit int) ([]analytics.EvalResultRow, error)
+	ReadSessionsFunc           func(ctx context.Context, after time.Time, limit int) ([]analytics.SessionRow, error)
+	ReadMessagesFunc           func(ctx context.Context, after time.Time, limit int) ([]analytics.MessageRow, error)
+	ReadEvalResultsFunc        func(ctx context.Context, after time.Time, limit int) ([]analytics.EvalResultRow, error)
+	ReadMemoryEntitiesFunc     func(ctx context.Context, after time.Time, limit int) ([]analytics.MemoryEntityRow, error)
+	ReadMemoryObservationsFunc func(ctx context.Context, after time.Time, limit int) ([]analytics.MemoryObservationRow, error) //nolint:lll
 }
 
 func (m *MockSourceReader) ReadSessions(
@@ -112,6 +114,24 @@ func (m *MockSourceReader) ReadEvalResults(
 ) ([]analytics.EvalResultRow, error) {
 	if m.ReadEvalResultsFunc != nil {
 		return m.ReadEvalResultsFunc(ctx, after, limit)
+	}
+	return nil, nil
+}
+
+func (m *MockSourceReader) ReadMemoryEntities(
+	ctx context.Context, after time.Time, limit int,
+) ([]analytics.MemoryEntityRow, error) {
+	if m.ReadMemoryEntitiesFunc != nil {
+		return m.ReadMemoryEntitiesFunc(ctx, after, limit)
+	}
+	return nil, nil
+}
+
+func (m *MockSourceReader) ReadMemoryObservations(
+	ctx context.Context, after time.Time, limit int,
+) ([]analytics.MemoryObservationRow, error) {
+	if m.ReadMemoryObservationsFunc != nil {
+		return m.ReadMemoryObservationsFunc(ctx, after, limit)
 	}
 	return nil, nil
 }
@@ -414,6 +434,7 @@ func TestProvider_Sync_EvalResults(t *testing.T) {
 	}
 }
 
+//nolint:dupl
 func TestProvider_Sync_EvalResults_Empty(t *testing.T) {
 	source := &MockSourceReader{
 		ReadEvalResultsFunc: func(_ context.Context, _ time.Time, _ int) ([]analytics.EvalResultRow, error) {
@@ -539,6 +560,12 @@ func TestProvider_Sync_AllTables(t *testing.T) {
 		ReadEvalResultsFunc: func(_ context.Context, _ time.Time, _ int) ([]analytics.EvalResultRow, error) {
 			return nil, nil
 		},
+		ReadMemoryEntitiesFunc: func(_ context.Context, _ time.Time, _ int) ([]analytics.MemoryEntityRow, error) {
+			return nil, nil
+		},
+		ReadMemoryObservationsFunc: func(_ context.Context, _ time.Time, _ int) ([]analytics.MemoryObservationRow, error) { //nolint:lll
+			return nil, nil
+		},
 	}
 	mock := &MockDB{
 		QueryRowFunc: func(_ context.Context, _ string, _ ...any) Row {
@@ -553,8 +580,8 @@ func TestProvider_Sync_AllTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result.Tables) != 3 {
-		t.Errorf("expected 3 table results (all tables), got %d", len(result.Tables))
+	if len(result.Tables) != 5 {
+		t.Errorf("expected 5 table results (all tables), got %d", len(result.Tables))
 	}
 }
 
@@ -689,7 +716,7 @@ func TestFilterTables(t *testing.T) {
 		available []string
 		expected  int
 	}{
-		{"empty returns all", nil, AllTables, 3},
+		{"empty returns all", nil, AllTables, 5},
 		{"filter sessions", []string{TableSessions}, AllTables, 1},
 		{"filter eval_results", []string{TableEvalResults}, AllTables, 1},
 		{"filter unknown", []string{"unknown"}, AllTables, 0},
@@ -745,6 +772,18 @@ func TestProvider_Sync_DefaultBatchSize(t *testing.T) {
 			return nil, nil
 		},
 		ReadEvalResultsFunc: func(_ context.Context, _ time.Time, limit int) ([]analytics.EvalResultRow, error) {
+			if limit != 100 {
+				t.Errorf("expected batch size 100, got %d", limit)
+			}
+			return nil, nil
+		},
+		ReadMemoryEntitiesFunc: func(_ context.Context, _ time.Time, limit int) ([]analytics.MemoryEntityRow, error) {
+			if limit != 100 {
+				t.Errorf("expected batch size 100, got %d", limit)
+			}
+			return nil, nil
+		},
+		ReadMemoryObservationsFunc: func(_ context.Context, _ time.Time, limit int) ([]analytics.MemoryObservationRow, error) { //nolint:lll
 			if limit != 100 {
 				t.Errorf("expected batch size 100, got %d", limit)
 			}

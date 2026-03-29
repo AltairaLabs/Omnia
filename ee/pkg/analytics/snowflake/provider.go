@@ -121,6 +121,36 @@ const (
 		s.eval_id, s.eval_type, s.trigger, s.passed, s.score,
 		s.details, s.duration_ms, s.judge_tokens,
 		s.judge_cost_usd, s.source, s.created_at)`
+
+	memoryEntityMergeQuery = `MERGE INTO omnia_memory_entities t USING (SELECT
+		? AS id, ? AS workspace_id, ? AS virtual_user_id, ? AS agent_id,
+		? AS name, ? AS kind, ? AS source_type, ? AS trust_model,
+		? AS purpose, ? AS forgotten, ? AS created_at, ? AS updated_at
+	) s ON t.id = s.id
+	WHEN MATCHED THEN UPDATE SET
+		workspace_id = s.workspace_id, virtual_user_id = s.virtual_user_id,
+		agent_id = s.agent_id, name = s.name, kind = s.kind,
+		source_type = s.source_type, trust_model = s.trust_model,
+		purpose = s.purpose, forgotten = s.forgotten, updated_at = s.updated_at
+	WHEN NOT MATCHED THEN INSERT (id, workspace_id, virtual_user_id, agent_id,
+		name, kind, source_type, trust_model, purpose, forgotten, created_at, updated_at)
+		VALUES (s.id, s.workspace_id, s.virtual_user_id, s.agent_id,
+		s.name, s.kind, s.source_type, s.trust_model,
+		s.purpose, s.forgotten, s.created_at, s.updated_at)`
+
+	memoryObservationMergeQuery = `MERGE INTO omnia_memory_observations t USING (SELECT
+		? AS id, ? AS entity_id, ? AS content, ? AS confidence,
+		? AS source_type, ? AS session_id, ? AS observed_at,
+		? AS created_at, ? AS access_count
+	) s ON t.id = s.id
+	WHEN MATCHED THEN UPDATE SET
+		entity_id = s.entity_id, content = s.content, confidence = s.confidence,
+		source_type = s.source_type, session_id = s.session_id,
+		observed_at = s.observed_at, access_count = s.access_count
+	WHEN NOT MATCHED THEN INSERT (id, entity_id, content, confidence,
+		source_type, session_id, observed_at, created_at, access_count)
+		VALUES (s.id, s.entity_id, s.content, s.confidence,
+		s.source_type, s.session_id, s.observed_at, s.created_at, s.access_count)`
 )
 
 // Provider implements analytics.SyncProvider for Snowflake.
@@ -300,6 +330,10 @@ func (p *Provider) syncTableData(
 		return p.syncMessages(ctx, after, batchSize, dryRun)
 	case TableEvalResults:
 		return p.syncEvalResults(ctx, after, batchSize, dryRun)
+	case TableMemoryEntities:
+		return p.syncMemoryEntities(ctx, after, batchSize, dryRun)
+	case TableMemoryObservations:
+		return p.syncMemoryObservations(ctx, after, batchSize, dryRun)
 	default:
 		return 0, after, fmt.Errorf("unknown table: %s", table)
 	}
@@ -437,6 +471,82 @@ func marshalEvalDetails(details string) string {
 		return "{}"
 	}
 	return details
+}
+
+// syncMemoryEntities syncs memory entity rows from source to Snowflake.
+func (p *Provider) syncMemoryEntities(
+	ctx context.Context, after time.Time, limit int, dryRun bool,
+) (int64, time.Time, error) {
+	rows, err := p.source.ReadMemoryEntities(ctx, after, limit)
+	if err != nil {
+		return 0, after, fmt.Errorf("read memory entities: %w", err)
+	}
+	if len(rows) == 0 {
+		return 0, after, nil
+	}
+
+	maxTime := after
+	if !dryRun {
+		for i := range rows {
+			if err := p.upsertMemoryEntity(ctx, &rows[i]); err != nil {
+				return int64(i), maxTime, fmt.Errorf("upsert memory entity %s: %w", rows[i].ID, err)
+			}
+			maxTime = latestTime(maxTime, rows[i].UpdatedAt)
+		}
+	} else {
+		for i := range rows {
+			maxTime = latestTime(maxTime, rows[i].UpdatedAt)
+		}
+	}
+	return int64(len(rows)), maxTime, nil
+}
+
+// upsertMemoryEntity merges a single memory entity row into Snowflake.
+func (p *Provider) upsertMemoryEntity(ctx context.Context, row *analytics.MemoryEntityRow) error {
+	_, err := p.db.ExecContext(ctx, memoryEntityMergeQuery,
+		row.ID, row.WorkspaceID, row.VirtualUserID, row.AgentID,
+		row.Name, row.Kind, row.SourceType, row.TrustModel,
+		row.Purpose, row.Forgotten, row.CreatedAt, row.UpdatedAt,
+	)
+	return err
+}
+
+// syncMemoryObservations syncs memory observation rows from source to Snowflake.
+func (p *Provider) syncMemoryObservations(
+	ctx context.Context, after time.Time, limit int, dryRun bool,
+) (int64, time.Time, error) {
+	rows, err := p.source.ReadMemoryObservations(ctx, after, limit)
+	if err != nil {
+		return 0, after, fmt.Errorf("read memory observations: %w", err)
+	}
+	if len(rows) == 0 {
+		return 0, after, nil
+	}
+
+	maxTime := after
+	if !dryRun {
+		for i := range rows {
+			if err := p.upsertMemoryObservation(ctx, &rows[i]); err != nil {
+				return int64(i), maxTime, fmt.Errorf("upsert memory observation %s: %w", rows[i].ID, err)
+			}
+			maxTime = latestTime(maxTime, rows[i].CreatedAt)
+		}
+	} else {
+		for i := range rows {
+			maxTime = latestTime(maxTime, rows[i].CreatedAt)
+		}
+	}
+	return int64(len(rows)), maxTime, nil
+}
+
+// upsertMemoryObservation merges a single memory observation row into Snowflake.
+func (p *Provider) upsertMemoryObservation(ctx context.Context, row *analytics.MemoryObservationRow) error {
+	_, err := p.db.ExecContext(ctx, memoryObservationMergeQuery,
+		row.ID, row.EntityID, row.Content, row.Confidence,
+		row.SourceType, row.SessionID, row.ObservedAt,
+		row.CreatedAt, row.AccessCount,
+	)
+	return err
 }
 
 // upsertMessage merges a single message row into Snowflake.

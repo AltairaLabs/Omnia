@@ -29,6 +29,12 @@ import (
 	"github.com/altairalabs/omnia/internal/memory"
 )
 
+// eventTypeMemoryCreated is the event type published when a memory is saved.
+const eventTypeMemoryCreated = "memory_created"
+
+// eventTypeMemoryDeleted is the event type published when a memory is deleted.
+const eventTypeMemoryDeleted = "memory_deleted"
+
 // Sentinel errors returned by the memory service and handler.
 var (
 	ErrMissingWorkspace = errors.New("workspace parameter is required")
@@ -49,10 +55,11 @@ type MemoryServiceConfig struct {
 
 // MemoryService wraps the memory store with business logic for the HTTP layer.
 type MemoryService struct {
-	store        memory.Store
-	embeddingSvc *memory.EmbeddingService // nil if embeddings not configured
-	config       MemoryServiceConfig
-	log          logr.Logger
+	store          memory.Store
+	embeddingSvc   *memory.EmbeddingService // nil if embeddings not configured
+	eventPublisher MemoryEventPublisher     // nil if event publishing not configured
+	config         MemoryServiceConfig
+	log            logr.Logger
 }
 
 // NewMemoryService creates a new MemoryService backed by the given store.
@@ -66,6 +73,12 @@ func NewMemoryService(store memory.Store, embeddingSvc *memory.EmbeddingService,
 	}
 }
 
+// SetEventPublisher configures the event publisher for the service.
+// It may be called at most once before the service begins handling requests.
+func (s *MemoryService) SetEventPublisher(p MemoryEventPublisher) {
+	s.eventPublisher = p
+}
+
 // SaveMemory persists a memory entry and, if an embedding service is configured,
 // asynchronously generates and stores its embedding.
 func (s *MemoryService) SaveMemory(ctx context.Context, mem *memory.Memory) error {
@@ -75,6 +88,21 @@ func (s *MemoryService) SaveMemory(ctx context.Context, mem *memory.Memory) erro
 	}
 	if err := s.store.Save(ctx, mem); err != nil {
 		return err
+	}
+	if s.eventPublisher != nil {
+		event := MemoryEvent{
+			EventType:   eventTypeMemoryCreated,
+			MemoryID:    mem.ID,
+			WorkspaceID: mem.Scope[memory.ScopeWorkspaceID],
+			UserID:      mem.Scope[memory.ScopeUserID],
+			Kind:        mem.Type,
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		}
+		go func() {
+			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
+				s.log.Error(err, "memory event publish failed", "eventType", event.EventType, "memoryID", event.MemoryID)
+			}
+		}()
 	}
 	if s.embeddingSvc != nil {
 		go func() {
@@ -100,7 +128,24 @@ func (s *MemoryService) ListMemories(ctx context.Context, scope map[string]strin
 
 // DeleteMemory performs a soft delete (forget) of a single memory.
 func (s *MemoryService) DeleteMemory(ctx context.Context, scope map[string]string, memoryID string) error {
-	return s.store.Delete(ctx, scope, memoryID)
+	if err := s.store.Delete(ctx, scope, memoryID); err != nil {
+		return err
+	}
+	if s.eventPublisher != nil {
+		event := MemoryEvent{
+			EventType:   eventTypeMemoryDeleted,
+			MemoryID:    memoryID,
+			WorkspaceID: scope[memory.ScopeWorkspaceID],
+			UserID:      scope[memory.ScopeUserID],
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		}
+		go func() {
+			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
+				s.log.Error(err, "memory event publish failed", "eventType", event.EventType, "memoryID", event.MemoryID)
+			}
+		}()
+	}
+	return nil
 }
 
 // DeleteAllMemories hard-deletes all memories for the given scope (DSAR).

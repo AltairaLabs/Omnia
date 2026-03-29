@@ -251,6 +251,38 @@ spec:
                     required:
                     - target
                     type: object
+                  memoryEntities:
+                    description: MemoryEntities configures the memory entities table
+                      mapping.
+                    properties:
+                      partitionBy:
+                        description: partitionBy is the column used for partitioning
+                          in the target table.
+                        type: string
+                      target:
+                        description: target is the name of the destination table in
+                          the analytics backend.
+                        minLength: 1
+                        type: string
+                    required:
+                    - target
+                    type: object
+                  memoryObservations:
+                    description: MemoryObservations configures the memory observations
+                      table mapping.
+                    properties:
+                      partitionBy:
+                        description: partitionBy is the column used for partitioning
+                          in the target table.
+                        type: string
+                      target:
+                        description: target is the name of the destination table in
+                          the analytics backend.
+                        minLength: 1
+                        type: string
+                    required:
+                    - target
+                    type: object
                   messages:
                     description: messages defines the mapping for the messages table.
                     properties:
