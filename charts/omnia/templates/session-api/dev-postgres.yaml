@@ -90,7 +90,7 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: postgres:17-alpine
+          image: pgvector/pgvector:pg17
           env:
             - name: POSTGRES_USER
               value: omnia

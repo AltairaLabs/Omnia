@@ -257,7 +257,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: postgres
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16
         ports:
         - containerPort: 5432
         env:
