@@ -446,6 +446,52 @@ func TestPostgresMemoryStore_Save_WithSessionAndTurnRange(t *testing.T) {
 	assert.Equal(t, [2]int{1, 5}, results[0].TurnRange)
 }
 
+func TestPostgresMemoryStore_UpdateEmbedding(t *testing.T) {
+
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	mem := &Memory{
+		Type:       "fact",
+		Content:    "likes neural networks",
+		Confidence: 0.9,
+		Scope:      scope,
+	}
+	require.NoError(t, store.Save(ctx, mem))
+
+	// Build a 1536-dim embedding.
+	embedding := make([]float32, 1536)
+	for i := range embedding {
+		embedding[i] = float32(i) * 0.001
+	}
+
+	err := store.UpdateEmbedding(ctx, mem.ID, embedding)
+	require.NoError(t, err)
+
+	// Verify via direct SQL that the embedding is non-null.
+	var hasEmbedding bool
+	err = store.Pool().QueryRow(ctx, `
+		SELECT embedding IS NOT NULL
+		FROM memory_observations
+		WHERE entity_id = $1
+		ORDER BY observed_at DESC
+		LIMIT 1`, mem.ID).Scan(&hasEmbedding)
+	require.NoError(t, err)
+	assert.True(t, hasEmbedding, "embedding should be non-null after update")
+}
+
+func TestPostgresMemoryStore_UpdateEmbedding_NotFound(t *testing.T) {
+
+	store := newStore(t)
+	ctx := context.Background()
+
+	embedding := make([]float32, 1536)
+	err := store.UpdateEmbedding(ctx, "00000000-0000-0000-0000-000000000000", embedding)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no observation found")
+}
+
 func TestPostgresMemoryStore_Save_NilMetadata(t *testing.T) {
 
 	store := newStore(t)
