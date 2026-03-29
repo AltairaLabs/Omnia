@@ -95,6 +95,10 @@ type SourceReader interface {
 	ReadMessages(ctx context.Context, after time.Time, limit int) ([]MessageRow, error)
 	// ReadEvalResults returns eval results created after the given watermark, up to limit rows.
 	ReadEvalResults(ctx context.Context, after time.Time, limit int) ([]EvalResultRow, error)
+	// ReadMemoryEntities returns non-forgotten memory entities created after the given watermark, up to limit rows.
+	ReadMemoryEntities(ctx context.Context, after time.Time, limit int) ([]MemoryEntityRow, error)
+	// ReadMemoryObservations returns memory observations created after the given watermark, up to limit rows.
+	ReadMemoryObservations(ctx context.Context, after time.Time, limit int) ([]MemoryObservationRow, error)
 }
 
 // SessionRow is a flattened session record for analytics sync.
@@ -146,4 +150,35 @@ type EvalResultRow struct {
 	JudgeCostUSD      *float64
 	Source            string
 	CreatedAt         time.Time
+}
+
+// MemoryEntityRow is a flattened memory entity record for analytics sync.
+// Embedding vectors are excluded — they are too large for analytics export.
+type MemoryEntityRow struct {
+	ID            string
+	WorkspaceID   string
+	VirtualUserID string
+	AgentID       string
+	Name          string
+	Kind          string
+	SourceType    string
+	TrustModel    string
+	Purpose       string
+	Forgotten     bool
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// MemoryObservationRow is a flattened memory observation record for analytics sync.
+// Embedding vectors are excluded — they are too large for analytics export.
+type MemoryObservationRow struct {
+	ID          string
+	EntityID    string
+	Content     string
+	Confidence  float64
+	SourceType  string
+	SessionID   string
+	ObservedAt  time.Time
+	CreatedAt   time.Time
+	AccessCount int
 }

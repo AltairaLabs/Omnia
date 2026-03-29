@@ -32,6 +32,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	goredis "github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -234,8 +235,16 @@ func run() error {
 		}
 	}
 
+	// --- Event publisher (optional) ---
+	var eventPublisher memoryapi.MemoryEventPublisher
+	if f.redisAddrs != "" {
+		redisClient := goredis.NewClient(&goredis.Options{Addr: f.redisAddrs})
+		eventPublisher = memoryapi.NewRedisMemoryEventPublisher(redisClient, log)
+		log.Info("memory event publisher enabled", "redisAddrs", f.redisAddrs)
+	}
+
 	// --- Build API mux ---
-	apiMux, cleanup := buildAPIMux(store, embeddingSvc, svcCfg, log)
+	apiMux, cleanup := buildAPIMux(store, embeddingSvc, svcCfg, eventPublisher, log)
 	defer cleanup()
 
 	// --- Servers ---
@@ -271,10 +280,13 @@ func run() error {
 // buildAPIMux assembles the HTTP handler with all memory-api routes, wrapped
 // with rate limiting, metrics, and tracing middleware. Returns the handler and
 // a cleanup function.
-func buildAPIMux(store memory.Store, embeddingSvc *memory.EmbeddingService, cfg memoryapi.MemoryServiceConfig, log logr.Logger) (http.Handler, func()) {
+func buildAPIMux(store memory.Store, embeddingSvc *memory.EmbeddingService, cfg memoryapi.MemoryServiceConfig, publisher memoryapi.MemoryEventPublisher, log logr.Logger) (http.Handler, func()) {
 	httpMetrics := memoryapi.NewHTTPMetrics(nil)
 
 	svc := memoryapi.NewMemoryService(store, embeddingSvc, cfg, log)
+	if publisher != nil {
+		svc.SetEventPublisher(publisher)
+	}
 	handler := memoryapi.NewHandler(svc, log)
 
 	mux := http.NewServeMux()

@@ -84,9 +84,11 @@ func (m *MockDB) Close() error {
 
 // MockSourceReader implements analytics.SourceReader for testing.
 type MockSourceReader struct {
-	ReadSessionsFunc    func(ctx context.Context, after time.Time, limit int) ([]analytics.SessionRow, error)
-	ReadMessagesFunc    func(ctx context.Context, after time.Time, limit int) ([]analytics.MessageRow, error)
-	ReadEvalResultsFunc func(ctx context.Context, after time.Time, limit int) ([]analytics.EvalResultRow, error)
+	ReadSessionsFunc           func(ctx context.Context, after time.Time, limit int) ([]analytics.SessionRow, error)
+	ReadMessagesFunc           func(ctx context.Context, after time.Time, limit int) ([]analytics.MessageRow, error)
+	ReadEvalResultsFunc        func(ctx context.Context, after time.Time, limit int) ([]analytics.EvalResultRow, error)
+	ReadMemoryEntitiesFunc     func(ctx context.Context, after time.Time, limit int) ([]analytics.MemoryEntityRow, error)
+	ReadMemoryObservationsFunc func(ctx context.Context, after time.Time, limit int) ([]analytics.MemoryObservationRow, error) //nolint:lll
 }
 
 func (m *MockSourceReader) ReadSessions(
@@ -112,6 +114,24 @@ func (m *MockSourceReader) ReadEvalResults(
 ) ([]analytics.EvalResultRow, error) {
 	if m.ReadEvalResultsFunc != nil {
 		return m.ReadEvalResultsFunc(ctx, after, limit)
+	}
+	return nil, nil
+}
+
+func (m *MockSourceReader) ReadMemoryEntities(
+	ctx context.Context, after time.Time, limit int,
+) ([]analytics.MemoryEntityRow, error) {
+	if m.ReadMemoryEntitiesFunc != nil {
+		return m.ReadMemoryEntitiesFunc(ctx, after, limit)
+	}
+	return nil, nil
+}
+
+func (m *MockSourceReader) ReadMemoryObservations(
+	ctx context.Context, after time.Time, limit int,
+) ([]analytics.MemoryObservationRow, error) {
+	if m.ReadMemoryObservationsFunc != nil {
+		return m.ReadMemoryObservationsFunc(ctx, after, limit)
 	}
 	return nil, nil
 }
