@@ -60,6 +60,9 @@ type flags struct {
 	tracingInsecure   bool
 	embeddingProvider string // openai, gemini, voyageai
 	embeddingModel    string // model override
+	defaultTTL        string // env: DEFAULT_TTL, e.g. "720h"
+	purpose           string // env: MEMORY_PURPOSE, e.g. "support_continuity"
+	retentionInterval string // env: RETENTION_INTERVAL, e.g. "1h"
 }
 
 func parseFlags() *flags {
@@ -76,6 +79,9 @@ func parseFlags() *flags {
 	flag.BoolVar(&f.tracingInsecure, "tracing-insecure", false, "Use insecure gRPC for tracing")
 	flag.StringVar(&f.embeddingProvider, "embedding-provider", "", "Embedding provider (openai, gemini, voyageai)")
 	flag.StringVar(&f.embeddingModel, "embedding-model", "", "Embedding model override")
+	flag.StringVar(&f.defaultTTL, "default-ttl", "", "Default memory TTL duration (e.g. 720h)")
+	flag.StringVar(&f.purpose, "purpose", "", "Default memory purpose tag (e.g. support_continuity)")
+	flag.StringVar(&f.retentionInterval, "retention-interval", "", "Interval for retention worker (e.g. 1h)")
 	flag.Parse()
 
 	f.applyEnvFallbacks()
@@ -96,6 +102,9 @@ func (f *flags) applyEnvFallbacks() {
 	envFallback(&f.tracingEndpoint, "", "TRACING_ENDPOINT")
 	envFallback(&f.embeddingProvider, "", "EMBEDDING_PROVIDER")
 	envFallback(&f.embeddingModel, "", "EMBEDDING_MODEL")
+	envFallback(&f.defaultTTL, "", "DEFAULT_TTL")
+	envFallback(&f.purpose, "", "MEMORY_PURPOSE")
+	envFallback(&f.retentionInterval, "", "RETENTION_INTERVAL")
 	if v := os.Getenv("TRACING_SAMPLE_RATE"); v != "" && f.tracingSample == 0 {
 		if rate, err := strconv.ParseFloat(v, 64); err == nil {
 			f.tracingSample = rate
@@ -169,6 +178,31 @@ func run() error {
 	// --- Memory store ---
 	store := memory.NewPostgresMemoryStore(pool)
 
+	// --- Service config: TTL + purpose ---
+	var defaultTTL time.Duration
+	if f.defaultTTL != "" {
+		if d, err := time.ParseDuration(f.defaultTTL); err == nil {
+			defaultTTL = d
+		} else {
+			log.Error(err, "invalid DEFAULT_TTL, defaulting to no TTL", "value", f.defaultTTL)
+		}
+	}
+	svcCfg := memoryapi.MemoryServiceConfig{
+		DefaultTTL: defaultTTL,
+		Purpose:    f.purpose,
+	}
+
+	// --- Retention worker ---
+	if f.retentionInterval != "" {
+		if interval, err := time.ParseDuration(f.retentionInterval); err == nil && interval > 0 {
+			worker := memory.NewRetentionWorker(store, interval, log)
+			go worker.Run(ctx)
+			log.Info("retention worker started", "interval", interval)
+		} else if err != nil {
+			log.Error(err, "invalid RETENTION_INTERVAL, retention worker disabled", "value", f.retentionInterval)
+		}
+	}
+
 	// --- Embedding service ---
 	var embeddingSvc *memory.EmbeddingService
 	if f.embeddingProvider != "" {
@@ -201,7 +235,7 @@ func run() error {
 	}
 
 	// --- Build API mux ---
-	apiMux, cleanup := buildAPIMux(store, embeddingSvc, log)
+	apiMux, cleanup := buildAPIMux(store, embeddingSvc, svcCfg, log)
 	defer cleanup()
 
 	// --- Servers ---
@@ -237,10 +271,10 @@ func run() error {
 // buildAPIMux assembles the HTTP handler with all memory-api routes, wrapped
 // with rate limiting, metrics, and tracing middleware. Returns the handler and
 // a cleanup function.
-func buildAPIMux(store memory.Store, embeddingSvc *memory.EmbeddingService, log logr.Logger) (http.Handler, func()) {
+func buildAPIMux(store memory.Store, embeddingSvc *memory.EmbeddingService, cfg memoryapi.MemoryServiceConfig, log logr.Logger) (http.Handler, func()) {
 	httpMetrics := memoryapi.NewHTTPMetrics(nil)
 
-	svc := memoryapi.NewMemoryService(store, embeddingSvc, log)
+	svc := memoryapi.NewMemoryService(store, embeddingSvc, cfg, log)
 	handler := memoryapi.NewHandler(svc, log)
 
 	mux := http.NewServeMux()
