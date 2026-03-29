@@ -28,6 +28,10 @@ import type {
   SessionMessageOptions,
   SessionListResponse,
   SessionMessagesResponse,
+  MemoryEntity,
+  MemoryListResponse,
+  MemoryListOptions,
+  MemorySearchOptions,
 } from "./types";
 import type { Session } from "@/types/session";
 import type {
@@ -48,6 +52,7 @@ import { WorkspaceApiService } from "./workspace-api-service";
 import { PrometheusService } from "./prometheus-service";
 import { ArenaService, type ArenaJobMetrics } from "./arena-service";
 import { SessionApiService } from "./session-api-service";
+import { MemoryApiService } from "./memory-api-service";
 import { getWsProxyUrl } from "@/lib/config";
 
 /**
@@ -310,12 +315,14 @@ export class LiveDataService implements DataService {
   private readonly prometheusService: PrometheusService;
   private readonly arenaService: ArenaService;
   private readonly sessionService: SessionApiService;
+  private readonly memoryService: MemoryApiService;
 
   constructor() {
     this.workspaceService = new WorkspaceApiService();
     this.prometheusService = new PrometheusService();
     this.arenaService = new ArenaService();
     this.sessionService = new SessionApiService();
+    this.memoryService = new MemoryApiService();
   }
 
   // ============================================================
@@ -500,6 +507,30 @@ export class LiveDataService implements DataService {
 
   async getSessionMessages(workspace: string, sessionId: string, options?: SessionMessageOptions): Promise<SessionMessagesResponse> {
     return this.sessionService.getSessionMessages(workspace, sessionId, options);
+  }
+
+  // ============================================================
+  // Memory - delegated to MemoryApiService
+  // ============================================================
+
+  async getMemories(options: MemoryListOptions): Promise<MemoryListResponse> {
+    return this.memoryService.getMemories(options);
+  }
+
+  async searchMemories(options: MemorySearchOptions): Promise<MemoryListResponse> {
+    return this.memoryService.searchMemories(options);
+  }
+
+  async exportMemories(workspace: string, userId: string): Promise<MemoryEntity[]> {
+    return this.memoryService.exportMemories(workspace, userId);
+  }
+
+  async deleteMemory(workspace: string, memoryId: string): Promise<void> {
+    return this.memoryService.deleteMemory(workspace, memoryId);
+  }
+
+  async deleteAllMemories(workspace: string, userId: string): Promise<void> {
+    return this.memoryService.deleteAllMemories(workspace, userId);
   }
 
   // ============================================================
