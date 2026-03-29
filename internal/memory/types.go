@@ -47,13 +47,15 @@ type RetrieveOptions struct {
 	Types         []string
 	Limit         int
 	MinConfidence float64
+	Purpose       string
 }
 
 // ListOptions controls filtering and pagination for List calls.
 type ListOptions struct {
-	Types  []string
-	Limit  int
-	Offset int
+	Types   []string
+	Limit   int
+	Offset  int
+	Purpose string
 }
 
 // Store defines the interface for memory persistence.
@@ -64,4 +66,5 @@ type Store interface {
 	List(ctx context.Context, scope map[string]string, opts ListOptions) ([]*Memory, error)
 	Delete(ctx context.Context, scope map[string]string, memoryID string) error
 	DeleteAll(ctx context.Context, scope map[string]string) error
+	ExportAll(ctx context.Context, scope map[string]string) ([]*Memory, error)
 }

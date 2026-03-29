@@ -143,7 +143,7 @@ func newTestService(t *testing.T) *MemoryService {
 	t.Helper()
 	pool := freshDB(t)
 	store := memory.NewPostgresMemoryStore(pool)
-	return NewMemoryService(store, nil, logr.Discard())
+	return NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
 }
 
 // mockEmbeddingProvider is a test double for memory.EmbeddingProvider.
@@ -321,7 +321,7 @@ func TestMemoryService_SaveWithEmbedding(t *testing.T) {
 	provider := newMockEmbeddingProvider(1)
 	logger := zap.New(zap.UseDevMode(true))
 	embSvc := memory.NewEmbeddingService(store, provider, logger)
-	svc := NewMemoryService(store, embSvc, logr.Discard())
+	svc := NewMemoryService(store, embSvc, MemoryServiceConfig{}, logr.Discard())
 
 	ctx := context.Background()
 	mem := &memory.Memory{
@@ -351,7 +351,7 @@ func TestMemoryService_SaveWithEmbedding_EmbedError(t *testing.T) {
 	provider.err = errors.New("provider unavailable")
 	logger := zap.New(zap.UseDevMode(true))
 	embSvc := memory.NewEmbeddingService(store, provider, logger)
-	svc := NewMemoryService(store, embSvc, logr.Discard())
+	svc := NewMemoryService(store, embSvc, MemoryServiceConfig{}, logr.Discard())
 
 	ctx := context.Background()
 	mem := &memory.Memory{
@@ -390,4 +390,51 @@ func TestMemoryService_SaveWithoutEmbedding(t *testing.T) {
 	err := svc.SaveMemory(ctx, mem)
 	require.NoError(t, err)
 	assert.NotEmpty(t, mem.ID)
+}
+
+func TestMemoryService_SaveWithTTL(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	cfg := MemoryServiceConfig{DefaultTTL: 24 * time.Hour}
+	svc := NewMemoryService(store, nil, cfg, logr.Discard())
+
+	ctx := context.Background()
+	before := time.Now()
+	mem := &memory.Memory{
+		Type:       "fact",
+		Content:    "TTL test",
+		Confidence: 0.9,
+		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID},
+	}
+
+	err := svc.SaveMemory(ctx, mem)
+	require.NoError(t, err)
+	require.NotNil(t, mem.ExpiresAt, "ExpiresAt should be set by DefaultTTL")
+	assert.True(t, mem.ExpiresAt.After(before.Add(23*time.Hour)),
+		"ExpiresAt should be ~24h from now")
+	assert.True(t, mem.ExpiresAt.Before(before.Add(25*time.Hour)),
+		"ExpiresAt should be ~24h from now")
+}
+
+func TestMemoryService_SaveWithExplicitExpiry(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	cfg := MemoryServiceConfig{DefaultTTL: 24 * time.Hour}
+	svc := NewMemoryService(store, nil, cfg, logr.Discard())
+
+	ctx := context.Background()
+	explicit := time.Now().Add(7 * 24 * time.Hour).Truncate(time.Second)
+	mem := &memory.Memory{
+		Type:       "fact",
+		Content:    "explicit expiry test",
+		Confidence: 0.9,
+		ExpiresAt:  &explicit,
+		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID},
+	}
+
+	err := svc.SaveMemory(ctx, mem)
+	require.NoError(t, err)
+	require.NotNil(t, mem.ExpiresAt)
+	assert.True(t, mem.ExpiresAt.Equal(explicit),
+		"explicit ExpiresAt should not be overridden by DefaultTTL")
 }

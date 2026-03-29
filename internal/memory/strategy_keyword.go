@@ -54,7 +54,7 @@ func (k *KeywordStrategy) Retrieve(ctx context.Context, pool *pgxpool.Pool, scop
 
 // buildKeywordQuery constructs the SQL and arguments for a keyword Retrieve call.
 func buildKeywordQuery(scope map[string]string, query string, limit int) (string, *pgutil.QueryBuilder) {
-	qb := buildBaseMemoryQuery(scope, nil)
+	qb := buildBaseMemoryQuery(scope, nil, "")
 
 	if query != "" {
 		qb.Add("o.content ILIKE $?", "%"+query+"%")

@@ -64,6 +64,10 @@ func (m *mockStore) DeleteAll(_ context.Context, _ map[string]string) error {
 	return nil
 }
 
+func (m *mockStore) ExportAll(_ context.Context, _ map[string]string) ([]*Memory, error) {
+	return []*Memory{}, nil
+}
+
 // mockPopulator is a MemoryPopulator mock.
 type mockPopulator struct {
 	result *PopulationResult

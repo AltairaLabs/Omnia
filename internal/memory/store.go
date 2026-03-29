@@ -21,6 +21,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"time"
@@ -81,7 +82,7 @@ func (s *PostgresMemoryStore) Pool() *pgxpool.Pool {
 // populated on return.
 func (s *PostgresMemoryStore) Save(ctx context.Context, mem *Memory) error {
 	if mem.Scope[ScopeWorkspaceID] == "" {
-		return fmt.Errorf(errWorkspaceRequired)
+		return errors.New(errWorkspaceRequired)
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -186,7 +187,7 @@ func insertObservation(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 // Results are ordered by observed_at DESC and limited to opts.Limit (default 50).
 func (s *PostgresMemoryStore) Retrieve(ctx context.Context, scope map[string]string, query string, opts RetrieveOptions) ([]*Memory, error) {
 	if scope[ScopeWorkspaceID] == "" {
-		return nil, fmt.Errorf(errWorkspaceRequired)
+		return nil, errors.New(errWorkspaceRequired)
 	}
 
 	sql, qb := buildRetrieveQuery(scope, query, opts)
@@ -202,7 +203,7 @@ func (s *PostgresMemoryStore) Retrieve(ctx context.Context, scope map[string]str
 
 // buildRetrieveQuery constructs the SQL and arguments for a Retrieve call.
 func buildRetrieveQuery(scope map[string]string, query string, opts RetrieveOptions) (string, *pgutil.QueryBuilder) {
-	qb := buildBaseMemoryQuery(scope, opts.Types)
+	qb := buildBaseMemoryQuery(scope, opts.Types, opts.Purpose)
 
 	if opts.MinConfidence > 0 {
 		qb.Add(confidenceFilter, opts.MinConfidence)
@@ -217,7 +218,7 @@ func buildRetrieveQuery(scope map[string]string, query string, opts RetrieveOpti
 // List returns memories filtered by scope and options with pagination.
 func (s *PostgresMemoryStore) List(ctx context.Context, scope map[string]string, opts ListOptions) ([]*Memory, error) {
 	if scope[ScopeWorkspaceID] == "" {
-		return nil, fmt.Errorf(errWorkspaceRequired)
+		return nil, errors.New(errWorkspaceRequired)
 	}
 
 	sql, qb := buildListQuery(scope, opts)
@@ -233,14 +234,14 @@ func (s *PostgresMemoryStore) List(ctx context.Context, scope map[string]string,
 
 // buildListQuery constructs the SQL and arguments for a List call.
 func buildListQuery(scope map[string]string, opts ListOptions) (string, *pgutil.QueryBuilder) {
-	qb := buildBaseMemoryQuery(scope, opts.Types)
+	qb := buildBaseMemoryQuery(scope, opts.Types, opts.Purpose)
 	return formatMemorySQL(qb, opts.Limit, opts.Offset), qb
 }
 
 // Delete performs a soft delete by setting forgotten = true on the entity.
 func (s *PostgresMemoryStore) Delete(ctx context.Context, scope map[string]string, memoryID string) error {
 	if scope[ScopeWorkspaceID] == "" {
-		return fmt.Errorf(errWorkspaceRequired)
+		return errors.New(errWorkspaceRequired)
 	}
 
 	tag, err := s.pool.Exec(ctx, `
@@ -259,7 +260,7 @@ func (s *PostgresMemoryStore) Delete(ctx context.Context, scope map[string]strin
 // DeleteAll hard-deletes all entities (and cascading observations/relations) for the scope.
 func (s *PostgresMemoryStore) DeleteAll(ctx context.Context, scope map[string]string) error {
 	if scope[ScopeWorkspaceID] == "" {
-		return fmt.Errorf(errWorkspaceRequired)
+		return errors.New(errWorkspaceRequired)
 	}
 
 	sql, qb := buildDeleteAllQuery(scope)
@@ -285,6 +286,29 @@ func buildDeleteAllQuery(scope map[string]string) (string, *pgutil.QueryBuilder)
 	return sql, &qb
 }
 
+// exportAllLimit is the maximum number of memories returned by ExportAll (DSAR cap).
+const exportAllLimit = 10000
+
+// ExportAll returns all memories for a scope without pagination (DSAR export).
+// It uses a high limit cap to avoid unbounded result sets while still returning
+// all practical user data.
+func (s *PostgresMemoryStore) ExportAll(ctx context.Context, scope map[string]string) ([]*Memory, error) {
+	if scope[ScopeWorkspaceID] == "" {
+		return nil, errors.New(errWorkspaceRequired)
+	}
+
+	qb := buildBaseMemoryQuery(scope, nil, "")
+	sql := formatMemorySQL(qb, exportAllLimit, 0)
+
+	rows, err := s.pool.Query(ctx, sql, qb.Args()...)
+	if err != nil {
+		return nil, fmt.Errorf("memory: export all query: %w", err)
+	}
+	defer rows.Close()
+
+	return scanMemories(rows, scope)
+}
+
 // UpdateEmbedding sets the embedding vector on the latest observation for an entity.
 func (s *PostgresMemoryStore) UpdateEmbedding(ctx context.Context, entityID string, embedding []float32) error {
 	tag, err := s.pool.Exec(ctx, `
@@ -305,18 +329,32 @@ func (s *PostgresMemoryStore) UpdateEmbedding(ctx context.Context, entityID stri
 	return nil
 }
 
+// ExpireMemories deletes entities past their expires_at timestamp.
+// Returns the number of expired entities.
+func (s *PostgresMemoryStore) ExpireMemories(ctx context.Context) (int64, error) {
+	tag, err := s.pool.Exec(ctx,
+		"DELETE FROM memory_entities WHERE expires_at IS NOT NULL AND expires_at < now()")
+	if err != nil {
+		return 0, fmt.Errorf("memory: expire: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // --- helpers -----------------------------------------------------------------
 
 // defaultMemoryLimit is applied when no explicit limit is provided.
 const defaultMemoryLimit = 50
 
 // buildBaseMemoryQuery creates the common query builder for memory entity queries.
-// It applies workspace, scope, and type filters.
-func buildBaseMemoryQuery(scope map[string]string, types []string) *pgutil.QueryBuilder {
+// It applies workspace, scope, type, and purpose filters.
+func buildBaseMemoryQuery(scope map[string]string, types []string, purpose string) *pgutil.QueryBuilder {
 	var qb pgutil.QueryBuilder
 	qb.Add(colWorkspaceID, scope[ScopeWorkspaceID])
 	addScopeFilters(&qb, scope)
 	addTypeFilters(&qb, types)
+	if purpose != "" {
+		qb.Add("e.purpose=$?", purpose)
+	}
 	return &qb
 }
 

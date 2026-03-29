@@ -38,19 +38,30 @@ var (
 	ErrBodyTooLarge     = errors.New("request body too large")
 )
 
+// MemoryServiceConfig holds runtime configuration for the MemoryService.
+type MemoryServiceConfig struct {
+	// DefaultTTL is applied to new memories that do not carry an explicit ExpiresAt.
+	// Zero means no default TTL.
+	DefaultTTL time.Duration
+	// Purpose is the default purpose tag sourced from the CRD configuration.
+	Purpose string
+}
+
 // MemoryService wraps the memory store with business logic for the HTTP layer.
 type MemoryService struct {
 	store        memory.Store
 	embeddingSvc *memory.EmbeddingService // nil if embeddings not configured
+	config       MemoryServiceConfig
 	log          logr.Logger
 }
 
 // NewMemoryService creates a new MemoryService backed by the given store.
 // embeddingSvc may be nil when embedding is not configured.
-func NewMemoryService(store memory.Store, embeddingSvc *memory.EmbeddingService, log logr.Logger) *MemoryService {
+func NewMemoryService(store memory.Store, embeddingSvc *memory.EmbeddingService, cfg MemoryServiceConfig, log logr.Logger) *MemoryService {
 	return &MemoryService{
 		store:        store,
 		embeddingSvc: embeddingSvc,
+		config:       cfg,
 		log:          log.WithName("memory-service"),
 	}
 }
@@ -58,6 +69,10 @@ func NewMemoryService(store memory.Store, embeddingSvc *memory.EmbeddingService,
 // SaveMemory persists a memory entry and, if an embedding service is configured,
 // asynchronously generates and stores its embedding.
 func (s *MemoryService) SaveMemory(ctx context.Context, mem *memory.Memory) error {
+	if mem.ExpiresAt == nil && s.config.DefaultTTL > 0 {
+		exp := time.Now().Add(s.config.DefaultTTL)
+		mem.ExpiresAt = &exp
+	}
 	if err := s.store.Save(ctx, mem); err != nil {
 		return err
 	}
@@ -91,4 +106,14 @@ func (s *MemoryService) DeleteMemory(ctx context.Context, scope map[string]strin
 // DeleteAllMemories hard-deletes all memories for the given scope (DSAR).
 func (s *MemoryService) DeleteAllMemories(ctx context.Context, scope map[string]string) error {
 	return s.store.DeleteAll(ctx, scope)
+}
+
+// ExportMemories returns all memories for a scope without pagination (DSAR export).
+func (s *MemoryService) ExportMemories(ctx context.Context, scope map[string]string) ([]*memory.Memory, error) {
+	memories, err := s.store.ExportAll(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	s.log.V(1).Info("memories exported", "workspace", scope[memory.ScopeWorkspaceID], "count", len(memories))
+	return memories, nil
 }

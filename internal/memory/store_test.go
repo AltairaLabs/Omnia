@@ -506,3 +506,211 @@ func TestPostgresMemoryStore_Save_NilMetadata(t *testing.T) {
 	require.NoError(t, store.Save(ctx, mem))
 	assert.NotEmpty(t, mem.ID)
 }
+
+func TestPostgresMemoryStore_Retrieve_PurposeFilter(t *testing.T) {
+
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	// Save two memories — both get the DB default purpose 'support_continuity'.
+	mem1 := &Memory{
+		Type:       "fact",
+		Content:    "likes Go",
+		Confidence: 0.9,
+		Scope:      scope,
+	}
+	mem2 := &Memory{
+		Type:       "fact",
+		Content:    "likes Rust",
+		Confidence: 0.9,
+		Scope:      scope,
+	}
+	require.NoError(t, store.Save(ctx, mem1))
+	require.NoError(t, store.Save(ctx, mem2))
+
+	// Set mem2's purpose to 'personalization' via direct SQL.
+	_, err := store.Pool().Exec(ctx,
+		"UPDATE memory_entities SET purpose = 'personalization' WHERE id = $1",
+		mem2.ID,
+	)
+	require.NoError(t, err)
+
+	// Retrieve with purpose = 'personalization' — should return only mem2.
+	results, err := store.Retrieve(ctx, scope, "", RetrieveOptions{Purpose: "personalization"})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, mem2.ID, results[0].ID)
+
+	// Retrieve with purpose = 'support_continuity' — should return only mem1.
+	results, err = store.Retrieve(ctx, scope, "", RetrieveOptions{Purpose: "support_continuity"})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, mem1.ID, results[0].ID)
+
+	// Retrieve with no purpose filter — should return both.
+	results, err = store.Retrieve(ctx, scope, "", RetrieveOptions{})
+	require.NoError(t, err)
+	assert.Len(t, results, 2)
+}
+
+func TestPostgresMemoryStore_List_PurposeFilter(t *testing.T) {
+
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	// Save two memories — both get the DB default purpose 'support_continuity'.
+	mem1 := &Memory{
+		Type:       "fact",
+		Content:    "prefers dark mode",
+		Confidence: 0.9,
+		Scope:      scope,
+	}
+	mem2 := &Memory{
+		Type:       "fact",
+		Content:    "uses vim editor",
+		Confidence: 0.9,
+		Scope:      scope,
+	}
+	require.NoError(t, store.Save(ctx, mem1))
+	require.NoError(t, store.Save(ctx, mem2))
+
+	// Set mem2's purpose to 'personalization' via direct SQL.
+	_, err := store.Pool().Exec(ctx,
+		"UPDATE memory_entities SET purpose = 'personalization' WHERE id = $1",
+		mem2.ID,
+	)
+	require.NoError(t, err)
+
+	// List with purpose = 'personalization' — should return only mem2.
+	results, err := store.List(ctx, scope, ListOptions{Purpose: "personalization"})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, mem2.ID, results[0].ID)
+
+	// List with purpose = 'support_continuity' — should return only mem1.
+	results, err = store.List(ctx, scope, ListOptions{Purpose: "support_continuity"})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, mem1.ID, results[0].ID)
+
+	// List with no purpose filter — should return both.
+	results, err = store.List(ctx, scope, ListOptions{})
+	require.NoError(t, err)
+	assert.Len(t, results, 2)
+}
+
+func TestPostgresMemoryStore_ExpireMemories(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	pastTime := time.Now().Add(-1 * time.Hour)
+	mem := &Memory{
+		Type:       "fact",
+		Content:    "expires in the past",
+		Confidence: 0.9,
+		Scope:      scope,
+		ExpiresAt:  &pastTime,
+	}
+	require.NoError(t, store.Save(ctx, mem))
+
+	// Verify it exists before expiry.
+	results, err := store.List(ctx, scope, ListOptions{})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	expired, err := store.ExpireMemories(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), expired)
+
+	// Verify it is gone after expiry.
+	results, err = store.List(ctx, scope, ListOptions{})
+	require.NoError(t, err)
+	assert.Empty(t, results)
+}
+
+func TestPostgresMemoryStore_ExpireMemories_NoExpired(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	futureTime := time.Now().Add(1 * time.Hour)
+	mem := &Memory{
+		Type:       "fact",
+		Content:    "expires in the future",
+		Confidence: 0.9,
+		Scope:      scope,
+		ExpiresAt:  &futureTime,
+	}
+	require.NoError(t, store.Save(ctx, mem))
+
+	expired, err := store.ExpireMemories(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), expired)
+
+	// Verify it still exists.
+	results, err := store.List(ctx, scope, ListOptions{})
+	require.NoError(t, err)
+	assert.Len(t, results, 1)
+}
+
+func TestPostgresMemoryStore_ExportAll(t *testing.T) {
+
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	for i := range 5 {
+		mem := &Memory{
+			Type:       "fact",
+			Content:    fmt.Sprintf("export fact %d", i),
+			Confidence: 0.9,
+			Scope:      scope,
+		}
+		require.NoError(t, store.Save(ctx, mem))
+	}
+
+	results, err := store.ExportAll(ctx, scope)
+	require.NoError(t, err)
+	assert.Len(t, results, 5, "ExportAll should return all 5 memories")
+}
+
+func TestPostgresMemoryStore_ExportAll_MissingWorkspace(t *testing.T) {
+
+	store := newStore(t)
+	ctx := context.Background()
+
+	_, err := store.ExportAll(ctx, map[string]string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "workspace_id")
+}
+
+func TestPostgresMemoryStore_ExportAll_ExcludesForgotten(t *testing.T) {
+
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	// Save 3 memories.
+	mems := make([]*Memory, 3)
+	for i := range 3 {
+		mem := &Memory{
+			Type:       "fact",
+			Content:    fmt.Sprintf("exportable %d", i),
+			Confidence: 0.9,
+			Scope:      scope,
+		}
+		require.NoError(t, store.Save(ctx, mem))
+		mems[i] = mem
+	}
+
+	// Soft-delete one.
+	require.NoError(t, store.Delete(ctx, scope, mems[0].ID))
+
+	// ExportAll should only return the 2 non-forgotten ones.
+	results, err := store.ExportAll(ctx, scope)
+	require.NoError(t, err)
+	assert.Len(t, results, 2, "ExportAll should exclude soft-deleted memories")
+}
