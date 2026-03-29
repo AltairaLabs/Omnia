@@ -1715,3 +1715,126 @@ func TestSetBatchSize_Positive(t *testing.T) {
 	svc.SetBatchSize(50)
 	assert.Equal(t, 50, svc.batchSize)
 }
+
+// --- MockMemoryDeleter -------------------------------------------------------
+
+// MockMemoryDeleter is a test double for MemoryDeleter.
+type MockMemoryDeleter struct {
+	mu        sync.Mutex
+	Calls     []memoryDeleteCall
+	ReturnErr error
+}
+
+type memoryDeleteCall struct {
+	UserID    string
+	Workspace string
+}
+
+func (m *MockMemoryDeleter) DeleteAllMemories(_ context.Context, userID, workspace string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Calls = append(m.Calls, memoryDeleteCall{UserID: userID, Workspace: workspace})
+	return m.ReturnErr
+}
+
+// --- MemoryDeleter integration tests ----------------------------------------
+
+func TestDeletionService_WithMemoryDeleter(t *testing.T) {
+	store := NewMockDeletionStore()
+	deleter := NewMockSessionDeleter()
+	memDeleter := &MockMemoryDeleter{}
+	svc := newTestService(store, deleter, nil)
+	svc.SetMemoryDeleter(memDeleter)
+
+	deleter.Sessions["user-1|ws-a"] = []string{"sess-1", "sess-2"}
+
+	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
+		UserID:    "user-1",
+		Reason:    "gdpr_erasure",
+		Scope:     "workspace",
+		Workspace: "ws-a",
+	})
+	require.NoError(t, err)
+
+	err = svc.ProcessRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+
+	// Sessions should be deleted.
+	updated, err := store.GetRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+	assert.Equal(t, StatusCompleted, updated.Status)
+	assert.Equal(t, 2, updated.SessionsDeleted)
+	assert.Empty(t, updated.Errors)
+
+	// Memory deleter should have been called once with the correct args.
+	memDeleter.mu.Lock()
+	defer memDeleter.mu.Unlock()
+	require.Len(t, memDeleter.Calls, 1)
+	assert.Equal(t, "user-1", memDeleter.Calls[0].UserID)
+	assert.Equal(t, "ws-a", memDeleter.Calls[0].Workspace)
+}
+
+func TestDeletionService_MemoryDeleterError(t *testing.T) {
+	store := NewMockDeletionStore()
+	deleter := NewMockSessionDeleter()
+	memDeleter := &MockMemoryDeleter{ReturnErr: errors.New("memory store unavailable")}
+	svc := newTestService(store, deleter, nil)
+	svc.SetMemoryDeleter(memDeleter)
+
+	deleter.Sessions["user-1|"] = []string{"sess-1"}
+
+	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
+		UserID: "user-1",
+		Reason: "gdpr_erasure",
+		Scope:  "all",
+	})
+	require.NoError(t, err)
+
+	// ProcessRequest should complete (not return error) even when memory deletion fails.
+	err = svc.ProcessRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+
+	updated, err := store.GetRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+	// Status should be failed because there's an error recorded.
+	assert.Equal(t, StatusFailed, updated.Status)
+	// Sessions should still have been deleted.
+	assert.Equal(t, 1, updated.SessionsDeleted)
+	// The memory deletion error should be recorded.
+	require.Len(t, updated.Errors, 1)
+	assert.Contains(t, updated.Errors[0], "memory deletion")
+}
+
+func TestDeletionService_NoMemoryDeleter(t *testing.T) {
+	store := NewMockDeletionStore()
+	deleter := NewMockSessionDeleter()
+	// No memory deleter set — nil is the default.
+	svc := newTestService(store, deleter, nil)
+
+	deleter.Sessions["user-1|"] = []string{"sess-1", "sess-2"}
+
+	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
+		UserID: "user-1",
+		Reason: "user_request",
+		Scope:  "all",
+	})
+	require.NoError(t, err)
+
+	// Should not panic, sessions should still be deleted.
+	err = svc.ProcessRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+
+	updated, err := store.GetRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+	assert.Equal(t, StatusCompleted, updated.Status)
+	assert.Equal(t, 2, updated.SessionsDeleted)
+	assert.Empty(t, updated.Errors)
+}
+
+func TestDeletionService_SetMemoryDeleter_Nil(t *testing.T) {
+	svc := NewDeletionService(NewMockDeletionStore(), NewMockSessionDeleter(), nil, logr.Discard())
+	// Calling SetMemoryDeleter(nil) should not overwrite the field.
+	svc.SetMemoryDeleter(nil)
+	// Field stays nil (no panic on use because the nil guard in ProcessRequest handles it).
+	assert.Nil(t, svc.memory)
+}

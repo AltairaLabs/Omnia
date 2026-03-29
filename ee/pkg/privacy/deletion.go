@@ -96,6 +96,11 @@ type SessionDeleter interface {
 	DeleteSession(ctx context.Context, sessionID string) error
 }
 
+// MemoryDeleter handles memory deletion for privacy requests.
+type MemoryDeleter interface {
+	DeleteAllMemories(ctx context.Context, userID, workspace string) error
+}
+
 // AuditLogger abstracts audit event logging.
 type AuditLogger interface {
 	LogEvent(ctx context.Context, entry *api.AuditEntry)
@@ -117,6 +122,7 @@ type DeletionService struct {
 	store     DeletionStore
 	deleter   SessionDeleter
 	media     MediaDeleter
+	memory    MemoryDeleter
 	audit     AuditLogger
 	log       logr.Logger
 	batchSize int
@@ -140,6 +146,13 @@ func NewDeletionService(
 func (s *DeletionService) SetMediaDeleter(m MediaDeleter) {
 	if m != nil {
 		s.media = m
+	}
+}
+
+// SetMemoryDeleter configures the MemoryDeleter for memory cleanup during DSAR processing.
+func (s *DeletionService) SetMemoryDeleter(m MemoryDeleter) {
+	if m != nil {
+		s.memory = m
 	}
 }
 
@@ -204,6 +217,17 @@ func (s *DeletionService) ProcessRequest(ctx context.Context, id string) error {
 
 	// Process sessions in batches.
 	s.processBatches(ctx, req, sessionIDs)
+
+	// Delete all memories for the user. Errors are recorded but do not fail the request.
+	if s.memory != nil {
+		if err := s.memory.DeleteAllMemories(ctx, req.UserID, req.Workspace); err != nil {
+			s.log.Error(err, "memory deletion failed",
+				"requestID", req.ID,
+				"userID", req.UserID,
+			)
+			req.Errors = append(req.Errors, fmt.Sprintf("memory deletion: %v", err))
+		}
+	}
 
 	return s.completeRequest(ctx, req)
 }
