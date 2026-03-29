@@ -93,6 +93,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/v1/memories", h.handleListMemories)
 	mux.HandleFunc("GET /api/v1/memories/search", h.handleSearchMemories)
+	mux.HandleFunc("GET /api/v1/memories/export", h.handleExportMemories)
 	mux.HandleFunc("POST /api/v1/memories", h.handleSaveMemory)
 	mux.HandleFunc("DELETE /api/v1/memories/{id}", h.handleDeleteMemory)
 	mux.HandleFunc("DELETE /api/v1/memories", h.handleDeleteAllMemories)
@@ -154,6 +155,33 @@ func (h *Handler) handleSearchMemories(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, MemoryListResponse{
+		Memories: memories,
+		Total:    len(memories),
+	})
+}
+
+// exportFilename is the Content-Disposition filename for DSAR exports.
+const exportFilename = `attachment; filename="memories-export.json"`
+
+// handleExportMemories exports all memories for a scope (DSAR data subject access request).
+func (h *Handler) handleExportMemories(w http.ResponseWriter, r *http.Request) {
+	scope, err := parseWorkspaceScope(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	memories, err := h.service.ExportMemories(r.Context(), scope)
+	if err != nil {
+		h.log.Error(err, "ExportMemories failed", "workspace", scope[memory.ScopeWorkspaceID])
+		writeError(w, err)
+		return
+	}
+
+	h.log.V(1).Info("memories export served", "workspace", scope[memory.ScopeWorkspaceID], "count", len(memories))
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
+	w.Header().Set("Content-Disposition", exportFilename)
+	_ = json.NewEncoder(w).Encode(MemoryListResponse{
 		Memories: memories,
 		Total:    len(memories),
 	})

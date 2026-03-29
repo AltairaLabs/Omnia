@@ -38,13 +38,14 @@ import (
 // --- Mock store ---
 
 type mockStore struct {
-	memories  []*memory.Memory
-	saveErr   error
-	retErr    error
-	listErr   error
-	delErr    error
-	delAllErr error
-	savedMem  *memory.Memory
+	memories     []*memory.Memory
+	saveErr      error
+	retErr       error
+	listErr      error
+	delErr       error
+	delAllErr    error
+	exportAllErr error
+	savedMem     *memory.Memory
 }
 
 func (m *mockStore) Save(_ context.Context, mem *memory.Memory) error {
@@ -76,6 +77,13 @@ func (m *mockStore) Delete(_ context.Context, _ map[string]string, _ string) err
 
 func (m *mockStore) DeleteAll(_ context.Context, _ map[string]string) error {
 	return m.delAllErr
+}
+
+func (m *mockStore) ExportAll(_ context.Context, _ map[string]string) ([]*memory.Memory, error) {
+	if m.exportAllErr != nil {
+		return nil, m.exportAllErr
+	}
+	return m.memories, nil
 }
 
 func newTestHandler(store memory.Store) *Handler {
@@ -450,6 +458,58 @@ func TestParseMinConfidence(t *testing.T) {
 func TestWriteError_UnknownError(t *testing.T) {
 	rr := httptest.NewRecorder()
 	writeError(rr, fmt.Errorf("something unexpected"))
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+// --- Export memories tests ---
+
+func TestHandler_ExportMemories(t *testing.T) {
+	store := &mockStore{
+		memories: []*memory.Memory{
+			{ID: "1", Type: "preference", Content: "likes Go"},
+			{ID: "2", Type: "fact", Content: "uses Linux"},
+		},
+	}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/memories/export?workspace=ws1&user_id=u1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, exportFilename, rr.Header().Get("Content-Disposition"))
+	assert.Equal(t, "application/json", rr.Header().Get("Content-Type"))
+
+	var resp MemoryListResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, 2, resp.Total)
+	assert.Len(t, resp.Memories, 2)
+}
+
+func TestHandler_ExportMemories_MissingWorkspace(t *testing.T) {
+	h := newTestHandler(&mockStore{})
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/memories/export", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	var resp ErrorResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Contains(t, resp.Error, "workspace")
+}
+
+func TestHandler_ExportMemories_StoreError(t *testing.T) {
+	store := &mockStore{exportAllErr: fmt.Errorf("db error")}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/memories/export?workspace=ws1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 }
 

@@ -1,0 +1,447 @@
+/*
+Copyright 2026 Altaira Labs.
+
+SPDX-License-Identifier: Apache-2.0
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package memory
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/go-logr/logr"
+	"github.com/redis/go-redis/v9"
+)
+
+// cacheTestStore is a test double for the Store interface used by CachedStore tests.
+type cacheTestStore struct {
+	mu            sync.Mutex
+	memories      []*Memory
+	retrieveCalls int
+	listCalls     int
+	saveCalls     int
+	saveErr       error
+	retrieveErr   error
+	listErr       error
+	deleteErr     error
+	deleteAllErr  error
+}
+
+func (m *cacheTestStore) Save(_ context.Context, mem *Memory) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.saveCalls++
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	if mem.ID == "" {
+		mem.ID = "mock-id"
+		mem.CreatedAt = time.Now()
+	}
+	m.memories = append(m.memories, mem)
+	return nil
+}
+
+func (m *cacheTestStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ RetrieveOptions) ([]*Memory, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.retrieveCalls++
+	if m.retrieveErr != nil {
+		return nil, m.retrieveErr
+	}
+	return m.memories, nil
+}
+
+func (m *cacheTestStore) List(_ context.Context, _ map[string]string, _ ListOptions) ([]*Memory, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.listCalls++
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
+	return m.memories, nil
+}
+
+func (m *cacheTestStore) Delete(_ context.Context, _ map[string]string, _ string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
+	return nil
+}
+
+func (m *cacheTestStore) DeleteAll(_ context.Context, _ map[string]string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.deleteAllErr != nil {
+		return m.deleteAllErr
+	}
+	m.memories = nil
+	return nil
+}
+
+func (m *cacheTestStore) ExportAll(_ context.Context, _ map[string]string) ([]*Memory, error) {
+	return []*Memory{}, nil
+}
+
+// cacheTestScope returns a minimal scope map for CachedStore tests.
+func cacheTestScope() map[string]string {
+	return map[string]string{ScopeWorkspaceID: "ws-1", ScopeUserID: "user-1"}
+}
+
+// newTestCache creates a CachedStore backed by miniredis and the given mock.
+func newTestCache(t *testing.T, inner *cacheTestStore) (*CachedStore, *miniredis.Miniredis) {
+	t.Helper()
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis.Run: %v", err)
+	}
+	t.Cleanup(mr.Close)
+
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	return NewCachedStore(inner, rdb, 5*time.Minute, logr.Discard()), mr
+}
+
+// --- Retrieve tests -----------------------------------------------------------
+
+func TestCachedStore_Retrieve_CacheMiss(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{{ID: "m1", Type: "fact", Content: "sky is blue"}}}
+	cs, _ := newTestCache(t, inner)
+	ctx := context.Background()
+	scope := cacheTestScope()
+
+	// First call: cache miss, inner called.
+	mems, err := cs.Retrieve(ctx, scope, "sky", RetrieveOptions{Limit: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mems) != 1 {
+		t.Fatalf("expected 1 memory, got %d", len(mems))
+	}
+	if inner.retrieveCalls != 1 {
+		t.Fatalf("expected 1 inner call, got %d", inner.retrieveCalls)
+	}
+
+	// Second call: same key → cache hit, inner NOT called again.
+	mems2, err := cs.Retrieve(ctx, scope, "sky", RetrieveOptions{Limit: 10})
+	if err != nil {
+		t.Fatalf("unexpected error on second call: %v", err)
+	}
+	if len(mems2) != 1 {
+		t.Fatalf("expected 1 memory on cache hit, got %d", len(mems2))
+	}
+	if inner.retrieveCalls != 1 {
+		t.Fatalf("expected inner still called only once, got %d", inner.retrieveCalls)
+	}
+}
+
+func TestCachedStore_Retrieve_CacheHit(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{{ID: "m1", Type: "fact", Content: "cached"}}}
+	cs, _ := newTestCache(t, inner)
+	ctx := context.Background()
+	scope := cacheTestScope()
+
+	// Prime cache with first call.
+	if _, err := cs.Retrieve(ctx, scope, "q", RetrieveOptions{}); err != nil {
+		t.Fatalf("prime: %v", err)
+	}
+	beforeCalls := inner.retrieveCalls
+
+	// Second call must return cached data without hitting inner again.
+	mems, err := cs.Retrieve(ctx, scope, "q", RetrieveOptions{})
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if len(mems) != 1 {
+		t.Fatalf("expected 1 memory, got %d", len(mems))
+	}
+	if inner.retrieveCalls != beforeCalls {
+		t.Fatalf("cache hit should not call inner; calls before=%d after=%d", beforeCalls, inner.retrieveCalls)
+	}
+}
+
+func TestCachedStore_Retrieve_InnerError(t *testing.T) {
+	inner := &cacheTestStore{retrieveErr: errTest}
+	cs, _ := newTestCache(t, inner)
+
+	_, err := cs.Retrieve(context.Background(), cacheTestScope(), "", RetrieveOptions{})
+	if err == nil {
+		t.Fatal("expected error from inner, got nil")
+	}
+}
+
+// --- Save / invalidation tests ------------------------------------------------
+
+func TestCachedStore_Save_InvalidatesCache(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{{ID: "m1", Content: "old"}}}
+	cs, _ := newTestCache(t, inner)
+	ctx := context.Background()
+	scope := cacheTestScope()
+
+	// Prime cache.
+	if _, err := cs.Retrieve(ctx, scope, "", RetrieveOptions{}); err != nil {
+		t.Fatalf("prime: %v", err)
+	}
+	if inner.retrieveCalls != 1 {
+		t.Fatalf("expected 1 inner call after priming, got %d", inner.retrieveCalls)
+	}
+
+	// Save bumps version. The mock's Save appends to inner.memories, so inner now has 2.
+	newMem := &Memory{Type: "fact", Content: "new", Scope: scope}
+	if err := cs.Save(ctx, newMem); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	// Next Retrieve must bypass cache (version changed) and call inner again.
+	mems, err := cs.Retrieve(ctx, scope, "", RetrieveOptions{})
+	if err != nil {
+		t.Fatalf("retrieve after save: %v", err)
+	}
+	if len(mems) != 2 {
+		t.Fatalf("expected 2 memories after invalidation, got %d", len(mems))
+	}
+	if inner.retrieveCalls != 2 {
+		t.Fatalf("expected inner called again after invalidation, got %d calls", inner.retrieveCalls)
+	}
+}
+
+func TestCachedStore_Save_InnerError(t *testing.T) {
+	inner := &cacheTestStore{saveErr: errTest}
+	cs, _ := newTestCache(t, inner)
+
+	err := cs.Save(context.Background(), &Memory{Type: "fact", Content: "x", Scope: cacheTestScope()})
+	if err == nil {
+		t.Fatal("expected error from inner save, got nil")
+	}
+}
+
+// --- Delete tests -------------------------------------------------------------
+
+func TestCachedStore_Delete_InvalidatesCache(t *testing.T) {
+	m1 := &Memory{ID: "m1", Type: "fact", Content: "deletable"}
+	inner := &cacheTestStore{memories: []*Memory{m1}}
+	cs, _ := newTestCache(t, inner)
+	ctx := context.Background()
+	scope := cacheTestScope()
+
+	// Prime cache.
+	if _, err := cs.Retrieve(ctx, scope, "", RetrieveOptions{}); err != nil {
+		t.Fatalf("prime: %v", err)
+	}
+	callsBefore := inner.retrieveCalls
+
+	// Delete bumps version.
+	if err := cs.Delete(ctx, scope, "m1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	// Clear from mock too.
+	inner.mu.Lock()
+	inner.memories = nil
+	inner.mu.Unlock()
+
+	// Next Retrieve must miss the cache.
+	mems, err := cs.Retrieve(ctx, scope, "", RetrieveOptions{})
+	if err != nil {
+		t.Fatalf("retrieve after delete: %v", err)
+	}
+	if len(mems) != 0 {
+		t.Fatalf("expected 0 memories after delete, got %d", len(mems))
+	}
+	if inner.retrieveCalls != callsBefore+1 {
+		t.Fatalf("expected inner called once more after delete invalidation; calls=%d", inner.retrieveCalls)
+	}
+}
+
+func TestCachedStore_Delete_InnerError(t *testing.T) {
+	inner := &cacheTestStore{deleteErr: errTest}
+	cs, _ := newTestCache(t, inner)
+
+	err := cs.Delete(context.Background(), cacheTestScope(), "no-such-id")
+	if err == nil {
+		t.Fatal("expected error from inner delete, got nil")
+	}
+}
+
+// --- List tests ---------------------------------------------------------------
+
+func TestCachedStore_List_Cached(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{
+		{ID: "a", Type: "fact", Content: "one"},
+		{ID: "b", Type: "skill", Content: "two"},
+	}}
+	cs, _ := newTestCache(t, inner)
+	ctx := context.Background()
+	scope := cacheTestScope()
+	opts := ListOptions{Limit: 10}
+
+	// First call: cache miss.
+	mems, err := cs.List(ctx, scope, opts)
+	if err != nil {
+		t.Fatalf("first list: %v", err)
+	}
+	if len(mems) != 2 {
+		t.Fatalf("expected 2, got %d", len(mems))
+	}
+	if inner.listCalls != 1 {
+		t.Fatalf("expected 1 inner call, got %d", inner.listCalls)
+	}
+
+	// Second call: cache hit.
+	if _, err := cs.List(ctx, scope, opts); err != nil {
+		t.Fatalf("second list: %v", err)
+	}
+	if inner.listCalls != 1 {
+		t.Fatalf("expected inner still called once on cache hit, got %d", inner.listCalls)
+	}
+}
+
+func TestCachedStore_List_InnerError(t *testing.T) {
+	inner := &cacheTestStore{listErr: errTest}
+	cs, _ := newTestCache(t, inner)
+
+	_, err := cs.List(context.Background(), cacheTestScope(), ListOptions{})
+	if err == nil {
+		t.Fatal("expected error from inner list, got nil")
+	}
+}
+
+// --- DeleteAll tests ----------------------------------------------------------
+
+func TestCachedStore_DeleteAll_InvalidatesCache(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{{ID: "m1", Content: "gone"}}}
+	cs, _ := newTestCache(t, inner)
+	ctx := context.Background()
+	scope := cacheTestScope()
+
+	if _, err := cs.List(ctx, scope, ListOptions{}); err != nil {
+		t.Fatalf("prime: %v", err)
+	}
+	listBefore := inner.listCalls
+
+	if err := cs.DeleteAll(ctx, scope); err != nil {
+		t.Fatalf("delete all: %v", err)
+	}
+
+	if _, err := cs.List(ctx, scope, ListOptions{}); err != nil {
+		t.Fatalf("list after delete all: %v", err)
+	}
+	if inner.listCalls != listBefore+1 {
+		t.Fatalf("expected inner called again after DeleteAll; calls=%d", inner.listCalls)
+	}
+}
+
+func TestCachedStore_DeleteAll_InnerError(t *testing.T) {
+	inner := &cacheTestStore{deleteAllErr: errTest}
+	cs, _ := newTestCache(t, inner)
+
+	err := cs.DeleteAll(context.Background(), cacheTestScope())
+	if err == nil {
+		t.Fatal("expected error from inner delete all, got nil")
+	}
+}
+
+// --- Redis down / fallthrough tests -------------------------------------------
+
+func TestCachedStore_RedisDown_Fallthrough(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{{ID: "m1", Content: "fallback"}}}
+	cs, mr := newTestCache(t, inner)
+	ctx := context.Background()
+	scope := cacheTestScope()
+
+	// Shut Redis down.
+	mr.Close()
+
+	// Retrieve must fall through to inner without error.
+	mems, err := cs.Retrieve(ctx, scope, "", RetrieveOptions{})
+	if err != nil {
+		t.Fatalf("expected fallthrough, got error: %v", err)
+	}
+	if len(mems) != 1 {
+		t.Fatalf("expected 1 memory from inner, got %d", len(mems))
+	}
+	if inner.retrieveCalls != 1 {
+		t.Fatalf("expected inner called once, got %d", inner.retrieveCalls)
+	}
+}
+
+func TestCachedStore_RedisDown_List_Fallthrough(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{{ID: "m1", Content: "fallback"}}}
+	cs, mr := newTestCache(t, inner)
+	ctx := context.Background()
+
+	mr.Close()
+
+	mems, err := cs.List(ctx, cacheTestScope(), ListOptions{})
+	if err != nil {
+		t.Fatalf("expected fallthrough on list, got error: %v", err)
+	}
+	if len(mems) != 1 {
+		t.Fatalf("expected 1 memory, got %d", len(mems))
+	}
+}
+
+// --- Edge case: cache returns empty but inner has data ------------------------
+
+// TestCachedStore_EmptyCache_DoesNotMaskInnerData verifies that a version bump
+// (e.g. after a Save) causes a subsequent Retrieve to call inner even when the
+// previous cached result was an empty slice. This guards against the "cache
+// empty = definitive answer" antipattern described in CLAUDE.md.
+func TestCachedStore_EmptyCache_DoesNotMaskInnerData(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{}}
+	cs, _ := newTestCache(t, inner)
+	ctx := context.Background()
+	scope := cacheTestScope()
+
+	// First call returns empty from inner; this gets cached.
+	mems, err := cs.Retrieve(ctx, scope, "", RetrieveOptions{})
+	if err != nil {
+		t.Fatalf("first retrieve: %v", err)
+	}
+	if len(mems) != 0 {
+		t.Fatalf("expected empty, got %d", len(mems))
+	}
+
+	// A Save bumps the version.
+	newMem := &Memory{Type: "fact", Content: "new", Scope: scope}
+	if err := cs.Save(ctx, newMem); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	// Now inner has one memory.
+	inner.mu.Lock()
+	inner.memories = []*Memory{{ID: "m2", Content: "new"}}
+	inner.mu.Unlock()
+
+	// Retrieve must NOT return the old empty cache; must call inner.
+	mems, err = cs.Retrieve(ctx, scope, "", RetrieveOptions{})
+	if err != nil {
+		t.Fatalf("retrieve after save: %v", err)
+	}
+	if len(mems) != 1 {
+		t.Fatalf("expected 1 memory after version bump, got %d (empty cache was incorrectly trusted)", len(mems))
+	}
+}
+
+// errTest is a sentinel error for injection.
+var errTest = fmt.Errorf("injected error")

@@ -92,3 +92,13 @@ func (s *MemoryService) DeleteMemory(ctx context.Context, scope map[string]strin
 func (s *MemoryService) DeleteAllMemories(ctx context.Context, scope map[string]string) error {
 	return s.store.DeleteAll(ctx, scope)
 }
+
+// ExportMemories returns all memories for a scope without pagination (DSAR export).
+func (s *MemoryService) ExportMemories(ctx context.Context, scope map[string]string) ([]*memory.Memory, error) {
+	memories, err := s.store.ExportAll(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	s.log.V(1).Info("memories exported", "workspace", scope[memory.ScopeWorkspaceID], "count", len(memories))
+	return memories, nil
+}

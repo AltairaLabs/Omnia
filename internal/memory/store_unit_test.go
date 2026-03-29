@@ -149,6 +149,13 @@ func TestDeleteAll_MissingWorkspace(t *testing.T) {
 	assert.Contains(t, err.Error(), "workspace_id")
 }
 
+func TestExportAll_MissingWorkspace(t *testing.T) {
+	store := &PostgresMemoryStore{} // nil pool — validation fails before use
+	_, err := store.ExportAll(context.Background(), map[string]string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "workspace_id")
+}
+
 func TestNewPostgresMemoryStore(t *testing.T) {
 	store := NewPostgresMemoryStore(nil)
 	assert.NotNil(t, store)
