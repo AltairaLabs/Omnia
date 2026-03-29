@@ -120,7 +120,7 @@ spec:
               mountPath: /var/lib/postgresql/data
 {{- if $pgbouncerEnabled }}
         - name: pgbouncer
-          image: bitnami/pgbouncer:1
+          image: edoburu/pgbouncer:latest
           ports:
             - containerPort: 6432
               protocol: TCP

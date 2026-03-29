@@ -214,10 +214,16 @@ docker_build(
     only=[
         './cmd/session-api',
         './api',
-        './internal',
+        './internal/session',
+        './internal/pgutil',
+        './internal/httputil',
+        './internal/tracing',
         './ee/api',
-        './ee/pkg',
-        './ee/internal',
+        './ee/pkg/privacy',
+        './ee/pkg/redaction',
+        './ee/pkg/audit',
+        './ee/pkg/encryption',
+        './ee/pkg/metrics',
         './pkg',
         './go.mod',
         './go.sum',
@@ -235,10 +241,11 @@ docker_build(
     only=[
         './cmd/memory-api',
         './api',
-        './internal',
-        './ee/api',
-        './ee/pkg',
-        './ee/internal',
+        './internal/memory',
+        './internal/session',
+        './internal/pgutil',
+        './internal/httputil',
+        './internal/tracing',
         './pkg',
         './go.mod',
         './go.sum',
@@ -291,9 +298,13 @@ docker_build(
         './internal/agent',
         './internal/facade',
         './internal/session',
+        './internal/httputil',
+        './internal/media',
         './internal/tracing',
         './pkg',
-        './ee',
+        './ee/pkg/privacy',
+        './ee/pkg/redaction',
+        './ee/api',
         './go.mod',
         './go.sum',
     ],
@@ -303,10 +314,14 @@ docker_build(
 # When USE_LOCAL_PROMPTKIT is enabled, includes local PromptKit source for development
 runtime_only = [
     './cmd/runtime',
+    './api',
     './internal/runtime',
+    './internal/memory',
+    './internal/session',
+    './internal/httputil',
+    './internal/pgutil',
     './internal/tracing',
     './pkg',
-    './api/proto',
     './go.mod',
     './go.sum',
 ]
@@ -1081,31 +1096,47 @@ local_resource(
     trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
-# Auto-rebuild images and restart agent pods when source changes.
-# Since AgentRuntime deployments are created by the operator (not Tilt),
-# we rebuild both images and roll out new pods in one step.
-restart_agents_deps = [
+# Auto-rebuild agent images when their specific source files change.
+# Separated into facade and runtime to avoid unnecessary rebuilds — a change to
+# runtime code no longer triggers a facade rebuild (and vice versa).
+# Agent pods are restarted after each rebuild since they're operator-managed.
+
+_facade_deps = [
     './cmd/agent',
     './internal/agent',
     './internal/facade',
     './internal/session',
+    './internal/httputil',
+    './internal/media',
     './internal/tracing',
-    './ee',
-    './cmd/runtime',
-    './internal/runtime',
 ]
 
-# Include promptkit-local when using local PromptKit source
+_runtime_deps = [
+    './cmd/runtime',
+    './internal/runtime',
+    './internal/memory',
+    './internal/tracing',
+]
+
 if USE_LOCAL_PROMPTKIT:
-    restart_agents_deps.append('./promptkit-local')
+    _runtime_deps.append('./promptkit-local')
 
 local_resource(
-    'restart-agents',
-    cmd=_rebuild_facade_cmd + ' && ' + _rebuild_runtime_cmd + ' && ' + _restart_cmd,
-    deps=restart_agents_deps,
+    'auto-rebuild-facade',
+    cmd=_rebuild_facade_cmd + ' && ' + _restart_cmd,
+    deps=_facade_deps,
     labels=['agents'],
     resource_deps=['sample-resources'],
-    auto_init=False,  # Don't run on initial tilt up
+    auto_init=False,
+)
+
+local_resource(
+    'auto-rebuild-runtime',
+    cmd=_rebuild_runtime_cmd + ' && ' + _restart_cmd,
+    deps=_runtime_deps,
+    labels=['agents'],
+    resource_deps=['sample-resources'],
+    auto_init=False,
 )
 
 # ============================================================================
