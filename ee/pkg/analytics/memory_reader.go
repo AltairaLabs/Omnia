@@ -15,8 +15,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// queryExecutor is a minimal interface over pgxpool.Pool for testability.
+type queryExecutor interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
 
 // SQL query constants for memory analytics reads.
 const (
@@ -41,11 +47,12 @@ LIMIT $2`
 // for analytics sync. It uses watermark-based cursors on created_at.
 type MemorySourceReader struct {
 	pool *pgxpool.Pool
+	exec queryExecutor // overridden in tests; defaults to pool
 }
 
 // NewMemorySourceReader creates a new MemorySourceReader backed by the given pool.
 func NewMemorySourceReader(pool *pgxpool.Pool) *MemorySourceReader {
-	return &MemorySourceReader{pool: pool}
+	return &MemorySourceReader{pool: pool, exec: pool}
 }
 
 // ReadMemoryEntities returns non-forgotten memory entities created after the
@@ -53,7 +60,7 @@ func NewMemorySourceReader(pool *pgxpool.Pool) *MemorySourceReader {
 func (r *MemorySourceReader) ReadMemoryEntities(
 	ctx context.Context, after time.Time, limit int,
 ) ([]MemoryEntityRow, error) {
-	rows, err := r.pool.Query(ctx, readMemoryEntitiesQuery, after, limit)
+	rows, err := r.exec.Query(ctx, readMemoryEntitiesQuery, after, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query memory entities: %w", err)
 	}
@@ -92,7 +99,7 @@ func (r *MemorySourceReader) ReadMemoryEntities(
 func (r *MemorySourceReader) ReadMemoryObservations(
 	ctx context.Context, after time.Time, limit int,
 ) ([]MemoryObservationRow, error) {
-	rows, err := r.pool.Query(ctx, readMemoryObservationsQuery, after, limit)
+	rows, err := r.exec.Query(ctx, readMemoryObservationsQuery, after, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query memory observations: %w", err)
 	}

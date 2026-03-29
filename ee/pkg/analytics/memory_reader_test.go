@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/testcontainers/testcontainers-go"
@@ -601,5 +603,107 @@ func TestMemorySourceReader_ContextCancellation_Observations(t *testing.T) {
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Logf("got expected error (non-nil): %v", err)
+	}
+}
+
+// --- mock queryExecutor and rows for error-path tests -----------------------
+
+var errScan = errors.New("scan error")
+var errRowsErr = errors.New("rows iteration error")
+
+// mockRows implements pgx.Rows with configurable behavior.
+type mockRows struct {
+	hasRow  bool // return true on first Next call
+	scanErr error
+	rowsErr error
+	closed  bool
+}
+
+func (m *mockRows) Close() { m.closed = true }
+
+func (m *mockRows) Err() error { return m.rowsErr }
+
+func (m *mockRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
+
+func (m *mockRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+
+func (m *mockRows) Next() bool {
+	if m.hasRow {
+		m.hasRow = false
+		return true
+	}
+	return false
+}
+
+func (m *mockRows) Scan(_ ...any) error { return m.scanErr }
+
+func (m *mockRows) Values() ([]any, error) { return nil, nil }
+
+func (m *mockRows) RawValues() [][]byte { return nil }
+
+func (m *mockRows) Conn() *pgx.Conn { return nil }
+
+// mockQueryExecutor returns a preset pgx.Rows or error.
+type mockQueryExecutor struct {
+	rows pgx.Rows
+	err  error
+}
+
+func (m *mockQueryExecutor) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.rows, nil
+}
+
+func TestMemorySourceReader_ReadEntities_ScanError(t *testing.T) {
+	exec := &mockQueryExecutor{rows: &mockRows{hasRow: true, scanErr: errScan}}
+	reader := &MemorySourceReader{exec: exec}
+
+	_, err := reader.ReadMemoryEntities(context.Background(), time.Time{}, 10)
+	if err == nil {
+		t.Fatal("expected scan error")
+	}
+	if !errors.Is(err, errScan) {
+		t.Errorf("expected errScan wrapped, got: %v", err)
+	}
+}
+
+func TestMemorySourceReader_ReadEntities_RowsErrError(t *testing.T) {
+	exec := &mockQueryExecutor{rows: &mockRows{hasRow: false, rowsErr: errRowsErr}}
+	reader := &MemorySourceReader{exec: exec}
+
+	_, err := reader.ReadMemoryEntities(context.Background(), time.Time{}, 10)
+	if err == nil {
+		t.Fatal("expected rows.Err() error")
+	}
+	if !errors.Is(err, errRowsErr) {
+		t.Errorf("expected errRowsErr wrapped, got: %v", err)
+	}
+}
+
+func TestMemorySourceReader_ReadObservations_ScanError(t *testing.T) {
+	exec := &mockQueryExecutor{rows: &mockRows{hasRow: true, scanErr: errScan}}
+	reader := &MemorySourceReader{exec: exec}
+
+	_, err := reader.ReadMemoryObservations(context.Background(), time.Time{}, 10)
+	if err == nil {
+		t.Fatal("expected scan error")
+	}
+	if !errors.Is(err, errScan) {
+		t.Errorf("expected errScan wrapped, got: %v", err)
+	}
+}
+
+func TestMemorySourceReader_ReadObservations_RowsErrError(t *testing.T) {
+	exec := &mockQueryExecutor{rows: &mockRows{hasRow: false, rowsErr: errRowsErr}}
+	reader := &MemorySourceReader{exec: exec}
+
+	_, err := reader.ReadMemoryObservations(context.Background(), time.Time{}, 10)
+	if err == nil {
+		t.Fatal("expected rows.Err() error")
+	}
+	if !errors.Is(err, errRowsErr) {
+		t.Errorf("expected errRowsErr wrapped, got: %v", err)
 	}
 }
