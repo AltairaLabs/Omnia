@@ -707,3 +707,123 @@ func TestMemorySourceReader_ReadObservations_RowsErrError(t *testing.T) {
 		t.Errorf("expected errRowsErr wrapped, got: %v", err)
 	}
 }
+
+// --- end-to-end integration tests -------------------------------------------
+
+// TestMemorySourceReader_EndToEnd verifies that entities and observations are
+// read together correctly in a single end-to-end pass — something no individual
+// method test covers.
+func TestMemorySourceReader_EndToEnd(t *testing.T) {
+	pool := freshMemDB(t)
+	reader := NewMemorySourceReader(pool)
+
+	workspaceID := "00000000-0000-0000-0000-0000000000e1"
+	base := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Millisecond)
+	watermark := base.Add(-1 * time.Second)
+
+	// Insert two entities with observations.
+	entityID1 := insertTestEntity(t, pool, workspaceID, "Alice", "person", base.Add(1*time.Second))
+	entityID2 := insertTestEntity(t, pool, workspaceID, "Bob", "person", base.Add(2*time.Second))
+	obsID1 := insertTestObservation(t, pool, entityID1, "likes tea", base.Add(3*time.Second))
+	obsID2 := insertTestObservation(t, pool, entityID2, "likes coffee", base.Add(4*time.Second))
+
+	// Read entities.
+	entities, err := reader.ReadMemoryEntities(context.Background(), watermark, 100)
+	if err != nil {
+		t.Fatalf("ReadMemoryEntities: %v", err)
+	}
+	if len(entities) != 2 {
+		t.Fatalf("expected 2 entities, got %d", len(entities))
+	}
+	entityIDs := map[string]bool{entities[0].ID: true, entities[1].ID: true}
+	if !entityIDs[entityID1] || !entityIDs[entityID2] {
+		t.Errorf("expected entities %s and %s, got %v", entityID1, entityID2, entityIDs)
+	}
+
+	// Read observations.
+	observations, err := reader.ReadMemoryObservations(context.Background(), watermark, 100)
+	if err != nil {
+		t.Fatalf("ReadMemoryObservations: %v", err)
+	}
+	if len(observations) != 2 {
+		t.Fatalf("expected 2 observations, got %d", len(observations))
+	}
+	obsIDs := map[string]bool{observations[0].ID: true, observations[1].ID: true}
+	if !obsIDs[obsID1] || !obsIDs[obsID2] {
+		t.Errorf("expected observations %s and %s, got %v", obsID1, obsID2, obsIDs)
+	}
+
+	// Verify cross-references: each observation links to a known entity.
+	for _, obs := range observations {
+		if !entityIDs[obs.EntityID] {
+			t.Errorf("observation %s has unexpected EntityID %s", obs.ID, obs.EntityID)
+		}
+	}
+
+	// Verify that a watermark after all data returns nothing.
+	futureWatermark := base.Add(1 * time.Hour)
+	emptyEntities, err := reader.ReadMemoryEntities(context.Background(), futureWatermark, 100)
+	if err != nil {
+		t.Fatalf("ReadMemoryEntities (future watermark): %v", err)
+	}
+	if len(emptyEntities) != 0 {
+		t.Errorf("expected 0 entities after all data, got %d", len(emptyEntities))
+	}
+	emptyObs, err := reader.ReadMemoryObservations(context.Background(), futureWatermark, 100)
+	if err != nil {
+		t.Fatalf("ReadMemoryObservations (future watermark): %v", err)
+	}
+	if len(emptyObs) != 0 {
+		t.Errorf("expected 0 observations after all data, got %d", len(emptyObs))
+	}
+}
+
+// TestMemorySourceReader_WatermarkProgression verifies that watermark-based
+// reads correctly page through data across multiple checkpoints — the pattern
+// that analytics sync actually uses.
+func TestMemorySourceReader_WatermarkProgression(t *testing.T) {
+	pool := freshMemDB(t)
+	reader := NewMemorySourceReader(pool)
+
+	workspaceID := "00000000-0000-0000-0000-0000000000e2"
+	base := time.Now().UTC().Add(-3 * time.Hour).Truncate(time.Millisecond)
+
+	// T1, T2, T3: three time points with one entity each.
+	t1 := base
+	t2 := base.Add(10 * time.Second)
+	t3 := base.Add(20 * time.Second)
+
+	insertTestEntity(t, pool, workspaceID, "EntityAt_T1", "person", t1.Add(1*time.Second))
+	insertTestEntity(t, pool, workspaceID, "EntityAt_T2", "person", t2.Add(1*time.Second))
+	insertTestEntity(t, pool, workspaceID, "EntityAt_T3", "person", t3.Add(1*time.Second))
+
+	// Checkpoint before T1: all 3 entities returned.
+	rows, err := reader.ReadMemoryEntities(context.Background(), t1.Add(-1*time.Second), 100)
+	if err != nil {
+		t.Fatalf("watermark before T1: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Errorf("before T1: expected 3, got %d", len(rows))
+	}
+
+	// Checkpoint at T2: only the T3 entity is after T2+1s.
+	rows, err = reader.ReadMemoryEntities(context.Background(), t2.Add(1*time.Second), 100)
+	if err != nil {
+		t.Fatalf("watermark at T2+1: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Errorf("after T2+1: expected 1, got %d", len(rows))
+	}
+	if rows[0].Name != "EntityAt_T3" {
+		t.Errorf("expected EntityAt_T3, got %s", rows[0].Name)
+	}
+
+	// Checkpoint after T3: no entities remain.
+	rows, err = reader.ReadMemoryEntities(context.Background(), t3.Add(2*time.Second), 100)
+	if err != nil {
+		t.Fatalf("watermark after T3: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("after T3+2s: expected 0, got %d", len(rows))
+	}
+}
