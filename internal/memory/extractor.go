@@ -25,19 +25,28 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// Redactor strips PII from text before memory storage.
+// Implemented by ee/pkg/redaction.Redactor in production.
+type Redactor interface {
+	RedactText(ctx context.Context, text string) (string, error)
+}
+
 // OmniaExtractor bridges the flat Extractor interface to the richer MemoryPopulator.
 // Called by PromptKit's extraction pipeline stage.
 type OmniaExtractor struct {
 	store     Store
 	populator MemoryPopulator
+	redactor  Redactor
 	log       logr.Logger
 }
 
 // NewOmniaExtractor creates a new OmniaExtractor.
-func NewOmniaExtractor(store Store, populator MemoryPopulator, log logr.Logger) *OmniaExtractor {
+// If redactor is nil, no PII redaction is applied.
+func NewOmniaExtractor(store Store, populator MemoryPopulator, redactor Redactor, log logr.Logger) *OmniaExtractor {
 	return &OmniaExtractor{
 		store:     store,
 		populator: populator,
+		redactor:  redactor,
 		log:       log,
 	}
 }
@@ -58,6 +67,10 @@ func (e *OmniaExtractor) Extract(ctx context.Context, scope map[string]string, m
 	result, err := e.populator.Populate(ctx, source)
 	if err != nil {
 		return nil, fmt.Errorf("memory: populate: %w", err)
+	}
+
+	if e.redactor != nil {
+		e.redactResult(ctx, result)
 	}
 
 	entities := buildEntityIndex(result.Entities)
@@ -98,6 +111,33 @@ func (e *OmniaExtractor) saveObservations(
 		saved = append(saved, mem)
 	}
 	return saved, nil
+}
+
+// redactResult applies PII redaction to all entity names and observation contents in-place.
+func (e *OmniaExtractor) redactResult(ctx context.Context, result *PopulationResult) {
+	for i := range result.Entities {
+		redacted, err := e.redactor.RedactText(ctx, result.Entities[i].Name)
+		if err != nil {
+			e.log.Error(err, "redaction failed for entity name",
+				"entityName", result.Entities[i].Name)
+			continue
+		}
+		result.Entities[i].Name = redacted
+	}
+
+	for i := range result.Observations {
+		redacted, err := e.redactor.RedactText(ctx, result.Observations[i].Content)
+		if err != nil {
+			e.log.Error(err, "redaction failed for observation content",
+				"entityName", result.Observations[i].EntityName)
+			continue
+		}
+		result.Observations[i].Content = redacted
+	}
+
+	e.log.V(1).Info("redaction applied",
+		"entityCount", len(result.Entities),
+		"observationCount", len(result.Observations))
 }
 
 // buildMemory constructs a Memory from an observation and its parent entity.

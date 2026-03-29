@@ -48,16 +48,18 @@ import (
 
 // flags groups all CLI flags for the memory-api binary.
 type flags struct {
-	apiAddr         string
-	healthAddr      string
-	metricsAddr     string
-	postgresConn    string
-	redisAddrs      string
-	enterprise      bool
-	tracingEnabled  bool
-	tracingEndpoint string
-	tracingSample   float64
-	tracingInsecure bool
+	apiAddr           string
+	healthAddr        string
+	metricsAddr       string
+	postgresConn      string
+	redisAddrs        string
+	enterprise        bool
+	tracingEnabled    bool
+	tracingEndpoint   string
+	tracingSample     float64
+	tracingInsecure   bool
+	embeddingProvider string // openai, gemini, voyageai
+	embeddingModel    string // model override
 }
 
 func parseFlags() *flags {
@@ -72,6 +74,8 @@ func parseFlags() *flags {
 	flag.StringVar(&f.tracingEndpoint, "tracing-endpoint", "", "OTel collector endpoint")
 	flag.Float64Var(&f.tracingSample, "tracing-sample", 0, "Tracing sample rate (0.0-1.0)")
 	flag.BoolVar(&f.tracingInsecure, "tracing-insecure", false, "Use insecure gRPC for tracing")
+	flag.StringVar(&f.embeddingProvider, "embedding-provider", "", "Embedding provider (openai, gemini, voyageai)")
+	flag.StringVar(&f.embeddingModel, "embedding-model", "", "Embedding model override")
 	flag.Parse()
 
 	f.applyEnvFallbacks()
@@ -90,6 +94,8 @@ func (f *flags) applyEnvFallbacks() {
 	envBoolFallback(&f.tracingEnabled, "TRACING_ENABLED")
 	envBoolFallback(&f.tracingInsecure, "TRACING_INSECURE")
 	envFallback(&f.tracingEndpoint, "", "TRACING_ENDPOINT")
+	envFallback(&f.embeddingProvider, "", "EMBEDDING_PROVIDER")
+	envFallback(&f.embeddingModel, "", "EMBEDDING_MODEL")
 	if v := os.Getenv("TRACING_SAMPLE_RATE"); v != "" && f.tracingSample == 0 {
 		if rate, err := strconv.ParseFloat(v, 64); err == nil {
 			f.tracingSample = rate
@@ -163,6 +169,14 @@ func run() error {
 	// --- Memory store ---
 	store := memory.NewPostgresMemoryStore(pool)
 
+	// --- Embedding service ---
+	var embeddingSvc *memory.EmbeddingService
+	if f.embeddingProvider != "" {
+		// Provider creation (OpenAI/Gemini/Voyage) will be wired when
+		// PromptKit embedding providers are imported.
+		log.Info("embedding provider configured", "provider", f.embeddingProvider, "model", f.embeddingModel)
+	}
+
 	// --- Tracing ---
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
@@ -187,7 +201,7 @@ func run() error {
 	}
 
 	// --- Build API mux ---
-	apiMux, cleanup := buildAPIMux(store, log)
+	apiMux, cleanup := buildAPIMux(store, embeddingSvc, log)
 	defer cleanup()
 
 	// --- Servers ---
@@ -223,10 +237,10 @@ func run() error {
 // buildAPIMux assembles the HTTP handler with all memory-api routes, wrapped
 // with rate limiting, metrics, and tracing middleware. Returns the handler and
 // a cleanup function.
-func buildAPIMux(store memory.Store, log logr.Logger) (http.Handler, func()) {
+func buildAPIMux(store memory.Store, embeddingSvc *memory.EmbeddingService, log logr.Logger) (http.Handler, func()) {
 	httpMetrics := memoryapi.NewHTTPMetrics(nil)
 
-	svc := memoryapi.NewMemoryService(store, log)
+	svc := memoryapi.NewMemoryService(store, embeddingSvc, log)
 	handler := memoryapi.NewHandler(svc, log)
 
 	mux := http.NewServeMux()

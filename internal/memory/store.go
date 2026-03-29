@@ -27,6 +27,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	pgvector "github.com/pgvector/pgvector-go"
 
 	"github.com/altairalabs/omnia/internal/pgutil"
 )
@@ -282,6 +283,26 @@ func buildDeleteAllQuery(scope map[string]string) (string, *pgutil.QueryBuilder)
 	sql := "DELETE FROM memory_entities WHERE 1=1" + qb.Where()
 
 	return sql, &qb
+}
+
+// UpdateEmbedding sets the embedding vector on the latest observation for an entity.
+func (s *PostgresMemoryStore) UpdateEmbedding(ctx context.Context, entityID string, embedding []float32) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE memory_observations
+		SET embedding = $1
+		WHERE id = (
+			SELECT id FROM memory_observations
+			WHERE entity_id = $2
+			ORDER BY observed_at DESC
+			LIMIT 1
+		)`, pgvector.NewVector(embedding), entityID)
+	if err != nil {
+		return fmt.Errorf("memory: update embedding: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("memory: no observation found for entity %s", entityID)
+	}
+	return nil
 }
 
 // --- helpers -----------------------------------------------------------------

@@ -46,7 +46,7 @@ func TestMemoryEndToEnd(t *testing.T) {
 
 	// --- extraction ---
 	populator := NewConversationPopulator()
-	extractor := NewOmniaExtractor(store, populator, log)
+	extractor := NewOmniaExtractor(store, populator, nil, log)
 
 	memories, err := extractor.Extract(ctx, scope, sampleMessages())
 	require.NoError(t, err)

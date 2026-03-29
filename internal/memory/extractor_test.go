@@ -81,7 +81,7 @@ func (m *mockPopulator) TrustModel() string { return "deterministic" }
 
 func newTestExtractor(store Store, pop MemoryPopulator) *OmniaExtractor {
 	log := zap.New(zap.UseDevMode(true))
-	return NewOmniaExtractor(store, pop, log)
+	return NewOmniaExtractor(store, pop, nil, log)
 }
 
 func basicScope() map[string]string {
@@ -225,6 +225,125 @@ func TestOmniaExtractor_ObservationWithUnknownEntity(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, memories, 1)
 	assert.Equal(t, "", memories[0].Type) // zero-value kind
+}
+
+// --- mock redactor -----------------------------------------------------------
+
+// mockRedactor replaces known PII patterns with "[REDACTED]".
+type mockRedactor struct {
+	replacements map[string]string
+	err          error
+}
+
+func (m *mockRedactor) RedactText(_ context.Context, text string) (string, error) {
+	if m.err != nil {
+		return "", m.err
+	}
+	for old, repl := range m.replacements {
+		text = replaceAll(text, old, repl)
+	}
+	return text, nil
+}
+
+// replaceAll is a simple string replacer (avoids importing strings for one call).
+func replaceAll(s, old, new string) string {
+	for {
+		i := indexOf(s, old)
+		if i < 0 {
+			return s
+		}
+		s = s[:i] + new + s[i+len(old):]
+	}
+}
+
+func indexOf(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
+}
+
+// --- redaction tests ---------------------------------------------------------
+
+func TestOmniaExtractor_WithRedaction(t *testing.T) {
+	pop := &mockPopulator{
+		result: &PopulationResult{
+			Entities: []EntityRecord{
+				{Name: "secret@email.com", Kind: "person"},
+			},
+			Observations: []ObservationRecord{
+				{EntityName: "secret@email.com", Content: "secret@email.com prefers Go", Confidence: 0.9, SessionID: "sess-1"},
+			},
+		},
+	}
+	store := &mockStore{}
+	redactor := &mockRedactor{
+		replacements: map[string]string{"secret@email.com": "[REDACTED]"},
+	}
+	log := zap.New(zap.UseDevMode(true))
+	ext := NewOmniaExtractor(store, pop, redactor, log)
+
+	memories, err := ext.Extract(context.Background(), basicScope(), nil)
+	require.NoError(t, err)
+	require.Len(t, memories, 1)
+
+	// Content should be redacted.
+	assert.Equal(t, "[REDACTED] prefers Go", memories[0].Content)
+	assert.NotContains(t, memories[0].Content, "secret@email.com")
+
+	// Store should have received the redacted content.
+	require.Len(t, store.saves, 1)
+	assert.Equal(t, "[REDACTED] prefers Go", store.saves[0].Content)
+}
+
+func TestOmniaExtractor_NilRedactor(t *testing.T) {
+	pop := &mockPopulator{
+		result: &PopulationResult{
+			Entities: []EntityRecord{
+				{Name: "Alice", Kind: "person"},
+			},
+			Observations: []ObservationRecord{
+				{EntityName: "Alice", Content: "Alice prefers Go", Confidence: 0.9},
+			},
+		},
+	}
+	store := &mockStore{}
+	log := zap.New(zap.UseDevMode(true))
+	ext := NewOmniaExtractor(store, pop, nil, log)
+
+	memories, err := ext.Extract(context.Background(), basicScope(), nil)
+	require.NoError(t, err)
+	require.Len(t, memories, 1)
+	assert.Equal(t, "Alice prefers Go", memories[0].Content)
+}
+
+func TestOmniaExtractor_RedactorError(t *testing.T) {
+	pop := &mockPopulator{
+		result: &PopulationResult{
+			Entities: []EntityRecord{
+				{Name: "Alice", Kind: "person"},
+			},
+			Observations: []ObservationRecord{
+				{EntityName: "Alice", Content: "Alice prefers Go", Confidence: 0.9},
+			},
+		},
+	}
+	store := &mockStore{}
+	redactor := &mockRedactor{
+		err: errors.New("redaction service unavailable"),
+	}
+	log := zap.New(zap.UseDevMode(true))
+	ext := NewOmniaExtractor(store, pop, redactor, log)
+
+	// Extraction should still succeed despite redactor errors.
+	memories, err := ext.Extract(context.Background(), basicScope(), nil)
+	require.NoError(t, err)
+	require.Len(t, memories, 1)
+
+	// Content should be unchanged since redaction failed gracefully.
+	assert.Equal(t, "Alice prefers Go", memories[0].Content)
 }
 
 // --- helper unit tests -------------------------------------------------------

@@ -22,6 +22,7 @@ package api
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/go-logr/logr"
 
@@ -39,21 +40,37 @@ var (
 
 // MemoryService wraps the memory store with business logic for the HTTP layer.
 type MemoryService struct {
-	store memory.Store
-	log   logr.Logger
+	store        memory.Store
+	embeddingSvc *memory.EmbeddingService // nil if embeddings not configured
+	log          logr.Logger
 }
 
 // NewMemoryService creates a new MemoryService backed by the given store.
-func NewMemoryService(store memory.Store, log logr.Logger) *MemoryService {
+// embeddingSvc may be nil when embedding is not configured.
+func NewMemoryService(store memory.Store, embeddingSvc *memory.EmbeddingService, log logr.Logger) *MemoryService {
 	return &MemoryService{
-		store: store,
-		log:   log.WithName("memory-service"),
+		store:        store,
+		embeddingSvc: embeddingSvc,
+		log:          log.WithName("memory-service"),
 	}
 }
 
-// SaveMemory persists a memory entry.
+// SaveMemory persists a memory entry and, if an embedding service is configured,
+// asynchronously generates and stores its embedding.
 func (s *MemoryService) SaveMemory(ctx context.Context, mem *memory.Memory) error {
-	return s.store.Save(ctx, mem)
+	if err := s.store.Save(ctx, mem); err != nil {
+		return err
+	}
+	if s.embeddingSvc != nil {
+		go func() {
+			embedCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := s.embeddingSvc.EmbedMemory(embedCtx, mem); err != nil {
+				s.log.Error(err, "async embedding failed", "memoryID", mem.ID)
+			}
+		}()
+	}
+	return nil
 }
 
 // SearchMemories retrieves memories matching a query and scope.
