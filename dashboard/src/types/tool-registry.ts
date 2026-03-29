@@ -4,7 +4,7 @@ import { ObjectMeta, Condition, SecretKeyRef } from "./common";
 
 // Enums
 export type ToolRegistryPhase = "Pending" | "Ready" | "Degraded" | "Failed";
-export type HandlerType = "http" | "openapi" | "grpc" | "mcp";
+export type HandlerType = "http" | "openapi" | "grpc" | "mcp" | "client";
 export type ToolStatus = "Available" | "Unavailable" | "Unknown";
 export type MCPTransport = "sse" | "stdio";
 export type HTTPAuthType = "none" | "bearer" | "basic";
