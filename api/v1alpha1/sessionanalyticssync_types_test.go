@@ -425,6 +425,14 @@ func TestSessionAnalyticsSyncTableMappings(t *testing.T) {
 				Artifacts: &TableMapping{
 					Target: "ARTIFACTS",
 				},
+				MemoryEntities: &TableMapping{
+					Target:      "MEMORY_ENTITIES",
+					PartitionBy: "created_at",
+				},
+				MemoryObservations: &TableMapping{
+					Target:      "MEMORY_OBSERVATIONS",
+					PartitionBy: "created_at",
+				},
 			},
 		},
 	}
@@ -447,6 +455,54 @@ func TestSessionAnalyticsSyncTableMappings(t *testing.T) {
 
 	if sync.Spec.Tables.Artifacts.PartitionBy != "" {
 		t.Errorf("Tables.Artifacts.PartitionBy = %v, want empty string", sync.Spec.Tables.Artifacts.PartitionBy)
+	}
+
+	if sync.Spec.Tables.MemoryEntities == nil {
+		t.Fatal("Tables.MemoryEntities should not be nil")
+	}
+
+	if sync.Spec.Tables.MemoryEntities.Target != "MEMORY_ENTITIES" {
+		t.Errorf("Tables.MemoryEntities.Target = %v, want MEMORY_ENTITIES", sync.Spec.Tables.MemoryEntities.Target)
+	}
+
+	if sync.Spec.Tables.MemoryEntities.PartitionBy != "created_at" {
+		t.Errorf("Tables.MemoryEntities.PartitionBy = %v, want created_at", sync.Spec.Tables.MemoryEntities.PartitionBy)
+	}
+
+	if sync.Spec.Tables.MemoryObservations == nil {
+		t.Fatal("Tables.MemoryObservations should not be nil")
+	}
+
+	if sync.Spec.Tables.MemoryObservations.Target != "MEMORY_OBSERVATIONS" {
+		t.Errorf("Tables.MemoryObservations.Target = %v, want MEMORY_OBSERVATIONS", sync.Spec.Tables.MemoryObservations.Target)
+	}
+
+	if sync.Spec.Tables.MemoryObservations.PartitionBy != "created_at" {
+		t.Errorf("Tables.MemoryObservations.PartitionBy = %v, want created_at", sync.Spec.Tables.MemoryObservations.PartitionBy)
+	}
+}
+
+func TestSessionAnalyticsSyncTableMappingsMemoryNil(t *testing.T) {
+	sync := &SessionAnalyticsSync{
+		Spec: SessionAnalyticsSyncSpec{
+			Provider: AnalyticsProviderSnowflake,
+			Sync: SyncConfig{
+				Schedule: "0 3 * * *",
+			},
+			Tables: &TablesConfig{
+				Sessions: &TableMapping{
+					Target: "SESSIONS",
+				},
+			},
+		},
+	}
+
+	if sync.Spec.Tables.MemoryEntities != nil {
+		t.Error("Tables.MemoryEntities should be nil when not set")
+	}
+
+	if sync.Spec.Tables.MemoryObservations != nil {
+		t.Error("Tables.MemoryObservations should be nil when not set")
 	}
 }
 
@@ -582,6 +638,13 @@ func TestSessionAnalyticsSyncDeepCopy(t *testing.T) {
 					Target:      "SESSIONS",
 					PartitionBy: "created_at",
 				},
+				MemoryEntities: &TableMapping{
+					Target:      "MEMORY_ENTITIES",
+					PartitionBy: "created_at",
+				},
+				MemoryObservations: &TableMapping{
+					Target: "MEMORY_OBSERVATIONS",
+				},
 			},
 		},
 		Status: SessionAnalyticsSyncStatus{
@@ -633,6 +696,14 @@ func TestSessionAnalyticsSyncDeepCopy(t *testing.T) {
 
 	if copied.Spec.Tables.Sessions == original.Spec.Tables.Sessions {
 		t.Error("DeepCopy should create new Sessions TableMapping pointer")
+	}
+
+	if copied.Spec.Tables.MemoryEntities == original.Spec.Tables.MemoryEntities {
+		t.Error("DeepCopy should create new MemoryEntities TableMapping pointer")
+	}
+
+	if copied.Spec.Tables.MemoryObservations == original.Spec.Tables.MemoryObservations {
+		t.Error("DeepCopy should create new MemoryObservations TableMapping pointer")
 	}
 
 	// Modify the copy and verify original is unchanged
