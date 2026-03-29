@@ -26,26 +26,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Compile-time interface checks.
+// Compile-time interface check.
 var _ RetrievalStrategy = (*KeywordStrategy)(nil)
-var _ RetrievalStrategy = (*SemanticStrategy)(nil)
 
 func TestKeywordStrategy_Name(t *testing.T) {
 	s := &KeywordStrategy{}
 	assert.Equal(t, "keyword", s.Name())
-}
-
-func TestSemanticStrategy_Name(t *testing.T) {
-	s := &SemanticStrategy{}
-	assert.Equal(t, "semantic", s.Name())
-}
-
-func TestSemanticStrategy_NotConfigured(t *testing.T) {
-	s := &SemanticStrategy{}
-	ctx := context.Background()
-	_, err := s.Retrieve(ctx, nil, map[string]string{ScopeWorkspaceID: testWorkspace1}, "query", 10)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "embedding pipeline")
 }
 
 func TestKeywordStrategy_Retrieve(t *testing.T) {

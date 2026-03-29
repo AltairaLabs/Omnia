@@ -980,6 +980,10 @@ type MemoryConfig struct {
 	// Retrieval configures memory retrieval behavior.
 	// +optional
 	Retrieval *MemoryRetrievalConfig `json:"retrieval,omitempty"`
+
+	// Embedding configures the embedding provider for semantic memory retrieval.
+	// +optional
+	Embedding *MemoryEmbeddingConfig `json:"embedding,omitempty"`
 }
 
 // MemoryExtractionConfig controls how memories are extracted from conversations.
@@ -1016,6 +1020,22 @@ type MemoryRetrievalConfig struct {
 	// +kubebuilder:validation:Maximum=50
 	// +optional
 	Limit *int32 `json:"limit,omitempty"`
+}
+
+// MemoryEmbeddingConfig configures the embedding provider for memory.
+type MemoryEmbeddingConfig struct {
+	// Provider specifies the embedding provider type (e.g., openai, gemini, voyageai).
+	// +kubebuilder:validation:Enum=openai;gemini;voyageai
+	// +optional
+	Provider string `json:"provider,omitempty"`
+
+	// Model overrides the default embedding model for the provider.
+	// +optional
+	Model string `json:"model,omitempty"`
+
+	// SecretRef references the Kubernetes secret containing the API key.
+	// +optional
+	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
 }
 
 // AgentRuntimeSpec defines the desired state of AgentRuntime.

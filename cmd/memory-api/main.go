@@ -48,16 +48,18 @@ import (
 
 // flags groups all CLI flags for the memory-api binary.
 type flags struct {
-	apiAddr         string
-	healthAddr      string
-	metricsAddr     string
-	postgresConn    string
-	redisAddrs      string
-	enterprise      bool
-	tracingEnabled  bool
-	tracingEndpoint string
-	tracingSample   float64
-	tracingInsecure bool
+	apiAddr           string
+	healthAddr        string
+	metricsAddr       string
+	postgresConn      string
+	redisAddrs        string
+	enterprise        bool
+	tracingEnabled    bool
+	tracingEndpoint   string
+	tracingSample     float64
+	tracingInsecure   bool
+	embeddingProvider string // openai, gemini, voyageai
+	embeddingModel    string // model override
 }
 
 func parseFlags() *flags {
@@ -72,6 +74,8 @@ func parseFlags() *flags {
 	flag.StringVar(&f.tracingEndpoint, "tracing-endpoint", "", "OTel collector endpoint")
 	flag.Float64Var(&f.tracingSample, "tracing-sample", 0, "Tracing sample rate (0.0-1.0)")
 	flag.BoolVar(&f.tracingInsecure, "tracing-insecure", false, "Use insecure gRPC for tracing")
+	flag.StringVar(&f.embeddingProvider, "embedding-provider", "", "Embedding provider (openai, gemini, voyageai)")
+	flag.StringVar(&f.embeddingModel, "embedding-model", "", "Embedding model override")
 	flag.Parse()
 
 	f.applyEnvFallbacks()
@@ -90,6 +94,8 @@ func (f *flags) applyEnvFallbacks() {
 	envBoolFallback(&f.tracingEnabled, "TRACING_ENABLED")
 	envBoolFallback(&f.tracingInsecure, "TRACING_INSECURE")
 	envFallback(&f.tracingEndpoint, "", "TRACING_ENDPOINT")
+	envFallback(&f.embeddingProvider, "", "EMBEDDING_PROVIDER")
+	envFallback(&f.embeddingModel, "", "EMBEDDING_MODEL")
 	if v := os.Getenv("TRACING_SAMPLE_RATE"); v != "" && f.tracingSample == 0 {
 		if rate, err := strconv.ParseFloat(v, 64); err == nil {
 			f.tracingSample = rate

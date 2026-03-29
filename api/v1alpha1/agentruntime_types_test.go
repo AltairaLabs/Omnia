@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -827,4 +828,37 @@ func TestAgentRuntimeMemoryConfigNil(t *testing.T) {
 	if ar.Spec.Memory != nil {
 		t.Error("Memory should be nil when not configured")
 	}
+}
+
+func TestAgentRuntimeMemoryEmbeddingConfig(t *testing.T) {
+	ar := &AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "embedding-agent",
+			Namespace: "default",
+		},
+		Spec: AgentRuntimeSpec{
+			PromptPackRef: PromptPackRef{Name: testPromptPack},
+			Facade:        FacadeConfig{Type: FacadeTypeWebSocket},
+			Providers: []NamedProviderRef{
+				{Name: "default", ProviderRef: ProviderRef{Name: testCredentials}},
+			},
+			Memory: &MemoryConfig{
+				Enabled: true,
+				Embedding: &MemoryEmbeddingConfig{
+					Provider:  "openai",
+					Model:     "text-embedding-3-small",
+					SecretRef: &corev1.LocalObjectReference{Name: "openai-key"},
+				},
+			},
+		},
+	}
+
+	assert.Equal(t, "openai", ar.Spec.Memory.Embedding.Provider)
+	assert.Equal(t, "text-embedding-3-small", ar.Spec.Memory.Embedding.Model)
+	assert.Equal(t, "openai-key", ar.Spec.Memory.Embedding.SecretRef.Name)
+
+	// Deep copy test — mutating the copy must not affect the original.
+	copied := ar.DeepCopy()
+	copied.Spec.Memory.Embedding.Provider = "gemini"
+	assert.Equal(t, "openai", ar.Spec.Memory.Embedding.Provider)
 }

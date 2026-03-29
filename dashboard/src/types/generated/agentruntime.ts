@@ -353,6 +353,22 @@ export interface AgentRuntimeSpec {
   };
   /** memory configures cross-session memory for this agent. */
   memory?: {
+    /** Embedding configures the embedding provider for semantic memory retrieval. */
+    embedding?: {
+      /** Model overrides the default embedding model for the provider. */
+      model?: string;
+      /** Provider specifies the embedding provider type (e.g., openai, gemini, voyageai). */
+      provider?: "openai" | "gemini" | "voyageai";
+      /** SecretRef references the Kubernetes secret containing the API key. */
+      secretRef?: {
+        /** Name of the referent.
+         * This field is effectively required, but due to backwards compatibility is
+         * allowed to be empty. Instances of this type with an empty value here are
+         * almost certainly wrong.
+         * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
+        name?: string;
+      };
+    };
     /** Enabled controls whether cross-session memory is active.
      * Memory is disabled by default. */
     enabled?: boolean;

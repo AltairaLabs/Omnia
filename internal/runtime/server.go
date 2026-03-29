@@ -94,9 +94,10 @@ type Server struct {
 	sessionStore session.Store
 
 	// Memory store for cross-session memory
-	memoryStore     *memory.PostgresMemoryStore
-	memoryExtractor *memory.OmniaExtractor
-	memoryRetriever *memory.OmniaRetriever
+	memoryStore       *memory.PostgresMemoryStore
+	memoryExtractor   *memory.OmniaExtractor
+	memoryRetriever   *memory.OmniaRetriever
+	embeddingProvider memory.EmbeddingProvider
 
 	// Media resolution for mock provider
 	mediaResolver *MediaResolver
@@ -274,6 +275,13 @@ func WithMemoryExtractor(extractor *memory.OmniaExtractor) ServerOption {
 func WithMemoryRetriever(retriever *memory.OmniaRetriever) ServerOption {
 	return func(s *Server) {
 		s.memoryRetriever = retriever
+	}
+}
+
+// WithEmbeddingProvider sets the embedding provider for semantic memory retrieval.
+func WithEmbeddingProvider(provider memory.EmbeddingProvider) ServerOption {
+	return func(s *Server) {
+		s.embeddingProvider = provider
 	}
 }
 

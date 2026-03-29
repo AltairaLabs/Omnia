@@ -779,6 +779,38 @@ spec:
               memory:
                 description: memory configures cross-session memory for this agent.
                 properties:
+                  embedding:
+                    description: Embedding configures the embedding provider for semantic
+                      memory retrieval.
+                    properties:
+                      model:
+                        description: Model overrides the default embedding model for
+                          the provider.
+                        type: string
+                      provider:
+                        description: Provider specifies the embedding provider type
+                          (e.g., openai, gemini, voyageai).
+                        enum:
+                        - openai
+                        - gemini
+                        - voyageai
+                        type: string
+                      secretRef:
+                        description: SecretRef references the Kubernetes secret containing
+                          the API key.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    type: object
                   enabled:
                     description: |-
                       Enabled controls whether cross-session memory is active.
