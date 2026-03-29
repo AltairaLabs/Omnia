@@ -1,0 +1,367 @@
+openapi: 3.0.3
+info:
+  title: Omnia Memory API
+  description: Cross-session agentic memory store for Omnia agents.
+  version: 1.0.0
+  contact:
+    name: Altaira Labs
+    url: https://altairalabs.ai
+
+servers:
+  - url: /api/v1
+    description: Memory API v1
+
+paths:
+  /memories:
+    get:
+      operationId: listMemories
+      summary: List memories
+      description: Returns a paginated list of memories for the given scope.
+      parameters:
+        - name: workspace
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Workspace ID (required)
+        - name: user_id
+          in: query
+          schema:
+            type: string
+          description: Filter by user ID
+        - name: agent
+          in: query
+          schema:
+            type: string
+          description: Filter by agent ID
+        - name: type
+          in: query
+          schema:
+            type: string
+          description: Filter by memory type (e.g., preference, episodic, fact)
+        - name: purpose
+          in: query
+          schema:
+            type: string
+            enum: [personalisation, support_continuity, safety]
+          description: Filter by purpose tag
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Memory list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryListResponse'
+        '400':
+          description: Missing workspace parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      operationId: saveMemory
+      summary: Save a memory
+      description: Creates or updates a memory entity with an observation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Memory'
+      responses:
+        '201':
+          description: Memory saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryResponse'
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      operationId: deleteAllMemories
+      summary: Delete all memories (DSAR)
+      description: Hard-deletes all memories for the given scope. Used for GDPR/CCPA data subject access requests.
+      parameters:
+        - name: workspace
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: user_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: All memories deleted
+
+  /memories/search:
+    get:
+      operationId: searchMemories
+      summary: Search memories
+      description: Searches memories by content query within the given scope.
+      parameters:
+        - name: workspace
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Search query
+        - name: user_id
+          in: query
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            type: string
+        - name: min_confidence
+          in: query
+          schema:
+            type: number
+            format: float
+            minimum: 0
+            maximum: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryListResponse'
+        '400':
+          description: Missing workspace or query parameter
+
+  /memories/export:
+    get:
+      operationId: exportMemories
+      summary: Export all memories (DSAR)
+      description: Returns all memories for a user as a downloadable JSON file. Used for GDPR data subject access requests.
+      parameters:
+        - name: workspace
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: user_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Memory export
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: 'attachment; filename="memories-export.json"'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryListResponse'
+
+  /memories/{id}:
+    delete:
+      operationId: deleteMemory
+      summary: Forget a memory
+      description: Soft-deletes a memory (sets forgotten=true).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: workspace
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Memory forgotten
+        '400':
+          description: Missing memory ID or workspace
+        '404':
+          description: Memory not found
+
+  /memories/{id}/related:
+    get:
+      operationId: getRelatedMemories
+      summary: Get related memories
+      description: Graph traversal — finds entities related to the given memory via the relations table.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Related entities
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RelatedEntity'
+
+  /memories/{id}/timeline:
+    get:
+      operationId: getMemoryTimeline
+      summary: Get memory timeline
+      description: Returns the observation history for a memory entity over time.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Observation timeline
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Observation'
+
+components:
+  schemas:
+    Memory:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        type:
+          type: string
+          description: Free-form memory type (e.g., preference, episodic, fact, need)
+        content:
+          type: string
+          description: Natural language memory content
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        scope:
+          type: object
+          additionalProperties:
+            type: string
+          description: 'Scoping keys: workspace_id (required), user_id, agent_id'
+        metadata:
+          type: object
+          additionalProperties: true
+        sessionId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        accessedAt:
+          type: string
+          format: date-time
+          readOnly: true
+        expiresAt:
+          type: string
+          format: date-time
+      required:
+        - type
+        - content
+        - confidence
+        - scope
+
+    MemoryListResponse:
+      type: object
+      properties:
+        memories:
+          type: array
+          items:
+            $ref: '#/components/schemas/Memory'
+        total:
+          type: integer
+
+    MemoryResponse:
+      type: object
+      properties:
+        memory:
+          $ref: '#/components/schemas/Memory'
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+
+    RelatedEntity:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        kind:
+          type: string
+        relationType:
+          type: string
+        weight:
+          type: number
+          format: float
+
+    Observation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        content:
+          type: string
+        confidence:
+          type: number
+          format: float
+        sourceType:
+          type: string
+        observedAt:
+          type: string
+          format: date-time
+        validUntil:
+          type: string
+          format: date-time

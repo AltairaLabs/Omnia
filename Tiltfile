@@ -761,7 +761,7 @@ k8s_resource(
 k8s_resource(
     'omnia-memory-api',
     labels=['memory-api'],
-    port_forwards=['8083:8080'],
+    port_forwards=['8083:8080'],  # Memory API (REST + /docs)
     resource_deps=['omnia-postgres'],
 )
 
