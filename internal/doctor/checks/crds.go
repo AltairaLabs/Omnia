@@ -32,127 +32,92 @@ func (c *CRDChecker) Checks() []doctor.Check {
 	}
 }
 
-// countPhases builds a map of phase string → count from any slice of strings.
-func countPhases(phases []string) map[string]int {
-	counts := make(map[string]int, len(phases))
-	for _, p := range phases {
+// crdListResult captures the common output from listing a CRD type.
+type crdListResult struct {
+	count  int
+	phases map[string]int
+}
+
+// listCRDPhases is a generic helper that lists a CRD type, checks for an empty list,
+// and collects phase counts. The getPhase function extracts the phase string from each item.
+func listCRDPhases[T any](ctx context.Context, k8s client.Client, list client.ObjectList, items func() []T, getPhase func(T) string) (*crdListResult, error) {
+	if err := k8s.List(ctx, list); err != nil {
+		return nil, err
+	}
+	all := items()
+	phases := make(map[string]int, len(all))
+	for _, item := range all {
+		p := getPhase(item)
 		if p == "" {
 			p = "Unknown"
 		}
-		counts[p]++
+		phases[p]++
 	}
-	return counts
+	return &crdListResult{count: len(all), phases: phases}, nil
+}
+
+// checkCRDExists is a generic check: list CRD items, fail if empty, report phase counts.
+func checkCRDExists[T any](ctx context.Context, k8s client.Client, typeName string, list client.ObjectList, items func() []T, getPhase func(T) string) doctor.TestResult {
+	result, err := listCRDPhases(ctx, k8s, list, items, getPhase)
+	if err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: fmt.Sprintf("list %s: %v", typeName, err)}
+	}
+	if result.count == 0 {
+		return doctor.TestResult{Status: doctor.StatusFail, Detail: fmt.Sprintf("no %s found", typeName)}
+	}
+	return doctor.TestResult{
+		Status: doctor.StatusPass,
+		Detail: fmt.Sprintf("found %d %s: %s", result.count, typeName, formatPhaseCounts(result.phases)),
+	}
 }
 
 func (c *CRDChecker) checkAgentRuntimes(ctx context.Context) doctor.TestResult {
 	var list omniav1alpha1.AgentRuntimeList
-	if err := c.client.List(ctx, &list); err != nil {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Error:  fmt.Sprintf("list AgentRuntimes: %v", err),
-		}
-	}
-	if len(list.Items) == 0 {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Detail: "no AgentRuntimes found",
-		}
-	}
-
-	phases := make([]string, len(list.Items))
-	for i, item := range list.Items {
-		phases[i] = string(item.Status.Phase)
-	}
-	counts := countPhases(phases)
-
-	return doctor.TestResult{
-		Status: doctor.StatusPass,
-		Detail: fmt.Sprintf("found %d AgentRuntimes: %s", len(list.Items), formatPhaseCounts(counts)),
-	}
+	return checkCRDExists(ctx, c.client, "AgentRuntimes", &list,
+		func() []omniav1alpha1.AgentRuntime { return list.Items },
+		func(item omniav1alpha1.AgentRuntime) string { return string(item.Status.Phase) },
+	)
 }
 
 func (c *CRDChecker) checkPromptPacks(ctx context.Context) doctor.TestResult {
 	var list omniav1alpha1.PromptPackList
-	if err := c.client.List(ctx, &list); err != nil {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Error:  fmt.Sprintf("list PromptPacks: %v", err),
-		}
-	}
-	if len(list.Items) == 0 {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Detail: "no PromptPacks found",
-		}
-	}
-
-	phases := make([]string, len(list.Items))
-	for i, item := range list.Items {
-		phases[i] = string(item.Status.Phase)
-	}
-	counts := countPhases(phases)
-
-	return doctor.TestResult{
-		Status: doctor.StatusPass,
-		Detail: fmt.Sprintf("found %d PromptPacks: %s", len(list.Items), formatPhaseCounts(counts)),
-	}
+	return checkCRDExists(ctx, c.client, "PromptPacks", &list,
+		func() []omniav1alpha1.PromptPack { return list.Items },
+		func(item omniav1alpha1.PromptPack) string { return string(item.Status.Phase) },
+	)
 }
 
 func (c *CRDChecker) checkToolRegistries(ctx context.Context) doctor.TestResult {
 	var list omniav1alpha1.ToolRegistryList
-	if err := c.client.List(ctx, &list); err != nil {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Error:  fmt.Sprintf("list ToolRegistries: %v", err),
-		}
+	result, err := listCRDPhases(ctx, c.client, &list,
+		func() []omniav1alpha1.ToolRegistry { return list.Items },
+		func(item omniav1alpha1.ToolRegistry) string { return string(item.Status.Phase) },
+	)
+	if err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: fmt.Sprintf("list ToolRegistries: %v", err)}
 	}
-	if len(list.Items) == 0 {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Detail: "no ToolRegistries found",
-		}
+	if result.count == 0 {
+		return doctor.TestResult{Status: doctor.StatusFail, Detail: "no ToolRegistries found"}
 	}
 
-	phases := make([]string, len(list.Items))
 	totalTools := int32(0)
-	for i, item := range list.Items {
-		phases[i] = string(item.Status.Phase)
+	for _, item := range list.Items {
 		totalTools += item.Status.DiscoveredToolsCount
 	}
-	counts := countPhases(phases)
 
 	return doctor.TestResult{
 		Status: doctor.StatusPass,
 		Detail: fmt.Sprintf("found %d ToolRegistries (%d tools discovered): %s",
-			len(list.Items), totalTools, formatPhaseCounts(counts)),
+			result.count, totalTools, formatPhaseCounts(result.phases)),
 	}
 }
 
 func (c *CRDChecker) checkWorkspaces(ctx context.Context) doctor.TestResult {
 	var list omniav1alpha1.WorkspaceList
-	if err := c.client.List(ctx, &list); err != nil {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Error:  fmt.Sprintf("list Workspaces: %v", err),
-		}
-	}
-	if len(list.Items) == 0 {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Detail: "no Workspaces found",
-		}
-	}
-
-	phases := make([]string, len(list.Items))
-	for i, item := range list.Items {
-		phases[i] = string(item.Status.Phase)
-	}
-	counts := countPhases(phases)
-
-	return doctor.TestResult{
-		Status: doctor.StatusPass,
-		Detail: fmt.Sprintf("found %d Workspaces: %s", len(list.Items), formatPhaseCounts(counts)),
-	}
+	return checkCRDExists(ctx, c.client, "Workspaces", &list,
+		func() []omniav1alpha1.Workspace { return list.Items },
+		func(item omniav1alpha1.Workspace) string { return string(item.Status.Phase) },
+	)
 }
 
 func (c *CRDChecker) checkMemoryEnabled(ctx context.Context) doctor.TestResult {
