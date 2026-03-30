@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Omnia Doctor</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><polygon points='16,2 20,12 16,10 12,12' fill='%233B82F6'/><polygon points='16,10 24,16 16,14 8,16' fill='%2306B6D4'/><polygon points='16,14 28,22 16,18 4,22' fill='%238B5CF6'/></svg>" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: #F8FAFC;
+      color: #0F172A;
+      min-height: 100vh;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #3B82F6 0%, #06B6D4 50%, #8B5CF6 100%);
+      color: white;
+      padding: 32px 24px;
+      text-align: center;
+    }
+
+    .header .logo {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 18px;
+      margin-bottom: 12px;
+    }
+
+    .header h1 {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 4px;
+    }
+
+    .header .subtitle {
+      font-size: 14px;
+      opacity: 0.85;
+      font-weight: 400;
+    }
+
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 24px 16px;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .btn-run {
+      background: #3B82F6;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .btn-run:hover { background: #2563EB; }
+    .btn-run:disabled { background: #94A3B8; cursor: not-allowed; }
+
+    .status-text {
+      font-size: 13px;
+      color: #64748B;
+    }
+
+    .category-header {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #64748B;
+      padding: 12px 0 6px;
+      border-bottom: 1px solid #E2E8F0;
+      margin-top: 16px;
+    }
+
+    .category-header:first-child { margin-top: 0; }
+
+    .result-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid #F1F5F9;
+      font-size: 14px;
+    }
+
+    .result-icon {
+      flex-shrink: 0;
+      width: 22px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .icon-pass { background: #D1FAE5; color: #10B981; }
+    .icon-fail { background: #FEE2E2; color: #EF4444; }
+    .icon-skip { background: #FEF3C7; color: #F59E0B; }
+    .icon-running { color: #3B82F6; animation: spin 1s linear infinite; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .result-name { font-weight: 500; flex: 1; }
+
+    .result-detail {
+      font-size: 12px;
+      color: #64748B;
+      max-width: 300px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .result-duration {
+      font-size: 12px;
+      color: #94A3B8;
+      font-variant-numeric: tabular-nums;
+      flex-shrink: 0;
+    }
+
+    .result-error {
+      font-size: 12px;
+      color: #EF4444;
+      max-width: 300px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .summary-bar {
+      margin-top: 20px;
+      padding: 14px 16px;
+      background: white;
+      border: 1px solid #E2E8F0;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .summary-stats { display: flex; gap: 16px; }
+    .stat-pass { color: #10B981; }
+    .stat-fail { color: #EF4444; }
+    .stat-skip { color: #F59E0B; }
+    .summary-duration { color: #64748B; font-size: 13px; }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #94A3B8;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">O</div>
+    <h1>Omnia Doctor</h1>
+    <p class="subtitle">Deployment Diagnostics</p>
+  </div>
+
+  <div class="container">
+    <div class="toolbar">
+      <button class="btn-run" id="runBtn" onclick="startRun()">Run Diagnostics</button>
+      <span class="status-text" id="statusText"></span>
+    </div>
+
+    <div id="results">
+      <div class="empty-state">Click "Run Diagnostics" to check your deployment.</div>
+    </div>
+
+    <div id="summary" style="display:none"></div>
+  </div>
+
+  <script>
+    let running = false;
+
+    function statusIcon(status) {
+      switch (status) {
+        case 'pass': return '<span class="result-icon icon-pass">&#10003;</span>';
+        case 'fail': return '<span class="result-icon icon-fail">&#10007;</span>';
+        case 'skip': return '<span class="result-icon icon-skip">&#8631;</span>';
+        default:     return '<span class="result-icon icon-running">&#9697;</span>';
+      }
+    }
+
+    function formatDuration(ns) {
+      if (ns < 1000000) return (ns / 1000).toFixed(0) + 'us';
+      if (ns < 1000000000) return (ns / 1000000).toFixed(0) + 'ms';
+      return (ns / 1000000000).toFixed(2) + 's';
+    }
+
+    function startRun() {
+      if (running) return;
+      running = true;
+
+      const btn = document.getElementById('runBtn');
+      const statusText = document.getElementById('statusText');
+      const resultsDiv = document.getElementById('results');
+      const summaryDiv = document.getElementById('summary');
+
+      btn.disabled = true;
+      statusText.textContent = 'Running...';
+      resultsDiv.innerHTML = '';
+      summaryDiv.style.display = 'none';
+      summaryDiv.innerHTML = '';
+
+      let currentCategory = '';
+      const es = new EventSource('/api/v1/run?stream=true');
+
+      es.onmessage = function(e) {
+        const r = JSON.parse(e.data);
+        if (r.category !== currentCategory) {
+          currentCategory = r.category;
+          resultsDiv.innerHTML += '<div class="category-header">' + escapeHtml(r.category) + '</div>';
+        }
+        const detail = r.error
+          ? '<span class="result-error">' + escapeHtml(r.error) + '</span>'
+          : '<span class="result-detail">' + escapeHtml(r.detail || '') + '</span>';
+        resultsDiv.innerHTML +=
+          '<div class="result-row">' +
+            statusIcon(r.status) +
+            '<span class="result-name">' + escapeHtml(r.name) + '</span>' +
+            detail +
+            '<span class="result-duration">' + formatDuration(r.duration) + '</span>' +
+          '</div>';
+      };
+
+      es.addEventListener('complete', function(e) {
+        es.close();
+        running = false;
+        btn.disabled = false;
+        statusText.textContent = '';
+
+        const run = JSON.parse(e.data);
+        const s = run.summary;
+        summaryDiv.style.display = 'flex';
+        summaryDiv.className = 'summary-bar';
+        summaryDiv.innerHTML =
+          '<div class="summary-stats">' +
+            '<span class="stat-pass">' + s.passed + ' passed</span>' +
+            '<span class="stat-fail">' + s.failed + ' failed</span>' +
+            '<span class="stat-skip">' + s.skipped + ' skipped</span>' +
+          '</div>' +
+          '<span class="summary-duration">' + formatDuration(run.duration) + '</span>';
+      });
+
+      es.onerror = function() {
+        es.close();
+        running = false;
+        btn.disabled = false;
+        statusText.textContent = 'Connection lost';
+      };
+    }
+
+    function escapeHtml(str) {
+      const d = document.createElement('div');
+      d.textContent = str;
+      return d.innerHTML;
+    }
+  </script>
+</body>
+</html>
