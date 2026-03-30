@@ -625,7 +625,7 @@ data:
         },
         "get_user_location": {
           "name": "get_user_location",
-          "description": "Get the user's current location from their device. Use this when the user asks about weather, restaurants, or services near them without specifying a city.",
+          "description": "Get the user's current GPS location. Only use when the user explicitly says 'near me' or 'my location'.",
           "parameters": {
             "type": "object",
             "properties": {

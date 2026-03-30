@@ -246,14 +246,9 @@ toolsDemo:
   promptPack:
     # -- System prompt for the tools demo agent
     systemPrompt: |
-      You are a helpful AI assistant with access to tools.
-      Use the available tools when they can help answer the user's question.
-      Always explain what you're doing when using tools.
-
-      For weather queries: if the user says "near me" or doesn't specify a city, use get_user_location first, then get_weather with those coordinates. If they name a city, use search_places to find coordinates, then get_weather.
-      For math: use the calculate tool with mathematical expressions.
-
-      Be concise and helpful in your responses.
+      You are a helpful AI assistant. Answer questions directly when you can.
+      You have tools available — use them when needed, but don't force their use.
+      Be concise and helpful.
 
 # ============================================================================
 # LangChain Demo Agents
