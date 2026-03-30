@@ -13,6 +13,15 @@ import (
 //go:embed templates
 var templateFS embed.FS
 
+// HTTP header constants (SonarCloud S1192).
+const (
+	headerContentType = "Content-Type"
+	mimeHTML          = "text/html; charset=utf-8"
+	mimeJSON          = "application/json"
+	mimeSSE           = "text/event-stream"
+	mimePlain         = "text/plain"
+)
+
 // Server is the HTTP server for Omnia Doctor.
 type Server struct {
 	runner    *Runner
@@ -58,7 +67,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "template not found", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set(headerContentType, mimeHTML)
 	_, _ = w.Write(data)
 }
 
@@ -74,7 +83,7 @@ func (s *Server) handleRunSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set(headerContentType, mimeSSE)
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
@@ -130,7 +139,7 @@ func (s *Server) handleRunTrigger(w http.ResponseWriter, r *http.Request) {
 	run := s.runner.Run(r.Context(), ch)
 	s.storeRun(run)
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(headerContentType, mimeJSON)
 	_ = json.NewEncoder(w).Encode(map[string]string{"runId": run.ID})
 }
 
@@ -144,12 +153,12 @@ func (s *Server) handleLatest(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(headerContentType, mimeJSON)
 	_ = json.NewEncoder(w).Encode(run)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set(headerContentType, mimePlain)
 	_, _ = w.Write([]byte("ok"))
 }
 
