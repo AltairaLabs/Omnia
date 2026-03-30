@@ -2057,7 +2057,7 @@ metadata:
   namespace: test-agents
 spec:
   handlers:
-  - name: get_location
+  - name: get-location
     type: client
     clientConfig:
       consentMessage: "Allow location access?"
