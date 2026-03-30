@@ -846,6 +846,16 @@ spec:
     name: demo-tools
   evals:
     enabled: true
+  memory:
+    enabled: true
+    purpose: support_continuity
+    extraction:
+      enabled: true
+    retention:
+      defaultTTL: "720h"
+    retrieval:
+      strategy: keyword
+      limit: 5
   facade:
     type: websocket
     port: 8080
