@@ -1,5 +1,5 @@
 /*
-Copyright 2026.
+Copyright 2026 Altaira Labs.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,13 +26,11 @@ var openapiSpec []byte
 
 // registerDocsRoutes adds the API documentation endpoints.
 func (h *Handler) registerDocsRoutes(mux *http.ServeMux) {
-	// Serve the raw OpenAPI spec.
 	mux.HandleFunc("GET /api/v1/openapi.yaml", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/yaml")
 		_, _ = w.Write(openapiSpec)
 	})
 
-	// Serve the branded API docs UI.
 	mux.HandleFunc("GET /docs", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(docsHTML))
@@ -42,7 +40,7 @@ func (h *Handler) registerDocsRoutes(mux *http.ServeMux) {
 const docsHTML = `<!DOCTYPE html>
 <html>
 <head>
-  <title>Omnia Session API</title>
+  <title>Omnia Memory API</title>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><polygon points='16,2 20,12 16,10 12,12' fill='%233B82F6'/><polygon points='16,10 24,16 16,14 8,16' fill='%2306B6D4'/><polygon points='16,14 28,22 16,18 4,22' fill='%238B5CF6'/></svg>" />
@@ -83,13 +81,13 @@ const docsHTML = `<!DOCTYPE html>
 </head>
 <body>
   <div class="custom-header">
-    <div class="logo">O</div>
+    <div class="logo">M</div>
     <div>
-      <h1>Omnia Session API</h1>
+      <h1>Omnia Memory API</h1>
       <div class="subtitle">AltairaLabs</div>
     </div>
   </div>
-  <script id="api-reference" data-url="/api/v1/openapi.yaml" data-configuration='{"theme":"default","layout":"modern","hideDarkModeToggle":false,"customCss":".darklight-reference-promo{display:none} .sidebar{border-color:#E5E7EB} .dark .sidebar{border-color:#374151}","metaData":{"title":"Omnia Session API"}}'></script>
+  <script id="api-reference" data-url="/api/v1/openapi.yaml" data-configuration='{"theme":"default","layout":"modern","hideDarkModeToggle":false,"customCss":".darklight-reference-promo{display:none} .sidebar{border-color:#E5E7EB} .dark .sidebar{border-color:#374151}","metaData":{"title":"Omnia Memory API"}}'></script>
   <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
 </body>
 </html>`

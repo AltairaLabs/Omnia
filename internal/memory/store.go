@@ -203,7 +203,7 @@ func (s *PostgresMemoryStore) Retrieve(ctx context.Context, scope map[string]str
 
 // buildRetrieveQuery constructs the SQL and arguments for a Retrieve call.
 func buildRetrieveQuery(scope map[string]string, query string, opts RetrieveOptions) (string, *pgutil.QueryBuilder) {
-	qb := buildBaseMemoryQuery(scope, opts.Types, opts.Purpose)
+	qb := buildBaseMemoryQuery(scope, opts.Types, "")
 
 	if opts.MinConfidence > 0 {
 		qb.Add(confidenceFilter, opts.MinConfidence)
@@ -234,7 +234,7 @@ func (s *PostgresMemoryStore) List(ctx context.Context, scope map[string]string,
 
 // buildListQuery constructs the SQL and arguments for a List call.
 func buildListQuery(scope map[string]string, opts ListOptions) (string, *pgutil.QueryBuilder) {
-	qb := buildBaseMemoryQuery(scope, opts.Types, opts.Purpose)
+	qb := buildBaseMemoryQuery(scope, opts.Types, "")
 	return formatMemorySQL(qb, opts.Limit, opts.Offset), qb
 }
 

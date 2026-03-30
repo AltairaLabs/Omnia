@@ -23,6 +23,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -108,7 +109,7 @@ func TestOmniaExtractor_Extract(t *testing.T) {
 	store := &mockStore{}
 	ext := newTestExtractor(store, pop)
 
-	msgs := []SimpleMessage{
+	msgs := []types.Message{
 		{Role: "user", Content: "I am Alice"},
 		{Role: "assistant", Content: "Hi Alice"},
 	}
@@ -166,7 +167,7 @@ func TestOmniaExtractor_EmptyMessages(t *testing.T) {
 	ext := newTestExtractor(store, pop)
 
 	// Empty messages — populator is still called.
-	memories, err := ext.Extract(context.Background(), basicScope(), []SimpleMessage{})
+	memories, err := ext.Extract(context.Background(), basicScope(), []types.Message{})
 	require.NoError(t, err)
 	require.Len(t, memories, 1)
 	assert.Len(t, store.saves, 1)

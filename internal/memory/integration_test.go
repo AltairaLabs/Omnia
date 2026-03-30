@@ -23,14 +23,15 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 // sampleMessages returns a small conversation for use in extraction tests.
-func sampleMessages() []SimpleMessage {
-	return []SimpleMessage{
+func sampleMessages() []types.Message {
+	return []types.Message{
 		{Role: "user", Content: "I really enjoy working with Kubernetes"},
 		{Role: "assistant", Content: "Kubernetes is a powerful orchestration platform"},
 	}
@@ -69,7 +70,7 @@ func TestMemoryEndToEnd(t *testing.T) {
 	// "User asked: I really enjoy working with Kubernetes | ..."
 	// The retriever uses lastUserMessage as the ILIKE query, so we need a word
 	// that appears in the stored content verbatim.
-	ragMessages := []SimpleMessage{
+	ragMessages := []types.Message{
 		{Role: "user", Content: "Kubernetes"},
 	}
 	ragResults, err := retriever.RetrieveContext(ctx, scope, ragMessages)
@@ -170,7 +171,7 @@ func TestPopulatorToRetriever(t *testing.T) {
 	//   "User asked: I really enjoy working with Kubernetes | ..."
 	// The retriever extracts lastUserMessage as the ILIKE query, so "Kubernetes"
 	// matches the stored content.
-	queryMessages := []SimpleMessage{
+	queryMessages := []types.Message{
 		{Role: "user", Content: "Kubernetes"},
 	}
 	found, err := retriever.RetrieveContext(ctx, scope, queryMessages)

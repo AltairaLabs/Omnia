@@ -97,6 +97,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/memories", h.handleSaveMemory)
 	mux.HandleFunc("DELETE /api/v1/memories/{id}", h.handleDeleteMemory)
 	mux.HandleFunc("DELETE /api/v1/memories", h.handleDeleteAllMemories)
+
+	h.registerDocsRoutes(mux)
 }
 
 // handleListMemories returns a paginated list of memories.

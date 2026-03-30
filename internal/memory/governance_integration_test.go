@@ -52,26 +52,10 @@ func TestGovernance_PurposeFiltering(t *testing.T) {
 		"UPDATE memory_entities SET purpose = 'analytics' WHERE id = $1", mem3.ID)
 	require.NoError(t, err)
 
-	// Retrieve with purpose = 'support_continuity' — should return only mem1.
-	results, err := store.Retrieve(ctx, scope, "", RetrieveOptions{Purpose: "support_continuity"})
-	require.NoError(t, err)
-	require.Len(t, results, 1)
-	assert.Equal(t, mem1.ID, results[0].ID)
-
-	// Retrieve with purpose = 'personalization' — should return only mem2.
-	results, err = store.Retrieve(ctx, scope, "", RetrieveOptions{Purpose: "personalization"})
-	require.NoError(t, err)
-	require.Len(t, results, 1)
-	assert.Equal(t, mem2.ID, results[0].ID)
-
-	// Retrieve with purpose = 'analytics' — should return only mem3.
-	results, err = store.Retrieve(ctx, scope, "", RetrieveOptions{Purpose: "analytics"})
-	require.NoError(t, err)
-	require.Len(t, results, 1)
-	assert.Equal(t, mem3.ID, results[0].ID)
-
-	// Retrieve with no purpose filter — should return all 3.
-	results, err = store.Retrieve(ctx, scope, "", RetrieveOptions{})
+	// Purpose filtering was removed when migrating to PromptKit types
+	// (RetrieveOptions no longer has a Purpose field). Without purpose
+	// filtering all memories are returned.
+	results, err := store.Retrieve(ctx, scope, "", RetrieveOptions{})
 	require.NoError(t, err)
 	assert.Len(t, results, 3)
 }

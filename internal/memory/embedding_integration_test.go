@@ -24,6 +24,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -149,7 +150,7 @@ func TestExtractionWithRedaction(t *testing.T) {
 	log := zap.New(zap.UseDevMode(true))
 
 	// Put PII in the assistant message — entity name derives from last user message.
-	messages := []SimpleMessage{
+	messages := []types.Message{
 		{Role: "user", Content: "Remember my contact info"},
 		{Role: "assistant", Content: "Sure, I noted test@example.com"},
 	}
@@ -202,7 +203,7 @@ func TestLLMExtractionEndToEnd(t *testing.T) {
 	populator := NewLLMConversationPopulator(llmProvider, log)
 	extractor := NewOmniaExtractor(store, populator, nil, log)
 
-	messages := []SimpleMessage{
+	messages := []types.Message{
 		{Role: "user", Content: "I love writing Go for backend services"},
 		{Role: "assistant", Content: "Go is an excellent choice for backend work"},
 	}

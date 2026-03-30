@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/go-logr/logr"
 )
 
@@ -54,7 +55,7 @@ func NewOmniaExtractor(store Store, populator MemoryPopulator, redactor Redactor
 // Extract derives memories from conversation messages.
 // Internally delegates to MemoryPopulator.Populate() and saves results to the store.
 // Returns flat []*Memory summary for pipeline telemetry.
-func (e *OmniaExtractor) Extract(ctx context.Context, scope map[string]string, messages []SimpleMessage) ([]*Memory, error) {
+func (e *OmniaExtractor) Extract(ctx context.Context, scope map[string]string, messages []types.Message) ([]*Memory, error) {
 	source := PopulationSource{
 		Scope:    scope,
 		Messages: messages,

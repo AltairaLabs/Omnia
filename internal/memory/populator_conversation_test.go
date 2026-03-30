@@ -22,6 +22,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/AltairaLabs/PromptKit/runtime/types"
 )
 
 // Compile-time interface check.
@@ -49,7 +51,7 @@ func TestConversationPopulator_Populate(t *testing.T) {
 		Scope: map[string]string{
 			"session_id": "sess-123",
 		},
-		Messages: []SimpleMessage{
+		Messages: []types.Message{
 			{Role: "system", Content: "You are a helpful assistant."},
 			{Role: "user", Content: "What is Go?"},
 			{Role: "assistant", Content: "Go is a programming language."},
@@ -100,7 +102,7 @@ func TestConversationPopulator_EmptyMessages(t *testing.T) {
 	ctx := context.Background()
 
 	source := PopulationSource{
-		Messages: []SimpleMessage{},
+		Messages: []types.Message{},
 	}
 
 	result, err := p.Populate(ctx, source)
@@ -121,7 +123,7 @@ func TestConversationPopulator_NoUserMessage(t *testing.T) {
 	ctx := context.Background()
 
 	source := PopulationSource{
-		Messages: []SimpleMessage{
+		Messages: []types.Message{
 			{Role: "system", Content: "You are a helpful assistant."},
 			{Role: "assistant", Content: "Hello! How can I help?"},
 		},
@@ -147,7 +149,7 @@ func TestConversationPopulator_LongContent(t *testing.T) {
 	longContent := strings.Repeat("a", 300)
 
 	source := PopulationSource{
-		Messages: []SimpleMessage{
+		Messages: []types.Message{
 			{Role: "user", Content: longContent},
 		},
 	}
@@ -183,7 +185,7 @@ func TestConversationPopulator_UserOnlyNoAssistant(t *testing.T) {
 	ctx := context.Background()
 
 	source := PopulationSource{
-		Messages: []SimpleMessage{
+		Messages: []types.Message{
 			{Role: "user", Content: "Hello"},
 		},
 	}
@@ -211,7 +213,7 @@ func TestConversationPopulator_MultipleUserMessages(t *testing.T) {
 	ctx := context.Background()
 
 	source := PopulationSource{
-		Messages: []SimpleMessage{
+		Messages: []types.Message{
 			{Role: "user", Content: "First question"},
 			{Role: "assistant", Content: "First answer"},
 			{Role: "user", Content: "Second question"},
@@ -236,7 +238,7 @@ func TestConversationPopulator_NilScope(t *testing.T) {
 	ctx := context.Background()
 
 	source := PopulationSource{
-		Messages: []SimpleMessage{
+		Messages: []types.Message{
 			{Role: "user", Content: "Hello"},
 		},
 	}

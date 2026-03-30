@@ -322,10 +322,20 @@ export function ToolTestPanel({ registry, workspaceName }: Readonly<ToolTestPane
             )}
           </div>
 
+          {/* Client tool notice */}
+          {currentHandler?.type === "client" && (
+            <div className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 p-3">
+              <p className="text-sm text-amber-700 dark:text-amber-400">
+                Client tools are executed in the browser during an active agent session.
+                They cannot be tested from this page — use the Console to test them through a live agent conversation.
+              </p>
+            </div>
+          )}
+
           {/* Run Button */}
           <Button
             onClick={handleRun}
-            disabled={isRunning || !selectedHandler}
+            disabled={isRunning || !selectedHandler || currentHandler?.type === "client"}
             className="w-full"
           >
             {isRunning ? (

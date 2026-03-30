@@ -25,6 +25,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/go-logr/logr"
 )
 
@@ -121,7 +122,7 @@ func (p *LLMConversationPopulator) Populate(ctx context.Context, source Populati
 }
 
 // formatConversation formats messages into a prompt string.
-func formatConversation(messages []SimpleMessage) string {
+func formatConversation(messages []types.Message) string {
 	var b strings.Builder
 	b.WriteString("Conversation:\n\n")
 	for _, m := range messages {
