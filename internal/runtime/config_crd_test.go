@@ -686,6 +686,77 @@ func TestLoadFromCRD_ProviderPricing(t *testing.T) {
 	assert.InDelta(t, 0.002, cfg.OutputCostPer1K, 1e-9)
 }
 
+func TestLoadFromCRD_MemoryEnabled(t *testing.T) {
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
+			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Memory: &v1alpha1.MemoryConfig{
+				Enabled: true,
+				Retrieval: &v1alpha1.MemoryRetrievalConfig{
+					Strategy: "keyword",
+				},
+			},
+		},
+	}
+
+	c := buildTestClient(ar)
+	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
+	require.NoError(t, err)
+
+	assert.True(t, cfg.MemoryEnabled)
+	assert.Equal(t, "keyword", cfg.MemoryRetrievalStrategy)
+}
+
+func TestLoadFromCRD_MemoryDisabled(t *testing.T) {
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
+			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		},
+	}
+
+	c := buildTestClient(ar)
+	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
+	require.NoError(t, err)
+
+	assert.False(t, cfg.MemoryEnabled)
+	assert.Empty(t, cfg.MemoryRetrievalStrategy)
+}
+
+func TestLoadFromCRD_MemoryEnvOverride(t *testing.T) {
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
+			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		},
+	}
+
+	t.Setenv("OMNIA_MEMORY_ENABLED", "true")
+	t.Setenv("OMNIA_MEMORY_POSTGRES_CONN", "postgres://localhost/mem")
+	t.Setenv("OMNIA_MEMORY_RETRIEVAL_STRATEGY", "semantic")
+
+	c := buildTestClient(ar)
+	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
+	require.NoError(t, err)
+
+	assert.True(t, cfg.MemoryEnabled)
+	assert.Equal(t, "postgres://localhost/mem", cfg.MemoryPostgresConn)
+	assert.Equal(t, "semantic", cfg.MemoryRetrievalStrategy)
+}
+
 func strPtr(s string) *string {
 	return &s
 }

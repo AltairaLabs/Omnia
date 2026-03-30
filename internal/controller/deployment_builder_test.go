@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -632,5 +633,66 @@ func TestBuildA2ADualProtocolEnvVars_NilA2A(t *testing.T) {
 	envVars := r.buildA2ADualProtocolEnvVars(ar)
 	if len(envVars) != 0 {
 		t.Errorf("expected no env vars for nil A2A, got %d", len(envVars))
+	}
+}
+
+func TestBuildRuntimeEnvVars_MemoryEnabled(t *testing.T) {
+	r := &AgentRuntimeReconciler{MemoryPostgresSecretName: "mem-secret"}
+
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "test-agent"
+	ar.Namespace = "default"
+	ar.Spec.Memory = &omniav1alpha1.MemoryConfig{
+		Enabled: true,
+		Retrieval: &omniav1alpha1.MemoryRetrievalConfig{
+			Strategy: "keyword",
+		},
+	}
+
+	envVars := r.buildRuntimeEnvVars(ar, nil)
+
+	envMap := make(map[string]string)
+	for _, ev := range envVars {
+		if ev.Value != "" {
+			envMap[ev.Name] = ev.Value
+		}
+	}
+
+	if envMap["OMNIA_MEMORY_ENABLED"] != "true" {
+		t.Errorf("OMNIA_MEMORY_ENABLED = %q, want %q", envMap["OMNIA_MEMORY_ENABLED"], "true")
+	}
+	if envMap["OMNIA_MEMORY_RETRIEVAL_STRATEGY"] != "keyword" {
+		t.Errorf("OMNIA_MEMORY_RETRIEVAL_STRATEGY = %q, want %q", envMap["OMNIA_MEMORY_RETRIEVAL_STRATEGY"], "keyword")
+	}
+
+	// OMNIA_MEMORY_POSTGRES_CONN is sourced from a secret ref, not a plain value.
+	foundSecret := false
+	for _, ev := range envVars {
+		if ev.Name == "OMNIA_MEMORY_POSTGRES_CONN" && ev.ValueFrom != nil && ev.ValueFrom.SecretKeyRef != nil {
+			foundSecret = true
+			if ev.ValueFrom.SecretKeyRef.Name != "mem-secret" {
+				t.Errorf("secret name = %q, want %q", ev.ValueFrom.SecretKeyRef.Name, "mem-secret")
+			}
+		}
+	}
+	if !foundSecret {
+		t.Error("expected OMNIA_MEMORY_POSTGRES_CONN env var from secret ref")
+	}
+}
+
+func TestBuildRuntimeEnvVars_MemoryDisabled(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "test-agent"
+	ar.Namespace = "default"
+	// Memory is nil — no memory config.
+
+	envVars := r.buildRuntimeEnvVars(ar, nil)
+
+	for _, ev := range envVars {
+		if strings.HasPrefix(ev.Name, "OMNIA_MEMORY_") {
+			t.Errorf("unexpected env var %q: no memory config should produce no OMNIA_MEMORY_* vars", ev.Name)
+		}
 	}
 }
