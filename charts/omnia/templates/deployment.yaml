@@ -72,6 +72,10 @@ spec:
             {{- if .Values.operator.apiBindAddress }}
             - --api-bind-address={{ .Values.operator.apiBindAddress }}
             {{- end }}
+            {{- if and .Values.memoryApi.enabled .Values.memoryApi.postgres.secretName }}
+            - --memory-postgres-secret-name={{ .Values.memoryApi.postgres.secretName }}
+            - --memory-postgres-secret-key={{ .Values.memoryApi.postgres.secretKey }}
+            {{- end }}
           ports:
             {{- if .Values.operator.apiBindAddress }}
             - name: api

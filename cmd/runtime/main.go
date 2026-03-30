@@ -48,6 +48,9 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/altairalabs/omnia/internal/memory"
 	pkruntime "github.com/altairalabs/omnia/internal/runtime"
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/session/httpclient"
@@ -99,7 +102,8 @@ func main() {
 		"toolsConfigPath", cfg.ToolsConfigPath,
 		"tracingEnabled", cfg.TracingEnabled,
 		"evalEnabled", cfg.EvalEnabled,
-		"sessionAPIURL", cfg.SessionAPIURL)
+		"sessionAPIURL", cfg.SessionAPIURL,
+		"memoryEnabled", cfg.MemoryEnabled)
 
 	// Create PromptKit Collector for all pipeline + eval metrics.
 	// This replaces the old hand-rolled LLMMetrics, RuntimeMetrics, and EvalMetrics.
@@ -255,6 +259,35 @@ func main() {
 		sessionStore := httpclient.NewStore(cfg.SessionAPIURL, log)
 		serverOpts = append(serverOpts, pkruntime.WithSessionStore(sessionStore))
 		log.Info("session recording enabled", "sessionAPIURL", cfg.SessionAPIURL)
+	}
+
+	// Wire memory store for cross-session memory
+	if cfg.MemoryEnabled && cfg.MemoryPostgresConn != "" {
+		memoryPool, poolErr := pgxpool.New(context.Background(), cfg.MemoryPostgresConn)
+		if poolErr != nil {
+			log.Error(poolErr, "failed to connect to memory database, continuing without memory")
+		} else {
+			memStore := memory.NewPostgresMemoryStore(memoryPool)
+			serverOpts = append(serverOpts, pkruntime.WithMemoryStore(memStore))
+
+			// Create retriever with the configured strategy (keyword is default).
+			// Semantic strategy requires an embedding provider wired separately.
+			var strategy memory.RetrievalStrategy = &memory.KeywordStrategy{}
+			retriever := memory.NewOmniaRetriever(memStore, strategy, 0, log)
+			serverOpts = append(serverOpts, pkruntime.WithMemoryRetriever(retriever))
+
+			// Create extractor with conversation populator (default)
+			populator := memory.NewConversationPopulator()
+			extractor := memory.NewOmniaExtractor(memStore, populator, nil, log)
+			serverOpts = append(serverOpts, pkruntime.WithMemoryExtractor(extractor))
+
+			log.Info("memory store wired",
+				"strategy", cfg.MemoryRetrievalStrategy,
+				"hasRetriever", true,
+				"hasExtractor", true)
+		}
+	} else if cfg.MemoryEnabled {
+		log.Info("memory enabled but no Postgres connection configured, skipping")
 	}
 
 	// Always wire the Collector so pipeline metrics (provider, tool, validation)

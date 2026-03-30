@@ -824,6 +824,37 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 		})
 	}
 
+	// Memory configuration
+	if agentRuntime.Spec.Memory != nil && agentRuntime.Spec.Memory.Enabled {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_MEMORY_ENABLED",
+			Value: "true",
+		})
+		if r.MemoryPostgresSecretName != "" {
+			secretKey := r.MemoryPostgresSecretKey
+			if secretKey == "" {
+				secretKey = "connection-string"
+			}
+			envVars = append(envVars, corev1.EnvVar{
+				Name: "OMNIA_MEMORY_POSTGRES_CONN",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: r.MemoryPostgresSecretName,
+						},
+						Key: secretKey,
+					},
+				},
+			})
+		}
+		if agentRuntime.Spec.Memory.Retrieval != nil && agentRuntime.Spec.Memory.Retrieval.Strategy != "" {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "OMNIA_MEMORY_RETRIEVAL_STRATEGY",
+				Value: agentRuntime.Spec.Memory.Retrieval.Strategy,
+			})
+		}
+	}
+
 	// Check for mock provider annotation (for E2E testing)
 	if mockProvider, ok := agentRuntime.Annotations[MockProviderAnnotation]; ok && mockProvider == "true" {
 		envVars = append(envVars, corev1.EnvVar{

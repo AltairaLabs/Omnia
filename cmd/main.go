@@ -76,6 +76,8 @@ func main() {
 	var tracingEnabled bool
 	var tracingEndpoint string
 	var sessionAPIURL string
+	var memoryPostgresSecretName string
+	var memoryPostgresSecretKey string
 	var workspaceStorageClass string
 	var redisAddr string
 	var evalWorkerImage string
@@ -103,6 +105,10 @@ func main() {
 		"OTLP endpoint for traces (e.g., tempo.omnia-system.svc.cluster.local:4317)")
 	flag.StringVar(&sessionAPIURL, "session-api-url", "",
 		"Internal URL of the session-api service for session recording")
+	flag.StringVar(&memoryPostgresSecretName, "memory-postgres-secret-name", "",
+		"K8s Secret name containing the Postgres connection string for memory store")
+	flag.StringVar(&memoryPostgresSecretKey, "memory-postgres-secret-key", "connection-string",
+		"Key within the memory Postgres secret (default: connection-string)")
 	flag.StringVar(&workspaceStorageClass, "workspace-storage-class", "",
 		"Default storage class for workspace PVCs (e.g., omnia-nfs). If empty, uses cluster default.")
 	flag.StringVar(&redisAddr, "redis-addr", "",
@@ -216,6 +222,8 @@ func main() {
 		TracingEnabled:           tracingEnabled,
 		TracingEndpoint:          tracingEndpoint,
 		SessionAPIURL:            sessionAPIURL,
+		MemoryPostgresSecretName: memoryPostgresSecretName,
+		MemoryPostgresSecretKey:  memoryPostgresSecretKey,
 		RedisAddr:                redisAddr,
 		EvalWorkerImage:          evalWorkerImage,
 	}).SetupWithManager(mgr); err != nil {
