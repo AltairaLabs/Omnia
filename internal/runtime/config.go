@@ -74,6 +74,11 @@ type Config struct {
 	// Session recording (Pattern C)
 	SessionAPIURL string // URL of the session-api service for event recording
 
+	// Memory configuration
+	MemoryEnabled           bool   // Enable cross-session memory
+	MemoryPostgresConn      string // Postgres connection string for memory store
+	MemoryRetrievalStrategy string // Retrieval strategy: "keyword", "semantic", "graph", "composite"
+
 	// Eval configuration
 	EvalEnabled bool // Enable real-time evals for PromptKit agents
 
@@ -90,20 +95,23 @@ type Config struct {
 
 // Environment variable names.
 const (
-	envAgentName         = "OMNIA_AGENT_NAME"
-	envNamespace         = "OMNIA_NAMESPACE"
-	envPromptPackPath    = "OMNIA_PROMPTPACK_PATH"
-	envPromptName        = "OMNIA_PROMPT_NAME"
-	envSessionURL        = "OMNIA_SESSION_URL"
-	envSessionTTL        = "OMNIA_SESSION_TTL"
-	envContextWindow     = "OMNIA_CONTEXT_WINDOW"
-	envSessionAPIURL     = "SESSION_API_URL"
-	envTracingEnabled    = "OMNIA_TRACING_ENABLED"
-	envTracingEndpoint   = "OMNIA_TRACING_ENDPOINT"
-	envTracingSampleRate = "OMNIA_TRACING_SAMPLE_RATE"
-	envTracingInsecure   = "OMNIA_TRACING_INSECURE"
-	envGRPCPort          = "OMNIA_GRPC_PORT"
-	envHealthPort        = "OMNIA_HEALTH_PORT"
+	envAgentName               = "OMNIA_AGENT_NAME"
+	envNamespace               = "OMNIA_NAMESPACE"
+	envPromptPackPath          = "OMNIA_PROMPTPACK_PATH"
+	envPromptName              = "OMNIA_PROMPT_NAME"
+	envSessionURL              = "OMNIA_SESSION_URL"
+	envSessionTTL              = "OMNIA_SESSION_TTL"
+	envContextWindow           = "OMNIA_CONTEXT_WINDOW"
+	envSessionAPIURL           = "SESSION_API_URL"
+	envMemoryEnabled           = "OMNIA_MEMORY_ENABLED"
+	envMemoryPostgresConn      = "OMNIA_MEMORY_POSTGRES_CONN"
+	envMemoryRetrievalStrategy = "OMNIA_MEMORY_RETRIEVAL_STRATEGY"
+	envTracingEnabled          = "OMNIA_TRACING_ENABLED"
+	envTracingEndpoint         = "OMNIA_TRACING_ENDPOINT"
+	envTracingSampleRate       = "OMNIA_TRACING_SAMPLE_RATE"
+	envTracingInsecure         = "OMNIA_TRACING_INSECURE"
+	envGRPCPort                = "OMNIA_GRPC_PORT"
+	envHealthPort              = "OMNIA_HEALTH_PORT"
 )
 
 // Default values.

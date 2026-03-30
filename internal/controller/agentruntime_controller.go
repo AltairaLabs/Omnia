@@ -58,6 +58,10 @@ type AgentRuntimeReconciler struct {
 	TracingEndpoint string
 	// SessionAPIURL is the internal URL of the session-api service for session recording
 	SessionAPIURL string
+	// MemoryPostgresSecretName is the K8s Secret containing the Postgres connection string for memory
+	MemoryPostgresSecretName string
+	// MemoryPostgresSecretKey is the key within the secret (default: "connection-string")
+	MemoryPostgresSecretKey string
 	// RedisAddr is the Redis address for eval worker deployments
 	RedisAddr string
 	// EvalWorkerImage overrides the default eval worker container image

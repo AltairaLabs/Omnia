@@ -101,6 +101,22 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		}
 	}
 
+	// Memory config from CRD + env
+	if ar.Spec.Memory != nil && ar.Spec.Memory.Enabled {
+		cfg.MemoryEnabled = true
+		if ar.Spec.Memory.Retrieval != nil && ar.Spec.Memory.Retrieval.Strategy != "" {
+			cfg.MemoryRetrievalStrategy = ar.Spec.Memory.Retrieval.Strategy
+		}
+	}
+	// Env overrides (operator injects these for memory-enabled agents)
+	if os.Getenv(envMemoryEnabled) == "true" {
+		cfg.MemoryEnabled = true
+	}
+	cfg.MemoryPostgresConn = os.Getenv(envMemoryPostgresConn)
+	if s := os.Getenv(envMemoryRetrievalStrategy); s != "" {
+		cfg.MemoryRetrievalStrategy = s
+	}
+
 	// Session-api URL from env (injected by operator for session recording)
 	cfg.SessionAPIURL = os.Getenv(envSessionAPIURL)
 
