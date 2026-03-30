@@ -198,6 +198,42 @@ Memory API image
 {{- end }}
 
 {{/*
+Doctor fullname
+*/}}
+{{- define "omnia.doctor.fullname" -}}
+{{- printf "%s-doctor" (include "omnia.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Doctor labels
+*/}}
+{{- define "omnia.doctor.labels" -}}
+helm.sh/chart: {{ include "omnia.chart" . }}
+{{ include "omnia.doctor.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{/*
+Doctor selector labels
+*/}}
+{{- define "omnia.doctor.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "omnia.name" . }}-doctor
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: doctor
+{{- end }}
+
+{{/*
+Doctor image
+*/}}
+{{- define "omnia.doctor.image" -}}
+{{- $tag := default .Chart.AppVersion .Values.doctor.image.tag }}
+{{- printf "%s:%s" .Values.doctor.image.repository $tag }}
+{{- end }}
+
+{{/*
 Eval Worker fullname
 */}}
 {{- define "omnia.evalWorker.fullname" -}}

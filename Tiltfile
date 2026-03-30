@@ -253,6 +253,24 @@ docker_build(
 )
 
 # ============================================================================
+# Doctor - Cluster diagnostic service for Omnia health checks
+# ============================================================================
+
+docker_build(
+    'omnia-doctor-dev',
+    context='.',
+    dockerfile='./Dockerfile.doctor',
+    only=[
+        './cmd/doctor',
+        './internal/doctor',
+        './api',
+        './pkg',
+        './go.mod',
+        './go.sum',
+    ],
+)
+
+# ============================================================================
 # Local PromptKit Sync — rsync source into promptkit-local/ for Docker builds
 # ============================================================================
 # Docker COPY does not follow symlinks, so we rsync the actual PromptKit source
@@ -498,6 +516,11 @@ helm_set = [
     'memoryApi.podDisruptionBudget.enabled=false',
     'memoryApi.postgres.secretName=omnia-postgres',
     'memoryApi.postgres.secretKey=connection-string',
+    # Doctor
+    'doctor.enabled=true',
+    'doctor.image.repository=omnia-doctor-dev',
+    'doctor.image.tag=latest',
+    'doctor.image.pullPolicy=Never',
     # LangChain runtime image (used when framework.type=langchain)
     'langchainRuntime.image.repository=omnia-langchain-runtime-dev',
     'langchainRuntime.image.tag=latest',
@@ -763,6 +786,12 @@ k8s_resource(
     labels=['memory-api'],
     port_forwards=['8083:8080'],  # Memory API (REST + /docs)
     resource_deps=['omnia-postgres'],
+)
+
+k8s_resource(
+    'omnia-doctor',
+    labels=['doctor'],
+    port_forwards=['8084:8080'],
 )
 
 # pgweb — lightweight Postgres web UI for inspecting session data, eval results, etc.
