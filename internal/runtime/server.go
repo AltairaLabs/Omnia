@@ -41,7 +41,8 @@ import (
 	"github.com/AltairaLabs/PromptKit/sdk"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 
-	"github.com/altairalabs/omnia/internal/memory"
+	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
+
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
@@ -93,11 +94,8 @@ type Server struct {
 	// Session recording (Pattern C)
 	sessionStore session.Store
 
-	// Memory store for cross-session memory
-	memoryStore       *memory.PostgresMemoryStore
-	memoryExtractor   *memory.OmniaExtractor
-	memoryRetriever   *memory.OmniaRetriever
-	embeddingProvider memory.EmbeddingProvider
+	// Memory store for cross-session memory (via memory-api HTTP client)
+	memoryStore pkmemory.Store
 
 	// Media resolution for mock provider
 	mediaResolver *MediaResolver
@@ -258,30 +256,10 @@ func WithSessionStore(store session.Store) ServerOption {
 }
 
 // WithMemoryStore sets the memory store for cross-session memory.
-func WithMemoryStore(store *memory.PostgresMemoryStore) ServerOption {
+// The store is typically an HTTP client backed by memory-api.
+func WithMemoryStore(store pkmemory.Store) ServerOption {
 	return func(s *Server) {
 		s.memoryStore = store
-	}
-}
-
-// WithMemoryExtractor sets the memory extractor for cross-session memory.
-func WithMemoryExtractor(extractor *memory.OmniaExtractor) ServerOption {
-	return func(s *Server) {
-		s.memoryExtractor = extractor
-	}
-}
-
-// WithMemoryRetriever sets the memory retriever for cross-session memory.
-func WithMemoryRetriever(retriever *memory.OmniaRetriever) ServerOption {
-	return func(s *Server) {
-		s.memoryRetriever = retriever
-	}
-}
-
-// WithEmbeddingProvider sets the embedding provider for semantic memory retrieval.
-func WithEmbeddingProvider(provider memory.EmbeddingProvider) ServerOption {
-	return func(s *Server) {
-		s.embeddingProvider = provider
 	}
 }
 

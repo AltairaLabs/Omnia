@@ -636,47 +636,24 @@ func TestBuildA2ADualProtocolEnvVars_NilA2A(t *testing.T) {
 	}
 }
 
-func TestBuildRuntimeEnvVars_MemoryEnabled(t *testing.T) {
-	r := &AgentRuntimeReconciler{MemoryPostgresSecretName: "mem-secret"}
+func TestBuildRuntimeEnvVars_MemoryNoEnvVars(t *testing.T) {
+	// Memory config is read from the CRD directly by config_crd.go.
+	// The operator no longer injects OMNIA_MEMORY_* env vars.
+	r := &AgentRuntimeReconciler{}
 
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Name = "test-agent"
 	ar.Namespace = "default"
 	ar.Spec.Memory = &omniav1alpha1.MemoryConfig{
 		Enabled: true,
-		Retrieval: &omniav1alpha1.MemoryRetrievalConfig{
-			Strategy: "keyword",
-		},
 	}
 
 	envVars := r.buildRuntimeEnvVars(ar, nil)
 
-	envMap := make(map[string]string)
 	for _, ev := range envVars {
-		if ev.Value != "" {
-			envMap[ev.Name] = ev.Value
+		if strings.HasPrefix(ev.Name, "OMNIA_MEMORY_") {
+			t.Errorf("unexpected env var %q: memory config is read from CRD, not env vars", ev.Name)
 		}
-	}
-
-	if envMap["OMNIA_MEMORY_ENABLED"] != "true" {
-		t.Errorf("OMNIA_MEMORY_ENABLED = %q, want %q", envMap["OMNIA_MEMORY_ENABLED"], "true")
-	}
-	if envMap["OMNIA_MEMORY_RETRIEVAL_STRATEGY"] != "keyword" {
-		t.Errorf("OMNIA_MEMORY_RETRIEVAL_STRATEGY = %q, want %q", envMap["OMNIA_MEMORY_RETRIEVAL_STRATEGY"], "keyword")
-	}
-
-	// OMNIA_MEMORY_POSTGRES_CONN is sourced from a secret ref, not a plain value.
-	foundSecret := false
-	for _, ev := range envVars {
-		if ev.Name == "OMNIA_MEMORY_POSTGRES_CONN" && ev.ValueFrom != nil && ev.ValueFrom.SecretKeyRef != nil {
-			foundSecret = true
-			if ev.ValueFrom.SecretKeyRef.Name != "mem-secret" {
-				t.Errorf("secret name = %q, want %q", ev.ValueFrom.SecretKeyRef.Name, "mem-secret")
-			}
-		}
-	}
-	if !foundSecret {
-		t.Error("expected OMNIA_MEMORY_POSTGRES_CONN env var from secret ref")
 	}
 }
 

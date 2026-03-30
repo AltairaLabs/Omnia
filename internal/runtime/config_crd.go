@@ -22,6 +22,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -101,24 +102,24 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		}
 	}
 
-	// Memory config from CRD + env
+	// Session-api URL from env (injected by operator for session recording).
+	// Must be read before memory config since memory-api URL is derived from it.
+	cfg.SessionAPIURL = os.Getenv(envSessionAPIURL)
+
+	// Memory config from CRD
 	if ar.Spec.Memory != nil && ar.Spec.Memory.Enabled {
 		cfg.MemoryEnabled = true
-		if ar.Spec.Memory.Retrieval != nil && ar.Spec.Memory.Retrieval.Strategy != "" {
-			cfg.MemoryRetrievalStrategy = ar.Spec.Memory.Retrieval.Strategy
+		// Memory API URL follows the same service naming convention as session-api.
+		// If session-api is at http://omnia-session-api.omnia-system:8080,
+		// memory-api is at http://omnia-memory-api.omnia-system:8080.
+		if cfg.SessionAPIURL != "" {
+			cfg.MemoryAPIURL = strings.Replace(cfg.SessionAPIURL, "session-api", "memory-api", 1)
+		}
+		// Allow explicit override via env var.
+		if url := os.Getenv(envMemoryAPIURL); url != "" {
+			cfg.MemoryAPIURL = url
 		}
 	}
-	// Env overrides (operator injects these for memory-enabled agents)
-	if os.Getenv(envMemoryEnabled) == "true" {
-		cfg.MemoryEnabled = true
-	}
-	cfg.MemoryPostgresConn = os.Getenv(envMemoryPostgresConn)
-	if s := os.Getenv(envMemoryRetrievalStrategy); s != "" {
-		cfg.MemoryRetrievalStrategy = s
-	}
-
-	// Session-api URL from env (injected by operator for session recording)
-	cfg.SessionAPIURL = os.Getenv(envSessionAPIURL)
 
 	// Tracing config from env (injected by operator from Helm values)
 	cfg.TracingEnabled = os.Getenv(envTracingEnabled) == "true"

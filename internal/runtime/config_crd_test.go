@@ -697,19 +697,19 @@ func TestLoadFromCRD_MemoryEnabled(t *testing.T) {
 			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
 			Memory: &v1alpha1.MemoryConfig{
 				Enabled: true,
-				Retrieval: &v1alpha1.MemoryRetrievalConfig{
-					Strategy: "keyword",
-				},
 			},
 		},
 	}
+
+	// Set SESSION_API_URL so the memory-api URL can be derived
+	t.Setenv("SESSION_API_URL", "http://omnia-session-api.omnia-system:8080")
 
 	c := buildTestClient(ar)
 	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
 	require.NoError(t, err)
 
 	assert.True(t, cfg.MemoryEnabled)
-	assert.Equal(t, "keyword", cfg.MemoryRetrievalStrategy)
+	assert.Equal(t, "http://omnia-memory-api.omnia-system:8080", cfg.MemoryAPIURL)
 }
 
 func TestLoadFromCRD_MemoryDisabled(t *testing.T) {
@@ -729,7 +729,7 @@ func TestLoadFromCRD_MemoryDisabled(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.False(t, cfg.MemoryEnabled)
-	assert.Empty(t, cfg.MemoryRetrievalStrategy)
+	assert.Empty(t, cfg.MemoryAPIURL)
 }
 
 func TestLoadFromCRD_MemoryEnvOverride(t *testing.T) {
@@ -741,20 +741,23 @@ func TestLoadFromCRD_MemoryEnvOverride(t *testing.T) {
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
 			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Memory: &v1alpha1.MemoryConfig{
+				Enabled: true,
+			},
 		},
 	}
 
-	t.Setenv("OMNIA_MEMORY_ENABLED", "true")
-	t.Setenv("OMNIA_MEMORY_POSTGRES_CONN", "postgres://localhost/mem")
-	t.Setenv("OMNIA_MEMORY_RETRIEVAL_STRATEGY", "semantic")
+	// Set session-api URL (would normally derive memory-api URL from it)
+	t.Setenv("SESSION_API_URL", "http://omnia-session-api.omnia-system:8080")
+	// Explicit override via env var
+	t.Setenv("OMNIA_MEMORY_API_URL", "http://custom-memory-api:9090")
 
 	c := buildTestClient(ar)
 	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
 	require.NoError(t, err)
 
 	assert.True(t, cfg.MemoryEnabled)
-	assert.Equal(t, "postgres://localhost/mem", cfg.MemoryPostgresConn)
-	assert.Equal(t, "semantic", cfg.MemoryRetrievalStrategy)
+	assert.Equal(t, "http://custom-memory-api:9090", cfg.MemoryAPIURL)
 }
 
 func strPtr(s string) *string {
