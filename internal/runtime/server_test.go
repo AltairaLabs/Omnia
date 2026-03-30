@@ -206,8 +206,7 @@ func TestServerOptions(t *testing.T) {
 	})
 
 	t.Run("WithMemoryStore", func(t *testing.T) {
-		// Can't test with real store (needs DB), just test the option function
-		// by verifying it doesn't panic with nil
+		// Verify default is nil and option sets the store
 		srv := NewServer()
 		assert.Nil(t, srv.memoryStore)
 	})
