@@ -166,13 +166,21 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 
 	// Wire memory store for cross-session memory.
 	if s.memoryStore != nil {
+		scope := map[string]string{
+			"workspace_id": s.namespace,
+			"agent_id":     s.agentName,
+		}
+		var memOpts []sdk.MemoryOption
+		if s.memoryExtractor != nil {
+			memOpts = append(memOpts, sdk.WithMemoryExtractor(s.memoryExtractor))
+		}
+		if s.memoryRetriever != nil {
+			memOpts = append(memOpts, sdk.WithMemoryRetriever(s.memoryRetriever))
+		}
+		opts = append(opts, sdk.WithMemory(s.memoryStore, scope, memOpts...))
 		log.V(1).Info("memory store wired",
 			"hasExtractor", s.memoryExtractor != nil,
 			"hasRetriever", s.memoryRetriever != nil)
-		// TODO: Wire via sdk.WithMemory() when PromptKit memory interfaces are published.
-		// For now, the memory store is available on the Server for direct use by the
-		// memory-api service. Pipeline integration will be added when PromptKit publishes
-		// the WithMemory() SDK option.
 	}
 
 	// Wire tracing provider into SDK for span propagation

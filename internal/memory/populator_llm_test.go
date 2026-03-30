@@ -23,6 +23,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -61,7 +62,7 @@ func TestLLMConversationPopulator_Populate(t *testing.T) {
 
 	source := PopulationSource{
 		Scope: map[string]string{"session_id": "sess-123"},
-		Messages: []SimpleMessage{
+		Messages: []types.Message{
 			{Role: "user", Content: "I prefer dark mode when coding in Go"},
 			{Role: "assistant", Content: "I'll remember that preference."},
 		},
@@ -97,7 +98,7 @@ func TestLLMConversationPopulator_MalformedJSON(t *testing.T) {
 	pop := NewLLMConversationPopulator(mock, logr.Discard())
 
 	source := PopulationSource{
-		Messages: []SimpleMessage{
+		Messages: []types.Message{
 			{Role: "user", Content: "Hello there"},
 			{Role: "assistant", Content: "Hi!"},
 		},
@@ -115,7 +116,7 @@ func TestLLMConversationPopulator_LLMError(t *testing.T) {
 	pop := NewLLMConversationPopulator(mock, logr.Discard())
 
 	source := PopulationSource{
-		Messages: []SimpleMessage{
+		Messages: []types.Message{
 			{Role: "user", Content: "Tell me about Go"},
 			{Role: "assistant", Content: "Go is great."},
 		},
@@ -135,7 +136,7 @@ func TestLLMConversationPopulator_EmptyEntities(t *testing.T) {
 	pop := NewLLMConversationPopulator(mock, logr.Discard())
 
 	source := PopulationSource{
-		Messages: []SimpleMessage{
+		Messages: []types.Message{
 			{Role: "user", Content: "Just saying hi"},
 		},
 	}
@@ -153,7 +154,7 @@ func TestLLMConversationPopulator_EmptyMessages(t *testing.T) {
 	pop := NewLLMConversationPopulator(mock, logr.Discard())
 
 	source := PopulationSource{
-		Messages: []SimpleMessage{},
+		Messages: []types.Message{},
 	}
 
 	result, err := pop.Populate(context.Background(), source)

@@ -18,7 +18,11 @@ limitations under the License.
 
 package memory
 
-import "context"
+import (
+	"context"
+
+	"github.com/AltairaLabs/PromptKit/runtime/types"
+)
 
 const (
 	maxContentLength             = 200
@@ -78,7 +82,7 @@ func (p *ConversationPopulator) Populate(_ context.Context, source PopulationSou
 
 // findLastMessageByRole returns the content of the last message with the given role,
 // or an empty string if none is found.
-func findLastMessageByRole(messages []SimpleMessage, role string) string {
+func findLastMessageByRole(messages []types.Message, role string) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == role {
 			return messages[i].Content

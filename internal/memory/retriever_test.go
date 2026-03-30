@@ -22,6 +22,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -50,7 +51,7 @@ func TestOmniaRetriever_RetrieveContext(t *testing.T) {
 
 	retriever := newTestRetriever(store)
 
-	msgs := []SimpleMessage{
+	msgs := []types.Message{
 		{Role: "system", Content: "You are a helpful assistant."},
 		{Role: "user", Content: userQuery},
 	}
@@ -77,7 +78,7 @@ func TestOmniaRetriever_RetrieveContext_NoMatch(t *testing.T) {
 
 	retriever := newTestRetriever(store)
 
-	msgs := []SimpleMessage{
+	msgs := []types.Message{
 		{Role: "user", Content: "Tell me about kubernetes"},
 	}
 
@@ -92,7 +93,7 @@ func TestOmniaRetriever_NoUserMessage(t *testing.T) {
 	retriever := newTestRetriever(store)
 	scope := testScope(testWorkspace1)
 
-	msgs := []SimpleMessage{
+	msgs := []types.Message{
 		{Role: "system", Content: "You are a helpful assistant."},
 		{Role: "assistant", Content: "How can I help?"},
 	}
@@ -108,7 +109,7 @@ func TestOmniaRetriever_EmptyMessages(t *testing.T) {
 	retriever := newTestRetriever(store)
 	scope := testScope(testWorkspace1)
 
-	results, err := retriever.RetrieveContext(context.Background(), scope, []SimpleMessage{})
+	results, err := retriever.RetrieveContext(context.Background(), scope, []types.Message{})
 	require.NoError(t, err)
 	assert.Nil(t, results)
 }
@@ -130,7 +131,7 @@ func TestOmniaRetriever_LastUserMessageUsed(t *testing.T) {
 	retriever := newTestRetriever(store)
 
 	// Last user message "goroutines" should match; earlier "python" should not.
-	msgs := []SimpleMessage{
+	msgs := []types.Message{
 		{Role: "user", Content: "python"},
 		{Role: "assistant", Content: "Python is great."},
 		{Role: "user", Content: "goroutines"},
@@ -145,7 +146,7 @@ func TestOmniaRetriever_LastUserMessageUsed(t *testing.T) {
 // --- helper unit tests -------------------------------------------------------
 
 func TestLastUserMessage_Found(t *testing.T) {
-	msgs := []SimpleMessage{
+	msgs := []types.Message{
 		{Role: "system", Content: "sys"},
 		{Role: "user", Content: "first user"},
 		{Role: "assistant", Content: "response"},
@@ -157,7 +158,7 @@ func TestLastUserMessage_Found(t *testing.T) {
 }
 
 func TestLastUserMessage_NotFound(t *testing.T) {
-	msgs := []SimpleMessage{
+	msgs := []types.Message{
 		{Role: "system", Content: "sys"},
 		{Role: "assistant", Content: "hello"},
 	}

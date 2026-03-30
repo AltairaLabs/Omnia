@@ -175,7 +175,7 @@ func (c *CachedStore) retrieveKey(ctx context.Context, scope map[string]string, 
 	if v == "" {
 		return ""
 	}
-	qh := shortHash(fmt.Sprintf("%s|%v|%d|%f|%s", query, opts.Types, opts.Limit, opts.MinConfidence, opts.Purpose))
+	qh := shortHash(fmt.Sprintf("%s|%v|%d|%f", query, opts.Types, opts.Limit, opts.MinConfidence))
 	return cacheKeyPrefix + sh + ":v" + v + cacheKeyRetrieve + qh
 }
 
@@ -187,7 +187,7 @@ func (c *CachedStore) listKey(ctx context.Context, scope map[string]string, opts
 	if v == "" {
 		return ""
 	}
-	descriptor := fmt.Sprintf("%v:%d:%d:%s", opts.Types, opts.Limit, opts.Offset, opts.Purpose)
+	descriptor := fmt.Sprintf("%v:%d:%d", opts.Types, opts.Limit, opts.Offset)
 	return cacheKeyPrefix + sh + ":v" + v + cacheKeyList + shortHash(descriptor)
 }
 

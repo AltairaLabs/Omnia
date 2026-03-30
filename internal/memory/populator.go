@@ -18,7 +18,11 @@ limitations under the License.
 
 package memory
 
-import "context"
+import (
+	"context"
+
+	"github.com/AltairaLabs/PromptKit/runtime/types"
+)
 
 // MemoryPopulator produces entities, relations, and observations from a source.
 // Different agent domains ship different populators. The store and governance are shared.
@@ -31,15 +35,8 @@ type MemoryPopulator interface {
 // PopulationSource carries the input data for a populator.
 type PopulationSource struct {
 	Scope    map[string]string
-	Messages []SimpleMessage
+	Messages []types.Message
 	Data     map[string]any
-}
-
-// SimpleMessage is a minimal message representation for population sources.
-// Avoids dependency on PromptKit types.
-type SimpleMessage struct {
-	Role    string
-	Content string
 }
 
 // PopulationResult holds the extracted entities, relations, and observations.

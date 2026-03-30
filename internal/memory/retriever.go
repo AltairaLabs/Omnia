@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/go-logr/logr"
 )
 
@@ -46,7 +47,7 @@ func NewOmniaRetriever(store *PostgresMemoryStore, strategy RetrievalStrategy, l
 
 // RetrieveContext finds relevant memories given conversation context.
 // Extracts the last user message and delegates to the configured strategy.
-func (r *OmniaRetriever) RetrieveContext(ctx context.Context, scope map[string]string, messages []SimpleMessage) ([]*Memory, error) {
+func (r *OmniaRetriever) RetrieveContext(ctx context.Context, scope map[string]string, messages []types.Message) ([]*Memory, error) {
 	query, ok := lastUserMessage(messages)
 	if !ok {
 		r.log.V(1).Info("retrieval skipped",
@@ -73,7 +74,7 @@ func (r *OmniaRetriever) RetrieveContext(ctx context.Context, scope map[string]s
 }
 
 // lastUserMessage scans messages from the end and returns the last user message content.
-func lastUserMessage(messages []SimpleMessage) (string, bool) {
+func lastUserMessage(messages []types.Message) (string, bool) {
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == "user" {
 			return messages[i].Content, true

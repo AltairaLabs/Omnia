@@ -537,19 +537,10 @@ func TestPostgresMemoryStore_Retrieve_PurposeFilter(t *testing.T) {
 	require.NoError(t, err)
 
 	// Retrieve with purpose = 'personalization' — should return only mem2.
-	results, err := store.Retrieve(ctx, scope, "", RetrieveOptions{Purpose: "personalization"})
-	require.NoError(t, err)
-	require.Len(t, results, 1)
-	assert.Equal(t, mem2.ID, results[0].ID)
-
-	// Retrieve with purpose = 'support_continuity' — should return only mem1.
-	results, err = store.Retrieve(ctx, scope, "", RetrieveOptions{Purpose: "support_continuity"})
-	require.NoError(t, err)
-	require.Len(t, results, 1)
-	assert.Equal(t, mem1.ID, results[0].ID)
-
-	// Retrieve with no purpose filter — should return both.
-	results, err = store.Retrieve(ctx, scope, "", RetrieveOptions{})
+	// Purpose filtering was removed when migrating to PromptKit types
+	// (RetrieveOptions no longer has a Purpose field). Without purpose
+	// filtering all memories are returned regardless of their DB purpose.
+	results, err := store.Retrieve(ctx, scope, "", RetrieveOptions{})
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 }
@@ -583,20 +574,10 @@ func TestPostgresMemoryStore_List_PurposeFilter(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// List with purpose = 'personalization' — should return only mem2.
-	results, err := store.List(ctx, scope, ListOptions{Purpose: "personalization"})
-	require.NoError(t, err)
-	require.Len(t, results, 1)
-	assert.Equal(t, mem2.ID, results[0].ID)
-
-	// List with purpose = 'support_continuity' — should return only mem1.
-	results, err = store.List(ctx, scope, ListOptions{Purpose: "support_continuity"})
-	require.NoError(t, err)
-	require.Len(t, results, 1)
-	assert.Equal(t, mem1.ID, results[0].ID)
-
-	// List with no purpose filter — should return both.
-	results, err = store.List(ctx, scope, ListOptions{})
+	// Purpose filtering was removed when migrating to PromptKit types
+	// (ListOptions no longer has a Purpose field). Without purpose
+	// filtering all memories are returned regardless of their DB purpose.
+	results, err := store.List(ctx, scope, ListOptions{})
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 }
