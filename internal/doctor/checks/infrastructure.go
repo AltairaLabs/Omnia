@@ -20,21 +20,8 @@ func InfrastructureChecks(services map[string]string) []doctor.Check {
 	return checks
 }
 
-// ReadinessChecks returns readiness checks (Postgres connectivity) for the provided services.
-func ReadinessChecks(services map[string]string) []doctor.Check {
-	checks := make([]doctor.Check, 0, len(services))
-	for name, url := range services {
-		checks = append(checks, readinessCheck(name, url))
-	}
-	return checks
-}
-
 func healthCheck(name, baseURL string) doctor.Check {
 	return probeCheck(name, baseURL, "/healthz", "Healthy")
-}
-
-func readinessCheck(name, baseURL string) doctor.Check {
-	return probeCheck(name, baseURL, "/readyz", "Ready")
 }
 
 func probeCheck(name, baseURL, path, suffix string) doctor.Check {

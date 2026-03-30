@@ -243,7 +243,7 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 	}
 	defer closeConn(conn)
 
-	if err := sendMessage(conn, "calculate 15 times 7"); err != nil {
+	if err := sendMessage(conn, "Use the calculate tool to compute: sqrt(144) + 3^2"); err != nil {
 		return doctor.TestResult{
 			Status: doctor.StatusFail,
 			Error:  err.Error(),
@@ -268,16 +268,16 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 	}
 
 	finalText := assembleText(msgs)
-	if !strings.Contains(finalText, "105") {
+	if !strings.Contains(finalText, "21") {
 		return doctor.TestResult{
 			Status: doctor.StatusFail,
-			Detail: fmt.Sprintf("expected '105' in response, got: %q", truncate(finalText, 200)),
+			Detail: fmt.Sprintf("expected '21' in response, got: %q", truncate(finalText, 200)),
 		}
 	}
 
 	return doctor.TestResult{
 		Status: doctor.StatusPass,
-		Detail: "tool was called and result '105' found in response",
+		Detail: "tool was called and result '21' found in response",
 	}
 }
 

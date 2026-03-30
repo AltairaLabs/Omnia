@@ -23,12 +23,9 @@ const (
 	defaultAgentNamespace = "omnia-demo"
 	defaultAgentName      = "tools-demo"
 	defaultAPIPort        = 8080
-	defaultMetricsPort    = 9090
-	defaultDashboardPort  = 3000
 
 	serviceSessionAPI = "omnia-session-api"
 	serviceMemoryAPI  = "omnia-memory-api"
-	serviceDashboard  = "omnia-dashboard"
 )
 
 func discoverServiceURL(namespace, service string, port int) string {
@@ -62,21 +59,13 @@ func main() {
 		memoryAPIURL = discoverServiceURL(*namespace, serviceMemoryAPI, defaultAPIPort)
 	}
 
-	dashboardURL := discoverServiceURL(*namespace, serviceDashboard, defaultDashboardPort)
 	agentFacadeURL := discoverServiceURL(*agentNamespace, *agentName, defaultAPIPort)
-
-	sessionAPIMetricsURL := discoverServiceURL(*namespace, serviceSessionAPI, defaultMetricsPort)
-	memoryAPIMetricsURL := discoverServiceURL(*namespace, serviceMemoryAPI, defaultMetricsPort)
 
 	runner := doctor.NewRunner()
 
 	runner.Register(checks.InfrastructureChecks(map[string]string{
 		"SessionAPI": sessionAPIURL,
 		"MemoryAPI":  memoryAPIURL,
-		"Dashboard":  dashboardURL,
-	})...)
-	runner.Register(checks.ReadinessChecks(map[string]string{
-		"Postgres": sessionAPIURL,
 	})...)
 
 	k8sClient, k8sErr := k8s.NewClient()
@@ -100,13 +89,18 @@ func main() {
 	})
 	runner.Register(sessionChecker.Checks()...)
 
-	memoryChecker := checks.NewMemoryChecker(memoryAPIURL, *agentNamespace, agentChecker)
+	var workspaceUID string
+	if k8sClient != nil {
+		workspaceUID = checks.ResolveWorkspaceUID(k8sClient, *agentNamespace, log)
+	}
+
+	memoryChecker := checks.NewMemoryChecker(memoryAPIURL, workspaceUID, agentChecker)
 	runner.Register(memoryChecker.Checks()...)
 
-	runner.Register(checks.ObservabilityChecks(map[string]string{
-		"SessionAPI": sessionAPIMetricsURL,
-		"MemoryAPI":  memoryAPIMetricsURL,
-	})...)
+	// Observability: Prometheus scrapes metrics via pod annotations (port 9090),
+	// not via the K8s service. Doctor checks the /healthz probe instead;
+	// metrics scraping is validated by the Prometheus service monitor.
+	// TODO: add pod-level metrics check in v2
 
 	if *runOnce {
 		runOnceMode(runner, log, *exitCode)

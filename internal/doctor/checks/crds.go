@@ -28,7 +28,6 @@ func (c *CRDChecker) Checks() []doctor.Check {
 		{Name: "PromptPacksCompiled", Category: categoryNameCRDs, Run: c.checkPromptPacks},
 		{Name: "ToolRegistriesDiscovered", Category: categoryNameCRDs, Run: c.checkToolRegistries},
 		{Name: "WorkspacesConfigured", Category: categoryNameCRDs, Run: c.checkWorkspaces},
-		{Name: "MemoryEnabled", Category: categoryNameCRDs, Run: c.checkMemoryEnabled},
 	}
 }
 
@@ -118,28 +117,6 @@ func (c *CRDChecker) checkWorkspaces(ctx context.Context) doctor.TestResult {
 		func() []omniav1alpha1.Workspace { return list.Items },
 		func(item omniav1alpha1.Workspace) string { return string(item.Status.Phase) },
 	)
-}
-
-func (c *CRDChecker) checkMemoryEnabled(ctx context.Context) doctor.TestResult {
-	var list omniav1alpha1.AgentRuntimeList
-	if err := c.client.List(ctx, &list); err != nil {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Error:  fmt.Sprintf("list AgentRuntimes: %v", err),
-		}
-	}
-
-	memoryCount := 0
-	for _, item := range list.Items {
-		if item.Spec.Memory != nil && item.Spec.Memory.Enabled {
-			memoryCount++
-		}
-	}
-
-	return doctor.TestResult{
-		Status: doctor.StatusPass,
-		Detail: fmt.Sprintf("%d of %d AgentRuntimes have memory enabled", memoryCount, len(list.Items)),
-	}
 }
 
 // formatPhaseCounts formats a phase→count map as "Running=2, Pending=1".

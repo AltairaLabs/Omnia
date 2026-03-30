@@ -19,7 +19,6 @@ const (
 	memoryAPIPrefix  = "/api/v1/memories"
 	memoryTestType   = "doctor-test"
 	memoryTestValue  = "doctor smoke test value"
-	memorySearchTerm = "doctor smoke"
 	workspaceParam   = "workspace"
 )
 
@@ -66,6 +65,15 @@ func memoryClient() *http.Client {
 	return &http.Client{Timeout: memoryAPITimeout}
 }
 
+// requireWorkspace returns a skip result if the workspace UID is empty.
+func (m *MemoryChecker) requireWorkspace() *doctor.TestResult {
+	if m.workspace == "" {
+		r := doctor.TestResult{Status: doctor.StatusSkip, Detail: "workspace UID not resolved"}
+		return &r
+	}
+	return nil
+}
+
 // checkDocs verifies the memory-api docs endpoint is reachable and has expected content.
 func (m *MemoryChecker) checkDocs(ctx context.Context) doctor.TestResult {
 	body, err := fetchBody(ctx, memoryClient(), m.memoryAPIURL+"/docs")
@@ -101,6 +109,9 @@ type memorySaveResponse struct {
 
 // checkSave POSTs a test memory and stores the returned ID for later deletion.
 func (m *MemoryChecker) checkSave(ctx context.Context) doctor.TestResult {
+	if r := m.requireWorkspace(); r != nil {
+		return *r
+	}
 	payload := memorySaveRequest{
 		Type:       memoryTestType,
 		Content:    memoryTestValue,
@@ -156,6 +167,9 @@ type memoryItem struct {
 
 // checkRetrieve searches for the previously saved test memory.
 func (m *MemoryChecker) checkRetrieve(ctx context.Context) doctor.TestResult {
+	if r := m.requireWorkspace(); r != nil {
+		return *r
+	}
 	url := fmt.Sprintf("%s%s/search?q=%s&%s=%s",
 		m.memoryAPIURL, memoryAPIPrefix,
 		"doctor+smoke",
@@ -186,6 +200,9 @@ type memoryListResponse struct {
 
 // checkList lists memories for the workspace and verifies at least one exists.
 func (m *MemoryChecker) checkList(ctx context.Context) doctor.TestResult {
+	if r := m.requireWorkspace(); r != nil {
+		return *r
+	}
 	url := fmt.Sprintf("%s%s?%s=%s", m.memoryAPIURL, memoryAPIPrefix, workspaceParam, m.workspace)
 	body, err := fetchBody(ctx, memoryClient(), url)
 	if err != nil {
@@ -238,6 +255,9 @@ func (m *MemoryChecker) checkDelete(ctx context.Context) doctor.TestResult {
 
 // checkExport downloads an export and verifies the Content-Disposition header.
 func (m *MemoryChecker) checkExport(ctx context.Context) doctor.TestResult {
+	if r := m.requireWorkspace(); r != nil {
+		return *r
+	}
 	url := fmt.Sprintf("%s%s/export?%s=%s", m.memoryAPIURL, memoryAPIPrefix, workspaceParam, m.workspace)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

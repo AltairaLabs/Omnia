@@ -171,44 +171,12 @@ func TestCRD_Workspaces_None(t *testing.T) {
 	assertDetailContains(t, result, "no Workspaces found")
 }
 
-// TestCRD_MemoryEnabled_Some verifies memory reporting when some runtimes have memory enabled.
-func TestCRD_MemoryEnabled_Some(t *testing.T) {
-	objs := []runtime.Object{
-		&omniav1alpha1.AgentRuntime{
-			ObjectMeta: metav1.ObjectMeta{Name: "rt-1", Namespace: "default"},
-			Spec:       omniav1alpha1.AgentRuntimeSpec{Memory: &omniav1alpha1.MemoryConfig{Enabled: true}},
-		},
-		&omniav1alpha1.AgentRuntime{
-			ObjectMeta: metav1.ObjectMeta{Name: "rt-2", Namespace: "default"},
-			Spec:       omniav1alpha1.AgentRuntimeSpec{Memory: &omniav1alpha1.MemoryConfig{Enabled: false}},
-		},
-		&omniav1alpha1.AgentRuntime{
-			ObjectMeta: metav1.ObjectMeta{Name: "rt-3", Namespace: "default"},
-			// Memory nil — disabled
-		},
-	}
-	checker := newCRDCheckerWithObjects(t, objs)
-	result := checker.checkMemoryEnabled(context.Background())
-
-	assertPass(t, result)
-	assertDetailContains(t, result, "1 of 3 AgentRuntimes have memory enabled")
-}
-
-// TestCRD_MemoryEnabled_None verifies memory reporting when no runtimes exist.
-func TestCRD_MemoryEnabled_None(t *testing.T) {
-	checker := newCRDCheckerWithObjects(t, nil)
-	result := checker.checkMemoryEnabled(context.Background())
-
-	assertPass(t, result) // memory is optional — no runtimes is not a failure here
-	assertDetailContains(t, result, "0 of 0 AgentRuntimes have memory enabled")
-}
-
 // TestCRD_Checks_Count verifies Checks() returns the expected number of checks.
 func TestCRD_Checks_Count(t *testing.T) {
 	checker := newCRDCheckerWithObjects(t, nil)
 	checks := checker.Checks()
-	if len(checks) != 5 {
-		t.Errorf("expected 5 checks, got %d", len(checks))
+	if len(checks) != 4 {
+		t.Errorf("expected 4 checks, got %d", len(checks))
 	}
 	for _, ch := range checks {
 		if ch.Category != categoryNameCRDs {

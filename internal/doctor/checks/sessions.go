@@ -122,9 +122,13 @@ func (s *SessionChecker) checkSessionExists(ctx context.Context) doctor.TestResu
 		}
 	}
 
+	count := len(result.Sessions)
+	if result.Total > 0 {
+		count = int(result.Total)
+	}
 	return doctor.TestResult{
 		Status: doctor.StatusPass,
-		Detail: fmt.Sprintf("%d session(s) found", result.Total),
+		Detail: fmt.Sprintf("%d session(s) found", count),
 	}
 }
 

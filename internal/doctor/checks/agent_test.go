@@ -175,8 +175,8 @@ func TestCheckToolCalling_Pass(t *testing.T) {
 	srv := serveMockFacade(t, mockFacadeHandler{
 		responses: []wsServerMessage{
 			{Type: wsMessageTypeToolCall, ToolCall: &wsToolCallInfo{Name: "calculate"}},
-			{Type: wsMessageTypeChunk, Content: "15 times 7 is "},
-			{Type: wsMessageTypeDone, Content: "105"},
+			{Type: wsMessageTypeChunk, Content: "sqrt(144) + 3^2 = "},
+			{Type: wsMessageTypeDone, Content: "21"},
 		},
 	})
 	defer srv.Close()
@@ -210,7 +210,7 @@ func TestCheckToolCalling_Fail_WrongAnswer(t *testing.T) {
 
 	result := newCheckerForServer(srv).checkToolCalling(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
-	assert.Contains(t, result.Detail, "105")
+	assert.Contains(t, result.Detail, "21")
 }
 
 func TestCheckToolCalling_Fail_ConnectionError(t *testing.T) {
