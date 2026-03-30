@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,11 +13,37 @@ import (
 	"time"
 
 	"github.com/altairalabs/omnia/internal/doctor"
+	"github.com/altairalabs/omnia/internal/doctor/checks"
+	"github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/altairalabs/omnia/pkg/logging"
 )
 
+const (
+	defaultNamespace      = "omnia-system"
+	defaultAgentNamespace = "omnia-demo"
+	defaultAgentName      = "tools-demo"
+	defaultAPIPort        = 8080
+	defaultMetricsPort    = 9090
+	defaultDashboardPort  = 3000
+
+	serviceSessionAPI = "omnia-session-api"
+	serviceMemoryAPI  = "omnia-memory-api"
+	serviceDashboard  = "omnia-dashboard"
+)
+
+func discoverServiceURL(namespace, service string, port int) string {
+	return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", service, namespace, port)
+}
+
 func main() {
 	addr := flag.String("addr", ":8080", "HTTP listen address")
+	runOnce := flag.Bool("run-once", false, "run all checks once, print JSON results, and exit")
+	exitCode := flag.Bool("exit-code", false, "when combined with --run-once, exit 1 if any check fails")
+	namespace := flag.String("namespace", defaultNamespace, "Omnia system namespace")
+	agentNamespace := flag.String("agent-namespace", defaultAgentNamespace, "agent namespace to test")
+	agentName := flag.String("agent-name", defaultAgentName, "agent name to test")
+	sessionAPIURLFlag := flag.String("session-api-url", "", "override session-api URL")
+	memoryAPIURLFlag := flag.String("memory-api-url", "", "override memory-api URL")
 	flag.Parse()
 
 	log, sync, err := logging.NewLogger()
@@ -24,7 +52,66 @@ func main() {
 	}
 	defer sync()
 
+	sessionAPIURL := *sessionAPIURLFlag
+	if sessionAPIURL == "" {
+		sessionAPIURL = discoverServiceURL(*namespace, serviceSessionAPI, defaultAPIPort)
+	}
+
+	memoryAPIURL := *memoryAPIURLFlag
+	if memoryAPIURL == "" {
+		memoryAPIURL = discoverServiceURL(*namespace, serviceMemoryAPI, defaultAPIPort)
+	}
+
+	dashboardURL := discoverServiceURL(*namespace, serviceDashboard, defaultDashboardPort)
+	agentFacadeURL := discoverServiceURL(*agentNamespace, *agentName, defaultAPIPort)
+
+	sessionAPIMetricsURL := discoverServiceURL(*namespace, serviceSessionAPI, defaultMetricsPort)
+	memoryAPIMetricsURL := discoverServiceURL(*namespace, serviceMemoryAPI, defaultMetricsPort)
+
 	runner := doctor.NewRunner()
+
+	runner.Register(checks.InfrastructureChecks(map[string]string{
+		"SessionAPI": sessionAPIURL,
+		"MemoryAPI":  memoryAPIURL,
+		"Dashboard":  dashboardURL,
+	})...)
+	runner.Register(checks.ReadinessChecks(map[string]string{
+		"Postgres": sessionAPIURL,
+	})...)
+
+	k8sClient, k8sErr := k8s.NewClient()
+	if k8sErr != nil {
+		log.Info("k8s client unavailable, CRD checks will be skipped", "error", k8sErr.Error())
+	}
+	if k8sClient != nil {
+		crdChecker := checks.NewCRDChecker(k8sClient)
+		runner.Register(crdChecker.Checks()...)
+	}
+
+	agentChecker := checks.NewAgentChecker(checks.AgentConfig{
+		FacadeURL: agentFacadeURL,
+		AgentName: *agentName,
+		Namespace: *agentNamespace,
+	})
+	runner.Register(agentChecker.Checks()...)
+
+	sessionChecker := checks.NewSessionChecker(sessionAPIURL, *agentNamespace, func() string {
+		return agentChecker.LastSessionID
+	})
+	runner.Register(sessionChecker.Checks()...)
+
+	memoryChecker := checks.NewMemoryChecker(memoryAPIURL, *agentNamespace, agentChecker)
+	runner.Register(memoryChecker.Checks()...)
+
+	runner.Register(checks.ObservabilityChecks(map[string]string{
+		"SessionAPI": sessionAPIMetricsURL,
+		"MemoryAPI":  memoryAPIMetricsURL,
+	})...)
+
+	if *runOnce {
+		runOnceMode(runner, log, *exitCode)
+		return
+	}
 
 	srv := doctor.NewServer(runner, *addr, log)
 	httpSrv := &http.Server{
@@ -53,4 +140,28 @@ func main() {
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		log.Error(err, "shutdown failed")
 	}
+}
+
+func runOnceMode(runner *doctor.Runner, log interface {
+	Info(msg string, keysAndValues ...interface{})
+}, exitOnFail bool) {
+	results := make(chan doctor.TestResult, 100)
+	go func() {
+		for r := range results {
+			log.Info("test completed", "name", r.Name, "status", r.Status, "detail", r.Detail)
+		}
+	}()
+
+	run := runner.Run(context.Background(), results)
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(run); err != nil {
+		os.Exit(1)
+	}
+
+	if exitOnFail && run.Summary.Failed > 0 {
+		os.Exit(1)
+	}
+	os.Exit(0)
 }
