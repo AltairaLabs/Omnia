@@ -263,7 +263,10 @@ func main() {
 	if cfg.MemoryEnabled && cfg.MemoryAPIURL != "" {
 		memStore := memoryhttpclient.NewStore(cfg.MemoryAPIURL, log)
 		serverOpts = append(serverOpts, pkruntime.WithMemoryStore(memStore))
-		log.Info("memory store wired", "memoryAPIURL", cfg.MemoryAPIURL)
+		if cfg.WorkspaceUID != "" {
+			serverOpts = append(serverOpts, pkruntime.WithWorkspaceUID(cfg.WorkspaceUID))
+		}
+		log.Info("memory store wired", "memoryAPIURL", cfg.MemoryAPIURL, "workspaceUID", cfg.WorkspaceUID)
 	} else if cfg.MemoryEnabled {
 		log.Info("memory enabled but no memory-api URL configured, skipping")
 	}

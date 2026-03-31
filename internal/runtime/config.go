@@ -77,6 +77,7 @@ type Config struct {
 	// Memory configuration
 	MemoryEnabled bool   // Enable cross-session memory
 	MemoryAPIURL  string // URL of memory-api service for memory store
+	WorkspaceUID  string // Kubernetes UID of the Workspace CRD (used as workspace_id scope for memory)
 
 	// Eval configuration
 	EvalEnabled bool // Enable real-time evals for PromptKit agents
