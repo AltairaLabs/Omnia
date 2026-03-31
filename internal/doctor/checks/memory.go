@@ -158,7 +158,7 @@ func (m *MemoryChecker) checkSave(ctx context.Context) doctor.TestResult {
 
 // memorySearchResponse is the shape returned by GET /api/v1/memories/search.
 type memorySearchResponse struct {
-	Results []memoryItem `json:"results"`
+	Memories []memoryItem `json:"memories"`
 }
 
 // memoryItem is a single memory returned by list or search.
@@ -186,18 +186,18 @@ func (m *MemoryChecker) checkRetrieve(ctx context.Context) doctor.TestResult {
 	if err := json.Unmarshal([]byte(body), &result); err != nil {
 		return doctor.TestResult{Status: doctor.StatusFail, Error: fmt.Sprintf("decode: %v", err)}
 	}
-	if len(result.Results) == 0 {
+	if len(result.Memories) == 0 {
 		return doctor.TestResult{Status: doctor.StatusFail, Detail: "search returned no results"}
 	}
 	return doctor.TestResult{
 		Status: doctor.StatusPass,
-		Detail: fmt.Sprintf("found %d result(s)", len(result.Results)),
+		Detail: fmt.Sprintf("found %d result(s)", len(result.Memories)),
 	}
 }
 
 // memoryListResponse is the shape returned by GET /api/v1/memories.
 type memoryListResponse struct {
-	Items []memoryItem `json:"items"`
+	Memories []memoryItem `json:"memories"`
 }
 
 // checkList lists memories for the workspace and verifies at least one exists.
@@ -215,12 +215,12 @@ func (m *MemoryChecker) checkList(ctx context.Context) doctor.TestResult {
 	if err := json.Unmarshal([]byte(body), &result); err != nil {
 		return doctor.TestResult{Status: doctor.StatusFail, Error: fmt.Sprintf("decode: %v", err)}
 	}
-	if len(result.Items) == 0 {
+	if len(result.Memories) == 0 {
 		return doctor.TestResult{Status: doctor.StatusFail, Detail: "list returned 0 items"}
 	}
 	return doctor.TestResult{
 		Status: doctor.StatusPass,
-		Detail: fmt.Sprintf("%d item(s) in workspace", len(result.Items)),
+		Detail: fmt.Sprintf("%d item(s) in workspace", len(result.Memories)),
 	}
 }
 

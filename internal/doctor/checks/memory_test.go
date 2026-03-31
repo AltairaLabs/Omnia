@@ -18,8 +18,8 @@ const (
 	testWorkspace      = "ws-test-1"
 	testContentDisp    = `attachment; filename="memories.json"`
 	testMemoryDocsBody = `<html><h1>Memory API</h1></html>`
-	testSearchBody     = `{"results":[{"id":"mem-test-abc","content":"doctor smoke test value"}]}`
-	testListBody       = `{"items":[{"id":"mem-test-abc","content":"doctor smoke test value"}]}`
+	testSearchBody     = `{"memories":[{"id":"mem-test-abc","content":"doctor smoke test value"}],"total":1}`
+	testListBody       = `{"memories":[{"id":"mem-test-abc","content":"doctor smoke test value"}],"total":1}`
 )
 
 // mockMemoryServer builds an httptest.Server that serves a complete, happy-path

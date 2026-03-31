@@ -140,12 +140,14 @@ func (s *SessionChecker) checkSessionExists(ctx context.Context) doctor.TestResu
 	}
 }
 
-// resolveSessionID returns the best available session ID: from agent chat, or from list fallback.
+// resolveSessionID returns the best available session ID.
+// Prefers the session from the list endpoint (known to exist in session-api)
+// over the WS session ID (which may not be persisted yet).
 func (s *SessionChecker) resolveSessionID() string {
-	if id := s.GetSessionID(); id != "" {
-		return id
+	if s.lastSessionID != "" {
+		return s.lastSessionID
 	}
-	return s.lastSessionID
+	return s.GetSessionID()
 }
 
 // checkMessages verifies that the session has both user and assistant messages recorded.
