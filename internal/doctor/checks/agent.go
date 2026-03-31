@@ -271,6 +271,9 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 		}
 	}
 
+	// Brief pause for async tool-call writes to flush to session-api.
+	time.Sleep(2 * time.Second)
+
 	toolCalls, err := a.fetchToolCalls(ctx, sessionID)
 	if err != nil {
 		return doctor.TestResult{
@@ -316,6 +319,9 @@ func (a *AgentChecker) fetchToolCalls(ctx context.Context, sessionID string) ([]
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil // session or tool calls not found yet
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
