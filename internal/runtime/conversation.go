@@ -168,7 +168,6 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 	if s.memoryStore != nil && s.workspaceUID != "" {
 		scope := map[string]string{
 			"workspace_id": s.workspaceUID,
-			"agent_id":     s.agentName,
 		}
 		opts = append(opts, sdk.WithMemory(s.memoryStore, scope))
 		log.V(1).Info("memory store wired",
