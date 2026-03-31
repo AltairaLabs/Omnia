@@ -105,6 +105,7 @@ const (
 	envSessionAPIURL     = "SESSION_API_URL"
 	envMemoryEnabled     = "OMNIA_MEMORY_ENABLED"
 	envMemoryAPIURL      = "OMNIA_MEMORY_API_URL"
+	envWorkspaceUID      = "OMNIA_WORKSPACE_UID"
 	envTracingEnabled    = "OMNIA_TRACING_ENABLED"
 	envTracingEndpoint   = "OMNIA_TRACING_ENDPOINT"
 	envTracingSampleRate = "OMNIA_TRACING_SAMPLE_RATE"

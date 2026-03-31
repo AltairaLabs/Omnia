@@ -117,8 +117,13 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		if url := os.Getenv(envMemoryAPIURL); url != "" {
 			cfg.MemoryAPIURL = url
 		}
-		// Resolve workspace UID for memory scope (memory_entities.workspace_id is UUID).
-		cfg.WorkspaceUID = resolveWorkspaceUID(ctx, c, namespace)
+		// Workspace UID for memory scope (memory_entities.workspace_id is UUID).
+		// Prefer env var (injected by operator) over K8s API lookup.
+		if uid := os.Getenv(envWorkspaceUID); uid != "" {
+			cfg.WorkspaceUID = uid
+		} else {
+			cfg.WorkspaceUID = resolveWorkspaceUID(ctx, c, namespace)
+		}
 	}
 
 	// Tracing config from env (injected by operator from Helm values)
