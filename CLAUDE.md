@@ -108,6 +108,14 @@ The repo has a pre-commit hook at `hack/pre-commit` that runs on every commit. *
 Browser → WebSocket → Facade → `internal/session/httpclient` → Session API HTTP → PostgreSQL.
 Redis is a **warm cache within session-api**, not a separate path.
 
+### Tool execution model
+There are two categories of tools with different visibility:
+
+- **ToolRegistry tools** (HTTP handlers like `search_places`, `get_weather`, `calculate`): Defined in ToolRegistry CRDs. Executed by the runtime. Tool calls **are forwarded** to the client via WebSocket `tool_call` messages and appear in `allowed_tools` sent to the LLM.
+- **Platform tools** (memory, workflow, etc.): Registered via PromptKit SDK capabilities (`sdk.WithMemory()`). Executed server-side in the runtime. Tool calls are **NOT forwarded** via WebSocket — they are invisible to the facade and client. They appear in runtime event logs and session-api tool-call records, but not in the WS stream.
+
+When testing or debugging tool calls: ToolRegistry tools are visible in WS messages; platform tools must be verified via runtime logs or session-api `/tool-calls` endpoint.
+
 ### Enterprise code
 Enterprise features live under `ee/`. This includes Arena (prompt testing/evaluation), ArenaJob controller, and ArenaDevSession controller.
 
