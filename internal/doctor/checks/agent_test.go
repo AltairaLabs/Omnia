@@ -172,45 +172,60 @@ func TestCheckChat_Fail_Timeout(t *testing.T) {
 // --- checkToolCalling ---
 
 func TestCheckToolCalling_Pass(t *testing.T) {
-	srv := serveMockFacade(t, mockFacadeHandler{
+	facadeSrv := serveMockFacade(t, mockFacadeHandler{
 		responses: []wsServerMessage{
-			{Type: wsMessageTypeToolCall, ToolCall: &wsToolCallInfo{Name: "calculate"}},
-			{Type: wsMessageTypeChunk, Content: "sqrt(144) + 3^2 = "},
-			{Type: wsMessageTypeDone, Content: "21"},
+			{Type: wsMessageTypeDone, Content: "The weather in London is 15°C."},
 		},
 	})
-	defer srv.Close()
+	defer facadeSrv.Close()
 
-	result := newCheckerForServer(srv).checkToolCalling(context.Background())
+	// Mock session-api returns tool calls for the session.
+	sessionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"name":"search_places","status":"success"},{"name":"get_weather","status":"success"}]`))
+	}))
+	defer sessionSrv.Close()
+
+	c := newCheckerForServer(facadeSrv)
+	c.config.SessionAPIURL = sessionSrv.URL
+	result := c.checkToolCalling(context.Background())
 	assert.Equal(t, doctor.StatusPass, result.Status)
+	assert.Contains(t, result.Detail, "search_places")
 }
 
-func TestCheckToolCalling_Fail_NoToolCall(t *testing.T) {
-	srv := serveMockFacade(t, mockFacadeHandler{
+func TestCheckToolCalling_Fail_NoToolCalls(t *testing.T) {
+	facadeSrv := serveMockFacade(t, mockFacadeHandler{
 		responses: []wsServerMessage{
-			{Type: wsMessageTypeChunk, Content: "15 times 7 is "},
-			{Type: wsMessageTypeDone, Content: "105"},
+			{Type: wsMessageTypeDone, Content: "I can't do that."},
 		},
 	})
-	defer srv.Close()
+	defer facadeSrv.Close()
 
-	result := newCheckerForServer(srv).checkToolCalling(context.Background())
+	sessionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer sessionSrv.Close()
+
+	c := newCheckerForServer(facadeSrv)
+	c.config.SessionAPIURL = sessionSrv.URL
+	result := c.checkToolCalling(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
-	assert.Contains(t, result.Detail, "no tool_call")
+	assert.Contains(t, result.Detail, "no tool calls")
 }
 
-func TestCheckToolCalling_Fail_WrongAnswer(t *testing.T) {
-	srv := serveMockFacade(t, mockFacadeHandler{
+func TestCheckToolCalling_Skip_NoSessionAPI(t *testing.T) {
+	facadeSrv := serveMockFacade(t, mockFacadeHandler{
 		responses: []wsServerMessage{
-			{Type: wsMessageTypeToolCall, ToolCall: &wsToolCallInfo{Name: "calculate"}},
-			{Type: wsMessageTypeDone, Content: "the answer is 42"},
+			{Type: wsMessageTypeDone, Content: "Done."},
 		},
 	})
-	defer srv.Close()
+	defer facadeSrv.Close()
 
-	result := newCheckerForServer(srv).checkToolCalling(context.Background())
-	assert.Equal(t, doctor.StatusFail, result.Status)
-	assert.Contains(t, result.Detail, "21")
+	c := newCheckerForServer(facadeSrv)
+	// No SessionAPIURL set
+	result := c.checkToolCalling(context.Background())
+	assert.Equal(t, doctor.StatusSkip, result.Status)
 }
 
 func TestCheckToolCalling_Fail_ConnectionError(t *testing.T) {

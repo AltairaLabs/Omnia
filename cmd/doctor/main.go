@@ -78,9 +78,10 @@ func main() {
 	}
 
 	agentChecker := checks.NewAgentChecker(checks.AgentConfig{
-		FacadeURL: agentFacadeURL,
-		AgentName: *agentName,
-		Namespace: *agentNamespace,
+		FacadeURL:     agentFacadeURL,
+		AgentName:     *agentName,
+		Namespace:     *agentNamespace,
+		SessionAPIURL: sessionAPIURL,
 	})
 	runner.Register(agentChecker.Checks()...)
 

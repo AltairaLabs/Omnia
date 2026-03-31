@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -30,9 +31,10 @@ const (
 
 // AgentConfig describes the agent to test.
 type AgentConfig struct {
-	FacadeURL string // e.g., http://tools-demo.omnia-demo.svc.cluster.local:8080
-	AgentName string
-	Namespace string
+	FacadeURL     string // e.g., http://tools-demo.omnia-demo.svc.cluster.local:8080
+	AgentName     string
+	Namespace     string
+	SessionAPIURL string // session-api URL for verifying tool calls after chat
 }
 
 // AgentChecker runs WebSocket-based agent checks.
@@ -228,12 +230,14 @@ func (a *AgentChecker) checkChat(ctx context.Context) doctor.TestResult {
 	}
 }
 
-// checkToolCalling sends a calculation prompt and verifies a tool call appears.
+// checkToolCalling sends a weather prompt and verifies tool calls were recorded.
+// Server-side tools (HTTP executors) are not forwarded via WebSocket, so we verify
+// by checking the session-api tool-calls endpoint after the chat completes.
 func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 	toolCtx, cancel := context.WithTimeout(ctx, wsResponseTimeout)
 	defer cancel()
 
-	conn, _, err := a.dial(toolCtx)
+	conn, sessionID, err := a.dial(toolCtx)
 	if err != nil {
 		return doctor.TestResult{
 			Status: doctor.StatusFail,
@@ -243,7 +247,7 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 	}
 	defer closeConn(conn)
 
-	if err := sendMessage(conn, "Use the calculate tool to compute: sqrt(144) + 3^2"); err != nil {
+	if err := sendMessage(conn, "What is the weather in London right now?"); err != nil {
 		return doctor.TestResult{
 			Status: doctor.StatusFail,
 			Error:  err.Error(),
@@ -251,8 +255,7 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 		}
 	}
 
-	msgs, err := collectResponse(toolCtx, conn)
-	if err != nil {
+	if _, err := collectResponse(toolCtx, conn); err != nil {
 		return doctor.TestResult{
 			Status: doctor.StatusFail,
 			Error:  err.Error(),
@@ -260,25 +263,67 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 		}
 	}
 
-	if !hasToolCall(msgs) {
+	// Verify tool calls via session-api (server-side tools aren't in WS stream).
+	if a.config.SessionAPIURL == "" || sessionID == "" {
 		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Detail: "no tool_call message in response stream",
+			Status: doctor.StatusSkip,
+			Detail: "no session-api URL or session ID available",
 		}
 	}
 
-	finalText := assembleText(msgs)
-	if !strings.Contains(finalText, "21") {
+	toolCalls, err := a.fetchToolCalls(ctx, sessionID)
+	if err != nil {
 		return doctor.TestResult{
 			Status: doctor.StatusFail,
-			Detail: fmt.Sprintf("expected '21' in response, got: %q", truncate(finalText, 200)),
+			Error:  err.Error(),
+			Detail: "failed to fetch tool calls from session-api",
 		}
 	}
 
+	if len(toolCalls) == 0 {
+		return doctor.TestResult{
+			Status: doctor.StatusFail,
+			Detail: "no tool calls recorded in session-api",
+		}
+	}
+
+	names := make([]string, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		names = append(names, tc.Name)
+	}
 	return doctor.TestResult{
 		Status: doctor.StatusPass,
-		Detail: "tool was called and result '21' found in response",
+		Detail: fmt.Sprintf("tool calls recorded: %v", names),
 	}
+}
+
+// toolCallRecord is the minimal shape returned by session-api /tool-calls endpoint.
+type toolCallRecord struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
+// fetchToolCalls queries session-api for tool calls in a given session.
+func (a *AgentChecker) fetchToolCalls(ctx context.Context, sessionID string) ([]toolCallRecord, error) {
+	url := fmt.Sprintf("%s/api/v1/sessions/%s/tool-calls", a.config.SessionAPIURL, sessionID)
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	var calls []toolCallRecord
+	if err := json.NewDecoder(resp.Body).Decode(&calls); err != nil {
+		return nil, err
+	}
+	return calls, nil
 }
 
 // assembleText concatenates the Content fields from all chunk and done messages.
