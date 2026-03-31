@@ -104,7 +104,9 @@ type memoryScope struct {
 
 // memorySaveResponse is the expected response from POST /api/v1/memories.
 type memorySaveResponse struct {
-	ID string `json:"id"`
+	Memory struct {
+		ID string `json:"id"`
+	} `json:"memory"`
 }
 
 // checkSave POSTs a test memory and stores the returned ID for later deletion.
@@ -146,12 +148,12 @@ func (m *MemoryChecker) checkSave(ctx context.Context) doctor.TestResult {
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return doctor.TestResult{Status: doctor.StatusFail, Error: fmt.Sprintf("decode response: %v", err)}
 	}
-	if result.ID == "" {
+	if result.Memory.ID == "" {
 		return doctor.TestResult{Status: doctor.StatusFail, Detail: "response missing id field"}
 	}
 
-	m.savedMemoryID = result.ID
-	return doctor.TestResult{Status: doctor.StatusPass, Detail: fmt.Sprintf("saved memory id=%s", result.ID)}
+	m.savedMemoryID = result.Memory.ID
+	return doctor.TestResult{Status: doctor.StatusPass, Detail: fmt.Sprintf("saved memory id=%s", result.Memory.ID)}
 }
 
 // memorySearchResponse is the shape returned by GET /api/v1/memories/search.

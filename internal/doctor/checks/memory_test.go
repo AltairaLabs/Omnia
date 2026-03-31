@@ -94,7 +94,7 @@ func defaultDocsHandler(w http.ResponseWriter, _ *http.Request) {
 
 func defaultSaveHandler(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusCreated)
-	_, _ = w.Write([]byte(`{"id":"` + testMemoryID + `"}`))
+	_, _ = w.Write([]byte(`{"memory":{"id":"` + testMemoryID + `"}}`))
 }
 
 func defaultSearchHandler(w http.ResponseWriter, _ *http.Request) {
@@ -205,7 +205,7 @@ func TestCheckSave_SendsCorrectPayload(t *testing.T) {
 		saveHandler: func(w http.ResponseWriter, r *http.Request) {
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&captured))
 			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"id":"x"}`))
+			_, _ = w.Write([]byte(`{"memory":{"id":"x"}}`))
 		},
 	}).serve(t)
 	defer srv.Close()

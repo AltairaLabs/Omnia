@@ -28,7 +28,8 @@ type SessionChecker struct {
 	sessionAPIURL string
 	namespace     string
 	// GetSessionID returns the session ID from the most recent agent chat check.
-	GetSessionID func() string
+	GetSessionID  func() string
+	lastSessionID string // populated by checkSessionExists as fallback
 }
 
 // NewSessionChecker creates a new SessionChecker.
@@ -108,8 +109,10 @@ func (s *SessionChecker) checkSessionExists(ctx context.Context) doctor.TestResu
 	}
 
 	var result struct {
-		Sessions []json.RawMessage `json:"sessions"`
-		Total    int64             `json:"total"`
+		Sessions []struct {
+			ID string `json:"id"`
+		} `json:"sessions"`
+		Total int64 `json:"total"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "decoding sessions response"}
@@ -122,6 +125,11 @@ func (s *SessionChecker) checkSessionExists(ctx context.Context) doctor.TestResu
 		}
 	}
 
+	// Store the first session ID so downstream checks (messages, provider-calls) can use it.
+	if result.Sessions[0].ID != "" {
+		s.lastSessionID = result.Sessions[0].ID
+	}
+
 	count := len(result.Sessions)
 	if result.Total > 0 {
 		count = int(result.Total)
@@ -132,9 +140,17 @@ func (s *SessionChecker) checkSessionExists(ctx context.Context) doctor.TestResu
 	}
 }
 
+// resolveSessionID returns the best available session ID: from agent chat, or from list fallback.
+func (s *SessionChecker) resolveSessionID() string {
+	if id := s.GetSessionID(); id != "" {
+		return id
+	}
+	return s.lastSessionID
+}
+
 // checkMessages verifies that the session has both user and assistant messages recorded.
 func (s *SessionChecker) checkMessages(ctx context.Context) doctor.TestResult {
-	sessionID := s.GetSessionID()
+	sessionID := s.resolveSessionID()
 	if sessionID == "" {
 		return doctor.TestResult{Status: doctor.StatusSkip, Detail: msgNoSessionAvailable}
 	}
@@ -194,7 +210,7 @@ func classifyMessages(messages []struct {
 
 // checkProviderCalls verifies the session has at least one provider call with non-zero input tokens.
 func (s *SessionChecker) checkProviderCalls(ctx context.Context) doctor.TestResult {
-	sessionID := s.GetSessionID()
+	sessionID := s.resolveSessionID()
 	if sessionID == "" {
 		return doctor.TestResult{Status: doctor.StatusSkip, Detail: msgNoSessionAvailable}
 	}
