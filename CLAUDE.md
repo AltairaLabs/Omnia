@@ -109,12 +109,13 @@ Browser → WebSocket → Facade → `internal/session/httpclient` → Session A
 Redis is a **warm cache within session-api**, not a separate path.
 
 ### Tool execution model
-There are two categories of tools with different visibility:
+Tools have different execution locations, which determines their visibility in the WebSocket stream:
 
-- **ToolRegistry tools** (HTTP handlers like `search_places`, `get_weather`, `calculate`): Defined in ToolRegistry CRDs. Executed by the runtime. Tool calls **are forwarded** to the client via WebSocket `tool_call` messages and appear in `allowed_tools` sent to the LLM.
-- **Platform tools** (memory, workflow, etc.): Registered via PromptKit SDK capabilities (`sdk.WithMemory()`). Executed server-side in the runtime. Tool calls are **NOT forwarded** via WebSocket — they are invisible to the facade and client. They appear in runtime event logs and session-api tool-call records, but not in the WS stream.
+- **Client tools** (`client://browser` endpoint): Defined in ToolRegistry CRDs with a client-side executor. The facade forwards these via WebSocket `tool_call` messages — the browser executes them and returns results. These are the **only** tools visible in the WS stream.
+- **Server tools** (HTTP, MCP, and other executor types in ToolRegistry): Executed by the runtime. NOT forwarded via WebSocket.
+- **Platform tools** (memory, workflow, etc.): Registered via PromptKit SDK capabilities (`sdk.WithMemory()`). Executed server-side in the runtime. NOT forwarded via WebSocket.
 
-When testing or debugging tool calls: ToolRegistry tools are visible in WS messages; platform tools must be verified via runtime logs or session-api `/tool-calls` endpoint.
+When testing or debugging: only client tools appear in WebSocket messages. All other tools must be verified via runtime logs or session-api `/tool-calls` endpoint.
 
 ### Enterprise code
 Enterprise features live under `ee/`. This includes Arena (prompt testing/evaluation), ArenaJob controller, and ArenaDevSession controller.
