@@ -43,6 +43,13 @@ func (r *Runner) Run(ctx context.Context, results chan<- TestResult) *RunResult 
 			break
 		}
 
+		// Emit a "running" event so the UI can show a pending indicator.
+		results <- TestResult{
+			Name:     check.Name,
+			Category: check.Category,
+			Status:   StatusRunning,
+		}
+
 		start := time.Now()
 		result := check.Run(ctx)
 		result.Name = check.Name

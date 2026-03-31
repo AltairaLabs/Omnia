@@ -51,7 +51,7 @@ func TestRunner_AllPass(t *testing.T) {
 		passCheck("check-c", "cat2"),
 	)
 
-	ch := make(chan TestResult, 3)
+	ch := make(chan TestResult, 10)
 	run := r.Run(context.Background(), ch)
 	results := collectResults(ch)
 
@@ -67,8 +67,9 @@ func TestRunner_AllPass(t *testing.T) {
 	if run.Summary.Failed != 0 {
 		t.Errorf("expected Failed=0, got %d", run.Summary.Failed)
 	}
-	if len(results) != 3 {
-		t.Errorf("expected 3 results from channel, got %d", len(results))
+	// Each check emits a "running" event + final result = 6 total
+	if len(results) != 6 {
+		t.Errorf("expected 6 results from channel (3 running + 3 final), got %d", len(results))
 	}
 }
 
@@ -79,7 +80,7 @@ func TestRunner_WithFailure(t *testing.T) {
 		failCheck("check-b", "cat1"),
 	)
 
-	ch := make(chan TestResult, 2)
+	ch := make(chan TestResult, 10)
 	run := r.Run(context.Background(), ch)
 	collectResults(ch)
 
@@ -98,7 +99,7 @@ func TestRunner_WithSkip(t *testing.T) {
 		skipCheck("check-b", "cat1"),
 	)
 
-	ch := make(chan TestResult, 2)
+	ch := make(chan TestResult, 10)
 	run := r.Run(context.Background(), ch)
 	collectResults(ch)
 
@@ -115,7 +116,7 @@ func TestRunner_CategoryOrder(t *testing.T) {
 		passCheck("check-c", "zcat"),
 	)
 
-	ch := make(chan TestResult, 3)
+	ch := make(chan TestResult, 10)
 	run := r.Run(context.Background(), ch)
 	collectResults(ch)
 
@@ -143,7 +144,7 @@ func TestRunner_ContextCancellation(t *testing.T) {
 		passCheck("check-b", "cat1"),
 	)
 
-	ch := make(chan TestResult, 2)
+	ch := make(chan TestResult, 10)
 	run := r.Run(ctx, ch)
 	results := collectResults(ch)
 
@@ -166,14 +167,22 @@ func TestRunner_ResultFieldsPopulated(t *testing.T) {
 		},
 	})
 
-	ch := make(chan TestResult, 1)
+	ch := make(chan TestResult, 10)
 	r.Run(context.Background(), ch)
 	results := collectResults(ch)
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results (running + final), got %d", len(results))
 	}
-	res := results[0]
+	// First event is "running"
+	if results[0].Status != StatusRunning {
+		t.Errorf("expected first event StatusRunning, got %s", results[0].Status)
+	}
+	if results[0].Name != "my-check" {
+		t.Errorf("expected running event Name='my-check', got '%s'", results[0].Name)
+	}
+	// Second event is the final result
+	res := results[1]
 	if res.Name != "my-check" {
 		t.Errorf("expected Name='my-check', got '%s'", res.Name)
 	}

@@ -236,20 +236,31 @@
 
       es.onmessage = function(e) {
         const r = JSON.parse(e.data);
+        const rowId = 'test-' + r.name.replace(/[^a-zA-Z0-9]/g, '-');
         if (r.category !== currentCategory) {
           currentCategory = r.category;
           resultsDiv.innerHTML += '<div class="category-header">' + escapeHtml(r.category) + '</div>';
         }
-        const detail = r.error
-          ? '<span class="result-error">' + escapeHtml(r.error) + '</span>'
-          : '<span class="result-detail">' + escapeHtml(r.detail || '') + '</span>';
-        resultsDiv.innerHTML +=
-          '<div class="result-row">' +
+        const detail = r.status === 'running'
+          ? '<span class="result-detail">running...</span>'
+          : r.error
+            ? '<span class="result-error">' + escapeHtml(r.error) + '</span>'
+            : '<span class="result-detail">' + escapeHtml(r.detail || '') + '</span>';
+        const duration = r.status === 'running'
+          ? ''
+          : '<span class="result-duration">' + formatDuration(r.duration) + '</span>';
+        const html =
+          '<div class="result-row" id="' + rowId + '">' +
             statusIcon(r.status) +
             '<span class="result-name">' + escapeHtml(r.name) + '</span>' +
-            detail +
-            '<span class="result-duration">' + formatDuration(r.duration) + '</span>' +
+            detail + duration +
           '</div>';
+        const existing = document.getElementById(rowId);
+        if (existing) {
+          existing.outerHTML = html;
+        } else {
+          resultsDiv.innerHTML += html;
+        }
       };
 
       es.addEventListener('complete', function(e) {

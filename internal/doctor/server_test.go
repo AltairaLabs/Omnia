@@ -89,9 +89,9 @@ func TestHandleRunSSE_StreamsResults(t *testing.T) {
 			dataLines++
 		}
 	}
-	// 2 test results + 1 complete event = 3 data lines
-	if dataLines != 3 {
-		t.Errorf("expected 3 data lines, got %d; body:\n%s", dataLines, body)
+	// 2 running events + 2 test results + 1 complete event = 5 data lines
+	if dataLines != 5 {
+		t.Errorf("expected 5 data lines, got %d; body:\n%s", dataLines, body)
 	}
 	if !strings.Contains(body, "event: complete") {
 		t.Error("expected complete event in SSE stream")
