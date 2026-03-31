@@ -393,41 +393,65 @@ func TestChecks_WithAgentChecker_ReturnsAllChecks(t *testing.T) {
 // --- Tool checks (memory agent via WebSocket) ---
 
 func TestCheckMemoryToolsAvailable_Pass(t *testing.T) {
-	srv := serveMockFacade(t, mockFacadeHandler{
+	// Mock facade: agent responds to "remember" prompt.
+	facadeSrv := serveMockFacade(t, mockFacadeHandler{
 		responses: []wsServerMessage{
-			{Type: wsMessageTypeToolCall, ToolCall: &wsToolCallInfo{Name: "memory__remember"}},
 			{Type: wsMessageTypeDone, Content: "Remembered."},
 		},
 	})
-	defer srv.Close()
+	defer facadeSrv.Close()
 
-	agentChecker := newCheckerForServer(srv)
-	c := NewMemoryChecker("", testWorkspace, agentChecker)
+	// Mock memory-api: search returns the remembered value.
+	memorySrv := (&mockMemoryServer{
+		searchHandler: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"memories":[{"id":"m1","content":"doctor test value is smoke-42"}],"total":1}`))
+		},
+	}).serve(t)
+	defer memorySrv.Close()
+
+	agentChecker := newCheckerForServer(facadeSrv)
+	c := NewMemoryChecker(memorySrv.URL, testWorkspace, agentChecker)
 	result := c.checkMemoryToolsAvailable(t.Context())
 	assert.Equal(t, doctor.StatusPass, result.Status)
 }
 
-func TestCheckMemoryToolsAvailable_Fail_WrongTool(t *testing.T) {
-	srv := serveMockFacade(t, mockFacadeHandler{
+func TestCheckMemoryToolsAvailable_Fail_NotPersisted(t *testing.T) {
+	facadeSrv := serveMockFacade(t, mockFacadeHandler{
 		responses: []wsServerMessage{
-			{Type: wsMessageTypeToolCall, ToolCall: &wsToolCallInfo{Name: "other__tool"}},
-			{Type: wsMessageTypeDone, Content: "Done."},
+			{Type: wsMessageTypeDone, Content: "OK."},
 		},
 	})
-	defer srv.Close()
+	defer facadeSrv.Close()
 
-	agentChecker := newCheckerForServer(srv)
-	c := NewMemoryChecker("", testWorkspace, agentChecker)
+	// Memory-api returns no results — the remember didn't persist.
+	memorySrv := (&mockMemoryServer{
+		searchHandler: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"memories":[],"total":0}`))
+		},
+	}).serve(t)
+	defer memorySrv.Close()
+
+	agentChecker := newCheckerForServer(facadeSrv)
+	c := NewMemoryChecker(memorySrv.URL, testWorkspace, agentChecker)
 	result := c.checkMemoryToolsAvailable(t.Context())
 	assert.Equal(t, doctor.StatusFail, result.Status)
-	assert.Contains(t, result.Detail, "memory__remember")
+	assert.Contains(t, result.Detail, "did not persist")
 }
 
 func TestCheckMemoryToolsAvailable_Fail_ConnectionError(t *testing.T) {
 	agentChecker := NewAgentChecker(AgentConfig{FacadeURL: "http://127.0.0.1:1", AgentName: "x", Namespace: "y"})
-	c := NewMemoryChecker("", testWorkspace, agentChecker)
+	c := NewMemoryChecker("http://localhost:9999", testWorkspace, agentChecker)
 	result := c.checkMemoryToolsAvailable(t.Context())
 	assert.Equal(t, doctor.StatusFail, result.Status)
+}
+
+func TestCheckMemoryToolsAvailable_Skip_NoWorkspace(t *testing.T) {
+	agentChecker := NewAgentChecker(AgentConfig{})
+	c := NewMemoryChecker("http://localhost:8080", "", agentChecker)
+	result := c.checkMemoryToolsAvailable(t.Context())
+	assert.Equal(t, doctor.StatusSkip, result.Status)
 }
 
 func TestCheckMemoryRecall_Pass(t *testing.T) {

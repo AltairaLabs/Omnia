@@ -286,8 +286,14 @@ func (m *MemoryChecker) checkExport(ctx context.Context) doctor.TestResult {
 	return doctor.TestResult{Status: doctor.StatusPass, Detail: fmt.Sprintf("export ready (%s)", cd)}
 }
 
-// checkMemoryToolsAvailable sends a remember prompt and checks the tool_call response.
+// checkMemoryToolsAvailable tells the agent to remember a value, then verifies
+// the memory was persisted by querying the memory-api directly. Memory tools are
+// platform-level and not forwarded via WebSocket, so we verify by outcome.
 func (m *MemoryChecker) checkMemoryToolsAvailable(ctx context.Context) doctor.TestResult {
+	if r := m.requireWorkspace(); r != nil {
+		return *r
+	}
+
 	toolCtx, cancel := context.WithTimeout(ctx, wsResponseTimeout)
 	defer cancel()
 
@@ -297,25 +303,41 @@ func (m *MemoryChecker) checkMemoryToolsAvailable(ctx context.Context) doctor.Te
 	}
 	defer closeConn(conn)
 
-	if err := sendMessage(conn, "remember that my doctor test value is smoke-42"); err != nil {
+	if err := sendMessage(conn, "Please remember that my doctor test value is smoke-42"); err != nil {
 		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "send failed"}
 	}
 
-	msgs, err := collectResponse(toolCtx, conn)
-	if err != nil {
+	// Wait for the agent to finish (memory__remember executes server-side).
+	if _, err := collectResponse(toolCtx, conn); err != nil {
 		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "receive failed"}
 	}
 
-	if !hasNamedToolCall(msgs, "memory__remember") {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Detail: "no memory__remember tool_call in response stream",
+	// Verify the memory was saved by searching the memory-api.
+	url := fmt.Sprintf("%s%s/search?q=%s&%s=%s",
+		m.memoryAPIURL, memoryAPIPrefix, "smoke-42", workspaceParam, m.workspace)
+	body, err := fetchBody(ctx, memoryClient(), url)
+	if err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "search after remember failed"}
+	}
+
+	var result memorySearchResponse
+	if err := json.Unmarshal([]byte(body), &result); err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "decode search response"}
+	}
+
+	for _, mem := range result.Memories {
+		if strings.Contains(mem.Content, "smoke-42") {
+			return doctor.TestResult{Status: doctor.StatusPass, Detail: "memory__remember persisted 'smoke-42'"}
 		}
 	}
-	return doctor.TestResult{Status: doctor.StatusPass, Detail: "memory__remember tool was called"}
+	return doctor.TestResult{
+		Status: doctor.StatusFail,
+		Detail: fmt.Sprintf("memory__remember did not persist 'smoke-42' (found %d memories)", len(result.Memories)),
+	}
 }
 
-// checkMemoryRecall asks the agent to recall the stored value and checks the response.
+// checkMemoryRecall asks the agent to recall the stored value. Memory tools are
+// platform-level, so we verify by checking the response text for the expected value.
 func (m *MemoryChecker) checkMemoryRecall(ctx context.Context) doctor.TestResult {
 	recallCtx, cancel := context.WithTimeout(ctx, wsResponseTimeout)
 	defer cancel()
@@ -326,7 +348,7 @@ func (m *MemoryChecker) checkMemoryRecall(ctx context.Context) doctor.TestResult
 	}
 	defer closeConn(conn)
 
-	if err := sendMessage(conn, "what is my doctor test value?"); err != nil {
+	if err := sendMessage(conn, "What is my doctor test value? Use your memory tools to find it."); err != nil {
 		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "send failed"}
 	}
 
@@ -336,13 +358,13 @@ func (m *MemoryChecker) checkMemoryRecall(ctx context.Context) doctor.TestResult
 	}
 
 	text := assembleText(msgs)
-	if !strings.Contains(text, "smoke-42") {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Detail: fmt.Sprintf("expected 'smoke-42' in response, got: %q", truncate(text, 200)),
-		}
+	if strings.Contains(text, "smoke-42") {
+		return doctor.TestResult{Status: doctor.StatusPass, Detail: "recalled 'smoke-42' from memory"}
 	}
-	return doctor.TestResult{Status: doctor.StatusPass, Detail: "recalled 'smoke-42' from memory"}
+	return doctor.TestResult{
+		Status: doctor.StatusFail,
+		Detail: fmt.Sprintf("expected 'smoke-42' in response, got: %q", truncate(text, 200)),
+	}
 }
 
 // hasNamedToolCall returns true if any message is a tool_call with the given name.
