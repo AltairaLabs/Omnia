@@ -28,6 +28,8 @@ type sessionAPIMuxConfig struct {
 	docsBody       string
 	sessionsStatus int
 	sessionsBody   interface{}
+	searchStatus   int
+	searchBody     interface{}
 	messagesStatus int
 	messagesBody   interface{}
 	providerStatus int
@@ -41,6 +43,18 @@ func defaultSessionAPIMux(t *testing.T, cfg sessionAPIMuxConfig) *httptest.Serve
 	mux.HandleFunc("/docs", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(cfg.docsStatus)
 		_, _ = w.Write([]byte(cfg.docsBody))
+	})
+
+	mux.HandleFunc("/api/v1/sessions/search", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		status := cfg.searchStatus
+		if status == 0 {
+			status = http.StatusOK
+		}
+		w.WriteHeader(status)
+		if cfg.searchBody != nil {
+			require.NoError(t, json.NewEncoder(w).Encode(cfg.searchBody))
+		}
 	})
 
 	mux.HandleFunc("/api/v1/sessions", func(w http.ResponseWriter, _ *http.Request) {
@@ -88,14 +102,15 @@ type messagesResponse struct {
 
 // --- TestSessionCheckerChecks ---
 
-func TestSessionCheckerChecks_ReturnsFour(t *testing.T) {
+func TestSessionCheckerChecks_ReturnsFive(t *testing.T) {
 	c := NewSessionChecker("http://localhost", testSessionNS, nil, goodSessionID)
 	checks := c.Checks()
-	require.Len(t, checks, 4)
+	require.Len(t, checks, 5)
 	assert.Equal(t, "SessionAPIDocsServed", checks[0].Name)
 	assert.Equal(t, "SessionCreated", checks[1].Name)
-	assert.Equal(t, "MessagesRecorded", checks[2].Name)
-	assert.Equal(t, "ProviderCallsTracked", checks[3].Name)
+	assert.Equal(t, "SessionSearch", checks[2].Name)
+	assert.Equal(t, "MessagesRecorded", checks[3].Name)
+	assert.Equal(t, "ProviderCallsTracked", checks[4].Name)
 	for _, ch := range checks {
 		assert.Equal(t, "Sessions", ch.Category)
 	}
@@ -209,6 +224,72 @@ func TestCheckSessionExists_Fail_BadJSON(t *testing.T) {
 
 	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
 	result := c.checkSessionExists(context.Background())
+	assert.Equal(t, doctor.StatusFail, result.Status)
+}
+
+// --- checkSessionSearch ---
+
+func TestCheckSessionSearch_Pass(t *testing.T) {
+	body := sessionListResponse{
+		Sessions: []map[string]interface{}{{"id": testSessionAPIID}},
+		Total:    1,
+	}
+	srv := defaultSessionAPIMux(t, sessionAPIMuxConfig{
+		searchStatus: http.StatusOK,
+		searchBody:   body,
+	})
+	defer srv.Close()
+
+	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
+	result := c.checkSessionSearch(context.Background())
+	assert.Equal(t, doctor.StatusPass, result.Status)
+	assert.Contains(t, result.Detail, "1 session(s)")
+}
+
+func TestCheckSessionSearch_Fail_NoResults(t *testing.T) {
+	body := sessionListResponse{Sessions: []map[string]interface{}{}, Total: 0}
+	srv := defaultSessionAPIMux(t, sessionAPIMuxConfig{
+		searchStatus: http.StatusOK,
+		searchBody:   body,
+	})
+	defer srv.Close()
+
+	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
+	result := c.checkSessionSearch(context.Background())
+	assert.Equal(t, doctor.StatusFail, result.Status)
+	assert.Contains(t, result.Detail, "no results")
+}
+
+func TestCheckSessionSearch_Fail_HTTPError(t *testing.T) {
+	srv := defaultSessionAPIMux(t, sessionAPIMuxConfig{
+		searchStatus: http.StatusInternalServerError,
+	})
+	defer srv.Close()
+
+	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
+	result := c.checkSessionSearch(context.Background())
+	assert.Equal(t, doctor.StatusFail, result.Status)
+	assert.Contains(t, result.Detail, "500")
+}
+
+func TestCheckSessionSearch_Fail_ConnectionError(t *testing.T) {
+	c := NewSessionChecker("http://127.0.0.1:1", testSessionNS, nil, goodSessionID)
+	result := c.checkSessionSearch(context.Background())
+	assert.Equal(t, doctor.StatusFail, result.Status)
+	assert.NotEmpty(t, result.Error)
+}
+
+func TestCheckSessionSearch_Fail_BadJSON(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/sessions/search", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("not-json"))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
+	result := c.checkSessionSearch(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 }
 

@@ -58,6 +58,7 @@ func (m *MemoryChecker) Checks() []doctor.Check {
 		checks = append(checks,
 			doctor.Check{Name: "MemoryToolsAvailable", Category: memoryCategory, Run: m.checkMemoryToolsAvailable},
 			doctor.Check{Name: "MemoryRecall", Category: memoryCategory, Run: m.checkMemoryRecall},
+			doctor.Check{Name: "MemoryPersistsAcrossSessions", Category: memoryCategory, Run: m.checkMemoryPersistsAcrossSessions},
 		)
 	}
 	return checks
@@ -302,6 +303,65 @@ func (m *MemoryChecker) checkMemoryRecall(ctx context.Context) doctor.TestResult
 	return doctor.TestResult{
 		Status: doctor.StatusFail,
 		Detail: fmt.Sprintf("expected 'smoke-42' in response, got: %q", truncate(text, 200)),
+	}
+}
+
+const memoryPersistTestValue = "persist-ok"
+
+// checkMemoryPersistsAcrossSessions verifies memories survive across WebSocket sessions.
+// It opens a connection, asks the agent to remember a value, closes it, then opens a
+// new connection and asks the agent to recall the value.
+func (m *MemoryChecker) checkMemoryPersistsAcrossSessions(ctx context.Context) doctor.TestResult {
+	if r := m.requireWorkspace(); r != nil {
+		return *r
+	}
+
+	// Session 1: ask the agent to remember a value.
+	storeCtx, storeCancel := context.WithTimeout(ctx, wsResponseTimeout)
+	defer storeCancel()
+
+	conn1, _, err := m.agentChecker.dial(storeCtx)
+	if err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "session 1 connection failed"}
+	}
+
+	if err := sendMessage(conn1, "Please remember that my doctor persistence test value is persist-ok"); err != nil {
+		closeConn(conn1)
+		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "session 1 send failed"}
+	}
+
+	if _, err := collectResponse(storeCtx, conn1); err != nil {
+		closeConn(conn1)
+		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "session 1 receive failed"}
+	}
+	closeConn(conn1)
+
+	// Session 2: ask the agent to recall the value.
+	recallCtx, recallCancel := context.WithTimeout(ctx, wsResponseTimeout)
+	defer recallCancel()
+
+	conn2, _, err := m.agentChecker.dial(recallCtx)
+	if err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "session 2 connection failed"}
+	}
+	defer closeConn(conn2)
+
+	if err := sendMessage(conn2, "What is my doctor persistence test value?"); err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "session 2 send failed"}
+	}
+
+	msgs, err := collectResponse(recallCtx, conn2)
+	if err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "session 2 receive failed"}
+	}
+
+	text := assembleText(msgs)
+	if strings.Contains(text, memoryPersistTestValue) {
+		return doctor.TestResult{Status: doctor.StatusPass, Detail: "memory persisted across sessions"}
+	}
+	return doctor.TestResult{
+		Status: doctor.StatusFail,
+		Detail: fmt.Sprintf("expected '%s' in response, got: %q", memoryPersistTestValue, truncate(text, 200)),
 	}
 }
 

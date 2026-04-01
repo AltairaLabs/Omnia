@@ -28,6 +28,8 @@ const (
 
 	serviceSessionAPI = "omnia-session-api"
 	serviceMemoryAPI  = "omnia-memory-api"
+	serviceOllama     = "ollama"
+	defaultOllamaPort = 11434
 )
 
 func discoverServiceURL(namespace, service string, port int) string {
@@ -43,6 +45,7 @@ func main() {
 	agentName := flag.String("agent-name", defaultAgentName, "agent name to test")
 	sessionAPIURLFlag := flag.String("session-api-url", "", "override session-api URL")
 	memoryAPIURLFlag := flag.String("memory-api-url", "", "override memory-api URL")
+	ollamaURLFlag := flag.String("ollama-url", "", "override Ollama URL")
 	flag.Parse()
 
 	log, sync, err := logging.NewLogger()
@@ -61,6 +64,11 @@ func main() {
 		memoryAPIURL = discoverServiceURL(*namespace, serviceMemoryAPI, defaultAPIPort)
 	}
 
+	ollamaURL := *ollamaURLFlag
+	if ollamaURL == "" {
+		ollamaURL = discoverServiceURL(*agentNamespace, serviceOllama, defaultOllamaPort)
+	}
+
 	agentFacadeURL := discoverServiceURL(*agentNamespace, *agentName, defaultAPIPort)
 
 	sessionStore := httpclient.NewStore(sessionAPIURL, log, httpclient.WithBufferCapacity(0))
@@ -72,6 +80,7 @@ func main() {
 		"SessionAPI": sessionAPIURL,
 		"MemoryAPI":  memoryAPIURL,
 	})...)
+	runner.Register(checks.OllamaCheck(ollamaURL))
 
 	k8sClient, k8sErr := k8s.NewClient()
 	if k8sErr != nil {

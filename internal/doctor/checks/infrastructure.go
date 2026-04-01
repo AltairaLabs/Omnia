@@ -20,6 +20,11 @@ func InfrastructureChecks(services map[string]string) []doctor.Check {
 	return checks
 }
 
+// OllamaCheck returns a health check that queries the Ollama /api/tags endpoint.
+func OllamaCheck(url string) doctor.Check {
+	return probeCheck("Ollama", url, "/api/tags", "Healthy")
+}
+
 func healthCheck(name, baseURL string) doctor.Check {
 	return probeCheck(name, baseURL, "/healthz", "Healthy")
 }

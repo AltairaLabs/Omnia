@@ -25,6 +25,7 @@ func NewCRDChecker(c client.Client) *CRDChecker {
 func (c *CRDChecker) Checks() []doctor.Check {
 	return []doctor.Check{
 		{Name: "AgentRuntimesExist", Category: categoryNameCRDs, Run: c.checkAgentRuntimes},
+		{Name: "MemoryEnabled", Category: categoryNameCRDs, Run: c.checkMemoryEnabled},
 		{Name: "PromptPacksCompiled", Category: categoryNameCRDs, Run: c.checkPromptPacks},
 		{Name: "ToolRegistriesDiscovered", Category: categoryNameCRDs, Run: c.checkToolRegistries},
 		{Name: "WorkspacesConfigured", Category: categoryNameCRDs, Run: c.checkWorkspaces},
@@ -76,6 +77,32 @@ func (c *CRDChecker) checkAgentRuntimes(ctx context.Context) doctor.TestResult {
 		func() []omniav1alpha1.AgentRuntime { return list.Items },
 		func(item omniav1alpha1.AgentRuntime) string { return string(item.Status.Phase) },
 	)
+}
+
+func (c *CRDChecker) checkMemoryEnabled(ctx context.Context) doctor.TestResult {
+	var list omniav1alpha1.AgentRuntimeList
+	if err := c.client.List(ctx, &list); err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: fmt.Sprintf("list AgentRuntimes: %v", err)}
+	}
+	if len(list.Items) == 0 {
+		return doctor.TestResult{Status: doctor.StatusSkip, Detail: "no AgentRuntimes found"}
+	}
+	var enabled []string
+	for _, ar := range list.Items {
+		if ar.Spec.Memory != nil && ar.Spec.Memory.Enabled {
+			enabled = append(enabled, ar.Name)
+		}
+	}
+	if len(enabled) == 0 {
+		return doctor.TestResult{
+			Status: doctor.StatusFail,
+			Detail: fmt.Sprintf("none of %d AgentRuntime(s) have memory enabled", len(list.Items)),
+		}
+	}
+	return doctor.TestResult{
+		Status: doctor.StatusPass,
+		Detail: fmt.Sprintf("%d/%d AgentRuntime(s) have memory enabled: %v", len(enabled), len(list.Items), enabled),
+	}
 }
 
 func (c *CRDChecker) checkPromptPacks(ctx context.Context) doctor.TestResult {

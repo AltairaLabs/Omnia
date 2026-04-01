@@ -48,6 +48,7 @@ func (s *SessionChecker) Checks() []doctor.Check {
 	return []doctor.Check{
 		{Name: "SessionAPIDocsServed", Category: "Sessions", Run: s.checkDocs},
 		{Name: "SessionCreated", Category: "Sessions", Run: s.checkSessionExists},
+		{Name: "SessionSearch", Category: "Sessions", Run: s.checkSessionSearch},
 		{Name: "MessagesRecorded", Category: "Sessions", Run: s.checkMessages},
 		{Name: "ProviderCallsTracked", Category: "Sessions", Run: s.checkProviderCalls},
 	}
@@ -139,6 +140,49 @@ func (s *SessionChecker) checkSessionExists(ctx context.Context) doctor.TestResu
 	return doctor.TestResult{
 		Status: doctor.StatusPass,
 		Detail: fmt.Sprintf("%d session(s) found", count),
+	}
+}
+
+// checkSessionSearch verifies the session search endpoint returns results for a known greeting.
+func (s *SessionChecker) checkSessionSearch(ctx context.Context) doctor.TestResult {
+	path := fmt.Sprintf("/api/v1/sessions/search?namespace=%s&q=Hello", s.namespace)
+	resp, err := s.sessionHTTPGet(ctx, path)
+	if err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "GET search failed"}
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode != http.StatusOK {
+		return doctor.TestResult{
+			Status: doctor.StatusFail,
+			Detail: fmt.Sprintf("GET search returned HTTP %d", resp.StatusCode),
+		}
+	}
+
+	var result struct {
+		Sessions []struct {
+			ID string `json:"id"`
+		} `json:"sessions"`
+		Total int64 `json:"total"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "decoding search response"}
+	}
+
+	if len(result.Sessions) == 0 {
+		return doctor.TestResult{
+			Status: doctor.StatusFail,
+			Detail: "search returned no results for 'Hello'",
+		}
+	}
+
+	count := len(result.Sessions)
+	if result.Total > 0 {
+		count = int(result.Total)
+	}
+	return doctor.TestResult{
+		Status: doctor.StatusPass,
+		Detail: fmt.Sprintf("search found %d session(s) matching 'Hello'", count),
 	}
 }
 
