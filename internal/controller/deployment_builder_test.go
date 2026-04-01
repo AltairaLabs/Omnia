@@ -20,7 +20,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
@@ -655,6 +660,40 @@ func TestBuildRuntimeEnvVars_MemoryNoEnvVars(t *testing.T) {
 			t.Errorf("unexpected env var %q: memory config is read from CRD, not env vars", ev.Name)
 		}
 	}
+}
+
+func TestBuildRuntimeEnvVars_MemoryWithWorkspaceUID(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
+
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "demo",
+			UID:  "ws-uid-abc-123",
+		},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			DisplayName: "Demo",
+			Namespace:   omniav1alpha1.NamespaceConfig{Name: "omnia-demo"},
+		},
+	}
+
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(ws).Build()
+	r := &AgentRuntimeReconciler{Client: k8sClient}
+
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "test-agent"
+	ar.Namespace = "omnia-demo"
+	ar.Spec.Memory = &omniav1alpha1.MemoryConfig{Enabled: true}
+
+	envVars := r.buildRuntimeEnvVars(ar, nil)
+
+	var workspaceUID string
+	for _, ev := range envVars {
+		if ev.Name == "OMNIA_WORKSPACE_UID" {
+			workspaceUID = ev.Value
+		}
+	}
+	assert.Equal(t, "ws-uid-abc-123", workspaceUID)
 }
 
 func TestBuildRuntimeEnvVars_MemoryDisabled(t *testing.T) {
