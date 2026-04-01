@@ -313,11 +313,20 @@ func (m *MemoryChecker) checkMemoryToolsAvailable(ctx context.Context) doctor.Te
 		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "receive failed"}
 	}
 
-	// Check session-api for tool call errors first.
+	// Check session-api for tool call errors. The runtime event store writes
+	// asynchronously, so poll until the tool call record appears.
 	if m.agentChecker.config.SessionAPIURL != "" && sessionID != "" {
-		time.Sleep(2 * time.Second)
-		if errDetail := m.checkToolCallErrors(ctx, sessionID, "memory__remember"); errDetail != "" {
-			return doctor.TestResult{Status: doctor.StatusFail, Detail: errDetail}
+		for attempt := range 5 {
+			if errDetail := m.checkToolCallErrors(ctx, sessionID, "memory__remember"); errDetail != "" {
+				return doctor.TestResult{Status: doctor.StatusFail, Detail: errDetail}
+			}
+			calls, _ := m.agentChecker.fetchToolCalls(ctx, sessionID)
+			if len(calls) > 0 {
+				break
+			}
+			if attempt < 4 {
+				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+			}
 		}
 	}
 

@@ -269,9 +269,8 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 		}
 	}
 
-	// The WS session may not be flushed to session-api yet. Query the most
-	// recent session for this namespace to find tool calls.
-	time.Sleep(3 * time.Second)
+	// The runtime event store writes tool calls to session-api asynchronously
+	// (fire-and-forget goroutines). Poll until they appear or timeout.
 	resolvedID := a.resolveLatestSession(ctx)
 	if resolvedID == "" {
 		resolvedID = sessionID
@@ -283,11 +282,21 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 		}
 	}
 
-	toolCalls, err := a.fetchToolCalls(ctx, resolvedID)
-	if err != nil {
+	var toolCalls []toolCallRecord
+	var fetchErr error
+	for attempt := range 5 {
+		toolCalls, fetchErr = a.fetchToolCalls(ctx, resolvedID)
+		if fetchErr == nil && len(toolCalls) > 0 {
+			break
+		}
+		if attempt < 4 {
+			time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+		}
+	}
+	if fetchErr != nil {
 		return doctor.TestResult{
 			Status: doctor.StatusFail,
-			Error:  err.Error(),
+			Error:  fetchErr.Error(),
 			Detail: "failed to fetch tool calls from session-api",
 		}
 	}
