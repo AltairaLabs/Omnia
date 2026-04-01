@@ -14,6 +14,8 @@ import (
 
 	"github.com/altairalabs/omnia/internal/doctor"
 	"github.com/altairalabs/omnia/internal/doctor/checks"
+	memoryhttpclient "github.com/altairalabs/omnia/internal/memory/httpclient"
+	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/altairalabs/omnia/pkg/logging"
 )
@@ -61,6 +63,9 @@ func main() {
 
 	agentFacadeURL := discoverServiceURL(*agentNamespace, *agentName, defaultAPIPort)
 
+	sessionStore := httpclient.NewStore(sessionAPIURL, log, httpclient.WithBufferCapacity(0))
+	defer sessionStore.Close() //nolint:errcheck
+
 	runner := doctor.NewRunner()
 
 	runner.Register(checks.InfrastructureChecks(map[string]string{
@@ -82,10 +87,11 @@ func main() {
 		AgentName:     *agentName,
 		Namespace:     *agentNamespace,
 		SessionAPIURL: sessionAPIURL,
+		SessionStore:  sessionStore,
 	})
 	runner.Register(agentChecker.Checks()...)
 
-	sessionChecker := checks.NewSessionChecker(sessionAPIURL, *agentNamespace, func() string {
+	sessionChecker := checks.NewSessionChecker(sessionAPIURL, *agentNamespace, sessionStore, func() string {
 		return agentChecker.LastSessionID
 	})
 	runner.Register(sessionChecker.Checks()...)
@@ -95,7 +101,8 @@ func main() {
 		workspaceUID = checks.ResolveWorkspaceUID(k8sClient, *agentNamespace, log)
 	}
 
-	memoryChecker := checks.NewMemoryChecker(memoryAPIURL, workspaceUID, agentChecker)
+	memoryStore := memoryhttpclient.NewStore(memoryAPIURL, log)
+	memoryChecker := checks.NewMemoryChecker(memoryAPIURL, memoryStore, workspaceUID, agentChecker)
 	runner.Register(memoryChecker.Checks()...)
 
 	if *runOnce {

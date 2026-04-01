@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/altairalabs/omnia/internal/doctor"
+	"github.com/altairalabs/omnia/internal/session"
 )
 
 const (
@@ -88,7 +89,7 @@ type messagesResponse struct {
 // --- TestSessionCheckerChecks ---
 
 func TestSessionCheckerChecks_ReturnsFour(t *testing.T) {
-	c := NewSessionChecker("http://localhost", testSessionNS, goodSessionID)
+	c := NewSessionChecker("http://localhost", testSessionNS, nil, goodSessionID)
 	checks := c.Checks()
 	require.Len(t, checks, 4)
 	assert.Equal(t, "SessionAPIDocsServed", checks[0].Name)
@@ -109,7 +110,7 @@ func TestSessionCheckDocs_Pass(t *testing.T) {
 	})
 	defer srv.Close()
 
-	c := NewSessionChecker(srv.URL, testSessionNS, goodSessionID)
+	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
 	result := c.checkDocs(context.Background())
 	assert.Equal(t, doctor.StatusPass, result.Status)
 }
@@ -121,7 +122,7 @@ func TestCheckDocs_Fail_NotFound(t *testing.T) {
 	})
 	defer srv.Close()
 
-	c := NewSessionChecker(srv.URL, testSessionNS, goodSessionID)
+	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
 	result := c.checkDocs(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 	assert.Contains(t, result.Detail, "404")
@@ -134,14 +135,14 @@ func TestCheckDocs_Fail_MissingText(t *testing.T) {
 	})
 	defer srv.Close()
 
-	c := NewSessionChecker(srv.URL, testSessionNS, goodSessionID)
+	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
 	result := c.checkDocs(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 	assert.Contains(t, result.Detail, "Session API")
 }
 
 func TestCheckDocs_Fail_ConnectionError(t *testing.T) {
-	c := NewSessionChecker("http://127.0.0.1:1", testSessionNS, goodSessionID)
+	c := NewSessionChecker("http://127.0.0.1:1", testSessionNS, nil, goodSessionID)
 	result := c.checkDocs(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 	assert.NotEmpty(t, result.Error)
@@ -160,7 +161,7 @@ func TestCheckSessionExists_Pass(t *testing.T) {
 	})
 	defer srv.Close()
 
-	c := NewSessionChecker(srv.URL, testSessionNS, goodSessionID)
+	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
 	result := c.checkSessionExists(context.Background())
 	assert.Equal(t, doctor.StatusPass, result.Status)
 	assert.Contains(t, result.Detail, "1")
@@ -174,7 +175,7 @@ func TestCheckSessionExists_Fail_EmptyList(t *testing.T) {
 	})
 	defer srv.Close()
 
-	c := NewSessionChecker(srv.URL, testSessionNS, goodSessionID)
+	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
 	result := c.checkSessionExists(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 	assert.Contains(t, result.Detail, "no sessions")
@@ -186,13 +187,13 @@ func TestCheckSessionExists_Fail_HTTPError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	c := NewSessionChecker(srv.URL, testSessionNS, goodSessionID)
+	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
 	result := c.checkSessionExists(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 }
 
 func TestCheckSessionExists_Fail_ConnectionError(t *testing.T) {
-	c := NewSessionChecker("http://127.0.0.1:1", testSessionNS, goodSessionID)
+	c := NewSessionChecker("http://127.0.0.1:1", testSessionNS, nil, goodSessionID)
 	result := c.checkSessionExists(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 }
@@ -206,7 +207,7 @@ func TestCheckSessionExists_Fail_BadJSON(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewSessionChecker(srv.URL, testSessionNS, goodSessionID)
+	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
 	result := c.checkSessionExists(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 }
@@ -226,14 +227,14 @@ func TestCheckMessages_Pass(t *testing.T) {
 	})
 	defer srv.Close()
 
-	c := NewSessionChecker(srv.URL, testSessionNS, goodSessionID)
+	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
 	result := c.checkMessages(context.Background())
 	assert.Equal(t, doctor.StatusPass, result.Status)
 	assert.Contains(t, result.Detail, "2")
 }
 
 func TestCheckMessages_Skip_NoSession(t *testing.T) {
-	c := NewSessionChecker("http://127.0.0.1:1", testSessionNS, emptySessionID)
+	c := NewSessionChecker("http://127.0.0.1:1", testSessionNS, nil, emptySessionID)
 	result := c.checkMessages(context.Background())
 	assert.Equal(t, doctor.StatusSkip, result.Status)
 	assert.Equal(t, msgNoSessionAvailable, result.Detail)
@@ -251,7 +252,7 @@ func TestCheckMessages_Fail_MissingUserRole(t *testing.T) {
 	})
 	defer srv.Close()
 
-	c := NewSessionChecker(srv.URL, testSessionNS, goodSessionID)
+	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
 	result := c.checkMessages(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 	assert.Contains(t, result.Detail, "hasUser=false")
@@ -269,7 +270,7 @@ func TestCheckMessages_Fail_MissingAssistantRole(t *testing.T) {
 	})
 	defer srv.Close()
 
-	c := NewSessionChecker(srv.URL, testSessionNS, goodSessionID)
+	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
 	result := c.checkMessages(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 	assert.Contains(t, result.Detail, "hasAssistant=false")
@@ -281,13 +282,13 @@ func TestCheckMessages_Fail_HTTPError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	c := NewSessionChecker(srv.URL, testSessionNS, goodSessionID)
+	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
 	result := c.checkMessages(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 }
 
 func TestCheckMessages_Fail_ConnectionError(t *testing.T) {
-	c := NewSessionChecker("http://127.0.0.1:1", testSessionNS, goodSessionID)
+	c := NewSessionChecker("http://127.0.0.1:1", testSessionNS, nil, goodSessionID)
 	result := c.checkMessages(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 }
@@ -301,7 +302,7 @@ func TestCheckMessages_Fail_BadJSON(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewSessionChecker(srv.URL, testSessionNS, goodSessionID)
+	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
 	result := c.checkMessages(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 }
@@ -309,88 +310,57 @@ func TestCheckMessages_Fail_BadJSON(t *testing.T) {
 // --- checkProviderCalls ---
 
 func TestCheckProviderCalls_Pass(t *testing.T) {
-	// provider-calls returns a bare JSON array
-	body := []map[string]interface{}{
-		{"inputTokens": 150, "outputTokens": 75},
+	store := &MockStore{
+		ProviderCalls: []session.ProviderCall{
+			{InputTokens: 150, OutputTokens: 75},
+		},
 	}
-	srv := defaultSessionAPIMux(t, sessionAPIMuxConfig{
-		providerStatus: http.StatusOK,
-		providerBody:   body,
-	})
-	defer srv.Close()
-
-	c := NewSessionChecker(srv.URL, testSessionNS, goodSessionID)
+	c := NewSessionChecker("http://localhost", testSessionNS, store, goodSessionID)
 	result := c.checkProviderCalls(context.Background())
 	assert.Equal(t, doctor.StatusPass, result.Status)
 	assert.Contains(t, result.Detail, "1 provider call")
 }
 
 func TestCheckProviderCalls_Skip_NoSession(t *testing.T) {
-	c := NewSessionChecker("http://127.0.0.1:1", testSessionNS, emptySessionID)
+	c := NewSessionChecker("http://127.0.0.1:1", testSessionNS, &MockStore{}, emptySessionID)
 	result := c.checkProviderCalls(context.Background())
 	assert.Equal(t, doctor.StatusSkip, result.Status)
 	assert.Equal(t, msgNoSessionAvailable, result.Detail)
 }
 
-func TestCheckProviderCalls_Fail_Empty(t *testing.T) {
-	body := []map[string]interface{}{}
-	srv := defaultSessionAPIMux(t, sessionAPIMuxConfig{
-		providerStatus: http.StatusOK,
-		providerBody:   body,
-	})
-	defer srv.Close()
+func TestCheckProviderCalls_Skip_NoStore(t *testing.T) {
+	c := NewSessionChecker("http://localhost", testSessionNS, nil, goodSessionID)
+	result := c.checkProviderCalls(context.Background())
+	assert.Equal(t, doctor.StatusSkip, result.Status)
+	assert.Contains(t, result.Detail, "no session store")
+}
 
-	c := NewSessionChecker(srv.URL, testSessionNS, goodSessionID)
+func TestCheckProviderCalls_Fail_Empty(t *testing.T) {
+	store := &MockStore{ProviderCalls: []session.ProviderCall{}}
+	c := NewSessionChecker("http://localhost", testSessionNS, store, goodSessionID)
 	result := c.checkProviderCalls(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 	assert.Contains(t, result.Detail, "no provider calls")
 }
 
 func TestCheckProviderCalls_Fail_ZeroTokens(t *testing.T) {
-	body := []map[string]interface{}{
-		{"inputTokens": 0, "outputTokens": 0},
+	store := &MockStore{
+		ProviderCalls: []session.ProviderCall{
+			{InputTokens: 0, OutputTokens: 0},
+		},
 	}
-	srv := defaultSessionAPIMux(t, sessionAPIMuxConfig{
-		providerStatus: http.StatusOK,
-		providerBody:   body,
-	})
-	defer srv.Close()
-
-	c := NewSessionChecker(srv.URL, testSessionNS, goodSessionID)
+	c := NewSessionChecker("http://localhost", testSessionNS, store, goodSessionID)
 	result := c.checkProviderCalls(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 	assert.Contains(t, result.Detail, "inputTokens > 0")
 }
 
-func TestCheckProviderCalls_Fail_HTTPError(t *testing.T) {
-	srv := defaultSessionAPIMux(t, sessionAPIMuxConfig{
-		providerStatus: http.StatusInternalServerError,
-	})
-	defer srv.Close()
-
-	c := NewSessionChecker(srv.URL, testSessionNS, goodSessionID)
+func TestCheckProviderCalls_Fail_StoreError(t *testing.T) {
+	store := &MockStore{ProviderCallsErr: assert.AnError}
+	c := NewSessionChecker("http://localhost", testSessionNS, store, goodSessionID)
 	result := c.checkProviderCalls(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
-}
-
-func TestCheckProviderCalls_Fail_ConnectionError(t *testing.T) {
-	c := NewSessionChecker("http://127.0.0.1:1", testSessionNS, goodSessionID)
-	result := c.checkProviderCalls(context.Background())
-	assert.Equal(t, doctor.StatusFail, result.Status)
-}
-
-func TestCheckProviderCalls_Fail_BadJSON(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/sessions/"+testSessionAPIID+"/provider-calls", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("not-json"))
-	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	c := NewSessionChecker(srv.URL, testSessionNS, goodSessionID)
-	result := c.checkProviderCalls(context.Background())
-	assert.Equal(t, doctor.StatusFail, result.Status)
+	assert.Contains(t, result.Detail, "get provider calls failed")
 }
 
 // --- classifyMessages unit test ---

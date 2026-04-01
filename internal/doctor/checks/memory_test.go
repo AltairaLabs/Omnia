@@ -7,10 +7,15 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
+
 	"github.com/altairalabs/omnia/internal/doctor"
+	memoryhttpclient "github.com/altairalabs/omnia/internal/memory/httpclient"
+	"github.com/altairalabs/omnia/internal/session"
 )
 
 const (
@@ -120,7 +125,8 @@ func defaultExportHandler(w http.ResponseWriter, _ *http.Request) {
 
 // newCheckerForMemoryServer creates a MemoryChecker pointing at the given server.
 func newCheckerForMemoryServer(srv *httptest.Server) *MemoryChecker {
-	return NewMemoryChecker(srv.URL, testWorkspace, nil)
+	store := memoryhttpclient.NewStore(srv.URL, logr.Discard())
+	return NewMemoryChecker(srv.URL, store, testWorkspace, nil)
 }
 
 // --- MemoryAPIDocsServed ---
@@ -200,7 +206,7 @@ func TestCheckSave_Fail_MissingID(t *testing.T) {
 }
 
 func TestCheckSave_SendsCorrectPayload(t *testing.T) {
-	var captured memorySaveRequest
+	var captured pkmemory.Memory
 	srv := (&mockMemoryServer{
 		saveHandler: func(w http.ResponseWriter, r *http.Request) {
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&captured))
@@ -214,7 +220,7 @@ func TestCheckSave_SendsCorrectPayload(t *testing.T) {
 	assert.Equal(t, memoryTestType, captured.Type)
 	assert.Equal(t, memoryTestValue, captured.Content)
 	assert.InDelta(t, 0.95, captured.Confidence, 0.001)
-	assert.Equal(t, testWorkspace, captured.Scope.WorkspaceID)
+	assert.Equal(t, testWorkspace, captured.Scope["workspace_id"])
 }
 
 // --- MemoryRetrieve ---
@@ -364,7 +370,7 @@ func TestCheckExport_Fail_ServerError(t *testing.T) {
 // --- Checks() registration ---
 
 func TestChecks_NoAgentChecker_ReturnsRestOnly(t *testing.T) {
-	c := NewMemoryChecker("http://localhost:8080", "ws1", nil)
+	c := NewMemoryChecker("http://localhost:8080", nil, "ws1", nil)
 	checks := c.Checks()
 	require.Len(t, checks, 6)
 	names := make([]string, len(checks))
@@ -383,7 +389,7 @@ func TestChecks_NoAgentChecker_ReturnsRestOnly(t *testing.T) {
 
 func TestChecks_WithAgentChecker_ReturnsAllChecks(t *testing.T) {
 	agentChecker := NewAgentChecker(AgentConfig{})
-	c := NewMemoryChecker("http://localhost:8080", "ws1", agentChecker)
+	c := NewMemoryChecker("http://localhost:8080", nil, "ws1", agentChecker)
 	checks := c.Checks()
 	require.Len(t, checks, 8)
 	assert.Equal(t, "MemoryToolsAvailable", checks[6].Name)
@@ -411,7 +417,8 @@ func TestCheckMemoryToolsAvailable_Pass(t *testing.T) {
 	defer memorySrv.Close()
 
 	agentChecker := newCheckerForServer(facadeSrv)
-	c := NewMemoryChecker(memorySrv.URL, testWorkspace, agentChecker)
+	memStore := memoryhttpclient.NewStore(memorySrv.URL, logr.Discard())
+	c := NewMemoryChecker(memorySrv.URL, memStore, testWorkspace, agentChecker)
 	result := c.checkMemoryToolsAvailable(t.Context())
 	assert.Equal(t, doctor.StatusPass, result.Status)
 }
@@ -434,7 +441,8 @@ func TestCheckMemoryToolsAvailable_Fail_NotPersisted(t *testing.T) {
 	defer memorySrv.Close()
 
 	agentChecker := newCheckerForServer(facadeSrv)
-	c := NewMemoryChecker(memorySrv.URL, testWorkspace, agentChecker)
+	memStore := memoryhttpclient.NewStore(memorySrv.URL, logr.Discard())
+	c := NewMemoryChecker(memorySrv.URL, memStore, testWorkspace, agentChecker)
 	result := c.checkMemoryToolsAvailable(t.Context())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 	assert.Contains(t, result.Detail, "did not persist")
@@ -448,13 +456,6 @@ func TestCheckMemoryToolsAvailable_Fail_ToolCallError(t *testing.T) {
 	})
 	defer facadeSrv.Close()
 
-	// Session-api returns a failed tool call with errorMessage.
-	sessionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"name":"memory__remember","status":"error","errorMessage":"validation error: metadata: Invalid type"}]`))
-	}))
-	defer sessionSrv.Close()
-
 	// Memory-api returns no results (remember failed).
 	memorySrv := (&mockMemoryServer{
 		searchHandler: func(w http.ResponseWriter, _ *http.Request) {
@@ -465,8 +466,13 @@ func TestCheckMemoryToolsAvailable_Fail_ToolCallError(t *testing.T) {
 	defer memorySrv.Close()
 
 	agentChecker := newCheckerForServer(facadeSrv)
-	agentChecker.config.SessionAPIURL = sessionSrv.URL
-	c := NewMemoryChecker(memorySrv.URL, testWorkspace, agentChecker)
+	agentChecker.config.SessionStore = &MockStore{
+		ToolCalls: []session.ToolCall{
+			{Name: "memory__remember", Status: session.ToolCallStatusError, ErrorMessage: "validation error: metadata: Invalid type"},
+		},
+	}
+	memStore := memoryhttpclient.NewStore(memorySrv.URL, logr.Discard())
+	c := NewMemoryChecker(memorySrv.URL, memStore, testWorkspace, agentChecker)
 	result := c.checkMemoryToolsAvailable(t.Context())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 	assert.Contains(t, result.Detail, "validation error")
@@ -480,13 +486,6 @@ func TestCheckMemoryToolsAvailable_Fail_ToolCallErrorFallbackResult(t *testing.T
 	})
 	defer facadeSrv.Close()
 
-	// Session-api returns error with result field but no errorMessage.
-	sessionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"name":"memory__remember","status":"error","result":"Tool execution failed: some error"}]`))
-	}))
-	defer sessionSrv.Close()
-
 	memorySrv := (&mockMemoryServer{
 		searchHandler: func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -496,8 +495,13 @@ func TestCheckMemoryToolsAvailable_Fail_ToolCallErrorFallbackResult(t *testing.T
 	defer memorySrv.Close()
 
 	agentChecker := newCheckerForServer(facadeSrv)
-	agentChecker.config.SessionAPIURL = sessionSrv.URL
-	c := NewMemoryChecker(memorySrv.URL, testWorkspace, agentChecker)
+	agentChecker.config.SessionStore = &MockStore{
+		ToolCalls: []session.ToolCall{
+			{Name: "memory__remember", Status: session.ToolCallStatusError, Result: "Tool execution failed: some error"},
+		},
+	}
+	memStore := memoryhttpclient.NewStore(memorySrv.URL, logr.Discard())
+	c := NewMemoryChecker(memorySrv.URL, memStore, testWorkspace, agentChecker)
 	result := c.checkMemoryToolsAvailable(t.Context())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 	assert.Contains(t, result.Detail, "Tool execution failed")
@@ -505,14 +509,15 @@ func TestCheckMemoryToolsAvailable_Fail_ToolCallErrorFallbackResult(t *testing.T
 
 func TestCheckMemoryToolsAvailable_Fail_ConnectionError(t *testing.T) {
 	agentChecker := NewAgentChecker(AgentConfig{FacadeURL: "http://127.0.0.1:1", AgentName: "x", Namespace: "y"})
-	c := NewMemoryChecker("http://localhost:9999", testWorkspace, agentChecker)
+	memStore := memoryhttpclient.NewStore("http://localhost:9999", logr.Discard())
+	c := NewMemoryChecker("http://localhost:9999", memStore, testWorkspace, agentChecker)
 	result := c.checkMemoryToolsAvailable(t.Context())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 }
 
 func TestCheckMemoryToolsAvailable_Skip_NoWorkspace(t *testing.T) {
 	agentChecker := NewAgentChecker(AgentConfig{})
-	c := NewMemoryChecker("http://localhost:8080", "", agentChecker)
+	c := NewMemoryChecker("http://localhost:8080", nil, "", agentChecker)
 	result := c.checkMemoryToolsAvailable(t.Context())
 	assert.Equal(t, doctor.StatusSkip, result.Status)
 }
@@ -527,7 +532,7 @@ func TestCheckMemoryRecall_Pass(t *testing.T) {
 	defer srv.Close()
 
 	agentChecker := newCheckerForServer(srv)
-	c := NewMemoryChecker("", testWorkspace, agentChecker)
+	c := NewMemoryChecker("", nil, testWorkspace, agentChecker)
 	result := c.checkMemoryRecall(t.Context())
 	assert.Equal(t, doctor.StatusPass, result.Status)
 }
@@ -541,7 +546,7 @@ func TestCheckMemoryRecall_Fail_ValueNotInResponse(t *testing.T) {
 	defer srv.Close()
 
 	agentChecker := newCheckerForServer(srv)
-	c := NewMemoryChecker("", testWorkspace, agentChecker)
+	c := NewMemoryChecker("", nil, testWorkspace, agentChecker)
 	result := c.checkMemoryRecall(t.Context())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 	assert.Contains(t, result.Detail, "smoke-42")
@@ -549,7 +554,7 @@ func TestCheckMemoryRecall_Fail_ValueNotInResponse(t *testing.T) {
 
 func TestCheckMemoryRecall_Fail_ConnectionError(t *testing.T) {
 	agentChecker := NewAgentChecker(AgentConfig{FacadeURL: "http://127.0.0.1:1", AgentName: "x", Namespace: "y"})
-	c := NewMemoryChecker("", testWorkspace, agentChecker)
+	c := NewMemoryChecker("", nil, testWorkspace, agentChecker)
 	result := c.checkMemoryRecall(t.Context())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 }

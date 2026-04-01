@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/altairalabs/omnia/internal/doctor"
+	"github.com/altairalabs/omnia/internal/session"
 )
 
 // testSessionID is the session ID returned by the mock facade.
@@ -80,6 +81,59 @@ func newCheckerForServer(srv *httptest.Server) *AgentChecker {
 		Namespace: "test-ns",
 	})
 }
+
+// MockStore is a minimal session.Store mock for doctor check tests.
+// Only GetToolCalls and GetProviderCalls are used; other methods panic.
+type MockStore struct {
+	ToolCalls        []session.ToolCall
+	ToolCallsErr     error
+	ProviderCalls    []session.ProviderCall
+	ProviderCallsErr error
+}
+
+func (m *MockStore) CreateSession(_ context.Context, _ session.CreateSessionOptions) (*session.Session, error) {
+	panic("not used")
+}
+func (m *MockStore) GetSession(_ context.Context, _ string) (*session.Session, error) {
+	panic("not used")
+}
+func (m *MockStore) DeleteSession(_ context.Context, _ string) error { panic("not used") }
+func (m *MockStore) AppendMessage(_ context.Context, _ string, _ session.Message) error {
+	panic("not used")
+}
+func (m *MockStore) GetMessages(_ context.Context, _ string) ([]session.Message, error) {
+	panic("not used")
+}
+func (m *MockStore) RefreshTTL(_ context.Context, _ string, _ time.Duration) error {
+	panic("not used")
+}
+func (m *MockStore) UpdateSessionStatus(_ context.Context, _ string, _ session.SessionStatusUpdate) error {
+	panic("not used")
+}
+func (m *MockStore) RecordToolCall(_ context.Context, _ string, _ session.ToolCall) error {
+	panic("not used")
+}
+func (m *MockStore) RecordProviderCall(_ context.Context, _ string, _ session.ProviderCall) error {
+	panic("not used")
+}
+func (m *MockStore) GetToolCalls(_ context.Context, _ string, _, _ int) ([]session.ToolCall, error) {
+	return m.ToolCalls, m.ToolCallsErr
+}
+func (m *MockStore) GetProviderCalls(_ context.Context, _ string, _, _ int) ([]session.ProviderCall, error) {
+	return m.ProviderCalls, m.ProviderCallsErr
+}
+func (m *MockStore) RecordEvalResult(_ context.Context, _ string, _ session.EvalResult) error {
+	panic("not used")
+}
+func (m *MockStore) RecordRuntimeEvent(_ context.Context, _ string, _ session.RuntimeEvent) error {
+	panic("not used")
+}
+func (m *MockStore) GetRuntimeEvents(_ context.Context, _ string, _, _ int) ([]session.RuntimeEvent, error) {
+	panic("not used")
+}
+func (m *MockStore) Close() error { return nil }
+
+var _ session.Store = (*MockStore)(nil)
 
 // --- Tests for facadeURL ---
 
@@ -179,15 +233,13 @@ func TestCheckToolCalling_Pass(t *testing.T) {
 	})
 	defer facadeSrv.Close()
 
-	// Mock session-api returns tool calls for the session.
-	sessionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"name":"search_places","status":"success"},{"name":"get_weather","status":"success"}]`))
-	}))
-	defer sessionSrv.Close()
-
 	c := newCheckerForServer(facadeSrv)
-	c.config.SessionAPIURL = sessionSrv.URL
+	c.config.SessionStore = &MockStore{
+		ToolCalls: []session.ToolCall{
+			{Name: "search_places", Status: session.ToolCallStatusSuccess},
+			{Name: "get_weather", Status: session.ToolCallStatusSuccess},
+		},
+	}
 	result := c.checkToolCalling(context.Background())
 	assert.Equal(t, doctor.StatusPass, result.Status)
 	assert.Contains(t, result.Detail, "search_places")
@@ -201,20 +253,14 @@ func TestCheckToolCalling_Fail_NoToolCalls(t *testing.T) {
 	})
 	defer facadeSrv.Close()
 
-	sessionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[]`))
-	}))
-	defer sessionSrv.Close()
-
 	c := newCheckerForServer(facadeSrv)
-	c.config.SessionAPIURL = sessionSrv.URL
+	c.config.SessionStore = &MockStore{ToolCalls: []session.ToolCall{}}
 	result := c.checkToolCalling(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 	assert.Contains(t, result.Detail, "no tool calls")
 }
 
-func TestCheckToolCalling_Skip_NoSessionAPI(t *testing.T) {
+func TestCheckToolCalling_Skip_NoStore(t *testing.T) {
 	facadeSrv := serveMockFacade(t, mockFacadeHandler{
 		responses: []wsServerMessage{
 			{Type: wsMessageTypeDone, Content: "Done."},
@@ -223,7 +269,7 @@ func TestCheckToolCalling_Skip_NoSessionAPI(t *testing.T) {
 	defer facadeSrv.Close()
 
 	c := newCheckerForServer(facadeSrv)
-	// No SessionAPIURL set
+	// No SessionStore set
 	result := c.checkToolCalling(context.Background())
 	assert.Equal(t, doctor.StatusSkip, result.Status)
 }
@@ -242,47 +288,30 @@ func TestCheckToolCalling_Fail_ToolCallErrors(t *testing.T) {
 	})
 	defer facadeSrv.Close()
 
-	sessionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "tool-calls") {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`[{"name":"get_weather","status":"error","errorMessage":"validation failed: latitude invalid"}]`))
-		} else {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"sessions":[{"id":"test-session-1"}]}`))
-		}
-	}))
-	defer sessionSrv.Close()
-
 	c := newCheckerForServer(facadeSrv)
-	c.config.SessionAPIURL = sessionSrv.URL
-	c.config.Namespace = "test"
+	c.config.SessionStore = &MockStore{
+		ToolCalls: []session.ToolCall{
+			{Name: "get_weather", Status: session.ToolCallStatusError, ErrorMessage: "validation failed: latitude invalid"},
+		},
+	}
 	result := c.checkToolCalling(context.Background())
 	assert.Equal(t, doctor.StatusFail, result.Status)
 	assert.Contains(t, result.Detail, "validation failed")
 }
 
-func TestFetchToolCalls_HTTPError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer srv.Close()
+func TestCheckToolCalling_Fail_StoreError(t *testing.T) {
+	facadeSrv := serveMockFacade(t, mockFacadeHandler{
+		responses: []wsServerMessage{
+			{Type: wsMessageTypeDone, Content: "Done."},
+		},
+	})
+	defer facadeSrv.Close()
 
-	c := NewAgentChecker(AgentConfig{SessionAPIURL: srv.URL})
-	calls, err := c.fetchToolCalls(context.Background(), "test-id")
-	assert.Error(t, err)
-	assert.Nil(t, calls)
-}
-
-func TestFetchToolCalls_404ReturnsNil(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	c := NewAgentChecker(AgentConfig{SessionAPIURL: srv.URL})
-	calls, err := c.fetchToolCalls(context.Background(), "test-id")
-	assert.NoError(t, err)
-	assert.Nil(t, calls)
+	c := newCheckerForServer(facadeSrv)
+	c.config.SessionStore = &MockStore{ToolCallsErr: assert.AnError}
+	result := c.checkToolCalling(context.Background())
+	assert.Equal(t, doctor.StatusFail, result.Status)
+	assert.Contains(t, result.Detail, "failed to fetch tool calls")
 }
 
 func TestResolveLatestSession_Pass(t *testing.T) {
@@ -319,6 +348,13 @@ func TestAssembleText(t *testing.T) {
 		{Type: wsMessageTypeDone, Content: "baz"},
 	}
 	assert.Equal(t, "foobarbaz", assembleText(msgs))
+}
+
+func TestToolCallResultString(t *testing.T) {
+	assert.Equal(t, "", toolCallResultString(nil))
+	assert.Equal(t, "hello", toolCallResultString("hello"))
+	assert.Equal(t, `{"key":"val"}`, toolCallResultString(map[string]string{"key": "val"}))
+	assert.Equal(t, "42", toolCallResultString(42))
 }
 
 func TestTruncate(t *testing.T) {
