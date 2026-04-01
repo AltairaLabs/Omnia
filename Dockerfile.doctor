@@ -7,11 +7,8 @@ WORKDIR /workspace
 # Copy the Go Modules manifests
 COPY go.mod go.mod
 COPY go.sum go.sum
-# NOTE: Skipping go mod download due to local replace directives for PromptKit
-# which aren't available in the Docker build context. Dependencies will be
-# downloaded during the build step instead.
-# TODO: Re-enable once PromptKit is published to a module proxy
-# RUN go mod download
+ENV GOWORK=off
+RUN go mod download
 
 # Copy the Go source (relies on .dockerignore to filter)
 COPY . .

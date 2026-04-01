@@ -261,8 +261,9 @@ docker_build(
     context='.',
     dockerfile='./Dockerfile.doctor',
     only=[
+        './Dockerfile.doctor',
         './cmd/doctor',
-        './internal/doctor',
+        './internal',
         './api',
         './pkg',
         './go.mod',
