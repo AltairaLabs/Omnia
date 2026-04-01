@@ -123,10 +123,8 @@ func readConnected(conn *websocket.Conn) (string, error) {
 
 // sendMessage marshals and writes a chat message to the WebSocket.
 func sendMessage(conn *websocket.Conn, content string) error {
-	data, err := json.Marshal(wsClientMessage{Type: wsMessageTypeMessage, Content: content})
-	if err != nil {
-		return err
-	}
+	// json.Marshal of wsClientMessage (two string fields) cannot fail.
+	data, _ := json.Marshal(wsClientMessage{Type: wsMessageTypeMessage, Content: content})
 	return conn.WriteMessage(websocket.TextMessage, data)
 }
 
