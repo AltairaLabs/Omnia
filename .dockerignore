@@ -13,6 +13,9 @@
 # Re-include embedded schema files for go:embed
 !internal/schema/*.json
 
+# Re-include doctor HTML templates for go:embed
+!internal/doctor/templates/*.html
+
 # Re-include SQL migration files for go:embed (session-api)
 !internal/session/postgres/migrations/*.sql
 

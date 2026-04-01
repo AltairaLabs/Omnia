@@ -897,6 +897,34 @@ memoryApi:
     enabled: false
 
 # ============================================================================
+# Doctor Configuration
+# Cluster diagnostic service for Omnia health checks
+# ============================================================================
+
+doctor:
+  # -- Enable the doctor diagnostic server deployment
+  enabled: false
+  image:
+    # -- Doctor image repository
+    repository: ghcr.io/altairalabs/omnia-doctor
+    # -- Doctor image tag (defaults to Chart.AppVersion)
+    tag: ""
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+  service:
+    # -- Service type
+    type: ClusterIP
+    # -- Service port
+    port: 8080
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# ============================================================================
 # Session Privacy Configuration
 # Privacy policies for session data: PII handling, encryption, opt-out
 # ============================================================================

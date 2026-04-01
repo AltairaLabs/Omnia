@@ -95,7 +95,8 @@ type Server struct {
 	sessionStore session.Store
 
 	// Memory store for cross-session memory (via memory-api HTTP client)
-	memoryStore pkmemory.Store
+	memoryStore  pkmemory.Store
+	workspaceUID string // Workspace CRD UID for memory scope
 
 	// Media resolution for mock provider
 	mediaResolver *MediaResolver
@@ -260,6 +261,13 @@ func WithSessionStore(store session.Store) ServerOption {
 func WithMemoryStore(store pkmemory.Store) ServerOption {
 	return func(s *Server) {
 		s.memoryStore = store
+	}
+}
+
+// WithWorkspaceUID sets the workspace UID for memory scope.
+func WithWorkspaceUID(uid string) ServerOption {
+	return func(s *Server) {
+		s.workspaceUID = uid
 	}
 }
 

@@ -824,8 +824,17 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 		})
 	}
 
-	// Memory configuration: runtime reads the CRD directly via config_crd.go
-	// and derives the memory-api URL from the session-api URL. No env vars needed.
+	// Memory: inject workspace UID so the runtime can scope memory operations.
+	// The memory_entities table uses workspace_id as UUID (the Workspace CR's UID).
+	if agentRuntime.Spec.Memory != nil && agentRuntime.Spec.Memory.Enabled {
+		wsUID := r.resolveWorkspaceUIDForNamespace(agentRuntime.Namespace)
+		if wsUID != "" {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "OMNIA_WORKSPACE_UID",
+				Value: wsUID,
+			})
+		}
+	}
 
 	// Check for mock provider annotation (for E2E testing)
 	if mockProvider, ok := agentRuntime.Annotations[MockProviderAnnotation]; ok && mockProvider == "true" {
@@ -863,6 +872,24 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 }
 
 // defaultImageForFramework returns the default container image for a framework type.
+// resolveWorkspaceUIDForNamespace finds the Workspace CRD whose spec.namespace.name
+// matches the given namespace and returns its UID.
+func (r *AgentRuntimeReconciler) resolveWorkspaceUIDForNamespace(namespace string) string {
+	if r.Client == nil {
+		return ""
+	}
+	var list omniav1alpha1.WorkspaceList
+	if err := r.List(context.Background(), &list); err != nil {
+		return ""
+	}
+	for _, ws := range list.Items {
+		if ws.Spec.Namespace.Name == namespace {
+			return string(ws.UID)
+		}
+	}
+	return ""
+}
+
 func defaultImageForFramework(framework *omniav1alpha1.FrameworkConfig) string {
 	if framework == nil {
 		return DefaultFrameworkImage

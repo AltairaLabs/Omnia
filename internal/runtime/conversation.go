@@ -165,13 +165,15 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 	}
 
 	// Wire memory store for cross-session memory (via memory-api HTTP).
-	if s.memoryStore != nil {
+	if s.memoryStore != nil && s.workspaceUID != "" {
 		scope := map[string]string{
-			"workspace_id": s.namespace,
-			"agent_id":     s.agentName,
+			"workspace_id": s.workspaceUID,
 		}
 		opts = append(opts, sdk.WithMemory(s.memoryStore, scope))
-		log.V(1).Info("memory store wired")
+		log.V(1).Info("memory store wired",
+			"session_id", sessionID,
+			"trace_id", sessionID,
+		)
 	}
 
 	// Wire tracing provider into SDK for span propagation

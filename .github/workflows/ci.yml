@@ -457,7 +457,7 @@ jobs:
 
     - name: Install envtest
       run: |
-        go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+        go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.23
         setup-envtest use --bin-dir ${{ github.workspace }}/bin/k8s
 
     - name: Run internal package tests

@@ -77,6 +77,7 @@ type Config struct {
 	// Memory configuration
 	MemoryEnabled bool   // Enable cross-session memory
 	MemoryAPIURL  string // URL of memory-api service for memory store
+	WorkspaceUID  string // Kubernetes UID of the Workspace CRD (used as workspace_id scope for memory)
 
 	// Eval configuration
 	EvalEnabled bool // Enable real-time evals for PromptKit agents
@@ -104,6 +105,7 @@ const (
 	envSessionAPIURL     = "SESSION_API_URL"
 	envMemoryEnabled     = "OMNIA_MEMORY_ENABLED"
 	envMemoryAPIURL      = "OMNIA_MEMORY_API_URL"
+	envWorkspaceUID      = "OMNIA_WORKSPACE_UID"
 	envTracingEnabled    = "OMNIA_TRACING_ENABLED"
 	envTracingEndpoint   = "OMNIA_TRACING_ENDPOINT"
 	envTracingSampleRate = "OMNIA_TRACING_SAMPLE_RATE"

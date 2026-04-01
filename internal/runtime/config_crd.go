@@ -110,14 +110,19 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	if ar.Spec.Memory != nil && ar.Spec.Memory.Enabled {
 		cfg.MemoryEnabled = true
 		// Memory API URL follows the same service naming convention as session-api.
-		// If session-api is at http://omnia-session-api.omnia-system:8080,
-		// memory-api is at http://omnia-memory-api.omnia-system:8080.
 		if cfg.SessionAPIURL != "" {
 			cfg.MemoryAPIURL = strings.Replace(cfg.SessionAPIURL, "session-api", "memory-api", 1)
 		}
 		// Allow explicit override via env var.
 		if url := os.Getenv(envMemoryAPIURL); url != "" {
 			cfg.MemoryAPIURL = url
+		}
+		// Workspace UID for memory scope (memory_entities.workspace_id is UUID).
+		// Prefer env var (injected by operator) over K8s API lookup.
+		if uid := os.Getenv(envWorkspaceUID); uid != "" {
+			cfg.WorkspaceUID = uid
+		} else {
+			cfg.WorkspaceUID = resolveWorkspaceUID(ctx, c, namespace)
 		}
 	}
 
@@ -133,6 +138,22 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	}
 
 	return cfg, nil
+}
+
+// resolveWorkspaceUID finds the Workspace CRD whose spec.namespace.name matches
+// the given namespace and returns its Kubernetes UID. The memory_entities table
+// uses workspace_id as UUID, which corresponds to the Workspace CR's UID.
+func resolveWorkspaceUID(ctx context.Context, c client.Client, namespace string) string {
+	var list v1alpha1.WorkspaceList
+	if err := c.List(ctx, &list); err != nil {
+		return ""
+	}
+	for _, ws := range list.Items {
+		if ws.Spec.Namespace.Name == namespace {
+			return string(ws.UID)
+		}
+	}
+	return ""
 }
 
 // loadRuntimeSessionFromCRD populates session config from the AgentRuntime CRD.
