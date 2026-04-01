@@ -211,6 +211,11 @@ func TestServerOptions(t *testing.T) {
 		assert.Nil(t, srv.memoryStore)
 	})
 
+	t.Run("WithWorkspaceUID", func(t *testing.T) {
+		srv := NewServer(WithWorkspaceUID("test-uid-123"))
+		assert.Equal(t, "test-uid-123", srv.workspaceUID)
+	})
+
 	t.Run("AllOptionsCombined", func(t *testing.T) {
 		server := NewServer(
 			WithLogger(logr.Discard()),
