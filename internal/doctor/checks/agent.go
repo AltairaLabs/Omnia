@@ -264,17 +264,28 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 	}
 
 	// Verify tool calls via session-api (server-side tools aren't in WS stream).
-	if a.config.SessionAPIURL == "" || sessionID == "" {
+	if a.config.SessionAPIURL == "" {
 		return doctor.TestResult{
 			Status: doctor.StatusSkip,
-			Detail: "no session-api URL or session ID available",
+			Detail: "no session-api URL available",
 		}
 	}
 
-	// Brief pause for async tool-call writes to flush to session-api.
-	time.Sleep(2 * time.Second)
+	// The WS session may not be flushed to session-api yet. Query the most
+	// recent session for this namespace to find tool calls.
+	time.Sleep(3 * time.Second)
+	resolvedID := a.resolveLatestSession(ctx)
+	if resolvedID == "" {
+		resolvedID = sessionID
+	}
+	if resolvedID == "" {
+		return doctor.TestResult{
+			Status: doctor.StatusFail,
+			Detail: "no session ID available to check tool calls",
+		}
+	}
 
-	toolCalls, err := a.fetchToolCalls(ctx, sessionID)
+	toolCalls, err := a.fetchToolCalls(ctx, resolvedID)
 	if err != nil {
 		return doctor.TestResult{
 			Status: doctor.StatusFail,
@@ -314,6 +325,33 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 		Status: doctor.StatusPass,
 		Detail: fmt.Sprintf("tool calls recorded: %v", names),
 	}
+}
+
+// resolveLatestSession queries session-api for the most recent session in the agent's namespace.
+func (a *AgentChecker) resolveLatestSession(ctx context.Context) string {
+	url := fmt.Sprintf("%s/api/v1/sessions?namespace=%s&limit=1", a.config.SessionAPIURL, a.config.Namespace)
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return ""
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var result struct {
+		Sessions []struct {
+			ID string `json:"id"`
+		} `json:"sessions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || len(result.Sessions) == 0 {
+		return ""
+	}
+	return result.Sessions[0].ID
 }
 
 // toolCallRecord is the shape returned by session-api /tool-calls endpoint.
