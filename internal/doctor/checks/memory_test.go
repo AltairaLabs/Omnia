@@ -472,6 +472,37 @@ func TestCheckMemoryToolsAvailable_Fail_ToolCallError(t *testing.T) {
 	assert.Contains(t, result.Detail, "validation error")
 }
 
+func TestCheckMemoryToolsAvailable_Fail_ToolCallErrorFallbackResult(t *testing.T) {
+	facadeSrv := serveMockFacade(t, mockFacadeHandler{
+		responses: []wsServerMessage{
+			{Type: wsMessageTypeDone, Content: "OK."},
+		},
+	})
+	defer facadeSrv.Close()
+
+	// Session-api returns error with result field but no errorMessage.
+	sessionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"name":"memory__remember","status":"error","result":"Tool execution failed: some error"}]`))
+	}))
+	defer sessionSrv.Close()
+
+	memorySrv := (&mockMemoryServer{
+		searchHandler: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"memories":[],"total":0}`))
+		},
+	}).serve(t)
+	defer memorySrv.Close()
+
+	agentChecker := newCheckerForServer(facadeSrv)
+	agentChecker.config.SessionAPIURL = sessionSrv.URL
+	c := NewMemoryChecker(memorySrv.URL, testWorkspace, agentChecker)
+	result := c.checkMemoryToolsAvailable(t.Context())
+	assert.Equal(t, doctor.StatusFail, result.Status)
+	assert.Contains(t, result.Detail, "Tool execution failed")
+}
+
 func TestCheckMemoryToolsAvailable_Fail_ConnectionError(t *testing.T) {
 	agentChecker := NewAgentChecker(AgentConfig{FacadeURL: "http://127.0.0.1:1", AgentName: "x", Namespace: "y"})
 	c := NewMemoryChecker("http://localhost:9999", testWorkspace, agentChecker)
