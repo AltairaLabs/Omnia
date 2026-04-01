@@ -247,7 +247,7 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 	}
 	defer closeConn(conn)
 
-	if err := sendMessage(conn, "What is the weather in London right now?"); err != nil {
+	if err := sendMessage(conn, "What is the weather at latitude 51.5, longitude -0.12 right now?"); err != nil {
 		return doctor.TestResult{
 			Status: doctor.StatusFail,
 			Error:  err.Error(),
