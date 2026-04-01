@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/altairalabs/omnia/internal/doctor"
+	"github.com/altairalabs/omnia/internal/session"
 )
 
 const (
@@ -448,13 +449,6 @@ func TestCheckMemoryToolsAvailable_Fail_ToolCallError(t *testing.T) {
 	})
 	defer facadeSrv.Close()
 
-	// Session-api returns a failed tool call with errorMessage.
-	sessionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"name":"memory__remember","status":"error","errorMessage":"validation error: metadata: Invalid type"}]`))
-	}))
-	defer sessionSrv.Close()
-
 	// Memory-api returns no results (remember failed).
 	memorySrv := (&mockMemoryServer{
 		searchHandler: func(w http.ResponseWriter, _ *http.Request) {
@@ -465,7 +459,11 @@ func TestCheckMemoryToolsAvailable_Fail_ToolCallError(t *testing.T) {
 	defer memorySrv.Close()
 
 	agentChecker := newCheckerForServer(facadeSrv)
-	agentChecker.config.SessionAPIURL = sessionSrv.URL
+	agentChecker.config.SessionStore = &MockStore{
+		ToolCalls: []session.ToolCall{
+			{Name: "memory__remember", Status: session.ToolCallStatusError, ErrorMessage: "validation error: metadata: Invalid type"},
+		},
+	}
 	c := NewMemoryChecker(memorySrv.URL, testWorkspace, agentChecker)
 	result := c.checkMemoryToolsAvailable(t.Context())
 	assert.Equal(t, doctor.StatusFail, result.Status)
@@ -480,13 +478,6 @@ func TestCheckMemoryToolsAvailable_Fail_ToolCallErrorFallbackResult(t *testing.T
 	})
 	defer facadeSrv.Close()
 
-	// Session-api returns error with result field but no errorMessage.
-	sessionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"name":"memory__remember","status":"error","result":"Tool execution failed: some error"}]`))
-	}))
-	defer sessionSrv.Close()
-
 	memorySrv := (&mockMemoryServer{
 		searchHandler: func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -496,7 +487,11 @@ func TestCheckMemoryToolsAvailable_Fail_ToolCallErrorFallbackResult(t *testing.T
 	defer memorySrv.Close()
 
 	agentChecker := newCheckerForServer(facadeSrv)
-	agentChecker.config.SessionAPIURL = sessionSrv.URL
+	agentChecker.config.SessionStore = &MockStore{
+		ToolCalls: []session.ToolCall{
+			{Name: "memory__remember", Status: session.ToolCallStatusError, Result: "Tool execution failed: some error"},
+		},
+	}
 	c := NewMemoryChecker(memorySrv.URL, testWorkspace, agentChecker)
 	result := c.checkMemoryToolsAvailable(t.Context())
 	assert.Equal(t, doctor.StatusFail, result.Status)

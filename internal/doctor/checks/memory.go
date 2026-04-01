@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/altairalabs/omnia/internal/doctor"
+	"github.com/altairalabs/omnia/internal/session"
 )
 
 const (
@@ -313,9 +314,8 @@ func (m *MemoryChecker) checkMemoryToolsAvailable(ctx context.Context) doctor.Te
 		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "receive failed"}
 	}
 
-	// Check session-api for tool call errors first.
-	if m.agentChecker.config.SessionAPIURL != "" && sessionID != "" {
-		time.Sleep(2 * time.Second)
+	// Check session store for tool call errors first.
+	if m.agentChecker.config.SessionStore != nil && sessionID != "" {
 		if errDetail := m.checkToolCallErrors(ctx, sessionID, "memory__remember"); errDetail != "" {
 			return doctor.TestResult{Status: doctor.StatusFail, Detail: errDetail}
 		}
@@ -345,18 +345,22 @@ func (m *MemoryChecker) checkMemoryToolsAvailable(ctx context.Context) doctor.Te
 	}
 }
 
-// checkToolCallErrors queries session-api for tool calls and returns an error detail
+// checkToolCallErrors queries the session store for tool calls and returns an error detail
 // string if any call matching toolName has status "error". Returns "" if no errors.
 func (m *MemoryChecker) checkToolCallErrors(ctx context.Context, sessionID, toolName string) string {
-	toolCalls, err := m.agentChecker.fetchToolCalls(ctx, sessionID)
+	store := m.agentChecker.config.SessionStore
+	if store == nil {
+		return ""
+	}
+	toolCalls, err := store.GetToolCalls(ctx, sessionID, 0, 0)
 	if err != nil || len(toolCalls) == 0 {
 		return ""
 	}
 	for _, tc := range toolCalls {
-		if tc.Name == toolName && tc.Status == "error" {
+		if tc.Name == toolName && tc.Status == session.ToolCallStatusError {
 			errMsg := tc.ErrorMessage
 			if errMsg == "" {
-				errMsg = tc.Result
+				errMsg = toolCallResultString(tc.Result)
 			}
 			return fmt.Sprintf("%s tool call failed: %s", toolName, truncate(errMsg, 150))
 		}

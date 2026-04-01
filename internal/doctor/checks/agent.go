@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/altairalabs/omnia/internal/doctor"
+	"github.com/altairalabs/omnia/internal/session"
 )
 
 const (
@@ -34,7 +35,8 @@ type AgentConfig struct {
 	FacadeURL     string // e.g., http://tools-demo.omnia-demo.svc.cluster.local:8080
 	AgentName     string
 	Namespace     string
-	SessionAPIURL string // session-api URL for verifying tool calls after chat
+	SessionAPIURL string        // session-api URL for resolving latest session (list endpoint)
+	SessionStore  session.Store // session store for tool-call and provider-call queries
 }
 
 // AgentChecker runs WebSocket-based agent checks.
@@ -261,17 +263,15 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 		}
 	}
 
-	// Verify tool calls via session-api (server-side tools aren't in WS stream).
-	if a.config.SessionAPIURL == "" {
+	// Verify tool calls via session store (server-side tools aren't in WS stream).
+	if a.config.SessionStore == nil {
 		return doctor.TestResult{
 			Status: doctor.StatusSkip,
-			Detail: "no session-api URL available",
+			Detail: "no session store available",
 		}
 	}
 
-	// The WS session may not be flushed to session-api yet. Query the most
-	// recent session for this namespace to find tool calls.
-	time.Sleep(3 * time.Second)
+	// Resolve the session ID — prefer the latest from session-api list (known persisted).
 	resolvedID := a.resolveLatestSession(ctx)
 	if resolvedID == "" {
 		resolvedID = sessionID
@@ -283,12 +283,12 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 		}
 	}
 
-	toolCalls, err := a.fetchToolCalls(ctx, resolvedID)
+	toolCalls, err := a.config.SessionStore.GetToolCalls(ctx, resolvedID, 0, 0)
 	if err != nil {
 		return doctor.TestResult{
 			Status: doctor.StatusFail,
 			Error:  err.Error(),
-			Detail: "failed to fetch tool calls from session-api",
+			Detail: "failed to fetch tool calls from session store",
 		}
 	}
 
@@ -303,10 +303,10 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 	var errors []string
 	for _, tc := range toolCalls {
 		names = append(names, tc.Name)
-		if tc.Status == "error" {
+		if tc.Status == session.ToolCallStatusError {
 			errMsg := tc.ErrorMessage
 			if errMsg == "" {
-				errMsg = tc.Result
+				errMsg = toolCallResultString(tc.Result)
 			}
 			errors = append(errors, fmt.Sprintf("%s: %s", tc.Name, truncate(errMsg, 100)))
 		}
@@ -352,38 +352,20 @@ func (a *AgentChecker) resolveLatestSession(ctx context.Context) string {
 	return result.Sessions[0].ID
 }
 
-// toolCallRecord is the shape returned by session-api /tool-calls endpoint.
-type toolCallRecord struct {
-	Name         string `json:"name"`
-	Status       string `json:"status"`
-	Result       string `json:"result,omitempty"`
-	ErrorMessage string `json:"errorMessage,omitempty"`
-}
-
-// fetchToolCalls queries session-api for tool calls in a given session.
-func (a *AgentChecker) fetchToolCalls(ctx context.Context, sessionID string) ([]toolCallRecord, error) {
-	url := fmt.Sprintf("%s/api/v1/sessions/%s/tool-calls", a.config.SessionAPIURL, sessionID)
-	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// toolCallResultString converts a session.ToolCall.Result (any) to a string
+// for display in error messages.
+func toolCallResultString(result any) string {
+	if result == nil {
+		return ""
+	}
+	if s, ok := result.(string); ok {
+		return s
+	}
+	data, err := json.Marshal(result)
 	if err != nil {
-		return nil, err
+		return fmt.Sprintf("%v", result)
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, nil // session or tool calls not found yet
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	var calls []toolCallRecord
-	if err := json.NewDecoder(resp.Body).Decode(&calls); err != nil {
-		return nil, err
-	}
-	return calls, nil
+	return string(data)
 }
 
 // assembleText concatenates the Content fields from all chunk and done messages.

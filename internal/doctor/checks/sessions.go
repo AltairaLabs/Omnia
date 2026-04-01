@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/altairalabs/omnia/internal/doctor"
+	"github.com/altairalabs/omnia/internal/session"
 )
 
 const (
@@ -27,16 +28,18 @@ const (
 type SessionChecker struct {
 	sessionAPIURL string
 	namespace     string
+	store         session.Store // session store for provider-call queries
 	// GetSessionID returns the session ID from the most recent agent chat check.
 	GetSessionID  func() string
 	lastSessionID string // populated by checkSessionExists as fallback
 }
 
 // NewSessionChecker creates a new SessionChecker.
-func NewSessionChecker(sessionAPIURL, namespace string, getSessionID func() string) *SessionChecker {
+func NewSessionChecker(sessionAPIURL, namespace string, store session.Store, getSessionID func() string) *SessionChecker {
 	return &SessionChecker{
 		sessionAPIURL: sessionAPIURL,
 		namespace:     namespace,
+		store:         store,
 		GetSessionID:  getSessionID,
 	}
 }
@@ -217,25 +220,13 @@ func (s *SessionChecker) checkProviderCalls(ctx context.Context) doctor.TestResu
 		return doctor.TestResult{Status: doctor.StatusSkip, Detail: msgNoSessionAvailable}
 	}
 
-	path := fmt.Sprintf("%s/%s%s", sessionAPIPathSessions, sessionID, sessionAPIPathProviders)
-	resp, err := s.sessionHTTPGet(ctx, path)
+	if s.store == nil {
+		return doctor.TestResult{Status: doctor.StatusSkip, Detail: "no session store available"}
+	}
+
+	calls, err := s.store.GetProviderCalls(ctx, sessionID, 0, 0)
 	if err != nil {
-		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "GET provider-calls failed"}
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode != http.StatusOK {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Detail: fmt.Sprintf("GET provider-calls returned HTTP %d", resp.StatusCode),
-		}
-	}
-
-	var calls []struct {
-		InputTokens int64 `json:"inputTokens"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&calls); err != nil {
-		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "decoding provider-calls response"}
+		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "get provider calls failed"}
 	}
 
 	if len(calls) == 0 {
@@ -256,9 +247,7 @@ func (s *SessionChecker) checkProviderCalls(ctx context.Context) doctor.TestResu
 }
 
 // anyProviderCallHasTokens returns true if at least one call has InputTokens > 0.
-func anyProviderCallHasTokens(calls []struct {
-	InputTokens int64 `json:"inputTokens"`
-}) bool {
+func anyProviderCallHasTokens(calls []session.ProviderCall) bool {
 	for _, c := range calls {
 		if c.InputTokens > 0 {
 			return true
