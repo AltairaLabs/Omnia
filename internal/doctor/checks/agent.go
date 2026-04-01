@@ -399,16 +399,6 @@ func assembleText(msgs []wsServerMessage) string {
 	return sb.String()
 }
 
-// hasToolCall returns true if any message in the list is a tool_call.
-func hasToolCall(msgs []wsServerMessage) bool {
-	for _, m := range msgs {
-		if m.Type == wsMessageTypeToolCall {
-			return true
-		}
-	}
-	return false
-}
-
 // truncate shortens s to at most n characters.
 func truncate(s string, n int) string {
 	if len(s) <= n {

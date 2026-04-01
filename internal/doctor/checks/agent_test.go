@@ -234,6 +234,81 @@ func TestCheckToolCalling_Fail_ConnectionError(t *testing.T) {
 	assert.Equal(t, doctor.StatusFail, result.Status)
 }
 
+func TestCheckToolCalling_Fail_ToolCallErrors(t *testing.T) {
+	facadeSrv := serveMockFacade(t, mockFacadeHandler{
+		responses: []wsServerMessage{
+			{Type: wsMessageTypeDone, Content: "Here's the weather."},
+		},
+	})
+	defer facadeSrv.Close()
+
+	sessionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "tool-calls") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"name":"get_weather","status":"error","errorMessage":"validation failed: latitude invalid"}]`))
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"sessions":[{"id":"test-session-1"}]}`))
+		}
+	}))
+	defer sessionSrv.Close()
+
+	c := newCheckerForServer(facadeSrv)
+	c.config.SessionAPIURL = sessionSrv.URL
+	c.config.Namespace = "test"
+	result := c.checkToolCalling(context.Background())
+	assert.Equal(t, doctor.StatusFail, result.Status)
+	assert.Contains(t, result.Detail, "validation failed")
+}
+
+func TestFetchToolCalls_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := NewAgentChecker(AgentConfig{SessionAPIURL: srv.URL})
+	calls, err := c.fetchToolCalls(context.Background(), "test-id")
+	assert.Error(t, err)
+	assert.Nil(t, calls)
+}
+
+func TestFetchToolCalls_404ReturnsNil(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := NewAgentChecker(AgentConfig{SessionAPIURL: srv.URL})
+	calls, err := c.fetchToolCalls(context.Background(), "test-id")
+	assert.NoError(t, err)
+	assert.Nil(t, calls)
+}
+
+func TestResolveLatestSession_Pass(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"sessions":[{"id":"session-abc"}]}`))
+	}))
+	defer srv.Close()
+
+	c := NewAgentChecker(AgentConfig{SessionAPIURL: srv.URL, Namespace: "test"})
+	id := c.resolveLatestSession(context.Background())
+	assert.Equal(t, "session-abc", id)
+}
+
+func TestResolveLatestSession_Empty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"sessions":[]}`))
+	}))
+	defer srv.Close()
+
+	c := NewAgentChecker(AgentConfig{SessionAPIURL: srv.URL, Namespace: "test"})
+	id := c.resolveLatestSession(context.Background())
+	assert.Empty(t, id)
+}
+
 // --- helper unit tests ---
 
 func TestAssembleText(t *testing.T) {
@@ -244,12 +319,6 @@ func TestAssembleText(t *testing.T) {
 		{Type: wsMessageTypeDone, Content: "baz"},
 	}
 	assert.Equal(t, "foobarbaz", assembleText(msgs))
-}
-
-func TestHasToolCall(t *testing.T) {
-	assert.False(t, hasToolCall(nil))
-	assert.False(t, hasToolCall([]wsServerMessage{{Type: wsMessageTypeChunk}}))
-	assert.True(t, hasToolCall([]wsServerMessage{{Type: wsMessageTypeToolCall}}))
 }
 
 func TestTruncate(t *testing.T) {
