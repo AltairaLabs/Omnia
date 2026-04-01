@@ -3,6 +3,7 @@ package doctor
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func passCheck(name, category string) Check {
@@ -163,6 +164,7 @@ func TestRunner_ResultFieldsPopulated(t *testing.T) {
 		Name:     "my-check",
 		Category: "my-cat",
 		Run: func(_ context.Context) TestResult {
+			time.Sleep(time.Microsecond) // ensure non-zero duration
 			return TestResult{Status: StatusPass}
 		},
 	})

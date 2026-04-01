@@ -236,16 +236,19 @@
 
       es.onmessage = function(e) {
         const r = JSON.parse(e.data);
-        const rowId = 'test-' + r.name.replace(/[^a-zA-Z0-9]/g, '-');
+        const rowId = 'test-' + r.name.replaceAll(/[^a-zA-Z0-9]/g, '-');
         if (r.category !== currentCategory) {
           currentCategory = r.category;
           resultsDiv.innerHTML += '<div class="category-header">' + escapeHtml(r.category) + '</div>';
         }
-        const detail = r.status === 'running'
-          ? '<span class="result-detail">running...</span>'
-          : r.error
-            ? '<span class="result-error">' + escapeHtml(r.error) + '</span>'
-            : '<span class="result-detail">' + escapeHtml(r.detail || '') + '</span>';
+        var detail;
+        if (r.status === 'running') {
+          detail = '<span class="result-detail">running...</span>';
+        } else if (r.error) {
+          detail = '<span class="result-error">' + escapeHtml(r.error) + '</span>';
+        } else {
+          detail = '<span class="result-detail">' + escapeHtml(r.detail || '') + '</span>';
+        }
         const duration = r.status === 'running'
           ? ''
           : '<span class="result-duration">' + formatDuration(r.duration) + '</span>';

@@ -19,6 +19,7 @@ const (
 	memoryAPIPrefix  = "/api/v1/memories"
 	memoryTestType   = "doctor-test"
 	memoryTestValue  = "doctor smoke test value"
+	memoryTestMarker = "smoke-42"
 	workspaceParam   = "workspace"
 )
 
@@ -322,7 +323,7 @@ func (m *MemoryChecker) checkMemoryToolsAvailable(ctx context.Context) doctor.Te
 
 	// Verify the memory was saved by searching the memory-api.
 	url := fmt.Sprintf("%s%s/search?q=%s&%s=%s",
-		m.memoryAPIURL, memoryAPIPrefix, "smoke-42", workspaceParam, m.workspace)
+		m.memoryAPIURL, memoryAPIPrefix, memoryTestMarker, workspaceParam, m.workspace)
 	body, err := fetchBody(ctx, memoryClient(), url)
 	if err != nil {
 		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "search after remember failed"}
@@ -334,7 +335,7 @@ func (m *MemoryChecker) checkMemoryToolsAvailable(ctx context.Context) doctor.Te
 	}
 
 	for _, mem := range result.Memories {
-		if strings.Contains(mem.Content, "smoke-42") {
+		if strings.Contains(mem.Content, memoryTestMarker) {
 			return doctor.TestResult{Status: doctor.StatusPass, Detail: "memory__remember persisted 'smoke-42'"}
 		}
 	}
@@ -385,7 +386,7 @@ func (m *MemoryChecker) checkMemoryRecall(ctx context.Context) doctor.TestResult
 	}
 
 	text := assembleText(msgs)
-	if strings.Contains(text, "smoke-42") {
+	if strings.Contains(text, memoryTestMarker) {
 		return doctor.TestResult{Status: doctor.StatusPass, Detail: "recalled 'smoke-42' from memory"}
 	}
 	return doctor.TestResult{
