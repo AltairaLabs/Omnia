@@ -297,7 +297,7 @@ func (m *MemoryChecker) checkMemoryToolsAvailable(ctx context.Context) doctor.Te
 	toolCtx, cancel := context.WithTimeout(ctx, wsResponseTimeout)
 	defer cancel()
 
-	conn, _, err := m.agentChecker.dial(toolCtx)
+	conn, sessionID, err := m.agentChecker.dial(toolCtx)
 	if err != nil {
 		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "connection failed"}
 	}
@@ -310,6 +310,14 @@ func (m *MemoryChecker) checkMemoryToolsAvailable(ctx context.Context) doctor.Te
 	// Wait for the agent to finish (memory__remember executes server-side).
 	if _, err := collectResponse(toolCtx, conn); err != nil {
 		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "receive failed"}
+	}
+
+	// Check session-api for tool call errors first.
+	if m.agentChecker.config.SessionAPIURL != "" && sessionID != "" {
+		time.Sleep(2 * time.Second)
+		if errDetail := m.checkToolCallErrors(ctx, sessionID, "memory__remember"); errDetail != "" {
+			return doctor.TestResult{Status: doctor.StatusFail, Detail: errDetail}
+		}
 	}
 
 	// Verify the memory was saved by searching the memory-api.
@@ -334,6 +342,21 @@ func (m *MemoryChecker) checkMemoryToolsAvailable(ctx context.Context) doctor.Te
 		Status: doctor.StatusFail,
 		Detail: fmt.Sprintf("memory__remember did not persist 'smoke-42' (found %d memories)", len(result.Memories)),
 	}
+}
+
+// checkToolCallErrors queries session-api for tool calls and returns an error detail
+// string if any call matching toolName has status "error". Returns "" if no errors.
+func (m *MemoryChecker) checkToolCallErrors(ctx context.Context, sessionID, toolName string) string {
+	toolCalls, err := m.agentChecker.fetchToolCalls(ctx, sessionID)
+	if err != nil || len(toolCalls) == 0 {
+		return ""
+	}
+	for _, tc := range toolCalls {
+		if tc.Name == toolName && tc.Status == "error" {
+			return fmt.Sprintf("%s tool call failed: %s", toolName, truncate(tc.Result, 150))
+		}
+	}
+	return ""
 }
 
 // checkMemoryRecall asks the agent to recall the stored value. Memory tools are

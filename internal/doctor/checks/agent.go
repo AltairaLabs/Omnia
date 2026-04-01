@@ -291,19 +291,32 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 	}
 
 	names := make([]string, 0, len(toolCalls))
+	var errors []string
 	for _, tc := range toolCalls {
 		names = append(names, tc.Name)
+		if tc.Status == "error" {
+			errors = append(errors, fmt.Sprintf("%s: %s", tc.Name, truncate(tc.Result, 100)))
+		}
 	}
+
+	if len(errors) > 0 {
+		return doctor.TestResult{
+			Status: doctor.StatusFail,
+			Detail: fmt.Sprintf("tool calls failed: %v", errors),
+		}
+	}
+
 	return doctor.TestResult{
 		Status: doctor.StatusPass,
 		Detail: fmt.Sprintf("tool calls recorded: %v", names),
 	}
 }
 
-// toolCallRecord is the minimal shape returned by session-api /tool-calls endpoint.
+// toolCallRecord is the shape returned by session-api /tool-calls endpoint.
 type toolCallRecord struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
+	Result string `json:"result,omitempty"`
 }
 
 // fetchToolCalls queries session-api for tool calls in a given session.
