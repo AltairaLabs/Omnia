@@ -353,7 +353,11 @@ func (m *MemoryChecker) checkToolCallErrors(ctx context.Context, sessionID, tool
 	}
 	for _, tc := range toolCalls {
 		if tc.Name == toolName && tc.Status == "error" {
-			return fmt.Sprintf("%s tool call failed: %s", toolName, truncate(tc.Result, 150))
+			errMsg := tc.ErrorMessage
+			if errMsg == "" {
+				errMsg = tc.Result
+			}
+			return fmt.Sprintf("%s tool call failed: %s", toolName, truncate(errMsg, 150))
 		}
 	}
 	return ""

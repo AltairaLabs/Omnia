@@ -286,7 +286,7 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 	if len(toolCalls) == 0 {
 		return doctor.TestResult{
 			Status: doctor.StatusFail,
-			Detail: "no tool calls recorded in session-api",
+			Detail: fmt.Sprintf("no tool calls recorded in session-api (session=%s)", sessionID),
 		}
 	}
 
@@ -295,7 +295,11 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 	for _, tc := range toolCalls {
 		names = append(names, tc.Name)
 		if tc.Status == "error" {
-			errors = append(errors, fmt.Sprintf("%s: %s", tc.Name, truncate(tc.Result, 100)))
+			errMsg := tc.ErrorMessage
+			if errMsg == "" {
+				errMsg = tc.Result
+			}
+			errors = append(errors, fmt.Sprintf("%s: %s", tc.Name, truncate(errMsg, 100)))
 		}
 	}
 
@@ -314,9 +318,10 @@ func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
 
 // toolCallRecord is the shape returned by session-api /tool-calls endpoint.
 type toolCallRecord struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
-	Result string `json:"result,omitempty"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	Result       string `json:"result,omitempty"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
 }
 
 // fetchToolCalls queries session-api for tool calls in a given session.
