@@ -3,8 +3,6 @@ package doctor
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -186,33 +184,5 @@ func TestNewServer(t *testing.T) {
 	}
 	if s.addr != ":9090" {
 		t.Errorf("expected addr :9090, got %s", s.addr)
-	}
-}
-
-func TestServer_ListenAndServe(t *testing.T) {
-	srv := testServer()
-	// Override to use a random port.
-	s := &http.Server{
-		Addr:    "127.0.0.1:0",
-		Handler: srv.Handler(),
-	}
-
-	// Use a listener to get the actual port.
-	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-
-	go func() { _ = s.Serve(ln) }()
-	defer func() { _ = s.Close() }()
-
-	resp, err := http.Get("http://" + ln.Addr().String() + "/healthz")
-	if err != nil {
-		t.Fatalf("GET /healthz: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(resp.Body)
-	if string(body) != "ok" {
-		t.Errorf("expected 'ok', got %q", string(body))
 	}
 }

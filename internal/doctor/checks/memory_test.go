@@ -604,16 +604,3 @@ func (t *bodyErrorTransport) RoundTrip(req *http.Request) (*http.Response, error
 	resp.Body = errReader{}
 	return resp, nil
 }
-
-// --- hasNamedToolCall helper ---
-
-func TestHasNamedToolCall(t *testing.T) {
-	assert.False(t, hasNamedToolCall(nil, "foo"))
-	assert.False(t, hasNamedToolCall([]wsServerMessage{{Type: wsMessageTypeChunk}}, "foo"))
-	assert.False(t, hasNamedToolCall([]wsServerMessage{
-		{Type: wsMessageTypeToolCall, ToolCall: &wsToolCallInfo{Name: "bar"}},
-	}, "foo"))
-	assert.True(t, hasNamedToolCall([]wsServerMessage{
-		{Type: wsMessageTypeToolCall, ToolCall: &wsToolCallInfo{Name: "foo"}},
-	}, "foo"))
-}

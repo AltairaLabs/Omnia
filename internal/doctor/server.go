@@ -51,16 +51,6 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// ListenAndServe starts the HTTP server.
-func (s *Server) ListenAndServe() error {
-	srv := &http.Server{
-		Addr:    s.addr,
-		Handler: s.Handler(),
-	}
-	s.log.Info("server starting", "addr", s.addr)
-	return srv.ListenAndServe()
-}
-
 func (s *Server) handleIndex(w http.ResponseWriter, _ *http.Request) {
 	data, err := templateFS.ReadFile("templates/index.html")
 	if err != nil {

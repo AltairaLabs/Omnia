@@ -98,11 +98,6 @@ func main() {
 	memoryChecker := checks.NewMemoryChecker(memoryAPIURL, workspaceUID, agentChecker)
 	runner.Register(memoryChecker.Checks()...)
 
-	// Observability: Prometheus scrapes metrics via pod annotations (port 9090),
-	// not via the K8s service. Doctor checks the /healthz probe instead;
-	// metrics scraping is validated by the Prometheus service monitor.
-	// TODO: add pod-level metrics check in v2
-
 	if *runOnce {
 		runOnceMode(runner, log, *exitCode)
 		return

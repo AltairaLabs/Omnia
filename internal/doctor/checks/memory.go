@@ -395,16 +395,6 @@ func (m *MemoryChecker) checkMemoryRecall(ctx context.Context) doctor.TestResult
 	}
 }
 
-// hasNamedToolCall returns true if any message is a tool_call with the given name.
-func hasNamedToolCall(msgs []wsServerMessage, name string) bool {
-	for _, m := range msgs {
-		if m.Type == wsMessageTypeToolCall && m.ToolCall != nil && m.ToolCall.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
 // fetchBody performs a GET and returns the response body as a string.
 // It returns an error for non-200 responses.
 func fetchBody(ctx context.Context, client *http.Client, url string) (string, error) {
