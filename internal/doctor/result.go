@@ -5,7 +5,6 @@ import "time"
 type Status string
 
 const (
-	StatusPending Status = "pending"
 	StatusRunning Status = "running"
 	StatusPass    Status = "pass"
 	StatusFail    Status = "fail"
