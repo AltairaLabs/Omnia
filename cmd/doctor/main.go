@@ -14,6 +14,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/doctor"
 	"github.com/altairalabs/omnia/internal/doctor/checks"
+	memoryhttpclient "github.com/altairalabs/omnia/internal/memory/httpclient"
 	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/altairalabs/omnia/pkg/logging"
@@ -100,7 +101,8 @@ func main() {
 		workspaceUID = checks.ResolveWorkspaceUID(k8sClient, *agentNamespace, log)
 	}
 
-	memoryChecker := checks.NewMemoryChecker(memoryAPIURL, workspaceUID, agentChecker)
+	memoryStore := memoryhttpclient.NewStore(memoryAPIURL, log)
+	memoryChecker := checks.NewMemoryChecker(memoryAPIURL, memoryStore, workspaceUID, agentChecker)
 	runner.Register(memoryChecker.Checks()...)
 
 	if *runOnce {
