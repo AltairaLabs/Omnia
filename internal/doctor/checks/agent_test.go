@@ -350,6 +350,13 @@ func TestAssembleText(t *testing.T) {
 	assert.Equal(t, "foobarbaz", assembleText(msgs))
 }
 
+func TestToolCallResultString(t *testing.T) {
+	assert.Equal(t, "", toolCallResultString(nil))
+	assert.Equal(t, "hello", toolCallResultString("hello"))
+	assert.Equal(t, `{"key":"val"}`, toolCallResultString(map[string]string{"key": "val"}))
+	assert.Equal(t, "42", toolCallResultString(42))
+}
+
 func TestTruncate(t *testing.T) {
 	assert.Equal(t, "abc", truncate("abc", 10))
 	assert.Equal(t, "ab...", truncate("abcde", 2))

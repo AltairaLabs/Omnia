@@ -16,10 +16,9 @@ import (
 const (
 	sessionTimeout = 10 * time.Second
 
-	sessionAPIPathSessions  = "/api/v1/sessions"
-	sessionAPIPathDocs      = "/docs"
-	sessionAPIPathMessages  = "/messages"
-	sessionAPIPathProviders = "/provider-calls"
+	sessionAPIPathSessions = "/api/v1/sessions"
+	sessionAPIPathDocs     = "/docs"
+	sessionAPIPathMessages = "/messages"
 
 	msgNoSessionAvailable = "no agent chat session available"
 )
