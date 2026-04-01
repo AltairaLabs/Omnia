@@ -180,36 +180,39 @@ func (a *AgentChecker) checkConnect(ctx context.Context) doctor.TestResult {
 	}
 }
 
-// checkChat sends a greeting and verifies a non-empty response is received.
-func (a *AgentChecker) checkChat(ctx context.Context) doctor.TestResult {
+// chatWithAgent dials the facade, sends a message, waits for the response, and returns
+// the session ID, assembled messages, and any error as a TestResult.
+// The connection is opened and closed within the helper; the caller's ctx is not modified.
+func (a *AgentChecker) chatWithAgent(ctx context.Context, message string) (sessionID string, msgs []wsServerMessage, fail *doctor.TestResult) {
 	chatCtx, cancel := context.WithTimeout(ctx, wsResponseTimeout)
 	defer cancel()
 
-	conn, sessionID, err := a.dial(chatCtx)
+	conn, sid, err := a.dial(chatCtx)
 	if err != nil {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Error:  err.Error(),
-			Detail: "connection failed",
-		}
+		r := doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "connection failed"}
+		return "", nil, &r
 	}
 	defer closeConn(conn)
 
-	if err := sendMessage(conn, "Hello, what can you help me with?"); err != nil {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Error:  err.Error(),
-			Detail: "failed to send message",
-		}
+	if err := sendMessage(conn, message); err != nil {
+		r := doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "send failed"}
+		return sid, nil, &r
 	}
 
-	msgs, err := collectResponse(chatCtx, conn)
+	collected, err := collectResponse(chatCtx, conn)
 	if err != nil {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Error:  err.Error(),
-			Detail: "failed to receive response",
-		}
+		r := doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "receive failed"}
+		return sid, collected, &r
+	}
+
+	return sid, collected, nil
+}
+
+// checkChat sends a greeting and verifies a non-empty response is received.
+func (a *AgentChecker) checkChat(ctx context.Context) doctor.TestResult {
+	sessionID, msgs, fail := a.chatWithAgent(ctx, "Hello, what can you help me with?")
+	if fail != nil {
+		return *fail
 	}
 
 	text := assembleText(msgs)
@@ -234,33 +237,9 @@ func (a *AgentChecker) checkChat(ctx context.Context) doctor.TestResult {
 // Server-side tools (HTTP executors) are not forwarded via WebSocket, so we verify
 // by checking the session-api tool-calls endpoint after the chat completes.
 func (a *AgentChecker) checkToolCalling(ctx context.Context) doctor.TestResult {
-	toolCtx, cancel := context.WithTimeout(ctx, wsResponseTimeout)
-	defer cancel()
-
-	conn, sessionID, err := a.dial(toolCtx)
-	if err != nil {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Error:  err.Error(),
-			Detail: "connection failed",
-		}
-	}
-	defer closeConn(conn)
-
-	if err := sendMessage(conn, "What is the weather at latitude 51.5, longitude -0.12 right now?"); err != nil {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Error:  err.Error(),
-			Detail: "failed to send message",
-		}
-	}
-
-	if _, err := collectResponse(toolCtx, conn); err != nil {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Error:  err.Error(),
-			Detail: "failed to receive response",
-		}
+	sessionID, _, fail := a.chatWithAgent(ctx, "What is the weather at latitude 51.5, longitude -0.12 right now?")
+	if fail != nil {
+		return *fail
 	}
 
 	// Verify tool calls via session store (server-side tools aren't in WS stream).

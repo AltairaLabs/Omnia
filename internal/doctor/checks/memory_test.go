@@ -615,7 +615,7 @@ func TestCheckMemoryPersistsAcrossSessions_Fail_ConnectionError(t *testing.T) {
 	c := NewMemoryChecker("", nil, testWorkspace, agentChecker)
 	result := c.checkMemoryPersistsAcrossSessions(t.Context())
 	assert.Equal(t, doctor.StatusFail, result.Status)
-	assert.Contains(t, result.Detail, "session 1 connection failed")
+	assert.Contains(t, result.Detail, "connection failed")
 }
 
 func TestCheckMemoryPersistsAcrossSessions_Skip_NoWorkspace(t *testing.T) {
