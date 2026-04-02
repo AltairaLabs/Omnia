@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
@@ -200,5 +201,57 @@ func TestNewRunner(t *testing.T) {
 	r := NewRunner()
 	if r == nil {
 		t.Error("expected non-nil runner")
+	}
+}
+
+func TestRunner_SequentialGroup(t *testing.T) {
+	// cat1 and cat2 are in a sequential group — cat1 must finish before cat2 starts.
+	// cat3 runs independently in parallel.
+	var order []string
+	var mu sync.Mutex
+	record := func(name string) {
+		mu.Lock()
+		order = append(order, name)
+		mu.Unlock()
+	}
+
+	r := NewRunner()
+	r.Register(Check{Name: "c1", Category: "cat1", Run: func(_ context.Context) TestResult {
+		time.Sleep(10 * time.Millisecond)
+		record("c1")
+		return TestResult{Status: StatusPass}
+	}})
+	r.Register(Check{Name: "c2", Category: "cat2", Run: func(_ context.Context) TestResult {
+		record("c2")
+		return TestResult{Status: StatusPass}
+	}})
+	r.Register(Check{Name: "c3", Category: "cat3", Run: func(_ context.Context) TestResult {
+		record("c3")
+		return TestResult{Status: StatusPass}
+	}})
+	r.SequentialGroup("linked", "cat1", "cat2")
+
+	ch := make(chan TestResult, 20)
+	run := r.Run(context.Background(), ch)
+	collectResults(ch)
+
+	if run.Summary.Total != 3 {
+		t.Fatalf("expected 3 total, got %d", run.Summary.Total)
+	}
+
+	// c1 must come before c2 (same sequential group).
+	mu.Lock()
+	defer mu.Unlock()
+	c1Idx, c2Idx := -1, -1
+	for i, name := range order {
+		if name == "c1" {
+			c1Idx = i
+		}
+		if name == "c2" {
+			c2Idx = i
+		}
+	}
+	if c1Idx >= c2Idx {
+		t.Errorf("expected c1 before c2 in sequential group, got order: %v", order)
 	}
 }

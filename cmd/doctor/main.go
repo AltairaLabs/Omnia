@@ -26,10 +26,18 @@ const (
 	defaultAgentName      = "tools-demo"
 	defaultAPIPort        = 8080
 
-	serviceSessionAPI = "omnia-session-api"
-	serviceMemoryAPI  = "omnia-memory-api"
-	serviceOllama     = "ollama"
-	defaultOllamaPort = 11434
+	serviceSessionAPI      = "omnia-session-api"
+	serviceMemoryAPI       = "omnia-memory-api"
+	serviceOllama          = "ollama"
+	serviceOperator        = "omnia-operator"
+	serviceDashboard       = "omnia-dashboard"
+	serviceRedis           = "omnia-redis-master"
+	serviceArenaController = "omnia-arena-controller"
+	defaultOllamaPort      = 11434
+	defaultOperatorPort    = 8083
+	defaultDashboardPort   = 3000
+	defaultRedisPort       = 6379
+	defaultArenaPort       = 8082
 )
 
 func discoverServiceURL(namespace, service string, port int) string {
@@ -46,6 +54,10 @@ func main() {
 	sessionAPIURLFlag := flag.String("session-api-url", "", "override session-api URL")
 	memoryAPIURLFlag := flag.String("memory-api-url", "", "override memory-api URL")
 	ollamaURLFlag := flag.String("ollama-url", "", "override Ollama URL")
+	operatorURLFlag := flag.String("operator-url", "", "override operator API URL")
+	dashboardURLFlag := flag.String("dashboard-url", "", "override dashboard URL")
+	redisAddrFlag := flag.String("redis-addr", "", "override Redis address (host:port)")
+	arenaURLFlag := flag.String("arena-url", "", "override arena controller URL")
 	flag.Parse()
 
 	log, sync, err := logging.NewLogger()
@@ -69,6 +81,26 @@ func main() {
 		ollamaURL = discoverServiceURL(*agentNamespace, serviceOllama, defaultOllamaPort)
 	}
 
+	operatorURL := *operatorURLFlag
+	if operatorURL == "" {
+		operatorURL = discoverServiceURL(*namespace, serviceOperator, defaultOperatorPort)
+	}
+
+	dashboardURL := *dashboardURLFlag
+	if dashboardURL == "" {
+		dashboardURL = discoverServiceURL(*namespace, serviceDashboard, defaultDashboardPort)
+	}
+
+	redisAddr := *redisAddrFlag
+	if redisAddr == "" {
+		redisAddr = fmt.Sprintf("%s.%s.svc.cluster.local:%d", serviceRedis, *namespace, defaultRedisPort)
+	}
+
+	arenaURL := *arenaURLFlag
+	if arenaURL == "" {
+		arenaURL = discoverServiceURL(*namespace, serviceArenaController, defaultArenaPort)
+	}
+
 	agentFacadeURL := discoverServiceURL(*agentNamespace, *agentName, defaultAPIPort)
 
 	sessionStore := httpclient.NewStore(sessionAPIURL, log, httpclient.WithBufferCapacity(0))
@@ -81,6 +113,10 @@ func main() {
 		"MemoryAPI":  memoryAPIURL,
 	})...)
 	runner.Register(checks.OllamaCheck(ollamaURL))
+	runner.Register(checks.OperatorAPICheck(operatorURL))
+	runner.Register(checks.DashboardCheck(dashboardURL))
+	runner.Register(checks.TCPCheck("Redis", redisAddr))
+	runner.Register(checks.ArenaControllerCheck(arenaURL))
 
 	k8sClient, k8sErr := k8s.NewClient()
 	if k8sErr != nil {
@@ -113,6 +149,9 @@ func main() {
 	memoryStore := memoryhttpclient.NewStore(memoryAPIURL, log)
 	memoryChecker := checks.NewMemoryChecker(memoryAPIURL, memoryStore, workspaceUID, agentChecker)
 	runner.Register(memoryChecker.Checks()...)
+
+	// Agent → Sessions must run sequentially (Sessions reads Agent's LastSessionID).
+	runner.SequentialGroup("agent-sessions", "Agent", "Sessions")
 
 	if *runOnce {
 		runOnceMode(runner, log, *exitCode)
