@@ -76,6 +76,7 @@ type SaveMemoryRequest struct {
 	Scope      map[string]string `json:"scope"`
 	SessionID  string            `json:"session_id,omitempty"`
 	TurnRange  [2]int            `json:"turn_range,omitempty"`
+	Category   string            `json:"category,omitempty"`
 }
 
 // Handler provides HTTP endpoints for the memory API.
