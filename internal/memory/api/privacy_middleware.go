@@ -22,7 +22,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 
@@ -33,7 +32,9 @@ import (
 
 // OptOutChecker returns false when the user has opted out of memory storage,
 // indicating the write should be silently dropped.
-type OptOutChecker func(ctx context.Context, userID, workspace string) bool
+// category is the consent category from the request body (may be empty string
+// when no category was supplied; callers should apply a default in that case).
+type OptOutChecker func(ctx context.Context, userID, workspace, category string) bool
 
 // ContentRedactor redacts PII from memory content text.
 // Returns the redacted string; if redaction is not configured it returns the
@@ -80,68 +81,46 @@ func (m *MemoryPrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 		workspace := r.URL.Query().Get("workspace")
 		userID := r.URL.Query().Get("user_id")
 
-		// Check opt-out: if the user has opted out, silently drop the write.
-		if userID != "" && !m.checkOptOut(r.Context(), userID, workspace) {
-			m.log.V(1).Info("memory write suppressed", "reason", "user opt-out", "userHash", logging.HashID(userID), "workspace", workspace)
+		// Read body once so we can inspect category for opt-out and content for redaction.
+		var data []byte
+		if r.Body != nil {
+			var err error
+			data, err = io.ReadAll(r.Body)
+			_ = r.Body.Close()
+			if err != nil {
+				http.Error(w, "failed to read body", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// Try to decode to get category and content for downstream use.
+		var req SaveMemoryRequest
+		decoded := len(data) > 0 && json.Unmarshal(data, &req) == nil
+
+		// Check opt-out with category (empty string if not decoded).
+		if userID != "" && !m.checkOptOut(r.Context(), userID, workspace, req.Category) {
+			m.log.V(1).Info("memory write suppressed", "reason", "user opt-out", "userHash", logging.HashID(userID), "workspace", workspace, "category", req.Category)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 
-		// Apply PII redaction to the request body's content field.
-		if err := m.applyRedaction(r, workspace); err != nil {
-			m.log.Error(err, "content redaction failed, blocking request", "workspace", workspace)
-			http.Error(w, "redaction failed", http.StatusInternalServerError)
-			return
+		// Apply PII redaction when body was successfully decoded.
+		if decoded {
+			redacted, err := m.redact(r.Context(), workspace, req.Content)
+			if err != nil {
+				m.log.Error(err, "content redaction failed, blocking request", "workspace", workspace)
+				http.Error(w, "redaction failed", http.StatusInternalServerError)
+				return
+			}
+			if redacted != req.Content {
+				req.Content = redacted
+				encoded, _ := json.Marshal(req)
+				data = encoded
+			}
 		}
 
+		r.Body = io.NopCloser(bytes.NewReader(data))
+		r.ContentLength = int64(len(data))
 		next.ServeHTTP(w, r)
 	})
-}
-
-// applyRedaction reads the request body, redacts the content field, and
-// replaces r.Body with the redacted payload.
-func (m *MemoryPrivacyMiddleware) applyRedaction(r *http.Request, workspace string) error {
-	if r.Body == nil {
-		return nil
-	}
-
-	data, err := io.ReadAll(r.Body)
-	_ = r.Body.Close()
-	if err != nil {
-		return fmt.Errorf("reading request body: %w", err)
-	}
-
-	if len(data) == 0 {
-		r.Body = io.NopCloser(bytes.NewReader(data))
-		return nil
-	}
-
-	var req SaveMemoryRequest
-	if err := json.Unmarshal(data, &req); err != nil {
-		// Not valid JSON — restore the body and let the handler return the
-		// appropriate 400 error.
-		r.Body = io.NopCloser(bytes.NewReader(data))
-		return nil
-	}
-
-	redacted, err := m.redact(r.Context(), workspace, req.Content)
-	if err != nil {
-		return fmt.Errorf("redacting content: %w", err)
-	}
-
-	if redacted == req.Content {
-		// Nothing changed — avoid re-encoding unnecessarily.
-		r.Body = io.NopCloser(bytes.NewReader(data))
-		return nil
-	}
-
-	req.Content = redacted
-	encoded, err := json.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("re-encoding request body: %w", err)
-	}
-
-	r.Body = io.NopCloser(bytes.NewReader(encoded))
-	r.ContentLength = int64(len(encoded))
-	return nil
 }

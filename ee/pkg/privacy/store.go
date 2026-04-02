@@ -11,6 +11,7 @@ package privacy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -36,12 +37,13 @@ var ErrPreferencesNotFound = errors.New("privacy: user preferences not found")
 
 // Preferences represents a user's privacy opt-out preferences.
 type Preferences struct {
-	UserID           string    `json:"userId"`
-	OptOutAll        bool      `json:"optOutAll"`
-	OptOutWorkspaces []string  `json:"optOutWorkspaces"`
-	OptOutAgents     []string  `json:"optOutAgents"`
-	CreatedAt        time.Time `json:"createdAt"`
-	UpdatedAt        time.Time `json:"updatedAt"`
+	UserID           string            `json:"userId"`
+	OptOutAll        bool              `json:"optOutAll"`
+	OptOutWorkspaces []string          `json:"optOutWorkspaces"`
+	OptOutAgents     []string          `json:"optOutAgents"`
+	ConsentGrants    []ConsentCategory `json:"consentGrants"`
+	CreatedAt        time.Time         `json:"createdAt"`
+	UpdatedAt        time.Time         `json:"updatedAt"`
 }
 
 // PreferencesStore defines the interface for privacy preference persistence.
@@ -61,21 +63,27 @@ func NewPreferencesStore(pool dbPool) *PreferencesPostgresStore {
 	return &PreferencesPostgresStore{pool: pool}
 }
 
-// Compile-time interface check.
+// Compile-time interface checks.
 var _ PreferencesStore = (*PreferencesPostgresStore)(nil)
+var _ ConsentSource = (*PreferencesPostgresStore)(nil)
 
 // GetPreferences retrieves privacy preferences for a user.
 func (s *PreferencesPostgresStore) GetPreferences(ctx context.Context, userID string) (*Preferences, error) {
 	p := &Preferences{UserID: userID}
+	var grants []string
 	err := s.pool.QueryRow(ctx,
-		`SELECT opt_out_all, opt_out_workspaces, opt_out_agents, created_at, updated_at
+		`SELECT opt_out_all, opt_out_workspaces, opt_out_agents, consent_grants, created_at, updated_at
 		 FROM user_privacy_preferences WHERE user_id = $1`, userID,
-	).Scan(&p.OptOutAll, &p.OptOutWorkspaces, &p.OptOutAgents, &p.CreatedAt, &p.UpdatedAt)
+	).Scan(&p.OptOutAll, &p.OptOutWorkspaces, &p.OptOutAgents, &grants, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrPreferencesNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	p.ConsentGrants = make([]ConsentCategory, len(grants))
+	for i, g := range grants {
+		p.ConsentGrants[i] = ConsentCategory(g)
 	}
 	normalizeSlices(p)
 	return p, nil
@@ -109,6 +117,44 @@ func (s *PreferencesPostgresStore) RemoveOptOut(ctx context.Context, userID, sco
 	}
 }
 
+// GetConsentGrants returns the consent grants for a user.
+// Returns an empty slice (not an error) when the user has no preferences row.
+func (s *PreferencesPostgresStore) GetConsentGrants(ctx context.Context, userID string) ([]ConsentCategory, error) {
+	var grants []string
+	err := s.pool.QueryRow(ctx,
+		`SELECT consent_grants FROM user_privacy_preferences WHERE user_id = $1`, userID,
+	).Scan(&grants)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return []ConsentCategory{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	result := make([]ConsentCategory, len(grants))
+	for i, g := range grants {
+		result[i] = ConsentCategory(g)
+	}
+	return result, nil
+}
+
+// SetConsentGrant adds a consent grant for a user.
+func (s *PreferencesPostgresStore) SetConsentGrant(ctx context.Context, userID string, category ConsentCategory) error {
+	if _, valid := CategoryInfo(category); !valid {
+		return fmt.Errorf("privacy: unknown consent category: %q", category)
+	}
+	return s.upsertArrayElement(ctx, userID, "consent_grants", string(category))
+}
+
+// RemoveConsentGrant removes a consent grant for a user.
+func (s *PreferencesPostgresStore) RemoveConsentGrant(
+	ctx context.Context, userID string, category ConsentCategory,
+) error {
+	if _, valid := CategoryInfo(category); !valid {
+		return fmt.Errorf("privacy: unknown consent category: %q", category)
+	}
+	return s.removeArrayElement(ctx, userID, "consent_grants", string(category))
+}
+
 // normalizeSlices ensures nil slices become empty slices for JSON serialization.
 func normalizeSlices(p *Preferences) {
 	if p.OptOutWorkspaces == nil {
@@ -116,6 +162,9 @@ func normalizeSlices(p *Preferences) {
 	}
 	if p.OptOutAgents == nil {
 		p.OptOutAgents = []string{}
+	}
+	if p.ConsentGrants == nil {
+		p.ConsentGrants = []ConsentCategory{}
 	}
 }
 

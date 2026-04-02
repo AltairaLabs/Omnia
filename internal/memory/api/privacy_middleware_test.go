@@ -34,7 +34,7 @@ import (
 )
 
 // passthroughOptOut always returns true (no opt-out).
-var passthroughOptOut OptOutChecker = func(_ context.Context, _, _ string) bool { return true }
+var passthroughOptOut OptOutChecker = func(_ context.Context, _, _, _ string) bool { return true }
 
 // noOpRedact returns content unchanged.
 var noOpRedact ContentRedactor = func(_ context.Context, _, content string) (string, error) {
@@ -42,10 +42,10 @@ var noOpRedact ContentRedactor = func(_ context.Context, _, content string) (str
 }
 
 // optedOutChecker always returns false (user opted out).
-var optedOutChecker OptOutChecker = func(_ context.Context, _, _ string) bool { return false }
+var optedOutChecker OptOutChecker = func(_ context.Context, _, _, _ string) bool { return false }
 
 // panicOptOut panics if called — use to assert opt-out is never checked.
-var panicOptOut OptOutChecker = func(_ context.Context, _, _ string) bool {
+var panicOptOut OptOutChecker = func(_ context.Context, _, _, _ string) bool {
 	panic("OptOutChecker must not be called for this request")
 }
 
@@ -310,4 +310,94 @@ func TestMemoryPrivacyMiddleware_OptedOutUserWithNoRedaction_Returns204(t *testi
 	handler.ServeHTTP(w, r)
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
+}
+
+func makePostRequestWithCategory(t *testing.T, content, workspace, userID, category string) *http.Request {
+	t.Helper()
+	req := SaveMemoryRequest{
+		Type:     "fact",
+		Content:  content,
+		Scope:    map[string]string{"workspace": workspace},
+		Category: category,
+	}
+	b, err := json.Marshal(req)
+	require.NoError(t, err)
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/memories", bytes.NewBuffer(b))
+	q := r.URL.Query()
+	q.Set("workspace", workspace)
+	if userID != "" {
+		q.Set("user_id", userID)
+	}
+	r.URL.RawQuery = q.Encode()
+	r.Header.Set("Content-Type", "application/json")
+	return r
+}
+
+func TestMemoryPrivacyMiddleware_NoCategoryInBody_OptOutCheckerReceivesEmpty(t *testing.T) {
+	// POST without a category field — opt-out checker must receive an empty string.
+	var receivedCategory string
+	checker := OptOutChecker(func(_ context.Context, _, _, category string) bool {
+		receivedCategory = category
+		return true // allow
+	})
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	mw := newTestMiddleware(checker, noOpRedact)
+	handler := mw.Wrap(next)
+
+	w := httptest.NewRecorder()
+	r := makePostRequest(t, "some content", "ws-1", "user-abc")
+	handler.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Equal(t, "", receivedCategory, "category should be empty string when not in body")
+}
+
+func TestMemoryPrivacyMiddleware_WithCategory_OptOutCheckerReceivesCategory(t *testing.T) {
+	// POST with category: "memory:identity" — opt-out checker must receive it.
+	var receivedCategory string
+	checker := OptOutChecker(func(_ context.Context, _, _, category string) bool {
+		receivedCategory = category
+		return true // allow
+	})
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	mw := newTestMiddleware(checker, noOpRedact)
+	handler := mw.Wrap(next)
+
+	w := httptest.NewRecorder()
+	r := makePostRequestWithCategory(t, "my name is Alice", "ws-1", "user-abc", "memory:identity")
+	handler.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Equal(t, "memory:identity", receivedCategory, "checker should receive the category from the body")
+}
+
+func TestMemoryPrivacyMiddleware_CategoryOptedOut_Returns204(t *testing.T) {
+	// Opt-out checker that only rejects "memory:identity".
+	checker := OptOutChecker(func(_ context.Context, _, _, category string) bool {
+		return category != "memory:identity"
+	})
+
+	var handlerCalled bool
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	mw := newTestMiddleware(checker, noOpRedact)
+	handler := mw.Wrap(next)
+
+	w := httptest.NewRecorder()
+	r := makePostRequestWithCategory(t, "my name is Alice", "ws-1", "user-abc", "memory:identity")
+	handler.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.False(t, handlerCalled)
 }

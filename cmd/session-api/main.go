@@ -482,6 +482,9 @@ func registerEnterpriseRoutes(mux *http.ServeMux, pool *pgxpool.Pool, registry *
 		privacyStore := privacy.NewPreferencesStore(pool)
 		optOutHandler := privacy.NewOptOutHandler(privacyStore, log)
 		optOutHandler.RegisterRoutes(mux)
+
+		consentHandler := privacy.NewConsentHandler(privacyStore, auditLogger, log)
+		consentHandler.RegisterRoutes(mux)
 	}
 }
 
