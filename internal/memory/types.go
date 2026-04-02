@@ -37,7 +37,9 @@ type (
 // Store extends the PromptKit memory.Store interface with Omnia-specific methods.
 // ExportAll is needed for DSAR (data subject access request) data export and is
 // not part of the PromptKit SDK contract.
+// BatchDelete is needed for paginated DSAR deletion (Task 4 cascade).
 type Store interface {
 	pkmemory.Store
 	ExportAll(ctx context.Context, scope map[string]string) ([]*Memory, error)
+	BatchDelete(ctx context.Context, scope map[string]string, limit int) (int, error)
 }

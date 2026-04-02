@@ -39,6 +39,11 @@ const (
 
 	// DefaultMaxBodySize is the maximum allowed request body size (16 MB).
 	DefaultMaxBodySize int64 = 16 << 20
+
+	// defaultBatchDeleteLimit is the default number of rows deleted per batch delete request.
+	defaultBatchDeleteLimit = 500
+	// maxBatchDeleteLimit is the maximum number of rows allowed per batch delete request.
+	maxBatchDeleteLimit = 10000
 )
 
 // MemoryListResponse is the JSON response for memory list/search endpoints.
@@ -55,6 +60,11 @@ type MemoryResponse struct {
 // ErrorResponse is the JSON response for errors.
 type ErrorResponse struct {
 	Error string `json:"error"`
+}
+
+// BatchDeleteResponse is the JSON response for DELETE /api/v1/memories/batch.
+type BatchDeleteResponse struct {
+	Deleted int `json:"deleted"`
 }
 
 // SaveMemoryRequest is the JSON body for POST /api/v1/memories.
@@ -96,6 +106,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/memories/export", h.handleExportMemories)
 	mux.HandleFunc("POST /api/v1/memories", h.handleSaveMemory)
 	mux.HandleFunc("DELETE /api/v1/memories/{id}", h.handleDeleteMemory)
+	mux.HandleFunc("DELETE /api/v1/memories/batch", h.handleBatchDeleteMemories)
 	mux.HandleFunc("DELETE /api/v1/memories", h.handleDeleteAllMemories)
 
 	h.registerDocsRoutes(mux)
@@ -265,6 +276,31 @@ func (h *Handler) handleDeleteAllMemories(w http.ResponseWriter, r *http.Request
 
 	h.log.V(1).Info("all memories deleted", "workspace", scope[memory.ScopeWorkspaceID])
 	w.WriteHeader(http.StatusOK)
+}
+
+// handleBatchDeleteMemories deletes up to limit memories for a scope (paginated DSAR).
+// Route: DELETE /api/v1/memories/batch?workspace=X&user_id=Y&limit=N
+func (h *Handler) handleBatchDeleteMemories(w http.ResponseWriter, r *http.Request) {
+	scope, err := parseWorkspaceScope(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	limit := parseIntParam(r, "limit", defaultBatchDeleteLimit)
+	if limit > maxBatchDeleteLimit {
+		limit = maxBatchDeleteLimit
+	}
+
+	n, err := h.service.BatchDeleteMemories(r.Context(), scope, limit)
+	if err != nil {
+		h.log.Error(err, "BatchDeleteMemories failed", "workspace", scope[memory.ScopeWorkspaceID])
+		writeError(w, err)
+		return
+	}
+
+	h.log.V(1).Info("batch memories deleted", "workspace", scope[memory.ScopeWorkspaceID], "count", n)
+	writeJSON(w, BatchDeleteResponse{Deleted: n})
 }
 
 // --- helpers -----------------------------------------------------------------

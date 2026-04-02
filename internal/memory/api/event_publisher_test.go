@@ -77,6 +77,10 @@ func (m *mockMemoryStore) ExportAll(_ context.Context, _ map[string]string) ([]*
 	return nil, nil
 }
 
+func (m *mockMemoryStore) BatchDelete(_ context.Context, _ map[string]string, _ int) (int, error) {
+	return 0, nil
+}
+
 // --- mockMemoryEventPublisher -----------------------------------------------
 
 // mockMemoryEventPublisher records published events and can be configured to

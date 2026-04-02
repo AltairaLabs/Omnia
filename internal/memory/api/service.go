@@ -153,6 +153,29 @@ func (s *MemoryService) DeleteAllMemories(ctx context.Context, scope map[string]
 	return s.store.DeleteAll(ctx, scope)
 }
 
+// BatchDeleteMemories hard-deletes up to limit memories for the given scope (paginated DSAR).
+// Returns the count of deleted rows so the caller can loop until 0.
+func (s *MemoryService) BatchDeleteMemories(ctx context.Context, scope map[string]string, limit int) (int, error) {
+	n, err := s.store.BatchDelete(ctx, scope, limit)
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 && s.eventPublisher != nil {
+		event := MemoryEvent{
+			EventType:   eventTypeMemoryDeleted,
+			WorkspaceID: scope[memory.ScopeWorkspaceID],
+			UserID:      scope[memory.ScopeUserID],
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		}
+		go func() {
+			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
+				s.log.Error(err, "memory batch delete event publish failed", "eventType", event.EventType, "count", n)
+			}
+		}()
+	}
+	return n, nil
+}
+
 // ExportMemories returns all memories for a scope without pagination (DSAR export).
 func (s *MemoryService) ExportMemories(ctx context.Context, scope map[string]string) ([]*memory.Memory, error) {
 	memories, err := s.store.ExportAll(ctx, scope)

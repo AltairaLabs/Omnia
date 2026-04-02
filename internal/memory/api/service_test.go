@@ -438,3 +438,49 @@ func TestMemoryService_SaveWithExplicitExpiry(t *testing.T) {
 	assert.True(t, mem.ExpiresAt.Equal(explicit),
 		"explicit ExpiresAt should not be overridden by DefaultTTL")
 }
+
+func TestServiceBatchDeleteMemories(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID}
+
+	// Save 5 memories.
+	for i := 0; i < 5; i++ {
+		require.NoError(t, svc.SaveMemory(ctx, &memory.Memory{
+			Type:       "fact",
+			Content:    fmt.Sprintf("batch memory %d", i),
+			Confidence: 0.8,
+			Scope:      scope,
+		}))
+	}
+
+	// BatchDelete with limit 3 should delete 3.
+	n, err := svc.BatchDeleteMemories(ctx, scope, 3)
+	require.NoError(t, err)
+	assert.Equal(t, 3, n)
+
+	// 2 remain.
+	remaining, err := svc.ListMemories(ctx, scope, memory.ListOptions{Limit: 10})
+	require.NoError(t, err)
+	assert.Len(t, remaining, 2)
+}
+
+func TestServiceBatchDeleteMemories_Empty(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID}
+
+	// BatchDelete on empty store returns 0.
+	n, err := svc.BatchDeleteMemories(ctx, scope, 500)
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+}
+
+func TestServiceBatchDeleteMemories_MissingWorkspace(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.BatchDeleteMemories(ctx, map[string]string{}, 500)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "workspace_id")
+}

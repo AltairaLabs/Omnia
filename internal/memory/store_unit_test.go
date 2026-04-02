@@ -241,3 +241,34 @@ func TestBuildDeleteAllQuery_WithUserID(t *testing.T) {
 	assert.Contains(t, sql, "virtual_user_id=$2")
 	assert.Len(t, qb.Args(), 2)
 }
+
+func TestBuildBatchDeleteQuery_Basic(t *testing.T) {
+	scope := map[string]string{ScopeWorkspaceID: "ws-uuid"}
+	sql, qb := buildBatchDeleteQuery(scope, 500)
+
+	assert.Contains(t, sql, "DELETE FROM memory_entities WHERE id IN")
+	assert.Contains(t, sql, "SELECT id FROM memory_entities WHERE 1=1")
+	assert.Contains(t, sql, "workspace_id=$1")
+	assert.Contains(t, sql, "LIMIT")
+	// workspace_id + limit = 2 args
+	assert.Len(t, qb.Args(), 2)
+	assert.Equal(t, 500, qb.Args()[1])
+}
+
+func TestBuildBatchDeleteQuery_WithUserID(t *testing.T) {
+	scope := map[string]string{ScopeWorkspaceID: "ws-uuid", ScopeUserID: "u1"}
+	sql, qb := buildBatchDeleteQuery(scope, 100)
+
+	assert.Contains(t, sql, "virtual_user_id=$2")
+	assert.Contains(t, sql, "LIMIT")
+	// workspace_id, virtual_user_id, limit = 3 args
+	assert.Len(t, qb.Args(), 3)
+	assert.Equal(t, 100, qb.Args()[2])
+}
+
+func TestBatchDelete_MissingWorkspace(t *testing.T) {
+	store := &PostgresMemoryStore{} // nil pool — validation fails before use
+	_, err := store.BatchDelete(context.Background(), map[string]string{}, 500)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "workspace_id")
+}
