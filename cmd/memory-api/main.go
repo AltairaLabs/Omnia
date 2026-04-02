@@ -43,6 +43,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
+	eeaudit "github.com/altairalabs/omnia/ee/pkg/audit"
+	eemetrics "github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
 	"github.com/altairalabs/omnia/ee/pkg/redaction"
 	"github.com/altairalabs/omnia/internal/memory"
@@ -53,6 +55,33 @@ import (
 	"github.com/altairalabs/omnia/pkg/logctx"
 	"github.com/altairalabs/omnia/pkg/logging"
 )
+
+// auditLoggerAdapter adapts ee/pkg/audit.Logger to memoryapi.MemoryAuditLogger.
+// It converts MemoryAuditEntry fields into the session/api.AuditEntry shape,
+// placing memory-specific fields (MemoryID, Kind) in Metadata.
+type auditLoggerAdapter struct {
+	inner *eeaudit.Logger
+}
+
+func (a *auditLoggerAdapter) LogEvent(ctx context.Context, entry *memoryapi.MemoryAuditEntry) {
+	meta := entry.Metadata
+	if meta == nil {
+		meta = make(map[string]string)
+	}
+	if entry.MemoryID != "" {
+		meta["memoryId"] = entry.MemoryID
+	}
+	if entry.Kind != "" {
+		meta["kind"] = entry.Kind
+	}
+	a.inner.LogEvent(ctx, &sessionapi.AuditEntry{
+		EventType: entry.EventType,
+		Workspace: entry.WorkspaceID,
+		IPAddress: entry.IPAddress,
+		UserAgent: entry.UserAgent,
+		Metadata:  meta,
+	})
+}
 
 // flags groups all CLI flags for the memory-api binary.
 type flags struct {
@@ -302,12 +331,25 @@ func buildAPIMux(
 	if publisher != nil {
 		svc.SetEventPublisher(publisher)
 	}
+
+	// Enterprise audit logging.
+	var auditClose func() error
+	if enterprise {
+		auditMetrics := eemetrics.NewAuditMetrics()
+		auditLogger := eeaudit.NewLogger(pool, log, auditMetrics, eeaudit.LoggerConfig{})
+		auditClose = auditLogger.Close
+		svc.SetAuditLogger(&auditLoggerAdapter{inner: auditLogger})
+		log.Info("memory audit logging enabled")
+	}
+
 	handler := memoryapi.NewHandler(svc, log)
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
-	var apiHandler http.Handler = mux
+	// AuditMiddleware always applied — populates request context with IP/UA.
+	// The service only emits events when an audit logger is configured.
+	apiHandler := memoryapi.AuditMiddleware(mux)
 
 	// Enterprise privacy middleware (opt-out + PII redaction).
 	if enterprise {
@@ -324,7 +366,13 @@ func buildAPIMux(
 			return r.URL.Path != "/healthz"
 		}),
 	)
-	return rlMiddleware(httpMetrics.MetricsMiddleware(traced)), rlStop
+	cleanup := func() {
+		rlStop()
+		if auditClose != nil {
+			_ = auditClose()
+		}
+	}
+	return rlMiddleware(httpMetrics.MetricsMiddleware(traced)), cleanup
 }
 
 // wrapPrivacyMiddleware creates and wires the enterprise privacy middleware.
