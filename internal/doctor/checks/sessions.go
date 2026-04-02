@@ -95,94 +95,81 @@ func (s *SessionChecker) checkDocs(ctx context.Context) doctor.TestResult {
 	return doctor.TestResult{Status: doctor.StatusPass, Detail: "docs endpoint responding"}
 }
 
-// checkSessionExists verifies at least one session exists for the configured namespace.
-func (s *SessionChecker) checkSessionExists(ctx context.Context) doctor.TestResult {
-	path := fmt.Sprintf("%s?namespace=%s&limit=1", sessionAPIPathSessions, s.namespace)
+// sessionListResult holds the common response shape for session list/search endpoints.
+type sessionListResult struct {
+	Sessions []struct {
+		ID string `json:"id"`
+	} `json:"sessions"`
+	Total int64 `json:"total"`
+}
+
+// fetchSessionList performs a GET against a session list/search path and returns parsed results.
+func (s *SessionChecker) fetchSessionList(ctx context.Context, path, label string) (*sessionListResult, *doctor.TestResult) {
 	resp, err := s.sessionHTTPGet(ctx, path)
 	if err != nil {
-		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "GET sessions failed"}
+		r := doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: fmt.Sprintf("GET %s failed", label)}
+		return nil, &r
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Detail: fmt.Sprintf("GET sessions returned HTTP %d", resp.StatusCode),
-		}
+		r := doctor.TestResult{Status: doctor.StatusFail, Detail: fmt.Sprintf("GET %s returned HTTP %d", label, resp.StatusCode)}
+		return nil, &r
 	}
 
-	var result struct {
-		Sessions []struct {
-			ID string `json:"id"`
-		} `json:"sessions"`
-		Total int64 `json:"total"`
-	}
+	var result sessionListResult
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "decoding sessions response"}
+		r := doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: fmt.Sprintf("decoding %s response", label)}
+		return nil, &r
+	}
+	return &result, nil
+}
+
+// sessionCount returns the best available count from a session list result.
+func (r *sessionListResult) sessionCount() int {
+	if r.Total > 0 {
+		return int(r.Total)
+	}
+	return len(r.Sessions)
+}
+
+// checkSessionExists verifies at least one session exists for the configured namespace.
+func (s *SessionChecker) checkSessionExists(ctx context.Context) doctor.TestResult {
+	path := fmt.Sprintf("%s?namespace=%s&limit=1", sessionAPIPathSessions, s.namespace)
+	result, fail := s.fetchSessionList(ctx, path, "sessions")
+	if fail != nil {
+		return *fail
 	}
 
 	if len(result.Sessions) == 0 {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Detail: "no sessions found in namespace",
-		}
+		return doctor.TestResult{Status: doctor.StatusFail, Detail: "no sessions found in namespace"}
 	}
 
-	// Store the first session ID so downstream checks (messages, provider-calls) can use it.
 	if result.Sessions[0].ID != "" {
 		s.lastSessionID = result.Sessions[0].ID
 	}
 
-	count := len(result.Sessions)
-	if result.Total > 0 {
-		count = int(result.Total)
-	}
 	return doctor.TestResult{
 		Status: doctor.StatusPass,
-		Detail: fmt.Sprintf("%d session(s) found", count),
+		Detail: fmt.Sprintf("%d session(s) found", result.sessionCount()),
 	}
 }
 
 // checkSessionSearch verifies the session search endpoint returns results for a known greeting.
 func (s *SessionChecker) checkSessionSearch(ctx context.Context) doctor.TestResult {
 	path := fmt.Sprintf("/api/v1/sessions/search?namespace=%s&q=Hello", s.namespace)
-	resp, err := s.sessionHTTPGet(ctx, path)
-	if err != nil {
-		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "GET search failed"}
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode != http.StatusOK {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Detail: fmt.Sprintf("GET search returned HTTP %d", resp.StatusCode),
-		}
-	}
-
-	var result struct {
-		Sessions []struct {
-			ID string `json:"id"`
-		} `json:"sessions"`
-		Total int64 `json:"total"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "decoding search response"}
+	result, fail := s.fetchSessionList(ctx, path, "search")
+	if fail != nil {
+		return *fail
 	}
 
 	if len(result.Sessions) == 0 {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Detail: "search returned no results for 'Hello'",
-		}
+		return doctor.TestResult{Status: doctor.StatusFail, Detail: "search returned no results for 'Hello'"}
 	}
 
-	count := len(result.Sessions)
-	if result.Total > 0 {
-		count = int(result.Total)
-	}
 	return doctor.TestResult{
 		Status: doctor.StatusPass,
-		Detail: fmt.Sprintf("search found %d session(s) matching 'Hello'", count),
+		Detail: fmt.Sprintf("search found %d session(s) matching 'Hello'", result.sessionCount()),
 	}
 }
 
