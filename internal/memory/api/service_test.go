@@ -438,3 +438,263 @@ func TestMemoryService_SaveWithExplicitExpiry(t *testing.T) {
 	assert.True(t, mem.ExpiresAt.Equal(explicit),
 		"explicit ExpiresAt should not be overridden by DefaultTTL")
 }
+
+func TestServiceBatchDeleteMemories(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID}
+
+	// Save 5 memories.
+	for i := 0; i < 5; i++ {
+		require.NoError(t, svc.SaveMemory(ctx, &memory.Memory{
+			Type:       "fact",
+			Content:    fmt.Sprintf("batch memory %d", i),
+			Confidence: 0.8,
+			Scope:      scope,
+		}))
+	}
+
+	// BatchDelete with limit 3 should delete 3.
+	n, err := svc.BatchDeleteMemories(ctx, scope, 3)
+	require.NoError(t, err)
+	assert.Equal(t, 3, n)
+
+	// 2 remain.
+	remaining, err := svc.ListMemories(ctx, scope, memory.ListOptions{Limit: 10})
+	require.NoError(t, err)
+	assert.Len(t, remaining, 2)
+}
+
+func TestServiceBatchDeleteMemories_Empty(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID}
+
+	// BatchDelete on empty store returns 0.
+	n, err := svc.BatchDeleteMemories(ctx, scope, 500)
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+}
+
+func TestServiceBatchDeleteMemories_MissingWorkspace(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.BatchDeleteMemories(ctx, map[string]string{}, 500)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "workspace_id")
+}
+
+// --- Audit logger tests ---
+
+// mockAuditLogger records MemoryAuditEntry values for assertion.
+type mockAuditLogger struct {
+	entries chan *MemoryAuditEntry
+}
+
+func newMockAuditLogger() *mockAuditLogger {
+	return &mockAuditLogger{entries: make(chan *MemoryAuditEntry, 16)}
+}
+
+func (m *mockAuditLogger) LogEvent(_ context.Context, entry *MemoryAuditEntry) {
+	m.entries <- entry
+}
+
+// receiveEntry waits up to 5 seconds for an audit entry from the logger.
+func (m *mockAuditLogger) receiveEntry(t *testing.T) *MemoryAuditEntry {
+	t.Helper()
+	select {
+	case e := <-m.entries:
+		return e
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for audit entry")
+		return nil
+	}
+}
+
+func TestAuditLogger_SaveMemory_EmitsCreated(t *testing.T) {
+	svc := newTestService(t)
+	al := newMockAuditLogger()
+	svc.SetAuditLogger(al)
+
+	ctx := context.Background()
+	mem := &memory.Memory{
+		Type:       "fact",
+		Content:    "audit test",
+		Confidence: 0.9,
+		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID},
+	}
+	require.NoError(t, svc.SaveMemory(ctx, mem))
+
+	entry := al.receiveEntry(t)
+	assert.Equal(t, eventTypeMemoryCreated, entry.EventType)
+	assert.Equal(t, testWorkspaceID, entry.WorkspaceID)
+	assert.NotEmpty(t, entry.MemoryID)
+}
+
+func TestAuditLogger_SearchMemories_EmitsAccessed(t *testing.T) {
+	svc := newTestService(t)
+	al := newMockAuditLogger()
+	svc.SetAuditLogger(al)
+
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID}
+	ctx := context.Background()
+	require.NoError(t, svc.SaveMemory(ctx, &memory.Memory{
+		Type: "fact", Content: "searchable", Confidence: 0.8, Scope: scope,
+	}))
+	// Drain the created event.
+	al.receiveEntry(t)
+
+	_, err := svc.SearchMemories(ctx, scope, "search", memory.RetrieveOptions{Limit: 5})
+	require.NoError(t, err)
+
+	entry := al.receiveEntry(t)
+	assert.Equal(t, auditEventMemoryAccessed, entry.EventType)
+	assert.Equal(t, "search", entry.Metadata["operation"])
+}
+
+func TestAuditLogger_ListMemories_EmitsAccessed(t *testing.T) {
+	svc := newTestService(t)
+	al := newMockAuditLogger()
+	svc.SetAuditLogger(al)
+
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID}
+	ctx := context.Background()
+
+	_, err := svc.ListMemories(ctx, scope, memory.ListOptions{Limit: 5})
+	require.NoError(t, err)
+
+	entry := al.receiveEntry(t)
+	assert.Equal(t, auditEventMemoryAccessed, entry.EventType)
+	assert.Equal(t, "list", entry.Metadata["operation"])
+}
+
+func TestAuditLogger_DeleteMemory_EmitsDeleted(t *testing.T) {
+	svc := newTestService(t)
+	al := newMockAuditLogger()
+	svc.SetAuditLogger(al)
+
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID}
+	ctx := context.Background()
+
+	mem := &memory.Memory{
+		Type: "fact", Content: "to delete", Confidence: 0.8, Scope: scope,
+	}
+	require.NoError(t, svc.SaveMemory(ctx, mem))
+	al.receiveEntry(t) // drain created event
+
+	require.NoError(t, svc.DeleteMemory(ctx, scope, mem.ID))
+
+	entry := al.receiveEntry(t)
+	assert.Equal(t, eventTypeMemoryDeleted, entry.EventType)
+	assert.Equal(t, mem.ID, entry.MemoryID)
+}
+
+func TestAuditLogger_DeleteAllMemories_EmitsDeleted(t *testing.T) {
+	svc := newTestService(t)
+	al := newMockAuditLogger()
+	svc.SetAuditLogger(al)
+
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID}
+	ctx := context.Background()
+
+	require.NoError(t, svc.DeleteAllMemories(ctx, scope))
+
+	entry := al.receiveEntry(t)
+	assert.Equal(t, eventTypeMemoryDeleted, entry.EventType)
+	assert.Equal(t, "delete_all", entry.Metadata["operation"])
+}
+
+func TestAuditLogger_BatchDeleteMemories_EmitsDeleted(t *testing.T) {
+	svc := newTestService(t)
+	al := newMockAuditLogger()
+	svc.SetAuditLogger(al)
+
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID}
+	ctx := context.Background()
+
+	// Save one memory so there is something to delete.
+	require.NoError(t, svc.SaveMemory(ctx, &memory.Memory{
+		Type: "fact", Content: "batch", Confidence: 0.8, Scope: scope,
+	}))
+	al.receiveEntry(t) // drain created event
+
+	n, err := svc.BatchDeleteMemories(ctx, scope, 10)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	entry := al.receiveEntry(t)
+	assert.Equal(t, eventTypeMemoryDeleted, entry.EventType)
+	assert.Equal(t, "batch_delete", entry.Metadata["operation"])
+}
+
+func TestAuditLogger_BatchDeleteMemories_NoEmitWhenEmpty(t *testing.T) {
+	svc := newTestService(t)
+	al := newMockAuditLogger()
+	svc.SetAuditLogger(al)
+
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID}
+	ctx := context.Background()
+
+	n, err := svc.BatchDeleteMemories(ctx, scope, 10)
+	require.NoError(t, err)
+	require.Equal(t, 0, n)
+
+	// No audit event should be emitted for empty batch delete.
+	select {
+	case entry := <-al.entries:
+		t.Fatalf("unexpected audit entry for zero-row batch delete: %+v", entry)
+	case <-time.After(100 * time.Millisecond):
+		// Expected — no entry emitted.
+	}
+}
+
+func TestAuditLogger_ExportMemories_EmitsExported(t *testing.T) {
+	svc := newTestService(t)
+	al := newMockAuditLogger()
+	svc.SetAuditLogger(al)
+
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID}
+	ctx := context.Background()
+
+	_, err := svc.ExportMemories(ctx, scope)
+	require.NoError(t, err)
+
+	entry := al.receiveEntry(t)
+	assert.Equal(t, auditEventMemoryExported, entry.EventType)
+}
+
+func TestAuditLogger_NilLogger_NoEvents(t *testing.T) {
+	// No audit logger set — operations must succeed without panicking.
+	svc := newTestService(t)
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID}
+	ctx := context.Background()
+
+	mem := &memory.Memory{Type: "fact", Content: "nil logger", Confidence: 0.7, Scope: scope}
+	require.NoError(t, svc.SaveMemory(ctx, mem))
+
+	_, err := svc.ListMemories(ctx, scope, memory.ListOptions{Limit: 5})
+	require.NoError(t, err)
+
+	_, err = svc.ExportMemories(ctx, scope)
+	require.NoError(t, err)
+}
+
+func TestAuditLogger_RequestMetaInContext_PropagatesIPAndUA(t *testing.T) {
+	svc := newTestService(t)
+	al := newMockAuditLogger()
+	svc.SetAuditLogger(al)
+
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID}
+	ctx := withRequestMeta(context.Background(), RequestMeta{
+		IPAddress: "10.1.2.3",
+		UserAgent: "omnia-test/1.0",
+	})
+
+	_, err := svc.ListMemories(ctx, scope, memory.ListOptions{Limit: 5})
+	require.NoError(t, err)
+
+	entry := al.receiveEntry(t)
+	assert.Equal(t, "10.1.2.3", entry.IPAddress)
+	assert.Equal(t, "omnia-test/1.0", entry.UserAgent)
+}

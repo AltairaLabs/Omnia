@@ -695,3 +695,60 @@ func TestPostgresMemoryStore_ExportAll_ExcludesForgotten(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, results, 2, "ExportAll should exclude soft-deleted memories")
 }
+
+func TestPostgresMemoryStore_BatchDelete(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	// Save 5 memories.
+	for i := range 5 {
+		mem := &Memory{
+			Type:       "fact",
+			Content:    fmt.Sprintf("batch fact %d", i),
+			Confidence: 0.9,
+			Scope:      scope,
+		}
+		require.NoError(t, store.Save(ctx, mem))
+	}
+
+	// BatchDelete with limit=3 should delete 3 rows.
+	n, err := store.BatchDelete(ctx, scope, 3)
+	require.NoError(t, err)
+	assert.Equal(t, 3, n)
+
+	// 2 should remain.
+	results, err := store.List(ctx, scope, ListOptions{})
+	require.NoError(t, err)
+	assert.Len(t, results, 2)
+
+	// Delete the rest.
+	n, err = store.BatchDelete(ctx, scope, 10)
+	require.NoError(t, err)
+	assert.Equal(t, 2, n)
+
+	// All gone.
+	results, err = store.List(ctx, scope, ListOptions{})
+	require.NoError(t, err)
+	assert.Empty(t, results)
+}
+
+func TestPostgresMemoryStore_BatchDelete_NoRows(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	// BatchDelete on empty store returns 0 with no error.
+	n, err := store.BatchDelete(ctx, scope, 500)
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+}
+
+func TestPostgresMemoryStore_BatchDelete_MissingWorkspace(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	_, err := store.BatchDelete(ctx, map[string]string{}, 500)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "workspace_id")
+}

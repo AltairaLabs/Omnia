@@ -286,6 +286,39 @@ func buildDeleteAllQuery(scope map[string]string) (string, *pgutil.QueryBuilder)
 	return sql, &qb
 }
 
+// BatchDelete hard-deletes up to limit entities (and cascading observations/relations) for the scope.
+// It returns the count of deleted rows. Use limit=500 in a loop until count=0 for DSAR cascades.
+func (s *PostgresMemoryStore) BatchDelete(ctx context.Context, scope map[string]string, limit int) (int, error) {
+	if scope[ScopeWorkspaceID] == "" {
+		return 0, errors.New(errWorkspaceRequired)
+	}
+
+	sql, qb := buildBatchDeleteQuery(scope, limit)
+
+	tag, err := s.pool.Exec(ctx, sql, qb.Args()...)
+	if err != nil {
+		return 0, fmt.Errorf("memory: batch delete: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// buildBatchDeleteQuery constructs the SQL and arguments for a BatchDelete call.
+func buildBatchDeleteQuery(scope map[string]string, limit int) (string, *pgutil.QueryBuilder) {
+	var qb pgutil.QueryBuilder
+	qb.Add(colWorkspaceID, scope[ScopeWorkspaceID])
+
+	if uid := scope[ScopeUserID]; uid != "" {
+		qb.Add(colVirtualUserID, uid)
+	}
+
+	subquery := "SELECT id FROM memory_entities WHERE 1=1" + qb.Where()
+	subquery = qb.AppendPagination(subquery, limit, 0)
+
+	sql := "DELETE FROM memory_entities WHERE id IN (" + subquery + ")"
+
+	return sql, &qb
+}
+
 // exportAllLimit is the maximum number of memories returned by ExportAll (DSAR cap).
 const exportAllLimit = 10000
 

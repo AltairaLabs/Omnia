@@ -102,6 +102,20 @@ func (m *cacheTestStore) ExportAll(_ context.Context, _ map[string]string) ([]*M
 	return []*Memory{}, nil
 }
 
+func (m *cacheTestStore) BatchDelete(_ context.Context, _ map[string]string, limit int) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.deleteAllErr != nil {
+		return 0, m.deleteAllErr
+	}
+	n := len(m.memories)
+	if limit > 0 && limit < n {
+		n = limit
+	}
+	m.memories = m.memories[n:]
+	return n, nil
+}
+
 // cacheTestScope returns a minimal scope map for CachedStore tests.
 func cacheTestScope() map[string]string {
 	return map[string]string{ScopeWorkspaceID: "ws-1", ScopeUserID: "user-1"}
@@ -440,6 +454,79 @@ func TestCachedStore_EmptyCache_DoesNotMaskInnerData(t *testing.T) {
 	}
 	if len(mems) != 1 {
 		t.Fatalf("expected 1 memory after version bump, got %d (empty cache was incorrectly trusted)", len(mems))
+	}
+}
+
+// --- BatchDelete tests --------------------------------------------------------
+
+func TestCachedStore_BatchDelete_InvalidatesCache(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{
+		{ID: "m1", Content: "one"},
+		{ID: "m2", Content: "two"},
+		{ID: "m3", Content: "three"},
+	}}
+	cs, _ := newTestCache(t, inner)
+	ctx := context.Background()
+	scope := cacheTestScope()
+
+	if _, err := cs.List(ctx, scope, ListOptions{}); err != nil {
+		t.Fatalf("prime: %v", err)
+	}
+	listBefore := inner.listCalls
+
+	n, err := cs.BatchDelete(ctx, scope, 2)
+	if err != nil {
+		t.Fatalf("batch delete: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("expected 2 deleted, got %d", n)
+	}
+
+	if _, err := cs.List(ctx, scope, ListOptions{}); err != nil {
+		t.Fatalf("list after batch delete: %v", err)
+	}
+	if inner.listCalls != listBefore+1 {
+		t.Fatalf("expected inner called again after BatchDelete; calls=%d", inner.listCalls)
+	}
+}
+
+func TestCachedStore_BatchDelete_ZeroRows_NoBump(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{}}
+	cs, _ := newTestCache(t, inner)
+	ctx := context.Background()
+	scope := cacheTestScope()
+
+	// Prime cache.
+	if _, err := cs.List(ctx, scope, ListOptions{}); err != nil {
+		t.Fatalf("prime: %v", err)
+	}
+	listBefore := inner.listCalls
+
+	// BatchDelete with nothing to delete returns 0 — no version bump needed.
+	n, err := cs.BatchDelete(ctx, scope, 500)
+	if err != nil {
+		t.Fatalf("batch delete: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("expected 0 deleted, got %d", n)
+	}
+
+	// Cache should NOT be invalidated (version not bumped).
+	if _, err := cs.List(ctx, scope, ListOptions{}); err != nil {
+		t.Fatalf("list after no-op batch delete: %v", err)
+	}
+	if inner.listCalls != listBefore {
+		t.Fatalf("expected inner NOT called again (no invalidation); calls=%d", inner.listCalls)
+	}
+}
+
+func TestCachedStore_BatchDelete_InnerError(t *testing.T) {
+	inner := &cacheTestStore{deleteAllErr: errTest}
+	cs, _ := newTestCache(t, inner)
+
+	_, err := cs.BatchDelete(context.Background(), cacheTestScope(), 500)
+	if err == nil {
+		t.Fatal("expected error from inner batch delete, got nil")
 	}
 }
 

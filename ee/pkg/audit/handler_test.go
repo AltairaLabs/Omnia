@@ -117,6 +117,41 @@ func TestRegisterRoutes(t *testing.T) {
 	h.RegisterRoutes(mux)
 }
 
+func TestRegisterMemoryRoutes(t *testing.T) {
+	h := NewHandler(nil, logr.Discard())
+	mux := http.NewServeMux()
+	// Should not panic.
+	h.RegisterMemoryRoutes(mux)
+}
+
+func TestRegisterMemoryRoutes_Success(t *testing.T) {
+	mq := &mockQuerier{
+		result: &QueryResult{
+			Entries: []*Entry{{ID: 2, EventType: "memory_stored"}},
+			Total:   1,
+			HasMore: false,
+		},
+	}
+	h := &Handler{logger: mq, log: logr.Discard()}
+
+	mux := http.NewServeMux()
+	h.RegisterMemoryRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/audit/memories?workspace=ws1", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+
+	var result QueryResult
+	err := json.NewDecoder(rec.Body).Decode(&result)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), result.Total)
+	assert.Len(t, result.Entries, 1)
+	assert.Equal(t, "ws1", mq.opts.Workspace)
+}
+
 func TestHandleQuery_Success(t *testing.T) {
 	mq := &mockQuerier{
 		result: &QueryResult{

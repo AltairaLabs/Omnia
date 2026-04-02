@@ -43,6 +43,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/audit/sessions", h.handleQuery)
 }
 
+// RegisterMemoryRoutes registers the memory audit query route on the given mux.
+func (h *Handler) RegisterMemoryRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/v1/audit/memories", h.handleQuery)
+}
+
 // handleQuery returns paginated audit log entries matching the query filters.
 func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()

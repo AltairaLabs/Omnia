@@ -29,8 +29,15 @@ import (
 	"github.com/altairalabs/omnia/internal/memory"
 )
 
-// eventTypeMemoryCreated is the event type published when a memory is saved.
-const eventTypeMemoryCreated = "memory_created"
+// Audit event type constants for memory operations.
+const (
+	// eventTypeMemoryCreated is the event type published when a memory is saved.
+	eventTypeMemoryCreated = "memory_created"
+	// auditEventMemoryAccessed is the event type emitted when memories are read.
+	auditEventMemoryAccessed = "memory_accessed"
+	// auditEventMemoryExported is the event type emitted on DSAR export.
+	auditEventMemoryExported = "memory_exported"
+)
 
 // eventTypeMemoryDeleted is the event type published when a memory is deleted.
 const eventTypeMemoryDeleted = "memory_deleted"
@@ -53,11 +60,32 @@ type MemoryServiceConfig struct {
 	Purpose string
 }
 
+// MemoryAuditLogger is the audit logging interface for memory operations.
+// Implemented in ee/pkg/audit for enterprise deployments.
+type MemoryAuditLogger interface {
+	// LogEvent records an audit entry. Implementations must be non-blocking —
+	// entries may be dropped if the internal buffer is full.
+	LogEvent(ctx context.Context, entry *MemoryAuditEntry)
+}
+
+// MemoryAuditEntry represents a single audit log entry for a memory operation.
+type MemoryAuditEntry struct {
+	EventType   string
+	MemoryID    string
+	WorkspaceID string
+	UserID      string
+	Kind        string
+	IPAddress   string
+	UserAgent   string
+	Metadata    map[string]string
+}
+
 // MemoryService wraps the memory store with business logic for the HTTP layer.
 type MemoryService struct {
 	store          memory.Store
 	embeddingSvc   *memory.EmbeddingService // nil if embeddings not configured
 	eventPublisher MemoryEventPublisher     // nil if event publishing not configured
+	auditLogger    MemoryAuditLogger        // nil if audit logging not configured
 	config         MemoryServiceConfig
 	log            logr.Logger
 }
@@ -77,6 +105,27 @@ func NewMemoryService(store memory.Store, embeddingSvc *memory.EmbeddingService,
 // It may be called at most once before the service begins handling requests.
 func (s *MemoryService) SetEventPublisher(p MemoryEventPublisher) {
 	s.eventPublisher = p
+}
+
+// SetAuditLogger configures the audit logger for the service.
+// It may be called at most once before the service begins handling requests.
+func (s *MemoryService) SetAuditLogger(l MemoryAuditLogger) {
+	s.auditLogger = l
+}
+
+// emitAuditEvent fires an audit log entry asynchronously. If no audit logger is
+// configured the call is a no-op. Request metadata (IP, User-Agent) is extracted
+// from the context when present.
+func (s *MemoryService) emitAuditEvent(ctx context.Context, entry *MemoryAuditEntry) {
+	if s.auditLogger == nil {
+		return
+	}
+	if meta, ok := requestMetaFromCtx(ctx); ok {
+		entry.IPAddress = meta.IPAddress
+		entry.UserAgent = meta.UserAgent
+	}
+	logger := s.auditLogger
+	go logger.LogEvent(context.Background(), entry)
 }
 
 // SaveMemory persists a memory entry and, if an embedding service is configured,
@@ -113,17 +162,44 @@ func (s *MemoryService) SaveMemory(ctx context.Context, mem *memory.Memory) erro
 			}
 		}()
 	}
+	s.emitAuditEvent(ctx, &MemoryAuditEntry{
+		EventType:   eventTypeMemoryCreated,
+		MemoryID:    mem.ID,
+		WorkspaceID: mem.Scope[memory.ScopeWorkspaceID],
+		UserID:      mem.Scope[memory.ScopeUserID],
+		Kind:        mem.Type,
+	})
 	return nil
 }
 
 // SearchMemories retrieves memories matching a query and scope.
 func (s *MemoryService) SearchMemories(ctx context.Context, scope map[string]string, query string, opts memory.RetrieveOptions) ([]*memory.Memory, error) {
-	return s.store.Retrieve(ctx, scope, query, opts)
+	results, err := s.store.Retrieve(ctx, scope, query, opts)
+	if err != nil {
+		return nil, err
+	}
+	s.emitAuditEvent(ctx, &MemoryAuditEntry{
+		EventType:   auditEventMemoryAccessed,
+		WorkspaceID: scope[memory.ScopeWorkspaceID],
+		UserID:      scope[memory.ScopeUserID],
+		Metadata:    map[string]string{"operation": "search"},
+	})
+	return results, nil
 }
 
 // ListMemories returns memories for a given scope with pagination.
 func (s *MemoryService) ListMemories(ctx context.Context, scope map[string]string, opts memory.ListOptions) ([]*memory.Memory, error) {
-	return s.store.List(ctx, scope, opts)
+	results, err := s.store.List(ctx, scope, opts)
+	if err != nil {
+		return nil, err
+	}
+	s.emitAuditEvent(ctx, &MemoryAuditEntry{
+		EventType:   auditEventMemoryAccessed,
+		WorkspaceID: scope[memory.ScopeWorkspaceID],
+		UserID:      scope[memory.ScopeUserID],
+		Metadata:    map[string]string{"operation": "list"},
+	})
+	return results, nil
 }
 
 // DeleteMemory performs a soft delete (forget) of a single memory.
@@ -145,12 +221,58 @@ func (s *MemoryService) DeleteMemory(ctx context.Context, scope map[string]strin
 			}
 		}()
 	}
+	s.emitAuditEvent(ctx, &MemoryAuditEntry{
+		EventType:   eventTypeMemoryDeleted,
+		MemoryID:    memoryID,
+		WorkspaceID: scope[memory.ScopeWorkspaceID],
+		UserID:      scope[memory.ScopeUserID],
+	})
 	return nil
 }
 
 // DeleteAllMemories hard-deletes all memories for the given scope (DSAR).
 func (s *MemoryService) DeleteAllMemories(ctx context.Context, scope map[string]string) error {
-	return s.store.DeleteAll(ctx, scope)
+	if err := s.store.DeleteAll(ctx, scope); err != nil {
+		return err
+	}
+	s.emitAuditEvent(ctx, &MemoryAuditEntry{
+		EventType:   eventTypeMemoryDeleted,
+		WorkspaceID: scope[memory.ScopeWorkspaceID],
+		UserID:      scope[memory.ScopeUserID],
+		Metadata:    map[string]string{"operation": "delete_all"},
+	})
+	return nil
+}
+
+// BatchDeleteMemories hard-deletes up to limit memories for the given scope (paginated DSAR).
+// Returns the count of deleted rows so the caller can loop until 0.
+func (s *MemoryService) BatchDeleteMemories(ctx context.Context, scope map[string]string, limit int) (int, error) {
+	n, err := s.store.BatchDelete(ctx, scope, limit)
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 && s.eventPublisher != nil {
+		event := MemoryEvent{
+			EventType:   eventTypeMemoryDeleted,
+			WorkspaceID: scope[memory.ScopeWorkspaceID],
+			UserID:      scope[memory.ScopeUserID],
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		}
+		go func() {
+			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
+				s.log.Error(err, "memory batch delete event publish failed", "eventType", event.EventType, "count", n)
+			}
+		}()
+	}
+	if n > 0 {
+		s.emitAuditEvent(ctx, &MemoryAuditEntry{
+			EventType:   eventTypeMemoryDeleted,
+			WorkspaceID: scope[memory.ScopeWorkspaceID],
+			UserID:      scope[memory.ScopeUserID],
+			Metadata:    map[string]string{"operation": "batch_delete"},
+		})
+	}
+	return n, nil
 }
 
 // ExportMemories returns all memories for a scope without pagination (DSAR export).
@@ -160,5 +282,10 @@ func (s *MemoryService) ExportMemories(ctx context.Context, scope map[string]str
 		return nil, err
 	}
 	s.log.V(1).Info("memories exported", "workspace", scope[memory.ScopeWorkspaceID], "count", len(memories))
+	s.emitAuditEvent(ctx, &MemoryAuditEntry{
+		EventType:   auditEventMemoryExported,
+		WorkspaceID: scope[memory.ScopeWorkspaceID],
+		UserID:      scope[memory.ScopeUserID],
+	})
 	return memories, nil
 }

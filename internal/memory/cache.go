@@ -138,6 +138,18 @@ func (c *CachedStore) ExportAll(ctx context.Context, scope map[string]string) ([
 	return c.inner.ExportAll(ctx, scope)
 }
 
+// BatchDelete delegates to the inner store then invalidates the cache for the scope.
+func (c *CachedStore) BatchDelete(ctx context.Context, scope map[string]string, limit int) (int, error) {
+	n, err := c.inner.BatchDelete(ctx, scope, limit)
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		c.bumpVersion(ctx, scope)
+	}
+	return n, nil
+}
+
 // --- cache helpers -------------------------------------------------------------
 
 // versionKey returns the Redis key that tracks the invalidation version for a scope.

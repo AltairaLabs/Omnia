@@ -37,7 +37,16 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
+	eeaudit "github.com/altairalabs/omnia/ee/pkg/audit"
+	eemetrics "github.com/altairalabs/omnia/ee/pkg/metrics"
+	"github.com/altairalabs/omnia/ee/pkg/privacy"
+	"github.com/altairalabs/omnia/ee/pkg/redaction"
 	"github.com/altairalabs/omnia/internal/memory"
 	memoryapi "github.com/altairalabs/omnia/internal/memory/api"
 	sessionapi "github.com/altairalabs/omnia/internal/session/api"
@@ -46,6 +55,33 @@ import (
 	"github.com/altairalabs/omnia/pkg/logctx"
 	"github.com/altairalabs/omnia/pkg/logging"
 )
+
+// auditLoggerAdapter adapts ee/pkg/audit.Logger to memoryapi.MemoryAuditLogger.
+// It converts MemoryAuditEntry fields into the session/api.AuditEntry shape,
+// placing memory-specific fields (MemoryID, Kind) in Metadata.
+type auditLoggerAdapter struct {
+	inner *eeaudit.Logger
+}
+
+func (a *auditLoggerAdapter) LogEvent(ctx context.Context, entry *memoryapi.MemoryAuditEntry) {
+	meta := entry.Metadata
+	if meta == nil {
+		meta = make(map[string]string)
+	}
+	if entry.MemoryID != "" {
+		meta["memoryId"] = entry.MemoryID
+	}
+	if entry.Kind != "" {
+		meta["kind"] = entry.Kind
+	}
+	a.inner.LogEvent(ctx, &sessionapi.AuditEntry{
+		EventType: entry.EventType,
+		Workspace: entry.WorkspaceID,
+		IPAddress: entry.IPAddress,
+		UserAgent: entry.UserAgent,
+		Metadata:  meta,
+	})
+}
 
 // flags groups all CLI flags for the memory-api binary.
 type flags struct {
@@ -244,7 +280,7 @@ func run() error {
 	}
 
 	// --- Build API mux ---
-	apiMux, cleanup := buildAPIMux(store, embeddingSvc, svcCfg, eventPublisher, log)
+	apiMux, cleanup := buildAPIMux(store, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, log)
 	defer cleanup()
 
 	// --- Servers ---
@@ -278,21 +314,52 @@ func run() error {
 }
 
 // buildAPIMux assembles the HTTP handler with all memory-api routes, wrapped
-// with rate limiting, metrics, and tracing middleware. Returns the handler and
-// a cleanup function.
-func buildAPIMux(store memory.Store, embeddingSvc *memory.EmbeddingService, cfg memoryapi.MemoryServiceConfig, publisher memoryapi.MemoryEventPublisher, log logr.Logger) (http.Handler, func()) {
+// with rate limiting, privacy (enterprise), metrics, and tracing middleware.
+// Returns the handler and a cleanup function.
+func buildAPIMux(
+	store memory.Store,
+	embeddingSvc *memory.EmbeddingService,
+	cfg memoryapi.MemoryServiceConfig,
+	publisher memoryapi.MemoryEventPublisher,
+	enterprise bool,
+	pool *pgxpool.Pool,
+	log logr.Logger,
+) (http.Handler, func()) {
 	httpMetrics := memoryapi.NewHTTPMetrics(nil)
 
 	svc := memoryapi.NewMemoryService(store, embeddingSvc, cfg, log)
 	if publisher != nil {
 		svc.SetEventPublisher(publisher)
 	}
+
+	// Enterprise audit logging.
+	var auditClose func() error
+	var auditHandler *eeaudit.Handler
+	if enterprise {
+		auditMetrics := eemetrics.NewAuditMetrics()
+		auditLogger := eeaudit.NewLogger(pool, log, auditMetrics, eeaudit.LoggerConfig{})
+		auditClose = auditLogger.Close
+		svc.SetAuditLogger(&auditLoggerAdapter{inner: auditLogger})
+		auditHandler = eeaudit.NewHandler(auditLogger, log)
+		log.Info("memory audit logging enabled")
+	}
+
 	handler := memoryapi.NewHandler(svc, log)
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
+	if auditHandler != nil {
+		auditHandler.RegisterMemoryRoutes(mux)
+	}
 
-	var apiHandler http.Handler = mux
+	// AuditMiddleware always applied — populates request context with IP/UA.
+	// The service only emits events when an audit logger is configured.
+	apiHandler := memoryapi.AuditMiddleware(mux)
+
+	// Enterprise privacy middleware (opt-out + PII redaction).
+	if enterprise {
+		apiHandler = wrapPrivacyMiddleware(apiHandler, pool, log)
+	}
 
 	// Rate limiting middleware (per-client-IP token bucket).
 	rlCfg := sessionapi.RateLimitConfigFromEnv()
@@ -304,7 +371,61 @@ func buildAPIMux(store memory.Store, embeddingSvc *memory.EmbeddingService, cfg 
 			return r.URL.Path != "/healthz"
 		}),
 	)
-	return rlMiddleware(httpMetrics.MetricsMiddleware(traced)), rlStop
+	cleanup := func() {
+		rlStop()
+		if auditClose != nil {
+			_ = auditClose()
+		}
+	}
+	return rlMiddleware(httpMetrics.MetricsMiddleware(traced)), cleanup
+}
+
+// wrapPrivacyMiddleware creates and wires the enterprise privacy middleware.
+// When the K8s API is unreachable (e.g., in tests), the middleware is skipped
+// and the original handler is returned unchanged.
+func wrapPrivacyMiddleware(next http.Handler, pool *pgxpool.Pool, log logr.Logger) http.Handler {
+	kubeConfig, err := rest.InClusterConfig()
+	if err != nil {
+		log.Info("memory privacy middleware skipped", "reason", "no in-cluster kubeconfig")
+		return next
+	}
+
+	scheme := runtime.NewScheme()
+	utilruntime.Must(eev1alpha1.AddToScheme(scheme))
+	k8sClient, err := client.New(kubeConfig, client.Options{Scheme: scheme})
+	if err != nil {
+		log.Error(err, "memory privacy middleware skipped", "reason", "k8s client creation failed")
+		return next
+	}
+
+	watcher := privacy.NewPolicyWatcher(k8sClient, log)
+
+	// Start the watcher asynchronously; it syncs the policy cache in the background.
+	go func() {
+		if startErr := watcher.Start(context.Background()); startErr != nil {
+			log.Error(startErr, "memory policy watcher start failed")
+		}
+	}()
+
+	prefStore := privacy.NewPreferencesStore(pool)
+	redactor := redaction.NewRedactor()
+
+	checkOptOut := memoryapi.OptOutChecker(func(ctx context.Context, userID, workspace string) bool {
+		return privacy.ShouldRemember(ctx, prefStore, userID, workspace, "")
+	})
+
+	contentRedactor := memoryapi.ContentRedactor(func(ctx context.Context, workspace, content string) (string, error) {
+		policy := watcher.GetEffectivePolicy(workspace, "")
+		if policy == nil || policy.Recording.PII == nil || !policy.Recording.PII.Redact {
+			return content, nil
+		}
+		redacted, _, err := redactor.Redact(ctx, content, policy.Recording.PII)
+		return redacted, err
+	})
+
+	mw := memoryapi.NewMemoryPrivacyMiddleware(checkOptOut, contentRedactor, log)
+	log.Info("memory privacy middleware enabled")
+	return mw.Wrap(next)
 }
 
 // traceLogMiddleware injects the OTel trace ID into the logging context.

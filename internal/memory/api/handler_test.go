@@ -38,14 +38,16 @@ import (
 // --- Mock store ---
 
 type mockStore struct {
-	memories     []*memory.Memory
-	saveErr      error
-	retErr       error
-	listErr      error
-	delErr       error
-	delAllErr    error
-	exportAllErr error
-	savedMem     *memory.Memory
+	memories       []*memory.Memory
+	saveErr        error
+	retErr         error
+	listErr        error
+	delErr         error
+	delAllErr      error
+	batchDeleteErr error
+	batchDeleteN   int
+	exportAllErr   error
+	savedMem       *memory.Memory
 }
 
 func (m *mockStore) Save(_ context.Context, mem *memory.Memory) error {
@@ -84,6 +86,13 @@ func (m *mockStore) ExportAll(_ context.Context, _ map[string]string) ([]*memory
 		return nil, m.exportAllErr
 	}
 	return m.memories, nil
+}
+
+func (m *mockStore) BatchDelete(_ context.Context, _ map[string]string, _ int) (int, error) {
+	if m.batchDeleteErr != nil {
+		return 0, m.batchDeleteErr
+	}
+	return m.batchDeleteN, nil
 }
 
 func newTestHandler(store memory.Store) *Handler {
@@ -511,6 +520,78 @@ func TestHandler_ExportMemories_StoreError(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+// --- BatchDeleteMemories tests ---
+
+func TestHandleBatchDeleteMemories_Success(t *testing.T) {
+	store := &mockStore{batchDeleteN: 3}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/memories/batch?workspace=ws1&limit=3", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var resp BatchDeleteResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, 3, resp.Deleted)
+}
+
+func TestHandleBatchDeleteMemories_ZeroRows(t *testing.T) {
+	store := &mockStore{batchDeleteN: 0}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/memories/batch?workspace=ws1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var resp BatchDeleteResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, 0, resp.Deleted)
+}
+
+func TestHandleBatchDeleteMemories_MissingWorkspace(t *testing.T) {
+	h := newTestHandler(&mockStore{})
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/memories/batch", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	var resp ErrorResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Contains(t, resp.Error, "workspace")
+}
+
+func TestHandleBatchDeleteMemories_StoreError(t *testing.T) {
+	store := &mockStore{batchDeleteErr: fmt.Errorf("db error")}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/memories/batch?workspace=ws1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+func TestHandleBatchDeleteMemories_LimitClamped(t *testing.T) {
+	// limit exceeding maxBatchDeleteLimit is clamped
+	store := &mockStore{batchDeleteN: 5}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(http.MethodDelete,
+		fmt.Sprintf("/api/v1/memories/batch?workspace=ws1&limit=%d", maxBatchDeleteLimit+999), nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
 }
 
 // fakeQuery implements the interface used by buildScope.

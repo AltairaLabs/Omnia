@@ -14,7 +14,9 @@ import (
 
 	"github.com/go-logr/logr"
 
+	"github.com/altairalabs/omnia/ee/pkg/audit"
 	"github.com/altairalabs/omnia/ee/pkg/redaction"
+	"github.com/altairalabs/omnia/internal/session/api"
 )
 
 // UserIDHeader is the HTTP header carrying the originating user's identity.
@@ -31,6 +33,7 @@ type PrivacyMiddleware struct {
 	sessionCache  *SessionMetadataCache
 	redactor      redaction.Redactor
 	prefStore     PreferencesStore
+	auditLogger   api.AuditLogger
 	log           logr.Logger
 }
 
@@ -51,11 +54,19 @@ func NewPrivacyMiddleware(
 	}
 }
 
+// SetAuditLogger configures an optional audit logger. When set, the middleware
+// emits session_accessed events for GET requests and session_created events
+// for write requests that are not blocked by opt-out or redaction failure.
+func (m *PrivacyMiddleware) SetAuditLogger(logger api.AuditLogger) {
+	m.auditLogger = logger
+}
+
 // Wrap returns an http.Handler that enforces privacy policy before delegating
 // to the next handler.
 func (m *PrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !isWriteMethod(r.Method) {
+			m.emitAccessEvent(r)
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -77,6 +88,7 @@ func (m *PrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 
 		policy := m.policyWatcher.GetEffectivePolicy(ns, agent)
 		if policy == nil {
+			m.emitWriteEvent(r, sessionID)
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -90,8 +102,41 @@ func (m *PrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 			return // 500 already sent
 		}
 
+		m.emitWriteEvent(r, sessionID)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// emitAccessEvent emits a session_accessed audit event for GET requests.
+// Only fires when the audit logger is set and the path contains a session ID.
+func (m *PrivacyMiddleware) emitAccessEvent(r *http.Request) {
+	if m.auditLogger == nil {
+		return
+	}
+	sessionID := extractSessionID(r.URL.Path)
+	if sessionID == "" {
+		return
+	}
+	ctx := r.Context()
+	entry := &api.AuditEntry{
+		EventType: audit.EventSessionAccessed,
+		SessionID: sessionID,
+	}
+	go m.auditLogger.LogEvent(ctx, entry)
+}
+
+// emitWriteEvent emits a session_created audit event for write requests.
+// Only fires when the audit logger is set.
+func (m *PrivacyMiddleware) emitWriteEvent(r *http.Request, sessionID string) {
+	if m.auditLogger == nil {
+		return
+	}
+	ctx := r.Context()
+	entry := &api.AuditEntry{
+		EventType: audit.EventSessionCreated,
+		SessionID: sessionID,
+	}
+	go m.auditLogger.LogEvent(ctx, entry)
 }
 
 // isWriteMethod returns true for HTTP methods that carry a request body.
