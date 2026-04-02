@@ -58,6 +58,7 @@ func (m *MemoryChecker) Checks() []doctor.Check {
 		checks = append(checks,
 			doctor.Check{Name: "MemoryToolsAvailable", Category: memoryCategory, Run: m.checkMemoryToolsAvailable},
 			doctor.Check{Name: "MemoryRecall", Category: memoryCategory, Run: m.checkMemoryRecall},
+			doctor.Check{Name: "MemoryPersistsAcrossSessions", Category: memoryCategory, Run: m.checkMemoryPersistsAcrossSessions},
 		)
 	}
 	return checks
@@ -201,6 +202,34 @@ func (m *MemoryChecker) checkExport(ctx context.Context) doctor.TestResult {
 	return doctor.TestResult{Status: doctor.StatusPass, Detail: fmt.Sprintf("export ready (%s)", cd)}
 }
 
+// chatWithAgent dials the facade, sends a message, waits for the response, and returns
+// the session ID, assembled response text, and any error as a TestResult.
+// The connection is opened and closed within the helper; the caller's ctx is not modified.
+func (m *MemoryChecker) chatWithAgent(ctx context.Context, message string) (sessionID, responseText string, fail *doctor.TestResult) {
+	chatCtx, cancel := context.WithTimeout(ctx, wsResponseTimeout)
+	defer cancel()
+
+	conn, sid, err := m.agentChecker.dial(chatCtx)
+	if err != nil {
+		r := doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "connection failed"}
+		return "", "", &r
+	}
+	defer closeConn(conn)
+
+	if err := sendMessage(conn, message); err != nil {
+		r := doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "send failed"}
+		return sid, "", &r
+	}
+
+	msgs, err := collectResponse(chatCtx, conn)
+	if err != nil {
+		r := doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "receive failed"}
+		return sid, assembleText(msgs), &r
+	}
+
+	return sid, assembleText(msgs), nil
+}
+
 // checkMemoryToolsAvailable tells the agent to remember a value, then verifies
 // the memory was persisted by querying the memory-api directly. Memory tools are
 // platform-level and not forwarded via WebSocket, so we verify by outcome.
@@ -209,22 +238,9 @@ func (m *MemoryChecker) checkMemoryToolsAvailable(ctx context.Context) doctor.Te
 		return *r
 	}
 
-	toolCtx, cancel := context.WithTimeout(ctx, wsResponseTimeout)
-	defer cancel()
-
-	conn, sessionID, err := m.agentChecker.dial(toolCtx)
-	if err != nil {
-		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "connection failed"}
-	}
-	defer closeConn(conn)
-
-	if err := sendMessage(conn, "Please remember that my doctor test value is smoke-42"); err != nil {
-		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "send failed"}
-	}
-
-	// Wait for the agent to finish (memory__remember executes server-side).
-	if _, err := collectResponse(toolCtx, conn); err != nil {
-		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "receive failed"}
+	sessionID, _, fail := m.chatWithAgent(ctx, "Please remember that my doctor test value is smoke-42")
+	if fail != nil {
+		return *fail
 	}
 
 	// Check session store for tool call errors first.
@@ -277,31 +293,47 @@ func (m *MemoryChecker) checkToolCallErrors(ctx context.Context, sessionID, tool
 // checkMemoryRecall asks the agent to recall the stored value. Memory tools are
 // platform-level, so we verify by checking the response text for the expected value.
 func (m *MemoryChecker) checkMemoryRecall(ctx context.Context) doctor.TestResult {
-	recallCtx, cancel := context.WithTimeout(ctx, wsResponseTimeout)
-	defer cancel()
-
-	conn, _, err := m.agentChecker.dial(recallCtx)
-	if err != nil {
-		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "connection failed"}
-	}
-	defer closeConn(conn)
-
-	if err := sendMessage(conn, "What is my doctor test value? Use your memory tools to find it."); err != nil {
-		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "send failed"}
+	_, text, fail := m.chatWithAgent(ctx, "What is my doctor test value? Use your memory tools to find it.")
+	if fail != nil {
+		return *fail
 	}
 
-	msgs, err := collectResponse(recallCtx, conn)
-	if err != nil {
-		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "receive failed"}
-	}
-
-	text := assembleText(msgs)
 	if strings.Contains(text, memoryTestMarker) {
 		return doctor.TestResult{Status: doctor.StatusPass, Detail: "recalled 'smoke-42' from memory"}
 	}
 	return doctor.TestResult{
 		Status: doctor.StatusFail,
 		Detail: fmt.Sprintf("expected 'smoke-42' in response, got: %q", truncate(text, 200)),
+	}
+}
+
+const memoryPersistTestValue = "persist-ok"
+
+// checkMemoryPersistsAcrossSessions verifies memories survive across WebSocket sessions.
+// It opens a connection, asks the agent to remember a value, closes it, then opens a
+// new connection and asks the agent to recall the value.
+func (m *MemoryChecker) checkMemoryPersistsAcrossSessions(ctx context.Context) doctor.TestResult {
+	if r := m.requireWorkspace(); r != nil {
+		return *r
+	}
+
+	// Session 1: ask the agent to remember a value.
+	if _, _, fail := m.chatWithAgent(ctx, "Please remember that my doctor persistence test value is persist-ok"); fail != nil {
+		return *fail
+	}
+
+	// Session 2: ask the agent to recall the value.
+	_, text, fail := m.chatWithAgent(ctx, "What is my doctor persistence test value?")
+	if fail != nil {
+		return *fail
+	}
+
+	if strings.Contains(text, memoryPersistTestValue) {
+		return doctor.TestResult{Status: doctor.StatusPass, Detail: "memory persisted across sessions"}
+	}
+	return doctor.TestResult{
+		Status: doctor.StatusFail,
+		Detail: fmt.Sprintf("expected '%s' in response, got: %q", memoryPersistTestValue, truncate(text, 200)),
 	}
 }
 

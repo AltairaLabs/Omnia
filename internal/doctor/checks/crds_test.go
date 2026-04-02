@@ -171,12 +171,75 @@ func TestCRD_Workspaces_None(t *testing.T) {
 	assertDetailContains(t, result, "no Workspaces found")
 }
 
+// TestCRD_MemoryEnabled_Pass verifies pass when at least one AgentRuntime has memory enabled.
+func TestCRD_MemoryEnabled_Pass(t *testing.T) {
+	objs := []runtime.Object{
+		&omniav1alpha1.AgentRuntime{
+			ObjectMeta: metav1.ObjectMeta{Name: "rt-1", Namespace: "default"},
+			Spec: omniav1alpha1.AgentRuntimeSpec{
+				Memory: &omniav1alpha1.MemoryConfig{Enabled: true},
+			},
+		},
+		&omniav1alpha1.AgentRuntime{
+			ObjectMeta: metav1.ObjectMeta{Name: "rt-2", Namespace: "default"},
+		},
+	}
+	checker := newCRDCheckerWithObjects(t, objs)
+	result := checker.checkMemoryEnabled(context.Background())
+
+	assertPass(t, result)
+	assertDetailContains(t, result, "1/2")
+	assertDetailContains(t, result, "rt-1")
+}
+
+// TestCRD_MemoryEnabled_Fail verifies fail when no AgentRuntimes have memory enabled.
+func TestCRD_MemoryEnabled_Fail(t *testing.T) {
+	objs := []runtime.Object{
+		&omniav1alpha1.AgentRuntime{
+			ObjectMeta: metav1.ObjectMeta{Name: "rt-1", Namespace: "default"},
+		},
+	}
+	checker := newCRDCheckerWithObjects(t, objs)
+	result := checker.checkMemoryEnabled(context.Background())
+
+	assertFail(t, result)
+	assertDetailContains(t, result, "none of 1")
+}
+
+// TestCRD_MemoryEnabled_Skip verifies skip when no AgentRuntimes exist at all.
+func TestCRD_MemoryEnabled_Skip(t *testing.T) {
+	checker := newCRDCheckerWithObjects(t, nil)
+	result := checker.checkMemoryEnabled(context.Background())
+
+	if result.Status != doctor.StatusSkip {
+		t.Errorf("expected StatusSkip, got %s (detail=%q)", result.Status, result.Detail)
+	}
+	assertDetailContains(t, result, "no AgentRuntimes")
+}
+
+// TestCRD_MemoryEnabled_Fail_DisabledExplicitly verifies fail when Memory is set but Enabled is false.
+func TestCRD_MemoryEnabled_Fail_DisabledExplicitly(t *testing.T) {
+	objs := []runtime.Object{
+		&omniav1alpha1.AgentRuntime{
+			ObjectMeta: metav1.ObjectMeta{Name: "rt-1", Namespace: "default"},
+			Spec: omniav1alpha1.AgentRuntimeSpec{
+				Memory: &omniav1alpha1.MemoryConfig{Enabled: false},
+			},
+		},
+	}
+	checker := newCRDCheckerWithObjects(t, objs)
+	result := checker.checkMemoryEnabled(context.Background())
+
+	assertFail(t, result)
+	assertDetailContains(t, result, "none of 1")
+}
+
 // TestCRD_Checks_Count verifies Checks() returns the expected number of checks.
 func TestCRD_Checks_Count(t *testing.T) {
 	checker := newCRDCheckerWithObjects(t, nil)
 	checks := checker.Checks()
-	if len(checks) != 4 {
-		t.Errorf("expected 4 checks, got %d", len(checks))
+	if len(checks) != 5 {
+		t.Errorf("expected 5 checks, got %d", len(checks))
 	}
 	for _, ch := range checks {
 		if ch.Category != categoryNameCRDs {

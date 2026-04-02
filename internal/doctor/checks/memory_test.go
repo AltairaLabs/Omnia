@@ -391,9 +391,10 @@ func TestChecks_WithAgentChecker_ReturnsAllChecks(t *testing.T) {
 	agentChecker := NewAgentChecker(AgentConfig{})
 	c := NewMemoryChecker("http://localhost:8080", nil, "ws1", agentChecker)
 	checks := c.Checks()
-	require.Len(t, checks, 8)
+	require.Len(t, checks, 9)
 	assert.Equal(t, "MemoryToolsAvailable", checks[6].Name)
 	assert.Equal(t, "MemoryRecall", checks[7].Name)
+	assert.Equal(t, "MemoryPersistsAcrossSessions", checks[8].Name)
 }
 
 // --- Tool checks (memory agent via WebSocket) ---
@@ -557,6 +558,71 @@ func TestCheckMemoryRecall_Fail_ConnectionError(t *testing.T) {
 	c := NewMemoryChecker("", nil, testWorkspace, agentChecker)
 	result := c.checkMemoryRecall(t.Context())
 	assert.Equal(t, doctor.StatusFail, result.Status)
+}
+
+// --- MemoryPersistsAcrossSessions ---
+
+func TestCheckMemoryPersistsAcrossSessions_Pass(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := wsUpgrader.Upgrade(w, r, nil)
+		require.NoError(t, err)
+		defer conn.Close() //nolint:errcheck
+
+		connected := wsServerMessage{Type: wsMessageTypeConnected, SessionID: fmt.Sprintf("sess-%d", callCount)}
+		require.NoError(t, conn.WriteJSON(connected))
+		callCount++
+
+		// Read one client message.
+		_, _, err = conn.ReadMessage()
+		if err != nil {
+			return
+		}
+
+		// Session 1: acknowledge remember; Session 2: recall with the value.
+		if callCount == 1 {
+			require.NoError(t, conn.WriteJSON(wsServerMessage{Type: wsMessageTypeDone, Content: "Remembered."}))
+		} else {
+			require.NoError(t, conn.WriteJSON(wsServerMessage{Type: wsMessageTypeDone, Content: "Your value is persist-ok."}))
+		}
+	}))
+	defer srv.Close()
+
+	agentChecker := newCheckerForServer(srv)
+	c := NewMemoryChecker("", nil, testWorkspace, agentChecker)
+	result := c.checkMemoryPersistsAcrossSessions(t.Context())
+	assert.Equal(t, doctor.StatusPass, result.Status)
+	assert.Contains(t, result.Detail, "persisted across sessions")
+}
+
+func TestCheckMemoryPersistsAcrossSessions_Fail_ValueNotRecalled(t *testing.T) {
+	srv := serveMockFacade(t, mockFacadeHandler{
+		responses: []wsServerMessage{
+			{Type: wsMessageTypeDone, Content: "I don't know."},
+		},
+	})
+	defer srv.Close()
+
+	agentChecker := newCheckerForServer(srv)
+	c := NewMemoryChecker("", nil, testWorkspace, agentChecker)
+	result := c.checkMemoryPersistsAcrossSessions(t.Context())
+	assert.Equal(t, doctor.StatusFail, result.Status)
+	assert.Contains(t, result.Detail, "persist-ok")
+}
+
+func TestCheckMemoryPersistsAcrossSessions_Fail_ConnectionError(t *testing.T) {
+	agentChecker := NewAgentChecker(AgentConfig{FacadeURL: "http://127.0.0.1:1", AgentName: "x", Namespace: "y"})
+	c := NewMemoryChecker("", nil, testWorkspace, agentChecker)
+	result := c.checkMemoryPersistsAcrossSessions(t.Context())
+	assert.Equal(t, doctor.StatusFail, result.Status)
+	assert.Contains(t, result.Detail, "connection failed")
+}
+
+func TestCheckMemoryPersistsAcrossSessions_Skip_NoWorkspace(t *testing.T) {
+	agentChecker := NewAgentChecker(AgentConfig{})
+	c := NewMemoryChecker("", nil, "", agentChecker)
+	result := c.checkMemoryPersistsAcrossSessions(t.Context())
+	assert.Equal(t, doctor.StatusSkip, result.Status)
 }
 
 // --- fetchBody helper ---
