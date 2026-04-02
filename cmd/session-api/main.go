@@ -469,6 +469,11 @@ func registerEnterpriseRoutes(mux *http.ServeMux, pool *pgxpool.Pool, registry *
 		deleter := privacy.NewWarmStoreSessionDeleter(warm)
 		deletionSvc := privacy.NewDeletionService(deletionStore, deleter, auditLogger, log)
 		deletionSvc.SetMediaDeleter(buildMediaDeleter(f, log))
+		if memoryAPIURL := os.Getenv("OMNIA_MEMORY_API_URL"); memoryAPIURL != "" {
+			memDeleter := privacy.NewMemoryHTTPDeleter(memoryAPIURL, log)
+			deletionSvc.SetMemoryDeleter(memDeleter)
+			log.Info("memory deleter enabled", "memoryAPIURL", memoryAPIURL)
+		}
 		deletionHandler := privacy.NewDeletionHandler(deletionSvc, log)
 		deletionHandler.RegisterRoutes(mux)
 	}
