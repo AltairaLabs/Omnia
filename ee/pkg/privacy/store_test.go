@@ -55,8 +55,9 @@ func TestGetPreferences_Found(t *testing.T) {
 				*dest[0].(*bool) = true
 				*dest[1].(*[]string) = []string{"ws1"}
 				*dest[2].(*[]string) = []string{"agent1"}
-				*dest[3].(*time.Time) = now
+				*dest[3].(*[]string) = []string{string(ConsentMemoryPreferences)}
 				*dest[4].(*time.Time) = now
+				*dest[5].(*time.Time) = now
 				return nil
 			}}
 		},
@@ -69,6 +70,7 @@ func TestGetPreferences_Found(t *testing.T) {
 	assert.True(t, prefs.OptOutAll)
 	assert.Equal(t, []string{"ws1"}, prefs.OptOutWorkspaces)
 	assert.Equal(t, []string{"agent1"}, prefs.OptOutAgents)
+	assert.Equal(t, []ConsentCategory{ConsentMemoryPreferences}, prefs.ConsentGrants)
 }
 
 func TestGetPreferences_NotFound(t *testing.T) {
@@ -93,8 +95,9 @@ func TestGetPreferences_NilSlices(t *testing.T) {
 				*dest[0].(*bool) = false
 				*dest[1].(*[]string) = nil
 				*dest[2].(*[]string) = nil
-				*dest[3].(*time.Time) = now
+				*dest[3].(*[]string) = nil
 				*dest[4].(*time.Time) = now
+				*dest[5].(*time.Time) = now
 				return nil
 			}}
 		},
@@ -107,6 +110,8 @@ func TestGetPreferences_NilSlices(t *testing.T) {
 	assert.NotNil(t, prefs.OptOutAgents)
 	assert.Empty(t, prefs.OptOutWorkspaces)
 	assert.Empty(t, prefs.OptOutAgents)
+	assert.NotNil(t, prefs.ConsentGrants)
+	assert.Empty(t, prefs.ConsentGrants)
 }
 
 func TestGetPreferences_DBError(t *testing.T) {
@@ -244,4 +249,91 @@ func TestSetOptOut_ExecError(t *testing.T) {
 	store := NewPreferencesStore(pool)
 	err := store.SetOptOut(context.Background(), "user1", ScopeAll, "")
 	assert.Error(t, err)
+}
+
+func TestGetConsentGrants_NoPreferences(t *testing.T) {
+	pool := &prefsMockPool{
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return &prefsMockRow{scanFn: func(_ ...any) error {
+				return pgx.ErrNoRows
+			}}
+		},
+	}
+
+	store := NewPreferencesStore(pool)
+	grants, err := store.GetConsentGrants(context.Background(), "user1")
+	require.NoError(t, err)
+	assert.NotNil(t, grants)
+	assert.Empty(t, grants)
+}
+
+func TestGetConsentGrants_ReturnsGrants(t *testing.T) {
+	pool := &prefsMockPool{
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return &prefsMockRow{scanFn: func(dest ...any) error {
+				*dest[0].(*[]string) = []string{
+					string(ConsentMemoryPreferences),
+					string(ConsentMemoryContext),
+				}
+				return nil
+			}}
+		},
+	}
+
+	store := NewPreferencesStore(pool)
+	grants, err := store.GetConsentGrants(context.Background(), "user1")
+	require.NoError(t, err)
+	assert.Equal(t, []ConsentCategory{ConsentMemoryPreferences, ConsentMemoryContext}, grants)
+}
+
+func TestGetConsentGrants_DBError(t *testing.T) {
+	pool := &prefsMockPool{
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return &prefsMockRow{scanFn: func(_ ...any) error {
+				return errors.New("connection refused")
+			}}
+		},
+	}
+
+	store := NewPreferencesStore(pool)
+	_, err := store.GetConsentGrants(context.Background(), "user1")
+	assert.Error(t, err)
+}
+
+func TestSetConsentGrant_ValidCategory(t *testing.T) {
+	pool := &prefsMockPool{
+		execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+			return pgconn.NewCommandTag("INSERT 0 1"), nil
+		},
+	}
+
+	store := NewPreferencesStore(pool)
+	err := store.SetConsentGrant(context.Background(), "user1", ConsentMemoryIdentity)
+	assert.NoError(t, err)
+}
+
+func TestSetConsentGrant_UnknownCategory(t *testing.T) {
+	store := NewPreferencesStore(&prefsMockPool{})
+	err := store.SetConsentGrant(context.Background(), "user1", ConsentCategory("invalid:category"))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown consent category")
+}
+
+func TestRemoveConsentGrant_ValidCategory(t *testing.T) {
+	pool := &prefsMockPool{
+		execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+			return pgconn.NewCommandTag("UPDATE 1"), nil
+		},
+	}
+
+	store := NewPreferencesStore(pool)
+	err := store.RemoveConsentGrant(context.Background(), "user1", ConsentMemoryHealth)
+	assert.NoError(t, err)
+}
+
+func TestRemoveConsentGrant_UnknownCategory(t *testing.T) {
+	store := NewPreferencesStore(&prefsMockPool{})
+	err := store.RemoveConsentGrant(context.Background(), "user1", ConsentCategory("invalid:category"))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown consent category")
 }
