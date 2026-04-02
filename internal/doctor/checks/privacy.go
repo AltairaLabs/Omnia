@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/altairalabs/omnia/internal/doctor"
 )
@@ -224,9 +225,52 @@ func (p *PrivacyChecker) checkDeletionCascade(ctx context.Context) doctor.TestRe
 	return doctor.TestResult{Status: doctor.StatusPass, Detail: "memory absent after batch delete"}
 }
 
-// checkAuditLogWritten is deferred until the audit query endpoint is added.
-func (p *PrivacyChecker) checkAuditLogWritten(_ context.Context) doctor.TestResult {
-	return doctor.TestResult{Status: doctor.StatusSkip, Detail: "audit endpoint not available"}
+// checkAuditLogWritten saves a memory and queries the audit endpoint to verify
+// a memory_created event was recorded. Skips if the audit endpoint is not available.
+func (p *PrivacyChecker) checkAuditLogWritten(ctx context.Context) doctor.TestResult {
+	if r := p.requireWorkspace(); r != nil {
+		return *r
+	}
+
+	// Probe the audit endpoint first.
+	auditURL := p.memoryAPIURL + "/api/v1/audit/memories?workspace=" + p.workspace + "&limit=1"
+	probeResp, err := fetchBody(ctx, memoryClient(), auditURL)
+	if err != nil {
+		return doctor.TestResult{Status: doctor.StatusSkip, Detail: "audit endpoint not available", Error: err.Error()}
+	}
+	_ = probeResp
+
+	// Save a test memory to generate an audit event.
+	_, status, err := p.saveMemory(ctx, "audit log test "+time.Now().Format(time.RFC3339Nano), nil)
+	if err != nil || status != http.StatusCreated {
+		return doctor.TestResult{Status: doctor.StatusFail, Detail: "save failed before audit check", Error: errString(err)}
+	}
+
+	// Brief pause to let the async audit logger flush.
+	time.Sleep(2 * time.Second)
+
+	// Query for memory_created events.
+	queryURL := p.memoryAPIURL + "/api/v1/audit/memories?workspace=" + p.workspace + "&eventTypes=memory_created&limit=5"
+	body, err := fetchBody(ctx, memoryClient(), queryURL)
+	if err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Detail: "audit query failed", Error: err.Error()}
+	}
+
+	var result struct {
+		Entries []map[string]any `json:"entries"`
+		Total   int64            `json:"total"`
+	}
+	if err := json.Unmarshal([]byte(body), &result); err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Detail: "invalid audit response", Error: err.Error()}
+	}
+
+	if result.Total == 0 {
+		return doctor.TestResult{Status: doctor.StatusFail, Detail: "no memory_created audit events found"}
+	}
+	return doctor.TestResult{
+		Status: doctor.StatusPass,
+		Detail: fmt.Sprintf("found %d memory_created audit event(s)", result.Total),
+	}
 }
 
 // errString returns the error message or an empty string if err is nil.

@@ -30,6 +30,7 @@ type mockPrivacyServer struct {
 	saveHandler        http.HandlerFunc
 	searchHandler      http.HandlerFunc
 	batchDeleteHandler http.HandlerFunc
+	auditHandler       http.HandlerFunc
 }
 
 func (m *mockPrivacyServer) serve(t *testing.T) *httptest.Server {
@@ -64,6 +65,10 @@ func (m *mockPrivacyServer) serve(t *testing.T) *httptest.Server {
 
 	if m.batchDeleteHandler != nil {
 		mux.HandleFunc(privacyBatchDeletePath, m.batchDeleteHandler)
+	}
+
+	if m.auditHandler != nil {
+		mux.HandleFunc("/api/v1/audit/memories", m.auditHandler)
 	}
 
 	return httptest.NewServer(mux)
@@ -299,11 +304,48 @@ func TestCheckDeletionCascade_Skip_NoWorkspace(t *testing.T) {
 
 // --- AuditLogWritten ---
 
-func TestCheckAuditLogWritten_AlwaysSkip(t *testing.T) {
-	c := NewPrivacyChecker("http://localhost:8080", testWorkspace)
-	result := c.checkAuditLogWritten(t.Context())
+func TestCheckAuditLogWritten_Pass(t *testing.T) {
+	srv := (&mockPrivacyServer{
+		auditHandler: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"entries":[{"eventType":"memory_created"}],"total":1,"hasMore":false}`))
+		},
+	}).serve(t)
+	defer srv.Close()
+
+	result := newPrivacyCheckerForServer(srv).checkAuditLogWritten(t.Context())
+	assert.Equal(t, doctor.StatusPass, result.Status)
+	assert.Contains(t, result.Detail, "memory_created")
+}
+
+func TestCheckAuditLogWritten_Fail_NoEvents(t *testing.T) {
+	srv := (&mockPrivacyServer{
+		auditHandler: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"entries":[],"total":0,"hasMore":false}`))
+		},
+	}).serve(t)
+	defer srv.Close()
+
+	result := newPrivacyCheckerForServer(srv).checkAuditLogWritten(t.Context())
+	assert.Equal(t, doctor.StatusFail, result.Status)
+	assert.Contains(t, result.Detail, "no memory_created")
+}
+
+func TestCheckAuditLogWritten_Skip_EndpointNotAvailable(t *testing.T) {
+	// No audit handler registered → 404 → skip.
+	srv := (&mockPrivacyServer{}).serve(t)
+	defer srv.Close()
+
+	result := newPrivacyCheckerForServer(srv).checkAuditLogWritten(t.Context())
 	assert.Equal(t, doctor.StatusSkip, result.Status)
 	assert.Contains(t, result.Detail, "audit endpoint not available")
+}
+
+func TestCheckAuditLogWritten_Skip_NoWorkspace(t *testing.T) {
+	c := NewPrivacyChecker("http://localhost:8080", "")
+	result := c.checkAuditLogWritten(t.Context())
+	assert.Equal(t, doctor.StatusSkip, result.Status)
 }
 
 // --- Checks() registration ---
