@@ -14,14 +14,49 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
+	"github.com/altairalabs/omnia/ee/pkg/audit"
 	"github.com/altairalabs/omnia/ee/pkg/redaction"
+	"github.com/altairalabs/omnia/internal/session/api"
 )
+
+// mockAuditLogger captures LogEvent calls for test assertions.
+type mockAuditLogger struct {
+	mu      sync.Mutex
+	entries []*api.AuditEntry
+}
+
+func (m *mockAuditLogger) LogEvent(_ context.Context, entry *api.AuditEntry) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.entries = append(m.entries, entry)
+}
+
+func (m *mockAuditLogger) Close() error { return nil }
+
+func (m *mockAuditLogger) waitForEntry(t *testing.T) []*api.AuditEntry {
+	t.Helper()
+	deadline := time.Now().Add(100 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		m.mu.Lock()
+		n := len(m.entries)
+		m.mu.Unlock()
+		if n > 0 {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]*api.AuditEntry(nil), m.entries...)
+}
 
 // mockSessionLookup always returns a fixed namespace/agent.
 type mockSessionLookup struct {
@@ -308,4 +343,133 @@ func TestSessionMetadataCache_Eviction(t *testing.T) {
 	ns, _, err := cache.Resolve(context.Background(), "s1")
 	assert.NoError(t, err)
 	assert.Equal(t, "ns1", ns)
+}
+
+func TestPrivacyMiddleware_AuditGETEmitsSessionAccessed(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	lookup := &mockSessionLookup{ns: "default", agent: "test-agent"}
+	cache := NewSessionMetadataCache(lookup, 100)
+	watcher := &PolicyWatcher{}
+	mw := NewPrivacyMiddleware(watcher, cache, nil, nil, logr.Discard())
+
+	auditLog := &mockAuditLogger{}
+	mw.SetAuditLogger(auditLog)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/abc-123/messages", nil)
+	rr := httptest.NewRecorder()
+	mw.Wrap(handler).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	entries := auditLog.waitForEntry(t)
+	assert.Len(t, entries, 1)
+	assert.Equal(t, audit.EventSessionAccessed, entries[0].EventType)
+	assert.Equal(t, "abc-123", entries[0].SessionID)
+}
+
+func TestPrivacyMiddleware_AuditPOSTEmitsSessionCreated(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	lookup := &mockSessionLookup{ns: "default", agent: "test-agent"}
+	cache := NewSessionMetadataCache(lookup, 100)
+	watcher := &PolicyWatcher{} // no policy — passes through
+	mw := NewPrivacyMiddleware(watcher, cache, nil, nil, logr.Discard())
+
+	auditLog := &mockAuditLogger{}
+	mw.SetAuditLogger(auditLog)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/abc-123/messages",
+		strings.NewReader(`{"content":"hello"}`))
+	rr := httptest.NewRecorder()
+	mw.Wrap(handler).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	entries := auditLog.waitForEntry(t)
+	assert.Len(t, entries, 1)
+	assert.Equal(t, audit.EventSessionCreated, entries[0].EventType)
+	assert.Equal(t, "abc-123", entries[0].SessionID)
+}
+
+func TestPrivacyMiddleware_AuditNilLoggerGETPassesThrough(t *testing.T) {
+	called := false
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	lookup := &mockSessionLookup{ns: "default", agent: "test-agent"}
+	cache := NewSessionMetadataCache(lookup, 100)
+	watcher := &PolicyWatcher{}
+	mw := NewPrivacyMiddleware(watcher, cache, nil, nil, logr.Discard())
+	// auditLogger intentionally not set (nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/abc-123/messages", nil)
+	rr := httptest.NewRecorder()
+	mw.Wrap(handler).ServeHTTP(rr, req)
+
+	assert.True(t, called)
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestPrivacyMiddleware_AuditGETNoSessionIDNoEvent(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	watcher := &PolicyWatcher{}
+	mw := NewPrivacyMiddleware(watcher, nil, nil, nil, logr.Discard())
+
+	auditLog := &mockAuditLogger{}
+	mw.SetAuditLogger(auditLog)
+
+	// Path with no session ID
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions", nil)
+	rr := httptest.NewRecorder()
+	mw.Wrap(handler).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	// Wait briefly to ensure no goroutine fires
+	time.Sleep(20 * time.Millisecond)
+	auditLog.mu.Lock()
+	defer auditLog.mu.Unlock()
+	assert.Empty(t, auditLog.entries)
+}
+
+func TestPrivacyMiddleware_AuditOptOutNoEvent(t *testing.T) {
+	handler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	lookup := &mockSessionLookup{ns: "default", agent: "test-agent"}
+	cache := NewSessionMetadataCache(lookup, 100)
+
+	watcher := &PolicyWatcher{}
+	watcher.policies.Store("test", &omniav1alpha1.SessionPrivacyPolicy{
+		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
+			Level:      omniav1alpha1.PolicyLevelGlobal,
+			Recording:  omniav1alpha1.RecordingConfig{Enabled: true},
+			UserOptOut: &omniav1alpha1.UserOptOutConfig{Enabled: true},
+		},
+	})
+
+	prefStore := optOutPrefStore()
+	mw := NewPrivacyMiddleware(watcher, cache, nil, prefStore, logr.Discard())
+
+	auditLog := &mockAuditLogger{}
+	mw.SetAuditLogger(auditLog)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/abc-123/messages",
+		strings.NewReader(`{}`))
+	req.Header.Set(UserIDHeader, "user-1")
+	rr := httptest.NewRecorder()
+	mw.Wrap(handler).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusNoContent, rr.Code)
+	// Wait briefly to confirm no event fired
+	time.Sleep(20 * time.Millisecond)
+	auditLog.mu.Lock()
+	defer auditLog.mu.Unlock()
+	assert.Empty(t, auditLog.entries, "opt-out should not emit audit event")
 }

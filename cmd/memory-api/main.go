@@ -334,11 +334,13 @@ func buildAPIMux(
 
 	// Enterprise audit logging.
 	var auditClose func() error
+	var auditHandler *eeaudit.Handler
 	if enterprise {
 		auditMetrics := eemetrics.NewAuditMetrics()
 		auditLogger := eeaudit.NewLogger(pool, log, auditMetrics, eeaudit.LoggerConfig{})
 		auditClose = auditLogger.Close
 		svc.SetAuditLogger(&auditLoggerAdapter{inner: auditLogger})
+		auditHandler = eeaudit.NewHandler(auditLogger, log)
 		log.Info("memory audit logging enabled")
 	}
 
@@ -346,6 +348,9 @@ func buildAPIMux(
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
+	if auditHandler != nil {
+		auditHandler.RegisterMemoryRoutes(mux)
+	}
 
 	// AuditMiddleware always applied — populates request context with IP/UA.
 	// The service only emits events when an audit logger is configured.

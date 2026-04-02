@@ -436,7 +436,7 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	// Privacy middleware (enterprise only): PII redaction + user opt-out.
 	var apiHandler http.Handler = mux
 	if f.enterprise {
-		apiHandler = wrapPrivacyMiddleware(apiHandler, registry, pool, log)
+		apiHandler = wrapPrivacyMiddleware(apiHandler, registry, pool, auditLogger, log)
 	}
 
 	// Rate limiting middleware (per-client-IP token bucket).
@@ -710,6 +710,7 @@ func wrapPrivacyMiddleware(
 	next http.Handler,
 	registry *providers.Registry,
 	pool *pgxpool.Pool,
+	auditLogger *audit.Logger,
 	log logr.Logger,
 ) http.Handler {
 	kubeConfig, err := rest.InClusterConfig()
@@ -741,6 +742,9 @@ func wrapPrivacyMiddleware(
 	prefStore := privacy.NewPreferencesStore(pool)
 
 	middleware := privacy.NewPrivacyMiddleware(watcher, sessionCache, redactor, prefStore, log)
+	if auditLogger != nil {
+		middleware.SetAuditLogger(auditLogger)
+	}
 	log.Info("privacy middleware enabled")
 	return middleware.Wrap(next)
 }
