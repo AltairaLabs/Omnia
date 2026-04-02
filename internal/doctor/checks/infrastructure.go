@@ -30,16 +30,16 @@ func healthCheck(name, baseURL string) doctor.Check {
 	return probeCheck(name, baseURL, "/healthz", "Healthy")
 }
 
-// OperatorAPICheck returns a check that verifies the operator REST API responds.
-// It GETs /api/v1/workspaces and expects HTTP 200.
+// OperatorAPICheck returns a check that verifies the operator API server responds.
+// It GETs /healthz and expects HTTP 200.
 func OperatorAPICheck(baseURL string) doctor.Check {
-	return probeCheck("OperatorAPI", baseURL, "/api/v1/workspaces", "Healthy")
+	return probeCheck("OperatorAPI", baseURL, "/healthz", "Healthy")
 }
 
 // DashboardCheck returns a check that verifies the dashboard responds.
-// It GETs / and expects HTTP 200.
+// It GETs /api/health and expects HTTP 200.
 func DashboardCheck(baseURL string) doctor.Check {
-	return probeCheck("Dashboard", baseURL, "/", "Responds")
+	return probeCheck("Dashboard", baseURL, "/api/health", "Responds")
 }
 
 // ArenaControllerCheck returns a check that verifies the arena controller health endpoint.
