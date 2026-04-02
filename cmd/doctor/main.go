@@ -114,6 +114,9 @@ func main() {
 	memoryChecker := checks.NewMemoryChecker(memoryAPIURL, memoryStore, workspaceUID, agentChecker)
 	runner.Register(memoryChecker.Checks()...)
 
+	// Agent → Sessions must run sequentially (Sessions reads Agent's LastSessionID).
+	runner.SequentialGroup("agent-sessions", "Agent", "Sessions")
+
 	if *runOnce {
 		runOnceMode(runner, log, *exitCode)
 		return
