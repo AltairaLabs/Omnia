@@ -16,11 +16,13 @@ import (
 )
 
 const (
-	memoryAPITimeout = 10 * time.Second
-	memoryCategory   = "Memory"
-	memoryTestType   = "doctor-test"
-	memoryTestValue  = "doctor smoke test value"
-	memoryTestMarker = "smoke-42"
+	memoryAPITimeout  = 10 * time.Second
+	memoryCategory    = "Memory"
+	memoryTestType    = "doctor-test"
+	memoryTestValue   = "doctor smoke test value"
+	memoryTestMarker  = "smoke-42"
+	memoryTestUserID  = "doctor-test-user"
+	memoryOtherUserID = "doctor-other-user"
 )
 
 // MemoryChecker runs REST API checks against the memory-api service, and
@@ -53,6 +55,8 @@ func (m *MemoryChecker) Checks() []doctor.Check {
 		{Name: "MemoryList", Category: memoryCategory, Run: m.checkList},
 		{Name: "MemoryDelete", Category: memoryCategory, Run: m.checkDelete},
 		{Name: "MemoryExport", Category: memoryCategory, Run: m.checkExport},
+		{Name: "MemoryUserOwnership", Category: memoryCategory, Run: m.checkUserOwnership},
+		{Name: "MemoryUserIsolation", Category: memoryCategory, Run: m.checkUserIsolation},
 	}
 	if m.agentChecker != nil {
 		checks = append(checks,
@@ -69,9 +73,20 @@ func memoryClient() *http.Client {
 	return &http.Client{Timeout: memoryAPITimeout}
 }
 
-// scope returns the scope map for memory operations.
+// scope returns the scope map for memory operations with the default test user.
 func (m *MemoryChecker) scope() map[string]string {
-	return map[string]string{"workspace_id": m.workspace}
+	return map[string]string{
+		"workspace_id": m.workspace,
+		"user_id":      memoryTestUserID,
+	}
+}
+
+// scopeForUser returns a scope map for a specific user ID.
+func (m *MemoryChecker) scopeForUser(userID string) map[string]string {
+	return map[string]string{
+		"workspace_id": m.workspace,
+		"user_id":      userID,
+	}
 }
 
 // requireWorkspace returns a skip result if the workspace UID is empty.
@@ -334,6 +349,94 @@ func (m *MemoryChecker) checkMemoryPersistsAcrossSessions(ctx context.Context) d
 	return doctor.TestResult{
 		Status: doctor.StatusFail,
 		Detail: fmt.Sprintf("expected '%s' in response, got: %q", memoryPersistTestValue, truncate(text, 200)),
+	}
+}
+
+// checkUserOwnership saves a memory with a user_id scope and verifies the
+// returned memory has user_id set. Every memory must be owned by a user.
+func (m *MemoryChecker) checkUserOwnership(ctx context.Context) doctor.TestResult {
+	if r := m.requireWorkspace(); r != nil {
+		return *r
+	}
+
+	mem := &pkmemory.Memory{
+		Type:       memoryTestType,
+		Content:    "ownership test",
+		Confidence: 0.9,
+		Scope:      m.scope(), // includes user_id
+	}
+	if err := m.memoryStore.Save(ctx, mem); err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "save with user_id failed"}
+	}
+	defer func() {
+		_ = m.memoryStore.Delete(ctx, m.scope(), mem.ID)
+	}()
+
+	// Retrieve and verify the memory has user_id in scope
+	memories, err := m.memoryStore.Retrieve(ctx, m.scope(), "ownership test", pkmemory.RetrieveOptions{})
+	if err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "retrieve failed"}
+	}
+
+	for _, found := range memories {
+		if found.ID == mem.ID {
+			if found.Scope["user_id"] == "" {
+				return doctor.TestResult{
+					Status: doctor.StatusFail,
+					Detail: "memory saved without user_id — all memories must be owned by a user",
+				}
+			}
+			return doctor.TestResult{
+				Status: doctor.StatusPass,
+				Detail: fmt.Sprintf("memory %s has user_id scope", mem.ID),
+			}
+		}
+	}
+
+	return doctor.TestResult{
+		Status: doctor.StatusFail,
+		Detail: "saved memory not found in retrieve results",
+	}
+}
+
+// checkUserIsolation verifies that memories saved by one user are not visible
+// to another user. This is a critical privacy requirement.
+func (m *MemoryChecker) checkUserIsolation(ctx context.Context) doctor.TestResult {
+	if r := m.requireWorkspace(); r != nil {
+		return *r
+	}
+
+	// Save a memory as the test user.
+	mem := &pkmemory.Memory{
+		Type:       memoryTestType,
+		Content:    "isolation test secret",
+		Confidence: 0.9,
+		Scope:      m.scope(), // user_id = memoryTestUserID
+	}
+	if err := m.memoryStore.Save(ctx, mem); err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "save failed"}
+	}
+	defer func() {
+		_ = m.memoryStore.Delete(ctx, m.scope(), mem.ID)
+	}()
+
+	// Try to retrieve as a different user — should return zero results.
+	otherScope := m.scopeForUser(memoryOtherUserID)
+	memories, err := m.memoryStore.Retrieve(ctx, otherScope, "isolation test", pkmemory.RetrieveOptions{})
+	if err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "retrieve as other user failed"}
+	}
+
+	if len(memories) > 0 {
+		return doctor.TestResult{
+			Status: doctor.StatusFail,
+			Detail: fmt.Sprintf("user isolation violated — other user can see %d memories", len(memories)),
+		}
+	}
+
+	return doctor.TestResult{
+		Status: doctor.StatusPass,
+		Detail: "memories isolated between users",
 	}
 }
 

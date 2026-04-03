@@ -367,12 +367,90 @@ func TestCheckExport_Fail_ServerError(t *testing.T) {
 	assert.Equal(t, doctor.StatusFail, result.Status)
 }
 
+// --- User Ownership tests ---
+
+func TestCheckUserOwnership_Pass(t *testing.T) {
+	srv := (&mockMemoryServer{
+		searchHandler: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"memories":[{"id":"` + testMemoryID + `","type":"doctor-test","content":"ownership test","scope":{"workspace_id":"ws1","user_id":"doctor-test-user"}}],"total":1}`))
+		},
+	}).serve(t)
+	defer srv.Close()
+
+	result := newCheckerForMemoryServer(srv).checkUserOwnership(t.Context())
+	assert.Equal(t, doctor.StatusPass, result.Status)
+	assert.Contains(t, result.Detail, "user_id scope")
+}
+
+func TestCheckUserOwnership_Fail_NoUserID(t *testing.T) {
+	srv := (&mockMemoryServer{
+		searchHandler: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"memories":[{"id":"` + testMemoryID + `","type":"doctor-test","content":"ownership test","scope":{"workspace_id":"ws1"}}],"total":1}`))
+		},
+	}).serve(t)
+	defer srv.Close()
+
+	result := newCheckerForMemoryServer(srv).checkUserOwnership(t.Context())
+	assert.Equal(t, doctor.StatusFail, result.Status)
+	assert.Contains(t, result.Detail, "without user_id")
+}
+
+func TestCheckUserOwnership_Skip_NoWorkspace(t *testing.T) {
+	c := NewMemoryChecker("http://localhost:8080", nil, "", nil)
+	result := c.checkUserOwnership(t.Context())
+	assert.Equal(t, doctor.StatusSkip, result.Status)
+}
+
+// --- User Isolation tests ---
+
+func TestCheckUserIsolation_Pass(t *testing.T) {
+	srv := (&mockMemoryServer{
+		searchHandler: func(w http.ResponseWriter, r *http.Request) {
+			uid := r.URL.Query().Get("user_id")
+			if uid == memoryOtherUserID {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"memories":[],"total":0}`))
+			} else {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"memories":[{"id":"iso-1"}],"total":1}`))
+			}
+		},
+	}).serve(t)
+	defer srv.Close()
+
+	result := newCheckerForMemoryServer(srv).checkUserIsolation(t.Context())
+	assert.Equal(t, doctor.StatusPass, result.Status)
+	assert.Contains(t, result.Detail, "isolated")
+}
+
+func TestCheckUserIsolation_Fail_LeaksToOtherUser(t *testing.T) {
+	srv := (&mockMemoryServer{
+		searchHandler: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"memories":[{"id":"iso-2","content":"isolation test secret"}],"total":1}`))
+		},
+	}).serve(t)
+	defer srv.Close()
+
+	result := newCheckerForMemoryServer(srv).checkUserIsolation(t.Context())
+	assert.Equal(t, doctor.StatusFail, result.Status)
+	assert.Contains(t, result.Detail, "isolation violated")
+}
+
+func TestCheckUserIsolation_Skip_NoWorkspace(t *testing.T) {
+	c := NewMemoryChecker("http://localhost:8080", nil, "", nil)
+	result := c.checkUserIsolation(t.Context())
+	assert.Equal(t, doctor.StatusSkip, result.Status)
+}
+
 // --- Checks() registration ---
 
 func TestChecks_NoAgentChecker_ReturnsRestOnly(t *testing.T) {
 	c := NewMemoryChecker("http://localhost:8080", nil, "ws1", nil)
 	checks := c.Checks()
-	require.Len(t, checks, 6)
+	require.Len(t, checks, 8)
 	names := make([]string, len(checks))
 	for i, ch := range checks {
 		names[i] = ch.Name
@@ -384,6 +462,8 @@ func TestChecks_NoAgentChecker_ReturnsRestOnly(t *testing.T) {
 		"MemoryList",
 		"MemoryDelete",
 		"MemoryExport",
+		"MemoryUserOwnership",
+		"MemoryUserIsolation",
 	}, names)
 }
 
@@ -391,10 +471,12 @@ func TestChecks_WithAgentChecker_ReturnsAllChecks(t *testing.T) {
 	agentChecker := NewAgentChecker(AgentConfig{})
 	c := NewMemoryChecker("http://localhost:8080", nil, "ws1", agentChecker)
 	checks := c.Checks()
-	require.Len(t, checks, 9)
-	assert.Equal(t, "MemoryToolsAvailable", checks[6].Name)
-	assert.Equal(t, "MemoryRecall", checks[7].Name)
-	assert.Equal(t, "MemoryPersistsAcrossSessions", checks[8].Name)
+	require.Len(t, checks, 11)
+	assert.Equal(t, "MemoryUserOwnership", checks[6].Name)
+	assert.Equal(t, "MemoryUserIsolation", checks[7].Name)
+	assert.Equal(t, "MemoryToolsAvailable", checks[8].Name)
+	assert.Equal(t, "MemoryRecall", checks[9].Name)
+	assert.Equal(t, "MemoryPersistsAcrossSessions", checks[10].Name)
 }
 
 // --- Tool checks (memory agent via WebSocket) ---
