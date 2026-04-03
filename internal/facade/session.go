@@ -61,6 +61,7 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 	ctx = logctx.WithTraceID(ctx, msgSpan.SpanContext().TraceID().String())
 	if c.userID != "" {
 		ctx = httpclient.WithUserID(ctx, c.userID)
+		ctx = policy.WithUserID(ctx, c.userID)
 	}
 	if len(msg.ConsentGrants) > 0 {
 		ctx = policy.WithConsentGrants(ctx, msg.ConsentGrants)

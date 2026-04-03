@@ -18,6 +18,7 @@ package facade
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -34,6 +35,8 @@ import (
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/identity"
+	"github.com/altairalabs/omnia/pkg/policy"
 )
 
 // newTracingTestProvider creates a Provider backed by an in-memory span exporter.
@@ -403,5 +406,66 @@ func TestBuildSessionState_PartialUser(t *testing.T) {
 	}
 	if state["promptpack.name"] != "pack-1" {
 		t.Errorf("promptpack.name = %q", state["promptpack.name"])
+	}
+}
+
+func TestProcessMessage_PropagatesUserIDToPolicyContext(t *testing.T) {
+	var capturedCtx context.Context
+
+	handler := &mockHandler{
+		handleFunc: func(ctx context.Context, _ string, msg *ClientMessage, writer ResponseWriter) error {
+			capturedCtx = ctx
+			return writer.WriteDone("ok")
+		},
+	}
+
+	store := session.NewMemoryStore()
+	cfg := DefaultServerConfig()
+	cfg.PingInterval = 100 * time.Millisecond
+	cfg.PongTimeout = 200 * time.Millisecond
+
+	log := logr.Discard()
+	server := NewServer(cfg, store, handler, log)
+
+	ts := httptest.NewServer(server)
+	t.Cleanup(func() {
+		ts.Close()
+		_ = store.Close()
+	})
+
+	// Dial with an X-User-Id header to simulate an authenticated user.
+	headers := http.Header{}
+	headers.Set(policy.IstioHeaderUserID, "test-user-raw")
+	ws, _, err := websocket.DefaultDialer.Dial(
+		strings.Replace(ts.URL, "http://", "ws://", 1)+"?agent=test-agent", headers)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	// Read connected message
+	var connMsg ServerMessage
+	if err := ws.ReadJSON(&connMsg); err != nil {
+		t.Fatalf("Failed to read connected: %v", err)
+	}
+
+	// Send a message
+	if err := ws.WriteJSON(ClientMessage{
+		Type: MessageTypeMessage, SessionID: connMsg.SessionID, Content: "hi",
+	}); err != nil {
+		t.Fatalf("Failed to send: %v", err)
+	}
+
+	// Read done
+	var doneMsg ServerMessage
+	if err := ws.ReadJSON(&doneMsg); err != nil {
+		t.Fatalf("Failed to read done: %v", err)
+	}
+
+	// Verify policy.UserID is set on the context (pseudonymized).
+	got := policy.UserID(capturedCtx)
+	want := identity.PseudonymizeID("test-user-raw")
+	if got != want {
+		t.Errorf("policy.UserID(ctx) = %q, want %q", got, want)
 	}
 }
