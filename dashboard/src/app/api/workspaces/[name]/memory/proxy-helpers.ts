@@ -4,16 +4,22 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getWorkspace } from "@/lib/k8s/workspace-route-helpers";
+import { pseudonymizeId } from "@/lib/identity";
 
 const MEMORY_API_URL = process.env.MEMORY_API_URL;
 
 /** Resolve workspace name to UID for memory-api scoping. */
 export async function resolveWorkspaceUID(name: string): Promise<string | null> {
   const workspace = await getWorkspace(name);
-  if (!workspace) return null;
-  // K8s API always returns metadata.uid even though our TS type doesn't declare it
-  const meta = workspace.metadata as unknown as Record<string, unknown>;
-  return (meta?.uid as string) ?? null;
+  if (!workspace) {
+    console.warn("resolveWorkspaceUID: workspace not found", { name });
+    return null;
+  }
+  const uid = workspace.metadata?.uid ?? null;
+  if (!uid) {
+    console.warn("resolveWorkspaceUID: workspace has no UID", { name, metadata: workspace.metadata });
+  }
+  return uid;
 }
 
 /** Map dashboard query param names to backend param names. */
@@ -25,7 +31,7 @@ export function buildBackendParams(
   params.set("workspace", workspaceUID);
 
   const userId = searchParams.get("userId");
-  if (userId) params.set("user_id", userId);
+  if (userId) params.set("user_id", pseudonymizeId(userId));
 
   for (const key of ["type", "limit", "offset"]) {
     const value = searchParams.get(key);

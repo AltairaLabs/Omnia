@@ -10,6 +10,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
+import { pseudonymizeId } from "@/lib/identity";
 
 // --- module mocks (hoisted before any dynamic imports) ---
 
@@ -128,7 +129,7 @@ describe("buildBackendParams", () => {
     const params = buildBackendParams(searchParams, "ws-uid-999");
 
     expect(params.get("workspace")).toBe("ws-uid-999");
-    expect(params.get("user_id")).toBe("user-abc");
+    expect(params.get("user_id")).toBe(pseudonymizeId("user-abc"));
     expect(params.has("userId")).toBe(false);
   });
 

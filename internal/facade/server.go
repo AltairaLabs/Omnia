@@ -35,6 +35,7 @@ import (
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/identity"
 	"github.com/altairalabs/omnia/pkg/logctx"
 	"github.com/altairalabs/omnia/pkg/logging"
 	"github.com/altairalabs/omnia/pkg/policy"
@@ -357,7 +358,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract user identity from Istio-injected headers on the upgrade request.
-	userID := r.Header.Get(policy.IstioHeaderUserID)
+	// Hash immediately — no raw user IDs are stored or propagated in the platform.
+	userID := identity.PseudonymizeID(r.Header.Get(policy.IstioHeaderUserID))
 	userRoles := r.Header.Get(policy.IstioHeaderUserRoles)
 	userEmail := r.Header.Get(policy.IstioHeaderUserEmail)
 	authorization := r.Header.Get("Authorization")

@@ -49,6 +49,8 @@ const CATEGORIES = [
 
 export default function MemoriesPage() {
   const { user } = useAuth();
+  // Always filter by userId — memories belong to users, not workspaces.
+  // The proxy hashes the userId before querying (pseudonymous storage).
   const { data, isLoading, error } = useMemories({ userId: user?.id, limit: 500 });
   const [selectedMemory, setSelectedMemory] = useState<MemoryEntity | null>(
     null

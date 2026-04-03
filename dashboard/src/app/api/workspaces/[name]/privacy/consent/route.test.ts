@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
+import { pseudonymizeId } from "@/lib/identity";
 
 vi.mock("@/lib/auth", () => ({
   getUser: vi.fn(),
@@ -87,7 +88,7 @@ describe("GET /api/workspaces/[name]/privacy/consent", () => {
     expect(body.grants).toEqual(["analytics"]);
 
     const fetchUrl = mockFetch.mock.calls[0][0] as string;
-    expect(fetchUrl).toContain("/api/v1/privacy/preferences/user-123/consent");
+    expect(fetchUrl).toContain(`/api/v1/privacy/preferences/${pseudonymizeId("user-123")}/consent`);
   });
 
   it("returns 400 when userId is missing", async () => {
@@ -231,7 +232,7 @@ describe("PUT /api/workspaces/[name]/privacy/consent", () => {
     expect(body.grants).toEqual(["analytics", "personalization"]);
 
     const [fetchUrl, fetchOpts] = mockFetch.mock.calls[0] as [string, RequestInit];
-    expect(fetchUrl).toContain("/api/v1/privacy/preferences/user-123/consent");
+    expect(fetchUrl).toContain(`/api/v1/privacy/preferences/${pseudonymizeId("user-123")}/consent`);
     expect(fetchOpts.method).toBe("PUT");
     expect(fetchOpts.headers).toMatchObject({ "Content-Type": "application/json" });
   });
