@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
+	"github.com/altairalabs/omnia/pkg/policy"
 )
 
 // mockMemoryAPI creates a test server that mimics the memory-api endpoints.
@@ -251,4 +252,37 @@ func TestScopeParams_MinimalScope(t *testing.T) {
 	assert.Equal(t, "ws-1", params.Get("workspace"))
 	assert.Empty(t, params.Get("user_id"))
 	assert.Empty(t, params.Get("agent"))
+}
+
+func TestStore_Save_ForwardsConsentGrants(t *testing.T) {
+	var capturedHeader string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedHeader = r.Header.Get("X-Consent-Grants")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"memory":{"id":"m1"}}`))
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	ctx := policy.WithConsentGrants(context.Background(), []string{"memory:identity", "memory:preferences"})
+	mem := &pkmemory.Memory{Content: "test", Scope: map[string]string{"workspace_id": "ws1"}}
+	err := store.Save(ctx, mem)
+	require.NoError(t, err)
+	assert.Equal(t, "memory:identity,memory:preferences", capturedHeader)
+}
+
+func TestStore_Save_NoConsentGrants_NoHeader(t *testing.T) {
+	var hasHeader bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hasHeader = r.Header.Get("X-Consent-Grants") != ""
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"memory":{"id":"m1"}}`))
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	mem := &pkmemory.Memory{Content: "test", Scope: map[string]string{"workspace_id": "ws1"}}
+	err := store.Save(context.Background(), mem)
+	require.NoError(t, err)
+	assert.False(t, hasHeader)
 }

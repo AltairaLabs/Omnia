@@ -163,6 +163,9 @@ type ClientMessage struct {
 	ToolCallAck *ToolCallAckInfo `json:"tool_call_ack,omitempty"`
 	// ToolCallNack rejects a client-side tool call.
 	ToolCallNack *ToolCallNackInfo `json:"tool_call_nack,omitempty"`
+	// ConsentGrants carries per-message consent category grants from the client.
+	// When present, these override stored consent for this request.
+	ConsentGrants []string `json:"consent_grants,omitempty"`
 }
 
 // ServerMessage represents a message sent from server to client.

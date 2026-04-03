@@ -215,6 +215,11 @@ export interface ClientMessage {
    * ToolCallNack rejects a client-side tool call.
    */
   tool_call_nack?: ToolCallNackInfo;
+  /**
+   * ConsentGrants carries per-message consent category grants from the client.
+   * When present, these override stored consent for this request.
+   */
+  consent_grants?: string[];
 }
 /**
  * ServerMessage represents a message sent from server to client.

@@ -24,17 +24,22 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/go-logr/logr"
 
 	"github.com/altairalabs/omnia/pkg/logging"
 )
 
+const consentGrantsHeader = "X-Consent-Grants"
+
 // OptOutChecker returns false when the user has opted out of memory storage,
 // indicating the write should be silently dropped.
 // category is the consent category from the request body (may be empty string
 // when no category was supplied; callers should apply a default in that case).
-type OptOutChecker func(ctx context.Context, userID, workspace, category string) bool
+// consentOverride, when non-nil, provides per-request grant overrides from the
+// X-Consent-Grants header, bypassing the database-backed consent source.
+type OptOutChecker func(ctx context.Context, userID, workspace, category string, consentOverride []string) bool
 
 // ContentRedactor redacts PII from memory content text.
 // Returns the redacted string; if redaction is not configured it returns the
@@ -116,8 +121,14 @@ func (m *MemoryPrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 			req.Category = m.classifier(req.Content)
 		}
 
+		// Read per-request consent override from header.
+		var consentOverride []string
+		if h := r.Header.Get(consentGrantsHeader); h != "" {
+			consentOverride = strings.Split(h, ",")
+		}
+
 		// Check opt-out with category (empty string if not decoded).
-		if userID != "" && !m.checkOptOut(r.Context(), userID, workspace, req.Category) {
+		if userID != "" && !m.checkOptOut(r.Context(), userID, workspace, req.Category, consentOverride) {
 			m.log.V(1).Info("memory write suppressed", "reason", "user opt-out", "userHash", logging.HashID(userID), "workspace", workspace, "category", req.Category)
 			w.WriteHeader(http.StatusNoContent)
 			return

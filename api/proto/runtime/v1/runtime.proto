@@ -39,6 +39,10 @@ message ClientMessage {
   // client_tool_result carries the result of a client-side tool execution.
   // Set when responding to a ToolCall with execution=CLIENT.
   ClientToolResult client_tool_result = 5;
+
+  // consent_grants carries per-message consent category grants from the client.
+  // When present, these override stored consent for this request.
+  repeated string consent_grants = 6;
 }
 
 // ClientToolResult carries the client's response to a client-side tool call.

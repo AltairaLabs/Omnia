@@ -239,3 +239,43 @@ func TestExtractPropagationFields_WrongType(t *testing.T) {
 	ctx := context.WithValue(context.Background(), ContextKeyAgentName, 12345)
 	assert.Equal(t, "", AgentName(ctx))
 }
+
+func TestConsentGrantsRoundTrip(t *testing.T) {
+	grants := []string{"memory", "analytics"}
+	ctx := WithConsentGrants(context.Background(), grants)
+	got := ConsentGrantsFromContext(ctx)
+	require.Equal(t, grants, got)
+}
+
+func TestConsentGrantsFromContextEmpty(t *testing.T) {
+	got := ConsentGrantsFromContext(context.Background())
+	assert.Nil(t, got)
+}
+
+func TestToGRPCMetadataIncludesConsentGrants(t *testing.T) {
+	ctx := WithConsentGrants(context.Background(), []string{"memory", "analytics"})
+	headers := ToGRPCMetadata(ctx)
+	assert.Equal(t, "memory,analytics", headers[HeaderConsentGrants])
+}
+
+func TestToGRPCMetadataOmitsConsentGrantsWhenEmpty(t *testing.T) {
+	headers := ToGRPCMetadata(context.Background())
+	_, ok := headers[HeaderConsentGrants]
+	assert.False(t, ok, "consent grants header should be absent when no grants set")
+}
+
+func TestWithPropagationFieldsConsentGrants(t *testing.T) {
+	fields := &PropagationFields{
+		ConsentGrants: []string{"memory"},
+	}
+	ctx := WithPropagationFields(context.Background(), fields)
+	got := ConsentGrantsFromContext(ctx)
+	require.Equal(t, []string{"memory"}, got)
+}
+
+func TestExtractPropagationFieldsConsentGrants(t *testing.T) {
+	grants := []string{"memory", "analytics"}
+	ctx := WithConsentGrants(context.Background(), grants)
+	fields := ExtractPropagationFields(ctx)
+	assert.Equal(t, grants, fields.ConsentGrants)
+}

@@ -410,12 +410,18 @@ func wrapPrivacyMiddleware(next http.Handler, pool *pgxpool.Pool, log logr.Logge
 	prefStore := privacy.NewPreferencesStore(pool)
 	redactor := redaction.NewRedactor()
 
-	checkOptOut := memoryapi.OptOutChecker(func(ctx context.Context, userID, workspace, category string) bool {
+	checkOptOut := memoryapi.OptOutChecker(func(ctx context.Context, userID, workspace, category string, consentOverride []string) bool {
 		cat := privacy.ConsentCategory(category)
 		if cat == "" {
 			cat = privacy.ConsentMemoryContext
 		}
-		return privacy.ShouldRememberCategory(ctx, prefStore, prefStore, userID, workspace, "", cat)
+		var source privacy.ConsentSource
+		if len(consentOverride) > 0 {
+			source = privacy.NewStaticConsentSource(consentOverride)
+		} else {
+			source = prefStore
+		}
+		return privacy.ShouldRememberCategory(ctx, prefStore, source, userID, workspace, "", cat)
 	})
 
 	contentRedactor := memoryapi.ContentRedactor(func(ctx context.Context, workspace, content string) (string, error) {
