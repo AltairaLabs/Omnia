@@ -241,6 +241,7 @@ docker_build(
     only=[
         './cmd/memory-api',
         './api',
+        './ee',
         './internal/memory',
         './internal/session',
         './internal/pgutil',
