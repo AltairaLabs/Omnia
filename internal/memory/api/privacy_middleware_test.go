@@ -55,7 +55,7 @@ var panicRedact ContentRedactor = func(_ context.Context, _, _ string) (string, 
 }
 
 func newTestMiddleware(checkOptOut OptOutChecker, redact ContentRedactor) *MemoryPrivacyMiddleware {
-	return NewMemoryPrivacyMiddleware(checkOptOut, redact, logr.Discard())
+	return NewMemoryPrivacyMiddleware(checkOptOut, redact, nil, logr.Discard())
 }
 
 func postBody(t *testing.T, content string) *bytes.Buffer {
@@ -396,6 +396,111 @@ func TestMemoryPrivacyMiddleware_CategoryOptedOut_Returns204(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := makePostRequestWithCategory(t, "my name is Alice", "ws-1", "user-abc", "memory:identity")
+	handler.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.False(t, handlerCalled)
+}
+
+func TestMemoryPrivacyMiddleware_ClassifiesWhenCategoryEmpty(t *testing.T) {
+	// POST with no category + classifier returns "memory:identity" → opt-out checker receives "memory:identity".
+	var receivedCategory string
+	checker := OptOutChecker(func(_ context.Context, _, _, category string) bool {
+		receivedCategory = category
+		return true // allow
+	})
+
+	classifier := ContentClassifier(func(_ string) string {
+		return "memory:identity"
+	})
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	mw := NewMemoryPrivacyMiddleware(checker, noOpRedact, classifier, logr.Discard())
+	handler := mw.Wrap(next)
+
+	w := httptest.NewRecorder()
+	r := makePostRequest(t, "my name is Alice", "ws-1", "user-abc")
+	handler.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Equal(t, "memory:identity", receivedCategory, "classifier result should reach opt-out checker")
+}
+
+func TestMemoryPrivacyMiddleware_SkipsClassifierWhenCategoryProvided(t *testing.T) {
+	// POST with explicit category → classifier must NOT be called.
+	panicClassifier := ContentClassifier(func(_ string) string {
+		panic("ContentClassifier must not be called when category already set")
+	})
+
+	var receivedCategory string
+	checker := OptOutChecker(func(_ context.Context, _, _, category string) bool {
+		receivedCategory = category
+		return true
+	})
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	mw := NewMemoryPrivacyMiddleware(checker, noOpRedact, panicClassifier, logr.Discard())
+	handler := mw.Wrap(next)
+
+	w := httptest.NewRecorder()
+	r := makePostRequestWithCategory(t, "my preferences", "ws-1", "user-abc", "memory:preferences")
+	handler.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Equal(t, "memory:preferences", receivedCategory, "explicit category should pass through unchanged")
+}
+
+func TestMemoryPrivacyMiddleware_NilClassifier_CategoryStaysEmpty(t *testing.T) {
+	// POST with no category + nil classifier → opt-out checker receives empty string.
+	var receivedCategory string
+	checker := OptOutChecker(func(_ context.Context, _, _, category string) bool {
+		receivedCategory = category
+		return true
+	})
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	// nil classifier explicitly
+	mw := NewMemoryPrivacyMiddleware(checker, noOpRedact, nil, logr.Discard())
+	handler := mw.Wrap(next)
+
+	w := httptest.NewRecorder()
+	r := makePostRequest(t, "some content", "ws-1", "user-abc")
+	handler.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Equal(t, "", receivedCategory, "category should remain empty when classifier is nil")
+}
+
+func TestMemoryPrivacyMiddleware_ClassifierBeforeOptOut(t *testing.T) {
+	// POST + classifier returns "memory:health" + opt-out rejects "memory:health" → 204.
+	classifier := ContentClassifier(func(_ string) string {
+		return "memory:health"
+	})
+
+	checker := OptOutChecker(func(_ context.Context, _, _, category string) bool {
+		return category != "memory:health" // reject memory:health
+	})
+
+	var handlerCalled bool
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	mw := NewMemoryPrivacyMiddleware(checker, panicRedact, classifier, logr.Discard())
+	handler := mw.Wrap(next)
+
+	w := httptest.NewRecorder()
+	r := makePostRequest(t, "I have diabetes", "ws-1", "user-abc")
 	handler.ServeHTTP(w, r)
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
