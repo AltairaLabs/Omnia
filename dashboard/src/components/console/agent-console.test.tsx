@@ -2,6 +2,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { AgentConsole } from "./agent-console";
 
+// Mock auth and memory hooks (needed by MemorySidebar)
+vi.mock("@/hooks/use-auth", () => ({
+  useAuth: () => ({ user: { id: "test-user" }, isAuthenticated: true }),
+}));
+vi.mock("@/hooks/use-memories", () => ({
+  useMemories: () => ({ data: { memories: [], total: 0 }, isLoading: false }),
+}));
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: () => ({ currentWorkspace: { name: "test-ws" }, workspaces: [], setCurrentWorkspace: vi.fn(), isLoading: false, error: null, refetch: vi.fn() }),
+}));
+
 // Mock the hooks
 vi.mock("@/hooks/console", () => ({
   useAgentConsole: () => ({

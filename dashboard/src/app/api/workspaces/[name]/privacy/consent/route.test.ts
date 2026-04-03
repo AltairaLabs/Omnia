@@ -76,6 +76,7 @@ describe("GET /api/workspaces/[name]/privacy/consent", () => {
       ok: true,
       status: 200,
       json: () => Promise.resolve({ grants: ["analytics"], defaults: ["essential"], denied: [] }),
+      text: () => Promise.resolve(JSON.stringify({ grants: ["analytics"], defaults: ["essential"], denied: [] })),
     });
 
     const { GET } = await import("./route");
@@ -175,6 +176,7 @@ describe("GET /api/workspaces/[name]/privacy/consent", () => {
       ok: false,
       status: 404,
       json: () => Promise.resolve({ error: "not found" }),
+      text: () => Promise.resolve(JSON.stringify({ error: "not found" })),
     });
 
     const { GET } = await import("./route");
@@ -215,6 +217,7 @@ describe("PUT /api/workspaces/[name]/privacy/consent", () => {
       ok: true,
       status: 200,
       json: () => Promise.resolve(updatedConsent),
+      text: () => Promise.resolve(JSON.stringify(updatedConsent)),
     });
 
     const { PUT } = await import("./route");

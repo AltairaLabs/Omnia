@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { Send, Trash2, Wifi, WifiOff, RefreshCw, Upload, Paperclip, X, AlertCircle } from "lucide-react";
+import { Send, Trash2, Wifi, WifiOff, RefreshCw, Upload, Paperclip, X, AlertCircle, Brain } from "lucide-react";
+import { MemorySidebar } from "@/components/memories/memory-sidebar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -95,6 +96,7 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [memorySidebarOpen, setMemorySidebarOpen] = useState(false);
   const [rejections, setRejections] = useState<string[]>([]);
   const [cropFile, setCropFile] = useState<File | null>(null);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
@@ -477,6 +479,15 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
           <Button
             variant="ghost"
             size="sm"
+            onClick={() => setMemorySidebarOpen(true)}
+            data-testid="memories-toggle"
+            title="Agent memories"
+          >
+            <Brain className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={clearMessages}
             disabled={messages.length === 0}
           >
@@ -484,6 +495,12 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
           </Button>
         </div>
       </div>
+
+      <MemorySidebar
+        agentName={agentName}
+        open={memorySidebarOpen}
+        onClose={() => setMemorySidebarOpen(false)}
+      />
 
       {/* Error display */}
       {error && (

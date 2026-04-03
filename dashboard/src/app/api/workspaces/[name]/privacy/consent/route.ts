@@ -55,8 +55,23 @@ export const GET = withWorkspaceAccess(
       const response = await fetch(targetUrl, {
         headers: { Accept: "application/json" },
       });
-      const data = await response.json();
-      return NextResponse.json(data, { status: response.status });
+      const text = await response.text();
+      try {
+        const data = JSON.parse(text);
+        return NextResponse.json(data, { status: response.status });
+      } catch {
+        // Non-JSON response (e.g. 404 HTML page — consent endpoint not deployed yet)
+        if (response.status === 404) {
+          return NextResponse.json(
+            { grants: [], defaults: [], denied: [] },
+            { status: 200 }
+          );
+        }
+        return NextResponse.json(
+          { error: `Session API returned non-JSON (HTTP ${response.status})` },
+          { status: 502 }
+        );
+      }
     } catch (error) {
       console.error("Consent API proxy error:", error);
       return NextResponse.json(
@@ -108,8 +123,16 @@ export const PUT = withWorkspaceAccess(
         },
         body,
       });
-      const data = await response.json();
-      return NextResponse.json(data, { status: response.status });
+      const text = await response.text();
+      try {
+        const data = JSON.parse(text);
+        return NextResponse.json(data, { status: response.status });
+      } catch {
+        return NextResponse.json(
+          { error: `Session API returned non-JSON (HTTP ${response.status})` },
+          { status: 502 }
+        );
+      }
     } catch (error) {
       console.error("Consent API proxy error:", error);
       return NextResponse.json(
