@@ -492,6 +492,21 @@ export interface MemorySearchOptions extends MemoryListOptions {
   minConfidence?: number;
 }
 
+// ============================================================
+// Consent types
+// ============================================================
+
+export interface ConsentResponse {
+  grants: string[];
+  defaults: string[];
+  denied: string[];
+}
+
+export interface ConsentRequest {
+  grants?: string[];
+  revocations?: string[];
+}
+
 /**
  * Agent WebSocket connection interface.
  * Provides a unified interface for communicating with agents
