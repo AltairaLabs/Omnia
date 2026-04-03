@@ -177,6 +177,8 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 		log.V(1).Info("memory store wired",
 			"session_id", sessionID,
 			"trace_id", sessionID,
+			"hasUserID", scope["user_id"] != "",
+			"scopeKeys", len(scope),
 		)
 	}
 
