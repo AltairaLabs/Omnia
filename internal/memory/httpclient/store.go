@@ -29,11 +29,13 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
 
 	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
+	"github.com/altairalabs/omnia/pkg/policy"
 )
 
 // Default timeout for HTTP requests to the memory-api.
@@ -223,6 +225,11 @@ func (s *Store) doRequest(ctx context.Context, method, path string, body []byte)
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+
+	// Forward consent grants if present in context.
+	if grants := policy.ConsentGrantsFromContext(ctx); len(grants) > 0 {
+		req.Header.Set("X-Consent-Grants", strings.Join(grants, ","))
+	}
 
 	s.log.V(2).Info("memory-api request", "method", method, "path", path)
 
