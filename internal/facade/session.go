@@ -35,6 +35,7 @@ import (
 	"github.com/altairalabs/omnia/internal/session/otlp"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logctx"
+	"github.com/altairalabs/omnia/pkg/policy"
 )
 
 // processMessage handles processing of an incoming client message.
@@ -60,6 +61,9 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 	ctx = logctx.WithTraceID(ctx, msgSpan.SpanContext().TraceID().String())
 	if c.userID != "" {
 		ctx = httpclient.WithUserID(ctx, c.userID)
+	}
+	if len(msg.ConsentGrants) > 0 {
+		ctx = policy.WithConsentGrants(ctx, msg.ConsentGrants)
 	}
 	log = logctx.LoggerWithContext(s.log, ctx)
 

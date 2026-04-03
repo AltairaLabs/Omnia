@@ -18,6 +18,7 @@ package runtime
 
 import (
 	"context"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -85,6 +86,9 @@ func extractPolicyFromMetadata(ctx context.Context) context.Context {
 		Provider:      firstValue(md, policy.HeaderProvider),
 		Model:         firstValue(md, policy.HeaderModel),
 		Claims:        extractClaims(md),
+	}
+	if grants := firstValue(md, policy.HeaderConsentGrants); grants != "" {
+		fields.ConsentGrants = strings.Split(grants, ",")
 	}
 	return policy.WithPropagationFields(ctx, fields)
 }
