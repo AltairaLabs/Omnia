@@ -29,6 +29,7 @@ import {
 import {
   ArrowLeft,
   Bot,
+  Brain,
   User,
   Wrench,
   Clock,
@@ -43,6 +44,7 @@ import {
   Shield,
 } from "lucide-react";
 import { useSessionDetail, useSessionAllMessages, useSessionEvalResults, useSessionToolCalls, useSessionProviderCalls, useSessionRuntimeEvents } from "@/hooks/sessions";
+import { MemorySidebar } from "@/components/memories/memory-sidebar";
 import type { Message, Session, ToolCall, ProviderCall, RuntimeEvent, EvalResult } from "@/types";
 import { EvalResultsBadge } from "@/components/sessions/eval-results-badge";
 import { ToolCallBadge } from "@/components/sessions/tool-call-badge";
@@ -323,6 +325,7 @@ export default function SessionDetailPage({
   const router = useRouter();
   const searchParams = useSearchParams();
   const defaultTab = searchParams.get("tab") ?? "conversation";
+  const [memorySidebarOpen, setMemorySidebarOpen] = useState(false);
   const { data: session, isLoading, error } = useSessionDetail(id);
   const { data: evalResults } = useSessionEvalResults(id);
   const { data: rawToolCalls } = useSessionToolCalls(id);
@@ -498,6 +501,15 @@ export default function SessionDetailPage({
           <Button variant="outline" size="sm" onClick={() => handleExport("json")}>
             <Download className="h-4 w-4 mr-2" />
             Export JSON
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setMemorySidebarOpen(true)}
+            data-testid="memories-toggle"
+          >
+            <Brain className="h-4 w-4 mr-2" />
+            Memories
           </Button>
         </div>
       </div>
@@ -676,6 +688,12 @@ export default function SessionDetailPage({
           </TabsContent>
         </Tabs>
       </div>
+
+      <MemorySidebar
+        agentName={session?.agentName ?? ""}
+        open={memorySidebarOpen}
+        onClose={() => setMemorySidebarOpen(false)}
+      />
     </div>
   );
 }

@@ -26,6 +26,17 @@ vi.mock("@/hooks/sessions", () => ({
   })),
 }));
 
+// Mock auth and memory hooks (needed by MemorySidebar imported by the page)
+vi.mock("@/hooks/use-auth", () => ({
+  useAuth: () => ({ user: { id: "test-user" }, isAuthenticated: true }),
+}));
+vi.mock("@/hooks/use-memories", () => ({
+  useMemories: () => ({ data: { memories: [], total: 0 }, isLoading: false }),
+}));
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: () => ({ currentWorkspace: { name: "test-ws" }, workspaces: [], setCurrentWorkspace: vi.fn(), isLoading: false, error: null, refetch: vi.fn() }),
+}));
+
 // Mock next/link
 vi.mock("next/link", () => ({
   default: function MockLink({ children, href }: { children: React.ReactNode; href: string }) {
