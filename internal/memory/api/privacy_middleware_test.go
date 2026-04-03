@@ -34,7 +34,7 @@ import (
 )
 
 // passthroughOptOut always returns true (no opt-out).
-var passthroughOptOut OptOutChecker = func(_ context.Context, _, _, _ string) bool { return true }
+var passthroughOptOut OptOutChecker = func(_ context.Context, _, _, _ string, _ []string) bool { return true }
 
 // noOpRedact returns content unchanged.
 var noOpRedact ContentRedactor = func(_ context.Context, _, content string) (string, error) {
@@ -42,10 +42,10 @@ var noOpRedact ContentRedactor = func(_ context.Context, _, content string) (str
 }
 
 // optedOutChecker always returns false (user opted out).
-var optedOutChecker OptOutChecker = func(_ context.Context, _, _, _ string) bool { return false }
+var optedOutChecker OptOutChecker = func(_ context.Context, _, _, _ string, _ []string) bool { return false }
 
 // panicOptOut panics if called — use to assert opt-out is never checked.
-var panicOptOut OptOutChecker = func(_ context.Context, _, _, _ string) bool {
+var panicOptOut OptOutChecker = func(_ context.Context, _, _, _ string, _ []string) bool {
 	panic("OptOutChecker must not be called for this request")
 }
 
@@ -336,7 +336,7 @@ func makePostRequestWithCategory(t *testing.T, content, workspace, userID, categ
 func TestMemoryPrivacyMiddleware_NoCategoryInBody_OptOutCheckerReceivesEmpty(t *testing.T) {
 	// POST without a category field — opt-out checker must receive an empty string.
 	var receivedCategory string
-	checker := OptOutChecker(func(_ context.Context, _, _, category string) bool {
+	checker := OptOutChecker(func(_ context.Context, _, _, category string, _ []string) bool {
 		receivedCategory = category
 		return true // allow
 	})
@@ -359,7 +359,7 @@ func TestMemoryPrivacyMiddleware_NoCategoryInBody_OptOutCheckerReceivesEmpty(t *
 func TestMemoryPrivacyMiddleware_WithCategory_OptOutCheckerReceivesCategory(t *testing.T) {
 	// POST with category: "memory:identity" — opt-out checker must receive it.
 	var receivedCategory string
-	checker := OptOutChecker(func(_ context.Context, _, _, category string) bool {
+	checker := OptOutChecker(func(_ context.Context, _, _, category string, _ []string) bool {
 		receivedCategory = category
 		return true // allow
 	})
@@ -381,7 +381,7 @@ func TestMemoryPrivacyMiddleware_WithCategory_OptOutCheckerReceivesCategory(t *t
 
 func TestMemoryPrivacyMiddleware_CategoryOptedOut_Returns204(t *testing.T) {
 	// Opt-out checker that only rejects "memory:identity".
-	checker := OptOutChecker(func(_ context.Context, _, _, category string) bool {
+	checker := OptOutChecker(func(_ context.Context, _, _, category string, _ []string) bool {
 		return category != "memory:identity"
 	})
 
@@ -405,7 +405,7 @@ func TestMemoryPrivacyMiddleware_CategoryOptedOut_Returns204(t *testing.T) {
 func TestMemoryPrivacyMiddleware_ClassifiesWhenCategoryEmpty(t *testing.T) {
 	// POST with no category + classifier returns "memory:identity" → opt-out checker receives "memory:identity".
 	var receivedCategory string
-	checker := OptOutChecker(func(_ context.Context, _, _, category string) bool {
+	checker := OptOutChecker(func(_ context.Context, _, _, category string, _ []string) bool {
 		receivedCategory = category
 		return true // allow
 	})
@@ -436,7 +436,7 @@ func TestMemoryPrivacyMiddleware_SkipsClassifierWhenCategoryProvided(t *testing.
 	})
 
 	var receivedCategory string
-	checker := OptOutChecker(func(_ context.Context, _, _, category string) bool {
+	checker := OptOutChecker(func(_ context.Context, _, _, category string, _ []string) bool {
 		receivedCategory = category
 		return true
 	})
@@ -459,7 +459,7 @@ func TestMemoryPrivacyMiddleware_SkipsClassifierWhenCategoryProvided(t *testing.
 func TestMemoryPrivacyMiddleware_NilClassifier_CategoryStaysEmpty(t *testing.T) {
 	// POST with no category + nil classifier → opt-out checker receives empty string.
 	var receivedCategory string
-	checker := OptOutChecker(func(_ context.Context, _, _, category string) bool {
+	checker := OptOutChecker(func(_ context.Context, _, _, category string, _ []string) bool {
 		receivedCategory = category
 		return true
 	})
@@ -486,7 +486,7 @@ func TestMemoryPrivacyMiddleware_ClassifierBeforeOptOut(t *testing.T) {
 		return "memory:health"
 	})
 
-	checker := OptOutChecker(func(_ context.Context, _, _, category string) bool {
+	checker := OptOutChecker(func(_ context.Context, _, _, category string, _ []string) bool {
 		return category != "memory:health" // reject memory:health
 	})
 
@@ -505,4 +505,80 @@ func TestMemoryPrivacyMiddleware_ClassifierBeforeOptOut(t *testing.T) {
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
 	assert.False(t, handlerCalled)
+}
+
+func TestMemoryPrivacyMiddleware_ConsentOverrideHeader_PassedToChecker(t *testing.T) {
+	// POST with X-Consent-Grants header → checker receives the parsed grants slice.
+	var receivedOverride []string
+	checker := OptOutChecker(func(_ context.Context, _, _, _ string, consentOverride []string) bool {
+		receivedOverride = consentOverride
+		return true
+	})
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	mw := newTestMiddleware(checker, noOpRedact)
+	handler := mw.Wrap(next)
+
+	w := httptest.NewRecorder()
+	r := makePostRequest(t, "some content", "ws-1", "user-abc")
+	r.Header.Set(consentGrantsHeader, "memory:identity,memory:preferences")
+	handler.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Equal(t, []string{"memory:identity", "memory:preferences"}, receivedOverride)
+}
+
+func TestMemoryPrivacyMiddleware_NoConsentHeader_NilOverride(t *testing.T) {
+	// POST without X-Consent-Grants header → checker receives nil override.
+	var receivedOverride []string
+	checker := OptOutChecker(func(_ context.Context, _, _, _ string, consentOverride []string) bool {
+		receivedOverride = consentOverride
+		return true
+	})
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	mw := newTestMiddleware(checker, noOpRedact)
+	handler := mw.Wrap(next)
+
+	w := httptest.NewRecorder()
+	r := makePostRequest(t, "some content", "ws-1", "user-abc")
+	handler.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Nil(t, receivedOverride, "no header should yield nil override")
+}
+
+func TestMemoryPrivacyMiddleware_ConsentOverride_OverridesDB(t *testing.T) {
+	// Checker that allows when override contains "memory:identity", else denies.
+	checker := OptOutChecker(func(_ context.Context, _, _, _ string, consentOverride []string) bool {
+		for _, g := range consentOverride {
+			if g == "memory:identity" {
+				return true
+			}
+		}
+		return false
+	})
+
+	var handlerCalled bool
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	mw := newTestMiddleware(checker, noOpRedact)
+	handler := mw.Wrap(next)
+
+	w := httptest.NewRecorder()
+	r := makePostRequest(t, "my name is Alice", "ws-1", "user-abc")
+	r.Header.Set(consentGrantsHeader, "memory:identity")
+	handler.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusCreated, w.Code, "header override should allow the write")
+	assert.True(t, handlerCalled)
 }
