@@ -41,6 +41,10 @@ type OptOutChecker func(ctx context.Context, userID, workspace, category string)
 // original text unchanged.
 type ContentRedactor func(ctx context.Context, workspace, content string) (string, error)
 
+// ContentClassifier infers a consent category from memory content.
+// Returns a category string (e.g. "memory:identity") or empty string for default.
+type ContentClassifier func(content string) string
+
 // MemoryPrivacyMiddleware intercepts POST requests to the memory API and:
 //  1. Returns 204 No Content when the user has opted out of memory storage.
 //  2. Redacts PII from the request body's "content" field before forwarding.
@@ -52,21 +56,41 @@ type ContentRedactor func(ctx context.Context, workspace, content string) (strin
 type MemoryPrivacyMiddleware struct {
 	checkOptOut OptOutChecker
 	redact      ContentRedactor
+	classifier  ContentClassifier // optional, nil when not configured
 	log         logr.Logger
 }
 
 // NewMemoryPrivacyMiddleware creates a MemoryPrivacyMiddleware.
-// checkOptOut and redact must not be nil.
+// checkOptOut and redact must not be nil. classifier may be nil.
 func NewMemoryPrivacyMiddleware(
 	checkOptOut OptOutChecker,
 	redact ContentRedactor,
+	classifier ContentClassifier,
 	log logr.Logger,
 ) *MemoryPrivacyMiddleware {
 	return &MemoryPrivacyMiddleware{
 		checkOptOut: checkOptOut,
 		redact:      redact,
+		classifier:  classifier,
 		log:         log.WithName("memory-privacy"),
 	}
+}
+
+// readAndDecode reads the request body and attempts to decode it as a SaveMemoryRequest.
+// Returns the raw bytes, the decoded request, and whether decoding succeeded.
+func readAndDecode(r *http.Request) ([]byte, SaveMemoryRequest, bool, error) {
+	var data []byte
+	if r.Body != nil {
+		var err error
+		data, err = io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		if err != nil {
+			return nil, SaveMemoryRequest{}, false, err
+		}
+	}
+	var req SaveMemoryRequest
+	decoded := len(data) > 0 && json.Unmarshal(data, &req) == nil
+	return data, req, decoded, nil
 }
 
 // Wrap returns an http.Handler that enforces privacy policy before delegating
@@ -81,21 +105,16 @@ func (m *MemoryPrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 		workspace := r.URL.Query().Get("workspace")
 		userID := r.URL.Query().Get("user_id")
 
-		// Read body once so we can inspect category for opt-out and content for redaction.
-		var data []byte
-		if r.Body != nil {
-			var err error
-			data, err = io.ReadAll(r.Body)
-			_ = r.Body.Close()
-			if err != nil {
-				http.Error(w, "failed to read body", http.StatusInternalServerError)
-				return
-			}
+		data, req, decoded, err := readAndDecode(r)
+		if err != nil {
+			http.Error(w, "failed to read body", http.StatusInternalServerError)
+			return
 		}
 
-		// Try to decode to get category and content for downstream use.
-		var req SaveMemoryRequest
-		decoded := len(data) > 0 && json.Unmarshal(data, &req) == nil
+		// Classify content when no explicit category provided.
+		if decoded && req.Category == "" && m.classifier != nil {
+			req.Category = m.classifier(req.Content)
+		}
 
 		// Check opt-out with category (empty string if not decoded).
 		if userID != "" && !m.checkOptOut(r.Context(), userID, workspace, req.Category) {
@@ -106,9 +125,9 @@ func (m *MemoryPrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 
 		// Apply PII redaction when body was successfully decoded.
 		if decoded {
-			redacted, err := m.redact(r.Context(), workspace, req.Content)
-			if err != nil {
-				m.log.Error(err, "content redaction failed, blocking request", "workspace", workspace)
+			redacted, redactErr := m.redact(r.Context(), workspace, req.Content)
+			if redactErr != nil {
+				m.log.Error(redactErr, "content redaction failed, blocking request", "workspace", workspace)
 				http.Error(w, "redaction failed", http.StatusInternalServerError)
 				return
 			}

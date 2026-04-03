@@ -427,7 +427,8 @@ func wrapPrivacyMiddleware(next http.Handler, pool *pgxpool.Pool, log logr.Logge
 		return redacted, err
 	})
 
-	mw := memoryapi.NewMemoryPrivacyMiddleware(checkOptOut, contentRedactor, log)
+	classifier := memoryapi.ContentClassifier(privacy.NewContentClassifier())
+	mw := memoryapi.NewMemoryPrivacyMiddleware(checkOptOut, contentRedactor, classifier, log)
 	log.Info("memory privacy middleware enabled")
 	return mw.Wrap(next)
 }
