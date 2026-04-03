@@ -53,6 +53,8 @@ const (
 	ContextKeyModel contextKey = "omnia-model"
 	// ContextKeyClaims holds extracted JWT claims as a map.
 	ContextKeyClaims contextKey = "omnia-claims"
+	// ContextKeyConsentGrants holds per-request consent grants.
+	ContextKeyConsentGrants contextKey = "omnia-consent-grants"
 )
 
 // HTTP/gRPC header constants for context propagation.
@@ -86,6 +88,8 @@ const (
 	HeaderClaimPrefix = "x-omnia-claim-"
 	// HeaderParamPrefix is the prefix for promoted tool parameters.
 	HeaderParamPrefix = "x-omnia-param-"
+	// HeaderConsentGrants carries comma-separated consent category grants.
+	HeaderConsentGrants = "x-omnia-consent-grants"
 )
 
 // Istio-injected header names that the facade reads from the WebSocket upgrade request.
@@ -111,6 +115,8 @@ type PropagationFields struct {
 	Provider      string
 	Model         string
 	Claims        map[string]string
+	// ConsentGrants holds per-request consent category grants.
+	ConsentGrants []string
 }
 
 // WithAgentName returns a context with the agent name set.
@@ -168,6 +174,21 @@ func WithClaims(ctx context.Context, claims map[string]string) context.Context {
 	return context.WithValue(ctx, ContextKeyClaims, claims)
 }
 
+// WithConsentGrants returns a context with consent grants set.
+func WithConsentGrants(ctx context.Context, grants []string) context.Context {
+	return context.WithValue(ctx, ContextKeyConsentGrants, grants)
+}
+
+// ConsentGrantsFromContext extracts consent grants from context.
+func ConsentGrantsFromContext(ctx context.Context) []string {
+	if v := ctx.Value(ContextKeyConsentGrants); v != nil {
+		if grants, ok := v.([]string); ok {
+			return grants
+		}
+	}
+	return nil
+}
+
 // WithPropagationFields returns a context with all propagation fields set.
 // Only non-empty values are stored.
 func WithPropagationFields(ctx context.Context, fields *PropagationFields) context.Context {
@@ -186,6 +207,9 @@ func WithPropagationFields(ctx context.Context, fields *PropagationFields) conte
 	ctx = setIfNonEmpty(ctx, ContextKeyModel, fields.Model)
 	if len(fields.Claims) > 0 {
 		ctx = WithClaims(ctx, fields.Claims)
+	}
+	if len(fields.ConsentGrants) > 0 {
+		ctx = WithConsentGrants(ctx, fields.ConsentGrants)
 	}
 	return ctx
 }
@@ -212,6 +236,7 @@ func ExtractPropagationFields(ctx context.Context) PropagationFields {
 		Provider:      getString(ctx, ContextKeyProvider),
 		Model:         getString(ctx, ContextKeyModel),
 		Claims:        getClaims(ctx),
+		ConsentGrants: ConsentGrantsFromContext(ctx),
 	}
 }
 
@@ -294,6 +319,10 @@ func ToOutboundHeaders(ctx context.Context) map[string]string {
 	// Append claim headers
 	for name, value := range getClaims(ctx) {
 		headers[HeaderClaimPrefix+name] = value
+	}
+	// Append consent grants header.
+	if grants := ConsentGrantsFromContext(ctx); len(grants) > 0 {
+		headers[HeaderConsentGrants] = strings.Join(grants, ",")
 	}
 	return headers
 }
