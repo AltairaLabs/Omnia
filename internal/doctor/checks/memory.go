@@ -13,6 +13,7 @@ import (
 	"github.com/altairalabs/omnia/internal/doctor"
 	memoryhttpclient "github.com/altairalabs/omnia/internal/memory/httpclient"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/pkg/identity"
 )
 
 const (
@@ -78,6 +79,16 @@ func (m *MemoryChecker) scope() map[string]string {
 	return map[string]string{
 		"workspace_id": m.workspace,
 		"user_id":      memoryTestUserID,
+	}
+}
+
+// agentScope returns the scope map for memories saved by the agent. The facade
+// pseudonymizes the raw user ID from the X-User-Id header, so we must use the
+// same hashed value when searching for agent-created memories.
+func (m *MemoryChecker) agentScope() map[string]string {
+	return map[string]string{
+		"workspace_id": m.workspace,
+		"user_id":      identity.PseudonymizeID("doctor-smoke-test"),
 	}
 }
 
@@ -266,7 +277,8 @@ func (m *MemoryChecker) checkMemoryToolsAvailable(ctx context.Context) doctor.Te
 	}
 
 	// Verify the memory was saved by searching the memory-api.
-	memories, err := m.memoryStore.Retrieve(ctx, m.scope(), memoryTestMarker, pkmemory.RetrieveOptions{})
+	// Use agentScope() because the facade hashes the X-User-Id header value.
+	memories, err := m.memoryStore.Retrieve(ctx, m.agentScope(), memoryTestMarker, pkmemory.RetrieveOptions{})
 	if err != nil {
 		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "search after remember failed"}
 	}
