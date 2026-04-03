@@ -62,7 +62,7 @@ func (p *PrivacyChecker) saveMemory(ctx context.Context, content string, extraHe
 		"type":       "doctor-privacy-test",
 		"content":    content,
 		"confidence": 0.9,
-		"scope":      map[string]string{"workspace_id": p.workspace},
+		"scope":      map[string]string{"workspace_id": p.workspace, "user_id": "doctor-privacy-test"},
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
