@@ -326,7 +326,7 @@ generate-dashboard-types: sync-chart-crds ## Generate TypeScript types from CRD 
 
 .PHONY: generate-websocket-types
 generate-websocket-types: ## Generate TypeScript types from Go WebSocket protocol structs
-	tygo generate
+	env GOWORK=off tygo generate
 
 .PHONY: generate-dashboard-api
 generate-dashboard-api: ## Generate TypeScript API client from OpenAPI spec

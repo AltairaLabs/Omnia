@@ -10,11 +10,12 @@
 package runtimev1
 
 import (
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
+
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -89,8 +90,11 @@ type ClientMessage struct {
 	// client_tool_result carries the result of a client-side tool execution.
 	// Set when responding to a ToolCall with execution=CLIENT.
 	ClientToolResult *ClientToolResult `protobuf:"bytes,5,opt,name=client_tool_result,json=clientToolResult,proto3" json:"client_tool_result,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// consent_grants carries per-message consent category grants from the client.
+	// When present, these override stored consent for this request.
+	ConsentGrants []string `protobuf:"bytes,6,rep,name=consent_grants,json=consentGrants,proto3" json:"consent_grants,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ClientMessage) Reset() {
@@ -154,6 +158,13 @@ func (x *ClientMessage) GetParts() []*ContentPart {
 func (x *ClientMessage) GetClientToolResult() *ClientToolResult {
 	if x != nil {
 		return x.ClientToolResult
+	}
+	return nil
+}
+
+func (x *ClientMessage) GetConsentGrants() []string {
+	if x != nil {
+		return x.ConsentGrants
 	}
 	return nil
 }
@@ -1070,14 +1081,15 @@ var File_api_proto_runtime_v1_runtime_proto protoreflect.FileDescriptor
 
 const file_api_proto_runtime_v1_runtime_proto_rawDesc = "" +
 	"\n" +
-	"\"api/proto/runtime/v1/runtime.proto\x12\x10omnia.runtime.v1\"\xd7\x02\n" +
+	"\"api/proto/runtime/v1/runtime.proto\x12\x10omnia.runtime.v1\"\xfe\x02\n" +
 	"\rClientMessage\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\x12I\n" +
 	"\bmetadata\x18\x03 \x03(\v2-.omnia.runtime.v1.ClientMessage.MetadataEntryR\bmetadata\x123\n" +
 	"\x05parts\x18\x04 \x03(\v2\x1d.omnia.runtime.v1.ContentPartR\x05parts\x12P\n" +
-	"\x12client_tool_result\x18\x05 \x01(\v2\".omnia.runtime.v1.ClientToolResultR\x10clientToolResult\x1a;\n" +
+	"\x12client_tool_result\x18\x05 \x01(\v2\".omnia.runtime.v1.ClientToolResultR\x10clientToolResult\x12%\n" +
+	"\x0econsent_grants\x18\x06 \x03(\tR\rconsentGrants\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x98\x01\n" +
