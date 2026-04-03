@@ -240,7 +240,7 @@ func TestHandleSaveMemory_Success(t *testing.T) {
 		Type:       "preference",
 		Content:    "likes Go",
 		Confidence: 0.9,
-		Scope:      map[string]string{"workspace_id": "ws1"},
+		Scope:      map[string]string{"workspace_id": "ws1", "user_id": "test-user"},
 	}
 	b, _ := json.Marshal(body)
 
@@ -276,7 +276,7 @@ func TestHandleSaveMemory_StoreError(t *testing.T) {
 	body := SaveMemoryRequest{
 		Type:    "fact",
 		Content: "test",
-		Scope:   map[string]string{"workspace_id": "ws1"},
+		Scope:   map[string]string{"workspace_id": "ws1", "user_id": "test-user"},
 	}
 	b, _ := json.Marshal(body)
 
