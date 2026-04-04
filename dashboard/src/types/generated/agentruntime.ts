@@ -2240,6 +2240,10 @@ export interface AgentRuntimeSpec {
       };
     }[];
   };
+  /** serviceGroup references a service group defined in the parent Workspace's spec.services[].name.
+   * The controller resolves the session-api and memory-api endpoints from that group.
+   * Defaults to "default". */
+  serviceGroup?: string;
   /** session configures session management and storage. */
   session?: {
     /** storeRef references a secret containing connection details for the session store.
