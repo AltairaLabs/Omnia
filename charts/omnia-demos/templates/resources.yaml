@@ -507,54 +507,42 @@ data:
               }
             },
             {
-              "id": "tool-explanation",
-              "type": "contains",
-              "trigger": "every_turn",
-              "description": "Checks the assistant explains what it is doing when using tools",
-              "params": {
-                "patterns": ["result", "weather"]
-              },
-              "metric": {
-                "name": "tool_explanation",
-                "type": "boolean"
-              }
-            },
-            {
-              "id": "tools-min-length",
+              "id": "response-min-length",
               "type": "min_length",
               "trigger": "every_turn",
-              "description": "Tool responses should provide meaningful content",
+              "description": "Responses should provide meaningful content",
               "params": {
                 "min_characters": 15
               },
               "metric": {
-                "name": "tools_min_length",
+                "name": "response_min_length",
                 "type": "boolean"
               }
             },
             {
-              "id": "tools-called",
+              "id": "no-refusals",
+              "type": "regex",
+              "trigger": "every_turn",
+              "description": "Agent should not refuse to answer with common refusal phrases",
+              "params": {
+                "pattern": "I (can't|cannot|am unable to|don't have the ability to) ",
+                "expect_match": false
+              },
+              "metric": {
+                "name": "no_refusals",
+                "type": "boolean"
+              }
+            },
+            {
+              "id": "any-tool-used",
               "type": "tools_called",
               "trigger": "on_session_complete",
-              "description": "Agent should use available tools during the session",
+              "description": "Agent should use at least one tool during the session",
               "params": {
-                "tool_names": ["search_places", "get_weather", "calculate"]
+                "tool_names": ["search_places", "get_weather", "calculate", "get_user_location"]
               },
               "metric": {
-                "name": "tools_called",
-                "type": "boolean"
-              }
-            },
-            {
-              "id": "tool-chain-weather",
-              "type": "tool_call_chain",
-              "trigger": "on_session_complete",
-              "description": "Agent should search places before getting weather",
-              "params": {
-                "chain": ["search_places", "get_weather"]
-              },
-              "metric": {
-                "name": "tool_chain_weather",
+                "name": "any_tool_used",
                 "type": "boolean"
               }
             },
@@ -640,7 +628,7 @@ data:
         },
         "get_user_location": {
           "name": "get_user_location",
-          "description": "Get the user's current location from their device. Use this when the user asks about weather, restaurants, or services near them without specifying a city.",
+          "description": "Get the user's current GPS location. Only use when the user explicitly says 'near me' or 'my location'.",
           "parameters": {
             "type": "object",
             "properties": {
