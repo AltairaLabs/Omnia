@@ -359,7 +359,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Extract user identity from Istio-injected headers on the upgrade request.
 	// Hash immediately — no raw user IDs are stored or propagated in the platform.
-	userID := identity.PseudonymizeID(r.Header.Get(policy.IstioHeaderUserID))
+	rawUserID := r.Header.Get(policy.IstioHeaderUserID)
+	userID := identity.PseudonymizeID(rawUserID)
+	s.log.V(1).Info("user identity extracted",
+		"hasRawUserID", rawUserID != "",
+		"hasUserID", userID != "",
+		"headerName", policy.IstioHeaderUserID,
+	)
 	userRoles := r.Header.Get(policy.IstioHeaderUserRoles)
 	userEmail := r.Header.Get(policy.IstioHeaderUserEmail)
 	authorization := r.Header.Get("Authorization")
