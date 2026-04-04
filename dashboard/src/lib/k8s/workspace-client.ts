@@ -62,6 +62,10 @@ export async function getWorkspace(name: string): Promise<Workspace | null> {
     if (isNotFoundError(error)) {
       return null;
     }
+    // K8s API unreachable (e.g. dashboard E2E without cluster) — treat as not found
+    if (isConnectionError(error)) {
+      return null;
+    }
     throw error;
   }
 }
@@ -144,6 +148,21 @@ function isNotFoundError(error: unknown): boolean {
   ) {
     const response = (error as { response: { statusCode?: number } }).response;
     return response?.statusCode === 404;
+  }
+  return false;
+}
+
+function isConnectionError(error: unknown): boolean {
+  if (error instanceof TypeError && error.message.includes("Invalid URL")) {
+    return true;
+  }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error
+  ) {
+    const code = (error as { code?: string }).code;
+    return code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "ERR_INVALID_URL";
   }
   return false;
 }
