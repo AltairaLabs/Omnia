@@ -67,6 +67,7 @@ const (
 	ConditionTypeRoleBindingsReady    = "RoleBindingsReady"
 	ConditionTypeNetworkPolicyReady   = "NetworkPolicyReady"
 	ConditionTypeStorageReady         = "StorageReady"
+	ConditionTypeServicesReady        = "ServicesReady"
 )
 
 // Network policy constants
@@ -82,6 +83,10 @@ type WorkspaceReconciler struct {
 	// DefaultStorageClass is the default storage class for workspace PVCs
 	// when not specified in the Workspace spec. Used for NFS-backed storage.
 	DefaultStorageClass string
+
+	// ServiceBuilder builds Deployment and Service objects for per-workspace
+	// session-api and memory-api instances.
+	ServiceBuilder *ServiceBuilder
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=workspaces,verbs=get;list;watch;create;update;patch;delete
@@ -97,6 +102,7 @@ type WorkspaceReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=events,verbs=get;list;watch;create;patch
 // +kubebuilder:rbac:groups=core,resources=pods;pods/log,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments;replicasets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes;promptpacks;toolregistries;providers;arenasources;arenajobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenasources/status;arenajobs/status,verbs=get
@@ -221,6 +227,12 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		SetCondition(&workspace.Status.Conditions, workspace.Generation, ConditionTypeStorageReady, metav1.ConditionTrue,
 			"StorageNotRequired", "Storage is not enabled for this workspace")
 	}
+
+	// Reconcile service instances (session-api, memory-api per workspace)
+	if err := r.reconcileServices(ctx, workspace); err != nil {
+		return r.setReconcileError(ctx, workspace, ConditionTypeServicesReady, "ServicesFailed", err, log)
+	}
+	setServicesReadyCondition(&workspace.Status.Conditions, workspace.Generation, workspace.Status.Services)
 
 	// Update member count
 	r.updateMemberCount(workspace)
