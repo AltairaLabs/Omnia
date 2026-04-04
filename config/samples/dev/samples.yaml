@@ -23,6 +23,31 @@ spec:
   anonymousAccess:
     enabled: true
     role: editor
+  # Per-workspace session-api and memory-api instances.
+  # The operator creates Deployments/Services named session-dev-agents-default
+  # and memory-dev-agents-default in the dev-agents namespace.
+  services:
+    - name: default
+      mode: managed
+      session:
+        database:
+          secretRef:
+            name: omnia-postgres
+      memory:
+        database:
+          secretRef:
+            name: omnia-postgres
+---
+# PostgreSQL connection secret for per-workspace services.
+# session-api and memory-api read POSTGRES_CONN from this secret at startup.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: omnia-postgres
+  namespace: dev-agents
+type: Opaque
+stringData:
+  POSTGRES_CONN: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia?sslmode=disable"
 ---
 # =============================================================================
 # Credential Secrets for Providers

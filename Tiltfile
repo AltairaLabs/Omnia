@@ -458,28 +458,13 @@ helm_set = [
     'framework.image.pullPolicy=Never',
     # Enable dashboard
     'dashboard.enabled=true',
-    # Use dev images for session-api and enable dev Postgres
-    'sessionApi.image.repository=omnia-session-api-dev',
-    'sessionApi.image.tag=latest',
-    'sessionApi.image.pullPolicy=Never',
-    'sessionApi.replicaCount=1',  # Single replica for dev
-    'sessionApi.podDisruptionBudget.enabled=false',  # No PDB for dev
-    'sessionApi.postgres.dev.enabled=true',  # Deploy dev Postgres
-    'sessionApi.extraEnv[0].name=LOG_LEVEL',
-    'sessionApi.extraEnv[0].value=debug',
-    # Memory API
-    'memoryApi.enabled=true',
-    'memoryApi.image.repository=omnia-memory-api-dev',
-    'memoryApi.image.tag=latest',
-    'memoryApi.image.pullPolicy=Never',
-    'memoryApi.replicaCount=1',
-    'memoryApi.podDisruptionBudget.enabled=false',
-    'memoryApi.postgres.secretName=omnia-postgres',
-    'memoryApi.extraEnv[0].name=EMBEDDING_PROVIDER',
-    'memoryApi.extraEnv[0].value=ollama-embeddings',
-    'memoryApi.extraEnv[1].name=EMBEDDING_PROVIDER_NAMESPACE',
-    'memoryApi.extraEnv[1].value=omnia-demo',
-    'memoryApi.postgres.secretKey=connection-string',
+    # Per-workspace service images (operator creates Deployments from Workspace CRD)
+    'workspaceServices.sessionApi.image.repository=omnia-session-api-dev',
+    'workspaceServices.sessionApi.image.tag=latest',
+    'workspaceServices.sessionApi.image.pullPolicy=Never',
+    'workspaceServices.memoryApi.image.repository=omnia-memory-api-dev',
+    'workspaceServices.memoryApi.image.tag=latest',
+    'workspaceServices.memoryApi.image.pullPolicy=Never',
     # Doctor
     'doctor.enabled=true',
     'doctor.image.repository=omnia-doctor-dev',
@@ -544,10 +529,6 @@ if ENABLE_ENTERPRISE:
         'enterprise.evalWorker.image.pullPolicy=Never',
         # Watch all dev namespaces plus omnia-system for eval events (e2e tests publish there)
         'enterprise.evalWorker.namespaces={dev-agents,omnia-demo,omnia-system}',
-        # Wire session-api to Redis so it publishes eval events to streams
-        'sessionApi.redis.addrs=omnia-redis-master:6379',
-        # Wire memory-api to Redis for caching
-        'memoryApi.redis.addrs=omnia-redis-master:6379',
     ])
 else:
     # Disable enterprise features
@@ -584,11 +565,9 @@ if ENABLE_OBSERVABILITY:
         'loki.enabled=true',
         'alloy.enabled=true',
         'tempo.enabled=true',
-        # Enable tracing: facade/runtime → Alloy (OTLP) → Tempo + session-api
+        # Enable tracing: facade/runtime → Alloy (OTLP) → Tempo
         'tracing.enabled=true',
         'tracing.endpoint=omnia-alloy.omnia-system.svc.cluster.local:4317',
-        # Enable OTLP ingestion on session-api so Alloy can forward traces
-        'sessionApi.otlp.enabled=true',
     ])
 else:
     helm_set.extend([
@@ -647,6 +626,79 @@ k8s_yaml(helm(
     values=helm_values,
     set=helm_set,
 ))
+
+# ============================================================================
+# Dev Postgres
+# Standalone PostgreSQL for local development. Previously managed by the
+# session-api Helm sub-chart; now deployed directly so it is available to
+# per-workspace services created by the operator from the Workspace CRD.
+# ============================================================================
+
+k8s_yaml(blob('''
+apiVersion: v1
+kind: Secret
+metadata:
+  name: omnia-postgres
+  namespace: omnia-system
+type: Opaque
+stringData:
+  POSTGRES_CONN: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia?sslmode=disable"
+  connection-string: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia?sslmode=disable"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: omnia-postgres
+  namespace: omnia-system
+spec:
+  selector:
+    app.kubernetes.io/name: omnia-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: omnia-postgres
+  namespace: omnia-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: omnia-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: omnia-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          env:
+            - name: POSTGRES_USER
+              value: omnia
+            - name: POSTGRES_PASSWORD
+              value: omnia
+            - name: POSTGRES_DB
+              value: omnia
+            - name: PGDATA
+              value: /tmp/pgdata
+          ports:
+            - containerPort: 5432
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, omnia]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+'''))
 
 # ============================================================================
 # Demo Charts (separate from main Omnia chart)
@@ -726,7 +778,7 @@ k8s_resource(
         '3000:3000',  # Dashboard UI
         '3002:3002',  # WebSocket proxy for agent connections
     ],
-    resource_deps=dashboard_deps + ['omnia-session-api'],
+    resource_deps=dashboard_deps + ['session-dev-agents-default'],
 )
 
 # Session API server and its dev Postgres
@@ -739,17 +791,17 @@ k8s_resource(
 )
 
 k8s_resource(
-    'omnia-session-api',
+    'session-dev-agents-default',
     labels=['session-api'],
     port_forwards=['8082:8080'],  # Session API (REST + /docs)
-    resource_deps=['omnia-postgres'],
+    resource_deps=['omnia-postgres', 'sample-resources'],
 )
 
 k8s_resource(
-    'omnia-memory-api',
+    'memory-dev-agents-default',
     labels=['memory-api'],
     port_forwards=['8083:8080'],  # Memory API (REST + /docs)
-    resource_deps=['omnia-postgres'],
+    resource_deps=['omnia-postgres', 'sample-resources'],
 )
 
 k8s_resource(
@@ -919,7 +971,7 @@ if ENABLE_ENTERPRISE:
     k8s_resource(
         'omnia-eval-worker',
         labels=['enterprise'],
-        resource_deps=['omnia-redis-master', 'omnia-session-api'],
+        resource_deps=['omnia-redis-master', 'session-dev-agents-default'],
     )
 
 # ============================================================================
@@ -1131,7 +1183,7 @@ _e2e_env = {
     'E2E_PREDEPLOYED': 'true',
     'E2E_SKIP_CLEANUP': 'true',
     'ENABLE_ARENA_E2E': 'true',
-    'SESSION_API_URL': 'http://omnia-session-api.omnia-system.svc.cluster.local:8080',
+    'SESSION_API_URL': 'http://session-dev-agents-default.dev-agents.svc.cluster.local:8080',
     'E2E_FACADE_IMAGE': 'omnia-facade-dev:latest',
     'E2E_RUNTIME_IMAGE': 'omnia-runtime-dev:latest',
     'E2E_SERVICE_ACCOUNT': 'omnia',
@@ -1148,7 +1200,7 @@ local_resource(
     labels=['test'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
-    resource_deps=['omnia-controller-manager', 'omnia-session-api'] + (['omnia-arena-controller'] if ENABLE_ENTERPRISE else []),
+    resource_deps=['omnia-controller-manager', 'session-dev-agents-default'] + (['omnia-arena-controller'] if ENABLE_ENTERPRISE else []),
 )
 
 # CRD-only e2e tests — runs only the "Omnia CRDs" context (session-api, agents, tools).
@@ -1158,7 +1210,7 @@ local_resource(
     labels=['test'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
-    resource_deps=['omnia-controller-manager', 'omnia-session-api'],
+    resource_deps=['omnia-controller-manager', 'session-dev-agents-default'],
 )
 
 # Policy e2e tests — runs only the "Policy E2E" context (AgentPolicy + ToolPolicy CRDs).
