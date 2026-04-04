@@ -113,7 +113,7 @@ var _ = Describe("Manager", Ordered, func() {
 		By("patching the controller-manager to use the test facade and framework images")
 		patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
 			"-n", namespace, "--type=strategic",
-			"-p", fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--metrics-bind-address=:8443","--leader-elect","--health-probe-bind-address=:8081","--facade-image=%s","--framework-image=%s"]}]}}}}`, facadeImageRef, runtimeImageRef))
+			"-p", fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--metrics-bind-address=:8443","--leader-elect","--health-probe-bind-address=:8081","--facade-image=%s","--framework-image=%s","--session-api-image=%s","--memory-api-image=%s"]}]}}}}`, facadeImageRef, runtimeImageRef, sessionApiImage, sessionApiImage))
 		_, err = utils.Run(patchCmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager")
 
@@ -499,11 +499,47 @@ spec:
 				g.Expect(output).To(Equal("True"))
 			}
 			Eventually(verifySessionApiReady, 4*time.Minute, time.Second).Should(Succeed())
+
+			By("creating e2e-workspace with external service group pointing to e2e session-api")
+			workspaceManifest := fmt.Sprintf(`
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Workspace
+metadata:
+  name: e2e-workspace
+spec:
+  displayName: E2E Test Workspace
+  namespace:
+    name: %s
+  services:
+    - name: default
+      mode: external
+      external:
+        sessionURL: "%s"
+        memoryURL: "%s"
+`, agentsNamespace, sessionApiURL, sessionApiURL)
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(workspaceManifest)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create e2e-workspace")
+
+			By("waiting for workspace to be ready")
+			verifyWorkspaceReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "workspace", "e2e-workspace",
+					"-o", "jsonpath={.status.services[0].ready}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("true"))
+			}
+			Eventually(verifyWorkspaceReady, 2*time.Minute, time.Second).Should(Succeed())
 		})
 
 		AfterAll(func() {
 			By("cleaning up test agents namespace")
 			cmd := exec.Command("kubectl", "delete", "ns", agentsNamespace, "--ignore-not-found", "--timeout=60s")
+			_, _ = utils.Run(cmd)
+
+			By("cleaning up e2e-workspace")
+			cmd = exec.Command("kubectl", "delete", "workspace", "e2e-workspace", "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 
 			if predeployed {
