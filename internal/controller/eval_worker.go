@@ -47,7 +47,7 @@ func (r *AgentRuntimeReconciler) reconcileEvalWorker(
 	}
 
 	if needed {
-		return r.ensureEvalWorkerDeployment(ctx, namespace)
+		return r.ensureEvalWorkerDeployment(ctx, agentRuntime)
 	}
 
 	log.V(1).Info("no non-PromptKit eval-enabled agents in namespace, cleaning up eval worker",
@@ -82,11 +82,12 @@ func (r *AgentRuntimeReconciler) namespaceNeedsEvalWorker(
 // ensureEvalWorkerDeployment creates or updates the eval worker Deployment.
 func (r *AgentRuntimeReconciler) ensureEvalWorkerDeployment(
 	ctx context.Context,
-	namespace string,
+	agentRuntime *omniav1alpha1.AgentRuntime,
 ) error {
 	log := logf.FromContext(ctx)
+	namespace := agentRuntime.Namespace
 
-	desired := r.buildEvalWorkerDeployment(namespace)
+	desired := r.buildEvalWorkerDeployment(ctx, agentRuntime)
 
 	existing := &appsv1.Deployment{}
 	key := types.NamespacedName{Name: EvalWorkerDeploymentName, Namespace: namespace}
@@ -131,7 +132,8 @@ func (r *AgentRuntimeReconciler) deleteEvalWorkerDeployment(
 }
 
 // buildEvalWorkerDeployment constructs the desired eval worker Deployment.
-func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(namespace string) *appsv1.Deployment {
+func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) *appsv1.Deployment {
+	namespace := agentRuntime.Namespace
 	labels := map[string]string{
 		labelAppName:      labelValueEvalWorker,
 		labelAppInstance:  EvalWorkerDeploymentName,
@@ -162,7 +164,7 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(namespace string) *ap
 						{
 							Name:  EvalWorkerContainerName,
 							Image: image,
-							Env:   r.buildEvalWorkerEnvVars(namespace),
+							Env:   r.buildEvalWorkerEnvVars(ctx, agentRuntime),
 						},
 					},
 				},
@@ -172,7 +174,8 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(namespace string) *ap
 }
 
 // buildEvalWorkerEnvVars creates environment variables for the eval worker container.
-func (r *AgentRuntimeReconciler) buildEvalWorkerEnvVars(namespace string) []corev1.EnvVar {
+func (r *AgentRuntimeReconciler) buildEvalWorkerEnvVars(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) []corev1.EnvVar {
+	namespace := agentRuntime.Namespace
 	envVars := []corev1.EnvVar{
 		{Name: envNamespace, Value: namespace},
 	}
@@ -184,14 +187,40 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerEnvVars(namespace string) []core
 		})
 	}
 
-	if r.SessionAPIURL != "" {
+	serviceGroup := agentRuntime.Spec.ServiceGroup
+	if serviceGroup == "" {
+		serviceGroup = "default"
+	}
+	sessionURL := r.resolveSessionURLForWorkspace(ctx, namespace, serviceGroup)
+	if sessionURL != "" {
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  envSessionAPIURL,
-			Value: r.SessionAPIURL,
+			Value: sessionURL,
 		})
 	}
 
 	return envVars
+}
+
+// resolveSessionURLForWorkspace looks up the session-api URL for the given namespace
+// and service group from the Workspace CRD status. Returns an empty string if not found.
+func (r *AgentRuntimeReconciler) resolveSessionURLForWorkspace(ctx context.Context, namespace, serviceGroup string) string {
+	var list omniav1alpha1.WorkspaceList
+	if err := r.List(ctx, &list); err != nil {
+		return ""
+	}
+	for i := range list.Items {
+		ws := &list.Items[i]
+		if ws.Spec.Namespace.Name != namespace {
+			continue
+		}
+		for _, sg := range ws.Status.Services {
+			if sg.Name == serviceGroup && sg.Ready {
+				return sg.SessionURL
+			}
+		}
+	}
+	return ""
 }
 
 // evalWorkerImage returns the image to use for the eval worker container.

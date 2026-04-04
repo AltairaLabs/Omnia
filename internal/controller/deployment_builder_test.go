@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -98,7 +99,7 @@ func TestBuildA2AContainer_CRDImageOverride(t *testing.T) {
 }
 
 func TestBuildA2AEnvVars(t *testing.T) {
-	r := &AgentRuntimeReconciler{SessionAPIURL: "http://session-api:8080"}
+	r := &AgentRuntimeReconciler{}
 
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Name = "test-agent"
@@ -127,8 +128,9 @@ func TestBuildA2AEnvVars(t *testing.T) {
 	if envMap["OMNIA_A2A_CONVERSATION_TTL"] != "45m" {
 		t.Errorf("OMNIA_A2A_CONVERSATION_TTL = %q, want %q", envMap["OMNIA_A2A_CONVERSATION_TTL"], "45m")
 	}
-	if envMap["SESSION_API_URL"] != "http://session-api:8080" {
-		t.Errorf("SESSION_API_URL = %q, want %q", envMap["SESSION_API_URL"], "http://session-api:8080")
+	// SESSION_API_URL is no longer injected by the reconciler; pods discover it via workspace status
+	if _, ok := envMap["SESSION_API_URL"]; ok {
+		t.Error("SESSION_API_URL should not be set on agent pods; URL is resolved per-workspace")
 	}
 	if envMap["OMNIA_HANDLER_MODE"] != "runtime" {
 		t.Errorf("OMNIA_HANDLER_MODE = %q, want %q", envMap["OMNIA_HANDLER_MODE"], "runtime")
@@ -710,5 +712,112 @@ func TestBuildRuntimeEnvVars_MemoryDisabled(t *testing.T) {
 		if strings.HasPrefix(ev.Name, "OMNIA_MEMORY_") {
 			t.Errorf("unexpected env var %q: no memory config should produce no OMNIA_MEMORY_* vars", ev.Name)
 		}
+	}
+}
+
+func TestResolveSessionURLForWorkspace(t *testing.T) {
+	sc := runtime.NewScheme()
+	require.NoError(t, omniav1alpha1.AddToScheme(sc))
+
+	makeWorkspace := func(name, namespace string, services []omniav1alpha1.ServiceGroupStatus) *omniav1alpha1.Workspace {
+		ws := &omniav1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: omniav1alpha1.WorkspaceSpec{
+				DisplayName: name,
+				Namespace:   omniav1alpha1.NamespaceConfig{Name: namespace},
+			},
+		}
+		ws.Status.Services = services
+		return ws
+	}
+
+	tests := []struct {
+		name         string
+		workspaces   []*omniav1alpha1.Workspace
+		namespace    string
+		serviceGroup string
+		want         string
+	}{
+		{
+			name: "returns session URL when workspace matches and service group is ready",
+			workspaces: []*omniav1alpha1.Workspace{
+				makeWorkspace("acme", "acme-ns", []omniav1alpha1.ServiceGroupStatus{
+					{Name: "default", SessionURL: "http://session-acme-default:8080", Ready: true},
+				}),
+			},
+			namespace:    "acme-ns",
+			serviceGroup: "default",
+			want:         "http://session-acme-default:8080",
+		},
+		{
+			name: "returns empty when service group is not ready",
+			workspaces: []*omniav1alpha1.Workspace{
+				makeWorkspace("acme", "acme-ns", []omniav1alpha1.ServiceGroupStatus{
+					{Name: "default", SessionURL: "http://session-acme-default:8080", Ready: false},
+				}),
+			},
+			namespace:    "acme-ns",
+			serviceGroup: "default",
+			want:         "",
+		},
+		{
+			name: "returns empty when no workspace matches the namespace",
+			workspaces: []*omniav1alpha1.Workspace{
+				makeWorkspace("acme", "acme-ns", []omniav1alpha1.ServiceGroupStatus{
+					{Name: "default", SessionURL: "http://session-acme-default:8080", Ready: true},
+				}),
+			},
+			namespace:    "other-ns",
+			serviceGroup: "default",
+			want:         "",
+		},
+		{
+			name: "returns empty when service group name does not match",
+			workspaces: []*omniav1alpha1.Workspace{
+				makeWorkspace("acme", "acme-ns", []omniav1alpha1.ServiceGroupStatus{
+					{Name: "default", SessionURL: "http://session-acme-default:8080", Ready: true},
+				}),
+			},
+			namespace:    "acme-ns",
+			serviceGroup: "premium",
+			want:         "",
+		},
+		{
+			name: "matches correct service group among multiple",
+			workspaces: []*omniav1alpha1.Workspace{
+				makeWorkspace("acme", "acme-ns", []omniav1alpha1.ServiceGroupStatus{
+					{Name: "default", SessionURL: "http://session-acme-default:8080", Ready: true},
+					{Name: "premium", SessionURL: "http://session-acme-premium:8080", Ready: true},
+				}),
+			},
+			namespace:    "acme-ns",
+			serviceGroup: "premium",
+			want:         "http://session-acme-premium:8080",
+		},
+		{
+			name:         "returns empty when no workspaces exist",
+			workspaces:   nil,
+			namespace:    "acme-ns",
+			serviceGroup: "default",
+			want:         "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			objs := make([]runtime.Object, len(tt.workspaces))
+			for i, ws := range tt.workspaces {
+				objs[i] = ws
+			}
+			cl := fake.NewClientBuilder().WithScheme(sc).WithRuntimeObjects(objs...).WithStatusSubresource(&omniav1alpha1.Workspace{}).Build()
+			// Populate status using the fake client's status writer.
+			for _, ws := range tt.workspaces {
+				assert.NoError(t, cl.Status().Update(context.Background(), ws))
+			}
+
+			r := &AgentRuntimeReconciler{Client: cl}
+			got := r.resolveSessionURLForWorkspace(context.Background(), tt.namespace, tt.serviceGroup)
+			assert.Equal(t, tt.want, got)
+		})
 	}
 }

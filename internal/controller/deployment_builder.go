@@ -471,14 +471,6 @@ func (r *AgentRuntimeReconciler) buildA2AEnvVars(
 	// A2A-specific config (TTLs, auth, task store).
 	envVars = append(envVars, buildA2AConfigEnvVars(agentRuntime.Spec.A2A)...)
 
-	// Session API URL
-	if r.SessionAPIURL != "" {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "SESSION_API_URL",
-			Value: r.SessionAPIURL,
-		})
-	}
-
 	// Tracing
 	if r.TracingEnabled && r.TracingEndpoint != "" {
 		envVars = append(envVars,
@@ -727,14 +719,6 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 		})
 	}
 
-	// Inject session-api URL so the facade uses httpclient.Store for session recording
-	if r.SessionAPIURL != "" {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "SESSION_API_URL",
-			Value: r.SessionAPIURL,
-		})
-	}
-
 	// Add tracing configuration if enabled
 	if r.TracingEnabled && r.TracingEndpoint != "" {
 		envVars = append(envVars,
@@ -813,14 +797,6 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "OMNIA_TOOLS_CONFIG_PATH",
 			Value: ToolsMountPath + "/" + ToolsConfigFileName,
-		})
-	}
-
-	// Inject session-api URL so the runtime uses OmniaEventStore for session recording
-	if r.SessionAPIURL != "" {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "SESSION_API_URL",
-			Value: r.SessionAPIURL,
 		})
 	}
 

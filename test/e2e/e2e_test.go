@@ -110,10 +110,10 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(strategyPatchCmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager strategy")
 
-		By("patching the controller-manager to use the test facade and framework images and session-api URL")
+		By("patching the controller-manager to use the test facade and framework images")
 		patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
 			"-n", namespace, "--type=strategic",
-			"-p", fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--metrics-bind-address=:8443","--leader-elect","--health-probe-bind-address=:8081","--facade-image=%s","--framework-image=%s","--session-api-url=%s"]}]}}}}`, facadeImageRef, runtimeImageRef, sessionApiURL))
+			"-p", fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--metrics-bind-address=:8443","--leader-elect","--health-probe-bind-address=:8081","--facade-image=%s","--framework-image=%s"]}]}}}}`, facadeImageRef, runtimeImageRef))
 		_, err = utils.Run(patchCmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager")
 
@@ -942,14 +942,9 @@ data:
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).To(Equal("true"), "Mock provider should be enabled for E2E testing")
 
-			By("verifying the facade container has SESSION_API_URL injected")
-			cmd = exec.Command("kubectl", "get", "pods",
-				"-n", agentsNamespace,
-				"-l", "app.kubernetes.io/instance=test-agent",
-				"-o", "jsonpath={.items[0].spec.containers[?(@.name=='facade')].env[?(@.name=='SESSION_API_URL')].value}")
-			output, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(output).To(Equal(sessionApiURL), "Facade should have SESSION_API_URL set by the operator")
+			// SESSION_API_URL is no longer injected by the operator into agent pods.
+			// Facade and runtime containers discover the session-api URL via workspace
+			// status (service group discovery). Verified in integration/unit tests.
 		})
 
 		It("should handle WebSocket connections to the facade", func() {
