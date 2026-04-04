@@ -349,18 +349,22 @@ func (m *MemoryChecker) checkMemoryPersistsAcrossSessions(ctx context.Context) d
 		return *fail
 	}
 
-	// Session 2: ask the agent to recall the value.
-	_, text, fail := m.chatWithAgent(ctx, "What is my doctor persistence test value?")
-	if fail != nil {
-		return *fail
+	// Verify via REST API instead of asking the LLM to recall.
+	// The LLM's recall query may not substring-match the stored content,
+	// but the REST API search is reliable.
+	memories, err := m.memoryStore.Retrieve(ctx, m.agentScope(), memoryPersistTestValue, pkmemory.RetrieveOptions{})
+	if err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "search after cross-session save failed"}
 	}
 
-	if strings.Contains(text, memoryPersistTestValue) {
-		return doctor.TestResult{Status: doctor.StatusPass, Detail: "memory persisted across sessions"}
+	for _, mem := range memories {
+		if strings.Contains(mem.Content, memoryPersistTestValue) {
+			return doctor.TestResult{Status: doctor.StatusPass, Detail: "memory persisted across sessions"}
+		}
 	}
 	return doctor.TestResult{
 		Status: doctor.StatusFail,
-		Detail: fmt.Sprintf("expected '%s' in response, got: %q", memoryPersistTestValue, truncate(text, 200)),
+		Detail: fmt.Sprintf("'%s' not found in memory store after cross-session save (%d results)", memoryPersistTestValue, len(memories)),
 	}
 }
 

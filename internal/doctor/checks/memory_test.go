@@ -671,29 +671,51 @@ func TestCheckMemoryPersistsAcrossSessions_Pass(t *testing.T) {
 	defer srv.Close()
 
 	agentChecker := newCheckerForServer(srv)
-	c := NewMemoryChecker("", nil, testWorkspace, agentChecker)
+
+	// Mock memory-api that returns persist-ok when searched.
+	memSrv := (&mockMemoryServer{
+		searchHandler: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"memories":[{"id":"p1","content":"persist-ok","scope":{"workspace_id":"ws1","user_id":"test"}}],"total":1}`))
+		},
+	}).serve(t)
+	defer memSrv.Close()
+
+	memStore := memoryhttpclient.NewStore(memSrv.URL, logr.Discard())
+	c := NewMemoryChecker(memSrv.URL, memStore, testWorkspace, agentChecker)
 	result := c.checkMemoryPersistsAcrossSessions(t.Context())
 	assert.Equal(t, doctor.StatusPass, result.Status)
 	assert.Contains(t, result.Detail, "persisted across sessions")
 }
 
-func TestCheckMemoryPersistsAcrossSessions_Fail_ValueNotRecalled(t *testing.T) {
+func TestCheckMemoryPersistsAcrossSessions_Fail_NotInStore(t *testing.T) {
 	srv := serveMockFacade(t, mockFacadeHandler{
 		responses: []wsServerMessage{
-			{Type: wsMessageTypeDone, Content: "I don't know."},
+			{Type: wsMessageTypeDone, Content: "Remembered."},
 		},
 	})
 	defer srv.Close()
 
 	agentChecker := newCheckerForServer(srv)
-	c := NewMemoryChecker("", nil, testWorkspace, agentChecker)
+
+	// Mock memory-api that returns empty results.
+	memSrv := (&mockMemoryServer{
+		searchHandler: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"memories":[],"total":0}`))
+		},
+	}).serve(t)
+	defer memSrv.Close()
+
+	memStore := memoryhttpclient.NewStore(memSrv.URL, logr.Discard())
+	c := NewMemoryChecker(memSrv.URL, memStore, testWorkspace, agentChecker)
 	result := c.checkMemoryPersistsAcrossSessions(t.Context())
 	assert.Equal(t, doctor.StatusFail, result.Status)
-	assert.Contains(t, result.Detail, "persist-ok")
+	assert.Contains(t, result.Detail, "not found in memory store")
 }
 
 func TestCheckMemoryPersistsAcrossSessions_Fail_ConnectionError(t *testing.T) {
-	agentChecker := NewAgentChecker(AgentConfig{FacadeURL: "http://127.0.0.1:1", AgentName: "x", Namespace: "y"})
+	agentChecker := NewAgentChecker(AgentConfig{FacadeURL: "https://127.0.0.1:1", AgentName: "x", Namespace: "y"})
 	c := NewMemoryChecker("", nil, testWorkspace, agentChecker)
 	result := c.checkMemoryPersistsAcrossSessions(t.Context())
 	assert.Equal(t, doctor.StatusFail, result.Status)

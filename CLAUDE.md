@@ -277,12 +277,27 @@ For any system with tiered fallback (hot → warm → cold, cache → database �
 
 The most dangerous case is **"cache empty"** — the cache returns success with zero results, which the service trusts as definitive, never checking the authoritative store. Always validate that an empty cache result falls through.
 
+### Wiring tests (service startup verification)
+
+Unit tests verify logic works. **Wiring tests** verify it's actually connected. Every service binary (`cmd/*/main.go`) should have a test that starts the real server and verifies cross-service contracts are met:
+
+- **Interceptors registered**: If a gRPC interceptor exists, test that the server has it installed (e.g., send metadata via gRPC, verify the handler receives it in context).
+- **Middleware active**: If middleware is wired conditionally (enterprise flags, env vars), test both enabled and disabled paths.
+- **Dependencies injected**: If a service depends on an interface implementation (store, deleter, logger), test that the real implementation is injected, not nil.
+
+**Why:** Code that exists, has passing unit tests, but isn't wired into the binary is the most common failure mode in this project. Unit tests for interceptors, middleware, and handlers all pass — but if `cmd/*/main.go` doesn't register them, the feature silently doesn't work. This is only caught by smoke tests in-cluster, which are slow and hard to debug.
+
+**Pattern:** One test per service binary that creates the server with real options and asserts the contract (e.g., "gRPC metadata arrives in handler context", "POST without user_id returns 400", "enterprise middleware is active when flag is set").
+
+See: https://github.com/AltairaLabs/Omnia/issues/714 (wiring test backlog)
+
 ### Test coverage requirements
 
 - **Happy path**: Basic functionality works
 - **Error paths**: All error branches are exercised (not just logged-and-swallowed)
 - **Degraded states**: Partial data, expired caches, split-key TTL expiry
 - **Contract alignment**: Mock response shapes match real API structs
+- **Wiring**: Service binaries register all interceptors, middleware, and dependencies
 
 ## CRD / Kubernetes Patterns
 

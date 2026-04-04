@@ -190,30 +190,50 @@ func (s *SessionChecker) checkMessages(ctx context.Context) doctor.TestResult {
 		return doctor.TestResult{Status: doctor.StatusSkip, Detail: msgNoSessionAvailable}
 	}
 
-	path := fmt.Sprintf("%s/%s%s", sessionAPIPathSessions, sessionID, sessionAPIPathMessages)
-	resp, err := s.sessionHTTPGet(ctx, path)
-	if err != nil {
-		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "GET messages failed"}
-	}
-	defer resp.Body.Close() //nolint:errcheck
+	// Retry with backoff — assistant messages are recorded asynchronously
+	// by the facade's recording pool, so they may not be available immediately
+	// after the agent responds.
+	var hasUser, hasAssistant bool
+	var lastErr error
+	for attempt := range 3 {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Detail: fmt.Sprintf("GET messages returned HTTP %d", resp.StatusCode),
+		path := fmt.Sprintf("%s/%s%s", sessionAPIPathSessions, sessionID, sessionAPIPathMessages)
+		resp, err := s.sessionHTTPGet(ctx, path)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close() //nolint:errcheck
+			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
+			continue
+		}
+
+		var result struct {
+			Messages []struct {
+				Role string `json:"role"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close() //nolint:errcheck
+			lastErr = err
+			continue
+		}
+		resp.Body.Close() //nolint:errcheck
+
+		hasUser, hasAssistant = classifyMessages(result.Messages)
+		if hasUser && hasAssistant {
+			break
 		}
 	}
 
-	var result struct {
-		Messages []struct {
-			Role string `json:"role"`
-		} `json:"messages"`
+	if lastErr != nil && !hasUser && !hasAssistant {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: lastErr.Error(), Detail: "GET messages failed"}
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "decoding messages response"}
-	}
-
-	hasUser, hasAssistant := classifyMessages(result.Messages)
 
 	if !hasUser || !hasAssistant {
 		return doctor.TestResult{
@@ -224,7 +244,7 @@ func (s *SessionChecker) checkMessages(ctx context.Context) doctor.TestResult {
 
 	return doctor.TestResult{
 		Status: doctor.StatusPass,
-		Detail: fmt.Sprintf("%d messages recorded with user and assistant roles", len(result.Messages)),
+		Detail: "messages recorded with user and assistant roles",
 	}
 }
 
