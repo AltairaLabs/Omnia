@@ -23,7 +23,8 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Brain, Download, Trash2, Search } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Brain, Download, Trash2, Search, AlertCircle } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useMemories } from "@/hooks/use-memories";
 import {
@@ -48,7 +49,9 @@ const CATEGORIES = [
 
 export default function MemoriesPage() {
   const { user } = useAuth();
-  const { data, isLoading } = useMemories({ userId: user?.id, limit: 500 });
+  // Always filter by userId — memories belong to users, not workspaces.
+  // The proxy hashes the userId before querying (pseudonymous storage).
+  const { data, isLoading, error } = useMemories({ userId: user?.id, limit: 500 });
   const [selectedMemory, setSelectedMemory] = useState<MemoryEntity | null>(
     null
   );
@@ -165,7 +168,15 @@ export default function MemoriesPage() {
           </AlertDialog>
         </div>
 
-        {isLoading ? (
+        {error ? (
+          <Alert variant="destructive" data-testid="memory-error">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Could not load memories</AlertTitle>
+            <AlertDescription>
+              {error instanceof Error ? error.message : "Failed to connect to the Memory API. Check that the service is running."}
+            </AlertDescription>
+          </Alert>
+        ) : isLoading ? (
           <Skeleton className="w-full h-[600px] rounded-lg" />
         ) : filtered.length === 0 ? (
           <div

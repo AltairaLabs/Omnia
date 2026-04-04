@@ -12,6 +12,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/doctor"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/pkg/policy"
 )
 
 const (
@@ -89,8 +90,12 @@ func (a *AgentChecker) facadeURL() string {
 // dial opens a WebSocket connection and reads the initial "connected" message.
 // Returns the connection and the session ID provided by the server.
 func (a *AgentChecker) dial(ctx context.Context) (*websocket.Conn, string, error) {
+	// Set user identity header so memories are stored with a user_id scope.
+	// Without this, the memory-api rejects saves (user_id is required).
+	headers := http.Header{}
+	headers.Set(policy.IstioHeaderUserID, "doctor-smoke-test")
 	dialer := websocket.Dialer{HandshakeTimeout: wsHandshakeTimeout}
-	conn, _, err := dialer.DialContext(ctx, a.facadeURL(), nil)
+	conn, _, err := dialer.DialContext(ctx, a.facadeURL(), headers)
 	if err != nil {
 		return nil, "", fmt.Errorf("dial: %w", err)
 	}

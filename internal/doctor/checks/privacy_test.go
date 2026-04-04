@@ -14,7 +14,7 @@ import (
 
 // newPrivacyCheckerForServer creates a PrivacyChecker pointing at the given test server.
 func newPrivacyCheckerForServer(srv *httptest.Server) *PrivacyChecker {
-	return NewPrivacyChecker(srv.URL, testWorkspace)
+	return NewPrivacyChecker(srv.URL, "", testWorkspace)
 }
 
 // privacySaveBody captures a decoded save request body for assertions.
@@ -88,7 +88,7 @@ func TestCheckPIIRedaction_Pass(t *testing.T) {
 
 	result := newPrivacyCheckerForServer(srv).checkPIIRedaction(t.Context())
 	assert.Equal(t, doctor.StatusPass, result.Status)
-	assert.Contains(t, result.Detail, "not present")
+	assert.Contains(t, result.Detail, "redacted")
 }
 
 func TestCheckPIIRedaction_Fail_SSNPresent(t *testing.T) {
@@ -125,7 +125,7 @@ func TestCheckPIIRedaction_Fail_SaveError(t *testing.T) {
 }
 
 func TestCheckPIIRedaction_Skip_NoWorkspace(t *testing.T) {
-	c := NewPrivacyChecker("http://localhost:8080", "")
+	c := NewPrivacyChecker("http://localhost:8080", "", "")
 	result := c.checkPIIRedaction(t.Context())
 	assert.Equal(t, doctor.StatusSkip, result.Status)
 	assert.Contains(t, result.Detail, "workspace UID not resolved")
@@ -163,60 +163,58 @@ func TestCheckPIIRedaction_SendsSSNInContent(t *testing.T) {
 // --- MemoryOptOutRespected ---
 
 func TestCheckOptOutRespected_Pass(t *testing.T) {
-	// Server returns 204 — opt-out header respected.
-	srv := (&mockPrivacyServer{
+	// Mock session-api accepts opt-out, mock memory-api rejects save with 204.
+	sessionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusNoContent)
+		} else {
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer sessionSrv.Close()
+
+	memorySrv := (&mockPrivacyServer{
 		saveHandler: func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 		},
 	}).serve(t)
-	defer srv.Close()
+	defer memorySrv.Close()
 
-	result := newPrivacyCheckerForServer(srv).checkOptOutRespected(t.Context())
+	c := NewPrivacyChecker(memorySrv.URL, sessionSrv.URL, testWorkspace)
+	result := c.checkOptOutRespected(t.Context())
 	assert.Equal(t, doctor.StatusPass, result.Status)
 	assert.Contains(t, result.Detail, "204")
 }
 
-func TestCheckOptOutRespected_Skip_EnterpriseNotDetected(t *testing.T) {
-	// Server returns 201 — memory saved, no enterprise middleware.
-	srv := (&mockPrivacyServer{}).serve(t)
-	defer srv.Close()
+func TestCheckOptOutRespected_Fail_SavedDespiteOptOut(t *testing.T) {
+	// Session-api accepts opt-out, but memory-api saves anyway (middleware broken).
+	sessionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer sessionSrv.Close()
 
-	result := newPrivacyCheckerForServer(srv).checkOptOutRespected(t.Context())
-	assert.Equal(t, doctor.StatusSkip, result.Status)
-	assert.Contains(t, result.Detail, "enterprise")
-}
+	memorySrv := (&mockPrivacyServer{}).serve(t)
+	defer memorySrv.Close()
 
-func TestCheckOptOutRespected_Fail_UnexpectedStatus(t *testing.T) {
-	srv := (&mockPrivacyServer{
-		saveHandler: func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "oops", http.StatusInternalServerError)
-		},
-	}).serve(t)
-	defer srv.Close()
-
-	result := newPrivacyCheckerForServer(srv).checkOptOutRespected(t.Context())
+	c := NewPrivacyChecker(memorySrv.URL, sessionSrv.URL, testWorkspace)
+	result := c.checkOptOutRespected(t.Context())
 	assert.Equal(t, doctor.StatusFail, result.Status)
-	assert.Contains(t, result.Detail, "unexpected")
+	assert.Contains(t, result.Detail, "despite")
 }
 
-func TestCheckOptOutRespected_Skip_NoWorkspace(t *testing.T) {
-	c := NewPrivacyChecker("http://localhost:8080", "")
+func TestCheckOptOutRespected_Skip_SessionAPIUnreachable(t *testing.T) {
+	memorySrv := (&mockPrivacyServer{}).serve(t)
+	defer memorySrv.Close()
+
+	c := NewPrivacyChecker(memorySrv.URL, "https://127.0.0.1:1", testWorkspace)
 	result := c.checkOptOutRespected(t.Context())
 	assert.Equal(t, doctor.StatusSkip, result.Status)
 }
 
-func TestCheckOptOutRespected_SendsOptOutHeader(t *testing.T) {
-	var capturedHeader string
-	srv := (&mockPrivacyServer{
-		saveHandler: func(w http.ResponseWriter, r *http.Request) {
-			capturedHeader = r.Header.Get(privacyOptOutHeader)
-			w.WriteHeader(http.StatusNoContent)
-		},
-	}).serve(t)
-	defer srv.Close()
-
-	_ = newPrivacyCheckerForServer(srv).checkOptOutRespected(t.Context())
-	assert.Equal(t, "true", capturedHeader)
+func TestCheckOptOutRespected_Skip_NoWorkspace(t *testing.T) {
+	c := NewPrivacyChecker("https://localhost:8080", "", "")
+	result := c.checkOptOutRespected(t.Context())
+	assert.Equal(t, doctor.StatusSkip, result.Status)
 }
 
 // --- MemoryDeletionCascade ---
@@ -297,7 +295,7 @@ func TestCheckDeletionCascade_Fail_BatchDeleteError(t *testing.T) {
 }
 
 func TestCheckDeletionCascade_Skip_NoWorkspace(t *testing.T) {
-	c := NewPrivacyChecker("http://localhost:8080", "")
+	c := NewPrivacyChecker("http://localhost:8080", "", "")
 	result := c.checkDeletionCascade(t.Context())
 	assert.Equal(t, doctor.StatusSkip, result.Status)
 }
@@ -343,7 +341,7 @@ func TestCheckAuditLogWritten_Skip_EndpointNotAvailable(t *testing.T) {
 }
 
 func TestCheckAuditLogWritten_Skip_NoWorkspace(t *testing.T) {
-	c := NewPrivacyChecker("http://localhost:8080", "")
+	c := NewPrivacyChecker("http://localhost:8080", "", "")
 	result := c.checkAuditLogWritten(t.Context())
 	assert.Equal(t, doctor.StatusSkip, result.Status)
 }
@@ -351,7 +349,7 @@ func TestCheckAuditLogWritten_Skip_NoWorkspace(t *testing.T) {
 // --- Checks() registration ---
 
 func TestPrivacyChecker_Checks_ReturnsFour(t *testing.T) {
-	c := NewPrivacyChecker("http://localhost:8080", "ws1")
+	c := NewPrivacyChecker("http://localhost:8080", "", "ws1")
 	cs := c.Checks()
 	require.Len(t, cs, 4)
 	names := make([]string, len(cs))

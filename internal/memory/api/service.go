@@ -45,6 +45,7 @@ const eventTypeMemoryDeleted = "memory_deleted"
 // Sentinel errors returned by the memory service and handler.
 var (
 	ErrMissingWorkspace = errors.New("workspace parameter is required")
+	ErrMissingUserID    = errors.New("user_id in scope is required — memories must be owned by a user")
 	ErrMissingQuery     = errors.New("search query parameter is required")
 	ErrMissingMemoryID  = errors.New("memory ID is required")
 	ErrMissingBody      = errors.New("request body is required")

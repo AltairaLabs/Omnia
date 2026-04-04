@@ -241,6 +241,7 @@ docker_build(
     only=[
         './cmd/memory-api',
         './api',
+        './ee',
         './internal/memory',
         './internal/session',
         './internal/pgutil',
@@ -306,57 +307,15 @@ if USE_LOCAL_PROMPTKIT:
 # Agent Images - Facade and Runtime containers for AgentRuntime pods
 # ============================================================================
 
-# Build facade image (WebSocket/HTTP server that handles client connections)
-docker_build(
-    'omnia-facade-dev',
-    context='.',
-    dockerfile='./Dockerfile.agent',
-    only=[
-        './cmd/agent',
-        './api',
-        './internal/agent',
-        './internal/facade',
-        './internal/session',
-        './internal/httputil',
-        './internal/media',
-        './internal/tracing',
-        './pkg',
-        './ee/pkg/privacy',
-        './ee/pkg/redaction',
-        './ee/api',
-        './go.mod',
-        './go.sum',
-    ],
-)
+# Facade image is built by auto-rebuild-facade local_resource (below).
+# Do NOT add a docker_build here — it conflicts with the local_resource
+# and causes Docker layer caching to mask source changes.
 
 # Build runtime image (LLM interaction and tool execution)
 # When USE_LOCAL_PROMPTKIT is enabled, includes local PromptKit source for development
-runtime_only = [
-    './cmd/runtime',
-    './api',
-    './internal/runtime',
-    './internal/memory',
-    './internal/session',
-    './internal/httputil',
-    './internal/pgutil',
-    './internal/tracing',
-    './pkg',
-    './go.mod',
-    './go.sum',
-]
-runtime_build_args = {}
-
-if USE_LOCAL_PROMPTKIT:
-    runtime_only.append('./promptkit-local')
-    runtime_build_args['USE_LOCAL_PROMPTKIT'] = 'true'
-
-docker_build(
-    'omnia-runtime-dev',
-    context='.',
-    dockerfile='./Dockerfile.runtime',
-    only=runtime_only,
-    build_args=runtime_build_args,
-)
+# Runtime image is built by auto-rebuild-runtime local_resource (below).
+# Do NOT add a docker_build here — it conflicts with the local_resource
+# and causes Docker layer caching to mask source changes.
 
 # ============================================================================
 # Enterprise Features - Arena Controller and Worker
@@ -516,6 +475,10 @@ helm_set = [
     'memoryApi.replicaCount=1',
     'memoryApi.podDisruptionBudget.enabled=false',
     'memoryApi.postgres.secretName=omnia-postgres',
+    'memoryApi.extraEnv[0].name=EMBEDDING_PROVIDER',
+    'memoryApi.extraEnv[0].value=ollama-embeddings',
+    'memoryApi.extraEnv[1].name=EMBEDDING_PROVIDER_NAMESPACE',
+    'memoryApi.extraEnv[1].value=omnia-demo',
     'memoryApi.postgres.secretKey=connection-string',
     # Doctor
     'doctor.enabled=true',
@@ -1098,8 +1061,8 @@ if ENABLE_ENTERPRISE:
 # Tilt can't track them as k8s_image_json_path resources. Instead, we watch
 # source deps, rebuild images, and restart pods in a single atomic flow.
 
-_rebuild_facade_cmd = 'docker build -f Dockerfile.agent -t omnia-facade-dev:latest .'
-_rebuild_runtime_cmd = 'docker build -f Dockerfile.runtime'
+_rebuild_facade_cmd = 'docker build --no-cache -f Dockerfile.agent -t omnia-facade-dev:latest .'
+_rebuild_runtime_cmd = 'docker build --no-cache -f Dockerfile.runtime'
 if USE_LOCAL_PROMPTKIT:
     _rebuild_runtime_cmd += ' --build-arg USE_LOCAL_PROMPTKIT=true'
 _rebuild_runtime_cmd += ' -t omnia-runtime-dev:latest .'
@@ -1108,23 +1071,6 @@ _restart_cmd = '''
     kubectl delete po -n dev-agents -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
     kubectl delete po -n omnia-demo -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
 '''
-
-# Manual buttons to rebuild individual images and restart pods
-local_resource(
-    'rebuild-facade',
-    cmd=_rebuild_facade_cmd + ' && ' + _restart_cmd,
-    labels=['agents'],
-    auto_init=False,
-    trigger_mode=TRIGGER_MODE_MANUAL,
-)
-
-local_resource(
-    'rebuild-runtime',
-    cmd=_rebuild_runtime_cmd + ' && ' + _restart_cmd,
-    labels=['agents'],
-    auto_init=False,
-    trigger_mode=TRIGGER_MODE_MANUAL,
-)
 
 # Auto-rebuild agent images when their specific source files change.
 # Separated into facade and runtime to avoid unnecessary rebuilds — a change to
@@ -1139,6 +1085,9 @@ _facade_deps = [
     './internal/httputil',
     './internal/media',
     './internal/tracing',
+    './pkg',
+    './ee',
+    './go.mod',
 ]
 
 _runtime_deps = [
@@ -1146,6 +1095,8 @@ _runtime_deps = [
     './internal/runtime',
     './internal/memory',
     './internal/tracing',
+    './pkg',
+    './go.mod',
 ]
 
 if USE_LOCAL_PROMPTKIT:
@@ -1156,8 +1107,6 @@ local_resource(
     cmd=_rebuild_facade_cmd + ' && ' + _restart_cmd,
     deps=_facade_deps,
     labels=['agents'],
-    resource_deps=['sample-resources'],
-    auto_init=False,
 )
 
 local_resource(
@@ -1165,8 +1114,6 @@ local_resource(
     cmd=_rebuild_runtime_cmd + ' && ' + _restart_cmd,
     deps=_runtime_deps,
     labels=['agents'],
-    resource_deps=['sample-resources'],
-    auto_init=False,
 )
 
 # ============================================================================

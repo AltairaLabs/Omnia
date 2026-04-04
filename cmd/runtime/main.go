@@ -306,6 +306,8 @@ func main() {
 	grpcOpts = append(grpcOpts,
 		grpc.MaxRecvMsgSize(maxMsgSize),
 		grpc.MaxSendMsgSize(maxMsgSize),
+		grpc.ChainUnaryInterceptor(pkruntime.PolicyUnaryServerInterceptor()),
+		grpc.ChainStreamInterceptor(pkruntime.PolicyStreamServerInterceptor()),
 	)
 	if tracingProvider != nil {
 		grpcOpts = append(grpcOpts, grpc.StatsHandler(otelgrpc.NewServerHandler(

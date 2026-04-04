@@ -82,6 +82,12 @@ func NewStore(baseURL string, log logr.Logger) *Store {
 
 // Save persists a memory via POST /api/v1/memories.
 func (s *Store) Save(ctx context.Context, mem *pkmemory.Memory) error {
+	s.log.V(1).Info("memory save request",
+		"hasScope", len(mem.Scope) > 0,
+		"scopeUserID", mem.Scope["user_id"],
+		"scopeWorkspaceID", mem.Scope["workspace_id"],
+		"contentLen", len(mem.Content),
+	)
 	body, err := json.Marshal(mem)
 	if err != nil {
 		return fmt.Errorf("memory httpclient: save: encode: %w", err)

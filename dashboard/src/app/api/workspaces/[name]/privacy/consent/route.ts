@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withWorkspaceAccess, type WorkspaceRouteContext } from "@/lib/auth/workspace-guard";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
+import { pseudonymizeId } from "@/lib/identity";
 
 const SESSION_API_URL = process.env.SESSION_API_URL;
 
@@ -22,7 +23,8 @@ const ERR_SESSION_API_NOT_CONFIGURED = "Session API not configured";
 function buildTargetUrl(userId: string): string | null {
   if (!SESSION_API_URL) return null;
   const base = SESSION_API_URL.endsWith("/") ? SESSION_API_URL.slice(0, -1) : SESSION_API_URL;
-  return `${base}/api/v1/privacy/preferences/${encodeURIComponent(userId)}/consent`;
+  const hashedId = pseudonymizeId(userId);
+  return `${base}/api/v1/privacy/preferences/${encodeURIComponent(hashedId)}/consent`;
 }
 
 function sessionApiNotConfigured(): NextResponse {
@@ -55,8 +57,23 @@ export const GET = withWorkspaceAccess(
       const response = await fetch(targetUrl, {
         headers: { Accept: "application/json" },
       });
-      const data = await response.json();
-      return NextResponse.json(data, { status: response.status });
+      const text = await response.text();
+      try {
+        const data = JSON.parse(text);
+        return NextResponse.json(data, { status: response.status });
+      } catch {
+        // Non-JSON response (e.g. 404 HTML page — consent endpoint not deployed yet)
+        if (response.status === 404) {
+          return NextResponse.json(
+            { grants: [], defaults: [], denied: [] },
+            { status: 200 }
+          );
+        }
+        return NextResponse.json(
+          { error: `Session API returned non-JSON (HTTP ${response.status})` },
+          { status: 502 }
+        );
+      }
     } catch (error) {
       console.error("Consent API proxy error:", error);
       return NextResponse.json(
@@ -108,8 +125,16 @@ export const PUT = withWorkspaceAccess(
         },
         body,
       });
-      const data = await response.json();
-      return NextResponse.json(data, { status: response.status });
+      const text = await response.text();
+      try {
+        const data = JSON.parse(text);
+        return NextResponse.json(data, { status: response.status });
+      } catch {
+        return NextResponse.json(
+          { error: `Session API returned non-JSON (HTTP ${response.status})` },
+          { status: 502 }
+        );
+      }
     } catch (error) {
       console.error("Consent API proxy error:", error);
       return NextResponse.json(

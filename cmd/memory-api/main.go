@@ -42,6 +42,10 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
+	ollamaProvider "github.com/AltairaLabs/PromptKit/runtime/providers/ollama"
+
+	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	eeaudit "github.com/altairalabs/omnia/ee/pkg/audit"
 	eemetrics "github.com/altairalabs/omnia/ee/pkg/metrics"
@@ -85,21 +89,20 @@ func (a *auditLoggerAdapter) LogEvent(ctx context.Context, entry *memoryapi.Memo
 
 // flags groups all CLI flags for the memory-api binary.
 type flags struct {
-	apiAddr           string
-	healthAddr        string
-	metricsAddr       string
-	postgresConn      string
-	redisAddrs        string
-	enterprise        bool
-	tracingEnabled    bool
-	tracingEndpoint   string
-	tracingSample     float64
-	tracingInsecure   bool
-	embeddingProvider string // openai, gemini, voyageai
-	embeddingModel    string // model override
-	defaultTTL        string // env: DEFAULT_TTL, e.g. "720h"
-	purpose           string // env: MEMORY_PURPOSE, e.g. "support_continuity"
-	retentionInterval string // env: RETENTION_INTERVAL, e.g. "1h"
+	apiAddr               string
+	healthAddr            string
+	metricsAddr           string
+	postgresConn          string
+	redisAddrs            string
+	enterprise            bool
+	tracingEnabled        bool
+	tracingEndpoint       string
+	tracingSample         float64
+	tracingInsecure       bool
+	embeddingProviderName string // name of the Provider CRD for embeddings
+	defaultTTL            string // env: DEFAULT_TTL, e.g. "720h"
+	purpose               string // env: MEMORY_PURPOSE, e.g. "support_continuity"
+	retentionInterval     string // env: RETENTION_INTERVAL, e.g. "1h"
 }
 
 func parseFlags() *flags {
@@ -114,8 +117,7 @@ func parseFlags() *flags {
 	flag.StringVar(&f.tracingEndpoint, "tracing-endpoint", "", "OTel collector endpoint")
 	flag.Float64Var(&f.tracingSample, "tracing-sample", 0, "Tracing sample rate (0.0-1.0)")
 	flag.BoolVar(&f.tracingInsecure, "tracing-insecure", false, "Use insecure gRPC for tracing")
-	flag.StringVar(&f.embeddingProvider, "embedding-provider", "", "Embedding provider (openai, gemini, voyageai)")
-	flag.StringVar(&f.embeddingModel, "embedding-model", "", "Embedding model override")
+	flag.StringVar(&f.embeddingProviderName, "embedding-provider", "", "Name of the Provider CRD to use for embeddings")
 	flag.StringVar(&f.defaultTTL, "default-ttl", "", "Default memory TTL duration (e.g. 720h)")
 	flag.StringVar(&f.purpose, "purpose", "", "Default memory purpose tag (e.g. support_continuity)")
 	flag.StringVar(&f.retentionInterval, "retention-interval", "", "Interval for retention worker (e.g. 1h)")
@@ -137,8 +139,7 @@ func (f *flags) applyEnvFallbacks() {
 	envBoolFallback(&f.tracingEnabled, "TRACING_ENABLED")
 	envBoolFallback(&f.tracingInsecure, "TRACING_INSECURE")
 	envFallback(&f.tracingEndpoint, "", "TRACING_ENDPOINT")
-	envFallback(&f.embeddingProvider, "", "EMBEDDING_PROVIDER")
-	envFallback(&f.embeddingModel, "", "EMBEDDING_MODEL")
+	envFallback(&f.embeddingProviderName, "", "EMBEDDING_PROVIDER")
 	envFallback(&f.defaultTTL, "", "DEFAULT_TTL")
 	envFallback(&f.purpose, "", "MEMORY_PURPOSE")
 	envFallback(&f.retentionInterval, "", "RETENTION_INTERVAL")
@@ -242,10 +243,8 @@ func run() error {
 
 	// --- Embedding service ---
 	var embeddingSvc *memory.EmbeddingService
-	if f.embeddingProvider != "" {
-		// Provider creation (OpenAI/Gemini/Voyage) will be wired when
-		// PromptKit embedding providers are imported.
-		log.Info("embedding provider configured", "provider", f.embeddingProvider, "model", f.embeddingModel)
+	if f.embeddingProviderName != "" {
+		embeddingSvc = createEmbeddingService(ctx, f.embeddingProviderName, store, log)
 	}
 
 	// --- Tracing ---
@@ -459,6 +458,97 @@ func startHTTPServer(log logr.Logger, name, addr string, srv *http.Server) {
 			log.Error(err, "server error", "server", name)
 		}
 	}()
+}
+
+// embeddingProviderAdapter adapts a PromptKit EmbeddingProvider to Omnia's
+// memory.EmbeddingProvider interface.
+type embeddingProviderAdapter struct {
+	inner pkproviders.EmbeddingProvider
+}
+
+func (a *embeddingProviderAdapter) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	resp, err := a.inner.Embed(ctx, pkproviders.EmbeddingRequest{Texts: texts})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Embeddings, nil
+}
+
+func (a *embeddingProviderAdapter) Dimensions() int {
+	return a.inner.EmbeddingDimensions()
+}
+
+// createEmbeddingService reads a Provider CRD by name and creates an
+// EmbeddingService with the appropriate PromptKit embedding provider.
+// Returns nil if the provider can't be resolved (logs the error).
+func createEmbeddingService(ctx context.Context, providerName string, store *memory.PostgresMemoryStore, log logr.Logger) *memory.EmbeddingService {
+	kubeConfig, err := rest.InClusterConfig()
+	if err != nil {
+		log.Info("embedding service skipped", "reason", "no in-cluster kubeconfig")
+		return nil
+	}
+
+	scheme := runtime.NewScheme()
+	utilruntime.Must(omniav1alpha1.AddToScheme(scheme))
+	k8sClient, err := client.New(kubeConfig, client.Options{Scheme: scheme})
+	if err != nil {
+		log.Error(err, "embedding service skipped", "reason", "k8s client creation failed")
+		return nil
+	}
+
+	// Read the Provider CRD from the configured namespace.
+	var provider omniav1alpha1.Provider
+	ns := os.Getenv("EMBEDDING_PROVIDER_NAMESPACE")
+	if ns == "" {
+		ns = os.Getenv("POD_NAMESPACE")
+	}
+	if ns == "" {
+		ns = "omnia-system"
+	}
+	key := client.ObjectKey{Namespace: ns, Name: providerName}
+	if err := k8sClient.Get(ctx, key, &provider); err != nil {
+		log.Error(err, "embedding provider CRD not found", "name", providerName, "namespace", ns)
+		return nil
+	}
+
+	embeddingProvider, err := createEmbeddingProviderFromCRD(&provider, log)
+	if err != nil {
+		log.Error(err, "failed to create embedding provider", "name", providerName, "type", provider.Spec.Type)
+		return nil
+	}
+
+	adapter := &embeddingProviderAdapter{inner: embeddingProvider}
+	svc := memory.NewEmbeddingService(store, adapter, log)
+	log.Info("embedding service enabled",
+		"provider", providerName,
+		"type", provider.Spec.Type,
+		"model", provider.Spec.Model,
+	)
+	return svc
+}
+
+// createEmbeddingProviderFromCRD creates a PromptKit EmbeddingProvider from
+// the Provider CRD spec.
+func createEmbeddingProviderFromCRD(provider *omniav1alpha1.Provider, log logr.Logger) (pkproviders.EmbeddingProvider, error) {
+	switch provider.Spec.Type {
+	case omniav1alpha1.ProviderTypeOllama:
+		var opts []ollamaProvider.EmbeddingOption
+		if provider.Spec.BaseURL != "" {
+			opts = append(opts, ollamaProvider.WithEmbeddingBaseURL(provider.Spec.BaseURL))
+		}
+		if provider.Spec.Model != "" {
+			opts = append(opts, ollamaProvider.WithEmbeddingModel(provider.Spec.Model))
+		}
+		p := ollamaProvider.NewEmbeddingProvider(opts...)
+		log.V(1).Info("created Ollama embedding provider",
+			"baseURL", provider.Spec.BaseURL,
+			"model", provider.Spec.Model,
+		)
+		return p, nil
+
+	default:
+		return nil, fmt.Errorf("unsupported embedding provider type: %s (supported: ollama)", provider.Spec.Type)
+	}
 }
 
 // shutdownServers gracefully stops all HTTP servers with a 30-second timeout.

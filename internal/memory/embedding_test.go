@@ -46,7 +46,7 @@ func TestEmbeddingService_EmbedMemory(t *testing.T) {
 	mem := &Memory{
 		Type:    "fact",
 		Content: "Paris is the capital of France",
-		Scope:   map[string]string{ScopeWorkspaceID: "b0000000-0000-0000-0000-000000000001"},
+		Scope:   map[string]string{ScopeWorkspaceID: "b0000000-0000-0000-0000-000000000001", ScopeUserID: "test-user"},
 	}
 	require.NoError(t, store.Save(ctx, mem))
 	require.NotEmpty(t, mem.ID)
@@ -90,7 +90,7 @@ func TestEmbeddingService_ProviderError(t *testing.T) {
 	mem := &Memory{
 		Type:    "fact",
 		Content: "some content",
-		Scope:   map[string]string{ScopeWorkspaceID: "b0000000-0000-0000-0000-000000000002"},
+		Scope:   map[string]string{ScopeWorkspaceID: "b0000000-0000-0000-0000-000000000002", ScopeUserID: "test-user"},
 	}
 	require.NoError(t, store.Save(ctx, mem))
 
@@ -117,7 +117,7 @@ func TestEmbeddingService_EmptyResult(t *testing.T) {
 	mem := &Memory{
 		Type:    "fact",
 		Content: "another content",
-		Scope:   map[string]string{ScopeWorkspaceID: "b0000000-0000-0000-0000-000000000003"},
+		Scope:   map[string]string{ScopeWorkspaceID: "b0000000-0000-0000-0000-000000000003", ScopeUserID: "test-user"},
 	}
 	require.NoError(t, store.Save(ctx, mem))
 

@@ -25,6 +25,11 @@ data:
   SESSION_API_URL: "http://{{ include "omnia.sessionApi.fullname" . }}:{{ .Values.sessionApi.service.port }}"
   {{- end }}
 
+  # Memory API URL (server-side for memory proxy)
+  {{- if .Values.memoryApi.enabled }}
+  MEMORY_API_URL: "http://{{ include "omnia.fullname" . }}-memory-api:{{ .Values.memoryApi.service.port | default 8080 }}"
+  {{- end }}
+
   # Mode settings (demo mode defaults to false, not exposed in config)
   {{- if .Values.devMode }}
   NEXT_PUBLIC_DEV_MODE: "true"

@@ -215,6 +215,11 @@ func (h *Handler) handleSaveMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Scope[memory.ScopeUserID] == "" {
+		writeError(w, ErrMissingUserID)
+		return
+	}
+
 	mem := &memory.Memory{
 		Type:       req.Type,
 		Content:    req.Content,
@@ -395,6 +400,9 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrMissingWorkspace):
 		status = http.StatusBadRequest
 		msg = ErrMissingWorkspace.Error()
+	case errors.Is(err, ErrMissingUserID):
+		status = http.StatusBadRequest
+		msg = ErrMissingUserID.Error()
 	case errors.Is(err, ErrMissingQuery):
 		status = http.StatusBadRequest
 		msg = ErrMissingQuery.Error()

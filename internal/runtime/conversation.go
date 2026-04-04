@@ -27,6 +27,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/altairalabs/omnia/pkg/logctx"
+	"github.com/altairalabs/omnia/pkg/policy"
 )
 
 // toolCallExecutionTimeout is the pipeline execution timeout when tools are
@@ -169,10 +170,15 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 		scope := map[string]string{
 			"workspace_id": s.workspaceUID,
 		}
+		if uid := policy.UserID(ctx); uid != "" {
+			scope["user_id"] = uid // Already pseudonymized by the facade
+		}
 		opts = append(opts, sdk.WithMemory(s.memoryStore, scope))
 		log.V(1).Info("memory store wired",
 			"session_id", sessionID,
 			"trace_id", sessionID,
+			"hasUserID", scope["user_id"] != "",
+			"scopeKeys", len(scope),
 		)
 	}
 

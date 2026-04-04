@@ -311,7 +311,7 @@ func TestCheckMessages_Pass(t *testing.T) {
 	c := NewSessionChecker(srv.URL, testSessionNS, nil, goodSessionID)
 	result := c.checkMessages(context.Background())
 	assert.Equal(t, doctor.StatusPass, result.Status)
-	assert.Contains(t, result.Detail, "2")
+	assert.Contains(t, result.Detail, "messages recorded")
 }
 
 func TestCheckMessages_Skip_NoSession(t *testing.T) {

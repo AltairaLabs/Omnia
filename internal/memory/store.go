@@ -44,7 +44,10 @@ const (
 )
 
 // Error message constants (SonarCloud S1192).
-const errWorkspaceRequired = "memory: workspace_id scope is required"
+const (
+	errWorkspaceRequired = "memory: workspace_id scope is required"
+	errUserIDRequired    = "memory: user_id scope is required"
+)
 
 // SQL column/filter constants to avoid duplication (SonarCloud S1192).
 const (
@@ -83,6 +86,9 @@ func (s *PostgresMemoryStore) Pool() *pgxpool.Pool {
 func (s *PostgresMemoryStore) Save(ctx context.Context, mem *Memory) error {
 	if mem.Scope[ScopeWorkspaceID] == "" {
 		return errors.New(errWorkspaceRequired)
+	}
+	if mem.Scope[ScopeUserID] == "" {
+		return errors.New(errUserIDRequired)
 	}
 
 	tx, err := s.pool.Begin(ctx)
