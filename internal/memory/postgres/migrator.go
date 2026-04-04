@@ -65,7 +65,12 @@ func (mg *Migrator) Up() error {
 	// Check for dirty state before attempting migration.
 	if v, dirty, err := mg.m.Version(); err == nil && dirty {
 		// The failed migration was v, so the last clean version is v-1.
+		// golang-migrate uses -1 (NilVersion) to represent "no version applied yet",
+		// which is the correct state to force when version 1 failed.
 		cleanVersion := int(v) - 1
+		if cleanVersion < 1 {
+			cleanVersion = -1 // NilVersion: reset to "no migrations applied"
+		}
 		mg.logger.Info("memory database is dirty, forcing version to last clean migration",
 			"dirtyVersion", v, "forceVersion", cleanVersion)
 		if err := mg.m.Force(cleanVersion); err != nil {
@@ -94,7 +99,7 @@ func (mg *Migrator) Down() error {
 // Returns 0 and false if no migrations have been applied.
 func (mg *Migrator) Version() (uint, bool, error) {
 	v, dirty, err := mg.m.Version()
-	if err != nil && errors.Is(err, migrate.ErrNoChange) {
+	if err != nil && (errors.Is(err, migrate.ErrNoChange) || errors.Is(err, migrate.ErrNilVersion)) {
 		return 0, false, nil
 	}
 	return v, dirty, err
