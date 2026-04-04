@@ -150,7 +150,7 @@ func main() {
 	memoryChecker := checks.NewMemoryChecker(memoryAPIURL, memoryStore, workspaceUID, agentChecker)
 	runner.Register(memoryChecker.Checks()...)
 
-	privacyChecker := checks.NewPrivacyChecker(memoryAPIURL, workspaceUID)
+	privacyChecker := checks.NewPrivacyChecker(memoryAPIURL, sessionAPIURL, workspaceUID)
 	runner.Register(privacyChecker.Checks()...)
 
 	// Agent → Sessions must run sequentially (Sessions reads Agent's LastSessionID).

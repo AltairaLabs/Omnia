@@ -16,7 +16,7 @@ import (
 const (
 	privacyCategory         = "Privacy"
 	privacyTestSSN          = "123-45-6789"
-	privacyOptOutHeader     = "X-Privacy-Opt-Out"
+	privacyTestUserID       = "doctor-privacy-test"
 	privacyBatchDeletePath  = "/api/v1/memories/batch"
 	privacyMemoriesPath     = "/api/v1/memories"
 	privacyMemorySearchPath = "/api/v1/memories/search"
@@ -24,15 +24,17 @@ const (
 
 // PrivacyChecker runs privacy-related checks against the memory-api service.
 type PrivacyChecker struct {
-	memoryAPIURL string
-	workspace    string
+	memoryAPIURL  string
+	sessionAPIURL string
+	workspace     string
 }
 
 // NewPrivacyChecker creates a new PrivacyChecker.
-func NewPrivacyChecker(memoryAPIURL, workspace string) *PrivacyChecker {
+func NewPrivacyChecker(memoryAPIURL, sessionAPIURL, workspace string) *PrivacyChecker {
 	return &PrivacyChecker{
-		memoryAPIURL: memoryAPIURL,
-		workspace:    workspace,
+		memoryAPIURL:  memoryAPIURL,
+		sessionAPIURL: sessionAPIURL,
+		workspace:     workspace,
 	}
 }
 
@@ -150,28 +152,69 @@ func (p *PrivacyChecker) checkPIIRedaction(ctx context.Context) doctor.TestResul
 	return doctor.TestResult{Status: doctor.StatusPass, Detail: "SSN not present in retrieved memory content"}
 }
 
-// checkOptOutRespected saves a memory with the opt-out header and verifies it
-// is rejected (HTTP 204). If the memory is saved (HTTP 201), enterprise privacy
-// middleware is not present — the check is skipped.
+// checkOptOutRespected sets an opt-out preference for the test user, attempts
+// to save a memory, and verifies the save is rejected (204). Cleans up the
+// opt-out preference afterward.
 func (p *PrivacyChecker) checkOptOutRespected(ctx context.Context) doctor.TestResult {
 	if r := p.requireWorkspace(); r != nil {
 		return *r
 	}
 
-	_, status, err := p.saveMemory(ctx, "opt-out test content", map[string]string{privacyOptOutHeader: "true"})
+	// Set opt-out for the test user via the session-api preferences endpoint.
+	optOutURL := fmt.Sprintf("%s/api/v1/privacy/opt-out", p.sessionAPIURL)
+	optOutBody, _ := json.Marshal(map[string]string{
+		"userId": privacyTestUserID,
+		"scope":  "all",
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, optOutURL, bytes.NewReader(optOutBody))
+	if err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error()}
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := memoryClient().Do(req)
+	if err != nil {
+		return doctor.TestResult{Status: doctor.StatusSkip, Detail: "session-api opt-out endpoint not reachable", Error: err.Error()}
+	}
+	resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode != http.StatusNoContent {
+		return doctor.TestResult{
+			Status: doctor.StatusSkip,
+			Detail: fmt.Sprintf("opt-out endpoint returned HTTP %d (expected 204)", resp.StatusCode),
+		}
+	}
+
+	// Clean up: remove opt-out after the test (best-effort).
+	defer func() {
+		delReq, _ := http.NewRequestWithContext(ctx, http.MethodDelete, optOutURL, bytes.NewReader(optOutBody))
+		if delReq != nil {
+			delReq.Header.Set("Content-Type", "application/json")
+			r, e := memoryClient().Do(delReq)
+			if e == nil {
+				r.Body.Close() //nolint:errcheck
+			}
+		}
+	}()
+
+	// Now try to save a memory — should be rejected with 204 (opted out).
+	_, status, err := p.saveMemory(ctx, "opt-out test content", nil)
 	if err != nil {
 		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error()}
 	}
 
 	switch status {
 	case http.StatusNoContent:
-		return doctor.TestResult{Status: doctor.StatusPass, Detail: "opt-out header respected: save rejected with 204"}
+		return doctor.TestResult{Status: doctor.StatusPass, Detail: "opted-out user's memory save rejected with 204"}
 	case http.StatusCreated:
-		return doctor.TestResult{Status: doctor.StatusSkip, Detail: "enterprise privacy middleware not detected"}
+		return doctor.TestResult{
+			Status: doctor.StatusFail,
+			Detail: "memory saved despite user opt-out — privacy middleware not enforcing",
+		}
 	default:
 		return doctor.TestResult{
 			Status: doctor.StatusFail,
-			Detail: fmt.Sprintf("unexpected HTTP %d (expected 204 or 201)", status),
+			Detail: fmt.Sprintf("unexpected HTTP %d (expected 204)", status),
 		}
 	}
 }
