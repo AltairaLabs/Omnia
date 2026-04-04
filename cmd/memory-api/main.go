@@ -496,9 +496,12 @@ func createEmbeddingService(ctx context.Context, providerName string, store *mem
 		return nil
 	}
 
-	// Read the Provider CRD. Try the system namespace first, then pod namespace.
+	// Read the Provider CRD from the configured namespace.
 	var provider omniav1alpha1.Provider
-	ns := os.Getenv("POD_NAMESPACE")
+	ns := os.Getenv("EMBEDDING_PROVIDER_NAMESPACE")
+	if ns == "" {
+		ns = os.Getenv("POD_NAMESPACE")
+	}
 	if ns == "" {
 		ns = "omnia-system"
 	}

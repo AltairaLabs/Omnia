@@ -475,6 +475,10 @@ helm_set = [
     'memoryApi.replicaCount=1',
     'memoryApi.podDisruptionBudget.enabled=false',
     'memoryApi.postgres.secretName=omnia-postgres',
+    'memoryApi.extraEnv[0].name=EMBEDDING_PROVIDER',
+    'memoryApi.extraEnv[0].value=ollama-embeddings',
+    'memoryApi.extraEnv[1].name=EMBEDDING_PROVIDER_NAMESPACE',
+    'memoryApi.extraEnv[1].value=omnia-demo',
     'memoryApi.postgres.secretKey=connection-string',
     # Doctor
     'doctor.enabled=true',

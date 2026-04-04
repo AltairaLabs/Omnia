@@ -422,6 +422,21 @@ spec:
     contextWindow: {{ .Values.ollama.contextWindow }}
     truncationStrategy: sliding
 ---
+# Provider configuration for embedding (reuses the same Ollama model to avoid
+# model-swapping overhead — Ollama only keeps one model loaded at a time).
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: ollama-embeddings
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-embedding-provider
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  type: ollama
+  model: llama3.2:3b
+  baseURL: http://ollama.{{ .Values.namespace }}:11434
+---
 # ConfigMap for the tools demo PromptPack
 apiVersion: v1
 kind: ConfigMap

@@ -1,4 +1,4 @@
-{{- if and .Values.memoryApi.enabled .Values.enterprise.enabled }}
+{{- if .Values.memoryApi.enabled }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -11,6 +11,7 @@ rules:
       - omnia.altairalabs.ai
     resources:
       - sessionprivacypolicies
+      - providers
     verbs:
       - get
       - list
@@ -32,3 +33,4 @@ subjects:
     name: {{ include "omnia.fullname" . }}-memory-api
     namespace: {{ .Release.Namespace }}
 {{- end }}
+
