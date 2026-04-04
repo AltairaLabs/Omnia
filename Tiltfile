@@ -1103,7 +1103,6 @@ local_resource(
     cmd=_rebuild_facade_cmd + ' && ' + _restart_cmd,
     deps=_facade_deps,
     labels=['agents'],
-    resource_deps=['sample-resources'],
 )
 
 local_resource(
@@ -1111,7 +1110,6 @@ local_resource(
     cmd=_rebuild_runtime_cmd + ' && ' + _restart_cmd,
     deps=_runtime_deps,
     labels=['agents'],
-    resource_deps=['sample-resources'],
 )
 
 # ============================================================================
