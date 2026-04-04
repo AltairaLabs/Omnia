@@ -17,6 +17,10 @@ vi.mock("@/lib/k8s/workspace-route-helpers", () => ({
   getWorkspace: vi.fn(),
 }));
 
+vi.mock("@/lib/k8s/service-url-resolver", () => ({
+  resolveServiceURLs: vi.fn(),
+}));
+
 const mockUser = {
   id: "testuser-id",
   provider: "oauth" as const,
@@ -50,19 +54,19 @@ function mockWorkspace(namespace = "test-ns") {
 describe("GET /api/workspaces/[name]/sessions/[sessionId]", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.stubEnv("SESSION_API_URL", "https://session-api:8080");
   });
 
   afterEach(() => {
     vi.resetAllMocks();
-    vi.unstubAllEnvs();
   });
 
   it("proxies session detail to backend", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace() as Awaited<ReturnType<typeof getWorkspace>>);
@@ -91,11 +95,12 @@ describe("GET /api/workspaces/[name]/sessions/[sessionId]", () => {
     expect(fetchUrl).toContain("/api/v1/sessions/sess-123");
   });
 
-  it("returns 503 when SESSION_API_URL is not set", async () => {
-    vi.stubEnv("SESSION_API_URL", "");
+  it("returns 503 when service URLs are not resolvable", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue(null);
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
 
@@ -109,7 +114,9 @@ describe("GET /api/workspaces/[name]/sessions/[sessionId]", () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace() as Awaited<ReturnType<typeof getWorkspace>>);
@@ -146,7 +153,9 @@ describe("GET /api/workspaces/[name]/sessions/[sessionId]", () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace() as Awaited<ReturnType<typeof getWorkspace>>);
@@ -168,7 +177,9 @@ describe("GET /api/workspaces/[name]/sessions/[sessionId]", () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
     // Workspace resolves to namespace-a

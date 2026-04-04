@@ -145,6 +145,8 @@ export interface WorkspaceStatus {
   phase?: "Active" | "Terminating" | "Pending";
   /** Cost usage tracking */
   costUsage?: CostUsage;
+  /** Per-workspace service group statuses */
+  services?: ServiceGroupStatus[];
   /** Conditions describing workspace state */
   conditions?: Array<{
     type: string;
@@ -153,6 +155,18 @@ export interface WorkspaceStatus {
     reason?: string;
     message?: string;
   }>;
+}
+
+/** Status of a service group (session-api + memory-api pair). */
+export interface ServiceGroupStatus {
+  /** Name of the service group */
+  name: string;
+  /** Resolved URL for session-api */
+  sessionURL: string;
+  /** Resolved URL for memory-api */
+  memoryURL: string;
+  /** Whether both services are ready */
+  ready: boolean;
 }
 
 /**

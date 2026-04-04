@@ -6,8 +6,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { resolveWorkspaceUID } from "../proxy-helpers";
-
-const MEMORY_API_URL = process.env.MEMORY_API_URL;
+import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
 
 export async function DELETE(
   request: NextRequest,
@@ -15,7 +14,8 @@ export async function DELETE(
 ): Promise<NextResponse> {
     const { name, memoryId } = await params;
 
-    if (!MEMORY_API_URL) {
+    const urls = await resolveServiceURLs(name);
+    if (!urls) {
       return NextResponse.json({ error: "Memory API not configured" }, { status: 503 });
     }
 
@@ -24,7 +24,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
     }
 
-    const baseUrl = MEMORY_API_URL.endsWith("/") ? MEMORY_API_URL.slice(0, -1) : MEMORY_API_URL;
+    const baseUrl = urls.memoryURL.endsWith("/") ? urls.memoryURL.slice(0, -1) : urls.memoryURL;
     const targetUrl = `${baseUrl}/api/v1/memories/${encodeURIComponent(memoryId)}?workspace=${encodeURIComponent(workspaceUID)}`;
 
     try {

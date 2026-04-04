@@ -8,15 +8,14 @@
 
 import { NextResponse } from "next/server";
 import { getWorkspace } from "@/lib/k8s/workspace-route-helpers";
-
-const SESSION_API_URL = process.env.SESSION_API_URL;
+import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
 
 /**
  * Resolve the workspace namespace and verify the session belongs to it.
  *
  * Fetches the session metadata from session-api, then compares its namespace
  * against the workspace's namespace. Returns an error response if:
- *  - SESSION_API_URL is not configured (503)
+ *  - Session API URL is not resolvable (503)
  *  - The workspace does not exist (404)
  *  - The session does not exist (404 forwarded from backend)
  *  - The session's namespace does not match the workspace's namespace (404)
@@ -31,7 +30,8 @@ export async function verifySessionNamespace(
   | { ok: true; namespace: string; baseUrl: string }
   | { ok: false; response: NextResponse }
 > {
-  if (!SESSION_API_URL) {
+  const urls = await resolveServiceURLs(workspaceName);
+  if (!urls) {
     return {
       ok: false,
       response: NextResponse.json(
@@ -53,9 +53,9 @@ export async function verifySessionNamespace(
   }
 
   const namespace = workspace.spec.namespace.name;
-  const baseUrl = SESSION_API_URL.endsWith("/")
-    ? SESSION_API_URL.slice(0, -1)
-    : SESSION_API_URL;
+  const baseUrl = urls.sessionURL.endsWith("/")
+    ? urls.sessionURL.slice(0, -1)
+    : urls.sessionURL;
 
   // Fetch session metadata to verify namespace ownership.
   const sessionUrl = `${baseUrl}/api/v1/sessions/${encodeURIComponent(sessionId)}`;

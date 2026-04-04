@@ -12,17 +12,15 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { withWorkspaceAccess, type WorkspaceRouteContext } from "@/lib/auth/workspace-guard";
+import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
 import { pseudonymizeId } from "@/lib/identity";
 
-const SESSION_API_URL = process.env.SESSION_API_URL;
-
 const ERR_SESSION_API_NOT_CONFIGURED = "Session API not configured";
 
-function buildTargetUrl(userId: string): string | null {
-  if (!SESSION_API_URL) return null;
-  const base = SESSION_API_URL.endsWith("/") ? SESSION_API_URL.slice(0, -1) : SESSION_API_URL;
+function buildTargetUrl(sessionURL: string, userId: string): string {
+  const base = sessionURL.endsWith("/") ? sessionURL.slice(0, -1) : sessionURL;
   const hashedId = pseudonymizeId(userId);
   return `${base}/api/v1/privacy/preferences/${encodeURIComponent(hashedId)}/consent`;
 }
@@ -35,11 +33,14 @@ export const GET = withWorkspaceAccess(
   "viewer",
   async (
     request: NextRequest,
-    _context: WorkspaceRouteContext,
+    context: WorkspaceRouteContext,
     _access: WorkspaceAccess,
     _user: User
   ): Promise<NextResponse> => {
-    if (!SESSION_API_URL) {
+    const { name } = await context.params;
+
+    const urls = await resolveServiceURLs(name);
+    if (!urls) {
       return sessionApiNotConfigured();
     }
 
@@ -48,10 +49,7 @@ export const GET = withWorkspaceAccess(
       return NextResponse.json({ error: "userId is required" }, { status: 400 });
     }
 
-    const targetUrl = buildTargetUrl(userId);
-    if (!targetUrl) {
-      return sessionApiNotConfigured();
-    }
+    const targetUrl = buildTargetUrl(urls.sessionURL, userId);
 
     try {
       const response = await fetch(targetUrl, {
@@ -91,11 +89,14 @@ export const PUT = withWorkspaceAccess(
   "viewer",
   async (
     request: NextRequest,
-    _context: WorkspaceRouteContext,
+    context: WorkspaceRouteContext,
     _access: WorkspaceAccess,
     _user: User
   ): Promise<NextResponse> => {
-    if (!SESSION_API_URL) {
+    const { name } = await context.params;
+
+    const urls = await resolveServiceURLs(name);
+    if (!urls) {
       return sessionApiNotConfigured();
     }
 
@@ -104,10 +105,7 @@ export const PUT = withWorkspaceAccess(
       return NextResponse.json({ error: "userId is required" }, { status: 400 });
     }
 
-    const targetUrl = buildTargetUrl(userId);
-    if (!targetUrl) {
-      return sessionApiNotConfigured();
-    }
+    const targetUrl = buildTargetUrl(urls.sessionURL, userId);
 
     let body: string;
     try {

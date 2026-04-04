@@ -14,6 +14,10 @@ vi.mock("@/lib/auth/workspace-authz", () => ({
   checkWorkspaceAccess: vi.fn(),
 }));
 
+vi.mock("@/lib/k8s/service-url-resolver", () => ({
+  resolveServiceURLs: vi.fn(),
+}));
+
 const mockUser = {
   id: "testuser-id",
   provider: "oauth" as const,
@@ -54,18 +58,18 @@ function createMockContext() {
 describe("GET /api/workspaces/[name]/privacy/consent", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.stubEnv("SESSION_API_URL", "https://session-api:8080");
   });
 
   afterEach(() => {
     vi.resetAllMocks();
-    vi.unstubAllEnvs();
   });
 
   it("proxies GET consent to session-api with userId in path", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -94,7 +98,9 @@ describe("GET /api/workspaces/[name]/privacy/consent", () => {
   it("returns 400 when userId is missing", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -108,11 +114,12 @@ describe("GET /api/workspaces/[name]/privacy/consent", () => {
     expect(response.status).toBe(400);
   });
 
-  it("returns 503 when SESSION_API_URL is not set", async () => {
-    vi.stubEnv("SESSION_API_URL", "");
+  it("returns 503 when service URLs are not resolvable", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue(null);
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -146,7 +153,9 @@ describe("GET /api/workspaces/[name]/privacy/consent", () => {
   it("returns 502 on fetch error", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -165,7 +174,9 @@ describe("GET /api/workspaces/[name]/privacy/consent", () => {
   it("forwards backend status code on non-OK response", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -190,18 +201,18 @@ describe("GET /api/workspaces/[name]/privacy/consent", () => {
 describe("PUT /api/workspaces/[name]/privacy/consent", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.stubEnv("SESSION_API_URL", "https://session-api:8080");
   });
 
   afterEach(() => {
     vi.resetAllMocks();
-    vi.unstubAllEnvs();
   });
 
   it("proxies PUT consent to session-api with body", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -240,7 +251,9 @@ describe("PUT /api/workspaces/[name]/privacy/consent", () => {
   it("returns 400 when userId is missing", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -254,11 +267,12 @@ describe("PUT /api/workspaces/[name]/privacy/consent", () => {
     expect(response.status).toBe(400);
   });
 
-  it("returns 503 when SESSION_API_URL is not set", async () => {
-    vi.stubEnv("SESSION_API_URL", "");
+  it("returns 503 when service URLs are not resolvable", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue(null);
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -292,7 +306,9 @@ describe("PUT /api/workspaces/[name]/privacy/consent", () => {
   it("returns 502 on fetch error", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
