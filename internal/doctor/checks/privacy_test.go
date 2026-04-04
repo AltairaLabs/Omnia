@@ -108,7 +108,7 @@ func TestCheckPIIRedaction_Fail_SSNPresent(t *testing.T) {
 	defer srv.Close()
 
 	result := newPrivacyCheckerForServer(srv).checkPIIRedaction(t.Context())
-	assert.Equal(t, doctor.StatusSkip, result.Status)
+	assert.Equal(t, doctor.StatusFail, result.Status)
 	assert.Contains(t, result.Detail, "unredacted")
 }
 
@@ -328,7 +328,7 @@ func TestCheckAuditLogWritten_Fail_NoEvents(t *testing.T) {
 	defer srv.Close()
 
 	result := newPrivacyCheckerForServer(srv).checkAuditLogWritten(t.Context())
-	assert.Equal(t, doctor.StatusSkip, result.Status)
+	assert.Equal(t, doctor.StatusFail, result.Status)
 	assert.Contains(t, result.Detail, "no memory_created")
 }
 

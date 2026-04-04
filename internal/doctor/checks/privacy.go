@@ -141,11 +141,9 @@ func (p *PrivacyChecker) checkPIIRedaction(ctx context.Context) doctor.TestResul
 	for _, mem := range memories {
 		content, _ := mem["content"].(string)
 		if strings.Contains(content, privacyTestSSN) {
-			// SSN unredacted — either enterprise PII redaction is not enabled
-			// or the privacy policy watcher failed to load policies.
 			return doctor.TestResult{
-				Status: doctor.StatusSkip,
-				Detail: "SSN found unredacted — PII redaction not active (enterprise privacy middleware may not be configured)",
+				Status: doctor.StatusFail,
+				Detail: "SSN found unredacted in retrieved memory content",
 			}
 		}
 	}
@@ -267,7 +265,7 @@ func (p *PrivacyChecker) checkAuditLogWritten(ctx context.Context) doctor.TestRe
 	}
 
 	if result.Total == 0 {
-		return doctor.TestResult{Status: doctor.StatusSkip, Detail: "no memory_created audit events found (audit logging may not be configured)"}
+		return doctor.TestResult{Status: doctor.StatusFail, Detail: "no memory_created audit events found"}
 	}
 	return doctor.TestResult{
 		Status: doctor.StatusPass,

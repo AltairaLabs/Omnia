@@ -6,7 +6,7 @@ require (
 	cloud.google.com/go/kms v1.26.0
 	cloud.google.com/go/storage v1.60.0
 	github.com/AltairaLabs/PromptKit/pkg v1.3.25
-	github.com/AltairaLabs/PromptKit/runtime v1.3.25
+	github.com/AltairaLabs/PromptKit/runtime v1.3.30
 	github.com/AltairaLabs/PromptKit/sdk v1.3.25
 	github.com/AltairaLabs/PromptKit/server/a2a v1.3.25
 	github.com/AltairaLabs/PromptKit/tools/arena v1.3.25
