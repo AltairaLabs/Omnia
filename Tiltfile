@@ -307,57 +307,15 @@ if USE_LOCAL_PROMPTKIT:
 # Agent Images - Facade and Runtime containers for AgentRuntime pods
 # ============================================================================
 
-# Build facade image (WebSocket/HTTP server that handles client connections)
-docker_build(
-    'omnia-facade-dev',
-    context='.',
-    dockerfile='./Dockerfile.agent',
-    only=[
-        './cmd/agent',
-        './api',
-        './internal/agent',
-        './internal/facade',
-        './internal/session',
-        './internal/httputil',
-        './internal/media',
-        './internal/tracing',
-        './pkg',
-        './ee/pkg/privacy',
-        './ee/pkg/redaction',
-        './ee/api',
-        './go.mod',
-        './go.sum',
-    ],
-)
+# Facade image is built by auto-rebuild-facade local_resource (below).
+# Do NOT add a docker_build here — it conflicts with the local_resource
+# and causes Docker layer caching to mask source changes.
 
 # Build runtime image (LLM interaction and tool execution)
 # When USE_LOCAL_PROMPTKIT is enabled, includes local PromptKit source for development
-runtime_only = [
-    './cmd/runtime',
-    './api',
-    './internal/runtime',
-    './internal/memory',
-    './internal/session',
-    './internal/httputil',
-    './internal/pgutil',
-    './internal/tracing',
-    './pkg',
-    './go.mod',
-    './go.sum',
-]
-runtime_build_args = {}
-
-if USE_LOCAL_PROMPTKIT:
-    runtime_only.append('./promptkit-local')
-    runtime_build_args['USE_LOCAL_PROMPTKIT'] = 'true'
-
-docker_build(
-    'omnia-runtime-dev',
-    context='.',
-    dockerfile='./Dockerfile.runtime',
-    only=runtime_only,
-    build_args=runtime_build_args,
-)
+# Runtime image is built by auto-rebuild-runtime local_resource (below).
+# Do NOT add a docker_build here — it conflicts with the local_resource
+# and causes Docker layer caching to mask source changes.
 
 # ============================================================================
 # Enterprise Features - Arena Controller and Worker
@@ -1140,6 +1098,9 @@ _facade_deps = [
     './internal/httputil',
     './internal/media',
     './internal/tracing',
+    './pkg',
+    './ee',
+    './go.mod',
 ]
 
 _runtime_deps = [
@@ -1147,6 +1108,8 @@ _runtime_deps = [
     './internal/runtime',
     './internal/memory',
     './internal/tracing',
+    './pkg',
+    './go.mod',
 ]
 
 if USE_LOCAL_PROMPTKIT:
