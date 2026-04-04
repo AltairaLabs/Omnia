@@ -9,8 +9,8 @@ metadata:
 data:
   config.alloy: |
     // ==========================================================================
-    // Omnia OTLP Fan-Out Configuration
-    // Receives OTLP traces and forwards to both session-api and Tempo.
+    // Omnia OTLP Configuration
+    // Receives OTLP traces and forwards to Tempo.
     // ==========================================================================
 
     // OTLP receiver — agents send gRPC, Ollama/vLLM send HTTP
@@ -23,23 +23,12 @@ data:
       }
       output {
         traces = [
-          otelcol.exporter.otlphttp.session_api.input,
           otelcol.exporter.otlp.tempo.input,
         ]
       }
     }
 
-    // Fan-out 1: Session-API OTLP endpoint (full payload for session reconstruction)
-    otelcol.exporter.otlphttp "session_api" {
-      client {
-        endpoint = "http://{{ include "omnia.fullname" . }}-session-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.sessionApi.otlp.httpPort }}"
-        tls {
-          insecure = true
-        }
-      }
-    }
-
-    // Fan-out 2: Tempo (distributed tracing backend)
+    // Tempo (distributed tracing backend)
     otelcol.exporter.otlp "tempo" {
       client {
         endpoint = {{ .Values.tracing.alloy.tempo.endpoint | quote }}

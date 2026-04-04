@@ -157,8 +157,8 @@ app.kubernetes.io/component: session-api
 Session API image
 */}}
 {{- define "omnia.sessionApi.image" -}}
-{{- $tag := default .Chart.AppVersion .Values.sessionApi.image.tag }}
-{{- printf "%s:%s" .Values.sessionApi.image.repository $tag }}
+{{- $tag := default .Chart.AppVersion .Values.workspaceServices.sessionApi.image.tag }}
+{{- printf "%s:%s" .Values.workspaceServices.sessionApi.image.repository $tag }}
 {{- end }}
 
 {{/*
@@ -193,8 +193,8 @@ app.kubernetes.io/component: memory-api
 Memory API image
 */}}
 {{- define "omnia.memoryApi.image" -}}
-{{- $tag := default .Chart.AppVersion .Values.memoryApi.image.tag }}
-{{- printf "%s:%s" .Values.memoryApi.image.repository $tag }}
+{{- $tag := default .Chart.AppVersion .Values.workspaceServices.memoryApi.image.tag }}
+{{- printf "%s:%s" .Values.workspaceServices.memoryApi.image.repository $tag }}
 {{- end }}
 
 {{/*

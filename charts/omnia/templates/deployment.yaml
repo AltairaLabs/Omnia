@@ -55,9 +55,6 @@ spec:
             - --tracing-enabled=true
             - --tracing-endpoint={{ $resolvedTracingEndpoint }}
             {{- end }}
-            {{- if .Values.sessionApi.enabled }}
-            - --session-api-url=http://{{ include "omnia.sessionApi.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.sessionApi.service.port }}
-            {{- end }}
             {{- if .Values.metrics.enabled }}
             - --metrics-bind-address=:{{ .Values.metrics.port }}
             {{- if .Values.metrics.secure }}
