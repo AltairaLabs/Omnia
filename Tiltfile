@@ -1057,8 +1057,8 @@ if ENABLE_ENTERPRISE:
 # Tilt can't track them as k8s_image_json_path resources. Instead, we watch
 # source deps, rebuild images, and restart pods in a single atomic flow.
 
-_rebuild_facade_cmd = 'docker build -f Dockerfile.agent -t omnia-facade-dev:latest .'
-_rebuild_runtime_cmd = 'docker build -f Dockerfile.runtime'
+_rebuild_facade_cmd = 'docker build --no-cache -f Dockerfile.agent -t omnia-facade-dev:latest .'
+_rebuild_runtime_cmd = 'docker build --no-cache -f Dockerfile.runtime'
 if USE_LOCAL_PROMPTKIT:
     _rebuild_runtime_cmd += ' --build-arg USE_LOCAL_PROMPTKIT=true'
 _rebuild_runtime_cmd += ' -t omnia-runtime-dev:latest .'
