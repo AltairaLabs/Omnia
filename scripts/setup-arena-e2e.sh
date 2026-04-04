@@ -197,10 +197,13 @@ retry 2 15 helm upgrade --install omnia charts/omnia \
     --set enterprise.arena.devConsole.image.repository=omnia-arena-dev-console-dev \
     --set enterprise.arena.devConsole.image.tag=latest \
     --set enterprise.arena.devConsole.image.pullPolicy=Never \
-    --set sessionApi.image.repository=omnia-session-api-dev \
-    --set sessionApi.image.tag=latest \
-    --set sessionApi.image.pullPolicy=Never \
-    --set sessionApi.postgres.dev.enabled=true \
+    --set workspaceServices.sessionApi.image.repository=omnia-session-api-dev \
+    --set workspaceServices.sessionApi.image.tag=latest \
+    --set workspaceServices.sessionApi.image.pullPolicy=Never \
+    --set workspaceServices.memoryApi.image.repository=omnia-memory-api-dev \
+    --set workspaceServices.memoryApi.image.tag=latest \
+    --set workspaceServices.memoryApi.image.pullPolicy=Never \
+    --set postgres.dev.enabled=true \
     --set enterprise.evalWorker.image.repository=omnia-eval-worker-dev \
     --set enterprise.evalWorker.image.tag=latest \
     --set enterprise.evalWorker.image.pullPolicy=Never \

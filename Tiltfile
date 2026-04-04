@@ -465,6 +465,8 @@ helm_set = [
     'workspaceServices.memoryApi.image.repository=omnia-memory-api-dev',
     'workspaceServices.memoryApi.image.tag=latest',
     'workspaceServices.memoryApi.image.pullPolicy=Never',
+    # Dev Postgres for workspace services
+    'postgres.dev.enabled=true',
     # Doctor
     'doctor.enabled=true',
     'doctor.image.repository=omnia-doctor-dev',
@@ -626,79 +628,6 @@ k8s_yaml(helm(
     values=helm_values,
     set=helm_set,
 ))
-
-# ============================================================================
-# Dev Postgres
-# Standalone PostgreSQL for local development. Previously managed by the
-# session-api Helm sub-chart; now deployed directly so it is available to
-# per-workspace services created by the operator from the Workspace CRD.
-# ============================================================================
-
-k8s_yaml(blob('''
-apiVersion: v1
-kind: Secret
-metadata:
-  name: omnia-postgres
-  namespace: omnia-system
-type: Opaque
-stringData:
-  POSTGRES_CONN: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia?sslmode=disable"
-  connection-string: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia?sslmode=disable"
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: omnia-postgres
-  namespace: omnia-system
-spec:
-  selector:
-    app.kubernetes.io/name: omnia-postgres
-  ports:
-    - port: 5432
-      targetPort: 5432
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: omnia-postgres
-  namespace: omnia-system
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: omnia-postgres
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: omnia-postgres
-    spec:
-      containers:
-        - name: postgres
-          image: postgres:15-alpine
-          env:
-            - name: POSTGRES_USER
-              value: omnia
-            - name: POSTGRES_PASSWORD
-              value: omnia
-            - name: POSTGRES_DB
-              value: omnia
-            - name: PGDATA
-              value: /tmp/pgdata
-          ports:
-            - containerPort: 5432
-          resources:
-            limits:
-              cpu: 500m
-              memory: 512Mi
-            requests:
-              cpu: 100m
-              memory: 256Mi
-          readinessProbe:
-            exec:
-              command: [pg_isready, -U, omnia]
-            initialDelaySeconds: 5
-            periodSeconds: 5
-'''))
 
 # ============================================================================
 # Demo Charts (separate from main Omnia chart)

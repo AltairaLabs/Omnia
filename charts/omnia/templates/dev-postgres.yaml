@@ -1,0 +1,155 @@
+{{- if .Values.postgres.dev.enabled }}
+{{- $pgbouncerEnabled := .Values.postgres.dev.pgbouncer.enabled }}
+{{- $clientPort := ternary 6432 5432 $pgbouncerEnabled }}
+# =============================================================================
+# Dev-only Postgres — NOT for production use.
+# Provides the omnia-postgres Secret and a single-node Postgres StatefulSet
+# so that per-workspace services can start without external infrastructure.
+# When pgbouncer.enabled=true, a PgBouncer sidecar pools connections.
+# =============================================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.postgres.dev.secretName }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+stringData:
+  {{ .Values.postgres.dev.secretKey }}: "postgres://omnia:omnia@{{ include "omnia.fullname" . }}-postgres:{{ $clientPort }}/omnia?sslmode=disable"
+  POSTGRES_CONN: "postgres://omnia:omnia@{{ include "omnia.fullname" . }}-postgres:{{ $clientPort }}/omnia?sslmode=disable"
+{{- if $pgbouncerEnabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "omnia.fullname" . }}-pgbouncer
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+data:
+  pgbouncer.ini: |
+    [databases]
+    omnia = host=127.0.0.1 port=5432 dbname=omnia
+
+    [pgbouncer]
+    listen_addr = 0.0.0.0
+    listen_port = 6432
+    auth_type = md5
+    auth_file = /etc/pgbouncer/userlist.txt
+    pool_mode = {{ .Values.postgres.dev.pgbouncer.poolMode }}
+    default_pool_size = {{ .Values.postgres.dev.pgbouncer.defaultPoolSize }}
+    max_client_conn = {{ .Values.postgres.dev.pgbouncer.maxClientConn }}
+    max_db_connections = {{ .Values.postgres.dev.pgbouncer.maxDbConnections }}
+    ignore_startup_parameters = extra_float_digits
+    log_connections = 1
+    log_disconnections = 1
+    stats_period = 60
+  userlist.txt: |
+    "omnia" "md55b67425b5ec6058d90ce3e21f576a7cf"
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnia.fullname" . }}-postgres
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ $clientPort }}
+      targetPort: {{ $clientPort }}
+      protocol: TCP
+      name: {{ ternary "pgbouncer" "postgres" $pgbouncerEnabled }}
+  selector:
+    app.kubernetes.io/name: {{ include "omnia.name" . }}-postgres
+    app.kubernetes.io/instance: {{ .Release.Name }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "omnia.fullname" . }}-postgres
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  serviceName: {{ include "omnia.fullname" . }}-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "omnia.name" . }}-postgres
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "omnia.name" . }}-postgres
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg17
+          env:
+            - name: POSTGRES_USER
+              value: omnia
+            - name: POSTGRES_PASSWORD
+              value: omnia
+            - name: POSTGRES_DB
+              value: omnia
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+              protocol: TCP
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "omnia"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+{{- if $pgbouncerEnabled }}
+        - name: pgbouncer
+          image: edoburu/pgbouncer:latest
+          ports:
+            - containerPort: 6432
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: 6432
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: 200m
+              memory: 128Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          volumeMounts:
+            - name: pgbouncer-config
+              mountPath: /etc/pgbouncer
+              readOnly: true
+      volumes:
+        - name: pgbouncer-config
+          configMap:
+            name: {{ include "omnia.fullname" . }}-pgbouncer
+{{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+{{- end }}

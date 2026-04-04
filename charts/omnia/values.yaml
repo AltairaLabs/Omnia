@@ -724,6 +724,28 @@ workspaceServices:
       pullPolicy: IfNotPresent
 
 # ============================================================================
+# Dev Postgres
+# ============================================================================
+
+# Dev-only Postgres for local development and CI
+# Deploys a single-node Postgres StatefulSet with PgBouncer sidecar option
+postgres:
+  dev:
+    # -- Deploy a dev Postgres instance (NOT for production)
+    enabled: false
+    # -- Secret name for the Postgres connection string
+    secretName: omnia-postgres
+    # -- Key in the secret containing the connection string
+    secretKey: connection-string
+    pgbouncer:
+      # -- Enable PgBouncer connection pooling sidecar
+      enabled: false
+      poolMode: transaction
+      defaultPoolSize: 20
+      maxClientConn: 100
+      maxDbConnections: 20
+
+# ============================================================================
 # Doctor Configuration
 # Cluster diagnostic service for Omnia health checks
 # ============================================================================
