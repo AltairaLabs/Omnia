@@ -652,6 +652,11 @@ spec:
                   required:
                   - name
                   type: object
+                  x-kubernetes-validations:
+                  - message: managed mode requires both memory and session configuration
+                    rule: self.mode != 'managed' || (has(self.memory) && has(self.session))
+                  - message: external mode requires external endpoints
+                    rule: self.mode != 'external' || has(self.external)
                 type: array
                 x-kubernetes-list-map-keys:
                 - name

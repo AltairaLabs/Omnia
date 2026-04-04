@@ -1107,6 +1107,8 @@ type AgentRuntimeSpec struct {
 	// The controller resolves the session-api and memory-api endpoints from that group.
 	// Defaults to "default".
 	// +kubebuilder:default="default"
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`
+	// +kubebuilder:validation:MaxLength=63
 	// +optional
 	ServiceGroup string `json:"serviceGroup,omitempty"`
 }

@@ -642,6 +642,8 @@ const (
 
 // WorkspaceServiceGroup defines a named group of session-api and memory-api endpoints
 // for a workspace. Agents reference a group by name via spec.serviceGroup.
+// +kubebuilder:validation:XValidation:rule="self.mode != 'managed' || (has(self.memory) && has(self.session))",message="managed mode requires both memory and session configuration"
+// +kubebuilder:validation:XValidation:rule="self.mode != 'external' || has(self.external)",message="external mode requires external endpoints"
 type WorkspaceServiceGroup struct {
 	// name is the unique identifier for this service group within the workspace.
 	// Referenced by AgentRuntime spec.serviceGroup.
