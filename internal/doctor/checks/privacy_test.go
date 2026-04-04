@@ -88,7 +88,7 @@ func TestCheckPIIRedaction_Pass(t *testing.T) {
 
 	result := newPrivacyCheckerForServer(srv).checkPIIRedaction(t.Context())
 	assert.Equal(t, doctor.StatusPass, result.Status)
-	assert.Contains(t, result.Detail, "not present")
+	assert.Contains(t, result.Detail, "redacted")
 }
 
 func TestCheckPIIRedaction_Fail_SSNPresent(t *testing.T) {

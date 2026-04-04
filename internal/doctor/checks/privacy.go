@@ -135,9 +135,18 @@ func (p *PrivacyChecker) checkPIIRedaction(ctx context.Context) doctor.TestResul
 		return doctor.TestResult{Status: doctor.StatusFail, Detail: fmt.Sprintf("expected HTTP 201, got %d", status)}
 	}
 
-	memories, err := p.searchMemories(ctx, privacyTestSSN)
+	// Search for the memory we just saved. Use a broad query ("patient ssn")
+	// that will match both redacted and unredacted content.
+	memories, err := p.searchMemories(ctx, "patient ssn")
 	if err != nil {
 		return doctor.TestResult{Status: doctor.StatusSkip, Detail: "memory-api search unavailable", Error: err.Error()}
+	}
+
+	if len(memories) == 0 {
+		return doctor.TestResult{
+			Status: doctor.StatusFail,
+			Detail: "saved memory not found in search results — cannot verify redaction",
+		}
 	}
 
 	for _, mem := range memories {
@@ -149,7 +158,7 @@ func (p *PrivacyChecker) checkPIIRedaction(ctx context.Context) doctor.TestResul
 			}
 		}
 	}
-	return doctor.TestResult{Status: doctor.StatusPass, Detail: "SSN not present in retrieved memory content"}
+	return doctor.TestResult{Status: doctor.StatusPass, Detail: fmt.Sprintf("SSN redacted in %d retrieved memory(ies)", len(memories))}
 }
 
 // checkOptOutRespected sets an opt-out preference for the test user, attempts
