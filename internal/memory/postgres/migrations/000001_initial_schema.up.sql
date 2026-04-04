@@ -64,3 +64,16 @@ CREATE TABLE memory_observations (
 CREATE INDEX idx_memory_observations_entity ON memory_observations (entity_id, observed_at DESC);
 CREATE INDEX idx_memory_observations_source ON memory_observations (entity_id, source_type);
 CREATE INDEX idx_memory_observations_embedding ON memory_observations USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+-- User privacy preferences with consent grants.
+CREATE TABLE user_privacy_preferences (
+    user_id         TEXT            PRIMARY KEY,
+    opt_out_all     BOOLEAN         DEFAULT FALSE,
+    opt_out_workspaces TEXT[]       DEFAULT '{}',
+    opt_out_agents  TEXT[]          DEFAULT '{}',
+    consent_grants  TEXT[]          DEFAULT '{}',
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_privacy_prefs_updated ON user_privacy_preferences (updated_at);

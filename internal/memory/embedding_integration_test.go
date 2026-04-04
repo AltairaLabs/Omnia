@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
-// embeddingDim matches the vector(1536) column declared in migration 000025.
+// embeddingDim matches the vector(1536) column declared in the memory schema migration.
 const embeddingDim = 1536
 
 // --- Mock types ---

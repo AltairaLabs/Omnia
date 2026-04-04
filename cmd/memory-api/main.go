@@ -53,8 +53,8 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/redaction"
 	"github.com/altairalabs/omnia/internal/memory"
 	memoryapi "github.com/altairalabs/omnia/internal/memory/api"
+	memorypg "github.com/altairalabs/omnia/internal/memory/postgres"
 	sessionapi "github.com/altairalabs/omnia/internal/session/api"
-	sessionpg "github.com/altairalabs/omnia/internal/session/postgres"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logctx"
 	"github.com/altairalabs/omnia/pkg/logging"
@@ -621,7 +621,7 @@ func envDuration(key string, def time.Duration) time.Duration {
 
 // runMigrations applies database schema migrations.
 func runMigrations(connStr string, log logr.Logger) error {
-	migrator, err := sessionpg.NewMigrator(connStr, log)
+	migrator, err := memorypg.NewMigrator(connStr, log)
 	if err != nil {
 		return fmt.Errorf("creating migrator: %w", err)
 	}

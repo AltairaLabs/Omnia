@@ -63,7 +63,7 @@ const (
 )
 
 // PostgresMemoryStore implements Store against the memory_entities / memory_observations
-// PostgreSQL tables created by migration 000025.
+// PostgreSQL tables created by the memory database initial schema migration.
 type PostgresMemoryStore struct {
 	pool *pgxpool.Pool
 }
