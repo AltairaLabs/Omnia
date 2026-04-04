@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -466,6 +467,14 @@ type WorkspaceSpec struct {
 	// Job runners and dashboard mount this PVC directly for efficient content access.
 	// +optional
 	Storage *WorkspaceStorageConfig `json:"storage,omitempty"`
+
+	// services defines per-workspace service groups for session-api and memory-api.
+	// Each group can be managed (operator-provisioned) or external (user-supplied URLs).
+	// Agents reference a group by name via spec.serviceGroup.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Services []WorkspaceServiceGroup `json:"services,omitempty"`
 }
 
 // WorkspacePhase represents the current phase of a Workspace.
@@ -573,6 +582,10 @@ type WorkspaceStatus struct {
 	// +optional
 	Storage *WorkspaceStorageStatus `json:"storage,omitempty"`
 
+	// services tracks the status of each service group defined in spec.services.
+	// +optional
+	Services []ServiceGroupStatus `json:"services,omitempty"`
+
 	// conditions represent the current state of the Workspace resource.
 	// +listType=map
 	// +listMapKey=type
@@ -614,6 +627,129 @@ type WorkspaceList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitzero"`
 	Items           []Workspace `json:"items"`
+}
+
+// ServiceMode defines how a service group's endpoints are provisioned.
+// +kubebuilder:validation:Enum=managed;external
+type ServiceMode string
+
+const (
+	// ServiceModeManaged indicates the operator provisions and manages the service endpoints.
+	ServiceModeManaged ServiceMode = "managed"
+	// ServiceModeExternal indicates the user supplies pre-existing endpoint URLs.
+	ServiceModeExternal ServiceMode = "external"
+)
+
+// WorkspaceServiceGroup defines a named group of session-api and memory-api endpoints
+// for a workspace. Agents reference a group by name via spec.serviceGroup.
+type WorkspaceServiceGroup struct {
+	// name is the unique identifier for this service group within the workspace.
+	// Referenced by AgentRuntime spec.serviceGroup.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`
+	// +kubebuilder:validation:MaxLength=63
+	Name string `json:"name"`
+
+	// mode specifies whether the operator manages these endpoints or they are user-supplied.
+	// +kubebuilder:default="managed"
+	// +optional
+	Mode ServiceMode `json:"mode,omitempty"`
+
+	// memory configures the memory-api for this service group.
+	// Required when mode is "managed".
+	// +optional
+	Memory *MemoryServiceConfig `json:"memory,omitempty"`
+
+	// session configures the session-api for this service group.
+	// Required when mode is "managed".
+	// +optional
+	Session *SessionServiceConfig `json:"session,omitempty"`
+
+	// external specifies pre-existing endpoint URLs when mode is "external".
+	// Required when mode is "external".
+	// +optional
+	External *ExternalEndpoints `json:"external,omitempty"`
+}
+
+// MemoryServiceConfig defines the configuration for a managed memory-api instance.
+type MemoryServiceConfig struct {
+	// database configures the PostgreSQL database for this memory service.
+	// +kubebuilder:validation:Required
+	Database DatabaseConfig `json:"database"`
+
+	// providerRef optionally references a Provider CRD used for embedding generation.
+	// +optional
+	ProviderRef *corev1.LocalObjectReference `json:"providerRef,omitempty"`
+
+	// retention configures memory retention settings.
+	// +optional
+	Retention *WorkspaceMemoryRetentionConfig `json:"retention,omitempty"`
+}
+
+// SessionServiceConfig defines the configuration for a managed session-api instance.
+type SessionServiceConfig struct {
+	// database configures the PostgreSQL database for this session service.
+	// +kubebuilder:validation:Required
+	Database DatabaseConfig `json:"database"`
+
+	// retention configures session retention settings.
+	// +optional
+	Retention *SessionRetentionConfig `json:"retention,omitempty"`
+}
+
+// DatabaseConfig holds the reference to a Secret containing database connection details.
+type DatabaseConfig struct {
+	// secretRef references a Secret containing the database connection string.
+	// The Secret must have a key "DATABASE_URL" with a valid PostgreSQL DSN.
+	// +kubebuilder:validation:Required
+	SecretRef corev1.LocalObjectReference `json:"secretRef"`
+}
+
+// WorkspaceMemoryRetentionConfig defines retention policy for memory entries in a service group.
+type WorkspaceMemoryRetentionConfig struct {
+	// defaultTTL is the default time-to-live for memory entries (e.g., "720h" for 30 days).
+	// If not set, memories do not expire.
+	// +optional
+	DefaultTTL string `json:"defaultTTL,omitempty"`
+}
+
+// SessionRetentionConfig defines retention policy for sessions.
+type SessionRetentionConfig struct {
+	// warmDays is the number of days to keep sessions in the warm (Redis) cache.
+	// Sessions older than this are evicted to cold storage only.
+	// +optional
+	WarmDays *int32 `json:"warmDays,omitempty"`
+}
+
+// ExternalEndpoints holds user-supplied URLs for a service group using external mode.
+type ExternalEndpoints struct {
+	// sessionURL is the base URL of the external session-api (e.g., "https://session.example.com").
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^https?://`
+	SessionURL string `json:"sessionURL"`
+
+	// memoryURL is the base URL of the external memory-api (e.g., "https://memory.example.com").
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^https?://`
+	MemoryURL string `json:"memoryURL"`
+}
+
+// ServiceGroupStatus tracks the observed state of a single service group.
+type ServiceGroupStatus struct {
+	// name is the name of the service group (matches spec.services[].name).
+	Name string `json:"name,omitempty"`
+
+	// sessionURL is the resolved URL of the session-api for this group.
+	// +optional
+	SessionURL string `json:"sessionURL,omitempty"`
+
+	// memoryURL is the resolved URL of the memory-api for this group.
+	// +optional
+	MemoryURL string `json:"memoryURL,omitempty"`
+
+	// ready indicates whether all components of this service group are operational.
+	// +optional
+	Ready bool `json:"ready,omitempty"`
 }
 
 func init() {

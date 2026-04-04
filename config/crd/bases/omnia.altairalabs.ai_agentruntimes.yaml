@@ -4221,6 +4221,13 @@ spec:
                       type: object
                     type: array
                 type: object
+              serviceGroup:
+                default: default
+                description: |-
+                  serviceGroup references a service group defined in the parent Workspace's spec.services[].name.
+                  The controller resolves the session-api and memory-api endpoints from that group.
+                  Defaults to "default".
+                type: string
               session:
                 description: session configures session management and storage.
                 properties:

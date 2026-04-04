@@ -1102,6 +1102,13 @@ type AgentRuntimeSpec struct {
 	// Use this for integrations like service meshes, logging agents, or monitoring tools.
 	// +optional
 	ExtraPodAnnotations map[string]string `json:"extraPodAnnotations,omitempty"`
+
+	// serviceGroup references a service group defined in the parent Workspace's spec.services[].name.
+	// The controller resolves the session-api and memory-api endpoints from that group.
+	// Defaults to "default".
+	// +kubebuilder:default="default"
+	// +optional
+	ServiceGroup string `json:"serviceGroup,omitempty"`
 }
 
 // AgentRuntimePhase represents the current phase of the AgentRuntime.
