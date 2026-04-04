@@ -702,7 +702,7 @@ type SessionServiceConfig struct {
 // DatabaseConfig holds the reference to a Secret containing database connection details.
 type DatabaseConfig struct {
 	// secretRef references a Secret containing the database connection string.
-	// The Secret must have a key "DATABASE_URL" with a valid PostgreSQL DSN.
+	// The Secret must have a key "POSTGRES_CONN" with a valid PostgreSQL connection string.
 	// +kubebuilder:validation:Required
 	SecretRef corev1.LocalObjectReference `json:"secretRef"`
 }

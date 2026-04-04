@@ -550,7 +550,7 @@ spec:
                             secretRef:
                               description: |-
                                 secretRef references a Secret containing the database connection string.
-                                The Secret must have a key "DATABASE_URL" with a valid PostgreSQL DSN.
+                                The Secret must have a key "POSTGRES_CONN" with a valid PostgreSQL connection string.
                               properties:
                                 name:
                                   default: ""
@@ -620,7 +620,7 @@ spec:
                             secretRef:
                               description: |-
                                 secretRef references a Secret containing the database connection string.
-                                The Secret must have a key "DATABASE_URL" with a valid PostgreSQL DSN.
+                                The Secret must have a key "POSTGRES_CONN" with a valid PostgreSQL connection string.
                               properties:
                                 name:
                                   default: ""
