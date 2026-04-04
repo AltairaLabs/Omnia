@@ -48,3 +48,6 @@ updates:
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
+    ignore:
+      - dependency-name: "actions/upload-artifact"
+      - dependency-name: "actions/download-artifact"
