@@ -58,10 +58,6 @@ type ArenaDevSessionReconciler struct {
 
 	// DevConsoleImage is the default image for dev console pods.
 	DevConsoleImage string
-
-	// SessionAPIURL is the URL of the session-api service for session recording.
-	// When set, SESSION_API_URL is injected into dev console pods.
-	SessionAPIURL string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenadevsessions,verbs=get;list;watch;create;update;patch;delete
@@ -534,11 +530,11 @@ func (r *ArenaDevSessionReconciler) reconcileDeployment(ctx context.Context, ses
 		},
 	}
 
-	// Inject SESSION_API_URL for session recording if configured
-	if r.SessionAPIURL != "" {
+	// Inject SESSION_API_URL for session recording if a workspace is configured
+	if sessionURL := r.resolveSessionURLForWorkspace(ctx, session.Namespace); sessionURL != "" {
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "SESSION_API_URL",
-			Value: r.SessionAPIURL,
+			Value: sessionURL,
 		})
 	}
 
@@ -757,4 +753,23 @@ func (r *ArenaDevSessionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&rbacv1.Role{}).
 		Owns(&rbacv1.RoleBinding{}).
 		Complete(r)
+}
+
+// resolveSessionURLForWorkspace looks up the session-api URL from the Workspace CRD status
+// for the workspace that owns the given namespace.
+func (r *ArenaDevSessionReconciler) resolveSessionURLForWorkspace(ctx context.Context, namespace string) string {
+	var list corev1alpha1.WorkspaceList
+	if err := r.List(ctx, &list); err != nil {
+		return ""
+	}
+	for _, ws := range list.Items {
+		if ws.Spec.Namespace.Name == namespace {
+			for _, sg := range ws.Status.Services {
+				if sg.Name == "default" && sg.Ready {
+					return sg.SessionURL
+				}
+			}
+		}
+	}
+	return ""
 }

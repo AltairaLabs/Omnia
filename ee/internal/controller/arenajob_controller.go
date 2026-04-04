@@ -127,9 +127,6 @@ type ArenaJobReconciler struct {
 	TracingEnabled bool
 	// TracingEndpoint is the OTLP gRPC endpoint for arena worker tracing.
 	TracingEndpoint string
-	// SessionAPIURL is the session-api URL for recording arena sessions.
-	// When set, worker pods receive SESSION_API_URL and record provider calls to PostgreSQL.
-	SessionAPIURL string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs,verbs=get;list;watch;create;update;patch;delete
@@ -669,11 +666,14 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 
 	// Inject SESSION_API_URL only when session recording is explicitly enabled.
 	// Default is off to avoid overwhelming session-api during load tests.
-	if r.SessionAPIURL != "" && arenaJob.Spec.SessionRecording {
-		env = append(env, corev1.EnvVar{
-			Name:  "SESSION_API_URL",
-			Value: r.SessionAPIURL,
-		})
+	if arenaJob.Spec.SessionRecording {
+		sessionURL := r.resolveSessionURLForWorkspace(ctx, arenaJob.Namespace)
+		if sessionURL != "" {
+			env = append(env, corev1.EnvVar{
+				Name:  "SESSION_API_URL",
+				Value: sessionURL,
+			})
+		}
 	}
 
 	// Extract root path from arenaFile (directory containing the config file)
@@ -1565,4 +1565,23 @@ func (r *ArenaJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		).
 		Named("arenajob").
 		Complete(r)
+}
+
+// resolveSessionURLForWorkspace looks up the session-api URL from the Workspace CRD status
+// for the workspace that owns the given namespace.
+func (r *ArenaJobReconciler) resolveSessionURLForWorkspace(ctx context.Context, namespace string) string {
+	var list corev1alpha1.WorkspaceList
+	if err := r.List(ctx, &list); err != nil {
+		return ""
+	}
+	for _, ws := range list.Items {
+		if ws.Spec.Namespace.Name == namespace {
+			for _, sg := range ws.Status.Services {
+				if sg.Name == "default" && sg.Ready {
+					return sg.SessionURL
+				}
+			}
+		}
+	}
+	return ""
 }
