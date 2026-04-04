@@ -51,6 +51,10 @@ spec:
             - --facade-image-pull-policy={{ .Values.facade.image.pullPolicy }}
             - --framework-image={{ .Values.framework.image.repository }}:{{ .Values.framework.image.tag | default .Chart.AppVersion }}
             - --framework-image-pull-policy={{ .Values.framework.image.pullPolicy }}
+            - --session-api-image={{ include "omnia.sessionApi.image" . }}
+            - --session-api-image-pull-policy={{ .Values.workspaceServices.sessionApi.image.pullPolicy }}
+            - --memory-api-image={{ include "omnia.memoryApi.image" . }}
+            - --memory-api-image-pull-policy={{ .Values.workspaceServices.memoryApi.image.pullPolicy }}
             {{- if and .Values.tracing.enabled $resolvedTracingEndpoint }}
             - --tracing-enabled=true
             - --tracing-endpoint={{ $resolvedTracingEndpoint }}

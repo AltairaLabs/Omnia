@@ -42,8 +42,6 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             {{- end }}
-            - name: SESSION_API_URL
-              value: {{ printf "http://%s-session-api:8080" (include "omnia.fullname" .) }}
             - name: METRICS_ADDR
               value: ":9090"
             {{- if .Values.redis.enabled }}
