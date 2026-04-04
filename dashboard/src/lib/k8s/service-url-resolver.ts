@@ -21,18 +21,22 @@ export async function resolveServiceURLs(
   workspaceName: string,
   serviceGroup = "default"
 ): Promise<ServiceURLs | null> {
-  // Try Workspace CRD status first
-  const workspace = await getWorkspace(workspaceName);
-  if (workspace?.status?.services) {
-    const sg = workspace.status.services.find(
-      (s) => s.name === serviceGroup && s.ready
-    );
-    if (sg) {
-      return { sessionURL: sg.sessionURL, memoryURL: sg.memoryURL };
+  // Try Workspace CRD status first (may fail if K8s API unavailable)
+  try {
+    const workspace = await getWorkspace(workspaceName);
+    if (workspace?.status?.services) {
+      const sg = workspace.status.services.find(
+        (s) => s.name === serviceGroup && s.ready
+      );
+      if (sg) {
+        return { sessionURL: sg.sessionURL, memoryURL: sg.memoryURL };
+      }
     }
+  } catch {
+    // K8s API unavailable — fall through to env var fallback
   }
 
-  // Fall back to env vars (local dev)
+  // Fall back to env vars (local dev, dashboard E2E)
   if (ENV_SESSION_API_URL && ENV_MEMORY_API_URL) {
     return { sessionURL: ENV_SESSION_API_URL, memoryURL: ENV_MEMORY_API_URL };
   }
