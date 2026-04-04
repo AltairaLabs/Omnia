@@ -1068,23 +1068,6 @@ _restart_cmd = '''
     kubectl delete po -n omnia-demo -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
 '''
 
-# Manual buttons to rebuild individual images and restart pods
-local_resource(
-    'rebuild-facade',
-    cmd=_rebuild_facade_cmd + ' && ' + _restart_cmd,
-    labels=['agents'],
-    auto_init=False,
-    trigger_mode=TRIGGER_MODE_MANUAL,
-)
-
-local_resource(
-    'rebuild-runtime',
-    cmd=_rebuild_runtime_cmd + ' && ' + _restart_cmd,
-    labels=['agents'],
-    auto_init=False,
-    trigger_mode=TRIGGER_MODE_MANUAL,
-)
-
 # Auto-rebuild agent images when their specific source files change.
 # Separated into facade and runtime to avoid unnecessary rebuilds — a change to
 # runtime code no longer triggers a facade rebuild (and vice versa).
@@ -1121,7 +1104,6 @@ local_resource(
     deps=_facade_deps,
     labels=['agents'],
     resource_deps=['sample-resources'],
-    auto_init=False,
 )
 
 local_resource(
@@ -1130,7 +1112,6 @@ local_resource(
     deps=_runtime_deps,
     labels=['agents'],
     resource_deps=['sample-resources'],
-    auto_init=False,
 )
 
 # ============================================================================
