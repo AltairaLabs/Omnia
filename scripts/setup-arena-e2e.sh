@@ -80,19 +80,91 @@ else
 fi
 
 # Build images (unless skipped)
+#
+# Strategy: build all binaries natively via `go build` in one pass — this shares
+# the module cache and the build cache across binaries. Then wrap each binary
+# in a thin Dockerfile that only COPYs the pre-built binary (no Go toolchain
+# in the image). This replaces 8 independent multi-stage docker builds (each
+# re-downloading modules and re-compiling shared packages) and cuts BeforeSuite
+# time from ~15-18m to a few minutes. Mirrors test/e2e/e2e_suite_test.go which
+# uses the same pattern for Core E2E. See #732.
 if [[ "${SKIP_BUILD:-false}" != "true" ]]; then
-    log_info "Building container images in parallel..."
+    DIST_DIR="$PROJECT_ROOT/dist/arena-e2e"
+    log_info "Building binaries natively (shared Go cache)..."
+    rm -rf "$DIST_DIR"
+    mkdir -p "$DIST_DIR"
 
-    docker build -t "$OPERATOR_IMAGE" -f Dockerfile . &
-    docker build -t "$FACADE_IMAGE" -f Dockerfile.agent . &
-    docker build -t "$RUNTIME_IMAGE" -f Dockerfile.runtime . &
-    docker build -t "$ARENA_CONTROLLER_IMAGE" -f ee/Dockerfile.arena-controller . &
-    docker build -t "$ARENA_WORKER_IMAGE" -f ee/Dockerfile.arena-worker . &
-    docker build -t "$ARENA_DEV_CONSOLE_IMAGE" -f ee/Dockerfile.arena-dev-console . &
-    docker build -t "$SESSION_API_IMAGE" -f Dockerfile.session-api . &
-    docker build -t "$EVAL_WORKER_IMAGE" -f ee/Dockerfile.eval-worker . &
+    # name|package|image
+    BUILD_SPECS="
+manager|./cmd|$OPERATOR_IMAGE
+agent|./cmd/agent|$FACADE_IMAGE
+runtime|./cmd/runtime|$RUNTIME_IMAGE
+session-api|./cmd/session-api|$SESSION_API_IMAGE
+memory-api|./cmd/memory-api|omnia-memory-api-dev:latest
+arena-controller|./ee/cmd/omnia-arena-controller|$ARENA_CONTROLLER_IMAGE
+arena-worker|./ee/cmd/arena-worker|$ARENA_WORKER_IMAGE
+arena-dev-console|./ee/cmd/arena-dev-console|$ARENA_DEV_CONSOLE_IMAGE
+arena-eval-worker|./ee/cmd/arena-eval-worker|$EVAL_WORKER_IMAGE
+"
 
-    wait
+    build_one() {
+        local name=$1 pkg=$2
+        local out_dir="$DIST_DIR/$name"
+        mkdir -p "$out_dir"
+        # CGO_ENABLED=0 for static binaries (distroless has no libc);
+        # -ldflags="-w -s" strips debug info to shrink the binary;
+        # GOWORK=off ignores any local go.work file (e.g. promptkit-local
+        # overrides) so the build uses the published SDK from go.mod, matching
+        # the in-docker build path. Without this the build fails locally when
+        # the developer has a promptkit-local checkout.
+        env GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -ldflags="-w -s" -o "$out_dir/$name" "$pkg"
+    }
+
+    # Parallel native build. Binaries share Go's build cache so shared
+    # packages (internal/, api/, pkg/) only compile once across the suite.
+    build_pids=()
+    while IFS='|' read -r name pkg _; do
+        [ -z "$name" ] && continue
+        ( build_one "$name" "$pkg" ) &
+        build_pids+=($!)
+    done <<< "$BUILD_SPECS"
+    build_fail=0
+    for pid in "${build_pids[@]}"; do
+        if ! wait "$pid"; then
+            build_fail=1
+        fi
+    done
+    if [ "$build_fail" -ne 0 ]; then
+        log_error "One or more native builds failed"
+        exit 1
+    fi
+    log_info "All binaries built natively"
+
+    log_info "Packaging binaries into thin container images in parallel..."
+    pkg_pids=()
+    while IFS='|' read -r name pkg image; do
+        [ -z "$name" ] && continue
+        ctx="$DIST_DIR/$name"
+        cat > "$ctx/Dockerfile" <<DOCKEREOF
+FROM gcr.io/distroless/static:nonroot
+COPY $name /$name
+USER 65532:65532
+ENTRYPOINT ["/$name"]
+DOCKEREOF
+        docker build -q -t "$image" "$ctx" &
+        pkg_pids+=($!)
+    done <<< "$BUILD_SPECS"
+    pkg_fail=0
+    for pid in "${pkg_pids[@]}"; do
+        if ! wait "$pid"; then
+            pkg_fail=1
+        fi
+    done
+    if [ "$pkg_fail" -ne 0 ]; then
+        log_error "One or more image packagings failed"
+        exit 1
+    fi
     log_info "All images built"
 else
     log_info "Skipping image builds"
