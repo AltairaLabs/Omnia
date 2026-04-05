@@ -1,85 +1,67 @@
 import { test, expect } from '../fixtures/coverage';
 
+const ANONYMOUS_NOTICE = '[data-testid="memory-anonymous-notice"]';
+
 /**
  * E2E tests for the Memories page.
  *
- * These tests verify the full data flow: dashboard → proxy route → memory-api.
- * They fail if the proxy routes are missing, env vars aren't set, or the
- * memory-api is unreachable — which is the point.
+ * The E2E suite runs with OMNIA_AUTH_ANONYMOUS_ROLE=editor, so the session is
+ * anonymous. Memory operations require an authenticated user_id, so the page
+ * surfaces a sign-in notice, hides the toolbar, and skips the memory-api
+ * fetch entirely. These tests verify that anonymous UX.
+ *
+ * Proxy-route wiring for authenticated users is covered by the unit tests
+ * under src/app/api/workspaces/[name]/memory/.
  */
-test.describe('Memories Page', () => {
+test.describe('Memories Page (anonymous)', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/memories');
-    // Wait for the page to finish loading (toolbar is always rendered)
-    await page.waitForSelector('[data-testid="memories-toolbar"]', { timeout: 10000 });
+    // Anonymous notice is rendered synchronously once the auth context resolves
+    await page.waitForSelector(ANONYMOUS_NOTICE, { timeout: 10000 });
   });
 
-  test('should load without API errors', async ({ page }) => {
-    // The error alert should NOT be visible — if it is, the proxy/backend is broken
+  test('should show the sign-in notice', async ({ page }) => {
+    const notice = page.locator(ANONYMOUS_NOTICE);
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText(/sign in/i);
+  });
+
+  test('should not show an error alert', async ({ page }) => {
     const errorAlert = page.locator('[data-testid="memory-error"]');
     await expect(errorAlert).not.toBeVisible({ timeout: 5000 });
   });
 
-  test('should show graph or empty state (not error)', async ({ page }) => {
-    // Must show one of these — NOT the error state
-    const graph = page.locator('[data-testid="memory-graph"]');
-    const emptyState = page.locator('[data-testid="empty-state"]');
-    const errorAlert = page.locator('[data-testid="memory-error"]');
-
-    // Wait for content to settle
-    await page.waitForTimeout(2000);
-
-    const hasGraph = await graph.isVisible().catch(() => false);
-    const hasEmpty = await emptyState.isVisible().catch(() => false);
-    const hasError = await errorAlert.isVisible().catch(() => false);
-
-    expect(hasError).toBe(false);
-    expect(hasGraph || hasEmpty).toBe(true);
+  test('should hide the toolbar for anonymous users', async ({ page }) => {
+    await expect(page.locator('[data-testid="memories-toolbar"]')).toHaveCount(0);
   });
 
-  test('should show consent banner without errors', async ({ page }) => {
+  test('should not render the graph or the empty state', async ({ page }) => {
+    // Anonymous notice replaces both
+    await expect(page.locator('[data-testid="memory-graph"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="empty-state"]')).toHaveCount(0);
+  });
+
+  test('should still show the consent banner', async ({ page }) => {
     const banner = page.locator('[data-testid="consent-banner"]');
     await expect(banner).toBeVisible({ timeout: 5000 });
-
-    // Banner should show toggle switches, not a loading skeleton after 3s
-    await page.waitForTimeout(3000);
-    const switches = banner.locator('[role="switch"]');
-    const switchCount = await switches.count();
-    // Should have at least the 3 non-PII default toggles
-    expect(switchCount).toBeGreaterThanOrEqual(3);
   });
 
-  test('should have functional search input', async ({ page }) => {
-    const searchInput = page.locator('[data-testid="memory-search"]');
-    await expect(searchInput).toBeVisible();
-    await expect(searchInput).toBeEnabled();
-    await searchInput.fill('test query');
-    await expect(searchInput).toHaveValue('test query');
-  });
+  test('should not fire a request to the memory proxy', async ({ page }) => {
+    // The hook is disabled for anonymous users, so no /api/workspaces/*/memory
+    // request should fire during page load.
+    let memoryRequestFired = false;
+    page.on('request', (req) => {
+      const url = req.url();
+      if (url.includes('/api/workspaces/') && url.includes('/memory')) {
+        memoryRequestFired = true;
+      }
+    });
 
-  test('should have functional category filter', async ({ page }) => {
-    const filter = page.locator('[data-testid="category-filter"]');
-    await expect(filter).toBeVisible();
-    await filter.click();
-    // Dropdown should show category options
-    const options = page.locator('[role="option"]');
-    const optionCount = await options.count();
-    // "All Categories" + 6 category options = 7
-    expect(optionCount).toBeGreaterThanOrEqual(7);
-  });
+    await page.reload();
+    await page.waitForSelector(ANONYMOUS_NOTICE, { timeout: 10000 });
+    // Give any in-flight requests a chance to fire
+    await page.waitForTimeout(1000);
 
-  test('should intercept memory API requests through proxy', async ({ page }) => {
-    // Verify the proxy route is wired by intercepting the network request
-    const apiResponse = await page.waitForResponse(
-      (resp) => resp.url().includes('/api/workspaces/') && resp.url().includes('/memory'),
-      { timeout: 10000 }
-    );
-
-    // The proxy should return a valid response (not 404, not 503)
-    const status = apiResponse.status();
-    expect(status).not.toBe(404); // proxy route exists
-    expect(status).not.toBe(503); // MEMORY_API_URL is configured
-    // 200 = success, 502 = memory-api unreachable (acceptable in some CI envs)
-    expect([200, 502]).toContain(status);
+    expect(memoryRequestFired).toBe(false);
   });
 });
