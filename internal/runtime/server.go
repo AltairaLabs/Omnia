@@ -280,6 +280,14 @@ func WithMediaBasePath(path string) ServerOption {
 	}
 }
 
+// HasMediaResolver reports whether a media resolver has been wired into the
+// server via WithMediaBasePath. Used by wiring tests in cmd/runtime to assert
+// that cmd/runtime/main.go forwards cfg.MediaBasePath to the server (without
+// which mock:// and file:// URL resolution in media chunks silently fails).
+func (s *Server) HasMediaResolver() bool {
+	return s.mediaResolver != nil
+}
+
 // WithContextWindow sets the token budget for conversation context.
 // When set, PromptKit automatically truncates older messages when the budget is exceeded.
 func WithContextWindow(tokens int) ServerOption {

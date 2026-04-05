@@ -227,25 +227,16 @@ func main() {
 	})
 	testGauge.Set(1)
 
-	// Create runtime server
+	// Create runtime server. The config-derived options are factored out into
+	// configDerivedServerOpts so wiring tests can assert that every config
+	// field that should reach the runtime server actually does (see #728
+	// item 2 and the wiring test in this package).
 	serverOpts := []pkruntime.ServerOption{
 		pkruntime.WithLogger(log),
 		pkruntime.WithSlogLogger(sdkLogger),
-		pkruntime.WithPackPath(cfg.PromptPackPath),
-		pkruntime.WithPromptName(cfg.PromptName),
-		pkruntime.WithAgentIdentity(cfg.AgentName, cfg.Namespace),
-		pkruntime.WithPromptPackName(cfg.PromptPackName),
 		pkruntime.WithStateStore(store),
-		pkruntime.WithModel(cfg.Model),
-		pkruntime.WithMockProvider(cfg.MockProvider),
-		pkruntime.WithMockConfigPath(cfg.MockConfigPath),
-		pkruntime.WithToolsConfig(cfg.ToolsConfigPath),
-		pkruntime.WithProviderInfo(cfg.ProviderType, cfg.Model),
-		pkruntime.WithBaseURL(cfg.BaseURL),
-		pkruntime.WithPricing(cfg.InputCostPer1K, cfg.OutputCostPer1K),
-		pkruntime.WithContextWindow(cfg.ContextWindow),
-		pkruntime.WithTruncationStrategy(cfg.TruncationStrategy),
 	}
+	serverOpts = append(serverOpts, configDerivedServerOpts(cfg)...)
 	if tracingProvider != nil {
 		serverOpts = append(serverOpts, pkruntime.WithTracingProvider(tracingProvider))
 	}
@@ -419,6 +410,31 @@ func enrichToolRegistryMeta(cfg *pkruntime.Config, server *pkruntime.Server, log
 // isNotHealthCheck filters out gRPC health check RPCs from tracing.
 func isNotHealthCheck(info *stats.RPCTagInfo) bool {
 	return info.FullMethodName != "/omnia.runtime.v1.RuntimeService/Health"
+}
+
+// configDerivedServerOpts returns the pkruntime.ServerOption slice derived
+// solely from cfg fields (no logger, store, collector, etc.). Factored out of
+// run so wiring tests can assert that cfg fields with real production impact
+// — especially MediaBasePath — actually reach the runtime server. If you add
+// a new cfg.Xxx field that the runtime needs, add the corresponding
+// pkruntime.WithXxx here, not ad hoc in run. See #728.
+func configDerivedServerOpts(cfg *pkruntime.Config) []pkruntime.ServerOption {
+	return []pkruntime.ServerOption{
+		pkruntime.WithPackPath(cfg.PromptPackPath),
+		pkruntime.WithPromptName(cfg.PromptName),
+		pkruntime.WithAgentIdentity(cfg.AgentName, cfg.Namespace),
+		pkruntime.WithPromptPackName(cfg.PromptPackName),
+		pkruntime.WithModel(cfg.Model),
+		pkruntime.WithMockProvider(cfg.MockProvider),
+		pkruntime.WithMockConfigPath(cfg.MockConfigPath),
+		pkruntime.WithToolsConfig(cfg.ToolsConfigPath),
+		pkruntime.WithProviderInfo(cfg.ProviderType, cfg.Model),
+		pkruntime.WithBaseURL(cfg.BaseURL),
+		pkruntime.WithPricing(cfg.InputCostPer1K, cfg.OutputCostPer1K),
+		pkruntime.WithContextWindow(cfg.ContextWindow),
+		pkruntime.WithTruncationStrategy(cfg.TruncationStrategy),
+		pkruntime.WithMediaBasePath(cfg.MediaBasePath),
+	}
 }
 
 // buildGRPCServer constructs the runtime gRPC server with the policy
