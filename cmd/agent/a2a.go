@@ -17,6 +17,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/agent"
@@ -27,10 +28,39 @@ import (
 	a2aserver "github.com/AltairaLabs/PromptKit/server/a2a"
 )
 
+// buildA2AHandler assembles the HTTP handler chain for an A2A server:
+//
+//	inner handler -> metrics middleware -> OpenTelemetry tracing
+//
+// The tracing wrapper is only applied when tracingProvider is non-nil. This
+// is factored out of runA2AFacade and startA2AServer so both standalone and
+// dual-protocol modes share the same middleware stack, and so wiring tests
+// can assert that tracing is wired when the provider is set. A regression
+// that drops the tracing wrapper — or blank-identifies the provider at the
+// call site, like #728 items 3+5 — is caught by
+// TestBuildA2AHandler_WiresTracingProvider.
+//
+// inner is the handler returned by facadea2a.Server.Handler(). It is taken as
+// an http.Handler (not *facadea2a.Server) so the wiring test can exercise
+// this function without standing up a real A2A server.
+func buildA2AHandler(
+	inner http.Handler,
+	metrics *facadea2a.Metrics,
+	tracingProvider *tracing.Provider,
+) http.Handler {
+	var handler http.Handler = facadea2a.NewMetricsMiddleware(inner, metrics)
+	if tracingProvider != nil {
+		handler = otelhttp.NewHandler(handler, "a2a-facade",
+			otelhttp.WithTracerProvider(tracingProvider.TracerProvider()),
+		)
+	}
+	return handler
+}
+
 // runA2AFacade starts the A2A JSON-RPC facade with PromptKit SDK in-process.
 // Unlike the WebSocket facade, A2A does not use a separate runtime sidecar —
 // the SDK handles LLM calls directly.
-func runA2AFacade(cfg *agent.Config, log logr.Logger, _ *tracing.Provider) {
+func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.Provider) {
 	log.Info("starting A2A facade",
 		"port", cfg.FacadePort,
 		"taskTTL", cfg.A2ATaskTTL,
@@ -84,8 +114,8 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, _ *tracing.Provider) {
 	// Create A2A metrics.
 	a2aMetrics := facadea2a.NewMetrics(cfg.AgentName, cfg.Namespace)
 
-	// Wrap the A2A handler with metrics middleware.
-	a2aHandler := facadea2a.NewMetricsMiddleware(a2aSrv.Handler(), a2aMetrics)
+	// Wrap the A2A handler with metrics + (optional) tracing middleware.
+	a2aHandler := buildA2AHandler(a2aSrv.Handler(), a2aMetrics, tracingProvider)
 
 	// Build the mux with metrics endpoint.
 	mux := http.NewServeMux()
