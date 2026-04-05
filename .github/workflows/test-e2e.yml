@@ -140,6 +140,15 @@ jobs:
           echo ""
           echo "=== Postgres logs ==="
           kubectl logs -n omnia-system -l app=e2e-postgres --tail=100 || true
+          echo ""
+          # Dump stdout for every test python pod. These pods exit non-zero
+          # with an AssertionError or traceback on failure, and without their
+          # logs we can't tell *why* a spec failed. See #734.
+          echo "=== Test pod logs (test-agents) ==="
+          for pod in $(kubectl get pods -n test-agents -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+            echo "--- $pod ---"
+            kubectl logs -n test-agents "$pod" --tail=500 --all-containers=true || true
+          done
 
       - name: Publish Test Results
         uses: mikepenz/action-junit-report@v6
