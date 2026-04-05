@@ -199,6 +199,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build doctor from source
+        env:
+          GOWORK: "off"
+        run: go build -o /tmp/doctor ./cmd/doctor
+
       - name: Download image artifacts
         uses: actions/download-artifact@v4
         with:
@@ -282,22 +293,12 @@ jobs:
       - name: Run doctor smoke test
         run: |
           set -euo pipefail
-          # TODO: the `doctor` binary is currently an untracked local build
-          # (a Go CLI that talks to a live cluster). Until it is either
-          # committed as source under cmd/doctor/ and built here, or
-          # published as a release artifact, run a placeholder so the
-          # workflow is fully wired and runnable end-to-end.
-          #
-          # When doctor ships: replace this with either
-          #   go run ./cmd/doctor -- --namespace omnia-system
-          # or download the release binary for linux/amd64 and invoke it.
-          if [ -x ./doctor ]; then
-            ./doctor --namespace omnia-system
-          else
-            echo "doctor binary not present in repo — running placeholder smoke checks"
-            kubectl -n omnia-system wait --for=condition=Available deploy --all --timeout=120s || true
-            kubectl -n omnia-system get pods
-          fi
+          # doctor is built from ./cmd/doctor earlier in this job. It reads
+          # KUBECONFIG from the environment (kind-action sets this) and talks
+          # to in-cluster services by DNS name, resolved from the --namespace
+          # flag. --run-once runs all checks, prints a JSON report, and
+          # --exit-code makes the process exit 1 if any check fails.
+          /tmp/doctor --run-once --exit-code --namespace omnia-system
 
       - name: Dump logs on failure
         if: failure()
