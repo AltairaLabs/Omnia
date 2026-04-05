@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import {
   Sheet,
   SheetContent,
@@ -7,12 +8,14 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Brain } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Brain, LogIn } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/hooks/use-auth";
 import { useMemories } from "@/hooks/use-memories";
 import { MemoryCard } from "./memory-card";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { MemoryEntity } from "@/lib/data/types";
 
 interface MemorySidebarProps {
   agentName: string;
@@ -41,9 +44,42 @@ function EmptyState() {
   );
 }
 
+function AnonymousNotice() {
+  return (
+    <Alert className="mt-2" data-testid="memory-sidebar-anonymous-notice">
+      <LogIn className="h-4 w-4" />
+      <AlertTitle>Memories require sign-in</AlertTitle>
+      <AlertDescription>
+        Memories are scoped to authenticated identities so each user&apos;s data
+        stays private. Sign in to start saving memories.
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+function renderBody(
+  isAuthenticated: boolean,
+  isLoading: boolean,
+  memories: MemoryEntity[]
+): ReactNode {
+  if (!isAuthenticated) return <AnonymousNotice />;
+  if (isLoading) return <LoadingSkeletons />;
+  if (memories.length === 0) return <EmptyState />;
+  return (
+    <div className="space-y-1 pb-4">
+      {memories.map((memory) => (
+        <MemoryCard key={memory.id} memory={memory} />
+      ))}
+    </div>
+  );
+}
+
 export function MemorySidebar({ agentName: _agentName, open, onClose }: MemorySidebarProps) {
-  const { user } = useAuth();
-  const { data, isLoading } = useMemories({ userId: user?.id });
+  const { user, isAuthenticated } = useAuth();
+  const { data, isLoading } = useMemories({
+    userId: user?.id,
+    enabled: isAuthenticated,
+  });
 
   // No agent-specific filtering for now — show all memories
   // (agent scoping requires agent_id in scope, which may not be set)
@@ -63,17 +99,7 @@ export function MemorySidebar({ agentName: _agentName, open, onClose }: MemorySi
         </SheetHeader>
 
         <ScrollArea className="h-[calc(100vh-120px)] px-4">
-          {isLoading ? (
-            <LoadingSkeletons />
-          ) : memories.length === 0 ? (
-            <EmptyState />
-          ) : (
-            <div className="space-y-1 pb-4">
-              {memories.map((memory) => (
-                <MemoryCard key={memory.id} memory={memory} />
-              ))}
-            </div>
-          )}
+          {renderBody(isAuthenticated, isLoading, memories)}
         </ScrollArea>
 
         <div className="border-t p-3">
