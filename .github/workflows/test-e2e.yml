@@ -61,7 +61,23 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false  # We manage the module/build cache explicitly below.
+
+      # setup-go's built-in cache only reliably restores the Go toolchain,
+      # not the module download cache (~/go/pkg/mod) or the compiler build
+      # cache (~/.cache/go-build). Without this step, every E2E run re-downloads
+      # every module and recompiles every shared package from scratch — costing
+      # ~4-6 minutes. Keying on go.sum means the cache is invalidated only when
+      # dependencies change. See #732 follow-up.
+      - name: Cache Go modules and build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-e2e-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            go-e2e-${{ runner.os }}-
 
       - name: Install kind
         run: |
@@ -162,6 +178,18 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: false  # We manage the module/build cache explicitly below.
+
+      # See Core E2E for rationale.
+      - name: Cache Go modules and build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-e2e-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            go-e2e-${{ runner.os }}-
 
       - name: Install kind
         run: |
