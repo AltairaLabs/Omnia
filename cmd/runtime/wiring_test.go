@@ -125,6 +125,21 @@ func TestBuildGRPCServer_PolicyInterceptorWiresUserIDMetadata(t *testing.T) {
 	}
 }
 
+// TODO(#728 item 4): runtime ToolPolicy evaluator wiring test.
+//
+// The #728 backlog listed "Runtime doesn't check ToolPolicy before executing
+// tools" as a wiring gap. Investigation under this PR found that ToolPolicy
+// enforcement in Omnia lives in the separate policy-proxy sidecar
+// (ee/cmd/policy-proxy/), not the runtime. The runtime has no existing hook
+// point for in-process policy evaluation, and internal/runtime/ does not
+// import ee/pkg/policy at all. Adding one is an architectural change
+// (either an HTTP call out to the proxy on every tool call, or importing
+// the evaluator and running CEL in-process), not a regression guard for
+// existing wiring.
+//
+// Deferred to a follow-up ticket. The other four items of #728 ship in this
+// PR; the controller wiring tests in PR 2 cover the sidecar injection path.
+
 // TestBuildGRPCServer_ReturnsNonNilServer is a minimal smoke test that the
 // factory returns a usable server even without a tracing provider.
 func TestBuildGRPCServer_ReturnsNonNilServer(t *testing.T) {
