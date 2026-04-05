@@ -60,6 +60,9 @@ type AgentRuntimeReconciler struct {
 	RedisAddr string
 	// EvalWorkerImage overrides the default eval worker container image
 	EvalWorkerImage string
+	// AgentWorkspaceReaderClusterRole is the name of the ClusterRole that grants
+	// agent pods read access to Workspace CRDs (for service URL resolution).
+	AgentWorkspaceReaderClusterRole string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch;create;update;patch;delete

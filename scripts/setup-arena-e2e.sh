@@ -246,7 +246,55 @@ kubectl rollout status deployment/omnia-controller-manager -n "$NAMESPACE" --tim
 kubectl rollout status deployment/omnia-arena-controller -n "$NAMESPACE" --timeout=3m
 kubectl rollout status statefulset/omnia-redis-master -n "$NAMESPACE" --timeout=3m
 kubectl rollout status statefulset/omnia-postgres -n "$NAMESPACE" --timeout=3m
-kubectl rollout status deployment/omnia-session-api -n "$NAMESPACE" --timeout=3m
+
+# Create Workspace CRD so the operator provisions per-workspace session-api
+# and memory-api instances in the dev-agents namespace.
+log_info "Creating dev-agents Workspace..."
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev-agents
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: omnia-postgres
+  namespace: dev-agents
+type: Opaque
+stringData:
+  POSTGRES_CONN: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia?sslmode=disable"
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Workspace
+metadata:
+  name: dev-agents
+spec:
+  displayName: Dev Agents
+  environment: development
+  namespace:
+    name: dev-agents
+  anonymousAccess:
+    enabled: true
+    role: editor
+  services:
+    - name: default
+      mode: managed
+      session:
+        database:
+          secretRef:
+            name: omnia-postgres
+      memory:
+        database:
+          secretRef:
+            name: omnia-postgres
+EOF
+
+log_info "Waiting for per-workspace services..."
+kubectl wait --for=condition=Available --timeout=3m \
+  deployment/session-dev-agents-default -n dev-agents || true
+kubectl wait --for=condition=Available --timeout=3m \
+  deployment/memory-dev-agents-default -n dev-agents || true
 
 log_info "Arena E2E environment ready!"
 echo ""

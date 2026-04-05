@@ -82,6 +82,7 @@ func main() {
 	var workspaceStorageClass string
 	var redisAddr string
 	var evalWorkerImage string
+	var agentWorkspaceReaderClusterRole string
 	var apiBindAddress string
 	var enterpriseEnabled bool
 	var licenseServerURL string
@@ -118,6 +119,8 @@ func main() {
 		"Redis address for eval worker deployments (e.g., redis.omnia-system.svc.cluster.local:6379)")
 	flag.StringVar(&evalWorkerImage, "eval-worker-image", "",
 		"Image for the arena-eval-worker container. If not set, defaults to ghcr.io/altairalabs/arena-eval-worker:latest")
+	flag.StringVar(&agentWorkspaceReaderClusterRole, "agent-workspace-reader-clusterrole", "",
+		"Name of the ClusterRole granting agent pods read access to Workspace CRDs. If empty, no binding is created.")
 	flag.StringVar(&apiBindAddress, "api-bind-address", "",
 		"Address for the tool test API server (e.g., :8083). If empty, the API server is not started.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -216,16 +219,17 @@ func main() {
 	}
 
 	if err := (&controller.AgentRuntimeReconciler{
-		Client:                   mgr.GetClient(),
-		Scheme:                   mgr.GetScheme(),
-		FacadeImage:              facadeImage,
-		FacadeImagePullPolicy:    corev1.PullPolicy(facadeImagePullPolicy),
-		FrameworkImage:           frameworkImage,
-		FrameworkImagePullPolicy: corev1.PullPolicy(frameworkImagePullPolicy),
-		TracingEnabled:           tracingEnabled,
-		TracingEndpoint:          tracingEndpoint,
-		RedisAddr:                redisAddr,
-		EvalWorkerImage:          evalWorkerImage,
+		Client:                          mgr.GetClient(),
+		Scheme:                          mgr.GetScheme(),
+		FacadeImage:                     facadeImage,
+		FacadeImagePullPolicy:           corev1.PullPolicy(facadeImagePullPolicy),
+		FrameworkImage:                  frameworkImage,
+		FrameworkImagePullPolicy:        corev1.PullPolicy(frameworkImagePullPolicy),
+		TracingEnabled:                  tracingEnabled,
+		TracingEndpoint:                 tracingEndpoint,
+		RedisAddr:                       redisAddr,
+		EvalWorkerImage:                 evalWorkerImage,
+		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "AgentRuntime")
 		os.Exit(1)
