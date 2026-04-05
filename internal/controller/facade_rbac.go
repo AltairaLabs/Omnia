@@ -58,7 +58,9 @@ func (r *AgentRuntimeReconciler) reconcileFacadeRBAC(
 
 // reconcileWorkspaceReaderBinding creates a ClusterRoleBinding granting the facade SA
 // read access to Workspace CRDs (cluster-scoped) for service URL resolution.
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
+// The clusterrolebindings RBAC marker lives in the canonical block above
+// AgentRuntimeReconciler.reconcileReferences in agentruntime_controller.go;
+// markers on individual reconcile helpers are not picked up by controller-gen.
 func (r *AgentRuntimeReconciler) reconcileWorkspaceReaderBinding(
 	ctx context.Context,
 	agentRuntime *omniav1alpha1.AgentRuntime,

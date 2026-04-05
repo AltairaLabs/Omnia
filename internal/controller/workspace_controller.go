@@ -261,9 +261,6 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{}, nil
 }
 
-// deletePageSize is the maximum number of resources to list per page during workspace cleanup.
-const deletePageSize = 100
-
 //nolint:gocognit // Deletion logic requires handling many resource types
 func (r *WorkspaceReconciler) reconcileDelete(ctx context.Context, workspace *omniav1alpha1.Workspace) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -315,94 +312,76 @@ func (r *WorkspaceReconciler) reconcileDelete(ctx context.Context, workspace *om
 	return ctrl.Result{}, nil
 }
 
-// deletePVCs deletes all managed PVCs in the namespace with paginated listing.
+// deletePVCs deletes all managed PVCs in the namespace.
+//
+// Pagination was removed: the controller-runtime cache that backs r.Client
+// does not support client.Continue tokens (it holds the entire watched set
+// in memory), and attempting paginated listing returned "continue list
+// option is not supported by the cache" errors that kept the finalizer
+// stuck and blocked namespace cleanup in e2e tests. The cache already has
+// everything in memory, so a single List is both correct and cheap.
 func (r *WorkspaceReconciler) deletePVCs(ctx context.Context, ns string, labels client.MatchingLabels, log logr.Logger) error {
+	pvcs := &corev1.PersistentVolumeClaimList{}
+	if err := r.List(ctx, pvcs, client.InNamespace(ns), labels); err != nil {
+		return fmt.Errorf("list PVCs: %w", err)
+	}
 	var errs []error
-	opts := []client.ListOption{client.InNamespace(ns), labels, client.Limit(deletePageSize)}
-	for {
-		pvcs := &corev1.PersistentVolumeClaimList{}
-		if err := r.List(ctx, pvcs, opts...); err != nil {
-			return fmt.Errorf("list PVCs: %w", err)
+	for i := range pvcs.Items {
+		if err := r.Delete(ctx, &pvcs.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+			log.Error(err, "delete PVC failed", "name", pvcs.Items[i].Name)
+			errs = append(errs, err)
 		}
-		for i := range pvcs.Items {
-			if err := r.Delete(ctx, &pvcs.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-				log.Error(err, "delete PVC failed", "name", pvcs.Items[i].Name)
-				errs = append(errs, err)
-			}
-		}
-		if pvcs.Continue == "" {
-			break
-		}
-		opts = []client.ListOption{client.InNamespace(ns), labels, client.Limit(deletePageSize), client.Continue(pvcs.Continue)}
 	}
 	return errors.Join(errs...)
 }
 
-// deleteNetworkPolicies deletes all managed NetworkPolicies with paginated listing.
+// deleteNetworkPolicies deletes all managed NetworkPolicies. See deletePVCs
+// comment — pagination removed for the same reason.
 func (r *WorkspaceReconciler) deleteNetworkPolicies(ctx context.Context, ns string, labels client.MatchingLabels, log logr.Logger) error {
+	list := &networkingv1.NetworkPolicyList{}
+	if err := r.List(ctx, list, client.InNamespace(ns), labels); err != nil {
+		return fmt.Errorf("list NetworkPolicies: %w", err)
+	}
 	var errs []error
-	opts := []client.ListOption{client.InNamespace(ns), labels, client.Limit(deletePageSize)}
-	for {
-		list := &networkingv1.NetworkPolicyList{}
-		if err := r.List(ctx, list, opts...); err != nil {
-			return fmt.Errorf("list NetworkPolicies: %w", err)
+	for i := range list.Items {
+		if err := r.Delete(ctx, &list.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+			log.Error(err, "delete NetworkPolicy failed", "name", list.Items[i].Name)
+			errs = append(errs, err)
 		}
-		for i := range list.Items {
-			if err := r.Delete(ctx, &list.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-				log.Error(err, "delete NetworkPolicy failed", "name", list.Items[i].Name)
-				errs = append(errs, err)
-			}
-		}
-		if list.Continue == "" {
-			break
-		}
-		opts = []client.ListOption{client.InNamespace(ns), labels, client.Limit(deletePageSize), client.Continue(list.Continue)}
 	}
 	return errors.Join(errs...)
 }
 
-// deleteRoleBindings deletes all managed RoleBindings with paginated listing.
+// deleteRoleBindings deletes all managed RoleBindings. See deletePVCs
+// comment — pagination removed for the same reason.
 func (r *WorkspaceReconciler) deleteRoleBindings(ctx context.Context, ns string, labels client.MatchingLabels, log logr.Logger) error {
+	list := &rbacv1.RoleBindingList{}
+	if err := r.List(ctx, list, client.InNamespace(ns), labels); err != nil {
+		return fmt.Errorf("list RoleBindings: %w", err)
+	}
 	var errs []error
-	opts := []client.ListOption{client.InNamespace(ns), labels, client.Limit(deletePageSize)}
-	for {
-		list := &rbacv1.RoleBindingList{}
-		if err := r.List(ctx, list, opts...); err != nil {
-			return fmt.Errorf("list RoleBindings: %w", err)
+	for i := range list.Items {
+		if err := r.Delete(ctx, &list.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+			log.Error(err, "delete RoleBinding failed", "name", list.Items[i].Name)
+			errs = append(errs, err)
 		}
-		for i := range list.Items {
-			if err := r.Delete(ctx, &list.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-				log.Error(err, "delete RoleBinding failed", "name", list.Items[i].Name)
-				errs = append(errs, err)
-			}
-		}
-		if list.Continue == "" {
-			break
-		}
-		opts = []client.ListOption{client.InNamespace(ns), labels, client.Limit(deletePageSize), client.Continue(list.Continue)}
 	}
 	return errors.Join(errs...)
 }
 
-// deleteServiceAccounts deletes all managed ServiceAccounts with paginated listing.
+// deleteServiceAccounts deletes all managed ServiceAccounts. See deletePVCs
+// comment — pagination removed for the same reason.
 func (r *WorkspaceReconciler) deleteServiceAccounts(ctx context.Context, ns string, labels client.MatchingLabels, log logr.Logger) error {
+	list := &corev1.ServiceAccountList{}
+	if err := r.List(ctx, list, client.InNamespace(ns), labels); err != nil {
+		return fmt.Errorf("list ServiceAccounts: %w", err)
+	}
 	var errs []error
-	opts := []client.ListOption{client.InNamespace(ns), labels, client.Limit(deletePageSize)}
-	for {
-		list := &corev1.ServiceAccountList{}
-		if err := r.List(ctx, list, opts...); err != nil {
-			return fmt.Errorf("list ServiceAccounts: %w", err)
+	for i := range list.Items {
+		if err := r.Delete(ctx, &list.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+			log.Error(err, "delete ServiceAccount failed", "name", list.Items[i].Name)
+			errs = append(errs, err)
 		}
-		for i := range list.Items {
-			if err := r.Delete(ctx, &list.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-				log.Error(err, "delete ServiceAccount failed", "name", list.Items[i].Name)
-				errs = append(errs, err)
-			}
-		}
-		if list.Continue == "" {
-			break
-		}
-		opts = []client.ListOption{client.InNamespace(ns), labels, client.Limit(deletePageSize), client.Continue(list.Continue)}
 	}
 	return errors.Join(errs...)
 }
