@@ -113,7 +113,7 @@ var _ = Describe("Manager", Ordered, func() {
 		By("patching the controller-manager to use the test facade and framework images")
 		patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
 			"-n", namespace, "--type=strategic",
-			"-p", fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--metrics-bind-address=:8443","--leader-elect","--health-probe-bind-address=:8081","--facade-image=%s","--framework-image=%s","--session-api-image=%s","--memory-api-image=%s"]}]}}}}`, facadeImageRef, runtimeImageRef, sessionApiImage, sessionApiImage))
+			"-p", fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--metrics-bind-address=:8443","--leader-elect","--health-probe-bind-address=:8081","--facade-image=%s","--framework-image=%s","--session-api-image=%s","--memory-api-image=%s","--agent-workspace-reader-clusterrole=omnia-agent-workspace-reader"]}]}}}}`, facadeImageRef, runtimeImageRef, sessionApiImage, sessionApiImage))
 		_, err = utils.Run(patchCmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager")
 
@@ -1281,17 +1281,13 @@ spec:
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create session test pod")
 
-			By("waiting for the session test to complete")
-			verifySessionTest := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "pod", "session-test",
-					"-n", agentsNamespace, "-o", "jsonpath={.status.phase}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("Succeeded"))
-			}
-			ok := Eventually(verifySessionTest, 3*time.Minute, 5*time.Second).Should(Succeed())
-			if !ok {
-				// Dump debug info on failure
+			// DeferCleanup dumps debug logs if the test fails, regardless of where it fails.
+			// Ginkgo's CurrentSpecReport().Failed() tells us if the spec failed by the time
+			// cleanup runs, so we can dump logs unconditionally registered but conditionally output.
+			DeferCleanup(func() {
+				if !CurrentSpecReport().Failed() {
+					return
+				}
 				_, _ = fmt.Fprintf(GinkgoWriter, "\n=== DEBUG: Session test failed ===\n")
 				logsCmd := exec.Command("kubectl", "logs", "session-test", "-n", agentsNamespace)
 				if logs, err := utils.Run(logsCmd); err == nil {
@@ -1305,8 +1301,17 @@ spec:
 				if sessionApiLogs, err := utils.Run(sessionApiLogsCmd); err == nil {
 					_, _ = fmt.Fprintf(GinkgoWriter, "Session-api logs:\n%s\n", sessionApiLogs)
 				}
-				Fail("Session test failed - see debug output above")
+			})
+
+			By("waiting for the session test to complete")
+			verifySessionTest := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", "session-test",
+					"-n", agentsNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Succeeded"))
 			}
+			Eventually(verifySessionTest, 3*time.Minute, 5*time.Second).Should(Succeed())
 
 			By("checking the session test logs")
 			cmd = exec.Command("kubectl", "logs", "session-test", "-n", agentsNamespace)

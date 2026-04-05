@@ -119,10 +119,14 @@ spec:
           volumeMounts:
             - name: workspace-content
               mountPath: /workspace-content
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: workspace-content
           persistentVolumeClaim:
             claimName: {{ include "omnia.fullname" . }}-workspace-content
+        - name: tmp
+          emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
