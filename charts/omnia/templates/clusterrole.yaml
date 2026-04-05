@@ -108,8 +108,10 @@ rules:
     resources:
       - agentpolicies
       - agentruntimes
+      - arenadevsessions
       - arenajobs
       - arenasources
+      - arenatemplatesources
       - promptpacks
       - providers
       - sessionretentionpolicies
@@ -152,8 +154,10 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
+      - arenadevsessions/status
       - arenajobs/status
       - arenasources/status
+      - arenatemplatesources/status
     verbs:
       - get
   - apiGroups:
