@@ -101,6 +101,15 @@ describe("useMemories", () => {
 
     expect(result.current.error).toBeInstanceOf(Error);
   });
+
+  it("does not fetch when enabled is false", () => {
+    const { result } = renderHook(
+      () => useMemories({ userId: "u1", enabled: false }),
+      { wrapper: createWrapper() }
+    );
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(mockGetMemories).not.toHaveBeenCalled();
+  });
 });
 
 describe("useMemorySearch", () => {

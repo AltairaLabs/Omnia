@@ -48,10 +48,24 @@ function makeMemory(id: string, content: string): MemoryEntity {
 }
 
 function setup(memories: MemoryEntity[] = [], isLoading = false) {
-  mockUseAuth.mockReturnValue({ user: { id: "user-1" } });
+  mockUseAuth.mockReturnValue({
+    user: { id: "user-1" },
+    isAuthenticated: true,
+  });
   mockUseMemories.mockReturnValue({
     data: { memories, total: memories.length },
     isLoading,
+  });
+}
+
+function setupAnonymous() {
+  mockUseAuth.mockReturnValue({
+    user: { id: "anon", provider: "anonymous" },
+    isAuthenticated: false,
+  });
+  mockUseMemories.mockReturnValue({
+    data: { memories: [], total: 0 },
+    isLoading: false,
   });
 }
 
@@ -107,6 +121,24 @@ describe("MemorySidebar", () => {
     render(<MemorySidebar agentName="my-agent" open={true} onClose={vi.fn()} />);
     expect(screen.getByTestId("view-all-memories")).toBeInTheDocument();
     expect(screen.getByTestId("view-all-memories")).toHaveAttribute("href", "/memories");
+  });
+
+  it("shows anonymous notice for anonymous users", () => {
+    setupAnonymous();
+    render(<MemorySidebar agentName="my-agent" open={true} onClose={vi.fn()} />);
+    expect(
+      screen.getByTestId("memory-sidebar-anonymous-notice")
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Memories require sign-in/i)).toBeInTheDocument();
+    expect(screen.queryByText("No memories yet")).not.toBeInTheDocument();
+  });
+
+  it("does not fetch memories for anonymous users", () => {
+    setupAnonymous();
+    render(<MemorySidebar agentName="my-agent" open={true} onClose={vi.fn()} />);
+    expect(mockUseMemories).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: false })
+    );
   });
 
   it("calls onClose when sheet is closed", async () => {

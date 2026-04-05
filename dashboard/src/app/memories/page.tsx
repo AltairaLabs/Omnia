@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import { Header } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Brain, Download, Trash2, Search, AlertCircle } from "lucide-react";
+import { Brain, Download, Trash2, Search, AlertCircle, LogIn } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useMemories } from "@/hooks/use-memories";
 import {
@@ -47,11 +47,78 @@ const CATEGORIES = [
   { value: "memory:history", label: "History" },
 ];
 
+interface MemoriesBodyState {
+  isAuthenticated: boolean;
+  error: unknown;
+  isLoading: boolean;
+  filtered: MemoryEntity[];
+  onSelect: (memory: MemoryEntity) => void;
+}
+
+function renderMemoriesBody({
+  isAuthenticated,
+  error,
+  isLoading,
+  filtered,
+  onSelect,
+}: MemoriesBodyState): ReactNode {
+  if (!isAuthenticated) {
+    return (
+      <Alert data-testid="memory-anonymous-notice">
+        <LogIn className="h-4 w-4" />
+        <AlertTitle>Memories require sign-in</AlertTitle>
+        <AlertDescription>
+          You&apos;re viewing as an anonymous user. Memories are scoped to
+          authenticated identities so each user&apos;s data stays private. Sign
+          in to start saving memories.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+  if (error) {
+    return (
+      <Alert variant="destructive" data-testid="memory-error">
+        <AlertCircle className="h-4 w-4" />
+        <AlertTitle>Could not load memories</AlertTitle>
+        <AlertDescription>
+          {error instanceof Error
+            ? error.message
+            : "Failed to connect to the Memory API. Check that the service is running."}
+        </AlertDescription>
+      </Alert>
+    );
+  }
+  if (isLoading) {
+    return <Skeleton className="w-full h-[600px] rounded-lg" />;
+  }
+  if (filtered.length === 0) {
+    return (
+      <div
+        className="flex flex-col items-center justify-center h-[400px] text-muted-foreground"
+        data-testid="empty-state"
+      >
+        <Brain className="h-16 w-16 mb-4 opacity-30" />
+        <h3 className="text-lg font-medium mb-1">No memories yet</h3>
+        <p className="text-sm">
+          As you interact with agents, they&apos;ll remember things here.
+        </p>
+      </div>
+    );
+  }
+  return <MemoryGraph memories={filtered} onNodeClick={onSelect} />;
+}
+
 export default function MemoriesPage() {
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   // Always filter by userId — memories belong to users, not workspaces.
   // The proxy hashes the userId before querying (pseudonymous storage).
-  const { data, isLoading, error } = useMemories({ userId: user?.id, limit: 500 });
+  // Anonymous users are skipped entirely: the memory-api rejects requests
+  // without a user-owned scope, so fetching would just produce an error.
+  const { data, isLoading, error } = useMemories({
+    userId: user?.id,
+    limit: 500,
+    enabled: isAuthenticated,
+  });
   const [selectedMemory, setSelectedMemory] = useState<MemoryEntity | null>(
     null
   );
@@ -96,6 +163,7 @@ export default function MemoriesPage() {
       <div className="flex-1 overflow-auto p-6 space-y-4">
         <ConsentBanner />
 
+        {isAuthenticated && (
         <div
           className="flex items-center gap-3 flex-wrap"
           data-testid="memories-toolbar"
@@ -167,31 +235,15 @@ export default function MemoriesPage() {
             </AlertDialogContent>
           </AlertDialog>
         </div>
-
-        {error ? (
-          <Alert variant="destructive" data-testid="memory-error">
-            <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Could not load memories</AlertTitle>
-            <AlertDescription>
-              {error instanceof Error ? error.message : "Failed to connect to the Memory API. Check that the service is running."}
-            </AlertDescription>
-          </Alert>
-        ) : isLoading ? (
-          <Skeleton className="w-full h-[600px] rounded-lg" />
-        ) : filtered.length === 0 ? (
-          <div
-            className="flex flex-col items-center justify-center h-[400px] text-muted-foreground"
-            data-testid="empty-state"
-          >
-            <Brain className="h-16 w-16 mb-4 opacity-30" />
-            <h3 className="text-lg font-medium mb-1">No memories yet</h3>
-            <p className="text-sm">
-              As you interact with agents, they&apos;ll remember things here.
-            </p>
-          </div>
-        ) : (
-          <MemoryGraph memories={filtered} onNodeClick={setSelectedMemory} />
         )}
+
+        {renderMemoriesBody({
+          isAuthenticated,
+          error,
+          isLoading,
+          filtered,
+          onSelect: setSelectedMemory,
+        })}
 
         {!isLoading && (data?.total ?? 0) > 0 && (
           <p className="text-xs text-muted-foreground text-center">

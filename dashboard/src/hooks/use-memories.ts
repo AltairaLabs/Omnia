@@ -11,11 +11,16 @@ import type {
 
 /**
  * Fetch memories for the current workspace with optional filters.
+ *
+ * Pass `enabled: false` to suppress the fetch (e.g. for anonymous users,
+ * where the memory-api would reject the request for lack of a user scope).
  */
-export function useMemories(options?: Omit<Partial<MemoryListOptions>, "workspace">) {
+export function useMemories(
+  options?: Omit<Partial<MemoryListOptions>, "workspace"> & { enabled?: boolean }
+) {
   const { currentWorkspace } = useWorkspace();
 
-  const { userId, type, purpose, limit, offset } = options ?? {};
+  const { userId, type, purpose, limit, offset, enabled = true } = options ?? {};
 
   return useQuery({
     queryKey: ["memories", currentWorkspace?.name, userId, type, purpose, limit, offset],
@@ -33,7 +38,7 @@ export function useMemories(options?: Omit<Partial<MemoryListOptions>, "workspac
         offset,
       });
     },
-    enabled: !!currentWorkspace,
+    enabled: !!currentWorkspace && enabled,
     staleTime: 30000,
   });
 }
