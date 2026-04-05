@@ -18,6 +18,7 @@ import (
 	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/altairalabs/omnia/pkg/logging"
+	"github.com/altairalabs/omnia/pkg/servicediscovery"
 )
 
 const (
@@ -58,6 +59,8 @@ func main() {
 	dashboardURLFlag := flag.String("dashboard-url", "", "override dashboard URL")
 	redisAddrFlag := flag.String("redis-addr", "", "override Redis address (host:port)")
 	arenaURLFlag := flag.String("arena-url", "", "override arena controller URL")
+	workspaceFlag := flag.String("workspace", "", "workspace name for per-workspace service discovery (optional)")
+	serviceGroupFlag := flag.String("service-group", "default", "service group to resolve within the workspace")
 	flag.Parse()
 
 	log, sync, err := logging.NewLogger()
@@ -99,6 +102,13 @@ func main() {
 	arenaURL := *arenaURLFlag
 	if arenaURL == "" {
 		arenaURL = discoverServiceURL(*namespace, serviceArenaController, defaultArenaPort)
+	}
+
+	// If --workspace is set, use service discovery to resolve per-workspace URLs.
+	// This overrides the flag-based URL (but the flag-based URL is still the fallback
+	// when --workspace is not set, for local/singleton testing).
+	if *workspaceFlag != "" {
+		resolveWorkspaceURLs(log, *workspaceFlag, *serviceGroupFlag, &sessionAPIURL, &memoryAPIURL)
 	}
 
 	agentFacadeURL := discoverServiceURL(*agentNamespace, *agentName, defaultAPIPort)
@@ -188,6 +198,39 @@ func main() {
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		log.Error(err, "shutdown failed")
 	}
+}
+
+// resolveWorkspaceURLs uses service discovery to find per-workspace service URLs.
+// On success it overwrites sessionAPIURL and memoryAPIURL; on failure it logs and
+// leaves the pointers unchanged so the flag-based fallback values are used.
+func resolveWorkspaceURLs(log interface {
+	Info(msg string, keysAndValues ...interface{})
+}, workspace, serviceGroup string, sessionAPIURL, memoryAPIURL *string) {
+	k8sClient, sdErr := k8s.NewClient()
+	if sdErr != nil {
+		log.Info("service discovery unavailable, using flag URLs", "reason", sdErr.Error())
+		return
+	}
+	resolver := servicediscovery.NewResolver(k8sClient)
+	sdCtx, sdCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	urls, resolveErr := resolver.ResolveServiceURLs(sdCtx, serviceGroup)
+	sdCancel()
+	if resolveErr != nil {
+		log.Info("service discovery failed, using flag URLs",
+			"reason", resolveErr.Error(),
+			"workspace", workspace,
+			"serviceGroup", serviceGroup,
+		)
+		return
+	}
+	*sessionAPIURL = urls.SessionURL
+	*memoryAPIURL = urls.MemoryURL
+	log.Info("service URLs resolved via workspace",
+		"workspace", workspace,
+		"serviceGroup", serviceGroup,
+		"sessionAPIURL", *sessionAPIURL,
+		"memoryAPIURL", *memoryAPIURL,
+	)
 }
 
 func runOnceMode(runner *doctor.Runner, log interface {

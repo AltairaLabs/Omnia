@@ -51,12 +51,14 @@ spec:
             - --facade-image-pull-policy={{ .Values.facade.image.pullPolicy }}
             - --framework-image={{ .Values.framework.image.repository }}:{{ .Values.framework.image.tag | default .Chart.AppVersion }}
             - --framework-image-pull-policy={{ .Values.framework.image.pullPolicy }}
+            - --session-api-image={{ include "omnia.sessionApi.image" . }}
+            - --session-api-image-pull-policy={{ .Values.workspaceServices.sessionApi.image.pullPolicy }}
+            - --memory-api-image={{ include "omnia.memoryApi.image" . }}
+            - --memory-api-image-pull-policy={{ .Values.workspaceServices.memoryApi.image.pullPolicy }}
+            - --agent-workspace-reader-clusterrole={{ include "omnia.fullname" . }}-agent-workspace-reader
             {{- if and .Values.tracing.enabled $resolvedTracingEndpoint }}
             - --tracing-enabled=true
             - --tracing-endpoint={{ $resolvedTracingEndpoint }}
-            {{- end }}
-            {{- if .Values.sessionApi.enabled }}
-            - --session-api-url=http://{{ include "omnia.sessionApi.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.sessionApi.service.port }}
             {{- end }}
             {{- if .Values.metrics.enabled }}
             - --metrics-bind-address=:{{ .Values.metrics.port }}

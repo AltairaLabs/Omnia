@@ -27,7 +27,11 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade"
 	"github.com/altairalabs/omnia/internal/media"
@@ -35,6 +39,7 @@ import (
 	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logging"
+	"github.com/altairalabs/omnia/pkg/servicediscovery"
 )
 
 const (
@@ -134,13 +139,35 @@ func main() {
 }
 
 func initSessionStore(log logr.Logger) (session.Store, error) {
-	url := os.Getenv("SESSION_API_URL")
-	if url == "" {
-		log.Info("SESSION_API_URL not set, using in-memory session store (sessions will not be persisted)")
+	resolver := servicediscovery.NewResolver(buildK8sClient())
+	urls, err := resolver.ResolveServiceURLs(context.Background(), resolveServiceGroup())
+	if err != nil {
+		log.Info("service discovery unavailable, using in-memory session store", "reason", err.Error())
 		return session.NewMemoryStore(), nil
 	}
-	log.Info("using session-api HTTP store", "url", url)
-	return httpclient.NewStore(url, log), nil
+	log.Info("using session-api HTTP store", "url", urls.SessionURL)
+	return httpclient.NewStore(urls.SessionURL, log), nil
+}
+
+func buildK8sClient() client.Client {
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		return nil // Not in cluster
+	}
+	scheme := k8sruntime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+	c, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		return nil
+	}
+	return c
+}
+
+func resolveServiceGroup() string {
+	if sg := os.Getenv("OMNIA_SERVICE_GROUP"); sg != "" {
+		return sg
+	}
+	return "default"
 }
 
 func closeStore(store session.Store, log logr.Logger) {

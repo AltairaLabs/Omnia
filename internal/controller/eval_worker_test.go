@@ -46,7 +46,6 @@ var _ = Describe("Eval Worker Reconciliation", func() {
 			Scheme:          k8sClient.Scheme(),
 			FacadeImage:     "test-facade:v1.0.0",
 			FrameworkImage:  "test-runtime:v1.0.0",
-			SessionAPIURL:   "http://session-api:8080",
 			RedisAddr:       "redis:6379",
 			EvalWorkerImage: "test-eval-worker:v1.0.0",
 		}
@@ -156,7 +155,9 @@ var _ = Describe("Eval Worker Reconciliation", func() {
 			envMap := envVarMap(dep.Spec.Template.Spec.Containers[0].Env)
 			Expect(envMap[envNamespace]).To(Equal(namespace))
 			Expect(envMap[envRedisAddr]).To(Equal("redis:6379"))
-			Expect(envMap[envSessionAPIURL]).To(Equal("http://session-api:8080"))
+			// SESSION_API_URL is resolved from Workspace status; no Workspace in this test
+			// so the key should be absent rather than set to a stale singleton URL.
+			Expect(envMap).NotTo(HaveKey(envSessionAPIURL))
 		})
 
 		It("should NOT create eval worker for PromptKit agent with evals enabled", func() {

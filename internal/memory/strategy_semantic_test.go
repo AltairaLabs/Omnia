@@ -43,7 +43,7 @@ func TestSemanticStrategy_NilProvider(t *testing.T) {
 	assert.Contains(t, err.Error(), "embedding provider")
 }
 
-// embeddingDims matches the vector(1536) column definition in migration 000025.
+// embeddingDims matches the vector(1536) column definition in the memory schema migration.
 const embeddingDims = 1536
 
 // unitEmbedding returns a 1536-dim vector with value 1.0 at index 0, 0.0 elsewhere.

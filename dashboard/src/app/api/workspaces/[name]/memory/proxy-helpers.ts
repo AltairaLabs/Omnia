@@ -4,9 +4,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getWorkspace } from "@/lib/k8s/workspace-route-helpers";
+import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
 import { pseudonymizeId } from "@/lib/identity";
-
-const MEMORY_API_URL = process.env.MEMORY_API_URL;
 
 /** Resolve workspace name to UID for memory-api scoping. */
 export async function resolveWorkspaceUID(name: string): Promise<string | null> {
@@ -48,7 +47,8 @@ export async function proxyToMemoryApi(
   backendPath: string,
   extraParams?: URLSearchParams
 ): Promise<NextResponse> {
-  if (!MEMORY_API_URL) {
+  const urls = await resolveServiceURLs(workspaceName);
+  if (!urls) {
     return NextResponse.json(
       { error: "Memory API not configured", memories: [], total: 0 },
       { status: 503 }
@@ -68,9 +68,9 @@ export async function proxyToMemoryApi(
     params.set("workspace", workspaceUID);
   }
 
-  const baseUrl = MEMORY_API_URL.endsWith("/")
-    ? MEMORY_API_URL.slice(0, -1)
-    : MEMORY_API_URL;
+  const baseUrl = urls.memoryURL.endsWith("/")
+    ? urls.memoryURL.slice(0, -1)
+    : urls.memoryURL;
   const targetUrl = `${baseUrl}${backendPath}?${params.toString()}`;
 
   try {

@@ -356,7 +356,25 @@ var _ = Describe("ArenaJob Controller", func() {
 			Expect(k8sJob.Labels["omnia.altairalabs.ai/job"]).To(Equal(arenaJobName))
 		})
 
-		It("should inject SESSION_API_URL only when sessionRecording is true", func() {
+		It("should inject SESSION_API_URL from workspace status when sessionRecording is true", func() {
+			By("creating a workspace with a session URL in status")
+			ws := &corev1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-workspace-session",
+				},
+				Spec: corev1alpha1.WorkspaceSpec{
+					DisplayName: "Test Workspace Session",
+					Namespace: corev1alpha1.NamespaceConfig{
+						Name: arenaJobNamespace,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).To(Succeed())
+			ws.Status.Services = []corev1alpha1.ServiceGroupStatus{
+				{Name: "default", Ready: true, SessionURL: "http://session-api:8080"},
+			}
+			Expect(k8sClient.Status().Update(ctx, ws)).To(Succeed())
+
 			By("creating a new ArenaJob with sessionRecording enabled")
 			sessionJob := &omniav1alpha1.ArenaJob{
 				ObjectMeta: metav1.ObjectMeta{
@@ -377,10 +395,9 @@ var _ = Describe("ArenaJob Controller", func() {
 			Expect(k8sClient.Create(ctx, sessionJob)).To(Succeed())
 
 			reconciler := &ArenaJobReconciler{
-				Client:        k8sClient,
-				Scheme:        k8sClient.Scheme(),
-				Recorder:      record.NewFakeRecorder(10),
-				SessionAPIURL: "http://session-api:8080",
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(10),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -405,10 +422,11 @@ var _ = Describe("ArenaJob Controller", func() {
 					Expect(e.Value).To(Equal("http://session-api:8080"))
 				}
 			}
-			Expect(found).To(BeTrue(), "SESSION_API_URL should be injected when sessionRecording is true")
+			Expect(found).To(BeTrue(), "SESSION_API_URL should be injected from workspace when sessionRecording is true")
 
 			Expect(k8sClient.Delete(ctx, sessionJob)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, k8sJob)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, ws)).To(Succeed())
 		})
 	})
 

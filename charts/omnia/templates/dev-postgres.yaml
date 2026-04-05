@@ -1,23 +1,24 @@
-{{- if and .Values.sessionApi.enabled .Values.sessionApi.postgres.dev.enabled }}
-{{- $pgbouncerEnabled := .Values.sessionApi.postgres.pgbouncer.enabled }}
+{{- if .Values.postgres.dev.enabled }}
+{{- $pgbouncerEnabled := .Values.postgres.dev.pgbouncer.enabled }}
 {{- $clientPort := ternary 6432 5432 $pgbouncerEnabled }}
 # =============================================================================
 # Dev-only Postgres — NOT for production use.
 # Provides the omnia-postgres Secret and a single-node Postgres StatefulSet
-# so that session-api can start without external infrastructure.
+# so that per-workspace services can start without external infrastructure.
 # When pgbouncer.enabled=true, a PgBouncer sidecar pools connections.
 # =============================================================================
 apiVersion: v1
 kind: Secret
 metadata:
-  name: {{ .Values.sessionApi.postgres.secretName }}
+  name: {{ .Values.postgres.dev.secretName }}
   labels:
-    {{- include "omnia.sessionApi.labels" . | nindent 4 }}
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
 stringData:
-  {{ .Values.sessionApi.postgres.secretKey }}: "postgres://omnia:omnia@{{ include "omnia.fullname" . }}-postgres:{{ $clientPort }}/omnia?sslmode=disable"
+  {{ .Values.postgres.dev.secretKey }}: "postgres://omnia:omnia@{{ include "omnia.fullname" . }}-postgres:{{ $clientPort }}/omnia?sslmode=disable"
+  POSTGRES_CONN: "postgres://omnia:omnia@{{ include "omnia.fullname" . }}-postgres:{{ $clientPort }}/omnia?sslmode=disable"
 {{- if $pgbouncerEnabled }}
 ---
-# PgBouncer configuration for the dev Postgres sidecar.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -35,15 +36,13 @@ data:
     listen_port = 6432
     auth_type = md5
     auth_file = /etc/pgbouncer/userlist.txt
-    pool_mode = {{ .Values.sessionApi.postgres.pgbouncer.poolMode }}
-    default_pool_size = {{ .Values.sessionApi.postgres.pgbouncer.defaultPoolSize }}
-    max_client_conn = {{ .Values.sessionApi.postgres.pgbouncer.maxClientConn }}
-    max_db_connections = {{ .Values.sessionApi.postgres.pgbouncer.maxDbConnections }}
+    pool_mode = {{ .Values.postgres.dev.pgbouncer.poolMode }}
+    default_pool_size = {{ .Values.postgres.dev.pgbouncer.defaultPoolSize }}
+    max_client_conn = {{ .Values.postgres.dev.pgbouncer.maxClientConn }}
+    max_db_connections = {{ .Values.postgres.dev.pgbouncer.maxDbConnections }}
     ignore_startup_parameters = extra_float_digits
-    # Log connections/disconnections for debugging
     log_connections = 1
     log_disconnections = 1
-    # Stats available via SHOW STATS
     stats_period = 60
   userlist.txt: |
     "omnia" "md55b67425b5ec6058d90ce3e21f576a7cf"

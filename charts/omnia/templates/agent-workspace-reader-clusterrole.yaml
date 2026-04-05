@@ -1,0 +1,19 @@
+{{- if .Values.rbac.create -}}
+# ClusterRole granting agent pods (facade/runtime) read access to Workspace CRDs.
+# Agents need this to resolve per-workspace service URLs from Workspace.status.services.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "omnia.fullname" . }}-agent-workspace-reader
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - workspaces
+    verbs:
+      - get
+      - list
+      - watch
+{{- end }}

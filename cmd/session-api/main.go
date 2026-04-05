@@ -40,11 +40,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	goredis "github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
-	"k8s.io/apimachinery/pkg/runtime"
+	corev1 "k8s.io/api/core/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/rest"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	coreomniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/audit"
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
@@ -59,6 +62,7 @@ import (
 	"github.com/altairalabs/omnia/internal/session/providers/redis"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logging"
+	"github.com/altairalabs/omnia/pkg/servicediscovery"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -90,6 +94,8 @@ type flags struct {
 	tracingEndpoint string
 	tracingSample   float64
 	tracingInsecure bool
+	workspace       string
+	serviceGroup    string
 }
 
 func parseFlags() *flags {
@@ -107,6 +113,8 @@ func parseFlags() *flags {
 	flag.BoolVar(&f.otlpEnabled, "otlp-enabled", false, "Enable OTLP ingestion endpoint")
 	flag.StringVar(&f.otlpGRPCAddr, "otlp-grpc-addr", ":4317", "OTLP gRPC listen address")
 	flag.StringVar(&f.otlpHTTPAddr, "otlp-http-addr", ":4318", "OTLP HTTP listen address")
+	flag.StringVar(&f.workspace, "workspace", "", "Workspace name (K8s CRD resolution mode)")
+	flag.StringVar(&f.serviceGroup, "service-group", "", "Service group name within workspace")
 	flag.Parse()
 
 	f.applyEnvFallbacks()
@@ -174,6 +182,16 @@ func run() error {
 		return fmt.Errorf("creating logger: %w", err)
 	}
 	defer syncLog()
+
+	// --- Workspace CRD config resolution ---
+	if f.workspace != "" && f.serviceGroup != "" {
+		if err := f.resolveConfigFromWorkspace(log); err != nil {
+			return fmt.Errorf("resolving config from workspace: %w", err)
+		}
+		log.Info("config resolved from workspace CRD",
+			"workspace", f.workspace,
+			"serviceGroup", f.serviceGroup)
+	}
 
 	// --- Validate ---
 	if f.postgresConn == "" {
@@ -394,6 +412,47 @@ func runMigrations(connStr string, log logr.Logger) error {
 	}
 	_ = migrator.Close()
 	return nil
+}
+
+// resolveConfigFromWorkspace uses the Kubernetes API to resolve session-api
+// configuration from the named Workspace CRD and service group.
+func (f *flags) resolveConfigFromWorkspace(log logr.Logger) error {
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		return fmt.Errorf("building K8s client config: %w", err)
+	}
+	scheme := k8sruntime.NewScheme()
+	_ = coreomniav1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+	c, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		return fmt.Errorf("creating K8s client: %w", err)
+	}
+	cr := servicediscovery.NewConfigResolver(c)
+	namespace := detectNamespace()
+	sessCfg, err := cr.ResolveSessionConfig(context.Background(), f.workspace, f.serviceGroup, namespace)
+	if err != nil {
+		return fmt.Errorf("resolving session config: %w", err)
+	}
+	f.postgresConn = sessCfg.PostgresConn
+	log.V(1).Info("session config resolved",
+		"workspace", f.workspace,
+		"serviceGroup", f.serviceGroup)
+	return nil
+}
+
+// detectNamespace returns the Kubernetes namespace this process is running in.
+// It checks OMNIA_NAMESPACE first, then the in-cluster service account file,
+// and falls back to "default".
+func detectNamespace() string {
+	if ns := os.Getenv("OMNIA_NAMESPACE"); ns != "" {
+		return ns
+	}
+	data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+	if err != nil {
+		return "default"
+	}
+	return string(data)
 }
 
 // buildAPIMux assembles the HTTP handler with all API routes, wrapped with
@@ -722,7 +781,7 @@ func wrapPrivacyMiddleware(
 		return next
 	}
 
-	scheme := runtime.NewScheme()
+	scheme := k8sruntime.NewScheme()
 	utilruntime.Must(omniav1alpha1.AddToScheme(scheme))
 	k8sClient, err := client.New(kubeConfig, client.Options{Scheme: scheme})
 	if err != nil {

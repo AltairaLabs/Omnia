@@ -50,6 +50,59 @@ func (r *AgentRuntimeReconciler) reconcileFacadeRBAC(
 	if err := r.reconcileRoleBinding(ctx, agentRuntime); err != nil {
 		return fmt.Errorf("reconcile RoleBinding: %w", err)
 	}
+	if err := r.reconcileWorkspaceReaderBinding(ctx, agentRuntime); err != nil {
+		return fmt.Errorf("reconcile workspace reader ClusterRoleBinding: %w", err)
+	}
+	return nil
+}
+
+// reconcileWorkspaceReaderBinding creates a ClusterRoleBinding granting the facade SA
+// read access to Workspace CRDs (cluster-scoped) for service URL resolution.
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
+func (r *AgentRuntimeReconciler) reconcileWorkspaceReaderBinding(
+	ctx context.Context,
+	agentRuntime *omniav1alpha1.AgentRuntime,
+) error {
+	if r.AgentWorkspaceReaderClusterRole == "" {
+		// Not configured — skip (e.g. local dev, tests)
+		return nil
+	}
+
+	log := logf.FromContext(ctx)
+	name := fmt.Sprintf("%s-%s-workspace-reader", agentRuntime.Namespace, agentRuntime.Name)
+
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+	}
+
+	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, crb, func() error {
+		crb.Labels = map[string]string{
+			labelAppName:      labelValueOmniaAgent,
+			labelAppInstance:  agentRuntime.Name,
+			labelAppManagedBy: labelValueOmniaOperator,
+			"omnia.altairalabs.ai/workspace-reader-for": agentRuntime.Namespace,
+		}
+		crb.RoleRef = rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     r.AgentWorkspaceReaderClusterRole,
+		}
+		crb.Subjects = []rbacv1.Subject{
+			{
+				Kind:      "ServiceAccount",
+				Name:      facadeServiceAccountName(agentRuntime),
+				Namespace: agentRuntime.Namespace,
+			},
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	log.V(1).Info("ClusterRoleBinding reconciled", "name", name, "result", result)
 	return nil
 }
 

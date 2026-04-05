@@ -55,4 +55,4 @@ docs/local-backlog/
 # Test output directories
 **/out/
 /omnia-arena-controller
-memory-api
+/memory-api

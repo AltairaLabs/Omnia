@@ -29,7 +29,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	pgmigrate "github.com/altairalabs/omnia/internal/session/postgres"
+	pgmigrate "github.com/altairalabs/omnia/internal/memory/postgres"
 )
 
 var memTestConnStr string

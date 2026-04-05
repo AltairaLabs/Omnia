@@ -22,7 +22,6 @@ import (
 	"os"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,6 +29,7 @@ import (
 	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/pkg/k8s"
 	pkgprovider "github.com/altairalabs/omnia/pkg/provider"
+	"github.com/altairalabs/omnia/pkg/servicediscovery"
 )
 
 // LoadFromCRD loads runtime configuration by reading the AgentRuntime CRD directly.
@@ -102,28 +102,21 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		}
 	}
 
-	// Session-api URL from env (injected by operator for session recording).
-	// Must be read before memory config since memory-api URL is derived from it.
-	cfg.SessionAPIURL = os.Getenv(envSessionAPIURL)
+	// Service URLs from Workspace CRD status (in-cluster) or env vars (local dev).
+	resolver := servicediscovery.NewResolver(c)
+	serviceGroup := ar.Spec.ServiceGroup
+	if serviceGroup == "" {
+		serviceGroup = "default"
+	}
+	if urls, err := resolver.ResolveServiceURLs(ctx, serviceGroup); err == nil {
+		cfg.SessionAPIURL = urls.SessionURL
+		cfg.MemoryAPIURL = urls.MemoryURL
+	}
 
 	// Memory config from CRD
 	if ar.Spec.Memory != nil && ar.Spec.Memory.Enabled {
 		cfg.MemoryEnabled = true
-		// Memory API URL follows the same service naming convention as session-api.
-		if cfg.SessionAPIURL != "" {
-			cfg.MemoryAPIURL = strings.Replace(cfg.SessionAPIURL, "session-api", "memory-api", 1)
-		}
-		// Allow explicit override via env var.
-		if url := os.Getenv(envMemoryAPIURL); url != "" {
-			cfg.MemoryAPIURL = url
-		}
-		// Workspace UID for memory scope (memory_entities.workspace_id is UUID).
-		// Prefer env var (injected by operator) over K8s API lookup.
-		if uid := os.Getenv(envWorkspaceUID); uid != "" {
-			cfg.WorkspaceUID = uid
-		} else {
-			cfg.WorkspaceUID = resolveWorkspaceUID(ctx, c, namespace)
-		}
+		cfg.WorkspaceUID = resolveWorkspaceUID(ctx, c, namespace)
 	}
 
 	// Tracing config from env (injected by operator from Helm values)

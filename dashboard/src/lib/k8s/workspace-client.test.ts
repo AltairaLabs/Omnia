@@ -23,6 +23,9 @@ vi.mock("@kubernetes/client-node", () => {
       loadFromDefault() {
         return mockLoadFromDefault();
       }
+      getCurrentCluster() {
+        return { server: "https://mock-k8s:6443", name: "mock" };
+      }
       makeApiClient() {
         return {
           getClusterCustomObject: mockGetClusterCustomObject,

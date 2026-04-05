@@ -509,6 +509,158 @@ spec:
                   - role
                   type: object
                 type: array
+              services:
+                description: |-
+                  services defines per-workspace service groups for session-api and memory-api.
+                  Each group can be managed (operator-provisioned) or external (user-supplied URLs).
+                  Agents reference a group by name via spec.serviceGroup.
+                items:
+                  description: |-
+                    WorkspaceServiceGroup defines a named group of session-api and memory-api endpoints
+                    for a workspace. Agents reference a group by name via spec.serviceGroup.
+                  properties:
+                    external:
+                      description: |-
+                        external specifies pre-existing endpoint URLs when mode is "external".
+                        Required when mode is "external".
+                      properties:
+                        memoryURL:
+                          description: memoryURL is the base URL of the external memory-api
+                            (e.g., "https://memory.example.com").
+                          pattern: ^https?://
+                          type: string
+                        sessionURL:
+                          description: sessionURL is the base URL of the external
+                            session-api (e.g., "https://session.example.com").
+                          pattern: ^https?://
+                          type: string
+                      required:
+                      - memoryURL
+                      - sessionURL
+                      type: object
+                    memory:
+                      description: |-
+                        memory configures the memory-api for this service group.
+                        Required when mode is "managed".
+                      properties:
+                        database:
+                          description: database configures the PostgreSQL database
+                            for this memory service.
+                          properties:
+                            secretRef:
+                              description: |-
+                                secretRef references a Secret containing the database connection string.
+                                The Secret must have a key "POSTGRES_CONN" with a valid PostgreSQL connection string.
+                              properties:
+                                name:
+                                  default: ""
+                                  description: |-
+                                    Name of the referent.
+                                    This field is effectively required, but due to backwards compatibility is
+                                    allowed to be empty. Instances of this type with an empty value here are
+                                    almost certainly wrong.
+                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                  type: string
+                              type: object
+                              x-kubernetes-map-type: atomic
+                          required:
+                          - secretRef
+                          type: object
+                        providerRef:
+                          description: providerRef optionally references a Provider
+                            CRD used for embedding generation.
+                          properties:
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        retention:
+                          description: retention configures memory retention settings.
+                          properties:
+                            defaultTTL:
+                              description: |-
+                                defaultTTL is the default time-to-live for memory entries (e.g., "720h" for 30 days).
+                                If not set, memories do not expire.
+                              type: string
+                          type: object
+                      required:
+                      - database
+                      type: object
+                    mode:
+                      default: managed
+                      description: mode specifies whether the operator manages these
+                        endpoints or they are user-supplied.
+                      enum:
+                      - managed
+                      - external
+                      type: string
+                    name:
+                      description: |-
+                        name is the unique identifier for this service group within the workspace.
+                        Referenced by AgentRuntime spec.serviceGroup.
+                      maxLength: 63
+                      pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
+                      type: string
+                    session:
+                      description: |-
+                        session configures the session-api for this service group.
+                        Required when mode is "managed".
+                      properties:
+                        database:
+                          description: database configures the PostgreSQL database
+                            for this session service.
+                          properties:
+                            secretRef:
+                              description: |-
+                                secretRef references a Secret containing the database connection string.
+                                The Secret must have a key "POSTGRES_CONN" with a valid PostgreSQL connection string.
+                              properties:
+                                name:
+                                  default: ""
+                                  description: |-
+                                    Name of the referent.
+                                    This field is effectively required, but due to backwards compatibility is
+                                    allowed to be empty. Instances of this type with an empty value here are
+                                    almost certainly wrong.
+                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                  type: string
+                              type: object
+                              x-kubernetes-map-type: atomic
+                          required:
+                          - secretRef
+                          type: object
+                        retention:
+                          description: retention configures session retention settings.
+                          properties:
+                            warmDays:
+                              description: |-
+                                warmDays is the number of days to keep sessions in the warm (Redis) cache.
+                                Sessions older than this are evicted to cold storage only.
+                              format: int32
+                              type: integer
+                          type: object
+                      required:
+                      - database
+                      type: object
+                  required:
+                  - name
+                  type: object
+                  x-kubernetes-validations:
+                  - message: managed mode requires both memory and session configuration
+                    rule: self.mode != 'managed' || (has(self.memory) && has(self.session))
+                  - message: external mode requires external endpoints
+                    rule: self.mode != 'external' || has(self.external)
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               storage:
                 description: |-
                   storage configures shared storage for this workspace.
@@ -706,6 +858,31 @@ spec:
                     description: viewer is the name of the viewer ServiceAccount.
                     type: string
                 type: object
+              services:
+                description: services tracks the status of each service group defined
+                  in spec.services.
+                items:
+                  description: ServiceGroupStatus tracks the observed state of a single
+                    service group.
+                  properties:
+                    memoryURL:
+                      description: memoryURL is the resolved URL of the memory-api
+                        for this group.
+                      type: string
+                    name:
+                      description: name is the name of the service group (matches
+                        spec.services[].name).
+                      type: string
+                    ready:
+                      description: ready indicates whether all components of this
+                        service group are operational.
+                      type: boolean
+                    sessionURL:
+                      description: sessionURL is the resolved URL of the session-api
+                        for this group.
+                      type: string
+                  type: object
+                type: array
               storage:
                 description: storage tracks the status of workspace shared storage.
                 properties:

@@ -39,7 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/altairalabs/omnia/internal/memory"
-	pgmigrate "github.com/altairalabs/omnia/internal/session/postgres"
+	pgmigrate "github.com/altairalabs/omnia/internal/memory/postgres"
 )
 
 var testConnStr string

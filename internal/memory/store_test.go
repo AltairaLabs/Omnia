@@ -36,7 +36,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	pgmigrate "github.com/altairalabs/omnia/internal/session/postgres"
+	pgmigrate "github.com/altairalabs/omnia/internal/memory/postgres"
 )
 
 var testConnStr string
@@ -90,7 +90,7 @@ func freshDB(t *testing.T) *pgxpool.Pool {
 
 	connStr := replaceDBName(testConnStr, dbName)
 
-	// Run all migrations (including 000025 memory tables).
+	// Run all memory migrations.
 	logger := zap.New(zap.UseDevMode(true))
 	mg, err := pgmigrate.NewMigrator(connStr, logger)
 	require.NoError(t, err)

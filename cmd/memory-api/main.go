@@ -37,9 +37,11 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
-	"k8s.io/apimachinery/pkg/runtime"
+	corev1 "k8s.io/api/core/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/rest"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
@@ -53,11 +55,12 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/redaction"
 	"github.com/altairalabs/omnia/internal/memory"
 	memoryapi "github.com/altairalabs/omnia/internal/memory/api"
+	memorypg "github.com/altairalabs/omnia/internal/memory/postgres"
 	sessionapi "github.com/altairalabs/omnia/internal/session/api"
-	sessionpg "github.com/altairalabs/omnia/internal/session/postgres"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logctx"
 	"github.com/altairalabs/omnia/pkg/logging"
+	"github.com/altairalabs/omnia/pkg/servicediscovery"
 )
 
 // auditLoggerAdapter adapts ee/pkg/audit.Logger to memoryapi.MemoryAuditLogger.
@@ -103,6 +106,8 @@ type flags struct {
 	defaultTTL            string // env: DEFAULT_TTL, e.g. "720h"
 	purpose               string // env: MEMORY_PURPOSE, e.g. "support_continuity"
 	retentionInterval     string // env: RETENTION_INTERVAL, e.g. "1h"
+	workspace             string
+	serviceGroup          string
 }
 
 func parseFlags() *flags {
@@ -121,6 +126,8 @@ func parseFlags() *flags {
 	flag.StringVar(&f.defaultTTL, "default-ttl", "", "Default memory TTL duration (e.g. 720h)")
 	flag.StringVar(&f.purpose, "purpose", "", "Default memory purpose tag (e.g. support_continuity)")
 	flag.StringVar(&f.retentionInterval, "retention-interval", "", "Interval for retention worker (e.g. 1h)")
+	flag.StringVar(&f.workspace, "workspace", "", "Workspace name (K8s CRD resolution mode)")
+	flag.StringVar(&f.serviceGroup, "service-group", "", "Service group name within workspace")
 	flag.Parse()
 
 	f.applyEnvFallbacks()
@@ -184,6 +191,13 @@ func run() error {
 		return fmt.Errorf("creating logger: %w", err)
 	}
 	defer syncLog()
+
+	// --- Workspace CRD config resolution ---
+	if f.workspace != "" && f.serviceGroup != "" {
+		if err := f.resolveConfigFromWorkspace(log); err != nil {
+			return fmt.Errorf("resolving config from workspace: %w", err)
+		}
+	}
 
 	// --- Validate ---
 	if f.postgresConn == "" {
@@ -312,6 +326,52 @@ func run() error {
 	return nil
 }
 
+// resolveConfigFromWorkspace uses the Kubernetes API to resolve memory-api
+// configuration from the named Workspace CRD and service group.
+func (f *flags) resolveConfigFromWorkspace(log logr.Logger) error {
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		return fmt.Errorf("building K8s client config: %w", err)
+	}
+	scheme := k8sruntime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+	c, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		return fmt.Errorf("creating K8s client: %w", err)
+	}
+	cr := servicediscovery.NewConfigResolver(c)
+	namespace := detectNamespace()
+	memCfg, err := cr.ResolveMemoryConfig(context.Background(), f.workspace, f.serviceGroup, namespace)
+	if err != nil {
+		return fmt.Errorf("resolving memory config: %w", err)
+	}
+	f.postgresConn = memCfg.PostgresConn
+	f.embeddingProviderName = memCfg.EmbeddingProviderName
+	if memCfg.DefaultTTL != "" {
+		f.defaultTTL = memCfg.DefaultTTL
+	}
+	log.Info("config resolved from workspace CRD",
+		"workspace", f.workspace,
+		"serviceGroup", f.serviceGroup,
+		"hasEmbeddingProvider", memCfg.EmbeddingProviderName != "")
+	return nil
+}
+
+// detectNamespace returns the Kubernetes namespace this process is running in.
+// It checks OMNIA_NAMESPACE first, then the in-cluster service account file,
+// and falls back to "default".
+func detectNamespace() string {
+	if ns := os.Getenv("OMNIA_NAMESPACE"); ns != "" {
+		return ns
+	}
+	data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+	if err != nil {
+		return "default"
+	}
+	return string(data)
+}
+
 // buildAPIMux assembles the HTTP handler with all memory-api routes, wrapped
 // with rate limiting, privacy (enterprise), metrics, and tracing middleware.
 // Returns the handler and a cleanup function.
@@ -389,7 +449,7 @@ func wrapPrivacyMiddleware(next http.Handler, pool *pgxpool.Pool, log logr.Logge
 		return next
 	}
 
-	scheme := runtime.NewScheme()
+	scheme := k8sruntime.NewScheme()
 	utilruntime.Must(eev1alpha1.AddToScheme(scheme))
 	k8sClient, err := client.New(kubeConfig, client.Options{Scheme: scheme})
 	if err != nil {
@@ -488,7 +548,7 @@ func createEmbeddingService(ctx context.Context, providerName string, store *mem
 		return nil
 	}
 
-	scheme := runtime.NewScheme()
+	scheme := k8sruntime.NewScheme()
 	utilruntime.Must(omniav1alpha1.AddToScheme(scheme))
 	k8sClient, err := client.New(kubeConfig, client.Options{Scheme: scheme})
 	if err != nil {
@@ -621,7 +681,7 @@ func envDuration(key string, def time.Duration) time.Duration {
 
 // runMigrations applies database schema migrations.
 func runMigrations(connStr string, log logr.Logger) error {
-	migrator, err := sessionpg.NewMigrator(connStr, log)
+	migrator, err := memorypg.NewMigrator(connStr, log)
 	if err != nil {
 		return fmt.Errorf("creating migrator: %w", err)
 	}

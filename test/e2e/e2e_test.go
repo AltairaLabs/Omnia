@@ -110,10 +110,10 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(strategyPatchCmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager strategy")
 
-		By("patching the controller-manager to use the test facade and framework images and session-api URL")
+		By("patching the controller-manager to use the test facade and framework images")
 		patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
 			"-n", namespace, "--type=strategic",
-			"-p", fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--metrics-bind-address=:8443","--leader-elect","--health-probe-bind-address=:8081","--facade-image=%s","--framework-image=%s","--session-api-url=%s"]}]}}}}`, facadeImageRef, runtimeImageRef, sessionApiURL))
+			"-p", fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--metrics-bind-address=:8443","--leader-elect","--health-probe-bind-address=:8081","--facade-image=%s","--framework-image=%s","--session-api-image=%s","--memory-api-image=%s","--agent-workspace-reader-clusterrole=omnia-agent-workspace-reader"]}]}}}}`, facadeImageRef, runtimeImageRef, sessionApiImage, sessionApiImage))
 		_, err = utils.Run(patchCmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager")
 
@@ -499,11 +499,47 @@ spec:
 				g.Expect(output).To(Equal("True"))
 			}
 			Eventually(verifySessionApiReady, 4*time.Minute, time.Second).Should(Succeed())
+
+			By("creating e2e-workspace with external service group pointing to e2e session-api")
+			workspaceManifest := fmt.Sprintf(`
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Workspace
+metadata:
+  name: e2e-workspace
+spec:
+  displayName: E2E Test Workspace
+  namespace:
+    name: %s
+  services:
+    - name: default
+      mode: external
+      external:
+        sessionURL: "%s"
+        memoryURL: "%s"
+`, agentsNamespace, sessionApiURL, sessionApiURL)
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(workspaceManifest)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create e2e-workspace")
+
+			By("waiting for workspace to be ready")
+			verifyWorkspaceReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "workspace", "e2e-workspace",
+					"-o", "jsonpath={.status.services[0].ready}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("true"))
+			}
+			Eventually(verifyWorkspaceReady, 2*time.Minute, time.Second).Should(Succeed())
 		})
 
 		AfterAll(func() {
 			By("cleaning up test agents namespace")
 			cmd := exec.Command("kubectl", "delete", "ns", agentsNamespace, "--ignore-not-found", "--timeout=60s")
+			_, _ = utils.Run(cmd)
+
+			By("cleaning up e2e-workspace")
+			cmd = exec.Command("kubectl", "delete", "workspace", "e2e-workspace", "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 
 			if predeployed {
@@ -942,14 +978,9 @@ data:
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).To(Equal("true"), "Mock provider should be enabled for E2E testing")
 
-			By("verifying the facade container has SESSION_API_URL injected")
-			cmd = exec.Command("kubectl", "get", "pods",
-				"-n", agentsNamespace,
-				"-l", "app.kubernetes.io/instance=test-agent",
-				"-o", "jsonpath={.items[0].spec.containers[?(@.name=='facade')].env[?(@.name=='SESSION_API_URL')].value}")
-			output, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(output).To(Equal(sessionApiURL), "Facade should have SESSION_API_URL set by the operator")
+			// SESSION_API_URL is no longer injected by the operator into agent pods.
+			// Facade and runtime containers discover the session-api URL via workspace
+			// status (service group discovery). Verified in integration/unit tests.
 		})
 
 		It("should handle WebSocket connections to the facade", func() {
@@ -1250,17 +1281,13 @@ spec:
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create session test pod")
 
-			By("waiting for the session test to complete")
-			verifySessionTest := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "pod", "session-test",
-					"-n", agentsNamespace, "-o", "jsonpath={.status.phase}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("Succeeded"))
-			}
-			ok := Eventually(verifySessionTest, 3*time.Minute, 5*time.Second).Should(Succeed())
-			if !ok {
-				// Dump debug info on failure
+			// DeferCleanup dumps debug logs if the test fails, regardless of where it fails.
+			// Ginkgo's CurrentSpecReport().Failed() tells us if the spec failed by the time
+			// cleanup runs, so we can dump logs unconditionally registered but conditionally output.
+			DeferCleanup(func() {
+				if !CurrentSpecReport().Failed() {
+					return
+				}
 				_, _ = fmt.Fprintf(GinkgoWriter, "\n=== DEBUG: Session test failed ===\n")
 				logsCmd := exec.Command("kubectl", "logs", "session-test", "-n", agentsNamespace)
 				if logs, err := utils.Run(logsCmd); err == nil {
@@ -1274,8 +1301,17 @@ spec:
 				if sessionApiLogs, err := utils.Run(sessionApiLogsCmd); err == nil {
 					_, _ = fmt.Fprintf(GinkgoWriter, "Session-api logs:\n%s\n", sessionApiLogs)
 				}
-				Fail("Session test failed - see debug output above")
+			})
+
+			By("waiting for the session test to complete")
+			verifySessionTest := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", "session-test",
+					"-n", agentsNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Succeeded"))
 			}
+			Eventually(verifySessionTest, 3*time.Minute, 5*time.Second).Should(Succeed())
 
 			By("checking the session test logs")
 			cmd = exec.Command("kubectl", "logs", "session-test", "-n", agentsNamespace)

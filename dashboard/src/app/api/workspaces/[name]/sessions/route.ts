@@ -10,10 +10,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withWorkspaceAccess, type WorkspaceRouteContext } from "@/lib/auth/workspace-guard";
 import { getWorkspace } from "@/lib/k8s/workspace-route-helpers";
+import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
-
-const SESSION_API_URL = process.env.SESSION_API_URL;
 
 export const GET = withWorkspaceAccess(
   "viewer",
@@ -25,7 +24,8 @@ export const GET = withWorkspaceAccess(
   ): Promise<NextResponse> => {
     const { name } = await context.params;
 
-    if (!SESSION_API_URL) {
+    const urls = await resolveServiceURLs(name);
+    if (!urls) {
       return NextResponse.json(
         { error: "Session API not configured", sessions: [], total: 0, hasMore: false },
         { status: 503 }
@@ -58,7 +58,7 @@ export const GET = withWorkspaceAccess(
     const hasQuery = request.nextUrl.searchParams.has("q");
     const endpoint = hasQuery ? "sessions/search" : "sessions";
 
-    const baseUrl = SESSION_API_URL.endsWith("/") ? SESSION_API_URL.slice(0, -1) : SESSION_API_URL;
+    const baseUrl = urls.sessionURL.endsWith("/") ? urls.sessionURL.slice(0, -1) : urls.sessionURL;
     const targetUrl = `${baseUrl}/api/v1/${endpoint}?${params.toString()}`;
 
     try {

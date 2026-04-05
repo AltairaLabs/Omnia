@@ -75,10 +75,14 @@ func main() {
 	var frameworkImagePullPolicy string
 	var tracingEnabled bool
 	var tracingEndpoint string
-	var sessionAPIURL string
+	var sessionAPIImage string
+	var sessionAPIImagePullPolicy string
+	var memoryAPIImage string
+	var memoryAPIImagePullPolicy string
 	var workspaceStorageClass string
 	var redisAddr string
 	var evalWorkerImage string
+	var agentWorkspaceReaderClusterRole string
 	var apiBindAddress string
 	var enterpriseEnabled bool
 	var licenseServerURL string
@@ -101,14 +105,22 @@ func main() {
 		"Enable distributed tracing for agent runtime containers")
 	flag.StringVar(&tracingEndpoint, "tracing-endpoint", "",
 		"OTLP endpoint for traces (e.g., tempo.omnia-system.svc.cluster.local:4317)")
-	flag.StringVar(&sessionAPIURL, "session-api-url", "",
-		"Internal URL of the session-api service for session recording")
+	flag.StringVar(&sessionAPIImage, "session-api-image", "",
+		"Image for per-workspace session-api containers. Defaults to ghcr.io/altairalabs/omnia-session-api:latest")
+	flag.StringVar(&sessionAPIImagePullPolicy, "session-api-image-pull-policy", "",
+		"Image pull policy for session-api containers. Valid values: Always, Never, IfNotPresent.")
+	flag.StringVar(&memoryAPIImage, "memory-api-image", "",
+		"Image for per-workspace memory-api containers. Defaults to ghcr.io/altairalabs/omnia-memory-api:latest")
+	flag.StringVar(&memoryAPIImagePullPolicy, "memory-api-image-pull-policy", "",
+		"Image pull policy for memory-api containers. Valid values: Always, Never, IfNotPresent.")
 	flag.StringVar(&workspaceStorageClass, "workspace-storage-class", "",
 		"Default storage class for workspace PVCs (e.g., omnia-nfs). If empty, uses cluster default.")
 	flag.StringVar(&redisAddr, "redis-addr", "",
 		"Redis address for eval worker deployments (e.g., redis.omnia-system.svc.cluster.local:6379)")
 	flag.StringVar(&evalWorkerImage, "eval-worker-image", "",
 		"Image for the arena-eval-worker container. If not set, defaults to ghcr.io/altairalabs/arena-eval-worker:latest")
+	flag.StringVar(&agentWorkspaceReaderClusterRole, "agent-workspace-reader-clusterrole", "",
+		"Name of the ClusterRole granting agent pods read access to Workspace CRDs. If empty, no binding is created.")
 	flag.StringVar(&apiBindAddress, "api-bind-address", "",
 		"Address for the tool test API server (e.g., :8083). If empty, the API server is not started.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -207,17 +219,17 @@ func main() {
 	}
 
 	if err := (&controller.AgentRuntimeReconciler{
-		Client:                   mgr.GetClient(),
-		Scheme:                   mgr.GetScheme(),
-		FacadeImage:              facadeImage,
-		FacadeImagePullPolicy:    corev1.PullPolicy(facadeImagePullPolicy),
-		FrameworkImage:           frameworkImage,
-		FrameworkImagePullPolicy: corev1.PullPolicy(frameworkImagePullPolicy),
-		TracingEnabled:           tracingEnabled,
-		TracingEndpoint:          tracingEndpoint,
-		SessionAPIURL:            sessionAPIURL,
-		RedisAddr:                redisAddr,
-		EvalWorkerImage:          evalWorkerImage,
+		Client:                          mgr.GetClient(),
+		Scheme:                          mgr.GetScheme(),
+		FacadeImage:                     facadeImage,
+		FacadeImagePullPolicy:           corev1.PullPolicy(facadeImagePullPolicy),
+		FrameworkImage:                  frameworkImage,
+		FrameworkImagePullPolicy:        corev1.PullPolicy(frameworkImagePullPolicy),
+		TracingEnabled:                  tracingEnabled,
+		TracingEndpoint:                 tracingEndpoint,
+		RedisAddr:                       redisAddr,
+		EvalWorkerImage:                 evalWorkerImage,
+		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "AgentRuntime")
 		os.Exit(1)
@@ -252,6 +264,12 @@ func main() {
 		Client:              mgr.GetClient(),
 		Scheme:              mgr.GetScheme(),
 		DefaultStorageClass: workspaceStorageClass,
+		ServiceBuilder: &controller.ServiceBuilder{
+			SessionImage:           sessionAPIImage,
+			SessionImagePullPolicy: corev1.PullPolicy(sessionAPIImagePullPolicy),
+			MemoryImage:            memoryAPIImage,
+			MemoryImagePullPolicy:  corev1.PullPolicy(memoryAPIImagePullPolicy),
+		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "Workspace")
 		os.Exit(1)

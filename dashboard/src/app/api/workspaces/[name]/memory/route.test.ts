@@ -26,6 +26,10 @@ vi.mock("@/lib/k8s/workspace-route-helpers", () => ({
   getWorkspace: vi.fn(),
 }));
 
+vi.mock("@/lib/k8s/service-url-resolver", () => ({
+  resolveServiceURLs: vi.fn(),
+}));
+
 // --- global fetch mock ---
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
@@ -154,11 +158,11 @@ describe("proxyToMemoryApi", () => {
 
   afterEach(() => {
     vi.resetAllMocks();
-    vi.unstubAllEnvs();
   });
 
-  it("returns 503 when MEMORY_API_URL is not set", async () => {
-    vi.stubEnv("MEMORY_API_URL", "");
+  it("returns 503 when service URLs are not resolvable", async () => {
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+    vi.mocked(resolveServiceURLs).mockResolvedValue(null);
 
     const { proxyToMemoryApi } = await import("./proxy-helpers");
     const req = createRequest("GET", "/api/workspaces/test-ws/memory");
@@ -170,7 +174,9 @@ describe("proxyToMemoryApi", () => {
   });
 
   it("returns 404 when workspace not found", async () => {
-    vi.stubEnv("MEMORY_API_URL", "https://memory-api:8080");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     vi.mocked(getWorkspace).mockResolvedValue(null as never);
 
@@ -184,7 +190,9 @@ describe("proxyToMemoryApi", () => {
   });
 
   it("returns 200 with proxied data on success", async () => {
-    vi.stubEnv("MEMORY_API_URL", "https://memory-api:8080");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
 
@@ -206,7 +214,9 @@ describe("proxyToMemoryApi", () => {
   });
 
   it("returns 200 with empty list on backend 404 non-JSON response", async () => {
-    vi.stubEnv("MEMORY_API_URL", "https://memory-api:8080");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
 
@@ -223,7 +233,9 @@ describe("proxyToMemoryApi", () => {
   });
 
   it("returns 502 on fetch error", async () => {
-    vi.stubEnv("MEMORY_API_URL", "https://memory-api:8080");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
 
@@ -239,7 +251,9 @@ describe("proxyToMemoryApi", () => {
   });
 
   it("returns 502 on backend non-JSON non-404 response", async () => {
-    vi.stubEnv("MEMORY_API_URL", "https://memory-api:8080");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
 
@@ -254,8 +268,10 @@ describe("proxyToMemoryApi", () => {
     expect(body.error).toContain("non-JSON");
   });
 
-  it("strips trailing slash from MEMORY_API_URL", async () => {
-    vi.stubEnv("MEMORY_API_URL", "https://memory-api:8080/");
+  it("strips trailing slash from memory URL", async () => {
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080/" });
+
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
 
@@ -276,19 +292,19 @@ describe("proxyToMemoryApi", () => {
 describe("GET /api/workspaces/[name]/memory", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.stubEnv("MEMORY_API_URL", "https://memory-api:8080");
   });
 
   afterEach(() => {
     vi.resetAllMocks();
-    vi.unstubAllEnvs();
   });
 
   it("returns memories list from backend", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -337,19 +353,19 @@ describe("GET /api/workspaces/[name]/memory", () => {
 describe("DELETE /api/workspaces/[name]/memory", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.stubEnv("MEMORY_API_URL", "https://memory-api:8080");
   });
 
   afterEach(() => {
     vi.resetAllMocks();
-    vi.unstubAllEnvs();
   });
 
   it("proxies DELETE to backend", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -397,19 +413,19 @@ describe("DELETE /api/workspaces/[name]/memory", () => {
 describe("GET /api/workspaces/[name]/memory/search", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.stubEnv("MEMORY_API_URL", "https://memory-api:8080");
   });
 
   afterEach(() => {
     vi.resetAllMocks();
-    vi.unstubAllEnvs();
   });
 
   it("adds q and min_confidence params to backend request", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -444,7 +460,9 @@ describe("GET /api/workspaces/[name]/memory/search", () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -472,7 +490,9 @@ describe("GET /api/workspaces/[name]/memory/search", () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -512,12 +532,10 @@ describe("GET /api/workspaces/[name]/memory/search", () => {
 describe("DELETE /api/workspaces/[name]/memory/[memoryId]", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.stubEnv("MEMORY_API_URL", "https://memory-api:8080");
   });
 
   afterEach(() => {
     vi.resetAllMocks();
-    vi.unstubAllEnvs();
   });
 
   function createMemoryIdContext(memoryId = "mem-456") {
@@ -525,6 +543,9 @@ describe("DELETE /api/workspaces/[name]/memory/[memoryId]", () => {
   }
 
   it("deletes a specific memory by ID", async () => {
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
 
@@ -542,8 +563,9 @@ describe("DELETE /api/workspaces/[name]/memory/[memoryId]", () => {
     expect(fetchOpts.method).toBe("DELETE");
   });
 
-  it("returns 503 when MEMORY_API_URL is not configured", async () => {
-    vi.stubEnv("MEMORY_API_URL", "");
+  it("returns 503 when service URLs are not resolvable", async () => {
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+    vi.mocked(resolveServiceURLs).mockResolvedValue(null);
 
     const { DELETE } = await import("./[memoryId]/route");
     const req = createRequest("DELETE", "/api/workspaces/test-ws/memory/mem-456");
@@ -553,6 +575,9 @@ describe("DELETE /api/workspaces/[name]/memory/[memoryId]", () => {
   });
 
   it("returns 404 when workspace not found", async () => {
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     vi.mocked(getWorkspace).mockResolvedValue(null as never);
 
@@ -564,6 +589,9 @@ describe("DELETE /api/workspaces/[name]/memory/[memoryId]", () => {
   });
 
   it("forwards non-ok backend status", async () => {
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
 
@@ -581,6 +609,9 @@ describe("DELETE /api/workspaces/[name]/memory/[memoryId]", () => {
   });
 
   it("returns 502 on fetch error", async () => {
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
 
@@ -594,6 +625,9 @@ describe("DELETE /api/workspaces/[name]/memory/[memoryId]", () => {
   });
 
   it("handles non-JSON error body from backend gracefully", async () => {
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
 
@@ -618,19 +652,19 @@ describe("DELETE /api/workspaces/[name]/memory/[memoryId]", () => {
 describe("GET /api/workspaces/[name]/memory/export", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.stubEnv("MEMORY_API_URL", "https://memory-api:8080");
   });
 
   afterEach(() => {
     vi.resetAllMocks();
-    vi.unstubAllEnvs();
   });
 
   it("proxies to export endpoint", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -682,11 +716,12 @@ describe("GET /api/workspaces/[name]/memory/export", () => {
     expect(response.status).toBe(403);
   });
 
-  it("returns 503 when MEMORY_API_URL is not configured", async () => {
-    vi.stubEnv("MEMORY_API_URL", "");
+  it("returns 503 when service URLs are not resolvable", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
+    vi.mocked(resolveServiceURLs).mockResolvedValue(null);
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
