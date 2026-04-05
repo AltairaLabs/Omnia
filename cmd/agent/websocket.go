@@ -82,7 +82,7 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 	var a2aSrv *facadea2a.Server
 	var a2aHTTPServer *http.Server
 	if cfg.A2AEnabled {
-		a2aSrv, a2aHTTPServer = startA2AServer(cfg, log)
+		a2aSrv, a2aHTTPServer = startA2AServer(cfg, log, tracingProvider)
 	}
 
 	startAndServe(log, wsServer, facadeServer, healthServer, a2aSrv, a2aHTTPServer)
@@ -242,7 +242,11 @@ func shutdownAll(
 
 // startA2AServer creates and configures the A2A server for dual-protocol mode.
 // Returns the A2A server (for shutdown) and the HTTP server (for ListenAndServe).
-func startA2AServer(cfg *agent.Config, log logr.Logger) (*facadea2a.Server, *http.Server) {
+func startA2AServer(
+	cfg *agent.Config,
+	log logr.Logger,
+	tracingProvider *tracing.Provider,
+) (*facadea2a.Server, *http.Server) {
 	log.Info("dual-protocol mode: starting A2A alongside WebSocket",
 		"a2aPort", cfg.A2APort,
 		"taskTTL", cfg.A2ATaskTTL,
@@ -287,8 +291,10 @@ func startA2AServer(cfg *agent.Config, log logr.Logger) (*facadea2a.Server, *htt
 	// Create A2A metrics.
 	a2aMetrics := facadea2a.NewMetrics(cfg.AgentName, cfg.Namespace)
 
-	// Wrap with metrics middleware.
-	a2aHandler := facadea2a.NewMetricsMiddleware(a2aSrv.Handler(), a2aMetrics)
+	// Wrap with metrics + (optional) tracing middleware. Shared with
+	// standalone mode via buildA2AHandler so both paths get tracing spans
+	// when OMNIA_TRACING_ENABLED=true.
+	a2aHandler := buildA2AHandler(a2aSrv.Handler(), a2aMetrics, tracingProvider)
 
 	a2aHTTPServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.A2APort),
