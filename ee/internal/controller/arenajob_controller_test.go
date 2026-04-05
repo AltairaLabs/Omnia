@@ -1091,6 +1091,51 @@ var _ = Describe("ArenaJob Controller", func() {
 
 			Expect(arenaJob.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhaseFailed))
 			Expect(arenaJob.Status.CompletionTime).NotTo(BeNil())
+			// Regression for #736: Progress must be lazy-initialized on the
+			// JobFailed path so .status.progress always exists (and serializes
+			// as {completed:0,failed:0,pending:0,total:0}) once the job
+			// reaches a terminal phase — even when the failure happened
+			// before any work items were enqueued and Progress was nil.
+			Expect(arenaJob.Status.Progress).NotTo(BeNil())
+		})
+
+		It("should lazy-init Progress on JobComplete when Progress was nil (#736)", func() {
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "complete-nil-progress-job",
+					Namespace: arenaJobNamespace,
+				},
+				Status: omniav1alpha1.ArenaJobStatus{
+					Phase: omniav1alpha1.ArenaJobPhaseRunning,
+					// Progress deliberately left nil — simulates the case
+					// where enqueueWorkItems never ran (e.g. reconcile sees
+					// an existing Job on a restart).
+				},
+			}
+
+			completions := int32(1)
+			k8sJob := &batchv1.Job{
+				Spec: batchv1.JobSpec{Completions: &completions},
+				Status: batchv1.JobStatus{
+					Active:    0,
+					Succeeded: 1,
+					Failed:    0,
+					Conditions: []batchv1.JobCondition{
+						{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+					},
+				},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(10),
+			}
+
+			reconciler.updateStatusFromJob(ctx, arenaJob, k8sJob)
+
+			Expect(arenaJob.Status.Progress).NotTo(BeNil(),
+				"Progress must be lazy-initialized on a terminal phase, even when previously nil")
 		})
 
 		It("should update active workers when job is still running", func() {

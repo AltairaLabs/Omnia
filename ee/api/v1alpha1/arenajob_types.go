@@ -397,22 +397,25 @@ const (
 )
 
 // JobProgress tracks the progress of a job execution.
+// Fields do NOT use omitempty so a zero count (e.g. a job that failed before
+// any work items ran) still serializes as "0" rather than being stripped from
+// the JSON, which previously caused jsonpath queries to return an empty string.
 type JobProgress struct {
 	// total is the total number of work items.
 	// +optional
-	Total int32 `json:"total,omitempty"`
+	Total int32 `json:"total"`
 
 	// completed is the number of successfully completed work items.
 	// +optional
-	Completed int32 `json:"completed,omitempty"`
+	Completed int32 `json:"completed"`
 
 	// failed is the number of failed work items.
 	// +optional
-	Failed int32 `json:"failed,omitempty"`
+	Failed int32 `json:"failed"`
 
 	// pending is the number of pending work items.
 	// +optional
-	Pending int32 `json:"pending,omitempty"`
+	Pending int32 `json:"pending"`
 }
 
 // JobResult contains summary results for a completed job.
