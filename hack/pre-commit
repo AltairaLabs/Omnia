@@ -622,10 +622,13 @@ fi
 print_header "Checking Generated Code"
 
 # Run Go codegen (manifests + DeepCopy)
-# Note: controller-gen doesn't work with go.work, so we disable it for codegen
+# Note: controller-gen doesn't work with go.work, so we disable it for codegen.
+# 'make manifests' also runs hack/sync-helm-rbac.sh to keep
+# charts/omnia/templates/clusterrole.yaml in sync with config/rbac/role.yaml
+# (see #733).
 GOWORK=off make generate manifests 2>/dev/null
 
-GO_CHANGES=$(git diff --name-only config/ api/ 2>/dev/null || true)
+GO_CHANGES=$(git diff --name-only config/ api/ charts/omnia/templates/clusterrole.yaml 2>/dev/null || true)
 if [ -n "$GO_CHANGES" ]; then
     print_error "Generated Go files are out of date:"
     for file in $GO_CHANGES; do
@@ -636,6 +639,19 @@ if [ -n "$GO_CHANGES" ]; then
     CHECKS_FAILED=1
 else
     print_success "Go manifests are up to date"
+fi
+
+# Verify RBAC sync for hand-maintained ClusterRoles (workspace-owner/editor/
+# viewer, agent-workspace-reader, metrics-reader). These aren't generated
+# from kubebuilder markers, so drift between kustomize and Helm must be
+# caught separately. See #733.
+if ! ./hack/verify-rbac-sync.sh >/dev/null 2>&1; then
+    print_error "Kustomize and Helm RBAC have drifted:"
+    ./hack/verify-rbac-sync.sh 2>&1 | tail -30
+    print_info "See issue #733"
+    CHECKS_FAILED=1
+else
+    print_success "RBAC kustomize/Helm are in sync"
 fi
 
 # Sync CRDs to Helm chart

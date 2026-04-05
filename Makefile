@@ -55,6 +55,15 @@ setup: ## Set up development environment (install git hooks)
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./api/..." paths="./cmd/..." paths="./internal/..." paths="./pkg/..." output:crd:artifacts:config=config/crd/bases
+	@./hack/sync-helm-rbac.sh
+
+.PHONY: sync-helm-rbac
+sync-helm-rbac: ## Regenerate charts/omnia/templates/clusterrole.yaml from config/rbac/role.yaml (#733).
+	@./hack/sync-helm-rbac.sh
+
+.PHONY: verify-rbac-sync
+verify-rbac-sync: ## Verify kustomize and Helm RBAC are in sync (#733).
+	@./hack/verify-rbac-sync.sh
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.

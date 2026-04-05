@@ -12,7 +12,8 @@ metadata:
     omnia.altairalabs.ai/rbac: workspace
   name: workspace-viewer
 rules:
-  # Read-only on all Omnia resources
+  # Read-only on all Omnia resources. Arena CRDs are listed unconditionally —
+  # see workspace_owner_role.yaml for the rationale.
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
@@ -22,6 +23,8 @@ rules:
       - providers
       - arenasources
       - arenajobs
+      - arenatemplatesources
+      - arenadevsessions
     verbs:
       - get
       - list
@@ -36,6 +39,8 @@ rules:
       - providers/status
       - arenasources/status
       - arenajobs/status
+      - arenatemplatesources/status
+      - arenadevsessions/status
     verbs:
       - get
   # Read ConfigMaps

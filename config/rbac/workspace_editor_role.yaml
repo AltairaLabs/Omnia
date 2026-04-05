@@ -13,7 +13,8 @@ metadata:
     omnia.altairalabs.ai/rbac: workspace
   name: workspace-editor
 rules:
-  # CRUD on most Omnia resources
+  # CRUD on most Omnia resources. Arena CRDs are listed unconditionally —
+  # see workspace_owner_role.yaml for the rationale.
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
@@ -21,6 +22,8 @@ rules:
       - promptpacks
       - arenasources
       - arenajobs
+      - arenatemplatesources
+      - arenadevsessions
     verbs:
       - create
       - delete
@@ -37,6 +40,8 @@ rules:
       - promptpacks/status
       - arenasources/status
       - arenajobs/status
+      - arenatemplatesources/status
+      - arenadevsessions/status
     verbs:
       - get
   # Read-only on shared resources (Providers, ToolRegistries)

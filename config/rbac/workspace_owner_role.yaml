@@ -13,7 +13,10 @@ metadata:
     omnia.altairalabs.ai/rbac: workspace
   name: workspace-owner
 rules:
-  # Full access to Omnia resources
+  # Full access to Omnia resources. Arena CRDs are listed unconditionally —
+  # a ClusterRole granting access to an uninstalled CRD simply has no effect,
+  # and listing them here keeps kustomize in lock-step with the Helm chart
+  # (see hack/verify-rbac-sync.sh and #733).
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
@@ -23,6 +26,8 @@ rules:
       - providers
       - arenasources
       - arenajobs
+      - arenatemplatesources
+      - arenadevsessions
     verbs:
       - create
       - delete
@@ -41,6 +46,8 @@ rules:
       - providers/status
       - arenasources/status
       - arenajobs/status
+      - arenatemplatesources/status
+      - arenadevsessions/status
     verbs:
       - get
   # Manage workspace members (via patch access)
