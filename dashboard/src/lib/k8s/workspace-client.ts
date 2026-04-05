@@ -15,8 +15,9 @@ const PLURAL = "workspaces";
 /**
  * Create the K8s custom objects API client.
  * Uses in-cluster config when running in K8s, falls back to kubeconfig for local dev.
+ * Returns null if no valid K8s API server is available.
  */
-function createCustomObjectsClient(): k8s.CustomObjectsApi {
+function createCustomObjectsClient(): k8s.CustomObjectsApi | null {
   const kc = new k8s.KubeConfig();
 
   try {
@@ -27,15 +28,25 @@ function createCustomObjectsClient(): k8s.CustomObjectsApi {
     kc.loadFromDefault();
   }
 
+  // Verify the cluster has a valid server URL — if not, K8s is unavailable
+  // (e.g. dashboard E2E, standalone demo mode). Return null to avoid
+  // making failing HTTP requests on every API call.
+  const cluster = kc.getCurrentCluster();
+  if (!cluster?.server) {
+    return null;
+  }
+
   return kc.makeApiClient(k8s.CustomObjectsApi);
 }
 
-// Singleton client
+// Singleton client (null means K8s unavailable)
 let client: k8s.CustomObjectsApi | null = null;
+let clientInitialized = false;
 
-function getClient(): k8s.CustomObjectsApi {
-  if (!client) {
+function getClient(): k8s.CustomObjectsApi | null {
+  if (!clientInitialized) {
     client = createCustomObjectsClient();
+    clientInitialized = true;
   }
   return client;
 }
@@ -49,6 +60,9 @@ function getClient(): k8s.CustomObjectsApi {
  */
 export async function getWorkspace(name: string): Promise<Workspace | null> {
   const k8sClient = getClient();
+  if (!k8sClient) {
+    return null;
+  }
 
   try {
     const response = await k8sClient.getClusterCustomObject({
@@ -80,6 +94,9 @@ export async function listWorkspaces(
   labelSelector?: string
 ): Promise<Workspace[]> {
   const k8sClient = getClient();
+  if (!k8sClient) {
+    return [];
+  }
 
   try {
     const response = await k8sClient.listClusterCustomObject({
@@ -172,4 +189,5 @@ function isConnectionError(error: unknown): boolean {
  */
 export function resetWorkspaceClient(): void {
   client = null;
+  clientInitialized = false;
 }
