@@ -69,7 +69,7 @@ GENERATED=$(cat <<EOF
 # → controller-gen → config/rbac/role.yaml → this file. To change operator
 # permissions, edit the marker above the relevant Reconcile method and run
 # 'make manifests'. See issue #733 for background on why this is generated.
-{{- if .Values.rbac.create -}}
+{{ if .Values.rbac.create -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
