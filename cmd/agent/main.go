@@ -281,6 +281,14 @@ func createHandler(cfg *agent.Config, log logr.Logger, tp *tracing.Provider) (fa
 		}
 
 		handler := agent.NewRuntimeHandler(client)
+		// Apply CRD-driven client tool timeout. The config struct is populated
+		// from AgentRuntime.spec.facade.clientToolTimeout by agent.LoadFromCRD.
+		// Without this, the handler always used defaultClientToolTimeout (60s)
+		// and the CRD field was dead.
+		if cfg.ClientToolTimeout > 0 {
+			handler.SetClientToolTimeout(cfg.ClientToolTimeout)
+			log.V(1).Info("client tool timeout override applied", "timeout", cfg.ClientToolTimeout)
+		}
 		cleanup := func() {
 			if err := client.Close(); err != nil {
 				log.Error(err, "error closing runtime client")

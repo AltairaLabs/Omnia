@@ -57,6 +57,9 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	} else {
 		cfg.FacadePort = DefaultFacadePort
 	}
+	if ar.Spec.Facade.ClientToolTimeout != nil {
+		cfg.ClientToolTimeout = ar.Spec.Facade.ClientToolTimeout.Duration
+	}
 
 	// Handler mode from env (operator decides this, not CRD)
 	cfg.HandlerMode = HandlerMode(getEnvOrDefault(EnvHandlerMode, string(HandlerModeRuntime)))

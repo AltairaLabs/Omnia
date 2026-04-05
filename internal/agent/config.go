@@ -160,6 +160,11 @@ type Config struct {
 	// Session configuration.
 	SessionTTL time.Duration
 
+	// ClientToolTimeout overrides the default 60s timeout for client tool
+	// responses. Sourced from AgentRuntime.spec.facade.clientToolTimeout.
+	// Zero means "use RuntimeHandler default".
+	ClientToolTimeout time.Duration
+
 	// Media storage configuration.
 	MediaStorageType MediaStorageType
 	MediaStoragePath string
