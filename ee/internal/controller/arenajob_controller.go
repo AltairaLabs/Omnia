@@ -1212,18 +1212,23 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 					log.V(1).Info("aggregator not available, skipping result aggregation")
 				}
 
-				// Set final progress counts from aggregation or queue stats
-				if arenaJob.Status.Progress != nil {
-					if hasAggregation {
-						arenaJob.Status.Progress.Completed = int32(passedItems)
-						arenaJob.Status.Progress.Failed = int32(failedItems)
+				// Set final progress counts from aggregation or queue stats.
+				// Lazy-init Progress so the struct is always populated on a
+				// terminal phase — callers (and jsonpath queries) can rely on
+				// .status.progress existing once the job reaches Succeeded or
+				// Failed, even if createWorkerJob never ran in this reconcile.
+				if arenaJob.Status.Progress == nil {
+					arenaJob.Status.Progress = &omniav1alpha1.JobProgress{}
+				}
+				if hasAggregation {
+					arenaJob.Status.Progress.Completed = int32(passedItems)
+					arenaJob.Status.Progress.Failed = int32(failedItems)
+					arenaJob.Status.Progress.Pending = 0
+				} else if r.Queue != nil {
+					if stats, err := r.Queue.GetStats(ctx, arenaJob.Name); err == nil && stats != nil {
+						arenaJob.Status.Progress.Completed = int32(stats.Passed)
+						arenaJob.Status.Progress.Failed = int32(stats.Failed)
 						arenaJob.Status.Progress.Pending = 0
-					} else if r.Queue != nil {
-						if stats, err := r.Queue.GetStats(ctx, arenaJob.Name); err == nil && stats != nil {
-							arenaJob.Status.Progress.Completed = int32(stats.Passed)
-							arenaJob.Status.Progress.Failed = int32(stats.Failed)
-							arenaJob.Status.Progress.Pending = 0
-						}
 					}
 				}
 
@@ -1278,6 +1283,22 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 				arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseFailed
 				now := metav1.Now()
 				arenaJob.Status.CompletionTime = &now
+				// Lazy-init Progress so callers can rely on .status.progress
+				// existing once the job reaches a terminal phase, even when
+				// the failure happened before any work items were enqueued.
+				if arenaJob.Status.Progress == nil {
+					arenaJob.Status.Progress = &omniav1alpha1.JobProgress{}
+				}
+				// Pull final counts from the queue if we have one; otherwise
+				// leave the zero values (which now serialize thanks to the
+				// JobProgress field tag change).
+				if r.Queue != nil {
+					if stats, err := r.Queue.GetStats(ctx, arenaJob.Name); err == nil && stats != nil {
+						arenaJob.Status.Progress.Completed = int32(stats.Passed)
+						arenaJob.Status.Progress.Failed = int32(stats.Failed)
+						arenaJob.Status.Progress.Pending = 0
+					}
+				}
 				SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeProgressing, metav1.ConditionFalse,
 					"JobFailed", condition.Message)
 				SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeReady, metav1.ConditionFalse,
