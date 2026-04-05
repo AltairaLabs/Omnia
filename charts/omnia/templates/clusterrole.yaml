@@ -90,6 +90,20 @@ rules:
       - patch
       - update
       - watch
+  # ClusterRoleBindings for binding agent facade SAs to cluster-scoped
+  # workspace read permissions (Workspace CRD is cluster-scoped).
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterrolebindings
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
   # Deployments for agent pods
   - apiGroups:
       - apps
