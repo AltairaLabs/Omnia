@@ -534,6 +534,17 @@ spec:
 		})
 
 		AfterAll(func() {
+			// On failure, leave the test-agents namespace + e2e-workspace +
+			// e2e-postgres/session-api in place so the workflow-level debug
+			// dump (and any local debugging) can inspect pod logs, events,
+			// and resource state. The kind cluster is thrown away at the end
+			// of the job anyway, so orphaned resources are harmless.
+			if CurrentSpecReport().Failed() {
+				_, _ = fmt.Fprintf(GinkgoWriter,
+					"\n=== spec failed — leaving test-agents + e2e-workspace + e2e-postgres intact for diagnostics ===\n")
+				return
+			}
+
 			By("cleaning up test agents namespace")
 			// Force-delete. Without --force the AgentRuntime finalizer can
 			// hold the namespace for the full --timeout. In a teardown path
