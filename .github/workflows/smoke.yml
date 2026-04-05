@@ -1,0 +1,310 @@
+name: Smoke (ko prototype)
+
+# Prototype workflow for fast PR smoke tests.
+#
+# Goal: replace slow Dockerfile-based image builds (~20+ min) with ko
+# (https://ko.build) for the three Go services — compiling Go + appending a
+# layer to a base image takes seconds instead of minutes. Dashboard stays on
+# docker build (it's a Next.js app, not a Go binary).
+#
+# After images are built they are loaded into a kind cluster via
+# helm/kind-action, the Helm chart is installed with --set overrides pointing
+# at the freshly-built tags, then the `doctor` smoke test binary is invoked
+# against the cluster.
+#
+# NOTE: this workflow runs ALONGSIDE the existing test-agent-e2e.yml and
+# test-helm-e2e.yml — it does not replace them yet. It exists so we can
+# measure wall-clock savings on real PRs before cutting the old ones over.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Registry path matches release.yml / test-agent-e2e.yml conventions.
+  KO_DOCKER_REPO: ghcr.io/altairalabs/omnia-ko
+  # Single tag shared across all four images for this run.
+  IMAGE_TAG: ${{ github.sha }}
+  KIND_CLUSTER: smoke
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # changes: advisory-only path filter. For the prototype we still build all
+  # four images every run so we get a clean wall-clock comparison against the
+  # existing docker-based workflow. The outputs are exposed so we can wire
+  # them into conditional builds later.
+  # ---------------------------------------------------------------------------
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      operator: ${{ steps.filter.outputs.operator }}
+      facade: ${{ steps.filter.outputs.facade }}
+      runtime: ${{ steps.filter.outputs.runtime }}
+      dashboard: ${{ steps.filter.outputs.dashboard }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            operator:
+              - 'cmd/main.go'
+              - 'cmd/session-api/**'
+              - 'internal/**'
+              - 'api/**'
+              - 'pkg/**'
+              - 'ee/**'
+              - 'go.mod'
+              - 'go.sum'
+              - 'Dockerfile'
+            facade:
+              - 'cmd/agent/**'
+              - 'internal/facade/**'
+              - 'internal/session/**'
+              - 'pkg/**'
+              - 'go.mod'
+              - 'go.sum'
+              - 'Dockerfile.agent'
+            runtime:
+              - 'cmd/runtime/**'
+              - 'internal/runtime/**'
+              - 'pkg/**'
+              - 'go.mod'
+              - 'go.sum'
+              - 'Dockerfile.runtime'
+            dashboard:
+              - 'dashboard/**'
+
+  # ---------------------------------------------------------------------------
+  # build-images: build operator/facade/runtime with ko, dashboard with docker.
+  #
+  # ko notes:
+  #  - ko is invoked with --local to produce a docker-loadable image instead
+  #    of pushing to a registry. The resulting image is tagged by KO_DOCKER_REPO
+  #    and the ko-computed name (e.g. ghcr.io/altairalabs/omnia-ko/main). We
+  #    then re-tag it to the name the Helm chart expects.
+  #  - CI uses GOWORK=off so ko builds against the published PromptKit module,
+  #    matching the rest of CI and avoiding promptkit-local/ (read-only).
+  #  - The operator Dockerfile is a plain distroless Go build with no
+  #    embedded dashboard assets (dashboard is a separate image/deployment
+  #    in the Helm chart), so ko is a safe drop-in replacement for the
+  #    operator image.
+  # ---------------------------------------------------------------------------
+  build-images:
+    name: Build ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: changes
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: operator
+            kind: ko
+            main: ./cmd
+            image: ghcr.io/altairalabs/omnia
+          - service: facade
+            kind: ko
+            main: ./cmd/agent
+            image: ghcr.io/altairalabs/omnia-facade
+          - service: runtime
+            kind: ko
+            main: ./cmd/runtime
+            image: ghcr.io/altairalabs/omnia-runtime
+          - service: dashboard
+            kind: docker
+            dockerfile: dashboard/Dockerfile
+            context: dashboard
+            image: ghcr.io/altairalabs/omnia-dashboard
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        if: matrix.kind == 'ko'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Set up ko
+        if: matrix.kind == 'ko'
+        uses: ko-build/setup-ko@v0.6
+        with:
+          version: v0.16.0
+
+      - name: Build Go image with ko
+        if: matrix.kind == 'ko'
+        env:
+          GOWORK: "off"
+          # Keep repo path stable regardless of matrix entry.
+          KO_DOCKER_REPO: ghcr.io/altairalabs/omnia-ko
+        run: |
+          set -euo pipefail
+          echo "Building ${{ matrix.service }} from ${{ matrix.main }}"
+          # --local produces a docker-daemon image; --bare drops the path
+          # suffix so KO_DOCKER_REPO *is* the image name. We then retag to
+          # match the Helm chart's expected repo.
+          KO_IMAGE=$(ko build --local --bare --tags "${IMAGE_TAG}" "${{ matrix.main }}")
+          echo "ko produced: ${KO_IMAGE}"
+          docker tag "${KO_IMAGE}" "${{ matrix.image }}:${IMAGE_TAG}"
+          docker image inspect "${{ matrix.image }}:${IMAGE_TAG}" --format '{{.Id}} {{.Size}}'
+
+      - name: Set up Docker Buildx
+        if: matrix.kind == 'docker'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build dashboard image with docker
+        if: matrix.kind == 'docker'
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: false
+          load: true
+          tags: ${{ matrix.image }}:${{ env.IMAGE_TAG }}
+          cache-from: type=gha,scope=smoke-${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=smoke-${{ matrix.service }}
+
+      - name: Export image to artifact
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/images
+          docker save "${{ matrix.image }}:${IMAGE_TAG}" -o "/tmp/images/${{ matrix.service }}.tar"
+          ls -lh /tmp/images
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-image-${{ matrix.service }}
+          path: /tmp/images/${{ matrix.service }}.tar
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # smoke: spin up kind, load all four images, helm install, run doctor.
+  # ---------------------------------------------------------------------------
+  smoke:
+    name: Smoke (kind + helm + doctor)
+    runs-on: ubuntu-latest
+    needs: build-images
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Download image artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: smoke-image-*
+          path: /tmp/images
+          merge-multiple: true
+
+      - name: Load images into local docker
+        run: |
+          set -euo pipefail
+          for tar in /tmp/images/*.tar; do
+            echo "Loading ${tar}"
+            docker load -i "${tar}"
+          done
+          docker images | grep altairalabs || true
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER }}
+          wait: 120s
+
+      - name: Load images into kind
+        run: |
+          set -euo pipefail
+          kind load docker-image "ghcr.io/altairalabs/omnia:${IMAGE_TAG}"          --name "${KIND_CLUSTER}"
+          kind load docker-image "ghcr.io/altairalabs/omnia-facade:${IMAGE_TAG}"   --name "${KIND_CLUSTER}"
+          kind load docker-image "ghcr.io/altairalabs/omnia-runtime:${IMAGE_TAG}"  --name "${KIND_CLUSTER}"
+          kind load docker-image "ghcr.io/altairalabs/omnia-dashboard:${IMAGE_TAG}" --name "${KIND_CLUSTER}"
+
+      - name: Install cert-manager
+        run: |
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
+          kubectl wait --for=condition=Available deployment/cert-manager            -n cert-manager --timeout=180s
+          kubectl wait --for=condition=Available deployment/cert-manager-webhook    -n cert-manager --timeout=180s
+          kubectl wait --for=condition=Available deployment/cert-manager-cainjector -n cert-manager --timeout=180s
+
+      - name: Install Gateway API CRDs
+        run: |
+          kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
+
+      - name: Helm install omnia
+        run: |
+          set -euo pipefail
+          kubectl create namespace omnia-system --dry-run=client -o yaml | kubectl apply -f -
+          # Image tag overrides map to charts/omnia/values.yaml:
+          #   image.{repository,tag}         -> operator
+          #   facade.image.{repository,tag}  -> facade
+          #   runtime.image.{repository,tag} -> runtime
+          #   dashboard.image.{repository,tag} -> dashboard
+          helm install omnia charts/omnia \
+            --namespace omnia-system \
+            --set image.repository=ghcr.io/altairalabs/omnia \
+            --set image.tag="${IMAGE_TAG}" \
+            --set image.pullPolicy=IfNotPresent \
+            --set facade.image.repository=ghcr.io/altairalabs/omnia-facade \
+            --set facade.image.tag="${IMAGE_TAG}" \
+            --set runtime.image.repository=ghcr.io/altairalabs/omnia-runtime \
+            --set runtime.image.tag="${IMAGE_TAG}" \
+            --set dashboard.image.repository=ghcr.io/altairalabs/omnia-dashboard \
+            --set dashboard.image.tag="${IMAGE_TAG}" \
+            --wait --timeout=8m || {
+              echo "::group::helm install failed — pod status"
+              kubectl -n omnia-system get pods
+              kubectl -n omnia-system describe pods
+              echo "::endgroup::"
+              exit 1
+            }
+
+      - name: Show cluster state
+        if: always()
+        run: |
+          kubectl -n omnia-system get pods,svc,deploy
+          kubectl get nodes
+
+      - name: Run doctor smoke test
+        run: |
+          set -euo pipefail
+          # TODO: the `doctor` binary is currently an untracked local build
+          # (a Go CLI that talks to a live cluster). Until it is either
+          # committed as source under cmd/doctor/ and built here, or
+          # published as a release artifact, run a placeholder so the
+          # workflow is fully wired and runnable end-to-end.
+          #
+          # When doctor ships: replace this with either
+          #   go run ./cmd/doctor -- --namespace omnia-system
+          # or download the release binary for linux/amd64 and invoke it.
+          if [ -x ./doctor ]; then
+            ./doctor --namespace omnia-system
+          else
+            echo "doctor binary not present in repo — running placeholder smoke checks"
+            kubectl -n omnia-system wait --for=condition=Available deploy --all --timeout=120s || true
+            kubectl -n omnia-system get pods
+          fi
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          kubectl -n omnia-system get events --sort-by=.lastTimestamp | tail -n 100 || true
+          for pod in $(kubectl -n omnia-system get pods -o name); do
+            echo "::group::${pod}"
+            kubectl -n omnia-system logs "${pod}" --all-containers --tail=200 || true
+            echo "::endgroup::"
+          done
