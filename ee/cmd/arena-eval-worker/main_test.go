@@ -9,14 +9,20 @@ Functional Source License. See ee/LICENSE for details.
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/pkg/k8s"
+	"github.com/altairalabs/omnia/pkg/servicediscovery"
 )
 
 func TestNewK8sClient_Success(t *testing.T) {
@@ -45,9 +51,12 @@ func TestLoadConfig_RequiredFields(t *testing.T) {
 			wantErr: "NAMESPACE",
 		},
 		{
-			name:    "missing SESSION_API_URL",
-			env:     map[string]string{"REDIS_ADDR": "localhost:6379", "NAMESPACE": "ns"},
-			wantErr: "SESSION_API_URL",
+			// SESSION_API_URL is now resolved separately after the k8s
+			// client is built (see resolveSessionAPIURL), so loadConfig no
+			// longer enforces its presence. The empty-env case is covered
+			// by TestResolveSessionAPIURL_MissingEverything.
+			name: "no session api url — loadConfig still passes",
+			env:  map[string]string{"REDIS_ADDR": "localhost:6379", "NAMESPACE": "ns"},
 		},
 		{
 			name: "all required present",
@@ -206,4 +215,57 @@ func TestParseNamespaces_NeitherSet(t *testing.T) {
 
 	result := parseNamespaces()
 	assert.Nil(t, result)
+}
+
+// TestResolveSessionAPIURL_EnvOverride verifies that an explicit
+// SESSION_API_URL env var takes precedence over service discovery.
+func TestResolveSessionAPIURL_EnvOverride(t *testing.T) {
+	url, err := resolveSessionAPIURL(context.Background(), nil, "http://explicit:8080")
+	require.NoError(t, err)
+	assert.Equal(t, "http://explicit:8080", url)
+}
+
+// TestResolveSessionAPIURL_MissingEverything verifies we return a clear
+// error when neither the env var nor a resolver is available.
+func TestResolveSessionAPIURL_MissingEverything(t *testing.T) {
+	_, err := resolveSessionAPIURL(context.Background(), nil, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), envSessionAPI)
+}
+
+// TestResolveSessionAPIURL_FromWorkspaceCRD verifies that the resolver
+// returns a session-api URL from the Workspace CRD's status when no env var
+// override is set. This is the post-#717 path: the operator no longer injects
+// SESSION_API_URL; services read it from Workspace.status.services[*].
+func TestResolveSessionAPIURL_FromWorkspaceCRD(t *testing.T) {
+	// Tell the resolver which namespace this "process" runs in (the
+	// eval-worker pod's workspace namespace in a real deployment).
+	t.Setenv("OMNIA_NAMESPACE", "ws-ns")
+
+	scheme := runtime.NewScheme()
+	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
+
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "ws"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			DisplayName: "ws",
+			Namespace:   omniav1alpha1.NamespaceConfig{Name: "ws-ns"},
+		},
+		Status: omniav1alpha1.WorkspaceStatus{
+			Services: []omniav1alpha1.ServiceGroupStatus{
+				{
+					Name:       "default",
+					Ready:      true,
+					SessionURL: "http://session-ws.ws-ns.svc:8080",
+					MemoryURL:  "http://memory-ws.ws-ns.svc:8080",
+				},
+			},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ws).Build()
+	resolver := servicediscovery.NewResolver(c)
+
+	url, err := resolveSessionAPIURL(context.Background(), resolver, "")
+	require.NoError(t, err)
+	assert.Equal(t, "http://session-ws.ws-ns.svc:8080", url)
 }

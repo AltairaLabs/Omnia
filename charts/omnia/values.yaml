@@ -167,6 +167,15 @@ enterprise:
     # If set, watches all listed namespaces (multi-namespace mode) and uses
     # ClusterRole RBAC instead of namespace-scoped Role.
     namespaces: []
+    # -- Namespace of the Workspace CRD whose session-api this eval-worker
+    # should target. Post-#717, the eval-worker discovers its session-api
+    # URL from Workspace.status.services rather than an injected env var,
+    # and it needs to know which Workspace to look up. Defaults to the
+    # eval-worker's own pod namespace, which only works when the eval-worker
+    # is deployed inside a workspace namespace. In multi-tenant clusters
+    # where the eval-worker lives in a control-plane namespace, set this
+    # to the target workspace's namespace. See #742.
+    workspaceNamespace: ""
     # -- Extra environment variables for eval worker (e.g., provider API keys for LLM judges)
     extraEnv: []
     # - name: OPENAI_API_KEY

@@ -34,6 +34,7 @@ import (
 	redisprovider "github.com/altairalabs/omnia/internal/session/providers/redis"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/k8s"
+	"github.com/altairalabs/omnia/pkg/servicediscovery"
 
 	// Register PromptKit provider factories for LLM judge eval execution.
 	_ "github.com/AltairaLabs/PromptKit/runtime/providers/claude"
@@ -48,10 +49,12 @@ const (
 	envNamespace    = "NAMESPACE"
 	envNamespaces   = "NAMESPACES"
 	envSessionAPI   = "SESSION_API_URL"
+	envServiceGroup = "OMNIA_SERVICE_GROUP"
 	envLogLevel     = "LOG_LEVEL"
 	envMetricsAddr  = "METRICS_ADDR"
 	defaultLogLevel = "info"
 	defaultMetrics  = ":9090"
+	defaultSvcGroup = "default"
 )
 
 func main() {
@@ -88,12 +91,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Set up K8s client for PromptPack ConfigMap reads.
+	// Set up K8s client for PromptPack ConfigMap reads and Workspace CRD
+	// lookups (see resolveSessionAPIURL).
 	k8sClient, err := k8s.NewClient()
 	if err != nil {
 		logger.Error("failed to create k8s client", "error", err)
 		os.Exit(1)
 	}
+
+	// Resolve the session-api URL. Prefers SESSION_API_URL for back-compat,
+	// otherwise looks up Workspace.status.services via the resolver.
+	resolver := servicediscovery.NewResolver(k8sClient)
+	sessionAPIURL, err := resolveSessionAPIURL(context.Background(), resolver, cfg.SessionAPIURL)
+	if err != nil {
+		logger.Error("failed to resolve session-api URL", "error", err)
+		os.Exit(1)
+	}
+	cfg.SessionAPIURL = sessionAPIURL
 
 	packLoader := evals.NewPromptPackLoader(k8sClient)
 
@@ -190,7 +204,10 @@ type workerEnvConfig struct {
 	MetricsAddr   string
 }
 
-// loadConfig reads and validates environment variables.
+// loadConfig reads and validates environment variables. It does NOT resolve
+// SessionAPIURL — that happens in resolveSessionAPIURL after the Kubernetes
+// client is available, because post-#717 the URL comes from the Workspace CRD
+// rather than a static env var injected by the operator.
 func loadConfig() (*workerEnvConfig, error) {
 	cfg := &workerEnvConfig{
 		RedisAddr:     os.Getenv(envRedisAddr),
@@ -207,9 +224,6 @@ func loadConfig() (*workerEnvConfig, error) {
 	if len(cfg.Namespaces) == 0 {
 		return nil, fmt.Errorf("%s or %s is required", envNamespaces, envNamespace)
 	}
-	if cfg.SessionAPIURL == "" {
-		return nil, fmt.Errorf("%s is required", envSessionAPI)
-	}
 	if cfg.MetricsAddr == "" {
 		cfg.MetricsAddr = defaultMetrics
 	}
@@ -223,6 +237,36 @@ func loadConfig() (*workerEnvConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+// resolveSessionAPIURL returns the session-api URL, preferring an explicit
+// SESSION_API_URL env var override and falling back to per-workspace service
+// discovery via the Workspace CRD. The resolver needs a Kubernetes client, so
+// this runs after the client is built in main — not inside loadConfig.
+//
+// Post-#717 the operator no longer injects SESSION_API_URL on per-workspace
+// services; the URL lives in Workspace.status.services[*].sessionURL. See
+// pkg/servicediscovery and issue #742.
+func resolveSessionAPIURL(
+	ctx context.Context,
+	resolver *servicediscovery.Resolver,
+	envOverride string,
+) (string, error) {
+	if envOverride != "" {
+		return envOverride, nil
+	}
+	if resolver == nil {
+		return "", fmt.Errorf("%s not set and no Kubernetes client for service discovery", envSessionAPI)
+	}
+	group := os.Getenv(envServiceGroup)
+	if group == "" {
+		group = defaultSvcGroup
+	}
+	urls, err := resolver.ResolveServiceURLs(ctx, group)
+	if err != nil {
+		return "", fmt.Errorf("resolve session-api URL via Workspace CRD (service group %q): %w", group, err)
+	}
+	return urls.SessionURL, nil
 }
 
 // parseNamespaces reads NAMESPACES (comma-separated) with fallback to NAMESPACE.

@@ -12,6 +12,13 @@ rules:
   - apiGroups: ["omnia.altairalabs.ai"]
     resources: ["agentruntimes", "providers"]
     verbs: ["get", "list"]
+  # Workspaces are cluster-scoped and the resolver lists them to find the
+  # one that matches the eval-worker's OMNIA_NAMESPACE, in order to read
+  # the per-workspace session-api URL from .status.services. Post-#717 the
+  # operator no longer injects SESSION_API_URL as an env var (#742).
+  - apiGroups: ["omnia.altairalabs.ai"]
+    resources: ["workspaces"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
