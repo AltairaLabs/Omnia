@@ -472,3 +472,11 @@ func (s *Server) ConnectionCount() int {
 	defer s.mu.RUnlock()
 	return len(s.connections)
 }
+
+// HasMediaStorage reports whether media storage has been wired into the
+// server via WithMediaStorage. Used by wiring tests in cmd/agent to assert
+// that cmd/agent/websocket.go passes the storage through to the facade
+// (otherwise the WebSocket upload_request flow fails with mediaStorage==nil).
+func (s *Server) HasMediaStorage() bool {
+	return s.mediaStorage != nil
+}

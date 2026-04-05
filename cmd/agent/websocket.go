@@ -58,13 +58,17 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 	// Create Prometheus metrics
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 
-	wsServer, mux := buildWebSocketServer(cfg, log, store, handler, metrics, tracingProvider)
-
-	// Initialize media storage if configured
+	// Initialize media storage BEFORE building the WS server so it can be
+	// threaded into the facade via WithMediaStorage. Without this, the facade
+	// server's mediaStorage is nil and the WS upload_request flow fails even
+	// though the REST media handler routes are registered.
 	mediaStorage, mediaCleanup := initMediaStorage(cfg, log)
 	if mediaCleanup != nil {
 		defer mediaCleanup()
 	}
+
+	wsServer, mux := buildWebSocketServer(cfg, log, store, handler, metrics, tracingProvider, mediaStorage)
+
 	if mediaStorage != nil {
 		mediaHandler := media.NewHandler(mediaStorage, log, media.WithHandlerMetrics(metrics))
 		mediaHandler.RegisterRoutes(mux)
@@ -78,13 +82,18 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 	var a2aSrv *facadea2a.Server
 	var a2aHTTPServer *http.Server
 	if cfg.A2AEnabled {
-		a2aSrv, a2aHTTPServer = startA2AServer(cfg, log)
+		a2aSrv, a2aHTTPServer = startA2AServer(cfg, log, tracingProvider)
 	}
 
 	startAndServe(log, wsServer, facadeServer, healthServer, a2aSrv, a2aHTTPServer)
 }
 
 // buildWebSocketServer creates the WebSocket server and HTTP mux.
+//
+// mediaStorage may be nil; if non-nil it is passed to facade.NewServer via
+// WithMediaStorage so the WebSocket upload_request flow can resolve
+// upload/download URLs. Without this, the facade's s.mediaStorage stays nil
+// and WS media flows always error (even though REST media routes work).
 func buildWebSocketServer(
 	cfg *agent.Config,
 	log logr.Logger,
@@ -92,6 +101,7 @@ func buildWebSocketServer(
 	handler facade.MessageHandler,
 	metrics *agent.Metrics,
 	tracingProvider *tracing.Provider,
+	mediaStorage media.Storage,
 ) (*facade.Server, *http.ServeMux) {
 	wsConfig := facade.DefaultServerConfig()
 	wsConfig.SessionTTL = cfg.SessionTTL
@@ -109,6 +119,9 @@ func buildWebSocketServer(
 	}
 	if tracingProvider != nil {
 		serverOpts = append(serverOpts, facade.WithTracingProvider(tracingProvider))
+	}
+	if mediaStorage != nil {
+		serverOpts = append(serverOpts, facade.WithMediaStorage(mediaStorage))
 	}
 	wsServer := facade.NewServer(wsConfig, store, handler, log, serverOpts...)
 
@@ -229,7 +242,11 @@ func shutdownAll(
 
 // startA2AServer creates and configures the A2A server for dual-protocol mode.
 // Returns the A2A server (for shutdown) and the HTTP server (for ListenAndServe).
-func startA2AServer(cfg *agent.Config, log logr.Logger) (*facadea2a.Server, *http.Server) {
+func startA2AServer(
+	cfg *agent.Config,
+	log logr.Logger,
+	tracingProvider *tracing.Provider,
+) (*facadea2a.Server, *http.Server) {
 	log.Info("dual-protocol mode: starting A2A alongside WebSocket",
 		"a2aPort", cfg.A2APort,
 		"taskTTL", cfg.A2ATaskTTL,
@@ -274,8 +291,10 @@ func startA2AServer(cfg *agent.Config, log logr.Logger) (*facadea2a.Server, *htt
 	// Create A2A metrics.
 	a2aMetrics := facadea2a.NewMetrics(cfg.AgentName, cfg.Namespace)
 
-	// Wrap with metrics middleware.
-	a2aHandler := facadea2a.NewMetricsMiddleware(a2aSrv.Handler(), a2aMetrics)
+	// Wrap with metrics + (optional) tracing middleware. Shared with
+	// standalone mode via buildA2AHandler so both paths get tracing spans
+	// when OMNIA_TRACING_ENABLED=true.
+	a2aHandler := buildA2AHandler(a2aSrv.Handler(), a2aMetrics, tracingProvider)
 
 	a2aHTTPServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.A2APort),
