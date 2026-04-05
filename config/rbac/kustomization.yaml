@@ -35,4 +35,7 @@ resources:
 - workspace_owner_role.yaml
 - workspace_editor_role.yaml
 - workspace_viewer_role.yaml
+# ClusterRole granting agent pods read access to Workspace CRDs (per-agent
+# ClusterRoleBindings pointing at this are created by AgentRuntimeReconciler).
+- agent_workspace_reader_clusterrole.yaml
 

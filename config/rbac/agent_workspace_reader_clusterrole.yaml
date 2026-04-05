@@ -1,0 +1,31 @@
+# ClusterRole granting agent pods (facade/runtime) read access to Workspace CRDs.
+# Agents need this to resolve per-workspace service URLs from
+# Workspace.status.services. The AgentRuntimeReconciler creates a
+# ClusterRoleBinding per agent that references this ClusterRole by the name
+# passed to --agent-workspace-reader-clusterrole (default:
+# "omnia-agent-workspace-reader").
+#
+# Without this file, kustomize-based deployments (including `make deploy` used
+# by e2e) do not create the ClusterRole, leaving the per-agent CRBs dangling
+# and breaking Workspace status resolution in agent pods. The Helm chart has
+# its own equivalent template under
+# charts/omnia/templates/agent-workspace-reader-clusterrole.yaml.
+#
+# NOTE: the name is "agent-workspace-reader" (without the omnia- prefix)
+# because config/default/kustomization.yaml applies `namePrefix: omnia-` to
+# all resources. After kustomize transformation the final name is
+# `omnia-agent-workspace-reader`, which matches the value passed to the
+# operator via --agent-workspace-reader-clusterrole in e2e.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-workspace-reader
+rules:
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - workspaces
+    verbs:
+      - get
+      - list
+      - watch

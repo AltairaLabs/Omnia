@@ -66,9 +66,11 @@ spec:
 		_, _ = utils.Run(cmd)
 	}()
 
-	// Give the controller 10 seconds to reconcile
-	for i := 0; i < 5; i++ {
-		time.Sleep(2 * time.Second)
+	// Give the controller up to ~5 seconds to reconcile. Poll every 250ms
+	// so a healthy controller is detected within the first ~500ms instead of
+	// always waiting a full 2s before the first check.
+	for i := 0; i < 20; i++ {
+		time.Sleep(250 * time.Millisecond)
 		cmd := exec.Command("kubectl", "get", "agentpolicy", "controller-probe",
 			"-n", "test-agents", "-o", "jsonpath={.status.phase}")
 		output, err := utils.Run(cmd)
@@ -110,9 +112,11 @@ spec:
 		_, _ = utils.Run(cmd)
 	}()
 
-	// Give the controller 10 seconds to reconcile
-	for i := 0; i < 5; i++ {
-		time.Sleep(2 * time.Second)
+	// Give the controller up to ~5 seconds to reconcile. Poll every 250ms
+	// so a healthy controller is detected within the first ~500ms instead of
+	// always waiting a full 2s before the first check.
+	for i := 0; i < 20; i++ {
+		time.Sleep(250 * time.Millisecond)
 		cmd := exec.Command("kubectl", "get", "toolpolicy", "controller-probe",
 			"-n", "test-agents", "-o", "jsonpath={.status.phase}")
 		output, err := utils.Run(cmd)

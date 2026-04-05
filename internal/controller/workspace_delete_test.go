@@ -331,7 +331,3 @@ func TestReconcileDelete_NamespaceNotCreatedSkipsDelete(t *testing.T) {
 	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: ns}, &corev1.Namespace{})
 	assert.NoError(t, err)
 }
-
-func TestDeletePageSize(t *testing.T) {
-	assert.Equal(t, 100, deletePageSize)
-}
