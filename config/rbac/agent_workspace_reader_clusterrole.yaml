@@ -10,10 +10,16 @@
 # and breaking Workspace status resolution in agent pods. The Helm chart has
 # its own equivalent template under
 # charts/omnia/templates/agent-workspace-reader-clusterrole.yaml.
+#
+# NOTE: the name is "agent-workspace-reader" (without the omnia- prefix)
+# because config/default/kustomization.yaml applies `namePrefix: omnia-` to
+# all resources. After kustomize transformation the final name is
+# `omnia-agent-workspace-reader`, which matches the value passed to the
+# operator via --agent-workspace-reader-clusterrole in e2e.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: omnia-agent-workspace-reader
+  name: agent-workspace-reader
 rules:
   - apiGroups:
       - omnia.altairalabs.ai
