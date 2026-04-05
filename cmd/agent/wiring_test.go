@@ -25,10 +25,27 @@ import (
 
 	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade"
+	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/pkg/identity"
 	"github.com/altairalabs/omnia/pkg/policy"
 )
+
+// stubMediaStorage is a no-op media.Storage used by wiring tests to assert
+// that cmd/agent threads the storage through to the facade. The methods are
+// never invoked in the wiring test path — only the facade server's reference
+// to the storage is checked.
+type stubMediaStorage struct{}
+
+func (stubMediaStorage) GetUploadURL(context.Context, media.UploadRequest) (*media.UploadCredentials, error) {
+	return &media.UploadCredentials{}, nil
+}
+func (stubMediaStorage) GetDownloadURL(context.Context, string) (string, error) { return "", nil }
+func (stubMediaStorage) GetMediaInfo(context.Context, string) (*media.MediaInfo, error) {
+	return &media.MediaInfo{}, nil
+}
+func (stubMediaStorage) Delete(context.Context, string) error { return nil }
+func (stubMediaStorage) Close() error                         { return nil }
 
 // freshPromRegistry swaps the default Prometheus registerer for the duration
 // of a test. agent.NewMetrics and buildWebSocketServer register collectors on
@@ -96,7 +113,7 @@ func TestBuildWebSocketServer_PseudonymizesUserIDHeader(t *testing.T) {
 	}
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 
-	wsServer, mux := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil)
+	wsServer, mux := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
 	_ = wsServer // shut down implicitly when ts is closed
 
 	ts := httptest.NewServer(mux)
@@ -142,6 +159,43 @@ func TestBuildWebSocketServer_PseudonymizesUserIDHeader(t *testing.T) {
 	}
 }
 
+// TestBuildWebSocketServer_WiresMediaStorage verifies that cmd/agent threads
+// media storage through buildWebSocketServer into the facade server via
+// WithMediaStorage. Without this, the facade's mediaStorage field is nil and
+// the WebSocket upload_request / upload_ready / upload_complete flow always
+// fails with a "media storage not configured" error — even though the REST
+// media routes work because they use the storage directly.
+//
+// This is the #728 item 1 regression guard.
+func TestBuildWebSocketServer_WiresMediaStorage(t *testing.T) {
+	freshPromRegistry(t)
+
+	store := session.NewMemoryStore()
+	t.Cleanup(func() { _ = store.Close() })
+
+	cfg := &agent.Config{AgentName: "probe", Namespace: "ns"}
+	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
+	handler := &captureHandler{name: "probe"}
+
+	// With nil media storage: facade reports none wired.
+	nilServer, _ := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
+	if nilServer.HasMediaStorage() {
+		t.Error("facade reports media storage wired when nil was passed")
+	}
+
+	// Fresh prom registry again because NewMetrics registers collectors.
+	freshPromRegistry(t)
+	metrics2 := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
+
+	// With non-nil media storage: facade reports it wired.
+	withStorage, _ := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics2, nil, stubMediaStorage{})
+	if !withStorage.HasMediaStorage() {
+		t.Error("facade reports media storage not wired; buildWebSocketServer " +
+			"is not forwarding the storage via facade.WithMediaStorage — " +
+			"WebSocket upload_request will fail with mediaStorage == nil")
+	}
+}
+
 // TestBuildWebSocketServer_RegistersWebSocketRoutes verifies the real mux
 // returned by buildWebSocketServer has /ws and /api/agents/ routes registered.
 // /metrics is not asserted here because it is registered unconditionally by
@@ -156,7 +210,7 @@ func TestBuildWebSocketServer_RegistersWebSocketRoutes(t *testing.T) {
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 	handler := &captureHandler{name: "probe"}
 
-	_, mux := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil)
+	_, mux := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
 
 	// /ws should at minimum not 404 (will 400 on a non-upgrade GET).
 	req := httptest.NewRequest(http.MethodGet, "/ws", nil)

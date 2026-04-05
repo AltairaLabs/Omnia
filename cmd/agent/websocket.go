@@ -58,13 +58,17 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 	// Create Prometheus metrics
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 
-	wsServer, mux := buildWebSocketServer(cfg, log, store, handler, metrics, tracingProvider)
-
-	// Initialize media storage if configured
+	// Initialize media storage BEFORE building the WS server so it can be
+	// threaded into the facade via WithMediaStorage. Without this, the facade
+	// server's mediaStorage is nil and the WS upload_request flow fails even
+	// though the REST media handler routes are registered.
 	mediaStorage, mediaCleanup := initMediaStorage(cfg, log)
 	if mediaCleanup != nil {
 		defer mediaCleanup()
 	}
+
+	wsServer, mux := buildWebSocketServer(cfg, log, store, handler, metrics, tracingProvider, mediaStorage)
+
 	if mediaStorage != nil {
 		mediaHandler := media.NewHandler(mediaStorage, log, media.WithHandlerMetrics(metrics))
 		mediaHandler.RegisterRoutes(mux)
@@ -85,6 +89,11 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 }
 
 // buildWebSocketServer creates the WebSocket server and HTTP mux.
+//
+// mediaStorage may be nil; if non-nil it is passed to facade.NewServer via
+// WithMediaStorage so the WebSocket upload_request flow can resolve
+// upload/download URLs. Without this, the facade's s.mediaStorage stays nil
+// and WS media flows always error (even though REST media routes work).
 func buildWebSocketServer(
 	cfg *agent.Config,
 	log logr.Logger,
@@ -92,6 +101,7 @@ func buildWebSocketServer(
 	handler facade.MessageHandler,
 	metrics *agent.Metrics,
 	tracingProvider *tracing.Provider,
+	mediaStorage media.Storage,
 ) (*facade.Server, *http.ServeMux) {
 	wsConfig := facade.DefaultServerConfig()
 	wsConfig.SessionTTL = cfg.SessionTTL
@@ -109,6 +119,9 @@ func buildWebSocketServer(
 	}
 	if tracingProvider != nil {
 		serverOpts = append(serverOpts, facade.WithTracingProvider(tracingProvider))
+	}
+	if mediaStorage != nil {
+		serverOpts = append(serverOpts, facade.WithMediaStorage(mediaStorage))
 	}
 	wsServer := facade.NewServer(wsConfig, store, handler, log, serverOpts...)
 
