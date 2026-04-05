@@ -77,6 +77,54 @@ jobs:
           # Run only non-arena tests (excludes Label("arena"))
           make test-e2e-junit GINKGO_LABEL_FILTER='!arena'
 
+      - name: Dump debug info on failure
+        if: failure()
+        run: |
+          echo "=== Nodes ==="
+          kubectl get nodes -o wide || true
+          echo ""
+          echo "=== All pods ==="
+          kubectl get pods -A -o wide || true
+          echo ""
+          echo "=== Controller-manager pods ==="
+          kubectl get pods -n omnia-system -l control-plane=controller-manager -o wide || true
+          echo ""
+          echo "=== Controller-manager logs (current) ==="
+          kubectl logs -n omnia-system -l control-plane=controller-manager --tail=500 --all-containers=true || true
+          echo ""
+          echo "=== Controller-manager logs (previous, if restarted) ==="
+          kubectl logs -n omnia-system -l control-plane=controller-manager --tail=500 --all-containers=true --previous || true
+          echo ""
+          echo "=== Events in omnia-system ==="
+          kubectl get events -n omnia-system --sort-by=.lastTimestamp | tail -80 || true
+          echo ""
+          echo "=== Events in test-agents ==="
+          kubectl get events -n test-agents --sort-by=.lastTimestamp | tail -80 || true
+          echo ""
+          echo "=== AgentRuntimes in test-agents ==="
+          kubectl get agentruntime -n test-agents -o yaml || true
+          echo ""
+          echo "=== Providers in test-agents ==="
+          kubectl get provider -n test-agents -o yaml || true
+          echo ""
+          echo "=== PromptPacks in test-agents ==="
+          kubectl get promptpack -n test-agents -o yaml || true
+          echo ""
+          echo "=== ToolRegistries in test-agents ==="
+          kubectl get toolregistry -n test-agents -o yaml || true
+          echo ""
+          echo "=== Workspaces ==="
+          kubectl get workspace -A -o yaml || true
+          echo ""
+          echo "=== Deployments in test-agents ==="
+          kubectl get deployment -n test-agents -o yaml || true
+          echo ""
+          echo "=== Session-API logs ==="
+          kubectl logs -n omnia-system -l app=e2e-session-api --tail=200 || true
+          echo ""
+          echo "=== Postgres logs ==="
+          kubectl logs -n omnia-system -l app=e2e-postgres --tail=100 || true
+
       - name: Publish Test Results
         uses: mikepenz/action-junit-report@v6
         if: always()

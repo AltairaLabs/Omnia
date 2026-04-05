@@ -766,6 +766,39 @@ spec:
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create AgentRuntime")
 
+			// On failure, dump controller-manager logs and AgentRuntime status
+			// so CI gives us a real diagnostic instead of just "Deployment never
+			// appeared". The Core E2E has been failing at this spec on main for
+			// weeks with no visibility; this closes the gap.
+			DeferCleanup(func() {
+				if !CurrentSpecReport().Failed() {
+					return
+				}
+				_, _ = fmt.Fprintf(GinkgoWriter, "\n=== DEBUG: AgentRuntime deploy failure ===\n")
+				arCmd := exec.Command("kubectl", "get", "agentruntime", "test-agent",
+					"-n", agentsNamespace, "-o", "yaml")
+				if out, err := utils.Run(arCmd); err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "AgentRuntime yaml:\n%s\n", out)
+				}
+				provCmd := exec.Command("kubectl", "get", "provider", "test-provider",
+					"-n", agentsNamespace, "-o", "yaml")
+				if out, err := utils.Run(provCmd); err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Provider yaml:\n%s\n", out)
+				}
+				eventsCmd := exec.Command("kubectl", "get", "events", "-n", agentsNamespace,
+					"--sort-by=.lastTimestamp")
+				if out, err := utils.Run(eventsCmd); err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "test-agents events:\n%s\n", out)
+				}
+				logsCmd := exec.Command("kubectl", "logs",
+					"-n", "omnia-system",
+					"-l", "control-plane=controller-manager",
+					"--tail=300", "--all-containers=true")
+				if out, err := utils.Run(logsCmd); err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "controller-manager logs:\n%s\n", out)
+				}
+			})
+
 			By("verifying the AgentRuntime creates a Deployment")
 			verifyDeploymentCreated := func(g Gomega) {
 				cmd := exec.Command("kubectl", "get", "deployment", "test-agent",

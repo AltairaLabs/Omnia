@@ -300,22 +300,10 @@ func main() {
 		log.V(1).Info("tools disabled (no config path specified)")
 	}
 
-	// Create gRPC server with increased message size for multimodal content
-	const maxMsgSize = 16 * 1024 * 1024 // 16MB to support base64-encoded images
-	var grpcOpts []grpc.ServerOption
-	grpcOpts = append(grpcOpts,
-		grpc.MaxRecvMsgSize(maxMsgSize),
-		grpc.MaxSendMsgSize(maxMsgSize),
-		grpc.ChainUnaryInterceptor(pkruntime.PolicyUnaryServerInterceptor()),
-		grpc.ChainStreamInterceptor(pkruntime.PolicyStreamServerInterceptor()),
-	)
-	if tracingProvider != nil {
-		grpcOpts = append(grpcOpts, grpc.StatsHandler(otelgrpc.NewServerHandler(
-			otelgrpc.WithTracerProvider(tracingProvider.TracerProvider()),
-			otelgrpc.WithFilter(isNotHealthCheck),
-		)))
-	}
-	grpcServer := grpc.NewServer(grpcOpts...)
+	// Create gRPC server with policy interceptors and optional tracing. Factored
+	// out so wiring tests can assert the real server has the interceptors
+	// installed.
+	grpcServer := buildGRPCServer(tracingProvider)
 	runtimev1.RegisterRuntimeServiceServer(grpcServer, runtimeServer)
 
 	// Register health service
@@ -431,4 +419,25 @@ func enrichToolRegistryMeta(cfg *pkruntime.Config, server *pkruntime.Server, log
 // isNotHealthCheck filters out gRPC health check RPCs from tracing.
 func isNotHealthCheck(info *stats.RPCTagInfo) bool {
 	return info.FullMethodName != "/omnia.runtime.v1.RuntimeService/Health"
+}
+
+// buildGRPCServer constructs the runtime gRPC server with the policy
+// interceptors and, optionally, the OpenTelemetry stats handler. It is
+// factored out of run so wiring tests can assert that the interceptors are
+// installed on the real server. See issue #714.
+func buildGRPCServer(tracingProvider *tracing.Provider) *grpc.Server {
+	const maxMsgSize = 16 * 1024 * 1024 // 16MB to support base64-encoded images
+	opts := []grpc.ServerOption{
+		grpc.MaxRecvMsgSize(maxMsgSize),
+		grpc.MaxSendMsgSize(maxMsgSize),
+		grpc.ChainUnaryInterceptor(pkruntime.PolicyUnaryServerInterceptor()),
+		grpc.ChainStreamInterceptor(pkruntime.PolicyStreamServerInterceptor()),
+	}
+	if tracingProvider != nil {
+		opts = append(opts, grpc.StatsHandler(otelgrpc.NewServerHandler(
+			otelgrpc.WithTracerProvider(tracingProvider.TracerProvider()),
+			otelgrpc.WithFilter(isNotHealthCheck),
+		)))
+	}
+	return grpc.NewServer(opts...)
 }
