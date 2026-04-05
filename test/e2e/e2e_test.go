@@ -2057,16 +2057,6 @@ spec:
 		})
 
 		It("should handle client-side tool execution", func() {
-			// This spec has never run successfully in CI since it was added in
-			// #617/#621 on 2026-03-14 — the same day Core E2E went red for
-			// unrelated reasons. #731 fixed the upstream blockers (controller
-			// RBAC, workspace finalizer pagination, missing ClusterRole, kustomize
-			// namePrefix) and the suite now reaches this spec for the first time,
-			// where it times out: the client-tool-test python pod reaches phase
-			// Error. Tracked separately in #734. Skipping here to unblock the
-			// rest of Core E2E — 17 specs of value are now passing once this
-			// latent bug stops blocking the Ordered container.
-			Skip("see #734 — client-side tool execution spec has never run in CI")
 			By("creating ConfigMaps for client-tool PromptPack and mock config")
 			clientToolPackManifest := `
 apiVersion: v1
@@ -2299,16 +2289,18 @@ spec:
                   continue
 
               if msg_type == "tool_call":
+                  # All WebSocket tool_call messages are client-side by
+                  # definition — server/platform tools never reach the WS,
+                  # so the protocol has no "execution" field to filter on.
                   tc = msg.get("tool_call", {})
-                  if tc.get("execution") == "client":
-                      tool_call_info = tc
-                      result_payload = tool_result_fn(tc)
-                      result_msg = {
-                          "type": "tool_result",
-                          "session_id": session_id,
-                          "tool_result": result_payload,
-                      }
-                      await ws.send(json.dumps(result_msg))
+                  tool_call_info = tc
+                  result_payload = tool_result_fn(tc)
+                  result_msg = {
+                      "type": "tool_result",
+                      "session_id": session_id,
+                      "tool_result": result_payload,
+                  }
+                  await ws.send(json.dumps(result_msg))
 
               elif msg_type == "done":
                   done_content = msg.get("content", "")
@@ -2333,8 +2325,7 @@ spec:
               tc, done = await send_and_handle_client_tool(ws, "Where am I?", approve)
 
               assert tc is not None, "Never received client-side tool call"
-              assert tc.get("name") == "get_user_location", f"Wrong tool: {tc.get('name')}"
-              assert tc.get("execution") == "client", f"Wrong execution: {tc.get('execution')}"
+              assert tc.get("name") == "get_location", f"Wrong tool: {tc.get('name')}"
               assert done is not None, "Never received done"
 
               print(f"APPROVE: done={done[:120]}")
