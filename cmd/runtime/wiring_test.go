@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	pkruntime "github.com/altairalabs/omnia/internal/runtime"
 	"github.com/altairalabs/omnia/pkg/policy"
 )
 
@@ -132,4 +133,55 @@ func TestBuildGRPCServer_ReturnsNonNilServer(t *testing.T) {
 		t.Fatal("buildGRPCServer returned nil")
 	}
 	srv.Stop()
+}
+
+// TestConfigDerivedServerOpts_WiresMediaBasePath verifies that
+// configDerivedServerOpts — the helper cmd/runtime/main.go uses to assemble
+// its pkruntime.ServerOption slice — forwards cfg.MediaBasePath to
+// pkruntime.WithMediaBasePath. Without this, the runtime server's
+// mediaResolver is always nil and `mock://` and `file://` media URL
+// resolution silently fails (item 2 of #728).
+//
+// The test applies the slice to a real pkruntime.NewServer call and asserts
+// the resulting server reports a non-nil media resolver via
+// HasMediaResolver(). A regression that removes WithMediaBasePath from the
+// helper — or stops calling the helper from main.go — fails this test.
+func TestConfigDerivedServerOpts_WiresMediaBasePath(t *testing.T) {
+	t.Setenv("OMNIA_AGENT_NAME", "wiring-test")
+	t.Setenv("OMNIA_NAMESPACE", "wiring")
+
+	cfg := &pkruntime.Config{
+		AgentName:     "wiring-test",
+		Namespace:     "wiring",
+		PromptName:    "default",
+		MediaBasePath: t.TempDir(),
+	}
+	opts := configDerivedServerOpts(cfg)
+
+	srv := pkruntime.NewServer(opts...)
+	t.Cleanup(func() { _ = srv.Close() })
+
+	if !srv.HasMediaResolver() {
+		t.Error("configDerivedServerOpts does not wire MediaBasePath — " +
+			"runtime server has nil mediaResolver, mock:// and file:// URL " +
+			"resolution will silently fail")
+	}
+}
+
+// TestConfigDerivedServerOpts_EmptyMediaBasePathLeavesResolverNil guards the
+// inverse: when MediaBasePath is empty, WithMediaBasePath is a no-op and the
+// server has no resolver. If a future change makes the option always set a
+// resolver even for empty paths, we want to notice because it would change
+// production behavior silently.
+func TestConfigDerivedServerOpts_EmptyMediaBasePathLeavesResolverNil(t *testing.T) {
+	cfg := &pkruntime.Config{AgentName: "wiring-test", Namespace: "wiring"}
+	opts := configDerivedServerOpts(cfg)
+
+	srv := pkruntime.NewServer(opts...)
+	t.Cleanup(func() { _ = srv.Close() })
+
+	if srv.HasMediaResolver() {
+		t.Error("configDerivedServerOpts wires a media resolver even though " +
+			"MediaBasePath is empty — WithMediaBasePath semantics changed")
+	}
 }
