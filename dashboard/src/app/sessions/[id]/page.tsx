@@ -327,11 +327,12 @@ export default function SessionDetailPage({
   const defaultTab = searchParams.get("tab") ?? "conversation";
   const [memorySidebarOpen, setMemorySidebarOpen] = useState(false);
   const { data: session, isLoading, error } = useSessionDetail(id);
-  const { data: evalResults } = useSessionEvalResults(id);
-  const { data: rawToolCalls } = useSessionToolCalls(id);
+  const sessionReady = !!session;
+  const { data: evalResults } = useSessionEvalResults(id, sessionReady);
+  const { data: rawToolCalls } = useSessionToolCalls(id, sessionReady);
   const toolCalls = rawToolCalls ? collapseToolCalls(rawToolCalls) : undefined;
-  const { data: providerCalls } = useSessionProviderCalls(id);
-  const { data: runtimeEvents } = useSessionRuntimeEvents(id);
+  const { data: providerCalls } = useSessionProviderCalls(id, sessionReady);
+  const { data: runtimeEvents } = useSessionRuntimeEvents(id, sessionReady);
   const grafana = useGrafana();
   const sessionDashboardUrl = grafana.enabled && session
     ? buildSessionDashboardUrl(grafana, id, session.agentName, session.agentNamespace)
@@ -950,7 +951,7 @@ function ConversationWithDebugPanel({
     hasMore,
     isFetchingMore,
     fetchMore,
-  } = useSessionAllMessages(session.id);
+  } = useSessionAllMessages(session.id, session.status);
 
   // Use paginated messages once loaded, otherwise fall back to session.messages
   const messages = paginatedMessages.length > 0 ? paginatedMessages : session.messages;
