@@ -270,6 +270,7 @@ func main() {
 			MemoryImage:            memoryAPIImage,
 			MemoryImagePullPolicy:  corev1.PullPolicy(memoryAPIImagePullPolicy),
 		},
+		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "Workspace")
 		os.Exit(1)

@@ -36,6 +36,8 @@ import (
 	"github.com/altairalabs/omnia/ee/cmd/arena-dev-console/server"
 	"github.com/altairalabs/omnia/internal/facade"
 	"github.com/altairalabs/omnia/internal/session/httpclient"
+	"github.com/altairalabs/omnia/pkg/k8s"
+	"github.com/altairalabs/omnia/pkg/servicediscovery"
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
@@ -89,14 +91,42 @@ func main() {
 		"workspacePath", *workspacePath,
 	)
 
-	// Initialize session store via session-api.
+	// Start health server early so liveness probes pass during service
+	// discovery retry (same pattern as eval-worker, see #750).
+	go startHealthServer(*healthPort, log)
+
+	// Resolve session-api URL: flag → env var → workspace CRD service discovery.
 	apiURL := *sessionAPIURL
 	if apiURL == "" {
 		apiURL = os.Getenv("SESSION_API_URL")
 	}
 	if apiURL == "" {
-		log.Error(nil, "SESSION_API_URL is required for session recording")
-		os.Exit(1)
+		// Post-#717: resolve from Workspace CRD with retry.
+		k8sClient, _ := k8s.NewClient()
+		resolver := servicediscovery.NewResolver(k8sClient)
+		group := os.Getenv("OMNIA_SERVICE_GROUP")
+		if group == "" {
+			group = "default"
+		}
+		backoff := 2 * time.Second
+		for attempt := 1; attempt <= 15; attempt++ {
+			urls, resolveErr := resolver.ResolveServiceURLs(
+				context.Background(), group,
+			)
+			if resolveErr == nil {
+				apiURL = urls.SessionURL
+				break
+			}
+			log.Info("session-api URL not ready, retrying",
+				"attempt", attempt, "error", resolveErr.Error(),
+				"retryIn", backoff.String())
+			time.Sleep(backoff)
+			backoff = min(backoff*2, 30*time.Second)
+		}
+		if apiURL == "" {
+			log.Error(nil, "failed to resolve session-api URL after retries")
+			os.Exit(1)
+		}
 	}
 	store := httpclient.NewStore(apiURL, log)
 	log.Info("session recording enabled via session-api", "url", apiURL)
@@ -135,32 +165,14 @@ func main() {
 		IdleTimeout:  idleTimeout,
 	}
 
-	// Create health check server
-	healthMux := http.NewServeMux()
-	healthMux.HandleFunc("/healthz", healthzHandler)
-	healthMux.HandleFunc("/readyz", readyzHandler(handler))
-
-	healthServer := &http.Server{
-		Addr:         fmt.Sprintf(":%d", *healthPort),
-		Handler:      healthMux,
-		ReadTimeout:  readTimeout,
-		WriteTimeout: writeTimeout,
-	}
-
-	// Start servers
-	errChan := make(chan error, 2)
+	// Health server already started early (before service discovery).
+	// Start only the facade server here.
+	errChan := make(chan error, 1)
 
 	go func() {
 		log.Info("starting facade server", "addr", facadeServer.Addr)
 		if err := facadeServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errChan <- fmt.Errorf("facade server error: %w", err)
-		}
-	}()
-
-	go func() {
-		log.Info("starting health server", "addr", healthServer.Addr)
-		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errChan <- fmt.Errorf("health server error: %w", err)
 		}
 	}()
 
@@ -189,9 +201,8 @@ func main() {
 	if err := facadeServer.Shutdown(ctx); err != nil {
 		log.Error(err, "error shutting down facade server")
 	}
-	if err := healthServer.Shutdown(ctx); err != nil {
-		log.Error(err, "error shutting down health server")
-	}
+	// Health server runs on a basic http.Server started in startHealthServer;
+	// it shuts down when the process exits.
 
 	log.Info("shutdown complete")
 }
@@ -286,6 +297,24 @@ func handleReload(handler *server.PromptKitHandler, log logr.Logger) http.Handle
 		log.Info("configuration reloaded", "path", configPath)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"reloaded"}`))
+	}
+}
+
+// startHealthServer starts a minimal health endpoint so Kubernetes liveness
+// probes pass while the main server is still initialising (e.g. during
+// service-discovery retry). The full readyz handler is added later.
+func startHealthServer(port int, log logr.Logger) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", healthzHandler)
+	mux.HandleFunc("/readyz", healthzHandler) // basic readyz until full handler is wired
+	srv := &http.Server{
+		Addr:              fmt.Sprintf(":%d", port),
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	log.Info("starting early health server", "addr", srv.Addr)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Error(err, "early health server failed")
 	}
 }
 

@@ -765,7 +765,7 @@ func (r *ArenaDevSessionReconciler) resolveSessionURLForWorkspace(ctx context.Co
 	for _, ws := range list.Items {
 		if ws.Spec.Namespace.Name == namespace {
 			for _, sg := range ws.Status.Services {
-				if sg.Name == "default" && sg.Ready {
+				if sg.Name == "default" && sg.SessionURL != "" {
 					return sg.SessionURL
 				}
 			}

@@ -119,6 +119,8 @@ func TestResolveServiceURLs_ServiceGroupNotReady(t *testing.T) {
 	t.Setenv(envMemoryAPIURL, "")
 	t.Setenv(envOmniaNamespace, "workspace-ns")
 
+	// Ready=false but URLs populated — should succeed. Callers that only
+	// need session-api shouldn't be blocked by memory-api failures.
 	ws := makeWorkspaceWithStatus("my-workspace", "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
 		{
 			Name:       "default",
@@ -134,9 +136,37 @@ func TestResolveServiceURLs_ServiceGroupNotReady(t *testing.T) {
 		Build()
 
 	r := NewResolver(fakeClient)
+	urls, err := r.ResolveServiceURLs(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urls.SessionURL != "http://session.workspace-ns.svc.cluster.local" {
+		t.Errorf("expected session URL, got %s", urls.SessionURL)
+	}
+}
+
+func TestResolveServiceURLs_ServiceGroupNoURLs(t *testing.T) {
+	t.Setenv(envSessionAPIURL, "")
+	t.Setenv(envMemoryAPIURL, "")
+	t.Setenv(envOmniaNamespace, "workspace-ns")
+
+	// No URLs populated — should fail even if the group exists.
+	ws := makeWorkspaceWithStatus("my-workspace", "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
+		{
+			Name:  "default",
+			Ready: false,
+		},
+	})
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(ws).
+		Build()
+
+	r := NewResolver(fakeClient)
 	_, err := r.ResolveServiceURLs(context.Background(), "default")
 	if err == nil {
-		t.Fatal("expected error when service group not ready")
+		t.Fatal("expected error when service group has no URLs")
 	}
 }
 

@@ -23,6 +23,7 @@ import (
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -125,6 +126,15 @@ func (r *WorkspaceReconciler) reconcileManagedServiceGroup(
 	sessionDepName := fmt.Sprintf("session-%s-%s", workspace.Name, sg.Name)
 	memoryDepName := fmt.Sprintf("memory-%s-%s", workspace.Name, sg.Name)
 
+	// Reconcile ServiceAccounts for service pods. Per-workspace session-api
+	// and memory-api need to read the cluster-scoped Workspace CRD to
+	// resolve their own config (workspace name, service group, DB secret).
+	for _, depName := range []string{sessionDepName, memoryDepName} {
+		if err := r.reconcileServicePodSA(ctx, workspace, namespace, depName); err != nil {
+			return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("service account %s: %w", depName, err)
+		}
+	}
+
 	// Reconcile session-api deployment and service
 	sessionDep := r.ServiceBuilder.BuildSessionDeployment(workspace.Name, namespace, sg)
 	if err := r.reconcileManagedDeployment(ctx, workspace, namespace, sessionDep); err != nil {
@@ -219,6 +229,88 @@ func (r *WorkspaceReconciler) isDeploymentReady(ctx context.Context, name, names
 		return false
 	}
 	return dep.Status.ReadyReplicas > 0
+}
+
+// reconcileServicePodSA ensures a ServiceAccount and ClusterRoleBinding exist
+// for a per-workspace service pod. The service pods (session-api, memory-api)
+// need to read the cluster-scoped Workspace CRD to resolve their own config.
+// The ClusterRoleBinding grants the agent-workspace-reader ClusterRole which
+// provides get/list/watch on Workspaces.
+func (r *WorkspaceReconciler) reconcileServicePodSA(
+	ctx context.Context,
+	workspace *omniav1alpha1.Workspace,
+	namespace, name string,
+) error {
+	// ServiceAccount
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+	}
+	existing := &corev1.ServiceAccount{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(sa), existing); apierrors.IsNotFound(err) {
+		if err := controllerutil.SetControllerReference(workspace, sa, r.Scheme); err != nil {
+			return err
+		}
+		if err := r.Create(ctx, sa); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+
+	// ClusterRoleBinding — binds the SA to the agent-workspace-reader ClusterRole
+	// which grants get/list/watch on Workspaces.
+	crbName := fmt.Sprintf("service-%s-%s", namespace, name)
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: crbName},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      name,
+			Namespace: namespace,
+		}},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     r.AgentWorkspaceReaderClusterRole,
+		},
+	}
+	existingCRB := &rbacv1.ClusterRoleBinding{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(crb), existingCRB); apierrors.IsNotFound(err) {
+		if err := r.Create(ctx, crb); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+
+	// RoleBinding — grants the service pod access to secrets in its namespace
+	// (needed to read database connection strings from the secretRef).
+	rbName := fmt.Sprintf("service-%s-secrets", name)
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: rbName, Namespace: namespace},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      name,
+			Namespace: namespace,
+		}},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     clusterRoleEditor,
+		},
+	}
+	existingRB := &rbacv1.RoleBinding{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(rb), existingRB); apierrors.IsNotFound(err) {
+		if err := controllerutil.SetControllerReference(workspace, rb, r.Scheme); err != nil {
+			return err
+		}
+		if err := r.Create(ctx, rb); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // cleanupRemovedServiceGroups deletes Deployments and Services for service groups

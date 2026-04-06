@@ -95,6 +95,11 @@ func BuildService(name, namespace, component, workspaceName, groupName string) *
 	}
 }
 
+// serviceAccountName returns the ServiceAccount name for a per-workspace service deployment.
+func serviceAccountName(deploymentName string) string {
+	return deploymentName
+}
+
 // ServiceURL returns the in-cluster HTTP URL for the given service.
 func ServiceURL(serviceName, namespace string) string {
 	return fmt.Sprintf("http://%s.%s:%d", serviceName, namespace, servicePort)
@@ -119,6 +124,7 @@ func buildServiceDeployment(name, namespace, image string, pullPolicy corev1.Pul
 					Labels: labels,
 				},
 				Spec: corev1.PodSpec{
+					ServiceAccountName: serviceAccountName(name),
 					Containers: []corev1.Container{
 						{
 							Name:            name,

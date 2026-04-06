@@ -51,11 +51,10 @@ func effectiveEvalNamespace() string {
 const evalCurlPod = "eval-e2e-curl"
 
 // sessionAPIEndpoint returns the in-cluster session-api URL.
+// Post-#717, session-api is per-workspace in the workspace namespace.
 func sessionAPIEndpoint() string {
 	if predeployed {
-		return fmt.Sprintf(
-			"http://omnia-session-api.%s.svc.cluster.local:8080",
-			namespace)
+		return "http://session-dev-agents-default.dev-agents.svc.cluster.local:8080"
 	}
 	return fmt.Sprintf(
 		"http://e2e-eval-session-api.%s.svc.cluster.local:8080",
@@ -123,17 +122,20 @@ var _ = Describe("Eval Worker Pipeline", Ordered, Label("arena"), func() {
 			Eventually(verifyWorker, 2*time.Minute, 2*time.Second).
 				Should(Succeed())
 
-			By("verifying existing session-api is ready (predeployed)")
+			// Post-#717: session-api is per-workspace, deployed by the workspace
+			// controller in the workspace namespace (not omnia-system).
+			By("verifying per-workspace session-api is ready")
 			verifySAPI := func(g Gomega) {
 				cmd := exec.Command("kubectl", "get", "deployment",
-					"omnia-session-api",
-					"-n", namespace,
+					"session-dev-agents-default",
+					"-n", "dev-agents",
 					"-o", "jsonpath={.status.readyReplicas}")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).NotTo(BeEmpty())
 				g.Expect(output).NotTo(Equal("0"))
 			}
-			Eventually(verifySAPI, 2*time.Minute, 2*time.Second).
+			Eventually(verifySAPI, 3*time.Minute, 2*time.Second).
 				Should(Succeed())
 		}
 

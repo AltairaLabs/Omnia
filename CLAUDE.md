@@ -174,6 +174,36 @@ make manifests                                    # Regenerate CRD YAML + RBAC
 make test-e2e                                     # Full E2E suite (creates kind cluster)
 ```
 
+### Running E2E Tests Locally
+
+**Always debug E2E failures locally** — never push to CI and wait for logs. Each CI cycle is ~15 min; local runs give immediate `kubectl logs` access.
+
+```bash
+# Core E2E (non-arena tests)
+kind create cluster --name omnia-test-e2e --wait 60s
+env GOWORK=off KIND_CLUSTER=omnia-test-e2e E2E_SKIP_CLEANUP=true \
+  go test -tags=e2e ./test/e2e/ -v -ginkgo.v \
+  -ginkgo.label-filter='!arena' -timeout 20m
+
+# Arena E2E (enterprise features)
+env GOWORK=off ./scripts/setup-arena-e2e.sh
+kubectl config use-context kind-omnia-arena-e2e
+env GOWORK=off E2E_SKIP_SETUP=true E2E_PREDEPLOYED=true ENABLE_ARENA_E2E=true \
+  E2E_SKIP_CLEANUP=true go test -tags=e2e ./test/e2e/ -v -ginkgo.v \
+  -ginkgo.label-filter=arena -timeout 30m
+
+# After failure, inspect pods directly:
+kubectl logs -n test-agents <pod> --all-containers
+kubectl get pods -n test-agents -o wide
+```
+
+**Critical gotchas:**
+- `GOWORK=off` — required; `promptkit-local` has type mismatches with the published SDK
+- `KIND_CLUSTER=omnia-test-e2e` — the test defaults to `"kind"`, mismatch = "no nodes found"
+- `E2E_SKIP_CLEANUP=true` — leaves resources in cluster for debugging
+- **Never use `--ginkgo.focus` on specs inside Ordered containers** — it skips the `BeforeAll` that deploys the operator, so the focused spec fails because nothing is deployed
+- The cluster must exist before `go test` — `BeforeSuite` doesn't create it
+
 ## SonarCloud Quality Gate (CI)
 
 SonarCloud runs on every PR and enforces the **Sonar Way** quality profile. The quality gate checks **new code only** (changes in the PR):
