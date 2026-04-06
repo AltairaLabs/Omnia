@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/altairalabs/omnia/internal/doctor"
@@ -68,10 +69,18 @@ func ArenaControllerCheck(baseURL string) doctor.Check {
 
 			resp, err := client.Do(req)
 			if err != nil {
-				// If the arena controller is not deployed, skip rather than fail.
+				// DNS resolution failure → service doesn't exist → skip.
+				// Connection refused / timeout → service exists but broken → fail.
+				errStr := err.Error()
+				if strings.Contains(errStr, "no such host") || strings.Contains(errStr, "server misbehaving") {
+					return doctor.TestResult{
+						Status: doctor.StatusSkip,
+						Detail: "arena controller not deployed",
+					}
+				}
 				return doctor.TestResult{
-					Status: doctor.StatusSkip,
-					Detail: "arena controller not deployed",
+					Status: doctor.StatusFail,
+					Detail: fmt.Sprintf("arena controller unreachable: %s", errStr),
 				}
 			}
 			defer func() { _ = resp.Body.Close() }()

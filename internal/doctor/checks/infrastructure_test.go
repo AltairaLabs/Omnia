@@ -332,16 +332,17 @@ func TestArenaControllerCheck_Fail_ServerError(t *testing.T) {
 	}
 }
 
-func TestArenaControllerCheck_Skip_Unreachable(t *testing.T) {
+func TestArenaControllerCheck_Fail_ConnectionRefused(t *testing.T) {
 	check := ArenaControllerCheck("http://127.0.0.1:1")
 	result := check.Run(context.Background())
 
-	// Unreachable arena controller should skip, not fail (not deployed).
-	if result.Status != doctor.StatusSkip {
-		t.Errorf("expected skip, got %s: %s", result.Status, result.Detail)
+	// Connection refused means the service exists but is broken — fail, not skip.
+	// Skip is reserved for DNS resolution failure (service doesn't exist at all).
+	if result.Status != doctor.StatusFail {
+		t.Errorf("expected fail, got %s: %s", result.Status, result.Detail)
 	}
-	if !strings.Contains(result.Detail, "not deployed") {
-		t.Errorf("expected detail to contain 'not deployed', got %q", result.Detail)
+	if !strings.Contains(result.Detail, "unreachable") {
+		t.Errorf("expected detail to contain 'unreachable', got %q", result.Detail)
 	}
 }
 

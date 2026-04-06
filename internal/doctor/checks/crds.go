@@ -56,7 +56,13 @@ func listCRDPhases[T any](ctx context.Context, k8s client.Client, list client.Ob
 	return &crdListResult{count: len(all), phases: phases}, nil
 }
 
-// checkCRDExists is a generic check: list CRD items, fail if empty, report phase counts.
+// healthyPhases are CRD phases that indicate a working resource.
+var healthyPhases = map[string]bool{
+	"Running": true, "Active": true, "Ready": true, "Succeeded": true, "": true,
+}
+
+// checkCRDExists is a generic check: list CRD items, fail if empty, warn if
+// none are in a healthy phase. Prevents false passes when all items are Failed.
 func checkCRDExists[T any](ctx context.Context, k8s client.Client, typeName string, list client.ObjectList, items func() []T, getPhase func(T) string) doctor.TestResult {
 	result, err := listCRDPhases(ctx, k8s, list, items, getPhase)
 	if err != nil {
@@ -65,10 +71,19 @@ func checkCRDExists[T any](ctx context.Context, k8s client.Client, typeName stri
 	if result.count == 0 {
 		return doctor.TestResult{Status: doctor.StatusFail, Detail: fmt.Sprintf("no %s found", typeName)}
 	}
-	return doctor.TestResult{
-		Status: doctor.StatusPass,
-		Detail: fmt.Sprintf("found %d %s: %s", result.count, typeName, formatPhaseCounts(result.phases)),
+	detail := fmt.Sprintf("found %d %s: %s", result.count, typeName, formatPhaseCounts(result.phases))
+	// Fail if no items are in a healthy phase (e.g., all Failed/Error).
+	hasHealthy := false
+	for phase := range result.phases {
+		if healthyPhases[phase] {
+			hasHealthy = true
+			break
+		}
 	}
+	if !hasHealthy {
+		return doctor.TestResult{Status: doctor.StatusFail, Detail: detail + " (none healthy)"}
+	}
+	return doctor.TestResult{Status: doctor.StatusPass, Detail: detail}
 }
 
 func (c *CRDChecker) checkAgentRuntimes(ctx context.Context) doctor.TestResult {

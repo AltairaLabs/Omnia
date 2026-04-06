@@ -302,7 +302,10 @@ func (m *MemoryChecker) checkToolCallErrors(ctx context.Context, sessionID, tool
 		return ""
 	}
 	toolCalls, err := store.GetToolCalls(ctx, sessionID, 0, 0)
-	if err != nil || len(toolCalls) == 0 {
+	if err != nil {
+		return fmt.Sprintf("failed to query tool calls: %v", err)
+	}
+	if len(toolCalls) == 0 {
 		return ""
 	}
 	for _, tc := range toolCalls {

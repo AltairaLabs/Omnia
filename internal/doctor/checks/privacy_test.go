@@ -306,14 +306,15 @@ func TestCheckAuditLogWritten_Pass(t *testing.T) {
 	srv := (&mockPrivacyServer{
 		auditHandler: func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"entries":[{"eventType":"memory_created"}],"total":1,"hasMore":false}`))
+			// Return entry with memory_id matching the test save response ("priv-test-id").
+			_, _ = w.Write([]byte(`{"entries":[{"eventType":"memory_created","memory_id":"priv-test-id"}],"total":1,"hasMore":false}`))
 		},
 	}).serve(t)
 	defer srv.Close()
 
 	result := newPrivacyCheckerForServer(srv).checkAuditLogWritten(t.Context())
 	assert.Equal(t, doctor.StatusPass, result.Status)
-	assert.Contains(t, result.Detail, "memory_created")
+	assert.Contains(t, result.Detail, "priv-test-id")
 }
 
 func TestCheckAuditLogWritten_Fail_NoEvents(t *testing.T) {
@@ -327,7 +328,7 @@ func TestCheckAuditLogWritten_Fail_NoEvents(t *testing.T) {
 
 	result := newPrivacyCheckerForServer(srv).checkAuditLogWritten(t.Context())
 	assert.Equal(t, doctor.StatusFail, result.Status)
-	assert.Contains(t, result.Detail, "no memory_created")
+	assert.Contains(t, result.Detail, "no audit event found")
 }
 
 func TestCheckAuditLogWritten_Skip_EndpointNotAvailable(t *testing.T) {
