@@ -9,7 +9,10 @@ metadata:
     {{- include "omnia.labels" . | nindent 4 }}
     omnia.altairalabs.ai/rbac: workspace
 rules:
-  # Full access to Omnia resources
+  # Full access to Omnia resources. Arena CRDs are listed unconditionally —
+  # a ClusterRole granting access to an uninstalled CRD simply has no effect,
+  # and listing them here keeps this chart in lock-step with
+  # config/rbac/workspace_owner_role.yaml (see #733).
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
@@ -17,12 +20,10 @@ rules:
       - promptpacks
       - toolregistries
       - providers
-      {{- if .Values.enterprise.enabled }}
       - arenasources
       - arenajobs
       - arenatemplatesources
       - arenadevsessions
-      {{- end }}
     verbs:
       - create
       - delete
@@ -39,12 +40,10 @@ rules:
       - promptpacks/status
       - toolregistries/status
       - providers/status
-      {{- if .Values.enterprise.enabled }}
       - arenasources/status
       - arenajobs/status
       - arenatemplatesources/status
       - arenadevsessions/status
-      {{- end }}
     verbs:
       - get
   # Manage workspace members (via patch access)
@@ -110,18 +109,16 @@ metadata:
     {{- include "omnia.labels" . | nindent 4 }}
     omnia.altairalabs.ai/rbac: workspace
 rules:
-  # CRUD on most Omnia resources
+  # CRUD on most Omnia resources (arena CRDs unconditional — see owner role).
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
       - agentruntimes
       - promptpacks
-      {{- if .Values.enterprise.enabled }}
       - arenasources
       - arenajobs
       - arenatemplatesources
       - arenadevsessions
-      {{- end }}
     verbs:
       - create
       - delete
@@ -136,12 +133,10 @@ rules:
     resources:
       - agentruntimes/status
       - promptpacks/status
-      {{- if .Values.enterprise.enabled }}
       - arenasources/status
       - arenajobs/status
       - arenatemplatesources/status
       - arenadevsessions/status
-      {{- end }}
     verbs:
       - get
   # Read-only on shared resources (Providers, ToolRegistries)
@@ -223,7 +218,7 @@ metadata:
     {{- include "omnia.labels" . | nindent 4 }}
     omnia.altairalabs.ai/rbac: workspace
 rules:
-  # Read-only on all Omnia resources
+  # Read-only on all Omnia resources (arena CRDs unconditional — see owner role).
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
@@ -231,12 +226,10 @@ rules:
       - promptpacks
       - toolregistries
       - providers
-      {{- if .Values.enterprise.enabled }}
       - arenasources
       - arenajobs
       - arenatemplatesources
       - arenadevsessions
-      {{- end }}
     verbs:
       - get
       - list
@@ -249,12 +242,10 @@ rules:
       - promptpacks/status
       - toolregistries/status
       - providers/status
-      {{- if .Values.enterprise.enabled }}
       - arenasources/status
       - arenajobs/status
       - arenatemplatesources/status
       - arenadevsessions/status
-      {{- end }}
     verbs:
       - get
   # Read ConfigMaps

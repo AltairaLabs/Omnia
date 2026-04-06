@@ -94,6 +94,7 @@ type WorkspaceReconciler struct {
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=workspaces/finalizers,verbs=update
 // +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=serviceaccounts/token,verbs=create
 // +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
@@ -104,8 +105,8 @@ type WorkspaceReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments;replicasets,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes;promptpacks;toolregistries;providers;arenasources;arenajobs,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenasources/status;arenajobs/status,verbs=get
+// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes;promptpacks;toolregistries;providers;arenasources;arenajobs;arenatemplatesources;arenadevsessions,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenasources/status;arenajobs/status;arenatemplatesources/status;arenadevsessions/status,verbs=get
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.

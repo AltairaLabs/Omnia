@@ -372,6 +372,21 @@ jobs:
           --set redis.enabled=true \
           > /dev/null
 
+    # Verify kustomize and Helm RBAC are in sync. The drift between these
+    # two paths shipped two separate RBAC regressions on main for ~3 weeks
+    # (see #733). This check catches any future hand-edit that touches one
+    # side without the other.
+    - name: Install kustomize and yq
+      run: |
+        curl --retry 3 -Lo kustomize.tar.gz https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.5.0/kustomize_v5.5.0_linux_amd64.tar.gz
+        tar -xzf kustomize.tar.gz
+        sudo mv kustomize /usr/local/bin/kustomize
+        sudo curl --retry 3 -Lo /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
+        sudo chmod +x /usr/local/bin/yq
+
+    - name: Verify RBAC sync (kustomize vs Helm)
+      run: ./hack/verify-rbac-sync.sh
+
   helm-validate-skip:
     name: Helm Validation
     runs-on: ubuntu-latest
