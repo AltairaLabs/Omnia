@@ -63,6 +63,11 @@ type AgentRuntimeReconciler struct {
 	// AgentWorkspaceReaderClusterRole is the name of the ClusterRole that grants
 	// agent pods read access to Workspace CRDs (for service URL resolution).
 	AgentWorkspaceReaderClusterRole string
+	// PolicyProxyImage is the container image for the ToolPolicy enforcement
+	// sidecar. When a ToolPolicy exists in the agent's namespace, this sidecar
+	// is injected into the agent pod to evaluate CEL rules before tool execution.
+	// If empty, the default image from policy_proxy_sidecar.go is used.
+	PolicyProxyImage string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch;create;update;patch;delete
