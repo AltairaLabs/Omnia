@@ -99,12 +99,28 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Resolve the session-api URL. Prefers SESSION_API_URL for back-compat,
-	// otherwise looks up Workspace.status.services via the resolver.
+	// Resolve the session-api URL with retry. Prefers SESSION_API_URL for
+	// back-compat, otherwise looks up Workspace.status.services via the
+	// resolver. Retries because per-workspace services (session-api,
+	// memory-api) may still be starting when the eval-worker boots.
 	resolver := servicediscovery.NewResolver(k8sClient)
-	sessionAPIURL, err := resolveSessionAPIURL(context.Background(), resolver, cfg.SessionAPIURL)
+	var sessionAPIURL string
+	backoff := 2 * time.Second
+	for attempt := 1; attempt <= 15; attempt++ {
+		sessionAPIURL, err = resolveSessionAPIURL(
+			context.Background(), resolver, cfg.SessionAPIURL,
+		)
+		if err == nil {
+			break
+		}
+		logger.Warn("session-api URL not ready, retrying",
+			"attempt", attempt, "error", err.Error(),
+			"retryIn", backoff.String())
+		time.Sleep(backoff)
+		backoff = min(backoff*2, 30*time.Second)
+	}
 	if err != nil {
-		logger.Error("failed to resolve session-api URL", "error", err)
+		logger.Error("failed to resolve session-api URL after retries", "error", err)
 		os.Exit(1)
 	}
 	cfg.SessionAPIURL = sessionAPIURL
