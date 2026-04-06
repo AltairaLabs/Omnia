@@ -17,6 +17,7 @@ limitations under the License.
 package runtime
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
@@ -29,15 +30,45 @@ import (
 // and mock tool_calls from the config are never emitted. See #734.
 func (s *Server) createMockProvider() (*mock.ToolProvider, error) {
 	if s.mockConfigPath != "" {
-		// Use file-based mock repository
 		repo, err := mock.NewFileMockRepository(s.mockConfigPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load mock config: %w", err)
 		}
-		return mock.NewToolProviderWithRepository("mock", "mock-model", false, repo), nil
+		// Wrap the repo so that the Omnia runtime's default scenario ("default")
+		// is used when the PromptKit mock provider receives an empty ScenarioID.
+		// Without this, GetTurn rejects empty IDs and falls through to the
+		// text-only defaultResponse, bypassing tool_calls turns. See #734.
+		wrapped := &defaultScenarioRepo{inner: repo}
+		return mock.NewToolProviderWithRepository("mock", "mock-model", false, wrapped), nil
 	}
-	// Use in-memory mock provider with default responses
 	return mock.NewToolProvider("mock", "mock-model", false, nil), nil
+}
+
+// defaultScenarioRepo wraps a ResponseRepository and substitutes "default"
+// for empty ScenarioIDs. This bridges the gap between Omnia's scenario
+// handling (which returns ScenarioDefault="default" but doesn't inject it
+// into the SDK's request metadata) and PromptKit's mock provider (which
+// treats empty ScenarioID as "no scenario" and skips scenario turns).
+type defaultScenarioRepo struct {
+	inner mock.ResponseRepository
+}
+
+func (r *defaultScenarioRepo) GetResponse(
+	ctx context.Context, params mock.ResponseParams,
+) (string, error) {
+	if params.ScenarioID == "" {
+		params.ScenarioID = ScenarioDefault
+	}
+	return r.inner.GetResponse(ctx, params)
+}
+
+func (r *defaultScenarioRepo) GetTurn(
+	ctx context.Context, params mock.ResponseParams,
+) (*mock.Turn, error) {
+	if params.ScenarioID == "" {
+		params.ScenarioID = ScenarioDefault
+	}
+	return r.inner.GetTurn(ctx, params)
 }
 
 // createProviderFromConfig creates a PromptKit provider based on runtime configuration.

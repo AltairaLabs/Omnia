@@ -2123,7 +2123,7 @@ data:
   mock-responses.yaml: |
     defaultResponse: "I can help with location questions."
     scenarios:
-      "":
+      default:
         turns:
           1:
             type: tool_calls
