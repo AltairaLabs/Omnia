@@ -101,7 +101,12 @@ func (r *Resolver) resolveFromWorkspace(ctx context.Context, serviceGroup string
 		if svc.Name != serviceGroup {
 			continue
 		}
-		if !svc.Ready {
+		// Return URLs as soon as they're populated, even if the group isn't
+		// fully Ready. Ready requires ALL services (session + memory) to be
+		// available, but callers like the eval-worker only need session-api.
+		// Blocking on Ready causes unnecessary CrashLoopBackOff when one
+		// service has an independent failure (e.g. memory-api migration).
+		if svc.SessionURL == "" {
 			return nil, fmt.Errorf("service group %q is not ready", serviceGroup)
 		}
 		return &ServiceURLs{

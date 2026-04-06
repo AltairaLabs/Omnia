@@ -27,6 +27,7 @@ ARENA_CONTROLLER_IMAGE="omnia-arena-controller-dev:latest"
 ARENA_WORKER_IMAGE="omnia-arena-worker-dev:latest"
 ARENA_DEV_CONSOLE_IMAGE="omnia-arena-dev-console-dev:latest"
 SESSION_API_IMAGE="omnia-session-api-dev:latest"
+MEMORY_API_IMAGE="omnia-memory-api-dev:latest"
 EVAL_WORKER_IMAGE="omnia-eval-worker-dev:latest"
 
 cd "$PROJECT_ROOT"
@@ -172,7 +173,7 @@ fi
 
 # Load images into kind
 log_info "Loading images into kind..."
-for img in "$OPERATOR_IMAGE" "$FACADE_IMAGE" "$RUNTIME_IMAGE" "$ARENA_CONTROLLER_IMAGE" "$ARENA_WORKER_IMAGE" "$ARENA_DEV_CONSOLE_IMAGE" "$SESSION_API_IMAGE" "$EVAL_WORKER_IMAGE"; do
+for img in "$OPERATOR_IMAGE" "$FACADE_IMAGE" "$RUNTIME_IMAGE" "$ARENA_CONTROLLER_IMAGE" "$ARENA_WORKER_IMAGE" "$ARENA_DEV_CONSOLE_IMAGE" "$SESSION_API_IMAGE" "$MEMORY_API_IMAGE" "$EVAL_WORKER_IMAGE"; do
     kind load docker-image "$img" --name "$KIND_CLUSTER" &
 done
 wait
@@ -320,6 +321,13 @@ kubectl rollout status deployment/omnia-arena-controller -n "$NAMESPACE" --timeo
 kubectl rollout status statefulset/omnia-redis-master -n "$NAMESPACE" --timeout=3m
 kubectl rollout status statefulset/omnia-postgres -n "$NAMESPACE" --timeout=3m
 
+# Create separate databases for session-api and memory-api. They cannot share
+# a database because their schema migrations use the same tracking table and
+# collide. The dev postgres initializes with a single "omnia" database.
+log_info "Creating per-service databases in postgres..."
+kubectl exec -n "$NAMESPACE" omnia-postgres-0 -- psql -U omnia -d omnia -c "CREATE DATABASE omnia_sessions;" 2>/dev/null || true
+kubectl exec -n "$NAMESPACE" omnia-postgres-0 -- psql -U omnia -d omnia -c "CREATE DATABASE omnia_memory;" 2>/dev/null || true
+
 # Create Workspace CRD so the operator provisions per-workspace session-api
 # and memory-api instances in the dev-agents namespace.
 log_info "Creating dev-agents Workspace..."
@@ -336,7 +344,16 @@ metadata:
   namespace: dev-agents
 type: Opaque
 stringData:
-  POSTGRES_CONN: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia?sslmode=disable"
+  POSTGRES_CONN: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia_sessions?sslmode=disable"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: omnia-postgres-memory
+  namespace: dev-agents
+type: Opaque
+stringData:
+  POSTGRES_CONN: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia_memory?sslmode=disable"
 ---
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: Workspace
@@ -360,7 +377,7 @@ spec:
       memory:
         database:
           secretRef:
-            name: omnia-postgres
+            name: omnia-postgres-memory
 EOF
 
 log_info "Waiting for per-workspace services..."

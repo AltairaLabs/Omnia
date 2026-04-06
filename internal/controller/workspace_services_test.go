@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -39,6 +40,7 @@ func testScheme() *k8sruntime.Scheme {
 	_ = omniav1alpha1.AddToScheme(s)
 	_ = corev1.AddToScheme(s)
 	_ = appsv1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
 	return s
 }
 
@@ -69,9 +71,10 @@ func newTestReconciler(scheme *k8sruntime.Scheme, objs ...k8sruntime.Object) *Wo
 		MemoryImagePullPolicy:  corev1.PullIfNotPresent,
 	}
 	return &WorkspaceReconciler{
-		Client:         cl,
-		Scheme:         scheme,
-		ServiceBuilder: sb,
+		Client:                          cl,
+		Scheme:                          scheme,
+		ServiceBuilder:                  sb,
+		AgentWorkspaceReaderClusterRole: "omnia-agent-workspace-reader",
 	}
 }
 

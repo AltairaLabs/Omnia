@@ -87,6 +87,11 @@ type WorkspaceReconciler struct {
 	// ServiceBuilder builds Deployment and Service objects for per-workspace
 	// session-api and memory-api instances.
 	ServiceBuilder *ServiceBuilder
+
+	// AgentWorkspaceReaderClusterRole is the ClusterRole that grants
+	// get/list/watch on Workspaces. Per-workspace service pods (session-api,
+	// memory-api) need this to resolve their config from the Workspace CRD.
+	AgentWorkspaceReaderClusterRole string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=workspaces,verbs=get;list;watch;create;update;patch;delete
