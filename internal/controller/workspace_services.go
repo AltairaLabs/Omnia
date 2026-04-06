@@ -68,7 +68,9 @@ func setServicesReadyCondition(conditions *[]metav1.Condition, generation int64,
 
 // reconcileServices ensures that each service group defined in the workspace
 // spec has the correct Deployments, Services, and status entries.
-func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *omniav1alpha1.Workspace) error {
+func (r *WorkspaceReconciler) reconcileServices(
+	ctx context.Context, workspace *omniav1alpha1.Workspace,
+) error {
 	log := logf.FromContext(ctx)
 	namespace := workspace.Spec.Namespace.Name
 
