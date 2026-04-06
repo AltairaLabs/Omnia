@@ -279,6 +279,7 @@ retry 2 15 helm upgrade --install omnia charts/omnia \
     --set enterprise.evalWorker.image.repository=omnia-eval-worker-dev \
     --set enterprise.evalWorker.image.tag=latest \
     --set enterprise.evalWorker.image.pullPolicy=Never \
+    --set enterprise.evalWorker.workspaceNamespace=dev-agents \
     --set enterprise.arena.queue.type=redis \
     --set enterprise.arena.queue.redis.host=omnia-redis-master \
     --set enterprise.arena.queue.redis.port=6379 \

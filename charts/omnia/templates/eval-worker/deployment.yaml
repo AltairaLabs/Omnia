@@ -42,6 +42,21 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             {{- end }}
+            # OMNIA_NAMESPACE tells the service-discovery resolver which
+            # Workspace CRD to read session-api/memory-api URLs from. In a
+            # multi-tenant deployment, set workspaceNamespace to the namespace
+            # of the workspace this eval-worker serves. Defaults to the
+            # eval-worker's own pod namespace, which only works if there is a
+            # Workspace CRD matching that namespace. See #742.
+            {{- if .Values.enterprise.evalWorker.workspaceNamespace }}
+            - name: OMNIA_NAMESPACE
+              value: {{ .Values.enterprise.evalWorker.workspaceNamespace | quote }}
+            {{- else }}
+            - name: OMNIA_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- end }}
             - name: METRICS_ADDR
               value: ":9090"
             {{- if .Values.redis.enabled }}
