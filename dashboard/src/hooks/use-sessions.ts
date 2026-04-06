@@ -99,28 +99,6 @@ export function useSessionSearch(options: SessionSearchOptions) {
   });
 }
 
-/**
- * Fetch paginated messages for a session.
- */
-export function useSessionMessages(sessionId: string, options: SessionMessageOptions = {}) {
-  const service = useDataService();
-  const { currentWorkspace } = useWorkspace();
-
-  const { limit, before, after } = options;
-
-  return useQuery({
-    queryKey: ["session-messages", currentWorkspace?.name, sessionId, limit, before, after, service.name],
-    queryFn: async () => {
-      if (!currentWorkspace) {
-        return { messages: [], hasMore: false };
-      }
-      return service.getSessionMessages(currentWorkspace.name, sessionId, options);
-    },
-    enabled: !!currentWorkspace && !!sessionId,
-    staleTime: 5000,
-  });
-}
-
 /** Page size for infinite message loading. */
 const MESSAGE_PAGE_SIZE = 100;
 
@@ -128,8 +106,15 @@ const MESSAGE_PAGE_SIZE = 100;
  * Fetch all session messages using cursor-based infinite loading.
  * Pages are fetched via the /messages endpoint using `after` sequence cursors.
  * Returns a flat deduplicated message array and load-more controls.
+ *
+ * Only polls for new messages when sessionStatus is "active". Completed
+ * sessions are fetched once and never re-polled. See #723.
  */
-export function useSessionAllMessages(sessionId: string, enabled = true) {
+export function useSessionAllMessages(
+  sessionId: string,
+  sessionStatus?: string,
+  enabled = true,
+) {
   const service = useDataService();
   const { currentWorkspace } = useWorkspace();
 
@@ -153,14 +138,9 @@ export function useSessionAllMessages(sessionId: string, enabled = true) {
     },
     enabled: !!currentWorkspace && !!sessionId && enabled,
     staleTime: 5000,
-    refetchInterval: (query) => {
-      // Only auto-refetch if we haven't loaded all pages yet
-      // (active sessions keep getting new messages)
-      const pages = query.state.data?.pages;
-      if (pages && pages.length > 0) {
-        const lastPage = pages[pages.length - 1];
-        if (lastPage.hasMore) return false; // don't refetch partial loads
-      }
+    refetchInterval: () => {
+      // Only poll active sessions. Completed sessions are fetched once.
+      if (sessionStatus !== "active") return false;
       return 5000;
     },
   });
@@ -198,7 +178,7 @@ export function useSessionAllMessages(sessionId: string, enabled = true) {
 /**
  * Fetch tool calls for a session from the first-class tool_calls table.
  */
-export function useSessionToolCalls(sessionId: string) {
+export function useSessionToolCalls(sessionId: string, enabled = true) {
   const { currentWorkspace } = useWorkspace();
 
   return useQuery({
@@ -208,7 +188,7 @@ export function useSessionToolCalls(sessionId: string) {
       const service = new SessionApiService();
       return service.getToolCalls(currentWorkspace.name, sessionId);
     },
-    enabled: !!currentWorkspace && !!sessionId,
+    enabled: !!currentWorkspace && !!sessionId && enabled,
     staleTime: 10000,
   });
 }
@@ -216,7 +196,7 @@ export function useSessionToolCalls(sessionId: string) {
 /**
  * Fetch provider calls for a session from the first-class provider_calls table.
  */
-export function useSessionProviderCalls(sessionId: string) {
+export function useSessionProviderCalls(sessionId: string, enabled = true) {
   const { currentWorkspace } = useWorkspace();
 
   return useQuery({
@@ -226,7 +206,7 @@ export function useSessionProviderCalls(sessionId: string) {
       const service = new SessionApiService();
       return service.getProviderCalls(currentWorkspace.name, sessionId);
     },
-    enabled: !!currentWorkspace && !!sessionId,
+    enabled: !!currentWorkspace && !!sessionId && enabled,
     staleTime: 10000,
   });
 }
@@ -234,7 +214,7 @@ export function useSessionProviderCalls(sessionId: string) {
 /**
  * Fetch runtime events for a session from the first-class runtime_events table.
  */
-export function useSessionRuntimeEvents(sessionId: string) {
+export function useSessionRuntimeEvents(sessionId: string, enabled = true) {
   const { currentWorkspace } = useWorkspace();
 
   return useQuery({
@@ -244,7 +224,7 @@ export function useSessionRuntimeEvents(sessionId: string) {
       const service = new SessionApiService();
       return service.getEvents(currentWorkspace.name, sessionId);
     },
-    enabled: !!currentWorkspace && !!sessionId,
+    enabled: !!currentWorkspace && !!sessionId && enabled,
     staleTime: 10000,
   });
 }
@@ -254,7 +234,7 @@ export function useSessionRuntimeEvents(sessionId: string) {
  * Uses SessionApiService directly since eval results are not part of the
  * DataService interface (they are session-api specific).
  */
-export function useSessionEvalResults(sessionId: string) {
+export function useSessionEvalResults(sessionId: string, enabled = true) {
   const { currentWorkspace } = useWorkspace();
 
   return useQuery({
@@ -266,7 +246,7 @@ export function useSessionEvalResults(sessionId: string) {
       const service = new SessionApiService();
       return service.getSessionEvalResults(currentWorkspace.name, sessionId);
     },
-    enabled: !!currentWorkspace && !!sessionId,
+    enabled: !!currentWorkspace && !!sessionId && enabled,
     staleTime: 10000,
   });
 }

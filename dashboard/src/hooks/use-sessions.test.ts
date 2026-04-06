@@ -42,7 +42,7 @@ vi.mock("@/lib/data/session-api-service", () => ({
 }));
 
 // Import after mocks
-import { useSessions, useSessionDetail, useSessionSearch, useSessionMessages, useSessionAllMessages, useSessionToolCalls, useSessionProviderCalls, useSessionEvalResults } from "./use-sessions";
+import { useSessions, useSessionDetail, useSessionSearch, useSessionAllMessages, useSessionToolCalls, useSessionProviderCalls, useSessionEvalResults } from "./use-sessions";
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -140,34 +140,6 @@ describe("useSessionSearch", () => {
   });
 });
 
-describe("useSessionMessages", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockGetSessionMessages.mockResolvedValue({
-      messages: [{ id: "m1", role: "user", content: "hello", timestamp: new Date().toISOString() }],
-      hasMore: false,
-    });
-  });
-
-  it("fetches messages for a session", async () => {
-    const { result } = renderHook(() => useSessionMessages("s1"), { wrapper: createWrapper() });
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(mockGetSessionMessages).toHaveBeenCalledWith("test-workspace", "s1", {});
-    expect(result.current.data?.messages).toHaveLength(1);
-  });
-
-  it("passes pagination options", async () => {
-    const opts = { limit: 10, after: 5 };
-    const { result } = renderHook(() => useSessionMessages("s1", opts), { wrapper: createWrapper() });
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(mockGetSessionMessages).toHaveBeenCalledWith("test-workspace", "s1", opts);
-  });
-});
-
 describe("useSessionAllMessages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -199,7 +171,7 @@ describe("useSessionAllMessages", () => {
   });
 
   it("is disabled when enabled=false", () => {
-    const { result } = renderHook(() => useSessionAllMessages("s1", false), { wrapper: createWrapper() });
+    const { result } = renderHook(() => useSessionAllMessages("s1", undefined, false), { wrapper: createWrapper() });
     expect(result.current.isLoading).toBe(false);
     expect(result.current.messages).toHaveLength(0);
   });
