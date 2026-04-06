@@ -24,17 +24,20 @@ import (
 )
 
 // createMockProvider creates a mock provider based on configuration.
-func (s *Server) createMockProvider() (*mock.Provider, error) {
+// Returns a ToolProvider (not the basic Provider) so that PredictWithTools
+// is available — without this, the ProviderStage falls back to plain Predict
+// and mock tool_calls from the config are never emitted. See #734.
+func (s *Server) createMockProvider() (*mock.ToolProvider, error) {
 	if s.mockConfigPath != "" {
 		// Use file-based mock repository
 		repo, err := mock.NewFileMockRepository(s.mockConfigPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load mock config: %w", err)
 		}
-		return mock.NewProviderWithRepository("mock", "mock-model", false, repo), nil
+		return mock.NewToolProviderWithRepository("mock", "mock-model", false, repo), nil
 	}
 	// Use in-memory mock provider with default responses
-	return mock.NewProvider("mock", "mock-model", false), nil
+	return mock.NewToolProvider("mock", "mock-model", false, nil), nil
 }
 
 // createProviderFromConfig creates a PromptKit provider based on runtime configuration.
