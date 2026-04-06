@@ -2264,6 +2264,7 @@ spec:
     command: ["sh", "-c"]
     args:
     - |
+      export HOME=/tmp
       pip install websockets --quiet
       python3 << 'PYTHON_SCRIPT'
       import asyncio
