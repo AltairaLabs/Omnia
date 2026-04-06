@@ -99,12 +99,34 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Resolve the session-api URL. Prefers SESSION_API_URL for back-compat,
-	// otherwise looks up Workspace.status.services via the resolver.
+	// Start the health/metrics server early so Kubernetes liveness probes
+	// pass while we wait for service discovery. Without this, the retry
+	// loop below blocks main() and the pod gets killed for failing the
+	// liveness check before resolution succeeds.
+	go startHTTPServer(cfg.MetricsAddr, logger, nil)
+
+	// Resolve the session-api URL with retry. Prefers SESSION_API_URL for
+	// back-compat, otherwise looks up Workspace.status.services via the
+	// resolver. Retries because per-workspace services (session-api,
+	// memory-api) may still be starting when the eval-worker boots.
 	resolver := servicediscovery.NewResolver(k8sClient)
-	sessionAPIURL, err := resolveSessionAPIURL(context.Background(), resolver, cfg.SessionAPIURL)
+	var sessionAPIURL string
+	backoff := 2 * time.Second
+	for attempt := 1; attempt <= 15; attempt++ {
+		sessionAPIURL, err = resolveSessionAPIURL(
+			context.Background(), resolver, cfg.SessionAPIURL,
+		)
+		if err == nil {
+			break
+		}
+		logger.Warn("session-api URL not ready, retrying",
+			"attempt", attempt, "error", err.Error(),
+			"retryIn", backoff.String())
+		time.Sleep(backoff)
+		backoff = min(backoff*2, 30*time.Second)
+	}
 	if err != nil {
-		logger.Error("failed to resolve session-api URL", "error", err)
+		logger.Error("failed to resolve session-api URL after retries", "error", err)
 		os.Exit(1)
 	}
 	cfg.SessionAPIURL = sessionAPIURL
@@ -175,9 +197,6 @@ func main() {
 		logger.Info("received shutdown signal", "signal", sig.String())
 		cancel()
 	}()
-
-	// Start HTTP server for metrics and health probes.
-	go startHTTPServer(cfg.MetricsAddr, logger, evalRegistry)
 
 	logger.Info("starting arena-eval-worker",
 		"namespaces", cfg.Namespaces,

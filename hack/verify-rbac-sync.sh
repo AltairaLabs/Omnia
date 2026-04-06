@@ -60,9 +60,24 @@ HELM_OUT="$TMP_DIR/helm.yaml"
 info "Rendering kustomize (config/default)..."
 kustomize build "$REPO_ROOT/config/default" > "$KUSTOMIZE_OUT"
 
-info "Rendering Helm chart (charts/omnia)..."
-# Render with defaults. RBAC is controlled by .Values.rbac.create (default true).
+info "Rendering Helm chart (charts/omnia, default values)..."
 helm template omnia "$REPO_ROOT/charts/omnia" > "$HELM_OUT"
+
+# Also render with enterprise enabled so we can compare enterprise-only
+# ClusterRoles (arena-manager-role, eval-worker) against ee/config/rbac/.
+HELM_ENTERPRISE_OUT="$TMP_DIR/helm-enterprise.yaml"
+info "Rendering Helm chart (charts/omnia, enterprise.enabled=true)..."
+helm template omnia "$REPO_ROOT/charts/omnia" --set enterprise.enabled=true > "$HELM_ENTERPRISE_OUT"
+
+# Append enterprise kustomize roles to the kustomize output so they're
+# available for comparison. ee/config/rbac/ is controller-gen-owned, just
+# like config/rbac/, but lives in a separate directory for the enterprise
+# controller-gen invocation.
+if [ -d "$REPO_ROOT/ee/config/rbac" ]; then
+    for f in "$REPO_ROOT"/ee/config/rbac/role.yaml; do
+        [ -f "$f" ] && cat "$f" >> "$KUSTOMIZE_OUT"
+    done
+fi
 
 # Extract normalized rule triples for a given ClusterRole name from a source.
 # Each rule expands to the cartesian product (apiGroup, resource, verb), one
@@ -89,8 +104,10 @@ extract_rules() {
 # viewer aggregation roles that Helm intentionally omits; those are ignored.
 # yq emits "---" between matching documents when multiple docs match a
 # select() — filter it out so it doesn't show up as a fake role name.
+# Combine both Helm renders (default + enterprise) for role discovery.
+# Enterprise roles only appear when enterprise.enabled=true.
 kustomize_roles=$(yq eval-all 'select(.kind == "ClusterRole") | .metadata.name' "$KUSTOMIZE_OUT" | grep -v '^---$' | sort -u)
-helm_roles=$(yq eval-all 'select(.kind == "ClusterRole") | .metadata.name' "$HELM_OUT" | grep -v '^---$' | sort -u)
+helm_roles=$( (yq eval-all 'select(.kind == "ClusterRole") | .metadata.name' "$HELM_OUT"; yq eval-all 'select(.kind == "ClusterRole") | .metadata.name' "$HELM_ENTERPRISE_OUT") | grep -v '^---$' | sort -u)
 shared_roles=$(comm -12 <(echo "$kustomize_roles") <(echo "$helm_roles"))
 
 if [ -z "$shared_roles" ]; then
@@ -109,7 +126,21 @@ while IFS= read -r role; do
     [ -z "$role" ] && continue
 
     kustomize_rules=$(extract_rules "$KUSTOMIZE_OUT" "$role")
+    # The Helm manager-role merges core + enterprise rules into one
+    # ClusterRole. Kustomize keeps them as separate roles (manager-role
+    # + arena-manager-role). When comparing the manager-role, also merge
+    # the kustomize arena-manager-role rules so the union matches.
+    if [ "$role" = "omnia-manager-role" ] && [ -f "$REPO_ROOT/ee/config/rbac/role.yaml" ]; then
+        ee_rules=$(extract_rules "$KUSTOMIZE_OUT" "arena-manager-role")
+        if [ -n "$ee_rules" ]; then
+            kustomize_rules=$( (echo "$kustomize_rules"; echo "$ee_rules") | sort -u)
+        fi
+    fi
+    # Try the default render first; if the role isn't there, try enterprise.
     helm_rules=$(extract_rules "$HELM_OUT" "$role")
+    if [ -z "$helm_rules" ]; then
+        helm_rules=$(extract_rules "$HELM_ENTERPRISE_OUT" "$role")
+    fi
 
     only_in_kustomize=$(comm -23 <(echo "$kustomize_rules") <(echo "$helm_rules"))
     only_in_helm=$(comm -13 <(echo "$kustomize_rules") <(echo "$helm_rules"))
