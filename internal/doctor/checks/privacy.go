@@ -293,7 +293,7 @@ func (p *PrivacyChecker) checkAuditLogWritten(ctx context.Context) doctor.TestRe
 	_ = probeResp
 
 	// Save a test memory to generate an audit event.
-	_, status, err := p.saveMemory(ctx, "audit log test "+time.Now().Format(time.RFC3339Nano), nil)
+	memoryID, status, err := p.saveMemory(ctx, "audit log test "+time.Now().Format(time.RFC3339Nano), nil)
 	if err != nil || status != http.StatusCreated {
 		return doctor.TestResult{Status: doctor.StatusFail, Detail: "save failed before audit check", Error: errString(err)}
 	}
@@ -301,8 +301,9 @@ func (p *PrivacyChecker) checkAuditLogWritten(ctx context.Context) doctor.TestRe
 	// Brief pause to let the async audit logger flush.
 	time.Sleep(2 * time.Second)
 
-	// Query for memory_created events.
-	queryURL := p.memoryAPIURL + "/api/v1/audit/memories?workspace=" + p.workspace + "&eventTypes=memory_created&limit=5"
+	// Query for memory_created events, filtering by the specific memory ID
+	// to avoid false passes from stale events left by previous runs.
+	queryURL := p.memoryAPIURL + "/api/v1/audit/memories?workspace=" + p.workspace + "&eventTypes=memory_created&limit=20"
 	body, err := fetchBody(ctx, memoryClient(), queryURL)
 	if err != nil {
 		return doctor.TestResult{Status: doctor.StatusFail, Detail: "audit query failed", Error: err.Error()}
@@ -316,12 +317,18 @@ func (p *PrivacyChecker) checkAuditLogWritten(ctx context.Context) doctor.TestRe
 		return doctor.TestResult{Status: doctor.StatusFail, Detail: "invalid audit response", Error: err.Error()}
 	}
 
-	if result.Total == 0 {
-		return doctor.TestResult{Status: doctor.StatusFail, Detail: "no memory_created audit events found"}
+	// Look for the specific memory ID in the audit entries.
+	for _, entry := range result.Entries {
+		if id, ok := entry["memory_id"].(string); ok && id == memoryID {
+			return doctor.TestResult{
+				Status: doctor.StatusPass,
+				Detail: fmt.Sprintf("audit event found for memory %s", memoryID),
+			}
+		}
 	}
 	return doctor.TestResult{
-		Status: doctor.StatusPass,
-		Detail: fmt.Sprintf("found %d memory_created audit event(s)", result.Total),
+		Status: doctor.StatusFail,
+		Detail: fmt.Sprintf("no audit event found for memory %s (%d total events checked)", memoryID, len(result.Entries)),
 	}
 }
 
