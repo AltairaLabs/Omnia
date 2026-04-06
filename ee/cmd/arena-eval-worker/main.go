@@ -99,6 +99,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Start the health/metrics server early so Kubernetes liveness probes
+	// pass while we wait for service discovery. Without this, the retry
+	// loop below blocks main() and the pod gets killed for failing the
+	// liveness check before resolution succeeds.
+	go startHTTPServer(cfg.MetricsAddr, logger, nil)
+
 	// Resolve the session-api URL with retry. Prefers SESSION_API_URL for
 	// back-compat, otherwise looks up Workspace.status.services via the
 	// resolver. Retries because per-workspace services (session-api,
@@ -191,9 +197,6 @@ func main() {
 		logger.Info("received shutdown signal", "signal", sig.String())
 		cancel()
 	}()
-
-	// Start HTTP server for metrics and health probes.
-	go startHTTPServer(cfg.MetricsAddr, logger, evalRegistry)
 
 	logger.Info("starting arena-eval-worker",
 		"namespaces", cfg.Namespaces,
