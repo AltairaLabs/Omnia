@@ -357,9 +357,13 @@ func main() {
 
 // policyProxyImageForEnterprise returns the policy proxy image when enterprise
 // is enabled, or empty string when disabled (which prevents sidecar injection).
+// When enterprise is enabled but no image is specified, the default is used.
 func policyProxyImageForEnterprise(enterpriseEnabled bool, image string) string {
 	if !enterpriseEnabled {
 		return ""
+	}
+	if image == "" {
+		return controller.DefaultPolicyProxyImage
 	}
 	return image
 }
