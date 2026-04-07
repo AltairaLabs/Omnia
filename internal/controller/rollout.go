@@ -74,6 +74,10 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 			if err := r.resetTrafficRouting(ctx, ar.Namespace, ar.Spec.Rollout.TrafficRouting.Istio); err != nil {
 				log.Error(err, "failed to reset traffic routing on auto-rollback")
 			}
+			if err := r.patchDestinationRuleConsistentHash(ctx, ar.Namespace,
+				ar.Spec.Rollout.TrafficRouting.Istio, ""); err != nil {
+				log.Error(err, "failed to remove consistent hash on auto-rollback")
+			}
 		}
 		if r.RolloutMetrics != nil {
 			r.RolloutMetrics.Rollbacks.WithLabelValues(ar.Namespace, ar.Name, "pod_unhealthy").Inc()
@@ -110,6 +114,12 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 				r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "canary").Set(float64(result.desiredWeight))
 			}
 		}
+		if ar.Spec.Rollout.StickySession != nil {
+			if err := r.patchDestinationRuleConsistentHash(ctx, ar.Namespace,
+				ar.Spec.Rollout.TrafficRouting.Istio, ar.Spec.Rollout.StickySession.HashOn); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 	}
 
 	if result.promote {
@@ -133,6 +143,10 @@ func (r *AgentRuntimeReconciler) reconcileRolloutIdle(
 	if ar.Spec.Rollout != nil && ar.Spec.Rollout.TrafficRouting != nil && ar.Spec.Rollout.TrafficRouting.Istio != nil {
 		if err := r.resetTrafficRouting(ctx, ar.Namespace, ar.Spec.Rollout.TrafficRouting.Istio); err != nil {
 			log.Error(err, "failed to reset traffic routing on idle cleanup")
+		}
+		if err := r.patchDestinationRuleConsistentHash(ctx, ar.Namespace,
+			ar.Spec.Rollout.TrafficRouting.Istio, ""); err != nil {
+			log.Error(err, "failed to remove consistent hash on idle cleanup")
 		}
 	}
 	if r.RolloutMetrics != nil {
@@ -167,6 +181,10 @@ func (r *AgentRuntimeReconciler) reconcileRolloutPromote(
 	if ar.Spec.Rollout != nil && ar.Spec.Rollout.TrafficRouting != nil && ar.Spec.Rollout.TrafficRouting.Istio != nil {
 		if err := r.resetTrafficRouting(ctx, ar.Namespace, ar.Spec.Rollout.TrafficRouting.Istio); err != nil {
 			log.Error(err, "failed to reset traffic routing on promotion")
+		}
+		if err := r.patchDestinationRuleConsistentHash(ctx, ar.Namespace,
+			ar.Spec.Rollout.TrafficRouting.Istio, ""); err != nil {
+			log.Error(err, "failed to remove consistent hash on promotion")
 		}
 	}
 

@@ -778,6 +778,178 @@ func TestReconcileRollout_Idle_ResetsIstioTrafficRouting(t *testing.T) {
 	assert.Equal(t, int64(0), dests[1].(map[string]interface{})["weight"])
 }
 
+func TestReconcileRollout_StickySession_PatchesDR(t *testing.T) {
+	scheme := newTestScheme(t)
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1", Kind: "VirtualService"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1", Kind: "VirtualServiceList"},
+		&unstructured.UnstructuredList{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1", Kind: "DestinationRule"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1", Kind: "DestinationRuleList"},
+		&unstructured.UnstructuredList{},
+	)
+
+	ar := newRolloutTestAR()
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackVersion: ptr.To("v2"),
+		},
+		Steps: []omniav1alpha1.RolloutStep{
+			{SetWeight: ptr.To[int32](30)},
+		},
+		StickySession: &omniav1alpha1.StickySessionConfig{HashOn: "x-user-id"},
+		TrafficRouting: &omniav1alpha1.TrafficRoutingConfig{
+			Istio: &omniav1alpha1.IstioTrafficRouting{
+				VirtualService: omniav1alpha1.IstioVirtualServiceRef{
+					Name:   "my-vs",
+					Routes: []string{"primary"},
+				},
+				DestinationRule: omniav1alpha1.IstioDestinationRuleRef{
+					Name:            "my-dr",
+					StableSubset:    "stable",
+					CandidateSubset: "canary",
+				},
+			},
+		},
+	}
+	ar.Status.ActiveVersion = ptr.To("v1")
+
+	route := makeRoute("primary", 100, 0)
+	vs := newTestVirtualService("my-vs", "default", []interface{}{route})
+	dr := newTestDestinationRule()
+	pp := newTestPromptPack()
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(vs, dr).
+		Build()
+
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	_, err := r.reconcileRollout(context.Background(), ar, pp, nil, nil)
+	require.NoError(t, err)
+
+	// Verify DR was patched with the consistent hash header.
+	updatedDR := &unstructured.Unstructured{}
+	updatedDR.SetAPIVersion(istioNetworkingAPIVersion)
+	updatedDR.SetKind(istioDestinationRuleKind)
+	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "my-dr", Namespace: "default"}, updatedDR)
+	require.NoError(t, err)
+
+	val, found, err := unstructured.NestedString(updatedDR.Object,
+		"spec", "trafficPolicy", "loadBalancer", "consistentHash", "httpHeaderName")
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "x-user-id", val)
+}
+
+func TestReconcileRollout_Promotion_RemovesDRConsistentHash(t *testing.T) {
+	scheme := newTestScheme(t)
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1", Kind: "VirtualService"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1", Kind: "VirtualServiceList"},
+		&unstructured.UnstructuredList{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1", Kind: "DestinationRule"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1", Kind: "DestinationRuleList"},
+		&unstructured.UnstructuredList{},
+	)
+
+	ar := newRolloutTestAR()
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackVersion: ptr.To("v2"),
+		},
+		Steps: []omniav1alpha1.RolloutStep{
+			{SetWeight: ptr.To[int32](100)},
+		},
+		TrafficRouting: &omniav1alpha1.TrafficRoutingConfig{
+			Istio: &omniav1alpha1.IstioTrafficRouting{
+				VirtualService: omniav1alpha1.IstioVirtualServiceRef{
+					Name:   "my-vs",
+					Routes: []string{"primary"},
+				},
+				DestinationRule: omniav1alpha1.IstioDestinationRuleRef{
+					Name:            "my-dr",
+					StableSubset:    "stable",
+					CandidateSubset: "canary",
+				},
+			},
+		},
+	}
+	// At step 1 (past last step) — triggers promotion.
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
+		Active:      true,
+		CurrentStep: ptr.To[int32](1),
+	}
+	ar.Status.ActiveVersion = ptr.To("v1")
+
+	route := makeRoute("primary", 100, 0)
+	vs := newTestVirtualService("my-vs", "default", []interface{}{route})
+
+	// DR with a pre-existing consistentHash block.
+	dr := newTestDestinationRule()
+	dr.Object["spec"] = map[string]interface{}{
+		"trafficPolicy": map[string]interface{}{
+			"loadBalancer": map[string]interface{}{
+				"consistentHash": map[string]interface{}{
+					"httpHeaderName": "x-user-id",
+				},
+			},
+		},
+	}
+
+	pp := newTestPromptPack()
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ar, vs, dr).
+		WithStatusSubresource(ar).
+		Build()
+
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	// Create candidate so promotion can delete it.
+	_, err := r.reconcileCandidateDeployment(context.Background(), ar, pp, nil, nil)
+	require.NoError(t, err)
+
+	_, err = r.reconcileRollout(context.Background(), ar, pp, nil, nil)
+	require.NoError(t, err)
+
+	// Verify consistentHash block was removed after promotion.
+	updatedDR := &unstructured.Unstructured{}
+	updatedDR.SetAPIVersion(istioNetworkingAPIVersion)
+	updatedDR.SetKind(istioDestinationRuleKind)
+	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "my-dr", Namespace: "default"}, updatedDR)
+	require.NoError(t, err)
+
+	_, found, err := unstructured.NestedFieldNoCopy(updatedDR.Object,
+		"spec", "trafficPolicy", "loadBalancer", "consistentHash")
+	require.NoError(t, err)
+	assert.False(t, found, "consistentHash should be removed after promotion")
+}
+
 // assertCondition checks that a condition with the given type and status exists.
 func assertCondition(t *testing.T, conditions []metav1.Condition, condType string, status metav1.ConditionStatus) {
 	t.Helper()
