@@ -1,0 +1,207 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: rolloutanalyses.omnia.altairalabs.ai
+spec:
+  group: omnia.altairalabs.ai
+  names:
+    kind: RolloutAnalysis
+    listKind: RolloutAnalysisList
+    plural: rolloutanalyses
+    shortNames:
+    - ra
+    singular: rolloutanalysis
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.metrics[*]
+      name: Metrics
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          RolloutAnalysis is the Schema for the rolloutanalyses API.
+          It defines reusable metric templates for evaluating rollout health.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of RolloutAnalysis.
+            properties:
+              args:
+                description: args defines template arguments that can be overridden
+                  when referencing this analysis.
+                items:
+                  description: RolloutAnalysisArg defines a template argument for
+                    a RolloutAnalysis.
+                  properties:
+                    name:
+                      description: name is the argument name. Referenced in provider
+                        queries/URLs using the args.name syntax.
+                      minLength: 1
+                      type: string
+                    value:
+                      description: value is the default value for this argument. Can
+                        be overridden at reference time.
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              metrics:
+                description: metrics defines the set of metric measurements to perform.
+                items:
+                  description: AnalysisMetric defines a single metric measurement
+                    within a RolloutAnalysis.
+                  properties:
+                    count:
+                      description: count is the total number of measurements to take.
+                      format: int32
+                      minimum: 1
+                      type: integer
+                    failureCondition:
+                      description: failureCondition is an explicit expression that,
+                        when true, marks the measurement as failed.
+                      type: string
+                    failureLimit:
+                      description: failureLimit is the maximum number of failed measurements
+                        before the analysis fails.
+                      format: int32
+                      minimum: 0
+                      type: integer
+                    interval:
+                      description: interval is the duration between measurements (e.g.
+                        "1m", "5m").
+                      minLength: 1
+                      type: string
+                    name:
+                      description: name is the identifier for this metric, used in
+                        logging and status reporting.
+                      minLength: 1
+                      type: string
+                    provider:
+                      description: provider defines where the metric value is sourced
+                        from.
+                      properties:
+                        arenaEval:
+                          description: arenaEval configures an Arena evaluation as
+                            a metric source.
+                          properties:
+                            evalDef:
+                              description: evalDef is the name of the evaluation definition
+                                to run.
+                              minLength: 1
+                              type: string
+                            workspace:
+                              description: workspace is the name of the workspace
+                                that owns the evaluation.
+                              minLength: 1
+                              type: string
+                          required:
+                          - evalDef
+                          - workspace
+                          type: object
+                        prometheus:
+                          description: prometheus configures a Prometheus metric query.
+                          properties:
+                            address:
+                              description: address is the Prometheus server URL (e.g.
+                                "http://prometheus:9090").
+                              minLength: 1
+                              type: string
+                            query:
+                              description: query is a PromQL query string. Supports
+                                args.name template substitution syntax.
+                              minLength: 1
+                              type: string
+                            timeout:
+                              default: 30
+                              description: timeout is the query timeout in seconds.
+                              format: int32
+                              type: integer
+                          required:
+                          - address
+                          - query
+                          type: object
+                        web:
+                          description: web configures an HTTP endpoint as a metric
+                            source.
+                          properties:
+                            headers:
+                              additionalProperties:
+                                type: string
+                              description: headers is a map of HTTP headers to include
+                                in the request.
+                              type: object
+                            jsonPath:
+                              description: jsonPath is a JSONPath expression to extract
+                                the metric value from the response body.
+                              type: string
+                            method:
+                              default: GET
+                              description: method is the HTTP method to use.
+                              enum:
+                              - GET
+                              - POST
+                              type: string
+                            timeout:
+                              default: 30
+                              description: timeout is the request timeout in seconds.
+                              format: int32
+                              type: integer
+                            url:
+                              description: url is the HTTP endpoint URL. Supports
+                                args.name template substitution syntax.
+                              minLength: 1
+                              type: string
+                          required:
+                          - url
+                          type: object
+                      type: object
+                    successCondition:
+                      description: |-
+                        successCondition is a CEL/expression evaluated against the metric result to determine success
+                        (e.g. "result[0] <= 0.05").
+                      minLength: 1
+                      type: string
+                  required:
+                  - count
+                  - interval
+                  - name
+                  - provider
+                  - successCondition
+                  type: object
+                minItems: 1
+                type: array
+            required:
+            - metrics
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

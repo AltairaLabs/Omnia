@@ -322,7 +322,8 @@ sync-chart-crds: manifests manifests-ee ## Sync CRDs from config/crd/bases to ch
 	# Sync enterprise CRDs to conditional templates (wrapped with enterprise.enabled check)
 	@echo "Syncing enterprise CRDs to conditional templates..."
 	@for f in config/crd/bases/omnia.altairalabs.ai_arena*.yaml \
-	          config/crd/bases/omnia.altairalabs.ai_sessionprivacypolicies.yaml; do \
+	          config/crd/bases/omnia.altairalabs.ai_sessionprivacypolicies.yaml \
+	          config/crd/bases/omnia.altairalabs.ai_rolloutanalyses.yaml; do \
 		base=$$(basename $$f); \
 		echo "{{- if .Values.enterprise.enabled }}" > charts/omnia/templates/enterprise/$$base; \
 		cat $$f >> charts/omnia/templates/enterprise/$$base; \
