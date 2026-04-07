@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/utils/ptr"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -367,6 +368,65 @@ func TestRollback_NilRollout(t *testing.T) {
 	ar := newRolloutTestAR()
 	// Should not panic.
 	rollback(ar)
+}
+
+// --- shouldAutoRollback tests ---
+
+func newAutoRollbackAR() *omniav1alpha1.AgentRuntime {
+	ar := newRolloutTestAR()
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackVersion: ptr.To("v2"),
+		},
+		Steps: []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](10)}},
+		Rollback: &omniav1alpha1.RollbackConfig{
+			Mode: omniav1alpha1.RollbackModeAutomatic,
+		},
+	}
+	return ar
+}
+
+func unhealthyDeploy() *appsv1.Deployment {
+	d := &appsv1.Deployment{}
+	d.Status.ReadyReplicas = 0
+	d.Status.UnavailableReplicas = 1
+	return d
+}
+
+func TestShouldAutoRollback_HealthyCandidate(t *testing.T) {
+	ar := newAutoRollbackAR()
+	d := &appsv1.Deployment{}
+	d.Status.ReadyReplicas = 1
+	d.Status.UnavailableReplicas = 0
+	assert.False(t, shouldAutoRollback(ar, d))
+}
+
+func TestShouldAutoRollback_UnhealthyCandidate_AutomaticMode(t *testing.T) {
+	ar := newAutoRollbackAR()
+	assert.True(t, shouldAutoRollback(ar, unhealthyDeploy()))
+}
+
+func TestShouldAutoRollback_UnhealthyCandidate_ManualMode(t *testing.T) {
+	ar := newAutoRollbackAR()
+	ar.Spec.Rollout.Rollback.Mode = omniav1alpha1.RollbackModeManual
+	assert.False(t, shouldAutoRollback(ar, unhealthyDeploy()))
+}
+
+func TestShouldAutoRollback_UnhealthyCandidate_DisabledMode(t *testing.T) {
+	ar := newAutoRollbackAR()
+	ar.Spec.Rollout.Rollback.Mode = omniav1alpha1.RollbackModeDisabled
+	assert.False(t, shouldAutoRollback(ar, unhealthyDeploy()))
+}
+
+func TestShouldAutoRollback_NilRollbackConfig(t *testing.T) {
+	ar := newAutoRollbackAR()
+	ar.Spec.Rollout.Rollback = nil
+	assert.False(t, shouldAutoRollback(ar, unhealthyDeploy()))
+}
+
+func TestShouldAutoRollback_NilCandidateDeploy(t *testing.T) {
+	ar := newAutoRollbackAR()
+	assert.False(t, shouldAutoRollback(ar, nil))
 }
 
 func TestRollback_NilSpecVersion(t *testing.T) {

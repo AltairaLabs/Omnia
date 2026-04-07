@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -52,8 +53,39 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 	}
 
 	// Ensure the candidate Deployment exists.
-	if _, err := r.reconcileCandidateDeployment(ctx, ar, promptPack, toolRegistry, providers); err != nil {
+	candidateDeploy, err := r.reconcileCandidateDeployment(ctx, ar, promptPack, toolRegistry, providers)
+	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("reconcile candidate deployment: %w", err)
+	}
+
+	// Auto-rollback when candidate pods are unhealthy and mode is automatic.
+	if shouldAutoRollback(ar, candidateDeploy) {
+		log.Info("rollout auto-rollback triggered",
+			"agentRuntime", ar.Name,
+			"reason", "pod_unhealthy")
+		rollback(ar)
+		if err := r.Update(ctx, ar); err != nil {
+			return ctrl.Result{}, fmt.Errorf("persist auto-rollback spec: %w", err)
+		}
+		if err := r.deleteCandidateDeployment(ctx, ar); err != nil {
+			return ctrl.Result{}, fmt.Errorf("delete candidate after auto-rollback: %w", err)
+		}
+		if ar.Spec.Rollout != nil && ar.Spec.Rollout.TrafficRouting != nil && ar.Spec.Rollout.TrafficRouting.Istio != nil {
+			if err := r.resetTrafficRouting(ctx, ar.Namespace, ar.Spec.Rollout.TrafficRouting.Istio); err != nil {
+				log.Error(err, "failed to reset traffic routing on auto-rollback")
+			}
+		}
+		if r.RolloutMetrics != nil {
+			r.RolloutMetrics.Rollbacks.WithLabelValues(ar.Namespace, ar.Name, "pod_unhealthy").Inc()
+		}
+		ar.Status.Rollout = &omniav1alpha1.RolloutStatus{Active: false, Message: "auto-rollback: pod unhealthy"}
+		SetCondition(&ar.Status.Conditions, ar.Generation,
+			ConditionTypeRolloutActive, metav1.ConditionFalse,
+			"NoActiveRollout", "auto-rollback triggered: pod unhealthy")
+		if err := r.Status().Update(ctx, ar); err != nil {
+			return ctrl.Result{}, fmt.Errorf("persist auto-rollback status: %w", err)
+		}
+		return ctrl.Result{}, nil
 	}
 
 	result := reconcileRolloutSteps(ar)
@@ -419,6 +451,21 @@ func promote(ar *omniav1alpha1.AgentRuntime) {
 	if c.ToolRegistryRef != nil {
 		ar.Spec.ToolRegistryRef = c.ToolRegistryRef
 	}
+}
+
+// shouldAutoRollback returns true when the candidate Deployment is unhealthy
+// and automatic rollback is configured.
+func shouldAutoRollback(ar *omniav1alpha1.AgentRuntime, candidateDeploy *appsv1.Deployment) bool {
+	if ar.Spec.Rollout == nil || ar.Spec.Rollout.Rollback == nil {
+		return false
+	}
+	if ar.Spec.Rollout.Rollback.Mode != omniav1alpha1.RollbackModeAutomatic {
+		return false
+	}
+	if candidateDeploy == nil {
+		return false
+	}
+	return candidateDeploy.Status.UnavailableReplicas > 0 && candidateDeploy.Status.ReadyReplicas == 0
 }
 
 // rollback reverts candidate overrides to match current spec values.
