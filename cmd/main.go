@@ -82,6 +82,7 @@ func main() {
 	var workspaceStorageClass string
 	var redisAddr string
 	var evalWorkerImage string
+	var policyProxyImage string
 	var agentWorkspaceReaderClusterRole string
 	var apiBindAddress string
 	var enterpriseEnabled bool
@@ -119,6 +120,8 @@ func main() {
 		"Redis address for eval worker deployments (e.g., redis.omnia-system.svc.cluster.local:6379)")
 	flag.StringVar(&evalWorkerImage, "eval-worker-image", "",
 		"Image for the arena-eval-worker container. If not set, defaults to ghcr.io/altairalabs/arena-eval-worker:latest")
+	flag.StringVar(&policyProxyImage, "policy-proxy-image", "",
+		"Image for the ToolPolicy enforcement sidecar. If empty, uses the default from policy_proxy_sidecar.go.")
 	flag.StringVar(&agentWorkspaceReaderClusterRole, "agent-workspace-reader-clusterrole", "",
 		"Name of the ClusterRole granting agent pods read access to Workspace CRDs. If empty, no binding is created.")
 	flag.StringVar(&apiBindAddress, "api-bind-address", "",
@@ -230,6 +233,7 @@ func main() {
 		RedisAddr:                       redisAddr,
 		EvalWorkerImage:                 evalWorkerImage,
 		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
+		PolicyProxyImage:                policyProxyImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "AgentRuntime")
 		os.Exit(1)

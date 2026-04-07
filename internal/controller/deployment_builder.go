@@ -68,7 +68,7 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 		}
 
 		// Build deployment spec
-		r.buildDeploymentSpec(deployment, agentRuntime, promptPack, toolRegistry, secretHash, resolvedClients)
+		r.buildDeploymentSpec(ctx, deployment, agentRuntime, promptPack, toolRegistry, secretHash, resolvedClients)
 		return nil
 	})
 
@@ -133,6 +133,7 @@ func (r *AgentRuntimeReconciler) hashSecretData(ctx context.Context, hasher hash
 }
 
 func (r *AgentRuntimeReconciler) buildDeploymentSpec(
+	ctx context.Context,
 	deployment *appsv1.Deployment,
 	agentRuntime *omniav1alpha1.AgentRuntime,
 	promptPack *omniav1alpha1.PromptPack,
@@ -140,6 +141,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	secretHash string,
 	resolvedClients []ResolvedA2AClient,
 ) {
+	log := logf.FromContext(ctx)
 	labels := map[string]string{
 		labelAppName:      labelValueOmniaAgent,
 		labelAppInstance:  agentRuntime.Name,
@@ -189,6 +191,18 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 
 		runtimeContainer := r.buildRuntimeContainer(agentRuntime, promptPack, toolRegistry)
 		containers = []corev1.Container{facadeContainer, runtimeContainer}
+	}
+
+	_ = log // used conditionally below
+
+	// Inject policy-proxy sidecar when ToolPolicies exist in this namespace.
+	// The sidecar intercepts tool calls and evaluates CEL rules before they
+	// reach the runtime. Without this injection, ToolPolicy CRDs are reconciled
+	// by the controller but never enforced.
+	if r.shouldInjectPolicyProxy(ctx, agentRuntime) {
+		policyContainer := buildPolicyProxyContainer(agentRuntime, r.PolicyProxyImage)
+		containers = append(containers, policyContainer)
+		log.Info("injecting policy-proxy sidecar", "agent", agentRuntime.Name)
 	}
 
 	// Build pod spec
