@@ -13,30 +13,21 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, Loader2 } from "lucide-react";
-import type { PromptPackSpec, RolloutStrategyType } from "@/types/prompt-pack";
+import type { PromptPackSpec } from "@/types/prompt-pack";
 
 // --- Form state ---
 interface FormState {
   name: string;
   configMapName: string;
   version: string;
-  rolloutType: RolloutStrategyType;
-  canaryWeight: string;
-  canaryStepWeight: string;
-  canaryInterval: string;
 }
 
 const INITIAL_FORM: FormState = {
   name: "",
   configMapName: "",
   version: "",
-  rolloutType: "immediate",
-  canaryWeight: "10",
-  canaryStepWeight: "10",
-  canaryInterval: "5m",
 };
 
 // --- Validation ---
@@ -56,34 +47,17 @@ function validateForm(form: FormState): string | null {
   if (!SEMVER_RE.test(form.version)) {
     return "Version must be valid semver (e.g. 1.0.0)";
   }
-  if (form.rolloutType === "canary") {
-    const weight = Number(form.canaryWeight);
-    if (Number.isNaN(weight) || weight < 0 || weight > 100) {
-      return "Canary weight must be between 0 and 100";
-    }
-  }
   return null;
 }
 
 function buildSpec(form: FormState): PromptPackSpec {
-  const spec: PromptPackSpec = {
+  return {
     source: {
       type: "configmap",
       configMapRef: { name: form.configMapName },
     },
     version: form.version.replace(/^v/, ""),
-    rollout: { type: form.rolloutType },
   };
-
-  if (form.rolloutType === "canary") {
-    spec.rollout.canary = {
-      weight: Number(form.canaryWeight),
-      stepWeight: Number(form.canaryStepWeight),
-      interval: form.canaryInterval,
-    };
-  }
-
-  return spec;
 }
 
 // --- Dialog props ---
@@ -175,74 +149,6 @@ function PromptPackDialogForm({
             onChange={(e) => updateForm("version", e.target.value)}
           />
         </div>
-
-        {/* Rollout Strategy */}
-        <div className="space-y-2">
-          <Label>Rollout Strategy</Label>
-          <RadioGroup
-            value={form.rolloutType}
-            onValueChange={(v) => updateForm("rolloutType", v as RolloutStrategyType)}
-          >
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="immediate" id="rollout-immediate" />
-              <Label htmlFor="rollout-immediate" className="font-normal">
-                Immediate
-              </Label>
-            </div>
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="canary" id="rollout-canary" />
-              <Label htmlFor="rollout-canary" className="font-normal">
-                Canary
-              </Label>
-            </div>
-          </RadioGroup>
-        </div>
-
-        {/* Canary Config (conditional) */}
-        {form.rolloutType === "canary" && (
-          <div className="space-y-3 rounded-lg border p-3">
-            <p className="text-sm font-medium">Canary Configuration</p>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="space-y-1">
-                <Label htmlFor="pp-canary-weight" className="text-xs">
-                  Initial Weight (%)
-                </Label>
-                <Input
-                  id="pp-canary-weight"
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={form.canaryWeight}
-                  onChange={(e) => updateForm("canaryWeight", e.target.value)}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="pp-canary-step" className="text-xs">
-                  Step Weight (%)
-                </Label>
-                <Input
-                  id="pp-canary-step"
-                  type="number"
-                  min="1"
-                  max="100"
-                  value={form.canaryStepWeight}
-                  onChange={(e) => updateForm("canaryStepWeight", e.target.value)}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="pp-canary-interval" className="text-xs">
-                  Interval
-                </Label>
-                <Input
-                  id="pp-canary-interval"
-                  placeholder="5m"
-                  value={form.canaryInterval}
-                  onChange={(e) => updateForm("canaryInterval", e.target.value)}
-                />
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       <DialogFooter>
