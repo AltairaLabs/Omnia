@@ -78,6 +78,8 @@ func (m *MemoryStore) CreateSession(ctx context.Context, opts CreateSessionOptio
 		UpdatedAt: now,
 		Messages:  []Message{},
 		State:     make(map[string]string),
+		CohortID:  opts.CohortID,
+		Variant:   opts.Variant,
 	}
 
 	if opts.TTL > 0 {
@@ -507,6 +509,8 @@ func (m *MemoryStore) copySession(s *Session) *Session {
 		WorkspaceName:      s.WorkspaceName,
 		PromptPackName:     s.PromptPackName,
 		PromptPackVersion:  s.PromptPackVersion,
+		CohortID:           s.CohortID,
+		Variant:            s.Variant,
 		Status:             s.Status,
 		EndedAt:            s.EndedAt,
 		MessageCount:       s.MessageCount,

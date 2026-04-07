@@ -146,6 +146,58 @@ func TestSessionToAPI_EmptyInitialState(t *testing.T) {
 	assert.Nil(t, result.InitialState)
 }
 
+func TestSessionToAPI_WithCohortFields(t *testing.T) {
+	id := uuid.New().String()
+	result := SessionToAPI(id, session.CreateSessionOptions{
+		AgentName: "a",
+		Namespace: "ns",
+		CohortID:  "cohort-42",
+		Variant:   "canary",
+	})
+
+	require.NotNil(t, result.CohortId)
+	assert.Equal(t, "cohort-42", *result.CohortId)
+	require.NotNil(t, result.Variant)
+	assert.Equal(t, "canary", *result.Variant)
+}
+
+func TestSessionToAPI_EmptyCohortFields(t *testing.T) {
+	id := uuid.New().String()
+	result := SessionToAPI(id, session.CreateSessionOptions{
+		AgentName: "a",
+		Namespace: "ns",
+	})
+
+	assert.Nil(t, result.CohortId)
+	assert.Nil(t, result.Variant)
+}
+
+func TestSessionFromAPI_WithCohortFields(t *testing.T) {
+	sid := uuid.New()
+	s := &Session{
+		Id:        &sid,
+		AgentName: ptr("a"),
+		Namespace: ptr("ns"),
+		CohortId:  ptr("cohort-42"),
+		Variant:   ptr("canary"),
+	}
+	result := SessionFromAPI(s)
+	assert.Equal(t, "cohort-42", result.CohortID)
+	assert.Equal(t, "canary", result.Variant)
+}
+
+func TestSessionFromAPI_NilCohortFields(t *testing.T) {
+	sid := uuid.New()
+	s := &Session{
+		Id:        &sid,
+		AgentName: ptr("a"),
+		Namespace: ptr("ns"),
+	}
+	result := SessionFromAPI(s)
+	assert.Empty(t, result.CohortID)
+	assert.Empty(t, result.Variant)
+}
+
 func TestMessageToAPI(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	msg := session.Message{

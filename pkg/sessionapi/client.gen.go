@@ -51,6 +51,9 @@ const (
 type CreateSessionRequest struct {
 	AgentName *string `json:"agentName,omitempty"`
 
+	// CohortId Rollout cohort identifier
+	CohortId *string `json:"cohortId,omitempty"`
+
 	// Id Optional pre-generated session UUID
 	Id *openapi_types.UUID `json:"id,omitempty"`
 
@@ -64,7 +67,10 @@ type CreateSessionRequest struct {
 	Tags *[]string `json:"tags,omitempty"`
 
 	// TtlSeconds Session TTL in seconds (0 = no expiry)
-	TtlSeconds    *int    `json:"ttlSeconds,omitempty"`
+	TtlSeconds *int `json:"ttlSeconds,omitempty"`
+
+	// Variant Rollout variant (e.g., stable, canary)
+	Variant       *string `json:"variant,omitempty"`
 	WorkspaceName *string `json:"workspaceName,omitempty"`
 }
 
@@ -179,7 +185,10 @@ type RuntimeEvent struct {
 
 // Session defines model for Session.
 type Session struct {
-	AgentName          *string             `json:"agentName,omitempty"`
+	AgentName *string `json:"agentName,omitempty"`
+
+	// CohortId Rollout cohort identifier
+	CohortId           *string             `json:"cohortId,omitempty"`
 	CreatedAt          *time.Time          `json:"createdAt,omitempty"`
 	EndedAt            *time.Time          `json:"endedAt,omitempty"`
 	EstimatedCostUSD   *float64            `json:"estimatedCostUSD,omitempty"`
@@ -198,7 +207,10 @@ type Session struct {
 	TotalInputTokens   *int64              `json:"totalInputTokens,omitempty"`
 	TotalOutputTokens  *int64              `json:"totalOutputTokens,omitempty"`
 	UpdatedAt          *time.Time          `json:"updatedAt,omitempty"`
-	WorkspaceName      *string             `json:"workspaceName,omitempty"`
+
+	// Variant Rollout variant (e.g., stable, canary)
+	Variant       *string `json:"variant,omitempty"`
+	WorkspaceName *string `json:"workspaceName,omitempty"`
 }
 
 // SessionListResponse defines model for SessionListResponse.

@@ -83,6 +83,12 @@ func SessionToAPI(id string, opts session.CreateSessionOptions) CreateSessionReq
 	if len(opts.InitialState) > 0 {
 		req.InitialState = &opts.InitialState
 	}
+	if opts.CohortID != "" {
+		req.CohortId = ptr(opts.CohortID)
+	}
+	if opts.Variant != "" {
+		req.Variant = ptr(opts.Variant)
+	}
 	return req
 }
 
@@ -269,6 +275,8 @@ func SessionFromAPI(s *Session) *session.Session {
 		LastMessagePreview: deref(s.LastMessagePreview),
 		PromptPackName:     deref(s.PromptPackName),
 		PromptPackVersion:  deref(s.PromptPackVersion),
+		CohortID:           deref(s.CohortId),
+		Variant:            deref(s.Variant),
 		Tags:               derefSlice(s.Tags),
 		State:              derefMap(s.State),
 		Messages:           MessagesFromAPI(s.Messages),

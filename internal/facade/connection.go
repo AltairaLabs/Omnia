@@ -48,6 +48,10 @@ type Connection struct {
 	userEmail     string
 	authorization string // Original JWT token for passthrough
 
+	// Rollout cohort tracking fields extracted from HTTP headers on WebSocket upgrade.
+	cohortID string
+	variant  string
+
 	// rateLimiter enforces per-connection message rate limiting. Nil when disabled.
 	rateLimiter *rate.Limiter
 }

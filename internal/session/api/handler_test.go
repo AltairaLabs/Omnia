@@ -3205,3 +3205,51 @@ func TestHandleRecordToolCall_InvalidBody(t *testing.T) {
 		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
 	}
 }
+
+func TestHandleCreateSession_WithCohortFields(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","cohortId":"cohort-123","variant":"canary"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeJSON[SessionResponse](t, rec)
+	if resp.Session.CohortID != "cohort-123" {
+		t.Errorf("CohortID = %q, want %q", resp.Session.CohortID, "cohort-123")
+	}
+	if resp.Session.Variant != "canary" {
+		t.Errorf("Variant = %q, want %q", resp.Session.Variant, "canary")
+	}
+}
+
+func TestHandleCreateSession_NoCohortFields(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeJSON[SessionResponse](t, rec)
+	if resp.Session.CohortID != "" {
+		t.Errorf("CohortID = %q, want empty", resp.Session.CohortID)
+	}
+	if resp.Session.Variant != "" {
+		t.Errorf("Variant = %q, want empty", resp.Session.Variant)
+	}
+}

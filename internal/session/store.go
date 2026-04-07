@@ -180,6 +180,10 @@ type Session struct {
 	PromptPackName string `json:"promptPackName,omitempty"`
 	// PromptPackVersion is the version of the PromptPack at session creation.
 	PromptPackVersion string `json:"promptPackVersion,omitempty"`
+	// CohortID identifies the rollout cohort this session belongs to.
+	CohortID string `json:"cohortId,omitempty"`
+	// Variant identifies the rollout variant (e.g., "stable", "canary").
+	Variant string `json:"variant,omitempty"`
 }
 
 // IsExpired returns true if the session has expired.
@@ -213,6 +217,10 @@ type CreateSessionOptions struct {
 	PromptPackVersion string
 	// Tags are optional labels for categorizing sessions (e.g., "source:arena").
 	Tags []string
+	// CohortID identifies the rollout cohort this session belongs to.
+	CohortID string
+	// Variant identifies the rollout variant (e.g., "stable", "canary").
+	Variant string
 }
 
 // SessionStatusUpdate contains lifecycle state changes for a session.

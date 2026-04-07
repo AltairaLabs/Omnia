@@ -73,6 +73,8 @@ const (
 	AttrOmniaPromptPackName      = "omnia.promptpack.name"
 	AttrOmniaPromptPackVersion   = "omnia.promptpack.version"
 	AttrOmniaPromptPackNamespace = "omnia.promptpack.namespace"
+	AttrOmniaCohortID            = "omnia.cohort.id"
+	AttrOmniaVariant             = "omnia.variant"
 )
 
 // PromptKit tool span attribute keys.

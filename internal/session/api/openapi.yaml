@@ -707,6 +707,12 @@ components:
           type: string
         promptPackVersion:
           type: string
+        cohortId:
+          type: string
+          description: Rollout cohort identifier
+        variant:
+          type: string
+          description: Rollout variant (e.g., stable, canary)
 
     Message:
       type: object
@@ -932,6 +938,12 @@ components:
           additionalProperties:
             type: string
           description: Optional initial key-value state for the session
+        cohortId:
+          type: string
+          description: Rollout cohort identifier
+        variant:
+          type: string
+          description: Rollout variant (e.g., stable, canary)
 
     RefreshTTLRequest:
       type: object

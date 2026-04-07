@@ -143,16 +143,24 @@ func (s *Server) startMessageSpan(ctx context.Context, c *Connection, sessionID 
 	})
 	ctx = trace.ContextWithRemoteSpanContext(ctx, remoteCtx)
 
+	spanAttrs := []attribute.KeyValue{
+		attribute.String("session.id", sessionID),
+		attribute.String(otlp.AttrOmniaAgentName, c.agentName),
+		attribute.String(otlp.AttrOmniaAgentNamespace, c.namespace),
+		attribute.String(otlp.AttrOmniaPromptPackName, s.config.PromptPackName),
+		attribute.String(otlp.AttrOmniaPromptPackVersion, s.config.PromptPackVersion),
+		attribute.String(otlp.AttrOmniaPromptPackNamespace, c.namespace),
+	}
+	if c.cohortID != "" {
+		spanAttrs = append(spanAttrs, attribute.String(otlp.AttrOmniaCohortID, c.cohortID))
+	}
+	if c.variant != "" {
+		spanAttrs = append(spanAttrs, attribute.String(otlp.AttrOmniaVariant, c.variant))
+	}
+
 	opts = append(opts,
 		trace.WithSpanKind(trace.SpanKindServer),
-		trace.WithAttributes(
-			attribute.String("session.id", sessionID),
-			attribute.String(otlp.AttrOmniaAgentName, c.agentName),
-			attribute.String(otlp.AttrOmniaAgentNamespace, c.namespace),
-			attribute.String(otlp.AttrOmniaPromptPackName, s.config.PromptPackName),
-			attribute.String(otlp.AttrOmniaPromptPackVersion, s.config.PromptPackVersion),
-			attribute.String(otlp.AttrOmniaPromptPackNamespace, c.namespace),
-		),
+		trace.WithAttributes(spanAttrs...),
 	)
 
 	return s.tracingProvider.Tracer().Start(ctx, "omnia.facade.message", opts...)
@@ -234,6 +242,8 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 		PromptPackVersion: s.config.PromptPackVersion,
 		Tags:              buildSessionTags(c),
 		InitialState:      buildSessionState(c, s.config),
+		CohortID:          c.cohortID,
+		Variant:           c.variant,
 	})
 	if err != nil {
 		return "", err
