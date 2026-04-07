@@ -147,6 +147,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		labelAppInstance:  agentRuntime.Name,
 		labelAppManagedBy: labelValueOmniaOperator,
 		labelOmniaComp:    "agent",
+		labelOmniaTrack:   "stable",
 	}
 
 	replicas := int32(1)
