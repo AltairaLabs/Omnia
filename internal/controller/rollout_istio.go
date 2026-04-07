@@ -30,6 +30,7 @@ import (
 const (
 	istioNetworkingAPIVersion = "networking.istio.io/v1"
 	istioVirtualServiceKind   = "VirtualService"
+	istioDestinationRuleKind  = "DestinationRule"
 )
 
 // patchVirtualServiceWeights patches the HTTP route weights of an Istio
@@ -95,6 +96,50 @@ func (r *AgentRuntimeReconciler) patchVirtualServiceWeights(
 		"virtualService", vsName,
 		"stableWeight", stableWeight,
 		"candidateWeight", candWeight)
+	return nil
+}
+
+// patchDestinationRuleConsistentHash patches (or removes) consistent hash-based
+// load balancing on the DestinationRule. When hashHeader is non-empty it sets
+// spec.trafficPolicy.loadBalancer.consistentHash.httpHeaderName; when empty it
+// removes the consistentHash block entirely.
+func (r *AgentRuntimeReconciler) patchDestinationRuleConsistentHash(
+	ctx context.Context,
+	namespace string,
+	istio *omniav1alpha1.IstioTrafficRouting,
+	hashHeader string,
+) error {
+	log := logf.FromContext(ctx)
+
+	drName := istio.DestinationRule.Name
+	dr := &unstructured.Unstructured{}
+	dr.SetAPIVersion(istioNetworkingAPIVersion)
+	dr.SetKind(istioDestinationRuleKind)
+
+	if err := r.Get(ctx, types.NamespacedName{Name: drName, Namespace: namespace}, dr); err != nil {
+		if isNoMatchError(err) {
+			log.V(1).Info("istio CRDs not installed", "reason", "DestinationRule kind not registered")
+			return nil
+		}
+		return fmt.Errorf("get DestinationRule %q: %w", drName, err)
+	}
+
+	if hashHeader != "" {
+		if err := unstructured.SetNestedField(dr.Object, hashHeader,
+			"spec", "trafficPolicy", "loadBalancer", "consistentHash", "httpHeaderName"); err != nil {
+			return fmt.Errorf("set consistentHash on DestinationRule %q: %w", drName, err)
+		}
+	} else {
+		unstructured.RemoveNestedField(dr.Object, "spec", "trafficPolicy", "loadBalancer", "consistentHash")
+	}
+
+	if err := r.Update(ctx, dr); err != nil {
+		return fmt.Errorf("update DestinationRule %q: %w", drName, err)
+	}
+
+	log.V(1).Info("patched DestinationRule consistent hash",
+		"destinationRule", drName,
+		"hashHeader", hashHeader)
 	return nil
 }
 

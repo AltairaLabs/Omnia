@@ -49,6 +49,29 @@ func newTestSchemeWithIstioNetworking(t *testing.T) *runtime.Scheme {
 	return scheme
 }
 
+func newTestSchemeWithIstioAll(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	scheme := newTestSchemeWithIstioNetworking(t)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1", Kind: "DestinationRule"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1", Kind: "DestinationRuleList"},
+		&unstructured.UnstructuredList{},
+	)
+	return scheme
+}
+
+func newTestDestinationRule() *unstructured.Unstructured {
+	dr := &unstructured.Unstructured{}
+	dr.SetAPIVersion(istioNetworkingAPIVersion)
+	dr.SetKind(istioDestinationRuleKind)
+	dr.SetName("my-dr")
+	dr.SetNamespace("default")
+	return dr
+}
+
 func newTestIstioConfig() *omniav1alpha1.IstioTrafficRouting {
 	return &omniav1alpha1.IstioTrafficRouting{
 		VirtualService: omniav1alpha1.IstioVirtualServiceRef{
@@ -391,4 +414,81 @@ func TestPatchVirtualServiceWeights_InvalidRouteEntry(t *testing.T) {
 func TestIsTargetRoute_EmptyTargets(t *testing.T) {
 	assert.False(t, isTargetRoute("primary", nil))
 	assert.False(t, isTargetRoute("primary", []string{}))
+}
+
+func TestPatchDestinationRuleConsistentHash(t *testing.T) {
+	scheme := newTestSchemeWithIstioAll(t)
+	dr := newTestDestinationRule()
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(dr).Build()
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	istioConfig := newTestIstioConfig()
+	err := r.patchDestinationRuleConsistentHash(context.Background(), "default", istioConfig, "x-user-id")
+	require.NoError(t, err)
+
+	// Verify consistentHash.httpHeaderName was set.
+	updated := &unstructured.Unstructured{}
+	updated.SetAPIVersion(istioNetworkingAPIVersion)
+	updated.SetKind(istioDestinationRuleKind)
+	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "my-dr", Namespace: "default"}, updated)
+	require.NoError(t, err)
+
+	val, found, err := unstructured.NestedString(updated.Object,
+		"spec", "trafficPolicy", "loadBalancer", "consistentHash", "httpHeaderName")
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "x-user-id", val)
+}
+
+func TestPatchDestinationRuleConsistentHash_Remove(t *testing.T) {
+	scheme := newTestSchemeWithIstioAll(t)
+	dr := newTestDestinationRule()
+	// Pre-set a consistentHash block.
+	dr.Object["spec"] = map[string]interface{}{
+		"trafficPolicy": map[string]interface{}{
+			"loadBalancer": map[string]interface{}{
+				"consistentHash": map[string]interface{}{
+					"httpHeaderName": "x-user-id",
+				},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(dr).Build()
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	istioConfig := newTestIstioConfig()
+	err := r.patchDestinationRuleConsistentHash(context.Background(), "default", istioConfig, "")
+	require.NoError(t, err)
+
+	// Verify consistentHash block was removed.
+	updated := &unstructured.Unstructured{}
+	updated.SetAPIVersion(istioNetworkingAPIVersion)
+	updated.SetKind(istioDestinationRuleKind)
+	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "my-dr", Namespace: "default"}, updated)
+	require.NoError(t, err)
+
+	_, found, err := unstructured.NestedFieldNoCopy(updated.Object,
+		"spec", "trafficPolicy", "loadBalancer", "consistentHash")
+	require.NoError(t, err)
+	assert.False(t, found, "consistentHash block should have been removed")
+}
+
+func TestPatchDestinationRuleConsistentHash_NoCRD(t *testing.T) {
+	scheme := newTestSchemeWithIstioAll(t)
+	noMatchErr := fmt.Errorf("no matches for kind %q in version %q", "DestinationRule", "networking.istio.io/v1")
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				return noMatchErr
+			},
+		}).
+		Build()
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	istioConfig := newTestIstioConfig()
+	err := r.patchDestinationRuleConsistentHash(context.Background(), "default", istioConfig, "x-user-id")
+	assert.NoError(t, err) // graceful no-op
 }
