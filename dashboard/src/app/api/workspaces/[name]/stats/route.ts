@@ -23,7 +23,6 @@ interface Stats {
   promptPacks: {
     total: number;
     active: number;
-    canary: number;
   };
   tools: {
     total: number;
@@ -85,10 +84,9 @@ export const GET = withWorkspaceAccess("viewer", async (req, ctx, access) => {
       acc.total++;
       const phase = pack.status?.phase;
       if (phase === "Active") acc.active++;
-      else if (phase === "Canary") acc.canary++;
       return acc;
     },
-    { total: 0, active: 0, canary: 0 }
+    { total: 0, active: 0 }
   );
 
   // Calculate tool registry stats

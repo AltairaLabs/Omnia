@@ -15,7 +15,6 @@ const phaseStyles: Record<Phase, string> = {
   Failed: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/20",
   // PromptPack phases
   Active: STYLE_GREEN,
-  Canary: "bg-violet-500/15 text-violet-700 dark:text-violet-400 border-violet-500/20",
   Superseded: "bg-gray-500/15 text-gray-700 dark:text-gray-400 border-gray-500/20",
   // ToolRegistry phases
   Ready: STYLE_GREEN,

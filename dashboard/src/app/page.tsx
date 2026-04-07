@@ -46,7 +46,7 @@ export default function Home() {
             description={
               <>
                 <span className="text-violet-600 dark:text-violet-400">
-                  {stats?.promptPacks.canary ?? 0} canary
+                  {stats?.promptPacks.active ?? 0} active
                 </span>{" "}
                 deployments
               </>

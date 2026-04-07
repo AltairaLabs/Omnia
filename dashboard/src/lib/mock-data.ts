@@ -75,7 +75,7 @@ export const mockAgentRuntimes: AgentRuntime[] = [
       },
     },
     spec: {
-      promptPackRef: { name: "code-prompts", track: "stable" },
+      promptPackRef: { name: "code-prompts" },
       facade: { type: "websocket", port: 8080, handler: "runtime" },
       providers: [{ name: "default", providerRef: { name: "claude-production" } }],
       session: { type: "redis", ttl: "1h" },
@@ -293,7 +293,6 @@ export const mockPromptPacks: PromptPack[] = [
     spec: {
       source: { type: "configmap", configMapRef: { name: "support-prompts-v1.2.0" } },
       version: "1.2.0",
-      rollout: { type: "immediate" },
     },
     status: {
       phase: "Active",
@@ -313,16 +312,10 @@ export const mockPromptPacks: PromptPack[] = [
     spec: {
       source: { type: "configmap", configMapRef: { name: "code-prompts-v2.1.0" } },
       version: "2.1.0",
-      rollout: {
-        type: "canary",
-        canary: { weight: 30, stepWeight: 10, interval: "5m" },
-      },
     },
     status: {
-      phase: "Canary",
-      activeVersion: "2.0.1",
-      canaryVersion: "2.1.0",
-      canaryWeight: 30,
+      phase: "Active",
+      activeVersion: "2.1.0",
       lastUpdated: hoursAgo(2),
     },
   },
@@ -338,7 +331,6 @@ export const mockPromptPacks: PromptPack[] = [
     spec: {
       source: { type: "configmap", configMapRef: { name: "analyst-prompts-v1.0.0" } },
       version: "1.0.0",
-      rollout: { type: "immediate" },
     },
     status: {
       phase: "Active",
@@ -358,16 +350,10 @@ export const mockPromptPacks: PromptPack[] = [
     spec: {
       source: { type: "configmap", configMapRef: { name: "sales-prompts-v1.2.0" } },
       version: "1.2.0",
-      rollout: {
-        type: "canary",
-        canary: { weight: 75, stepWeight: 25, interval: "10m" },
-      },
     },
     status: {
-      phase: "Canary",
-      activeVersion: "1.1.0",
-      canaryVersion: "1.2.0",
-      canaryWeight: 75,
+      phase: "Active",
+      activeVersion: "1.2.0",
       lastUpdated: hoursAgo(1),
     },
   },
@@ -384,7 +370,6 @@ export const mockPromptPacks: PromptPack[] = [
     spec: {
       source: { type: "configmap", configMapRef: { name: "e2e-test-prompts-v1.0.0" } },
       version: "1.0.0",
-      rollout: { type: "immediate" },
     },
     status: {
       phase: "Active",
@@ -1596,7 +1581,6 @@ export function getMockStats() {
 
   const packs = mockPromptPacks;
   const activePacks = packs.filter((p) => p.status?.phase === "Active").length;
-  const canaryPacks = packs.filter((p) => p.status?.phase === "Canary").length;
 
   const registries = mockToolRegistries;
   const totalTools = registries.reduce(
@@ -1612,7 +1596,7 @@ export function getMockStats() {
 
   return {
     agents: { total: agents.length, running, pending, failed },
-    promptPacks: { total: packs.length, active: activePacks, canary: canaryPacks },
+    promptPacks: { total: packs.length, active: activePacks },
     tools: { total: totalTools, available: availableTools, degraded: totalTools - availableTools },
     sessions: { active: 1847 }, // Mock value
   };

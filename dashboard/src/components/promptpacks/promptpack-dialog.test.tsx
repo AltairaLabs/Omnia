@@ -127,7 +127,7 @@ describe("PromptPackDialog", () => {
     });
   });
 
-  it("creates PromptPack with immediate rollout", async () => {
+  it("creates PromptPack with correct spec", async () => {
     vi.useRealTimers();
     const user = userEvent.setup();
     const onSuccess = vi.fn();
@@ -158,64 +158,12 @@ describe("PromptPackDialog", () => {
             configMapRef: { name: "my-configmap" },
           },
           version: "1.0.0",
-          rollout: { type: "immediate" },
         })
       );
     });
 
     expect(onSuccess).toHaveBeenCalled();
     expect(onOpenChange).toHaveBeenCalledWith(false);
-  });
-
-  it("creates PromptPack with canary rollout", async () => {
-    vi.useRealTimers();
-    const user = userEvent.setup();
-
-    render(
-      <PromptPackDialog open={true} onOpenChange={vi.fn()} />
-    );
-
-    await user.type(screen.getByLabelText("Name"), "canary-pack");
-    await user.type(screen.getByLabelText("ConfigMap Reference"), "my-config");
-    await user.type(screen.getByLabelText("Version"), "2.0.0");
-
-    // Switch to canary
-    fireEvent.click(screen.getByLabelText("Canary"));
-
-    fireEvent.click(
-      screen.getByRole("button", { name: /create promptpack/i })
-    );
-
-    await waitFor(() => {
-      expect(mockCreatePromptPack).toHaveBeenCalledWith(
-        "canary-pack",
-        expect.objectContaining({
-          version: "2.0.0",
-          rollout: {
-            type: "canary",
-            canary: {
-              weight: 10,
-              stepWeight: 10,
-              interval: "5m",
-            },
-          },
-        })
-      );
-    });
-  });
-
-  it("shows canary config fields only when canary is selected", () => {
-    render(
-      <PromptPackDialog open={true} onOpenChange={vi.fn()} />
-    );
-
-    // Canary config should not be visible by default (immediate)
-    expect(screen.queryByText("Canary Configuration")).not.toBeInTheDocument();
-
-    // Switch to canary
-    fireEvent.click(screen.getByLabelText("Canary"));
-
-    expect(screen.getByText("Canary Configuration")).toBeInTheDocument();
   });
 
   it("shows error on mutation failure", async () => {
