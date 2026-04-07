@@ -173,6 +173,12 @@ var _ = Describe("Rollout E2E", func() {
 
 	Context("Rollout lifecycle", Ordered, func() {
 		BeforeAll(func() {
+			By("checking if operator is deployed")
+			cmd := exec.Command("kubectl", "get", "deployment", "omnia-controller-manager", "-n", "omnia-system")
+			if _, err := utils.Run(cmd); err != nil {
+				Skip("Operator not deployed — rollout E2E tests require a running operator")
+			}
+
 			By("checking that the AgentRuntime CRD is installed")
 			cmd := exec.Command("kubectl", "get", "crd", "agentruntimes.omnia.altairalabs.ai")
 			if _, err := utils.Run(cmd); err != nil {
@@ -391,6 +397,12 @@ spec:
 		const istioPromptPack = "rollout-istio-prompts"
 
 		BeforeAll(func() {
+			By("checking if operator is deployed")
+			cmd := exec.Command("kubectl", "get", "deployment", "omnia-controller-manager", "-n", "omnia-system")
+			if _, err := utils.Run(cmd); err != nil {
+				Skip("Operator not deployed — rollout E2E tests require a running operator")
+			}
+
 			if !isIstioNetworkingCRDInstalled() {
 				By("installing Istio networking CRDs")
 				err := installIstioNetworkingCRDs()

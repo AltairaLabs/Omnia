@@ -444,3 +444,119 @@ func TestRollback_NilSpecVersion(t *testing.T) {
 	assert.Nil(t, ar.Spec.Rollout.Candidate.PromptPackVersion)
 	assert.False(t, isRolloutActive(ar))
 }
+
+func TestRollback_NilProviders(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.Providers = nil
+	ar.Spec.ToolRegistryRef = nil
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackVersion: ptr.To("v2"),
+			ProviderRefs: []omniav1alpha1.NamedProviderRef{
+				{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "openai"}},
+			},
+			ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{Name: "tools-v2"},
+		},
+		Steps: []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](100)}},
+	}
+
+	rollback(ar)
+
+	c := ar.Spec.Rollout.Candidate
+	assert.Nil(t, c.ProviderRefs)
+	assert.Nil(t, c.ToolRegistryRef)
+	assert.False(t, isRolloutActive(ar))
+}
+
+func TestRollback_NilCandidate(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: nil,
+	}
+	// Should not panic.
+	rollback(ar)
+}
+
+// --- resolveRolloutCandidateVersion tests ---
+
+func TestResolveRolloutCandidateVersion_FromCandidate(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackVersion: ptr.To("v3"),
+		},
+	}
+	assert.Equal(t, "v3", resolveRolloutCandidateVersion(ar))
+}
+
+func TestResolveRolloutCandidateVersion_FallbackToSpec(t *testing.T) {
+	ar := newRolloutTestAR()
+	// No rollout candidate.
+	assert.Equal(t, "v1", resolveRolloutCandidateVersion(ar))
+}
+
+func TestResolveRolloutCandidateVersion_NoVersionAnywhere(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.PromptPackRef.Version = nil
+	assert.Equal(t, "", resolveRolloutCandidateVersion(ar))
+}
+
+// --- evaluateStep tests ---
+
+func TestEvaluateStep_UnknownStepType(t *testing.T) {
+	step := omniav1alpha1.RolloutStep{} // No SetWeight, Pause, or Analysis
+	result := evaluateStep(step, 3)
+	assert.True(t, result.active)
+	assert.Equal(t, int32(3), result.currentStep)
+	assert.Contains(t, result.message, "unknown step type")
+}
+
+func TestEvaluatePause_InvalidDuration(t *testing.T) {
+	step := omniav1alpha1.RolloutStep{
+		Pause: &omniav1alpha1.RolloutPause{Duration: ptr.To("not-a-duration")},
+	}
+	result := evaluateStep(step, 0)
+	assert.True(t, result.active)
+	assert.True(t, result.paused)
+	assert.Contains(t, result.message, "invalid pause duration")
+}
+
+// --- candidateDiffers edge cases ---
+
+func TestCandidateDiffers_ToolRegistryRef_NilSpec(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.ToolRegistryRef = nil
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{Name: "tools-v2"},
+		},
+		Steps: []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](10)}},
+	}
+	assert.True(t, candidateDiffers(ar))
+}
+
+func TestCandidateDiffers_ToolRegistryRef_SameName(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{Name: "tools-v1"},
+		},
+		Steps: []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](10)}},
+	}
+	assert.False(t, candidateDiffers(ar))
+}
+
+func TestPromptPackVersionDiffers_NilSpecVersion(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.PromptPackRef.Version = nil
+	c := &omniav1alpha1.CandidateOverrides{
+		PromptPackVersion: ptr.To("v2"),
+	}
+	assert.True(t, promptPackVersionDiffers(c, ar))
+}
+
+func TestPromptPackVersionDiffers_NilCandidateVersion(t *testing.T) {
+	ar := newRolloutTestAR()
+	c := &omniav1alpha1.CandidateOverrides{}
+	assert.False(t, promptPackVersionDiffers(c, ar))
+}

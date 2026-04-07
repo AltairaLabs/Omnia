@@ -259,3 +259,136 @@ func TestPatchRouteWeights_NoRouteKey(t *testing.T) {
 	// Should not panic.
 	patchRouteWeights(route, "stable", "canary", 80, 20)
 }
+
+func TestPatchRouteWeights_InvalidRouteType(t *testing.T) {
+	route := map[string]interface{}{
+		"name":  "test",
+		"route": "not-a-slice",
+	}
+	// Should not panic — route value is not []interface{}.
+	patchRouteWeights(route, "stable", "canary", 80, 20)
+}
+
+func TestPatchRouteWeights_InvalidDestinationType(t *testing.T) {
+	route := map[string]interface{}{
+		"name": "test",
+		"route": []interface{}{
+			"not-a-map",
+		},
+	}
+	// Should not panic — dest entry is not map[string]interface{}.
+	patchRouteWeights(route, "stable", "canary", 80, 20)
+}
+
+func TestPatchVirtualServiceWeights_NoSpecHTTP(t *testing.T) {
+	scheme := newTestSchemeWithIstioNetworking(t)
+
+	// VirtualService with no spec.http field.
+	vs := &unstructured.Unstructured{}
+	vs.SetAPIVersion(istioNetworkingAPIVersion)
+	vs.SetKind(istioVirtualServiceKind)
+	vs.SetName("my-vs")
+	vs.SetNamespace("default")
+	vs.Object["spec"] = map[string]interface{}{}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(vs).Build()
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	istioConfig := newTestIstioConfig()
+	err := r.patchVirtualServiceWeights(context.Background(), "default", istioConfig, 20)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no spec.http routes")
+}
+
+func TestPatchVirtualServiceWeights_GetError(t *testing.T) {
+	scheme := newTestSchemeWithIstioNetworking(t)
+	// No VS object — Get will return NotFound.
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	istioConfig := newTestIstioConfig()
+	err := r.patchVirtualServiceWeights(context.Background(), "default", istioConfig, 20)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "get VirtualService")
+}
+
+func TestPatchVirtualServiceWeights_UpdateError(t *testing.T) {
+	scheme := newTestSchemeWithIstioNetworking(t)
+	route := makeRoute("primary", 100, 0)
+	vs := newTestVirtualService("my-vs", "default", []interface{}{route})
+
+	updateErr := fmt.Errorf("update conflict")
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(vs).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+				return updateErr
+			},
+		}).
+		Build()
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	istioConfig := newTestIstioConfig()
+	err := r.patchVirtualServiceWeights(context.Background(), "default", istioConfig, 20)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "update VirtualService")
+}
+
+func TestPatchVirtualServiceWeights_NonTargetRouteSkipped(t *testing.T) {
+	scheme := newTestSchemeWithIstioNetworking(t)
+	// Route with a non-matching name — should be skipped.
+	route := map[string]interface{}{
+		"name": "other-route",
+		"route": []interface{}{
+			map[string]interface{}{
+				"destination": map[string]interface{}{
+					"host":   "my-svc",
+					"subset": "stable",
+				},
+				"weight": int64(100),
+			},
+		},
+	}
+	vs := newTestVirtualService("my-vs", "default", []interface{}{route})
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(vs).Build()
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	istioConfig := newTestIstioConfig()
+	err := r.patchVirtualServiceWeights(context.Background(), "default", istioConfig, 30)
+	require.NoError(t, err)
+
+	// Verify weights were NOT changed on the non-target route.
+	updated := &unstructured.Unstructured{}
+	updated.SetAPIVersion(istioNetworkingAPIVersion)
+	updated.SetKind(istioVirtualServiceKind)
+	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "my-vs", Namespace: "default"}, updated)
+	require.NoError(t, err)
+
+	httpRoutes, _, _ := unstructured.NestedSlice(updated.Object, "spec", "http")
+	r0 := httpRoutes[0].(map[string]interface{})
+	dests := r0["route"].([]interface{})
+	assert.Equal(t, int64(100), dests[0].(map[string]interface{})["weight"])
+}
+
+func TestPatchVirtualServiceWeights_InvalidRouteEntry(t *testing.T) {
+	scheme := newTestSchemeWithIstioNetworking(t)
+	// Route entry that is not a map — should be skipped without error.
+	vs := newTestVirtualService("my-vs", "default", []interface{}{
+		"not-a-map",
+		makeRoute("primary", 100, 0),
+	})
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(vs).Build()
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	istioConfig := newTestIstioConfig()
+	err := r.patchVirtualServiceWeights(context.Background(), "default", istioConfig, 25)
+	require.NoError(t, err)
+}
+
+func TestIsTargetRoute_EmptyTargets(t *testing.T) {
+	assert.False(t, isTargetRoute("primary", nil))
+	assert.False(t, isTargetRoute("primary", []string{}))
+}
