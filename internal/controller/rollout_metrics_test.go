@@ -35,6 +35,7 @@ func TestNewRolloutMetrics_AllNonNil(t *testing.T) {
 	assert.NotNil(t, m.Rollbacks)
 	assert.NotNil(t, m.StepDuration)
 	assert.NotNil(t, m.TrafficWeight)
+	assert.NotNil(t, m.AnalysisRuns)
 }
 
 func TestRolloutMetrics_Recording(t *testing.T) {
@@ -50,6 +51,7 @@ func TestRolloutMetrics_Recording(t *testing.T) {
 
 	m.TrafficWeight.WithLabelValues("default", "customer-support", "stable").Set(80)
 	m.TrafficWeight.WithLabelValues("default", "customer-support", "canary").Set(20)
+	m.AnalysisRuns.WithLabelValues("default", "customer-support", "error-rate-check", "pass").Inc()
 
 	// Gather and verify counts
 	families, err := reg.Gather()
@@ -66,6 +68,7 @@ func TestRolloutMetrics_Recording(t *testing.T) {
 	assert.True(t, metricNames[metricRolloutRollbacks])
 	assert.True(t, metricNames[metricRolloutStepDuration])
 	assert.True(t, metricNames[metricRolloutTrafficWeight])
+	assert.True(t, metricNames[metricRolloutAnalysisRuns])
 }
 
 func TestRolloutMetrics_DoubleRegisterPanics(t *testing.T) {

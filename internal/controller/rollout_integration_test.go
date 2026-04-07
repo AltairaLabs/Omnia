@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
@@ -27,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
@@ -960,4 +962,232 @@ func assertCondition(t *testing.T, conditions []metav1.Condition, condType strin
 		}
 	}
 	t.Errorf("condition %s not found", condType)
+}
+
+// --- Analysis step integration tests ---
+
+func newAnalysisTestScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	scheme := newTestScheme(t)
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "omnia.altairalabs.ai", Version: "v1alpha1", Kind: "RolloutAnalysis"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "omnia.altairalabs.ai", Version: "v1alpha1", Kind: "RolloutAnalysisList"},
+		&unstructured.UnstructuredList{},
+	)
+	return scheme
+}
+
+func newAnalysisTestAR() *omniav1alpha1.AgentRuntime {
+	ar := newRolloutTestAR()
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackVersion: ptr.To("v2"),
+		},
+		Steps: []omniav1alpha1.RolloutStep{
+			{SetWeight: ptr.To[int32](20)},
+			{Analysis: &omniav1alpha1.RolloutAnalysisStep{
+				TemplateName: "error-rate-check",
+			}},
+			{SetWeight: ptr.To[int32](100)},
+		},
+	}
+	ar.Status.ActiveVersion = ptr.To("v1")
+	// Position at step 1 (the analysis step).
+	step := int32(1)
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
+		Active:      true,
+		CurrentStep: &step,
+	}
+	return ar
+}
+
+func newAnalysisUnstructuredCRD(promURL string) *unstructured.Unstructured {
+	ra := &unstructured.Unstructured{}
+	ra.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "omnia.altairalabs.ai",
+		Version: "v1alpha1",
+		Kind:    "RolloutAnalysis",
+	})
+	ra.SetName("error-rate-check")
+	ra.SetNamespace("default")
+	ra.SetCreationTimestamp(metav1.Now())
+	ra.Object["spec"] = map[string]interface{}{
+		"metrics": []interface{}{
+			map[string]interface{}{
+				"name":             "error-rate",
+				"interval":         "1m",
+				"count":            int64(3),
+				"successCondition": "result[0] <= 0.05",
+				"provider": map[string]interface{}{
+					"prometheus": map[string]interface{}{
+						"address": promURL,
+						"query":   "rate(http_errors[5m])",
+					},
+				},
+			},
+		},
+	}
+	return ra
+}
+
+func TestReconcileRolloutAnalysis_Pass_AdvancesStep(t *testing.T) {
+	ts := newMockPrometheus(t, "0.02")
+	defer ts.Close()
+
+	scheme := newAnalysisTestScheme(t)
+	ar := newAnalysisTestAR()
+	raCRD := newAnalysisUnstructuredCRD(ts.URL)
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ar, raCRD).
+		WithStatusSubresource(ar).
+		Build()
+
+	reg := prometheus.NewRegistry()
+	metrics := NewRolloutMetrics(reg)
+
+	r := &AgentRuntimeReconciler{
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RolloutMetrics: metrics,
+	}
+
+	result := rolloutStepResult{
+		active:       true,
+		currentStep:  1,
+		analysis:     true,
+		analysisName: "error-rate-check",
+	}
+
+	ctrlResult, err := r.reconcileRolloutAnalysis(context.Background(), ar, result)
+	require.NoError(t, err)
+	assert.Equal(t, 1*time.Second, ctrlResult.RequeueAfter)
+
+	// Step should advance to 2.
+	require.NotNil(t, ar.Status.Rollout)
+	require.NotNil(t, ar.Status.Rollout.CurrentStep)
+	assert.Equal(t, int32(2), *ar.Status.Rollout.CurrentStep)
+	assert.Contains(t, ar.Status.Rollout.Message, "passed")
+}
+
+func TestReconcileRolloutAnalysis_Fail_ManualMode(t *testing.T) {
+	ts := newMockPrometheus(t, "0.15")
+	defer ts.Close()
+
+	scheme := newAnalysisTestScheme(t)
+	ar := newAnalysisTestAR()
+	raCRD := newAnalysisUnstructuredCRD(ts.URL)
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ar, raCRD).
+		WithStatusSubresource(ar).
+		Build()
+
+	r := &AgentRuntimeReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	result := rolloutStepResult{
+		active:       true,
+		currentStep:  1,
+		analysis:     true,
+		analysisName: "error-rate-check",
+	}
+
+	ctrlResult, err := r.reconcileRolloutAnalysis(context.Background(), ar, result)
+	require.NoError(t, err)
+	assert.Equal(t, 30*time.Second, ctrlResult.RequeueAfter)
+
+	require.NotNil(t, ar.Status.Rollout)
+	assert.True(t, ar.Status.Rollout.Active)
+	assert.Contains(t, ar.Status.Rollout.Message, "analysis failed")
+}
+
+func TestReconcileRolloutAnalysis_Fail_AutoRollback(t *testing.T) {
+	ts := newMockPrometheus(t, "0.15")
+	defer ts.Close()
+
+	scheme := newAnalysisTestScheme(t)
+	ar := newAnalysisTestAR()
+	ar.Spec.Rollout.Rollback = &omniav1alpha1.RollbackConfig{
+		Mode: omniav1alpha1.RollbackModeAutomatic,
+	}
+	raCRD := newAnalysisUnstructuredCRD(ts.URL)
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ar, raCRD).
+		WithStatusSubresource(ar).
+		Build()
+
+	reg := prometheus.NewRegistry()
+	metrics := NewRolloutMetrics(reg)
+
+	r := &AgentRuntimeReconciler{
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RolloutMetrics: metrics,
+	}
+
+	result := rolloutStepResult{
+		active:       true,
+		currentStep:  1,
+		analysis:     true,
+		analysisName: "error-rate-check",
+	}
+
+	ctrlResult, err := r.reconcileRolloutAnalysis(context.Background(), ar, result)
+	require.NoError(t, err)
+	assert.Zero(t, ctrlResult.RequeueAfter)
+
+	require.NotNil(t, ar.Status.Rollout)
+	assert.False(t, ar.Status.Rollout.Active)
+	assert.Contains(t, ar.Status.Rollout.Message, "auto-rollback")
+}
+
+func TestReconcileRolloutAnalysis_ExecutionError_Requeues(t *testing.T) {
+	scheme := newAnalysisTestScheme(t)
+	ar := newAnalysisTestAR()
+	raCRD := newAnalysisUnstructuredCRD("http://localhost:1")
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ar, raCRD).
+		WithStatusSubresource(ar).
+		Build()
+
+	r := &AgentRuntimeReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	result := rolloutStepResult{
+		active:       true,
+		currentStep:  1,
+		analysis:     true,
+		analysisName: "error-rate-check",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ctrlResult, err := r.reconcileRolloutAnalysis(ctx, ar, result)
+	require.NoError(t, err) // Should not return error — requeues instead.
+	assert.Equal(t, 30*time.Second, ctrlResult.RequeueAfter)
+}
+
+func TestRecordAnalysisMetrics_NilSafe(t *testing.T) {
+	r := &AgentRuntimeReconciler{RolloutMetrics: nil}
+	ar := newRolloutTestAR()
+	// Should not panic with nil metrics.
+	r.recordAnalysisMetrics(ar, "test-template", true)
+	r.recordAnalysisMetrics(ar, "test-template", false)
 }
