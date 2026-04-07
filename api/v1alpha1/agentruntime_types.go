@@ -1104,6 +1104,11 @@ type AgentRuntimeSpec struct {
 	// +kubebuilder:validation:MaxLength=63
 	// +optional
 	ServiceGroup string `json:"serviceGroup,omitempty"`
+
+	// rollout configures a progressive delivery rollout for this AgentRuntime.
+	// When nil, no rollout is active and all traffic goes to the current spec.
+	// +optional
+	Rollout *RolloutConfig `json:"rollout,omitempty"`
 }
 
 // AgentRuntimePhase represents the current phase of the AgentRuntime.
@@ -1154,6 +1159,10 @@ type AgentRuntimeStatus struct {
 	// a2a holds A2A-specific status information when facade.type is "a2a".
 	// +optional
 	A2A *A2AStatus `json:"a2a,omitempty"`
+
+	// rollout reports the current state of an active rollout, if any.
+	// +optional
+	Rollout *RolloutStatus `json:"rollout,omitempty"`
 
 	// conditions represent the current state of the AgentRuntime resource.
 	// +listType=map
