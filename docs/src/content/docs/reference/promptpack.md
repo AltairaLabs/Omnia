@@ -38,27 +38,6 @@ spec:
       name: my-prompts  # ConfigMap must have pack.json key
 ```
 
-### `rollout`
-
-Rollout strategy for prompt updates.
-
-| Field | Type | Default | Required |
-|-------|------|---------|----------|
-| `rollout.strategy` | string | immediate | No |
-| `rollout.canary.weight` | integer | - | No |
-
-```yaml
-spec:
-  rollout:
-    strategy: canary
-    canary:
-      weight: 20  # 20% of traffic uses new prompts
-```
-
-Strategies:
-- `immediate` - Updates apply immediately to all agents
-- `canary` - Gradual rollout with traffic splitting
-
 ## Status Fields
 
 ### `phase`
@@ -69,16 +48,12 @@ Current phase of the PromptPack.
 |-------|-------------|
 | `Pending` | Validating source |
 | `Active` | Prompts are valid and in use |
-| `Canary` | Canary rollout in progress |
+| `Superseded` | A newer version has replaced this pack |
 | `Failed` | Source validation failed |
 
 ### `activeVersion`
 
 The currently active prompt version (content hash).
-
-### `canaryVersion`
-
-The canary version during rollout (if applicable).
 
 ### `conditions`
 
@@ -168,45 +143,9 @@ data:
 
 For the complete specification, see [promptpack.org](https://promptpack.org/docs/spec/schema-reference).
 
-## Canary Rollout
-
-### Start Canary
-
-```yaml
-spec:
-  rollout:
-    strategy: canary
-    canary:
-      weight: 10  # Start with 10%
-```
-
-### Increase Traffic
-
-Update the weight to increase canary traffic:
-
-```yaml
-spec:
-  rollout:
-    canary:
-      weight: 50  # Increase to 50%
-```
-
-### Promote to Active
-
-Set weight to 100 to promote canary:
-
-```yaml
-spec:
-  rollout:
-    canary:
-      weight: 100  # Promotes canary to active
-```
-
-The status will transition from `Canary` to `Active`.
-
 ## Example
 
-Complete PromptPack example with canary rollout:
+Complete PromptPack example:
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -220,20 +159,14 @@ spec:
     type: configmap
     configMapRef:
       name: cs-prompts-v2
-  rollout:
-    type: canary
-    canary:
-      weight: 25
 ```
 
 Status after deployment:
 
 ```yaml
 status:
-  phase: Canary
-  activeVersion: "1.0.0"
-  canaryVersion: "2.0.0"
-  canaryWeight: 25
+  phase: Active
+  activeVersion: "2.0.0"
   conditions:
     - type: SourceValid
       status: "True"

@@ -107,8 +107,6 @@ metadata:
   namespace: default
 spec:
   version: "1.0.0"
-  rollout:
-    type: immediate
   source:
     type: configmap
     configMapRef:
