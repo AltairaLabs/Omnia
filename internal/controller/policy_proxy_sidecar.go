@@ -17,15 +17,12 @@ limitations under the License.
 package controller
 
 import (
-	"context"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
-	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 )
 
 // Policy proxy sidecar constants.
@@ -39,37 +36,6 @@ const (
 	// DefaultPolicyProxyHealthPort is the health port for the policy proxy.
 	DefaultPolicyProxyHealthPort = 8083
 )
-
-// extractToolRegistryName returns the tool registry name from the agent runtime spec.
-func extractToolRegistryName(agentRuntime *omniav1alpha1.AgentRuntime) string {
-	if agentRuntime.Spec.ToolRegistryRef == nil {
-		return ""
-	}
-	return agentRuntime.Spec.ToolRegistryRef.Name
-}
-
-// filterPoliciesByRegistry returns policies whose selector matches the given registry.
-func filterPoliciesByRegistry(policies []eev1alpha1.ToolPolicy, registry string) []eev1alpha1.ToolPolicy {
-	var matched []eev1alpha1.ToolPolicy
-	for i := range policies {
-		if policies[i].Spec.Selector.Registry == registry {
-			matched = append(matched, policies[i])
-		}
-	}
-	return matched
-}
-
-// shouldInjectPolicyProxy returns true if any ToolPolicy exists in the agent's
-// namespace. When true, the deployment builder adds the policy-proxy sidecar to
-// intercept and evaluate tool calls before they reach the runtime.
-func (r *AgentRuntimeReconciler) shouldInjectPolicyProxy(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) bool {
-	var list eev1alpha1.ToolPolicyList
-	if err := r.List(ctx, &list, client.InNamespace(agentRuntime.Namespace)); err != nil {
-		// If the CRD isn't installed or we can't list, don't inject.
-		return false
-	}
-	return len(list.Items) > 0
-}
 
 // buildPolicyProxyContainer creates the policy proxy sidecar container spec.
 func buildPolicyProxyContainer(

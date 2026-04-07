@@ -233,7 +233,7 @@ func main() {
 		RedisAddr:                       redisAddr,
 		EvalWorkerImage:                 evalWorkerImage,
 		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
-		PolicyProxyImage:                policyProxyImage,
+		PolicyProxyImage:                policyProxyImageForEnterprise(enterpriseEnabled, policyProxyImage),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "AgentRuntime")
 		os.Exit(1)
@@ -353,4 +353,17 @@ func main() {
 			setupLog.Error(err, "API server shutdown error")
 		}
 	}
+}
+
+// policyProxyImageForEnterprise returns the policy proxy image when enterprise
+// is enabled, or empty string when disabled (which prevents sidecar injection).
+// When enterprise is enabled but no image is specified, the default is used.
+func policyProxyImageForEnterprise(enterpriseEnabled bool, image string) string {
+	if !enterpriseEnabled {
+		return ""
+	}
+	if image == "" {
+		return controller.DefaultPolicyProxyImage
+	}
+	return image
 }

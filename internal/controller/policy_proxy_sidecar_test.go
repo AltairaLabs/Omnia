@@ -17,16 +17,12 @@ limitations under the License.
 package controller
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	k8sruntime "k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
-	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 )
 
 func TestBuildPolicyProxyContainer_DefaultImage(t *testing.T) {
@@ -131,159 +127,5 @@ func TestBuildPolicyProxyContainer_Probes(t *testing.T) {
 	}
 	if container.LivenessProbe.HTTPGet.Path != healthzPath {
 		t.Errorf("liveness path = %q, want %q", container.LivenessProbe.HTTPGet.Path, healthzPath)
-	}
-}
-
-func TestExtractToolRegistryName(t *testing.T) {
-	tests := []struct {
-		name     string
-		agent    *omniav1alpha1.AgentRuntime
-		expected string
-	}{
-		{
-			name: "with tool registry ref",
-			agent: &omniav1alpha1.AgentRuntime{
-				Spec: omniav1alpha1.AgentRuntimeSpec{
-					ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{
-						Name: "customer-tools",
-					},
-				},
-			},
-			expected: "customer-tools",
-		},
-		{
-			name: "without tool registry ref",
-			agent: &omniav1alpha1.AgentRuntime{
-				Spec: omniav1alpha1.AgentRuntimeSpec{},
-			},
-			expected: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractToolRegistryName(tt.agent)
-			if got != tt.expected {
-				t.Errorf("extractToolRegistryName() = %q, want %q", got, tt.expected)
-			}
-		})
-	}
-}
-
-func TestFilterPoliciesByRegistry(t *testing.T) {
-	policies := []eev1alpha1.ToolPolicy{
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "p1"},
-			Spec: eev1alpha1.ToolPolicySpec{
-				Selector: eev1alpha1.ToolPolicySelector{Registry: "customer-tools"},
-				Rules:    []eev1alpha1.PolicyRule{{Name: "r1", Deny: eev1alpha1.PolicyRuleDeny{CEL: "true", Message: "m"}}},
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "p2"},
-			Spec: eev1alpha1.ToolPolicySpec{
-				Selector: eev1alpha1.ToolPolicySelector{Registry: "other-tools"},
-				Rules:    []eev1alpha1.PolicyRule{{Name: "r2", Deny: eev1alpha1.PolicyRuleDeny{CEL: "true", Message: "m"}}},
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "p3"},
-			Spec: eev1alpha1.ToolPolicySpec{
-				Selector: eev1alpha1.ToolPolicySelector{Registry: "customer-tools"},
-				Rules:    []eev1alpha1.PolicyRule{{Name: "r3", Deny: eev1alpha1.PolicyRuleDeny{CEL: "true", Message: "m"}}},
-			},
-		},
-	}
-
-	matched := filterPoliciesByRegistry(policies, "customer-tools")
-	if len(matched) != 2 {
-		t.Errorf("matched count = %d, want 2", len(matched))
-	}
-	if matched[0].Name != "p1" {
-		t.Errorf("first match = %q, want %q", matched[0].Name, "p1")
-	}
-	if matched[1].Name != "p3" {
-		t.Errorf("second match = %q, want %q", matched[1].Name, "p3")
-	}
-}
-
-func TestFilterPoliciesByRegistry_NoMatch(t *testing.T) {
-	policies := []eev1alpha1.ToolPolicy{
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "p1"},
-			Spec: eev1alpha1.ToolPolicySpec{
-				Selector: eev1alpha1.ToolPolicySelector{Registry: "other-tools"},
-				Rules:    []eev1alpha1.PolicyRule{{Name: "r1", Deny: eev1alpha1.PolicyRuleDeny{CEL: "true", Message: "m"}}},
-			},
-		},
-	}
-
-	matched := filterPoliciesByRegistry(policies, "customer-tools")
-	if len(matched) != 0 {
-		t.Errorf("matched count = %d, want 0", len(matched))
-	}
-}
-
-func TestFilterPoliciesByRegistry_Empty(t *testing.T) {
-	matched := filterPoliciesByRegistry(nil, "customer-tools")
-	if len(matched) != 0 {
-		t.Errorf("matched count = %d, want 0", len(matched))
-	}
-}
-
-func testSchemeWithEE() *k8sruntime.Scheme {
-	s := k8sruntime.NewScheme()
-	_ = omniav1alpha1.AddToScheme(s)
-	_ = eev1alpha1.AddToScheme(s)
-	return s
-}
-
-func TestShouldInjectPolicyProxy_NoPolicies(t *testing.T) {
-	scheme := testSchemeWithEE()
-	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
-	r := &AgentRuntimeReconciler{Client: cl, Scheme: scheme}
-	ar := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
-	}
-	if r.shouldInjectPolicyProxy(context.Background(), ar) {
-		t.Error("expected false when no ToolPolicies exist")
-	}
-}
-
-func TestShouldInjectPolicyProxy_WithPolicy(t *testing.T) {
-	scheme := testSchemeWithEE()
-	tp := &eev1alpha1.ToolPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "block-sql", Namespace: "default"},
-		Spec: eev1alpha1.ToolPolicySpec{
-			Selector: eev1alpha1.ToolPolicySelector{Registry: "my-tools"},
-			Rules:    []eev1alpha1.PolicyRule{{Name: "block", Deny: eev1alpha1.PolicyRuleDeny{CEL: "true", Message: "blocked"}}},
-		},
-	}
-	cl := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(tp).Build()
-	r := &AgentRuntimeReconciler{Client: cl, Scheme: scheme}
-	ar := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
-	}
-	if !r.shouldInjectPolicyProxy(context.Background(), ar) {
-		t.Error("expected true when ToolPolicy exists in namespace")
-	}
-}
-
-func TestShouldInjectPolicyProxy_DifferentNamespace(t *testing.T) {
-	scheme := testSchemeWithEE()
-	tp := &eev1alpha1.ToolPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "block-sql", Namespace: "other-ns"},
-		Spec: eev1alpha1.ToolPolicySpec{
-			Selector: eev1alpha1.ToolPolicySelector{Registry: "my-tools"},
-			Rules:    []eev1alpha1.PolicyRule{{Name: "block", Deny: eev1alpha1.PolicyRuleDeny{CEL: "true", Message: "blocked"}}},
-		},
-	}
-	cl := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(tp).Build()
-	r := &AgentRuntimeReconciler{Client: cl, Scheme: scheme}
-	ar := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
-	}
-	if r.shouldInjectPolicyProxy(context.Background(), ar) {
-		t.Error("expected false when ToolPolicy is in a different namespace")
 	}
 }
