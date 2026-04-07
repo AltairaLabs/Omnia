@@ -25,6 +25,7 @@ const (
 	metricRolloutRollbacks       = "omnia_rollout_rollbacks_total"
 	metricRolloutStepDuration    = "omnia_rollout_step_duration_seconds"
 	metricRolloutTrafficWeight   = "omnia_rollout_traffic_weight"
+	metricRolloutAnalysisRuns    = "omnia_rollout_analysis_runs_total"
 )
 
 // Label constants for rollout metrics.
@@ -34,6 +35,8 @@ const (
 	labelStepType     = "step_type"
 	labelReason       = "reason"
 	labelVariant      = "variant"
+	labelTemplate     = "template"
+	labelResult       = "result"
 )
 
 // RolloutMetrics holds Prometheus metrics for rollout observability.
@@ -44,6 +47,7 @@ type RolloutMetrics struct {
 	Rollbacks       *prometheus.CounterVec
 	StepDuration    *prometheus.HistogramVec
 	TrafficWeight   *prometheus.GaugeVec
+	AnalysisRuns    *prometheus.CounterVec
 }
 
 // DefaultRolloutDurationBuckets are histogram buckets for rollout step durations.
@@ -82,8 +86,13 @@ func NewRolloutMetrics(reg prometheus.Registerer) *RolloutMetrics {
 			Name: metricRolloutTrafficWeight,
 			Help: "Current traffic weight percentage per variant.",
 		}, []string{labelNamespace, labelAgentRuntime, labelVariant}),
+
+		AnalysisRuns: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: metricRolloutAnalysisRuns,
+			Help: "Total rollout analysis runs by template and result.",
+		}, []string{labelNamespace, labelAgentRuntime, labelTemplate, labelResult}),
 	}
 
-	reg.MustRegister(m.Active, m.StepTransitions, m.Promotions, m.Rollbacks, m.StepDuration, m.TrafficWeight)
+	reg.MustRegister(m.Active, m.StepTransitions, m.Promotions, m.Rollbacks, m.StepDuration, m.TrafficWeight, m.AnalysisRuns)
 	return m
 }

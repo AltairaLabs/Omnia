@@ -129,6 +129,11 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 		return r.reconcileRolloutPromote(ctx, ar)
 	}
 
+	// Execute analysis step if pending.
+	if result.analysis && result.analysisName != "" {
+		return r.reconcileRolloutAnalysis(ctx, ar, result)
+	}
+
 	return r.reconcileRolloutUpdateStatus(ctx, ar, result)
 }
 
@@ -262,6 +267,129 @@ func (r *AgentRuntimeReconciler) reconcileRolloutUpdateStatus(
 		return ctrl.Result{RequeueAfter: result.requeueAfter}, nil
 	}
 	return ctrl.Result{}, nil
+}
+
+// reconcileRolloutAnalysis runs the analysis step and advances or rolls back
+// based on the result.
+func (r *AgentRuntimeReconciler) reconcileRolloutAnalysis(
+	ctx context.Context,
+	ar *omniav1alpha1.AgentRuntime,
+	result rolloutStepResult,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	step := ar.Spec.Rollout.Steps[result.currentStep]
+	analysisOut, err := r.runAnalysis(ctx, ar.Namespace, step.Analysis)
+	if err != nil {
+		log.Error(err, "analysis execution error", "template", result.analysisName)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	r.recordAnalysisMetrics(ar, result.analysisName, analysisOut.passed)
+
+	if analysisOut.passed {
+		return r.handleAnalysisPass(ctx, ar, result)
+	}
+
+	log.Info("analysis failed", "template", result.analysisName, "message", analysisOut.message)
+
+	if ar.Spec.Rollout.Rollback != nil && ar.Spec.Rollout.Rollback.Mode == omniav1alpha1.RollbackModeAutomatic {
+		return r.handleAnalysisAutoRollback(ctx, ar, analysisOut.message)
+	}
+
+	return r.handleAnalysisManualPause(ctx, ar, result.currentStep, analysisOut.message)
+}
+
+// recordAnalysisMetrics records analysis run and step transition metrics.
+func (r *AgentRuntimeReconciler) recordAnalysisMetrics(ar *omniav1alpha1.AgentRuntime, templateName string, passed bool) {
+	if r.RolloutMetrics == nil {
+		return
+	}
+	outcome := "pass"
+	if !passed {
+		outcome = "fail"
+	}
+	r.RolloutMetrics.AnalysisRuns.WithLabelValues(ar.Namespace, ar.Name, templateName, outcome).Inc()
+	r.RolloutMetrics.StepTransitions.WithLabelValues(ar.Namespace, ar.Name, "analysis").Inc()
+}
+
+// handleAnalysisPass advances to the next rollout step after a passing analysis.
+func (r *AgentRuntimeReconciler) handleAnalysisPass(
+	ctx context.Context,
+	ar *omniav1alpha1.AgentRuntime,
+	result rolloutStepResult,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	log.V(1).Info("analysis passed, advancing step", "template", result.analysisName)
+
+	nextStep := result.currentStep + 1
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
+		Active:      true,
+		CurrentStep: &nextStep,
+		Message:     fmt.Sprintf("analysis %s passed", result.analysisName),
+	}
+	if err := r.Status().Update(ctx, ar); err != nil {
+		return ctrl.Result{}, fmt.Errorf("persist analysis pass status: %w", err)
+	}
+	return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
+}
+
+// handleAnalysisAutoRollback triggers automatic rollback after a failed analysis.
+func (r *AgentRuntimeReconciler) handleAnalysisAutoRollback(
+	ctx context.Context,
+	ar *omniav1alpha1.AgentRuntime,
+	failMessage string,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	rollback(ar)
+	if err := r.Update(ctx, ar); err != nil {
+		return ctrl.Result{}, fmt.Errorf("persist analysis rollback spec: %w", err)
+	}
+	if err := r.deleteCandidateDeployment(ctx, ar); err != nil {
+		return ctrl.Result{}, fmt.Errorf("delete candidate after analysis rollback: %w", err)
+	}
+	if ar.Spec.Rollout.TrafficRouting != nil && ar.Spec.Rollout.TrafficRouting.Istio != nil {
+		if err := r.resetTrafficRouting(ctx, ar.Namespace, ar.Spec.Rollout.TrafficRouting.Istio); err != nil {
+			log.Error(err, "failed to reset traffic routing on analysis rollback")
+		}
+	}
+	if r.RolloutMetrics != nil {
+		r.RolloutMetrics.Rollbacks.WithLabelValues(ar.Namespace, ar.Name, "analysis_failed").Inc()
+		r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "stable").Set(100)
+		r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "canary").Set(0)
+	}
+
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{Active: false, Message: "auto-rollback: " + failMessage}
+	SetCondition(&ar.Status.Conditions, ar.Generation,
+		ConditionTypeRolloutActive, metav1.ConditionFalse,
+		"NoActiveRollout", "auto-rollback triggered: analysis failed")
+	if err := r.Status().Update(ctx, ar); err != nil {
+		return ctrl.Result{}, fmt.Errorf("persist analysis rollback status: %w", err)
+	}
+	return ctrl.Result{}, nil
+}
+
+// handleAnalysisManualPause updates status with the failure message and requeues
+// for manual intervention when automatic rollback is not configured.
+func (r *AgentRuntimeReconciler) handleAnalysisManualPause(
+	ctx context.Context,
+	ar *omniav1alpha1.AgentRuntime,
+	currentStep int32,
+	failMessage string,
+) (ctrl.Result, error) {
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
+		Active:      true,
+		CurrentStep: &currentStep,
+		Message:     "analysis failed: " + failMessage,
+	}
+	SetCondition(&ar.Status.Conditions, ar.Generation,
+		ConditionTypeRolloutActive, metav1.ConditionTrue,
+		"AnalysisFailed", "analysis failed: "+failMessage)
+	if err := r.Status().Update(ctx, ar); err != nil {
+		return ctrl.Result{}, fmt.Errorf("persist analysis failure status: %w", err)
+	}
+	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
 // resolveRolloutCandidateVersion returns the candidate prompt pack version,
