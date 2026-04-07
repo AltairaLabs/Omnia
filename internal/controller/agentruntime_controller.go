@@ -68,6 +68,9 @@ type AgentRuntimeReconciler struct {
 	// is injected into the agent pod to evaluate CEL rules before tool execution.
 	// If empty, the default image from policy_proxy_sidecar.go is used.
 	PolicyProxyImage string
+	// RolloutMetrics holds Prometheus metrics for rollout observability.
+	// Nil in tests that don't need metrics.
+	RolloutMetrics *RolloutMetrics
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch;create;update;patch;delete
@@ -289,6 +292,11 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		log.Error(rolloutErr, "rollout reconciliation failed")
 		return ctrl.Result{}, rolloutErr
 	} else if rolloutResult.RequeueAfter > 0 {
+		// Persist status before early return so rollout progress is not lost.
+		agentRuntime.Status.ObservedGeneration = agentRuntime.Generation
+		if err := r.Status().Update(ctx, agentRuntime); err != nil {
+			return ctrl.Result{}, err
+		}
 		return rolloutResult, nil
 	}
 

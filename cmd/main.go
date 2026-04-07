@@ -36,6 +36,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	eesetup "github.com/altairalabs/omnia/ee/pkg/setup"
@@ -234,6 +236,7 @@ func main() {
 		EvalWorkerImage:                 evalWorkerImage,
 		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
 		PolicyProxyImage:                policyProxyImageForEnterprise(enterpriseEnabled, policyProxyImage),
+		RolloutMetrics:                  controller.NewRolloutMetrics(prometheus.DefaultRegisterer),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "AgentRuntime")
 		os.Exit(1)

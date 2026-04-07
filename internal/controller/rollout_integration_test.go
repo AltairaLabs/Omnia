@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -157,6 +158,8 @@ func TestReconcileRollout_Promotion(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
+		WithObjects(ar).
+		WithStatusSubresource(ar).
 		Build()
 
 	r := &AgentRuntimeReconciler{
@@ -213,6 +216,8 @@ func TestReconcileRollout_PauseStep_RequeuesAfterDuration(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
+		WithObjects(ar).
+		WithStatusSubresource(ar).
 		Build()
 
 	r := &AgentRuntimeReconciler{
@@ -246,6 +251,165 @@ func TestReconcileRolloutIdle_NoCandidateDeployment(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, result.RequeueAfter)
 	assert.Nil(t, ar.Status.Rollout)
+}
+
+func TestReconcileRollout_Promotion_PersistsSpec(t *testing.T) {
+	scheme := newTestScheme(t)
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ar := newRolloutTestAR()
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackVersion: ptr.To("v2"),
+		},
+		Steps: []omniav1alpha1.RolloutStep{
+			{SetWeight: ptr.To[int32](100)},
+		},
+	}
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
+		Active:      true,
+		CurrentStep: ptr.To[int32](1),
+	}
+	ar.Status.ActiveVersion = ptr.To("v1")
+
+	pp := newTestPromptPack()
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ar).
+		WithStatusSubresource(ar).
+		Build()
+
+	r := &AgentRuntimeReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	// Create candidate so promotion can delete it.
+	_, err := r.reconcileCandidateDeployment(context.Background(), ar, pp, nil, nil)
+	require.NoError(t, err)
+
+	_, err = r.reconcileRollout(context.Background(), ar, pp, nil, nil)
+	require.NoError(t, err)
+
+	// Re-read from fake client to verify spec was persisted.
+	persisted := &omniav1alpha1.AgentRuntime{}
+	key := types.NamespacedName{Name: ar.Name, Namespace: ar.Namespace}
+	require.NoError(t, fakeClient.Get(context.Background(), key, persisted))
+	assert.Equal(t, "v2", *persisted.Spec.PromptPackRef.Version, "promoted version should be persisted")
+}
+
+func TestReconcileRollout_SetWeightZero_Advances(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackVersion: ptr.To("v2"),
+		},
+		Steps: []omniav1alpha1.RolloutStep{
+			{SetWeight: ptr.To[int32](0)},
+			{SetWeight: ptr.To[int32](50)},
+		},
+	}
+
+	result := reconcileRolloutSteps(ar)
+	assert.True(t, result.active)
+	assert.Equal(t, int32(0), result.currentStep)
+	assert.Equal(t, int32(0), result.desiredWeight)
+	// Verify the step is not blocked — reconcileRolloutUpdateStatus should advance.
+	assert.False(t, result.paused)
+	assert.False(t, result.analysis)
+}
+
+func TestCandidateDeployment_SelectorIncludesTrack(t *testing.T) {
+	scheme := newTestScheme(t)
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ar := newRolloutTestAR()
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackVersion: ptr.To("v2"),
+		},
+		Steps: []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](10)}},
+	}
+
+	pp := newTestPromptPack()
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		Build()
+
+	r := &AgentRuntimeReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	deploy, err := r.reconcileCandidateDeployment(context.Background(), ar, pp, nil, nil)
+	require.NoError(t, err)
+
+	// Selector must include track=canary for disjoint pod ownership.
+	assert.Equal(t, "canary", deploy.Spec.Selector.MatchLabels[labelOmniaTrack],
+		"candidate selector must include track label")
+	assert.Equal(t, "canary", deploy.Spec.Template.Labels[labelOmniaTrack],
+		"candidate pod template must include track label")
+}
+
+func TestReconcileRollout_MetricsRecorded(t *testing.T) {
+	scheme := newTestScheme(t)
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ar := newRolloutTestAR()
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackVersion: ptr.To("v2"),
+		},
+		Steps: []omniav1alpha1.RolloutStep{
+			{SetWeight: ptr.To[int32](100)},
+		},
+	}
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
+		Active:      true,
+		CurrentStep: ptr.To[int32](1),
+	}
+	ar.Status.ActiveVersion = ptr.To("v1")
+
+	pp := newTestPromptPack()
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ar).
+		WithStatusSubresource(ar).
+		Build()
+
+	reg := prometheus.NewRegistry()
+	metrics := NewRolloutMetrics(reg)
+
+	r := &AgentRuntimeReconciler{
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RolloutMetrics: metrics,
+	}
+
+	// Create candidate so promotion can delete it.
+	_, err := r.reconcileCandidateDeployment(context.Background(), ar, pp, nil, nil)
+	require.NoError(t, err)
+
+	_, err = r.reconcileRollout(context.Background(), ar, pp, nil, nil)
+	require.NoError(t, err)
+
+	// Verify promotion metric was incremented.
+	m, err := reg.Gather()
+	require.NoError(t, err)
+	found := false
+	for _, mf := range m {
+		if mf.GetName() == metricRolloutPromotions {
+			found = true
+			assert.Greater(t, mf.GetMetric()[0].GetCounter().GetValue(), float64(0))
+		}
+	}
+	assert.True(t, found, "promotion metric should be registered and incremented")
 }
 
 // assertCondition checks that a condition with the given type and status exists.

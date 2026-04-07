@@ -41,7 +41,14 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 	log := logf.FromContext(ctx)
 
 	if !isRolloutActive(ar) {
+		if r.RolloutMetrics != nil {
+			r.RolloutMetrics.Active.WithLabelValues(ar.Namespace, ar.Name).Set(0)
+		}
 		return r.reconcileRolloutIdle(ctx, ar)
+	}
+
+	if r.RolloutMetrics != nil {
+		r.RolloutMetrics.Active.WithLabelValues(ar.Namespace, ar.Name).Set(1)
 	}
 
 	// Ensure the candidate Deployment exists.
@@ -58,6 +65,9 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 		"message", result.message)
 
 	if result.promote {
+		if r.RolloutMetrics != nil {
+			r.RolloutMetrics.Promotions.WithLabelValues(ar.Namespace, ar.Name).Inc()
+		}
 		return r.reconcileRolloutPromote(ctx, ar)
 	}
 
@@ -94,6 +104,12 @@ func (r *AgentRuntimeReconciler) reconcileRolloutPromote(
 
 	promote(ar)
 
+	// Persist the spec mutation (promote copies candidate overrides into main spec).
+	// This must happen before status update since they are separate API calls.
+	if err := r.Update(ctx, ar); err != nil {
+		return ctrl.Result{}, fmt.Errorf("persist promotion: %w", err)
+	}
+
 	if err := r.deleteCandidateDeployment(ctx, ar); err != nil {
 		return ctrl.Result{}, fmt.Errorf("delete candidate after promotion: %w", err)
 	}
@@ -103,6 +119,10 @@ func (r *AgentRuntimeReconciler) reconcileRolloutPromote(
 		ConditionTypeRolloutActive, metav1.ConditionFalse,
 		"NoActiveRollout", "rollout promoted successfully")
 
+	if err := r.Status().Update(ctx, ar); err != nil {
+		return ctrl.Result{}, fmt.Errorf("persist promotion status: %w", err)
+	}
+
 	log.Info("rollout promoted", "agentRuntime", ar.Name)
 	return ctrl.Result{}, nil
 }
@@ -110,7 +130,7 @@ func (r *AgentRuntimeReconciler) reconcileRolloutPromote(
 // reconcileRolloutUpdateStatus updates the rollout status from the step result
 // and advances to the next step for setWeight steps that are not paused.
 func (r *AgentRuntimeReconciler) reconcileRolloutUpdateStatus(
-	_ context.Context,
+	ctx context.Context,
 	ar *omniav1alpha1.AgentRuntime,
 	result rolloutStepResult,
 ) (ctrl.Result, error) {
@@ -137,12 +157,18 @@ func (r *AgentRuntimeReconciler) reconcileRolloutUpdateStatus(
 		"RolloutInProgress", result.message)
 
 	// For setWeight steps (not paused, not analysis), advance to next step.
-	if !result.paused && !result.analysis && result.desiredWeight > 0 {
+	if !result.paused && !result.analysis {
 		next := step + 1
 		ar.Status.Rollout.CurrentStep = &next
+		if r.RolloutMetrics != nil {
+			r.RolloutMetrics.StepTransitions.WithLabelValues(ar.Namespace, ar.Name, "setWeight").Inc()
+		}
 	}
 
 	if result.requeueAfter > 0 {
+		if err := r.Status().Update(ctx, ar); err != nil {
+			return ctrl.Result{}, fmt.Errorf("persist rollout status before requeue: %w", err)
+		}
 		return ctrl.Result{RequeueAfter: result.requeueAfter}, nil
 	}
 	return ctrl.Result{}, nil

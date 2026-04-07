@@ -99,10 +99,27 @@ func (r *AgentRuntimeReconciler) reconcileCandidateDeployment(
 			return err
 		}
 
-		// Build the standard deployment spec (sets track="stable").
-		r.buildDeploymentSpec(ctx, deployment, ar, promptPack, toolRegistry, secretHash, resolvedClients)
+		// Build a modified copy of the AgentRuntime with candidate overrides
+		// so the candidate Deployment runs the overridden config, not stable.
+		candidateAR := ar.DeepCopy()
+		overrides := applyCandidateOverrides(ar)
+		candidateAR.Spec.PromptPackRef = overrides.PromptPackRef
+		if len(overrides.Providers) > 0 {
+			candidateAR.Spec.Providers = overrides.Providers
+		}
+		if overrides.ToolRegistryRef != nil {
+			candidateAR.Spec.ToolRegistryRef = overrides.ToolRegistryRef
+		}
 
-		// Override the track label to "canary" on pod template.
+		// Build the standard deployment spec using candidate overrides.
+		r.buildDeploymentSpec(ctx, deployment, candidateAR, promptPack, toolRegistry, secretHash, resolvedClients)
+
+		// Override the track label to "canary" on both selector and pod template
+		// so candidate pods are disjoint from stable pods.
+		if deployment.Spec.Selector == nil {
+			deployment.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{}}
+		}
+		deployment.Spec.Selector.MatchLabels[labelOmniaTrack] = "canary"
 		if deployment.Spec.Template.Labels == nil {
 			deployment.Spec.Template.Labels = make(map[string]string)
 		}
