@@ -23,10 +23,6 @@ spec:
       jsonPath: .status.phase
       name: Phase
       type: string
-    - description: Rollout strategy
-      jsonPath: .spec.rollout.type
-      name: Strategy
-      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -57,52 +53,6 @@ spec:
           spec:
             description: spec defines the desired state of PromptPack
             properties:
-              rollout:
-                description: rollout specifies how this version should be rolled out.
-                properties:
-                  canary:
-                    description: |-
-                      canary specifies the canary rollout configuration.
-                      Required when type is "canary".
-                    properties:
-                      interval:
-                        default: 5m
-                        description: interval specifies the time to wait between canary
-                          steps.
-                        type: string
-                      stepWeight:
-                        default: 10
-                        description: stepWeight specifies the percentage to increase
-                          canary traffic on each step.
-                        format: int32
-                        maximum: 100
-                        minimum: 1
-                        type: integer
-                      weight:
-                        default: 10
-                        description: |-
-                          weight specifies the percentage of traffic to route to the canary version.
-                          Must be between 0 and 100.
-                        format: int32
-                        maximum: 100
-                        minimum: 0
-                        type: integer
-                    required:
-                    - weight
-                    type: object
-                  type:
-                    default: immediate
-                    description: |-
-                      type specifies the rollout strategy type.
-                      "immediate" deploys all traffic to the new version at once.
-                      "canary" gradually shifts traffic to the new version.
-                    enum:
-                    - immediate
-                    - canary
-                    type: string
-                required:
-                - type
-                type: object
               source:
                 description: source specifies where the prompt configuration is stored.
                 properties:
@@ -139,7 +89,6 @@ spec:
                 pattern: ^v?(\d+)\.(\d+)\.(\d+)(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?(\+[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$
                 type: string
             required:
-            - rollout
             - source
             - version
             type: object
@@ -150,15 +99,6 @@ spec:
                 description: activeVersion is the currently active version serving
                   production traffic.
                 type: string
-              canaryVersion:
-                description: canaryVersion is the version currently receiving canary
-                  traffic, if any.
-                type: string
-              canaryWeight:
-                description: canaryWeight is the current percentage of traffic going
-                  to the canary version.
-                format: int32
-                type: integer
               conditions:
                 description: conditions represent the current state of the PromptPack
                   resource.
@@ -229,7 +169,6 @@ spec:
                 enum:
                 - Pending
                 - Active
-                - Canary
                 - Superseded
                 - Failed
                 type: string

@@ -28,7 +28,7 @@ const mockPromptPacks = [
       system: "You are a code assistant",
     },
     status: {
-      phase: "Canary",
+      phase: "Pending",
     },
   },
   {
@@ -142,8 +142,8 @@ describe("usePromptPacks", () => {
     expect(result.current.data?.every(p => p.status?.phase === "Active")).toBe(true);
   });
 
-  it("should filter by Canary phase", async () => {
-    const { result } = renderHook(() => usePromptPacks({ phase: "Canary" }), {
+  it("should filter by Pending phase", async () => {
+    const { result } = renderHook(() => usePromptPacks({ phase: "Pending" }), {
       wrapper: TestWrapper,
     });
 

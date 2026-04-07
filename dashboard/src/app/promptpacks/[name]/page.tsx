@@ -15,8 +15,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { Separator } from "@/components/ui/separator";
 import { YamlBlock } from "@/components/ui/yaml-block";
 import {
   Accordion,
@@ -241,7 +239,6 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
   }
 
   const { metadata, spec, status } = promptPack;
-  const isCanary = status?.phase === "Canary";
 
   return (
     <div className="flex flex-col h-full">
@@ -285,7 +282,7 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
                 <CardDescription>Current state of the PromptPack</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
                   <div>
                     <p className="text-sm text-muted-foreground">Phase</p>
                     <StatusBadge phase={status?.phase} className="mt-1" />
@@ -300,12 +297,6 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
                     </div>
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">Rollout Strategy</p>
-                    <Badge variant="outline" className="mt-1 capitalize">
-                      {spec.rollout.type}
-                    </Badge>
-                  </div>
-                  <div>
                     <p className="text-sm text-muted-foreground">Last Updated</p>
                     <div className="flex items-center gap-1.5 mt-1">
                       <Clock className="h-4 w-4 text-muted-foreground" />
@@ -315,34 +306,6 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
                     </div>
                   </div>
                 </div>
-
-                {/* Canary progress */}
-                {isCanary && status?.canaryWeight !== undefined && (
-                  <>
-                    <Separator className="my-4" />
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium">Canary Rollout</p>
-                          <p className="text-xs text-muted-foreground">
-                            Rolling out v{status.canaryVersion} to replace v{status.activeVersion}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-2xl font-bold">{status.canaryWeight}%</p>
-                          <p className="text-xs text-muted-foreground">traffic to canary</p>
-                        </div>
-                      </div>
-                      <Progress value={status.canaryWeight} className="h-2" />
-                      {spec.rollout.canary && (
-                        <div className="flex gap-4 text-xs text-muted-foreground">
-                          <span>Step: +{spec.rollout.canary.stepWeight}%</span>
-                          <span>Interval: {spec.rollout.canary.interval}</span>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
               </CardContent>
             </Card>
 
@@ -788,11 +751,6 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
                           {agent.spec.promptPackRef?.version && (
                             <Badge variant="secondary" className="text-xs">
                               v{agent.spec.promptPackRef.version}
-                            </Badge>
-                          )}
-                          {agent.spec.promptPackRef?.track && (
-                            <Badge variant="outline" className="text-xs">
-                              {agent.spec.promptPackRef.track}
                             </Badge>
                           )}
                           <StatusBadge phase={agent.status?.phase} />

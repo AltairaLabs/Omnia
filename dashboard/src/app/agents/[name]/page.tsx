@@ -343,12 +343,6 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
                     <span className="text-muted-foreground">Phase</span>
                     <span className="font-medium">{promptPack?.status?.phase || "-"}</span>
                   </div>
-                  {spec.promptPackRef?.track && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Track</span>
-                      <span className="font-medium">{spec.promptPackRef.track}</span>
-                    </div>
-                  )}
                 </CardContent>
               </Card>
 

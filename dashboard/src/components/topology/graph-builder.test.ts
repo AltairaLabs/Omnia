@@ -26,7 +26,6 @@ function createPromptPack(name: string, namespace: string): PromptPack {
     spec: {
       source: { type: "configmap", configMapRef: { name: "test" } },
       version: "1.0.0",
-      rollout: { type: "immediate" },
     },
     status: { phase: "Active", activeVersion: "1.0.0" },
   } as PromptPack;

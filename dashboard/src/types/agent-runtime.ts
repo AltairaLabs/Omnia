@@ -15,7 +15,6 @@ export type FrameworkType = "promptkit" | "langchain" | "autogen" | "custom";
 export interface PromptPackRef {
   name: string;
   version?: string;
-  track?: string;
 }
 
 export interface FacadeConfig {

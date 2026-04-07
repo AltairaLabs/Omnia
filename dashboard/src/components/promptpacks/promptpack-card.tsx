@@ -4,7 +4,6 @@ import Link from "next/link";
 import { FileText, GitBranch, Clock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { StatusBadge } from "@/components/agents";
 import type { PromptPack } from "@/types";
 
@@ -28,7 +27,6 @@ function formatRelativeTime(timestamp?: string): string {
 
 export function PromptPackCard({ promptPack }: Readonly<PromptPackCardProps>) {
   const { metadata, spec, status } = promptPack;
-  const isCanary = status?.phase === "Canary";
 
   return (
     <Link
@@ -55,26 +53,7 @@ export function PromptPackCard({ promptPack }: Readonly<PromptPackCardProps>) {
                 v{status?.activeVersion || spec.version}
               </Badge>
             </div>
-            {isCanary && status?.canaryVersion && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-muted-foreground">Canary:</span>
-                <Badge variant="outline" className="text-xs border-violet-500/30 text-violet-600 dark:text-violet-400">
-                  v{status.canaryVersion}
-                </Badge>
-              </div>
-            )}
           </div>
-
-          {/* Canary progress bar */}
-          {isCanary && status?.canaryWeight !== undefined && (
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Canary rollout</span>
-                <span className="font-medium">{status.canaryWeight}%</span>
-              </div>
-              <Progress value={status.canaryWeight} className="h-1.5" />
-            </div>
-          )}
 
           {/* Source info */}
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -84,11 +63,8 @@ export function PromptPackCard({ promptPack }: Readonly<PromptPackCardProps>) {
             </code>
           </div>
 
-          {/* Rollout type and last updated */}
-          <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t">
-            <Badge variant="outline" className="text-xs capitalize">
-              {spec.rollout.type}
-            </Badge>
+          {/* Last updated */}
+          <div className="flex items-center justify-end text-xs text-muted-foreground pt-1 border-t">
             <div className="flex items-center gap-1">
               <Clock className="h-3 w-3" />
               <span>{formatRelativeTime(status?.lastUpdated)}</span>

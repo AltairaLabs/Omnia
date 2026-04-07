@@ -30,17 +30,6 @@ const (
 	PromptPackSourceTypeConfigMap PromptPackSourceType = "configmap"
 )
 
-// RolloutStrategyType defines the type of rollout strategy
-// +kubebuilder:validation:Enum=immediate;canary
-type RolloutStrategyType string
-
-const (
-	// RolloutStrategyImmediate deploys all traffic to the new version immediately
-	RolloutStrategyImmediate RolloutStrategyType = "immediate"
-	// RolloutStrategyCanary gradually shifts traffic to the new version
-	RolloutStrategyCanary RolloutStrategyType = "canary"
-)
-
 // PromptPackSource defines the source configuration for prompts
 type PromptPackSource struct {
 	// type specifies the type of source for the prompt configuration.
@@ -54,43 +43,6 @@ type PromptPackSource struct {
 	ConfigMapRef *corev1.LocalObjectReference `json:"configMapRef,omitempty"`
 }
 
-// CanaryConfig defines the canary rollout configuration
-type CanaryConfig struct {
-	// weight specifies the percentage of traffic to route to the canary version.
-	// Must be between 0 and 100.
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=100
-	// +kubebuilder:default=10
-	Weight int32 `json:"weight"`
-
-	// stepWeight specifies the percentage to increase canary traffic on each step.
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=100
-	// +kubebuilder:default=10
-	// +optional
-	StepWeight *int32 `json:"stepWeight,omitempty"`
-
-	// interval specifies the time to wait between canary steps.
-	// +kubebuilder:default="5m"
-	// +optional
-	Interval *string `json:"interval,omitempty"`
-}
-
-// RolloutStrategy defines how new versions are rolled out
-type RolloutStrategy struct {
-	// type specifies the rollout strategy type.
-	// "immediate" deploys all traffic to the new version at once.
-	// "canary" gradually shifts traffic to the new version.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:default=immediate
-	Type RolloutStrategyType `json:"type"`
-
-	// canary specifies the canary rollout configuration.
-	// Required when type is "canary".
-	// +optional
-	Canary *CanaryConfig `json:"canary,omitempty"`
-}
-
 // PromptPackSpec defines the desired state of PromptPack
 type PromptPackSpec struct {
 	// source specifies where the prompt configuration is stored.
@@ -102,14 +54,10 @@ type PromptPackSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^v?(\d+)\.(\d+)\.(\d+)(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?(\+[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$`
 	Version string `json:"version"`
-
-	// rollout specifies how this version should be rolled out.
-	// +kubebuilder:validation:Required
-	Rollout RolloutStrategy `json:"rollout"`
 }
 
 // PromptPackPhase represents the current phase of the PromptPack
-// +kubebuilder:validation:Enum=Pending;Active;Canary;Superseded;Failed
+// +kubebuilder:validation:Enum=Pending;Active;Superseded;Failed
 type PromptPackPhase string
 
 const (
@@ -117,8 +65,6 @@ const (
 	PromptPackPhasePending PromptPackPhase = "Pending"
 	// PromptPackPhaseActive indicates the PromptPack is the active version
 	PromptPackPhaseActive PromptPackPhase = "Active"
-	// PromptPackPhaseCanary indicates the PromptPack is receiving canary traffic
-	PromptPackPhaseCanary PromptPackPhase = "Canary"
 	// PromptPackPhaseSuperseded indicates the PromptPack was replaced by a newer version
 	PromptPackPhaseSuperseded PromptPackPhase = "Superseded"
 	// PromptPackPhaseFailed indicates the PromptPack failed to deploy
@@ -135,14 +81,6 @@ type PromptPackStatus struct {
 	// +optional
 	ActiveVersion *string `json:"activeVersion,omitempty"`
 
-	// canaryVersion is the version currently receiving canary traffic, if any.
-	// +optional
-	CanaryVersion *string `json:"canaryVersion,omitempty"`
-
-	// canaryWeight is the current percentage of traffic going to the canary version.
-	// +optional
-	CanaryWeight *int32 `json:"canaryWeight,omitempty"`
-
 	// lastUpdated is the timestamp of the last status update.
 	// +optional
 	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
@@ -158,7 +96,6 @@ type PromptPackStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Version",type="string",JSONPath=".spec.version",description="Prompt pack version"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="Current phase"
-// +kubebuilder:printcolumn:name="Strategy",type="string",JSONPath=".spec.rollout.type",description="Rollout strategy"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // PromptPack is the Schema for the promptpacks API.

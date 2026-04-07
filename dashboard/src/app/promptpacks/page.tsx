@@ -60,12 +60,11 @@ export default function PromptPacksPage() {
     (acc, pack) => {
       const phase = pack.status?.phase;
       if (phase === "Active") acc.active++;
-      else if (phase === "Canary") acc.canary++;
       else if (phase === "Failed") acc.failed++;
       else if (phase === "Pending") acc.pending++;
       return acc;
     },
-    { active: 0, canary: 0, pending: 0, failed: 0 }
+    { active: 0, pending: 0, failed: 0 }
   );
 
   return (
@@ -89,9 +88,6 @@ export default function PromptPacksPage() {
                 </TabsTrigger>
                 <TabsTrigger value="Active">
                   Active ({phaseCounts?.active ?? 0})
-                </TabsTrigger>
-                <TabsTrigger value="Canary">
-                  Canary ({phaseCounts?.canary ?? 0})
                 </TabsTrigger>
                 <TabsTrigger value="Pending">
                   Pending ({phaseCounts?.pending ?? 0})

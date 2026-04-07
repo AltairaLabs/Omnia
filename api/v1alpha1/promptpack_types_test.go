@@ -30,7 +30,6 @@ const (
 	testPromptPackNamespace = "test-namespace"
 	testPromptPackVersion   = "1.0.0"
 	testConfigMapName       = "my-prompts"
-	testCanaryVersion       = "1.1.0"
 	testModifiedName        = "modified-name"
 )
 
@@ -56,33 +55,6 @@ func TestPromptPackSourceTypeConstants(t *testing.T) {
 	}
 }
 
-func TestRolloutStrategyTypeConstants(t *testing.T) {
-	tests := []struct {
-		name     string
-		constant RolloutStrategyType
-		expected string
-	}{
-		{
-			name:     "Immediate rollout strategy",
-			constant: RolloutStrategyImmediate,
-			expected: "immediate",
-		},
-		{
-			name:     "Canary rollout strategy",
-			constant: RolloutStrategyCanary,
-			expected: "canary",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if string(tt.constant) != tt.expected {
-				t.Errorf("RolloutStrategyType constant = %v, want %v", tt.constant, tt.expected)
-			}
-		})
-	}
-}
-
 func TestPromptPackPhaseConstants(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -98,11 +70,6 @@ func TestPromptPackPhaseConstants(t *testing.T) {
 			name:     "Active phase",
 			constant: PromptPackPhaseActive,
 			expected: "Active",
-		},
-		{
-			name:     "Canary phase",
-			constant: PromptPackPhaseCanary,
-			expected: "Canary",
 		},
 		{
 			name:     "Superseded phase",
@@ -139,9 +106,6 @@ func TestPromptPackCreation(t *testing.T) {
 				},
 			},
 			Version: testPromptPackVersion,
-			Rollout: RolloutStrategy{
-				Type: RolloutStrategyImmediate,
-			},
 		},
 	}
 
@@ -164,63 +128,9 @@ func TestPromptPackCreation(t *testing.T) {
 	if promptPack.Spec.Source.ConfigMapRef.Name != testConfigMapName {
 		t.Errorf("PromptPack.Spec.Source.ConfigMapRef.Name = %v, want %v", promptPack.Spec.Source.ConfigMapRef.Name, testConfigMapName)
 	}
-
-	if promptPack.Spec.Rollout.Type != RolloutStrategyImmediate {
-		t.Errorf("PromptPack.Spec.Rollout.Type = %v, want %v", promptPack.Spec.Rollout.Type, RolloutStrategyImmediate)
-	}
-}
-
-func TestPromptPackWithCanaryRollout(t *testing.T) {
-	stepWeight := int32(20)
-	interval := "10m"
-
-	promptPack := &PromptPack{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      testPromptPackName,
-			Namespace: testPromptPackNamespace,
-		},
-		Spec: PromptPackSpec{
-			Source: PromptPackSource{
-				Type: PromptPackSourceTypeConfigMap,
-				ConfigMapRef: &corev1.LocalObjectReference{
-					Name: testConfigMapName,
-				},
-			},
-			Version: testPromptPackVersion,
-			Rollout: RolloutStrategy{
-				Type: RolloutStrategyCanary,
-				Canary: &CanaryConfig{
-					Weight:     10,
-					StepWeight: &stepWeight,
-					Interval:   &interval,
-				},
-			},
-		},
-	}
-
-	if promptPack.Spec.Rollout.Type != RolloutStrategyCanary {
-		t.Errorf("PromptPack.Spec.Rollout.Type = %v, want %v", promptPack.Spec.Rollout.Type, RolloutStrategyCanary)
-	}
-
-	if promptPack.Spec.Rollout.Canary == nil {
-		t.Fatal("PromptPack.Spec.Rollout.Canary should not be nil")
-	}
-
-	if promptPack.Spec.Rollout.Canary.Weight != 10 {
-		t.Errorf("PromptPack.Spec.Rollout.Canary.Weight = %v, want %v", promptPack.Spec.Rollout.Canary.Weight, 10)
-	}
-
-	if *promptPack.Spec.Rollout.Canary.StepWeight != 20 {
-		t.Errorf("PromptPack.Spec.Rollout.Canary.StepWeight = %v, want %v", *promptPack.Spec.Rollout.Canary.StepWeight, 20)
-	}
-
-	if *promptPack.Spec.Rollout.Canary.Interval != "10m" {
-		t.Errorf("PromptPack.Spec.Rollout.Canary.Interval = %v, want %v", *promptPack.Spec.Rollout.Canary.Interval, "10m")
-	}
 }
 
 func TestPromptPackStatus(t *testing.T) {
-	canaryWeight := int32(25)
 	now := metav1.NewTime(time.Now())
 
 	promptPack := &PromptPack{
@@ -235,43 +145,30 @@ func TestPromptPackStatus(t *testing.T) {
 					Name: testConfigMapName,
 				},
 			},
-			Version: testCanaryVersion,
-			Rollout: RolloutStrategy{
-				Type: RolloutStrategyCanary,
-			},
+			Version: testPromptPackVersion,
 		},
 		Status: PromptPackStatus{
-			Phase:         PromptPackPhaseCanary,
+			Phase:         PromptPackPhaseActive,
 			ActiveVersion: ptrString(testPromptPackVersion),
-			CanaryVersion: ptrString(testCanaryVersion),
-			CanaryWeight:  &canaryWeight,
 			LastUpdated:   &now,
 			Conditions: []metav1.Condition{
 				{
 					Type:               "Available",
 					Status:             metav1.ConditionTrue,
 					LastTransitionTime: now,
-					Reason:             "CanaryInProgress",
-					Message:            "Canary rollout in progress",
+					Reason:             "Reconciled",
+					Message:            "PromptPack reconciled successfully",
 				},
 			},
 		},
 	}
 
-	if promptPack.Status.Phase != PromptPackPhaseCanary {
-		t.Errorf("PromptPack.Status.Phase = %v, want %v", promptPack.Status.Phase, PromptPackPhaseCanary)
+	if promptPack.Status.Phase != PromptPackPhaseActive {
+		t.Errorf("PromptPack.Status.Phase = %v, want %v", promptPack.Status.Phase, PromptPackPhaseActive)
 	}
 
 	if *promptPack.Status.ActiveVersion != testPromptPackVersion {
 		t.Errorf("PromptPack.Status.ActiveVersion = %v, want %v", *promptPack.Status.ActiveVersion, testPromptPackVersion)
-	}
-
-	if *promptPack.Status.CanaryVersion != testCanaryVersion {
-		t.Errorf("PromptPack.Status.CanaryVersion = %v, want %v", *promptPack.Status.CanaryVersion, testCanaryVersion)
-	}
-
-	if *promptPack.Status.CanaryWeight != 25 {
-		t.Errorf("PromptPack.Status.CanaryWeight = %v, want %v", *promptPack.Status.CanaryWeight, 25)
 	}
 
 	if promptPack.Status.LastUpdated == nil {
@@ -288,9 +185,6 @@ func TestPromptPackStatus(t *testing.T) {
 }
 
 func TestPromptPackDeepCopy(t *testing.T) {
-	stepWeight := int32(15)
-	interval := "5m"
-	canaryWeight := int32(30)
 	now := metav1.NewTime(time.Now())
 
 	original := &PromptPack{
@@ -306,20 +200,10 @@ func TestPromptPackDeepCopy(t *testing.T) {
 				},
 			},
 			Version: testPromptPackVersion,
-			Rollout: RolloutStrategy{
-				Type: RolloutStrategyCanary,
-				Canary: &CanaryConfig{
-					Weight:     10,
-					StepWeight: &stepWeight,
-					Interval:   &interval,
-				},
-			},
 		},
 		Status: PromptPackStatus{
-			Phase:         PromptPackPhaseCanary,
+			Phase:         PromptPackPhaseActive,
 			ActiveVersion: ptrString(testPromptPackVersion),
-			CanaryVersion: ptrString(testCanaryVersion),
-			CanaryWeight:  &canaryWeight,
 			LastUpdated:   &now,
 			Conditions: []metav1.Condition{
 				{
@@ -357,12 +241,8 @@ func TestPromptPackDeepCopy(t *testing.T) {
 	}
 
 	// Verify nested pointer fields are also deep copied
-	if copied.Spec.Rollout.Canary == original.Spec.Rollout.Canary {
-		t.Error("DeepCopy should create new Canary pointer")
-	}
-
-	if copied.Status.CanaryWeight == original.Status.CanaryWeight {
-		t.Error("DeepCopy should create new CanaryWeight pointer")
+	if copied.Status.ActiveVersion == original.Status.ActiveVersion {
+		t.Error("DeepCopy should create new ActiveVersion pointer")
 	}
 }
 
@@ -379,9 +259,6 @@ func TestPromptPackListDeepCopy(t *testing.T) {
 						Type: PromptPackSourceTypeConfigMap,
 					},
 					Version: testPromptPackVersion,
-					Rollout: RolloutStrategy{
-						Type: RolloutStrategyImmediate,
-					},
 				},
 			},
 		},
@@ -421,37 +298,26 @@ func TestPromptPackStatusPhases(t *testing.T) {
 		name     string
 		phase    PromptPackPhase
 		isActive bool
-		isCanary bool
 	}{
 		{
 			name:     "Pending phase",
 			phase:    PromptPackPhasePending,
 			isActive: false,
-			isCanary: false,
 		},
 		{
 			name:     "Active phase",
 			phase:    PromptPackPhaseActive,
 			isActive: true,
-			isCanary: false,
-		},
-		{
-			name:     "Canary phase",
-			phase:    PromptPackPhaseCanary,
-			isActive: false,
-			isCanary: true,
 		},
 		{
 			name:     "Superseded phase",
 			phase:    PromptPackPhaseSuperseded,
 			isActive: false,
-			isCanary: false,
 		},
 		{
 			name:     "Failed phase",
 			phase:    PromptPackPhaseFailed,
 			isActive: false,
-			isCanary: false,
 		},
 	}
 
@@ -465,10 +331,6 @@ func TestPromptPackStatusPhases(t *testing.T) {
 
 			if (promptPack.Status.Phase == PromptPackPhaseActive) != tt.isActive {
 				t.Errorf("Phase %v isActive = %v, want %v", tt.phase, promptPack.Status.Phase == PromptPackPhaseActive, tt.isActive)
-			}
-
-			if (promptPack.Status.Phase == PromptPackPhaseCanary) != tt.isCanary {
-				t.Errorf("Phase %v isCanary = %v, want %v", tt.phase, promptPack.Status.Phase == PromptPackPhaseCanary, tt.isCanary)
 			}
 		})
 	}
@@ -486,25 +348,6 @@ func TestPromptPackSourceWithoutConfigMapRef(t *testing.T) {
 
 	if source.ConfigMapRef != nil {
 		t.Error("PromptPackSource.ConfigMapRef should be nil when not set")
-	}
-}
-
-func TestCanaryConfigDefaults(t *testing.T) {
-	// Test CanaryConfig with only required field
-	canary := CanaryConfig{
-		Weight: 10,
-	}
-
-	if canary.Weight != 10 {
-		t.Errorf("CanaryConfig.Weight = %v, want %v", canary.Weight, 10)
-	}
-
-	if canary.StepWeight != nil {
-		t.Error("CanaryConfig.StepWeight should be nil when not set")
-	}
-
-	if canary.Interval != nil {
-		t.Error("CanaryConfig.Interval should be nil when not set")
 	}
 }
 

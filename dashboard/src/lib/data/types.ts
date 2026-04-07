@@ -123,9 +123,6 @@ export interface Stats {
   promptPacks: {
     total: number;
     active: number;
-    canary: number;
-    pending: number;
-    failed: number;
   };
   tools: {
     total: number;

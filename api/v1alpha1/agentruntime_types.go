@@ -29,15 +29,8 @@ type PromptPackRef struct {
 	Name string `json:"name"`
 
 	// version specifies a specific version of the PromptPack to use.
-	// If not specified, the track field is used instead.
 	// +optional
 	Version *string `json:"version,omitempty"`
-
-	// track specifies which release track to follow (e.g., "stable", "canary").
-	// Only used if version is not specified.
-	// +kubebuilder:default="stable"
-	// +optional
-	Track *string `json:"track,omitempty"`
 }
 
 // FacadeType defines the type of facade for client connections.
@@ -1111,6 +1104,11 @@ type AgentRuntimeSpec struct {
 	// +kubebuilder:validation:MaxLength=63
 	// +optional
 	ServiceGroup string `json:"serviceGroup,omitempty"`
+
+	// rollout configures a progressive delivery rollout for this AgentRuntime.
+	// When nil, no rollout is active and all traffic goes to the current spec.
+	// +optional
+	Rollout *RolloutConfig `json:"rollout,omitempty"`
 }
 
 // AgentRuntimePhase represents the current phase of the AgentRuntime.
@@ -1161,6 +1159,10 @@ type AgentRuntimeStatus struct {
 	// a2a holds A2A-specific status information when facade.type is "a2a".
 	// +optional
 	A2A *A2AStatus `json:"a2a,omitempty"`
+
+	// rollout reports the current state of an active rollout, if any.
+	// +optional
+	Rollout *RolloutStatus `json:"rollout,omitempty"`
 
 	// conditions represent the current state of the AgentRuntime resource.
 	// +listType=map

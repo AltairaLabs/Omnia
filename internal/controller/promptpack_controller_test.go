@@ -95,9 +95,6 @@ var _ = Describe("PromptPack Controller", func() {
 						},
 					},
 					Version: "1.0.0",
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -178,9 +175,6 @@ var _ = Describe("PromptPack Controller", func() {
 						},
 					},
 					Version: "1.0.0",
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -250,8 +244,7 @@ var _ = Describe("PromptPack Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
 
-			By("creating the PromptPack with canary rollout")
-			weight := int32(20)
+			By("creating the PromptPack")
 			promptPack = &omniav1alpha1.PromptPack{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "canary-pack",
@@ -265,14 +258,9 @@ var _ = Describe("PromptPack Controller", func() {
 						},
 					},
 					Version: "2.0.0",
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyCanary,
-						Canary: &omniav1alpha1.CanaryConfig{
-							Weight: weight,
-						},
-					},
 				},
 			}
+
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
 		})
 
@@ -320,11 +308,9 @@ var _ = Describe("PromptPack Controller", func() {
 				Namespace: promptPackNamespace,
 			}, updatedPP)).To(Succeed())
 
-			Expect(updatedPP.Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseCanary))
-			Expect(updatedPP.Status.CanaryVersion).NotTo(BeNil())
-			Expect(*updatedPP.Status.CanaryVersion).To(Equal("2.0.0"))
-			Expect(updatedPP.Status.CanaryWeight).NotTo(BeNil())
-			Expect(*updatedPP.Status.CanaryWeight).To(Equal(int32(20)))
+			Expect(updatedPP.Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
+			Expect(updatedPP.Status.ActiveVersion).NotTo(BeNil())
+			Expect(*updatedPP.Status.ActiveVersion).To(Equal("2.0.0"))
 		})
 	})
 
@@ -362,9 +348,6 @@ var _ = Describe("PromptPack Controller", func() {
 						},
 					},
 					Version: "1.0.0",
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -486,9 +469,6 @@ var _ = Describe("PromptPack Controller", func() {
 						// ConfigMapRef is nil
 					},
 					Version: "1.0.0",
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -566,12 +546,6 @@ var _ = Describe("PromptPack Controller", func() {
 						},
 					},
 					Version: "3.0.0",
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyCanary,
-						Canary: &omniav1alpha1.CanaryConfig{
-							Weight: 100,
-						},
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -624,8 +598,6 @@ var _ = Describe("PromptPack Controller", func() {
 			Expect(updatedPP.Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
 			Expect(updatedPP.Status.ActiveVersion).NotTo(BeNil())
 			Expect(*updatedPP.Status.ActiveVersion).To(Equal("3.0.0"))
-			Expect(updatedPP.Status.CanaryVersion).To(BeNil())
-			Expect(updatedPP.Status.CanaryWeight).To(BeNil())
 		})
 	})
 
@@ -660,9 +632,6 @@ var _ = Describe("PromptPack Controller", func() {
 						},
 					},
 					Version: "1.0.0",
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -750,9 +719,6 @@ var _ = Describe("PromptPack Controller", func() {
 						},
 					},
 					Version: "1.0.0",
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -827,9 +793,6 @@ var _ = Describe("PromptPack Controller", func() {
 						},
 					},
 					Version: "1.0.0",
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -918,9 +881,6 @@ var _ = Describe("PromptPack Controller", func() {
 						},
 					},
 					Version: "1.0.0",
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())

@@ -17,6 +17,7 @@ resources:
 - bases/omnia.altairalabs.ai_workspaces.yaml
 - bases/omnia.altairalabs.ai_agentpolicies.yaml
 - bases/omnia.altairalabs.ai_toolpolicies.yaml
+- bases/omnia.altairalabs.ai_rolloutanalyses.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

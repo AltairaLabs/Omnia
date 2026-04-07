@@ -4,24 +4,6 @@
 import type { ObjectMeta } from "../common";
 
 export interface PromptPackSpec {
-  /** rollout specifies how this version should be rolled out. */
-  rollout: {
-    /** canary specifies the canary rollout configuration.
-     * Required when type is "canary". */
-    canary?: {
-      /** interval specifies the time to wait between canary steps. */
-      interval?: string;
-      /** stepWeight specifies the percentage to increase canary traffic on each step. */
-      stepWeight?: number;
-      /** weight specifies the percentage of traffic to route to the canary version.
-       * Must be between 0 and 100. */
-      weight: number;
-    };
-    /** type specifies the rollout strategy type.
-     * "immediate" deploys all traffic to the new version at once.
-     * "canary" gradually shifts traffic to the new version. */
-    type: "immediate" | "canary";
-  };
   /** source specifies where the prompt configuration is stored. */
   source: {
     /** configMapRef references a ConfigMap containing the prompt configuration.
@@ -46,10 +28,6 @@ export interface PromptPackSpec {
 export interface PromptPackStatus {
   /** activeVersion is the currently active version serving production traffic. */
   activeVersion?: string;
-  /** canaryVersion is the version currently receiving canary traffic, if any. */
-  canaryVersion?: string;
-  /** canaryWeight is the current percentage of traffic going to the canary version. */
-  canaryWeight?: number;
   /** conditions represent the current state of the PromptPack resource. */
   conditions?: {
     /** lastTransitionTime is the last time the condition transitioned from one status to another.
@@ -76,7 +54,7 @@ export interface PromptPackStatus {
   /** lastUpdated is the timestamp of the last status update. */
   lastUpdated?: string;
   /** phase represents the current lifecycle phase of the PromptPack. */
-  phase?: "Pending" | "Active" | "Canary" | "Superseded" | "Failed";
+  phase?: "Pending" | "Active" | "Superseded" | "Failed";
 }
 
 export interface PromptPack {

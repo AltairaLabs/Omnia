@@ -91,9 +91,6 @@ var _ = Describe("Eval Worker Reconciliation", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, pp)).To(Succeed())

@@ -401,11 +401,7 @@ export interface AgentRuntimeSpec {
   promptPackRef: {
     /** name is the name of the PromptPack resource. */
     name: string;
-    /** track specifies which release track to follow (e.g., "stable", "canary").
-     * Only used if version is not specified. */
-    track?: string;
-    /** version specifies a specific version of the PromptPack to use.
-     * If not specified, the track field is used instead. */
+    /** version specifies a specific version of the PromptPack to use. */
     version?: string;
   };
   /** providers is a list of named provider references.
@@ -423,6 +419,111 @@ export interface AgentRuntimeSpec {
       namespace?: string;
     };
   }[];
+  /** rollout configures a progressive delivery rollout for this AgentRuntime.
+   * When nil, no rollout is active and all traffic goes to the current spec. */
+  rollout?: {
+    /** candidate defines the sparse overrides for the candidate version.
+     * When nil, no rollout is active. Only fields that differ from the
+     * stable version need to be set. */
+    candidate?: {
+      /** promptPackVersion overrides the PromptPack version for the candidate.
+       * When set, the candidate runs a different prompt version than stable. */
+      promptPackVersion?: string;
+      /** providerRefs overrides the provider list for the candidate.
+       * Use this to test a different LLM model or provider configuration. */
+      providerRefs?: {
+        /** name is the logical name for this provider (e.g. "default", "judge", "embeddings"). */
+        name: string;
+        /** providerRef references the Provider CRD. */
+        providerRef: {
+          /** name is the name of the Provider resource. */
+          name: string;
+          /** namespace is the namespace of the Provider resource.
+           * If not specified, the same namespace as the AgentRuntime is used. */
+          namespace?: string;
+        };
+      }[];
+      /** toolRegistryRef overrides the tool registry for the candidate. */
+      toolRegistryRef?: {
+        /** name is the name of the ToolRegistry resource. */
+        name: string;
+        /** namespace is the namespace of the ToolRegistry resource.
+         * If not specified, the same namespace as the AgentRuntime is used. */
+        namespace?: string;
+      };
+    };
+    /** rollback configures automatic or manual rollback behavior. */
+    rollback?: {
+      /** cooldown is the minimum time to wait before allowing another rollout
+       * after a rollback. Uses Go duration format (e.g., "5m", "1h"). */
+      cooldown?: string;
+      /** mode controls how rollback is triggered.
+       * "automatic" rolls back on analysis failure or error thresholds.
+       * "manual" requires explicit operator action.
+       * "disabled" prevents any rollback. */
+      mode?: "automatic" | "manual" | "disabled";
+    };
+    /** steps defines the sequence of rollout actions to execute.
+     * Each step sets traffic weight, introduces a pause, or triggers analysis. */
+    steps: {
+      /** analysis triggers a RolloutAnalysis evaluation at this step.
+       * The rollout only advances if the analysis passes. */
+      analysis?: {
+        /** args provides argument overrides for the analysis template. */
+        args?: {
+          /** name is the argument name. */
+          name: string;
+          /** value is the argument value. */
+          value: string;
+        }[];
+        /** templateName is the name of the RolloutAnalysis CRD to instantiate.
+         * The analysis runs in the same namespace as the AgentRuntime. */
+        templateName: string;
+      };
+      /** pause introduces a hold point in the rollout.
+       * If duration is set, the controller waits that long before advancing.
+       * If duration is nil, the rollout waits indefinitely for manual promotion. */
+      pause?: {
+        /** duration is the time to wait before automatically advancing to the next step.
+         * Uses Go duration format (e.g., "5m", "1h").
+         * When nil, the rollout pauses indefinitely and requires manual promotion. */
+        duration?: string;
+      };
+      /** setWeight sets the percentage of traffic sent to the candidate version. */
+      setWeight?: number;
+    }[];
+    /** stickySession configures consistent hashing so a given user always
+     * reaches the same version during a rollout. */
+    stickySession?: {
+      /** hashOn is the HTTP header name used as the consistent hashing key.
+       * Typically "x-user-id". Requests with the same header value are always
+       * routed to the same version. */
+      hashOn: string;
+    };
+    /** trafficRouting configures integration with a service mesh for traffic splitting. */
+    trafficRouting?: {
+      /** istio configures Istio VirtualService and DestinationRule mutation.
+       * The controller patches existing resources — it does not create them. */
+      istio?: {
+        /** destinationRule references the Istio DestinationRule to patch. */
+        destinationRule: {
+          /** candidateSubset is the subset name for candidate (new) traffic. */
+          candidateSubset?: string;
+          /** name is the DestinationRule resource name. */
+          name: string;
+          /** stableSubset is the subset name for stable (current) traffic. */
+          stableSubset?: string;
+        };
+        /** virtualService references the Istio VirtualService to patch. */
+        virtualService: {
+          /** name is the VirtualService resource name. */
+          name: string;
+          /** routes lists the HTTP route names within the VirtualService to patch. */
+          routes: string[];
+        };
+      };
+    };
+  };
   /** runtime configures deployment settings like replicas and resources. */
   runtime?: {
     /** affinity defines affinity rules for pod scheduling. */
@@ -2327,6 +2428,23 @@ export interface AgentRuntimeStatus {
     desired: number;
     /** ready is the number of ready replicas. */
     ready: number;
+  };
+  /** rollout reports the current state of an active rollout, if any. */
+  rollout?: {
+    /** active indicates whether a rollout is currently in progress. */
+    active?: boolean;
+    /** candidateVersion is the version identifier of the candidate being rolled out. */
+    candidateVersion?: string;
+    /** currentStep is the zero-based index of the step currently being executed. */
+    currentStep?: number;
+    /** currentWeight is the percentage of traffic currently sent to the candidate. */
+    currentWeight?: number;
+    /** message is a human-readable description of the current rollout state. */
+    message?: string;
+    /** stableVersion is the version identifier of the current stable deployment. */
+    stableVersion?: string;
+    /** startedAt is the RFC3339 timestamp when the rollout began. */
+    startedAt?: string;
   };
   /** serviceEndpoint is the internal Kubernetes service endpoint for the agent facade.
    * Format: {name}.{namespace}.svc.cluster.local:{port}

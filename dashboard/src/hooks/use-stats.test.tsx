@@ -32,7 +32,6 @@ const mockStats = {
   promptPacks: {
     total: 5,
     active: 4,
-    canary: 1,
   },
   tools: {
     total: 15,
@@ -124,7 +123,6 @@ describe("useStats", () => {
       promptPacks: {
         total: 0,
         active: 0,
-        canary: 0,
       },
       tools: {
         total: 0,
@@ -156,7 +154,6 @@ describe("useStats", () => {
       promptPacks: {
         total: 0,
         active: 0,
-        canary: 0,
       },
       tools: {
         total: 0,

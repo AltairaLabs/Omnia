@@ -877,16 +877,9 @@ spec:
                     description: name is the name of the PromptPack resource.
                     minLength: 1
                     type: string
-                  track:
-                    default: stable
-                    description: |-
-                      track specifies which release track to follow (e.g., "stable", "canary").
-                      Only used if version is not specified.
-                    type: string
                   version:
-                    description: |-
-                      version specifies a specific version of the PromptPack to use.
-                      If not specified, the track field is used instead.
+                    description: version specifies a specific version of the PromptPack
+                      to use.
                     type: string
                 required:
                 - name
@@ -930,6 +923,235 @@ spec:
                 x-kubernetes-list-map-keys:
                 - name
                 x-kubernetes-list-type: map
+              rollout:
+                description: |-
+                  rollout configures a progressive delivery rollout for this AgentRuntime.
+                  When nil, no rollout is active and all traffic goes to the current spec.
+                properties:
+                  candidate:
+                    description: |-
+                      candidate defines the sparse overrides for the candidate version.
+                      When nil, no rollout is active. Only fields that differ from the
+                      stable version need to be set.
+                    properties:
+                      promptPackVersion:
+                        description: |-
+                          promptPackVersion overrides the PromptPack version for the candidate.
+                          When set, the candidate runs a different prompt version than stable.
+                        type: string
+                      providerRefs:
+                        description: |-
+                          providerRefs overrides the provider list for the candidate.
+                          Use this to test a different LLM model or provider configuration.
+                        items:
+                          description: |-
+                            NamedProviderRef associates a name with a Provider CRD reference.
+                            The name is used to look up providers by role (e.g. "default", "judge").
+                          properties:
+                            name:
+                              description: name is the logical name for this provider
+                                (e.g. "default", "judge", "embeddings").
+                              minLength: 1
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                            providerRef:
+                              description: providerRef references the Provider CRD.
+                              properties:
+                                name:
+                                  description: name is the name of the Provider resource.
+                                  minLength: 1
+                                  type: string
+                                namespace:
+                                  description: |-
+                                    namespace is the namespace of the Provider resource.
+                                    If not specified, the same namespace as the AgentRuntime is used.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                          required:
+                          - name
+                          - providerRef
+                          type: object
+                        type: array
+                      toolRegistryRef:
+                        description: toolRegistryRef overrides the tool registry for
+                          the candidate.
+                        properties:
+                          name:
+                            description: name is the name of the ToolRegistry resource.
+                            minLength: 1
+                            type: string
+                          namespace:
+                            description: |-
+                              namespace is the namespace of the ToolRegistry resource.
+                              If not specified, the same namespace as the AgentRuntime is used.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                    type: object
+                  rollback:
+                    description: rollback configures automatic or manual rollback
+                      behavior.
+                    properties:
+                      cooldown:
+                        default: 5m
+                        description: |-
+                          cooldown is the minimum time to wait before allowing another rollout
+                          after a rollback. Uses Go duration format (e.g., "5m", "1h").
+                        type: string
+                      mode:
+                        default: manual
+                        description: |-
+                          mode controls how rollback is triggered.
+                          "automatic" rolls back on analysis failure or error thresholds.
+                          "manual" requires explicit operator action.
+                          "disabled" prevents any rollback.
+                        enum:
+                        - automatic
+                        - manual
+                        - disabled
+                        type: string
+                    type: object
+                  steps:
+                    description: |-
+                      steps defines the sequence of rollout actions to execute.
+                      Each step sets traffic weight, introduces a pause, or triggers analysis.
+                    items:
+                      description: |-
+                        RolloutStep is a union type — exactly one field should be set per step.
+                        A sequence of steps defines the rollout shape (canary, blue-green, etc.).
+                      properties:
+                        analysis:
+                          description: |-
+                            analysis triggers a RolloutAnalysis evaluation at this step.
+                            The rollout only advances if the analysis passes.
+                          properties:
+                            args:
+                              description: args provides argument overrides for the
+                                analysis template.
+                              items:
+                                description: AnalysisArg is a name/value pair passed
+                                  to a RolloutAnalysis template.
+                                properties:
+                                  name:
+                                    description: name is the argument name.
+                                    minLength: 1
+                                    type: string
+                                  value:
+                                    description: value is the argument value.
+                                    type: string
+                                required:
+                                - name
+                                - value
+                                type: object
+                              type: array
+                            templateName:
+                              description: |-
+                                templateName is the name of the RolloutAnalysis CRD to instantiate.
+                                The analysis runs in the same namespace as the AgentRuntime.
+                              minLength: 1
+                              type: string
+                          required:
+                          - templateName
+                          type: object
+                        pause:
+                          description: |-
+                            pause introduces a hold point in the rollout.
+                            If duration is set, the controller waits that long before advancing.
+                            If duration is nil, the rollout waits indefinitely for manual promotion.
+                          properties:
+                            duration:
+                              description: |-
+                                duration is the time to wait before automatically advancing to the next step.
+                                Uses Go duration format (e.g., "5m", "1h").
+                                When nil, the rollout pauses indefinitely and requires manual promotion.
+                              type: string
+                          type: object
+                        setWeight:
+                          description: setWeight sets the percentage of traffic sent
+                            to the candidate version.
+                          format: int32
+                          maximum: 100
+                          minimum: 0
+                          type: integer
+                      type: object
+                    minItems: 1
+                    type: array
+                  stickySession:
+                    description: |-
+                      stickySession configures consistent hashing so a given user always
+                      reaches the same version during a rollout.
+                    properties:
+                      hashOn:
+                        description: |-
+                          hashOn is the HTTP header name used as the consistent hashing key.
+                          Typically "x-user-id". Requests with the same header value are always
+                          routed to the same version.
+                        minLength: 1
+                        type: string
+                    required:
+                    - hashOn
+                    type: object
+                  trafficRouting:
+                    description: trafficRouting configures integration with a service
+                      mesh for traffic splitting.
+                    properties:
+                      istio:
+                        description: |-
+                          istio configures Istio VirtualService and DestinationRule mutation.
+                          The controller patches existing resources — it does not create them.
+                        properties:
+                          destinationRule:
+                            description: destinationRule references the Istio DestinationRule
+                              to patch.
+                            properties:
+                              candidateSubset:
+                                default: canary
+                                description: candidateSubset is the subset name for
+                                  candidate (new) traffic.
+                                type: string
+                              name:
+                                description: name is the DestinationRule resource
+                                  name.
+                                minLength: 1
+                                type: string
+                              stableSubset:
+                                default: stable
+                                description: stableSubset is the subset name for stable
+                                  (current) traffic.
+                                type: string
+                            required:
+                            - name
+                            type: object
+                          virtualService:
+                            description: virtualService references the Istio VirtualService
+                              to patch.
+                            properties:
+                              name:
+                                description: name is the VirtualService resource name.
+                                minLength: 1
+                                type: string
+                              routes:
+                                description: routes lists the HTTP route names within
+                                  the VirtualService to patch.
+                                items:
+                                  type: string
+                                minItems: 1
+                                type: array
+                            required:
+                            - name
+                            - routes
+                            type: object
+                        required:
+                        - destinationRule
+                        - virtualService
+                        type: object
+                    type: object
+                required:
+                - steps
+                type: object
               runtime:
                 description: runtime configures deployment settings like replicas
                   and resources.
@@ -4419,6 +4641,41 @@ spec:
                 - available
                 - desired
                 - ready
+                type: object
+              rollout:
+                description: rollout reports the current state of an active rollout,
+                  if any.
+                properties:
+                  active:
+                    description: active indicates whether a rollout is currently in
+                      progress.
+                    type: boolean
+                  candidateVersion:
+                    description: candidateVersion is the version identifier of the
+                      candidate being rolled out.
+                    type: string
+                  currentStep:
+                    description: currentStep is the zero-based index of the step currently
+                      being executed.
+                    format: int32
+                    type: integer
+                  currentWeight:
+                    description: currentWeight is the percentage of traffic currently
+                      sent to the candidate.
+                    format: int32
+                    type: integer
+                  message:
+                    description: message is a human-readable description of the current
+                      rollout state.
+                    type: string
+                  stableVersion:
+                    description: stableVersion is the version identifier of the current
+                      stable deployment.
+                    type: string
+                  startedAt:
+                    description: startedAt is the RFC3339 timestamp when the rollout
+                      began.
+                    type: string
                 type: object
               serviceEndpoint:
                 description: |-

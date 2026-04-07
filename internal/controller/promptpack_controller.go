@@ -240,37 +240,14 @@ func (r *PromptPackReconciler) findReferencingAgentRuntimes(ctx context.Context,
 	return referencingRuntimes, nil
 }
 
-// updateRolloutStatus updates the status based on rollout strategy.
+// updateRolloutStatus updates the status to reflect the active version.
 // The referencingRuntimes parameter is used to track how many agents will be affected.
 func (r *PromptPackReconciler) updateRolloutStatus(promptPack *omniav1alpha1.PromptPack, referencingRuntimes []omniav1alpha1.AgentRuntime) {
 	version := promptPack.Spec.Version
 	_ = len(referencingRuntimes) // Track affected agents count for future metrics
 
-	switch promptPack.Spec.Rollout.Type {
-	case omniav1alpha1.RolloutStrategyImmediate:
-		// Immediate rollout: set as active version
-		promptPack.Status.Phase = omniav1alpha1.PromptPackPhaseActive
-		promptPack.Status.ActiveVersion = &version
-		promptPack.Status.CanaryVersion = nil
-		promptPack.Status.CanaryWeight = nil
-
-	case omniav1alpha1.RolloutStrategyCanary:
-		// Canary rollout: track canary weight
-		if promptPack.Spec.Rollout.Canary != nil {
-			weight := promptPack.Spec.Rollout.Canary.Weight
-			promptPack.Status.Phase = omniav1alpha1.PromptPackPhaseCanary
-			promptPack.Status.CanaryVersion = &version
-			promptPack.Status.CanaryWeight = &weight
-
-			// If weight reaches 100%, promote to active
-			if weight >= 100 {
-				promptPack.Status.Phase = omniav1alpha1.PromptPackPhaseActive
-				promptPack.Status.ActiveVersion = &version
-				promptPack.Status.CanaryVersion = nil
-				promptPack.Status.CanaryWeight = nil
-			}
-		}
-	}
+	promptPack.Status.Phase = omniav1alpha1.PromptPackPhaseActive
+	promptPack.Status.ActiveVersion = &version
 }
 
 // findPromptPacksForConfigMap maps a ConfigMap to PromptPacks that reference it.

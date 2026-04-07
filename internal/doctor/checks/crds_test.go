@@ -60,7 +60,6 @@ func TestCRD_PromptPacks_Exist(t *testing.T) {
 			Spec: omniav1alpha1.PromptPackSpec{
 				Source:  omniav1alpha1.PromptPackSource{Type: omniav1alpha1.PromptPackSourceTypeConfigMap},
 				Version: "1.0.0",
-				Rollout: omniav1alpha1.RolloutStrategy{Type: omniav1alpha1.RolloutStrategyImmediate},
 			},
 			Status: omniav1alpha1.PromptPackStatus{Phase: omniav1alpha1.PromptPackPhaseActive},
 		},
@@ -69,7 +68,6 @@ func TestCRD_PromptPacks_Exist(t *testing.T) {
 			Spec: omniav1alpha1.PromptPackSpec{
 				Source:  omniav1alpha1.PromptPackSource{Type: omniav1alpha1.PromptPackSourceTypeConfigMap},
 				Version: "2.0.0",
-				Rollout: omniav1alpha1.RolloutStrategy{Type: omniav1alpha1.RolloutStrategyImmediate},
 			},
 			Status: omniav1alpha1.PromptPackStatus{Phase: omniav1alpha1.PromptPackPhasePending},
 		},

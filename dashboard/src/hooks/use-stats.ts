@@ -18,7 +18,6 @@ export interface DashboardStats {
   promptPacks: {
     total: number;
     active: number;
-    canary: number;
   };
   tools: {
     total: number;
@@ -41,7 +40,7 @@ export function useStats() {
       if (!currentWorkspace) {
         return {
           agents: { total: 0, running: 0, pending: 0, failed: 0 },
-          promptPacks: { total: 0, active: 0, canary: 0 },
+          promptPacks: { total: 0, active: 0 },
           tools: { total: 0, available: 0, degraded: 0 },
           sessions: { active: 0, trend: null },
         };
@@ -92,7 +91,6 @@ export function useStats() {
         promptPacks: {
           total: stats.promptPacks?.total ?? 0,
           active: stats.promptPacks?.active ?? 0,
-          canary: stats.promptPacks?.canary ?? 0,
         },
         tools: {
           total: stats.tools?.total ?? 0,

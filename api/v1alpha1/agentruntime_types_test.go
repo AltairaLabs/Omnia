@@ -114,7 +114,6 @@ func TestAgentRuntimeCreation(t *testing.T) {
 	port := int32(8080)
 	replicas := int32(3)
 	version := testVersion
-	track := "stable"
 	ttl := "24h"
 	namespace := "tools"
 
@@ -127,7 +126,6 @@ func TestAgentRuntimeCreation(t *testing.T) {
 			PromptPackRef: PromptPackRef{
 				Name:    testPromptPack,
 				Version: &version,
-				Track:   &track,
 			},
 			Facade: FacadeConfig{
 				Type: FacadeTypeWebSocket,
@@ -337,24 +335,6 @@ func TestMinimalAgentRuntime(t *testing.T) {
 	}
 	if ar.Spec.Runtime != nil {
 		t.Error("Runtime should be nil")
-	}
-}
-
-func TestPromptPackRefWithTrackOnly(t *testing.T) {
-	track := "canary"
-	ref := PromptPackRef{
-		Name:  testPromptPack,
-		Track: &track,
-	}
-
-	if ref.Name != testPromptPack {
-		t.Errorf("Name = %q, want %q", ref.Name, testPromptPack)
-	}
-	if ref.Version != nil {
-		t.Error("Version should be nil when using track")
-	}
-	if *ref.Track != "canary" {
-		t.Errorf("Track = %q, want %q", *ref.Track, "canary")
 	}
 }
 
