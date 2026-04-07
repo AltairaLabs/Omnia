@@ -193,13 +193,11 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		containers = []corev1.Container{facadeContainer, runtimeContainer}
 	}
 
-	_ = log // used conditionally below
-
-	// Inject policy-proxy sidecar when ToolPolicies exist in this namespace.
-	// The sidecar intercepts tool calls and evaluates CEL rules before they
-	// reach the runtime. Without this injection, ToolPolicy CRDs are reconciled
-	// by the controller but never enforced.
-	if r.shouldInjectPolicyProxy(ctx, agentRuntime) {
+	// Inject policy-proxy sidecar when enterprise edition is enabled.
+	// The sidecar intercepts tool calls and evaluates ToolPolicy CEL rules
+	// before they reach the runtime. PolicyProxyImage is only set when
+	// the --enterprise flag is active.
+	if r.PolicyProxyImage != "" {
 		policyContainer := buildPolicyProxyContainer(agentRuntime, r.PolicyProxyImage)
 		containers = append(containers, policyContainer)
 		log.Info("injecting policy-proxy sidecar", "agent", agentRuntime.Name)
