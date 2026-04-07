@@ -625,8 +625,6 @@ spec:
     configMapRef:
       name: test-prompts
   version: "1.0.0"
-  rollout:
-    type: immediate
 `
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(promptPackManifest)
@@ -2105,8 +2103,6 @@ spec:
     type: configmap
     configMapRef:
       name: client-tool-pack-config
-  rollout:
-    type: immediate
 `
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(clientToolPackManifest)
