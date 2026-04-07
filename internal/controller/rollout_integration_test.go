@@ -26,6 +26,8 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -410,6 +412,370 @@ func TestReconcileRollout_MetricsRecorded(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "promotion metric should be registered and incremented")
+}
+
+func TestReconcileRollout_AutoRollback_UnhealthyCandidate(t *testing.T) {
+	scheme := newTestScheme(t)
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ar := newRolloutTestAR()
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackVersion: ptr.To("v2"),
+		},
+		Steps: []omniav1alpha1.RolloutStep{
+			{SetWeight: ptr.To[int32](20)},
+		},
+		Rollback: &omniav1alpha1.RollbackConfig{
+			Mode: omniav1alpha1.RollbackModeAutomatic,
+		},
+	}
+	ar.Status.ActiveVersion = ptr.To("v1")
+
+	pp := newTestPromptPack()
+
+	// Pre-create a candidate Deployment with unhealthy status.
+	candidateDeploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      candidateDeploymentName(ar.Name),
+			Namespace: ar.Namespace,
+		},
+		Status: appsv1.DeploymentStatus{
+			ReadyReplicas:       0,
+			UnavailableReplicas: 1,
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ar, candidateDeploy).
+		WithStatusSubresource(ar).
+		Build()
+
+	reg := prometheus.NewRegistry()
+	metrics := NewRolloutMetrics(reg)
+
+	r := &AgentRuntimeReconciler{
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RolloutMetrics: metrics,
+	}
+
+	result, err := r.reconcileRollout(context.Background(), ar, pp, nil, nil)
+	require.NoError(t, err)
+	assert.Zero(t, result.RequeueAfter)
+
+	// Rollout should be inactive after auto-rollback.
+	require.NotNil(t, ar.Status.Rollout)
+	assert.False(t, ar.Status.Rollout.Active)
+	assert.Contains(t, ar.Status.Rollout.Message, "auto-rollback")
+
+	// Candidate deployment should be deleted.
+	deploy := &appsv1.Deployment{}
+	key := types.NamespacedName{
+		Name:      candidateDeploymentName(ar.Name),
+		Namespace: ar.Namespace,
+	}
+	err = fakeClient.Get(context.Background(), key, deploy)
+	assert.Error(t, err, "candidate deployment should be deleted after auto-rollback")
+
+	// RolloutActive condition should be False.
+	assertCondition(t, ar.Status.Conditions, ConditionTypeRolloutActive, metav1.ConditionFalse)
+
+	// Rollback metric should be recorded.
+	m, err := reg.Gather()
+	require.NoError(t, err)
+	found := false
+	for _, mf := range m {
+		if mf.GetName() == metricRolloutRollbacks {
+			found = true
+			assert.Greater(t, mf.GetMetric()[0].GetCounter().GetValue(), float64(0))
+		}
+	}
+	assert.True(t, found, "rollback metric should be registered and incremented")
+}
+
+func TestReconcileRollout_AutoRollback_HealthyCandidate_Continues(t *testing.T) {
+	scheme := newTestScheme(t)
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ar := newRolloutTestAR()
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackVersion: ptr.To("v2"),
+		},
+		Steps: []omniav1alpha1.RolloutStep{
+			{SetWeight: ptr.To[int32](20)},
+		},
+		Rollback: &omniav1alpha1.RollbackConfig{
+			Mode: omniav1alpha1.RollbackModeAutomatic,
+		},
+	}
+	ar.Status.ActiveVersion = ptr.To("v1")
+
+	pp := newTestPromptPack()
+
+	// Pre-create a healthy candidate Deployment.
+	candidateDeploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      candidateDeploymentName(ar.Name),
+			Namespace: ar.Namespace,
+		},
+		Status: appsv1.DeploymentStatus{
+			ReadyReplicas:       1,
+			UnavailableReplicas: 0,
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ar, candidateDeploy).
+		WithStatusSubresource(ar).
+		Build()
+
+	r := &AgentRuntimeReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	result, err := r.reconcileRollout(context.Background(), ar, pp, nil, nil)
+	require.NoError(t, err)
+	assert.Zero(t, result.RequeueAfter)
+
+	// Rollout should remain active — healthy candidate should not trigger rollback.
+	require.NotNil(t, ar.Status.Rollout)
+	assert.True(t, ar.Status.Rollout.Active)
+
+	// Candidate deployment should still exist.
+	deploy := &appsv1.Deployment{}
+	key := types.NamespacedName{
+		Name:      candidateDeploymentName(ar.Name),
+		Namespace: ar.Namespace,
+	}
+	require.NoError(t, fakeClient.Get(context.Background(), key, deploy))
+}
+
+func TestReconcileRollout_Idle_WithMetrics(t *testing.T) {
+	scheme := newTestScheme(t)
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ar := newRolloutTestAR()
+	// No rollout config — idle.
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		Build()
+
+	reg := prometheus.NewRegistry()
+	metrics := NewRolloutMetrics(reg)
+
+	r := &AgentRuntimeReconciler{
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RolloutMetrics: metrics,
+	}
+
+	_, err := r.reconcileRollout(context.Background(), ar, nil, nil, nil)
+	require.NoError(t, err)
+
+	// Active metric should be 0 for idle.
+	m, err := reg.Gather()
+	require.NoError(t, err)
+	for _, mf := range m {
+		if mf.GetName() == metricRolloutActive {
+			assert.Equal(t, float64(0), mf.GetMetric()[0].GetGauge().GetValue())
+		}
+	}
+}
+
+func TestReconcileRolloutUpdateStatus_NilActiveVersion(t *testing.T) {
+	scheme := newTestScheme(t)
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ar := newRolloutTestAR()
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackVersion: ptr.To("v2"),
+		},
+		Steps: []omniav1alpha1.RolloutStep{
+			{SetWeight: ptr.To[int32](20)},
+		},
+	}
+	// ActiveVersion not set — stableVersion should be empty.
+	ar.Status.ActiveVersion = nil
+
+	pp := newTestPromptPack()
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		Build()
+
+	r := &AgentRuntimeReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	_, err := r.reconcileRollout(context.Background(), ar, pp, nil, nil)
+	require.NoError(t, err)
+
+	require.NotNil(t, ar.Status.Rollout)
+	assert.True(t, ar.Status.Rollout.Active)
+	assert.Empty(t, ar.Status.Rollout.StableVersion)
+	assert.Equal(t, "v2", ar.Status.Rollout.CandidateVersion)
+}
+
+func TestReconcileRollout_Active_WithIstioTrafficRouting(t *testing.T) {
+	scheme := newTestScheme(t)
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1", Kind: "VirtualService"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1", Kind: "VirtualServiceList"},
+		&unstructured.UnstructuredList{},
+	)
+
+	ar := newRolloutTestAR()
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackVersion: ptr.To("v2"),
+		},
+		Steps: []omniav1alpha1.RolloutStep{
+			{SetWeight: ptr.To[int32](30)},
+		},
+		TrafficRouting: &omniav1alpha1.TrafficRoutingConfig{
+			Istio: &omniav1alpha1.IstioTrafficRouting{
+				VirtualService: omniav1alpha1.IstioVirtualServiceRef{
+					Name:   "my-vs",
+					Routes: []string{"primary"},
+				},
+				DestinationRule: omniav1alpha1.IstioDestinationRuleRef{
+					Name:            "my-dr",
+					StableSubset:    "stable",
+					CandidateSubset: "canary",
+				},
+			},
+		},
+	}
+	ar.Status.ActiveVersion = ptr.To("v1")
+
+	// Create the VirtualService.
+	route := makeRoute("primary", 100, 0)
+	vs := newTestVirtualService("my-vs", "default", []interface{}{route})
+
+	pp := newTestPromptPack()
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(vs).
+		Build()
+
+	reg := prometheus.NewRegistry()
+	metrics := NewRolloutMetrics(reg)
+
+	r := &AgentRuntimeReconciler{
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RolloutMetrics: metrics,
+	}
+
+	_, err := r.reconcileRollout(context.Background(), ar, pp, nil, nil)
+	require.NoError(t, err)
+
+	// Verify VS weights were updated.
+	updated := &unstructured.Unstructured{}
+	updated.SetAPIVersion(istioNetworkingAPIVersion)
+	updated.SetKind(istioVirtualServiceKind)
+	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "my-vs", Namespace: "default"}, updated)
+	require.NoError(t, err)
+
+	httpRoutes, found, err := unstructured.NestedSlice(updated.Object, "spec", "http")
+	require.NoError(t, err)
+	require.True(t, found)
+
+	r0 := httpRoutes[0].(map[string]interface{})
+	dests := r0["route"].([]interface{})
+	stableDest := dests[0].(map[string]interface{})
+	canaryDest := dests[1].(map[string]interface{})
+	assert.Equal(t, int64(70), stableDest["weight"])
+	assert.Equal(t, int64(30), canaryDest["weight"])
+}
+
+func TestReconcileRollout_Idle_ResetsIstioTrafficRouting(t *testing.T) {
+	scheme := newTestScheme(t)
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1", Kind: "VirtualService"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1", Kind: "VirtualServiceList"},
+		&unstructured.UnstructuredList{},
+	)
+
+	ar := newRolloutTestAR()
+	// Rollout with no candidate — idle, but traffic routing is configured.
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Steps: []omniav1alpha1.RolloutStep{
+			{SetWeight: ptr.To[int32](30)},
+		},
+		TrafficRouting: &omniav1alpha1.TrafficRoutingConfig{
+			Istio: &omniav1alpha1.IstioTrafficRouting{
+				VirtualService: omniav1alpha1.IstioVirtualServiceRef{
+					Name:   "my-vs",
+					Routes: []string{"primary"},
+				},
+				DestinationRule: omniav1alpha1.IstioDestinationRuleRef{
+					Name:            "my-dr",
+					StableSubset:    "stable",
+					CandidateSubset: "canary",
+				},
+			},
+		},
+	}
+
+	// VS with canary weight still set from previous rollout.
+	route := makeRoute("primary", 70, 30)
+	vs := newTestVirtualService("my-vs", "default", []interface{}{route})
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(vs).
+		Build()
+
+	reg := prometheus.NewRegistry()
+	metrics := NewRolloutMetrics(reg)
+
+	r := &AgentRuntimeReconciler{
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RolloutMetrics: metrics,
+	}
+
+	_, err := r.reconcileRollout(context.Background(), ar, nil, nil, nil)
+	require.NoError(t, err)
+
+	// VS should be reset to 100/0.
+	updated := &unstructured.Unstructured{}
+	updated.SetAPIVersion(istioNetworkingAPIVersion)
+	updated.SetKind(istioVirtualServiceKind)
+	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "my-vs", Namespace: "default"}, updated)
+	require.NoError(t, err)
+
+	httpRoutes, _, _ := unstructured.NestedSlice(updated.Object, "spec", "http")
+	r0 := httpRoutes[0].(map[string]interface{})
+	dests := r0["route"].([]interface{})
+	assert.Equal(t, int64(100), dests[0].(map[string]interface{})["weight"])
+	assert.Equal(t, int64(0), dests[1].(map[string]interface{})["weight"])
 }
 
 // assertCondition checks that a condition with the given type and status exists.
