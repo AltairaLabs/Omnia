@@ -180,7 +180,7 @@ var _ = Describe("Rollout E2E", func() {
 			}
 
 			By("checking that the AgentRuntime CRD is installed")
-			cmd := exec.Command("kubectl", "get", "crd", "agentruntimes.omnia.altairalabs.ai")
+			cmd = exec.Command("kubectl", "get", "crd", "agentruntimes.omnia.altairalabs.ai")
 			if _, err := utils.Run(cmd); err != nil {
 				Skip("AgentRuntime CRD not installed")
 			}
@@ -462,7 +462,7 @@ spec:
 			}, 60*time.Second, 2*time.Second).Should(Succeed())
 
 			By("creating provider for Istio rollout tests")
-			cmd := exec.Command("kubectl", "create", "secret", "generic", "rollout-istio-provider",
+			cmd = exec.Command("kubectl", "create", "secret", "generic", "rollout-istio-provider",
 				"-n", rolloutNamespace,
 				"--from-literal=api-key=istio-rollout-test-key",
 				"--dry-run=client", "-o", "yaml")
