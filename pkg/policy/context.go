@@ -102,6 +102,14 @@ const (
 	IstioHeaderUserEmail = "x-user-email"
 )
 
+// Rollout cohort tracking headers set by Istio during canary deployments.
+const (
+	// HeaderCohortID identifies the cohort a request was routed to.
+	HeaderCohortID = "x-omnia-cohort-id"
+	// HeaderVariant identifies the rollout variant (e.g., "stable", "canary").
+	HeaderVariant = "x-omnia-variant"
+)
+
 // PropagationFields holds all values for context propagation across service boundaries.
 type PropagationFields struct {
 	AgentName     string

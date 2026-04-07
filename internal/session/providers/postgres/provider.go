@@ -96,7 +96,8 @@ const sessionColumns = `id, agent_name, namespace, workspace_name, status,
 	created_at, updated_at, expires_at, ended_at,
 	message_count, tool_call_count, total_input_tokens, total_output_tokens,
 	estimated_cost_usd, tags, state, last_message_preview,
-	prompt_pack_name, prompt_pack_version`
+	prompt_pack_name, prompt_pack_version,
+	cohort_id, variant`
 
 // nullableSessionFields groups nullable columns scanned from a session row.
 type nullableSessionFields struct {
@@ -104,6 +105,8 @@ type nullableSessionFields struct {
 	lastMsgPreview    *string
 	promptPackName    *string
 	promptPackVersion *string
+	cohortID          *string
+	variant           *string
 	expiresAt         *time.Time
 	endedAt           *time.Time
 	stateJSON         []byte
@@ -118,6 +121,8 @@ func populateSession(s *session.Session, n nullableSessionFields) {
 	s.LastMessagePreview = pgutil.DerefString(n.lastMsgPreview)
 	s.PromptPackName = pgutil.DerefString(n.promptPackName)
 	s.PromptPackVersion = pgutil.DerefString(n.promptPackVersion)
+	s.CohortID = pgutil.DerefString(n.cohortID)
+	s.Variant = pgutil.DerefString(n.variant)
 	if s.Tags == nil {
 		s.Tags = []string{}
 	}
@@ -133,6 +138,7 @@ func scanSession(row pgx.Row) (*session.Session, error) {
 		&s.MessageCount, &s.ToolCallCount, &s.TotalInputTokens, &s.TotalOutputTokens,
 		&s.EstimatedCostUSD, &s.Tags, &n.stateJSON, &n.lastMsgPreview,
 		&n.promptPackName, &n.promptPackVersion,
+		&n.cohortID, &n.variant,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -274,8 +280,9 @@ func (p *Provider) CreateSession(ctx context.Context, s *session.Session) error 
 		created_at, updated_at, expires_at, ended_at,
 		message_count, tool_call_count, total_input_tokens, total_output_tokens,
 		estimated_cost_usd, tags, state, last_message_preview,
-		prompt_pack_name, prompt_pack_version
-	) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19
+		prompt_pack_name, prompt_pack_version,
+		cohort_id, variant
+	) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21
 	WHERE NOT EXISTS (SELECT 1 FROM sessions WHERE id=$1)`
 
 	tags := s.Tags
@@ -289,6 +296,7 @@ func (p *Provider) CreateSession(ctx context.Context, s *session.Session) error 
 		s.MessageCount, s.ToolCallCount, s.TotalInputTokens, s.TotalOutputTokens,
 		s.EstimatedCostUSD, tags, pgutil.MarshalJSONB(s.State), pgutil.NullString(s.LastMessagePreview),
 		pgutil.NullString(s.PromptPackName), pgutil.NullString(s.PromptPackVersion),
+		pgutil.NullString(s.CohortID), pgutil.NullString(s.Variant),
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: create session: %w", err)
@@ -309,7 +317,8 @@ func (p *Provider) UpdateSession(ctx context.Context, s *session.Session) error 
 		updated_at=$6, expires_at=$7, ended_at=$8,
 		message_count=$9, tool_call_count=$10, total_input_tokens=$11, total_output_tokens=$12,
 		estimated_cost_usd=$13, tags=$14, state=$15, last_message_preview=$16,
-		prompt_pack_name=$17, prompt_pack_version=$18
+		prompt_pack_name=$17, prompt_pack_version=$18,
+		cohort_id=$19, variant=$20
 	WHERE id=$1`
 
 	tags := s.Tags
@@ -323,6 +332,7 @@ func (p *Provider) UpdateSession(ctx context.Context, s *session.Session) error 
 		s.MessageCount, s.ToolCallCount, s.TotalInputTokens, s.TotalOutputTokens,
 		s.EstimatedCostUSD, tags, pgutil.MarshalJSONB(s.State), pgutil.NullString(s.LastMessagePreview),
 		pgutil.NullString(s.PromptPackName), pgutil.NullString(s.PromptPackVersion),
+		pgutil.NullString(s.CohortID), pgutil.NullString(s.Variant),
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: update session: %w", err)

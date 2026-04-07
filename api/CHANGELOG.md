@@ -8,6 +8,14 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ---
 
+## 2026-04-07
+- **Session API**: Added `cohortId` and `variant` fields to `CreateSessionRequest` and `Session` schemas
+  - Supports rollout cohort tracking: Istio routes set `x-omnia-cohort-id` and `x-omnia-variant` headers,
+    which the facade extracts and persists to the session for per-variant analysis.
+  - New Postgres columns `cohort_id` and `variant` with partial indexes (migration 000025).
+  - New OTel span attributes `omnia.cohort.id` and `omnia.variant` on `omnia.facade.message` spans.
+  - Non-breaking: both fields are optional with `omitempty`.
+
 ## 2026-03-28
 - **ArenaJob CRD** (Enterprise): Added `spec.sessionRecording` boolean (default: false)
   - **Breaking**: Session recording was previously always enabled when `SESSION_API_URL` was configured on the controller. Now requires explicit `sessionRecording: true` on the ArenaJob spec. Existing ArenaJobs without this field will stop recording sessions after upgrade.

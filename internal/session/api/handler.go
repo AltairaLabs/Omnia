@@ -136,6 +136,8 @@ type CreateSessionRequest struct {
 	PromptPackVersion string            `json:"promptPackVersion,omitempty"`
 	Tags              []string          `json:"tags,omitempty"`
 	InitialState      map[string]string `json:"initialState,omitempty"`
+	CohortID          string            `json:"cohortId,omitempty"`
+	Variant           string            `json:"variant,omitempty"`
 }
 
 // AppendMessageRequest is the JSON body for POST /api/v1/sessions/{sessionID}/messages.
@@ -438,6 +440,8 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		Status:            session.SessionStatusActive,
 		CreatedAt:         now,
 		UpdatedAt:         now,
+		CohortID:          req.CohortID,
+		Variant:           req.Variant,
 	}
 	if req.TTLSeconds > 0 {
 		sess.ExpiresAt = now.Add(time.Duration(req.TTLSeconds) * time.Second)

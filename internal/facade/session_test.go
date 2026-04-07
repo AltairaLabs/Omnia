@@ -469,3 +469,236 @@ func TestProcessMessage_PropagatesUserIDToPolicyContext(t *testing.T) {
 		t.Errorf("policy.UserID(ctx) = %q, want %q", got, want)
 	}
 }
+
+func TestCohortHeaders_ExtractedAndStoredOnSession(t *testing.T) {
+	handler := &mockHandler{
+		handleFunc: func(_ context.Context, _ string, _ *ClientMessage, writer ResponseWriter) error {
+			return writer.WriteDone("ok")
+		},
+	}
+
+	store := session.NewMemoryStore()
+	cfg := DefaultServerConfig()
+	cfg.PingInterval = 100 * time.Millisecond
+	cfg.PongTimeout = 200 * time.Millisecond
+
+	log := logr.Discard()
+	server := NewServer(cfg, store, handler, log)
+
+	ts := httptest.NewServer(server)
+	t.Cleanup(func() {
+		ts.Close()
+		_ = store.Close()
+	})
+
+	headers := http.Header{}
+	headers.Set(policy.HeaderCohortID, "cohort-abc")
+	headers.Set(policy.HeaderVariant, "canary")
+	ws, _, err := websocket.DefaultDialer.Dial(
+		strings.Replace(ts.URL, "http://", "ws://", 1)+"?agent=test-agent", headers)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	var connMsg ServerMessage
+	if err := ws.ReadJSON(&connMsg); err != nil {
+		t.Fatalf("Failed to read connected: %v", err)
+	}
+
+	// Send a message to trigger session persistence
+	if err := ws.WriteJSON(ClientMessage{
+		Type: MessageTypeMessage, SessionID: connMsg.SessionID, Content: "hi",
+	}); err != nil {
+		t.Fatalf("Failed to send: %v", err)
+	}
+
+	var doneMsg ServerMessage
+	if err := ws.ReadJSON(&doneMsg); err != nil {
+		t.Fatalf("Failed to read done: %v", err)
+	}
+
+	// Verify session was created with cohort fields
+	sess, err := store.GetSession(context.Background(), connMsg.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.CohortID != "cohort-abc" {
+		t.Errorf("CohortID = %q, want %q", sess.CohortID, "cohort-abc")
+	}
+	if sess.Variant != "canary" {
+		t.Errorf("Variant = %q, want %q", sess.Variant, "canary")
+	}
+}
+
+func TestCohortHeaders_EmptyWhenNotSet(t *testing.T) {
+	handler := &mockHandler{
+		handleFunc: func(_ context.Context, _ string, _ *ClientMessage, writer ResponseWriter) error {
+			return writer.WriteDone("ok")
+		},
+	}
+
+	store := session.NewMemoryStore()
+	cfg := DefaultServerConfig()
+	cfg.PingInterval = 100 * time.Millisecond
+	cfg.PongTimeout = 200 * time.Millisecond
+
+	log := logr.Discard()
+	server := NewServer(cfg, store, handler, log)
+
+	ts := httptest.NewServer(server)
+	t.Cleanup(func() {
+		ts.Close()
+		_ = store.Close()
+	})
+
+	// Connect without cohort headers
+	ws, _, err := websocket.DefaultDialer.Dial(
+		strings.Replace(ts.URL, "http://", "ws://", 1)+"?agent=test-agent", nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	var connMsg ServerMessage
+	if err := ws.ReadJSON(&connMsg); err != nil {
+		t.Fatalf("Failed to read connected: %v", err)
+	}
+
+	if err := ws.WriteJSON(ClientMessage{
+		Type: MessageTypeMessage, SessionID: connMsg.SessionID, Content: "hi",
+	}); err != nil {
+		t.Fatalf("Failed to send: %v", err)
+	}
+
+	var doneMsg ServerMessage
+	if err := ws.ReadJSON(&doneMsg); err != nil {
+		t.Fatalf("Failed to read done: %v", err)
+	}
+
+	sess, err := store.GetSession(context.Background(), connMsg.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.CohortID != "" {
+		t.Errorf("CohortID = %q, want empty", sess.CohortID)
+	}
+	if sess.Variant != "" {
+		t.Errorf("Variant = %q, want empty", sess.Variant)
+	}
+}
+
+func TestCohortHeaders_SpanAttributes(t *testing.T) {
+	provider, exporter := newTracingTestProvider(t)
+
+	handler := &mockHandler{
+		handleFunc: func(_ context.Context, _ string, _ *ClientMessage, writer ResponseWriter) error {
+			return writer.WriteDone("ok")
+		},
+	}
+
+	ts := newTestServerWithTracing(t, handler, provider)
+
+	headers := http.Header{}
+	headers.Set(policy.HeaderCohortID, "cohort-xyz")
+	headers.Set(policy.HeaderVariant, "stable")
+	ws, _, err := websocket.DefaultDialer.Dial(
+		strings.Replace(ts.URL, "http://", "ws://", 1)+"?agent=test-agent", headers)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	var connMsg ServerMessage
+	if err := ws.ReadJSON(&connMsg); err != nil {
+		t.Fatalf("Failed to read connected: %v", err)
+	}
+
+	if err := ws.WriteJSON(ClientMessage{
+		Type: MessageTypeMessage, SessionID: connMsg.SessionID, Content: "hi",
+	}); err != nil {
+		t.Fatalf("Failed to send: %v", err)
+	}
+
+	var doneMsg ServerMessage
+	if err := ws.ReadJSON(&doneMsg); err != nil {
+		t.Fatalf("Failed to read done: %v", err)
+	}
+
+	_ = ws.Close()
+	time.Sleep(50 * time.Millisecond)
+
+	spans := exporter.GetSpans()
+	msgSpan := findSpanByName(spans, "omnia.facade.message")
+	if msgSpan == nil {
+		t.Fatal("expected 'omnia.facade.message' span")
+	}
+
+	cohortVal, ok := findSpanAttr(*msgSpan, "omnia.cohort.id")
+	if !ok {
+		t.Fatal("missing omnia.cohort.id attribute")
+	}
+	if cohortVal.AsString() != "cohort-xyz" {
+		t.Errorf("omnia.cohort.id = %q, want %q", cohortVal.AsString(), "cohort-xyz")
+	}
+
+	variantVal, ok := findSpanAttr(*msgSpan, "omnia.variant")
+	if !ok {
+		t.Fatal("missing omnia.variant attribute")
+	}
+	if variantVal.AsString() != "stable" {
+		t.Errorf("omnia.variant = %q, want %q", variantVal.AsString(), "stable")
+	}
+}
+
+func TestCohortHeaders_SpanOmitsEmptyAttributes(t *testing.T) {
+	provider, exporter := newTracingTestProvider(t)
+
+	handler := &mockHandler{
+		handleFunc: func(_ context.Context, _ string, _ *ClientMessage, writer ResponseWriter) error {
+			return writer.WriteDone("ok")
+		},
+	}
+
+	ts := newTestServerWithTracing(t, handler, provider)
+
+	// No cohort headers
+	ws, _, err := websocket.DefaultDialer.Dial(
+		strings.Replace(ts.URL, "http://", "ws://", 1)+"?agent=test-agent", nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	var connMsg ServerMessage
+	if err := ws.ReadJSON(&connMsg); err != nil {
+		t.Fatalf("Failed to read connected: %v", err)
+	}
+
+	if err := ws.WriteJSON(ClientMessage{
+		Type: MessageTypeMessage, SessionID: connMsg.SessionID, Content: "hi",
+	}); err != nil {
+		t.Fatalf("Failed to send: %v", err)
+	}
+
+	var doneMsg ServerMessage
+	if err := ws.ReadJSON(&doneMsg); err != nil {
+		t.Fatalf("Failed to read done: %v", err)
+	}
+
+	_ = ws.Close()
+	time.Sleep(50 * time.Millisecond)
+
+	spans := exporter.GetSpans()
+	msgSpan := findSpanByName(spans, "omnia.facade.message")
+	if msgSpan == nil {
+		t.Fatal("expected 'omnia.facade.message' span")
+	}
+
+	if _, ok := findSpanAttr(*msgSpan, "omnia.cohort.id"); ok {
+		t.Error("omnia.cohort.id should not be set when header is empty")
+	}
+	if _, ok := findSpanAttr(*msgSpan, "omnia.variant"); ok {
+		t.Error("omnia.variant should not be set when header is empty")
+	}
+}

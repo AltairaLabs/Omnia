@@ -369,6 +369,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	userRoles := r.Header.Get(policy.IstioHeaderUserRoles)
 	userEmail := r.Header.Get(policy.IstioHeaderUserEmail)
 	authorization := r.Header.Get("Authorization")
+	cohortID := r.Header.Get(policy.HeaderCohortID)
+	variant := r.Header.Get(policy.HeaderVariant)
 
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -387,6 +389,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		userRoles:     userRoles,
 		userEmail:     userEmail,
 		authorization: authorization,
+		cohortID:      cohortID,
+		variant:       variant,
 	}
 	if s.config.MessageRateLimit > 0 {
 		c.rateLimiter = rate.NewLimiter(rate.Limit(s.config.MessageRateLimit), s.config.MessageRateBurst)

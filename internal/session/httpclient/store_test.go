@@ -86,6 +86,8 @@ func mockSessionAPI(t *testing.T) *httptest.Server {
 			Status:    &status,
 			CreatedAt: &now,
 			UpdatedAt: &now,
+			CohortId:  req.CohortId,
+			Variant:   req.Variant,
 		}
 		if req.TtlSeconds != nil && *req.TtlSeconds > 0 {
 			exp := now.Add(time.Duration(*req.TtlSeconds) * time.Second)
@@ -1462,5 +1464,29 @@ func TestGetRuntimeEvents_NotFound(t *testing.T) {
 	_, err := store.GetRuntimeEvents(context.Background(), "bad-id", 0, 0)
 	if err != session.ErrSessionNotFound {
 		t.Fatalf("expected ErrSessionNotFound, got %v", err)
+	}
+}
+
+func TestCreateSession_WithCohortFields(t *testing.T) {
+	srv := mockSessionAPI(t)
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+
+	sess, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+		AgentName: "test-agent",
+		Namespace: "default",
+		CohortID:  "cohort-99",
+		Variant:   "canary",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sess.CohortID != "cohort-99" {
+		t.Errorf("CohortID = %q, want %q", sess.CohortID, "cohort-99")
+	}
+	if sess.Variant != "canary" {
+		t.Errorf("Variant = %q, want %q", sess.Variant, "canary")
 	}
 }
