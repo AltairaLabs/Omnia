@@ -877,16 +877,9 @@ spec:
                     description: name is the name of the PromptPack resource.
                     minLength: 1
                     type: string
-                  track:
-                    default: stable
-                    description: |-
-                      track specifies which release track to follow (e.g., "stable", "canary").
-                      Only used if version is not specified.
-                    type: string
                   version:
-                    description: |-
-                      version specifies a specific version of the PromptPack to use.
-                      If not specified, the track field is used instead.
+                    description: version specifies a specific version of the PromptPack
+                      to use.
                     type: string
                 required:
                 - name

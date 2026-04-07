@@ -29,15 +29,8 @@ type PromptPackRef struct {
 	Name string `json:"name"`
 
 	// version specifies a specific version of the PromptPack to use.
-	// If not specified, the track field is used instead.
 	// +optional
 	Version *string `json:"version,omitempty"`
-
-	// track specifies which release track to follow (e.g., "stable", "canary").
-	// Only used if version is not specified.
-	// +kubebuilder:default="stable"
-	// +optional
-	Track *string `json:"track,omitempty"`
 }
 
 // FacadeType defines the type of facade for client connections.
