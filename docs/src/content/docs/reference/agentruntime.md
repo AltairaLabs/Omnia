@@ -25,13 +25,12 @@ Reference to the PromptPack containing agent prompts.
 |-------|------|----------|
 | `promptPackRef.name` | string | Yes |
 | `promptPackRef.version` | string | No |
-| `promptPackRef.track` | string | No (default: "stable") |
 
 ```yaml
 spec:
   promptPackRef:
     name: my-prompts
-    version: "1.0.0"  # Or use track: "canary"
+    version: "1.0.0"
 ```
 
 ### `providers`
@@ -461,6 +460,71 @@ spec:
       inactivityTimeout: 10m
 ```
 
+### `rollout`
+
+Progressive rollout configuration. When `rollout.candidate` is set and differs from the current spec, the controller creates a candidate Deployment and progresses through the defined steps.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `rollout.candidate` | object | No | Overrides for the candidate version |
+| `rollout.candidate.promptPackVersion` | string | No | PromptPack version for the candidate |
+| `rollout.candidate.providerRefs` | array | No | Provider overrides for the candidate |
+| `rollout.candidate.toolRegistryRef` | object | No | ToolRegistry override for the candidate |
+| `rollout.steps` | array | Yes | Ordered sequence of rollout actions |
+| `rollout.steps[].setWeight` | integer | — | Set candidate traffic weight (0-100) |
+| `rollout.steps[].pause` | object | — | Pause the rollout |
+| `rollout.steps[].pause.duration` | string | No | Pause duration (e.g., "5m"). Omit for indefinite |
+| `rollout.steps[].analysis` | object | — | Run a RolloutAnalysis template |
+| `rollout.steps[].analysis.templateName` | string | Yes | Name of the RolloutAnalysis CRD |
+| `rollout.steps[].analysis.args` | array | No | Argument overrides for the template |
+| `rollout.stickySession` | object | No | Consistent routing for experiments |
+| `rollout.stickySession.hashOn` | string | Yes | Header for consistent hashing (e.g., "x-user-id") |
+| `rollout.rollback` | object | No | Rollback configuration |
+| `rollout.rollback.mode` | string | No | `automatic`, `manual` (default), or `disabled` |
+| `rollout.rollback.cooldown` | string | No | Debounce duration (default: "5m") |
+| `rollout.trafficRouting` | object | No | Traffic management provider |
+| `rollout.trafficRouting.istio.virtualService.name` | string | Yes | VirtualService to patch |
+| `rollout.trafficRouting.istio.virtualService.routes` | array | Yes | Route names to manage |
+| `rollout.trafficRouting.istio.destinationRule.name` | string | Yes | DestinationRule to patch |
+
+:::note[Enterprise]
+The `analysis` step type requires the `RolloutAnalysis` CRD, which is an enterprise feature.
+:::
+
+#### Rollout Example
+
+```yaml
+# Canary rollout with analysis
+spec:
+  promptPackRef:
+    name: customer-support-pack
+    version: "1.0.0"
+  rollout:
+    candidate:
+      promptPackVersion: "2.0.0"
+    steps:
+      - setWeight: 10
+      - pause:
+          duration: "5m"
+      - analysis:
+          templateName: quality-check
+      - setWeight: 50
+      - pause:
+          duration: "10m"
+      - setWeight: 100
+    rollback:
+      mode: automatic
+    trafficRouting:
+      istio:
+        virtualService:
+          name: customer-support-vs
+          routes: [primary]
+        destinationRule:
+          name: customer-support-dr
+```
+
+When candidate matches the current spec, the rollout is idle. Promotion copies candidate overrides into the main spec. Rollback reverts the candidate to match the current spec.
+
 ## Status Fields
 
 ### `phase`
@@ -478,6 +542,16 @@ spec:
 | `status.replicas.desired` | Desired replicas |
 | `status.replicas.ready` | Ready replicas |
 | `status.replicas.available` | Available replicas |
+
+### `rollout` (status)
+
+| Field | Description |
+|-------|-------------|
+| `status.rollout.active` | Whether a rollout is in progress |
+| `status.rollout.currentStep` | Current step index |
+| `status.rollout.currentWeight` | Current candidate traffic weight |
+| `status.rollout.stableVersion` | Version serving stable traffic |
+| `status.rollout.candidateVersion` | Version serving candidate traffic |
 
 ### `conditions`
 
