@@ -192,9 +192,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -299,9 +296,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -365,9 +359,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -430,9 +421,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -490,9 +478,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -544,9 +529,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Version: "2.1.0",
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
-					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
 					},
 				},
 			}
@@ -642,9 +624,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -715,9 +694,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Version: "1.0.0",
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
-					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
 					},
 				},
 			}
@@ -790,9 +766,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Version: "1.0.0",
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
-					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
 					},
 				},
 			}
@@ -875,9 +848,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -946,9 +916,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Version: "1.0.0",
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
-					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
 					},
 				},
 			}
@@ -1029,9 +996,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -1107,9 +1071,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -1170,9 +1131,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Version: "1.0.0",
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
-					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
 					},
 				},
 			}
@@ -1284,9 +1242,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -1339,9 +1294,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Version: "1.0.0",
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
-					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
 					},
 				},
 			}
@@ -1413,9 +1365,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 							Name: "prompts-config",
 						},
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -1485,9 +1434,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -1542,9 +1488,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Version: "1.0.0",
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
-					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
 					},
 				},
 			}
@@ -1624,9 +1567,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -1688,9 +1628,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Version: "1.0.0",
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
-					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
 					},
 				},
 			}
@@ -1762,9 +1699,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -1812,9 +1746,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Version: "1.0.0",
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
-					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
 					},
 				},
 			}
@@ -1892,9 +1823,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -1958,9 +1886,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Version: "1.0.0",
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
-					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
 					},
 				},
 			}
@@ -2031,9 +1956,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -2099,9 +2021,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -2160,9 +2079,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Version: "1.0.0",
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
-					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
 					},
 				},
 			}
@@ -2243,9 +2159,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -2313,9 +2226,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -2371,9 +2281,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Version: "1.0.0",
 					Source: omniav1alpha1.PromptPackSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
-					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
 					},
 				},
 			}
@@ -2444,9 +2351,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 						ConfigMapRef: &corev1.LocalObjectReference{
 							Name: "prompts-config",
 						},
-					},
-					Rollout: omniav1alpha1.RolloutStrategy{
-						Type: omniav1alpha1.RolloutStrategyImmediate,
 					},
 				},
 			}
@@ -4054,9 +3958,6 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 						Source: omniav1alpha1.PromptPackSource{
 							Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 						},
-						Rollout: omniav1alpha1.RolloutStrategy{
-							Type: omniav1alpha1.RolloutStrategyImmediate,
-						},
 					},
 				}
 				Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -4159,9 +4060,6 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 						Source: omniav1alpha1.PromptPackSource{
 							Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 						},
-						Rollout: omniav1alpha1.RolloutStrategy{
-							Type: omniav1alpha1.RolloutStrategyImmediate,
-						},
 					},
 				}
 				Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
@@ -4220,9 +4118,6 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 						Version: "1.0.0",
 						Source: omniav1alpha1.PromptPackSource{
 							Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
-						},
-						Rollout: omniav1alpha1.RolloutStrategy{
-							Type: omniav1alpha1.RolloutStrategyImmediate,
 						},
 					},
 				}
