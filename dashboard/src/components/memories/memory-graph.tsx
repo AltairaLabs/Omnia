@@ -96,7 +96,7 @@ export function MemoryGraph({ memories, onNodeClick }: MemoryGraphProps) {
     let cancelled = false;
     layoutingRef.current = true;
 
-    layoutNodes(memories.map(memoryToNode)).then((positioned) => {
+    layoutNodes(memories.map((m, i) => memoryToNode(m, i))).then((positioned) => {
       if (!cancelled) {
         setNodes(positioned);
         setIsLayouting(false);
