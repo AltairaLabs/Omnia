@@ -64,6 +64,20 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 		"paused", result.paused,
 		"message", result.message)
 
+	// Apply traffic routing if configured.
+	if ar.Spec.Rollout.TrafficRouting != nil && ar.Spec.Rollout.TrafficRouting.Istio != nil {
+		if !result.paused && !result.analysis {
+			if err := r.patchVirtualServiceWeights(ctx, ar.Namespace,
+				ar.Spec.Rollout.TrafficRouting.Istio, result.desiredWeight); err != nil {
+				return ctrl.Result{}, err
+			}
+			if r.RolloutMetrics != nil {
+				r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "stable").Set(float64(100 - result.desiredWeight))
+				r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "canary").Set(float64(result.desiredWeight))
+			}
+		}
+	}
+
 	if result.promote {
 		if r.RolloutMetrics != nil {
 			r.RolloutMetrics.Promotions.WithLabelValues(ar.Namespace, ar.Name).Inc()
@@ -80,6 +94,13 @@ func (r *AgentRuntimeReconciler) reconcileRolloutIdle(
 	ar *omniav1alpha1.AgentRuntime,
 ) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
+
+	// Reset traffic routing if Istio was configured.
+	if ar.Spec.Rollout != nil && ar.Spec.Rollout.TrafficRouting != nil && ar.Spec.Rollout.TrafficRouting.Istio != nil {
+		if err := r.resetTrafficRouting(ctx, ar.Namespace, ar.Spec.Rollout.TrafficRouting.Istio); err != nil {
+			log.Error(err, "failed to reset traffic routing on idle cleanup")
+		}
+	}
 
 	if err := r.deleteCandidateDeployment(ctx, ar); err != nil {
 		return ctrl.Result{}, fmt.Errorf("delete candidate deployment: %w", err)
@@ -103,6 +124,13 @@ func (r *AgentRuntimeReconciler) reconcileRolloutPromote(
 	log := logf.FromContext(ctx)
 
 	promote(ar)
+
+	// Reset traffic to 100% stable before removing the candidate.
+	if ar.Spec.Rollout != nil && ar.Spec.Rollout.TrafficRouting != nil && ar.Spec.Rollout.TrafficRouting.Istio != nil {
+		if err := r.resetTrafficRouting(ctx, ar.Namespace, ar.Spec.Rollout.TrafficRouting.Istio); err != nil {
+			log.Error(err, "failed to reset traffic routing on promotion")
+		}
+	}
 
 	// Persist the spec mutation (promote copies candidate overrides into main spec).
 	// This must happen before status update since they are separate API calls.
