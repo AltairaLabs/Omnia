@@ -77,6 +77,8 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 		}
 		if r.RolloutMetrics != nil {
 			r.RolloutMetrics.Rollbacks.WithLabelValues(ar.Namespace, ar.Name, "pod_unhealthy").Inc()
+			r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "stable").Set(100)
+			r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "canary").Set(0)
 		}
 		ar.Status.Rollout = &omniav1alpha1.RolloutStatus{Active: false, Message: "auto-rollback: pod unhealthy"}
 		SetCondition(&ar.Status.Conditions, ar.Generation,
@@ -133,6 +135,10 @@ func (r *AgentRuntimeReconciler) reconcileRolloutIdle(
 			log.Error(err, "failed to reset traffic routing on idle cleanup")
 		}
 	}
+	if r.RolloutMetrics != nil {
+		r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "stable").Set(100)
+		r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "canary").Set(0)
+	}
 
 	if err := r.deleteCandidateDeployment(ctx, ar); err != nil {
 		return ctrl.Result{}, fmt.Errorf("delete candidate deployment: %w", err)
@@ -162,6 +168,12 @@ func (r *AgentRuntimeReconciler) reconcileRolloutPromote(
 		if err := r.resetTrafficRouting(ctx, ar.Namespace, ar.Spec.Rollout.TrafficRouting.Istio); err != nil {
 			log.Error(err, "failed to reset traffic routing on promotion")
 		}
+	}
+
+	if r.RolloutMetrics != nil {
+		r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "stable").Set(100)
+		r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "canary").Set(0)
+		r.RolloutMetrics.Promotions.WithLabelValues(ar.Namespace, ar.Name).Inc()
 	}
 
 	// Persist the spec mutation (promote copies candidate overrides into main spec).

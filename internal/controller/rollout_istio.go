@@ -30,7 +30,6 @@ import (
 const (
 	istioNetworkingAPIVersion = "networking.istio.io/v1"
 	istioVirtualServiceKind   = "VirtualService"
-	istioDestinationRuleKind  = "DestinationRule"
 )
 
 // patchVirtualServiceWeights patches the HTTP route weights of an Istio
