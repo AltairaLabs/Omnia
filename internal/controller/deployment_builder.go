@@ -267,6 +267,15 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		podAnnotations[key] = value
 	}
 
+	// Pod labels include the track label for Istio DestinationRule subset routing.
+	// The selector does NOT include track — it's immutable and must match both
+	// stable and candidate Deployments.
+	podLabels := make(map[string]string, len(labels)+1)
+	for k, v := range labels {
+		podLabels[k] = v
+	}
+	podLabels[labelOmniaTrack] = "stable"
+
 	deployment.Labels = labels
 	deployment.Spec = appsv1.DeploymentSpec{
 		Replicas: &replicas,
@@ -275,7 +284,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		},
 		Template: corev1.PodTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
-				Labels:      labels,
+				Labels:      podLabels,
 				Annotations: podAnnotations,
 			},
 			Spec: podSpec,

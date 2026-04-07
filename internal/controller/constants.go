@@ -27,6 +27,7 @@ const (
 	labelAppInstance  = "app.kubernetes.io/instance"
 	labelAppManagedBy = "app.kubernetes.io/managed-by"
 	labelOmniaComp    = "omnia.altairalabs.ai/component"
+	labelOmniaTrack   = "omnia.altairalabs.ai/track"
 )
 
 // Label value constants.
