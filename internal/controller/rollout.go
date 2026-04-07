@@ -17,11 +17,148 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"fmt"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
+
+// reconcileRollout manages the candidate Deployment lifecycle, step progression,
+// promotion, and cleanup. Called from the main Reconcile loop after stable
+// resources are created.
+func (r *AgentRuntimeReconciler) reconcileRollout(
+	ctx context.Context,
+	ar *omniav1alpha1.AgentRuntime,
+	promptPack *omniav1alpha1.PromptPack,
+	toolRegistry *omniav1alpha1.ToolRegistry,
+	providers map[string]*omniav1alpha1.Provider,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	if !isRolloutActive(ar) {
+		return r.reconcileRolloutIdle(ctx, ar)
+	}
+
+	// Ensure the candidate Deployment exists.
+	if _, err := r.reconcileCandidateDeployment(ctx, ar, promptPack, toolRegistry, providers); err != nil {
+		return ctrl.Result{}, fmt.Errorf("reconcile candidate deployment: %w", err)
+	}
+
+	result := reconcileRolloutSteps(ar)
+	log.V(1).Info("rollout step evaluated",
+		"step", result.currentStep,
+		"weight", result.desiredWeight,
+		"promote", result.promote,
+		"paused", result.paused,
+		"message", result.message)
+
+	if result.promote {
+		return r.reconcileRolloutPromote(ctx, ar)
+	}
+
+	return r.reconcileRolloutUpdateStatus(ctx, ar, result)
+}
+
+// reconcileRolloutIdle cleans up candidate resources and clears rollout status.
+func (r *AgentRuntimeReconciler) reconcileRolloutIdle(
+	ctx context.Context,
+	ar *omniav1alpha1.AgentRuntime,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	if err := r.deleteCandidateDeployment(ctx, ar); err != nil {
+		return ctrl.Result{}, fmt.Errorf("delete candidate deployment: %w", err)
+	}
+
+	log.V(1).Info("rollout idle, cleaning up candidate", "agentRuntime", ar.Name)
+	ar.Status.Rollout = nil
+	SetCondition(&ar.Status.Conditions, ar.Generation,
+		ConditionTypeRolloutActive, metav1.ConditionFalse,
+		"NoActiveRollout", "no active rollout")
+
+	return ctrl.Result{}, nil
+}
+
+// reconcileRolloutPromote copies candidate overrides into the main spec,
+// deletes the candidate Deployment, and marks the rollout inactive.
+func (r *AgentRuntimeReconciler) reconcileRolloutPromote(
+	ctx context.Context,
+	ar *omniav1alpha1.AgentRuntime,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	promote(ar)
+
+	if err := r.deleteCandidateDeployment(ctx, ar); err != nil {
+		return ctrl.Result{}, fmt.Errorf("delete candidate after promotion: %w", err)
+	}
+
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{Active: false, Message: "promoted"}
+	SetCondition(&ar.Status.Conditions, ar.Generation,
+		ConditionTypeRolloutActive, metav1.ConditionFalse,
+		"NoActiveRollout", "rollout promoted successfully")
+
+	log.Info("rollout promoted", "agentRuntime", ar.Name)
+	return ctrl.Result{}, nil
+}
+
+// reconcileRolloutUpdateStatus updates the rollout status from the step result
+// and advances to the next step for setWeight steps that are not paused.
+func (r *AgentRuntimeReconciler) reconcileRolloutUpdateStatus(
+	_ context.Context,
+	ar *omniav1alpha1.AgentRuntime,
+	result rolloutStepResult,
+) (ctrl.Result, error) {
+	stableVersion := ""
+	if ar.Status.ActiveVersion != nil {
+		stableVersion = *ar.Status.ActiveVersion
+	}
+	candidateVersion := resolveRolloutCandidateVersion(ar)
+
+	step := result.currentStep
+	weight := result.desiredWeight
+
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
+		Active:           true,
+		CurrentStep:      &step,
+		CurrentWeight:    &weight,
+		StableVersion:    stableVersion,
+		CandidateVersion: candidateVersion,
+		Message:          result.message,
+	}
+
+	SetCondition(&ar.Status.Conditions, ar.Generation,
+		ConditionTypeRolloutActive, metav1.ConditionTrue,
+		"RolloutInProgress", result.message)
+
+	// For setWeight steps (not paused, not analysis), advance to next step.
+	if !result.paused && !result.analysis && result.desiredWeight > 0 {
+		next := step + 1
+		ar.Status.Rollout.CurrentStep = &next
+	}
+
+	if result.requeueAfter > 0 {
+		return ctrl.Result{RequeueAfter: result.requeueAfter}, nil
+	}
+	return ctrl.Result{}, nil
+}
+
+// resolveRolloutCandidateVersion returns the candidate prompt pack version,
+// falling back to the stable version when no override is set.
+func resolveRolloutCandidateVersion(ar *omniav1alpha1.AgentRuntime) string {
+	if ar.Spec.Rollout != nil && ar.Spec.Rollout.Candidate != nil && ar.Spec.Rollout.Candidate.PromptPackVersion != nil {
+		return *ar.Spec.Rollout.Candidate.PromptPackVersion
+	}
+	if ar.Spec.PromptPackRef.Version != nil {
+		return *ar.Spec.PromptPackRef.Version
+	}
+	return ""
+}
 
 // rolloutStepResult describes the outcome of evaluating the current rollout step.
 // It is a pure value — reconcileRolloutSteps reads state and returns a decision

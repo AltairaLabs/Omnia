@@ -118,4 +118,5 @@ const (
 	ConditionTypeToolRegistryReady = "ToolRegistryReady"
 	ConditionTypeProviderReady     = "ProviderReady"
 	ConditionTypePackContentValid  = "PackContentValid"
+	ConditionTypeRolloutActive     = "RolloutActive"
 )

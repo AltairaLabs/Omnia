@@ -284,6 +284,14 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	// Reconcile rollout (candidate Deployment, step progression)
+	if rolloutResult, rolloutErr := r.reconcileRollout(ctx, agentRuntime, promptPack, toolRegistry, providers); rolloutErr != nil {
+		log.Error(rolloutErr, "rollout reconciliation failed")
+		return ctrl.Result{}, rolloutErr
+	} else if rolloutResult.RequeueAfter > 0 {
+		return rolloutResult, nil
+	}
+
 	// Reconcile autoscaling (HPA or KEDA if enabled)
 	if err := r.reconcileAutoscaling(ctx, agentRuntime); err != nil {
 		log.Error(err, "Failed to reconcile autoscaling")
