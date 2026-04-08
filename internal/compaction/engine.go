@@ -142,28 +142,27 @@ func (e *Engine) compactWarmToCold(ctx context.Context, result *Result) error {
 }
 
 func (e *Engine) processBatch(ctx context.Context, sessions []*session.Session) error {
-	if e.cfg.DryRun {
-		ids := make([]string, len(sessions))
-		for i, s := range sessions {
-			ids[i] = s.ID
-		}
-		e.log.Infow("dry-run: would compact sessions", "count", len(sessions), "ids", ids)
-		return nil
-	}
-
-	// Write to cold archive with retry.
-	writeOpts := providers.WriteOpts{Compression: e.cfg.Compression}
-	if err := e.withRetry(ctx, "write_parquet", func() error {
-		return e.coldArchive.WriteParquet(ctx, sessions, writeOpts)
-	}); err != nil {
-		return fmt.Errorf("writing parquet: %w", err)
-	}
-
-	// Delete from warm store with retry.
 	ids := make([]string, len(sessions))
 	for i, s := range sessions {
 		ids[i] = s.ID
 	}
+
+	if e.cfg.DryRun {
+		e.log.Infow("dry-run: would compact sessions", "count", len(sessions), "ids", ids)
+		return nil
+	}
+
+	// Write to cold archive when available.
+	if e.coldArchive != nil {
+		writeOpts := providers.WriteOpts{Compression: e.cfg.Compression}
+		if err := e.withRetry(ctx, "write_parquet", func() error {
+			return e.coldArchive.WriteParquet(ctx, sessions, writeOpts)
+		}); err != nil {
+			return fmt.Errorf("writing parquet: %w", err)
+		}
+	}
+
+	// Delete from warm store with retry.
 	if err := e.withRetry(ctx, "delete_warm", func() error {
 		return e.warmStore.DeleteSessionsBatch(ctx, ids)
 	}); err != nil {
@@ -199,6 +198,11 @@ func (e *Engine) invalidateHotCache(ctx context.Context, ids []string) {
 }
 
 func (e *Engine) purgeExpiredCold(ctx context.Context, result *Result) {
+	if e.coldArchive == nil {
+		e.log.Info("cold purge skipped: no cold archive configured")
+		return
+	}
+
 	cutoff := e.retention.ColdCutoff(time.Now())
 	if cutoff.IsZero() {
 		e.log.Info("cold purge skipped: no retention cutoff configured")
