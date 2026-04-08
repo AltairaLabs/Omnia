@@ -106,6 +106,9 @@ const mockListNamespacedPod = vi.fn();
 const mockReadNamespacedPodLog = vi.fn();
 const mockListNamespacedEvent = vi.fn();
 const mockReadNamespacedConfigMap = vi.fn();
+const mockCreateNamespacedConfigMap = vi.fn();
+const mockReplaceNamespacedConfigMap = vi.fn();
+const mockDeleteNamespacedConfigMap = vi.fn();
 const mockPatchNamespacedDeploymentScale = vi.fn();
 
 class MockCustomObjectsApi {
@@ -122,6 +125,9 @@ class MockCoreV1Api {
   readNamespacedPodLog = mockReadNamespacedPodLog;
   listNamespacedEvent = mockListNamespacedEvent;
   readNamespacedConfigMap = mockReadNamespacedConfigMap;
+  createNamespacedConfigMap = mockCreateNamespacedConfigMap;
+  replaceNamespacedConfigMap = mockReplaceNamespacedConfigMap;
+  deleteNamespacedConfigMap = mockDeleteNamespacedConfigMap;
 }
 
 class MockAppsV1Api {
@@ -979,6 +985,111 @@ describe("crd-operations", () => {
 
       expect(result).toBeDefined();
       expect(result?.["fallback.yaml"]).toBe("fallback content");
+    });
+  });
+
+  describe("createOrUpdateConfigMap", () => {
+    const configMapData = { "pack.yaml": "prompts:\n  main:\n    template: Hello" };
+    const configMapLabels = { "omnia.altairalabs.ai/workspace": "my-workspace" };
+
+    it("should create ConfigMap when it does not exist", async () => {
+      mockReadNamespacedConfigMap.mockRejectedValue({ statusCode: 404 });
+      mockCreateNamespacedConfigMap.mockResolvedValue({});
+
+      await crdOperations.createOrUpdateConfigMap(
+        defaultOptions,
+        "my-pack-content",
+        configMapData,
+        configMapLabels
+      );
+
+      expect(mockReadNamespacedConfigMap).toHaveBeenCalledWith({
+        namespace: "workspace-ns",
+        name: "my-pack-content",
+      });
+      expect(mockCreateNamespacedConfigMap).toHaveBeenCalledWith({
+        namespace: "workspace-ns",
+        body: {
+          apiVersion: "v1",
+          kind: "ConfigMap",
+          metadata: { name: "my-pack-content", namespace: "workspace-ns", labels: configMapLabels },
+          data: configMapData,
+        },
+      });
+      expect(mockReplaceNamespacedConfigMap).not.toHaveBeenCalled();
+    });
+
+    it("should update ConfigMap when it already exists", async () => {
+      mockReadNamespacedConfigMap.mockResolvedValue({ data: { "old.yaml": "old" } });
+      mockReplaceNamespacedConfigMap.mockResolvedValue({});
+
+      await crdOperations.createOrUpdateConfigMap(
+        defaultOptions,
+        "my-pack-content",
+        configMapData,
+        configMapLabels
+      );
+
+      expect(mockReplaceNamespacedConfigMap).toHaveBeenCalledWith({
+        namespace: "workspace-ns",
+        name: "my-pack-content",
+        body: {
+          apiVersion: "v1",
+          kind: "ConfigMap",
+          metadata: { name: "my-pack-content", namespace: "workspace-ns", labels: configMapLabels },
+          data: configMapData,
+        },
+      });
+      expect(mockCreateNamespacedConfigMap).not.toHaveBeenCalled();
+    });
+
+    it("should create ConfigMap without labels when not provided", async () => {
+      mockReadNamespacedConfigMap.mockRejectedValue({ statusCode: 404 });
+      mockCreateNamespacedConfigMap.mockResolvedValue({});
+
+      await crdOperations.createOrUpdateConfigMap(defaultOptions, "my-pack-content", configMapData);
+
+      expect(mockCreateNamespacedConfigMap).toHaveBeenCalledWith({
+        namespace: "workspace-ns",
+        body: expect.objectContaining({ metadata: expect.objectContaining({ labels: undefined }) }),
+      });
+    });
+
+    it("should throw on non-404 read error", async () => {
+      mockReadNamespacedConfigMap.mockRejectedValue(new Error("Server error"));
+
+      await expect(
+        crdOperations.createOrUpdateConfigMap(defaultOptions, "my-pack-content", configMapData)
+      ).rejects.toThrow("Server error");
+    });
+  });
+
+  describe("deleteConfigMap", () => {
+    it("should delete a ConfigMap by name", async () => {
+      mockDeleteNamespacedConfigMap.mockResolvedValue({});
+
+      await crdOperations.deleteConfigMap(defaultOptions, "my-pack-content");
+
+      expect(mockDeleteNamespacedConfigMap).toHaveBeenCalledWith({
+        namespace: "workspace-ns",
+        name: "my-pack-content",
+      });
+    });
+
+    it("should be a no-op when ConfigMap does not exist", async () => {
+      mockDeleteNamespacedConfigMap.mockRejectedValue({ statusCode: 404 });
+
+      await expect(
+        crdOperations.deleteConfigMap(defaultOptions, "missing-configmap")
+      ).resolves.not.toThrow();
+    });
+
+    it("should throw on non-404 delete error", async () => {
+      mockDeleteNamespacedConfigMap.mockRejectedValue(new Error("Forbidden"));
+
+      await expect(
+        crdOperations.deleteConfigMap(defaultOptions, "my-pack-content")
+      ).rejects.toThrow("Forbidden");
     });
   });
 

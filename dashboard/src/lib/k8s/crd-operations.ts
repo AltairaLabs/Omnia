@@ -548,6 +548,64 @@ async function extractTarGz(buffer: Buffer): Promise<Record<string, string>> {
 }
 
 /**
+ * Create or update a ConfigMap in a workspace namespace.
+ * Uses read → replace → catch 404 → create pattern.
+ *
+ * @param options - Workspace client options
+ * @param name - ConfigMap name
+ * @param data - ConfigMap data (key → value)
+ * @param labels - Optional labels to apply to the ConfigMap
+ */
+export async function createOrUpdateConfigMap(
+  options: WorkspaceClientOptions,
+  name: string,
+  data: Record<string, string>,
+  labels?: Record<string, string>
+): Promise<void> {
+  return withTokenRefresh(options, async () => {
+    const coreApi = await getWorkspaceCoreApi(options);
+    const body = {
+      apiVersion: "v1" as const,
+      kind: "ConfigMap" as const,
+      metadata: { name, namespace: options.namespace, labels },
+      data,
+    };
+    try {
+      await coreApi.readNamespacedConfigMap({ namespace: options.namespace, name });
+      await coreApi.replaceNamespacedConfigMap({ namespace: options.namespace, name, body });
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        await coreApi.createNamespacedConfigMap({ namespace: options.namespace, body });
+      } else {
+        throw error;
+      }
+    }
+  });
+}
+
+/**
+ * Delete a ConfigMap. No-op if it doesn't exist.
+ *
+ * @param options - Workspace client options
+ * @param name - ConfigMap name
+ */
+export async function deleteConfigMap(
+  options: WorkspaceClientOptions,
+  name: string
+): Promise<void> {
+  return withTokenRefresh(options, async () => {
+    const coreApi = await getWorkspaceCoreApi(options);
+    try {
+      await coreApi.deleteNamespacedConfigMap({ namespace: options.namespace, name });
+    } catch (error) {
+      if (!isNotFoundError(error)) {
+        throw error;
+      }
+    }
+  });
+}
+
+/**
  * Get the content of a ConfigMap (for PromptPack/Arena content).
  * Supports both binaryData (tar.gz archive) and raw data keys.
  *
