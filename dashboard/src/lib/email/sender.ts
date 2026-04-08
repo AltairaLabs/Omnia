@@ -25,7 +25,7 @@ export async function sendEmail(message: EmailMessage): Promise<EmailResult> {
 
   if (!smtpHost) {
     console.warn(
-      `[email] OMNIA_SMTP_HOST not configured — email not sent. to=${message.to} subject="${message.subject}" body=${message.text}`
+      `[email] OMNIA_SMTP_HOST not configured — email not sent. to=${message.to} subject="${message.subject}"`
     );
     return { accepted: false, to: message.to, subject: message.subject };
   }
