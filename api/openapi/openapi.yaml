@@ -225,6 +225,37 @@ paths:
                   $ref: '#/components/schemas/PromptPack'
         '500':
           $ref: '#/components/responses/InternalError'
+    post:
+      tags: [promptpacks]
+      summary: Create a new PromptPack
+      description: |
+        Creates a PromptPack CRD. If the optional `content` field is provided in the
+        request body, a backing ConfigMap is created automatically and the PromptPack's
+        `spec.source` is set to reference it.
+      operationId: createPromptPack
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromptPackCreateRequest'
+      responses:
+        '201':
+          description: PromptPack created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptPack'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: PromptPack already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/v1/promptpacks/{namespace}/{name}:
     get:
@@ -249,6 +280,68 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PromptPack'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [promptpacks]
+      summary: Update a PromptPack
+      description: |
+        Updates a PromptPack CRD. If the optional `content` field is provided,
+        the backing ConfigMap is updated (or created if it doesn't exist).
+      operationId: updatePromptPack
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromptPackUpdateRequest'
+      responses:
+        '200':
+          description: PromptPack updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptPack'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [promptpacks]
+      summary: Delete a PromptPack
+      description: |
+        Deletes a PromptPack CRD and its backing ConfigMap (if one exists
+        with the naming convention `{name}-content`).
+      operationId: deletePromptPack
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: PromptPack deleted successfully
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -856,6 +949,8 @@ components:
           $ref: '#/components/schemas/RuntimeConfig'
         console:
           $ref: '#/components/schemas/ConsoleConfig'
+        rollout:
+          $ref: '#/components/schemas/RolloutConfig'
 
     LocalObjectReference:
       type: object
@@ -1076,7 +1171,9 @@ components:
           type: integer
         serviceEndpoint:
           type: string
-          description: Internal Kubernetes service endpoint for agent facade (e.g., my-agent.default.svc.cluster.local:8080)
+          description: Internal Kubernetes service endpoint for agent facade
+        rollout:
+          $ref: '#/components/schemas/RolloutStatus'
 
     Condition:
       type: object
@@ -1113,10 +1210,9 @@ components:
       properties:
         version:
           type: string
+          description: Semantic version of the prompt pack (e.g., "2.1.0")
         source:
           $ref: '#/components/schemas/PromptPackSource'
-        rollout:
-          $ref: '#/components/schemas/RolloutConfig'
 
     PromptPackSource:
       type: object
@@ -1141,27 +1237,180 @@ components:
 
     RolloutConfig:
       type: object
+      description: |
+        Step-based rollout configuration for AgentRuntime. All rollout patterns
+        (canary, blue-green, experiment) are expressed as different step sequences.
       properties:
-        type:
+        candidate:
+          $ref: '#/components/schemas/CandidateOverrides'
+        steps:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/RolloutStep'
+        stickySession:
+          type: object
+          properties:
+            hashOn:
+              type: string
+              description: HTTP header for consistent hashing (e.g., "x-user-id")
+        rollback:
+          type: object
+          properties:
+            mode:
+              type: string
+              enum: [automatic, manual, disabled]
+              default: manual
+            cooldown:
+              type: string
+              description: Minimum wait time before allowing another rollout after rollback
+              default: "5m"
+        trafficRouting:
+          type: object
+          properties:
+            istio:
+              type: object
+              properties:
+                virtualService:
+                  type: object
+                  required: [name, routes]
+                  properties:
+                    name:
+                      type: string
+                    routes:
+                      type: array
+                      items:
+                        type: string
+                destinationRule:
+                  type: object
+                  required: [name]
+                  properties:
+                    name:
+                      type: string
+                    stableSubset:
+                      type: string
+                      default: stable
+                    candidateSubset:
+                      type: string
+                      default: canary
+
+    CandidateOverrides:
+      type: object
+      description: Sparse overrides for the candidate version during a rollout.
+      properties:
+        promptPackVersion:
           type: string
-          enum: [immediate, canary]
-        canaryWeight:
+          description: Override PromptPack version for the candidate
+        providerRefs:
+          type: array
+          items:
+            $ref: '#/components/schemas/NamedProviderRef'
+        toolRegistryRef:
+          $ref: '#/components/schemas/LocalObjectReference'
+
+    RolloutStep:
+      type: object
+      description: A single step in a rollout sequence. Exactly one field should be set.
+      properties:
+        setWeight:
           type: integer
+          minimum: 0
+          maximum: 100
+          description: Set candidate traffic weight percentage
+        pause:
+          type: object
+          properties:
+            duration:
+              type: string
+              description: Duration to pause (e.g., "5m"). Nil means pause indefinitely.
+        analysis:
+          type: object
+          properties:
+            templateName:
+              type: string
+              description: Name of the RolloutAnalysis CRD to run
+            args:
+              type: array
+              items:
+                type: object
+                required: [name, value]
+                properties:
+                  name:
+                    type: string
+                  value:
+                    type: string
+
+    RolloutStatus:
+      type: object
+      description: Observed state of an active rollout
+      properties:
+        active:
+          type: boolean
+        currentStep:
+          type: integer
+        currentWeight:
+          type: integer
+        stableVersion:
+          type: string
+        candidateVersion:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        message:
+          type: string
 
     PromptPackStatus:
       type: object
       properties:
         phase:
           type: string
-          enum: [Pending, Active, Canary, Failed]
+          enum: [Pending, Active, Failed]
         conditions:
           type: array
           items:
             $ref: '#/components/schemas/Condition'
         activeVersion:
           type: string
-        canaryVersion:
-          type: string
+
+    PromptPackCreateRequest:
+      type: object
+      description: |
+        Request body for creating a PromptPack. Extends the standard PromptPack
+        with an optional `content` field. When `content` is provided, a ConfigMap
+        named `{metadata.name}-content` is created with the given key-value pairs,
+        and the PromptPack's `spec.source` is automatically set to reference it.
+      properties:
+        metadata:
+          $ref: '#/components/schemas/ObjectMeta'
+        spec:
+          $ref: '#/components/schemas/PromptPackSpec'
+        content:
+          type: object
+          description: |
+            Optional inline content for the backing ConfigMap. Keys are filenames
+            (e.g., "pack.json", "prompt.yaml"), values are the file contents as strings.
+            When provided, a ConfigMap is created and `spec.source.configMapRef` is set automatically.
+          additionalProperties:
+            type: string
+          example:
+            pack.json: '{"system_prompt": "You are a helpful assistant", "model": "claude-sonnet"}'
+
+    PromptPackUpdateRequest:
+      type: object
+      description: |
+        Request body for updating a PromptPack. Same as create — if `content` is
+        provided, the backing ConfigMap is updated (or created if it doesn't exist).
+      properties:
+        metadata:
+          $ref: '#/components/schemas/ObjectMeta'
+        spec:
+          $ref: '#/components/schemas/PromptPackSpec'
+        content:
+          type: object
+          description: Optional inline content for the backing ConfigMap.
+          additionalProperties:
+            type: string
 
     ToolRegistry:
       type: object

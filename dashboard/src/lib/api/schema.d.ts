@@ -83,7 +83,13 @@ export interface paths {
         /** List all PromptPacks */
         get: operations["listPromptPacks"];
         put?: never;
-        post?: never;
+        /**
+         * Create a new PromptPack
+         * @description Creates a PromptPack CRD. If the optional `content` field is provided in the
+         *     request body, a backing ConfigMap is created automatically and the PromptPack's
+         *     `spec.source` is set to reference it.
+         */
+        post: operations["createPromptPack"];
         delete?: never;
         options?: never;
         head?: never;
@@ -99,9 +105,19 @@ export interface paths {
         };
         /** Get a specific PromptPack */
         get: operations["getPromptPack"];
-        put?: never;
+        /**
+         * Update a PromptPack
+         * @description Updates a PromptPack CRD. If the optional `content` field is provided,
+         *     the backing ConfigMap is updated (or created if it doesn't exist).
+         */
+        put: operations["updatePromptPack"];
         post?: never;
-        delete?: never;
+        /**
+         * Delete a PromptPack
+         * @description Deletes a PromptPack CRD and its backing ConfigMap (if one exists
+         *     with the naming convention `{name}-content`).
+         */
+        delete: operations["deletePromptPack"];
         options?: never;
         head?: never;
         patch?: never;
@@ -334,6 +350,7 @@ export interface components {
             session?: components["schemas"]["SessionConfig"];
             runtime?: components["schemas"]["RuntimeConfig"];
             console?: components["schemas"]["ConsoleConfig"];
+            rollout?: components["schemas"]["RolloutConfig"];
         };
         LocalObjectReference: {
             name?: string;
@@ -463,8 +480,9 @@ export interface components {
             conditions?: components["schemas"]["Condition"][];
             readyReplicas?: number;
             replicas?: number;
-            /** @description Internal Kubernetes service endpoint for agent facade (e.g., my-agent.default.svc.cluster.local:8080) */
+            /** @description Internal Kubernetes service endpoint for agent facade */
             serviceEndpoint?: string;
+            rollout?: components["schemas"]["RolloutStatus"];
         };
         Condition: {
             type?: string;
@@ -483,9 +501,9 @@ export interface components {
             status?: components["schemas"]["PromptPackStatus"];
         };
         PromptPackSpec: {
+            /** @description Semantic version of the prompt pack (e.g., "2.1.0") */
             version?: string;
             source?: components["schemas"]["PromptPackSource"];
-            rollout?: components["schemas"]["RolloutConfig"];
         };
         PromptPackSource: {
             /** @enum {string} */
@@ -498,17 +516,118 @@ export interface components {
             ref?: string;
             path?: string;
         };
+        /**
+         * @description Step-based rollout configuration for AgentRuntime. All rollout patterns
+         *     (canary, blue-green, experiment) are expressed as different step sequences.
+         */
         RolloutConfig: {
-            /** @enum {string} */
-            type?: "immediate" | "canary";
-            canaryWeight?: number;
+            candidate?: components["schemas"]["CandidateOverrides"];
+            steps?: components["schemas"]["RolloutStep"][];
+            stickySession?: {
+                /** @description HTTP header for consistent hashing (e.g., "x-user-id") */
+                hashOn?: string;
+            };
+            rollback?: {
+                /**
+                 * @default manual
+                 * @enum {string}
+                 */
+                mode: "automatic" | "manual" | "disabled";
+                /**
+                 * @description Minimum wait time before allowing another rollout after rollback
+                 * @default 5m
+                 */
+                cooldown: string;
+            };
+            trafficRouting?: {
+                istio?: {
+                    virtualService?: {
+                        name: string;
+                        routes: string[];
+                    };
+                    destinationRule?: {
+                        name: string;
+                        /** @default stable */
+                        stableSubset: string;
+                        /** @default canary */
+                        candidateSubset: string;
+                    };
+                };
+            };
+        };
+        /** @description Sparse overrides for the candidate version during a rollout. */
+        CandidateOverrides: {
+            /** @description Override PromptPack version for the candidate */
+            promptPackVersion?: string;
+            providerRefs?: components["schemas"]["NamedProviderRef"][];
+            toolRegistryRef?: components["schemas"]["LocalObjectReference"];
+        };
+        /** @description A single step in a rollout sequence. Exactly one field should be set. */
+        RolloutStep: {
+            /** @description Set candidate traffic weight percentage */
+            setWeight?: number;
+            pause?: {
+                /** @description Duration to pause (e.g., "5m"). Nil means pause indefinitely. */
+                duration?: string;
+            };
+            analysis?: {
+                /** @description Name of the RolloutAnalysis CRD to run */
+                templateName?: string;
+                args?: {
+                    name: string;
+                    value: string;
+                }[];
+            };
+        };
+        /** @description Observed state of an active rollout */
+        RolloutStatus: {
+            active?: boolean;
+            currentStep?: number;
+            currentWeight?: number;
+            stableVersion?: string;
+            candidateVersion?: string;
+            /** Format: date-time */
+            startedAt?: string;
+            message?: string;
         };
         PromptPackStatus: {
             /** @enum {string} */
-            phase?: "Pending" | "Active" | "Canary" | "Failed";
+            phase?: "Pending" | "Active" | "Failed";
             conditions?: components["schemas"]["Condition"][];
             activeVersion?: string;
-            canaryVersion?: string;
+        };
+        /**
+         * @description Request body for creating a PromptPack. Extends the standard PromptPack
+         *     with an optional `content` field. When `content` is provided, a ConfigMap
+         *     named `{metadata.name}-content` is created with the given key-value pairs,
+         *     and the PromptPack's `spec.source` is automatically set to reference it.
+         */
+        PromptPackCreateRequest: {
+            metadata?: components["schemas"]["ObjectMeta"];
+            spec?: components["schemas"]["PromptPackSpec"];
+            /**
+             * @description Optional inline content for the backing ConfigMap. Keys are filenames
+             *     (e.g., "pack.json", "prompt.yaml"), values are the file contents as strings.
+             *     When provided, a ConfigMap is created and `spec.source.configMapRef` is set automatically.
+             * @example {
+             *       "pack.json": "{\"system_prompt\": \"You are a helpful assistant\", \"model\": \"claude-sonnet\"}"
+             *     }
+             */
+            content?: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * @description Request body for updating a PromptPack. Same as create — if `content` is
+         *     provided, the backing ConfigMap is updated (or created if it doesn't exist).
+         */
+        PromptPackUpdateRequest: {
+            metadata?: components["schemas"]["ObjectMeta"];
+            spec?: components["schemas"]["PromptPackSpec"];
+            /** @description Optional inline content for the backing ConfigMap. */
+            content?: {
+                [key: string]: string;
+            };
         };
         ToolRegistry: {
             apiVersion?: string;
@@ -915,6 +1034,41 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    createPromptPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptPackCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description PromptPack created successfully */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptPack"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description PromptPack already exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["InternalError"];
+        };
+    };
     getPromptPack: {
         parameters: {
             query?: never;
@@ -935,6 +1089,59 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PromptPack"];
                 };
+            };
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    updatePromptPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptPackUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description PromptPack updated successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptPack"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deletePromptPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PromptPack deleted successfully */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
