@@ -72,9 +72,6 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 .PHONY: manifests-all
 manifests-all: manifests manifests-ee ## Generate manifests for core and enterprise.
 
-.PHONY: generate-all
-generate-all: generate generate-ee ## Generate code for core and enterprise.
-
 .PHONY: fmt
 fmt: ## Run go fmt against code.
 	go fmt ./...
