@@ -126,6 +126,30 @@ func TestLoadConfig(t *testing.T) {
 	}
 }
 
+func TestMCPToolFilterCfg_Includes(t *testing.T) {
+	tests := []struct {
+		name   string
+		filter MCPToolFilterCfg
+		tool   string
+		want   bool
+	}{
+		{"empty filter allows all", MCPToolFilterCfg{}, "anything", true},
+		{"allowlist includes match", MCPToolFilterCfg{Allowlist: []string{"read", "write"}}, "read", true},
+		{"allowlist excludes non-match", MCPToolFilterCfg{Allowlist: []string{"read", "write"}}, "delete", false},
+		{"blocklist excludes match", MCPToolFilterCfg{Blocklist: []string{"delete", "drop"}}, "delete", false},
+		{"blocklist allows non-match", MCPToolFilterCfg{Blocklist: []string{"delete", "drop"}}, "read", true},
+		{"allowlist takes precedence over blocklist", MCPToolFilterCfg{Allowlist: []string{"read"}, Blocklist: []string{"read"}}, "read", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.filter.Includes(tt.tool)
+			if got != tt.want {
+				t.Errorf("Includes(%q) = %v, want %v", tt.tool, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadConfig_FileNotFound(t *testing.T) {
 	_, err := LoadConfig("/nonexistent/path/config.yaml")
 	if err == nil {

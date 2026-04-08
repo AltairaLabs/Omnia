@@ -235,7 +235,7 @@ Exceptions configured in `sonar-project.properties` — cognitive complexity is 
 - **Duplicated strings**: Extract string literals used 3+ times into constants (SonarCloud `go:S1192`).
 - **Naming**: Follow Go conventions. Test doubles should use `Mock` prefix (e.g., `MockStore`).
 - **Formatting**: `gofmt` and `goimports` are enforced. Run before committing.
-- Runtime and runtime test packages (`internal/runtime/`, `cmd/runtime/`) are excluded from golangci-lint because they depend on the unpublished PromptKit SDK.
+- **Never exclude packages from golangci-lint** to work around build problems. If a package doesn't compile with `GOWORK=off`, fix the dependency — don't suppress the lint. All Go code in the repo must lint cleanly.
 
 ### PromptKit SDK Version Strategy
 
