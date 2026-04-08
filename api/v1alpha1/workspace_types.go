@@ -131,66 +131,6 @@ type AnonymousAccess struct {
 	Role WorkspaceRole `json:"role,omitempty"`
 }
 
-// ComputeQuotas defines compute resource quotas.
-type ComputeQuotas struct {
-	// requestsCPU is the total CPU requests allowed (e.g., "50").
-	// +optional
-	RequestsCPU string `json:"requests.cpu,omitempty"`
-
-	// requestsMemory is the total memory requests allowed (e.g., "100Gi").
-	// +optional
-	RequestsMemory string `json:"requests.memory,omitempty"`
-
-	// limitsCPU is the total CPU limits allowed (e.g., "100").
-	// +optional
-	LimitsCPU string `json:"limits.cpu,omitempty"`
-
-	// limitsMemory is the total memory limits allowed (e.g., "200Gi").
-	// +optional
-	LimitsMemory string `json:"limits.memory,omitempty"`
-}
-
-// ObjectQuotas defines object count quotas.
-type ObjectQuotas struct {
-	// configmaps is the maximum number of ConfigMaps allowed.
-	// +optional
-	ConfigMaps *int32 `json:"configmaps,omitempty"`
-
-	// secrets is the maximum number of Secrets allowed.
-	// +optional
-	Secrets *int32 `json:"secrets,omitempty"`
-
-	// persistentvolumeclaims is the maximum number of PVCs allowed.
-	// +optional
-	PersistentVolumeClaims *int32 `json:"persistentvolumeclaims,omitempty"`
-}
-
-// ArenaQuotas defines Arena-specific quotas.
-type ArenaQuotas struct {
-	// maxConcurrentJobs is the maximum number of concurrent Arena jobs.
-	// +optional
-	MaxConcurrentJobs *int32 `json:"maxConcurrentJobs,omitempty"`
-
-	// maxJobsPerDay is the maximum number of Arena jobs per day.
-	// +optional
-	MaxJobsPerDay *int32 `json:"maxJobsPerDay,omitempty"`
-
-	// maxWorkersPerJob is the maximum number of workers per Arena job.
-	// +optional
-	MaxWorkersPerJob *int32 `json:"maxWorkersPerJob,omitempty"`
-}
-
-// AgentQuotas defines AgentRuntime-specific quotas.
-type AgentQuotas struct {
-	// maxAgentRuntimes is the maximum number of AgentRuntimes allowed.
-	// +optional
-	MaxAgentRuntimes *int32 `json:"maxAgentRuntimes,omitempty"`
-
-	// maxReplicasPerAgent is the maximum replicas per AgentRuntime.
-	// +optional
-	MaxReplicasPerAgent *int32 `json:"maxReplicasPerAgent,omitempty"`
-}
-
 // BudgetExceededAction defines what action to take when budget is exceeded.
 // +kubebuilder:validation:Enum=warn;pauseJobs;block
 type BudgetExceededAction string
@@ -391,25 +331,6 @@ type WorkspaceStorageStatus struct {
 	MountPath string `json:"mountPath,omitempty"`
 }
 
-// WorkspaceQuotas defines resource quotas for a workspace.
-type WorkspaceQuotas struct {
-	// compute defines compute resource quotas.
-	// +optional
-	Compute *ComputeQuotas `json:"compute,omitempty"`
-
-	// objects defines object count quotas.
-	// +optional
-	Objects *ObjectQuotas `json:"objects,omitempty"`
-
-	// arena defines Arena-specific quotas.
-	// +optional
-	Arena *ArenaQuotas `json:"arena,omitempty"`
-
-	// agents defines AgentRuntime-specific quotas.
-	// +optional
-	Agents *AgentQuotas `json:"agents,omitempty"`
-}
-
 // WorkspaceSpec defines the desired state of Workspace.
 type WorkspaceSpec struct {
 	// displayName is the human-readable name for this workspace.
@@ -449,10 +370,6 @@ type WorkspaceSpec struct {
 	// WARNING: Granting editor or owner allows anonymous users to modify resources.
 	// +optional
 	AnonymousAccess *AnonymousAccess `json:"anonymousAccess,omitempty"`
-
-	// quotas defines resource quotas for this workspace.
-	// +optional
-	Quotas *WorkspaceQuotas `json:"quotas,omitempty"`
 
 	// costControls defines budget and cost control settings.
 	// +optional
