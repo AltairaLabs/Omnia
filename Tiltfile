@@ -421,6 +421,23 @@ if ENABLE_ENTERPRISE:
         labels=['arena'],
     )
 
+    # Build policy-proxy sidecar image (ToolPolicy enforcement sidecar)
+    docker_build(
+        'omnia-policy-proxy-dev',
+        context='.',
+        dockerfile='./ee/Dockerfile.policy-proxy',
+        only=[
+            './ee/cmd/policy-proxy',
+            './ee/api',
+            './ee/pkg',
+            './api',
+            './internal',
+            './pkg',
+            './go.mod',
+            './go.sum',
+        ],
+    )
+
 # ============================================================================
 # LangChain Runtime - Python-based agent framework
 # ============================================================================
@@ -531,6 +548,10 @@ if ENABLE_ENTERPRISE:
         'enterprise.evalWorker.image.pullPolicy=Never',
         # Watch all dev namespaces plus omnia-system for eval events (e2e tests publish there)
         'enterprise.evalWorker.namespaces={dev-agents,omnia-demo,omnia-system}',
+        # Policy proxy sidecar for ToolPolicy enforcement
+        'enterprise.policyProxy.image.repository=omnia-policy-proxy-dev',
+        'enterprise.policyProxy.image.tag=latest',
+        'enterprise.policyProxy.image.pullPolicy=Never',
     ])
 else:
     # Disable enterprise features
