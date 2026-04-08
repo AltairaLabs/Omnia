@@ -66,6 +66,20 @@ export const POST = withWorkspaceAccess(
       resourceName = body.metadata?.name || body.name || "";
       const content: Record<string, string> | undefined = body.content;
 
+      // Validate content size before creating ConfigMap
+      const MAX_CONFIGMAP_SIZE = 900 * 1024; // 900KB (under K8s 1MiB limit)
+      if (content) {
+        const contentSize = Object.entries(content).reduce(
+          (sum, [k, v]) => sum + k.length + v.length, 0
+        );
+        if (contentSize > MAX_CONFIGMAP_SIZE) {
+          return NextResponse.json(
+            { error: "Content exceeds maximum size of 900KB" },
+            { status: 413 }
+          );
+        }
+      }
+
       // If content is provided, create/update the backing ConfigMap
       let spec = body.spec || {};
       if (content) {

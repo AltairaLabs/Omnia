@@ -80,6 +80,20 @@ export const PUT = withWorkspaceAccess<ItemParams>(
       const body = await request.json();
       const content: Record<string, string> | undefined = body.content;
 
+      // Validate content size before creating ConfigMap
+      const MAX_CONFIGMAP_SIZE = 900 * 1024; // 900KB (under K8s 1MiB limit)
+      if (content) {
+        const contentSize = Object.entries(content).reduce(
+          (sum, [k, v]) => sum + k.length + v.length, 0
+        );
+        if (contentSize > MAX_CONFIGMAP_SIZE) {
+          return NextResponse.json(
+            { error: "Content exceeds maximum size of 900KB" },
+            { status: 413 }
+          );
+        }
+      }
+
       let spec = body.spec || result.resource.spec;
       if (content) {
         const configMapName = `${packName}-content`;
@@ -152,8 +166,8 @@ export const DELETE = withWorkspaceAccess<ItemParams>(
         "PromptPack"
       );
 
-      // Delete the backing ConfigMap (no-op if it doesn't exist)
-      await deleteConfigMap(result.clientOptions, `${packName}-content`);
+      // Delete the backing ConfigMap (no-op if it doesn't exist or isn't managed by promptpack)
+      await deleteConfigMap(result.clientOptions, `${packName}-content`, "promptpack");
 
       // Delete the PromptPack CRD
       await deleteCrd(result.clientOptions, CRD_PROMPTPACKS, packName);

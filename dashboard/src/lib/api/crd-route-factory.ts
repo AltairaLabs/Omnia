@@ -143,7 +143,7 @@ export function createCollectionRoutes<T>(config: CollectionRouteConfig) {
           kind
         );
 
-        const labelSelector = request.nextUrl.searchParams.get("labelSelector") ?? undefined;
+        const labelSelector = request.nextUrl.searchParams.get("labelSelector") || undefined;
         const listOptions: ListCrdOptions = { labelSelector };
         const items = await listCrd<T>(result.clientOptions, plural, listOptions);
 

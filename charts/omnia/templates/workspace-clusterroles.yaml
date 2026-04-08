@@ -16,8 +16,10 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
+      - agentpolicies
       - agentruntimes
       - promptpacks
+      - toolpolicies
       - toolregistries
       - providers
       - arenasources
@@ -36,8 +38,10 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
+      - agentpolicies/status
       - agentruntimes/status
       - promptpacks/status
+      - toolpolicies/status
       - toolregistries/status
       - providers/status
       - arenasources/status
@@ -113,8 +117,11 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
+      - agentpolicies
       - agentruntimes
       - promptpacks
+      - toolpolicies
+      - toolregistries
       - arenasources
       - arenajobs
       - arenatemplatesources
@@ -131,19 +138,21 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
+      - agentpolicies/status
       - agentruntimes/status
       - promptpacks/status
+      - toolpolicies/status
+      - toolregistries/status
       - arenasources/status
       - arenajobs/status
       - arenatemplatesources/status
       - arenadevsessions/status
     verbs:
       - get
-  # Read-only on shared resources (Providers, ToolRegistries)
+  # Read-only on shared resources (Providers)
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
-      - toolregistries
       - providers
     verbs:
       - get
@@ -153,7 +162,6 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
-      - toolregistries/status
       - providers/status
     verbs:
       - get
@@ -222,8 +230,10 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
+      - agentpolicies
       - agentruntimes
       - promptpacks
+      - toolpolicies
       - toolregistries
       - providers
       - arenasources
@@ -238,8 +248,10 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
+      - agentpolicies/status
       - agentruntimes/status
       - promptpacks/status
+      - toolpolicies/status
       - toolregistries/status
       - providers/status
       - arenasources/status

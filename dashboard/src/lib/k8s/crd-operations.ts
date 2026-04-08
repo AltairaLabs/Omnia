@@ -571,7 +571,15 @@ export async function createOrUpdateConfigMap(
       data,
     };
     try {
-      await coreApi.readNamespacedConfigMap({ namespace: options.namespace, name });
+      const existing = await coreApi.readNamespacedConfigMap({ namespace: options.namespace, name });
+      const existingManagedBy = (existing as { metadata?: { labels?: Record<string, string> } })
+        ?.metadata?.labels?.["omnia.altairalabs.ai/managed-by"];
+      const newManagedBy = labels?.["omnia.altairalabs.ai/managed-by"];
+      if (existingManagedBy !== undefined && existingManagedBy !== newManagedBy) {
+        throw new Error(
+          `ConfigMap "${name}" is managed by "${existingManagedBy}", not "${newManagedBy}"`
+        );
+      }
       await coreApi.replaceNamespacedConfigMap({ namespace: options.namespace, name, body });
     } catch (error) {
       if (isNotFoundError(error)) {
@@ -591,11 +599,20 @@ export async function createOrUpdateConfigMap(
  */
 export async function deleteConfigMap(
   options: WorkspaceClientOptions,
-  name: string
+  name: string,
+  managedBy?: string
 ): Promise<void> {
   return withTokenRefresh(options, async () => {
     const coreApi = await getWorkspaceCoreApi(options);
     try {
+      if (managedBy) {
+        const existing = await coreApi.readNamespacedConfigMap({ namespace: options.namespace, name });
+        const existingManagedBy = (existing as { metadata?: { labels?: Record<string, string> } })
+          ?.metadata?.labels?.["omnia.altairalabs.ai/managed-by"];
+        if (existingManagedBy !== managedBy) {
+          return; // Not managed by us, don't delete
+        }
+      }
       await coreApi.deleteNamespacedConfigMap({ namespace: options.namespace, name });
     } catch (error) {
       if (!isNotFoundError(error)) {

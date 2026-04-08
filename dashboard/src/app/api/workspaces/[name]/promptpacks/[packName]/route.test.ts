@@ -272,7 +272,8 @@ describe("DELETE /api/workspaces/[name]/promptpacks/[packName]", () => {
     expect(response.status).toBe(204);
     expect(deleteConfigMap).toHaveBeenCalledWith(
       { workspace: "test-ws", namespace: "test-ns", role: "editor" },
-      "my-pack-content"
+      "my-pack-content",
+      "promptpack"
     );
     expect(deleteCrd).toHaveBeenCalled();
   });
