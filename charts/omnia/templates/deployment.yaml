@@ -77,6 +77,12 @@ spec:
             {{- if .Values.enterprise.enabled }}
             - --enterprise
             - --policy-proxy-image={{ .Values.enterprise.policyProxy.image.repository }}:{{ .Values.enterprise.policyProxy.image.tag | default .Chart.AppVersion }}
+            {{- if .Values.enterprise.analytics.enabled }}
+            - --enable-analytics
+            {{- end }}
+            {{- if .Values.enterprise.streaming.enabled }}
+            - --enable-streaming
+            {{- end }}
             {{- end }}
           ports:
             {{- if .Values.operator.apiBindAddress }}

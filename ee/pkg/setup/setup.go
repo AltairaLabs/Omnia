@@ -16,6 +16,7 @@ import (
 
 	eecontroller "github.com/altairalabs/omnia/ee/internal/controller"
 	"github.com/altairalabs/omnia/ee/internal/webhook"
+	"github.com/altairalabs/omnia/ee/pkg/analyticsfactory"
 	"github.com/altairalabs/omnia/ee/pkg/license"
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/policy"
@@ -143,9 +144,10 @@ func registerConditionalControllers(mgr ctrl.Manager, opts EnterpriseOptions) er
 // registerSessionAnalyticsSync sets up the SessionAnalyticsSync controller.
 func registerSessionAnalyticsSync(mgr ctrl.Manager) error {
 	return (&eecontroller.SessionAnalyticsSyncReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: eventRecorder(mgr, "sessionanalyticssync-controller"),
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		Recorder:        eventRecorder(mgr, "sessionanalyticssync-controller"),
+		ProviderFactory: &analyticsfactory.Factory{},
 	}).SetupWithManager(mgr)
 }
 
