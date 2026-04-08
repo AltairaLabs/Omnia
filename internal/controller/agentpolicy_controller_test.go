@@ -30,7 +30,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
@@ -1130,6 +1132,74 @@ func TestReconcileAuthorizationPolicies_NoToolAccess(t *testing.T) {
 	policy := &omniav1alpha1.AgentPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
 		Spec:       omniav1alpha1.AgentPolicySpec{},
+	}
+
+	err := r.reconcileAuthorizationPolicies(context.Background(), policy)
+	assert.NoError(t, err)
+}
+
+func TestReconcileAuthorizationPolicies_IstioNoMatch_OnFailureDeny_ReturnsError(t *testing.T) {
+	// Test the OnFailure logic by directly checking reconcileAuthorizationPolicies
+	// with a mock that returns a "no matches" error simulating Istio not installed.
+	scheme := newTestSchemeWithIstio(t)
+	noMatchErr := fmt.Errorf("no matches for kind \"AuthorizationPolicy\" in version \"security.istio.io/v1\"")
+	// Intercept ALL client operations to return "no matches" error (simulates Istio not installed)
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList, _ ...client.ListOption) error {
+				return noMatchErr
+			},
+			Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+				return noMatchErr
+			},
+			Create: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.CreateOption) error {
+				return noMatchErr
+			},
+		}).Build()
+
+	r := &AgentPolicyReconciler{Client: fakeClient, Scheme: scheme}
+	policy := &omniav1alpha1.AgentPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "strict-policy", Namespace: "default"},
+		Spec: omniav1alpha1.AgentPolicySpec{
+			ToolAccess: &omniav1alpha1.ToolAccessConfig{
+				Mode:  omniav1alpha1.ToolAccessModeAllowlist,
+				Rules: []omniav1alpha1.ToolAccessRule{{Registry: "tools", Tools: []string{"search"}}},
+			},
+			OnFailure: omniav1alpha1.OnFailureDeny,
+		},
+	}
+
+	err := r.reconcileAuthorizationPolicies(context.Background(), policy)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot enforce policy (onFailure=deny)")
+}
+
+func TestReconcileAuthorizationPolicies_IstioNoMatch_OnFailureAllow_Succeeds(t *testing.T) {
+	scheme := newTestSchemeWithIstio(t)
+	noMatchErr := fmt.Errorf("no matches for kind \"AuthorizationPolicy\" in version \"security.istio.io/v1\"")
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList, _ ...client.ListOption) error {
+				return noMatchErr
+			},
+			Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+				return noMatchErr
+			},
+			Create: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.CreateOption) error {
+				return noMatchErr
+			},
+		}).Build()
+
+	r := &AgentPolicyReconciler{Client: fakeClient, Scheme: scheme}
+	policy := &omniav1alpha1.AgentPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "relaxed-policy", Namespace: "default"},
+		Spec: omniav1alpha1.AgentPolicySpec{
+			ToolAccess: &omniav1alpha1.ToolAccessConfig{
+				Mode:  omniav1alpha1.ToolAccessModeAllowlist,
+				Rules: []omniav1alpha1.ToolAccessRule{{Registry: "tools", Tools: []string{"search"}}},
+			},
+			OnFailure: omniav1alpha1.OnFailureAllow,
+		},
 	}
 
 	err := r.reconcileAuthorizationPolicies(context.Background(), policy)

@@ -236,16 +236,20 @@ func buildAppliedMessage(mode omniav1alpha1.AgentPolicyMode, matchedCount int32)
 }
 
 // reconcileAuthorizationPolicies creates/updates/deletes Istio AuthorizationPolicies based on toolAccess config.
-// If Istio CRDs are not installed, logs a warning and returns nil — the policy
-// is still validated and status is set, but no enforcement resources are created.
+// If Istio CRDs are not installed and OnFailure is "deny" (the default), returns an error
+// so the controller sets the policy status to Error. If OnFailure is "allow", logs a warning
+// and returns nil (fail-open — enforcement is inactive but the policy is accepted).
 func (r *AgentPolicyReconciler) reconcileAuthorizationPolicies(ctx context.Context, policy *omniav1alpha1.AgentPolicy) error {
 	log := logf.FromContext(ctx)
 	desired := r.buildDesiredAuthPolicies(policy)
 	err := r.applyAuthPolicies(ctx, policy, desired)
 	if err != nil && isNoMatchError(err) {
-		log.Info("Istio CRDs not installed — AuthorizationPolicy enforcement is inactive",
-			"policy", policy.Name)
-		return nil
+		if policy.Spec.OnFailure == omniav1alpha1.OnFailureAllow {
+			log.Info("Istio CRDs not installed — enforcement inactive (onFailure=allow)",
+				"policy", policy.Name)
+			return nil
+		}
+		return fmt.Errorf("istio CRDs not installed — cannot enforce policy (onFailure=deny)")
 	}
 	return err
 }
