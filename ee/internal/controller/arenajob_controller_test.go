@@ -2566,4 +2566,184 @@ spec:
 			Expect(items).To(HaveLen(4)) // 2 scenarios x 2 providers
 		})
 	})
+
+	// --- Output config ---
+
+	Describe("buildOutputConfig", func() {
+		var reconciler *ArenaJobReconciler
+
+		BeforeEach(func() {
+			reconciler = &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+		})
+
+		It("should return empty slices when Output is nil", func() {
+			job := &omniav1alpha1.ArenaJob{}
+			env, vols, mounts := reconciler.buildOutputConfig(job)
+			Expect(env).To(BeEmpty())
+			Expect(vols).To(BeEmpty())
+			Expect(mounts).To(BeEmpty())
+		})
+
+		It("should mount PVC and set ARENA_OUTPUT_DIR for PVC output", func() {
+			job := &omniav1alpha1.ArenaJob{
+				Spec: omniav1alpha1.ArenaJobSpec{
+					Output: &omniav1alpha1.OutputConfig{
+						Type: omniav1alpha1.OutputTypePVC,
+						PVC: &omniav1alpha1.PVCOutputConfig{
+							ClaimName: "results-pvc",
+						},
+					},
+				},
+			}
+			env, vols, mounts := reconciler.buildOutputConfig(job)
+
+			Expect(vols).To(HaveLen(1))
+			Expect(vols[0].Name).To(Equal("arena-output"))
+			Expect(vols[0].PersistentVolumeClaim.ClaimName).To(Equal("results-pvc"))
+			Expect(vols[0].PersistentVolumeClaim.ReadOnly).To(BeFalse())
+
+			Expect(mounts).To(HaveLen(1))
+			Expect(mounts[0].Name).To(Equal("arena-output"))
+			Expect(mounts[0].MountPath).To(Equal("/arena-output"))
+			Expect(mounts[0].ReadOnly).To(BeFalse())
+			Expect(mounts[0].SubPath).To(BeEmpty())
+
+			Expect(env).To(ContainElement(corev1.EnvVar{
+				Name:  "ARENA_OUTPUT_DIR",
+				Value: "/arena-output",
+			}))
+			// ARENA_OUTPUT_CONFIG must be present
+			Expect(env).To(ContainElement(HaveField("Name", "ARENA_OUTPUT_CONFIG")))
+		})
+
+		It("should set SubPath on volume mount when specified", func() {
+			job := &omniav1alpha1.ArenaJob{
+				Spec: omniav1alpha1.ArenaJobSpec{
+					Output: &omniav1alpha1.OutputConfig{
+						Type: omniav1alpha1.OutputTypePVC,
+						PVC: &omniav1alpha1.PVCOutputConfig{
+							ClaimName: "shared-pvc",
+							SubPath:   "job-results",
+						},
+					},
+				},
+			}
+			_, _, mounts := reconciler.buildOutputConfig(job)
+			Expect(mounts).To(HaveLen(1))
+			Expect(mounts[0].SubPath).To(Equal("job-results"))
+		})
+
+		It("should return empty volumes for PVC output when PVC field is nil", func() {
+			job := &omniav1alpha1.ArenaJob{
+				Spec: omniav1alpha1.ArenaJobSpec{
+					Output: &omniav1alpha1.OutputConfig{
+						Type: omniav1alpha1.OutputTypePVC,
+						PVC:  nil,
+					},
+				},
+			}
+			_, vols, mounts := reconciler.buildOutputConfig(job)
+			Expect(vols).To(BeEmpty())
+			Expect(mounts).To(BeEmpty())
+		})
+
+		It("should inject S3 credentials from SecretRef for S3 output", func() {
+			job := &omniav1alpha1.ArenaJob{
+				Spec: omniav1alpha1.ArenaJobSpec{
+					Output: &omniav1alpha1.OutputConfig{
+						Type: omniav1alpha1.OutputTypeS3,
+						S3: &omniav1alpha1.S3OutputConfig{
+							Bucket: "my-bucket",
+							Region: "us-east-1",
+							SecretRef: &corev1alpha1.LocalObjectReference{
+								Name: "s3-creds",
+							},
+						},
+					},
+				},
+			}
+			env, vols, mounts := reconciler.buildOutputConfig(job)
+
+			Expect(vols).To(BeEmpty())
+			Expect(mounts).To(BeEmpty())
+
+			// Find the access key env var
+			var accessKeyEnv, secretKeyEnv *corev1.EnvVar
+			for i := range env {
+				switch env[i].Name {
+				case "ARENA_S3_ACCESS_KEY_ID":
+					accessKeyEnv = &env[i]
+				case "ARENA_S3_SECRET_ACCESS_KEY":
+					secretKeyEnv = &env[i]
+				}
+			}
+			Expect(accessKeyEnv).NotTo(BeNil())
+			Expect(accessKeyEnv.ValueFrom.SecretKeyRef.Name).To(Equal("s3-creds"))
+			Expect(accessKeyEnv.ValueFrom.SecretKeyRef.Key).To(Equal("AWS_ACCESS_KEY_ID"))
+
+			Expect(secretKeyEnv).NotTo(BeNil())
+			Expect(secretKeyEnv.ValueFrom.SecretKeyRef.Name).To(Equal("s3-creds"))
+			Expect(secretKeyEnv.ValueFrom.SecretKeyRef.Key).To(Equal("AWS_SECRET_ACCESS_KEY"))
+		})
+
+		It("should not inject S3 credential env vars when SecretRef is nil", func() {
+			job := &omniav1alpha1.ArenaJob{
+				Spec: omniav1alpha1.ArenaJobSpec{
+					Output: &omniav1alpha1.OutputConfig{
+						Type: omniav1alpha1.OutputTypeS3,
+						S3: &omniav1alpha1.S3OutputConfig{
+							Bucket:    "my-bucket",
+							Region:    "us-east-1",
+							SecretRef: nil,
+						},
+					},
+				},
+			}
+			env, _, _ := reconciler.buildOutputConfig(job)
+			for _, e := range env {
+				Expect(e.Name).NotTo(Equal("ARENA_S3_ACCESS_KEY_ID"))
+				Expect(e.Name).NotTo(Equal("ARENA_S3_SECRET_ACCESS_KEY"))
+			}
+		})
+
+		It("should return empty volumes for S3 output when S3 field is nil", func() {
+			job := &omniav1alpha1.ArenaJob{
+				Spec: omniav1alpha1.ArenaJobSpec{
+					Output: &omniav1alpha1.OutputConfig{
+						Type: omniav1alpha1.OutputTypeS3,
+						S3:   nil,
+					},
+				},
+			}
+			_, vols, mounts := reconciler.buildOutputConfig(job)
+			Expect(vols).To(BeEmpty())
+			Expect(mounts).To(BeEmpty())
+		})
+
+		It("should include ARENA_OUTPUT_CONFIG env var for S3 output", func() {
+			job := &omniav1alpha1.ArenaJob{
+				Spec: omniav1alpha1.ArenaJobSpec{
+					Output: &omniav1alpha1.OutputConfig{
+						Type: omniav1alpha1.OutputTypeS3,
+						S3: &omniav1alpha1.S3OutputConfig{
+							Bucket: "my-bucket",
+							Region: "us-east-1",
+						},
+					},
+				},
+			}
+			env, _, _ := reconciler.buildOutputConfig(job)
+			var found bool
+			for _, e := range env {
+				if e.Name == "ARENA_OUTPUT_CONFIG" {
+					found = true
+					Expect(e.Value).To(ContainSubstring("my-bucket"))
+				}
+			}
+			Expect(found).To(BeTrue())
+		})
+	})
 })
