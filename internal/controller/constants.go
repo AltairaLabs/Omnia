@@ -82,6 +82,8 @@ const (
 	fieldPathInstanceLabel = "metadata.labels['app.kubernetes.io/instance']"
 	// fieldPathNamespace is the downward API field path for the namespace.
 	fieldPathNamespace = "metadata.namespace"
+	// promptpackConfigVolumeName is the name of the PromptPack config volume.
+	promptpackConfigVolumeName = "promptpack-config"
 	// toolsConfigVolumeName is the name of the tools config volume.
 	toolsConfigVolumeName = "tools-config"
 )

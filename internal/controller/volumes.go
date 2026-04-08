@@ -33,7 +33,7 @@ func (r *AgentRuntimeReconciler) buildVolumes(
 	if promptPack.Spec.Source.Type == omniav1alpha1.PromptPackSourceTypeConfigMap &&
 		promptPack.Spec.Source.ConfigMapRef != nil {
 		volumes = append(volumes, corev1.Volume{
-			Name: "promptpack-config",
+			Name: promptpackConfigVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: *promptPack.Spec.Source.ConfigMapRef,
@@ -75,7 +75,7 @@ func (r *AgentRuntimeReconciler) buildFacadeVolumeMounts(
 	if promptPack.Spec.Source.Type == omniav1alpha1.PromptPackSourceTypeConfigMap &&
 		promptPack.Spec.Source.ConfigMapRef != nil {
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
-			Name:      "promptpack-config",
+			Name:      promptpackConfigVolumeName,
 			MountPath: PromptPackMountPath,
 			ReadOnly:  true,
 		})
@@ -96,7 +96,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
 	if promptPack.Spec.Source.Type == omniav1alpha1.PromptPackSourceTypeConfigMap &&
 		promptPack.Spec.Source.ConfigMapRef != nil {
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
-			Name:      "promptpack-config",
+			Name:      promptpackConfigVolumeName,
 			MountPath: PromptPackMountPath,
 			ReadOnly:  true,
 		})
