@@ -117,7 +117,8 @@ export interface paths {
         /** List all ToolRegistries */
         get: operations["listToolRegistries"];
         put?: never;
-        post?: never;
+        /** Create a new ToolRegistry */
+        post: operations["createToolRegistry"];
         delete?: never;
         options?: never;
         head?: never;
@@ -133,9 +134,11 @@ export interface paths {
         };
         /** Get a specific ToolRegistry */
         get: operations["getToolRegistry"];
-        put?: never;
+        /** Update a ToolRegistry */
+        put: operations["updateToolRegistry"];
         post?: never;
-        delete?: never;
+        /** Delete a ToolRegistry */
+        delete: operations["deleteToolRegistry"];
         options?: never;
         head?: never;
         patch?: never;
@@ -170,6 +173,80 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agentpolicies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List all AgentPolicies */
+        get: operations["listAgentPolicies"];
+        put?: never;
+        /** Create a new AgentPolicy */
+        post: operations["createAgentPolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agentpolicies/{namespace}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a specific AgentPolicy */
+        get: operations["getAgentPolicy"];
+        /** Update an AgentPolicy */
+        put: operations["updateAgentPolicy"];
+        post?: never;
+        /** Delete an AgentPolicy */
+        delete: operations["deleteAgentPolicy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/toolpolicies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List all ToolPolicies */
+        get: operations["listToolPolicies"];
+        put?: never;
+        /** Create a new ToolPolicy */
+        post: operations["createToolPolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/toolpolicies/{namespace}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a specific ToolPolicy */
+        get: operations["getToolPolicy"];
+        /** Update a ToolPolicy */
+        put: operations["updateToolPolicy"];
+        post?: never;
+        /** Delete a ToolPolicy */
+        delete: operations["deleteToolPolicy"];
         options?: never;
         head?: never;
         patch?: never;
@@ -516,6 +593,100 @@ export interface components {
             lastValidatedAt?: string;
             observedGeneration?: number;
         };
+        AgentPolicy: {
+            apiVersion?: string;
+            kind?: string;
+            metadata?: components["schemas"]["ObjectMeta"];
+            spec?: components["schemas"]["AgentPolicySpec"];
+            status?: components["schemas"]["AgentPolicyStatus"];
+        };
+        AgentPolicySpec: {
+            selector?: {
+                agents?: string[];
+            };
+            claimMapping?: {
+                forwardClaims?: {
+                    claim: string;
+                    header: string;
+                }[];
+            };
+            toolAccess?: {
+                /** @enum {string} */
+                mode?: "allowlist" | "denylist";
+                rules?: {
+                    registry: string;
+                    tools: string[];
+                }[];
+            };
+            /**
+             * @default enforce
+             * @enum {string}
+             */
+            mode: "enforce" | "permissive";
+            /**
+             * @default deny
+             * @enum {string}
+             */
+            onFailure: "deny" | "allow";
+        };
+        AgentPolicyStatus: {
+            /** @enum {string} */
+            phase?: "Active" | "Error";
+            matchedAgents?: number;
+            conditions?: components["schemas"]["Condition"][];
+            observedGeneration?: number;
+        };
+        ToolPolicy: {
+            apiVersion?: string;
+            kind?: string;
+            metadata?: components["schemas"]["ObjectMeta"];
+            spec?: components["schemas"]["ToolPolicySpec"];
+            status?: components["schemas"]["ToolPolicyStatus"];
+        };
+        ToolPolicySpec: {
+            selector: {
+                registry: string;
+                tools?: string[];
+            };
+            rules: {
+                name: string;
+                description?: string;
+                deny: {
+                    cel: string;
+                    message: string;
+                };
+            }[];
+            requiredClaims?: {
+                claim: string;
+                message: string;
+            }[];
+            /**
+             * @default enforce
+             * @enum {string}
+             */
+            mode: "enforce" | "audit";
+            /**
+             * @default deny
+             * @enum {string}
+             */
+            onFailure: "deny" | "allow";
+            headerInjection?: {
+                header: string;
+                value?: string;
+                cel?: string;
+            }[];
+            audit?: {
+                logDecisions?: boolean;
+                redactFields?: string[];
+            };
+        };
+        ToolPolicyStatus: {
+            /** @enum {string} */
+            phase?: "Active" | "Error";
+            conditions?: components["schemas"]["Condition"][];
+            observedGeneration?: number;
+            ruleCount?: number;
+        };
         Stats: {
             agents?: {
                 total?: number;
@@ -576,6 +747,8 @@ export interface operations {
             query?: {
                 /** @description Filter by namespace */
                 namespace?: string;
+                /** @description Kubernetes label selector for filtering */
+                labelSelector?: string;
             };
             header?: never;
             path?: never;
@@ -721,6 +894,8 @@ export interface operations {
             query?: {
                 /** @description Filter by namespace */
                 namespace?: string;
+                /** @description Kubernetes label selector for filtering */
+                labelSelector?: string;
             };
             header?: never;
             path?: never;
@@ -770,6 +945,8 @@ export interface operations {
             query?: {
                 /** @description Filter by namespace */
                 namespace?: string;
+                /** @description Kubernetes label selector for filtering */
+                labelSelector?: string;
             };
             header?: never;
             path?: never;
@@ -784,6 +961,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ToolRegistry"][];
+                };
+            };
+            500: components["responses"]["InternalError"];
+        };
+    };
+    createToolRegistry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolRegistry"];
+            };
+        };
+        responses: {
+            /** @description ToolRegistry created successfully */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolRegistry"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description ToolRegistry already exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             500: components["responses"]["InternalError"];
@@ -814,11 +1026,66 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    updateToolRegistry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolRegistry"];
+            };
+        };
+        responses: {
+            /** @description ToolRegistry updated successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolRegistry"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deleteToolRegistry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ToolRegistry deleted successfully */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     listProviders: {
         parameters: {
             query?: {
                 /** @description Filter by namespace */
                 namespace?: string;
+                /** @description Kubernetes label selector for filtering */
+                labelSelector?: string;
             };
             header?: never;
             path?: never;
@@ -858,6 +1125,266 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Provider"];
                 };
+            };
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listAgentPolicies: {
+        parameters: {
+            query?: {
+                /** @description Filter by namespace */
+                namespace?: string;
+                /** @description Kubernetes label selector for filtering */
+                labelSelector?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of agent policies */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPolicy"][];
+                };
+            };
+            500: components["responses"]["InternalError"];
+        };
+    };
+    createAgentPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentPolicy"];
+            };
+        };
+        responses: {
+            /** @description AgentPolicy created successfully */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getAgentPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description AgentPolicy details */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPolicy"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    updateAgentPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentPolicy"];
+            };
+        };
+        responses: {
+            /** @description AgentPolicy updated successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deleteAgentPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description AgentPolicy deleted successfully */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listToolPolicies: {
+        parameters: {
+            query?: {
+                /** @description Filter by namespace */
+                namespace?: string;
+                /** @description Kubernetes label selector for filtering */
+                labelSelector?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of tool policies */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolPolicy"][];
+                };
+            };
+            500: components["responses"]["InternalError"];
+        };
+    };
+    createToolPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolPolicy"];
+            };
+        };
+        responses: {
+            /** @description ToolPolicy created successfully */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getToolPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ToolPolicy details */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolPolicy"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    updateToolPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolPolicy"];
+            };
+        };
+        responses: {
+            /** @description ToolPolicy updated successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deleteToolPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ToolPolicy deleted successfully */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
