@@ -20,8 +20,10 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
+      - agentpolicies
       - agentruntimes
       - promptpacks
+      - toolpolicies
       - toolregistries
       - providers
       - arenasources
@@ -40,8 +42,10 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
+      - agentpolicies/status
       - agentruntimes/status
       - promptpacks/status
+      - toolpolicies/status
       - toolregistries/status
       - providers/status
       - arenasources/status

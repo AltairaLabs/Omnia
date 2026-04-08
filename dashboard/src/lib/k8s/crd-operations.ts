@@ -28,15 +28,25 @@ const CRD_GROUP = "omnia.altairalabs.ai";
 const CRD_VERSION = "v1alpha1";
 
 /**
+ * Options for listing CRD resources.
+ */
+export interface ListCrdOptions {
+  /** Kubernetes label selector string (e.g., "app=my-app,env=prod") */
+  labelSelector?: string;
+}
+
+/**
  * List CRD resources in a workspace namespace.
  *
  * @param options - Workspace client options
  * @param plural - CRD plural name (e.g., "agentruntimes")
+ * @param listOptions - Optional list options (e.g., labelSelector)
  * @returns Array of CRD resources
  */
 export async function listCrd<T>(
   options: WorkspaceClientOptions,
-  plural: string
+  plural: string,
+  listOptions?: ListCrdOptions
 ): Promise<T[]> {
   return withTokenRefresh(options, async () => {
     const api = await getWorkspaceCustomObjectsApi(options);
@@ -45,6 +55,7 @@ export async function listCrd<T>(
       version: CRD_VERSION,
       namespace: options.namespace,
       plural,
+      ...(listOptions?.labelSelector !== undefined && { labelSelector: listOptions.labelSelector }),
     });
     const list = result as { items?: T[] };
     return (list.items || []) as T[];
@@ -533,6 +544,81 @@ async function extractTarGz(buffer: Buffer): Promise<Record<string, string>> {
     });
 
     extract.end(decompressed);
+  });
+}
+
+/**
+ * Create or update a ConfigMap in a workspace namespace.
+ * Uses read → replace → catch 404 → create pattern.
+ *
+ * @param options - Workspace client options
+ * @param name - ConfigMap name
+ * @param data - ConfigMap data (key → value)
+ * @param labels - Optional labels to apply to the ConfigMap
+ */
+export async function createOrUpdateConfigMap(
+  options: WorkspaceClientOptions,
+  name: string,
+  data: Record<string, string>,
+  labels?: Record<string, string>
+): Promise<void> {
+  return withTokenRefresh(options, async () => {
+    const coreApi = await getWorkspaceCoreApi(options);
+    const body = {
+      apiVersion: "v1" as const,
+      kind: "ConfigMap" as const,
+      metadata: { name, namespace: options.namespace, labels },
+      data,
+    };
+    try {
+      const existing = await coreApi.readNamespacedConfigMap({ namespace: options.namespace, name });
+      const existingManagedBy = (existing as { metadata?: { labels?: Record<string, string> } })
+        ?.metadata?.labels?.["omnia.altairalabs.ai/managed-by"];
+      const newManagedBy = labels?.["omnia.altairalabs.ai/managed-by"];
+      if (existingManagedBy !== undefined && existingManagedBy !== newManagedBy) {
+        throw new Error(
+          `ConfigMap "${name}" is managed by "${existingManagedBy}", not "${newManagedBy}"`
+        );
+      }
+      await coreApi.replaceNamespacedConfigMap({ namespace: options.namespace, name, body });
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        await coreApi.createNamespacedConfigMap({ namespace: options.namespace, body });
+      } else {
+        throw error;
+      }
+    }
+  });
+}
+
+/**
+ * Delete a ConfigMap. No-op if it doesn't exist.
+ *
+ * @param options - Workspace client options
+ * @param name - ConfigMap name
+ */
+export async function deleteConfigMap(
+  options: WorkspaceClientOptions,
+  name: string,
+  managedBy?: string
+): Promise<void> {
+  return withTokenRefresh(options, async () => {
+    const coreApi = await getWorkspaceCoreApi(options);
+    try {
+      if (managedBy) {
+        const existing = await coreApi.readNamespacedConfigMap({ namespace: options.namespace, name });
+        const existingManagedBy = (existing as { metadata?: { labels?: Record<string, string> } })
+          ?.metadata?.labels?.["omnia.altairalabs.ai/managed-by"];
+        if (existingManagedBy !== managedBy) {
+          return; // Not managed by us, don't delete
+        }
+      }
+      await coreApi.deleteNamespacedConfigMap({ namespace: options.namespace, name });
+    } catch (error) {
+      if (!isNotFoundError(error)) {
+        throw error;
+      }
+    }
   });
 }
 

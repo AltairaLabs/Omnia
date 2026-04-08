@@ -83,7 +83,13 @@ export interface paths {
         /** List all PromptPacks */
         get: operations["listPromptPacks"];
         put?: never;
-        post?: never;
+        /**
+         * Create a new PromptPack
+         * @description Creates a PromptPack CRD. If the optional `content` field is provided in the
+         *     request body, a backing ConfigMap is created automatically and the PromptPack's
+         *     `spec.source` is set to reference it.
+         */
+        post: operations["createPromptPack"];
         delete?: never;
         options?: never;
         head?: never;
@@ -99,9 +105,19 @@ export interface paths {
         };
         /** Get a specific PromptPack */
         get: operations["getPromptPack"];
-        put?: never;
+        /**
+         * Update a PromptPack
+         * @description Updates a PromptPack CRD. If the optional `content` field is provided,
+         *     the backing ConfigMap is updated (or created if it doesn't exist).
+         */
+        put: operations["updatePromptPack"];
         post?: never;
-        delete?: never;
+        /**
+         * Delete a PromptPack
+         * @description Deletes a PromptPack CRD and its backing ConfigMap (if one exists
+         *     with the naming convention `{name}-content`).
+         */
+        delete: operations["deletePromptPack"];
         options?: never;
         head?: never;
         patch?: never;
@@ -117,7 +133,8 @@ export interface paths {
         /** List all ToolRegistries */
         get: operations["listToolRegistries"];
         put?: never;
-        post?: never;
+        /** Create a new ToolRegistry */
+        post: operations["createToolRegistry"];
         delete?: never;
         options?: never;
         head?: never;
@@ -133,9 +150,11 @@ export interface paths {
         };
         /** Get a specific ToolRegistry */
         get: operations["getToolRegistry"];
-        put?: never;
+        /** Update a ToolRegistry */
+        put: operations["updateToolRegistry"];
         post?: never;
-        delete?: never;
+        /** Delete a ToolRegistry */
+        delete: operations["deleteToolRegistry"];
         options?: never;
         head?: never;
         patch?: never;
@@ -170,6 +189,80 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agentpolicies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List all AgentPolicies */
+        get: operations["listAgentPolicies"];
+        put?: never;
+        /** Create a new AgentPolicy */
+        post: operations["createAgentPolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agentpolicies/{namespace}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a specific AgentPolicy */
+        get: operations["getAgentPolicy"];
+        /** Update an AgentPolicy */
+        put: operations["updateAgentPolicy"];
+        post?: never;
+        /** Delete an AgentPolicy */
+        delete: operations["deleteAgentPolicy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/toolpolicies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List all ToolPolicies */
+        get: operations["listToolPolicies"];
+        put?: never;
+        /** Create a new ToolPolicy */
+        post: operations["createToolPolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/toolpolicies/{namespace}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a specific ToolPolicy */
+        get: operations["getToolPolicy"];
+        /** Update a ToolPolicy */
+        put: operations["updateToolPolicy"];
+        post?: never;
+        /** Delete a ToolPolicy */
+        delete: operations["deleteToolPolicy"];
         options?: never;
         head?: never;
         patch?: never;
@@ -257,6 +350,7 @@ export interface components {
             session?: components["schemas"]["SessionConfig"];
             runtime?: components["schemas"]["RuntimeConfig"];
             console?: components["schemas"]["ConsoleConfig"];
+            rollout?: components["schemas"]["RolloutConfig"];
         };
         LocalObjectReference: {
             name?: string;
@@ -386,8 +480,9 @@ export interface components {
             conditions?: components["schemas"]["Condition"][];
             readyReplicas?: number;
             replicas?: number;
-            /** @description Internal Kubernetes service endpoint for agent facade (e.g., my-agent.default.svc.cluster.local:8080) */
+            /** @description Internal Kubernetes service endpoint for agent facade */
             serviceEndpoint?: string;
+            rollout?: components["schemas"]["RolloutStatus"];
         };
         Condition: {
             type?: string;
@@ -406,9 +501,9 @@ export interface components {
             status?: components["schemas"]["PromptPackStatus"];
         };
         PromptPackSpec: {
+            /** @description Semantic version of the prompt pack (e.g., "2.1.0") */
             version?: string;
             source?: components["schemas"]["PromptPackSource"];
-            rollout?: components["schemas"]["RolloutConfig"];
         };
         PromptPackSource: {
             /** @enum {string} */
@@ -421,17 +516,118 @@ export interface components {
             ref?: string;
             path?: string;
         };
+        /**
+         * @description Step-based rollout configuration for AgentRuntime. All rollout patterns
+         *     (canary, blue-green, experiment) are expressed as different step sequences.
+         */
         RolloutConfig: {
-            /** @enum {string} */
-            type?: "immediate" | "canary";
-            canaryWeight?: number;
+            candidate?: components["schemas"]["CandidateOverrides"];
+            steps?: components["schemas"]["RolloutStep"][];
+            stickySession?: {
+                /** @description HTTP header for consistent hashing (e.g., "x-user-id") */
+                hashOn?: string;
+            };
+            rollback?: {
+                /**
+                 * @default manual
+                 * @enum {string}
+                 */
+                mode: "automatic" | "manual" | "disabled";
+                /**
+                 * @description Minimum wait time before allowing another rollout after rollback
+                 * @default 5m
+                 */
+                cooldown: string;
+            };
+            trafficRouting?: {
+                istio?: {
+                    virtualService?: {
+                        name: string;
+                        routes: string[];
+                    };
+                    destinationRule?: {
+                        name: string;
+                        /** @default stable */
+                        stableSubset: string;
+                        /** @default canary */
+                        candidateSubset: string;
+                    };
+                };
+            };
+        };
+        /** @description Sparse overrides for the candidate version during a rollout. */
+        CandidateOverrides: {
+            /** @description Override PromptPack version for the candidate */
+            promptPackVersion?: string;
+            providerRefs?: components["schemas"]["NamedProviderRef"][];
+            toolRegistryRef?: components["schemas"]["LocalObjectReference"];
+        };
+        /** @description A single step in a rollout sequence. Exactly one field should be set. */
+        RolloutStep: {
+            /** @description Set candidate traffic weight percentage */
+            setWeight?: number;
+            pause?: {
+                /** @description Duration to pause (e.g., "5m"). Nil means pause indefinitely. */
+                duration?: string;
+            };
+            analysis?: {
+                /** @description Name of the RolloutAnalysis CRD to run */
+                templateName?: string;
+                args?: {
+                    name: string;
+                    value: string;
+                }[];
+            };
+        };
+        /** @description Observed state of an active rollout */
+        RolloutStatus: {
+            active?: boolean;
+            currentStep?: number;
+            currentWeight?: number;
+            stableVersion?: string;
+            candidateVersion?: string;
+            /** Format: date-time */
+            startedAt?: string;
+            message?: string;
         };
         PromptPackStatus: {
             /** @enum {string} */
-            phase?: "Pending" | "Active" | "Canary" | "Failed";
+            phase?: "Pending" | "Active" | "Failed";
             conditions?: components["schemas"]["Condition"][];
             activeVersion?: string;
-            canaryVersion?: string;
+        };
+        /**
+         * @description Request body for creating a PromptPack. Extends the standard PromptPack
+         *     with an optional `content` field. When `content` is provided, a ConfigMap
+         *     named `{metadata.name}-content` is created with the given key-value pairs,
+         *     and the PromptPack's `spec.source` is automatically set to reference it.
+         */
+        PromptPackCreateRequest: {
+            metadata?: components["schemas"]["ObjectMeta"];
+            spec?: components["schemas"]["PromptPackSpec"];
+            /**
+             * @description Optional inline content for the backing ConfigMap. Keys are filenames
+             *     (e.g., "pack.json", "prompt.yaml"), values are the file contents as strings.
+             *     When provided, a ConfigMap is created and `spec.source.configMapRef` is set automatically.
+             * @example {
+             *       "pack.json": "{\"system_prompt\": \"You are a helpful assistant\", \"model\": \"claude-sonnet\"}"
+             *     }
+             */
+            content?: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * @description Request body for updating a PromptPack. Same as create — if `content` is
+         *     provided, the backing ConfigMap is updated (or created if it doesn't exist).
+         */
+        PromptPackUpdateRequest: {
+            metadata?: components["schemas"]["ObjectMeta"];
+            spec?: components["schemas"]["PromptPackSpec"];
+            /** @description Optional inline content for the backing ConfigMap. */
+            content?: {
+                [key: string]: string;
+            };
         };
         ToolRegistry: {
             apiVersion?: string;
@@ -516,6 +712,100 @@ export interface components {
             lastValidatedAt?: string;
             observedGeneration?: number;
         };
+        AgentPolicy: {
+            apiVersion?: string;
+            kind?: string;
+            metadata?: components["schemas"]["ObjectMeta"];
+            spec?: components["schemas"]["AgentPolicySpec"];
+            status?: components["schemas"]["AgentPolicyStatus"];
+        };
+        AgentPolicySpec: {
+            selector?: {
+                agents?: string[];
+            };
+            claimMapping?: {
+                forwardClaims?: {
+                    claim: string;
+                    header: string;
+                }[];
+            };
+            toolAccess?: {
+                /** @enum {string} */
+                mode?: "allowlist" | "denylist";
+                rules?: {
+                    registry: string;
+                    tools: string[];
+                }[];
+            };
+            /**
+             * @default enforce
+             * @enum {string}
+             */
+            mode: "enforce" | "permissive";
+            /**
+             * @default deny
+             * @enum {string}
+             */
+            onFailure: "deny" | "allow";
+        };
+        AgentPolicyStatus: {
+            /** @enum {string} */
+            phase?: "Active" | "Error";
+            matchedAgents?: number;
+            conditions?: components["schemas"]["Condition"][];
+            observedGeneration?: number;
+        };
+        ToolPolicy: {
+            apiVersion?: string;
+            kind?: string;
+            metadata?: components["schemas"]["ObjectMeta"];
+            spec?: components["schemas"]["ToolPolicySpec"];
+            status?: components["schemas"]["ToolPolicyStatus"];
+        };
+        ToolPolicySpec: {
+            selector: {
+                registry: string;
+                tools?: string[];
+            };
+            rules: {
+                name: string;
+                description?: string;
+                deny: {
+                    cel: string;
+                    message: string;
+                };
+            }[];
+            requiredClaims?: {
+                claim: string;
+                message: string;
+            }[];
+            /**
+             * @default enforce
+             * @enum {string}
+             */
+            mode: "enforce" | "audit";
+            /**
+             * @default deny
+             * @enum {string}
+             */
+            onFailure: "deny" | "allow";
+            headerInjection?: {
+                header: string;
+                value?: string;
+                cel?: string;
+            }[];
+            audit?: {
+                logDecisions?: boolean;
+                redactFields?: string[];
+            };
+        };
+        ToolPolicyStatus: {
+            /** @enum {string} */
+            phase?: "Active" | "Error";
+            conditions?: components["schemas"]["Condition"][];
+            observedGeneration?: number;
+            ruleCount?: number;
+        };
         Stats: {
             agents?: {
                 total?: number;
@@ -576,6 +866,8 @@ export interface operations {
             query?: {
                 /** @description Filter by namespace */
                 namespace?: string;
+                /** @description Kubernetes label selector for filtering */
+                labelSelector?: string;
             };
             header?: never;
             path?: never;
@@ -721,6 +1013,8 @@ export interface operations {
             query?: {
                 /** @description Filter by namespace */
                 namespace?: string;
+                /** @description Kubernetes label selector for filtering */
+                labelSelector?: string;
             };
             header?: never;
             path?: never;
@@ -735,6 +1029,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PromptPack"][];
+                };
+            };
+            500: components["responses"]["InternalError"];
+        };
+    };
+    createPromptPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptPackCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description PromptPack created successfully */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptPack"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description PromptPack already exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             500: components["responses"]["InternalError"];
@@ -765,11 +1094,66 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    updatePromptPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptPackUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description PromptPack updated successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptPack"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deletePromptPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PromptPack deleted successfully */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     listToolRegistries: {
         parameters: {
             query?: {
                 /** @description Filter by namespace */
                 namespace?: string;
+                /** @description Kubernetes label selector for filtering */
+                labelSelector?: string;
             };
             header?: never;
             path?: never;
@@ -784,6 +1168,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ToolRegistry"][];
+                };
+            };
+            500: components["responses"]["InternalError"];
+        };
+    };
+    createToolRegistry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolRegistry"];
+            };
+        };
+        responses: {
+            /** @description ToolRegistry created successfully */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolRegistry"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description ToolRegistry already exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             500: components["responses"]["InternalError"];
@@ -814,11 +1233,66 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    updateToolRegistry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolRegistry"];
+            };
+        };
+        responses: {
+            /** @description ToolRegistry updated successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolRegistry"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deleteToolRegistry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ToolRegistry deleted successfully */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     listProviders: {
         parameters: {
             query?: {
                 /** @description Filter by namespace */
                 namespace?: string;
+                /** @description Kubernetes label selector for filtering */
+                labelSelector?: string;
             };
             header?: never;
             path?: never;
@@ -858,6 +1332,266 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Provider"];
                 };
+            };
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listAgentPolicies: {
+        parameters: {
+            query?: {
+                /** @description Filter by namespace */
+                namespace?: string;
+                /** @description Kubernetes label selector for filtering */
+                labelSelector?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of agent policies */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPolicy"][];
+                };
+            };
+            500: components["responses"]["InternalError"];
+        };
+    };
+    createAgentPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentPolicy"];
+            };
+        };
+        responses: {
+            /** @description AgentPolicy created successfully */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getAgentPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description AgentPolicy details */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPolicy"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    updateAgentPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentPolicy"];
+            };
+        };
+        responses: {
+            /** @description AgentPolicy updated successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deleteAgentPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description AgentPolicy deleted successfully */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listToolPolicies: {
+        parameters: {
+            query?: {
+                /** @description Filter by namespace */
+                namespace?: string;
+                /** @description Kubernetes label selector for filtering */
+                labelSelector?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of tool policies */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolPolicy"][];
+                };
+            };
+            500: components["responses"]["InternalError"];
+        };
+    };
+    createToolPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolPolicy"];
+            };
+        };
+        responses: {
+            /** @description ToolPolicy created successfully */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getToolPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ToolPolicy details */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolPolicy"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    updateToolPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolPolicy"];
+            };
+        };
+        responses: {
+            /** @description ToolPolicy updated successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deleteToolPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ToolPolicy deleted successfully */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];

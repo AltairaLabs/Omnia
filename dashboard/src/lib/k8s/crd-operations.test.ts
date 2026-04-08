@@ -106,6 +106,9 @@ const mockListNamespacedPod = vi.fn();
 const mockReadNamespacedPodLog = vi.fn();
 const mockListNamespacedEvent = vi.fn();
 const mockReadNamespacedConfigMap = vi.fn();
+const mockCreateNamespacedConfigMap = vi.fn();
+const mockReplaceNamespacedConfigMap = vi.fn();
+const mockDeleteNamespacedConfigMap = vi.fn();
 const mockPatchNamespacedDeploymentScale = vi.fn();
 
 class MockCustomObjectsApi {
@@ -122,6 +125,9 @@ class MockCoreV1Api {
   readNamespacedPodLog = mockReadNamespacedPodLog;
   listNamespacedEvent = mockListNamespacedEvent;
   readNamespacedConfigMap = mockReadNamespacedConfigMap;
+  createNamespacedConfigMap = mockCreateNamespacedConfigMap;
+  replaceNamespacedConfigMap = mockReplaceNamespacedConfigMap;
+  deleteNamespacedConfigMap = mockDeleteNamespacedConfigMap;
 }
 
 class MockAppsV1Api {
@@ -220,6 +226,46 @@ describe("crd-operations", () => {
       const result = await crdOperations.listCrd(defaultOptions, "agentruntimes");
 
       expect(result).toHaveLength(0);
+    });
+
+    it("should pass labelSelector to K8s API when provided", async () => {
+      mockListNamespacedCustomObject.mockResolvedValue(mockAgentList);
+
+      await crdOperations.listCrd(defaultOptions, "agentruntimes", {
+        labelSelector: "arena.omnia.altairalabs.ai/project-id=my-project",
+      });
+
+      expect(mockListNamespacedCustomObject).toHaveBeenCalledWith({
+        group: "omnia.altairalabs.ai",
+        version: "v1alpha1",
+        namespace: "workspace-ns",
+        plural: "agentruntimes",
+        labelSelector: "arena.omnia.altairalabs.ai/project-id=my-project",
+      });
+    });
+
+    it("should omit labelSelector from K8s API when not provided", async () => {
+      mockListNamespacedCustomObject.mockResolvedValue(mockAgentList);
+
+      await crdOperations.listCrd(defaultOptions, "agentruntimes");
+
+      expect(mockListNamespacedCustomObject).toHaveBeenCalledWith({
+        group: "omnia.altairalabs.ai",
+        version: "v1alpha1",
+        namespace: "workspace-ns",
+        plural: "agentruntimes",
+      });
+      const callArg = mockListNamespacedCustomObject.mock.calls[0][0] as Record<string, unknown>;
+      expect(callArg).not.toHaveProperty("labelSelector");
+    });
+
+    it("should omit labelSelector from K8s API when listOptions is empty", async () => {
+      mockListNamespacedCustomObject.mockResolvedValue(mockAgentList);
+
+      await crdOperations.listCrd(defaultOptions, "agentruntimes", {});
+
+      const callArg = mockListNamespacedCustomObject.mock.calls[0][0] as Record<string, unknown>;
+      expect(callArg).not.toHaveProperty("labelSelector");
     });
   });
 
@@ -939,6 +985,169 @@ describe("crd-operations", () => {
 
       expect(result).toBeDefined();
       expect(result?.["fallback.yaml"]).toBe("fallback content");
+    });
+  });
+
+  describe("createOrUpdateConfigMap", () => {
+    const configMapData = { "pack.yaml": "prompts:\n  main:\n    template: Hello" };
+    const configMapLabels = { "omnia.altairalabs.ai/workspace": "my-workspace" };
+
+    it("should create ConfigMap when it does not exist", async () => {
+      mockReadNamespacedConfigMap.mockRejectedValue({ statusCode: 404 });
+      mockCreateNamespacedConfigMap.mockResolvedValue({});
+
+      await crdOperations.createOrUpdateConfigMap(
+        defaultOptions,
+        "my-pack-content",
+        configMapData,
+        configMapLabels
+      );
+
+      expect(mockReadNamespacedConfigMap).toHaveBeenCalledWith({
+        namespace: "workspace-ns",
+        name: "my-pack-content",
+      });
+      expect(mockCreateNamespacedConfigMap).toHaveBeenCalledWith({
+        namespace: "workspace-ns",
+        body: {
+          apiVersion: "v1",
+          kind: "ConfigMap",
+          metadata: { name: "my-pack-content", namespace: "workspace-ns", labels: configMapLabels },
+          data: configMapData,
+        },
+      });
+      expect(mockReplaceNamespacedConfigMap).not.toHaveBeenCalled();
+    });
+
+    it("should update ConfigMap when it already exists", async () => {
+      mockReadNamespacedConfigMap.mockResolvedValue({ data: { "old.yaml": "old" } });
+      mockReplaceNamespacedConfigMap.mockResolvedValue({});
+
+      await crdOperations.createOrUpdateConfigMap(
+        defaultOptions,
+        "my-pack-content",
+        configMapData,
+        configMapLabels
+      );
+
+      expect(mockReplaceNamespacedConfigMap).toHaveBeenCalledWith({
+        namespace: "workspace-ns",
+        name: "my-pack-content",
+        body: {
+          apiVersion: "v1",
+          kind: "ConfigMap",
+          metadata: { name: "my-pack-content", namespace: "workspace-ns", labels: configMapLabels },
+          data: configMapData,
+        },
+      });
+      expect(mockCreateNamespacedConfigMap).not.toHaveBeenCalled();
+    });
+
+    it("should update ConfigMap when existing has matching managed-by label", async () => {
+      mockReadNamespacedConfigMap.mockResolvedValue({
+        metadata: { labels: { "omnia.altairalabs.ai/managed-by": "promptpack" } },
+        data: { "old.yaml": "old" },
+      });
+      mockReplaceNamespacedConfigMap.mockResolvedValue({});
+
+      const labels = { ...configMapLabels, "omnia.altairalabs.ai/managed-by": "promptpack" };
+      await crdOperations.createOrUpdateConfigMap(
+        defaultOptions,
+        "my-pack-content",
+        configMapData,
+        labels
+      );
+
+      expect(mockReplaceNamespacedConfigMap).toHaveBeenCalled();
+    });
+
+    it("should throw when existing ConfigMap has different managed-by label", async () => {
+      mockReadNamespacedConfigMap.mockResolvedValue({
+        metadata: { labels: { "omnia.altairalabs.ai/managed-by": "other-controller" } },
+        data: { "old.yaml": "old" },
+      });
+
+      const labels = { ...configMapLabels, "omnia.altairalabs.ai/managed-by": "promptpack" };
+      await expect(
+        crdOperations.createOrUpdateConfigMap(defaultOptions, "my-pack-content", configMapData, labels)
+      ).rejects.toThrow('ConfigMap "my-pack-content" is managed by "other-controller", not "promptpack"');
+
+      expect(mockReplaceNamespacedConfigMap).not.toHaveBeenCalled();
+    });
+
+    it("should create ConfigMap without labels when not provided", async () => {
+      mockReadNamespacedConfigMap.mockRejectedValue({ statusCode: 404 });
+      mockCreateNamespacedConfigMap.mockResolvedValue({});
+
+      await crdOperations.createOrUpdateConfigMap(defaultOptions, "my-pack-content", configMapData);
+
+      expect(mockCreateNamespacedConfigMap).toHaveBeenCalledWith({
+        namespace: "workspace-ns",
+        body: expect.objectContaining({ metadata: expect.objectContaining({ labels: undefined }) }),
+      });
+    });
+
+    it("should throw on non-404 read error", async () => {
+      mockReadNamespacedConfigMap.mockRejectedValue(new Error("Server error"));
+
+      await expect(
+        crdOperations.createOrUpdateConfigMap(defaultOptions, "my-pack-content", configMapData)
+      ).rejects.toThrow("Server error");
+    });
+  });
+
+  describe("deleteConfigMap", () => {
+    it("should delete a ConfigMap by name", async () => {
+      mockDeleteNamespacedConfigMap.mockResolvedValue({});
+
+      await crdOperations.deleteConfigMap(defaultOptions, "my-pack-content");
+
+      expect(mockDeleteNamespacedConfigMap).toHaveBeenCalledWith({
+        namespace: "workspace-ns",
+        name: "my-pack-content",
+      });
+    });
+
+    it("should delete when managedBy matches", async () => {
+      mockReadNamespacedConfigMap.mockResolvedValue({
+        metadata: { labels: { "omnia.altairalabs.ai/managed-by": "promptpack" } },
+      });
+      mockDeleteNamespacedConfigMap.mockResolvedValue({});
+
+      await crdOperations.deleteConfigMap(defaultOptions, "my-pack-content", "promptpack");
+
+      expect(mockReadNamespacedConfigMap).toHaveBeenCalledWith({
+        namespace: "workspace-ns",
+        name: "my-pack-content",
+      });
+      expect(mockDeleteNamespacedConfigMap).toHaveBeenCalled();
+    });
+
+    it("should skip delete when managedBy does not match", async () => {
+      mockReadNamespacedConfigMap.mockResolvedValue({
+        metadata: { labels: { "omnia.altairalabs.ai/managed-by": "other-controller" } },
+      });
+
+      await crdOperations.deleteConfigMap(defaultOptions, "my-pack-content", "promptpack");
+
+      expect(mockReadNamespacedConfigMap).toHaveBeenCalled();
+      expect(mockDeleteNamespacedConfigMap).not.toHaveBeenCalled();
+    });
+
+    it("should be a no-op when ConfigMap does not exist", async () => {
+      mockDeleteNamespacedConfigMap.mockRejectedValue({ statusCode: 404 });
+
+      await expect(
+        crdOperations.deleteConfigMap(defaultOptions, "missing-configmap")
+      ).resolves.not.toThrow();
+    });
+
+    it("should throw on non-404 delete error", async () => {
+      mockDeleteNamespacedConfigMap.mockRejectedValue(new Error("Forbidden"));
+
+      await expect(
+        crdOperations.deleteConfigMap(defaultOptions, "my-pack-content")
+      ).rejects.toThrow("Forbidden");
     });
   });
 
