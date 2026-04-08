@@ -659,6 +659,10 @@ func (e *OmniaExecutor) initMCPHandler(ctx context.Context, name string, h *Hand
 			e.log.Error(err, "failed to list MCP tool", "handler", name)
 			continue
 		}
+		if h.MCPConfig.ToolFilter != nil && !h.MCPConfig.ToolFilter.Includes(tool.Name) {
+			e.log.V(1).Info("filtered out MCP tool", "tool", tool.Name, "handler", name)
+			continue
+		}
 		e.mcpTools[name][tool.Name] = tool
 		e.toolHandlers[tool.Name] = name
 		e.log.V(1).Info("registered MCP tool", "tool", tool.Name, "handler", name)

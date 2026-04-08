@@ -19,6 +19,7 @@ package tools
 import (
 	"fmt"
 	"os"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 )
@@ -115,6 +116,15 @@ type MCPCfg struct {
 type MCPToolFilterCfg struct {
 	Allowlist []string `json:"allowlist,omitempty" yaml:"allowlist,omitempty"`
 	Blocklist []string `json:"blocklist,omitempty" yaml:"blocklist,omitempty"`
+}
+
+// Includes returns true if the given tool name passes the filter.
+// An empty filter (no allowlist and no blocklist) allows all tools.
+func (f *MCPToolFilterCfg) Includes(name string) bool {
+	if len(f.Allowlist) > 0 {
+		return slices.Contains(f.Allowlist, name)
+	}
+	return !slices.Contains(f.Blocklist, name)
 }
 
 // OpenAPICfg represents OpenAPI configuration for a tool.
