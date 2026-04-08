@@ -221,6 +221,46 @@ describe("crd-operations", () => {
 
       expect(result).toHaveLength(0);
     });
+
+    it("should pass labelSelector to K8s API when provided", async () => {
+      mockListNamespacedCustomObject.mockResolvedValue(mockAgentList);
+
+      await crdOperations.listCrd(defaultOptions, "agentruntimes", {
+        labelSelector: "arena.omnia.altairalabs.ai/project-id=my-project",
+      });
+
+      expect(mockListNamespacedCustomObject).toHaveBeenCalledWith({
+        group: "omnia.altairalabs.ai",
+        version: "v1alpha1",
+        namespace: "workspace-ns",
+        plural: "agentruntimes",
+        labelSelector: "arena.omnia.altairalabs.ai/project-id=my-project",
+      });
+    });
+
+    it("should omit labelSelector from K8s API when not provided", async () => {
+      mockListNamespacedCustomObject.mockResolvedValue(mockAgentList);
+
+      await crdOperations.listCrd(defaultOptions, "agentruntimes");
+
+      expect(mockListNamespacedCustomObject).toHaveBeenCalledWith({
+        group: "omnia.altairalabs.ai",
+        version: "v1alpha1",
+        namespace: "workspace-ns",
+        plural: "agentruntimes",
+      });
+      const callArg = mockListNamespacedCustomObject.mock.calls[0][0] as Record<string, unknown>;
+      expect(callArg).not.toHaveProperty("labelSelector");
+    });
+
+    it("should omit labelSelector from K8s API when listOptions is empty", async () => {
+      mockListNamespacedCustomObject.mockResolvedValue(mockAgentList);
+
+      await crdOperations.listCrd(defaultOptions, "agentruntimes", {});
+
+      const callArg = mockListNamespacedCustomObject.mock.calls[0][0] as Record<string, unknown>;
+      expect(callArg).not.toHaveProperty("labelSelector");
+    });
   });
 
   describe("getCrd", () => {

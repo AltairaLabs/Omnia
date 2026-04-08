@@ -28,15 +28,25 @@ const CRD_GROUP = "omnia.altairalabs.ai";
 const CRD_VERSION = "v1alpha1";
 
 /**
+ * Options for listing CRD resources.
+ */
+export interface ListCrdOptions {
+  /** Kubernetes label selector string (e.g., "app=my-app,env=prod") */
+  labelSelector?: string;
+}
+
+/**
  * List CRD resources in a workspace namespace.
  *
  * @param options - Workspace client options
  * @param plural - CRD plural name (e.g., "agentruntimes")
+ * @param listOptions - Optional list options (e.g., labelSelector)
  * @returns Array of CRD resources
  */
 export async function listCrd<T>(
   options: WorkspaceClientOptions,
-  plural: string
+  plural: string,
+  listOptions?: ListCrdOptions
 ): Promise<T[]> {
   return withTokenRefresh(options, async () => {
     const api = await getWorkspaceCustomObjectsApi(options);
@@ -45,6 +55,7 @@ export async function listCrd<T>(
       version: CRD_VERSION,
       namespace: options.namespace,
       plural,
+      ...(listOptions?.labelSelector !== undefined && { labelSelector: listOptions.labelSelector }),
     });
     const list = result as { items?: T[] };
     return (list.items || []) as T[];

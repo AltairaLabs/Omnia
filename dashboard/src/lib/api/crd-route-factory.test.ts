@@ -171,7 +171,37 @@ describe("createCollectionRoutes", () => {
     expect(body[0].metadata.name).toBe("item-1");
     expect(listCrd).toHaveBeenCalledWith(
       expect.objectContaining({ namespace: "test-ns" }),
-      "testkinds"
+      "testkinds",
+      { labelSelector: undefined }
+    );
+  });
+
+  it("GET passes labelSelector query param to listCrd", async () => {
+    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { listCrd } = await import("@/lib/k8s/crd-operations");
+    const { createCollectionRoutes } = await import("./crd-route-factory");
+
+    vi.mocked(validateWorkspace).mockResolvedValue(validWorkspaceResult());
+    const mockItems = [{ metadata: { name: "item-1" }, spec: { field: "a" } }];
+    vi.mocked(listCrd).mockResolvedValue(mockItems);
+
+    const { GET } = createCollectionRoutes<TestResource>({
+      kind: "TestKind",
+      plural: "testkinds",
+      errorLabel: "test resources",
+    });
+
+    const request = makeRequest(
+      "http://localhost/api/workspaces/test-ws/testkinds?labelSelector=arena.omnia.altairalabs.ai%2Fproject-id%3Dmy-project"
+    );
+    const context = makeContext({ name: "test-ws" });
+    const response = await GET(request, context);
+
+    expect(response.status).toBe(200);
+    expect(listCrd).toHaveBeenCalledWith(
+      expect.objectContaining({ namespace: "test-ns" }),
+      "testkinds",
+      { labelSelector: "arena.omnia.altairalabs.ai/project-id=my-project" }
     );
   });
 

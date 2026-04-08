@@ -20,6 +20,7 @@ import {
   deleteCrd,
   listSharedCrd,
   getSharedCrd,
+  type ListCrdOptions,
 } from "@/lib/k8s/crd-operations";
 import {
   validateWorkspace,
@@ -122,7 +123,7 @@ export function createCollectionRoutes<T>(config: CollectionRouteConfig) {
   const GET = withWorkspaceAccess(
     "viewer",
     async (
-      _request: NextRequest,
+      request: NextRequest,
       context: WorkspaceRouteContext,
       access: WorkspaceAccess,
       user: User
@@ -142,7 +143,9 @@ export function createCollectionRoutes<T>(config: CollectionRouteConfig) {
           kind
         );
 
-        const items = await listCrd<T>(result.clientOptions, plural);
+        const labelSelector = request.nextUrl.searchParams.get("labelSelector") ?? undefined;
+        const listOptions: ListCrdOptions = { labelSelector };
+        const items = await listCrd<T>(result.clientOptions, plural, listOptions);
 
         auditSuccess(auditCtx, "list", undefined, { count: items.length });
         return NextResponse.json(items);
