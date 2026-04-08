@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/fleet"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 	"github.com/altairalabs/omnia/internal/session/httpclient"
@@ -118,6 +119,14 @@ type Config struct {
 	RampUp       time.Duration // Ramp-up duration (0 = no ramp-up)
 	RampDown     time.Duration // Ramp-down duration (0 = no ramp-down)
 
+	// Output configuration
+	// OutputConfig is parsed from the ARENA_OUTPUT_CONFIG env var (JSON-encoded OutputConfig).
+	// When nil, output is written to /tmp/arena-output and discarded when the pod exits.
+	OutputConfig *omniav1alpha1.OutputConfig
+	// OutputDir is the mount path injected by the controller for PVC output.
+	// Populated from the ARENA_OUTPUT_DIR env var.
+	OutputDir string
+
 	// Override configurations (resolved from CRDs)
 	ToolOverrides map[string]ToolOverrideConfig // Tool name -> override config
 
@@ -177,6 +186,16 @@ func loadConfig() (*Config, error) {
 	cfg.Concurrency = getIntEnvOrDefault("ARENA_CONCURRENCY", 0)
 	cfg.RampUp = getDurationEnv("ARENA_RAMP_UP", 0)
 	cfg.RampDown = getDurationEnv("ARENA_RAMP_DOWN", 0)
+
+	// Output configuration — optional; defaults to /tmp/arena-output (lost on pod exit).
+	cfg.OutputDir = os.Getenv("ARENA_OUTPUT_DIR")
+	if raw := os.Getenv("ARENA_OUTPUT_CONFIG"); raw != "" {
+		var outCfg omniav1alpha1.OutputConfig
+		if err := json.Unmarshal([]byte(raw), &outCfg); err != nil {
+			return nil, fmt.Errorf("failed to parse ARENA_OUTPUT_CONFIG: %w", err)
+		}
+		cfg.OutputConfig = &outCfg
+	}
 
 	if cfg.JobName == "" {
 		return nil, errors.New("ARENA_JOB_NAME is required")
@@ -497,9 +516,11 @@ func executeWorkItem(
 		arenaCfg.Defaults.Verbose = true
 	}
 
-	// Set output directory to a writable location
-	// The workspace content is mounted read-only, so we need a writable path for media files
-	arenaCfg.Defaults.Output.Dir = "/tmp/arena-output"
+	// Set output directory to a writable location.
+	// The workspace content is mounted read-only, so we need a writable path for media files.
+	// resolveOutputDir reads from OutputConfig: PVC uses the mounted path, S3 stages
+	// to /tmp/arena-output (uploaded after all items complete), nil uses the fallback.
+	arenaCfg.Defaults.Output.Dir = resolveOutputDir(cfg)
 
 	// Resolve providers and tools from CRDs
 	k8sClient := cfg.K8sClient

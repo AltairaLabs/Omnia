@@ -142,12 +142,11 @@ func runWithFlags(f *flags) error {
 		return fmt.Errorf("loading retention config: %w", err)
 	}
 	if !retentionCfg.ColdArchiveEnabled() {
-		log.Info("cold archive is not enabled; exiting")
-		return nil
+		log.Info("cold archive not enabled — running warm-only compaction")
 	}
 
 	// --- Providers ---
-	warmProvider, coldProvider, hotProvider, cleanup, err := initProviders(ctx, f)
+	warmProvider, coldProvider, hotProvider, cleanup, err := initProviders(ctx, f, retentionCfg.ColdArchiveEnabled())
 	if err != nil {
 		return err
 	}
@@ -187,9 +186,13 @@ func runWithFlags(f *flags) error {
 
 // validateProviderFlags checks that all required provider flags are set
 // before attempting to create any network connections.
-func validateProviderFlags(f *flags) error {
+// coldEnabled controls whether cold-archive flags are required.
+func validateProviderFlags(f *flags, coldEnabled bool) error {
 	if f.postgresConn == "" {
 		return fmt.Errorf("--postgres-conn or POSTGRES_CONN is required")
+	}
+	if !coldEnabled {
+		return nil
 	}
 	if f.coldBucket == "" {
 		return fmt.Errorf("--cold-bucket or COLD_BUCKET is required")
@@ -204,10 +207,11 @@ func validateProviderFlags(f *flags) error {
 }
 
 // initProviders creates the storage providers and returns a cleanup function.
+// coldEnabled controls whether the cold archive provider is initialised.
 func initProviders(
-	ctx context.Context, f *flags,
+	ctx context.Context, f *flags, coldEnabled bool,
 ) (*postgres.Provider, *cold.Provider, *redis.Provider, func(), error) {
-	if err := validateProviderFlags(f); err != nil {
+	if err := validateProviderFlags(f, coldEnabled); err != nil {
 		return nil, nil, nil, nil, err
 	}
 
@@ -228,28 +232,32 @@ func initProviders(
 	}
 	cleanups = append(cleanups, func() { _ = warmProvider.Close() })
 
-	// Cold archive (required)
-	coldCfg := cold.DefaultConfig()
-	coldCfg.Backend = cold.BackendType(f.coldBackend)
-	coldCfg.Bucket = f.coldBucket
-	switch coldCfg.Backend {
-	case cold.BackendS3:
-		coldCfg.S3 = &cold.S3Config{
-			Region:   f.coldRegion,
-			Endpoint: f.coldEndpoint,
+	// Cold archive (optional — only when cold archive is enabled)
+	var coldProvider *cold.Provider
+	if coldEnabled {
+		coldCfg := cold.DefaultConfig()
+		coldCfg.Backend = cold.BackendType(f.coldBackend)
+		coldCfg.Bucket = f.coldBucket
+		switch coldCfg.Backend {
+		case cold.BackendS3:
+			coldCfg.S3 = &cold.S3Config{
+				Region:   f.coldRegion,
+				Endpoint: f.coldEndpoint,
+			}
+		case cold.BackendGCS:
+			coldCfg.GCS = &cold.GCSConfig{}
+		case cold.BackendAzure:
+			coldCfg.Azure = &cold.AzureConfig{}
 		}
-	case cold.BackendGCS:
-		coldCfg.GCS = &cold.GCSConfig{}
-	case cold.BackendAzure:
-		coldCfg.Azure = &cold.AzureConfig{}
+		var coldErr error
+		coldProvider, coldErr = cold.New(ctx, coldCfg)
+		if coldErr != nil {
+			cleanup()
+			return nil, nil, nil, nil,
+				fmt.Errorf("creating cold archive provider: %w", coldErr)
+		}
+		cleanups = append(cleanups, func() { _ = coldProvider.Close() })
 	}
-	coldProvider, err := cold.New(ctx, coldCfg)
-	if err != nil {
-		cleanup()
-		return nil, nil, nil, nil,
-			fmt.Errorf("creating cold archive provider: %w", err)
-	}
-	cleanups = append(cleanups, func() { _ = coldProvider.Close() })
 
 	// Redis (optional)
 	var hotProvider *redis.Provider

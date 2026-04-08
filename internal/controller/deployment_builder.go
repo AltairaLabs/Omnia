@@ -170,7 +170,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		a2aContainer := r.buildA2AContainer(agentRuntime, promptPack, toolRegistry, facadePort, resolvedClients)
 		containers = []corev1.Container{a2aContainer}
 	} else {
-		facadeContainer := r.buildFacadeContainer(agentRuntime, facadePort)
+		facadeContainer := r.buildFacadeContainer(agentRuntime, promptPack, facadePort)
 
 		// Dual-protocol: add A2A port and env vars to the facade container.
 		if isDualProtocol(agentRuntime) {
@@ -287,6 +287,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 // buildFacadeContainer creates the facade container spec.
 func (r *AgentRuntimeReconciler) buildFacadeContainer(
 	agentRuntime *omniav1alpha1.AgentRuntime,
+	promptPack *omniav1alpha1.PromptPack,
 	facadePort int32,
 ) corev1.Container {
 	// Check for CRD image override first, then operator default, then hardcoded default
@@ -321,7 +322,8 @@ func (r *AgentRuntimeReconciler) buildFacadeContainer(
 				Protocol:      corev1.ProtocolTCP,
 			},
 		},
-		Env: r.buildFacadeEnvVars(agentRuntime),
+		Env:          r.buildFacadeEnvVars(agentRuntime),
+		VolumeMounts: r.buildFacadeVolumeMounts(promptPack),
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{

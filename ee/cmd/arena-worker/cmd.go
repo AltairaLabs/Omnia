@@ -21,10 +21,12 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/AltairaLabs/PromptKit/runtime/logger"
+	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 
+	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logging"
@@ -142,6 +144,12 @@ func run(ctx context.Context) error {
 	// Process work items
 	err = processWorkItems(ctx, log, cfg, q, bundlePath, workerMetrics)
 
+	// Persist output to S3 after all work items complete (best-effort, non-fatal).
+	// For PVC output, the engine writes directly to the mounted path — no extra step needed.
+	if err == nil {
+		persistOutputToS3(ctx, log, cfg)
+	}
+
 	// Wait after processing completes so Prometheus can scrape final metrics.
 	// Without this, the pod exits immediately and the last scrape never happens.
 	if cfg.ShutdownDelay > 0 {
@@ -150,6 +158,36 @@ func run(ctx context.Context) error {
 	}
 
 	return err
+}
+
+// persistOutputToS3 uploads the engine output directory to S3 when the job's
+// OutputConfig specifies S3. It is a no-op for PVC output (the engine writes
+// directly to the mounted path) and when no output config is set.
+// Errors are logged but do not fail the worker — results have already been
+// recorded to Redis at this point.
+func persistOutputToS3(ctx context.Context, log logr.Logger, cfg *Config) {
+	if cfg.OutputConfig == nil ||
+		cfg.OutputConfig.Type != omniav1alpha1.OutputTypeS3 ||
+		cfg.OutputConfig.S3 == nil {
+		return
+	}
+	outputDir := resolveOutputDir(cfg)
+	s3Cfg := cfg.OutputConfig.S3
+	log.Info("uploading output to S3",
+		"bucket", s3Cfg.Bucket,
+		"prefix", s3Cfg.Prefix,
+		"outputDir", outputDir,
+	)
+	uploadFn, err := newS3UploadFunc(ctx, s3Cfg)
+	if err != nil {
+		log.Error(err, "failed to create S3 upload client — output not persisted")
+		return
+	}
+	if err := uploadOutputToS3(ctx, log, outputDir, cfg.JobName, cfg.JobNamespace, s3Cfg, uploadFn); err != nil {
+		log.Error(err, "failed to upload output to S3 — results may be incomplete")
+		return
+	}
+	log.Info("output uploaded to S3", "bucket", s3Cfg.Bucket, "prefix", s3Cfg.Prefix)
 }
 
 // configureSDKLogging sets up PromptKit SDK logging via the slog bridge.

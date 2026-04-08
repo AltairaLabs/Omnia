@@ -184,6 +184,16 @@ enterprise:
     #       name: llm-provider-keys
     #       key: openai-api-key
 
+  # Policy proxy sidecar for ToolPolicy enforcement
+  policyProxy:
+    image:
+      # -- Policy proxy image repository
+      repository: ghcr.io/altairalabs/omnia-policy-proxy
+      # -- Policy proxy image tag (defaults to Chart appVersion)
+      tag: ""
+      # -- Policy proxy image pull policy
+      pullPolicy: IfNotPresent
+
   # PromptKit LSP server for YAML validation
   promptkitLsp:
     # -- Enable PromptKit LSP server

@@ -796,3 +796,71 @@ func (m *mockWarmStoreWithQueryErr) GetSessionsOlderThan(
 func newTestMetrics() *metrics.CompactionMetrics {
 	return metrics.NewCompactionMetrics()
 }
+
+// ---------------------------------------------------------------------------
+// Warm-only mode (nil cold provider)
+// ---------------------------------------------------------------------------
+
+func testRetentionConfigWarmOnly() *RetentionConfig {
+	return &RetentionConfig{
+		Default: TierConfig{
+			WarmStore: &omniav1alpha1.WarmStoreConfig{RetentionDays: 7},
+			ColdArchive: &omniav1alpha1.ColdArchiveConfig{
+				Enabled: false,
+			},
+		},
+	}
+}
+
+func TestRun_WarmOnly_NilColdProvider(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-10 * 24 * time.Hour)
+
+	warm := &mockWarmStore{
+		sessions: []*session.Session{
+			testSession("s1", "", old),
+			testSession("s2", "", old),
+		},
+	}
+	hot := &mockHotCache{}
+
+	// nil cold provider — warm-only mode
+	e := NewEngine(warm, nil, hot, testRetentionConfigWarmOnly(), testConfig(), nil, testLogger())
+	result, err := e.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run with nil cold provider: %v", err)
+	}
+	if result.SessionsCompacted != 2 {
+		t.Errorf("expected 2 sessions purged from warm store, got %d", result.SessionsCompacted)
+	}
+	if len(warm.deletedBatches) != 1 || len(warm.deletedBatches[0]) != 2 {
+		t.Error("expected 1 batch delete of 2 sessions from warm store")
+	}
+	if len(hot.invalidated) != 2 {
+		t.Errorf("expected 2 hot cache invalidations, got %d", len(hot.invalidated))
+	}
+	// No cold archive operations should have been attempted.
+	if result.ColdPurged {
+		t.Error("expected ColdPurged == false when no cold provider")
+	}
+}
+
+func TestRun_WarmOnly_NoHotCache(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-10 * 24 * time.Hour)
+
+	warm := &mockWarmStore{
+		sessions: []*session.Session{
+			testSession("s1", "", old),
+		},
+	}
+
+	e := NewEngine(warm, nil, nil, testRetentionConfigWarmOnly(), testConfig(), nil, testLogger())
+	result, err := e.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run with nil cold and hot providers: %v", err)
+	}
+	if result.SessionsCompacted != 1 {
+		t.Errorf("expected 1 session purged, got %d", result.SessionsCompacted)
+	}
+}

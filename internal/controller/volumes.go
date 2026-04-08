@@ -33,7 +33,7 @@ func (r *AgentRuntimeReconciler) buildVolumes(
 	if promptPack.Spec.Source.Type == omniav1alpha1.PromptPackSourceTypeConfigMap &&
 		promptPack.Spec.Source.ConfigMapRef != nil {
 		volumes = append(volumes, corev1.Volume{
-			Name: "promptpack-config",
+			Name: promptpackConfigVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: *promptPack.Spec.Source.ConfigMapRef,
@@ -64,6 +64,26 @@ func (r *AgentRuntimeReconciler) buildVolumes(
 	return volumes
 }
 
+// buildFacadeVolumeMounts creates volume mounts for the facade container.
+// The facade only needs the promptpack-config volume (for dual-protocol A2A access);
+// it does not need tools-config or user-specified runtime volumes.
+func (r *AgentRuntimeReconciler) buildFacadeVolumeMounts(
+	promptPack *omniav1alpha1.PromptPack,
+) []corev1.VolumeMount {
+	var volumeMounts []corev1.VolumeMount
+
+	if promptPack.Spec.Source.Type == omniav1alpha1.PromptPackSourceTypeConfigMap &&
+		promptPack.Spec.Source.ConfigMapRef != nil {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      promptpackConfigVolumeName,
+			MountPath: PromptPackMountPath,
+			ReadOnly:  true,
+		})
+	}
+
+	return volumeMounts
+}
+
 // buildRuntimeVolumeMounts creates volume mounts for the runtime container.
 func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
 	agentRuntime *omniav1alpha1.AgentRuntime,
@@ -76,7 +96,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
 	if promptPack.Spec.Source.Type == omniav1alpha1.PromptPackSourceTypeConfigMap &&
 		promptPack.Spec.Source.ConfigMapRef != nil {
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
-			Name:      "promptpack-config",
+			Name:      promptpackConfigVolumeName,
 			MountPath: PromptPackMountPath,
 			ReadOnly:  true,
 		})

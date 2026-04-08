@@ -14,6 +14,7 @@ import {
   getBuiltinConfig,
   generateSecureToken,
 } from "@/lib/auth/builtin";
+import { sendEmail } from "@/lib/email/sender";
 
 export async function POST(request: NextRequest) {
   const authConfig = getAuthConfig();
@@ -72,15 +73,13 @@ export async function POST(request: NextRequest) {
 
     await store.createPasswordResetToken(user.id, hash, expiresAt);
 
-    // NOTE: Email sending not yet implemented
-    // For now, log the token (in production, this would be sent via email)
-    console.warn(
-      `Password reset token for ${email}: ${token} (expires: ${expiresAt.toISOString()})`
-    );
-
-    // In production, you would send an email like:
-    // const resetUrl = `${process.env.OMNIA_BASE_URL}/reset-password?token=${token}`;
-    // await sendPasswordResetEmail(user.email, resetUrl);
+    const resetUrl = `${process.env.OMNIA_BASE_URL || "http://localhost:3000"}/reset-password?token=${token}`;
+    await sendEmail({
+      to: user.email,
+      subject: "Password Reset Request",
+      text: `Click the following link to reset your password: ${resetUrl}\n\nThis link expires at ${expiresAt.toISOString()}.`,
+      html: `<p>Click <a href="${resetUrl}">here</a> to reset your password.</p><p>This link expires at ${expiresAt.toISOString()}.</p>`,
+    });
 
     return NextResponse.json({
       success: true,

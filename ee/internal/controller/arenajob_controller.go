@@ -362,6 +362,107 @@ func (r *ArenaJobReconciler) getWorkerResources(_ *omniav1alpha1.ArenaJob) corev
 	return defaultWorkerResources
 }
 
+// outputPVCMountPath is the container path where the output PVC is mounted.
+const outputPVCMountPath = "/arena-output"
+
+// buildOutputConfig returns env vars, volumes, and volume mounts required to
+// persist worker output to the configured destination.
+//
+// PVC output: mounts the named PVC at /arena-output (read-write) and sets
+// ARENA_OUTPUT_DIR so the worker writes engine output there directly.
+//
+// S3 output: injects ARENA_OUTPUT_CONFIG (JSON) so the worker can upload files
+// after execution. Credentials from spec.output.s3.secretRef are injected as
+// ARENA_S3_ACCESS_KEY_ID and ARENA_S3_SECRET_ACCESS_KEY via secretKeyRef.
+//
+// If no output config is set, all three returned slices are empty.
+func (r *ArenaJobReconciler) buildOutputConfig(arenaJob *omniav1alpha1.ArenaJob) (
+	env []corev1.EnvVar,
+	volumes []corev1.Volume,
+	volumeMounts []corev1.VolumeMount,
+) {
+	if arenaJob.Spec.Output == nil {
+		return nil, nil, nil
+	}
+
+	// Always inject the JSON-encoded OutputConfig so the worker knows the destination.
+	raw, err := json.Marshal(arenaJob.Spec.Output)
+	if err == nil {
+		env = append(env, corev1.EnvVar{
+			Name:  "ARENA_OUTPUT_CONFIG",
+			Value: string(raw),
+		})
+	}
+
+	switch arenaJob.Spec.Output.Type {
+	case omniav1alpha1.OutputTypePVC:
+		if arenaJob.Spec.Output.PVC == nil {
+			return env, nil, nil
+		}
+		pvc := arenaJob.Spec.Output.PVC
+		subPath := pvc.SubPath
+
+		volumes = append(volumes, corev1.Volume{
+			Name: "arena-output",
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: pvc.ClaimName,
+					ReadOnly:  false,
+				},
+			},
+		})
+		vm := corev1.VolumeMount{
+			Name:      "arena-output",
+			MountPath: outputPVCMountPath,
+			ReadOnly:  false,
+		}
+		if subPath != "" {
+			vm.SubPath = subPath
+		}
+		volumeMounts = append(volumeMounts, vm)
+		env = append(env, corev1.EnvVar{
+			Name:  "ARENA_OUTPUT_DIR",
+			Value: outputPVCMountPath,
+		})
+
+	case omniav1alpha1.OutputTypeS3:
+		if arenaJob.Spec.Output.S3 == nil {
+			return env, nil, nil
+		}
+		s3Cfg := arenaJob.Spec.Output.S3
+		if s3Cfg.SecretRef != nil {
+			env = append(env,
+				corev1.EnvVar{
+					Name: "ARENA_S3_ACCESS_KEY_ID",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: s3Cfg.SecretRef.Name,
+							},
+							Key:      "AWS_ACCESS_KEY_ID",
+							Optional: ptr.To(true),
+						},
+					},
+				},
+				corev1.EnvVar{
+					Name: "ARENA_S3_SECRET_ACCESS_KEY",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: s3Cfg.SecretRef.Name,
+							},
+							Key:      "AWS_SECRET_ACCESS_KEY",
+							Optional: ptr.To(true),
+						},
+					},
+				},
+			)
+		}
+	}
+
+	return env, volumes, volumeMounts
+}
+
 // resolvedProviderGroup holds the resolved CRDs and agent WebSocket URLs for a provider group.
 type resolvedProviderGroup struct {
 	providers []*corev1alpha1.Provider
@@ -806,6 +907,12 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		})
 		log.Info("mounting content with isolation", "subPath", contentSubPath)
 	}
+
+	// Wire output destination — PVC mount or S3 env vars.
+	outputEnv, outputVolumes, outputVolumeMounts := r.buildOutputConfig(arenaJob)
+	env = append(env, outputEnv...)
+	volumes = append(volumes, outputVolumes...)
+	volumeMounts = append(volumeMounts, outputVolumeMounts...)
 
 	// Create the Job
 	job := &batchv1.Job{

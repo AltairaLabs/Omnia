@@ -821,3 +821,100 @@ func TestResolveSessionURLForWorkspace(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildFacadeVolumeMounts_WithConfigMap verifies that a PromptPack backed by a
+// ConfigMap produces a single promptpack-config volume mount.
+func TestBuildFacadeVolumeMounts_WithConfigMap(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	pp := &omniav1alpha1.PromptPack{}
+	pp.Spec.Source.Type = omniav1alpha1.PromptPackSourceTypeConfigMap
+	pp.Spec.Source.ConfigMapRef = &corev1.LocalObjectReference{Name: "my-pack-config"}
+
+	mounts := r.buildFacadeVolumeMounts(pp)
+
+	if len(mounts) != 1 {
+		t.Fatalf("expected 1 volume mount, got %d", len(mounts))
+	}
+	if mounts[0].Name != "promptpack-config" {
+		t.Errorf("mount name = %q, want %q", mounts[0].Name, "promptpack-config")
+	}
+	if mounts[0].MountPath != PromptPackMountPath {
+		t.Errorf("mount path = %q, want %q", mounts[0].MountPath, PromptPackMountPath)
+	}
+	if !mounts[0].ReadOnly {
+		t.Error("expected mount to be read-only")
+	}
+}
+
+// TestBuildFacadeVolumeMounts_NoConfigMapRef verifies that a PromptPack without a
+// ConfigMapRef produces no volume mounts.
+func TestBuildFacadeVolumeMounts_NoConfigMapRef(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	pp := &omniav1alpha1.PromptPack{}
+	pp.Spec.Source.Type = omniav1alpha1.PromptPackSourceTypeConfigMap
+	pp.Spec.Source.ConfigMapRef = nil // no ref → nothing to mount
+
+	mounts := r.buildFacadeVolumeMounts(pp)
+
+	if len(mounts) != 0 {
+		t.Errorf("expected 0 volume mounts, got %d", len(mounts))
+	}
+}
+
+// TestBuildFacadeVolumeMounts_NonConfigMapSource verifies that a PromptPack with a
+// non-ConfigMap source type produces no volume mounts.
+func TestBuildFacadeVolumeMounts_NonConfigMapSource(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	pp := &omniav1alpha1.PromptPack{}
+	pp.Spec.Source.Type = omniav1alpha1.PromptPackSourceType("git")
+	pp.Spec.Source.ConfigMapRef = &corev1.LocalObjectReference{Name: "irrelevant"}
+
+	mounts := r.buildFacadeVolumeMounts(pp)
+
+	if len(mounts) != 0 {
+		t.Errorf("expected 0 volume mounts for non-configmap source, got %d", len(mounts))
+	}
+}
+
+// TestBuildFacadeContainer_VolumeMounts verifies that buildFacadeContainer sets
+// VolumeMounts when the PromptPack source is a ConfigMap.
+func TestBuildFacadeContainer_VolumeMounts(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "test-agent"
+	ar.Namespace = "default"
+
+	pp := &omniav1alpha1.PromptPack{}
+	pp.Spec.Source.Type = omniav1alpha1.PromptPackSourceTypeConfigMap
+	pp.Spec.Source.ConfigMapRef = &corev1.LocalObjectReference{Name: "pack-config"}
+
+	container := r.buildFacadeContainer(ar, pp, 8080)
+
+	if len(container.VolumeMounts) != 1 {
+		t.Fatalf("expected 1 volume mount on facade container, got %d", len(container.VolumeMounts))
+	}
+	if container.VolumeMounts[0].Name != "promptpack-config" {
+		t.Errorf("mount name = %q, want %q", container.VolumeMounts[0].Name, "promptpack-config")
+	}
+	if container.VolumeMounts[0].MountPath != PromptPackMountPath {
+		t.Errorf("mount path = %q, want %q", container.VolumeMounts[0].MountPath, PromptPackMountPath)
+	}
+}
+
+// TestBuildFacadeContainer_NoVolumeMounts verifies that buildFacadeContainer has no
+// VolumeMounts when the PromptPack does not reference a ConfigMap.
+func TestBuildFacadeContainer_NoVolumeMounts(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "test-agent"
+	ar.Namespace = "default"
+
+	pp := &omniav1alpha1.PromptPack{}
+	pp.Spec.Source.Type = omniav1alpha1.PromptPackSourceType("git")
+
+	container := r.buildFacadeContainer(ar, pp, 8080)
+
+	if len(container.VolumeMounts) != 0 {
+		t.Errorf("expected 0 volume mounts on facade container, got %d", len(container.VolumeMounts))
+	}
+}

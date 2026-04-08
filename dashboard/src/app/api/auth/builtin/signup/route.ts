@@ -21,6 +21,7 @@ import {
   validateUsername,
   generateSecureToken,
 } from "@/lib/auth/builtin";
+import { sendEmail } from "@/lib/email/sender";
 
 export async function POST(request: NextRequest) {
   const authConfig = getAuthConfig();
@@ -132,11 +133,13 @@ export async function POST(request: NextRequest) {
       );
       await store.createEmailVerificationToken(user.id, hash, expiresAt);
 
-      // NOTE: Email sending not yet implemented
-      // For now, log the token (in production, this would be sent via email)
-      console.warn(
-        `Email verification token for ${email}: ${token} (expires: ${expiresAt.toISOString()})`
-      );
+      const verifyUrl = `${process.env.OMNIA_BASE_URL || "http://localhost:3000"}/verify-email?token=${token}`;
+      await sendEmail({
+        to: email,
+        subject: "Verify Your Email",
+        text: `Click the following link to verify your email: ${verifyUrl}\n\nThis link expires at ${expiresAt.toISOString()}.`,
+        html: `<p>Click <a href="${verifyUrl}">here</a> to verify your email.</p><p>This link expires at ${expiresAt.toISOString()}.</p>`,
+      });
 
       return NextResponse.json({
         success: true,

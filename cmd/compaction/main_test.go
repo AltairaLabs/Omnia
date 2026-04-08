@@ -161,7 +161,7 @@ func TestParseFlags_FlagOverridesEnv(t *testing.T) {
 
 func TestValidateProviderFlags_MissingPostgresConn(t *testing.T) {
 	f := &flags{coldBucket: "bucket", coldBackend: "s3"}
-	err := validateProviderFlags(f)
+	err := validateProviderFlags(f, true)
 	if err == nil {
 		t.Fatal("expected error for missing postgres-conn")
 	}
@@ -175,7 +175,7 @@ func TestValidateProviderFlags_MissingColdBucket(t *testing.T) {
 		postgresConn: "postgres://localhost/db",
 		coldBackend:  "s3",
 	}
-	err := validateProviderFlags(f)
+	err := validateProviderFlags(f, true)
 	if err == nil {
 		t.Fatal("expected error for missing cold-bucket")
 	}
@@ -190,7 +190,7 @@ func TestValidateProviderFlags_UnsupportedBackend(t *testing.T) {
 		coldBucket:   "bucket",
 		coldBackend:  "invalid-backend",
 	}
-	err := validateProviderFlags(f)
+	err := validateProviderFlags(f, true)
 	if err == nil {
 		t.Fatal("expected error for unsupported backend")
 	}
@@ -205,7 +205,7 @@ func TestValidateProviderFlags_ValidS3(t *testing.T) {
 		coldBucket:   "bucket",
 		coldBackend:  "s3",
 	}
-	if err := validateProviderFlags(f); err != nil {
+	if err := validateProviderFlags(f, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -216,7 +216,7 @@ func TestValidateProviderFlags_ValidGCS(t *testing.T) {
 		coldBucket:   "bucket",
 		coldBackend:  "gcs",
 	}
-	if err := validateProviderFlags(f); err != nil {
+	if err := validateProviderFlags(f, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -227,8 +227,20 @@ func TestValidateProviderFlags_ValidAzure(t *testing.T) {
 		coldBucket:   "bucket",
 		coldBackend:  "azure",
 	}
-	if err := validateProviderFlags(f); err != nil {
+	if err := validateProviderFlags(f, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateProviderFlags_WarmOnly_NoColdBucketRequired(t *testing.T) {
+	// When cold archive is disabled, cold-bucket is not required.
+	f := &flags{
+		postgresConn: "postgres://localhost/db",
+		coldBackend:  "s3",
+		// coldBucket intentionally empty
+	}
+	if err := validateProviderFlags(f, false); err != nil {
+		t.Fatalf("unexpected error in warm-only mode: %v", err)
 	}
 }
 
@@ -238,7 +250,7 @@ func TestValidateProviderFlags_ValidAzure(t *testing.T) {
 
 func TestInitProviders_MissingPostgresConn(t *testing.T) {
 	f := &flags{coldBucket: "bucket", coldBackend: "s3"}
-	_, _, _, _, err := initProviders(context.Background(), f)
+	_, _, _, _, err := initProviders(context.Background(), f, true)
 	if err == nil {
 		t.Fatal("expected error for missing postgres-conn")
 	}
@@ -249,7 +261,7 @@ func TestInitProviders_MissingColdBucket(t *testing.T) {
 		postgresConn: "postgres://localhost/db",
 		coldBackend:  "s3",
 	}
-	_, _, _, _, err := initProviders(context.Background(), f)
+	_, _, _, _, err := initProviders(context.Background(), f, true)
 	if err == nil {
 		t.Fatal("expected error for missing cold-bucket")
 	}
@@ -261,7 +273,7 @@ func TestInitProviders_UnsupportedBackend(t *testing.T) {
 		coldBucket:   "bucket",
 		coldBackend:  "invalid",
 	}
-	_, _, _, _, err := initProviders(context.Background(), f)
+	_, _, _, _, err := initProviders(context.Background(), f, true)
 	if err == nil {
 		t.Fatal("expected error for unsupported backend")
 	}
@@ -288,7 +300,10 @@ func TestRunWithFlags_RetentionConfigNotFound(t *testing.T) {
 	}
 }
 
-func TestRunWithFlags_ColdArchiveDisabled(t *testing.T) {
+func TestRunWithFlags_ColdArchiveDisabled_NoColdBucketRequired(t *testing.T) {
+	// When cold archive is disabled, cold-bucket is not required. The run
+	// proceeds to provider initialisation and fails at postgres (no real DB),
+	// but must NOT fail with a "cold-bucket" error.
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "retention.yaml")
 	content := `
@@ -305,13 +320,20 @@ default:
 	f := &flags{
 		retentionConfigPath: cfgPath,
 		metricsAddr:         ":0",
-		postgresConn:        "postgres://localhost/db",
-		coldBucket:          "bucket",
-		coldBackend:         "s3",
+		postgresConn:        "postgres://user:pass@localhost:1/db?connect_timeout=1",
+		// coldBucket intentionally omitted — must not be required in warm-only mode
+		coldBackend: "s3",
 	}
 	err := runWithFlags(f)
-	if err != nil {
-		t.Fatalf("expected nil error for disabled cold archive, got: %v", err)
+	// We expect an error (postgres unreachable), but NOT a cold-bucket error.
+	if err == nil {
+		t.Fatal("expected error (postgres unreachable), got nil")
+	}
+	if strings.Contains(err.Error(), "cold-bucket") {
+		t.Errorf("got unexpected cold-bucket error in warm-only mode: %v", err)
+	}
+	if !strings.Contains(err.Error(), "postgres") {
+		t.Errorf("expected postgres error, got: %v", err)
 	}
 }
 
@@ -438,11 +460,45 @@ func TestInitProviders_PostgresConnectionFails(t *testing.T) {
 		coldBucket:   "bucket",
 		coldBackend:  "s3",
 	}
-	_, _, _, _, err := initProviders(context.Background(), f)
+	_, _, _, _, err := initProviders(context.Background(), f, true)
 	if err == nil {
 		t.Fatal("expected error for unreachable postgres")
 	}
 	if !strings.Contains(err.Error(), "creating postgres provider") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestInitProviders_WarmOnly_PostgresConnectionFails(t *testing.T) {
+	// Cold disabled — cold-bucket not required. Should fail at postgres, not validation.
+	f := &flags{
+		postgresConn: "postgres://user:pass@localhost:1/db?connect_timeout=1",
+		coldBackend:  "s3",
+		// coldBucket intentionally omitted
+	}
+	_, _, _, _, err := initProviders(context.Background(), f, false)
+	if err == nil {
+		t.Fatal("expected error for unreachable postgres in warm-only mode")
+	}
+	if strings.Contains(err.Error(), "cold-bucket") {
+		t.Errorf("got unexpected cold-bucket error in warm-only mode: %v", err)
+	}
+	if !strings.Contains(err.Error(), "creating postgres provider") {
+		t.Errorf("expected postgres provider error, got: %v", err)
+	}
+}
+
+func TestValidateProviderFlags_WarmOnly_MissingPostgresStillRequired(t *testing.T) {
+	// Even in warm-only mode, postgres-conn is required.
+	f := &flags{
+		coldBackend: "s3",
+		// postgresConn intentionally empty
+	}
+	err := validateProviderFlags(f, false)
+	if err == nil {
+		t.Fatal("expected error for missing postgres-conn even in warm-only mode")
+	}
+	if !strings.Contains(err.Error(), "postgres-conn") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
