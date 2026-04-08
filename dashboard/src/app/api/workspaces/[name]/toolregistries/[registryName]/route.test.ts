@@ -132,7 +132,7 @@ describe("GET /api/workspaces/[name]/toolregistries/[registryName]", () => {
     expect(response.status).toBe(403);
   });
 
-  it("returns 500 on K8s error", async () => {
+  it("returns 404 when tool registry not found", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspaceResource, notFoundResponse } = await import("@/lib/k8s/workspace-route-helpers");

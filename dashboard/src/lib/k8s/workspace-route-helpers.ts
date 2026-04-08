@@ -183,6 +183,7 @@ export async function getWorkspaceResource<T>(
 export const CRD_AGENTS = "agentruntimes";
 export const CRD_AGENT_POLICIES = "agentpolicies";
 export const CRD_TOOL_POLICIES = "toolpolicies";
+export const CRD_TOOL_REGISTRIES = "toolregistries";
 export const CRD_PROVIDERS = "providers";
 export const CRD_PROMPTPACKS = "promptpacks";
 export const CRD_ARENA_SOURCES = "arenasources";

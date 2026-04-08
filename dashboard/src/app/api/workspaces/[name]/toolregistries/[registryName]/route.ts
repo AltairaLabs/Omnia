@@ -9,11 +9,12 @@
  */
 
 import { createItemRoutes } from "@/lib/api/crd-route-factory";
+import { CRD_TOOL_REGISTRIES } from "@/lib/k8s/workspace-route-helpers";
 import type { ToolRegistry } from "@/lib/data/types";
 
 export const { GET, PUT, DELETE } = createItemRoutes<ToolRegistry>({
   kind: "ToolRegistry",
-  plural: "toolregistries",
+  plural: CRD_TOOL_REGISTRIES,
   resourceLabel: "Tool registry",
   paramKey: "registryName",
   errorLabel: "tool registry",
