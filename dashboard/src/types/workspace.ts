@@ -119,6 +119,13 @@ export interface WorkspaceSpec {
   anonymousAccess?: AnonymousAccessConfig;
   /** Cost control settings for budget and alerts */
   costControls?: CostControls;
+  /** Per-workspace service groups for session-api and memory-api */
+  services?: Array<{
+    name: string;
+    mode: "managed" | "external";
+    session?: { database?: { secretRef?: { name: string } } };
+    memory?: { database?: { secretRef?: { name: string } } };
+  }>;
 }
 
 /**
