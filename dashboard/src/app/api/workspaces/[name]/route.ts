@@ -126,6 +126,11 @@ export const GET = withWorkspaceAccess(
         );
       }
 
+      // Full CRD view for owners (used by workspace settings page)
+      if (_request.nextUrl.searchParams.get("view") === "full" && access.permissions.manageMembers) {
+        return NextResponse.json(workspace);
+      }
+
       // Build response with user's access info
       return NextResponse.json({
         workspace: {

@@ -6,7 +6,7 @@ import type { Workspace, WorkspaceSpec } from "@/types/workspace";
 const WORKSPACE_DETAIL_KEY = "workspace-detail";
 
 async function fetchWorkspaceDetail(name: string): Promise<Workspace> {
-  const response = await fetch(`/api/workspaces/${encodeURIComponent(name)}`);
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(name)}?view=full`);
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: "Failed to fetch workspace" }));

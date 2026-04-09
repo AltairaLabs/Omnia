@@ -49,7 +49,7 @@ describe("useWorkspaceDetail", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(result.current.data).toEqual(mockWorkspace);
-    expect(global.fetch).toHaveBeenCalledWith("/api/workspaces/test-ws");
+    expect(global.fetch).toHaveBeenCalledWith("/api/workspaces/test-ws?view=full");
   });
 
   it("does not fetch when name is null", () => {
