@@ -108,18 +108,26 @@ export function WorkspaceSwitcher() {
               </Badge>
             )}
             {isOwner && currentWorkspace && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
+              <span
+                role="link"
+                tabIndex={0}
+                className="inline-flex items-center justify-center h-6 w-6 rounded-md hover:bg-accent cursor-pointer"
                 data-testid="workspace-settings-gear"
                 onClick={(e) => {
                   e.stopPropagation();
+                  e.preventDefault();
                   router.push(`/workspaces/${currentWorkspace.name}/settings`);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    router.push(`/workspaces/${currentWorkspace.name}/settings`);
+                  }
                 }}
               >
                 <Settings className="h-3.5 w-3.5 opacity-50 hover:opacity-100" />
-              </Button>
+              </span>
             )}
             <ChevronsUpDown className="h-4 w-4 opacity-50" />
           </div>
