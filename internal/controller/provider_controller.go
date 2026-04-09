@@ -69,8 +69,9 @@ var envVarNameRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 // ProviderReconciler reconciles a Provider object
 type ProviderReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Scheme     *runtime.Scheme
+	Recorder   record.EventRecorder
+	HTTPClient *http.Client // used for provider health checks; defaults to a 5s-timeout client
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=providers,verbs=get;list;watch;create;update;patch;delete
@@ -560,7 +561,10 @@ func (r *ProviderReconciler) resolveHealthURL(provider *omniav1alpha1.Provider) 
 // A non-2xx response (e.g. 401 Unauthorized) is still considered "reachable" — it proves the
 // server is running. Only connection failures (DNS, timeout, refused) are treated as unhealthy.
 func (r *ProviderReconciler) checkEndpointHealth(_ context.Context, url string) error {
-	httpClient := &http.Client{Timeout: healthCheckTimeout}
+	httpClient := r.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: healthCheckTimeout}
+	}
 	resp, err := httpClient.Get(url) //nolint:gosec // URL is from trusted CRD spec, not user input
 	if err != nil {
 		return err

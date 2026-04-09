@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -30,6 +31,24 @@ import (
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
+
+// roundTripFunc adapts a function to http.RoundTripper.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// alwaysHealthyClient returns an HTTP client that responds 200 to every request.
+// This prevents envtest reconciler tests from hitting real provider endpoints.
+func alwaysHealthyClient() *http.Client {
+	return &http.Client{
+		Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       http.NoBody,
+			}, nil
+		}),
+	}
+}
 
 var _ = Describe("Provider Controller", func() {
 	const (
@@ -91,8 +110,9 @@ var _ = Describe("Provider Controller", func() {
 
 			// Reconcile
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -114,6 +134,50 @@ var _ = Describe("Provider Controller", func() {
 			}, timeout, interval).Should(Equal(omniav1alpha1.ProviderPhaseReady))
 		})
 
+		It("should set Unavailable when provider endpoint is unreachable", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      providerName + "-unreachable",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:    omniav1alpha1.ProviderTypeClaude,
+					Model:   "claude-sonnet-4-20250514",
+					BaseURL: "http://127.0.0.1:1", // unreachable
+					SecretRef: &omniav1alpha1.SecretKeyRef{
+						Name: secretName,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: &http.Client{Timeout: 1 * time.Second},
+			}
+
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      provider.Name,
+					Namespace: providerNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(healthCheckRequeueInterval))
+
+			var updatedProvider omniav1alpha1.Provider
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      provider.Name,
+				Namespace: providerNamespace,
+			}, &updatedProvider)).To(Succeed())
+			Expect(updatedProvider.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseUnavailable))
+
+			// Clean up
+			Expect(k8sClient.Delete(ctx, provider)).To(Succeed())
+			provider = nil
+		})
+
 		It("should fail when secret is not found", func() {
 			provider = &omniav1alpha1.Provider{
 				ObjectMeta: metav1.ObjectMeta{
@@ -132,8 +196,9 @@ var _ = Describe("Provider Controller", func() {
 
 			// Reconcile
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -179,8 +244,9 @@ var _ = Describe("Provider Controller", func() {
 
 			// Reconcile
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -229,8 +295,9 @@ var _ = Describe("Provider Controller", func() {
 
 			// Reconcile
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -270,8 +337,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -309,8 +377,9 @@ var _ = Describe("Provider Controller", func() {
 
 		It("should handle Provider not found", func() {
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			// Reconcile a non-existent Provider
@@ -343,8 +412,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -379,8 +449,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -431,8 +502,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -483,8 +555,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -567,8 +640,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			requests := reconciler.findProvidersForSecret(ctx, secret)
@@ -596,8 +670,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			requests := reconciler.findProvidersForSecret(ctx, secret)
@@ -620,8 +695,9 @@ var _ = Describe("Provider Controller", func() {
 			defer func() { _ = k8sClient.Delete(ctx, otherSecret) }()
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			requests := reconciler.findProvidersForSecret(ctx, otherSecret)
@@ -679,8 +755,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -726,8 +803,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -776,8 +854,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -821,8 +900,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -886,8 +966,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -972,8 +1053,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -1015,8 +1097,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -1059,8 +1142,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -1104,8 +1188,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -1208,8 +1293,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			requests := reconciler.findProvidersForSecret(ctx, secret)
@@ -1232,8 +1318,9 @@ var _ = Describe("Provider Controller", func() {
 				},
 			}
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			err := reconciler.validateCredentialEnvVar(provider, "123-BAD")
@@ -1268,8 +1355,9 @@ var _ = Describe("Provider Controller", func() {
 				},
 			}
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			err := reconciler.validateCredentialFilePath(provider, "relative/path")
@@ -1301,8 +1389,9 @@ var _ = Describe("Provider Controller", func() {
 				},
 			}
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			err := reconciler.validateCredentialFilePath(provider, "/var/secrets/../other/key")
@@ -1343,8 +1432,9 @@ var _ = Describe("Provider Controller", func() {
 				},
 			}
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			err := reconciler.validateCredentialBlock(ctx, provider)
@@ -1403,8 +1493,9 @@ var _ = Describe("Provider Controller", func() {
 			}
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			ref := &omniav1alpha1.SecretKeyRef{
@@ -1456,9 +1547,10 @@ var _ = Describe("Provider Controller", func() {
 			}
 			fakeRecorder := record.NewFakeRecorder(10)
 			reconciler := &ProviderReconciler{
-				Client:   k8sClient,
-				Scheme:   k8sClient.Scheme(),
-				Recorder: fakeRecorder,
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				Recorder:   fakeRecorder,
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			reconciler.emitWarningEvent(provider, "TestReason", "test message")
@@ -1518,9 +1610,10 @@ var _ = Describe("Provider Controller", func() {
 
 			fakeRecorder := record.NewFakeRecorder(10)
 			reconciler := &ProviderReconciler{
-				Client:   k8sClient,
-				Scheme:   k8sClient.Scheme(),
-				Recorder: fakeRecorder,
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				Recorder:   fakeRecorder,
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -1552,9 +1645,10 @@ var _ = Describe("Provider Controller", func() {
 
 			fakeRecorder := record.NewFakeRecorder(10)
 			reconciler := &ProviderReconciler{
-				Client:   k8sClient,
-				Scheme:   k8sClient.Scheme(),
-				Recorder: fakeRecorder,
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				Recorder:   fakeRecorder,
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -1600,8 +1694,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -1669,8 +1764,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -1716,8 +1812,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -1751,8 +1848,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -1806,8 +1904,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -1856,8 +1955,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -1945,8 +2045,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -1995,8 +2096,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -2037,8 +2139,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
