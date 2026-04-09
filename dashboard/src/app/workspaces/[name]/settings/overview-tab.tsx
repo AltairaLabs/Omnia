@@ -19,6 +19,21 @@ interface OverviewTabProps {
   workspace: Workspace;
 }
 
+const CONDITION_STYLE: Record<string, { label: string; className: string }> = {
+  True: { label: "OK", className: "bg-green-100 text-green-800 border-green-200" },
+  False: { label: "Error", className: "bg-red-100 text-red-800 border-red-200" },
+  Unknown: { label: "Warning", className: "bg-yellow-100 text-yellow-800 border-yellow-200" },
+};
+
+function ConditionBadge({ status }: { status: string }) {
+  const style = CONDITION_STYLE[status] ?? CONDITION_STYLE.Unknown;
+  return (
+    <Badge variant="outline" className={style.className}>
+      {style.label}
+    </Badge>
+  );
+}
+
 function getPhaseBadgeVariant(
   phase: string | undefined
 ): "default" | "secondary" | "destructive" | "outline" {
@@ -138,17 +153,7 @@ export function OverviewTab({ workspace }: OverviewTabProps) {
                       {condition.type}
                     </TableCell>
                     <TableCell>
-                      <Badge
-                        variant={
-                          condition.status === "True"
-                            ? "default"
-                            : condition.status === "False"
-                              ? "destructive"
-                              : "secondary"
-                        }
-                      >
-                        {condition.status}
-                      </Badge>
+                      <ConditionBadge status={condition.status} />
                     </TableCell>
                     <TableCell>{condition.reason ?? "—"}</TableCell>
                     <TableCell
