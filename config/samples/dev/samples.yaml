@@ -36,10 +36,10 @@ spec:
       memory:
         database:
           secretRef:
-            name: omnia-postgres
+            name: omnia-postgres-memory
 ---
-# PostgreSQL connection secret for per-workspace services.
-# session-api and memory-api read POSTGRES_CONN from this secret at startup.
+# PostgreSQL connection secrets for per-workspace services.
+# Session-api and memory-api use separate databases on the same server.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -47,7 +47,16 @@ metadata:
   namespace: dev-agents
 type: Opaque
 stringData:
-  POSTGRES_CONN: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia?sslmode=disable"
+  POSTGRES_CONN: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia_sessions?sslmode=disable"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: omnia-postgres-memory
+  namespace: dev-agents
+type: Opaque
+stringData:
+  POSTGRES_CONN: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia_memory?sslmode=disable"
 ---
 # =============================================================================
 # Credential Secrets for Providers

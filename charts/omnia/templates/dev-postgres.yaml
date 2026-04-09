@@ -15,8 +15,19 @@ metadata:
     {{- include "omnia.labels" . | nindent 4 }}
     app.kubernetes.io/component: postgres
 stringData:
-  {{ .Values.postgres.dev.secretKey }}: "postgres://omnia:omnia@{{ include "omnia.fullname" . }}-postgres:{{ $clientPort }}/omnia?sslmode=disable"
-  POSTGRES_CONN: "postgres://omnia:omnia@{{ include "omnia.fullname" . }}-postgres:{{ $clientPort }}/omnia?sslmode=disable"
+  {{ .Values.postgres.dev.secretKey }}: "postgres://omnia:omnia@{{ include "omnia.fullname" . }}-postgres:{{ $clientPort }}/omnia_sessions?sslmode=disable"
+  POSTGRES_CONN: "postgres://omnia:omnia@{{ include "omnia.fullname" . }}-postgres:{{ $clientPort }}/omnia_sessions?sslmode=disable"
+---
+# Separate secret for memory-api database
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.postgres.dev.secretName }}-memory
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+stringData:
+  POSTGRES_CONN: "postgres://omnia:omnia@{{ include "omnia.fullname" . }}-postgres:{{ $clientPort }}/omnia_memory?sslmode=disable"
 {{- if $pgbouncerEnabled }}
 ---
 apiVersion: v1
@@ -96,9 +107,18 @@ spec:
             - name: POSTGRES_PASSWORD
               value: omnia
             - name: POSTGRES_DB
-              value: omnia
+              value: omnia_sessions
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    until pg_isready -U omnia; do sleep 1; done
+                    psql -U omnia -d omnia_sessions -c "CREATE DATABASE omnia_memory;" 2>/dev/null || true
           ports:
             - containerPort: 5432
               protocol: TCP
