@@ -210,14 +210,16 @@ type ProviderSpec struct {
 }
 
 // ProviderPhase represents the current phase of the Provider.
-// +kubebuilder:validation:Enum=Ready;Error
+// +kubebuilder:validation:Enum=Ready;Error;Unavailable
 type ProviderPhase string
 
 const (
-	// ProviderPhaseReady indicates the provider is configured and ready.
+	// ProviderPhaseReady indicates the provider is configured and reachable.
 	ProviderPhaseReady ProviderPhase = "Ready"
 	// ProviderPhaseError indicates the provider has a configuration error.
 	ProviderPhaseError ProviderPhase = "Error"
+	// ProviderPhaseUnavailable indicates the provider endpoint is not reachable.
+	ProviderPhaseUnavailable ProviderPhase = "Unavailable"
 )
 
 // ProviderStatus defines the observed state of Provider.

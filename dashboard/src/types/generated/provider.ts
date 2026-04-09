@@ -147,7 +147,7 @@ export interface ProviderStatus {
   /** observedGeneration is the most recent generation observed by the controller. */
   observedGeneration?: number;
   /** phase represents the current lifecycle phase of the Provider. */
-  phase?: "Ready" | "Error";
+  phase?: "Ready" | "Error" | "Unavailable";
 }
 
 export interface Provider {

@@ -273,6 +273,69 @@ docker_build(
 )
 
 # ============================================================================
+# Dev Ollama — pre-loaded with a small model for tool-calling tests
+# ============================================================================
+
+docker_build(
+    'ollama-preloaded',
+    context='.',
+    dockerfile='./hack/Dockerfile.ollama-preloaded',
+)
+
+k8s_yaml(blob("""
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dev-ollama
+  namespace: dev-agents
+spec:
+  serviceName: dev-ollama
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dev-ollama
+  template:
+    metadata:
+      labels:
+        app: dev-ollama
+    spec:
+      containers:
+        - name: ollama
+          image: ollama-preloaded
+          ports:
+            - containerPort: 11434
+          env:
+            - name: OLLAMA_KEEP_ALIVE
+              value: "24h"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "4"
+              memory: 4Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dev-ollama
+  namespace: dev-agents
+spec:
+  selector:
+    app: dev-ollama
+  ports:
+    - port: 11434
+      targetPort: 11434
+"""))
+
+k8s_resource(
+    'dev-ollama',
+    labels=['dev'],
+    port_forwards=['11434:11434'],
+    resource_deps=['sample-resources'],
+)
+
+# ============================================================================
 # Local PromptKit Sync — rsync source into promptkit-local/ for Docker builds
 # ============================================================================
 # Docker COPY does not follow symlinks, so we rsync the actual PromptKit source

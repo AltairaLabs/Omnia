@@ -1,0 +1,7 @@
+FROM ollama/ollama:latest
+
+# Pre-load a small model that supports tool calling
+RUN nohup bash -c "ollama serve &" && \
+    sleep 3 && \
+    ollama pull qwen2.5:0.5b && \
+    pkill ollama || true
