@@ -280,6 +280,7 @@ rules:
       - arenajobs
       - arenasources
       - arenatemplatesources
+      - toolpolicies
     verbs:
       - create
       - delete
@@ -318,10 +319,7 @@ rules:
       - sessionanalyticssyncs
       - sessionprivacypolicies
       - sessionstreamingconfigs
-      - toolpolicies
     verbs:
-      - create
-      - delete
       - get
       - list
       - patch

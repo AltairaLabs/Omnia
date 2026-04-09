@@ -41,7 +41,7 @@ type ToolPolicyReconciler struct {
 	Evaluator *policy.Evaluator
 }
 
-// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=toolpolicies,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=toolpolicies,verbs=create;delete;get;list;watch;update;patch
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=toolpolicies/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
