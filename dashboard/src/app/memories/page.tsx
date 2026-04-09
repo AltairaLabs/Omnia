@@ -48,7 +48,7 @@ const CATEGORIES = [
 ];
 
 interface MemoriesBodyState {
-  isAuthenticated: boolean;
+  hasMemoryIdentity: boolean;
   error: unknown;
   isLoading: boolean;
   filtered: MemoryEntity[];
@@ -56,13 +56,13 @@ interface MemoriesBodyState {
 }
 
 function renderMemoriesBody({
-  isAuthenticated,
+  hasMemoryIdentity,
   error,
   isLoading,
   filtered,
   onSelect,
 }: MemoriesBodyState): ReactNode {
-  if (!isAuthenticated) {
+  if (!hasMemoryIdentity) {
     return (
       <Alert data-testid="memory-anonymous-notice">
         <LogIn className="h-4 w-4" />
@@ -109,15 +109,14 @@ function renderMemoriesBody({
 }
 
 export default function MemoriesPage() {
-  const { user, isAuthenticated } = useAuth();
+  const { hasMemoryIdentity, memoryUserId } = useAuth();
   // Always filter by userId — memories belong to users, not workspaces.
   // The proxy hashes the userId before querying (pseudonymous storage).
-  // Anonymous users are skipped entirely: the memory-api rejects requests
-  // without a user-owned scope, so fetching would just produce an error.
+  // For anonymous users with a device ID, we use the device ID as the userId.
   const { data, isLoading, error } = useMemories({
-    userId: user?.id,
+    userId: memoryUserId,
     limit: 500,
-    enabled: isAuthenticated,
+    enabled: hasMemoryIdentity,
   });
   const [selectedMemory, setSelectedMemory] = useState<MemoryEntity | null>(
     null
@@ -163,7 +162,7 @@ export default function MemoriesPage() {
       <div className="flex-1 overflow-auto p-6 space-y-4">
         <ConsentBanner />
 
-        {isAuthenticated && (
+        {hasMemoryIdentity && (
         <div
           className="flex items-center gap-3 flex-wrap"
           data-testid="memories-toolbar"
@@ -238,7 +237,7 @@ export default function MemoriesPage() {
         )}
 
         {renderMemoriesBody({
-          isAuthenticated,
+          hasMemoryIdentity,
           error,
           isLoading,
           filtered,

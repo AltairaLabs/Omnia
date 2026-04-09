@@ -405,8 +405,6 @@ spec:
     configMapRef:
       name: demo-prompts
   version: "2.0.0"
-  rollout:
-    type: immediate
 ---
 # ToolRegistry with HTTP handlers
 apiVersion: omnia.altairalabs.ai/v1alpha1

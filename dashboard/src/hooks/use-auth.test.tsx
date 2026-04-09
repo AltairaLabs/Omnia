@@ -17,6 +17,12 @@ vi.mock("@/lib/auth/actions", () => ({
   logout: () => mockServerLogout(),
 }));
 
+// Mock identity module — control device ID from tests
+const mockGetDeviceId = vi.fn().mockReturnValue("");
+vi.mock("@/lib/device-id", () => ({
+  getDeviceId: () => mockGetDeviceId(),
+}));
+
 // Test component that uses the auth hook
 function TestConsumer() {
   const auth = useAuth();
@@ -27,6 +33,8 @@ function TestConsumer() {
       <div data-testid="is-authenticated">{auth.isAuthenticated.toString()}</div>
       <div data-testid="can-write">{auth.canWrite.toString()}</div>
       <div data-testid="can-admin">{auth.canAdmin.toString()}</div>
+      <div data-testid="has-memory-identity">{auth.hasMemoryIdentity.toString()}</div>
+      <div data-testid="memory-user-id">{auth.memoryUserId ?? "none"}</div>
       <div data-testid="has-role-viewer">{auth.hasRole("viewer").toString()}</div>
       <div data-testid="has-role-editor">{auth.hasRole("editor").toString()}</div>
       <div data-testid="has-role-admin">{auth.hasRole("admin").toString()}</div>
@@ -203,6 +211,52 @@ describe("AuthProvider and useAuth", () => {
       );
 
       expect(screen.getByTestId("is-authenticated")).toHaveTextContent("false");
+    });
+
+    it("should have memory identity when device ID exists", () => {
+      mockGetDeviceId.mockReturnValue("device-uuid-123");
+      render(
+        <AuthProvider user={anonymousUser}>
+          <TestConsumer />
+        </AuthProvider>
+      );
+
+      expect(screen.getByTestId("has-memory-identity")).toHaveTextContent("true");
+      expect(screen.getByTestId("memory-user-id")).toHaveTextContent("device-uuid-123");
+    });
+
+    it("should not have memory identity without device ID", () => {
+      mockGetDeviceId.mockReturnValue("");
+      render(
+        <AuthProvider user={anonymousUser}>
+          <TestConsumer />
+        </AuthProvider>
+      );
+
+      expect(screen.getByTestId("has-memory-identity")).toHaveTextContent("false");
+      expect(screen.getByTestId("memory-user-id")).toHaveTextContent("none");
+    });
+  });
+
+  describe("memory identity for authenticated user", () => {
+    const authedUser: User = {
+      id: "user-1",
+      username: "testuser",
+      groups: [],
+      role: "viewer",
+      provider: "oauth",
+    };
+
+    it("should use auth user ID for memory regardless of device ID", () => {
+      mockGetDeviceId.mockReturnValue("device-uuid-123");
+      render(
+        <AuthProvider user={authedUser}>
+          <TestConsumer />
+        </AuthProvider>
+      );
+
+      expect(screen.getByTestId("has-memory-identity")).toHaveTextContent("true");
+      expect(screen.getByTestId("memory-user-id")).toHaveTextContent("user-1");
     });
   });
 

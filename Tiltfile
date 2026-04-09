@@ -86,7 +86,7 @@ allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind',
 # Also suppress langchain runtime which is referenced via Helm values, not directly in manifests
 _suppress_images = ['omnia-facade-dev', 'omnia-runtime-dev', 'omnia-langchain-runtime-dev']
 if ENABLE_ENTERPRISE:
-    _suppress_images.extend(['omnia-arena-controller-dev', 'omnia-promptkit-lsp-dev'])
+    _suppress_images.extend(['omnia-arena-controller-dev', 'omnia-promptkit-lsp-dev', 'omnia-policy-proxy-dev', 'omnia-session-api-dev', 'omnia-memory-api-dev'])
 update_settings(suppress_unused_image_warnings=_suppress_images)
 
 
@@ -728,7 +728,7 @@ k8s_resource(
         '3000:3000',  # Dashboard UI
         '3002:3002',  # WebSocket proxy for agent connections
     ],
-    resource_deps=dashboard_deps + ['session-dev-agents-default'],
+    resource_deps=dashboard_deps + ['sample-resources'],
 )
 
 # Session API server and its dev Postgres
@@ -740,17 +740,22 @@ k8s_resource(
     ],
 )
 
-k8s_resource(
+# Session-api and memory-api Deployments are created dynamically by the operator
+# when it reconciles the dev-agents Workspace CRD. We use local_resource to wait
+# for the pods and set up port-forwards. These are NOT tracked as k8s_resource
+# because Tilt can't discover operator-managed workloads from Helm output.
+# Session-api and memory-api are operator-managed: wait for them, then port-forward.
+local_resource(
     'session-dev-agents-default',
+    serve_cmd='kubectl wait --for=condition=available deployment/session-dev-agents-default -n dev-agents --timeout=300s && kubectl port-forward -n dev-agents deployment/session-dev-agents-default 8082:8080',
     labels=['session-api'],
-    port_forwards=['8082:8080'],  # Session API (REST + /docs)
     resource_deps=['omnia-postgres', 'sample-resources'],
 )
 
-k8s_resource(
+local_resource(
     'memory-dev-agents-default',
+    serve_cmd='kubectl wait --for=condition=available deployment/memory-dev-agents-default -n dev-agents --timeout=300s && kubectl port-forward -n dev-agents deployment/memory-dev-agents-default 8083:8080',
     labels=['memory-api'],
-    port_forwards=['8083:8080'],  # Memory API (REST + /docs)
     resource_deps=['omnia-postgres', 'sample-resources'],
 )
 
@@ -921,7 +926,7 @@ if ENABLE_ENTERPRISE:
     k8s_resource(
         'omnia-eval-worker',
         labels=['enterprise'],
-        resource_deps=['omnia-redis-master', 'session-dev-agents-default'],
+        resource_deps=['omnia-redis-master', 'sample-resources'],
     )
 
 # ============================================================================
@@ -1150,7 +1155,7 @@ local_resource(
     labels=['test'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
-    resource_deps=['omnia-controller-manager', 'session-dev-agents-default'] + (['omnia-arena-controller'] if ENABLE_ENTERPRISE else []),
+    resource_deps=['omnia-controller-manager', 'sample-resources'] + (['omnia-arena-controller'] if ENABLE_ENTERPRISE else []),
 )
 
 # CRD-only e2e tests — runs only the "Omnia CRDs" context (session-api, agents, tools).
@@ -1160,7 +1165,7 @@ local_resource(
     labels=['test'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
-    resource_deps=['omnia-controller-manager', 'session-dev-agents-default'],
+    resource_deps=['omnia-controller-manager', 'sample-resources'],
 )
 
 # Policy e2e tests — runs only the "Policy E2E" context (AgentPolicy + ToolPolicy CRDs).

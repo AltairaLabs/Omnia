@@ -75,10 +75,10 @@ function renderBody(
 }
 
 export function MemorySidebar({ agentName: _agentName, open, onClose }: MemorySidebarProps) {
-  const { user, isAuthenticated } = useAuth();
+  const { hasMemoryIdentity, memoryUserId } = useAuth();
   const { data, isLoading } = useMemories({
-    userId: user?.id,
-    enabled: isAuthenticated,
+    userId: memoryUserId,
+    enabled: hasMemoryIdentity,
   });
 
   // No agent-specific filtering for now — show all memories
@@ -99,7 +99,7 @@ export function MemorySidebar({ agentName: _agentName, open, onClose }: MemorySi
         </SheetHeader>
 
         <ScrollArea className="h-[calc(100vh-120px)] px-4">
-          {renderBody(isAuthenticated, isLoading, memories)}
+          {renderBody(hasMemoryIdentity, isLoading, memories)}
         </ScrollArea>
 
         <div className="border-t p-3">

@@ -54,6 +54,7 @@ import { ArenaService, type ArenaJobMetrics } from "./arena-service";
 import { SessionApiService } from "./session-api-service";
 import { MemoryApiService } from "./memory-api-service";
 import { getWsProxyUrl } from "@/lib/config";
+import { getDeviceId } from "@/lib/device-id";
 
 /**
  * Live agent connection using real WebSocket.
@@ -108,6 +109,8 @@ export class LiveAgentConnection implements AgentConnection {
       }
       const wsDirectMode = process.env.NEXT_PUBLIC_WS_DIRECT_MODE === "true";
 
+      const deviceId = getDeviceId();
+
       let wsUrl: string;
       if (wsProxyUrl && wsDirectMode) {
         // Direct mode: connect directly to the agent's /ws endpoint (for E2E testing)
@@ -120,6 +123,11 @@ export class LiveAgentConnection implements AgentConnection {
         // Use relative URL - works with gateway/ingress routing in production
         const wsHost = typeof globalThis !== "undefined" && globalThis.location ? globalThis.location.host : "localhost:3002";
         wsUrl = `${protocol}//${wsHost}/api/agents/${this.namespace}/${this.agentName}/ws`;
+      }
+
+      if (deviceId) {
+        const sep = wsUrl.includes("?") ? "&" : "?";
+        wsUrl += `${sep}device_id=${encodeURIComponent(deviceId)}`;
       }
 
       this.ws = new WebSocket(wsUrl);

@@ -22,12 +22,17 @@ import {
 import { useRouter } from "next/navigation";
 import type { User, UserRole } from "@/lib/auth/types";
 import { logout as serverLogout } from "@/lib/auth/actions";
+import { getDeviceId } from "@/lib/device-id";
 
 interface AuthContextValue {
   /** Current user */
   user: User;
   /** Whether user is authenticated (not anonymous) */
   isAuthenticated: boolean;
+  /** Whether a usable identity exists for memory scoping (authenticated or device ID) */
+  hasMemoryIdentity: boolean;
+  /** User ID suitable for memory API queries (auth user ID or device ID) */
+  memoryUserId: string | undefined;
   /** User's role */
   role: UserRole;
   /** Check if user has at least the required role */
@@ -73,15 +78,22 @@ export function AuthProvider({ children, user }: Readonly<AuthProviderProps>) {
   }, [router]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({
-      user,
-      isAuthenticated: user.provider !== "anonymous",
-      role: user.role,
-      hasRole,
-      canWrite: hasRole("editor"),
-      canAdmin: hasRole("admin"),
-      logout,
-    }),
+    () => {
+      const isAuthenticated = user.provider !== "anonymous";
+      const deviceId = isAuthenticated ? "" : getDeviceId();
+      const memoryUserId = isAuthenticated ? user.id : deviceId || undefined;
+      return {
+        user,
+        isAuthenticated,
+        hasMemoryIdentity: isAuthenticated || !!deviceId,
+        memoryUserId,
+        role: user.role,
+        hasRole,
+        canWrite: hasRole("editor"),
+        canAdmin: hasRole("admin"),
+        logout,
+      };
+    },
     [user, hasRole, logout]
   );
 

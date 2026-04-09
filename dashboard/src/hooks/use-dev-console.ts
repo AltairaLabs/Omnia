@@ -11,6 +11,7 @@ import type {
 } from "@/types/websocket";
 import { useConsoleStore, useSession } from "@/stores";
 import { generateId } from "@/lib/utils";
+import { getDeviceId } from "@/lib/device-id";
 
 interface UseDevConsoleOptions {
   /** Unique session identifier for the dev console */
@@ -342,6 +343,8 @@ export function useDevConsole({
     if (workspace) params.set("workspace", workspace);
     if (namespace) params.set("namespace", namespace);
     if (service) params.set("service", service);
+    const deviceId = getDeviceId();
+    if (deviceId) params.set("device_id", deviceId);
     const wsUrl = `${protocol}//${host}:${WS_PROXY_PORT}/api/dev-console?${params.toString()}`;
 
     const ws = new WebSocket(wsUrl);

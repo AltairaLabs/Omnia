@@ -51,6 +51,8 @@ function setup(memories: MemoryEntity[] = [], isLoading = false) {
   mockUseAuth.mockReturnValue({
     user: { id: "user-1" },
     isAuthenticated: true,
+    hasMemoryIdentity: true,
+    memoryUserId: "user-1",
   });
   mockUseMemories.mockReturnValue({
     data: { memories, total: memories.length },
@@ -62,6 +64,8 @@ function setupAnonymous() {
   mockUseAuth.mockReturnValue({
     user: { id: "anon", provider: "anonymous" },
     isAuthenticated: false,
+    hasMemoryIdentity: false,
+    memoryUserId: undefined,
   });
   mockUseMemories.mockReturnValue({
     data: { memories: [], total: 0 },

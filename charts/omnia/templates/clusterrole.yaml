@@ -320,6 +320,8 @@ rules:
       - sessionstreamingconfigs
       - toolpolicies
     verbs:
+      - create
+      - delete
       - get
       - list
       - patch
