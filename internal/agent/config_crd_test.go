@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -28,6 +29,18 @@ import (
 	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/pkg/k8s"
 )
+
+// testNamespace creates a Namespace with the workspace label set.
+// Required because ResolveWorkspaceName now returns an error if the namespace
+// cannot be read (instead of silently returning "").
+func testNamespace(name string) *corev1.Namespace {
+	return &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: map[string]string{"omnia.altairalabs.ai/workspace": name},
+		},
+	}
+}
 
 func newFakeAgentRuntime(name, namespace string, spec v1alpha1.AgentRuntimeSpec) *v1alpha1.AgentRuntime {
 	return &v1alpha1.AgentRuntime{
@@ -62,7 +75,7 @@ func TestLoadFromCRD_HappyPath(t *testing.T) {
 		},
 	})
 
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 	ctx := context.Background()
 
 	cfg, err := LoadFromCRD(ctx, c, "my-agent", "prod")
@@ -130,7 +143,7 @@ func TestLoadFromCRD_PromptPackVersionNil(t *testing.T) {
 		Facade: v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
 	})
 
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
 	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
 	if err != nil {
@@ -150,7 +163,7 @@ func TestLoadFromCRD_FacadePortDefault(t *testing.T) {
 		},
 	})
 
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
 	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
 	if err != nil {
@@ -171,7 +184,7 @@ func TestLoadFromCRD_InvalidSessionTTL(t *testing.T) {
 		},
 	})
 
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
 	_, err := LoadFromCRD(context.Background(), c, "agent", "ns")
 	if err == nil {
@@ -186,7 +199,7 @@ func TestLoadFromCRD_SessionNil(t *testing.T) {
 		// Session is nil
 	})
 
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
 	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
 	if err != nil {
@@ -207,7 +220,7 @@ func TestLoadFromCRD_SessionTTLNil(t *testing.T) {
 		},
 	})
 
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
 	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
 	if err != nil {
@@ -228,7 +241,7 @@ func TestLoadFromCRD_ToolRegistryNoNamespace(t *testing.T) {
 		},
 	})
 
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
 	cfg, err := LoadFromCRD(context.Background(), c, "agent", "mynamespace")
 	if err != nil {
@@ -246,7 +259,7 @@ func TestLoadFromCRD_NoToolRegistry(t *testing.T) {
 		// ToolRegistryRef is nil
 	})
 
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
 	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
 	if err != nil {
@@ -264,7 +277,7 @@ func TestLoadFromCRD_MediaFromEnvFallback(t *testing.T) {
 		// Media is nil — should fall back to env
 	})
 
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
 	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
 	if err != nil {
@@ -290,7 +303,7 @@ func TestLoadFromCRD_MediaEmptyBasePath(t *testing.T) {
 		},
 	})
 
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
 	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
 	if err != nil {
@@ -362,7 +375,7 @@ func TestLoadFromCRD_InvalidHealthPort(t *testing.T) {
 		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
 	})
 
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
 	t.Setenv(EnvHealthPort, "not-a-number")
 
@@ -378,7 +391,7 @@ func TestLoadFromCRD_TracingError(t *testing.T) {
 		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
 	})
 
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
 	t.Setenv(EnvTracingSampleRate, "invalid")
 
@@ -394,7 +407,7 @@ func TestLoadFromCRD_HandlerModeFromEnv(t *testing.T) {
 		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
 	})
 
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
 	t.Setenv(EnvHandlerMode, "echo")
 
@@ -440,7 +453,8 @@ func TestLoadConfig_MissingAgentNameOnly(t *testing.T) {
 
 func TestLoadConfig_FallbackToEnv(t *testing.T) {
 	// When K8s is unavailable, LoadConfig should fall back to env-based config.
-	// In test environment there's no K8s cluster, so this tests the fallback path.
+	// Force no-cluster by unsetting kubeconfig so NewClient fails.
+	t.Setenv("KUBECONFIG", "/nonexistent")
 	t.Setenv(EnvAgentName, "test-agent")
 	t.Setenv(EnvNamespace, "test-ns")
 	t.Setenv(EnvHandlerMode, "demo")
@@ -507,7 +521,7 @@ func TestLoadA2AConfigFromCRD_Defaults(t *testing.T) {
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
 		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeA2A},
 	})
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
 	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
 	if err != nil {
@@ -530,7 +544,7 @@ func TestLoadA2AConfigFromCRD_CustomTTLs(t *testing.T) {
 			ConversationTTL: ptr.To("45m"),
 		},
 	})
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
 	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
 	if err != nil {
@@ -552,7 +566,7 @@ func TestLoadA2AConfigFromCRD_InvalidTaskTTL(t *testing.T) {
 			TaskTTL: ptr.To("not-a-duration"),
 		},
 	})
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
 	_, err := LoadFromCRD(context.Background(), c, "agent", "ns")
 	if err == nil {
@@ -568,7 +582,7 @@ func TestLoadA2AConfigFromCRD_InvalidConversationTTL(t *testing.T) {
 			ConversationTTL: ptr.To("not-a-duration"),
 		},
 	})
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
 	_, err := LoadFromCRD(context.Background(), c, "agent", "ns")
 	if err == nil {

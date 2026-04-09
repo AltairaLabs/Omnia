@@ -141,12 +141,15 @@ metadata:
   namespace: dev-agents
 spec:
   type: ollama
-  model: qwen2.5:0.5b
+  model: qwen2.5:3b
   baseURL: http://dev-ollama.dev-agents:11434
   defaults:
     temperature: "0.7"
     contextWindow: 4096
     truncationStrategy: sliding
+  pricing:
+    inputCostPer1K: "0.001"
+    outputCostPer1K: "0.002"
 ---
 # ConfigMap for PromptPack (must contain pack.json)
 apiVersion: v1

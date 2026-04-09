@@ -794,6 +794,16 @@ doctor:
     type: ClusterIP
     # -- Service port
     port: 8080
+  # -- Workspace name for per-workspace service discovery (session-api, memory-api)
+  workspace: ""
+  # -- Service group within the workspace (default: "default")
+  serviceGroup: "default"
+  # -- Agent namespace to test
+  agentNamespace: ""
+  # -- Agent name to test
+  agentName: ""
+  # -- Ollama service name override
+  ollamaService: ""
   resources:
     limits:
       cpu: 500m
