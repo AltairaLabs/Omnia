@@ -7,6 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useWorkspaceDetail, useWorkspacePatch } from "@/hooks/use-workspace-detail";
+import { useToast } from "@/hooks/core";
 import { OverviewTab } from "./overview-tab";
 import { ServicesTab } from "./services-tab";
 import { AccessTab } from "./access-tab";
@@ -14,7 +15,16 @@ import { AccessTab } from "./access-tab";
 export default function WorkspaceSettingsPage() {
   const { name } = useParams<{ name: string }>();
   const { data: workspace, isLoading, error } = useWorkspaceDetail(name);
-  const { mutate } = useWorkspacePatch(name);
+  const { toast } = useToast();
+  const { mutate } = useWorkspacePatch(name, {
+    onError: (err: Error) => {
+      toast({
+        title: "Update failed",
+        description: err.message,
+        variant: "destructive",
+      });
+    },
+  });
 
   if (isLoading) {
     return (

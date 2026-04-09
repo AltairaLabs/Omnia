@@ -34,7 +34,10 @@ export function useWorkspaceDetail(name: string | null) {
  * Merges partial spec changes into the cached workspace data immediately,
  * then rolls back on error.
  */
-export function useWorkspacePatch(name: string) {
+export function useWorkspacePatch(
+  name: string,
+  options?: { onError?: (err: Error) => void }
+) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -68,10 +71,11 @@ export function useWorkspacePatch(name: string) {
       return { previous };
     },
 
-    onError: (_err, _updates, context) => {
+    onError: (err, _updates, context) => {
       if (context?.previous) {
         queryClient.setQueryData([WORKSPACE_DETAIL_KEY, name], context.previous);
       }
+      options?.onError?.(err);
     },
 
     onSettled: () => {

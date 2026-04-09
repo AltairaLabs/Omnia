@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withWorkspaceAccess } from "@/lib/auth/workspace-guard";
 import { getWorkspace, patchWorkspace } from "@/lib/k8s/workspace-client";
-import type { WorkspaceAccess, WorkspaceSpec } from "@/types/workspace";
+import type { Workspace, WorkspaceAccess, WorkspaceSpec } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
 
 interface RouteParams {
@@ -31,6 +31,28 @@ const ERR_INTERNAL = "Internal Server Error";
  * - roleBindings
  * - directGrants
  */
+/** Merge proposed updates into the current workspace spec to preview the result. */
+function mergeSpec(current: Workspace, updates: Partial<WorkspaceSpec>): WorkspaceSpec {
+  return { ...current.spec, ...updates };
+}
+
+/** Check whether a spec has at least one owner-level access path. */
+function hasOwnerAccess(spec: WorkspaceSpec): boolean {
+  // Anonymous access with owner role
+  if (spec.anonymousAccess?.enabled && spec.anonymousAccess.role === "owner") {
+    return true;
+  }
+  // Any role binding granting owner
+  if (spec.roleBindings?.some((rb) => rb.role === "owner")) {
+    return true;
+  }
+  // Any direct grant with owner role (ignoring expiry for simplicity)
+  if (spec.directGrants?.some((g) => g.role === "owner")) {
+    return true;
+  }
+  return false;
+}
+
 export const PATCH = withWorkspaceAccess(
   "owner",
   async (
@@ -61,6 +83,18 @@ export const PATCH = withWorkspaceAccess(
             message: "No updatable fields provided. Allowed fields: anonymousAccess, roleBindings, directGrants",
           },
           { status: 400 }
+        );
+      }
+
+      // Validate the proposed change won't remove all owner access paths
+      const current = await getWorkspace(name);
+      if (current && !hasOwnerAccess(mergeSpec(current, allowed))) {
+        return NextResponse.json(
+          {
+            error: "Conflict",
+            message: "This change would remove all owner-level access. At least one owner path (role binding, direct grant, or anonymous access with owner role) must remain.",
+          },
+          { status: 409 }
         );
       }
 
