@@ -18,12 +18,15 @@ interface StatusDotProps {
   ready: boolean;
 }
 
-function StatusDot({ ready }: StatusDotProps) {
+function StatusIndicator({ ready }: StatusDotProps) {
   return (
     <span
       data-testid={ready ? "status-ready" : "status-not-ready"}
-      className={`inline-block h-2 w-2 rounded-full ${ready ? "bg-green-500" : "bg-red-500"}`}
-    />
+      className={`inline-flex items-center gap-1.5 text-xs font-medium ${ready ? "text-green-600" : "text-red-600"}`}
+    >
+      <span className={`inline-block h-2 w-2 rounded-full ${ready ? "bg-green-500" : "bg-red-500"}`} />
+      {ready ? "Ready" : "Not Ready"}
+    </span>
   );
 }
 
@@ -43,7 +46,7 @@ function ServiceCard({ label, url, ready, secretRefName }: ServiceCardProps) {
     <div className="rounded-md border p-4 space-y-2">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium">{label}</span>
-        <StatusDot ready={ready} />
+        <StatusIndicator ready={ready} />
       </div>
       <div className="flex items-center gap-2">
         <span className="text-xs text-muted-foreground truncate flex-1 font-mono">
