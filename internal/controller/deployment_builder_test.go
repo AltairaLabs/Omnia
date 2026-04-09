@@ -918,3 +918,33 @@ func TestBuildFacadeContainer_NoVolumeMounts(t *testing.T) {
 		t.Errorf("expected 0 volume mounts on facade container, got %d", len(container.VolumeMounts))
 	}
 }
+
+func TestGetConfigHash_ProviderModelChange(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	provider := &omniav1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Spec: omniav1alpha1.ProviderSpec{
+			Type:  "ollama",
+			Model: "qwen2.5:3b",
+		},
+	}
+	providers := map[string]*omniav1alpha1.Provider{"default": provider}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	hash1 := r.getConfigHash(context.Background(), providers)
+	assert.Len(t, hash1, 16)
+
+	// Change model
+	provider2 := provider.DeepCopy()
+	provider2.Spec.Model = "qwen2.5:7b"
+	providers2 := map[string]*omniav1alpha1.Provider{"default": provider2}
+
+	hash2 := r.getConfigHash(context.Background(), providers2)
+	assert.Len(t, hash2, 16)
+	assert.NotEqual(t, hash1, hash2, "model change should produce different hash")
+}

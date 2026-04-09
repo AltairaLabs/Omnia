@@ -549,7 +549,7 @@ func TestFindAgentRuntimesForPromptPack_Indexed(t *testing.T) {
 	assert.Equal(t, "match", requests[0].Name)
 }
 
-func TestGetSecretHash(t *testing.T) {
+func TestGetConfigHash(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = omniav1alpha1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
@@ -563,7 +563,7 @@ func TestGetSecretHash(t *testing.T) {
 		expectChanged bool // If true, hash should be different from empty
 	}{
 		{
-			name: "no provider returns empty-ish hash",
+			name: "no provider returns empty hash",
 			agentRuntime: &omniav1alpha1.AgentRuntime{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-agent",
@@ -571,7 +571,7 @@ func TestGetSecretHash(t *testing.T) {
 				},
 			},
 			providers:   nil,
-			expectEmpty: false, // Returns a hash even with no data
+			expectEmpty: true,
 		},
 		{
 			name: "provider with secret returns hash",
@@ -765,27 +765,25 @@ func TestGetSecretHash(t *testing.T) {
 				Scheme: scheme,
 			}
 
-			hash := r.getSecretHash(context.Background(), tt.agentRuntime, tt.providers)
+			hash := r.getConfigHash(context.Background(), tt.providers)
 
-			// Hash is always 16 chars (truncated)
-			assert.Len(t, hash, 16, "hash should be 16 characters")
+			if tt.expectEmpty {
+				assert.Empty(t, hash, "hash should be empty when no providers")
+			} else {
+				// Hash is always 16 chars (truncated)
+				assert.Len(t, hash, 16, "hash should be 16 characters")
+			}
 
 			// Calculate a baseline hash to compare
 			if tt.expectChanged {
-				baselineAgent := &omniav1alpha1.AgentRuntime{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "baseline-agent",
-						Namespace: "default",
-					},
-				}
-				baselineHash := r.getSecretHash(context.Background(), baselineAgent, nil)
+				baselineHash := r.getConfigHash(context.Background(), nil)
 				assert.NotEqual(t, baselineHash, hash, "hash should differ from baseline when secrets are present")
 			}
 		})
 	}
 }
 
-func TestGetSecretHashDeterministic(t *testing.T) {
+func TestGetConfigHashDeterministic(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = omniav1alpha1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
@@ -833,9 +831,9 @@ func TestGetSecretHashDeterministic(t *testing.T) {
 	}
 
 	// Call multiple times to verify determinism
-	hash1 := r.getSecretHash(context.Background(), agentRuntime, providers)
-	hash2 := r.getSecretHash(context.Background(), agentRuntime, providers)
-	hash3 := r.getSecretHash(context.Background(), agentRuntime, providers)
+	hash1 := r.getConfigHash(context.Background(), providers)
+	hash2 := r.getConfigHash(context.Background(), providers)
+	hash3 := r.getConfigHash(context.Background(), providers)
 
 	assert.Equal(t, hash1, hash2, "hash should be deterministic")
 	assert.Equal(t, hash2, hash3, "hash should be deterministic")

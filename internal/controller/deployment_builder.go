@@ -36,8 +36,8 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
-// Annotation key for secret hash - changes to this trigger pod rollouts
-const annotationSecretHash = "omnia.altairalabs.ai/secret-hash"
+// Annotation key for config hash - changes to this trigger pod rollouts
+const annotationConfigHash = "omnia.altairalabs.ai/config-hash"
 
 func (r *AgentRuntimeReconciler) reconcileDeployment(
 	ctx context.Context,
@@ -48,8 +48,8 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 ) (*appsv1.Deployment, error) {
 	log := logf.FromContext(ctx)
 
-	// Calculate secret hash for rollout triggering
-	secretHash := r.getSecretHash(ctx, agentRuntime, providers)
+	// Calculate config hash for rollout triggering
+	configHash := r.getConfigHash(ctx, providers)
 
 	// Resolve A2A clients for env injection.
 	resolvedClients, _ := r.resolveA2AClients(ctx, log, agentRuntime)
@@ -68,7 +68,7 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 		}
 
 		// Build deployment spec
-		r.buildDeploymentSpec(ctx, deployment, agentRuntime, promptPack, toolRegistry, secretHash, resolvedClients)
+		r.buildDeploymentSpec(ctx, deployment, agentRuntime, promptPack, toolRegistry, configHash, resolvedClients)
 		return nil
 	})
 
@@ -80,16 +80,19 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 	return deployment, nil
 }
 
-// getSecretHash calculates a hash of all secrets referenced by the agent.
-// This is used to trigger pod rollouts when secrets change.
-func (r *AgentRuntimeReconciler) getSecretHash(
+// getConfigHash calculates a hash of all provider config and secrets.
+// This is used to trigger pod rollouts when provider spec or secrets change.
+func (r *AgentRuntimeReconciler) getConfigHash(
 	ctx context.Context,
-	agentRuntime *omniav1alpha1.AgentRuntime,
 	providers map[string]*omniav1alpha1.Provider,
 ) string {
+	if len(providers) == 0 {
+		return ""
+	}
+
 	hasher := sha256.New()
 
-	// Include all providers' secrets in sorted key order for determinism
+	// Include all providers in sorted key order for determinism
 	providerNames := make([]string, 0, len(providers))
 	for name := range providers {
 		providerNames = append(providerNames, name)
@@ -98,6 +101,19 @@ func (r *AgentRuntimeReconciler) getSecretHash(
 
 	for _, name := range providerNames {
 		provider := providers[name]
+		// Hash provider identity and spec fields
+		hashField(hasher, "name", name)
+		hashField(hasher, "type", string(provider.Spec.Type))
+		hashField(hasher, "model", provider.Spec.Model)
+		hashField(hasher, "baseURL", provider.Spec.BaseURL)
+
+		// Hash defaults
+		hashProviderDefaults(hasher, provider.Spec.Defaults)
+
+		// Hash pricing
+		hashProviderPricing(hasher, provider.Spec.Pricing)
+
+		// Hash secret data
 		if ref := effectiveSecretRef(provider); ref != nil {
 			r.hashSecretData(ctx, hasher, ref.Name, provider.Namespace)
 		}
@@ -109,6 +125,49 @@ func (r *AgentRuntimeReconciler) getSecretHash(
 		hashStr = hashStr[:16]
 	}
 	return hashStr
+}
+
+// hashField writes a key-value pair to the hasher with null-byte delimiters.
+func hashField(hasher hash.Hash, key, value string) {
+	hasher.Write([]byte(key))
+	hasher.Write([]byte{0})
+	hasher.Write([]byte(value))
+	hasher.Write([]byte{0})
+}
+
+// hashProviderDefaults writes provider defaults fields to the hasher.
+func hashProviderDefaults(hasher hash.Hash, defaults *omniav1alpha1.ProviderDefaults) {
+	if defaults == nil {
+		return
+	}
+	if defaults.Temperature != nil {
+		hashField(hasher, "defaults.temperature", *defaults.Temperature)
+	}
+	if defaults.TopP != nil {
+		hashField(hasher, "defaults.topP", *defaults.TopP)
+	}
+	if defaults.MaxTokens != nil {
+		hashField(hasher, "defaults.maxTokens", fmt.Sprintf("%d", *defaults.MaxTokens))
+	}
+	if defaults.ContextWindow != nil {
+		hashField(hasher, "defaults.contextWindow", fmt.Sprintf("%d", *defaults.ContextWindow))
+	}
+}
+
+// hashProviderPricing writes provider pricing fields to the hasher.
+func hashProviderPricing(hasher hash.Hash, pricing *omniav1alpha1.ProviderPricing) {
+	if pricing == nil {
+		return
+	}
+	if pricing.InputCostPer1K != nil {
+		hashField(hasher, "pricing.inputCostPer1K", *pricing.InputCostPer1K)
+	}
+	if pricing.OutputCostPer1K != nil {
+		hashField(hasher, "pricing.outputCostPer1K", *pricing.OutputCostPer1K)
+	}
+	if pricing.CachedCostPer1K != nil {
+		hashField(hasher, "pricing.cachedCostPer1K", *pricing.CachedCostPer1K)
+	}
 }
 
 // hashSecretData reads a secret and writes its data to the hasher in deterministic order.
@@ -138,7 +197,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	agentRuntime *omniav1alpha1.AgentRuntime,
 	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
-	secretHash string,
+	configHash string,
 	resolvedClients []ResolvedA2AClient,
 ) {
 	log := logf.FromContext(ctx)
@@ -258,9 +317,9 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		"traffic.sidecar.istio.io/excludeInboundPorts": fmt.Sprintf("%d", DefaultRuntimeHealthPort),
 	}
 
-	// Add secret hash annotation to trigger rollouts when secrets change
-	if secretHash != "" {
-		podAnnotations[annotationSecretHash] = secretHash
+	// Add config hash annotation to trigger rollouts when config changes
+	if configHash != "" {
+		podAnnotations[annotationConfigHash] = configHash
 	}
 
 	// Add extra pod annotations from CRD
