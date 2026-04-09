@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -46,7 +47,16 @@ func TestLoadFromCRD_ClientToolTimeoutPropagates(t *testing.T) {
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add scheme: %v", err)
 	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add corev1 scheme: %v", err)
+	}
 
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "default",
+			Labels: map[string]string{"omnia.altairalabs.ai/workspace": "default"},
+		},
+	}
 	ar := &v1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "wiring-test",
@@ -60,7 +70,7 @@ func TestLoadFromCRD_ClientToolTimeoutPropagates(t *testing.T) {
 			},
 		},
 	}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns, ar).Build()
 
 	cfg, err := LoadFromCRD(context.Background(), c, "wiring-test", "default")
 	if err != nil {
@@ -84,7 +94,16 @@ func TestLoadFromCRD_ClientToolTimeoutZeroWhenNil(t *testing.T) {
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add scheme: %v", err)
 	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add corev1 scheme: %v", err)
+	}
 
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "default",
+			Labels: map[string]string{"omnia.altairalabs.ai/workspace": "default"},
+		},
+	}
 	ar := &v1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "wiring-test", Namespace: "default"},
 		Spec: v1alpha1.AgentRuntimeSpec{
@@ -95,7 +114,7 @@ func TestLoadFromCRD_ClientToolTimeoutZeroWhenNil(t *testing.T) {
 			},
 		},
 	}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns, ar).Build()
 
 	cfg, err := LoadFromCRD(context.Background(), c, "wiring-test", "default")
 	if err != nil {
