@@ -2,19 +2,93 @@
  * API route for individual workspace operations.
  *
  * GET /api/workspaces/:name - Get workspace details
+ * PATCH /api/workspaces/:name - Update workspace access settings
  *
- * Protected by workspace access checks. User must have at least viewer role.
+ * Protected by workspace access checks. User must have at least viewer role for GET,
+ * owner role for PATCH.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { withWorkspaceAccess } from "@/lib/auth/workspace-guard";
-import { getWorkspace } from "@/lib/k8s/workspace-client";
-import type { WorkspaceAccess } from "@/types/workspace";
+import { getWorkspace, patchWorkspace } from "@/lib/k8s/workspace-client";
+import type { WorkspaceAccess, WorkspaceSpec } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
 
 interface RouteParams {
   params: Promise<{ name: string }>;
 }
+
+const ERR_INTERNAL = "Internal Server Error";
+
+/**
+ * PATCH /api/workspaces/:name
+ *
+ * Update access-related settings for a specific workspace.
+ * Requires owner role in the workspace.
+ *
+ * Only the following fields are updatable:
+ * - anonymousAccess
+ * - roleBindings
+ * - directGrants
+ */
+export const PATCH = withWorkspaceAccess(
+  "owner",
+  async (
+    request: NextRequest,
+    context: RouteParams,
+    _access: WorkspaceAccess,
+    _user: User
+  ): Promise<NextResponse> => {
+    try {
+      const { name } = await context.params;
+      const body = await request.json() as Partial<WorkspaceSpec>;
+
+      const allowed: Partial<WorkspaceSpec> = {};
+      if (body.anonymousAccess !== undefined) {
+        allowed.anonymousAccess = body.anonymousAccess;
+      }
+      if (body.roleBindings !== undefined) {
+        allowed.roleBindings = body.roleBindings;
+      }
+      if (body.directGrants !== undefined) {
+        allowed.directGrants = body.directGrants;
+      }
+
+      if (Object.keys(allowed).length === 0) {
+        return NextResponse.json(
+          {
+            error: "Bad Request",
+            message: "No updatable fields provided. Allowed fields: anonymousAccess, roleBindings, directGrants",
+          },
+          { status: 400 }
+        );
+      }
+
+      const updated = await patchWorkspace(name, allowed);
+
+      if (!updated) {
+        return NextResponse.json(
+          {
+            error: ERR_INTERNAL,
+            message: "Failed to patch workspace",
+          },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({ workspace: updated });
+    } catch (error) {
+      console.error("Failed to patch workspace:", error);
+      return NextResponse.json(
+        {
+          error: ERR_INTERNAL,
+          message: error instanceof Error ? error.message : "Failed to patch workspace",
+        },
+        { status: 500 }
+      );
+    }
+  }
+);
 
 /**
  * GET /api/workspaces/:name
@@ -81,7 +155,7 @@ export const GET = withWorkspaceAccess(
       console.error("Failed to get workspace:", error);
       return NextResponse.json(
         {
-          error: "Internal Server Error",
+          error: ERR_INTERNAL,
           message: error instanceof Error ? error.message : "Failed to get workspace",
         },
         { status: 500 }
