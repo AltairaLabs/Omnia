@@ -7,7 +7,8 @@
  * workspaces they have access to. Shows the user's role in each workspace.
  */
 
-import { Check, ChevronsUpDown, Building2, Loader2 } from "lucide-react";
+import { Check, ChevronsUpDown, Building2, Loader2, Settings } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { useWorkspace } from "@/contexts/workspace-context";
+import { useWorkspacePermissions } from "@/hooks/use-workspace-permissions";
 import type { WorkspaceRole } from "@/types/workspace";
 import { cn } from "@/lib/utils";
 
@@ -56,6 +58,8 @@ function getEnvironmentColor(environment: string): string {
  */
 export function WorkspaceSwitcher() {
   const { workspaces, currentWorkspace, setCurrentWorkspace, isLoading, error } = useWorkspace();
+  const router = useRouter();
+  const { isOwner } = useWorkspacePermissions();
 
   // Loading state
   if (isLoading) {
@@ -102,6 +106,20 @@ export function WorkspaceSwitcher() {
               <Badge variant={getRoleBadgeVariant(currentWorkspace.role)} className="text-xs">
                 {currentWorkspace.role}
               </Badge>
+            )}
+            {isOwner && currentWorkspace && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                data-testid="workspace-settings-gear"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  router.push(`/workspaces/${currentWorkspace.name}/settings`);
+                }}
+              >
+                <Settings className="h-3.5 w-3.5 opacity-50 hover:opacity-100" />
+              </Button>
             )}
             <ChevronsUpDown className="h-4 w-4 opacity-50" />
           </div>
