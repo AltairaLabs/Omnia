@@ -359,7 +359,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Extract user identity from Istio-injected headers on the upgrade request.
 	// Hash immediately — no raw user IDs are stored or propagated in the platform.
+	// Fall back to device_id query param for anonymous users (dev mode).
 	rawUserID := r.Header.Get(policy.IstioHeaderUserID)
+	if rawUserID == "" {
+		rawUserID = r.URL.Query().Get("device_id")
+	}
 	userID := identity.PseudonymizeID(rawUserID)
 	s.log.V(1).Info("user identity extracted",
 		"hasRawUserID", rawUserID != "",

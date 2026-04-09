@@ -7,7 +7,8 @@
  * workspaces they have access to. Shows the user's role in each workspace.
  */
 
-import { Check, ChevronsUpDown, Building2, Loader2 } from "lucide-react";
+import { Check, ChevronsUpDown, Building2, Loader2, Settings } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { useWorkspace } from "@/contexts/workspace-context";
+import { useWorkspacePermissions } from "@/hooks/use-workspace-permissions";
 import type { WorkspaceRole } from "@/types/workspace";
 import { cn } from "@/lib/utils";
 
@@ -56,6 +58,8 @@ function getEnvironmentColor(environment: string): string {
  */
 export function WorkspaceSwitcher() {
   const { workspaces, currentWorkspace, setCurrentWorkspace, isLoading, error } = useWorkspace();
+  const router = useRouter();
+  const { isOwner } = useWorkspacePermissions();
 
   // Loading state
   if (isLoading) {
@@ -88,6 +92,7 @@ export function WorkspaceSwitcher() {
   }
 
   return (
+    <div className="flex items-center gap-1">
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="outline" className="w-[250px] justify-between">
@@ -147,5 +152,16 @@ export function WorkspaceSwitcher() {
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+    {isOwner && currentWorkspace && (
+      <button
+        type="button"
+        className="inline-flex items-center justify-center h-9 w-9 rounded-md border border-input hover:bg-accent"
+        data-testid="workspace-settings-gear"
+        onClick={() => router.push(`/workspaces/${currentWorkspace.name}/settings`)}
+      >
+        <Settings className="h-4 w-4 opacity-60" />
+      </button>
+    )}
+    </div>
   );
 }

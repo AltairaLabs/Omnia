@@ -126,6 +126,8 @@ describe("MemoriesPage", () => {
     mockUseAuth.mockReturnValue({
       user: { id: "test-user" },
       isAuthenticated: true,
+      hasMemoryIdentity: true,
+      memoryUserId: "test-user",
     });
     mockUseMemories.mockReturnValue({
       data: { memories: [], total: 0 },
@@ -233,11 +235,13 @@ describe("MemoriesPage", () => {
     expect(mockDeleteMutate).toHaveBeenCalledWith("m1");
   });
 
-  describe("anonymous user", () => {
+  describe("anonymous user without device ID", () => {
     beforeEach(() => {
       mockUseAuth.mockReturnValue({
         user: { id: "anon", provider: "anonymous" },
         isAuthenticated: false,
+        hasMemoryIdentity: false,
+        memoryUserId: undefined,
       });
     });
 

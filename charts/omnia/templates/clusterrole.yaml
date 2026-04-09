@@ -115,6 +115,7 @@ rules:
       - promptpacks
       - providers
       - sessionretentionpolicies
+      - toolpolicies
       - toolregistries
       - workspaces
     verbs:
@@ -158,6 +159,7 @@ rules:
       - arenajobs/status
       - arenasources/status
       - arenatemplatesources/status
+      - toolpolicies/status
     verbs:
       - get
   - apiGroups:
@@ -280,6 +282,7 @@ rules:
       - arenajobs
       - arenasources
       - arenatemplatesources
+      - toolpolicies
     verbs:
       - create
       - delete
@@ -318,7 +321,6 @@ rules:
       - sessionanalyticssyncs
       - sessionprivacypolicies
       - sessionstreamingconfigs
-      - toolpolicies
     verbs:
       - get
       - list

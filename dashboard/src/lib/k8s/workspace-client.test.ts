@@ -4,6 +4,7 @@ import type { Workspace } from "@/types/workspace";
 // These need to be defined before the mock factory runs
 const mockGetClusterCustomObject = vi.fn();
 const mockListClusterCustomObject = vi.fn();
+const mockPatchClusterCustomObject = vi.fn();
 const mockLoadFromCluster = vi.fn();
 const mockLoadFromDefault = vi.fn();
 
@@ -30,6 +31,7 @@ vi.mock("@kubernetes/client-node", () => {
         return {
           getClusterCustomObject: mockGetClusterCustomObject,
           listClusterCustomObject: mockListClusterCustomObject,
+          patchClusterCustomObject: mockPatchClusterCustomObject,
         };
       }
     },
@@ -41,6 +43,7 @@ vi.mock("@kubernetes/client-node", () => {
 import {
   getWorkspace,
   listWorkspaces,
+  patchWorkspace,
   watchWorkspaces,
   getWorkspaceWatchPath,
   resetWorkspaceClient,
@@ -192,6 +195,66 @@ describe("workspace-client", () => {
       const result = await listWorkspaces();
 
       expect(result).toEqual([]);
+    });
+  });
+
+  describe("patchWorkspace", () => {
+    it("should return patched workspace on success", async () => {
+      const patchedWorkspace: Workspace = {
+        ...mockWorkspace,
+        spec: {
+          ...mockWorkspace.spec,
+          displayName: "Updated Workspace",
+        },
+      };
+      mockPatchClusterCustomObject.mockResolvedValue(patchedWorkspace);
+
+      const result = await patchWorkspace("test-workspace", {
+        displayName: "Updated Workspace",
+      });
+
+      expect(result).toEqual(patchedWorkspace);
+      expect(mockPatchClusterCustomObject).toHaveBeenCalledWith({
+        group: "omnia.altairalabs.ai",
+        version: "v1alpha1",
+        plural: "workspaces",
+        name: "test-workspace",
+        body: { spec: { displayName: "Updated Workspace" } },
+      });
+    });
+
+    it("should return null on error", async () => {
+      mockPatchClusterCustomObject.mockRejectedValue(
+        new Error("Patch failed")
+      );
+
+      const result = await patchWorkspace("test-workspace", {
+        displayName: "Updated Workspace",
+      });
+
+      expect(result).toBeNull();
+    });
+
+    it("should return null when client is unavailable", async () => {
+      // Reset so the next call gets a fresh null client
+      resetWorkspaceClient();
+
+      // Override getCurrentCluster to return null server
+      const k8s = await import("@kubernetes/client-node");
+      const origGetCurrentCluster = k8s.KubeConfig.prototype.getCurrentCluster;
+      // @ts-expect-error - patching prototype for test
+      k8s.KubeConfig.prototype.getCurrentCluster = () => ({ server: "" });
+
+      const result = await patchWorkspace("test-workspace", {
+        displayName: "Updated Workspace",
+      });
+
+      expect(result).toBeNull();
+      expect(mockPatchClusterCustomObject).not.toHaveBeenCalled();
+
+      // Restore
+      k8s.KubeConfig.prototype.getCurrentCluster = origGetCurrentCluster;
+      resetWorkspaceClient();
     });
   });
 

@@ -86,6 +86,7 @@ rules:
   - arenajobs
   - arenasources
   - arenatemplatesources
+  - toolpolicies
   verbs:
   - create
   - delete
@@ -124,7 +125,6 @@ rules:
   - sessionanalyticssyncs
   - sessionprivacypolicies
   - sessionstreamingconfigs
-  - toolpolicies
   verbs:
   - get
   - list

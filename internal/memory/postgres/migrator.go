@@ -42,6 +42,9 @@ type Migrator struct {
 // NewMigrator creates a new Migrator from a PostgreSQL connection string.
 // The connection string should be a valid PostgreSQL URL, e.g.:
 // "postgres://user:pass@host:5432/dbname?sslmode=disable"
+//
+// Memory-api and session-api use separate databases, so their schema_migrations
+// tables don't collide.
 func NewMigrator(connStr string, log logr.Logger) (*Migrator, error) {
 	source, err := iofs.New(migrationsFS, "migrations")
 	if err != nil {

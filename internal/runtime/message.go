@@ -23,7 +23,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/AltairaLabs/PromptKit/runtime/types"
+	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/sdk"
 	"github.com/go-logr/logr"
 	"go.opentelemetry.io/otel/trace"
@@ -248,14 +248,14 @@ func (s *Server) handleChunkText(stream runtimev1.RuntimeService_ConverseServer,
 }
 
 // handleChunkMedia sends a media chunk on the gRPC stream.
-func (s *Server) handleChunkMedia(ctx context.Context, stream runtimev1.RuntimeService_ConverseServer, media *types.MediaContent, log logr.Logger) error {
+func (s *Server) handleChunkMedia(_ context.Context, stream runtimev1.RuntimeService_ConverseServer, media *providers.StreamMediaData, log logr.Logger) error {
 	if media == nil {
 		return nil
 	}
-	mediaChunk, err := buildMediaChunk(ctx, s, media)
-	if err != nil {
-		log.Error(err, "failed to build media chunk")
-		return nil // non-fatal
+	mediaChunk := buildMediaChunk(media)
+	if mediaChunk == nil {
+		log.V(1).Info("skipping empty media chunk")
+		return nil
 	}
 	return stream.Send(&runtimev1.ServerMessage{
 		Message: &runtimev1.ServerMessage_MediaChunk{
@@ -354,64 +354,19 @@ func (s *Server) collectClientToolResults(
 
 // buildMediaChunk converts a PromptKit MediaContent into a gRPC MediaChunk.
 // It resolves base64 data, file paths, and URLs to raw bytes for efficient gRPC transport.
-func buildMediaChunk(ctx context.Context, s *Server, media *types.MediaContent) (*runtimev1.MediaChunk, error) {
-	mediaID := fmt.Sprintf("media-%d", mediaIDCounter.Add(1))
-
-	chunk := &runtimev1.MediaChunk{
-		MediaId:  mediaID,
-		Sequence: 0,
+// buildMediaChunk converts a StreamMediaData (raw bytes from the SDK) into a
+// gRPC MediaChunk. Returns nil if the media has no data.
+func buildMediaChunk(media *providers.StreamMediaData) *runtimev1.MediaChunk {
+	if len(media.Data) == 0 {
+		return nil
+	}
+	return &runtimev1.MediaChunk{
+		MediaId:  fmt.Sprintf("media-%d", mediaIDCounter.Add(1)),
+		Sequence: int32(media.FrameNum),
 		IsLast:   true, // SDK emits one ChunkMedia per media item
 		MimeType: media.MIMEType,
+		Data:     media.Data,
 	}
-
-	// Resolve media data to raw bytes
-	if media.Data != nil && *media.Data != "" {
-		decoded, err := decodeMediaData(*media.Data)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode media data: %w", err)
-		}
-		chunk.Data = decoded
-		return chunk, nil
-	}
-
-	if media.URL != nil && *media.URL != "" {
-		url := *media.URL
-		if IsResolvableURL(url) && s.mediaResolver != nil {
-			base64Data, mimeType, _, err := s.mediaResolver.ResolveURL(url)
-			if err != nil {
-				return nil, fmt.Errorf("failed to resolve media URL %s: %w", url, err)
-			}
-			decoded, err := decodeMediaData(base64Data)
-			if err != nil {
-				return nil, fmt.Errorf("failed to decode resolved media: %w", err)
-			}
-			chunk.Data = decoded
-			chunk.MimeType = mimeType
-			return chunk, nil
-		}
-		// For HTTP/HTTPS URLs, send zero-data chunk — facade/browser fetches directly
-		_ = ctx // ctx available for future use
-		return chunk, nil
-	}
-
-	if media.FilePath != nil && *media.FilePath != "" {
-		if s.mediaResolver != nil {
-			base64Data, mimeType, _, err := s.mediaResolver.ResolveURL("file://" + *media.FilePath)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read media file %s: %w", *media.FilePath, err)
-			}
-			decoded, err := decodeMediaData(base64Data)
-			if err != nil {
-				return nil, fmt.Errorf("failed to decode file media: %w", err)
-			}
-			chunk.Data = decoded
-			chunk.MimeType = mimeType
-			return chunk, nil
-		}
-		return nil, fmt.Errorf("media resolver not configured, cannot resolve file: %s", *media.FilePath)
-	}
-
-	return nil, fmt.Errorf("media content has no data source")
 }
 
 // sendDoneMessage builds usage info and sends the done message to the client.

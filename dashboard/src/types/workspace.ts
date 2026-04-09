@@ -119,6 +119,13 @@ export interface WorkspaceSpec {
   anonymousAccess?: AnonymousAccessConfig;
   /** Cost control settings for budget and alerts */
   costControls?: CostControls;
+  /** Per-workspace service groups for session-api and memory-api */
+  services?: Array<{
+    name: string;
+    mode: "managed" | "external";
+    session?: { database?: { secretRef?: { name: string } } };
+    memory?: { database?: { secretRef?: { name: string } } };
+  }>;
 }
 
 /**
@@ -142,7 +149,26 @@ export interface CostUsage {
  */
 export interface WorkspaceStatus {
   /** Current phase of the workspace */
-  phase?: "Active" | "Terminating" | "Pending";
+  phase?: "Pending" | "Ready" | "Suspended" | "Error";
+  /** Controller-observed generation */
+  observedGeneration?: number;
+  /** Namespace provisioned for the workspace */
+  namespace?: {
+    name: string;
+    created: boolean;
+  };
+  /** Service accounts provisioned for workspace members */
+  serviceAccounts?: {
+    owner: string;
+    editor: string;
+    viewer: string;
+  };
+  /** Member counts by role */
+  members?: {
+    owners: number;
+    editors: number;
+    viewers: number;
+  };
   /** Cost usage tracking */
   costUsage?: CostUsage;
   /** Per-workspace service group statuses */
@@ -154,6 +180,7 @@ export interface WorkspaceStatus {
     lastTransitionTime?: string;
     reason?: string;
     message?: string;
+    observedGeneration?: number;
   }>;
 }
 
