@@ -21,6 +21,55 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
+func TestReconcileRole_IncludesNamespaceReadAccess(t *testing.T) {
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "test-ns",
+			UID:       "fake-uid",
+		},
+	}
+
+	scheme := runtime.NewScheme()
+	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
+	require.NoError(t, rbacv1.AddToScheme(scheme))
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	r := &AgentRuntimeReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	err := r.reconcileRole(context.Background(), ar)
+	require.NoError(t, err)
+
+	role := &rbacv1.Role{}
+	err = fakeClient.Get(context.Background(), types.NamespacedName{
+		Name:      "test-agent-facade",
+		Namespace: "test-ns",
+	}, role)
+	require.NoError(t, err)
+
+	// The facade needs namespace read access so ResolveWorkspaceName can read
+	// the namespace label (omnia.altairalabs.ai/workspace) as a fallback when
+	// the AgentRuntime itself has no workspace label. Without this, sessions
+	// are stored with an empty workspace_name and don't appear in the dashboard.
+	var hasNamespaceRead bool
+	for _, rule := range role.Rules {
+		for _, res := range rule.Resources {
+			if res == "namespaces" {
+				for _, verb := range rule.Verbs {
+					if verb == "get" {
+						hasNamespaceRead = true
+					}
+				}
+			}
+		}
+	}
+	assert.True(t, hasNamespaceRead, "facade Role must grant GET on namespaces for workspace name resolution")
+}
+
 func TestReconcileWorkspaceReaderBinding_Creates(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{

@@ -341,6 +341,8 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil && !errors.Is(err, session.ErrSessionNotFound) {
 		log.Error(err, "GetMessages failed", "sessionID", sessionID)
+		writeError(w, err)
+		return
 	}
 	msgs := make([]session.Message, 0, len(msgPtrs))
 	for _, m := range msgPtrs {
@@ -417,6 +419,10 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Namespace == "" {
 		writeError(w, ErrMissingNamespace)
+		return
+	}
+	if req.WorkspaceName == "" {
+		writeError(w, ErrMissingWorkspace)
 		return
 	}
 
