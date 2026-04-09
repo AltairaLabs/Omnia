@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -1095,6 +1096,9 @@ func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 3}).
 		For(&omniav1alpha1.Workspace{}).
+		// Watch Deployments owned by this controller so service readiness
+		// changes (pods becoming ready/unready) trigger a workspace reconcile.
+		Owns(&appsv1.Deployment{}).
 		// Watch PVCs with the workspace label to trigger reconciliation when PVC phase changes
 		Watches(
 			&corev1.PersistentVolumeClaim{},
