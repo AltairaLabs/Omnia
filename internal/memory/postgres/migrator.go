@@ -23,6 +23,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/golang-migrate/migrate/v4"
@@ -42,13 +43,24 @@ type Migrator struct {
 // NewMigrator creates a new Migrator from a PostgreSQL connection string.
 // The connection string should be a valid PostgreSQL URL, e.g.:
 // "postgres://user:pass@host:5432/dbname?sslmode=disable"
+//
+// Memory and session migrations share the same database but use separate
+// tracking tables (memory_schema_migrations vs schema_migrations) to avoid
+// version collisions. The x-migrations-table param is a golang-migrate feature.
 func NewMigrator(connStr string, log logr.Logger) (*Migrator, error) {
 	source, err := iofs.New(migrationsFS, "migrations")
 	if err != nil {
 		return nil, fmt.Errorf("creating migration source: %w", err)
 	}
 
-	m, err := migrate.NewWithSourceInstance("iofs", source, connStr)
+	// Use a separate migrations table so memory and session don't collide.
+	sep := "?"
+	if strings.Contains(connStr, "?") {
+		sep = "&"
+	}
+	migrateConn := connStr + sep + "x-migrations-table=memory_schema_migrations"
+
+	m, err := migrate.NewWithSourceInstance("iofs", source, migrateConn)
 	if err != nil {
 		return nil, fmt.Errorf("creating migrator: %w", err)
 	}
