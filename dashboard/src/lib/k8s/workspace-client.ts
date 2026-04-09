@@ -6,7 +6,7 @@
  */
 
 import * as k8s from "@kubernetes/client-node";
-import type { Workspace } from "@/types/workspace";
+import type { Workspace, WorkspaceSpec } from "@/types/workspace";
 
 const GROUP = "omnia.altairalabs.ai";
 const VERSION = "v1alpha1";
@@ -115,6 +115,38 @@ export async function listWorkspaces(
       return [];
     }
     throw error;
+  }
+}
+
+/**
+ * Merge-patch a Workspace by name.
+ * Only the fields provided in updates are changed; all others are preserved.
+ *
+ * @param name - The workspace name
+ * @param updates - Partial spec fields to apply via merge-patch
+ * @returns The patched workspace, or null if client is unavailable or an error occurs
+ */
+export async function patchWorkspace(
+  name: string,
+  updates: Partial<WorkspaceSpec>
+): Promise<Workspace | null> {
+  const k8sClient = getClient();
+  if (!k8sClient) {
+    return null;
+  }
+
+  try {
+    const response = await k8sClient.patchClusterCustomObject({
+      group: GROUP,
+      version: VERSION,
+      plural: PLURAL,
+      name,
+      body: { spec: updates },
+    });
+    return response as Workspace;
+  } catch (error) {
+    console.error("patchWorkspace failed", error);
+    return null;
   }
 }
 
