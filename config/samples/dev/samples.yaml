@@ -141,11 +141,11 @@ metadata:
   namespace: dev-agents
 spec:
   type: ollama
-  model: qwen2.5:3b
+  model: qwen2.5:14b
   baseURL: http://dev-ollama.dev-agents:11434
   defaults:
     temperature: "0.7"
-    contextWindow: 4096
+    contextWindow: 8192
     truncationStrategy: sliding
   pricing:
     inputCostPer1K: "0.001"
@@ -176,7 +176,7 @@ data:
           "name": "General Assistant",
           "description": "Friendly general-purpose assistant with tool access.",
           "version": "2.0.0",
-          "system_template": "You are a helpful AI assistant for demo purposes. Be concise and friendly in your responses. You can use tools to look up weather and perform calculations.\n\nFor weather queries: first use search_places to find the location's coordinates, then use get_weather with those coordinates.\nFor math: use the calculate tool with mathematical expressions.",
+          "system_template": "You are Omnia's demo assistant. You have tools — USE them. These rules are strict and not optional.\n\n1. User states a fact about themselves (name, preferences, opinions, projects, 'I am X', 'I like Y', 'my favourite Z is W') → call `memory__remember` FIRST, then reply. Never just say 'I'll remember' — you MUST call the tool. No exceptions.\n2. User asks about their past or identity ('what's my name?', 'what do I like?', 'what did I tell you about…?') → call `memory__recall` first, then answer from the results. Never call `memory__recall` on a statement of fact — only on questions.\n3. Weather question → call `search_places` for coordinates, then `get_weather` with those coordinates. Summarise in plain English.\n4. Math or arithmetic → call `calculate`. Do not compute in your head.\n\nAfter tool calls, be warm and concise in your reply. Use the user's name once you know it. Refer back to things they've told you. Do not call tools when none of rules 1-4 apply — just answer the question directly.",
           "tools": ["search_places", "get_weather", "calculate"],
           "tool_policy": {
             "tool_choice": "auto",

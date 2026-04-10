@@ -340,7 +340,7 @@ spec:
               echo "sending warmup chat completion..."
               curl -fsS -m 180 -X POST http://127.0.0.1:11434/v1/chat/completions \\
                 -H 'Content-Type: application/json' \\
-                -d '{"model":"qwen2.5:3b","messages":[{"role":"user","content":"warmup"}],"max_tokens":4,"stream":false}' \\
+                -d '{"model":"qwen2.5:14b","messages":[{"role":"user","content":"warmup"}],"max_tokens":4,"stream":false}' \\
                 > /dev/null
               echo "warmup complete; sleeping"
               # Keep the sidecar running so we don't churn — Kubernetes

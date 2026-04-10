@@ -1,9 +1,14 @@
 FROM ollama/ollama:latest
 
 # Pre-load a model that supports tool calling reliably.
-# qwen2.5:3b is the smallest model with consistent tool-call schema adherence.
-# The 0.5b variant frequently sends malformed tool arguments (e.g. objects instead of strings).
+# qwen2.5:14b was chosen after empirically testing qwen2.5:7b, llama3.1:8b,
+# llama3-groq-tool-use:8b and hermes3:8b against the demo's tool-calling
+# scenarios. Smaller models frequently write tool calls as plain text
+# instead of emitting proper `tool_calls` — qwen2.5:14b is the smallest
+# open-weight model we found that reliably emits real tool_calls for
+# memory/recall/weather/math flows. Size: ~9GB quantized, fits on a
+# 16GB laptop with headroom.
 RUN nohup bash -c "ollama serve &" && \
     sleep 3 && \
-    ollama pull qwen2.5:3b && \
+    ollama pull qwen2.5:14b && \
     pkill ollama || true

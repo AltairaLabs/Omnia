@@ -18,7 +18,7 @@ import (
 const (
 	wsHandshakeTimeout = 10 * time.Second
 	// wsResponseTimeout bounds a single chat turn. Tool-calling rounds with
-	// small local models (e.g. qwen2.5:3b on CPU) can exceed 60s, so we allow
+	// local models (e.g. qwen2.5:14b on CPU) can exceed 60s, so we allow
 	// up to 3 minutes before declaring a hang.
 	wsResponseTimeout = 180 * time.Second
 

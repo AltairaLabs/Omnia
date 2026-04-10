@@ -17,12 +17,22 @@ import {
   useContext,
   useCallback,
   useMemo,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
 import type { User, UserRole } from "@/lib/auth/types";
 import { logout as serverLogout } from "@/lib/auth/actions";
 import { getDeviceId } from "@/lib/device-id";
+
+// Device ID lives in localStorage and never changes during a session, so
+// there's nothing to subscribe to — React will only read it once per mount.
+const subscribeToDeviceId = () => () => {};
+// Server snapshot is "" because localStorage doesn't exist during SSR.
+// Client snapshot reads the real value. Differing snapshots tell React to
+// re-render after hydration, which avoids the SSR/CSR mismatch that would
+// otherwise happen when a localStorage-derived value appears on the page.
+const getDeviceIdServerSnapshot = () => "";
 
 interface AuthContextValue {
   /** Current user */
@@ -60,6 +70,19 @@ interface AuthProviderProps {
 export function AuthProvider({ children, user }: Readonly<AuthProviderProps>) {
   const router = useRouter();
 
+  const isAuthenticated = user.provider !== "anonymous";
+
+  // Read device ID via useSyncExternalStore so the server render ("") and
+  // the initial client render agree — React re-renders after hydration when
+  // the snapshots differ, avoiding a hydration mismatch. Authenticated users
+  // ignore the device ID entirely, so we only use it when anonymous.
+  const rawDeviceId = useSyncExternalStore(
+    subscribeToDeviceId,
+    getDeviceId,
+    getDeviceIdServerSnapshot
+  );
+  const deviceId = isAuthenticated ? "" : rawDeviceId;
+
   const hasRole = useCallback(
     (requiredRole: UserRole) => {
       const roleHierarchy: Record<UserRole, number> = {
@@ -79,8 +102,6 @@ export function AuthProvider({ children, user }: Readonly<AuthProviderProps>) {
 
   const value = useMemo<AuthContextValue>(
     () => {
-      const isAuthenticated = user.provider !== "anonymous";
-      const deviceId = isAuthenticated ? "" : getDeviceId();
       const memoryUserId = isAuthenticated ? user.id : deviceId || undefined;
       return {
         user,
@@ -94,7 +115,7 @@ export function AuthProvider({ children, user }: Readonly<AuthProviderProps>) {
         logout,
       };
     },
-    [user, hasRole, logout]
+    [user, isAuthenticated, deviceId, hasRole, logout]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
