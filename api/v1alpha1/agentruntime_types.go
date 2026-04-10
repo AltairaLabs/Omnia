@@ -325,6 +325,22 @@ type ProviderDefaults struct {
 	// +kubebuilder:default=sliding
 	// +optional
 	TruncationStrategy TruncationStrategy `json:"truncationStrategy,omitempty"`
+
+	// requestTimeout caps the wall-clock duration of non-streaming provider
+	// HTTP calls (Predict, embeddings). Does not apply to streaming calls.
+	// Go duration string, e.g. "2m", "90s". Defaults to the provider's
+	// built-in default (typically 60s) when unset.
+	// +optional
+	RequestTimeout string `json:"requestTimeout,omitempty"`
+
+	// streamIdleTimeout bounds how long an SSE streaming body may remain
+	// silent (no bytes) between reads before the stream is aborted. The
+	// timer resets on every byte received, so legitimately long-running
+	// streams are not affected. Useful for slow local models (e.g. Ollama
+	// CPU inference) where first-token latency can exceed the default 30s.
+	// Go duration string, e.g. "120s", "2m". Defaults to 30s when unset.
+	// +optional
+	StreamIdleTimeout string `json:"streamIdleTimeout,omitempty"`
 }
 
 // ProviderPricing defines cost tracking configuration for the provider.

@@ -19,8 +19,6 @@ package controller
 import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
 // SetCondition sets a status condition on the given conditions slice.
@@ -32,12 +30,4 @@ func SetCondition(conditions *[]metav1.Condition, generation int64, condType str
 		Reason:             reason,
 		Message:            message,
 	})
-}
-
-// providerKeyMapping maps provider types to their expected API key env var names.
-// This is a package-level variable to avoid duplication across functions.
-var providerKeyMapping = map[omniav1alpha1.ProviderType][]string{
-	omniav1alpha1.ProviderTypeClaude: {"ANTHROPIC_API_KEY", "CLAUDE_API_KEY"},
-	omniav1alpha1.ProviderTypeOpenAI: {"OPENAI_API_KEY", "OPENAI_TOKEN"},
-	omniav1alpha1.ProviderTypeGemini: {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
 }

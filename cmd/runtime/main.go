@@ -430,6 +430,8 @@ func configDerivedServerOpts(cfg *pkruntime.Config) []pkruntime.ServerOption {
 		pkruntime.WithToolsConfig(cfg.ToolsConfigPath),
 		pkruntime.WithProviderInfo(cfg.ProviderType, cfg.Model),
 		pkruntime.WithBaseURL(cfg.BaseURL),
+		pkruntime.WithProviderRequestTimeout(cfg.ProviderRequestTimeout),
+		pkruntime.WithProviderStreamIdleTimeout(cfg.ProviderStreamIdleTimeout),
 		pkruntime.WithPricing(cfg.InputCostPer1K, cfg.OutputCostPer1K),
 		pkruntime.WithContextWindow(cfg.ContextWindow),
 		pkruntime.WithTruncationStrategy(cfg.TruncationStrategy),

@@ -19,10 +19,28 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/providers/mock"
 )
+
+// httpTimeoutSetter is satisfied by providers whose BaseProvider exposes
+// SetHTTPTimeout (available in PromptKit since the request_timeout feature).
+// Applied via type assertion so Omnia builds against both current and older
+// PromptKit versions.
+type httpTimeoutSetter interface {
+	SetHTTPTimeout(time.Duration)
+}
+
+// streamIdleTimeoutSetter is satisfied by providers whose BaseProvider
+// exposes SetStreamIdleTimeout. Not yet in the published PromptKit SDK;
+// this assertion is forward-compatible — it silently does nothing today
+// and will start taking effect once PromptKit publishes the setter.
+// TODO: drop the type assertion once SetStreamIdleTimeout is released.
+type streamIdleTimeoutSetter interface {
+	SetStreamIdleTimeout(time.Duration)
+}
 
 // createMockProvider creates a mock provider based on configuration.
 // Returns a ToolProvider (not the basic Provider) so that PredictWithTools
@@ -99,11 +117,26 @@ func (s *Server) createProviderFromConfig() (providers.Provider, error) {
 	s.log.Info("creating explicit provider from config",
 		"type", s.providerType,
 		"model", s.model,
-		"baseURL", s.baseURL)
+		"baseURL", s.baseURL,
+		"requestTimeout", s.providerRequestTimeout,
+		"streamIdleTimeout", s.providerStreamIdleTimeout)
 
 	provider, err := providers.CreateProviderFromSpec(spec)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create provider from spec: %w", err)
+	}
+
+	// Apply timeouts via setter interfaces — the fields are not on the
+	// published ProviderSpec struct, but BaseProvider exposes the setters.
+	if s.providerRequestTimeout > 0 {
+		if p, ok := provider.(httpTimeoutSetter); ok {
+			p.SetHTTPTimeout(s.providerRequestTimeout)
+		}
+	}
+	if s.providerStreamIdleTimeout > 0 {
+		if p, ok := provider.(streamIdleTimeoutSetter); ok {
+			p.SetStreamIdleTimeout(s.providerStreamIdleTimeout)
+		}
 	}
 
 	return provider, nil

@@ -235,7 +235,9 @@ func loadFromProviderRef(ctx context.Context, c client.Client, cfg *Config, ref 
 	cfg.ProviderRefNamespace = provider.Namespace
 
 	if provider.Spec.Defaults != nil {
-		loadProviderDefaults(cfg, provider.Spec.Defaults)
+		if err := loadProviderDefaults(cfg, provider.Spec.Defaults); err != nil {
+			return err
+		}
 	}
 
 	// Load pricing from Provider CRD
@@ -248,13 +250,34 @@ func loadFromProviderRef(ctx context.Context, c client.Client, cfg *Config, ref 
 }
 
 // loadProviderDefaults populates config fields from Provider CRD defaults.
-func loadProviderDefaults(cfg *Config, defaults *v1alpha1.ProviderDefaults) {
+func loadProviderDefaults(cfg *Config, defaults *v1alpha1.ProviderDefaults) error {
 	if defaults.ContextWindow != nil {
 		cfg.ContextWindow = int(*defaults.ContextWindow)
 	}
 	if defaults.TruncationStrategy != "" {
 		cfg.TruncationStrategy = string(defaults.TruncationStrategy)
 	}
+	if defaults.RequestTimeout != "" {
+		d, err := time.ParseDuration(defaults.RequestTimeout)
+		if err != nil {
+			return fmt.Errorf("parse requestTimeout %q: %w", defaults.RequestTimeout, err)
+		}
+		if d < 0 {
+			return fmt.Errorf("requestTimeout %q must be non-negative", defaults.RequestTimeout)
+		}
+		cfg.ProviderRequestTimeout = d
+	}
+	if defaults.StreamIdleTimeout != "" {
+		d, err := time.ParseDuration(defaults.StreamIdleTimeout)
+		if err != nil {
+			return fmt.Errorf("parse streamIdleTimeout %q: %w", defaults.StreamIdleTimeout, err)
+		}
+		if d < 0 {
+			return fmt.Errorf("streamIdleTimeout %q must be non-negative", defaults.StreamIdleTimeout)
+		}
+		cfg.ProviderStreamIdleTimeout = d
+	}
+	return nil
 }
 
 // loadProviderPricing extracts pricing from the Provider CRD and converts to float64.

@@ -185,6 +185,22 @@ spec:
                       the response.
                     format: int32
                     type: integer
+                  requestTimeout:
+                    description: |-
+                      requestTimeout caps the wall-clock duration of non-streaming provider
+                      HTTP calls (Predict, embeddings). Does not apply to streaming calls.
+                      Go duration string, e.g. "2m", "90s". Defaults to the provider's
+                      built-in default (typically 60s) when unset.
+                    type: string
+                  streamIdleTimeout:
+                    description: |-
+                      streamIdleTimeout bounds how long an SSE streaming body may remain
+                      silent (no bytes) between reads before the stream is aborted. The
+                      timer resets on every byte received, so legitimately long-running
+                      streams are not affected. Useful for slow local models (e.g. Ollama
+                      CPU inference) where first-token latency can exceed the default 30s.
+                      Go duration string, e.g. "120s", "2m". Defaults to 30s when unset.
+                    type: string
                   temperature:
                     description: |-
                       temperature controls randomness in responses (0.0-2.0).
