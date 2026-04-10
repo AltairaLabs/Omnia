@@ -1,7 +1,9 @@
 FROM ollama/ollama:latest
 
-# Pre-load a small model that supports tool calling
+# Pre-load a model that supports tool calling reliably.
+# qwen2.5:3b is the smallest model with consistent tool-call schema adherence.
+# The 0.5b variant frequently sends malformed tool arguments (e.g. objects instead of strings).
 RUN nohup bash -c "ollama serve &" && \
     sleep 3 && \
-    ollama pull qwen2.5:0.5b && \
+    ollama pull qwen2.5:3b && \
     pkill ollama || true

@@ -309,10 +309,10 @@ spec:
               value: "24h"
           resources:
             requests:
-              cpu: 500m
-              memory: 1Gi
+              cpu: "2"
+              memory: 2Gi
             limits:
-              cpu: "4"
+              cpu: "8"
               memory: 4Gi
 ---
 apiVersion: v1
@@ -552,6 +552,11 @@ helm_set = [
     'doctor.image.repository=omnia-doctor-dev',
     'doctor.image.tag=latest',
     'doctor.image.pullPolicy=Never',
+    'doctor.workspace=dev-agents',
+    'doctor.serviceGroup=default',
+    'doctor.agentNamespace=dev-agents',
+    'doctor.agentName=ollama-agent',
+    'doctor.ollamaService=dev-ollama',
     # LangChain runtime image (used when framework.type=langchain)
     'langchainRuntime.image.repository=omnia-langchain-runtime-dev',
     'langchainRuntime.image.tag=latest',
