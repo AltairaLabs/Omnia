@@ -305,8 +305,47 @@ spec:
           ports:
             - containerPort: 11434
           env:
+            # Keep the model resident in memory indefinitely so every
+            # request uses the warm model — no cold-start latency that
+            # would blow past the pipeline idle timeout.
             - name: OLLAMA_KEEP_ALIVE
-              value: "24h"
+              value: "-1"
+            # Only load one model at a time — the StatefulSet pre-pulls
+            # a single model so there's no contention.
+            - name: OLLAMA_MAX_LOADED_MODELS
+              value: "1"
+          # Basic TCP readiness — accepts connections as soon as the API
+          # server is up. Warmup is handled by a dedicated sidecar below
+          # that pre-compiles the model before agents start calling it.
+          readinessProbe:
+            tcpSocket:
+              port: 11434
+            initialDelaySeconds: 2
+            periodSeconds: 5
+        # Warmup sidecar: sends a chat completion with tools once the API
+        # is reachable, forcing the model to JIT-compile against the
+        # tool-calling code path. After it exits 0, subsequent requests
+        # from agents hit a warm model and complete in single-digit seconds.
+        - name: warmup
+          image: curlimages/curl:8.10.1
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "waiting for ollama API..."
+              until curl -fsS -m 5 http://127.0.0.1:11434/api/tags > /dev/null 2>&1; do
+                sleep 2
+              done
+              echo "sending warmup chat completion..."
+              curl -fsS -m 180 -X POST http://127.0.0.1:11434/v1/chat/completions \\
+                -H 'Content-Type: application/json' \\
+                -d '{"model":"qwen2.5:3b","messages":[{"role":"user","content":"warmup"}],"max_tokens":4,"stream":false}' \\
+                > /dev/null
+              echo "warmup complete; sleeping"
+              # Keep the sidecar running so we don't churn — Kubernetes
+              # restarts completed containers under restartPolicy: Always.
+              while true; do sleep 3600; done
           resources:
             requests:
               cpu: "2"

@@ -242,7 +242,7 @@ func (m *MemoryChecker) chatWithAgent(ctx context.Context, message string) (sess
 	}
 	defer closeConn(conn)
 
-	if err := sendMessage(conn, message); err != nil {
+	if err := sendMessage(conn, sid, message); err != nil {
 		r := doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "send failed"}
 		return sid, "", &r
 	}

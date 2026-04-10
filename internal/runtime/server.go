@@ -85,11 +85,13 @@ type Server struct {
 	evalDefs      []evals.EvalDef
 
 	// Provider info (for logging and provider creation)
-	providerType    string
-	model           string
-	baseURL         string  // Custom base URL for provider (e.g., Ollama endpoint)
-	inputCostPer1K  float64 // CRD pricing: cost per 1K input tokens
-	outputCostPer1K float64 // CRD pricing: cost per 1K output tokens
+	providerType              string
+	model                     string
+	baseURL                   string        // Custom base URL for provider (e.g., Ollama endpoint)
+	inputCostPer1K            float64       // CRD pricing: cost per 1K input tokens
+	outputCostPer1K           float64       // CRD pricing: cost per 1K output tokens
+	providerRequestTimeout    time.Duration // Non-streaming HTTP timeout (0 = provider default)
+	providerStreamIdleTimeout time.Duration // SSE stream idle timeout (0 = 30s default)
 
 	// Session recording (Pattern C)
 	sessionStore session.Store
@@ -222,6 +224,23 @@ func WithProviderInfo(providerType, model string) ServerOption {
 func WithBaseURL(baseURL string) ServerOption {
 	return func(s *Server) {
 		s.baseURL = baseURL
+	}
+}
+
+// WithProviderRequestTimeout caps the wall-clock duration of non-streaming
+// provider HTTP calls. Zero leaves the provider's built-in default in place.
+func WithProviderRequestTimeout(d time.Duration) ServerOption {
+	return func(s *Server) {
+		s.providerRequestTimeout = d
+	}
+}
+
+// WithProviderStreamIdleTimeout bounds how long an SSE streaming body may
+// remain silent before it is aborted. Useful for slow local models whose
+// first-token latency can exceed the default 30s. Zero uses the default.
+func WithProviderStreamIdleTimeout(d time.Duration) ServerOption {
+	return func(s *Server) {
+		s.providerStreamIdleTimeout = d
 	}
 }
 

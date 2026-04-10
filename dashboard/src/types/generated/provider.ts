@@ -64,6 +64,18 @@ export interface ProviderSpec {
     contextWindow?: number;
     /** maxTokens limits the maximum number of tokens in the response. */
     maxTokens?: number;
+    /** requestTimeout caps the wall-clock duration of non-streaming provider
+     * HTTP calls (Predict, embeddings). Does not apply to streaming calls.
+     * Go duration string, e.g. "2m", "90s". Defaults to the provider's
+     * built-in default (typically 60s) when unset. */
+    requestTimeout?: string;
+    /** streamIdleTimeout bounds how long an SSE streaming body may remain
+     * silent (no bytes) between reads before the stream is aborted. The
+     * timer resets on every byte received, so legitimately long-running
+     * streams are not affected. Useful for slow local models (e.g. Ollama
+     * CPU inference) where first-token latency can exceed the default 30s.
+     * Go duration string, e.g. "120s", "2m". Defaults to 30s when unset. */
+    streamIdleTimeout?: string;
     /** temperature controls randomness in responses (0.0-2.0).
      * Lower values make output more focused and deterministic.
      * Specified as a string to support decimal values (e.g., "0.7"). */

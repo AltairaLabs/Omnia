@@ -61,6 +61,10 @@ type Config struct {
 	ContextWindow      int    // Token budget for conversation context (0 = no limit)
 	TruncationStrategy string // How to handle context overflow: "sliding", "summarize", "custom"
 
+	// Provider timeouts
+	ProviderRequestTimeout    time.Duration // Non-streaming HTTP call timeout (0 = provider default)
+	ProviderStreamIdleTimeout time.Duration // SSE stream idle timeout (0 = 30s default)
+
 	// Mock provider configuration (for testing)
 	MockProvider   bool   // Enable mock provider instead of real LLM
 	MockConfigPath string // Path to mock responses YAML file (optional)
@@ -101,7 +105,6 @@ const (
 	envPromptName        = "OMNIA_PROMPT_NAME"
 	envSessionURL        = "OMNIA_SESSION_URL"
 	envSessionTTL        = "OMNIA_SESSION_TTL"
-	envContextWindow     = "OMNIA_CONTEXT_WINDOW"
 	envTracingEnabled    = "OMNIA_TRACING_ENABLED"
 	envTracingEndpoint   = "OMNIA_TRACING_ENDPOINT"
 	envTracingSampleRate = "OMNIA_TRACING_SAMPLE_RATE"
@@ -135,6 +138,8 @@ const (
 )
 
 // parseEnvironmentOverrides parses optional environment variable overrides.
+// ContextWindow and TruncationStrategy are CRD-derived and are loaded by
+// loadProviderDefaults() — do not re-read them from env vars here.
 func (cfg *Config) parseEnvironmentOverrides() error {
 	if err := cfg.parseTracingSampleRate(); err != nil {
 		return err
@@ -142,27 +147,7 @@ func (cfg *Config) parseEnvironmentOverrides() error {
 	if err := cfg.parsePorts(); err != nil {
 		return err
 	}
-	if err := cfg.parseContextWindow(); err != nil {
-		return err
-	}
 	return cfg.parseSessionTTL()
-}
-
-// parseContextWindow parses the context window size from environment.
-func (cfg *Config) parseContextWindow() error {
-	ctx := os.Getenv(envContextWindow)
-	if ctx == "" {
-		return nil
-	}
-	c, err := strconv.Atoi(ctx)
-	if err != nil {
-		return fmt.Errorf(errFmtInvalidEnvVar, envContextWindow, err)
-	}
-	if c < 0 {
-		return fmt.Errorf("invalid %s: must be positive", envContextWindow)
-	}
-	cfg.ContextWindow = c
-	return nil
 }
 
 // parseTracingSampleRate parses the tracing sample rate from environment.

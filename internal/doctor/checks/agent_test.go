@@ -391,5 +391,5 @@ func TestSendMessage_WritesJSON(t *testing.T) {
 	require.NoError(t, err)
 	defer conn.Close() //nolint:errcheck
 
-	require.NoError(t, sendMessage(conn, "hello world"))
+	require.NoError(t, sendMessage(conn, "test-session", "hello world"))
 }

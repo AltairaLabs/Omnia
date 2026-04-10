@@ -17,7 +17,10 @@ import (
 
 const (
 	wsHandshakeTimeout = 10 * time.Second
-	wsResponseTimeout  = 60 * time.Second // Ollama can be slow
+	// wsResponseTimeout bounds a single chat turn. Tool-calling rounds with
+	// small local models (e.g. qwen2.5:3b on CPU) can exceed 60s, so we allow
+	// up to 3 minutes before declaring a hang.
+	wsResponseTimeout = 180 * time.Second
 
 	// wsMessageTypeMessage is the client message type for a chat message.
 	wsMessageTypeMessage = "message"
@@ -29,6 +32,8 @@ const (
 	wsMessageTypeToolCall = "tool_call"
 	// wsMessageTypeConnected is the server message type sent on connect.
 	wsMessageTypeConnected = "connected"
+	// wsMessageTypeError is the server message type for an error from the facade/runtime.
+	wsMessageTypeError = "error"
 )
 
 // AgentConfig describes the agent to test.
@@ -63,8 +68,9 @@ func (a *AgentChecker) Checks() []doctor.Check {
 
 // wsClientMessage is the minimal outbound message shape.
 type wsClientMessage struct {
-	Type    string `json:"type"`
-	Content string `json:"content"`
+	Type      string `json:"type"`
+	SessionID string `json:"session_id,omitempty"`
+	Content   string `json:"content"`
 }
 
 // wsServerMessage is the minimal inbound message shape.
@@ -72,7 +78,14 @@ type wsServerMessage struct {
 	Type      string          `json:"type"`
 	SessionID string          `json:"session_id,omitempty"`
 	Content   string          `json:"content,omitempty"`
+	Error     *wsErrorInfo    `json:"error,omitempty"`
 	ToolCall  *wsToolCallInfo `json:"tool_call,omitempty"`
+}
+
+// wsErrorInfo holds the error code and message from a facade error frame.
+type wsErrorInfo struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 // wsToolCallInfo holds the name of a server-side tool call.
@@ -129,14 +142,15 @@ func readConnected(conn *websocket.Conn) (string, error) {
 }
 
 // sendMessage marshals and writes a chat message to the WebSocket.
-func sendMessage(conn *websocket.Conn, content string) error {
-	// json.Marshal of wsClientMessage (two string fields) cannot fail.
-	data, _ := json.Marshal(wsClientMessage{Type: wsMessageTypeMessage, Content: content})
+func sendMessage(conn *websocket.Conn, sessionID, content string) error {
+	// json.Marshal of wsClientMessage (three string fields) cannot fail.
+	data, _ := json.Marshal(wsClientMessage{Type: wsMessageTypeMessage, SessionID: sessionID, Content: content})
 	return conn.WriteMessage(websocket.TextMessage, data)
 }
 
-// collectResponse reads server messages until a "done" message or the context deadline.
-// It returns all messages received (not including the initial "connected" message).
+// collectResponse reads server messages until a "done" or "error" message
+// or the context deadline. It returns all messages received (not including
+// the initial "connected" message).
 func collectResponse(ctx context.Context, conn *websocket.Conn) ([]wsServerMessage, error) {
 	deadline, ok := ctx.Deadline()
 	if !ok {
@@ -155,6 +169,17 @@ func collectResponse(ctx context.Context, conn *websocket.Conn) ([]wsServerMessa
 		messages = append(messages, msg)
 		if msg.Type == wsMessageTypeDone {
 			return messages, nil
+		}
+		if msg.Type == wsMessageTypeError {
+			code, errText := "", ""
+			if msg.Error != nil {
+				code = msg.Error.Code
+				errText = msg.Error.Message
+			}
+			if errText == "" {
+				errText = msg.Content
+			}
+			return messages, fmt.Errorf("agent returned error (%s): %s", code, errText)
 		}
 	}
 }
@@ -199,7 +224,7 @@ func (a *AgentChecker) chatWithAgent(ctx context.Context, message string) (sessi
 	}
 	defer closeConn(conn)
 
-	if err := sendMessage(conn, message); err != nil {
+	if err := sendMessage(conn, sid, message); err != nil {
 		r := doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "send failed"}
 		return sid, nil, &r
 	}
