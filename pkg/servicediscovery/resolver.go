@@ -117,6 +117,40 @@ func (r *Resolver) resolveFromWorkspace(ctx context.Context, serviceGroup string
 	return nil, fmt.Errorf("service group %q not found in workspace %q", serviceGroup, ws.Name)
 }
 
+// ResolveByWorkspaceName returns the session-api and memory-api URLs for a
+// workspace looked up by its metadata.name rather than by the caller's namespace.
+// This is used by cross-namespace consumers like the doctor that run in omnia-system
+// but need to discover services in a workspace's namespace.
+func (r *Resolver) ResolveByWorkspaceName(
+	ctx context.Context, workspaceName, serviceGroup string,
+) (*ServiceURLs, error) {
+	if urls := resolveFromEnv(); urls != nil {
+		return urls, nil
+	}
+	if r.client == nil {
+		return nil, fmt.Errorf("no env var overrides set and no Kubernetes client available")
+	}
+
+	var ws omniav1alpha1.Workspace
+	if err := r.client.Get(ctx, client.ObjectKey{Name: workspaceName}, &ws); err != nil {
+		return nil, fmt.Errorf("get workspace %q: %w", workspaceName, err)
+	}
+
+	for _, svc := range ws.Status.Services {
+		if svc.Name != serviceGroup {
+			continue
+		}
+		if svc.SessionURL == "" {
+			return nil, fmt.Errorf("service group %q is not ready in workspace %q", serviceGroup, workspaceName)
+		}
+		return &ServiceURLs{
+			SessionURL: svc.SessionURL,
+			MemoryURL:  svc.MemoryURL,
+		}, nil
+	}
+	return nil, fmt.Errorf("service group %q not found in workspace %q", serviceGroup, workspaceName)
+}
+
 // findWorkspaceByNamespace detects the current namespace and finds the Workspace
 // whose spec.namespace.name matches it. The namespace is read from the OMNIA_NAMESPACE
 // env var, falling back to the in-cluster service account token file.

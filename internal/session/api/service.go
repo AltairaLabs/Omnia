@@ -492,6 +492,7 @@ func (s *SessionService) getFromCold(ctx context.Context, sessionID string) (*se
 func (s *SessionService) populateHotCache(ctx context.Context, sess *session.Session) {
 	hot, err := s.registry.HotCache()
 	if err != nil {
+		s.requestLog(ctx).V(1).Info("hot cache unavailable, skipping populate", "error", err.Error())
 		return
 	}
 	if err := hot.SetSession(ctx, sess, s.cacheTTL); err != nil {
@@ -715,10 +716,12 @@ func (s *SessionService) publishAsync(event SessionEvent) {
 func (s *SessionService) lookupSessionMetadata(ctx context.Context, sessionID string) *session.Session {
 	warm, err := s.registry.WarmStore()
 	if err != nil {
+		s.log.V(1).Info("warm store unavailable for metadata lookup", "sessionID", sessionID, "error", err.Error())
 		return &session.Session{}
 	}
 	sess, err := warm.GetSession(ctx, sessionID)
 	if err != nil {
+		s.log.V(1).Info("session metadata lookup failed", "sessionID", sessionID, "error", err.Error())
 		return &session.Session{}
 	}
 	return sess

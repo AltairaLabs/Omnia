@@ -26,6 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -917,4 +918,144 @@ func TestBuildFacadeContainer_NoVolumeMounts(t *testing.T) {
 	if len(container.VolumeMounts) != 0 {
 		t.Errorf("expected 0 volume mounts on facade container, got %d", len(container.VolumeMounts))
 	}
+}
+
+func TestGetConfigHash_ProviderModelChange(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	provider := &omniav1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Spec: omniav1alpha1.ProviderSpec{
+			Type:  "ollama",
+			Model: "qwen2.5:3b",
+		},
+	}
+	providers := map[string]*omniav1alpha1.Provider{"default": provider}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	hash1 := r.getConfigHash(context.Background(), providers)
+	assert.Len(t, hash1, 16)
+
+	// Change model
+	provider2 := provider.DeepCopy()
+	provider2.Spec.Model = "qwen2.5:7b"
+	providers2 := map[string]*omniav1alpha1.Provider{"default": provider2}
+
+	hash2 := r.getConfigHash(context.Background(), providers2)
+	assert.Len(t, hash2, 16)
+	assert.NotEqual(t, hash1, hash2, "model change should produce different hash")
+}
+
+func TestGetConfigHash_FieldSensitivity(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+	ctx := context.Background()
+
+	baseProvider := &omniav1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Spec: omniav1alpha1.ProviderSpec{
+			Type:    "openai",
+			Model:   "gpt-4o",
+			BaseURL: "https://api.openai.com/v1",
+			Defaults: &omniav1alpha1.ProviderDefaults{
+				Temperature:   ptr.To("0.7"),
+				ContextWindow: ptr.To(int32(128000)),
+			},
+			Pricing: &omniav1alpha1.ProviderPricing{
+				InputCostPer1K:  ptr.To("0.005"),
+				OutputCostPer1K: ptr.To("0.015"),
+			},
+		},
+	}
+
+	baseHash := r.getConfigHash(ctx, map[string]*omniav1alpha1.Provider{"default": baseProvider})
+	assert.NotEmpty(t, baseHash, "baseline hash must not be empty")
+
+	cases := []struct {
+		name   string
+		mutate func(p *omniav1alpha1.Provider)
+	}{
+		{
+			name:   "type",
+			mutate: func(p *omniav1alpha1.Provider) { p.Spec.Type = "anthropic" },
+		},
+		{
+			name:   "model",
+			mutate: func(p *omniav1alpha1.Provider) { p.Spec.Model = "gpt-4o-mini" },
+		},
+		{
+			name:   "baseURL",
+			mutate: func(p *omniav1alpha1.Provider) { p.Spec.BaseURL = "https://custom.example.com/v1" },
+		},
+		{
+			name:   "temperature",
+			mutate: func(p *omniav1alpha1.Provider) { p.Spec.Defaults.Temperature = ptr.To("1.0") },
+		},
+		{
+			name:   "contextWindow",
+			mutate: func(p *omniav1alpha1.Provider) { p.Spec.Defaults.ContextWindow = ptr.To(int32(32000)) },
+		},
+		{
+			name:   "inputCost",
+			mutate: func(p *omniav1alpha1.Provider) { p.Spec.Pricing.InputCostPer1K = ptr.To("0.010") },
+		},
+		{
+			name:   "outputCost",
+			mutate: func(p *omniav1alpha1.Provider) { p.Spec.Pricing.OutputCostPer1K = ptr.To("0.030") },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mutated := baseProvider.DeepCopy()
+			tc.mutate(mutated)
+			hash := r.getConfigHash(ctx, map[string]*omniav1alpha1.Provider{"default": mutated})
+			assert.NotEqual(t, baseHash, hash, "mutating %s should change the hash", tc.name)
+		})
+	}
+}
+
+func TestGetConfigHash_MultiProviderOrder(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+	ctx := context.Background()
+
+	p1 := &omniav1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+		Spec:       omniav1alpha1.ProviderSpec{Type: "openai", Model: "gpt-4o"},
+	}
+	p2 := &omniav1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: "p2", Namespace: "default"},
+		Spec:       omniav1alpha1.ProviderSpec{Type: "anthropic", Model: "claude-3-5-sonnet-20241022"},
+	}
+
+	hash1 := r.getConfigHash(ctx, map[string]*omniav1alpha1.Provider{"default": p1, "judge": p2})
+	hash2 := r.getConfigHash(ctx, map[string]*omniav1alpha1.Provider{"judge": p2, "default": p1})
+
+	assert.Equal(t, hash1, hash2, "hash must be deterministic regardless of map iteration order")
+}
+
+func TestGetConfigHash_EmptyProviders(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+	ctx := context.Background()
+
+	assert.Empty(t, r.getConfigHash(ctx, nil), "nil providers should return empty string")
+	assert.Empty(t, r.getConfigHash(ctx, map[string]*omniav1alpha1.Provider{}), "empty providers map should return empty string")
 }

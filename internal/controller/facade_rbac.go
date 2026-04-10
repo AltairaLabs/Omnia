@@ -183,6 +183,11 @@ func (r *AgentRuntimeReconciler) reconcileRole(
 				Resources: []string{"secrets"},
 				Verbs:     []string{"get"},
 			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{"namespaces"},
+				Verbs:     []string{"get"},
+			},
 		}
 		return nil
 	})

@@ -273,6 +273,69 @@ docker_build(
 )
 
 # ============================================================================
+# Dev Ollama — pre-loaded with a small model for tool-calling tests
+# ============================================================================
+
+docker_build(
+    'ollama-preloaded',
+    context='.',
+    dockerfile='./hack/Dockerfile.ollama-preloaded',
+)
+
+k8s_yaml(blob("""
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dev-ollama
+  namespace: dev-agents
+spec:
+  serviceName: dev-ollama
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dev-ollama
+  template:
+    metadata:
+      labels:
+        app: dev-ollama
+    spec:
+      containers:
+        - name: ollama
+          image: ollama-preloaded
+          ports:
+            - containerPort: 11434
+          env:
+            - name: OLLAMA_KEEP_ALIVE
+              value: "24h"
+          resources:
+            requests:
+              cpu: "2"
+              memory: 2Gi
+            limits:
+              cpu: "8"
+              memory: 4Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dev-ollama
+  namespace: dev-agents
+spec:
+  selector:
+    app: dev-ollama
+  ports:
+    - port: 11434
+      targetPort: 11434
+"""))
+
+k8s_resource(
+    'dev-ollama',
+    labels=['dev'],
+    port_forwards=['11434:11434'],
+    resource_deps=['sample-resources'],
+)
+
+# ============================================================================
 # Local PromptKit Sync — rsync source into promptkit-local/ for Docker builds
 # ============================================================================
 # Docker COPY does not follow symlinks, so we rsync the actual PromptKit source
@@ -489,6 +552,11 @@ helm_set = [
     'doctor.image.repository=omnia-doctor-dev',
     'doctor.image.tag=latest',
     'doctor.image.pullPolicy=Never',
+    'doctor.workspace=dev-agents',
+    'doctor.serviceGroup=default',
+    'doctor.agentNamespace=dev-agents',
+    'doctor.agentName=ollama-agent',
+    'doctor.ollamaService=dev-ollama',
     # LangChain runtime image (used when framework.type=langchain)
     'langchainRuntime.image.repository=omnia-langchain-runtime-dev',
     'langchainRuntime.image.tag=latest',

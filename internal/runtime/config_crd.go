@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/pkg/k8s"
@@ -41,10 +42,15 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		return nil, fmt.Errorf("load AgentRuntime CRD: %w", err)
 	}
 
+	workspaceName, err := k8s.ResolveWorkspaceName(ctx, c, ar.Labels, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace name: %w", err)
+	}
+
 	cfg := &Config{
 		AgentName:      name,
 		Namespace:      namespace,
-		WorkspaceName:  k8s.ResolveWorkspaceName(ctx, c, ar.Labels, namespace),
+		WorkspaceName:  workspaceName,
 		PromptPackPath: getEnvOrDefault(envPromptPackPath, defaultPromptPackPath),
 		PromptName:     getEnvOrDefault(envPromptName, defaultPromptName),
 		GRPCPort:       defaultGRPCPort,
@@ -61,7 +67,9 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	}
 
 	// Session config from CRD
-	loadRuntimeSessionFromCRD(cfg, ar)
+	if err := loadRuntimeSessionFromCRD(cfg, ar); err != nil {
+		return nil, err
+	}
 
 	// Media config from CRD
 	if ar.Spec.Media != nil && ar.Spec.Media.BasePath != "" {
@@ -108,7 +116,12 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	if serviceGroup == "" {
 		serviceGroup = "default"
 	}
-	if urls, err := resolver.ResolveServiceURLs(ctx, serviceGroup); err == nil {
+	urls, urlErr := resolver.ResolveServiceURLs(ctx, serviceGroup)
+	if urlErr != nil {
+		log := logf.FromContext(ctx)
+		log.Error(urlErr, "service URL resolution failed, falling back to env vars",
+			"serviceGroup", serviceGroup)
+	} else {
 		cfg.SessionAPIURL = urls.SessionURL
 		cfg.MemoryAPIURL = urls.MemoryURL
 	}
@@ -116,7 +129,11 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	// Memory config from CRD
 	if ar.Spec.Memory != nil && ar.Spec.Memory.Enabled {
 		cfg.MemoryEnabled = true
-		cfg.WorkspaceUID = resolveWorkspaceUID(ctx, c, namespace)
+		uid, uidErr := resolveWorkspaceUID(ctx, c, namespace)
+		if uidErr != nil {
+			return nil, fmt.Errorf("resolve workspace UID for memory: %w", uidErr)
+		}
+		cfg.WorkspaceUID = uid
 	}
 
 	// Tracing config from env (injected by operator from Helm values)
@@ -136,36 +153,39 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 // resolveWorkspaceUID finds the Workspace CRD whose spec.namespace.name matches
 // the given namespace and returns its Kubernetes UID. The memory_entities table
 // uses workspace_id as UUID, which corresponds to the Workspace CR's UID.
-func resolveWorkspaceUID(ctx context.Context, c client.Client, namespace string) string {
+func resolveWorkspaceUID(ctx context.Context, c client.Client, namespace string) (string, error) {
 	var list v1alpha1.WorkspaceList
 	if err := c.List(ctx, &list); err != nil {
-		return ""
+		return "", fmt.Errorf("list workspaces: %w", err)
 	}
 	for _, ws := range list.Items {
 		if ws.Spec.Namespace.Name == namespace {
-			return string(ws.UID)
+			return string(ws.UID), nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // loadRuntimeSessionFromCRD populates session config from the AgentRuntime CRD.
-func loadRuntimeSessionFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) {
+func loadRuntimeSessionFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) error {
 	if ar.Spec.Session == nil {
 		cfg.SessionType = defaultSessionType
-		return
+		return nil
 	}
 
 	cfg.SessionType = string(ar.Spec.Session.Type)
 
 	if ar.Spec.Session.TTL != nil {
-		if ttl, err := time.ParseDuration(*ar.Spec.Session.TTL); err == nil {
-			cfg.SessionTTL = ttl
+		ttl, err := time.ParseDuration(*ar.Spec.Session.TTL)
+		if err != nil {
+			return fmt.Errorf("parse session TTL %q: %w", *ar.Spec.Session.TTL, err)
 		}
+		cfg.SessionTTL = ttl
 	}
 
 	// Session store URL still comes from env (secret-backed)
 	cfg.SessionURL = os.Getenv(envSessionURL)
+	return nil
 }
 
 // loadProviderFromCRD resolves the provider from the AgentRuntime CRD and sets
@@ -219,7 +239,9 @@ func loadFromProviderRef(ctx context.Context, c client.Client, cfg *Config, ref 
 	}
 
 	// Load pricing from Provider CRD
-	loadProviderPricing(cfg, provider.Spec.Pricing)
+	if err := loadProviderPricing(cfg, provider.Spec.Pricing); err != nil {
+		return err
+	}
 
 	// Inject API key from secret
 	return injectAPIKey(ctx, c, cfg, provider)
@@ -236,20 +258,25 @@ func loadProviderDefaults(cfg *Config, defaults *v1alpha1.ProviderDefaults) {
 }
 
 // loadProviderPricing extracts pricing from the Provider CRD and converts to float64.
-func loadProviderPricing(cfg *Config, pricing *v1alpha1.ProviderPricing) {
+func loadProviderPricing(cfg *Config, pricing *v1alpha1.ProviderPricing) error {
 	if pricing == nil {
-		return
+		return nil
 	}
 	if pricing.InputCostPer1K != nil {
-		if v, err := strconv.ParseFloat(*pricing.InputCostPer1K, 64); err == nil {
-			cfg.InputCostPer1K = v
+		v, err := strconv.ParseFloat(*pricing.InputCostPer1K, 64)
+		if err != nil {
+			return fmt.Errorf("parse inputCostPer1K %q: %w", *pricing.InputCostPer1K, err)
 		}
+		cfg.InputCostPer1K = v
 	}
 	if pricing.OutputCostPer1K != nil {
-		if v, err := strconv.ParseFloat(*pricing.OutputCostPer1K, 64); err == nil {
-			cfg.OutputCostPer1K = v
+		v, err := strconv.ParseFloat(*pricing.OutputCostPer1K, 64)
+		if err != nil {
+			return fmt.Errorf("parse outputCostPer1K %q: %w", *pricing.OutputCostPer1K, err)
 		}
+		cfg.OutputCostPer1K = v
 	}
+	return nil
 }
 
 // injectAPIKey reads the provider's secret and sets the appropriate env var

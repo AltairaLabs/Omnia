@@ -19,11 +19,14 @@ package controller
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"regexp"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -42,9 +45,16 @@ const (
 	ProviderConditionTypeSecretFound          = "SecretFound"
 	ProviderConditionTypeCredentialConfigured = "CredentialConfigured"
 	ProviderConditionTypeAuthConfigured       = "AuthConfigured"
+	ProviderConditionTypeEndpointReachable    = "EndpointReachable"
 	// secretKeyAPIKey is the common secret key name for API keys.
 	secretKeyAPIKey = "api-key"
 )
+
+// healthCheckTimeout is how long we wait for a provider endpoint to respond.
+const healthCheckTimeout = 5 * time.Second
+
+// healthCheckRequeueInterval is how often we retry when a provider is unavailable.
+const healthCheckRequeueInterval = 30 * time.Second
 
 // Event reason constants
 const (
@@ -59,8 +69,9 @@ var envVarNameRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 // ProviderReconciler reconciles a Provider object
 type ProviderReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Scheme     *runtime.Scheme
+	Recorder   record.EventRecorder
+	HTTPClient *http.Client // used for provider health checks; defaults to a 5s-timeout client
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=providers,verbs=get;list;watch;create;update;patch;delete
@@ -105,6 +116,34 @@ func (r *ProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			log.Error(statusErr, logMsgFailedToUpdateStatus)
 		}
 		return ctrl.Result{}, err
+	}
+
+	// Health-check the provider endpoint if it has one
+	if healthURL := r.resolveHealthURL(provider); healthURL != "" {
+		if err := r.checkEndpointHealth(ctx, healthURL); err != nil {
+			log.Info("provider endpoint unreachable",
+				"name", req.Name, "url", healthURL, "error", err)
+			provider.Status.Phase = omniav1alpha1.ProviderPhaseUnavailable
+			meta.SetStatusCondition(&provider.Status.Conditions, metav1.Condition{
+				Type:               ProviderConditionTypeEndpointReachable,
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: provider.Generation,
+				Reason:             "EndpointUnreachable",
+				Message:            fmt.Sprintf("health check failed: %v", err),
+			})
+			provider.Status.ObservedGeneration = provider.Generation
+			if statusErr := r.Status().Update(ctx, provider); statusErr != nil {
+				log.Error(statusErr, logMsgFailedToUpdateStatus)
+			}
+			return ctrl.Result{RequeueAfter: healthCheckRequeueInterval}, nil
+		}
+		meta.SetStatusCondition(&provider.Status.Conditions, metav1.Condition{
+			Type:               ProviderConditionTypeEndpointReachable,
+			Status:             metav1.ConditionTrue,
+			ObservedGeneration: provider.Generation,
+			Reason:             "EndpointReachable",
+			Message:            "health check passed",
+		})
 	}
 
 	// Set phase to Ready if all validations pass
@@ -483,6 +522,56 @@ func (r *ProviderReconciler) findProvidersForSecret(ctx context.Context, obj cli
 	}
 
 	return requests
+}
+
+// defaultProviderEndpoints maps cloud provider types to their default API base URLs.
+var defaultProviderEndpoints = map[omniav1alpha1.ProviderType]string{
+	omniav1alpha1.ProviderTypeClaude: "https://api.anthropic.com",
+	omniav1alpha1.ProviderTypeOpenAI: "https://api.openai.com",
+	omniav1alpha1.ProviderTypeGemini: "https://generativelanguage.googleapis.com",
+}
+
+// resolveHealthURL returns the URL to health-check for this provider.
+// Returns empty string if no health check is applicable (mock, hyperscaler SDK-based).
+func (r *ProviderReconciler) resolveHealthURL(provider *omniav1alpha1.Provider) string {
+	if provider.Spec.Type == omniav1alpha1.ProviderTypeMock {
+		return ""
+	}
+
+	baseURL := provider.Spec.BaseURL
+	if baseURL == "" {
+		baseURL = defaultProviderEndpoints[provider.Spec.Type]
+	}
+	if baseURL == "" {
+		return "" // hyperscaler (bedrock, vertex, azure-ai) — skip
+	}
+
+	// Provider-specific health paths
+	switch provider.Spec.Type {
+	case omniav1alpha1.ProviderTypeOllama:
+		return baseURL + "/api/tags"
+	default:
+		// For OpenAI-compatible, Claude, Gemini: just check the base is reachable.
+		// We don't send auth headers — a 401 still proves the endpoint is up.
+		return baseURL
+	}
+}
+
+// checkEndpointHealth does a lightweight HTTP check to verify the provider endpoint is reachable.
+// A non-2xx response (e.g. 401 Unauthorized) is still considered "reachable" — it proves the
+// server is running. Only connection failures (DNS, timeout, refused) are treated as unhealthy.
+func (r *ProviderReconciler) checkEndpointHealth(_ context.Context, url string) error {
+	httpClient := r.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: healthCheckTimeout}
+	}
+	resp, err := httpClient.Get(url) //nolint:gosec // URL is from trusted CRD spec, not user input
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	// Any HTTP response means the endpoint is reachable — even 401/403/404
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

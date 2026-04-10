@@ -1549,13 +1549,32 @@ func TestGetSession_NoAuditLogger(t *testing.T) {
 
 // --- Write endpoint tests ---
 
+func TestHandleCreateSession_MissingWorkspaceName(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	// workspaceName is absent — session-api must reject this to prevent sessions
+	// that can't be found in the dashboard (which filters by workspace).
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHandleCreateSession_OK(t *testing.T) {
 	h, _, _ := setupHandler(t)
 
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","ttlSeconds":3600}`
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","workspaceName":"test-ws","ttlSeconds":3600}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -1582,7 +1601,7 @@ func TestHandleCreateSession_WithTagsAndInitialState(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","tags":["prod","v2"],"initialState":{"lang":"en","mode":"chat"}}`
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","workspaceName":"test-ws","tags":["prod","v2"],"initialState":{"lang":"en","mode":"chat"}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -1609,14 +1628,14 @@ func TestHandleCreateSession_EmptyTagsAndState(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default"}`
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","workspaceName":"test-ws"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d", rec.Code)
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
 	}
 	resp := decodeJSON[SessionResponse](t, rec)
 	if resp.Session.Tags != nil {
@@ -1650,7 +1669,7 @@ func TestHandleCreateSession_NoWarmStore(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"id":"` + testSessionID + `","agentName":"a","namespace":"ns"}`
+	body := `{"id":"` + testSessionID + `","agentName":"a","namespace":"ns","workspaceName":"ws"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -1934,7 +1953,7 @@ func TestHandleRegisterRoutes_WriteEndpoints(t *testing.T) {
 		body   string
 		want   int
 	}{
-		{http.MethodPost, "/api/v1/sessions", `{"id":"` + testSessionIDOther + `","agentName":"a","namespace":"ns"}`, http.StatusCreated},
+		{http.MethodPost, "/api/v1/sessions", `{"id":"` + testSessionIDOther + `","agentName":"a","namespace":"ns","workspaceName":"ws"}`, http.StatusCreated},
 		{http.MethodPost, "/api/v1/sessions/" + testSessionID + "/messages", `{"id":"m","role":"user","content":"hi"}`, http.StatusCreated},
 		{http.MethodPatch, "/api/v1/sessions/" + testSessionID + "/status", `{"addMessages":1}`, http.StatusOK},
 		{http.MethodPost, "/api/v1/sessions/" + testSessionID + "/ttl", `{"ttlSeconds":60}`, http.StatusOK},
@@ -2203,9 +2222,10 @@ func TestParseListParams_WithValidTimeRange(t *testing.T) {
 	}
 }
 
-func TestHandleGetSession_GetMessagesError(t *testing.T) {
-	// Test the path where GetSession succeeds but GetMessages returns
-	// a non-NotFound error (the log.Error branch).
+func TestHandleGetSession_GetMessagesNotFound_ReturnsSessionWithEmptyMessages(t *testing.T) {
+	// When GetSession succeeds but GetMessages returns ErrSessionNotFound
+	// (e.g. session exists but has no messages yet), the handler should return
+	// the session with an empty message list — not an error.
 	warm := newMockWarmStore()
 	warm.sessions[testSessionID] = &session.Session{
 		ID:            testSessionID,
@@ -2213,11 +2233,7 @@ func TestHandleGetSession_GetMessagesError(t *testing.T) {
 		Namespace:     "default",
 		WorkspaceName: "ws1",
 	}
-	// Do NOT add messages to the store — GetMessages will return NotFound
-	// since session has no messages entry. But we need a non-404 error.
-	// Actually the mock returns nil for empty messages, so this path is hard
-	// to trigger. Let us test the happy path with no messages instead,
-	// which covers the msgs loop and writeJSON call.
+	// No messages added — GetMessages will return ErrSessionNotFound
 
 	registry := providers.NewRegistry()
 	registry.SetWarmStore(warm)
@@ -2232,7 +2248,11 @@ func TestHandleGetSession_GetMessagesError(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("expected 200 when messages not found, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeJSON[SessionResponse](t, rec)
+	if resp.Session.ID != testSessionID {
+		t.Fatalf("expected session ID %s, got %s", testSessionID, resp.Session.ID)
 	}
 }
 
@@ -2484,7 +2504,7 @@ func TestHandleCreateSession_InvalidUUID(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"id":"not-a-uuid","agentName":"a","namespace":"ns"}`
+	body := `{"id":"not-a-uuid","agentName":"a","namespace":"ns","workspaceName":"ws"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -2505,7 +2525,7 @@ func TestHandleCreateSession_EmptyID(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	// Empty ID should be allowed (server may assign one).
-	body := `{"id":"","agentName":"a","namespace":"ns"}`
+	body := `{"id":"","agentName":"a","namespace":"ns","workspaceName":"ws"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -3212,7 +3232,7 @@ func TestHandleCreateSession_WithCohortFields(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","cohortId":"cohort-123","variant":"canary"}`
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","workspaceName":"test-ws","cohortId":"cohort-123","variant":"canary"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -3236,7 +3256,7 @@ func TestHandleCreateSession_NoCohortFields(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default"}`
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","workspaceName":"test-ws"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()

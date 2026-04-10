@@ -265,11 +265,9 @@ The rollout controller manages the full lifecycle:
 
 - Review the [AgentRuntime rollout reference](/reference/agentruntime/#rollout) for all available fields
 - Read [Rollout Strategies](/explanation/rollout-strategies/) to understand the design decisions
-- Configure [RolloutAnalysis](/reference/rolloutanalysis/) templates for automated quality gates
 - Set up [observability](/how-to/setup-observability/) to monitor rollout metrics
 
 ## Related Resources
 
 - [Rollout Strategies](/explanation/rollout-strategies/) — design and architecture
 - [AgentRuntime CRD Reference](/reference/agentruntime/) — field-by-field specification
-- [RolloutAnalysis CRD Reference](/reference/rolloutanalysis/) — analysis template specification

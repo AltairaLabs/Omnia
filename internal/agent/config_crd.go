@@ -37,10 +37,15 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		return nil, fmt.Errorf("load AgentRuntime CRD: %w", err)
 	}
 
+	workspaceName, err := k8s.ResolveWorkspaceName(ctx, c, ar.Labels, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace name: %w", err)
+	}
+
 	cfg := &Config{
 		AgentName:     name,
 		Namespace:     namespace,
-		WorkspaceName: k8s.ResolveWorkspaceName(ctx, c, ar.Labels, namespace),
+		WorkspaceName: workspaceName,
 	}
 
 	// PromptPack info from CRD
@@ -224,14 +229,16 @@ func LoadConfig(ctx context.Context) (*Config, error) {
 
 	c, err := k8s.NewClient()
 	if err != nil {
-		// No K8s cluster available — fall back to env-based config (demo/test mode)
+		// No K8s cluster available — fall back to env-based config (demo/test mode).
+		// This is expected when running outside a cluster (local dev, E2E).
 		return loadFromEnvFallback(name, namespace)
 	}
 
 	cfg, err := LoadFromCRD(ctx, c, name, namespace)
 	if err != nil {
-		// CRD unavailable — fall back to env-based config (demo/test mode)
-		return loadFromEnvFallback(name, namespace)
+		// CRD load failed in-cluster — this is a real error, not demo mode.
+		// Do not silently fall back; surface it so the operator can fix the misconfiguration.
+		return nil, fmt.Errorf("load config from CRD: %w", err)
 	}
 	return cfg, nil
 }

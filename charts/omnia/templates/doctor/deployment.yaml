@@ -27,6 +27,28 @@ spec:
         - name: doctor
           image: {{ include "omnia.doctor.image" . }}
           imagePullPolicy: {{ .Values.doctor.image.pullPolicy }}
+          {{- $args := list }}
+          {{- if .Values.doctor.workspace }}
+          {{- $args = append $args (printf "--workspace=%s" .Values.doctor.workspace) }}
+          {{- end }}
+          {{- if .Values.doctor.serviceGroup }}
+          {{- $args = append $args (printf "--service-group=%s" .Values.doctor.serviceGroup) }}
+          {{- end }}
+          {{- if .Values.doctor.agentNamespace }}
+          {{- $args = append $args (printf "--agent-namespace=%s" .Values.doctor.agentNamespace) }}
+          {{- end }}
+          {{- if .Values.doctor.agentName }}
+          {{- $args = append $args (printf "--agent-name=%s" .Values.doctor.agentName) }}
+          {{- end }}
+          {{- if .Values.doctor.ollamaService }}
+          {{- $args = append $args (printf "--ollama-url=http://%s.%s.svc.cluster.local:%d" .Values.doctor.ollamaService .Values.doctor.agentNamespace 11434) }}
+          {{- end }}
+          {{- if $args }}
+          args:
+            {{- range $args }}
+            - {{ . | quote }}
+            {{- end }}
+          {{- end }}
           ports:
             - name: http
               containerPort: 8080

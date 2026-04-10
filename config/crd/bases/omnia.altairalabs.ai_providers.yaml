@@ -383,6 +383,7 @@ spec:
                 enum:
                 - Ready
                 - Error
+                - Unavailable
                 type: string
             type: object
         required:

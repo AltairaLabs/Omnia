@@ -239,9 +239,10 @@ func TestIntegration_FullRecordingChain(t *testing.T) {
 
 	// 1. Create session (as facade.ensureSession would)
 	sess, err := store.CreateSession(ctx, session.CreateSessionOptions{
-		AgentName: "test-agent",
-		Namespace: "default",
-		TTL:       30 * time.Minute,
+		AgentName:     "test-agent",
+		Namespace:     "default",
+		WorkspaceName: "test-ws",
+		TTL:           30 * time.Minute,
 	})
 	require.NoError(t, err, "CreateSession should succeed")
 	require.NotEmpty(t, sess.ID, "session ID should be set")
@@ -317,8 +318,9 @@ func TestIntegration_ToolCallRecording(t *testing.T) {
 	ctx := context.Background()
 
 	sess, err := store.CreateSession(ctx, session.CreateSessionOptions{
-		AgentName: "tool-agent",
-		Namespace: "default",
+		AgentName:     "tool-agent",
+		Namespace:     "default",
+		WorkspaceName: "test-ws",
 	})
 	require.NoError(t, err)
 
@@ -370,9 +372,10 @@ func TestIntegration_ConcurrentSessionCreation(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			sess, err := store.CreateSession(ctx, session.CreateSessionOptions{
-				AgentName: "arena-worker",
-				Namespace: "default",
-				Tags:      []string{"source:arena", fmt.Sprintf("vu:%d", idx)},
+				AgentName:     "arena-worker",
+				Namespace:     "default",
+				WorkspaceName: "test-ws",
+				Tags:          []string{"source:arena", fmt.Sprintf("vu:%d", idx)},
 				InitialState: map[string]string{
 					"arena.job": "load-test",
 					"arena.vu":  fmt.Sprintf("%d", idx),
@@ -429,8 +432,9 @@ func TestIntegration_ConcurrentMixedOperations(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			sess, err := store.CreateSession(ctx, session.CreateSessionOptions{
-				AgentName: "arena-worker",
-				Namespace: "default",
+				AgentName:     "arena-worker",
+				Namespace:     "default",
+				WorkspaceName: "test-ws",
 			})
 			createErrors[idx] = err
 			if sess != nil {
@@ -496,8 +500,9 @@ func TestIntegration_NoWarmStore(t *testing.T) {
 
 	// All operations should fail with meaningful errors, not panic or hang.
 	_, err := store.CreateSession(ctx, session.CreateSessionOptions{
-		AgentName: "test",
-		Namespace: "default",
+		AgentName:     "test",
+		Namespace:     "default",
+		WorkspaceName: "test-ws",
 	})
 	require.Error(t, err, "CreateSession should fail without warm store")
 	assert.Contains(t, err.Error(), "503", "should get 503 Service Unavailable")

@@ -93,10 +93,21 @@ function parseQueryParams(url) {
 
 /**
  * Build the upstream WebSocket URL for the agent's facade service.
- * The facade requires an `agent` query parameter.
+ * The facade requires agent and namespace query parameters.
+ * Additional client query params (e.g. device_id) are forwarded.
  */
-function getAgentWsUrl(namespace, name, facadePort = DEFAULT_FACADE_PORT) {
-  return `ws://${name}.${namespace}.${SERVICE_DOMAIN}:${facadePort}/ws?agent=${encodeURIComponent(name)}&namespace=${encodeURIComponent(namespace)}`;
+function getAgentWsUrl(namespace, name, clientParams = {}, facadePort = DEFAULT_FACADE_PORT) {
+  const params = new URLSearchParams({
+    agent: name,
+    namespace: namespace,
+  });
+  // Forward client query params to the facade (e.g. device_id for anonymous user identity)
+  for (const [key, value] of Object.entries(clientParams)) {
+    if (key !== "agent" && key !== "namespace" && value) {
+      params.set(key, value);
+    }
+  }
+  return `ws://${name}.${namespace}.${SERVICE_DOMAIN}:${facadePort}/ws?${params.toString()}`;
 }
 
 /**
@@ -140,8 +151,8 @@ function sendError(clientSocket, message, code = "CONNECTION_ERROR") {
 /**
  * Proxy a WebSocket connection to an agent's facade.
  */
-function proxyWebSocket(clientSocket, namespace, name) {
-  const upstreamUrl = getAgentWsUrl(namespace, name);
+function proxyWebSocket(clientSocket, namespace, name, clientParams = {}) {
+  const upstreamUrl = getAgentWsUrl(namespace, name, clientParams);
   console.log(`[WS Proxy] Connecting to upstream: ${upstreamUrl}`);
   console.log(`[WS Proxy] SERVICE_DOMAIN=${SERVICE_DOMAIN}, DEFAULT_FACADE_PORT=${DEFAULT_FACADE_PORT}`);
 
@@ -531,7 +542,8 @@ app.prepare().then(() => {
     const agent = parseAgentWsPath(pathname);
 
     if (agent) {
-      proxyWebSocket(ws, agent.namespace, agent.name);
+      const clientParams = parseQueryParams(req.url);
+      proxyWebSocket(ws, agent.namespace, agent.name, clientParams);
     } else if (isLspPath(pathname)) {
       // Parse query params for LSP context
       const params = parseQueryParams(req.url);

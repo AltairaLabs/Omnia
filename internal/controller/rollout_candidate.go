@@ -84,7 +84,7 @@ func (r *AgentRuntimeReconciler) reconcileCandidateDeployment(
 	log := logf.FromContext(ctx)
 	deployName := candidateDeploymentName(ar.Name)
 
-	secretHash := r.getSecretHash(ctx, ar, providers)
+	configHash := r.getConfigHash(ctx, providers)
 	resolvedClients, _ := r.resolveA2AClients(ctx, log, ar)
 
 	deployment := &appsv1.Deployment{
@@ -112,7 +112,7 @@ func (r *AgentRuntimeReconciler) reconcileCandidateDeployment(
 		}
 
 		// Build the standard deployment spec using candidate overrides.
-		r.buildDeploymentSpec(ctx, deployment, candidateAR, promptPack, toolRegistry, secretHash, resolvedClients)
+		r.buildDeploymentSpec(ctx, deployment, candidateAR, promptPack, toolRegistry, configHash, resolvedClients)
 
 		// Override the track label to "canary" on both selector and pod template
 		// so candidate pods are disjoint from stable pods.

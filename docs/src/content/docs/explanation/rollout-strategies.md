@@ -196,4 +196,3 @@ The controller evaluates the query at the specified interval. If the success con
 
 - [Progressive Rollouts Tutorial](/tutorials/progressive-rollouts/) — step-by-step walkthrough
 - [AgentRuntime CRD Reference](/reference/agentruntime/#rollout) — field-by-field specification
-- [RolloutAnalysis CRD Reference](/reference/rolloutanalysis/) — analysis template specification

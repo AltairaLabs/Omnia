@@ -22,6 +22,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
@@ -386,10 +388,9 @@ func TestGetNamespaceLabel_Found(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(ns).Build()
 
-	got := GetNamespaceLabel(context.Background(), c, "test-ns", "omnia.altairalabs.ai/workspace")
-	if got != "my-ws" {
-		t.Errorf("expected my-ws, got %s", got)
-	}
+	got, err := GetNamespaceLabel(context.Background(), c, "test-ns", "omnia.altairalabs.ai/workspace")
+	require.NoError(t, err)
+	assert.Equal(t, "my-ws", got)
 }
 
 func TestGetNamespaceLabel_LabelNotFound(t *testing.T) {
@@ -402,20 +403,17 @@ func TestGetNamespaceLabel_LabelNotFound(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(ns).Build()
 
-	got := GetNamespaceLabel(context.Background(), c, "test-ns", "omnia.altairalabs.ai/workspace")
-	if got != "" {
-		t.Errorf("expected empty string, got %s", got)
-	}
+	got, err := GetNamespaceLabel(context.Background(), c, "test-ns", "omnia.altairalabs.ai/workspace")
+	require.NoError(t, err)
+	assert.Equal(t, "", got)
 }
 
 func TestGetNamespaceLabel_NamespaceNotFound(t *testing.T) {
 	s := Scheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 
-	got := GetNamespaceLabel(context.Background(), c, "nonexistent", "omnia.altairalabs.ai/workspace")
-	if got != "" {
-		t.Errorf("expected empty string, got %s", got)
-	}
+	_, err := GetNamespaceLabel(context.Background(), c, "nonexistent", "omnia.altairalabs.ai/workspace")
+	require.Error(t, err, "should return error when namespace not found")
 }
 
 func TestGetNamespaceLabel_NilLabels(t *testing.T) {
@@ -427,10 +425,9 @@ func TestGetNamespaceLabel_NilLabels(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(ns).Build()
 
-	got := GetNamespaceLabel(context.Background(), c, "test-ns", "omnia.altairalabs.ai/workspace")
-	if got != "" {
-		t.Errorf("expected empty string, got %s", got)
-	}
+	got, err := GetNamespaceLabel(context.Background(), c, "test-ns", "omnia.altairalabs.ai/workspace")
+	require.NoError(t, err)
+	assert.Equal(t, "", got)
 }
 
 func TestResolveWorkspaceName_FromResourceLabels(t *testing.T) {
@@ -438,10 +435,9 @@ func TestResolveWorkspaceName_FromResourceLabels(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 
 	labels := map[string]string{"omnia.altairalabs.ai/workspace": "resource-ws"}
-	got := ResolveWorkspaceName(context.Background(), c, labels, "default")
-	if got != "resource-ws" {
-		t.Errorf("expected resource-ws, got %s", got)
-	}
+	got, err := ResolveWorkspaceName(context.Background(), c, labels, "default")
+	require.NoError(t, err)
+	assert.Equal(t, "resource-ws", got)
 }
 
 func TestResolveWorkspaceName_FallbackToNamespace(t *testing.T) {
@@ -455,10 +451,9 @@ func TestResolveWorkspaceName_FallbackToNamespace(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(ns).Build()
 
 	labels := map[string]string{"other": "value"}
-	got := ResolveWorkspaceName(context.Background(), c, labels, "test-ns")
-	if got != "ns-ws" {
-		t.Errorf("expected ns-ws, got %s", got)
-	}
+	got, err := ResolveWorkspaceName(context.Background(), c, labels, "test-ns")
+	require.NoError(t, err)
+	assert.Equal(t, "ns-ws", got)
 }
 
 func TestResolveWorkspaceName_NilLabels(t *testing.T) {
@@ -471,18 +466,15 @@ func TestResolveWorkspaceName_NilLabels(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(ns).Build()
 
-	got := ResolveWorkspaceName(context.Background(), c, nil, "test-ns")
-	if got != "ns-ws" {
-		t.Errorf("expected ns-ws, got %s", got)
-	}
+	got, err := ResolveWorkspaceName(context.Background(), c, nil, "test-ns")
+	require.NoError(t, err)
+	assert.Equal(t, "ns-ws", got)
 }
 
-func TestResolveWorkspaceName_NotFound(t *testing.T) {
+func TestResolveWorkspaceName_NamespaceError(t *testing.T) {
 	s := Scheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 
-	got := ResolveWorkspaceName(context.Background(), c, nil, "nonexistent")
-	if got != "" {
-		t.Errorf("expected empty string, got %s", got)
-	}
+	_, err := ResolveWorkspaceName(context.Background(), c, nil, "nonexistent")
+	require.Error(t, err, "should return error when namespace lookup fails")
 }

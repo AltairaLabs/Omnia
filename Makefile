@@ -272,6 +272,12 @@ docs-dev: ## Run documentation site in development mode
 docs-serve: docs-install ## Build docs and serve locally (preview)
 	cd docs && npm run build && npm run preview
 
+.PHONY: docs-check-links
+docs-check-links: docs-build ## Check for broken links in built documentation
+	@echo "🔗 Checking for broken links..."
+	@cd docs && npm run check-links
+	@echo "✅ Link check complete"
+
 ##@ Dashboard
 
 DASHBOARD_IMG ?= omnia-dashboard:latest

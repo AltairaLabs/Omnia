@@ -160,7 +160,7 @@ func main() {
 	memoryChecker := checks.NewMemoryChecker(memoryAPIURL, memoryStore, workspaceUID, agentChecker)
 	runner.Register(memoryChecker.Checks()...)
 
-	privacyChecker := checks.NewPrivacyChecker(memoryAPIURL, sessionAPIURL, workspaceUID)
+	privacyChecker := checks.NewPrivacyChecker(memoryAPIURL, sessionAPIURL, workspaceUID, arenaURL)
 	runner.Register(privacyChecker.Checks()...)
 
 	// Agent → Sessions must run sequentially (Sessions reads Agent's LastSessionID).
@@ -213,7 +213,7 @@ func resolveWorkspaceURLs(log interface {
 	}
 	resolver := servicediscovery.NewResolver(k8sClient)
 	sdCtx, sdCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	urls, resolveErr := resolver.ResolveServiceURLs(sdCtx, serviceGroup)
+	urls, resolveErr := resolver.ResolveByWorkspaceName(sdCtx, workspace, serviceGroup)
 	sdCancel()
 	if resolveErr != nil {
 		log.Info("service discovery failed, using flag URLs",

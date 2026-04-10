@@ -174,13 +174,13 @@ func (s *SessionChecker) checkSessionSearch(ctx context.Context) doctor.TestResu
 }
 
 // resolveSessionID returns the best available session ID.
-// Prefers the session from the list endpoint (known to exist in session-api)
-// over the WS session ID (which may not be persisted yet).
+// Prefers the agent checker's session (from the current doctor run) over
+// the list endpoint's session (which may be from a prior run).
 func (s *SessionChecker) resolveSessionID() string {
-	if s.lastSessionID != "" {
-		return s.lastSessionID
+	if id := s.GetSessionID(); id != "" {
+		return id
 	}
-	return s.GetSessionID()
+	return s.lastSessionID
 }
 
 // checkMessages verifies that the session has both user and assistant messages recorded.
