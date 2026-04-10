@@ -23,18 +23,23 @@ const (
 )
 
 // PrivacyChecker runs privacy-related checks against the memory-api service.
+// Privacy features (PII redaction, opt-out, audit) are enterprise-only.
+// Each check verifies a valid enterprise license before running.
 type PrivacyChecker struct {
 	memoryAPIURL  string
 	sessionAPIURL string
 	workspace     string
+	arenaURL      string
 }
 
-// NewPrivacyChecker creates a new PrivacyChecker.
-func NewPrivacyChecker(memoryAPIURL, sessionAPIURL, workspace string) *PrivacyChecker {
+// NewPrivacyChecker creates a new PrivacyChecker. arenaURL is the base URL of
+// the arena controller, used to fetch the license for enterprise detection.
+func NewPrivacyChecker(memoryAPIURL, sessionAPIURL, workspace, arenaURL string) *PrivacyChecker {
 	return &PrivacyChecker{
 		memoryAPIURL:  memoryAPIURL,
 		sessionAPIURL: sessionAPIURL,
 		workspace:     workspace,
+		arenaURL:      arenaURL,
 	}
 }
 
@@ -46,6 +51,48 @@ func (p *PrivacyChecker) Checks() []doctor.Check {
 		{Name: "MemoryDeletionCascade", Category: privacyCategory, Run: p.checkDeletionCascade},
 		{Name: "AuditLogWritten", Category: privacyCategory, Run: p.checkAuditLogWritten},
 	}
+}
+
+// requireEnterprise fetches the license from the arena controller and checks
+// whether it is an enterprise license. Returns a skip result if the arena
+// controller is not deployed or the license is not enterprise tier.
+func (p *PrivacyChecker) requireEnterprise(ctx context.Context) *doctor.TestResult {
+	if p.arenaURL == "" {
+		r := doctor.TestResult{Status: doctor.StatusSkip, Detail: "enterprise not configured (no arena URL)"}
+		return &r
+	}
+
+	licenseURL := p.arenaURL + "/api/v1/license"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, licenseURL, nil)
+	if err != nil {
+		r := doctor.TestResult{Status: doctor.StatusSkip, Detail: "enterprise license check failed", Error: err.Error()}
+		return &r
+	}
+	resp, err := memoryClient().Do(req)
+	if err != nil {
+		r := doctor.TestResult{Status: doctor.StatusSkip, Detail: "enterprise not available (arena controller unreachable)"}
+		return &r
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		r := doctor.TestResult{Status: doctor.StatusSkip, Detail: fmt.Sprintf("license endpoint returned HTTP %d", resp.StatusCode)}
+		return &r
+	}
+
+	var license struct {
+		Tier string `json:"tier"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&license); err != nil {
+		r := doctor.TestResult{Status: doctor.StatusSkip, Detail: "failed to decode license response", Error: err.Error()}
+		return &r
+	}
+
+	if license.Tier != "enterprise" {
+		r := doctor.TestResult{Status: doctor.StatusSkip, Detail: fmt.Sprintf("privacy checks require enterprise license (current: %s)", license.Tier)}
+		return &r
+	}
+	return nil
 }
 
 // requireWorkspace returns a skip result if workspace is empty.
@@ -122,9 +169,17 @@ func (p *PrivacyChecker) searchMemories(ctx context.Context, query string) ([]ma
 
 // checkPIIRedaction saves a memory containing a test SSN, retrieves it, and
 // verifies the SSN is not present in the returned content.
+// Skips when the enterprise privacy middleware is not deployed.
 func (p *PrivacyChecker) checkPIIRedaction(ctx context.Context) doctor.TestResult {
 	if r := p.requireWorkspace(); r != nil {
 		return *r
+	}
+
+	// Probe the enterprise consent endpoint to detect whether the privacy
+	// middleware is deployed. This is an EE-only route; a 404 means
+	// redaction is not available so the check should skip.
+	if skip := p.requireEnterprise(ctx); skip != nil {
+		return *skip
 	}
 
 	_, status, err := p.saveMemory(ctx, "patient ssn is "+privacyTestSSN, nil)
@@ -166,6 +221,9 @@ func (p *PrivacyChecker) checkPIIRedaction(ctx context.Context) doctor.TestResul
 // opt-out preference afterward.
 func (p *PrivacyChecker) checkOptOutRespected(ctx context.Context) doctor.TestResult {
 	if r := p.requireWorkspace(); r != nil {
+		return *r
+	}
+	if r := p.requireEnterprise(ctx); r != nil {
 		return *r
 	}
 
@@ -234,6 +292,9 @@ func (p *PrivacyChecker) checkDeletionCascade(ctx context.Context) doctor.TestRe
 	if r := p.requireWorkspace(); r != nil {
 		return *r
 	}
+	if r := p.requireEnterprise(ctx); r != nil {
+		return *r
+	}
 
 	_, status, err := p.saveMemory(ctx, "deletion cascade test", nil)
 	if err != nil || status != http.StatusCreated {
@@ -281,6 +342,9 @@ func (p *PrivacyChecker) checkDeletionCascade(ctx context.Context) doctor.TestRe
 // a memory_created event was recorded. Skips if the audit endpoint is not available.
 func (p *PrivacyChecker) checkAuditLogWritten(ctx context.Context) doctor.TestResult {
 	if r := p.requireWorkspace(); r != nil {
+		return *r
+	}
+	if r := p.requireEnterprise(ctx); r != nil {
 		return *r
 	}
 

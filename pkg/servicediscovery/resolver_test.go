@@ -252,6 +252,91 @@ func TestResolveServiceURLs_NamespaceFromFile(t *testing.T) {
 	}
 }
 
+func TestResolveByWorkspaceName_Success(t *testing.T) {
+	t.Setenv(envSessionAPIURL, "")
+	t.Setenv(envMemoryAPIURL, "")
+
+	ws := makeWorkspaceWithStatus("dev-agents", "dev-agents", []omniav1alpha1.ServiceGroupStatus{
+		{
+			Name:       "default",
+			SessionURL: "http://session-dev-agents-default.dev-agents:8080",
+			MemoryURL:  "http://memory-dev-agents-default.dev-agents:8080",
+			Ready:      true,
+		},
+	})
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(ws).
+		Build()
+
+	r := NewResolver(fakeClient)
+	urls, err := r.ResolveByWorkspaceName(context.Background(), "dev-agents", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urls.SessionURL != "http://session-dev-agents-default.dev-agents:8080" {
+		t.Errorf("unexpected session URL: %s", urls.SessionURL)
+	}
+	if urls.MemoryURL != "http://memory-dev-agents-default.dev-agents:8080" {
+		t.Errorf("unexpected memory URL: %s", urls.MemoryURL)
+	}
+}
+
+func TestResolveByWorkspaceName_NotFound(t *testing.T) {
+	t.Setenv(envSessionAPIURL, "")
+	t.Setenv(envMemoryAPIURL, "")
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		Build()
+
+	r := NewResolver(fakeClient)
+	_, err := r.ResolveByWorkspaceName(context.Background(), "nonexistent", "default")
+	if err == nil {
+		t.Fatal("expected error when workspace not found")
+	}
+}
+
+func TestResolveByWorkspaceName_ServiceGroupNotFound(t *testing.T) {
+	t.Setenv(envSessionAPIURL, "")
+	t.Setenv(envMemoryAPIURL, "")
+
+	ws := makeWorkspaceWithStatus("dev-agents", "dev-agents", []omniav1alpha1.ServiceGroupStatus{
+		{
+			Name:       "premium",
+			SessionURL: "http://session.svc",
+			MemoryURL:  "http://memory.svc",
+			Ready:      true,
+		},
+	})
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(ws).
+		Build()
+
+	r := NewResolver(fakeClient)
+	_, err := r.ResolveByWorkspaceName(context.Background(), "dev-agents", "default")
+	if err == nil {
+		t.Fatal("expected error when service group not found")
+	}
+}
+
+func TestResolveByWorkspaceName_EnvVarOverride(t *testing.T) {
+	t.Setenv(envSessionAPIURL, "http://override-session")
+	t.Setenv(envMemoryAPIURL, "http://override-memory")
+
+	r := NewResolver(nil)
+	urls, err := r.ResolveByWorkspaceName(context.Background(), "any", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urls.SessionURL != "http://override-session" {
+		t.Errorf("unexpected session URL: %s", urls.SessionURL)
+	}
+}
+
 func TestResolveServiceURLs_NamespaceFileNotFound(t *testing.T) {
 	t.Setenv(envSessionAPIURL, "")
 	t.Setenv(envMemoryAPIURL, "")
