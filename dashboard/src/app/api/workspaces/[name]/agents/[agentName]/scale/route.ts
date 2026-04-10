@@ -43,7 +43,7 @@ export const PUT = withWorkspaceAccess<RouteParams>(
         result.clientOptions,
         CRD_AGENTS,
         agentName,
-        { spec: { replicas: body.replicas } }
+        { spec: { runtime: { replicas: body.replicas } } }
       );
 
       return NextResponse.json(patched);
