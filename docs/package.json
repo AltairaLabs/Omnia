@@ -6,7 +6,8 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "check-links": "node check-links.js"
   },
   "dependencies": {
     "@astrojs/mdx": "^4.0.0",
@@ -18,5 +19,8 @@
     "playwright": "^1.57.0",
     "rehype-mermaid": "^3.0.0",
     "starlight-theme-galaxy": "^0.6.0"
+  },
+  "devDependencies": {
+    "linkinator": "^7.6.1"
   }
 }

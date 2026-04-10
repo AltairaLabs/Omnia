@@ -1,8 +1,13 @@
-name: Deploy Documentation to GitHub Pages
+name: Documentation
 
-# Documentation is deployed automatically by release.yml on each release.
-# This workflow is for emergency manual deployments only.
+# Runs the docs build + link check on PRs that touch docs.
+# Deployment to GitHub Pages is handled by release.yml on each release.
+# workflow_dispatch is available for emergency manual deployments.
 on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
   workflow_dispatch:
     inputs:
       reason:
@@ -23,10 +28,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Log deployment trigger
+      - name: Log trigger
         run: |
-          echo "Manual deployment triggered"
-          echo "Reason: ${{ inputs.reason }}"
+          echo "Event: ${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Reason: ${{ inputs.reason }}"
+          fi
 
       - name: Checkout
         uses: actions/checkout@v6
@@ -40,6 +47,7 @@ jobs:
 
       - name: Setup Pages
         id: pages
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/configure-pages@v5
         with:
           enablement: true
@@ -57,12 +65,22 @@ jobs:
         env:
           NODE_ENV: production
 
+      - name: Check for broken links
+        working-directory: docs
+        # TODO: remove continue-on-error once existing broken links are fixed.
+        # Current backlog: ~143 absolute self-refs to omnia.altairalabs.ai that
+        # should be relative links. Tracked in GitHub issue.
+        continue-on-error: true
+        run: npm run check-links
+
       - name: Upload artifact
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-pages-artifact@v4
         with:
           path: docs/dist
 
   deploy:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     needs: build
     environment:
