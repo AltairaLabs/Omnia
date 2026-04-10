@@ -297,7 +297,7 @@ provider:
   temperature: {{ .temperature }}
 ```
 
-For more information on PromptKit project structure, see the [PromptKit documentation](https://promptkit.altairalabs.ai/docs/getting-started).
+For more information on PromptKit project structure, see the [PromptKit documentation](https://promptkit.altairalabs.ai/).
 
 ## Complete Examples
 

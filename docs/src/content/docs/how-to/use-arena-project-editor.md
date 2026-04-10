@@ -146,7 +146,7 @@ steps:
         value: "error"
 ```
 
-See the [PromptKit documentation](https://promptkit.altairalabs.ai/docs/configuration) for the complete configuration reference.
+See the [PromptKit documentation](https://promptkit.altairalabs.ai/) for the complete configuration reference.
 
 ## Importing Resources
 

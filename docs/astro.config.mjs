@@ -27,7 +27,7 @@ export default defineConfig({
         replacesTitle: false,
       },
       social: [
-        { icon: 'github', label: 'GitHub', href: 'https://github.com/altairalabs/omnia' },
+        { icon: 'github', label: 'GitHub', href: 'https://github.com/AltairaLabs/Omnia' },
       ],
       // Custom components for version switching
       components: {
@@ -53,7 +53,7 @@ export default defineConfig({
         },
       ],
       editLink: {
-        baseUrl: 'https://github.com/altairalabs/omnia/edit/main/docs/',
+        baseUrl: 'https://github.com/AltairaLabs/Omnia/edit/main/docs/',
       },
       head: [
         {

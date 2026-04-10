@@ -67,10 +67,6 @@ jobs:
 
       - name: Check for broken links
         working-directory: docs
-        # TODO: remove continue-on-error once existing broken links are fixed.
-        # Current backlog: ~143 absolute self-refs to omnia.altairalabs.ai that
-        # should be relative links. Tracked in GitHub issue.
-        continue-on-error: true
         run: npm run check-links
 
       - name: Upload artifact
