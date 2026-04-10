@@ -29,10 +29,14 @@ try {
     //     stale-deploy false positives rather than real authoring bugs.
     //   - localhost: examples in local-development docs for dev services.
     //   - portal.azure.com: has anti-bot protection that returns 404 to crawlers.
+    //   - github.com/.../edit/...: Starlight's "Edit this page" links redirect to
+    //     login for unauthenticated crawlers and occasionally return 404 under
+    //     rate limiting. The links are valid; they just aren't crawler-friendly.
     linksToSkip: [
       '^https?://omnia\\.altairalabs\\.ai/',
       '^http://localhost:(?!' + PORT + ')\\d+',
       '^https?://portal\\.azure\\.com',
+      '^https?://github\\.com/[^/]+/[^/]+/edit/',
     ],
   });
 
