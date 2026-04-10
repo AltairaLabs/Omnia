@@ -505,20 +505,20 @@ func TestClassifyMessages(t *testing.T) {
 	}
 }
 
-func TestResolveSessionID_PrefersLastSessionID(t *testing.T) {
+func TestResolveSessionID_PrefersAgentSession(t *testing.T) {
 	s := &SessionChecker{
 		lastSessionID: "from-list",
 		GetSessionID:  func() string { return "from-ws" },
 	}
-	assert.Equal(t, "from-list", s.resolveSessionID())
+	assert.Equal(t, "from-ws", s.resolveSessionID())
 }
 
-func TestResolveSessionID_FallsBackToGetSessionID(t *testing.T) {
+func TestResolveSessionID_FallsBackToLastSessionID(t *testing.T) {
 	s := &SessionChecker{
-		lastSessionID: "",
-		GetSessionID:  func() string { return "from-ws" },
+		lastSessionID: "from-list",
+		GetSessionID:  func() string { return "" },
 	}
-	assert.Equal(t, "from-ws", s.resolveSessionID())
+	assert.Equal(t, "from-list", s.resolveSessionID())
 }
 
 func TestResolveSessionID_Empty(t *testing.T) {
