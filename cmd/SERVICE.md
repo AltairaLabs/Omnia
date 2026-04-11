@@ -13,8 +13,6 @@
   - SessionPrivacyPolicy — privacy policy inheritance and enforcement
   - ToolPolicy — CEL-based tool call policy enforcement
   - LicenseActivation — license activation and heartbeats (`--license-server-url`, `--cluster-name`)
-  - SessionAnalyticsSync — analytics export to Snowflake/BigQuery/ClickHouse (`--enable-analytics`)
-  - SessionStreamingConfig — event streaming to Kafka/Kinesis/Pulsar/NATS (`--enable-streaming`)
   - SessionPrivacyPolicy webhook — validates inheritance rules (when webhook certs configured)
 - Dashboard server (embedded Next.js app via `dashboard/server.js`)
 - REST API for dashboard proxy routes

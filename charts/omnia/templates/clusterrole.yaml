@@ -307,9 +307,7 @@ rules:
       - arenajobs/status
       - arenasources/status
       - arenatemplatesources/status
-      - sessionanalyticssyncs/status
       - sessionprivacypolicies/status
-      - sessionstreamingconfigs/status
       - toolpolicies/status
     verbs:
       - get
@@ -318,9 +316,7 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
-      - sessionanalyticssyncs
       - sessionprivacypolicies
-      - sessionstreamingconfigs
     verbs:
       - get
       - list

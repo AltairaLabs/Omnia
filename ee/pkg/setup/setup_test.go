@@ -106,10 +106,6 @@ func newTestManager(t *testing.T) ctrl.Manager {
 
 // TestRegisterEnterpriseControllers verifies that all enterprise controllers
 // and webhooks register without error when all features are enabled.
-//
-// Controller-runtime enforces globally unique controller names per process,
-// so we use a single test that covers all registration paths (always-on
-// controllers, conditional analytics/streaming, webhooks, custom license URL).
 func TestRegisterEnterpriseControllers(t *testing.T) {
 	skipWithoutEnvtest(t)
 	mgr := newTestManager(t)
@@ -118,27 +114,12 @@ func TestRegisterEnterpriseControllers(t *testing.T) {
 		LicenseServerURL: "https://license.example.com",
 		ClusterName:      "test-cluster",
 		EnableWebhooks:   true,
-		EnableAnalytics:  true,
-		EnableStreaming:  true,
 		PrivacyMetrics:   eemetrics.NewPrivacyPolicyMetricsWithRegistry(prometheus.NewRegistry()),
 	}
 
 	err := RegisterEnterpriseControllers(mgr, opts)
 	if err != nil {
 		t.Fatalf("RegisterEnterpriseControllers failed: %v", err)
-	}
-}
-
-// TestConditionalControllersNoFlags verifies that no conditional controllers
-// are registered when all feature flags are disabled. This uses its own manager
-// and calls the conditional helper directly (which only registers analytics/streaming).
-func TestConditionalControllersNoFlags(t *testing.T) {
-	skipWithoutEnvtest(t)
-	mgr := newTestManager(t)
-	opts := EnterpriseOptions{}
-	err := registerConditionalControllers(mgr, opts)
-	if err != nil {
-		t.Fatalf("registerConditionalControllers with no flags failed: %v", err)
 	}
 }
 
@@ -149,12 +130,6 @@ func TestEnterpriseOptionsDefaults(t *testing.T) {
 
 	if opts.EnableWebhooks {
 		t.Error("EnableWebhooks should default to false")
-	}
-	if opts.EnableAnalytics {
-		t.Error("EnableAnalytics should default to false")
-	}
-	if opts.EnableStreaming {
-		t.Error("EnableStreaming should default to false")
 	}
 	if opts.LicenseServerURL != "" {
 		t.Error("LicenseServerURL should default to empty")
