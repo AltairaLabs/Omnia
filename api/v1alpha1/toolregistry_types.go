@@ -104,6 +104,11 @@ type MCPConfig struct {
 	// toolFilter controls which tools from the MCP server are exposed.
 	// +optional
 	ToolFilter *MCPToolFilter `json:"toolFilter,omitempty"`
+
+	// retryPolicy configures retry behavior for CallTool failures on this handler.
+	// When nil, tool calls are executed once with no retries.
+	// +optional
+	RetryPolicy *MCPRetryPolicy `json:"retryPolicy,omitempty"`
 }
 
 // MCPRetryPolicy defines retry behavior for MCP CallTool failures.
@@ -164,6 +169,11 @@ type OpenAPIConfig struct {
 	// authSecretRef references a secret containing auth credentials.
 	// +optional
 	AuthSecretRef *SecretKeySelector `json:"authSecretRef,omitempty"`
+
+	// retryPolicy configures retry behavior for operations exposed by this OpenAPI handler.
+	// OpenAPI handlers delegate execution to the HTTP executor, so HTTPRetryPolicy is used.
+	// +optional
+	RetryPolicy *HTTPRetryPolicy `json:"retryPolicy,omitempty"`
 }
 
 // GRPCConfig contains gRPC-specific handler configuration
@@ -191,6 +201,11 @@ type GRPCConfig struct {
 	// tlsInsecureSkipVerify skips TLS verification (not recommended for production).
 	// +optional
 	TLSInsecureSkipVerify bool `json:"tlsInsecureSkipVerify,omitempty"`
+
+	// retryPolicy configures retry behavior for this gRPC tool.
+	// When nil, tool calls are executed once with no retries.
+	// +optional
+	RetryPolicy *GRPCRetryPolicy `json:"retryPolicy,omitempty"`
 }
 
 // GRPCRetryPolicy defines retry behavior for gRPC tool calls.
@@ -299,6 +314,11 @@ type HTTPConfig struct {
 	// When set, overrides endpoint for URL construction; endpoint is used as the base URL.
 	// +optional
 	URLTemplate *string `json:"urlTemplate,omitempty"`
+
+	// retryPolicy configures retry behavior for this HTTP tool.
+	// When nil, tool calls are executed once with no retries.
+	// +optional
+	RetryPolicy *HTTPRetryPolicy `json:"retryPolicy,omitempty"`
 }
 
 // HTTPRetryPolicy defines retry behavior for HTTP (and OpenAPI) tool calls.

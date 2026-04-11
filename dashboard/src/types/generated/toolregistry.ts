@@ -22,6 +22,25 @@ export interface ToolRegistrySpec {
     grpcConfig?: {
       /** endpoint is the gRPC server address (host:port). */
       endpoint: string;
+      /** retryPolicy configures retry behavior for this gRPC tool.
+       * When nil, tool calls are executed once with no retries. */
+      retryPolicy?: {
+        /** backoffMultiplier multiplies the delay between successive retries.
+         * Must parse as a float >= 1.0. */
+        backoffMultiplier?: string;
+        /** initialBackoff is the delay before the first retry attempt. */
+        initialBackoff?: string;
+        /** maxAttempts is the maximum total number of attempts, including the first.
+         * A value of 1 means no retries. Must be between 1 and 10. */
+        maxAttempts: number;
+        /** maxBackoff is the upper bound on delay between retry attempts. */
+        maxBackoff?: string;
+        /** retryableStatusCodes is the list of gRPC status codes that trigger a retry.
+         * Defaults to ["UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED"] if unset.
+         * Set to an empty list to disable status-code-based retry entirely.
+         * Values must be valid gRPC status code names. */
+        retryableStatusCodes?: string[];
+      };
       /** tls enables TLS for the connection. */
       tls?: boolean;
       /** tlsCAPath is the path to the CA certificate. */
@@ -69,6 +88,32 @@ export interface ToolRegistrySpec {
       /** responseMapping is a JMESPath expression to filter/reshape the response
        * before returning to the LLM. */
       responseMapping?: string;
+      /** retryPolicy configures retry behavior for this HTTP tool.
+       * When nil, tool calls are executed once with no retries. */
+      retryPolicy?: {
+        /** backoffMultiplier multiplies the delay between successive retries.
+         * Expressed as a decimal string (e.g. "2.0", "1.5"). Must parse as a float >= 1.0. */
+        backoffMultiplier?: string;
+        /** initialBackoff is the delay before the first retry attempt.
+         * Subsequent attempts apply exponential backoff via backoffMultiplier. */
+        initialBackoff?: string;
+        /** maxAttempts is the maximum total number of attempts, including the first.
+         * A value of 1 means no retries. Must be between 1 and 10. */
+        maxAttempts: number;
+        /** maxBackoff is the upper bound on delay between retry attempts.
+         * Must be >= initialBackoff (validated by the controller). */
+        maxBackoff?: string;
+        /** respectRetryAfter honors the HTTP Retry-After header on 429 and 503 responses,
+         * overriding backoff calculations for that attempt. */
+        respectRetryAfter?: boolean;
+        /** retryOn is the list of HTTP status codes that trigger a retry.
+         * Defaults to [408, 429, 500, 502, 503, 504] if unset.
+         * Set to an empty list to disable status-code-based retry entirely. */
+        retryOn?: number[];
+        /** retryOnNetworkError enables retries on connection failures, DNS failures,
+         * and request timeouts (errors returned before a status code is received). */
+        retryOnNetworkError?: boolean;
+      };
       /** staticBody contains fixed JSON fields merged into the request body.
        * These are invisible to the LLM. */
       staticBody?: unknown;
@@ -91,6 +136,20 @@ export interface ToolRegistrySpec {
       endpoint?: string;
       /** env are additional environment variables for stdio transport. */
       env?: Record<string, string>;
+      /** retryPolicy configures retry behavior for CallTool failures on this handler.
+       * When nil, tool calls are executed once with no retries. */
+      retryPolicy?: {
+        /** backoffMultiplier multiplies the delay between successive retries.
+         * Must parse as a float >= 1.0. */
+        backoffMultiplier?: string;
+        /** initialBackoff is the delay before the first retry attempt. */
+        initialBackoff?: string;
+        /** maxAttempts is the maximum total number of attempts, including the first.
+         * A value of 1 means no retries. Must be between 1 and 10. */
+        maxAttempts: number;
+        /** maxBackoff is the upper bound on delay between retry attempts. */
+        maxBackoff?: string;
+      };
       /** toolFilter controls which tools from the MCP server are exposed. */
       toolFilter?: {
         /** allowlist restricts to only these tool names. If empty, all tools are allowed. */
@@ -125,6 +184,32 @@ export interface ToolRegistrySpec {
       /** operationFilter limits which operations are exposed as tools.
        * If empty, all operations are exposed. */
       operationFilter?: string[];
+      /** retryPolicy configures retry behavior for operations exposed by this OpenAPI handler.
+       * OpenAPI handlers delegate execution to the HTTP executor, so HTTPRetryPolicy is used. */
+      retryPolicy?: {
+        /** backoffMultiplier multiplies the delay between successive retries.
+         * Expressed as a decimal string (e.g. "2.0", "1.5"). Must parse as a float >= 1.0. */
+        backoffMultiplier?: string;
+        /** initialBackoff is the delay before the first retry attempt.
+         * Subsequent attempts apply exponential backoff via backoffMultiplier. */
+        initialBackoff?: string;
+        /** maxAttempts is the maximum total number of attempts, including the first.
+         * A value of 1 means no retries. Must be between 1 and 10. */
+        maxAttempts: number;
+        /** maxBackoff is the upper bound on delay between retry attempts.
+         * Must be >= initialBackoff (validated by the controller). */
+        maxBackoff?: string;
+        /** respectRetryAfter honors the HTTP Retry-After header on 429 and 503 responses,
+         * overriding backoff calculations for that attempt. */
+        respectRetryAfter?: boolean;
+        /** retryOn is the list of HTTP status codes that trigger a retry.
+         * Defaults to [408, 429, 500, 502, 503, 504] if unset.
+         * Set to an empty list to disable status-code-based retry entirely. */
+        retryOn?: number[];
+        /** retryOnNetworkError enables retries on connection failures, DNS failures,
+         * and request timeouts (errors returned before a status code is received). */
+        retryOnNetworkError?: boolean;
+      };
       /** specURL is the URL to the OpenAPI specification (JSON or YAML). */
       specURL: string;
     };
