@@ -70,7 +70,7 @@ jobs:
       # ~4-6 minutes. Keying on go.sum means the cache is invalidated only when
       # dependencies change. See #732 follow-up.
       - name: Cache Go modules and build cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/go/pkg/mod
@@ -191,7 +191,7 @@ jobs:
 
       # See Core E2E for rationale.
       - name: Cache Go modules and build cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/go/pkg/mod
