@@ -106,6 +106,37 @@ type MCPConfig struct {
 	ToolFilter *MCPToolFilter `json:"toolFilter,omitempty"`
 }
 
+// MCPRetryPolicy defines retry behavior for MCP CallTool failures.
+// When nil or when MaxAttempts is 1, no retries are performed.
+//
+// Note: MCP session reconnect on broken transport is handled separately by the
+// MCP client wrapper and is not governed by this retry policy.
+type MCPRetryPolicy struct {
+	// maxAttempts is the maximum total number of attempts, including the first.
+	// A value of 1 means no retries. Must be between 1 and 10.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=10
+	MaxAttempts int32 `json:"maxAttempts"`
+
+	// initialBackoff is the delay before the first retry attempt.
+	// +kubebuilder:default="100ms"
+	// +optional
+	InitialBackoff *metav1.Duration `json:"initialBackoff,omitempty"`
+
+	// backoffMultiplier multiplies the delay between successive retries.
+	// Must parse as a float >= 1.0.
+	// +kubebuilder:default="2.0"
+	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?$`
+	// +optional
+	BackoffMultiplier *string `json:"backoffMultiplier,omitempty"`
+
+	// maxBackoff is the upper bound on delay between retry attempts.
+	// +kubebuilder:default="30s"
+	// +optional
+	MaxBackoff *metav1.Duration `json:"maxBackoff,omitempty"`
+}
+
 // OpenAPIConfig contains OpenAPI-specific handler configuration
 type OpenAPIConfig struct {
 	// specURL is the URL to the OpenAPI specification (JSON or YAML).
