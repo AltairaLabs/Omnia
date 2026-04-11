@@ -98,17 +98,32 @@ For stable releases, additional tags are created:
 
 ### Helm Chart
 
-The Helm chart is pushed as an OCI artifact:
+The Helm chart is published to **two channels** on every release:
 
+**1. OCI registry** (GHCR):
 ```
 oci://ghcr.io/altairalabs/charts/omnia:<version>
 ```
 
-Users can install with:
-
+Install with:
 ```bash
 helm install omnia oci://ghcr.io/altairalabs/charts/omnia --version 0.2.0
 ```
+
+**2. Traditional HTTPS Helm repository** (charts.altairalabs.ai):
+
+The chart `.tgz` and an updated `index.yaml` are published to the `AltairaLabs/charts` repository, which is served via GitHub Pages at `https://charts.altairalabs.ai`.
+
+Install with:
+```bash
+helm repo add altaira https://charts.altairalabs.ai
+helm repo update
+helm install omnia altaira/omnia --version 0.2.0
+```
+
+Prereleases (`*-alpha.*`, `*-beta.*`, `*-rc.*`) are included in the HTTPS repo and in OCI. Per Helm's SemVer conventions, `helm install` without `--version` will select the latest stable release by default; users wanting prereleases should pass `--devel` or an explicit `--version`.
+
+**Required secret**: The release workflow needs a `CHARTS_REPO_TOKEN` secret configured on the Omnia repository. This should be a fine-grained Personal Access Token scoped to `AltairaLabs/charts` with `contents: write` permission, or a GitHub App installation token with equivalent scope.
 
 ### Documentation
 
