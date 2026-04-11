@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,6 +30,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	runtimetools "github.com/altairalabs/omnia/internal/runtime/tools"
 )
 
 // ToolConfig represents the tools configuration file format for the runtime.
@@ -66,39 +69,42 @@ type ToolDefinition struct {
 
 // ToolHTTP represents HTTP configuration for a handler.
 type ToolHTTP struct {
-	Endpoint        string            `json:"endpoint"`
-	Method          string            `json:"method,omitempty"`
-	Headers         map[string]string `json:"headers,omitempty"`
-	ContentType     string            `json:"contentType,omitempty"`
-	QueryParams     []string          `json:"queryParams,omitempty"`
-	HeaderParams    map[string]string `json:"headerParams,omitempty"`
-	StaticQuery     map[string]string `json:"staticQuery,omitempty"`
-	StaticBody      interface{}       `json:"staticBody,omitempty"`
-	BodyMapping     string            `json:"bodyMapping,omitempty"`
-	ResponseMapping string            `json:"responseMapping,omitempty"`
-	Redact          []string          `json:"redact,omitempty"`
-	URLTemplate     string            `json:"urlTemplate,omitempty"`
+	Endpoint        string                               `json:"endpoint"`
+	Method          string                               `json:"method,omitempty"`
+	Headers         map[string]string                    `json:"headers,omitempty"`
+	ContentType     string                               `json:"contentType,omitempty"`
+	QueryParams     []string                             `json:"queryParams,omitempty"`
+	HeaderParams    map[string]string                    `json:"headerParams,omitempty"`
+	StaticQuery     map[string]string                    `json:"staticQuery,omitempty"`
+	StaticBody      interface{}                          `json:"staticBody,omitempty"`
+	BodyMapping     string                               `json:"bodyMapping,omitempty"`
+	ResponseMapping string                               `json:"responseMapping,omitempty"`
+	Redact          []string                             `json:"redact,omitempty"`
+	URLTemplate     string                               `json:"urlTemplate,omitempty"`
+	RetryPolicy     *runtimetools.RuntimeHTTPRetryPolicy `json:"retryPolicy,omitempty"`
 }
 
 // ToolGRPC represents gRPC configuration for a handler.
 type ToolGRPC struct {
-	Endpoint              string `json:"endpoint"`
-	TLS                   bool   `json:"tls,omitempty"`
-	TLSCertPath           string `json:"tlsCertPath,omitempty"`
-	TLSKeyPath            string `json:"tlsKeyPath,omitempty"`
-	TLSCAPath             string `json:"tlsCAPath,omitempty"`
-	TLSInsecureSkipVerify bool   `json:"tlsInsecureSkipVerify,omitempty"`
+	Endpoint              string                               `json:"endpoint"`
+	TLS                   bool                                 `json:"tls,omitempty"`
+	TLSCertPath           string                               `json:"tlsCertPath,omitempty"`
+	TLSKeyPath            string                               `json:"tlsKeyPath,omitempty"`
+	TLSCAPath             string                               `json:"tlsCAPath,omitempty"`
+	TLSInsecureSkipVerify bool                                 `json:"tlsInsecureSkipVerify,omitempty"`
+	RetryPolicy           *runtimetools.RuntimeGRPCRetryPolicy `json:"retryPolicy,omitempty"`
 }
 
 // ToolMCP represents MCP configuration for a handler.
 type ToolMCP struct {
-	Transport  string            `json:"transport"`
-	Endpoint   string            `json:"endpoint,omitempty"`
-	Command    string            `json:"command,omitempty"`
-	Args       []string          `json:"args,omitempty"`
-	WorkDir    string            `json:"workDir,omitempty"`
-	Env        map[string]string `json:"env,omitempty"`
-	ToolFilter *ToolMCPFilter    `json:"toolFilter,omitempty"`
+	Transport   string                              `json:"transport"`
+	Endpoint    string                              `json:"endpoint,omitempty"`
+	Command     string                              `json:"command,omitempty"`
+	Args        []string                            `json:"args,omitempty"`
+	WorkDir     string                              `json:"workDir,omitempty"`
+	Env         map[string]string                   `json:"env,omitempty"`
+	ToolFilter  *ToolMCPFilter                      `json:"toolFilter,omitempty"`
+	RetryPolicy *runtimetools.RuntimeMCPRetryPolicy `json:"retryPolicy,omitempty"`
 }
 
 // ToolMCPFilter controls which tools from an MCP server are exposed.
@@ -108,11 +114,14 @@ type ToolMCPFilter struct {
 }
 
 // ToolOpenAPI represents OpenAPI configuration for a handler.
+// OpenAPI delegates execution to the HTTP executor, so it reuses
+// RuntimeHTTPRetryPolicy for its retry policy.
 type ToolOpenAPI struct {
-	SpecURL         string            `json:"specURL"`
-	BaseURL         string            `json:"baseURL,omitempty"`
-	OperationFilter []string          `json:"operationFilter,omitempty"`
-	Headers         map[string]string `json:"headers,omitempty"`
+	SpecURL         string                               `json:"specURL"`
+	BaseURL         string                               `json:"baseURL,omitempty"`
+	OperationFilter []string                             `json:"operationFilter,omitempty"`
+	Headers         map[string]string                    `json:"headers,omitempty"`
+	RetryPolicy     *runtimetools.RuntimeHTTPRetryPolicy `json:"retryPolicy,omitempty"`
 }
 
 // reconcileToolsConfigMap creates or updates the tools ConfigMap from ToolRegistry.
@@ -124,7 +133,10 @@ func (r *AgentRuntimeReconciler) reconcileToolsConfigMap(
 	log := logf.FromContext(ctx)
 
 	// Build tools config from ToolRegistry
-	toolsConfig := r.buildToolsConfig(toolRegistry)
+	toolsConfig, err := r.buildToolsConfig(toolRegistry)
+	if err != nil {
+		return fmt.Errorf("failed to build tools config: %w", err)
+	}
 
 	// Serialize to YAML
 	configData, err := yaml.Marshal(toolsConfig)
@@ -178,6 +190,187 @@ func findEndpoint(toolRegistry *omniav1alpha1.ToolRegistry, handlerName string) 
 	return ""
 }
 
+// defaultHTTPRetryOn is the default list of HTTP status codes that trigger a
+// retry when the user doesn't specify RetryOn explicitly. Kept in sync with
+// the documentation in HTTPRetryPolicy.
+var defaultHTTPRetryOn = []int32{408, 429, 500, 502, 503, 504}
+
+// defaultGRPCRetryableCodes is the default RetryableStatusCodes list applied
+// when the user doesn't specify one explicitly.
+var defaultGRPCRetryableCodes = []string{"UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED"}
+
+// validGRPCStatusCodes is the authoritative set of gRPC status code names
+// accepted in GRPCRetryPolicy.RetryableStatusCodes. Matches google.rpc.Code.
+var validGRPCStatusCodes = map[string]struct{}{
+	"OK":                  {},
+	"CANCELLED":           {},
+	"UNKNOWN":             {},
+	"INVALID_ARGUMENT":    {},
+	"DEADLINE_EXCEEDED":   {},
+	"NOT_FOUND":           {},
+	"ALREADY_EXISTS":      {},
+	"PERMISSION_DENIED":   {},
+	"RESOURCE_EXHAUSTED":  {},
+	"FAILED_PRECONDITION": {},
+	"ABORTED":             {},
+	"OUT_OF_RANGE":        {},
+	"UNIMPLEMENTED":       {},
+	"INTERNAL":            {},
+	"UNAVAILABLE":         {},
+	"DATA_LOSS":           {},
+	"UNAUTHENTICATED":     {},
+}
+
+// parseBackoffMultiplier parses a decimal-string multiplier and validates it.
+// Shared by HTTP, gRPC, and MCP retry policy builders.
+func parseBackoffMultiplier(s string) (float64, error) {
+	mult, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid backoffMultiplier %q: %w", s, err)
+	}
+	if mult < 1.0 {
+		return 0, fmt.Errorf("backoffMultiplier %v must be >= 1.0", mult)
+	}
+	return mult, nil
+}
+
+// validateBackoffBounds ensures MaxBackoff >= InitialBackoff. Shared by all
+// three retry policy builders.
+func validateBackoffBounds(initial, max runtimetools.Duration) error {
+	if max.Get() < initial.Get() {
+		return fmt.Errorf("maxBackoff (%v) must be >= initialBackoff (%v)", max.Get(), initial.Get())
+	}
+	return nil
+}
+
+// buildHTTPRetryPolicy validates an HTTPRetryPolicy from the CRD and returns
+// the runtime-side representation with defaults applied. Returns (nil, nil)
+// when the input is nil.
+func buildHTTPRetryPolicy(p *omniav1alpha1.HTTPRetryPolicy) (*runtimetools.RuntimeHTTPRetryPolicy, error) {
+	if p == nil {
+		return nil, nil
+	}
+
+	out := &runtimetools.RuntimeHTTPRetryPolicy{
+		MaxAttempts:         p.MaxAttempts,
+		InitialBackoff:      runtimetools.Duration(100 * time.Millisecond),
+		BackoffMultiplier:   2.0,
+		MaxBackoff:          runtimetools.Duration(30 * time.Second),
+		RetryOn:             defaultHTTPRetryOn,
+		RetryOnNetworkError: true,
+		RespectRetryAfter:   true,
+	}
+
+	if p.InitialBackoff != nil {
+		out.InitialBackoff = runtimetools.Duration(p.InitialBackoff.Duration)
+	}
+	if p.MaxBackoff != nil {
+		out.MaxBackoff = runtimetools.Duration(p.MaxBackoff.Duration)
+	}
+	if p.BackoffMultiplier != nil {
+		mult, err := parseBackoffMultiplier(*p.BackoffMultiplier)
+		if err != nil {
+			return nil, fmt.Errorf("http retry policy: %w", err)
+		}
+		out.BackoffMultiplier = mult
+	}
+	// RetryOn: nil means "apply defaults"; empty slice means "user opted out".
+	if p.RetryOn != nil {
+		out.RetryOn = p.RetryOn
+	}
+	if p.RetryOnNetworkError != nil {
+		out.RetryOnNetworkError = *p.RetryOnNetworkError
+	}
+	if p.RespectRetryAfter != nil {
+		out.RespectRetryAfter = *p.RespectRetryAfter
+	}
+
+	if err := validateBackoffBounds(out.InitialBackoff, out.MaxBackoff); err != nil {
+		return nil, fmt.Errorf("http retry policy: %w", err)
+	}
+
+	return out, nil
+}
+
+// buildGRPCRetryPolicy validates a GRPCRetryPolicy from the CRD and returns
+// the runtime-side representation with defaults applied.
+func buildGRPCRetryPolicy(p *omniav1alpha1.GRPCRetryPolicy) (*runtimetools.RuntimeGRPCRetryPolicy, error) {
+	if p == nil {
+		return nil, nil
+	}
+
+	out := &runtimetools.RuntimeGRPCRetryPolicy{
+		MaxAttempts:          p.MaxAttempts,
+		InitialBackoff:       runtimetools.Duration(100 * time.Millisecond),
+		BackoffMultiplier:    2.0,
+		MaxBackoff:           runtimetools.Duration(30 * time.Second),
+		RetryableStatusCodes: defaultGRPCRetryableCodes,
+	}
+
+	if p.InitialBackoff != nil {
+		out.InitialBackoff = runtimetools.Duration(p.InitialBackoff.Duration)
+	}
+	if p.MaxBackoff != nil {
+		out.MaxBackoff = runtimetools.Duration(p.MaxBackoff.Duration)
+	}
+	if p.BackoffMultiplier != nil {
+		mult, err := parseBackoffMultiplier(*p.BackoffMultiplier)
+		if err != nil {
+			return nil, fmt.Errorf("grpc retry policy: %w", err)
+		}
+		out.BackoffMultiplier = mult
+	}
+	if p.RetryableStatusCodes != nil {
+		for _, code := range p.RetryableStatusCodes {
+			if _, ok := validGRPCStatusCodes[code]; !ok {
+				return nil, fmt.Errorf("grpc retry policy: unknown gRPC status code %q", code)
+			}
+		}
+		out.RetryableStatusCodes = p.RetryableStatusCodes
+	}
+
+	if err := validateBackoffBounds(out.InitialBackoff, out.MaxBackoff); err != nil {
+		return nil, fmt.Errorf("grpc retry policy: %w", err)
+	}
+
+	return out, nil
+}
+
+// buildMCPRetryPolicy validates an MCPRetryPolicy from the CRD and returns
+// the runtime-side representation with defaults applied.
+func buildMCPRetryPolicy(p *omniav1alpha1.MCPRetryPolicy) (*runtimetools.RuntimeMCPRetryPolicy, error) {
+	if p == nil {
+		return nil, nil
+	}
+
+	out := &runtimetools.RuntimeMCPRetryPolicy{
+		MaxAttempts:       p.MaxAttempts,
+		InitialBackoff:    runtimetools.Duration(100 * time.Millisecond),
+		BackoffMultiplier: 2.0,
+		MaxBackoff:        runtimetools.Duration(30 * time.Second),
+	}
+
+	if p.InitialBackoff != nil {
+		out.InitialBackoff = runtimetools.Duration(p.InitialBackoff.Duration)
+	}
+	if p.MaxBackoff != nil {
+		out.MaxBackoff = runtimetools.Duration(p.MaxBackoff.Duration)
+	}
+	if p.BackoffMultiplier != nil {
+		mult, err := parseBackoffMultiplier(*p.BackoffMultiplier)
+		if err != nil {
+			return nil, fmt.Errorf("mcp retry policy: %w", err)
+		}
+		out.BackoffMultiplier = mult
+	}
+
+	if err := validateBackoffBounds(out.InitialBackoff, out.MaxBackoff); err != nil {
+		return nil, fmt.Errorf("mcp retry policy: %w", err)
+	}
+
+	return out, nil
+}
+
 // unmarshalRawJSON converts apiextensionsv1.JSON raw bytes into a typed
 // interface{} value.  Without this step, []byte assigned to interface{} gets
 // base64-encoded when marshaled to YAML, which breaks schema extraction in the
@@ -210,9 +403,9 @@ func buildToolDefinition(tool *omniav1alpha1.ToolDefinition) *ToolDefinition {
 }
 
 // buildHTTPConfig builds HTTP configuration for a handler entry.
-func buildHTTPConfig(h *omniav1alpha1.HandlerDefinition, endpoint string) *ToolHTTP {
+func buildHTTPConfig(h *omniav1alpha1.HandlerDefinition, endpoint string) (*ToolHTTP, error) {
 	if h.HTTPConfig == nil {
-		return nil
+		return nil, nil
 	}
 	cfg := &ToolHTTP{
 		Endpoint:     endpoint,
@@ -236,13 +429,18 @@ func buildHTTPConfig(h *omniav1alpha1.HandlerDefinition, endpoint string) *ToolH
 	if h.HTTPConfig.URLTemplate != nil {
 		cfg.URLTemplate = *h.HTTPConfig.URLTemplate
 	}
-	return cfg
+	rp, err := buildHTTPRetryPolicy(h.HTTPConfig.RetryPolicy)
+	if err != nil {
+		return nil, err
+	}
+	cfg.RetryPolicy = rp
+	return cfg, nil
 }
 
 // buildGRPCConfig builds gRPC configuration for a handler entry.
-func buildGRPCConfig(h *omniav1alpha1.HandlerDefinition, endpoint string) *ToolGRPC {
+func buildGRPCConfig(h *omniav1alpha1.HandlerDefinition, endpoint string) (*ToolGRPC, error) {
 	if h.GRPCConfig == nil {
-		return nil
+		return nil, nil
 	}
 	cfg := &ToolGRPC{
 		Endpoint:              endpoint,
@@ -258,13 +456,18 @@ func buildGRPCConfig(h *omniav1alpha1.HandlerDefinition, endpoint string) *ToolG
 	if h.GRPCConfig.TLSCAPath != nil {
 		cfg.TLSCAPath = *h.GRPCConfig.TLSCAPath
 	}
-	return cfg
+	rp, err := buildGRPCRetryPolicy(h.GRPCConfig.RetryPolicy)
+	if err != nil {
+		return nil, err
+	}
+	cfg.RetryPolicy = rp
+	return cfg, nil
 }
 
 // buildMCPConfig builds MCP configuration for a handler entry.
-func buildMCPConfig(h *omniav1alpha1.HandlerDefinition) *ToolMCP {
+func buildMCPConfig(h *omniav1alpha1.HandlerDefinition) (*ToolMCP, error) {
 	if h.MCPConfig == nil {
-		return nil
+		return nil, nil
 	}
 	cfg := &ToolMCP{
 		Transport: string(h.MCPConfig.Transport),
@@ -288,13 +491,20 @@ func buildMCPConfig(h *omniav1alpha1.HandlerDefinition) *ToolMCP {
 			Blocklist: h.MCPConfig.ToolFilter.Blocklist,
 		}
 	}
-	return cfg
+	rp, err := buildMCPRetryPolicy(h.MCPConfig.RetryPolicy)
+	if err != nil {
+		return nil, err
+	}
+	cfg.RetryPolicy = rp
+	return cfg, nil
 }
 
 // buildOpenAPIConfig builds OpenAPI configuration for a handler entry.
-func buildOpenAPIConfig(h *omniav1alpha1.HandlerDefinition) *ToolOpenAPI {
+// OpenAPI handlers delegate execution to the HTTP executor, so they reuse
+// HTTPRetryPolicy (translated via buildHTTPRetryPolicy).
+func buildOpenAPIConfig(h *omniav1alpha1.HandlerDefinition) (*ToolOpenAPI, error) {
 	if h.OpenAPIConfig == nil {
-		return nil
+		return nil, nil
 	}
 	cfg := &ToolOpenAPI{
 		SpecURL:         h.OpenAPIConfig.SpecURL,
@@ -304,11 +514,17 @@ func buildOpenAPIConfig(h *omniav1alpha1.HandlerDefinition) *ToolOpenAPI {
 	if h.OpenAPIConfig.BaseURL != nil {
 		cfg.BaseURL = *h.OpenAPIConfig.BaseURL
 	}
-	return cfg
+	rp, err := buildHTTPRetryPolicy(h.OpenAPIConfig.RetryPolicy)
+	if err != nil {
+		return nil, err
+	}
+	cfg.RetryPolicy = rp
+	return cfg, nil
 }
 
 // buildHandlerEntry builds a single handler entry from the handler spec.
-func buildHandlerEntry(h *omniav1alpha1.HandlerDefinition, endpoint string) HandlerEntry {
+// Returns an error if retry policy translation fails for any transport.
+func buildHandlerEntry(h *omniav1alpha1.HandlerDefinition, endpoint string) (HandlerEntry, error) {
 	entry := HandlerEntry{
 		Name:     h.Name,
 		Type:     string(h.Type),
@@ -320,15 +536,31 @@ func buildHandlerEntry(h *omniav1alpha1.HandlerDefinition, endpoint string) Hand
 
 	switch h.Type {
 	case omniav1alpha1.HandlerTypeHTTP:
-		entry.HTTPConfig = buildHTTPConfig(h, endpoint)
+		cfg, err := buildHTTPConfig(h, endpoint)
+		if err != nil {
+			return entry, fmt.Errorf("handler %q: %w", h.Name, err)
+		}
+		entry.HTTPConfig = cfg
 		entry.Tool = buildToolDefinition(h.Tool)
 	case omniav1alpha1.HandlerTypeGRPC:
-		entry.GRPCConfig = buildGRPCConfig(h, endpoint)
+		cfg, err := buildGRPCConfig(h, endpoint)
+		if err != nil {
+			return entry, fmt.Errorf("handler %q: %w", h.Name, err)
+		}
+		entry.GRPCConfig = cfg
 		entry.Tool = buildToolDefinition(h.Tool)
 	case omniav1alpha1.HandlerTypeMCP:
-		entry.MCPConfig = buildMCPConfig(h)
+		cfg, err := buildMCPConfig(h)
+		if err != nil {
+			return entry, fmt.Errorf("handler %q: %w", h.Name, err)
+		}
+		entry.MCPConfig = cfg
 	case omniav1alpha1.HandlerTypeOpenAPI:
-		entry.OpenAPIConfig = buildOpenAPIConfig(h)
+		cfg, err := buildOpenAPIConfig(h)
+		if err != nil {
+			return entry, fmt.Errorf("handler %q: %w", h.Name, err)
+		}
+		entry.OpenAPIConfig = cfg
 	case omniav1alpha1.HandlerTypeClient:
 		entry.Tool = buildToolDefinition(h.Tool)
 		if h.ClientConfig != nil {
@@ -339,11 +571,13 @@ func buildHandlerEntry(h *omniav1alpha1.HandlerDefinition, endpoint string) Hand
 		}
 	}
 
-	return entry
+	return entry, nil
 }
 
 // buildToolsConfig builds the tools configuration from ToolRegistry spec and status.
-func (r *AgentRuntimeReconciler) buildToolsConfig(toolRegistry *omniav1alpha1.ToolRegistry) ToolConfig {
+// Returns an error if any handler has an invalid retry policy. This fails the
+// whole reconcile rather than emitting a partial config.
+func (r *AgentRuntimeReconciler) buildToolsConfig(toolRegistry *omniav1alpha1.ToolRegistry) (ToolConfig, error) {
 	config := ToolConfig{
 		Handlers: make([]HandlerEntry, 0, len(toolRegistry.Spec.Handlers)),
 	}
@@ -351,15 +585,23 @@ func (r *AgentRuntimeReconciler) buildToolsConfig(toolRegistry *omniav1alpha1.To
 	for _, h := range toolRegistry.Spec.Handlers {
 		// Client handlers have no backend endpoint
 		if h.Type == omniav1alpha1.HandlerTypeClient {
-			config.Handlers = append(config.Handlers, buildHandlerEntry(&h, ""))
+			entry, err := buildHandlerEntry(&h, "")
+			if err != nil {
+				return ToolConfig{}, err
+			}
+			config.Handlers = append(config.Handlers, entry)
 			continue
 		}
 		endpoint := findEndpoint(toolRegistry, h.Name)
 		if endpoint == "" {
 			continue
 		}
-		config.Handlers = append(config.Handlers, buildHandlerEntry(&h, endpoint))
+		entry, err := buildHandlerEntry(&h, endpoint)
+		if err != nil {
+			return ToolConfig{}, err
+		}
+		config.Handlers = append(config.Handlers, entry)
 	}
 
-	return config
+	return config, nil
 }

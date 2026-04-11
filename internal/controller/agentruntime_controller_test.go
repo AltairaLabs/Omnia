@@ -3420,7 +3420,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			config := reconciler.buildToolsConfig(toolRegistry)
+			config, toolsErr := reconciler.buildToolsConfig(toolRegistry)
+			Expect(toolsErr).NotTo(HaveOccurred())
 
 			Expect(config.Handlers).To(HaveLen(1))
 			Expect(config.Handlers[0].Name).To(Equal("handler1"))
@@ -3476,7 +3477,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			config := reconciler.buildToolsConfig(toolRegistry)
+			config, toolsErr := reconciler.buildToolsConfig(toolRegistry)
+			Expect(toolsErr).NotTo(HaveOccurred())
 
 			Expect(config.Handlers).To(HaveLen(1))
 			Expect(config.Handlers[0].Name).To(Equal("handler1"))
@@ -3510,7 +3512,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			config := reconciler.buildToolsConfig(toolRegistry)
+			config, toolsErr := reconciler.buildToolsConfig(toolRegistry)
+			Expect(toolsErr).NotTo(HaveOccurred())
 
 			Expect(config.Handlers).To(HaveLen(1))
 			Expect(config.Handlers[0].Name).To(Equal("orphan-handler"))
@@ -3524,7 +3527,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				Status: omniav1alpha1.ToolRegistryStatus{},
 			}
 
-			config := reconciler.buildToolsConfig(toolRegistry)
+			config, toolsErr := reconciler.buildToolsConfig(toolRegistry)
+			Expect(toolsErr).NotTo(HaveOccurred())
 
 			Expect(config.Handlers).To(BeEmpty())
 		})
@@ -3559,7 +3563,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			config := reconciler.buildToolsConfig(toolRegistry)
+			config, toolsErr := reconciler.buildToolsConfig(toolRegistry)
+			Expect(toolsErr).NotTo(HaveOccurred())
 
 			Expect(config.Handlers).To(HaveLen(1))
 			Expect(config.Handlers[0].Name).To(Equal("grpc-handler"))
@@ -3595,7 +3600,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			config := reconciler.buildToolsConfig(toolRegistry)
+			config, toolsErr := reconciler.buildToolsConfig(toolRegistry)
+			Expect(toolsErr).NotTo(HaveOccurred())
 
 			Expect(config.Handlers).To(HaveLen(1))
 			Expect(config.Handlers[0].Name).To(Equal("mcp-handler"))
@@ -3637,7 +3643,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			config := reconciler.buildToolsConfig(toolRegistry)
+			config, toolsErr := reconciler.buildToolsConfig(toolRegistry)
+			Expect(toolsErr).NotTo(HaveOccurred())
 
 			Expect(config.Handlers).To(HaveLen(1))
 			Expect(config.Handlers[0].Name).To(Equal("mcp-stdio-handler"))
