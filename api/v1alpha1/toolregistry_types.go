@@ -233,6 +233,54 @@ type HTTPConfig struct {
 	URLTemplate *string `json:"urlTemplate,omitempty"`
 }
 
+// HTTPRetryPolicy defines retry behavior for HTTP (and OpenAPI) tool calls.
+// When nil or when MaxAttempts is 1, no retries are performed.
+type HTTPRetryPolicy struct {
+	// maxAttempts is the maximum total number of attempts, including the first.
+	// A value of 1 means no retries. Must be between 1 and 10.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=10
+	MaxAttempts int32 `json:"maxAttempts"`
+
+	// initialBackoff is the delay before the first retry attempt.
+	// Subsequent attempts apply exponential backoff via backoffMultiplier.
+	// +kubebuilder:default="100ms"
+	// +optional
+	InitialBackoff *metav1.Duration `json:"initialBackoff,omitempty"`
+
+	// backoffMultiplier multiplies the delay between successive retries.
+	// Expressed as a decimal string (e.g. "2.0", "1.5"). Must parse as a float >= 1.0.
+	// +kubebuilder:default="2.0"
+	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?$`
+	// +optional
+	BackoffMultiplier *string `json:"backoffMultiplier,omitempty"`
+
+	// maxBackoff is the upper bound on delay between retry attempts.
+	// Must be >= initialBackoff (validated by the controller).
+	// +kubebuilder:default="30s"
+	// +optional
+	MaxBackoff *metav1.Duration `json:"maxBackoff,omitempty"`
+
+	// retryOn is the list of HTTP status codes that trigger a retry.
+	// Defaults to [408, 429, 500, 502, 503, 504] if unset.
+	// Set to an empty list to disable status-code-based retry entirely.
+	// +optional
+	RetryOn []int32 `json:"retryOn,omitempty"`
+
+	// retryOnNetworkError enables retries on connection failures, DNS failures,
+	// and request timeouts (errors returned before a status code is received).
+	// +kubebuilder:default=true
+	// +optional
+	RetryOnNetworkError *bool `json:"retryOnNetworkError,omitempty"`
+
+	// respectRetryAfter honors the HTTP Retry-After header on 429 and 503 responses,
+	// overriding backoff calculations for that attempt.
+	// +kubebuilder:default=true
+	// +optional
+	RespectRetryAfter *bool `json:"respectRetryAfter,omitempty"`
+}
+
 // ClientToolConfig contains configuration for client-side tools.
 type ClientToolConfig struct {
 	// consentMessage is a human-readable message shown to the user before
