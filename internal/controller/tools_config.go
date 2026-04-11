@@ -48,7 +48,6 @@ type HandlerEntry struct {
 	OpenAPIConfig *ToolOpenAPI    `json:"openAPIConfig,omitempty"`
 	ClientConfig  *ToolClient     `json:"clientConfig,omitempty"`
 	Timeout       string          `json:"timeout,omitempty"`
-	Retries       int32           `json:"retries,omitempty"`
 }
 
 // ToolClient contains client-side tool configuration for the runtime.
@@ -316,10 +315,7 @@ func buildHandlerEntry(h *omniav1alpha1.HandlerDefinition, endpoint string) Hand
 		Endpoint: endpoint,
 	}
 	if h.Timeout != nil {
-		entry.Timeout = *h.Timeout
-	}
-	if h.Retries != nil {
-		entry.Retries = *h.Retries
+		entry.Timeout = h.Timeout.Duration.String()
 	}
 
 	switch h.Type {

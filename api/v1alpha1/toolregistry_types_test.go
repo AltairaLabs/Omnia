@@ -195,8 +195,7 @@ func TestMCPTransportConstants(t *testing.T) {
 }
 
 func TestToolRegistryCreation(t *testing.T) {
-	timeout := "60s"
-	retries := int32(3)
+	timeout := metav1.Duration{Duration: 60 * time.Second}
 
 	registry := &ToolRegistry{
 		ObjectMeta: metav1.ObjectMeta{
@@ -220,7 +219,6 @@ func TestToolRegistryCreation(t *testing.T) {
 						},
 					},
 					Timeout: &timeout,
-					Retries: &retries,
 				},
 			},
 		},

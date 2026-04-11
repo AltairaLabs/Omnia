@@ -20,9 +20,97 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// Duration is a wrapper around time.Duration that implements yaml.Unmarshaler
+// to accept human-readable duration strings (e.g. "30s", "500ms") in tools.yaml.
+// This keeps the wire format readable while letting executors consume parsed
+// time.Duration values without per-call re-parsing.
+type Duration time.Duration
+
+// UnmarshalYAML implements yaml.Unmarshaler.
+func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
+	var s string
+	if err := value.Decode(&s); err != nil {
+		return fmt.Errorf("duration must be a string: %w", err)
+	}
+	if s == "" {
+		*d = 0
+		return nil
+	}
+	parsed, err := time.ParseDuration(s)
+	if err != nil {
+		return fmt.Errorf("invalid duration %q: %w", s, err)
+	}
+	*d = Duration(parsed)
+	return nil
+}
+
+// MarshalYAML implements yaml.Marshaler so that round-tripping config through
+// yaml produces human-readable strings.
+func (d Duration) MarshalYAML() (interface{}, error) {
+	return time.Duration(d).String(), nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler using the same string-based format.
+func (d *Duration) UnmarshalJSON(data []byte) error {
+	s := string(data)
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		s = s[1 : len(s)-1]
+	}
+	if s == "" || s == "null" {
+		*d = 0
+		return nil
+	}
+	parsed, err := time.ParseDuration(s)
+	if err != nil {
+		return fmt.Errorf("invalid duration %q: %w", s, err)
+	}
+	*d = Duration(parsed)
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+func (d Duration) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + time.Duration(d).String() + `"`), nil
+}
+
+// Get returns the underlying time.Duration.
+func (d Duration) Get() time.Duration {
+	return time.Duration(d)
+}
+
+// RuntimeHTTPRetryPolicy is the runtime representation of HTTPRetryPolicy
+// with all durations parsed and defaults applied.
+type RuntimeHTTPRetryPolicy struct {
+	MaxAttempts         int32    `json:"maxAttempts" yaml:"maxAttempts"`
+	InitialBackoff      Duration `json:"initialBackoff" yaml:"initialBackoff"`
+	BackoffMultiplier   float64  `json:"backoffMultiplier" yaml:"backoffMultiplier"`
+	MaxBackoff          Duration `json:"maxBackoff" yaml:"maxBackoff"`
+	RetryOn             []int32  `json:"retryOn,omitempty" yaml:"retryOn,omitempty"`
+	RetryOnNetworkError bool     `json:"retryOnNetworkError" yaml:"retryOnNetworkError"`
+	RespectRetryAfter   bool     `json:"respectRetryAfter" yaml:"respectRetryAfter"`
+}
+
+// RuntimeGRPCRetryPolicy is the runtime representation of GRPCRetryPolicy.
+type RuntimeGRPCRetryPolicy struct {
+	MaxAttempts          int32    `json:"maxAttempts" yaml:"maxAttempts"`
+	InitialBackoff       Duration `json:"initialBackoff" yaml:"initialBackoff"`
+	BackoffMultiplier    float64  `json:"backoffMultiplier" yaml:"backoffMultiplier"`
+	MaxBackoff           Duration `json:"maxBackoff" yaml:"maxBackoff"`
+	RetryableStatusCodes []string `json:"retryableStatusCodes,omitempty" yaml:"retryableStatusCodes,omitempty"`
+}
+
+// RuntimeMCPRetryPolicy is the runtime representation of MCPRetryPolicy.
+type RuntimeMCPRetryPolicy struct {
+	MaxAttempts       int32    `json:"maxAttempts" yaml:"maxAttempts"`
+	InitialBackoff    Duration `json:"initialBackoff" yaml:"initialBackoff"`
+	BackoffMultiplier float64  `json:"backoffMultiplier" yaml:"backoffMultiplier"`
+	MaxBackoff        Duration `json:"maxBackoff" yaml:"maxBackoff"`
+}
 
 // ToolConfig represents the tools configuration file format.
 // The new format uses Handlers; Tools is kept for backward compatibility.
@@ -47,8 +135,16 @@ type HandlerEntry struct {
 	GRPCConfig    *GRPCCfg    `json:"grpcConfig,omitempty" yaml:"grpcConfig,omitempty"`
 	MCPConfig     *MCPCfg     `json:"mcpConfig,omitempty" yaml:"mcpConfig,omitempty"`
 	OpenAPIConfig *OpenAPICfg `json:"openAPIConfig,omitempty" yaml:"openAPIConfig,omitempty"`
-	Timeout       string      `json:"timeout,omitempty" yaml:"timeout,omitempty"`
-	Retries       int32       `json:"retries,omitempty" yaml:"retries,omitempty"`
+	ClientConfig  *ToolClient `json:"clientConfig,omitempty" yaml:"clientConfig,omitempty"`
+	// Timeout is the wall-clock budget for a single invocation of any tool
+	// exposed by this handler. Zero means the runtime default applies.
+	Timeout Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+}
+
+// ToolClient contains client-side tool configuration.
+type ToolClient struct {
+	ConsentMessage string   `json:"consentMessage,omitempty" yaml:"consentMessage,omitempty"`
+	Categories     []string `json:"categories,omitempty" yaml:"categories,omitempty"`
 }
 
 // ToolDefCfg represents a tool definition for explicit handlers (HTTP, gRPC).
@@ -69,47 +165,49 @@ type ToolEntry struct {
 	GRPCConfig    *GRPCCfg    `json:"grpcConfig,omitempty" yaml:"grpcConfig,omitempty"`
 	MCPConfig     *MCPCfg     `json:"mcpConfig,omitempty" yaml:"mcpConfig,omitempty"`
 	OpenAPIConfig *OpenAPICfg `json:"openAPIConfig,omitempty" yaml:"openAPIConfig,omitempty"`
-	Timeout       string      `json:"timeout,omitempty" yaml:"timeout,omitempty"`
-	Retries       int32       `json:"retries,omitempty" yaml:"retries,omitempty"`
+	Timeout       Duration    `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 }
 
 // HTTPCfg represents HTTP configuration for a tool.
 type HTTPCfg struct {
-	Endpoint        string            `json:"endpoint" yaml:"endpoint"`
-	Method          string            `json:"method,omitempty" yaml:"method,omitempty"`
-	Headers         map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
-	ContentType     string            `json:"contentType,omitempty" yaml:"contentType,omitempty"`
-	AuthType        string            `json:"authType,omitempty" yaml:"authType,omitempty"`
-	AuthToken       string            `json:"authToken,omitempty" yaml:"authToken,omitempty"`
-	QueryParams     []string          `json:"queryParams,omitempty" yaml:"queryParams,omitempty"`
-	HeaderParams    map[string]string `json:"headerParams,omitempty" yaml:"headerParams,omitempty"`
-	StaticQuery     map[string]string `json:"staticQuery,omitempty" yaml:"staticQuery,omitempty"`
-	StaticBody      interface{}       `json:"staticBody,omitempty" yaml:"staticBody,omitempty"`
-	BodyMapping     string            `json:"bodyMapping,omitempty" yaml:"bodyMapping,omitempty"`
-	ResponseMapping string            `json:"responseMapping,omitempty" yaml:"responseMapping,omitempty"`
-	Redact          []string          `json:"redact,omitempty" yaml:"redact,omitempty"`
-	URLTemplate     string            `json:"urlTemplate,omitempty" yaml:"urlTemplate,omitempty"`
+	Endpoint        string                  `json:"endpoint" yaml:"endpoint"`
+	Method          string                  `json:"method,omitempty" yaml:"method,omitempty"`
+	Headers         map[string]string       `json:"headers,omitempty" yaml:"headers,omitempty"`
+	ContentType     string                  `json:"contentType,omitempty" yaml:"contentType,omitempty"`
+	AuthType        string                  `json:"authType,omitempty" yaml:"authType,omitempty"`
+	AuthToken       string                  `json:"authToken,omitempty" yaml:"authToken,omitempty"`
+	QueryParams     []string                `json:"queryParams,omitempty" yaml:"queryParams,omitempty"`
+	HeaderParams    map[string]string       `json:"headerParams,omitempty" yaml:"headerParams,omitempty"`
+	StaticQuery     map[string]string       `json:"staticQuery,omitempty" yaml:"staticQuery,omitempty"`
+	StaticBody      interface{}             `json:"staticBody,omitempty" yaml:"staticBody,omitempty"`
+	BodyMapping     string                  `json:"bodyMapping,omitempty" yaml:"bodyMapping,omitempty"`
+	ResponseMapping string                  `json:"responseMapping,omitempty" yaml:"responseMapping,omitempty"`
+	Redact          []string                `json:"redact,omitempty" yaml:"redact,omitempty"`
+	URLTemplate     string                  `json:"urlTemplate,omitempty" yaml:"urlTemplate,omitempty"`
+	RetryPolicy     *RuntimeHTTPRetryPolicy `json:"retryPolicy,omitempty" yaml:"retryPolicy,omitempty"`
 }
 
 // GRPCCfg represents gRPC configuration for a tool.
 type GRPCCfg struct {
-	Endpoint              string `json:"endpoint" yaml:"endpoint"`
-	TLS                   bool   `json:"tls,omitempty" yaml:"tls,omitempty"`
-	TLSCertPath           string `json:"tlsCertPath,omitempty" yaml:"tlsCertPath,omitempty"`
-	TLSKeyPath            string `json:"tlsKeyPath,omitempty" yaml:"tlsKeyPath,omitempty"`
-	TLSCAPath             string `json:"tlsCAPath,omitempty" yaml:"tlsCAPath,omitempty"`
-	TLSInsecureSkipVerify bool   `json:"tlsInsecureSkipVerify,omitempty" yaml:"tlsInsecureSkipVerify,omitempty"`
+	Endpoint              string                  `json:"endpoint" yaml:"endpoint"`
+	TLS                   bool                    `json:"tls,omitempty" yaml:"tls,omitempty"`
+	TLSCertPath           string                  `json:"tlsCertPath,omitempty" yaml:"tlsCertPath,omitempty"`
+	TLSKeyPath            string                  `json:"tlsKeyPath,omitempty" yaml:"tlsKeyPath,omitempty"`
+	TLSCAPath             string                  `json:"tlsCAPath,omitempty" yaml:"tlsCAPath,omitempty"`
+	TLSInsecureSkipVerify bool                    `json:"tlsInsecureSkipVerify,omitempty" yaml:"tlsInsecureSkipVerify,omitempty"`
+	RetryPolicy           *RuntimeGRPCRetryPolicy `json:"retryPolicy,omitempty" yaml:"retryPolicy,omitempty"`
 }
 
 // MCPCfg represents MCP configuration for a tool.
 type MCPCfg struct {
-	Transport  string            `json:"transport" yaml:"transport"`
-	Endpoint   string            `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
-	Command    string            `json:"command,omitempty" yaml:"command,omitempty"`
-	Args       []string          `json:"args,omitempty" yaml:"args,omitempty"`
-	WorkDir    string            `json:"workDir,omitempty" yaml:"workDir,omitempty"`
-	Env        map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
-	ToolFilter *MCPToolFilterCfg `json:"toolFilter,omitempty" yaml:"toolFilter,omitempty"`
+	Transport   string                 `json:"transport" yaml:"transport"`
+	Endpoint    string                 `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+	Command     string                 `json:"command,omitempty" yaml:"command,omitempty"`
+	Args        []string               `json:"args,omitempty" yaml:"args,omitempty"`
+	WorkDir     string                 `json:"workDir,omitempty" yaml:"workDir,omitempty"`
+	Env         map[string]string      `json:"env,omitempty" yaml:"env,omitempty"`
+	ToolFilter  *MCPToolFilterCfg      `json:"toolFilter,omitempty" yaml:"toolFilter,omitempty"`
+	RetryPolicy *RuntimeMCPRetryPolicy `json:"retryPolicy,omitempty" yaml:"retryPolicy,omitempty"`
 }
 
 // MCPToolFilterCfg controls which tools from an MCP server are exposed.
@@ -129,12 +227,13 @@ func (f *MCPToolFilterCfg) Includes(name string) bool {
 
 // OpenAPICfg represents OpenAPI configuration for a tool.
 type OpenAPICfg struct {
-	SpecURL         string            `json:"specURL" yaml:"specURL"`
-	BaseURL         string            `json:"baseURL,omitempty" yaml:"baseURL,omitempty"`
-	OperationFilter []string          `json:"operationFilter,omitempty" yaml:"operationFilter,omitempty"`
-	Headers         map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
-	AuthType        string            `json:"authType,omitempty" yaml:"authType,omitempty"`
-	AuthToken       string            `json:"authToken,omitempty" yaml:"authToken,omitempty"`
+	SpecURL         string                  `json:"specURL" yaml:"specURL"`
+	BaseURL         string                  `json:"baseURL,omitempty" yaml:"baseURL,omitempty"`
+	OperationFilter []string                `json:"operationFilter,omitempty" yaml:"operationFilter,omitempty"`
+	Headers         map[string]string       `json:"headers,omitempty" yaml:"headers,omitempty"`
+	AuthType        string                  `json:"authType,omitempty" yaml:"authType,omitempty"`
+	AuthToken       string                  `json:"authToken,omitempty" yaml:"authToken,omitempty"`
+	RetryPolicy     *RuntimeHTTPRetryPolicy `json:"retryPolicy,omitempty" yaml:"retryPolicy,omitempty"`
 }
 
 // LoadConfig loads tool configuration from a YAML file.

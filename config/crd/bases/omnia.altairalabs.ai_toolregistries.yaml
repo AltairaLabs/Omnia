@@ -495,14 +495,6 @@ spec:
                       required:
                       - specURL
                       type: object
-                    retries:
-                      default: 0
-                      description: retries specifies the number of retry attempts
-                        on failure.
-                      format: int32
-                      maximum: 10
-                      minimum: 0
-                      type: integer
                     selector:
                       description: |-
                         selector discovers the handler endpoint from Kubernetes Services.
@@ -528,8 +520,8 @@ spec:
                     timeout:
                       default: 30s
                       description: |-
-                        timeout specifies the maximum duration for tool invocation.
-                        Defaults to "30s".
+                        timeout specifies the maximum duration for a single tool invocation (wall clock).
+                        Applies to all handler types.
                       type: string
                     tool:
                       description: |-

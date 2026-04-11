@@ -18,8 +18,10 @@ package controller
 
 import (
 	"testing"
+	"time"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
@@ -465,8 +467,7 @@ func TestFindEndpoint(t *testing.T) {
 }
 
 func TestBuildHandlerEntry(t *testing.T) {
-	timeout := "10s"
-	retries := int32(3)
+	timeout := metav1.Duration{Duration: 10 * time.Second}
 
 	t.Run("HTTP handler", func(t *testing.T) {
 		h := &omniav1alpha1.HandlerDefinition{
@@ -482,7 +483,6 @@ func TestBuildHandlerEntry(t *testing.T) {
 				InputSchema: apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
 			},
 			Timeout: &timeout,
-			Retries: &retries,
 		}
 
 		entry := buildHandlerEntry(h, "http://svc:8080")
@@ -491,9 +491,6 @@ func TestBuildHandlerEntry(t *testing.T) {
 		}
 		if entry.Timeout != "10s" {
 			t.Errorf("Timeout = %v, want 10s", entry.Timeout)
-		}
-		if entry.Retries != 3 {
-			t.Errorf("Retries = %v, want 3", entry.Retries)
 		}
 		if entry.HTTPConfig == nil {
 			t.Error("HTTPConfig is nil")

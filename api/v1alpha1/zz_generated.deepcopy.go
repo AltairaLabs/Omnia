@@ -1444,12 +1444,7 @@ func (in *HandlerDefinition) DeepCopyInto(out *HandlerDefinition) {
 	}
 	if in.Timeout != nil {
 		in, out := &in.Timeout, &out.Timeout
-		*out = new(string)
-		**out = **in
-	}
-	if in.Retries != nil {
-		in, out := &in.Retries, &out.Retries
-		*out = new(int32)
+		*out = new(v1.Duration)
 		**out = **in
 	}
 }

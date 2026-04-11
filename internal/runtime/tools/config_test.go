@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -32,7 +33,6 @@ func TestLoadConfig(t *testing.T) {
       endpoint: http://example.com/api
       method: POST
     timeout: "30s"
-    retries: 3
   - name: mcp-tool
     type: mcp
     description: An MCP tool
@@ -82,11 +82,8 @@ func TestLoadConfig(t *testing.T) {
 	if httpTool.HTTPConfig.Endpoint != "http://example.com/api" {
 		t.Errorf("unexpected endpoint: %q", httpTool.HTTPConfig.Endpoint)
 	}
-	if httpTool.Timeout != "30s" {
-		t.Errorf("expected timeout '30s', got %q", httpTool.Timeout)
-	}
-	if httpTool.Retries != 3 {
-		t.Errorf("expected retries 3, got %d", httpTool.Retries)
+	if httpTool.Timeout.Get() != 30*time.Second {
+		t.Errorf("expected timeout 30s, got %v", httpTool.Timeout.Get())
 	}
 
 	// Verify MCP SSE tool

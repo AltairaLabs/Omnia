@@ -292,12 +292,11 @@ func applyAuthHeader(headers map[string]string, authType, token string) {
 
 func (t *Tester) resolveTimeout(handler *omniav1alpha1.HandlerDefinition) time.Duration {
 	if handler.Timeout != nil {
-		if d, err := time.ParseDuration(*handler.Timeout); err == nil {
-			if d > maxTestTimeout {
-				return maxTestTimeout
-			}
-			return d
+		d := handler.Timeout.Duration
+		if d > maxTestTimeout {
+			return maxTestTimeout
 		}
+		return d
 	}
 	return maxTestTimeout
 }
@@ -311,10 +310,7 @@ func (t *Tester) buildHandlerConfig(h *omniav1alpha1.HandlerDefinition) tools.Ha
 	}
 
 	if h.Timeout != nil {
-		entry.Timeout = *h.Timeout
-	}
-	if h.Retries != nil {
-		entry.Retries = *h.Retries
+		entry.Timeout = tools.Duration(h.Timeout.Duration)
 	}
 
 	switch h.Type {

@@ -213,8 +213,6 @@ export interface ToolRegistrySpec {
       /** specURL is the URL to the OpenAPI specification (JSON or YAML). */
       specURL: string;
     };
-    /** retries specifies the number of retry attempts on failure. */
-    retries?: number;
     /** selector discovers the handler endpoint from Kubernetes Services.
      * Mutually exclusive with inline endpoint configuration. */
     selector?: {
@@ -227,8 +225,8 @@ export interface ToolRegistrySpec {
        * If empty, uses the first port. */
       port?: string;
     };
-    /** timeout specifies the maximum duration for tool invocation.
-     * Defaults to "30s". */
+    /** timeout specifies the maximum duration for a single tool invocation (wall clock).
+     * Applies to all handler types. */
     timeout?: string;
     /** tool defines the tool interface (required for http and grpc types).
      * Self-describing handlers (mcp, openapi) discover tools automatically. */

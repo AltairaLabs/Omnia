@@ -478,18 +478,15 @@ type HandlerDefinition struct {
 	// +optional
 	ClientConfig *ClientToolConfig `json:"clientConfig,omitempty"`
 
-	// timeout specifies the maximum duration for tool invocation.
-	// Defaults to "30s".
+	// timeout specifies the maximum duration for a single tool invocation (wall clock).
+	// Applies to all handler types.
 	// +kubebuilder:default="30s"
 	// +optional
-	Timeout *string `json:"timeout,omitempty"`
+	Timeout *metav1.Duration `json:"timeout,omitempty"`
 
-	// retries specifies the number of retry attempts on failure.
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=10
-	// +kubebuilder:default=0
-	// +optional
-	Retries *int32 `json:"retries,omitempty"`
+	// NOTE: the former Retries *int32 field has been removed in this release.
+	// Retry policies are now defined per transport inside httpConfig.retryPolicy,
+	// grpcConfig.retryPolicy, mcpConfig.retryPolicy, and openAPIConfig.retryPolicy.
 }
 
 // ToolRegistrySpec defines the desired state of ToolRegistry

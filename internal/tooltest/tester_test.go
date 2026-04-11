@@ -104,7 +104,7 @@ func TestResolveTimeout(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		timeout *string
+		timeout *metav1.Duration
 		want    time.Duration
 	}{
 		{
@@ -114,17 +114,12 @@ func TestResolveTimeout(t *testing.T) {
 		},
 		{
 			name:    "valid short timeout",
-			timeout: strPtr("10s"),
+			timeout: &metav1.Duration{Duration: 10 * time.Second},
 			want:    10 * time.Second,
 		},
 		{
 			name:    "timeout exceeding max is capped",
-			timeout: strPtr("5m"),
-			want:    maxTestTimeout,
-		},
-		{
-			name:    "invalid timeout uses max",
-			timeout: strPtr("invalid"),
+			timeout: &metav1.Duration{Duration: 5 * time.Minute},
 			want:    maxTestTimeout,
 		},
 	}
@@ -207,8 +202,7 @@ func TestBuildHandlerConfigHTTP(t *testing.T) {
 				Raw: []byte(`{"type":"object"}`),
 			},
 		},
-		Timeout: strPtr("15s"),
-		Retries: int32Ptr(2),
+		Timeout: &metav1.Duration{Duration: 15 * time.Second},
 	}
 
 	entry := tester.buildHandlerConfig(handler)
@@ -219,11 +213,8 @@ func TestBuildHandlerConfigHTTP(t *testing.T) {
 	if entry.Type != "http" {
 		t.Errorf("Type = %q, want %q", entry.Type, "http")
 	}
-	if entry.Timeout != "15s" {
-		t.Errorf("Timeout = %q, want %q", entry.Timeout, "15s")
-	}
-	if entry.Retries != 2 {
-		t.Errorf("Retries = %d, want 2", entry.Retries)
+	if entry.Timeout.Get() != 15*time.Second {
+		t.Errorf("Timeout = %v, want 15s", entry.Timeout.Get())
 	}
 	if entry.HTTPConfig == nil {
 		t.Fatal("HTTPConfig is nil")
@@ -1148,12 +1139,4 @@ func TestResolveOpenAPIAuthWithExistingHeaders(t *testing.T) {
 	if handler.OpenAPIConfig.Headers["Authorization"] != "Bearer tok456" {
 		t.Errorf("Authorization = %q, want %q", handler.OpenAPIConfig.Headers["Authorization"], "Bearer tok456")
 	}
-}
-
-func strPtr(s string) *string {
-	return &s
-}
-
-func int32Ptr(i int32) *int32 {
-	return &i
 }
