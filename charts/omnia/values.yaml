@@ -194,16 +194,6 @@ enterprise:
       # -- Policy proxy image pull policy
       pullPolicy: IfNotPresent
 
-  # Analytics sync controller (SessionAnalyticsSync CRD)
-  analytics:
-    # -- Enable the SessionAnalyticsSync controller
-    enabled: false
-
-  # Session streaming controller (SessionStreamingConfig CRD)
-  streaming:
-    # -- Enable the SessionStreamingConfig controller
-    enabled: false
-
   # PromptKit LSP server for YAML validation
   promptkitLsp:
     # -- Enable PromptKit LSP server

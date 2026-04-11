@@ -90,8 +90,6 @@ func main() {
 	var enterpriseEnabled bool
 	var licenseServerURL string
 	var clusterName string
-	var enableAnalytics bool
-	var enableStreaming bool
 	var tlsOpts []func(*tls.Config)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -149,10 +147,6 @@ func main() {
 		"URL of the license activation server for enterprise features")
 	flag.StringVar(&clusterName, "cluster-name", "",
 		"Human-readable name for this cluster in license records")
-	flag.BoolVar(&enableAnalytics, "enable-analytics", false,
-		"Enable the SessionAnalyticsSync controller (enterprise)")
-	flag.BoolVar(&enableStreaming, "enable-streaming", false,
-		"Enable the SessionStreamingConfig controller (enterprise)")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -311,8 +305,6 @@ func main() {
 			LicenseServerURL: licenseServerURL,
 			ClusterName:      clusterName,
 			EnableWebhooks:   len(webhookCertPath) > 0,
-			EnableAnalytics:  enableAnalytics,
-			EnableStreaming:  enableStreaming,
 		}
 		if err := eesetup.RegisterEnterpriseControllers(mgr, eeOpts); err != nil {
 			setupLog.Error(err, "unable to register enterprise controllers")

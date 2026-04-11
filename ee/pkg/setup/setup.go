@@ -16,7 +16,6 @@ import (
 
 	eecontroller "github.com/altairalabs/omnia/ee/internal/controller"
 	"github.com/altairalabs/omnia/ee/internal/webhook"
-	"github.com/altairalabs/omnia/ee/pkg/analyticsfactory"
 	"github.com/altairalabs/omnia/ee/pkg/license"
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/policy"
@@ -54,10 +53,6 @@ func RegisterEnterpriseControllers(mgr ctrl.Manager, opts EnterpriseOptions) err
 		return fmt.Errorf("%s: %w", errControllerRegistration, err)
 	}
 	log.V(1).Info("controller registered", logKeyController, "LicenseActivation")
-
-	if err := registerConditionalControllers(mgr, opts); err != nil {
-		return err
-	}
 
 	if opts.EnableWebhooks {
 		if err := registerWebhooks(mgr); err != nil {
@@ -117,46 +112,6 @@ func registerLicenseActivation(mgr ctrl.Manager, opts EnterpriseOptions) error {
 		LicenseValidator: validator,
 		ActivationClient: license.NewActivationClient(clientOpts...),
 		ClusterName:      opts.ClusterName,
-	}).SetupWithManager(mgr)
-}
-
-// registerConditionalControllers registers controllers gated by feature flags.
-func registerConditionalControllers(mgr ctrl.Manager, opts EnterpriseOptions) error {
-	log := ctrl.Log.WithName("ee-setup")
-
-	if opts.EnableAnalytics {
-		if err := registerSessionAnalyticsSync(mgr); err != nil {
-			return fmt.Errorf("%s: %w", errControllerRegistration, err)
-		}
-		log.V(1).Info("controller registered", logKeyController, "SessionAnalyticsSync")
-	}
-
-	if opts.EnableStreaming {
-		if err := registerSessionStreamingConfig(mgr); err != nil {
-			return fmt.Errorf("%s: %w", errControllerRegistration, err)
-		}
-		log.V(1).Info("controller registered", logKeyController, "SessionStreamingConfig")
-	}
-
-	return nil
-}
-
-// registerSessionAnalyticsSync sets up the SessionAnalyticsSync controller.
-func registerSessionAnalyticsSync(mgr ctrl.Manager) error {
-	return (&eecontroller.SessionAnalyticsSyncReconciler{
-		Client:          mgr.GetClient(),
-		Scheme:          mgr.GetScheme(),
-		Recorder:        eventRecorder(mgr, "sessionanalyticssync-controller"),
-		ProviderFactory: &analyticsfactory.Factory{},
-	}).SetupWithManager(mgr)
-}
-
-// registerSessionStreamingConfig sets up the SessionStreamingConfig controller.
-func registerSessionStreamingConfig(mgr ctrl.Manager) error {
-	return (&eecontroller.SessionStreamingConfigReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: eventRecorder(mgr, "sessionstreamingconfig-controller"),
 	}).SetupWithManager(mgr)
 }
 

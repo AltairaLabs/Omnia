@@ -23,12 +23,6 @@ type EnterpriseOptions struct {
 	// EnableWebhooks enables admission webhook registration for EE resources.
 	EnableWebhooks bool
 
-	// EnableAnalytics enables the SessionAnalyticsSync controller.
-	EnableAnalytics bool
-
-	// EnableStreaming enables the SessionStreamingConfig controller.
-	EnableStreaming bool
-
 	// PrivacyMetrics provides pre-created privacy policy metrics.
 	// If nil, new metrics are created using the default Prometheus registry.
 	PrivacyMetrics *metrics.PrivacyPolicyMetrics
