@@ -162,6 +162,43 @@ type GRPCConfig struct {
 	TLSInsecureSkipVerify bool `json:"tlsInsecureSkipVerify,omitempty"`
 }
 
+// GRPCRetryPolicy defines retry behavior for gRPC tool calls.
+// When nil or when MaxAttempts is 1, no retries are performed.
+// Retries are implemented as an Omnia-side loop, not via gRPC native service config,
+// so that retry attempts compose correctly with the existing circuit breaker.
+type GRPCRetryPolicy struct {
+	// maxAttempts is the maximum total number of attempts, including the first.
+	// A value of 1 means no retries. Must be between 1 and 10.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=10
+	MaxAttempts int32 `json:"maxAttempts"`
+
+	// initialBackoff is the delay before the first retry attempt.
+	// +kubebuilder:default="100ms"
+	// +optional
+	InitialBackoff *metav1.Duration `json:"initialBackoff,omitempty"`
+
+	// backoffMultiplier multiplies the delay between successive retries.
+	// Must parse as a float >= 1.0.
+	// +kubebuilder:default="2.0"
+	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?$`
+	// +optional
+	BackoffMultiplier *string `json:"backoffMultiplier,omitempty"`
+
+	// maxBackoff is the upper bound on delay between retry attempts.
+	// +kubebuilder:default="30s"
+	// +optional
+	MaxBackoff *metav1.Duration `json:"maxBackoff,omitempty"`
+
+	// retryableStatusCodes is the list of gRPC status codes that trigger a retry.
+	// Defaults to ["UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED"] if unset.
+	// Set to an empty list to disable status-code-based retry entirely.
+	// Values must be valid gRPC status code names.
+	// +optional
+	RetryableStatusCodes []string `json:"retryableStatusCodes,omitempty"`
+}
+
 // HTTPConfig contains HTTP-specific handler configuration
 type HTTPConfig struct {
 	// endpoint is the HTTP endpoint URL.
