@@ -915,6 +915,26 @@ spec:
                       required:
                       - name
                       type: object
+                    requiredCapabilities:
+                      description: |-
+                        requiredCapabilities lists capabilities the provider must support for
+                        this binding. If the provider does not advertise all listed capabilities,
+                        the AgentRuntime enters a Pending phase with a descriptive condition.
+                      items:
+                        description: ProviderCapability defines a capability that
+                          a provider supports.
+                        enum:
+                        - text
+                        - streaming
+                        - vision
+                        - tools
+                        - json
+                        - audio
+                        - video
+                        - documents
+                        - duplex
+                        type: string
+                      type: array
                   required:
                   - name
                   - providerRef
@@ -969,6 +989,26 @@ spec:
                               required:
                               - name
                               type: object
+                            requiredCapabilities:
+                              description: |-
+                                requiredCapabilities lists capabilities the provider must support for
+                                this binding. If the provider does not advertise all listed capabilities,
+                                the AgentRuntime enters a Pending phase with a descriptive condition.
+                              items:
+                                description: ProviderCapability defines a capability
+                                  that a provider supports.
+                                enum:
+                                - text
+                                - streaming
+                                - vision
+                                - tools
+                                - json
+                                - audio
+                                - video
+                                - documents
+                                - duplex
+                                type: string
+                              type: array
                           required:
                           - name
                           - providerRef

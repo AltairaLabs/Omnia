@@ -2676,7 +2676,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 
 			By("calling fetchAndValidateProvider")
 			log := logf.FromContext(ctx)
-			fetchedProvider, result, err := reconciler.fetchAndValidateProvider(ctx, log, agentRuntime, ref)
+			fetchedProvider, result, err := reconciler.fetchAndValidateProvider(ctx, log, agentRuntime, omniav1alpha1.NamedProviderRef{Name: "default", ProviderRef: ref})
 
 			By("verifying Provider is returned and no requeue")
 			Expect(err).NotTo(HaveOccurred())
@@ -2746,7 +2746,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 
 			By("calling fetchAndValidateProvider")
 			log := logf.FromContext(ctx)
-			fetchedProvider, result, err := reconciler.fetchAndValidateProvider(ctx, log, agentRuntime, ref)
+			fetchedProvider, result, err := reconciler.fetchAndValidateProvider(ctx, log, agentRuntime, omniav1alpha1.NamedProviderRef{Name: "default", ProviderRef: ref})
 
 			By("verifying Provider is returned (empty phase treated as Ready)")
 			Expect(err).NotTo(HaveOccurred())
@@ -2758,6 +2758,117 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
 			Expect(condition.Reason).To(Equal("ProviderFound"))
+		})
+
+		It("should reject a provider missing required capabilities", func() {
+			By("creating a Provider with limited capabilities")
+			provider := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "limited-provider",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:         omniav1alpha1.ProviderTypeClaude,
+					Model:        "claude-sonnet-4-20250514",
+					Capabilities: []omniav1alpha1.ProviderCapability{omniav1alpha1.ProviderCapabilityText},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+			provider.Status.Phase = omniav1alpha1.ProviderPhaseReady
+			Expect(k8sClient.Status().Update(ctx, provider)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, provider) }()
+
+			ref := omniav1alpha1.ProviderRef{Name: "limited-provider"}
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cap-test-runtime",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
+					Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+					Providers: []omniav1alpha1.NamedProviderRef{
+						{Name: "default", ProviderRef: ref, RequiredCapabilities: []omniav1alpha1.ProviderCapability{
+							omniav1alpha1.ProviderCapabilityText,
+							omniav1alpha1.ProviderCapabilityVision,
+							omniav1alpha1.ProviderCapabilityTools,
+						}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, agentRuntime) }()
+
+			By("calling fetchAndValidateProvider")
+			log := logf.FromContext(ctx)
+			_, result, err := reconciler.fetchAndValidateProvider(ctx, log, agentRuntime, agentRuntime.Spec.Providers[0])
+
+			By("verifying it requeues with CapabilityMismatch")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+
+			condition := meta.FindStatusCondition(agentRuntime.Status.Conditions, ConditionTypeProviderReady)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(condition.Reason).To(Equal("CapabilityMismatch"))
+			Expect(condition.Message).To(ContainSubstring("vision"))
+			Expect(condition.Message).To(ContainSubstring("tools"))
+		})
+
+		It("should accept a provider with all required capabilities", func() {
+			By("creating a Provider with full capabilities")
+			provider := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "full-provider",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+					Capabilities: []omniav1alpha1.ProviderCapability{
+						omniav1alpha1.ProviderCapabilityText,
+						omniav1alpha1.ProviderCapabilityVision,
+						omniav1alpha1.ProviderCapabilityTools,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+			provider.Status.Phase = omniav1alpha1.ProviderPhaseReady
+			Expect(k8sClient.Status().Update(ctx, provider)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, provider) }()
+
+			ref := omniav1alpha1.ProviderRef{Name: "full-provider"}
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cap-pass-runtime",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
+					Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+					Providers: []omniav1alpha1.NamedProviderRef{
+						{Name: "default", ProviderRef: ref, RequiredCapabilities: []omniav1alpha1.ProviderCapability{
+							omniav1alpha1.ProviderCapabilityText,
+							omniav1alpha1.ProviderCapabilityVision,
+						}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, agentRuntime) }()
+
+			By("calling fetchAndValidateProvider")
+			log := logf.FromContext(ctx)
+			fetchedProvider, result, err := reconciler.fetchAndValidateProvider(ctx, log, agentRuntime, agentRuntime.Spec.Providers[0])
+
+			By("verifying it succeeds")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+			Expect(fetchedProvider).NotTo(BeNil())
+
+			condition := meta.FindStatusCondition(agentRuntime.Status.Conditions, ConditionTypeProviderReady)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
 		})
 
 	})
