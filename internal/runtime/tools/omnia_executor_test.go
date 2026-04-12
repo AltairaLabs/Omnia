@@ -19,6 +19,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -28,6 +29,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -35,7 +37,9 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
+	grpcCodes "google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	grpcStatus "google.golang.org/grpc/status"
 
 	pktools "github.com/AltairaLabs/PromptKit/runtime/tools"
 
@@ -2373,5 +2377,249 @@ func TestOmniaExecutor_InitOpenAPIHandler_WithMockServer(t *testing.T) {
 	}
 	if op.Method != "GET" {
 		t.Errorf("method = %q, want %q", op.Method, "GET")
+	}
+}
+
+// --- Retry integration tests ---
+
+// failNTimesGRPCClient is a mock ToolServiceClient that returns failErr for the
+// first failCount calls, then returns successResp.
+type failNTimesGRPCClient struct {
+	failCount   int
+	calls       int
+	successResp *toolsv1.ToolResponse
+	failErr     error
+}
+
+func (m *failNTimesGRPCClient) Execute(
+	_ context.Context,
+	_ *toolsv1.ToolRequest,
+	_ ...grpc.CallOption,
+) (*toolsv1.ToolResponse, error) {
+	m.calls++
+	if m.calls <= m.failCount {
+		return nil, m.failErr
+	}
+	return m.successResp, nil
+}
+
+func (m *failNTimesGRPCClient) ListTools(
+	_ context.Context,
+	_ *toolsv1.ListToolsRequest,
+	_ ...grpc.CallOption,
+) (*toolsv1.ListToolsResponse, error) {
+	return nil, nil
+}
+
+func TestExecuteHTTP_RetryOnRetryableStatus(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls < 3 {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("bad gateway"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"result":"ok"}`))
+	}))
+	defer srv.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.handlers["retry-http"] = &HandlerEntry{
+		Name: "retry-http",
+		Type: ToolTypeHTTP,
+		HTTPConfig: &HTTPCfg{
+			Endpoint: srv.URL,
+			Method:   "GET",
+			RetryPolicy: &RuntimeHTTPRetryPolicy{
+				MaxAttempts:         3,
+				InitialBackoff:      Duration(1 * time.Millisecond),
+				BackoffMultiplier:   2.0,
+				MaxBackoff:          Duration(100 * time.Millisecond),
+				RetryOn:             []int32{502},
+				RetryOnNetworkError: true,
+			},
+		},
+	}
+	e.toolHandlers["retry-http-tool"] = "retry-http"
+
+	desc := &pktools.ToolDescriptor{Name: "retry-http-tool"}
+	result, err := e.Execute(context.Background(), desc, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if calls != 3 {
+		t.Errorf("expected 3 calls (2 retries + 1 success), got %d", calls)
+	}
+	if string(result) != `{"result":"ok"}` {
+		t.Errorf("unexpected result: %s", result)
+	}
+}
+
+func TestExecuteHTTP_NoRetryOnNonRetryableStatus(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("bad request"))
+	}))
+	defer srv.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.handlers["no-retry-http"] = &HandlerEntry{
+		Name: "no-retry-http",
+		Type: ToolTypeHTTP,
+		HTTPConfig: &HTTPCfg{
+			Endpoint: srv.URL,
+			Method:   "GET",
+			RetryPolicy: &RuntimeHTTPRetryPolicy{
+				MaxAttempts:         3,
+				InitialBackoff:      Duration(1 * time.Millisecond),
+				BackoffMultiplier:   2.0,
+				MaxBackoff:          Duration(100 * time.Millisecond),
+				RetryOn:             []int32{502, 503},
+				RetryOnNetworkError: true,
+			},
+		},
+	}
+	e.toolHandlers["no-retry-tool"] = "no-retry-http"
+
+	desc := &pktools.ToolDescriptor{Name: "no-retry-tool"}
+	_, err := e.Execute(context.Background(), desc, json.RawMessage(`{}`))
+	if err == nil {
+		t.Fatal("expected error for 400 response")
+	}
+	if calls != 1 {
+		t.Errorf("expected 1 call (no retries for 400), got %d", calls)
+	}
+}
+
+func TestExecuteGRPC_RetryOnUnavailable(t *testing.T) {
+	mock := &failNTimesGRPCClient{
+		failCount:   2,
+		failErr:     grpcStatus.Error(grpcCodes.Unavailable, "service unavailable"),
+		successResp: &toolsv1.ToolResponse{ResultJson: `{"answer":42}`},
+	}
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.grpcClients["grpc-retry"] = mock
+	e.handlers["grpc-retry"] = &HandlerEntry{
+		Name: "grpc-retry",
+		Type: ToolTypeGRPC,
+		GRPCConfig: &GRPCCfg{
+			Endpoint: "localhost:50051",
+			RetryPolicy: &RuntimeGRPCRetryPolicy{
+				MaxAttempts:          3,
+				InitialBackoff:       Duration(1 * time.Millisecond),
+				BackoffMultiplier:    2.0,
+				MaxBackoff:           Duration(100 * time.Millisecond),
+				RetryableStatusCodes: []string{"UNAVAILABLE"},
+			},
+		},
+	}
+	e.toolHandlers["grpc-retry-tool"] = "grpc-retry"
+
+	result, err := e.executeGRPC(context.Background(), "grpc-retry-tool", "grpc-retry", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("executeGRPC failed: %v", err)
+	}
+	if mock.calls != 3 {
+		t.Errorf("expected 3 calls, got %d", mock.calls)
+	}
+	if string(result) != `{"answer":42}` {
+		t.Errorf("unexpected result: %s", result)
+	}
+}
+
+func TestExecuteGRPC_NoRetryOnNotFound(t *testing.T) {
+	mock := &failNTimesGRPCClient{
+		failCount: 5,
+		failErr:   grpcStatus.Error(grpcCodes.NotFound, "not found"),
+	}
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.grpcClients["grpc-no-retry"] = mock
+	e.handlers["grpc-no-retry"] = &HandlerEntry{
+		Name: "grpc-no-retry",
+		Type: ToolTypeGRPC,
+		GRPCConfig: &GRPCCfg{
+			Endpoint: "localhost:50051",
+			RetryPolicy: &RuntimeGRPCRetryPolicy{
+				MaxAttempts:          3,
+				InitialBackoff:       Duration(1 * time.Millisecond),
+				BackoffMultiplier:    2.0,
+				MaxBackoff:           Duration(100 * time.Millisecond),
+				RetryableStatusCodes: []string{"UNAVAILABLE"},
+			},
+		},
+	}
+	e.toolHandlers["grpc-no-retry-tool"] = "grpc-no-retry"
+
+	_, err := e.executeGRPC(context.Background(), "grpc-no-retry-tool", "grpc-no-retry", json.RawMessage(`{}`))
+	if err == nil {
+		t.Fatal("expected error for NOT_FOUND")
+	}
+	if mock.calls != 1 {
+		t.Errorf("expected 1 call (no retries), got %d", mock.calls)
+	}
+}
+
+func TestMCPRetry_TransportErrorRetried(t *testing.T) {
+	calls := 0
+	policy := retryPolicy{
+		MaxAttempts:       3,
+		InitialBackoff:    1 * time.Millisecond,
+		BackoffMultiplier: 2.0,
+		MaxBackoff:        100 * time.Millisecond,
+	}
+
+	result, err := retryWithBackoff(
+		context.Background(), logr.Discard(), tracenoop.Span{},
+		policy, 0,
+		func(err error) (bool, time.Duration) { return classifyMCPError(err) },
+		func(_ context.Context) (json.RawMessage, error) {
+			calls++
+			if calls < 3 {
+				return nil, &net.OpError{Op: "read", Err: errors.New("connection reset")}
+			}
+			return json.RawMessage(`{"mcp":"ok"}`), nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != 3 {
+		t.Errorf("expected 3 calls, got %d", calls)
+	}
+	if string(result) != `{"mcp":"ok"}` {
+		t.Errorf("unexpected result: %s", result)
+	}
+}
+
+func TestMCPRetry_ToolErrorNotRetried(t *testing.T) {
+	calls := 0
+	policy := retryPolicy{
+		MaxAttempts:       3,
+		InitialBackoff:    1 * time.Millisecond,
+		BackoffMultiplier: 2.0,
+		MaxBackoff:        100 * time.Millisecond,
+	}
+
+	_, err := retryWithBackoff(
+		context.Background(), logr.Discard(), tracenoop.Span{},
+		policy, 0,
+		func(err error) (bool, time.Duration) { return classifyMCPError(err) },
+		func(_ context.Context) (json.RawMessage, error) {
+			calls++
+			return nil, &mcpToolError{message: "file not found"}
+		},
+	)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if calls != 1 {
+		t.Errorf("expected 1 call (tool errors not retried), got %d", calls)
 	}
 }
