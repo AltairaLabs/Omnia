@@ -138,7 +138,7 @@ func (r *AgentRuntimeReconciler) reconcileProviders(
 	providers := make(map[string]*omniav1alpha1.Provider)
 
 	for _, np := range agentRuntime.Spec.Providers {
-		provider, result, err := r.fetchAndValidateProvider(ctx, log, agentRuntime, np.ProviderRef)
+		provider, result, err := r.fetchAndValidateProvider(ctx, log, agentRuntime, np)
 		if err != nil || result.RequeueAfter > 0 {
 			return nil, result, err
 		}
@@ -148,14 +148,15 @@ func (r *AgentRuntimeReconciler) reconcileProviders(
 	return providers, ctrl.Result{}, nil
 }
 
-// fetchAndValidateProvider fetches a Provider by ref and validates its status.
+// fetchAndValidateProvider fetches a Provider by ref, validates its status,
+// and checks that it advertises all required capabilities.
 func (r *AgentRuntimeReconciler) fetchAndValidateProvider(
 	ctx context.Context,
 	log logr.Logger,
 	agentRuntime *omniav1alpha1.AgentRuntime,
-	ref omniav1alpha1.ProviderRef,
+	np omniav1alpha1.NamedProviderRef,
 ) (*omniav1alpha1.Provider, ctrl.Result, error) {
-	provider, err := r.fetchProviderByRef(ctx, ref, agentRuntime.Namespace)
+	provider, err := r.fetchProviderByRef(ctx, np.ProviderRef, agentRuntime.Namespace)
 	if err != nil {
 		r.handleRefError(ctx, log, agentRuntime, ConditionTypeProviderReady, "ProviderNotFound", err)
 		return nil, ctrl.Result{}, err
@@ -169,9 +170,39 @@ func (r *AgentRuntimeReconciler) fetchAndValidateProvider(
 		}
 		return nil, ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
+	if missing := missingCapabilities(provider, np.RequiredCapabilities); len(missing) > 0 {
+		msg := fmt.Sprintf("Provider %s missing required capabilities: %v", provider.Name, missing)
+		SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeProviderReady, metav1.ConditionFalse,
+			"CapabilityMismatch", msg)
+		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhasePending
+		if statusErr := r.Status().Update(ctx, agentRuntime); statusErr != nil {
+			log.Error(statusErr, logMsgFailedToUpdateStatus)
+		}
+		return nil, ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
 	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeProviderReady, metav1.ConditionTrue,
 		"ProviderFound", "Provider resource found and ready")
 	return provider, ctrl.Result{}, nil
+}
+
+// missingCapabilities returns the required capabilities not present in the
+// provider's advertised capabilities. Returns nil if all are satisfied or
+// if required is empty.
+func missingCapabilities(provider *omniav1alpha1.Provider, required []omniav1alpha1.ProviderCapability) []omniav1alpha1.ProviderCapability {
+	if len(required) == 0 {
+		return nil
+	}
+	have := make(map[omniav1alpha1.ProviderCapability]bool, len(provider.Spec.Capabilities))
+	for _, c := range provider.Spec.Capabilities {
+		have[c] = true
+	}
+	var missing []omniav1alpha1.ProviderCapability
+	for _, c := range required {
+		if !have[c] {
+			missing = append(missing, c)
+		}
+	}
+	return missing
 }
 
 // handleRefError handles reference fetch errors by setting condition, updating status, and logging.

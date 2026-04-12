@@ -418,6 +418,10 @@ export interface AgentRuntimeSpec {
        * If not specified, the same namespace as the AgentRuntime is used. */
       namespace?: string;
     };
+    /** requiredCapabilities lists capabilities the provider must support for
+     * this binding. If the provider does not advertise all listed capabilities,
+     * the AgentRuntime enters a Pending phase with a descriptive condition. */
+    requiredCapabilities?: ("text" | "streaming" | "vision" | "tools" | "json" | "audio" | "video" | "documents" | "duplex")[];
   }[];
   /** rollout configures a progressive delivery rollout for this AgentRuntime.
    * When nil, no rollout is active and all traffic goes to the current spec. */
@@ -442,6 +446,10 @@ export interface AgentRuntimeSpec {
            * If not specified, the same namespace as the AgentRuntime is used. */
           namespace?: string;
         };
+        /** requiredCapabilities lists capabilities the provider must support for
+         * this binding. If the provider does not advertise all listed capabilities,
+         * the AgentRuntime enters a Pending phase with a descriptive condition. */
+        requiredCapabilities?: ("text" | "streaming" | "vision" | "tools" | "json" | "audio" | "video" | "documents" | "duplex")[];
       }[];
       /** toolRegistryRef overrides the tool registry for the candidate. */
       toolRegistryRef?: {

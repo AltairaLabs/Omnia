@@ -371,6 +371,12 @@ type NamedProviderRef struct {
 	// providerRef references the Provider CRD.
 	// +kubebuilder:validation:Required
 	ProviderRef ProviderRef `json:"providerRef"`
+
+	// requiredCapabilities lists capabilities the provider must support for
+	// this binding. If the provider does not advertise all listed capabilities,
+	// the AgentRuntime enters a Pending phase with a descriptive condition.
+	// +optional
+	RequiredCapabilities []ProviderCapability `json:"requiredCapabilities,omitempty"`
 }
 
 // ProviderRef references a Provider resource.
