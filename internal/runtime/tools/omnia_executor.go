@@ -38,7 +38,6 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	pktools "github.com/AltairaLabs/PromptKit/runtime/tools"
-	sdktools "github.com/AltairaLabs/PromptKit/sdk/tools"
 
 	"github.com/altairalabs/omnia/internal/tracing"
 	toolsv1 "github.com/altairalabs/omnia/pkg/tools/v1"
@@ -74,9 +73,6 @@ type OmniaExecutor struct {
 	// Registry metadata for tracing/event store
 	toolMeta map[string]ToolMeta
 
-	// PromptKit HTTP executor (shared across all HTTP/OpenAPI tools)
-	httpExecutor *sdktools.HTTPExecutor
-
 	// MCP sessions keyed by handler name
 	mcpClients  map[string]*mcp.Client
 	mcpSessions map[string]*mcp.ClientSession
@@ -104,7 +100,6 @@ func NewOmniaExecutor(log logr.Logger, tp *tracing.Provider) *OmniaExecutor {
 		handlers:        make(map[string]*HandlerEntry),
 		toolHandlers:    make(map[string]string),
 		toolMeta:        make(map[string]ToolMeta),
-		httpExecutor:    sdktools.NewHTTPExecutor(),
 		mcpClients:      make(map[string]*mcp.Client),
 		mcpSessions:     make(map[string]*mcp.ClientSession),
 		mcpTools:        make(map[string]map[string]*mcp.Tool),
@@ -433,6 +428,11 @@ func (e *OmniaExecutor) startSpan(ctx context.Context, toolName string) (context
 	})
 }
 
+// currentSpan extracts the active span from context.
+func (e *OmniaExecutor) currentSpan(ctx context.Context) trace.Span {
+	return trace.SpanFromContext(ctx)
+}
+
 // recordResult records span attributes from the execution result.
 func (e *OmniaExecutor) recordResult(span trace.Span, _ json.RawMessage, err error) {
 	if err != nil {
@@ -577,19 +577,24 @@ func (e *OmniaExecutor) executeHTTP(
 		return nil, fmt.Errorf("handler %q has no HTTP config", handlerName)
 	}
 
-	// Build PromptKit HTTPConfig with policy headers
 	headers := e.buildHTTPHeaders(ctx, cfg, toolName, handlerName, args)
+	policy := httpRetryParams(cfg)
 
-	desc := &pktools.ToolDescriptor{
-		Name: toolName,
-		HTTPConfig: &pktools.HTTPConfig{
-			URL:     cfg.Endpoint,
-			Method:  cfg.Method,
-			Headers: headers,
-		},
+	var lastCallResult httpCallResult
+	classify := func(_ error) (bool, time.Duration) {
+		if cfg.RetryPolicy == nil {
+			return false, 0
+		}
+		return classifyHTTPResult(lastCallResult, cfg.RetryPolicy)
 	}
 
-	return e.httpExecutor.Execute(ctx, desc, args)
+	return retryWithBackoff(ctx, e.log, e.currentSpan(ctx), policy, handler.Timeout.Get(), classify,
+		func(attemptCtx context.Context) (json.RawMessage, error) {
+			result, callResult, err := doHTTPRequest(attemptCtx, &http.Client{}, cfg, headers, args)
+			lastCallResult = callResult
+			return result, err
+		},
+	)
 }
 
 // buildHTTPHeaders merges static headers, auth headers, and policy headers.
@@ -696,28 +701,47 @@ func (e *OmniaExecutor) executeMCP(
 ) (json.RawMessage, error) {
 	e.mu.RLock()
 	session := e.mcpSessions[handlerName]
+	handler := e.handlers[handlerName]
 	e.mu.RUnlock()
 
 	if session == nil {
 		return nil, fmt.Errorf("MCP handler %q not connected", handlerName)
 	}
 
-	var argsMap map[string]any
-	if len(args) > 0 {
-		if err := json.Unmarshal(args, &argsMap); err != nil {
-			return nil, fmt.Errorf("failed to parse MCP args: %w", err)
-		}
-	}
+	policy, classify := mcpRetryParams(handler.MCPConfig)
 
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      toolName,
-		Arguments: argsMap,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("MCP tool call failed: %w", err)
-	}
+	return retryWithBackoff(ctx, e.log, e.currentSpan(ctx), policy, handler.Timeout.Get(), classify,
+		func(attemptCtx context.Context) (json.RawMessage, error) {
+			var argsMap map[string]any
+			if len(args) > 0 {
+				if err := json.Unmarshal(args, &argsMap); err != nil {
+					return nil, fmt.Errorf("failed to parse MCP args: %w", err)
+				}
+			}
 
-	return marshalMCPResult(result)
+			result, err := session.CallTool(attemptCtx, &mcp.CallToolParams{
+				Name:      toolName,
+				Arguments: argsMap,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("MCP tool call failed: %w", err)
+			}
+
+			// Convert MCP tool errors to mcpToolError so the classifier
+			// can distinguish them from transport errors.
+			if result.IsError {
+				msg := "MCP tool returned error"
+				if len(result.Content) > 0 {
+					if tc, ok := result.Content[0].(*mcp.TextContent); ok && tc.Text != "" {
+						msg = tc.Text
+					}
+				}
+				return nil, &mcpToolError{message: msg}
+			}
+
+			return marshalMCPResult(result)
+		},
+	)
 }
 
 func marshalMCPResult(result *mcp.CallToolResult) (json.RawMessage, error) {
@@ -841,36 +865,44 @@ func (e *OmniaExecutor) executeGRPC(
 ) (json.RawMessage, error) {
 	e.mu.RLock()
 	client := e.grpcClients[handlerName]
+	handler := e.handlers[handlerName]
 	e.mu.RUnlock()
 
 	if client == nil {
 		return nil, fmt.Errorf("gRPC handler %q not connected", handlerName)
 	}
 
-	// Inject policy metadata
-	md := PolicyGRPCMetadata(ctx, toolName, handlerName, nil)
-	if len(md) > 0 {
-		pairs := make([]string, 0, len(md)*2)
-		for k, v := range md {
-			pairs = append(pairs, k, v)
-		}
-		ctx = metadata.AppendToOutgoingContext(ctx, pairs...)
-	}
+	policy, classify := grpcRetryParams(handler.GRPCConfig)
 
-	var resp *toolsv1.ToolResponse
-	_, err := e.breakers.Execute(toolName, func() ([]byte, error) {
-		var execErr error
-		resp, execErr = client.Execute(ctx, &toolsv1.ToolRequest{
-			ToolName:      toolName,
-			ArgumentsJson: string(args),
-		})
-		return nil, execErr
-	})
-	if err != nil {
-		return nil, fmt.Errorf("gRPC tool execution failed: %w", err)
-	}
+	return retryWithBackoff(ctx, e.log, e.currentSpan(ctx), policy, handler.Timeout.Get(), classify,
+		func(attemptCtx context.Context) (json.RawMessage, error) {
+			// Inject policy metadata.
+			md := PolicyGRPCMetadata(attemptCtx, toolName, handlerName, nil)
+			if len(md) > 0 {
+				pairs := make([]string, 0, len(md)*2)
+				for k, v := range md {
+					pairs = append(pairs, k, v)
+				}
+				attemptCtx = metadata.AppendToOutgoingContext(attemptCtx, pairs...)
+			}
 
-	return marshalGRPCResponse(resp)
+			// Execute through circuit breaker.
+			var resp *toolsv1.ToolResponse
+			_, cbErr := e.breakers.Execute(toolName, func() ([]byte, error) {
+				var execErr error
+				resp, execErr = client.Execute(attemptCtx, &toolsv1.ToolRequest{
+					ToolName:      toolName,
+					ArgumentsJson: string(args),
+				})
+				return nil, execErr
+			})
+			if cbErr != nil {
+				return nil, fmt.Errorf("gRPC tool execution failed: %w", cbErr)
+			}
+
+			return marshalGRPCResponse(resp)
+		},
+	)
 }
 
 func marshalGRPCResponse(resp *toolsv1.ToolResponse) (json.RawMessage, error) {
@@ -926,7 +958,7 @@ func (e *OmniaExecutor) executeOpenAPI(
 	e.mu.RLock()
 	ops := e.openAPIOps[handlerName]
 	baseURL := e.openAPIBaseURLs[handlerName]
-	headers := e.openAPIHeaders[handlerName]
+	hdrs := e.openAPIHeaders[handlerName]
 	e.mu.RUnlock()
 
 	op, ok := ops[toolName]
@@ -934,40 +966,37 @@ func (e *OmniaExecutor) executeOpenAPI(
 		return nil, fmt.Errorf("OpenAPI operation %q not found", toolName)
 	}
 
-	// Build the URL from base + path
-	url := baseURL + op.Path
-
-	// Merge policy and config headers
-	allHeaders := make(map[string]string)
-	for k, v := range headers {
-		allHeaders[k] = v
+	// Build a synthetic HTTPCfg for the OpenAPI operation.
+	cfg := &HTTPCfg{
+		Endpoint: baseURL + op.Path,
+		Method:   op.Method,
+		Headers:  make(map[string]string),
+	}
+	for k, v := range hdrs {
+		cfg.Headers[k] = v
 	}
 	if handler.OpenAPIConfig != nil {
-		if err := mergeAuthHeaders(allHeaders, handler.OpenAPIConfig.AuthType, handler.OpenAPIConfig.AuthToken); err != nil {
-			e.log.Error(err, "invalid auth config", "handler", handlerName)
-		}
+		cfg.AuthType = handler.OpenAPIConfig.AuthType
+		cfg.AuthToken = handler.OpenAPIConfig.AuthToken
+		cfg.RetryPolicy = handler.OpenAPIConfig.RetryPolicy
 	}
 
-	var argsMap map[string]any
-	if len(args) > 0 {
-		_ = json.Unmarshal(args, &argsMap)
-	}
-	req := &http.Request{Header: http.Header{}}
-	SetAllOutboundHeaders(ctx, req, toolName, handlerName, argsMap)
-	for k, v := range req.Header {
-		if len(v) > 0 {
-			allHeaders[k] = v[0]
+	headers := e.buildHTTPHeaders(ctx, cfg, toolName, handlerName, args)
+	policy := httpRetryParams(cfg)
+
+	var lastCallResult httpCallResult
+	classify := func(_ error) (bool, time.Duration) {
+		if cfg.RetryPolicy == nil {
+			return false, 0
 		}
+		return classifyHTTPResult(lastCallResult, cfg.RetryPolicy)
 	}
 
-	desc := &pktools.ToolDescriptor{
-		Name: toolName,
-		HTTPConfig: &pktools.HTTPConfig{
-			URL:     url,
-			Method:  op.Method,
-			Headers: allHeaders,
+	return retryWithBackoff(ctx, e.log, e.currentSpan(ctx), policy, handler.Timeout.Get(), classify,
+		func(attemptCtx context.Context) (json.RawMessage, error) {
+			result, callResult, err := doHTTPRequest(attemptCtx, &http.Client{}, cfg, headers, args)
+			lastCallResult = callResult
+			return result, err
 		},
-	}
-
-	return e.httpExecutor.Execute(ctx, desc, args)
+	)
 }

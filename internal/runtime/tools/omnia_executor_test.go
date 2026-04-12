@@ -19,15 +19,19 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -35,7 +39,9 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
+	grpcCodes "google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	grpcStatus "google.golang.org/grpc/status"
 
 	pktools "github.com/AltairaLabs/PromptKit/runtime/tools"
 
@@ -103,9 +109,6 @@ func TestOmniaExecutor_New(t *testing.T) {
 	}
 	if e.grpcClients == nil {
 		t.Error("grpcClients map not initialized")
-	}
-	if e.httpExecutor == nil {
-		t.Error("httpExecutor not initialized")
 	}
 	if e.breakers == nil {
 		t.Error("breakers not initialized")
@@ -1442,6 +1445,7 @@ func TestOmniaExecutor_ExecuteGRPC_WithMockClient(t *testing.T) {
 		},
 	}
 	e.grpcClients["grpc-handler"] = mock
+	e.handlers["grpc-handler"] = &HandlerEntry{Name: "grpc-handler", Type: ToolTypeGRPC}
 
 	result, err := e.executeGRPC(context.Background(), "grpc-tool", "grpc-handler", json.RawMessage(`{"q":"test"}`))
 	if err != nil {
@@ -1458,6 +1462,7 @@ func TestOmniaExecutor_ExecuteGRPC_MockClientError(t *testing.T) {
 		executeErr: fmt.Errorf("connection refused"),
 	}
 	e.grpcClients["grpc-handler"] = mock
+	e.handlers["grpc-handler"] = &HandlerEntry{Name: "grpc-handler", Type: ToolTypeGRPC}
 
 	_, err := e.executeGRPC(context.Background(), "grpc-tool", "grpc-handler", nil)
 	if err == nil {
@@ -1477,6 +1482,7 @@ func TestOmniaExecutor_ExecuteGRPC_MockClientToolError(t *testing.T) {
 		},
 	}
 	e.grpcClients["grpc-handler"] = mock
+	e.handlers["grpc-handler"] = &HandlerEntry{Name: "grpc-handler", Type: ToolTypeGRPC}
 
 	_, err := e.executeGRPC(context.Background(), "grpc-tool", "grpc-handler", nil)
 	if err == nil {
@@ -1495,6 +1501,7 @@ func TestOmniaExecutor_ExecuteGRPC_MetadataInjection(t *testing.T) {
 		},
 	}
 	e.grpcClients["grpc-handler"] = mock
+	e.handlers["grpc-handler"] = &HandlerEntry{Name: "grpc-handler", Type: ToolTypeGRPC}
 
 	// Pass args to exercise the metadata injection path
 	args := json.RawMessage(`{"param":"value"}`)
@@ -2182,6 +2189,7 @@ func TestOmniaExecutor_ExecuteMCP_Success(t *testing.T) {
 
 	e := NewOmniaExecutor(logr.Discard(), nil)
 	e.mcpSessions["test-mcp"] = session
+	e.handlers["test-mcp"] = &HandlerEntry{Name: "test-mcp", Type: ToolTypeMCP}
 
 	result, err := e.executeMCP(context.Background(), "echo", "test-mcp", json.RawMessage(`{}`))
 	if err != nil {
@@ -2238,6 +2246,7 @@ func TestOmniaExecutor_ExecuteMCP_WithArgs(t *testing.T) {
 
 	e := NewOmniaExecutor(logr.Discard(), nil)
 	e.mcpSessions["test-mcp"] = session
+	e.handlers["test-mcp"] = &HandlerEntry{Name: "test-mcp", Type: ToolTypeMCP}
 
 	result, err := e.executeMCP(context.Background(), "greet", "test-mcp", json.RawMessage(`{"name":"Alice"}`))
 	if err != nil {
@@ -2288,6 +2297,7 @@ func TestOmniaExecutor_ExecuteMCP_EmptyArgs(t *testing.T) {
 
 	e := NewOmniaExecutor(logr.Discard(), nil)
 	e.mcpSessions["test-mcp"] = session
+	e.handlers["test-mcp"] = &HandlerEntry{Name: "test-mcp", Type: ToolTypeMCP}
 
 	// Empty args (nil)
 	result, err := e.executeMCP(context.Background(), "ping", "test-mcp", nil)
@@ -2369,5 +2379,599 @@ func TestOmniaExecutor_InitOpenAPIHandler_WithMockServer(t *testing.T) {
 	}
 	if op.Method != "GET" {
 		t.Errorf("method = %q, want %q", op.Method, "GET")
+	}
+}
+
+// --- Retry integration tests ---
+
+// failNTimesGRPCClient is a mock ToolServiceClient that returns failErr for the
+// first failCount calls, then returns successResp.
+type failNTimesGRPCClient struct {
+	failCount   int
+	calls       int
+	successResp *toolsv1.ToolResponse
+	failErr     error
+}
+
+func (m *failNTimesGRPCClient) Execute(
+	_ context.Context,
+	_ *toolsv1.ToolRequest,
+	_ ...grpc.CallOption,
+) (*toolsv1.ToolResponse, error) {
+	m.calls++
+	if m.calls <= m.failCount {
+		return nil, m.failErr
+	}
+	return m.successResp, nil
+}
+
+func (m *failNTimesGRPCClient) ListTools(
+	_ context.Context,
+	_ *toolsv1.ListToolsRequest,
+	_ ...grpc.CallOption,
+) (*toolsv1.ListToolsResponse, error) {
+	return nil, nil
+}
+
+func TestExecuteHTTP_RetryOnRetryableStatus(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls < 3 {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("bad gateway"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"result":"ok"}`))
+	}))
+	defer srv.Close()
+
+	result, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint: srv.URL,
+		Method:   "GET",
+		RetryPolicy: &RuntimeHTTPRetryPolicy{
+			MaxAttempts:         3,
+			InitialBackoff:      Duration(1 * time.Millisecond),
+			BackoffMultiplier:   2.0,
+			MaxBackoff:          Duration(100 * time.Millisecond),
+			RetryOn:             []int32{502},
+			RetryOnNetworkError: true,
+		},
+	}, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if calls != 3 {
+		t.Errorf("expected 3 calls (2 retries + 1 success), got %d", calls)
+	}
+	if string(result) != `{"result":"ok"}` {
+		t.Errorf("unexpected result: %s", result)
+	}
+}
+
+func TestExecuteHTTP_NoRetryOnNonRetryableStatus(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("bad request"))
+	}))
+	defer srv.Close()
+
+	_, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint: srv.URL,
+		Method:   "GET",
+		RetryPolicy: &RuntimeHTTPRetryPolicy{
+			MaxAttempts:         3,
+			InitialBackoff:      Duration(1 * time.Millisecond),
+			BackoffMultiplier:   2.0,
+			MaxBackoff:          Duration(100 * time.Millisecond),
+			RetryOn:             []int32{502, 503},
+			RetryOnNetworkError: true,
+		},
+	}, json.RawMessage(`{}`))
+	if err == nil {
+		t.Fatal("expected error for 400 response")
+	}
+	if calls != 1 {
+		t.Errorf("expected 1 call (no retries for 400), got %d", calls)
+	}
+}
+
+func TestExecuteGRPC_RetryOnUnavailable(t *testing.T) {
+	mock := &failNTimesGRPCClient{
+		failCount:   2,
+		failErr:     grpcStatus.Error(grpcCodes.Unavailable, "service unavailable"),
+		successResp: &toolsv1.ToolResponse{ResultJson: `{"answer":42}`},
+	}
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.grpcClients["grpc-retry"] = mock
+	e.handlers["grpc-retry"] = &HandlerEntry{
+		Name: "grpc-retry",
+		Type: ToolTypeGRPC,
+		GRPCConfig: &GRPCCfg{
+			Endpoint: "localhost:50051",
+			RetryPolicy: &RuntimeGRPCRetryPolicy{
+				MaxAttempts:          3,
+				InitialBackoff:       Duration(1 * time.Millisecond),
+				BackoffMultiplier:    2.0,
+				MaxBackoff:           Duration(100 * time.Millisecond),
+				RetryableStatusCodes: []string{"UNAVAILABLE"},
+			},
+		},
+	}
+	e.toolHandlers["grpc-retry-tool"] = "grpc-retry"
+
+	result, err := e.executeGRPC(context.Background(), "grpc-retry-tool", "grpc-retry", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("executeGRPC failed: %v", err)
+	}
+	if mock.calls != 3 {
+		t.Errorf("expected 3 calls, got %d", mock.calls)
+	}
+	if string(result) != `{"answer":42}` {
+		t.Errorf("unexpected result: %s", result)
+	}
+}
+
+func TestExecuteGRPC_NoRetryOnNotFound(t *testing.T) {
+	mock := &failNTimesGRPCClient{
+		failCount: 5,
+		failErr:   grpcStatus.Error(grpcCodes.NotFound, "not found"),
+	}
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.grpcClients["grpc-no-retry"] = mock
+	e.handlers["grpc-no-retry"] = &HandlerEntry{
+		Name: "grpc-no-retry",
+		Type: ToolTypeGRPC,
+		GRPCConfig: &GRPCCfg{
+			Endpoint: "localhost:50051",
+			RetryPolicy: &RuntimeGRPCRetryPolicy{
+				MaxAttempts:          3,
+				InitialBackoff:       Duration(1 * time.Millisecond),
+				BackoffMultiplier:    2.0,
+				MaxBackoff:           Duration(100 * time.Millisecond),
+				RetryableStatusCodes: []string{"UNAVAILABLE"},
+			},
+		},
+	}
+	e.toolHandlers["grpc-no-retry-tool"] = "grpc-no-retry"
+
+	_, err := e.executeGRPC(context.Background(), "grpc-no-retry-tool", "grpc-no-retry", json.RawMessage(`{}`))
+	if err == nil {
+		t.Fatal("expected error for NOT_FOUND")
+	}
+	if mock.calls != 1 {
+		t.Errorf("expected 1 call (no retries), got %d", mock.calls)
+	}
+}
+
+func TestMCPRetry_TransportErrorRetried(t *testing.T) {
+	calls := 0
+	policy := retryPolicy{
+		MaxAttempts:       3,
+		InitialBackoff:    1 * time.Millisecond,
+		BackoffMultiplier: 2.0,
+		MaxBackoff:        100 * time.Millisecond,
+	}
+
+	result, err := retryWithBackoff(
+		context.Background(), logr.Discard(), tracenoop.Span{},
+		policy, 0,
+		func(err error) (bool, time.Duration) { return classifyMCPError(err) },
+		func(_ context.Context) (json.RawMessage, error) {
+			calls++
+			if calls < 3 {
+				return nil, &net.OpError{Op: "read", Err: errors.New("connection reset")}
+			}
+			return json.RawMessage(`{"mcp":"ok"}`), nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != 3 {
+		t.Errorf("expected 3 calls, got %d", calls)
+	}
+	if string(result) != `{"mcp":"ok"}` {
+		t.Errorf("unexpected result: %s", result)
+	}
+}
+
+func TestMCPRetry_ToolErrorNotRetried(t *testing.T) {
+	calls := 0
+	policy := retryPolicy{
+		MaxAttempts:       3,
+		InitialBackoff:    1 * time.Millisecond,
+		BackoffMultiplier: 2.0,
+		MaxBackoff:        100 * time.Millisecond,
+	}
+
+	_, err := retryWithBackoff(
+		context.Background(), logr.Discard(), tracenoop.Span{},
+		policy, 0,
+		func(err error) (bool, time.Duration) { return classifyMCPError(err) },
+		func(_ context.Context) (json.RawMessage, error) {
+			calls++
+			return nil, &mcpToolError{message: "file not found"}
+		},
+	)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if calls != 1 {
+		t.Errorf("expected 1 call (tool errors not retried), got %d", calls)
+	}
+}
+
+// --- Integration tests: HTTP config fields through OmniaExecutor.Execute() ---
+
+// executeHTTPTool sets up a minimal OmniaExecutor with a single HTTP handler
+// and executes a tool call. This eliminates repeated boilerplate in integration tests.
+func executeHTTPTool(t *testing.T, cfg *HTTPCfg, args json.RawMessage) (json.RawMessage, error) {
+	t.Helper()
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.handlers["h"] = &HandlerEntry{Name: "h", Type: ToolTypeHTTP, HTTPConfig: cfg}
+	e.toolHandlers["tool"] = "h"
+	return e.Execute(context.Background(), &pktools.ToolDescriptor{Name: "tool"}, args)
+}
+
+func TestExecuteHTTP_URLTemplate(t *testing.T) {
+	var receivedPath string
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		receivedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	_, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:    srv.URL,
+		URLTemplate: srv.URL + "/users/{id}/posts",
+		Method:      "POST",
+	}, json.RawMessage(`{"id":"42","title":"Hello"}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if receivedPath != "/users/42/posts" {
+		t.Errorf("URL path = %q, want %q", receivedPath, "/users/42/posts")
+	}
+	// id was consumed by the template; title should remain in body
+	if !strings.Contains(string(receivedBody), `"title"`) {
+		t.Errorf("expected title in body, got: %s", receivedBody)
+	}
+	if strings.Contains(string(receivedBody), `"id"`) {
+		t.Errorf("id should have been consumed by URL template, but found in body: %s", receivedBody)
+	}
+}
+
+func TestExecuteHTTP_StaticQuery(t *testing.T) {
+	var receivedQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	_, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:    srv.URL,
+		Method:      "GET",
+		StaticQuery: map[string]string{"api_key": "secret123"},
+	}, json.RawMessage(`{"q":"test"}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	vals, parseErr := url.ParseQuery(receivedQuery)
+	if parseErr != nil {
+		t.Fatalf("parse query: %v", parseErr)
+	}
+	if vals.Get("api_key") != "secret123" {
+		t.Errorf("api_key = %q, want %q", vals.Get("api_key"), "secret123")
+	}
+	if vals.Get("q") != "test" {
+		t.Errorf("q = %q, want %q", vals.Get("q"), "test")
+	}
+}
+
+func TestExecuteHTTP_QueryParams_POST(t *testing.T) {
+	var receivedQuery string
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedQuery = r.URL.RawQuery
+		receivedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	_, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:    srv.URL,
+		Method:      "POST",
+		QueryParams: []string{"page", "limit"},
+	}, json.RawMessage(`{"page":"1","limit":"10","data":"value"}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	qvals, parseErr := url.ParseQuery(receivedQuery)
+	if parseErr != nil {
+		t.Fatalf("parse query: %v", parseErr)
+	}
+	if qvals.Get("page") != "1" {
+		t.Errorf("page query param = %q, want %q", qvals.Get("page"), "1")
+	}
+	if qvals.Get("limit") != "10" {
+		t.Errorf("limit query param = %q, want %q", qvals.Get("limit"), "10")
+	}
+	// page and limit should NOT appear in body
+	if strings.Contains(string(receivedBody), `"page"`) {
+		t.Errorf("page should not be in body, got: %s", receivedBody)
+	}
+	if strings.Contains(string(receivedBody), `"limit"`) {
+		t.Errorf("limit should not be in body, got: %s", receivedBody)
+	}
+	// data should be in body
+	if !strings.Contains(string(receivedBody), `"data"`) {
+		t.Errorf("data should be in body, got: %s", receivedBody)
+	}
+}
+
+func TestExecuteHTTP_HeaderParams(t *testing.T) {
+	var receivedUserID, receivedTenant string
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedUserID = r.Header.Get("X-User-ID")
+		receivedTenant = r.Header.Get("X-Tenant")
+		receivedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	_, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:     srv.URL,
+		Method:       "POST",
+		HeaderParams: map[string]string{"user_id": "X-User-ID", "tenant": "X-Tenant"},
+	}, json.RawMessage(`{"user_id":"abc","tenant":"t1","query":"hello"}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if receivedUserID != "abc" {
+		t.Errorf("X-User-ID = %q, want %q", receivedUserID, "abc")
+	}
+	if receivedTenant != "t1" {
+		t.Errorf("X-Tenant = %q, want %q", receivedTenant, "t1")
+	}
+	// query was not promoted to header, should be in body
+	if !strings.Contains(string(receivedBody), `"query"`) {
+		t.Errorf("query should be in body, got: %s", receivedBody)
+	}
+}
+
+func TestExecuteHTTP_StaticBody(t *testing.T) {
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	_, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:   srv.URL,
+		Method:     "POST",
+		StaticBody: map[string]any{"source": "api", "version": "v2"},
+	}, json.RawMessage(`{"query":"test"}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var body map[string]any
+	if jsonErr := json.Unmarshal(receivedBody, &body); jsonErr != nil {
+		t.Fatalf("unmarshal body: %v (raw: %s)", jsonErr, receivedBody)
+	}
+	if body["source"] != "api" {
+		t.Errorf("source = %v, want %q", body["source"], "api")
+	}
+	if body["version"] != "v2" {
+		t.Errorf("version = %v, want %q", body["version"], "v2")
+	}
+	if body["query"] != "test" {
+		t.Errorf("query = %v, want %q", body["query"], "test")
+	}
+}
+
+func TestExecuteHTTP_Redact(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ssn":"123-45-6789","name":"Alice","age":30}`))
+	}))
+	defer srv.Close()
+
+	result, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint: srv.URL,
+		Method:   "GET",
+		Redact:   []string{"ssn"},
+	}, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var got map[string]any
+	if jsonErr := json.Unmarshal(result, &got); jsonErr != nil {
+		t.Fatalf("unmarshal result: %v", jsonErr)
+	}
+	if got["ssn"] != "[REDACTED]" {
+		t.Errorf("ssn = %v, want [REDACTED]", got["ssn"])
+	}
+	if got["name"] != "Alice" {
+		t.Errorf("name = %v, want Alice", got["name"])
+	}
+}
+
+func TestExecuteHTTP_BodyMapping(t *testing.T) {
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	_, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:    srv.URL,
+		Method:      "POST",
+		BodyMapping: "{query: query, filters: {page: page}}",
+	}, json.RawMessage(`{"query":"hello","page":1}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var body map[string]any
+	if jsonErr := json.Unmarshal(receivedBody, &body); jsonErr != nil {
+		t.Fatalf("unmarshal body: %v (raw: %s)", jsonErr, receivedBody)
+	}
+	if body["query"] != "hello" {
+		t.Errorf("query = %v, want hello", body["query"])
+	}
+	filters, ok := body["filters"].(map[string]any)
+	if !ok {
+		t.Fatalf("filters not a map: %v", body["filters"])
+	}
+	// JMESPath returns numbers as float64
+	if filters["page"] != float64(1) {
+		t.Errorf("filters.page = %v, want 1", filters["page"])
+	}
+}
+
+func TestExecuteHTTP_ResponseMapping(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":{"items":[1,2,3]},"meta":{"page":1}}`))
+	}))
+	defer srv.Close()
+
+	result, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:        srv.URL,
+		Method:          "GET",
+		ResponseMapping: "data.items",
+	}, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var items []any
+	if jsonErr := json.Unmarshal(result, &items); jsonErr != nil {
+		t.Fatalf("unmarshal result: %v (raw: %s)", jsonErr, result)
+	}
+	if len(items) != 3 {
+		t.Errorf("items length = %d, want 3", len(items))
+	}
+	if items[0] != float64(1) || items[1] != float64(2) || items[2] != float64(3) {
+		t.Errorf("items = %v, want [1 2 3]", items)
+	}
+}
+
+func TestExecuteHTTP_CombinedFeatures(t *testing.T) {
+	var receivedPath string
+	var receivedQuery string
+	var receivedAuthHeader string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		receivedQuery = r.URL.RawQuery
+		receivedAuthHeader = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"result":{"value":42},"secret":"top-secret"}`))
+	}))
+	defer srv.Close()
+
+	result, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:        srv.URL,
+		URLTemplate:     srv.URL + "/resources/{id}",
+		Method:          "POST",
+		StaticQuery:     map[string]string{"api_key": "k1"},
+		HeaderParams:    map[string]string{"token": "Authorization"},
+		ResponseMapping: "result",
+		Redact:          []string{"secret"},
+	}, json.RawMessage(`{"id":"99","token":"Bearer xyz","data":"payload"}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if receivedPath != "/resources/99" {
+		t.Errorf("path = %q, want /resources/99", receivedPath)
+	}
+	qvals, _ := url.ParseQuery(receivedQuery)
+	if qvals.Get("api_key") != "k1" {
+		t.Errorf("api_key = %q, want k1", qvals.Get("api_key"))
+	}
+	if receivedAuthHeader != "Bearer xyz" {
+		t.Errorf("Authorization = %q, want Bearer xyz", receivedAuthHeader)
+	}
+	// ResponseMapping: "result" → {"value":42}
+	var got map[string]any
+	if jsonErr := json.Unmarshal(result, &got); jsonErr != nil {
+		t.Fatalf("unmarshal result: %v (raw: %s)", jsonErr, result)
+	}
+	if got["value"] != float64(42) {
+		t.Errorf("value = %v, want 42", got["value"])
+	}
+	// Redact on "secret" — but ResponseMapping was applied first so "secret" is not in result
+	if _, hasSecret := got["secret"]; hasSecret {
+		t.Errorf("secret should not be in result after ResponseMapping, got: %v", got)
+	}
+}
+
+func TestExecuteHTTP_RetryWithURLTemplate(t *testing.T) {
+	calls := 0
+	var lastPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		lastPath = r.URL.Path
+		if calls < 3 {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("bad gateway"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"result":"ok"}`))
+	}))
+	defer srv.Close()
+
+	result, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:    srv.URL,
+		URLTemplate: srv.URL + "/items/{item_id}",
+		Method:      "GET",
+		RetryPolicy: &RuntimeHTTPRetryPolicy{
+			MaxAttempts:         3,
+			InitialBackoff:      Duration(1 * time.Millisecond),
+			BackoffMultiplier:   2.0,
+			MaxBackoff:          Duration(100 * time.Millisecond),
+			RetryOn:             []int32{502},
+			RetryOnNetworkError: true,
+		},
+	}, json.RawMessage(`{"item_id":"7"}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if calls != 3 {
+		t.Errorf("expected 3 calls (2 retries + 1 success), got %d", calls)
+	}
+	if lastPath != "/items/7" {
+		t.Errorf("URL path = %q, want /items/7", lastPath)
+	}
+	if string(result) != `{"result":"ok"}` {
+		t.Errorf("unexpected result: %s", result)
 	}
 }
