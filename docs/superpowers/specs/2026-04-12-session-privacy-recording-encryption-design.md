@@ -1,26 +1,28 @@
-# SessionPrivacyPolicy: Recording Control & Encryption at Rest
+# SessionPrivacyPolicy: Recording Control & Encryption at Rest (REVISED)
 
 **Issue:** #780
-**Date:** 2026-04-12
+**Date:** 2026-04-12 (revised after discovering existing `ee/pkg/encryption/` package)
 
 ## Problem
 
 The SessionPrivacyPolicy CRD exists with a full spec for recording control and encryption, but two gaps remain:
 
 1. **Recording control** — the facade records all session data unconditionally regardless of the privacy policy's `Recording.Enabled`, `FacadeData`, and `RichData` flags.
-2. **Encryption** — the CRD defines `EncryptionConfig` with KMS provider support, but session data is stored in Postgres as plaintext.
+2. **Encryption wiring** — the `ee/pkg/encryption/` package has a full `Encryptor` interface with four KMS providers (AWS KMS, Azure Key Vault, GCP KMS, Vault Transit), envelope encryption, and a `KeyRotationReconciler`. But **none of it is wired into session-api** — session data is stored in Postgres as plaintext because the handler layer never calls the encryptor.
 
 ## Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Recording enforcement | Defense in depth: facade skips + session-api rejects | Facade avoids unnecessary work; session-api catches bugs/stale images |
-| Encryption approach | Local symmetric key (K8s Secret) first; KMS providers follow | Fastest path to encrypted-at-rest without external dependencies |
-| Encrypted fields | `Content` + `State` | Covers messages, tool call payloads, and session state. Metadata stays queryable for dashboards |
-| Tool name visibility | `ToolCall.Name` stays plaintext in store wrapper | Analytics can show which tools were used without decrypting Arguments/Result |
-| Key rotation | Deferred to KMS provider follow-up | Rotation is more meaningful with KMS lifecycle policies |
-| Encryption location | Session-api only | Single service holds the key; facade/dashboard get plaintext over the wire |
-| Facade policy source | New session-api endpoint via existing httpclient | No new RBAC; reuses existing PolicyWatcher and HTTP client |
+| Encryption approach | Reuse existing `ee/pkg/encryption/` Encryptor + KMS providers | Full KMS support already built and tested — just needs wiring |
+| Encrypted fields | Message `Content` + `Metadata values`, ToolCall `Arguments`/`Result`/`ErrorMessage`, RuntimeEvent `Data`/`ErrorMessage` | Covers all user-generated content; operational fields (names, types, timestamps, token counts) stay queryable |
+| Plaintext for analytics | Message `Role`, ToolCall `Name`/`Status`/`DurationMs`, RuntimeEvent `EventType` | Dashboards can query "which tools ran" and "which events fired" without decryption |
+| Key rotation | Existing `KeyRotationReconciler` in arena-controller — just needs `StoreFactory` wired | Already handles annotation-triggered + scheduled rotation with batched re-encryption |
+| Encryption location | Session-api handler layer | Single chokepoint; facade/dashboard see plaintext over the wire |
+| Facade policy source | New session-api endpoint via existing httpclient | No new RBAC; reuses PolicyWatcher |
+| Package boundary | `internal/session/api` defines its own minimal `Encryptor` interface; adapter in `cmd/session-api` wraps `ee/pkg/encryption.Encryptor` | Keeps community edition free of `ee/` imports |
+| Effective-policy exposure | `PolicyWatcher.EffectivePolicy` carries `Encryption` config; `facadePolicyJSON` filters it out when serving the facade | Session-api gets encryption config for provider construction; facade only sees recording flags |
 
 ## Design
 
@@ -53,31 +55,40 @@ No changes to `PolicyWatcher` — it already loads effective policies and makes 
 
 ### 3. Encryption at Rest
 
-**Encryptor interface** in a new `ee/pkg/encryption/` package:
+**Reuse the existing `ee/pkg/encryption/` package** — it already provides:
 
-```go
-type Encryptor interface {
-    Encrypt(plaintext []byte) (ciphertext []byte, err error)
-    Decrypt(ciphertext []byte) (plaintext []byte, err error)
-}
-```
+- `Encryptor` interface with `EncryptMessage`/`DecryptMessage` on `*session.Message`
+- `Provider` interface with four KMS implementations: AWS KMS, Azure Key Vault, GCP KMS, HashiCorp Vault Transit
+- Envelope encryption (KMS-wrapped AES-256 data encryption keys)
+- `MessageReEncryptor` for batched key rotation
+- `encryptionMetadata` stored in message `Metadata["_encryption"]` to track which fields/keys were used
 
-**AESEncryptor:** Initial implementation using AES-256-GCM (authenticated encryption — tampering detected on decrypt). Key read from a Kubernetes Secret mounted as a volume into session-api.
+**What this plan adds:**
 
-**Key loading:** Session-api reads the Secret path from `ENCRYPTION_KEY_PATH` env var. If unset or empty, encryption is disabled — plaintext passthrough. Existing deployments upgrade without breaking.
+1. **Extend `Encryptor`** to cover `*session.ToolCall` and `*session.RuntimeEvent` — the existing interface only handles Messages. Use an envelope pattern: the encrypted fields (`Arguments`, `Result`, `Data`) are replaced with a map `{"_encryption": {metadata}, "_payload": "base64-ciphertext"}`. No schema migration needed — the Postgres columns are JSONB.
 
-**Encrypting store wrapper:** A thin wrapper around the session store that intercepts write and read paths:
+2. **Extend `PolicyWatcher.EffectivePolicy`** to include the merged `Encryption` config (today it only carries `Recording` and `UserOptOut`). The merge logic in `merge.go` already computes encryption merging.
 
-- On write: encrypt `Content` and `State` fields before passing to the Postgres store
-- On read: decrypt `Content` and `State` after retrieval
-- `Metadata` (including `type`, `latency_ms`, `cost_usd`) stays plaintext
-- For `ToolCall` records: encrypt `Arguments`, `Result`, `ErrorMessage`; keep `Name` plaintext
-- For `RuntimeEvent` records: encrypt `Data`, `ErrorMessage`; keep `EventType` plaintext
-- `ProviderCall` records: no encryption needed (operational metadata only)
+3. **Wire session-api to build an `Encryptor` from the effective policy** at startup. Read the global `SessionPrivacyPolicy`; if `Encryption.Enabled`, construct a `Provider` via `encryption.NewProvider(ProviderConfigFromEncryptionSpec(...))` and wrap with `NewEncryptor`. Plaintext passthrough when disabled.
 
-Encryption is orthogonal to storage logic — the Postgres store never sees plaintext when encryption is enabled, and the wrapper is independently testable.
+4. **Add encryption calls in session-api handlers**:
+   - `handleAppendMessage` → `encryptor.EncryptMessage` before persisting
+   - `handleGetMessages` → decrypt each returned message
+   - Same for `ToolCall` and `RuntimeEvent` handlers
 
-**Encrypted field encoding:** Ciphertext is base64-encoded before storing in `text` Postgres columns. A prefix marker (`enc:v1:`) distinguishes encrypted from plaintext data, enabling gradual migration — old unencrypted sessions read fine, new ones get encrypted.
+5. **Keep `internal/session/api/` free of `ee/` imports**: define a minimal `api.Encryptor` interface in the session-api package; an adapter in `cmd/session-api/main.go` wraps `ee/pkg/encryption.Encryptor` (drops the `[]EncryptionEvent` return).
+
+6. **Wire `KeyRotationReconciler.StoreFactory`** in `ee/cmd/omnia-arena-controller/main.go` — this field is currently never populated, so re-encryption is silently skipped during key rotation. Open a Postgres pool and return a `pgprovider.NewReEncryptionStore(pool)`.
+
+**Fields encrypted vs plaintext:**
+
+| Struct | Plaintext (analytics) | Encrypted (user content) |
+|--------|-----------------------|--------------------------|
+| Message | ID, Role, Timestamp, token counts, Metadata keys | Content, Metadata values |
+| ToolCall | ID, Name, Status, DurationMs, Timestamps, Labels | Arguments, Result, ErrorMessage |
+| RuntimeEvent | ID, EventType, DurationMs, Timestamp | Data, ErrorMessage |
+| ProviderCall | All fields (operational metadata only) | — |
+| Session | ID, AgentName, Namespace, counts, timestamps | State |
 
 ### 4. Session-API Privacy Policy Endpoint + Client
 
@@ -85,13 +96,15 @@ Encryption is orthogonal to storage logic — the Postgres store never sees plai
 
 Returns the effective policy for the given namespace/agent pair. The handler calls `PolicyWatcher.GetEffectivePolicy()` — no new logic, just exposing it over HTTP.
 
-**Response:** JSON serialization of the existing `EffectivePolicy` struct (which carries `Recording` and `UserOptOut` — the fields needed for facade recording decisions). No new struct needed.
+**Response:** JSON containing only the facade-visible subset (`Recording` fields). A `facadePolicyJSON` helper in `ee/pkg/privacy` filters out `Encryption` so key IDs and provider details don't leak to the facade. The full `EffectivePolicy` including `Encryption` stays server-side for session-api's own use.
 
 **Client method** added to the existing session-api httpclient:
 
 ```go
-func (c *Client) GetPrivacyPolicy(ctx context.Context, namespace, agent string) (*EffectivePolicy, error)
+func (s *Store) GetPrivacyPolicy(ctx context.Context, namespace, agent string) (*PrivacyPolicyResponse, error)
 ```
+
+The response type `PrivacyPolicyResponse` is defined in the httpclient package (Recording fields only) so the facade doesn't import `ee/`.
 
 **Facade-side caching:** Cached per session with 60s TTL. On cache miss or expiry, calls the client method. Short sessions: one call at connection start. Long sessions: background refresh.
 
@@ -115,42 +128,43 @@ func (c *Client) GetPrivacyPolicy(ctx context.Context, namespace, agent string) 
 
 ### Wiring tests
 
-- Session-api starts with encryption key mounted → encrypting wrapper active
-- Session-api starts without key → plaintext passthrough, no errors
-- Privacy policy endpoint responds with correct effective policy
+- Session-api starts with encryption enabled in global SessionPrivacyPolicy → `Encryptor` is built from the policy, handler has it set
+- Session-api starts with no policy or `Encryption.Enabled=false` → plaintext passthrough
+- Privacy policy endpoint responds with correct facade subset (no encryption config)
 - Facade httpclient correctly calls and caches the policy endpoint
-
-### Doctor health checks
-
-- Extend `PrivacyChecker`: verify encryption is active when configured (write test message, read raw from DB, confirm ciphertext with `enc:v1:` prefix)
+- KeyRotationReconciler has a non-nil `StoreFactory` when arena-controller has postgres connection configured
 
 ## Follow-up Issues
 
-Created as separate GitHub issues after this PR ships:
+None required from this PR — the KMS providers, envelope encryption, and key rotation infrastructure are already present in `ee/pkg/encryption/`. Future work items:
 
-1. **AWS KMS provider** — `Encryptor` backed by AWS KMS envelope encryption
-2. **Azure Key Vault provider** — `Encryptor` backed by Azure Key Vault
-3. **GCP KMS provider** — `Encryptor` backed by GCP Cloud KMS
-4. **HashiCorp Vault provider** — `Encryptor` backed by Vault Transit secrets engine
-5. **Automated key rotation** — background job for re-encrypting existing data on key change
-
-Each provider implements the `Encryptor` interface, adds webhook validation for provider-specific config, and wires provider selection based on `EncryptionConfig.KMSProvider`.
+- Per-workspace / per-agent encryption overrides (today session-api reads only the global policy's encryption config)
+- Dashboard surfacing of rotation status (the `KeyRotationStatus` CRD field is populated but not shown in the UI)
 
 ## Files Affected
 
 ### New files
-- `ee/pkg/encryption/encryptor.go` — `Encryptor` interface + `AESEncryptor`
-- `ee/pkg/encryption/encryptor_test.go`
-- `ee/pkg/encryption/store_wrapper.go` — encrypting store wrapper
-- `ee/pkg/encryption/store_wrapper_test.go`
+- `ee/pkg/privacy/resolver.go` — `facadePolicyJSON` helper + `PolicyWatcher.ResolveEffectivePolicy` method
+- `ee/pkg/privacy/resolver_test.go`
+- `ee/pkg/encryption/config_loader.go` — shared `ProviderConfigFromEncryptionSpec` used by session-api and keyrotation controller
+- `internal/facade/recording_policy.go` — `RecordingPolicyCache` + `PolicyFetcher` interface
+- `internal/facade/recording_policy_test.go`
+- `internal/session/api/encryption_adapter.go` — `api.Encryptor` interface (no ee/ imports)
 
 ### Modified files
-- `internal/facade/recording_writer.go` — recording gate based on privacy policy
+- `internal/session/httpclient/store.go` — `GetPrivacyPolicy` method + `PrivacyPolicyResponse` type
+- `internal/session/httpclient/store_test.go`
+- `internal/session/api/handler.go` — `PolicyResolver` interface, `SetEncryptor`, `handleGetPrivacyPolicy`, encryption calls in message/toolcall/event handlers
+- `internal/session/api/handler_test.go`
+- `internal/facade/recording_writer.go` — policy gate
 - `internal/facade/recording_writer_test.go`
-- `internal/session/httpclient/client.go` — `GetPrivacyPolicy()` method
-- `internal/session/httpclient/client_test.go`
-- `internal/session/api/` — new privacy policy endpoint handler
-- `ee/pkg/privacy/middleware.go` — recording flag enforcement
+- `internal/facade/session.go` / `connection.go` / `server.go` — policy cache wiring
+- `ee/pkg/privacy/watcher.go` — add `Encryption` to `EffectivePolicy`
+- `ee/pkg/privacy/watcher_test.go`
+- `ee/pkg/privacy/middleware.go` — recording flag enforcement (`checkRecordingPolicy`)
 - `ee/pkg/privacy/middleware_test.go`
-- `cmd/session-api/` — wire encryption wrapper and policy endpoint
-- `internal/doctor/checks/privacy.go` — encryption health check
+- `ee/pkg/encryption/encryptor.go` — extend `Encryptor` for `ToolCall` and `RuntimeEvent`
+- `ee/pkg/encryption/encryption_test.go`
+- `ee/internal/controller/keyrotation_controller.go` — switch to shared `ProviderConfigFromEncryptionSpec`
+- `cmd/session-api/main.go` — build encryptor from policy, set on handler, wire `PolicyResolver`
+- `ee/cmd/omnia-arena-controller/main.go` — wire `StoreFactory` for `KeyRotationReconciler`

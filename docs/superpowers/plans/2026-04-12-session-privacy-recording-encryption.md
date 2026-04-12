@@ -1,1081 +1,33 @@
-# SessionPrivacyPolicy Recording Control & Encryption Implementation Plan
+# SessionPrivacyPolicy Recording Control & Encryption Implementation Plan (REVISED)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Enforce SessionPrivacyPolicy recording flags at the facade and session-api layers, and encrypt sensitive session data at rest using AES-256-GCM with a symmetric key from a Kubernetes Secret.
+**Goal:** Enforce SessionPrivacyPolicy recording flags at the facade and session-api layers, and wire the **existing** `ee/pkg/encryption/` package into session-api so session data (messages, tool call arguments/results, runtime event data) is encrypted at rest.
 
-**Architecture:** Defense-in-depth recording control (facade skips early, session-api rejects as safety net). Encryption via an `Encryptor` interface with an AES-256-GCM implementation, wired as a store wrapper in session-api. A new privacy-policy endpoint on session-api exposes effective policies to the facade via the existing httpclient.
-
-**Tech Stack:** Go, AES-256-GCM (`crypto/aes`, `crypto/cipher`), Kubernetes Secrets, session-api HTTP, PromptKit `RecordingConfig` CRD types
+**Architecture:** Defense-in-depth recording control (facade skips early, session-api rejects as safety net). For encryption, reuse the existing `Encryptor`/`Provider` infrastructure in `ee/pkg/encryption/` — the AWS KMS, Azure Key Vault, GCP KMS, and Vault providers are already built and tested. This plan only adds the missing **wiring** from the SessionPrivacyPolicy CRD into session-api, and extends encryption to cover `ToolCall` and `RuntimeEvent` records.
 
 **Spec:** `docs/superpowers/specs/2026-04-12-session-privacy-recording-encryption-design.md`
 
----
+## Why this revision
 
-## File Structure
+The original plan was drafted without discovering that `ee/pkg/encryption/` already contains:
+- `Encryptor` interface with `EncryptMessage`/`DecryptMessage` on `*session.Message`
+- `Provider` interface and four KMS implementations (AWS, Azure, GCP, Vault)
+- `MessageReEncryptor` for key rotation
+- Postgres `ReEncryptionStore` implementation
+- `KeyRotationReconciler` already running in arena-controller
 
-### New files
-| File | Responsibility |
-|------|---------------|
-| `ee/pkg/encryption/encryptor.go` | `Encryptor` interface + `AESEncryptor` (AES-256-GCM) |
-| `ee/pkg/encryption/encryptor_test.go` | Unit tests for AESEncryptor |
-| `ee/pkg/encryption/store_wrapper.go` | Encrypting wrapper around `session.Store` |
-| `ee/pkg/encryption/store_wrapper_test.go` | Unit tests for store wrapper |
-| `internal/facade/recording_policy.go` | `RecordingPolicy` struct + facade-side caching |
-| `internal/facade/recording_policy_test.go` | Unit tests for policy cache |
+This revision drops the "local AES key in Secret" approach and the new `Encryptor`/`EncryptingStore` abstractions. Instead it:
 
-### Modified files
-| File | Changes |
-|------|---------|
-| `internal/facade/recording_writer.go` | Add policy field, recording gate logic |
-| `internal/facade/recording_writer_test.go` | Tests for gated recording + tool name metadata |
-| `internal/facade/session.go` | Fetch privacy policy before creating recording writer |
-| `internal/session/api/handler.go` | Register `GET /api/v1/privacy-policy` endpoint |
-| `internal/session/api/handler_test.go` | Tests for privacy policy endpoint |
-| `internal/session/httpclient/store.go` | Add `GetPrivacyPolicy()` method |
-| `internal/session/httpclient/store_test.go` | Tests for new client method |
-| `ee/pkg/privacy/middleware.go` | Add recording flag enforcement |
-| `ee/pkg/privacy/middleware_test.go` | Tests for recording flag checks |
-| `cmd/session-api/main.go` | Wire encryption wrapper + policy endpoint |
-| `internal/doctor/checks/privacy.go` | Add encryption health check |
+1. Extends `PolicyWatcher.EffectivePolicy` to carry the `Encryption` config
+2. Wires session-api to build an `encryption.Provider` + `encryption.Encryptor` from the effective policy
+3. Extends encryption to cover `ToolCall` and `RuntimeEvent` (Messages already work)
+4. Wires the encryption in the session-api handler layer
+5. Populates `KeyRotationReconciler.StoreFactory` in arena-controller
 
 ---
 
-## Task 1: Encryptor Interface + AES-256-GCM Implementation
-
-**Files:**
-- Create: `ee/pkg/encryption/encryptor.go`
-- Create: `ee/pkg/encryption/encryptor_test.go`
-
-### Tests first
-
-- [ ] **Step 1: Write the failing tests**
-
-Create `ee/pkg/encryption/encryptor_test.go`:
-
-```go
-package encryption
-
-import (
-	"crypto/rand"
-	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-)
-
-func TestAESEncryptor_RoundTrip(t *testing.T) {
-	key := make([]byte, 32) // AES-256
-	_, err := rand.Read(key)
-	require.NoError(t, err)
-
-	enc, err := NewAESEncryptor(key)
-	require.NoError(t, err)
-
-	plaintext := []byte("sensitive session content with PII")
-	ciphertext, err := enc.Encrypt(plaintext)
-	require.NoError(t, err)
-
-	assert.NotEqual(t, plaintext, ciphertext)
-
-	decrypted, err := enc.Decrypt(ciphertext)
-	require.NoError(t, err)
-	assert.Equal(t, plaintext, decrypted)
-}
-
-func TestAESEncryptor_TamperDetection(t *testing.T) {
-	key := make([]byte, 32)
-	_, err := rand.Read(key)
-	require.NoError(t, err)
-
-	enc, err := NewAESEncryptor(key)
-	require.NoError(t, err)
-
-	ciphertext, err := enc.Encrypt([]byte("secret"))
-	require.NoError(t, err)
-
-	// Tamper with ciphertext
-	ciphertext[len(ciphertext)-1] ^= 0xff
-
-	_, err = enc.Decrypt(ciphertext)
-	assert.Error(t, err)
-}
-
-func TestAESEncryptor_EmptyPlaintext(t *testing.T) {
-	key := make([]byte, 32)
-	_, err := rand.Read(key)
-	require.NoError(t, err)
-
-	enc, err := NewAESEncryptor(key)
-	require.NoError(t, err)
-
-	ciphertext, err := enc.Encrypt([]byte{})
-	require.NoError(t, err)
-
-	decrypted, err := enc.Decrypt(ciphertext)
-	require.NoError(t, err)
-	assert.Equal(t, []byte{}, decrypted)
-}
-
-func TestAESEncryptor_InvalidKeySize(t *testing.T) {
-	_, err := NewAESEncryptor([]byte("too-short"))
-	assert.Error(t, err)
-}
-
-func TestAESEncryptor_UniqueNonces(t *testing.T) {
-	key := make([]byte, 32)
-	_, err := rand.Read(key)
-	require.NoError(t, err)
-
-	enc, err := NewAESEncryptor(key)
-	require.NoError(t, err)
-
-	c1, err := enc.Encrypt([]byte("same"))
-	require.NoError(t, err)
-	c2, err := enc.Encrypt([]byte("same"))
-	require.NoError(t, err)
-
-	// Same plaintext must produce different ciphertext (random nonce)
-	assert.NotEqual(t, c1, c2)
-}
-
-func TestNoopEncryptor_Passthrough(t *testing.T) {
-	enc := NewNoopEncryptor()
-	plaintext := []byte("not encrypted")
-
-	ciphertext, err := enc.Encrypt(plaintext)
-	require.NoError(t, err)
-	assert.Equal(t, plaintext, ciphertext)
-
-	decrypted, err := enc.Decrypt(ciphertext)
-	require.NoError(t, err)
-	assert.Equal(t, plaintext, decrypted)
-}
-```
-
-- [ ] **Step 2: Run tests to verify they fail**
-
-Run: `go test ./ee/pkg/encryption/... -count=1 -v`
-Expected: Compilation failure — package doesn't exist yet.
-
-### Implementation
-
-- [ ] **Step 3: Write the implementation**
-
-Create `ee/pkg/encryption/encryptor.go`:
-
-```go
-/*
-Copyright 2026 Altaira Labs.
-
-SPDX-License-Identifier: FSL-1.1-Apache-2.0
-This file is part of Omnia Enterprise and is subject to the
-Functional Source License. See ee/LICENSE for details.
-*/
-
-package encryption
-
-import (
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"encoding/base64"
-	"fmt"
-	"io"
-	"strings"
-)
-
-// VersionPrefix marks encrypted data and its format version.
-const VersionPrefix = "enc:v1:"
-
-// Encryptor encrypts and decrypts byte slices.
-// Implementations must be safe for concurrent use.
-type Encryptor interface {
-	Encrypt(plaintext []byte) (ciphertext []byte, err error)
-	Decrypt(ciphertext []byte) (plaintext []byte, err error)
-}
-
-// AESEncryptor uses AES-256-GCM for authenticated encryption.
-type AESEncryptor struct {
-	gcm cipher.AEAD
-}
-
-// NewAESEncryptor creates an AES-256-GCM encryptor.
-// key must be exactly 32 bytes (AES-256).
-func NewAESEncryptor(key []byte) (*AESEncryptor, error) {
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, fmt.Errorf("create AES cipher: %w", err)
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("create GCM: %w", err)
-	}
-	return &AESEncryptor{gcm: gcm}, nil
-}
-
-// Encrypt encrypts plaintext using AES-256-GCM with a random nonce.
-func (e *AESEncryptor) Encrypt(plaintext []byte) ([]byte, error) {
-	nonce := make([]byte, e.gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, fmt.Errorf("generate nonce: %w", err)
-	}
-	// Seal appends ciphertext+tag to nonce: [nonce | ciphertext | tag]
-	sealed := e.gcm.Seal(nonce, nonce, plaintext, nil)
-	return sealed, nil
-}
-
-// Decrypt decrypts ciphertext produced by Encrypt.
-func (e *AESEncryptor) Decrypt(ciphertext []byte) ([]byte, error) {
-	nonceSize := e.gcm.NonceSize()
-	if len(ciphertext) < nonceSize {
-		return nil, fmt.Errorf("ciphertext too short")
-	}
-	nonce, data := ciphertext[:nonceSize], ciphertext[nonceSize:]
-	plaintext, err := e.gcm.Open(nil, nonce, data, nil)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt: %w", err)
-	}
-	return plaintext, nil
-}
-
-// NoopEncryptor passes data through unchanged. Used when encryption is disabled.
-type NoopEncryptor struct{}
-
-// NewNoopEncryptor creates a no-op encryptor (plaintext passthrough).
-func NewNoopEncryptor() *NoopEncryptor {
-	return &NoopEncryptor{}
-}
-
-func (n *NoopEncryptor) Encrypt(plaintext []byte) ([]byte, error) { return plaintext, nil }
-func (n *NoopEncryptor) Decrypt(ciphertext []byte) ([]byte, error) { return ciphertext, nil }
-
-// EncodeField encrypts a string field and returns a versioned base64 string.
-// Returns the original string unchanged if it's empty.
-func EncodeField(enc Encryptor, plaintext string) (string, error) {
-	if plaintext == "" {
-		return "", nil
-	}
-	// NoopEncryptor: skip encoding overhead.
-	if _, ok := enc.(*NoopEncryptor); ok {
-		return plaintext, nil
-	}
-	ciphertext, err := enc.Encrypt([]byte(plaintext))
-	if err != nil {
-		return "", err
-	}
-	return VersionPrefix + base64.StdEncoding.EncodeToString(ciphertext), nil
-}
-
-// DecodeField decrypts a versioned base64 string back to plaintext.
-// If the string doesn't have the version prefix, it's returned as-is
-// (unencrypted legacy data).
-func DecodeField(enc Encryptor, encoded string) (string, error) {
-	if encoded == "" {
-		return "", nil
-	}
-	if !strings.HasPrefix(encoded, VersionPrefix) {
-		return encoded, nil // legacy plaintext
-	}
-	data, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(encoded, VersionPrefix))
-	if err != nil {
-		return "", fmt.Errorf("base64 decode: %w", err)
-	}
-	plaintext, err := enc.Decrypt(data)
-	if err != nil {
-		return "", err
-	}
-	return string(plaintext), nil
-}
-
-// LoadKeyFromFile reads a 32-byte AES-256 key from a file path.
-// Returns a NoopEncryptor if path is empty (encryption disabled).
-func LoadKeyFromFile(path string) (Encryptor, error) {
-	if path == "" {
-		return NewNoopEncryptor(), nil
-	}
-	// Read is deferred to implementation step — os.ReadFile(path)
-	// then validate len == 32.
-	return nil, fmt.Errorf("not implemented: will be wired in Task 6")
-}
-```
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `go test ./ee/pkg/encryption/... -count=1 -v`
-Expected: All 6 tests PASS.
-
-- [ ] **Step 5: Commit**
-
-```
-feat(ee): add Encryptor interface with AES-256-GCM implementation
-
-Ref #780
-```
-
----
-
-## Task 2: Encrypting Store Wrapper
-
-**Files:**
-- Create: `ee/pkg/encryption/store_wrapper.go`
-- Create: `ee/pkg/encryption/store_wrapper_test.go`
-
-### Tests first
-
-- [ ] **Step 1: Write the failing tests**
-
-Create `ee/pkg/encryption/store_wrapper_test.go`:
-
-```go
-package encryption
-
-import (
-	"context"
-	"crypto/rand"
-	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/altairalabs/omnia/internal/session"
-)
-
-// mockStore records calls and returns stored messages for verification.
-type mockStore struct {
-	session.Store
-	appendedMessages []session.Message
-	returnMessages   []session.Message
-}
-
-func (m *mockStore) AppendMessage(_ context.Context, _ string, msg session.Message) error {
-	m.appendedMessages = append(m.appendedMessages, msg)
-	return nil
-}
-
-func (m *mockStore) GetMessages(_ context.Context, _ string) ([]session.Message, error) {
-	return m.returnMessages, nil
-}
-
-func (m *mockStore) GetSession(_ context.Context, _ string) (*session.Session, error) {
-	return &session.Session{
-		State: m.returnMessages[0].Content, // reuse Content field to carry State for testing
-	}, nil
-}
-
-func TestEncryptingStore_AppendMessage_EncryptsContent(t *testing.T) {
-	key := make([]byte, 32)
-	_, _ = rand.Read(key)
-	enc, err := NewAESEncryptor(key)
-	require.NoError(t, err)
-
-	inner := &mockStore{}
-	store := NewEncryptingStore(inner, enc)
-
-	err = store.AppendMessage(context.Background(), "sess-1", session.Message{
-		Content: "sensitive user message",
-		Metadata: map[string]string{
-			"type":      "tool_call",
-			"tool_name": "search",
-		},
-	})
-	require.NoError(t, err)
-	require.Len(t, inner.appendedMessages, 1)
-
-	stored := inner.appendedMessages[0]
-	// Content must be encrypted (has version prefix)
-	assert.True(t, len(stored.Content) > 0)
-	assert.Contains(t, stored.Content, VersionPrefix)
-	assert.NotContains(t, stored.Content, "sensitive user message")
-
-	// Metadata must be plaintext
-	assert.Equal(t, "tool_call", stored.Metadata["type"])
-	assert.Equal(t, "search", stored.Metadata["tool_name"])
-}
-
-func TestEncryptingStore_GetMessages_DecryptsContent(t *testing.T) {
-	key := make([]byte, 32)
-	_, _ = rand.Read(key)
-	enc, err := NewAESEncryptor(key)
-	require.NoError(t, err)
-
-	// Pre-encrypt a message to simulate stored data
-	encoded, err := EncodeField(enc, "decrypted content")
-	require.NoError(t, err)
-
-	inner := &mockStore{
-		returnMessages: []session.Message{
-			{Content: encoded, Metadata: map[string]string{"tool_name": "search"}},
-		},
-	}
-	store := NewEncryptingStore(inner, enc)
-
-	msgs, err := store.GetMessages(context.Background(), "sess-1")
-	require.NoError(t, err)
-	require.Len(t, msgs, 1)
-
-	assert.Equal(t, "decrypted content", msgs[0].Content)
-	assert.Equal(t, "search", msgs[0].Metadata["tool_name"])
-}
-
-func TestEncryptingStore_LegacyPlaintext_PassesThrough(t *testing.T) {
-	key := make([]byte, 32)
-	_, _ = rand.Read(key)
-	enc, err := NewAESEncryptor(key)
-	require.NoError(t, err)
-
-	inner := &mockStore{
-		returnMessages: []session.Message{
-			{Content: "old plaintext message"}, // no enc:v1: prefix
-		},
-	}
-	store := NewEncryptingStore(inner, enc)
-
-	msgs, err := store.GetMessages(context.Background(), "sess-1")
-	require.NoError(t, err)
-	assert.Equal(t, "old plaintext message", msgs[0].Content)
-}
-
-func TestEncryptingStore_NoopEncryptor_NoPrefix(t *testing.T) {
-	inner := &mockStore{}
-	store := NewEncryptingStore(inner, NewNoopEncryptor())
-
-	err := store.AppendMessage(context.Background(), "sess-1", session.Message{
-		Content: "plain message",
-	})
-	require.NoError(t, err)
-	require.Len(t, inner.appendedMessages, 1)
-
-	// NoopEncryptor should not add prefix
-	assert.Equal(t, "plain message", inner.appendedMessages[0].Content)
-}
-
-func TestEncryptingStore_RecordToolCall_EncryptsArgumentsAndResult(t *testing.T) {
-	key := make([]byte, 32)
-	_, _ = rand.Read(key)
-	enc, err := NewAESEncryptor(key)
-	require.NoError(t, err)
-
-	inner := &mockStore{}
-	store := NewEncryptingStore(inner, enc)
-
-	err = store.RecordToolCall(context.Background(), "sess-1", session.ToolCall{
-		Name:      "web_search",
-		Arguments: map[string]any{"query": "sensitive search"},
-		Result:    "sensitive result data",
-	})
-	require.NoError(t, err)
-	require.Len(t, inner.recordedToolCalls, 1)
-
-	stored := inner.recordedToolCalls[0]
-	// Name must stay plaintext for analytics
-	assert.Equal(t, "web_search", stored.Name)
-	// Arguments must be encrypted (stored as enc:v1: string in EncryptedArgs)
-	assert.NotContains(t, stored.EncryptedArgs, "sensitive search")
-	assert.Contains(t, stored.EncryptedArgs, VersionPrefix)
-	// Result must be encrypted
-	assert.NotContains(t, stored.EncryptedResult, "sensitive result")
-	assert.Contains(t, stored.EncryptedResult, VersionPrefix)
-	// Original fields should be nil/empty
-	assert.Nil(t, stored.Arguments)
-	assert.Nil(t, stored.Result)
-}
-
-func TestEncryptingStore_GetToolCalls_DecryptsFields(t *testing.T) {
-	key := make([]byte, 32)
-	_, _ = rand.Read(key)
-	enc, err := NewAESEncryptor(key)
-	require.NoError(t, err)
-
-	argsJSON, _ := json.Marshal(map[string]any{"query": "test"})
-	encArgs, _ := EncodeField(enc, string(argsJSON))
-	resultJSON, _ := json.Marshal("result data")
-	encResult, _ := EncodeField(enc, string(resultJSON))
-
-	inner := &mockStore{
-		returnToolCalls: []session.ToolCall{
-			{
-				Name:           "web_search",
-				EncryptedArgs:  encArgs,
-				EncryptedResult: encResult,
-			},
-		},
-	}
-	store := NewEncryptingStore(inner, enc)
-
-	tcs, err := store.GetToolCalls(context.Background(), "sess-1", 10, 0)
-	require.NoError(t, err)
-	require.Len(t, tcs, 1)
-
-	assert.Equal(t, "web_search", tcs[0].Name)
-	assert.Equal(t, map[string]any{"query": "test"}, tcs[0].Arguments)
-	assert.Equal(t, "result data", tcs[0].Result)
-}
-
-func TestEncryptingStore_RecordRuntimeEvent_EncryptsData(t *testing.T) {
-	key := make([]byte, 32)
-	_, _ = rand.Read(key)
-	enc, err := NewAESEncryptor(key)
-	require.NoError(t, err)
-
-	inner := &mockStore{}
-	store := NewEncryptingStore(inner, enc)
-
-	err = store.RecordRuntimeEvent(context.Background(), "sess-1", session.RuntimeEvent{
-		EventType:    "pipeline.completed",
-		Data:         map[string]any{"output": "sensitive"},
-		ErrorMessage: "sensitive error",
-	})
-	require.NoError(t, err)
-	require.Len(t, inner.recordedEvents, 1)
-
-	stored := inner.recordedEvents[0]
-	// EventType stays plaintext
-	assert.Equal(t, "pipeline.completed", stored.EventType)
-	// Data and ErrorMessage encrypted
-	assert.Nil(t, stored.Data)
-	assert.Contains(t, stored.EncryptedData, VersionPrefix)
-	assert.Contains(t, stored.EncryptedError, VersionPrefix)
-}
-```
-
-**Note:** The ToolCall and RuntimeEvent structs currently use `Arguments map[string]any` and `Data map[string]any` directly. For encryption, the store wrapper serializes these to JSON, encrypts the JSON string, and stores it in a new `EncryptedArgs`/`EncryptedResult`/`EncryptedData`/`EncryptedError` string field. On read, it reverses the process. This means **the ToolCall and RuntimeEvent structs need new string fields** for encrypted data. The implementer should add these fields to `internal/session/store.go`:
-
-```go
-// In ToolCall struct:
-EncryptedArgs   string `json:"encryptedArgs,omitempty"`
-EncryptedResult string `json:"encryptedResult,omitempty"`
-
-// In RuntimeEvent struct:
-EncryptedData  string `json:"encryptedData,omitempty"`
-EncryptedError string `json:"encryptedError,omitempty"`
-```
-
-The Postgres columns need corresponding migrations. Alternatively, the wrapper can serialize Arguments/Result/Data into the existing fields as encrypted JSON strings (overloading the field type). The implementer should choose based on the Postgres schema — if `arguments` is `jsonb`, storing a base64 string there would violate the column type, so new `text` columns are needed. If `arguments` is already `text`, in-place encryption works.
-
-The mockStore also needs additional fields:
-```go
-type mockStore struct {
-	session.Store
-	appendedMessages []session.Message
-	returnMessages   []session.Message
-	recordedToolCalls []session.ToolCall
-	returnToolCalls   []session.ToolCall
-	recordedEvents    []session.RuntimeEvent
-}
-
-func (m *mockStore) RecordToolCall(_ context.Context, _ string, tc session.ToolCall) error {
-	m.recordedToolCalls = append(m.recordedToolCalls, tc)
-	return nil
-}
-
-func (m *mockStore) GetToolCalls(_ context.Context, _ string, _, _ int) ([]session.ToolCall, error) {
-	return m.returnToolCalls, nil
-}
-
-func (m *mockStore) RecordRuntimeEvent(_ context.Context, _ string, evt session.RuntimeEvent) error {
-	m.recordedEvents = append(m.recordedEvents, evt)
-	return nil
-}
-
-func (m *mockStore) GetRuntimeEvents(_ context.Context, _ string, _, _ int) ([]session.RuntimeEvent, error) {
-	return nil, nil
-}
-```
-
-- [ ] **Step 2: Run tests to verify they fail**
-
-Run: `go test ./ee/pkg/encryption/... -count=1 -v -run TestEncryptingStore`
-Expected: Compilation failure — `NewEncryptingStore` doesn't exist.
-
-### Implementation
-
-- [ ] **Step 3: Write the implementation**
-
-Create `ee/pkg/encryption/store_wrapper.go`:
-
-```go
-/*
-Copyright 2026 Altaira Labs.
-
-SPDX-License-Identifier: FSL-1.1-Apache-2.0
-This file is part of Omnia Enterprise and is subject to the
-Functional Source License. See ee/LICENSE for details.
-*/
-
-package encryption
-
-import (
-	"context"
-	"fmt"
-
-	"github.com/altairalabs/omnia/internal/session"
-)
-
-// EncryptingStore wraps a session.Store and encrypts Content and State
-// fields on write, decrypting them on read. Metadata stays plaintext.
-type EncryptingStore struct {
-	inner session.Store
-	enc   Encryptor
-}
-
-// NewEncryptingStore creates an encrypting wrapper around inner.
-func NewEncryptingStore(inner session.Store, enc Encryptor) *EncryptingStore {
-	return &EncryptingStore{inner: inner, enc: enc}
-}
-
-func (s *EncryptingStore) AppendMessage(ctx context.Context, sessionID string, msg session.Message) error {
-	encrypted, err := EncodeField(s.enc, msg.Content)
-	if err != nil {
-		return fmt.Errorf("encrypt message content: %w", err)
-	}
-	msg.Content = encrypted
-	return s.inner.AppendMessage(ctx, sessionID, msg)
-}
-
-func (s *EncryptingStore) GetMessages(ctx context.Context, sessionID string) ([]session.Message, error) {
-	msgs, err := s.inner.GetMessages(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	for i := range msgs {
-		decrypted, decErr := DecodeField(s.enc, msgs[i].Content)
-		if decErr != nil {
-			return nil, fmt.Errorf("decrypt message %s: %w", msgs[i].ID, decErr)
-		}
-		msgs[i].Content = decrypted
-	}
-	return msgs, nil
-}
-
-func (s *EncryptingStore) GetSession(ctx context.Context, sessionID string) (*session.Session, error) {
-	sess, err := s.inner.GetSession(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	decryptedState, err := DecodeField(s.enc, sess.State)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt session state: %w", err)
-	}
-	sess.State = decryptedState
-
-	// Decrypt message Content fields if messages are loaded.
-	for i := range sess.Messages {
-		decrypted, decErr := DecodeField(s.enc, sess.Messages[i].Content)
-		if decErr != nil {
-			return nil, fmt.Errorf("decrypt message %s: %w", sess.Messages[i].ID, decErr)
-		}
-		sess.Messages[i].Content = decrypted
-	}
-	return sess, nil
-}
-
-func (s *EncryptingStore) CreateSession(ctx context.Context, opts session.CreateSessionOptions) (*session.Session, error) {
-	if opts.InitialState != "" {
-		encrypted, err := EncodeField(s.enc, opts.InitialState)
-		if err != nil {
-			return nil, fmt.Errorf("encrypt initial state: %w", err)
-		}
-		opts.InitialState = encrypted
-	}
-	sess, err := s.inner.CreateSession(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
-	// Decrypt state in the returned session.
-	if sess.State != "" {
-		decrypted, decErr := DecodeField(s.enc, sess.State)
-		if decErr != nil {
-			return nil, fmt.Errorf("decrypt session state: %w", decErr)
-		}
-		sess.State = decrypted
-	}
-	return sess, nil
-}
-
-// Delegated methods — no encryption needed for these.
-
-func (s *EncryptingStore) DeleteSession(ctx context.Context, sessionID string) error {
-	return s.inner.DeleteSession(ctx, sessionID)
-}
-
-func (s *EncryptingStore) RefreshTTL(ctx context.Context, sessionID string, ttl time.Duration) error {
-	return s.inner.RefreshTTL(ctx, sessionID, ttl)
-}
-
-func (s *EncryptingStore) UpdateSessionStatus(ctx context.Context, sessionID string, update session.SessionStatusUpdate) error {
-	return s.inner.UpdateSessionStatus(ctx, sessionID, update)
-}
-
-// RecordToolCall encrypts Arguments, Result, and ErrorMessage. Name stays plaintext.
-func (s *EncryptingStore) RecordToolCall(ctx context.Context, sessionID string, tc session.ToolCall) error {
-	if tc.Arguments != nil {
-		argsJSON, err := json.Marshal(tc.Arguments)
-		if err != nil {
-			return fmt.Errorf("marshal tool call arguments: %w", err)
-		}
-		encrypted, err := EncodeField(s.enc, string(argsJSON))
-		if err != nil {
-			return fmt.Errorf("encrypt tool call arguments: %w", err)
-		}
-		tc.EncryptedArgs = encrypted
-		tc.Arguments = nil
-	}
-	if tc.Result != nil {
-		resultJSON, err := json.Marshal(tc.Result)
-		if err != nil {
-			return fmt.Errorf("marshal tool call result: %w", err)
-		}
-		encrypted, err := EncodeField(s.enc, string(resultJSON))
-		if err != nil {
-			return fmt.Errorf("encrypt tool call result: %w", err)
-		}
-		tc.EncryptedResult = encrypted
-		tc.Result = nil
-	}
-	if tc.ErrorMessage != "" {
-		encrypted, err := EncodeField(s.enc, tc.ErrorMessage)
-		if err != nil {
-			return fmt.Errorf("encrypt tool call error: %w", err)
-		}
-		tc.ErrorMessage = encrypted
-	}
-	return s.inner.RecordToolCall(ctx, sessionID, tc)
-}
-
-// GetToolCalls decrypts Arguments, Result, and ErrorMessage.
-func (s *EncryptingStore) GetToolCalls(ctx context.Context, sessionID string, limit, offset int) ([]session.ToolCall, error) {
-	tcs, err := s.inner.GetToolCalls(ctx, sessionID, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	for i := range tcs {
-		if tcs[i].EncryptedArgs != "" {
-			decrypted, decErr := DecodeField(s.enc, tcs[i].EncryptedArgs)
-			if decErr != nil {
-				return nil, fmt.Errorf("decrypt tool call %s args: %w", tcs[i].ID, decErr)
-			}
-			if err := json.Unmarshal([]byte(decrypted), &tcs[i].Arguments); err != nil {
-				return nil, fmt.Errorf("unmarshal tool call %s args: %w", tcs[i].ID, err)
-			}
-			tcs[i].EncryptedArgs = ""
-		}
-		if tcs[i].EncryptedResult != "" {
-			decrypted, decErr := DecodeField(s.enc, tcs[i].EncryptedResult)
-			if decErr != nil {
-				return nil, fmt.Errorf("decrypt tool call %s result: %w", tcs[i].ID, decErr)
-			}
-			if err := json.Unmarshal([]byte(decrypted), &tcs[i].Result); err != nil {
-				return nil, fmt.Errorf("unmarshal tool call %s result: %w", tcs[i].ID, err)
-			}
-			tcs[i].EncryptedResult = ""
-		}
-		if tcs[i].ErrorMessage != "" {
-			decrypted, decErr := DecodeField(s.enc, tcs[i].ErrorMessage)
-			if decErr != nil {
-				return nil, fmt.Errorf("decrypt tool call %s error: %w", tcs[i].ID, decErr)
-			}
-			tcs[i].ErrorMessage = decrypted
-		}
-	}
-	return tcs, nil
-}
-
-// RecordRuntimeEvent encrypts Data and ErrorMessage. EventType stays plaintext.
-func (s *EncryptingStore) RecordRuntimeEvent(ctx context.Context, sessionID string, evt session.RuntimeEvent) error {
-	if evt.Data != nil {
-		dataJSON, err := json.Marshal(evt.Data)
-		if err != nil {
-			return fmt.Errorf("marshal runtime event data: %w", err)
-		}
-		encrypted, err := EncodeField(s.enc, string(dataJSON))
-		if err != nil {
-			return fmt.Errorf("encrypt runtime event data: %w", err)
-		}
-		evt.EncryptedData = encrypted
-		evt.Data = nil
-	}
-	if evt.ErrorMessage != "" {
-		encrypted, err := EncodeField(s.enc, evt.ErrorMessage)
-		if err != nil {
-			return fmt.Errorf("encrypt runtime event error: %w", err)
-		}
-		evt.ErrorMessage = encrypted
-	}
-	return s.inner.RecordRuntimeEvent(ctx, sessionID, evt)
-}
-
-// GetRuntimeEvents decrypts Data and ErrorMessage.
-func (s *EncryptingStore) GetRuntimeEvents(ctx context.Context, sessionID string, limit, offset int) ([]session.RuntimeEvent, error) {
-	evts, err := s.inner.GetRuntimeEvents(ctx, sessionID, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	for i := range evts {
-		if evts[i].EncryptedData != "" {
-			decrypted, decErr := DecodeField(s.enc, evts[i].EncryptedData)
-			if decErr != nil {
-				return nil, fmt.Errorf("decrypt event %s data: %w", evts[i].ID, decErr)
-			}
-			if err := json.Unmarshal([]byte(decrypted), &evts[i].Data); err != nil {
-				return nil, fmt.Errorf("unmarshal event %s data: %w", evts[i].ID, err)
-			}
-			evts[i].EncryptedData = ""
-		}
-		if evts[i].ErrorMessage != "" {
-			decrypted, decErr := DecodeField(s.enc, evts[i].ErrorMessage)
-			if decErr != nil {
-				return nil, fmt.Errorf("decrypt event %s error: %w", evts[i].ID, decErr)
-			}
-			evts[i].ErrorMessage = decrypted
-		}
-	}
-	return evts, nil
-}
-
-func (s *EncryptingStore) RecordProviderCall(ctx context.Context, sessionID string, pc session.ProviderCall) error {
-	return s.inner.RecordProviderCall(ctx, sessionID, pc)
-}
-
-func (s *EncryptingStore) GetProviderCalls(ctx context.Context, sessionID string, limit, offset int) ([]session.ProviderCall, error) {
-	return s.inner.GetProviderCalls(ctx, sessionID, limit, offset)
-}
-
-func (s *EncryptingStore) RecordEvalResult(ctx context.Context, sessionID string, result session.EvalResult) error {
-	return s.inner.RecordEvalResult(ctx, sessionID, result)
-}
-
-func (s *EncryptingStore) Close() error {
-	return s.inner.Close()
-}
-
-// Verify interface compliance.
-var _ session.Store = (*EncryptingStore)(nil)
-```
-
-**Note:** The `time` and `encoding/json` imports and exact delegated methods should match the current `session.Store` interface. The implementer should verify all interface methods are delegated by checking `internal/session/store.go:372-440`.
-
-**Prerequisite — struct and schema changes:**
-
-Before the store wrapper can use `EncryptedArgs`/`EncryptedResult`/`EncryptedData`/`EncryptedError`, these fields must exist on the structs and in Postgres:
-
-1. Add fields to `internal/session/store.go`:
-   - `ToolCall`: `EncryptedArgs string` and `EncryptedResult string` (with `json:"encryptedArgs,omitempty"` / `json:"encryptedResult,omitempty"`)
-   - `RuntimeEvent`: `EncryptedData string` and `EncryptedError string` (with `json:"encryptedData,omitempty"` / `json:"encryptedError,omitempty"`)
-
-2. Add a Postgres migration in `internal/session/postgres/migrations/`:
-   - `ALTER TABLE tool_calls ADD COLUMN encrypted_args TEXT, ADD COLUMN encrypted_result TEXT;`
-   - `ALTER TABLE runtime_events ADD COLUMN encrypted_data TEXT, ADD COLUMN encrypted_error TEXT;`
-
-3. Update the Postgres store `RecordToolCall`/`GetToolCalls` and `RecordRuntimeEvent`/`GetRuntimeEvents` queries to read/write the new columns.
-
-The implementer should check the existing migration numbering pattern and Postgres store queries to wire these correctly.
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `go test ./ee/pkg/encryption/... -count=1 -v`
-Expected: All tests PASS.
-
-- [ ] **Step 5: Run goimports**
-
-Run: `goimports -w ee/pkg/encryption/store_wrapper.go`
-
-- [ ] **Step 6: Commit**
-
-```
-feat(ee): add encrypting store wrapper for session data
-
-Wraps session.Store to encrypt sensitive fields on write, decrypt on
-read. Encrypted: Message.Content, Session.State, ToolCall.Arguments/
-Result/ErrorMessage, RuntimeEvent.Data/ErrorMessage. Plaintext for
-analytics: ToolCall.Name, RuntimeEvent.EventType, all Metadata.
-Supports gradual migration via enc:v1: prefix detection.
-
-Ref #780
-```
-
----
-
-## Task 3: Privacy Policy Endpoint on Session-API
-
-**Files:**
-- Modify: `internal/session/api/handler.go:159-201` (add route)
-- Create or modify: handler method for the new endpoint
-- Modify: `internal/session/api/handler_test.go` (add test)
-
-The privacy policy endpoint exposes the effective policy to the facade. It delegates to `PolicyWatcher.GetEffectivePolicy()`.
-
-### Tests first
-
-- [ ] **Step 1: Write the failing test**
-
-Add to `internal/session/api/handler_test.go` (or a new `privacy_handler_test.go` in the same package):
-
-```go
-func TestHandleGetPrivacyPolicy_ReturnsEffective(t *testing.T) {
-	// Mock PolicyResolver that returns a canned policy
-	resolver := &mockPolicyResolver{
-		policy: &privacy.EffectivePolicy{
-			Recording: omniav1alpha1.RecordingConfig{
-				Enabled:    true,
-				FacadeData: true,
-				RichData:   false,
-			},
-		},
-	}
-	handler := api.NewHandler(nil, logr.Discard(), api.DefaultMaxBodySize)
-	handler.SetPolicyResolver(resolver)
-
-	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux)
-
-	req := httptest.NewRequest("GET", "/api/v1/privacy-policy?namespace=default&agent=my-agent", nil)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var got privacy.EffectivePolicy
-	err := json.NewDecoder(rec.Body).Decode(&got)
-	require.NoError(t, err)
-	assert.True(t, got.Recording.Enabled)
-	assert.False(t, got.Recording.RichData)
-}
-
-func TestHandleGetPrivacyPolicy_NoPolicyReturns204(t *testing.T) {
-	resolver := &mockPolicyResolver{policy: nil}
-	handler := api.NewHandler(nil, logr.Discard(), api.DefaultMaxBodySize)
-	handler.SetPolicyResolver(resolver)
-
-	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux)
-
-	req := httptest.NewRequest("GET", "/api/v1/privacy-policy?namespace=default&agent=my-agent", nil)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusNoContent, rec.Code)
-}
-
-func TestHandleGetPrivacyPolicy_NoResolverReturns204(t *testing.T) {
-	handler := api.NewHandler(nil, logr.Discard(), api.DefaultMaxBodySize)
-	// No resolver set — non-enterprise deployment
-
-	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux)
-
-	req := httptest.NewRequest("GET", "/api/v1/privacy-policy?namespace=default&agent=my-agent", nil)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusNoContent, rec.Code)
-}
-```
-
-The `mockPolicyResolver` implements:
-```go
-type mockPolicyResolver struct {
-	policy *privacy.EffectivePolicy
-}
-
-func (m *mockPolicyResolver) GetEffectivePolicy(namespace, agentName string) *privacy.EffectivePolicy {
-	return m.policy
-}
-```
-
-- [ ] **Step 2: Run tests to verify they fail**
-
-Run: `go test ./internal/session/api/... -count=1 -v -run TestHandleGetPrivacyPolicy`
-Expected: Compilation failure — `SetPolicyResolver` doesn't exist.
-
-### Implementation
-
-- [ ] **Step 3: Define the PolicyResolver interface and add handler method**
-
-In `internal/session/api/handler.go`, add:
-
-1. A `PolicyResolver` interface:
-```go
-// PolicyResolver resolves the effective privacy policy for a namespace/agent pair.
-type PolicyResolver interface {
-	GetEffectivePolicy(namespace, agentName string) *privacy.EffectivePolicy
-}
-```
-
-**Note:** This import references `ee/pkg/privacy`. If the handler package cannot import EE code, use a minimal struct in the api package instead:
-
-```go
-// EffectivePolicyResponse is the response shape for GET /api/v1/privacy-policy.
-// Mirrors privacy.EffectivePolicy to avoid importing ee/ from internal/.
-type EffectivePolicyResponse struct {
-	Recording json.RawMessage `json:"recording"`
-	UserOptOut json.RawMessage `json:"userOptOut,omitempty"`
-}
-
-// PolicyResolver resolves the effective privacy policy for a namespace/agent pair.
-// Returns nil if no policy applies. The returned byte slices are JSON-encoded
-// RecordingConfig and UserOptOutConfig.
-type PolicyResolver interface {
-	GetEffectivePolicyJSON(namespace, agentName string) (recording, userOptOut []byte, found bool)
-}
-```
-
-The implementer should check whether `internal/session/api/` already imports `ee/` packages. If it does, use the direct `*privacy.EffectivePolicy` approach. If not, use the JSON-based interface to maintain the boundary.
-
-2. Add `policyResolver PolicyResolver` field to `Handler` struct.
-
-3. Add `SetPolicyResolver(resolver PolicyResolver)` method.
-
-4. Add `handleGetPrivacyPolicy` handler:
-```go
-func (h *Handler) handleGetPrivacyPolicy(w http.ResponseWriter, r *http.Request) {
-	if h.policyResolver == nil {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	ns := r.URL.Query().Get("namespace")
-	agent := r.URL.Query().Get("agent")
-
-	policy := h.policyResolver.GetEffectivePolicy(ns, agent)
-	if policy == nil {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(policy)
-}
-```
-
-5. Register route in `RegisterRoutes()`:
-```go
-mux.HandleFunc("GET /api/v1/privacy-policy", h.handleGetPrivacyPolicy)
-```
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `go test ./internal/session/api/... -count=1 -v -run TestHandleGetPrivacyPolicy`
-Expected: All 3 tests PASS.
-
-- [ ] **Step 5: Run goimports**
-
-Run: `goimports -w internal/session/api/handler.go`
-
-- [ ] **Step 6: Commit**
-
-```
-feat(api): add GET /api/v1/privacy-policy endpoint
-
-Exposes effective SessionPrivacyPolicy to the facade via the existing
-session-api. Returns 204 when no policy applies or resolver is not set
-(non-enterprise).
-
-Ref #780
-```
-
----
-
-## Task 4: Session-API HTTP Client — GetPrivacyPolicy Method
+## Task 1: httpclient GetPrivacyPolicy Method
 
 **Files:**
 - Modify: `internal/session/httpclient/store.go`
@@ -1089,23 +41,18 @@ Add to `internal/session/httpclient/store_test.go`:
 
 ```go
 func TestStore_GetPrivacyPolicy_Success(t *testing.T) {
-	expected := privacy.EffectivePolicy{
-		Recording: omniav1alpha1.RecordingConfig{
-			Enabled:    true,
-			FacadeData: true,
-			RichData:   false,
-		},
-	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/v1/privacy-policy", r.URL.Path)
 		assert.Equal(t, "default", r.URL.Query().Get("namespace"))
 		assert.Equal(t, "my-agent", r.URL.Query().Get("agent"))
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(expected)
+		_, _ = w.Write([]byte(`{"recording":{"enabled":true,"facadeData":true,"richData":false}}`))
 	}))
 	defer srv.Close()
 
 	store := httpclient.NewStore(srv.URL, logr.Discard())
+	defer func() { _ = store.Close() }()
+
 	policy, err := store.GetPrivacyPolicy(context.Background(), "default", "my-agent")
 	require.NoError(t, err)
 	require.NotNil(t, policy)
@@ -1120,6 +67,8 @@ func TestStore_GetPrivacyPolicy_NoPolicy(t *testing.T) {
 	defer srv.Close()
 
 	store := httpclient.NewStore(srv.URL, logr.Discard())
+	defer func() { _ = store.Close() }()
+
 	policy, err := store.GetPrivacyPolicy(context.Background(), "default", "my-agent")
 	require.NoError(t, err)
 	assert.Nil(t, policy)
@@ -1132,44 +81,65 @@ func TestStore_GetPrivacyPolicy_ServerError(t *testing.T) {
 	defer srv.Close()
 
 	store := httpclient.NewStore(srv.URL, logr.Discard())
+	defer func() { _ = store.Close() }()
+
 	_, err := store.GetPrivacyPolicy(context.Background(), "default", "my-agent")
 	assert.Error(t, err)
 }
 ```
 
-**Note:** The test imports for `privacy.EffectivePolicy` and `omniav1alpha1.RecordingConfig` should match whatever approach was chosen in Task 3. If the JSON-based interface was used, decode into the corresponding response struct instead.
+The response type should be a JSON-only representation to avoid the httpclient importing `ee/`:
 
-- [ ] **Step 2: Run tests to verify they fail**
+```go
+// PrivacyPolicyResponse is the shape of GET /api/v1/privacy-policy.
+type PrivacyPolicyResponse struct {
+	Recording struct {
+		Enabled    bool `json:"enabled"`
+		FacadeData bool `json:"facadeData"`
+		RichData   bool `json:"richData"`
+	} `json:"recording"`
+}
+```
 
-Run: `go test ./internal/session/httpclient/... -count=1 -v -run TestStore_GetPrivacyPolicy`
-Expected: Compilation failure — `GetPrivacyPolicy` doesn't exist.
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `env GOWORK=off go test ./internal/session/httpclient/... -count=1 -v -run TestStore_GetPrivacyPolicy`
+Expected: compilation failure — `GetPrivacyPolicy` doesn't exist.
 
 ### Implementation
 
-- [ ] **Step 3: Add GetPrivacyPolicy to the httpclient Store**
-
-In `internal/session/httpclient/store.go`, add:
+- [ ] **Step 3: Add GetPrivacyPolicy to the Store**
 
 ```go
+// PrivacyPolicyResponse is the minimal shape of GET /api/v1/privacy-policy
+// that the facade needs for recording decisions.
+type PrivacyPolicyResponse struct {
+	Recording struct {
+		Enabled    bool `json:"enabled"`
+		FacadeData bool `json:"facadeData"`
+		RichData   bool `json:"richData"`
+	} `json:"recording"`
+}
+
 // GetPrivacyPolicy fetches the effective privacy policy for a namespace/agent pair.
 // Returns nil with no error if no policy applies (204 response).
-func (s *Store) GetPrivacyPolicy(ctx context.Context, namespace, agent string) (*privacy.EffectivePolicy, error) {
-	url := fmt.Sprintf("%s/api/v1/privacy-policy?namespace=%s&agent=%s",
-		s.baseURL,
-		neturl.QueryEscape(namespace),
-		neturl.QueryEscape(agent),
-	)
+// Bypasses the circuit breaker — this is a config read, not a session write.
+func (s *Store) GetPrivacyPolicy(ctx context.Context, namespace, agent string) (*PrivacyPolicyResponse, error) {
+	q := neturl.Values{}
+	q.Set("namespace", namespace)
+	q.Set("agent", agent)
+	url := s.baseURL + "/api/v1/privacy-policy?" + q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create privacy policy request: %w", err)
 	}
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("privacy policy request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNoContent {
 		return nil, nil
@@ -1178,7 +148,7 @@ func (s *Store) GetPrivacyPolicy(ctx context.Context, namespace, agent string) (
 		return nil, fmt.Errorf("privacy policy: unexpected status %d", resp.StatusCode)
 	}
 
-	var policy privacy.EffectivePolicy
+	var policy PrivacyPolicyResponse
 	if err := json.NewDecoder(resp.Body).Decode(&policy); err != nil {
 		return nil, fmt.Errorf("decode privacy policy: %w", err)
 	}
@@ -1186,14 +156,14 @@ func (s *Store) GetPrivacyPolicy(ctx context.Context, namespace, agent string) (
 }
 ```
 
-**Note:** This method intentionally does NOT go through the circuit breaker — it's a read-only config endpoint, not a session write. A transient failure should not open the circuit for session writes.
+Use existing import alias `neturl "net/url"` that's already in the file (check existing imports).
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Run tests**
 
-Run: `go test ./internal/session/httpclient/... -count=1 -v -run TestStore_GetPrivacyPolicy`
-Expected: All 3 tests PASS.
+Run: `env GOWORK=off go test ./internal/session/httpclient/... -count=1 -v -run TestStore_GetPrivacyPolicy`
+Expected: all 3 tests PASS.
 
-- [ ] **Step 5: Run goimports**
+- [ ] **Step 5: goimports**
 
 Run: `goimports -w internal/session/httpclient/store.go`
 
@@ -1202,127 +172,354 @@ Run: `goimports -w internal/session/httpclient/store.go`
 ```
 feat(httpclient): add GetPrivacyPolicy method to session-api client
 
-Facade uses this to fetch effective privacy policy for recording
-decisions. Returns nil when no policy applies (204). Bypasses circuit
-breaker since it's a config read, not a session write.
+Ref #780
+```
+
+---
+
+## Task 2: Privacy Policy Endpoint on Session-API
+
+**Files:**
+- Modify: `internal/session/api/handler.go`
+- Modify: `internal/session/api/handler_test.go`
+
+### Tests first
+
+- [ ] **Step 1: Write the failing test**
+
+```go
+func TestHandleGetPrivacyPolicy_ReturnsEffective(t *testing.T) {
+	resolver := api.PolicyResolverFunc(func(namespace, agent string) (json.RawMessage, bool) {
+		return json.RawMessage(`{"recording":{"enabled":true,"facadeData":true,"richData":false}}`), true
+	})
+
+	handler := api.NewHandler(nil, logr.Discard(), api.DefaultMaxBodySize)
+	handler.SetPolicyResolver(resolver)
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/privacy-policy?namespace=default&agent=my-agent", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"enabled":true`)
+	assert.Contains(t, rec.Body.String(), `"richData":false`)
+}
+
+func TestHandleGetPrivacyPolicy_NoPolicyReturns204(t *testing.T) {
+	resolver := api.PolicyResolverFunc(func(namespace, agent string) (json.RawMessage, bool) {
+		return nil, false
+	})
+
+	handler := api.NewHandler(nil, logr.Discard(), api.DefaultMaxBodySize)
+	handler.SetPolicyResolver(resolver)
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/privacy-policy?namespace=default&agent=my-agent", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+func TestHandleGetPrivacyPolicy_NoResolverReturns204(t *testing.T) {
+	handler := api.NewHandler(nil, logr.Discard(), api.DefaultMaxBodySize)
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/privacy-policy?namespace=default&agent=my-agent", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `env GOWORK=off go test ./internal/session/api/... -count=1 -v -run TestHandleGetPrivacyPolicy`
+Expected: compilation failure.
+
+### Implementation
+
+- [ ] **Step 3: Add PolicyResolver interface to handler.go**
+
+```go
+// PolicyResolver returns the effective privacy policy JSON for a namespace/agent pair.
+// Returns (policyJSON, true) when a policy applies, or (nil, false) when none applies.
+// Using json.RawMessage keeps this package unaware of ee/ types.
+type PolicyResolver interface {
+	ResolveEffectivePolicy(namespace, agentName string) (json.RawMessage, bool)
+}
+
+// PolicyResolverFunc adapts a function to the PolicyResolver interface.
+type PolicyResolverFunc func(namespace, agentName string) (json.RawMessage, bool)
+
+func (f PolicyResolverFunc) ResolveEffectivePolicy(namespace, agentName string) (json.RawMessage, bool) {
+	return f(namespace, agentName)
+}
+```
+
+Add `policyResolver PolicyResolver` field to `Handler`, a `SetPolicyResolver` setter, a `handleGetPrivacyPolicy` method that writes the JSON or 204, and register the route:
+
+```go
+mux.HandleFunc("GET /api/v1/privacy-policy", h.handleGetPrivacyPolicy)
+```
+
+- [ ] **Step 4: Run tests**
+
+Run: `env GOWORK=off go test ./internal/session/api/... -count=1 -v -run TestHandleGetPrivacyPolicy`
+Expected: all 3 tests PASS.
+
+- [ ] **Step 5: goimports + commit**
+
+```
+feat(api): add GET /api/v1/privacy-policy endpoint
 
 Ref #780
 ```
 
 ---
 
-## Task 5: Facade Recording Policy Cache
+## Task 3: Extend EffectivePolicy with Encryption
+
+**Files:**
+- Modify: `ee/pkg/privacy/watcher.go`
+- Modify: `ee/pkg/privacy/watcher_test.go`
+- Verify: `ee/pkg/privacy/merge.go` already merges `Encryption` (it does — see `MergeEncryption` function)
+
+### Tests first
+
+- [ ] **Step 1: Write failing test**
+
+```go
+func TestEffectivePolicy_IncludesEncryption(t *testing.T) {
+	w := &PolicyWatcher{}
+	policy := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "global", Namespace: "omnia-system"},
+		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
+			Level: omniav1alpha1.PolicyLevelGlobal,
+			Recording: omniav1alpha1.RecordingConfig{Enabled: true},
+			Encryption: omniav1alpha1.EncryptionConfig{
+				Enabled:     true,
+				KMSProvider: omniav1alpha1.KMSProviderAWS,
+				KeyID:       "arn:aws:kms:us-east-1:123:key/test",
+			},
+		},
+	}
+	w.policies.Store("omnia-system/global", policy)
+
+	eff := w.GetEffectivePolicy("default", "my-agent")
+	require.NotNil(t, eff)
+	assert.True(t, eff.Encryption.Enabled)
+	assert.Equal(t, "arn:aws:kms:us-east-1:123:key/test", eff.Encryption.KeyID)
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Expected: `EffectivePolicy.Encryption` doesn't exist.
+
+### Implementation
+
+- [ ] **Step 3: Add Encryption field**
+
+```go
+type EffectivePolicy struct {
+	Recording  omniav1alpha1.RecordingConfig
+	UserOptOut *omniav1alpha1.UserOptOutConfig
+	Encryption omniav1alpha1.EncryptionConfig
+}
+```
+
+Update `GetEffectivePolicy` (inspect its current implementation) to populate `Encryption` from the merged spec. If the merge helper already computes encryption, this is a one-line assignment.
+
+- [ ] **Step 4: Run tests + goimports + commit**
+
+```
+feat(privacy): expose encryption config in EffectivePolicy
+
+Ref #780
+```
+
+---
+
+## Task 4: PolicyResolver Adapter on PolicyWatcher
+
+**Files:**
+- Create: `ee/pkg/privacy/resolver.go`
+- Create: `ee/pkg/privacy/resolver_test.go`
+
+### Tests first
+
+- [ ] **Step 1: Write failing tests**
+
+```go
+func TestFacadePolicyJSON_OnlyIncludesFacadeFields(t *testing.T) {
+	eff := &EffectivePolicy{
+		Recording: omniav1alpha1.RecordingConfig{
+			Enabled:    true,
+			FacadeData: true,
+			RichData:   false,
+		},
+		Encryption: omniav1alpha1.EncryptionConfig{
+			Enabled: true,
+			KeyID:   "secret-key-id",
+		},
+	}
+
+	raw, err := facadePolicyJSON(eff)
+	require.NoError(t, err)
+
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(raw, &decoded))
+
+	recording := decoded["recording"].(map[string]any)
+	assert.Equal(t, true, recording["enabled"])
+	assert.Equal(t, false, recording["richData"])
+
+	_, hasEncryption := decoded["encryption"]
+	assert.False(t, hasEncryption, "encryption config must not leak to facade")
+}
+
+func TestResolveEffectivePolicy_NilWhenNoPolicy(t *testing.T) {
+	w := &PolicyWatcher{}
+	raw, ok := w.ResolveEffectivePolicy("default", "my-agent")
+	assert.False(t, ok)
+	assert.Nil(t, raw)
+}
+```
+
+### Implementation
+
+- [ ] **Step 2: Write resolver.go**
+
+```go
+package privacy
+
+import (
+	"encoding/json"
+
+	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
+)
+
+// facadePolicy is the subset of EffectivePolicy exposed to the facade via
+// GET /api/v1/privacy-policy. Encryption config stays server-side.
+type facadePolicy struct {
+	Recording omniav1alpha1.RecordingConfig `json:"recording"`
+}
+
+func facadePolicyJSON(p *EffectivePolicy) (json.RawMessage, error) {
+	if p == nil {
+		return nil, nil
+	}
+	return json.Marshal(facadePolicy{Recording: p.Recording})
+}
+
+// ResolveEffectivePolicy adapts PolicyWatcher to api.PolicyResolver.
+func (w *PolicyWatcher) ResolveEffectivePolicy(namespace, agentName string) (json.RawMessage, bool) {
+	eff := w.GetEffectivePolicy(namespace, agentName)
+	if eff == nil {
+		return nil, false
+	}
+	raw, err := facadePolicyJSON(eff)
+	if err != nil || len(raw) == 0 {
+		return nil, false
+	}
+	return raw, true
+}
+```
+
+- [ ] **Step 3: Run tests + goimports + commit**
+
+```
+feat(privacy): add PolicyResolver adapter for session-api handler
+
+Ref #780
+```
+
+---
+
+## Task 5: Facade Recording Policy Cache + Gate
 
 **Files:**
 - Create: `internal/facade/recording_policy.go`
 - Create: `internal/facade/recording_policy_test.go`
-
-This is the facade-side cache that wraps the httpclient call with a TTL.
+- Modify: `internal/facade/recording_writer.go`
+- Modify: `internal/facade/recording_writer_test.go`
+- Modify: `internal/facade/session.go`, `internal/facade/connection.go`, `internal/facade/server.go`
 
 ### Tests first
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write failing tests for policy cache**
 
-Create `internal/facade/recording_policy_test.go`:
+Create `internal/facade/recording_policy_test.go` — see plan for full test code (TestRecordingPolicyCache_FetchesOnFirstCall, _ReturnsCachedWithinTTL, _FetchError_DefaultsToRecordingEnabled, _NilPolicy_DefaultsToRecordingEnabled). Use `httpclient.PrivacyPolicyResponse` as the cached type.
+
+- [ ] **Step 2: Write failing tests for recording gate**
+
+Add to `internal/facade/recording_writer_test.go`:
 
 ```go
-package facade
+func TestRecordingWriter_RecordingDisabled_SkipsAll(t *testing.T) {
+	store := &mockRecordingStore{} // or existing helper
+	policy := &httpclient.PrivacyPolicyResponse{}
+	policy.Recording.Enabled = false
 
-import (
-	"context"
-	"sync/atomic"
-	"testing"
-	"time"
+	writer := newRecordingWriter(context.Background(), &mockInnerWriter{}, store, "sess-1", logr.Discard(), nil)
+	writer.setPolicy(policy)
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	_ = writer.WriteDone("hello")
+	_ = writer.WriteToolCall(&ToolCallInfo{ID: "tc-1", Name: "search", Arguments: map[string]any{"q": "test"}})
+	_ = writer.WriteToolResult(&ToolResultInfo{ID: "tc-1", Result: "found it"})
 
-	"github.com/altairalabs/omnia/ee/pkg/privacy"
-	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
-)
-
-type mockPolicyFetcher struct {
-	policy    *privacy.EffectivePolicy
-	err       error
-	callCount atomic.Int32
+	time.Sleep(50 * time.Millisecond)
+	assert.Empty(t, store.messages)
 }
 
-func (m *mockPolicyFetcher) GetPrivacyPolicy(_ context.Context, _, _ string) (*privacy.EffectivePolicy, error) {
-	m.callCount.Add(1)
-	return m.policy, m.err
+func TestRecordingWriter_RichDataDisabled_SkipsContent(t *testing.T) {
+	store := &mockRecordingStore{}
+	policy := &httpclient.PrivacyPolicyResponse{}
+	policy.Recording.Enabled = true
+	policy.Recording.FacadeData = true
+	policy.Recording.RichData = false
+
+	writer := newRecordingWriter(context.Background(), &mockInnerWriter{}, store, "sess-1", logr.Discard(), nil)
+	writer.setPolicy(policy)
+
+	_ = writer.WriteDone("assistant response")
+	_ = writer.WriteToolCall(&ToolCallInfo{ID: "tc-1", Name: "search", Arguments: map[string]any{"q": "test"}})
+	_ = writer.WriteToolResult(&ToolResultInfo{ID: "tc-1", Result: "result"})
+
+	time.Sleep(50 * time.Millisecond)
+	assert.Empty(t, store.messages)
 }
 
-func TestRecordingPolicyCache_FetchesOnFirstCall(t *testing.T) {
-	fetcher := &mockPolicyFetcher{
-		policy: &privacy.EffectivePolicy{
-			Recording: omniav1alpha1.RecordingConfig{
-				Enabled:  true,
-				RichData: false,
-			},
-		},
-	}
-	cache := NewRecordingPolicyCache(fetcher, "default", "agent-1", 60*time.Second)
+func TestRecordingWriter_DefaultPolicy_RecordsEverything(t *testing.T) {
+	store := &mockRecordingStore{}
+	writer := newRecordingWriter(context.Background(), &mockInnerWriter{}, store, "sess-1", logr.Discard(), nil)
+	// no setPolicy — defaults to enabled
 
-	policy := cache.Get(context.Background())
-	require.NotNil(t, policy)
-	assert.True(t, policy.Recording.Enabled)
-	assert.False(t, policy.Recording.RichData)
-	assert.Equal(t, int32(1), fetcher.callCount.Load())
-}
+	_ = writer.WriteDone("hello")
 
-func TestRecordingPolicyCache_ReturnsCachedWithinTTL(t *testing.T) {
-	fetcher := &mockPolicyFetcher{
-		policy: &privacy.EffectivePolicy{
-			Recording: omniav1alpha1.RecordingConfig{Enabled: true},
-		},
-	}
-	cache := NewRecordingPolicyCache(fetcher, "default", "agent-1", 60*time.Second)
-
-	cache.Get(context.Background())
-	cache.Get(context.Background())
-	cache.Get(context.Background())
-
-	assert.Equal(t, int32(1), fetcher.callCount.Load())
-}
-
-func TestRecordingPolicyCache_FetchError_DefaultsToRecordingEnabled(t *testing.T) {
-	fetcher := &mockPolicyFetcher{
-		err: fmt.Errorf("connection refused"),
-	}
-	cache := NewRecordingPolicyCache(fetcher, "default", "agent-1", 60*time.Second)
-
-	policy := cache.Get(context.Background())
-	// Default: recording enabled (don't silently drop data on transient error)
-	require.NotNil(t, policy)
-	assert.True(t, policy.Recording.Enabled)
-	assert.True(t, policy.Recording.RichData)
-	assert.True(t, policy.Recording.FacadeData)
-}
-
-func TestRecordingPolicyCache_NilPolicy_CachesResult(t *testing.T) {
-	fetcher := &mockPolicyFetcher{policy: nil}
-	cache := NewRecordingPolicyCache(fetcher, "default", "agent-1", 60*time.Second)
-
-	policy := cache.Get(context.Background())
-	// nil from server means no policy → default to recording enabled
-	require.NotNil(t, policy)
-	assert.True(t, policy.Recording.Enabled)
-
-	cache.Get(context.Background())
-	assert.Equal(t, int32(1), fetcher.callCount.Load())
+	time.Sleep(50 * time.Millisecond)
+	assert.Len(t, store.messages, 1)
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+Inspect the existing test file for existing mocks before writing new ones; reuse what exists.
 
-Run: `go test ./internal/facade/... -count=1 -v -run TestRecordingPolicyCache`
-Expected: Compilation failure — `NewRecordingPolicyCache` doesn't exist.
+- [ ] **Step 3: Run tests to verify they fail**
+
+Expected: compilation failures.
 
 ### Implementation
 
-- [ ] **Step 3: Write the implementation**
-
-Create `internal/facade/recording_policy.go`:
+- [ ] **Step 4: Write recording_policy.go**
 
 ```go
 package facade
@@ -1332,29 +529,21 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-logr/logr"
-
-	"github.com/altairalabs/omnia/ee/pkg/privacy"
-	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/session/httpclient"
 )
 
-// PolicyFetcher fetches the effective privacy policy for a namespace/agent.
 type PolicyFetcher interface {
-	GetPrivacyPolicy(ctx context.Context, namespace, agent string) (*privacy.EffectivePolicy, error)
+	GetPrivacyPolicy(ctx context.Context, namespace, agent string) (*httpclient.PrivacyPolicyResponse, error)
 }
 
-// defaultPolicy is used when no policy is found or fetch fails.
-// Recording is fully enabled to avoid silently dropping data.
-var defaultPolicy = &privacy.EffectivePolicy{
-	Recording: omniav1alpha1.RecordingConfig{
-		Enabled:    true,
-		FacadeData: true,
-		RichData:   true,
-	},
+func defaultPolicy() *httpclient.PrivacyPolicyResponse {
+	p := &httpclient.PrivacyPolicyResponse{}
+	p.Recording.Enabled = true
+	p.Recording.FacadeData = true
+	p.Recording.RichData = true
+	return p
 }
 
-// RecordingPolicyCache caches the effective privacy policy for a single
-// namespace/agent pair (one cache per WebSocket session).
 type RecordingPolicyCache struct {
 	fetcher   PolicyFetcher
 	namespace string
@@ -1362,22 +551,15 @@ type RecordingPolicyCache struct {
 	ttl       time.Duration
 
 	mu        sync.Mutex
-	cached    *privacy.EffectivePolicy
+	cached    *httpclient.PrivacyPolicyResponse
 	fetchedAt time.Time
 }
 
-// NewRecordingPolicyCache creates a policy cache for a session.
 func NewRecordingPolicyCache(fetcher PolicyFetcher, namespace, agent string, ttl time.Duration) *RecordingPolicyCache {
-	return &RecordingPolicyCache{
-		fetcher:   fetcher,
-		namespace: namespace,
-		agent:     agent,
-		ttl:       ttl,
-	}
+	return &RecordingPolicyCache{fetcher: fetcher, namespace: namespace, agent: agent, ttl: ttl}
 }
 
-// Get returns the cached policy, refreshing if expired.
-func (c *RecordingPolicyCache) Get(ctx context.Context) *privacy.EffectivePolicy {
+func (c *RecordingPolicyCache) Get(ctx context.Context) *httpclient.PrivacyPolicyResponse {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -1386,16 +568,8 @@ func (c *RecordingPolicyCache) Get(ctx context.Context) *privacy.EffectivePolicy
 	}
 
 	policy, err := c.fetcher.GetPrivacyPolicy(ctx, c.namespace, c.agent)
-	if err != nil {
-		// On error, use default (recording enabled) to avoid dropping data.
-		// Cache it briefly to avoid hammering session-api.
-		c.cached = defaultPolicy
-		c.fetchedAt = time.Now()
-		return c.cached
-	}
-
-	if policy == nil {
-		c.cached = defaultPolicy
+	if err != nil || policy == nil {
+		c.cached = defaultPolicy()
 	} else {
 		c.cached = policy
 	}
@@ -1404,237 +578,54 @@ func (c *RecordingPolicyCache) Get(ctx context.Context) *privacy.EffectivePolicy
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 5: Add recording gate to recording_writer.go**
 
-Run: `go test ./internal/facade/... -count=1 -v -run TestRecordingPolicyCache`
-Expected: All 4 tests PASS.
-
-- [ ] **Step 5: Run goimports**
-
-Run: `goimports -w internal/facade/recording_policy.go`
-
-- [ ] **Step 6: Commit**
-
-```
-feat(facade): add recording policy cache with TTL
-
-Caches effective privacy policy per WebSocket session. Defaults to
-recording enabled on fetch errors to avoid silently dropping data.
-
-Ref #780
-```
-
----
-
-## Task 6: Facade Recording Gate
-
-**Files:**
-- Modify: `internal/facade/recording_writer.go`
-- Modify: `internal/facade/recording_writer_test.go`
-- Modify: `internal/facade/session.go`
-
-This is the core change — the recording writer checks the policy before recording.
-
-### Tests first
-
-- [ ] **Step 1: Write the failing tests for recording gate**
-
-Add to `internal/facade/recording_writer_test.go`:
+Add `policy *httpclient.PrivacyPolicyResponse` field to `recordingResponseWriter`, a `setPolicy` setter, and helpers:
 
 ```go
-func TestRecordingWriter_RecordingDisabled_SkipsAll(t *testing.T) {
-	store := &mockSessionStore{}
-	policy := &privacy.EffectivePolicy{
-		Recording: omniav1alpha1.RecordingConfig{
-			Enabled: false,
-		},
-	}
-	writer := newRecordingWriter(context.Background(), &mockInnerWriter{}, store, "sess-1", logr.Discard(), nil)
-	writer.setPolicy(policy)
-
-	// These should all delegate to inner but NOT record
-	writer.WriteDone("hello")
-	writer.WriteToolCall(&ToolCallInfo{ID: "tc-1", Name: "search", Arguments: map[string]interface{}{"q": "test"}})
-	writer.WriteToolResult(&ToolResultInfo{ID: "tc-1", Result: "found it"})
-
-	// Give async goroutines time to complete (if any leaked through)
-	time.Sleep(50 * time.Millisecond)
-	assert.Empty(t, store.messages, "no messages should be recorded when recording is disabled")
-}
-
-func TestRecordingWriter_RichDataDisabled_SkipsContent(t *testing.T) {
-	store := &mockSessionStore{}
-	policy := &privacy.EffectivePolicy{
-		Recording: omniav1alpha1.RecordingConfig{
-			Enabled:    true,
-			FacadeData: true,
-			RichData:   false,
-		},
-	}
-	writer := newRecordingWriter(context.Background(), &mockInnerWriter{}, store, "sess-1", logr.Discard(), nil)
-	writer.setPolicy(policy)
-
-	writer.WriteDone("assistant response")
-	writer.WriteToolCall(&ToolCallInfo{ID: "tc-1", Name: "search", Arguments: map[string]interface{}{"q": "test"}})
-	writer.WriteToolResult(&ToolResultInfo{ID: "tc-1", Result: "result"})
-
-	time.Sleep(50 * time.Millisecond)
-	assert.Empty(t, store.messages, "no rich content should be recorded when RichData is disabled")
-}
-
-func TestRecordingWriter_DefaultPolicy_RecordsEverything(t *testing.T) {
-	store := &mockSessionStore{}
-	// No policy set — should default to recording everything
-	writer := newRecordingWriter(context.Background(), &mockInnerWriter{}, store, "sess-1", logr.Discard(), nil)
-
-	writer.WriteDone("hello")
-
-	time.Sleep(50 * time.Millisecond)
-	assert.Len(t, store.messages, 1)
-}
-```
-
-The `mockSessionStore` and `mockInnerWriter` test helpers should capture appended messages and delegate calls respectively. The implementer should check if these already exist in the test file and extend them.
-
-- [ ] **Step 2: Run tests to verify they fail**
-
-Run: `go test ./internal/facade/... -count=1 -v -run "TestRecordingWriter_(RecordingDisabled|RichDataDisabled|DefaultPolicy)"`
-Expected: Compilation failure — `setPolicy` doesn't exist.
-
-### Implementation
-
-- [ ] **Step 3: Add policy field and setPolicy to recordingResponseWriter**
-
-In `internal/facade/recording_writer.go`:
-
-1. Add `policy *privacy.EffectivePolicy` field to the `recordingResponseWriter` struct.
-
-2. Add a `setPolicy` method:
-```go
-func (w *recordingResponseWriter) setPolicy(p *privacy.EffectivePolicy) {
-	w.policy = p
-}
-```
-
-3. Add helper methods for recording gate checks:
-```go
-// shouldRecord returns false if recording is entirely disabled.
 func (w *recordingResponseWriter) shouldRecord() bool {
 	return w.policy == nil || w.policy.Recording.Enabled
 }
 
-// shouldRecordRichData returns false if rich data (messages, tool calls) should be skipped.
 func (w *recordingResponseWriter) shouldRecordRichData() bool {
 	return w.policy == nil || w.policy.Recording.RichData
 }
 ```
 
-- [ ] **Step 4: Add recording gate to WriteDone, WriteToolCall, WriteToolResult, WriteError**
+Gate each method:
+- `WriteDone` / `WriteDoneWithParts`: call `recordDone` only when `shouldRecord() && shouldRecordRichData()`
+- `WriteToolCall` / `WriteToolResult`: skip the `w.submit(...)` call when `!shouldRecord() || !shouldRecordRichData()`
+- `WriteError`: skip `w.submit(...)` when `!shouldRecord()` (errors record regardless of RichData)
 
-Modify each method to check the policy before submitting the recording task:
+- [ ] **Step 6: Wire policy into Connection + session.go**
 
-**WriteDone / WriteDoneWithParts** — gate on `shouldRecord() && shouldRecordRichData()`:
+Add to `Connection`:
 ```go
-func (w *recordingResponseWriter) WriteDone(content string) error {
-	err := w.inner.WriteDone(content)
-	if w.shouldRecord() && w.shouldRecordRichData() {
-		w.recordDone(content)
-	}
-	return err
-}
+policyCache *RecordingPolicyCache
 ```
 
-**WriteToolCall** — gate on `shouldRecord() && shouldRecordRichData()`:
-```go
-func (w *recordingResponseWriter) WriteToolCall(toolCall *ToolCallInfo) error {
-	err := w.inner.WriteToolCall(toolCall)
-
-	if !w.shouldRecord() || !w.shouldRecordRichData() {
-		return err
-	}
-
-	// ... existing recording logic unchanged ...
-}
-```
-
-**Note:** Tool name visibility for analytics is handled by the encrypting store wrapper (Task 2), which keeps `ToolCall.Name` in plaintext while encrypting `Arguments` and `Result`. The facade's backward-compat message recording via `AppendMessage` does NOT need `Metadata["tool_name"]` — the authoritative tool call records come from the runtime via `RecordToolCall`.
-
-**WriteToolResult** — gate on `shouldRecord() && shouldRecordRichData()`:
-```go
-func (w *recordingResponseWriter) WriteToolResult(result *ToolResultInfo) error {
-	err := w.inner.WriteToolResult(result)
-
-	if !w.shouldRecord() || !w.shouldRecordRichData() {
-		return err
-	}
-
-	// ... existing recording logic unchanged ...
-}
-```
-
-**WriteError** — gate on `shouldRecord()` (errors are always recorded if recording is enabled, regardless of RichData):
-```go
-func (w *recordingResponseWriter) WriteError(code, message string) error {
-	err := w.inner.WriteError(code, message)
-
-	if !w.shouldRecord() {
-		return err
-	}
-
-	// ... existing recording logic unchanged ...
-}
-```
-
-- [ ] **Step 5: Wire policy into session.go**
-
-In `internal/facade/session.go`, after creating the recording writer (line 195), fetch and set the policy:
+Add a `PolicyFetcher` field on `Server` (or reuse the `session.Store` via type assertion). In `handleConnection`, once namespace/agent are known, create the cache. In `session.go` around line 195, set the policy on `recWriter`:
 
 ```go
 recWriter := newRecordingWriter(ctx, writer, s.sessionStore, sessionID, log, s.recordingPool)
-
-// Apply recording policy from session-api privacy policy cache.
-if s.policyCache != nil {
-	recWriter.setPolicy(s.policyCache.Get(ctx))
+if c.policyCache != nil {
+	recWriter.setPolicy(c.policyCache.Get(ctx))
 }
 ```
 
-The `policyCache` is a `*RecordingPolicyCache` on the `Server` struct, initialized when the server starts with a facade connection's namespace/agent. The implementer needs to:
+The implementer should inspect `internal/facade/server.go` to determine the cleanest place to hold the `PolicyFetcher` (likely the `Server` struct, accepting it via `ServerConfig` or a new `WithPolicyFetcher` option). The `*httpclient.Store` that the facade already uses for `session.Store` operations has `GetPrivacyPolicy` and thus satisfies `PolicyFetcher`.
 
-1. Add `policyCache *RecordingPolicyCache` to the `Server` struct (or create it per-connection in `handleConnection`).
-2. Since the cache is per namespace/agent, it should be created in `handleConnection()` when the connection's namespace and agent are known, then stored on the `Connection` struct.
-3. Pass it through to `processMessage`.
-
-The exact wiring depends on how the `Connection` flows into `processMessage`. The key requirement is: `RecordingPolicyCache` is created with the connection's namespace and agentName, using the session-api store as the `PolicyFetcher`.
-
-- [ ] **Step 6: Run tests to verify they pass**
-
-Run: `go test ./internal/facade/... -count=1 -v -run "TestRecordingWriter_(RecordingDisabled|RichDataDisabled|DefaultPolicy)"`
-Expected: All 3 tests PASS.
-
-- [ ] **Step 7: Run full facade test suite**
-
-Run: `go test ./internal/facade/... -count=1 -v`
-Expected: All existing tests still PASS (no regressions).
-
-- [ ] **Step 8: Run goimports**
-
-Run: `goimports -w internal/facade/recording_writer.go internal/facade/session.go`
-
-- [ ] **Step 9: Commit**
+- [ ] **Step 7: Run tests + goimports + commit**
 
 ```
-feat(facade): gate session recording on privacy policy
-
-Recording writer checks EffectivePolicy before persisting messages.
-Recording.Enabled=false skips all recording. RichData=false skips
-message content and tool call/result payloads.
+feat(facade): add recording policy cache and gate
 
 Ref #780
 ```
 
 ---
 
-## Task 7: Privacy Middleware Recording Flag Enforcement
+## Task 6: Privacy Middleware Recording Flag Enforcement
 
 **Files:**
 - Modify: `ee/pkg/privacy/middleware.go`
@@ -1642,161 +633,59 @@ Ref #780
 
 ### Tests first
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write failing tests**
 
-Add to `ee/pkg/privacy/middleware_test.go`:
-
-```go
-func TestPrivacyMiddleware_RecordingDisabled_Returns204(t *testing.T) {
-	watcher := newMockWatcher(&EffectivePolicy{
-		Recording: omniav1alpha1.RecordingConfig{
-			Enabled: false,
-		},
-	})
-	middleware := NewPrivacyMiddleware(watcher, newMockSessionCache(), redaction.NewRedactor(), newMockPrefStore(), logr.Discard())
-
-	called := false
-	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { called = true })
-
-	req := httptest.NewRequest("POST", "/api/v1/sessions/sess-1/messages", strings.NewReader(`{"content":"hello"}`))
-	rec := httptest.NewRecorder()
-
-	middleware.Wrap(next).ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusNoContent, rec.Code)
-	assert.False(t, called, "next handler should not be called")
-}
-
-func TestPrivacyMiddleware_RichDataDisabled_DropsToolCall(t *testing.T) {
-	watcher := newMockWatcher(&EffectivePolicy{
-		Recording: omniav1alpha1.RecordingConfig{
-			Enabled:    true,
-			FacadeData: true,
-			RichData:   false,
-		},
-	})
-	middleware := NewPrivacyMiddleware(watcher, newMockSessionCache(), redaction.NewRedactor(), newMockPrefStore(), logr.Discard())
-
-	called := false
-	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { called = true })
-
-	// Tool call message
-	body := `{"content":"{}","metadata":{"type":"tool_call"},"role":"assistant"}`
-	req := httptest.NewRequest("POST", "/api/v1/sessions/sess-1/messages", strings.NewReader(body))
-	rec := httptest.NewRecorder()
-
-	middleware.Wrap(next).ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusNoContent, rec.Code)
-	assert.False(t, called)
-}
-
-func TestPrivacyMiddleware_RichDataDisabled_AllowsStatusUpdate(t *testing.T) {
-	watcher := newMockWatcher(&EffectivePolicy{
-		Recording: omniav1alpha1.RecordingConfig{
-			Enabled:    true,
-			FacadeData: true,
-			RichData:   false,
-		},
-	})
-	middleware := NewPrivacyMiddleware(watcher, newMockSessionCache(), redaction.NewRedactor(), newMockPrefStore(), logr.Discard())
-
-	called := false
-	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { called = true })
-
-	req := httptest.NewRequest("PATCH", "/api/v1/sessions/sess-1/status", strings.NewReader(`{"status":"completed"}`))
-	rec := httptest.NewRecorder()
-
-	middleware.Wrap(next).ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.True(t, called, "status updates should pass through")
-}
-
-func TestPrivacyMiddleware_RecordingEnabled_PassesThrough(t *testing.T) {
-	watcher := newMockWatcher(&EffectivePolicy{
-		Recording: omniav1alpha1.RecordingConfig{
-			Enabled:    true,
-			FacadeData: true,
-			RichData:   true,
-		},
-	})
-	middleware := NewPrivacyMiddleware(watcher, newMockSessionCache(), redaction.NewRedactor(), newMockPrefStore(), logr.Discard())
-
-	called := false
-	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { called = true })
-
-	body := `{"content":"hello","role":"assistant"}`
-	req := httptest.NewRequest("POST", "/api/v1/sessions/sess-1/messages", strings.NewReader(body))
-	rec := httptest.NewRecorder()
-
-	middleware.Wrap(next).ServeHTTP(rec, req)
-
-	assert.True(t, called)
-}
-```
-
-**Note:** The test helpers (`newMockWatcher`, `newMockSessionCache`, `newMockPrefStore`) likely already exist in the test file. The implementer should check and reuse them.
-
-- [ ] **Step 2: Run tests to verify they fail**
-
-Run: `go test ./ee/pkg/privacy/... -count=1 -v -run "TestPrivacyMiddleware_Recording"`
-Expected: Tests fail — the recording check logic doesn't exist yet.
+Add tests: `TestPrivacyMiddleware_RecordingDisabled_Returns204`, `_RichDataDisabled_DropsAssistantMessage`, `_RichDataDisabled_AllowsUserMessage`, `_RichDataDisabled_BlocksToolCallEndpoint`, `_RichDataDisabled_AllowsStatusUpdate`. Use existing `newMockWatcher`, `newMockSessionCache`, `newMockPrefStore` helpers.
 
 ### Implementation
 
-- [ ] **Step 3: Add recording flag checks to middleware.go**
+- [ ] **Step 2: Add checkRecordingPolicy to middleware.go**
 
-In `ee/pkg/privacy/middleware.go`, add a `checkRecordingPolicy` method and call it in `Wrap()` after getting the effective policy (line 89) and before the opt-out check (line 97):
+Add regexes and helpers:
 
 ```go
-// checkRecordingPolicy enforces recording flags on write requests.
-// Returns true if the request should be blocked (204 sent).
+var (
+	messageEndpointRe  = regexp.MustCompile(`/api/v1/sessions/[^/]+/messages$`)
+	toolCallEndpointRe = regexp.MustCompile(`/api/v1/sessions/[^/]+/tool-calls$`)
+	runtimeEventRe     = regexp.MustCompile(`/api/v1/sessions/[^/]+/events$`)
+	providerCallRe     = regexp.MustCompile(`/api/v1/sessions/[^/]+/provider-calls$`)
+)
+
+func isRichDataEndpoint(path string) bool {
+	return toolCallEndpointRe.MatchString(path) ||
+		runtimeEventRe.MatchString(path) ||
+		providerCallRe.MatchString(path)
+}
+
+// checkRecordingPolicy returns true if the request was blocked.
 func (m *PrivacyMiddleware) checkRecordingPolicy(
 	w http.ResponseWriter, r *http.Request, policy *EffectivePolicy,
 ) bool {
-	// Master switch: recording entirely disabled.
 	if !policy.Recording.Enabled {
 		w.WriteHeader(http.StatusNoContent)
 		return true
 	}
-
-	// RichData disabled: block message content, tool calls, tool results.
-	// Allow status updates, TTL refreshes, and other non-content writes.
-	if !policy.Recording.RichData && isMessageEndpoint(r.URL.Path) {
-		if isRichContent(r) {
-			w.WriteHeader(http.StatusNoContent)
-			return true
-		}
+	if policy.Recording.RichData {
+		return false
 	}
-
+	if isRichDataEndpoint(r.URL.Path) {
+		w.WriteHeader(http.StatusNoContent)
+		return true
+	}
+	if messageEndpointRe.MatchString(r.URL.Path) && isRichMessage(r) {
+		w.WriteHeader(http.StatusNoContent)
+		return true
+	}
 	return false
 }
-```
 
-Add `isMessageEndpoint` helper:
-```go
-// isMessageEndpoint returns true for paths that carry message content.
-var messageEndpointPattern = regexp.MustCompile(`/api/v1/sessions/[^/]+/messages$`)
-
-func isMessageEndpoint(path string) bool {
-	return messageEndpointPattern.MatchString(path)
-}
-```
-
-Add `isRichContent` helper that peeks at the request body to check the role/type:
-```go
-// isRichContent checks if a message write contains rich content (assistant
-// messages, tool calls, tool results) that should be blocked when RichData
-// is disabled. Returns false for user messages and non-message requests.
-func isRichContent(r *http.Request) bool {
-	// Read body, then replace it for downstream consumption.
+func isRichMessage(r *http.Request) bool {
 	body, err := io.ReadAll(r.Body)
+	_ = r.Body.Close()
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	if err != nil {
-		return false // can't determine — let it through
+		return false
 	}
-
 	var msg struct {
 		Role     string            `json:"role"`
 		Metadata map[string]string `json:"metadata"`
@@ -1804,368 +693,515 @@ func isRichContent(r *http.Request) bool {
 	if err := json.Unmarshal(body, &msg); err != nil {
 		return false
 	}
-
-	// User messages are always allowed (they were typed by the user).
 	if msg.Role == "user" {
 		return false
 	}
-
-	// Assistant messages and tool call/result messages are rich content.
 	if msg.Role == "assistant" || msg.Role == "system" {
 		return true
 	}
-	msgType := msg.Metadata["type"]
-	return msgType == "tool_call" || msgType == "tool_result"
+	t := msg.Metadata["type"]
+	return t == "tool_call" || t == "tool_result"
 }
 ```
 
-Wire it into `Wrap()` between the policy fetch and opt-out check:
-```go
-// existing: policy := m.policyWatcher.GetEffectivePolicy(ns, agent)
-// ... (nil check) ...
+Wire into `Wrap()` between policy fetch (line 89) and opt-out check (line 97):
 
-// Check recording flags (safety net for facade).
+```go
 if m.checkRecordingPolicy(w, r, policy) {
 	return
 }
-
-// existing: check user opt-out
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `go test ./ee/pkg/privacy/... -count=1 -v -run "TestPrivacyMiddleware_Recording"`
-Expected: All 4 tests PASS.
-
-- [ ] **Step 5: Run full privacy test suite**
-
-Run: `go test ./ee/pkg/privacy/... -count=1 -v`
-Expected: All existing tests still PASS.
-
-- [ ] **Step 6: Run goimports**
-
-Run: `goimports -w ee/pkg/privacy/middleware.go`
-
-- [ ] **Step 7: Commit**
+- [ ] **Step 3: Run tests + goimports + commit**
 
 ```
 feat(ee): enforce recording flags in privacy middleware
 
-Session-api safety net: blocks writes when Recording.Enabled=false
-(204 No Content). When RichData=false, blocks assistant messages and
-tool call/result payloads but allows status updates and TTL refreshes.
-
 Ref #780
 ```
 
 ---
 
-## Task 8: Wire Encryption + Policy Endpoint in Session-API Main
+## Task 7: Extend Encryptor for ToolCall and RuntimeEvent
 
 **Files:**
-- Modify: `cmd/session-api/main.go`
-- Modify: `ee/pkg/encryption/encryptor.go` (finalize `LoadKeyFromFile`)
+- Modify: `ee/pkg/encryption/encryptor.go`
+- Modify: `ee/pkg/encryption/encryption_test.go`
 
-### Implementation
+The existing `Encryptor` interface only handles `*session.Message`. Extend it to cover `*session.ToolCall` and `*session.RuntimeEvent`.
 
-- [ ] **Step 1: Finalize LoadKeyFromFile**
+### Storage strategy
 
-In `ee/pkg/encryption/encryptor.go`, replace the placeholder `LoadKeyFromFile`:
+**ToolCall:**
+- `Name` → plaintext
+- `Arguments` (`map[string]any`) → JSON-marshal, encrypt, wrap in envelope map: `{"_encryption": {...meta...}, "_payload": "base64-ciphertext"}`. Stored back into `Arguments` field.
+- `Result` (`any`) → same envelope pattern in `Result`
+- `ErrorMessage` (`string`) → encrypted base64 string with a sentinel prefix, stored back in `ErrorMessage`
+- On read: detect the `_encryption` sentinel, reverse the process
 
-```go
-// LoadKeyFromFile reads a 32-byte AES-256 key from a file path.
-// Returns a NoopEncryptor if path is empty (encryption disabled).
-func LoadKeyFromFile(path string) (Encryptor, error) {
-	if path == "" {
-		return NewNoopEncryptor(), nil
-	}
-	key, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read encryption key: %w", err)
-	}
-	key = bytes.TrimSpace(key) // trim trailing newline from Secret mount
-	if len(key) != 32 {
-		return nil, fmt.Errorf("encryption key must be 32 bytes, got %d", len(key))
-	}
-	return NewAESEncryptor(key)
-}
-```
+**RuntimeEvent:**
+- `EventType` → plaintext
+- `Data` (`map[string]any`) → envelope pattern in `Data`
+- `ErrorMessage` → sentinel-prefixed ciphertext
 
-- [ ] **Step 2: Add LoadKeyFromFile test**
-
-Add to `ee/pkg/encryption/encryptor_test.go`:
-
-```go
-func TestLoadKeyFromFile_EmptyPath_ReturnsNoop(t *testing.T) {
-	enc, err := LoadKeyFromFile("")
-	require.NoError(t, err)
-	assert.IsType(t, &NoopEncryptor{}, enc)
-}
-
-func TestLoadKeyFromFile_ValidKey(t *testing.T) {
-	key := make([]byte, 32)
-	_, _ = rand.Read(key)
-	path := filepath.Join(t.TempDir(), "key")
-	require.NoError(t, os.WriteFile(path, key, 0o600))
-
-	enc, err := LoadKeyFromFile(path)
-	require.NoError(t, err)
-	assert.IsType(t, &AESEncryptor{}, enc)
-}
-
-func TestLoadKeyFromFile_WrongSize(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "key")
-	require.NoError(t, os.WriteFile(path, []byte("too-short"), 0o600))
-
-	_, err := LoadKeyFromFile(path)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "32 bytes")
-}
-
-func TestLoadKeyFromFile_TrailingNewline(t *testing.T) {
-	key := make([]byte, 32)
-	_, _ = rand.Read(key)
-	path := filepath.Join(t.TempDir(), "key")
-	require.NoError(t, os.WriteFile(path, append(key, '\n'), 0o600))
-
-	enc, err := LoadKeyFromFile(path)
-	require.NoError(t, err)
-	assert.IsType(t, &AESEncryptor{}, enc)
-}
-```
-
-- [ ] **Step 3: Run encryption tests**
-
-Run: `go test ./ee/pkg/encryption/... -count=1 -v`
-Expected: All tests PASS.
-
-- [ ] **Step 4: Wire encryption into session-api main**
-
-In `cmd/session-api/main.go`, in `buildAPIMux()` (around line 480, after creating the session service):
-
-1. Load the encryption key:
-```go
-encryptor, err := encryption.LoadKeyFromFile(os.Getenv("ENCRYPTION_KEY_PATH"))
-if err != nil {
-	log.Error(err, "encryption key loading failed")
-	return nil, nil, func() {}
-}
-if _, ok := encryptor.(*encryption.NoopEncryptor); !ok {
-	log.Info("session encryption enabled")
-}
-```
-
-2. Wrap the store passed to the session service:
-The implementer needs to find where the registry/store is used by `SessionService` and wrap it with `encryption.NewEncryptingStore()`. This depends on how `NewSessionService` receives the store. The exact wiring point should be determined by reading the `SessionService` constructor.
-
-3. Wire the PolicyWatcher as a PolicyResolver on the handler:
-In `wrapPrivacyMiddleware()`, after creating the `PolicyWatcher`, set it on the handler:
-```go
-// The handler needs the watcher reference for the privacy-policy endpoint.
-// This requires passing the handler into wrapPrivacyMiddleware or returning
-// the watcher. The implementer should choose the cleaner approach.
-```
-
-- [ ] **Step 5: Run session-api tests**
-
-Run: `go test ./cmd/session-api/... -count=1 -v`
-Expected: All tests PASS.
-
-- [ ] **Step 6: Run goimports**
-
-Run: `goimports -w cmd/session-api/main.go ee/pkg/encryption/encryptor.go`
-
-- [ ] **Step 7: Commit**
-
-```
-feat(session-api): wire encryption wrapper and privacy policy endpoint
-
-Session-api loads AES-256 key from ENCRYPTION_KEY_PATH. When set,
-wraps the session store with EncryptingStore for at-rest encryption.
-PolicyWatcher exposed as PolicyResolver for the privacy-policy endpoint.
-
-Ref #780
-```
-
----
-
-## Task 9: Doctor Health Check for Encryption
-
-**Files:**
-- Modify: `internal/doctor/checks/privacy.go`
-- Modify: `internal/doctor/checks/privacy_test.go`
+No schema changes — JSONB columns hold the envelope maps fine.
 
 ### Tests first
 
-- [ ] **Step 1: Write the failing test**
-
-Add to `internal/doctor/checks/privacy_test.go`:
+- [ ] **Step 1: Write failing tests**
 
 ```go
-func TestPrivacyChecker_CheckEncryption(t *testing.T) {
-	// This test verifies the check function exists and handles
-	// the case where encryption is not configured (skip result).
-	checker := NewPrivacyChecker("http://memory-api", "http://session-api", "test-ws", "http://arena")
+func TestEncryptor_EncryptToolCall_EncryptsArgumentsAndResult(t *testing.T) {
+	provider := newMockProvider(t)
+	enc := NewEncryptor(provider)
 
-	// When session-api reports no encryption, the check should skip.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/license" {
-			json.NewEncoder(w).Encode(map[string]string{"tier": "enterprise"})
-			return
-		}
-		if r.URL.Path == "/api/v1/encryption-status" {
-			json.NewEncoder(w).Encode(map[string]bool{"enabled": false})
-			return
-		}
-	}))
-	defer srv.Close()
+	tc := &session.ToolCall{
+		ID:           "tc-1",
+		Name:         "web_search",
+		Arguments:    map[string]any{"query": "sensitive search"},
+		Result:       "sensitive result",
+		ErrorMessage: "",
+	}
 
-	checker.arenaURL = srv.URL
-	checker.sessionAPIURL = srv.URL
+	encrypted, events, err := enc.EncryptToolCall(context.Background(), tc)
+	require.NoError(t, err)
 
-	checks := checker.Checks()
-	// The encryption check should be in the list
-	assert.True(t, len(checks) >= 5, "should have at least 5 checks including encryption")
+	assert.Equal(t, "web_search", encrypted.Name)
+	assert.NotEqual(t, tc.Arguments, encrypted.Arguments)
+	assert.NotEqual(t, tc.Result, encrypted.Result)
+
+	eventFieldSet := map[string]bool{}
+	for _, e := range events {
+		eventFieldSet[e.Field] = true
+	}
+	assert.True(t, eventFieldSet["arguments"])
+	assert.True(t, eventFieldSet["result"])
+}
+
+func TestEncryptor_DecryptToolCall_RoundTrip(t *testing.T) {
+	provider := newMockProvider(t)
+	enc := NewEncryptor(provider)
+
+	original := &session.ToolCall{
+		ID:           "tc-1",
+		Name:         "web_search",
+		Arguments:    map[string]any{"query": "test"},
+		Result:       "found",
+		ErrorMessage: "no error",
+	}
+
+	encrypted, _, err := enc.EncryptToolCall(context.Background(), original)
+	require.NoError(t, err)
+
+	decrypted, err := enc.DecryptToolCall(context.Background(), encrypted)
+	require.NoError(t, err)
+
+	assert.Equal(t, original.Name, decrypted.Name)
+	assert.Equal(t, original.Arguments, decrypted.Arguments)
+	assert.Equal(t, original.Result, decrypted.Result)
+	assert.Equal(t, original.ErrorMessage, decrypted.ErrorMessage)
+}
+
+func TestEncryptor_EncryptRuntimeEvent_EncryptsData(t *testing.T) {
+	provider := newMockProvider(t)
+	enc := NewEncryptor(provider)
+
+	evt := &session.RuntimeEvent{
+		ID:           "evt-1",
+		EventType:    "pipeline.completed",
+		Data:         map[string]any{"output": "sensitive"},
+		ErrorMessage: "sensitive error",
+	}
+
+	encrypted, _, err := enc.EncryptRuntimeEvent(context.Background(), evt)
+	require.NoError(t, err)
+	assert.Equal(t, "pipeline.completed", encrypted.EventType)
+	assert.NotEqual(t, evt.Data, encrypted.Data)
+}
+
+func TestEncryptor_DecryptRuntimeEvent_RoundTrip(t *testing.T) {
+	provider := newMockProvider(t)
+	enc := NewEncryptor(provider)
+
+	original := &session.RuntimeEvent{
+		ID:           "evt-1",
+		EventType:    "pipeline.completed",
+		Data:         map[string]any{"output": "hello"},
+		ErrorMessage: "fail",
+	}
+
+	encrypted, _, err := enc.EncryptRuntimeEvent(context.Background(), original)
+	require.NoError(t, err)
+
+	decrypted, err := enc.DecryptRuntimeEvent(context.Background(), encrypted)
+	require.NoError(t, err)
+
+	assert.Equal(t, original.EventType, decrypted.EventType)
+	assert.Equal(t, original.Data, decrypted.Data)
+	assert.Equal(t, original.ErrorMessage, decrypted.ErrorMessage)
 }
 ```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `go test ./internal/doctor/checks/... -count=1 -v -run TestPrivacyChecker_CheckEncryption`
-Expected: Failure — check count assertion fails (only 4 checks today).
 
 ### Implementation
 
-- [ ] **Step 3: Add encryption health check**
-
-In `internal/doctor/checks/privacy.go`, add a new check to `Checks()`:
+- [ ] **Step 2: Extend the Encryptor interface**
 
 ```go
-func (c *PrivacyChecker) Checks() []Check {
-	return []Check{
-		{Name: "pii-redaction", Fn: c.checkPIIRedaction},
-		{Name: "opt-out-respected", Fn: c.checkOptOutRespected},
-		{Name: "deletion-cascade", Fn: c.checkDeletionCascade},
-		{Name: "audit-log-written", Fn: c.checkAuditLogWritten},
-		{Name: "encryption-at-rest", Fn: c.checkEncryptionAtRest},
-	}
+type Encryptor interface {
+	EncryptMessage(ctx context.Context, msg *session.Message) (*session.Message, []EncryptionEvent, error)
+	DecryptMessage(ctx context.Context, msg *session.Message) (*session.Message, error)
+
+	EncryptToolCall(ctx context.Context, tc *session.ToolCall) (*session.ToolCall, []EncryptionEvent, error)
+	DecryptToolCall(ctx context.Context, tc *session.ToolCall) (*session.ToolCall, error)
+
+	EncryptRuntimeEvent(ctx context.Context, evt *session.RuntimeEvent) (*session.RuntimeEvent, []EncryptionEvent, error)
+	DecryptRuntimeEvent(ctx context.Context, evt *session.RuntimeEvent) (*session.RuntimeEvent, error)
 }
 ```
 
-Add the check method:
-```go
-// checkEncryptionAtRest verifies that session-api is encrypting data when configured.
-func (c *PrivacyChecker) checkEncryptionAtRest(ctx context.Context) Result {
-	if !c.requireEnterprise(ctx) {
-		return Result{Status: StatusSkip, Message: "enterprise not enabled"}
-	}
+Use envelope helpers to avoid duplication. Example:
 
-	// Check encryption status endpoint on session-api.
-	resp, err := http.Get(c.sessionAPIURL + "/api/v1/encryption-status")
+```go
+// encryptEnvelope JSON-marshals v, encrypts the bytes, and returns a map:
+// {"_encryption": {metadata}, "_payload": "base64-ciphertext"}
+func (e *encryptor) encryptEnvelope(ctx context.Context, v any) (map[string]any, *EncryptOutput, error) {
+	data, err := json.Marshal(v)
 	if err != nil {
-		return Result{Status: StatusSkip, Message: "session-api unreachable"}
+		return nil, nil, err
 	}
-	defer resp.Body.Close()
+	out, err := e.provider.Encrypt(ctx, data)
+	if err != nil {
+		return nil, nil, err
+	}
+	return map[string]any{
+		"_encryption": map[string]any{
+			"keyID":      out.KeyID,
+			"keyVersion": out.KeyVersion,
+			"algorithm":  out.Algorithm,
+		},
+		"_payload": base64.StdEncoding.EncodeToString(out.Ciphertext),
+	}, out, nil
+}
 
-	var status struct {
-		Enabled bool `json:"enabled"`
+// decryptEnvelope reverses encryptEnvelope.
+func (e *encryptor) decryptEnvelope(ctx context.Context, m map[string]any, into any) error {
+	payload, ok := m["_payload"].(string)
+	if !ok {
+		return fmt.Errorf("envelope missing _payload")
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-		return Result{Status: StatusFail, Message: "invalid encryption status response"}
+	ciphertext, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return err
 	}
+	plaintext, err := e.provider.Decrypt(ctx, ciphertext)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(plaintext, into)
+}
 
-	if !status.Enabled {
-		return Result{Status: StatusSkip, Message: "encryption not configured"}
-	}
-
-	// Write a test message, then verify the raw DB content is encrypted.
-	// This requires a round-trip: write via session-api, then read raw
-	// from a diagnostic endpoint or verify the prefix.
-	// For now, just verify the status endpoint reports enabled.
-	return Result{Status: StatusPass, Message: "encryption enabled"}
+// isEncrypted returns true if m is an envelope (has _encryption key).
+func isEncryptedEnvelope(m map[string]any) bool {
+	_, ok := m["_encryption"]
+	return ok
 }
 ```
 
-**Note:** A more thorough check (write-then-verify-ciphertext) requires either a diagnostic endpoint or direct DB access. The implementer can add a `GET /api/v1/encryption-status` endpoint to session-api as part of this task — a simple handler that reports whether the `EncryptingStore` wrapper is active.
+For `ErrorMessage` (a plain string), use a distinct sentinel-prefixed base64 format (e.g., `enc:v1:` + base64) — or wrap as JSON envelope and store as string. Pick one approach consistently.
 
-- [ ] **Step 4: Run tests to verify they pass**
+Keep each new function below cognitive complexity 15 (SonarCloud).
 
-Run: `go test ./internal/doctor/checks/... -count=1 -v -run TestPrivacyChecker_CheckEncryption`
-Expected: PASS.
-
-- [ ] **Step 5: Run goimports**
-
-Run: `goimports -w internal/doctor/checks/privacy.go`
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 3: Run tests + goimports + commit**
 
 ```
-feat(doctor): add encryption-at-rest health check
-
-Verifies session-api has encryption enabled when configured.
+feat(ee): extend Encryptor to cover ToolCall and RuntimeEvent
 
 Ref #780
 ```
 
 ---
 
-## Task 10: Create Follow-up GitHub Issues
+## Task 8: Wire Encryption into Session-API Handlers
 
-**Files:** None (GitHub only)
+**Files:**
+- Create: `internal/session/api/encryption_adapter.go` (interface)
+- Modify: `internal/session/api/handler.go` (plumb encryptor)
+- Modify: `internal/session/api/handler_test.go`
+- Modify: `cmd/session-api/main.go` (build and wire encryptor)
 
-- [ ] **Step 1: Create KMS provider issues**
+### Design
 
-```bash
-gh issue create --repo AltairaLabs/omnia \
-  --title "feat(ee): AWS KMS encryption provider" \
-  --body "Implement Encryptor backed by AWS KMS envelope encryption. Use the Encryptor interface from ee/pkg/encryption/. Add webhook validation for AWS-specific config fields. Ref #780" \
-  --label "enhancement"
+`internal/session/api/` must not import `ee/`. Define a minimal `Encryptor` interface in the api package that `ee/pkg/encryption.Encryptor` satisfies via an adapter.
 
-gh issue create --repo AltairaLabs/omnia \
-  --title "feat(ee): Azure Key Vault encryption provider" \
-  --body "Implement Encryptor backed by Azure Key Vault. Use the Encryptor interface from ee/pkg/encryption/. Add webhook validation for Azure-specific config fields. Ref #780" \
-  --label "enhancement"
+### Tests first
 
-gh issue create --repo AltairaLabs/omnia \
-  --title "feat(ee): GCP KMS encryption provider" \
-  --body "Implement Encryptor backed by GCP Cloud KMS. Use the Encryptor interface from ee/pkg/encryption/. Add webhook validation for GCP-specific config fields. Ref #780" \
-  --label "enhancement"
+- [ ] **Step 1: Write failing tests**
 
-gh issue create --repo AltairaLabs/omnia \
-  --title "feat(ee): HashiCorp Vault encryption provider" \
-  --body "Implement Encryptor backed by Vault Transit secrets engine. Use the Encryptor interface from ee/pkg/encryption/. Add webhook validation for Vault-specific config fields. Ref #780" \
-  --label "enhancement"
+Tests should:
+1. Verify `handleAppendMessage` calls `encryptor.EncryptMessage` when set
+2. Verify `handleGetMessages` decrypts messages before returning
+3. Verify non-encrypted path works when encryptor is nil (non-enterprise)
+4. Same for ToolCall and RuntimeEvent endpoints
 
-gh issue create --repo AltairaLabs/omnia \
-  --title "feat(ee): automated encryption key rotation" \
-  --body "Background job to re-encrypt existing session data when encryption keys change. Implements KeyRotation spec from SessionPrivacyPolicy CRD (Schedule, BatchSize, ReEncryptExisting). Depends on KMS provider support. Ref #780" \
-  --label "enhancement"
+Use existing handler test helpers. A mock encryptor that records calls is enough.
+
+### Implementation
+
+- [ ] **Step 2: Define api.Encryptor interface**
+
+Create `internal/session/api/encryption_adapter.go`:
+
+```go
+package api
+
+import (
+	"context"
+
+	"github.com/altairalabs/omnia/internal/session"
+)
+
+// Encryptor is the subset of encryption operations session-api requires.
+// ee/pkg/encryption.Encryptor satisfies this interface (via an adapter in
+// cmd/session-api that drops the []EncryptionEvent return).
+// When nil, session-api reads/writes plaintext (non-enterprise mode).
+type Encryptor interface {
+	EncryptMessage(ctx context.Context, msg *session.Message) (*session.Message, error)
+	DecryptMessage(ctx context.Context, msg *session.Message) (*session.Message, error)
+
+	EncryptToolCall(ctx context.Context, tc *session.ToolCall) (*session.ToolCall, error)
+	DecryptToolCall(ctx context.Context, tc *session.ToolCall) (*session.ToolCall, error)
+
+	EncryptRuntimeEvent(ctx context.Context, evt *session.RuntimeEvent) (*session.RuntimeEvent, error)
+	DecryptRuntimeEvent(ctx context.Context, evt *session.RuntimeEvent) (*session.RuntimeEvent, error)
+}
 ```
 
-- [ ] **Step 2: Verify issues created**
+- [ ] **Step 3: Plumb encryptor into Handler**
 
-Run: `gh issue list --repo AltairaLabs/omnia --search "encryption provider" --limit 10`
-Expected: All 5 issues visible.
+Add `encryptor Encryptor` field to `Handler`, a `SetEncryptor(e Encryptor)` method. Modify:
+- `handleAppendMessage`: if `h.encryptor != nil`, call `EncryptMessage` before forwarding to `service.AppendMessage`
+- `handleGetMessages`: if `h.encryptor != nil`, decrypt each returned message (swallow decrypt errors? or return 500? — log + return 500 is safer)
+- `handleRecordToolCall` / `handleGetToolCalls`: same pattern
+- `handleRecordRuntimeEvent` / `handleGetRuntimeEvents`: same pattern
 
-- [ ] **Step 3: Commit** (nothing to commit — GitHub-only task)
+- [ ] **Step 4: Build encryptor in cmd/session-api/main.go**
+
+In `buildAPIMux`, after the PolicyWatcher is set up (around line 498), check for encryption and build the encryptor:
+
+```go
+if f.enterprise && watcher != nil {
+	if enc, err := buildEncryptorFromPolicy(context.Background(), mgr, watcher, log); err != nil {
+		log.Error(err, "encryption disabled", "reason", "initialization failed")
+	} else if enc != nil {
+		handler.SetEncryptor(enc)
+		log.Info("session encryption enabled")
+	}
+}
+```
+
+**Refactor shared helper:** Factor the `buildProviderConfig` + `loadSecretCredentials` logic from `ee/internal/controller/keyrotation_controller.go:385-425` into a shared helper in `ee/pkg/encryption/`:
+
+```go
+// In ee/pkg/encryption/config_loader.go:
+func ProviderConfigFromEncryptionSpec(
+	ctx context.Context, c client.Client, namespace string, enc omniav1alpha1.EncryptionConfig,
+) (ProviderConfig, error) {
+	cfg := ProviderConfig{
+		ProviderType: ProviderType(enc.KMSProvider),
+		KeyID:        enc.KeyID,
+	}
+	if enc.SecretRef != nil {
+		creds, err := loadSecret(ctx, c, namespace, enc.SecretRef.Name)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.Credentials = creds
+		if v, ok := creds["vault-url"]; ok {
+			cfg.VaultURL = v
+		}
+	}
+	return cfg, nil
+}
+```
+
+Update `keyrotation_controller.go` to call `encryption.ProviderConfigFromEncryptionSpec(...)` instead of its private helpers. Keep the refactor minimal — don't rename anything else.
+
+Then `buildEncryptorFromPolicy` in session-api becomes:
+
+```go
+func buildEncryptorFromPolicy(
+	ctx context.Context, mgr ctrl.Manager, watcher *privacy.PolicyWatcher, log logr.Logger,
+) (api.Encryptor, error) {
+	eff := watcher.GetEffectivePolicy("", "")
+	if eff == nil || !eff.Encryption.Enabled {
+		return nil, nil
+	}
+
+	cfg, err := encryption.ProviderConfigFromEncryptionSpec(ctx, mgr.GetClient(), "omnia-system", eff.Encryption)
+	if err != nil {
+		return nil, err
+	}
+	provider, err := encryption.NewProvider(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &encryptorAdapter{inner: encryption.NewEncryptor(provider)}, nil
+}
+
+type encryptorAdapter struct {
+	inner encryption.Encryptor
+}
+
+func (a *encryptorAdapter) EncryptMessage(ctx context.Context, msg *session.Message) (*session.Message, error) {
+	out, _, err := a.inner.EncryptMessage(ctx, msg)
+	return out, err
+}
+
+func (a *encryptorAdapter) DecryptMessage(ctx context.Context, msg *session.Message) (*session.Message, error) {
+	return a.inner.DecryptMessage(ctx, msg)
+}
+
+func (a *encryptorAdapter) EncryptToolCall(ctx context.Context, tc *session.ToolCall) (*session.ToolCall, error) {
+	out, _, err := a.inner.EncryptToolCall(ctx, tc)
+	return out, err
+}
+
+func (a *encryptorAdapter) DecryptToolCall(ctx context.Context, tc *session.ToolCall) (*session.ToolCall, error) {
+	return a.inner.DecryptToolCall(ctx, tc)
+}
+
+func (a *encryptorAdapter) EncryptRuntimeEvent(ctx context.Context, evt *session.RuntimeEvent) (*session.RuntimeEvent, error) {
+	out, _, err := a.inner.EncryptRuntimeEvent(ctx, evt)
+	return out, err
+}
+
+func (a *encryptorAdapter) DecryptRuntimeEvent(ctx context.Context, evt *session.RuntimeEvent) (*session.RuntimeEvent, error) {
+	return a.inner.DecryptRuntimeEvent(ctx, evt)
+}
+```
+
+The session-api already has a K8s manager available (since `wrapPrivacyMiddleware` creates a `k8sClient`). The implementer should reuse that same client for secret loading — don't create a second one.
+
+- [ ] **Step 5: Wire the PolicyResolver**
+
+Also in `buildAPIMux`, wire the watcher as the PolicyResolver on the handler:
+
+```go
+if f.enterprise && watcher != nil {
+	handler.SetPolicyResolver(watcher) // PolicyWatcher.ResolveEffectivePolicy satisfies api.PolicyResolver
+}
+```
+
+**Note:** `wrapPrivacyMiddleware` currently creates the watcher locally. Refactor to return the watcher so `buildAPIMux` can pass it to both the middleware and the handler. Minimal change: split `wrapPrivacyMiddleware` into `buildPolicyWatcher()` returning `*privacy.PolicyWatcher` + `wrapPrivacyMiddlewareWithWatcher(next, watcher, ...)`.
+
+- [ ] **Step 6: Run tests**
+
+Run: `env GOWORK=off go test ./internal/session/api/... ./cmd/session-api/... ./ee/... -count=1`
+Expected: all tests PASS.
+
+- [ ] **Step 7: goimports + commit**
+
+```
+feat(session-api): wire encryption for messages, tool calls, runtime events
+
+Builds an ee/pkg/encryption.Provider + Encryptor from the global
+SessionPrivacyPolicy's Encryption config at startup. When enabled,
+all writes encrypt and all reads decrypt. Also wires the PolicyWatcher
+as the PolicyResolver for GET /api/v1/privacy-policy.
+
+Refactors buildProviderConfig/loadSecretCredentials out of
+keyrotation_controller.go into a shared encryption.ProviderConfigFromEncryptionSpec
+so session-api and the keyrotation controller use the same logic.
+
+Ref #780
+```
 
 ---
 
-## Task 11: Lint + Full Test Suite
+## Task 9: Wire KeyRotationReconciler.StoreFactory
+
+**Files:**
+- Modify: `ee/cmd/omnia-arena-controller/main.go`
+
+The `KeyRotationReconciler.StoreFactory` field is never populated, so re-encryption during key rotation fails with "store factory not configured" (see `keyrotation_controller.go:296`).
+
+### Implementation
+
+- [ ] **Step 1: Check arena-controller for existing Postgres config**
+
+Look for any `--postgres-conn` flag or `POSTGRES_*` env var in `ee/cmd/omnia-arena-controller/main.go`. If absent, add a `--session-postgres-conn` flag (distinct from arena's own storage if it has one).
+
+- [ ] **Step 2: Find the ReEncryptionStore Postgres constructor**
+
+Grep for `ReEncryptionStore` implementations. The postgres provider likely has something like `pgprovider.NewReEncryptionStore(pool)` or similar. Inspect `internal/session/providers/postgres/reencryption.go` for the exact export.
+
+- [ ] **Step 3: Populate StoreFactory**
+
+```go
+storeFactory := buildReEncryptionStoreFactory(sessionPostgresConn, setupLog)
+
+if err := (&controller.KeyRotationReconciler{
+	Client:   mgr.GetClient(),
+	Scheme:   mgr.GetScheme(),
+	Recorder: mgr.GetEventRecorderFor("keyrotation-controller"),
+	ProviderFactory: func(cfg encryption.ProviderConfig) (encryption.Provider, error) {
+		return encryption.NewProvider(cfg)
+	},
+	StoreFactory: storeFactory,
+}).SetupWithManager(mgr); err != nil {
+	// ...
+}
+
+func buildReEncryptionStoreFactory(conn string, log logr.Logger) func() (encryption.ReEncryptionStore, error) {
+	if conn == "" {
+		log.Info("reEncryption disabled", "reason", "no session postgres connection configured")
+		return nil
+	}
+	return func() (encryption.ReEncryptionStore, error) {
+		pool, err := pgxpool.New(context.Background(), conn)
+		if err != nil {
+			return nil, fmt.Errorf("open session postgres pool: %w", err)
+		}
+		return pgprovider.NewReEncryptionStore(pool), nil
+	}
+}
+```
+
+Update `privacyPolicyNamespace` usage if the secret lookup needs to happen in a different namespace than `omnia-system`.
+
+- [ ] **Step 4: Run tests**
+
+Run: `env GOWORK=off go test ./ee/cmd/omnia-arena-controller/... ./ee/internal/controller/... -count=1 -v`
+Expected: all tests PASS.
+
+- [ ] **Step 5: Commit**
+
+```
+feat(ee): wire StoreFactory for KeyRotationReconciler
+
+Arena-controller opens a session Postgres pool and provides a
+ReEncryptionStore factory. Without this wiring, key rotation was
+skipping re-encryption with "store factory not configured".
+
+Ref #780
+```
+
+---
+
+## Task 10: Final Lint + Test Suite
 
 - [ ] **Step 1: Run golangci-lint**
 
-Run: `golangci-lint run ./...`
-Expected: No new lint errors.
+Run: `env GOWORK=off golangci-lint run ./...`
+Expected: no new lint errors.
 
 - [ ] **Step 2: Run full Go test suite**
 
-Run: `go test ./... -count=1`
-Expected: All tests PASS.
+Run: `env GOWORK=off go test ./... -count=1`
+Expected: all tests PASS.
 
 - [ ] **Step 3: Fix any issues and commit**
 
-If lint or tests reveal issues, fix and commit:
 ```
 fix: address lint and test issues from privacy recording + encryption
 ```
