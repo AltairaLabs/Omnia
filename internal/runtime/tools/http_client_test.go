@@ -415,3 +415,46 @@ func TestDoHTTPRequest_Redact(t *testing.T) {
 		t.Errorf("expected age=30 (not redacted), got %v", got["age"])
 	}
 }
+
+func TestDoHTTPRequest_BodyMapping(t *testing.T) {
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	// BodyMapping extracts just the "query" field from the args
+	cfg := &HTTPCfg{Endpoint: srv.URL, Method: "POST", BodyMapping: "query"}
+	_, _, err := doHTTPRequest(context.Background(), http.DefaultClient, cfg, nil,
+		json.RawMessage(`{"query":"hello","page":1}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// JMESPath "query" extracts the string value → "hello"
+	if strings.TrimSpace(string(receivedBody)) != `"hello"` {
+		t.Errorf("expected body to be \"hello\" (JMESPath-extracted), got %s", receivedBody)
+	}
+}
+
+func TestDoHTTPRequest_ResponseMapping(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":{"items":[1,2,3]},"meta":{"page":1}}`))
+	}))
+	defer srv.Close()
+
+	// ResponseMapping extracts just data.items from the response
+	cfg := &HTTPCfg{Endpoint: srv.URL, Method: "GET", ResponseMapping: "data.items"}
+	result, _, err := doHTTPRequest(context.Background(), http.DefaultClient, cfg, nil,
+		json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(result) != `[1,2,3]` {
+		t.Errorf("expected [1,2,3] from response mapping, got %s", result)
+	}
+}

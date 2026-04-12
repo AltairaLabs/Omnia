@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/jmespath/go-jmespath"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
@@ -86,6 +87,15 @@ func doHTTPRequest(
 		body = redactResponseFields(body, cfg.Redact)
 	}
 
+	// Apply response mapping if configured.
+	if cfg.ResponseMapping != "" {
+		mapped, err := applyJMESPathToResponse(body, cfg.ResponseMapping)
+		if err != nil {
+			return nil, callResult, err
+		}
+		body = mapped
+	}
+
 	return body, callResult, nil
 }
 
@@ -140,7 +150,8 @@ func buildHTTPRequest(ctx context.Context, cfg *HTTPCfg, headers map[string]stri
 // hasAdvancedHTTPConfig returns true if cfg uses any fields that require parsed args.
 func hasAdvancedHTTPConfig(cfg *HTTPCfg) bool {
 	return cfg.URLTemplate != "" || len(cfg.HeaderParams) > 0 ||
-		len(cfg.QueryParams) > 0 || cfg.StaticBody != nil
+		len(cfg.QueryParams) > 0 || cfg.StaticBody != nil ||
+		cfg.BodyMapping != ""
 }
 
 // resolveHTTPParams processes all HTTPCfg fields (URL template, header params,
@@ -186,6 +197,14 @@ func resolveHTTPParams(cfg *HTTPCfg, method string, hasArgs, needsParsedArgs boo
 	}
 	if err != nil {
 		return nil, err
+	}
+
+	// 5. Body mapping — reshape the request body via JMESPath.
+	if cfg.BodyMapping != "" && p.body != nil {
+		p.body, err = applyJMESPathToBody(p.body, cfg.BodyMapping)
+		if err != nil {
+			return nil, fmt.Errorf("body mapping: %w", err)
+		}
 	}
 
 	return p, nil
@@ -430,4 +449,43 @@ func truncateBody(body []byte, maxLen int) string {
 		return string(body)
 	}
 	return string(body[:maxLen]) + "..."
+}
+
+// applyJMESPathToBody reads the body, applies a JMESPath expression, and returns
+// a new reader with the transformed JSON.
+func applyJMESPathToBody(body io.Reader, expr string) (io.Reader, error) {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return nil, fmt.Errorf("reading body for JMESPath: %w", err)
+	}
+	var parsed any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return bytes.NewReader(data), nil // not JSON, pass through
+	}
+	result, err := jmespath.Search(expr, parsed)
+	if err != nil {
+		return nil, fmt.Errorf("JMESPath expression %q: %w", expr, err)
+	}
+	out, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("marshalling JMESPath result: %w", err)
+	}
+	return bytes.NewReader(out), nil
+}
+
+// applyJMESPathToResponse applies a JMESPath expression to a JSON response body,
+// returning the transformed JSON.
+func applyJMESPathToResponse(body json.RawMessage, expr string) (json.RawMessage, error) {
+	var parsed any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return body, nil // not JSON, pass through
+	}
+	result, err := jmespath.Search(expr, parsed)
+	if err != nil {
+		return nil, fmt.Errorf("JMESPath response mapping %q: %w", expr, err)
+	}
+	if result == nil {
+		return json.RawMessage("null"), nil
+	}
+	return json.Marshal(result)
 }
