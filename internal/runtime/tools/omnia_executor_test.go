@@ -2428,27 +2428,18 @@ func TestExecuteHTTP_RetryOnRetryableStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := NewOmniaExecutor(logr.Discard(), nil)
-	e.handlers["retry-http"] = &HandlerEntry{
-		Name: "retry-http",
-		Type: ToolTypeHTTP,
-		HTTPConfig: &HTTPCfg{
-			Endpoint: srv.URL,
-			Method:   "GET",
-			RetryPolicy: &RuntimeHTTPRetryPolicy{
-				MaxAttempts:         3,
-				InitialBackoff:      Duration(1 * time.Millisecond),
-				BackoffMultiplier:   2.0,
-				MaxBackoff:          Duration(100 * time.Millisecond),
-				RetryOn:             []int32{502},
-				RetryOnNetworkError: true,
-			},
+	result, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint: srv.URL,
+		Method:   "GET",
+		RetryPolicy: &RuntimeHTTPRetryPolicy{
+			MaxAttempts:         3,
+			InitialBackoff:      Duration(1 * time.Millisecond),
+			BackoffMultiplier:   2.0,
+			MaxBackoff:          Duration(100 * time.Millisecond),
+			RetryOn:             []int32{502},
+			RetryOnNetworkError: true,
 		},
-	}
-	e.toolHandlers["retry-http-tool"] = "retry-http"
-
-	desc := &pktools.ToolDescriptor{Name: "retry-http-tool"}
-	result, err := e.Execute(context.Background(), desc, json.RawMessage(`{}`))
+	}, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -2469,27 +2460,18 @@ func TestExecuteHTTP_NoRetryOnNonRetryableStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := NewOmniaExecutor(logr.Discard(), nil)
-	e.handlers["no-retry-http"] = &HandlerEntry{
-		Name: "no-retry-http",
-		Type: ToolTypeHTTP,
-		HTTPConfig: &HTTPCfg{
-			Endpoint: srv.URL,
-			Method:   "GET",
-			RetryPolicy: &RuntimeHTTPRetryPolicy{
-				MaxAttempts:         3,
-				InitialBackoff:      Duration(1 * time.Millisecond),
-				BackoffMultiplier:   2.0,
-				MaxBackoff:          Duration(100 * time.Millisecond),
-				RetryOn:             []int32{502, 503},
-				RetryOnNetworkError: true,
-			},
+	_, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint: srv.URL,
+		Method:   "GET",
+		RetryPolicy: &RuntimeHTTPRetryPolicy{
+			MaxAttempts:         3,
+			InitialBackoff:      Duration(1 * time.Millisecond),
+			BackoffMultiplier:   2.0,
+			MaxBackoff:          Duration(100 * time.Millisecond),
+			RetryOn:             []int32{502, 503},
+			RetryOnNetworkError: true,
 		},
-	}
-	e.toolHandlers["no-retry-tool"] = "no-retry-http"
-
-	desc := &pktools.ToolDescriptor{Name: "no-retry-tool"}
-	_, err := e.Execute(context.Background(), desc, json.RawMessage(`{}`))
+	}, json.RawMessage(`{}`))
 	if err == nil {
 		t.Fatal("expected error for 400 response")
 	}
@@ -2628,6 +2610,16 @@ func TestMCPRetry_ToolErrorNotRetried(t *testing.T) {
 
 // --- Integration tests: HTTP config fields through OmniaExecutor.Execute() ---
 
+// executeHTTPTool sets up a minimal OmniaExecutor with a single HTTP handler
+// and executes a tool call. This eliminates repeated boilerplate in integration tests.
+func executeHTTPTool(t *testing.T, cfg *HTTPCfg, args json.RawMessage) (json.RawMessage, error) {
+	t.Helper()
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.handlers["h"] = &HandlerEntry{Name: "h", Type: ToolTypeHTTP, HTTPConfig: cfg}
+	e.toolHandlers["tool"] = "h"
+	return e.Execute(context.Background(), &pktools.ToolDescriptor{Name: "tool"}, args)
+}
+
 func TestExecuteHTTP_URLTemplate(t *testing.T) {
 	var receivedPath string
 	var receivedBody []byte
@@ -2640,20 +2632,11 @@ func TestExecuteHTTP_URLTemplate(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := NewOmniaExecutor(logr.Discard(), nil)
-	e.handlers["url-tmpl"] = &HandlerEntry{
-		Name: "url-tmpl",
-		Type: ToolTypeHTTP,
-		HTTPConfig: &HTTPCfg{
-			Endpoint:    srv.URL,
-			URLTemplate: srv.URL + "/users/{id}/posts",
-			Method:      "POST",
-		},
-	}
-	e.toolHandlers["url-tmpl-tool"] = "url-tmpl"
-
-	desc := &pktools.ToolDescriptor{Name: "url-tmpl-tool"}
-	_, err := e.Execute(context.Background(), desc, json.RawMessage(`{"id":"42","title":"Hello"}`))
+	_, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:    srv.URL,
+		URLTemplate: srv.URL + "/users/{id}/posts",
+		Method:      "POST",
+	}, json.RawMessage(`{"id":"42","title":"Hello"}`))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -2679,20 +2662,11 @@ func TestExecuteHTTP_StaticQuery(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := NewOmniaExecutor(logr.Discard(), nil)
-	e.handlers["static-query"] = &HandlerEntry{
-		Name: "static-query",
-		Type: ToolTypeHTTP,
-		HTTPConfig: &HTTPCfg{
-			Endpoint:    srv.URL,
-			Method:      "GET",
-			StaticQuery: map[string]string{"api_key": "secret123"},
-		},
-	}
-	e.toolHandlers["static-query-tool"] = "static-query"
-
-	desc := &pktools.ToolDescriptor{Name: "static-query-tool"}
-	_, err := e.Execute(context.Background(), desc, json.RawMessage(`{"q":"test"}`))
+	_, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:    srv.URL,
+		Method:      "GET",
+		StaticQuery: map[string]string{"api_key": "secret123"},
+	}, json.RawMessage(`{"q":"test"}`))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -2720,20 +2694,11 @@ func TestExecuteHTTP_QueryParams_POST(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := NewOmniaExecutor(logr.Discard(), nil)
-	e.handlers["qp-post"] = &HandlerEntry{
-		Name: "qp-post",
-		Type: ToolTypeHTTP,
-		HTTPConfig: &HTTPCfg{
-			Endpoint:    srv.URL,
-			Method:      "POST",
-			QueryParams: []string{"page", "limit"},
-		},
-	}
-	e.toolHandlers["qp-post-tool"] = "qp-post"
-
-	desc := &pktools.ToolDescriptor{Name: "qp-post-tool"}
-	_, err := e.Execute(context.Background(), desc, json.RawMessage(`{"page":"1","limit":"10","data":"value"}`))
+	_, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:    srv.URL,
+		Method:      "POST",
+		QueryParams: []string{"page", "limit"},
+	}, json.RawMessage(`{"page":"1","limit":"10","data":"value"}`))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -2773,20 +2738,11 @@ func TestExecuteHTTP_HeaderParams(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := NewOmniaExecutor(logr.Discard(), nil)
-	e.handlers["hdr-params"] = &HandlerEntry{
-		Name: "hdr-params",
-		Type: ToolTypeHTTP,
-		HTTPConfig: &HTTPCfg{
-			Endpoint:     srv.URL,
-			Method:       "POST",
-			HeaderParams: map[string]string{"user_id": "X-User-ID", "tenant": "X-Tenant"},
-		},
-	}
-	e.toolHandlers["hdr-params-tool"] = "hdr-params"
-
-	desc := &pktools.ToolDescriptor{Name: "hdr-params-tool"}
-	_, err := e.Execute(context.Background(), desc, json.RawMessage(`{"user_id":"abc","tenant":"t1","query":"hello"}`))
+	_, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:     srv.URL,
+		Method:       "POST",
+		HeaderParams: map[string]string{"user_id": "X-User-ID", "tenant": "X-Tenant"},
+	}, json.RawMessage(`{"user_id":"abc","tenant":"t1","query":"hello"}`))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -2812,20 +2768,11 @@ func TestExecuteHTTP_StaticBody(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := NewOmniaExecutor(logr.Discard(), nil)
-	e.handlers["static-body"] = &HandlerEntry{
-		Name: "static-body",
-		Type: ToolTypeHTTP,
-		HTTPConfig: &HTTPCfg{
-			Endpoint:   srv.URL,
-			Method:     "POST",
-			StaticBody: map[string]any{"source": "api", "version": "v2"},
-		},
-	}
-	e.toolHandlers["static-body-tool"] = "static-body"
-
-	desc := &pktools.ToolDescriptor{Name: "static-body-tool"}
-	_, err := e.Execute(context.Background(), desc, json.RawMessage(`{"query":"test"}`))
+	_, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:   srv.URL,
+		Method:     "POST",
+		StaticBody: map[string]any{"source": "api", "version": "v2"},
+	}, json.RawMessage(`{"query":"test"}`))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -2852,20 +2799,11 @@ func TestExecuteHTTP_Redact(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := NewOmniaExecutor(logr.Discard(), nil)
-	e.handlers["redact-hdlr"] = &HandlerEntry{
-		Name: "redact-hdlr",
-		Type: ToolTypeHTTP,
-		HTTPConfig: &HTTPCfg{
-			Endpoint: srv.URL,
-			Method:   "GET",
-			Redact:   []string{"ssn"},
-		},
-	}
-	e.toolHandlers["redact-tool"] = "redact-hdlr"
-
-	desc := &pktools.ToolDescriptor{Name: "redact-tool"}
-	result, err := e.Execute(context.Background(), desc, json.RawMessage(`{}`))
+	result, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint: srv.URL,
+		Method:   "GET",
+		Redact:   []string{"ssn"},
+	}, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -2891,20 +2829,11 @@ func TestExecuteHTTP_BodyMapping(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := NewOmniaExecutor(logr.Discard(), nil)
-	e.handlers["body-map"] = &HandlerEntry{
-		Name: "body-map",
-		Type: ToolTypeHTTP,
-		HTTPConfig: &HTTPCfg{
-			Endpoint:    srv.URL,
-			Method:      "POST",
-			BodyMapping: "{query: query, filters: {page: page}}",
-		},
-	}
-	e.toolHandlers["body-map-tool"] = "body-map"
-
-	desc := &pktools.ToolDescriptor{Name: "body-map-tool"}
-	_, err := e.Execute(context.Background(), desc, json.RawMessage(`{"query":"hello","page":1}`))
+	_, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:    srv.URL,
+		Method:      "POST",
+		BodyMapping: "{query: query, filters: {page: page}}",
+	}, json.RawMessage(`{"query":"hello","page":1}`))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -2933,20 +2862,11 @@ func TestExecuteHTTP_ResponseMapping(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := NewOmniaExecutor(logr.Discard(), nil)
-	e.handlers["resp-map"] = &HandlerEntry{
-		Name: "resp-map",
-		Type: ToolTypeHTTP,
-		HTTPConfig: &HTTPCfg{
-			Endpoint:        srv.URL,
-			Method:          "GET",
-			ResponseMapping: "data.items",
-		},
-	}
-	e.toolHandlers["resp-map-tool"] = "resp-map"
-
-	desc := &pktools.ToolDescriptor{Name: "resp-map-tool"}
-	result, err := e.Execute(context.Background(), desc, json.RawMessage(`{}`))
+	result, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:        srv.URL,
+		Method:          "GET",
+		ResponseMapping: "data.items",
+	}, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -2976,24 +2896,15 @@ func TestExecuteHTTP_CombinedFeatures(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := NewOmniaExecutor(logr.Discard(), nil)
-	e.handlers["combined"] = &HandlerEntry{
-		Name: "combined",
-		Type: ToolTypeHTTP,
-		HTTPConfig: &HTTPCfg{
-			Endpoint:        srv.URL,
-			URLTemplate:     srv.URL + "/resources/{id}",
-			Method:          "POST",
-			StaticQuery:     map[string]string{"api_key": "k1"},
-			HeaderParams:    map[string]string{"token": "Authorization"},
-			ResponseMapping: "result",
-			Redact:          []string{"secret"},
-		},
-	}
-	e.toolHandlers["combined-tool"] = "combined"
-
-	desc := &pktools.ToolDescriptor{Name: "combined-tool"}
-	result, err := e.Execute(context.Background(), desc, json.RawMessage(`{"id":"99","token":"Bearer xyz","data":"payload"}`))
+	result, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:        srv.URL,
+		URLTemplate:     srv.URL + "/resources/{id}",
+		Method:          "POST",
+		StaticQuery:     map[string]string{"api_key": "k1"},
+		HeaderParams:    map[string]string{"token": "Authorization"},
+		ResponseMapping: "result",
+		Redact:          []string{"secret"},
+	}, json.RawMessage(`{"id":"99","token":"Bearer xyz","data":"payload"}`))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -3038,28 +2949,19 @@ func TestExecuteHTTP_RetryWithURLTemplate(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := NewOmniaExecutor(logr.Discard(), nil)
-	e.handlers["retry-tmpl"] = &HandlerEntry{
-		Name: "retry-tmpl",
-		Type: ToolTypeHTTP,
-		HTTPConfig: &HTTPCfg{
-			Endpoint:    srv.URL,
-			URLTemplate: srv.URL + "/items/{item_id}",
-			Method:      "GET",
-			RetryPolicy: &RuntimeHTTPRetryPolicy{
-				MaxAttempts:         3,
-				InitialBackoff:      Duration(1 * time.Millisecond),
-				BackoffMultiplier:   2.0,
-				MaxBackoff:          Duration(100 * time.Millisecond),
-				RetryOn:             []int32{502},
-				RetryOnNetworkError: true,
-			},
+	result, err := executeHTTPTool(t, &HTTPCfg{
+		Endpoint:    srv.URL,
+		URLTemplate: srv.URL + "/items/{item_id}",
+		Method:      "GET",
+		RetryPolicy: &RuntimeHTTPRetryPolicy{
+			MaxAttempts:         3,
+			InitialBackoff:      Duration(1 * time.Millisecond),
+			BackoffMultiplier:   2.0,
+			MaxBackoff:          Duration(100 * time.Millisecond),
+			RetryOn:             []int32{502},
+			RetryOnNetworkError: true,
 		},
-	}
-	e.toolHandlers["retry-tmpl-tool"] = "retry-tmpl"
-
-	desc := &pktools.ToolDescriptor{Name: "retry-tmpl-tool"}
-	result, err := e.Execute(context.Background(), desc, json.RawMessage(`{"item_id":"7"}`))
+	}, json.RawMessage(`{"item_id":"7"}`))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
