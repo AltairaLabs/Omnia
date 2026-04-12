@@ -327,3 +327,87 @@ func TestLoadConfig_BadDurationInRetryPolicy(t *testing.T) {
 		t.Errorf("error = %v, want containing 'invalid duration'", err)
 	}
 }
+
+func TestDuration_MarshalYAML(t *testing.T) {
+	d := Duration(5 * time.Second)
+	val, err := d.MarshalYAML()
+	if err != nil {
+		t.Fatalf("MarshalYAML: %v", err)
+	}
+	s, ok := val.(string)
+	if !ok {
+		t.Fatalf("expected string, got %T", val)
+	}
+	if s != "5s" {
+		t.Errorf("MarshalYAML = %q, want %q", s, "5s")
+	}
+}
+
+func TestDuration_JSONRoundTrip(t *testing.T) {
+	d := Duration(250 * time.Millisecond)
+	data, err := d.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	if string(data) != `"250ms"` {
+		t.Errorf("MarshalJSON = %s, want %q", data, `"250ms"`)
+	}
+
+	var got Duration
+	if err := got.UnmarshalJSON(data); err != nil {
+		t.Fatalf("UnmarshalJSON: %v", err)
+	}
+	if got.Get() != 250*time.Millisecond {
+		t.Errorf("round-trip = %v, want 250ms", got.Get())
+	}
+}
+
+func TestDuration_UnmarshalJSON_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    time.Duration
+		wantErr bool
+	}{
+		{"empty string", `""`, 0, false},
+		{"null", `null`, 0, false},
+		{"valid", `"1s"`, time.Second, false},
+		{"invalid", `"bad"`, 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var d Duration
+			err := d.UnmarshalJSON([]byte(tt.input))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr = %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && d.Get() != tt.want {
+				t.Errorf("got %v, want %v", d.Get(), tt.want)
+			}
+		})
+	}
+}
+
+func TestDuration_UnmarshalYAML_EmptyString(t *testing.T) {
+	path := writeRetryPolicyYAML(t, `handlers:
+  - name: empty-timeout
+    type: http
+    endpoint: http://example.com
+    timeout: ""
+    tool:
+      name: foo
+      description: x
+      inputSchema:
+        type: object
+    httpConfig:
+      endpoint: http://example.com
+      method: GET
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Handlers[0].Timeout.Get() != 0 {
+		t.Errorf("Timeout = %v, want 0", cfg.Handlers[0].Timeout.Get())
+	}
+}
