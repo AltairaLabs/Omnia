@@ -578,6 +578,18 @@ func (e *OmniaExecutor) executeHTTP(
 		return nil, fmt.Errorf("handler %q has no HTTP config", handlerName)
 	}
 
+	return e.executeHTTPCall(ctx, toolName, handlerName, handler.Timeout.Get(), cfg, args)
+}
+
+// executeHTTPCall is the shared retry+breaker execution path for HTTP and
+// OpenAPI handlers.
+func (e *OmniaExecutor) executeHTTPCall(
+	ctx context.Context,
+	toolName, handlerName string,
+	timeout time.Duration,
+	cfg *HTTPCfg,
+	args json.RawMessage,
+) (json.RawMessage, error) {
 	headers := e.buildHTTPHeaders(ctx, cfg, toolName, handlerName, args)
 	policy := httpRetryParams(cfg)
 
@@ -589,7 +601,7 @@ func (e *OmniaExecutor) executeHTTP(
 		return classifyHTTPResult(lastCallResult, cfg.RetryPolicy)
 	}
 
-	return retryWithBackoff(ctx, e.log, e.currentSpan(ctx), policy, handler.Timeout.Get(), classify,
+	return retryWithBackoff(ctx, e.log, e.currentSpan(ctx), policy, timeout, classify,
 		func(attemptCtx context.Context) (json.RawMessage, error) {
 			return e.executeHTTPWithBreaker(attemptCtx, toolName, cfg, headers, args, &lastCallResult)
 		},
@@ -1019,20 +1031,5 @@ func (e *OmniaExecutor) executeOpenAPI(
 		cfg.RetryPolicy = handler.OpenAPIConfig.RetryPolicy
 	}
 
-	headers := e.buildHTTPHeaders(ctx, cfg, toolName, handlerName, args)
-	policy := httpRetryParams(cfg)
-
-	var lastCallResult httpCallResult
-	classify := func(_ error) (bool, time.Duration) {
-		if cfg.RetryPolicy == nil {
-			return false, 0
-		}
-		return classifyHTTPResult(lastCallResult, cfg.RetryPolicy)
-	}
-
-	return retryWithBackoff(ctx, e.log, e.currentSpan(ctx), policy, handler.Timeout.Get(), classify,
-		func(attemptCtx context.Context) (json.RawMessage, error) {
-			return e.executeHTTPWithBreaker(attemptCtx, toolName, cfg, headers, args, &lastCallResult)
-		},
-	)
+	return e.executeHTTPCall(ctx, toolName, handlerName, handler.Timeout.Get(), cfg, args)
 }
