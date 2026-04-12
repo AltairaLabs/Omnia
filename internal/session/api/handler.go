@@ -77,12 +77,28 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+// PolicyResolver returns the effective privacy policy JSON for a namespace/agent pair.
+// Returns (policyJSON, true) when a policy applies, or (nil, false) when none applies.
+// Using json.RawMessage keeps this package unaware of ee/ types.
+type PolicyResolver interface {
+	ResolveEffectivePolicy(namespace, agentName string) (json.RawMessage, bool)
+}
+
+// PolicyResolverFunc adapts a function to the PolicyResolver interface.
+type PolicyResolverFunc func(namespace, agentName string) (json.RawMessage, bool)
+
+// ResolveEffectivePolicy implements PolicyResolver.
+func (f PolicyResolverFunc) ResolveEffectivePolicy(namespace, agentName string) (json.RawMessage, bool) {
+	return f(namespace, agentName)
+}
+
 // Handler provides HTTP endpoints for session history.
 type Handler struct {
-	service     *SessionService
-	evalService *EvalService
-	log         logr.Logger
-	maxBodySize int64
+	service        *SessionService
+	evalService    *EvalService
+	policyResolver PolicyResolver
+	log            logr.Logger
+	maxBodySize    int64
 }
 
 // NewHandler creates a new session API handler.
@@ -102,6 +118,12 @@ func NewHandler(service *SessionService, log logr.Logger, maxBodySize ...int64) 
 // SetEvalService configures the eval service for eval result endpoints.
 func (h *Handler) SetEvalService(svc *EvalService) {
 	h.evalService = svc
+}
+
+// SetPolicyResolver configures the resolver for GET /api/v1/privacy-policy.
+// When unset, the endpoint returns 204 No Content (non-enterprise mode).
+func (h *Handler) SetPolicyResolver(r PolicyResolver) {
+	h.policyResolver = r
 }
 
 // TraceLogMiddleware extracts the OTel trace ID from the request's span context
@@ -195,6 +217,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/evaluate", h.handleEvaluateSession)
 	mux.HandleFunc("POST /api/v1/eval-results", h.handleCreateEvalResults)
 	mux.HandleFunc("GET /api/v1/eval-results", h.handleListEvalResults)
+
+	// Privacy policy endpoint
+	mux.HandleFunc("GET /api/v1/privacy-policy", h.handleGetPrivacyPolicy)
 
 	// API documentation
 	h.registerDocsRoutes(mux)
@@ -584,6 +609,26 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 
 	log.V(1).Info("session deleted", "sessionID", sessionID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleGetPrivacyPolicy returns the effective privacy policy for a namespace/agent pair.
+// Returns 204 No Content when no resolver is configured (non-enterprise) or no policy applies.
+func (h *Handler) handleGetPrivacyPolicy(w http.ResponseWriter, r *http.Request) {
+	if h.policyResolver == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	ns := r.URL.Query().Get("namespace")
+	agent := r.URL.Query().Get("agent")
+
+	policyJSON, ok := h.policyResolver.ResolveEffectivePolicy(ns, agent)
+	if !ok || len(policyJSON) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
+	_, _ = w.Write(policyJSON)
 }
 
 // handleRecordToolCall records a tool call for a session.
