@@ -578,6 +578,18 @@ func (e *OmniaExecutor) executeHTTP(
 		return nil, fmt.Errorf("handler %q has no HTTP config", handlerName)
 	}
 
+	return e.executeHTTPCall(ctx, toolName, handlerName, handler.Timeout.Get(), cfg, args)
+}
+
+// executeHTTPCall is the shared retry+breaker execution path for HTTP and
+// OpenAPI handlers.
+func (e *OmniaExecutor) executeHTTPCall(
+	ctx context.Context,
+	toolName, handlerName string,
+	timeout time.Duration,
+	cfg *HTTPCfg,
+	args json.RawMessage,
+) (json.RawMessage, error) {
 	headers := e.buildHTTPHeaders(ctx, cfg, toolName, handlerName, args)
 	policy := httpRetryParams(cfg)
 
@@ -589,13 +601,38 @@ func (e *OmniaExecutor) executeHTTP(
 		return classifyHTTPResult(lastCallResult, cfg.RetryPolicy)
 	}
 
-	return retryWithBackoff(ctx, e.log, e.currentSpan(ctx), policy, handler.Timeout.Get(), classify,
+	return retryWithBackoff(ctx, e.log, e.currentSpan(ctx), policy, timeout, classify,
 		func(attemptCtx context.Context) (json.RawMessage, error) {
-			result, callResult, err := doHTTPRequest(attemptCtx, &http.Client{}, cfg, headers, args)
-			lastCallResult = callResult
-			return result, err
+			return e.executeHTTPWithBreaker(attemptCtx, toolName, cfg, headers, args, &lastCallResult)
 		},
 	)
+}
+
+// executeHTTPWithBreaker runs an HTTP request through the circuit breaker.
+// HTTP 4xx errors are wrapped as clientError so they don't trip the breaker.
+func (e *OmniaExecutor) executeHTTPWithBreaker(
+	ctx context.Context,
+	toolName string,
+	cfg *HTTPCfg,
+	headers map[string]string,
+	args json.RawMessage,
+	lastCallResult *httpCallResult,
+) (json.RawMessage, error) {
+	var result json.RawMessage
+	_, cbErr := e.breakers.Execute(toolName, func() ([]byte, error) {
+		var callResult httpCallResult
+		var httpErr error
+		result, callResult, httpErr = doHTTPRequest(ctx, &http.Client{}, cfg, headers, args)
+		*lastCallResult = callResult
+		if httpErr != nil && callResult.StatusCode >= 400 && callResult.StatusCode < 500 {
+			return nil, &clientError{err: httpErr}
+		}
+		return nil, httpErr
+	})
+	if cbErr != nil {
+		return result, cbErr
+	}
+	return result, nil
 }
 
 // buildHTTPHeaders merges static headers, auth headers, and policy headers.
@@ -681,6 +718,8 @@ func (e *OmniaExecutor) buildMCPTransport(cfg *MCPCfg) (mcp.Transport, error) {
 	switch MCPTransportType(cfg.Transport) {
 	case MCPTransportSSE:
 		return &mcp.SSEClientTransport{Endpoint: cfg.Endpoint}, nil
+	case MCPTransportStreamableHTTP:
+		return &mcp.StreamableClientTransport{Endpoint: cfg.Endpoint}, nil
 	case MCPTransportStdio:
 		cmd := exec.Command(cfg.Command, cfg.Args...)
 		if cfg.WorkDir != "" {
@@ -720,27 +759,37 @@ func (e *OmniaExecutor) executeMCP(
 				}
 			}
 
-			result, err := session.CallTool(attemptCtx, &mcp.CallToolParams{
-				Name:      toolName,
-				Arguments: argsMap,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("MCP tool call failed: %w", err)
-			}
-
-			// Convert MCP tool errors to mcpToolError so the classifier
-			// can distinguish them from transport errors.
-			if result.IsError {
-				msg := "MCP tool returned error"
-				if len(result.Content) > 0 {
-					if tc, ok := result.Content[0].(*mcp.TextContent); ok && tc.Text != "" {
-						msg = tc.Text
-					}
+			var mcpResult json.RawMessage
+			_, cbErr := e.breakers.Execute(toolName, func() ([]byte, error) {
+				result, err := session.CallTool(attemptCtx, &mcp.CallToolParams{
+					Name:      toolName,
+					Arguments: argsMap,
+				})
+				if err != nil {
+					return nil, fmt.Errorf("MCP tool call failed: %w", err)
 				}
-				return nil, &mcpToolError{message: msg}
-			}
 
-			return marshalMCPResult(result)
+				// Convert MCP tool errors to mcpToolError so the classifier
+				// can distinguish them from transport errors.
+				// Wrap as clientError so the breaker doesn't trip on tool errors.
+				if result.IsError {
+					msg := "MCP tool returned error"
+					if len(result.Content) > 0 {
+						if tc, ok := result.Content[0].(*mcp.TextContent); ok && tc.Text != "" {
+							msg = tc.Text
+						}
+					}
+					return nil, &clientError{err: &mcpToolError{message: msg}}
+				}
+
+				var marshalErr error
+				mcpResult, marshalErr = marshalMCPResult(result)
+				return nil, marshalErr
+			})
+			if cbErr != nil {
+				return nil, cbErr
+			}
+			return mcpResult, nil
 		},
 	)
 }
@@ -982,22 +1031,5 @@ func (e *OmniaExecutor) executeOpenAPI(
 		cfg.RetryPolicy = handler.OpenAPIConfig.RetryPolicy
 	}
 
-	headers := e.buildHTTPHeaders(ctx, cfg, toolName, handlerName, args)
-	policy := httpRetryParams(cfg)
-
-	var lastCallResult httpCallResult
-	classify := func(_ error) (bool, time.Duration) {
-		if cfg.RetryPolicy == nil {
-			return false, 0
-		}
-		return classifyHTTPResult(lastCallResult, cfg.RetryPolicy)
-	}
-
-	return retryWithBackoff(ctx, e.log, e.currentSpan(ctx), policy, handler.Timeout.Get(), classify,
-		func(attemptCtx context.Context) (json.RawMessage, error) {
-			result, callResult, err := doHTTPRequest(attemptCtx, &http.Client{}, cfg, headers, args)
-			lastCallResult = callResult
-			return result, err
-		},
-	)
+	return e.executeHTTPCall(ctx, toolName, handlerName, handler.Timeout.Get(), cfg, args)
 }

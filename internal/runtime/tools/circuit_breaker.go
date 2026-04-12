@@ -17,12 +17,23 @@ limitations under the License.
 package tools
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/sony/gobreaker/v2"
 )
+
+// clientError wraps errors that represent client-side mistakes (HTTP 4xx, MCP
+// tool errors). The circuit breaker treats these as successes — the service is
+// healthy, the request was wrong.
+type clientError struct {
+	err error
+}
+
+func (e *clientError) Error() string { return e.err.Error() }
+func (e *clientError) Unwrap() error { return e.err }
 
 const (
 	// cbMaxConsecutiveFailures is the number of consecutive failures before the circuit opens.
@@ -49,9 +60,10 @@ func NewToolCircuitBreakers() *ToolCircuitBreakers {
 	return &ToolCircuitBreakers{
 		breakers: make(map[string]*gobreaker.CircuitBreaker[[]byte]),
 		settings: gobreaker.Settings{
-			MaxRequests: cbHalfOpenMaxRequests,
-			Timeout:     cbOpenTimeout,
-			ReadyToTrip: consecutiveFailureTrip,
+			MaxRequests:  cbHalfOpenMaxRequests,
+			Timeout:      cbOpenTimeout,
+			ReadyToTrip:  consecutiveFailureTrip,
+			IsSuccessful: isSuccessful,
 		},
 	}
 }
@@ -96,4 +108,14 @@ func (t *ToolCircuitBreakers) getOrCreate(toolName string) *gobreaker.CircuitBre
 // consecutiveFailureTrip opens the circuit after cbMaxConsecutiveFailures consecutive failures.
 func consecutiveFailureTrip(counts gobreaker.Counts) bool {
 	return counts.ConsecutiveFailures >= cbMaxConsecutiveFailures
+}
+
+// isSuccessful returns true if err is nil or a clientError (HTTP 4xx, MCP tool
+// error). Client errors do not trip the circuit — the service is healthy.
+func isSuccessful(err error) bool {
+	if err == nil {
+		return true
+	}
+	var ce *clientError
+	return errors.As(err, &ce)
 }
