@@ -439,6 +439,111 @@ func TestPrivacyMiddleware_AuditGETNoSessionIDNoEvent(t *testing.T) {
 	assert.Empty(t, auditLog.entries)
 }
 
+func TestPrivacyMiddleware_RecordingDisabled_Returns204(t *testing.T) {
+	lookup := &mockSessionLookup{ns: "default", agent: "test-agent"}
+	cache := NewSessionMetadataCache(lookup, 100)
+
+	watcher := &PolicyWatcher{}
+	watcher.policies.Store("test", &omniav1alpha1.SessionPrivacyPolicy{
+		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
+			Level: omniav1alpha1.PolicyLevelGlobal,
+			Recording: omniav1alpha1.RecordingConfig{
+				Enabled: false,
+			},
+		},
+	})
+
+	mw := NewPrivacyMiddleware(watcher, cache, nil, nil, logr.Discard())
+
+	called := false
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { called = true })
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/sess-1/messages",
+		strings.NewReader(`{"content":"hello","role":"user"}`))
+	rec := httptest.NewRecorder()
+
+	mw.Wrap(next).ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.False(t, called, "next handler should not be called")
+}
+
+// newRichDataDisabledMiddleware returns a PrivacyMiddleware with Recording.Enabled=true
+// and RichData=false, backed by a mock session that resolves to default/test-agent.
+func newRichDataDisabledMiddleware() *PrivacyMiddleware {
+	lookup := &mockSessionLookup{ns: "default", agent: "test-agent"}
+	cache := NewSessionMetadataCache(lookup, 100)
+	watcher := &PolicyWatcher{}
+	watcher.policies.Store("test", &omniav1alpha1.SessionPrivacyPolicy{
+		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
+			Level: omniav1alpha1.PolicyLevelGlobal,
+			Recording: omniav1alpha1.RecordingConfig{
+				Enabled:  true,
+				RichData: false,
+			},
+		},
+	})
+	return NewPrivacyMiddleware(watcher, cache, nil, nil, logr.Discard())
+}
+
+func TestPrivacyMiddleware_RichDataDisabled_DropsAssistantMessage(t *testing.T) {
+	mw := newRichDataDisabledMiddleware()
+	called := false
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { called = true })
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/sess-1/messages",
+		strings.NewReader(`{"content":"assistant output","role":"assistant"}`))
+	rec := httptest.NewRecorder()
+
+	mw.Wrap(next).ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.False(t, called)
+}
+
+func TestPrivacyMiddleware_RichDataDisabled_AllowsUserMessage(t *testing.T) {
+	mw := newRichDataDisabledMiddleware()
+	called := false
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { called = true })
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/sess-1/messages",
+		strings.NewReader(`{"content":"user input","role":"user"}`))
+	rec := httptest.NewRecorder()
+
+	mw.Wrap(next).ServeHTTP(rec, req)
+
+	assert.True(t, called, "user messages must pass through even when RichData=false")
+}
+
+func TestPrivacyMiddleware_RichDataDisabled_BlocksToolCallEndpoint(t *testing.T) {
+	mw := newRichDataDisabledMiddleware()
+	called := false
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { called = true })
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/sess-1/tool-calls",
+		strings.NewReader(`{"name":"search"}`))
+	rec := httptest.NewRecorder()
+
+	mw.Wrap(next).ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.False(t, called)
+}
+
+func TestPrivacyMiddleware_RichDataDisabled_AllowsStatusUpdate(t *testing.T) {
+	mw := newRichDataDisabledMiddleware()
+	called := false
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { called = true })
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/sess-1/status",
+		strings.NewReader(`{"status":"completed"}`))
+	rec := httptest.NewRecorder()
+
+	mw.Wrap(next).ServeHTTP(rec, req)
+
+	assert.True(t, called, "status updates must pass through")
+}
+
 func TestPrivacyMiddleware_AuditOptOutNoEvent(t *testing.T) {
 	handler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
