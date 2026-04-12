@@ -17,7 +17,7 @@ The SessionPrivacyPolicy CRD exists with a full spec for recording control and e
 | Recording enforcement | Defense in depth: facade skips + session-api rejects | Facade avoids unnecessary work; session-api catches bugs/stale images |
 | Encryption approach | Local symmetric key (K8s Secret) first; KMS providers follow | Fastest path to encrypted-at-rest without external dependencies |
 | Encrypted fields | `Content` + `State` | Covers messages, tool call payloads, and session state. Metadata stays queryable for dashboards |
-| Tool name visibility | `Metadata["tool_name"]` in plaintext | Analytics can show which tools were used without decrypting Content |
+| Tool name visibility | `ToolCall.Name` stays plaintext in store wrapper | Analytics can show which tools were used without decrypting Arguments/Result |
 | Key rotation | Deferred to KMS provider follow-up | Rotation is more meaningful with KMS lifecycle policies |
 | Encryption location | Session-api only | Single service holds the key; facade/dashboard get plaintext over the wire |
 | Facade policy source | New session-api endpoint via existing httpclient | No new RBAC; reuses existing PolicyWatcher and HTTP client |
@@ -36,7 +36,7 @@ The facade's `recordingResponseWriter` gains a policy-aware recording gate.
 - `Recording.RichData == false` → skip `WriteDone()` (assistant messages), `WriteToolCall()`, `WriteToolResult()` content. Still record session-level metadata (start/end, status, token counts).
 - `Recording.FacadeData == false` → skip facade-layer summary recording
 
-**Tool name extraction:** Before the recording gate, `WriteToolCall()` extracts the tool name from the JSON payload and stores it in `Metadata["tool_name"]`. This happens regardless of `RichData` — tool names are always visible for analytics.
+**Tool name visibility:** Tool names are preserved for analytics at the encryption layer, not the facade. The runtime records tool calls via `RecordToolCall` directly to session-api — the facade only sees backward-compat message recordings. The encrypting store wrapper keeps `ToolCall.Name` in plaintext while encrypting `Arguments`, `Result`, and `ErrorMessage`. Similarly, `RuntimeEvent.EventType` stays plaintext while `Data` and `ErrorMessage` are encrypted.
 
 ### 2. Recording Control — Session-API Safety Net
 
@@ -70,7 +70,10 @@ type Encryptor interface {
 
 - On write: encrypt `Content` and `State` fields before passing to the Postgres store
 - On read: decrypt `Content` and `State` after retrieval
-- `Metadata` (including `tool_name`, `type`, `latency_ms`, `cost_usd`) stays plaintext
+- `Metadata` (including `type`, `latency_ms`, `cost_usd`) stays plaintext
+- For `ToolCall` records: encrypt `Arguments`, `Result`, `ErrorMessage`; keep `Name` plaintext
+- For `RuntimeEvent` records: encrypt `Data`, `ErrorMessage`; keep `EventType` plaintext
+- `ProviderCall` records: no encryption needed (operational metadata only)
 
 Encryption is orthogonal to storage logic — the Postgres store never sees plaintext when encryption is enabled, and the wrapper is independently testable.
 
@@ -101,7 +104,7 @@ func (c *Client) GetPrivacyPolicy(ctx context.Context, namespace, agent string) 
 - **AESEncryptor**: encrypt/decrypt round-trip, tamper detection (modified ciphertext fails), prefix marker parsing, plaintext passthrough when disabled
 - **Encrypting store wrapper**: `Content` and `State` encrypted on write, decrypted on read, `Metadata` stays plaintext
 - **Recording gate (facade)**: policy combinations (`Enabled=false`, `RichData=false`, `FacadeData=false`) — correct messages skipped/recorded
-- **`Metadata["tool_name"]` extraction**: tool name present in metadata regardless of recording policy
+- **ToolCall/RuntimeEvent encryption**: Arguments/Result/Data encrypted, Name/EventType plaintext
 - **Privacy middleware recording checks**: 204 responses for disabled recording, pass-through for allowed writes
 
 ### Integration tests
@@ -142,7 +145,7 @@ Each provider implements the `Encryptor` interface, adds webhook validation for 
 - `ee/pkg/encryption/store_wrapper_test.go`
 
 ### Modified files
-- `internal/facade/recording_writer.go` — recording gate + tool name extraction
+- `internal/facade/recording_writer.go` — recording gate based on privacy policy
 - `internal/facade/recording_writer_test.go`
 - `internal/session/httpclient/client.go` — `GetPrivacyPolicy()` method
 - `internal/session/httpclient/client_test.go`
