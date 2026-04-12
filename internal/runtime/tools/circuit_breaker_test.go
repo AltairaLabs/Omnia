@@ -18,6 +18,7 @@ package tools
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -228,6 +229,70 @@ func TestNewToolCircuitBreakers_DefaultSettings(t *testing.T) {
 	}
 	if cbs.breakers == nil {
 		t.Error("expected breakers map to be initialized")
+	}
+}
+
+func TestToolCircuitBreakers_ClientErrorDoesNotTrip(t *testing.T) {
+	cbs := NewToolCircuitBreakers()
+
+	// Send cbMaxConsecutiveFailures client errors — should NOT open the circuit.
+	for i := 0; i < cbMaxConsecutiveFailures+1; i++ {
+		_, _ = cbs.Execute("client-err-tool", func() ([]byte, error) {
+			return nil, &clientError{err: errors.New("HTTP 400: bad request")}
+		})
+	}
+
+	// Circuit should still be closed — next call should execute.
+	called := false
+	_, err := cbs.Execute("client-err-tool", func() ([]byte, error) {
+		called = true
+		return []byte("ok"), nil
+	})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if !called {
+		t.Fatal("expected function to be called (circuit should be closed)")
+	}
+}
+
+func TestToolCircuitBreakers_ServerErrorTrips(t *testing.T) {
+	cbs := NewToolCircuitBreakers()
+
+	// Send cbMaxConsecutiveFailures server errors — should open the circuit.
+	for i := 0; i < cbMaxConsecutiveFailures; i++ {
+		_, _ = cbs.Execute("server-err-tool", func() ([]byte, error) {
+			return nil, errors.New("HTTP 502: bad gateway")
+		})
+	}
+
+	// Circuit should be open.
+	_, err := cbs.Execute("server-err-tool", func() ([]byte, error) {
+		t.Fatal("should not be called when circuit is open")
+		return nil, nil
+	})
+	if !errors.Is(err, gobreaker.ErrOpenState) {
+		t.Fatalf("expected ErrOpenState, got %v", err)
+	}
+}
+
+func TestIsSuccessful(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error", nil, true},
+		{"client error", &clientError{err: errors.New("bad request")}, true},
+		{"wrapped client error", fmt.Errorf("wrap: %w", &clientError{err: errors.New("bad")}), true},
+		{"server error", errors.New("connection refused"), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isSuccessful(tc.err); got != tc.want {
+				t.Errorf("isSuccessful(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }
 
