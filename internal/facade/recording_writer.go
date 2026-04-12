@@ -28,6 +28,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/httpclient"
 )
 
 // storeTimeout is the maximum duration for recording store operations.
@@ -58,6 +59,7 @@ type recordingResponseWriter struct {
 	startTime time.Time
 	usage     *UsageInfo
 	traceCtx  context.Context // carries span context for trace propagation (not cancellation)
+	policy    *httpclient.PrivacyPolicyResponse
 }
 
 // newRecordingWriter creates a recordingResponseWriter that wraps inner.
@@ -96,6 +98,21 @@ func (w *recordingResponseWriter) submit(task func()) {
 	}
 }
 
+// setPolicy sets the privacy policy used to gate recording decisions.
+func (w *recordingResponseWriter) setPolicy(p *httpclient.PrivacyPolicyResponse) {
+	w.policy = p
+}
+
+// shouldRecord returns false if recording is entirely disabled.
+func (w *recordingResponseWriter) shouldRecord() bool {
+	return w.policy == nil || w.policy.Recording.Enabled
+}
+
+// shouldRecordRichData returns false if rich content (messages, tool calls) should be skipped.
+func (w *recordingResponseWriter) shouldRecordRichData() bool {
+	return w.policy == nil || w.policy.Recording.RichData
+}
+
 // ReportUsage stores usage info for the next WriteDone call.
 func (w *recordingResponseWriter) ReportUsage(usage *UsageInfo) {
 	w.usage = usage
@@ -114,22 +131,30 @@ func (w *recordingResponseWriter) WriteChunkWithParts(parts []ContentPart) error
 // WriteDone delegates to inner, then async-records the assistant message.
 func (w *recordingResponseWriter) WriteDone(content string) error {
 	err := w.inner.WriteDone(content)
-	w.recordDone(content)
+	if w.shouldRecord() && w.shouldRecordRichData() {
+		w.recordDone(content)
+	}
 	return err
 }
 
 // WriteDoneWithParts delegates to inner, then async-records the assistant message.
 func (w *recordingResponseWriter) WriteDoneWithParts(parts []ContentPart) error {
 	err := w.inner.WriteDoneWithParts(parts)
-	// Extract text content from parts for recording
-	text := extractTextFromParts(parts)
-	w.recordDone(text)
+	if w.shouldRecord() && w.shouldRecordRichData() {
+		// Extract text content from parts for recording
+		text := extractTextFromParts(parts)
+		w.recordDone(text)
+	}
 	return err
 }
 
 // WriteToolCall delegates to inner, then async-records the tool call.
 func (w *recordingResponseWriter) WriteToolCall(toolCall *ToolCallInfo) error {
 	err := w.inner.WriteToolCall(toolCall)
+
+	if !w.shouldRecord() || !w.shouldRecordRichData() {
+		return err
+	}
 
 	w.submit(func() {
 		content, marshalErr := json.Marshal(map[string]interface{}{
@@ -166,6 +191,10 @@ func (w *recordingResponseWriter) WriteToolCall(toolCall *ToolCallInfo) error {
 // WriteToolResult delegates to inner, then async-records the tool result.
 func (w *recordingResponseWriter) WriteToolResult(result *ToolResultInfo) error {
 	err := w.inner.WriteToolResult(result)
+
+	if !w.shouldRecord() || !w.shouldRecordRichData() {
+		return err
+	}
 
 	w.submit(func() {
 		var content string
@@ -212,6 +241,10 @@ func (w *recordingResponseWriter) WriteToolResult(result *ToolResultInfo) error 
 // WriteError delegates to inner, then async-records the error.
 func (w *recordingResponseWriter) WriteError(code, message string) error {
 	err := w.inner.WriteError(code, message)
+
+	if !w.shouldRecord() {
+		return err
+	}
 
 	w.submit(func() {
 		msg := session.Message{

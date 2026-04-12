@@ -27,6 +27,7 @@ import (
 	"github.com/go-logr/logr"
 
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/httpclient"
 )
 
 // mockResponseWriter records calls for verification.
@@ -684,5 +685,143 @@ func TestRecordingWriter_InnerWriteError_Propagated(t *testing.T) {
 	}
 	if err := rw.WriteError("ERR", "msg"); err == nil {
 		t.Error("expected error from inner writer")
+	}
+}
+
+func TestRecordingWriter_RecordingDisabled_SkipsAll(t *testing.T) {
+	store := session.NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	sess, _ := store.CreateSession(ctx, session.CreateSessionOptions{
+		AgentName: "test", Namespace: "default",
+	})
+
+	policy := &httpclient.PrivacyPolicyResponse{}
+	policy.Recording.Enabled = false
+
+	inner := &mockResponseWriter{}
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
+	rw.setPolicy(policy)
+
+	_ = rw.WriteDone("hello")
+	_ = rw.WriteToolCall(&ToolCallInfo{ID: "tc-1", Name: "search", Arguments: map[string]interface{}{"q": "test"}})
+	_ = rw.WriteToolResult(&ToolResultInfo{ID: "tc-1", Result: "found"})
+
+	waitForAsyncWrites()
+
+	messages, _ := store.GetMessages(ctx, sess.ID)
+	if len(messages) != 0 {
+		t.Errorf("expected no messages recorded when Recording.Enabled=false, got %d", len(messages))
+	}
+}
+
+func TestRecordingWriter_RecordingDisabled_SkipsError(t *testing.T) {
+	store := session.NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	sess, _ := store.CreateSession(ctx, session.CreateSessionOptions{
+		AgentName: "test", Namespace: "default",
+	})
+
+	policy := &httpclient.PrivacyPolicyResponse{}
+	policy.Recording.Enabled = false
+
+	inner := &mockResponseWriter{}
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
+	rw.setPolicy(policy)
+
+	_ = rw.WriteError("INTERNAL_ERROR", "something went wrong")
+
+	waitForAsyncWrites()
+
+	messages, _ := store.GetMessages(ctx, sess.ID)
+	if len(messages) != 0 {
+		t.Errorf("expected no messages recorded when Recording.Enabled=false, got %d", len(messages))
+	}
+}
+
+func TestRecordingWriter_RichDataDisabled_SkipsContent(t *testing.T) {
+	store := session.NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	sess, _ := store.CreateSession(ctx, session.CreateSessionOptions{
+		AgentName: "test", Namespace: "default",
+	})
+
+	policy := &httpclient.PrivacyPolicyResponse{}
+	policy.Recording.Enabled = true
+	policy.Recording.FacadeData = true
+	policy.Recording.RichData = false
+
+	inner := &mockResponseWriter{}
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
+	rw.setPolicy(policy)
+
+	_ = rw.WriteDone("assistant response")
+	_ = rw.WriteToolCall(&ToolCallInfo{ID: "tc-1", Name: "search", Arguments: map[string]interface{}{"q": "test"}})
+	_ = rw.WriteToolResult(&ToolResultInfo{ID: "tc-1", Result: "result"})
+
+	waitForAsyncWrites()
+
+	messages, _ := store.GetMessages(ctx, sess.ID)
+	if len(messages) != 0 {
+		t.Errorf("expected no messages recorded when RichData=false, got %d", len(messages))
+	}
+}
+
+func TestRecordingWriter_RichDataDisabled_StillRecordsErrors(t *testing.T) {
+	store := session.NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	sess, _ := store.CreateSession(ctx, session.CreateSessionOptions{
+		AgentName: "test", Namespace: "default",
+	})
+
+	policy := &httpclient.PrivacyPolicyResponse{}
+	policy.Recording.Enabled = true
+	policy.Recording.FacadeData = true
+	policy.Recording.RichData = false
+
+	inner := &mockResponseWriter{}
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
+	rw.setPolicy(policy)
+
+	_ = rw.WriteError("INTERNAL_ERROR", "boom")
+
+	waitForAsyncWrites()
+
+	messages, _ := store.GetMessages(ctx, sess.ID)
+	if len(messages) != 1 {
+		t.Errorf("expected 1 error message recorded even when RichData=false, got %d", len(messages))
+	}
+	if messages[0].Metadata["type"] != "error" {
+		t.Errorf("expected error type, got %q", messages[0].Metadata["type"])
+	}
+}
+
+func TestRecordingWriter_NilPolicy_RecordsEverything(t *testing.T) {
+	store := session.NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	sess, _ := store.CreateSession(ctx, session.CreateSessionOptions{
+		AgentName: "test", Namespace: "default",
+	})
+
+	inner := &mockResponseWriter{}
+	// no setPolicy — defaults to recording everything
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
+
+	_ = rw.WriteDone("hello")
+
+	waitForAsyncWrites()
+
+	messages, _ := store.GetMessages(ctx, sess.ID)
+	if len(messages) != 1 {
+		t.Errorf("expected 1 message recorded with nil policy, got %d", len(messages))
 	}
 }

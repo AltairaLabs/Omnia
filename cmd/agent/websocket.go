@@ -123,6 +123,9 @@ func buildWebSocketServer(
 	if mediaStorage != nil {
 		serverOpts = append(serverOpts, facade.WithMediaStorage(mediaStorage))
 	}
+	if pf, ok := store.(facade.PolicyFetcher); ok {
+		serverOpts = append(serverOpts, facade.WithPolicyFetcher(pf))
+	}
 	wsServer := facade.NewServer(wsConfig, store, handler, log, serverOpts...)
 
 	mux := http.NewServeMux()
