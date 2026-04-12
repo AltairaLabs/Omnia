@@ -29,6 +29,8 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/sony/gobreaker/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -1489,4 +1491,52 @@ func TestCreateSession_WithCohortFields(t *testing.T) {
 	if sess.Variant != "canary" {
 		t.Errorf("Variant = %q, want %q", sess.Variant, "canary")
 	}
+}
+
+func TestStore_GetPrivacyPolicy_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/privacy-policy", r.URL.Path)
+		assert.Equal(t, "default", r.URL.Query().Get("namespace"))
+		assert.Equal(t, "my-agent", r.URL.Query().Get("agent"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"recording":{"enabled":true,"facadeData":true,"richData":false}}`))
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	defer func() { _ = store.Close() }()
+
+	policy, err := store.GetPrivacyPolicy(context.Background(), "default", "my-agent")
+	require.NoError(t, err)
+	require.NotNil(t, policy)
+	assert.True(t, policy.Recording.Enabled)
+	assert.True(t, policy.Recording.FacadeData)
+	assert.False(t, policy.Recording.RichData)
+}
+
+func TestStore_GetPrivacyPolicy_NoPolicy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	defer func() { _ = store.Close() }()
+
+	policy, err := store.GetPrivacyPolicy(context.Background(), "default", "my-agent")
+	require.NoError(t, err)
+	assert.Nil(t, policy)
+}
+
+func TestStore_GetPrivacyPolicy_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	defer func() { _ = store.Close() }()
+
+	_, err := store.GetPrivacyPolicy(context.Background(), "default", "my-agent")
+	assert.Error(t, err)
 }
