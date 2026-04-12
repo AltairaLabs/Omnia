@@ -19,6 +19,7 @@ package tools
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -164,5 +165,165 @@ func TestLoadConfig_InvalidYAML(t *testing.T) {
 	_, err := LoadConfig(configPath)
 	if err == nil {
 		t.Fatal("expected error for invalid YAML")
+	}
+}
+
+func writeRetryPolicyYAML(t *testing.T, content string) string {
+	t.Helper()
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "tools.yaml")
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	return configPath
+}
+
+func TestLoadConfig_HTTPRetryPolicyRoundTrip(t *testing.T) {
+	path := writeRetryPolicyYAML(t, `handlers:
+  - name: weather-api
+    type: http
+    endpoint: https://api.example.com
+    timeout: "30s"
+    tool:
+      name: get_weather
+      description: Get weather
+      inputSchema:
+        type: object
+    httpConfig:
+      endpoint: https://api.example.com/weather
+      method: GET
+      retryPolicy:
+        maxAttempts: 3
+        initialBackoff: "100ms"
+        backoffMultiplier: 2
+        maxBackoff: "30s"
+        retryOn: [502, 503, 504]
+        retryOnNetworkError: true
+        respectRetryAfter: true
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	h := cfg.Handlers[0]
+	if h.Timeout.Get() != 30*time.Second {
+		t.Errorf("Timeout = %v, want 30s", h.Timeout.Get())
+	}
+	if h.HTTPConfig == nil || h.HTTPConfig.RetryPolicy == nil {
+		t.Fatal("retry policy nil")
+	}
+	rp := h.HTTPConfig.RetryPolicy
+	if rp.MaxAttempts != 3 {
+		t.Errorf("MaxAttempts = %d, want 3", rp.MaxAttempts)
+	}
+	if rp.InitialBackoff.Get() != 100*time.Millisecond {
+		t.Errorf("InitialBackoff = %v, want 100ms", rp.InitialBackoff.Get())
+	}
+	if rp.BackoffMultiplier != 2.0 {
+		t.Errorf("BackoffMultiplier = %v, want 2.0", rp.BackoffMultiplier)
+	}
+	if len(rp.RetryOn) != 3 || rp.RetryOn[0] != 502 {
+		t.Errorf("RetryOn = %v, want [502 503 504]", rp.RetryOn)
+	}
+	if !rp.RetryOnNetworkError || !rp.RespectRetryAfter {
+		t.Error("bool flags not true")
+	}
+}
+
+func TestLoadConfig_GRPCRetryPolicyRoundTrip(t *testing.T) {
+	path := writeRetryPolicyYAML(t, `handlers:
+  - name: billing-grpc
+    type: grpc
+    endpoint: billing.svc:9090
+    tool:
+      name: create_invoice
+      description: Create invoice
+      inputSchema:
+        type: object
+    grpcConfig:
+      endpoint: billing.svc:9090
+      retryPolicy:
+        maxAttempts: 5
+        initialBackoff: "50ms"
+        backoffMultiplier: 1.5
+        maxBackoff: "10s"
+        retryableStatusCodes: [UNAVAILABLE, DEADLINE_EXCEEDED]
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	h := cfg.Handlers[0]
+	if h.GRPCConfig == nil || h.GRPCConfig.RetryPolicy == nil {
+		t.Fatal("retry policy nil")
+	}
+	rp := h.GRPCConfig.RetryPolicy
+	if rp.MaxAttempts != 5 {
+		t.Errorf("MaxAttempts = %d, want 5", rp.MaxAttempts)
+	}
+	if rp.BackoffMultiplier != 1.5 {
+		t.Errorf("BackoffMultiplier = %v, want 1.5", rp.BackoffMultiplier)
+	}
+	if len(rp.RetryableStatusCodes) != 2 {
+		t.Errorf("RetryableStatusCodes = %v, want 2 entries", rp.RetryableStatusCodes)
+	}
+}
+
+func TestLoadConfig_MCPRetryPolicyRoundTrip(t *testing.T) {
+	path := writeRetryPolicyYAML(t, `handlers:
+  - name: fs-mcp
+    type: mcp
+    mcpConfig:
+      transport: stdio
+      command: /usr/bin/mcp-fs
+      retryPolicy:
+        maxAttempts: 2
+        initialBackoff: "200ms"
+        backoffMultiplier: 2
+        maxBackoff: "5s"
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	h := cfg.Handlers[0]
+	if h.MCPConfig == nil || h.MCPConfig.RetryPolicy == nil {
+		t.Fatal("retry policy nil")
+	}
+	rp := h.MCPConfig.RetryPolicy
+	if rp.MaxAttempts != 2 {
+		t.Errorf("MaxAttempts = %d, want 2", rp.MaxAttempts)
+	}
+	if rp.InitialBackoff.Get() != 200*time.Millisecond {
+		t.Errorf("InitialBackoff = %v, want 200ms", rp.InitialBackoff.Get())
+	}
+}
+
+func TestLoadConfig_BadDurationInRetryPolicy(t *testing.T) {
+	content := `handlers:
+  - name: bad
+    type: http
+    endpoint: http://example.com
+    timeout: "not-a-duration"
+    tool:
+      name: foo
+      description: x
+      inputSchema: {}
+    httpConfig:
+      endpoint: http://example.com
+      method: GET
+`
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "bad.yaml")
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_, err := LoadConfig(configPath)
+	if err == nil {
+		t.Fatal("expected error for bad duration, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid duration") {
+		t.Errorf("error = %v, want containing 'invalid duration'", err)
 	}
 }
