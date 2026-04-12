@@ -3388,8 +3388,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 		})
 
 		It("should build config from available handlers", func() {
-			timeout := "30s"
-			retries := int32(3)
+			timeout := metav1.Duration{Duration: 30 * time.Second}
 
 			toolRegistry := &omniav1alpha1.ToolRegistry{
 				Spec: omniav1alpha1.ToolRegistrySpec{
@@ -3406,7 +3405,6 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 								InputSchema: apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
 							},
 							Timeout: &timeout,
-							Retries: &retries,
 						},
 					},
 				},
@@ -3422,13 +3420,13 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			config := reconciler.buildToolsConfig(toolRegistry)
+			config, toolsErr := reconciler.buildToolsConfig(toolRegistry)
+			Expect(toolsErr).NotTo(HaveOccurred())
 
 			Expect(config.Handlers).To(HaveLen(1))
 			Expect(config.Handlers[0].Name).To(Equal("handler1"))
 			Expect(config.Handlers[0].Type).To(Equal("http"))
-			Expect(config.Handlers[0].Timeout).To(Equal(timeout))
-			Expect(config.Handlers[0].Retries).To(Equal(retries))
+			Expect(config.Handlers[0].Timeout).To(Equal("30s"))
 			Expect(config.Handlers[0].HTTPConfig).NotTo(BeNil())
 			Expect(config.Handlers[0].HTTPConfig.Endpoint).To(Equal("http://tool1-service:8080/api"))
 			Expect(config.Handlers[0].Tool).NotTo(BeNil())
@@ -3479,7 +3477,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			config := reconciler.buildToolsConfig(toolRegistry)
+			config, toolsErr := reconciler.buildToolsConfig(toolRegistry)
+			Expect(toolsErr).NotTo(HaveOccurred())
 
 			Expect(config.Handlers).To(HaveLen(1))
 			Expect(config.Handlers[0].Name).To(Equal("handler1"))
@@ -3513,13 +3512,13 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			config := reconciler.buildToolsConfig(toolRegistry)
+			config, toolsErr := reconciler.buildToolsConfig(toolRegistry)
+			Expect(toolsErr).NotTo(HaveOccurred())
 
 			Expect(config.Handlers).To(HaveLen(1))
 			Expect(config.Handlers[0].Name).To(Equal("orphan-handler"))
 			Expect(config.Handlers[0].Type).To(Equal("http"))
 			Expect(config.Handlers[0].Timeout).To(BeEmpty())
-			Expect(config.Handlers[0].Retries).To(Equal(int32(0)))
 		})
 
 		It("should handle empty tool registry", func() {
@@ -3528,7 +3527,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				Status: omniav1alpha1.ToolRegistryStatus{},
 			}
 
-			config := reconciler.buildToolsConfig(toolRegistry)
+			config, toolsErr := reconciler.buildToolsConfig(toolRegistry)
+			Expect(toolsErr).NotTo(HaveOccurred())
 
 			Expect(config.Handlers).To(BeEmpty())
 		})
@@ -3563,7 +3563,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			config := reconciler.buildToolsConfig(toolRegistry)
+			config, toolsErr := reconciler.buildToolsConfig(toolRegistry)
+			Expect(toolsErr).NotTo(HaveOccurred())
 
 			Expect(config.Handlers).To(HaveLen(1))
 			Expect(config.Handlers[0].Name).To(Equal("grpc-handler"))
@@ -3599,7 +3600,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			config := reconciler.buildToolsConfig(toolRegistry)
+			config, toolsErr := reconciler.buildToolsConfig(toolRegistry)
+			Expect(toolsErr).NotTo(HaveOccurred())
 
 			Expect(config.Handlers).To(HaveLen(1))
 			Expect(config.Handlers[0].Name).To(Equal("mcp-handler"))
@@ -3641,7 +3643,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			config := reconciler.buildToolsConfig(toolRegistry)
+			config, toolsErr := reconciler.buildToolsConfig(toolRegistry)
+			Expect(toolsErr).NotTo(HaveOccurred())
 
 			Expect(config.Handlers).To(HaveLen(1))
 			Expect(config.Handlers[0].Name).To(Equal("mcp-stdio-handler"))

@@ -104,6 +104,42 @@ type MCPConfig struct {
 	// toolFilter controls which tools from the MCP server are exposed.
 	// +optional
 	ToolFilter *MCPToolFilter `json:"toolFilter,omitempty"`
+
+	// retryPolicy configures retry behavior for CallTool failures on this handler.
+	// When nil, tool calls are executed once with no retries.
+	// +optional
+	RetryPolicy *MCPRetryPolicy `json:"retryPolicy,omitempty"`
+}
+
+// MCPRetryPolicy defines retry behavior for MCP CallTool failures.
+// When nil or when MaxAttempts is 1, no retries are performed.
+//
+// Note: MCP session reconnect on broken transport is handled separately by the
+// MCP client wrapper and is not governed by this retry policy.
+type MCPRetryPolicy struct {
+	// maxAttempts is the maximum total number of attempts, including the first.
+	// A value of 1 means no retries. Must be between 1 and 10.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=10
+	MaxAttempts int32 `json:"maxAttempts"`
+
+	// initialBackoff is the delay before the first retry attempt.
+	// +kubebuilder:default="100ms"
+	// +optional
+	InitialBackoff *metav1.Duration `json:"initialBackoff,omitempty"`
+
+	// backoffMultiplier multiplies the delay between successive retries.
+	// Must parse as a float >= 1.0.
+	// +kubebuilder:default="2.0"
+	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?$`
+	// +optional
+	BackoffMultiplier *string `json:"backoffMultiplier,omitempty"`
+
+	// maxBackoff is the upper bound on delay between retry attempts.
+	// +kubebuilder:default="30s"
+	// +optional
+	MaxBackoff *metav1.Duration `json:"maxBackoff,omitempty"`
 }
 
 // OpenAPIConfig contains OpenAPI-specific handler configuration
@@ -133,6 +169,11 @@ type OpenAPIConfig struct {
 	// authSecretRef references a secret containing auth credentials.
 	// +optional
 	AuthSecretRef *SecretKeySelector `json:"authSecretRef,omitempty"`
+
+	// retryPolicy configures retry behavior for operations exposed by this OpenAPI handler.
+	// OpenAPI handlers delegate execution to the HTTP executor, so HTTPRetryPolicy is used.
+	// +optional
+	RetryPolicy *HTTPRetryPolicy `json:"retryPolicy,omitempty"`
 }
 
 // GRPCConfig contains gRPC-specific handler configuration
@@ -160,6 +201,48 @@ type GRPCConfig struct {
 	// tlsInsecureSkipVerify skips TLS verification (not recommended for production).
 	// +optional
 	TLSInsecureSkipVerify bool `json:"tlsInsecureSkipVerify,omitempty"`
+
+	// retryPolicy configures retry behavior for this gRPC tool.
+	// When nil, tool calls are executed once with no retries.
+	// +optional
+	RetryPolicy *GRPCRetryPolicy `json:"retryPolicy,omitempty"`
+}
+
+// GRPCRetryPolicy defines retry behavior for gRPC tool calls.
+// When nil or when MaxAttempts is 1, no retries are performed.
+// Retries are implemented as an Omnia-side loop, not via gRPC native service config,
+// so that retry attempts compose correctly with the existing circuit breaker.
+type GRPCRetryPolicy struct {
+	// maxAttempts is the maximum total number of attempts, including the first.
+	// A value of 1 means no retries. Must be between 1 and 10.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=10
+	MaxAttempts int32 `json:"maxAttempts"`
+
+	// initialBackoff is the delay before the first retry attempt.
+	// +kubebuilder:default="100ms"
+	// +optional
+	InitialBackoff *metav1.Duration `json:"initialBackoff,omitempty"`
+
+	// backoffMultiplier multiplies the delay between successive retries.
+	// Must parse as a float >= 1.0.
+	// +kubebuilder:default="2.0"
+	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?$`
+	// +optional
+	BackoffMultiplier *string `json:"backoffMultiplier,omitempty"`
+
+	// maxBackoff is the upper bound on delay between retry attempts.
+	// +kubebuilder:default="30s"
+	// +optional
+	MaxBackoff *metav1.Duration `json:"maxBackoff,omitempty"`
+
+	// retryableStatusCodes is the list of gRPC status codes that trigger a retry.
+	// Defaults to ["UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED"] if unset.
+	// Set to an empty list to disable status-code-based retry entirely.
+	// Values must be valid gRPC status code names.
+	// +optional
+	RetryableStatusCodes []string `json:"retryableStatusCodes,omitempty"`
 }
 
 // HTTPConfig contains HTTP-specific handler configuration
@@ -231,6 +314,59 @@ type HTTPConfig struct {
 	// When set, overrides endpoint for URL construction; endpoint is used as the base URL.
 	// +optional
 	URLTemplate *string `json:"urlTemplate,omitempty"`
+
+	// retryPolicy configures retry behavior for this HTTP tool.
+	// When nil, tool calls are executed once with no retries.
+	// +optional
+	RetryPolicy *HTTPRetryPolicy `json:"retryPolicy,omitempty"`
+}
+
+// HTTPRetryPolicy defines retry behavior for HTTP (and OpenAPI) tool calls.
+// When nil or when MaxAttempts is 1, no retries are performed.
+type HTTPRetryPolicy struct {
+	// maxAttempts is the maximum total number of attempts, including the first.
+	// A value of 1 means no retries. Must be between 1 and 10.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=10
+	MaxAttempts int32 `json:"maxAttempts"`
+
+	// initialBackoff is the delay before the first retry attempt.
+	// Subsequent attempts apply exponential backoff via backoffMultiplier.
+	// +kubebuilder:default="100ms"
+	// +optional
+	InitialBackoff *metav1.Duration `json:"initialBackoff,omitempty"`
+
+	// backoffMultiplier multiplies the delay between successive retries.
+	// Expressed as a decimal string (e.g. "2.0", "1.5"). Must parse as a float >= 1.0.
+	// +kubebuilder:default="2.0"
+	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?$`
+	// +optional
+	BackoffMultiplier *string `json:"backoffMultiplier,omitempty"`
+
+	// maxBackoff is the upper bound on delay between retry attempts.
+	// Must be >= initialBackoff (validated by the controller).
+	// +kubebuilder:default="30s"
+	// +optional
+	MaxBackoff *metav1.Duration `json:"maxBackoff,omitempty"`
+
+	// retryOn is the list of HTTP status codes that trigger a retry.
+	// Defaults to [408, 429, 500, 502, 503, 504] if unset.
+	// Set to an empty list to disable status-code-based retry entirely.
+	// +optional
+	RetryOn []int32 `json:"retryOn,omitempty"`
+
+	// retryOnNetworkError enables retries on connection failures, DNS failures,
+	// and request timeouts (errors returned before a status code is received).
+	// +kubebuilder:default=true
+	// +optional
+	RetryOnNetworkError *bool `json:"retryOnNetworkError,omitempty"`
+
+	// respectRetryAfter honors the HTTP Retry-After header on 429 and 503 responses,
+	// overriding backoff calculations for that attempt.
+	// +kubebuilder:default=true
+	// +optional
+	RespectRetryAfter *bool `json:"respectRetryAfter,omitempty"`
 }
 
 // ClientToolConfig contains configuration for client-side tools.
@@ -342,18 +478,15 @@ type HandlerDefinition struct {
 	// +optional
 	ClientConfig *ClientToolConfig `json:"clientConfig,omitempty"`
 
-	// timeout specifies the maximum duration for tool invocation.
-	// Defaults to "30s".
+	// timeout specifies the maximum duration for a single tool invocation (wall clock).
+	// Applies to all handler types.
 	// +kubebuilder:default="30s"
 	// +optional
-	Timeout *string `json:"timeout,omitempty"`
+	Timeout *metav1.Duration `json:"timeout,omitempty"`
 
-	// retries specifies the number of retry attempts on failure.
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=10
-	// +kubebuilder:default=0
-	// +optional
-	Retries *int32 `json:"retries,omitempty"`
+	// NOTE: the former Retries *int32 field has been removed in this release.
+	// Retry policies are now defined per transport inside httpConfig.retryPolicy,
+	// grpcConfig.retryPolicy, mcpConfig.retryPolicy, and openAPIConfig.retryPolicy.
 }
 
 // ToolRegistrySpec defines the desired state of ToolRegistry

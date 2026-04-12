@@ -19,7 +19,9 @@ package tools
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -32,7 +34,6 @@ func TestLoadConfig(t *testing.T) {
       endpoint: http://example.com/api
       method: POST
     timeout: "30s"
-    retries: 3
   - name: mcp-tool
     type: mcp
     description: An MCP tool
@@ -82,11 +83,8 @@ func TestLoadConfig(t *testing.T) {
 	if httpTool.HTTPConfig.Endpoint != "http://example.com/api" {
 		t.Errorf("unexpected endpoint: %q", httpTool.HTTPConfig.Endpoint)
 	}
-	if httpTool.Timeout != "30s" {
-		t.Errorf("expected timeout '30s', got %q", httpTool.Timeout)
-	}
-	if httpTool.Retries != 3 {
-		t.Errorf("expected retries 3, got %d", httpTool.Retries)
+	if httpTool.Timeout.Get() != 30*time.Second {
+		t.Errorf("expected timeout 30s, got %v", httpTool.Timeout.Get())
 	}
 
 	// Verify MCP SSE tool
@@ -167,5 +165,249 @@ func TestLoadConfig_InvalidYAML(t *testing.T) {
 	_, err := LoadConfig(configPath)
 	if err == nil {
 		t.Fatal("expected error for invalid YAML")
+	}
+}
+
+func writeRetryPolicyYAML(t *testing.T, content string) string {
+	t.Helper()
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "tools.yaml")
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	return configPath
+}
+
+func TestLoadConfig_HTTPRetryPolicyRoundTrip(t *testing.T) {
+	path := writeRetryPolicyYAML(t, `handlers:
+  - name: weather-api
+    type: http
+    endpoint: https://api.example.com
+    timeout: "30s"
+    tool:
+      name: get_weather
+      description: Get weather
+      inputSchema:
+        type: object
+    httpConfig:
+      endpoint: https://api.example.com/weather
+      method: GET
+      retryPolicy:
+        maxAttempts: 3
+        initialBackoff: "100ms"
+        backoffMultiplier: 2
+        maxBackoff: "30s"
+        retryOn: [502, 503, 504]
+        retryOnNetworkError: true
+        respectRetryAfter: true
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	h := cfg.Handlers[0]
+	if h.Timeout.Get() != 30*time.Second {
+		t.Errorf("Timeout = %v, want 30s", h.Timeout.Get())
+	}
+	if h.HTTPConfig == nil || h.HTTPConfig.RetryPolicy == nil {
+		t.Fatal("retry policy nil")
+	}
+	rp := h.HTTPConfig.RetryPolicy
+	if rp.MaxAttempts != 3 {
+		t.Errorf("MaxAttempts = %d, want 3", rp.MaxAttempts)
+	}
+	if rp.InitialBackoff.Get() != 100*time.Millisecond {
+		t.Errorf("InitialBackoff = %v, want 100ms", rp.InitialBackoff.Get())
+	}
+	if rp.BackoffMultiplier != 2.0 {
+		t.Errorf("BackoffMultiplier = %v, want 2.0", rp.BackoffMultiplier)
+	}
+	if len(rp.RetryOn) != 3 || rp.RetryOn[0] != 502 {
+		t.Errorf("RetryOn = %v, want [502 503 504]", rp.RetryOn)
+	}
+	if !rp.RetryOnNetworkError || !rp.RespectRetryAfter {
+		t.Error("bool flags not true")
+	}
+}
+
+func TestLoadConfig_GRPCRetryPolicyRoundTrip(t *testing.T) {
+	path := writeRetryPolicyYAML(t, `handlers:
+  - name: billing-grpc
+    type: grpc
+    endpoint: billing.svc:9090
+    tool:
+      name: create_invoice
+      description: Create invoice
+      inputSchema:
+        type: object
+    grpcConfig:
+      endpoint: billing.svc:9090
+      retryPolicy:
+        maxAttempts: 5
+        initialBackoff: "50ms"
+        backoffMultiplier: 1.5
+        maxBackoff: "10s"
+        retryableStatusCodes: [UNAVAILABLE, DEADLINE_EXCEEDED]
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	h := cfg.Handlers[0]
+	if h.GRPCConfig == nil || h.GRPCConfig.RetryPolicy == nil {
+		t.Fatal("retry policy nil")
+	}
+	rp := h.GRPCConfig.RetryPolicy
+	if rp.MaxAttempts != 5 {
+		t.Errorf("MaxAttempts = %d, want 5", rp.MaxAttempts)
+	}
+	if rp.BackoffMultiplier != 1.5 {
+		t.Errorf("BackoffMultiplier = %v, want 1.5", rp.BackoffMultiplier)
+	}
+	if len(rp.RetryableStatusCodes) != 2 {
+		t.Errorf("RetryableStatusCodes = %v, want 2 entries", rp.RetryableStatusCodes)
+	}
+}
+
+func TestLoadConfig_MCPRetryPolicyRoundTrip(t *testing.T) {
+	path := writeRetryPolicyYAML(t, `handlers:
+  - name: fs-mcp
+    type: mcp
+    mcpConfig:
+      transport: stdio
+      command: /usr/bin/mcp-fs
+      retryPolicy:
+        maxAttempts: 2
+        initialBackoff: "200ms"
+        backoffMultiplier: 2
+        maxBackoff: "5s"
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	h := cfg.Handlers[0]
+	if h.MCPConfig == nil || h.MCPConfig.RetryPolicy == nil {
+		t.Fatal("retry policy nil")
+	}
+	rp := h.MCPConfig.RetryPolicy
+	if rp.MaxAttempts != 2 {
+		t.Errorf("MaxAttempts = %d, want 2", rp.MaxAttempts)
+	}
+	if rp.InitialBackoff.Get() != 200*time.Millisecond {
+		t.Errorf("InitialBackoff = %v, want 200ms", rp.InitialBackoff.Get())
+	}
+}
+
+func TestLoadConfig_BadDurationInRetryPolicy(t *testing.T) {
+	content := `handlers:
+  - name: bad
+    type: http
+    endpoint: http://example.com
+    timeout: "not-a-duration"
+    tool:
+      name: foo
+      description: x
+      inputSchema: {}
+    httpConfig:
+      endpoint: http://example.com
+      method: GET
+`
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "bad.yaml")
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_, err := LoadConfig(configPath)
+	if err == nil {
+		t.Fatal("expected error for bad duration, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid duration") {
+		t.Errorf("error = %v, want containing 'invalid duration'", err)
+	}
+}
+
+func TestDuration_MarshalYAML(t *testing.T) {
+	d := Duration(5 * time.Second)
+	val, err := d.MarshalYAML()
+	if err != nil {
+		t.Fatalf("MarshalYAML: %v", err)
+	}
+	s, ok := val.(string)
+	if !ok {
+		t.Fatalf("expected string, got %T", val)
+	}
+	if s != "5s" {
+		t.Errorf("MarshalYAML = %q, want %q", s, "5s")
+	}
+}
+
+func TestDuration_JSONRoundTrip(t *testing.T) {
+	d := Duration(250 * time.Millisecond)
+	data, err := d.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	if string(data) != `"250ms"` {
+		t.Errorf("MarshalJSON = %s, want %q", data, `"250ms"`)
+	}
+
+	var got Duration
+	if err := got.UnmarshalJSON(data); err != nil {
+		t.Fatalf("UnmarshalJSON: %v", err)
+	}
+	if got.Get() != 250*time.Millisecond {
+		t.Errorf("round-trip = %v, want 250ms", got.Get())
+	}
+}
+
+func TestDuration_UnmarshalJSON_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    time.Duration
+		wantErr bool
+	}{
+		{"empty string", `""`, 0, false},
+		{"null", `null`, 0, false},
+		{"valid", `"1s"`, time.Second, false},
+		{"invalid", `"bad"`, 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var d Duration
+			err := d.UnmarshalJSON([]byte(tt.input))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr = %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && d.Get() != tt.want {
+				t.Errorf("got %v, want %v", d.Get(), tt.want)
+			}
+		})
+	}
+}
+
+func TestDuration_UnmarshalYAML_EmptyString(t *testing.T) {
+	path := writeRetryPolicyYAML(t, `handlers:
+  - name: empty-timeout
+    type: http
+    endpoint: http://example.com
+    timeout: ""
+    tool:
+      name: foo
+      description: x
+      inputSchema:
+        type: object
+    httpConfig:
+      endpoint: http://example.com
+      method: GET
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Handlers[0].Timeout.Get() != 0 {
+		t.Errorf("Timeout = %v, want 0", cfg.Handlers[0].Timeout.Get())
 	}
 }

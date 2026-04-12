@@ -87,6 +87,48 @@ spec:
                         endpoint:
                           description: endpoint is the gRPC server address (host:port).
                           type: string
+                        retryPolicy:
+                          description: |-
+                            retryPolicy configures retry behavior for this gRPC tool.
+                            When nil, tool calls are executed once with no retries.
+                          properties:
+                            backoffMultiplier:
+                              default: "2.0"
+                              description: |-
+                                backoffMultiplier multiplies the delay between successive retries.
+                                Must parse as a float >= 1.0.
+                              pattern: ^[0-9]+(\.[0-9]+)?$
+                              type: string
+                            initialBackoff:
+                              default: 100ms
+                              description: initialBackoff is the delay before the
+                                first retry attempt.
+                              type: string
+                            maxAttempts:
+                              description: |-
+                                maxAttempts is the maximum total number of attempts, including the first.
+                                A value of 1 means no retries. Must be between 1 and 10.
+                              format: int32
+                              maximum: 10
+                              minimum: 1
+                              type: integer
+                            maxBackoff:
+                              default: 30s
+                              description: maxBackoff is the upper bound on delay
+                                between retry attempts.
+                              type: string
+                            retryableStatusCodes:
+                              description: |-
+                                retryableStatusCodes is the list of gRPC status codes that trigger a retry.
+                                Defaults to ["UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED"] if unset.
+                                Set to an empty list to disable status-code-based retry entirely.
+                                Values must be valid gRPC status code names.
+                              items:
+                                type: string
+                              type: array
+                          required:
+                          - maxAttempts
+                          type: object
                         tls:
                           description: tls enables TLS for the connection.
                           type: boolean
@@ -180,6 +222,62 @@ spec:
                             responseMapping is a JMESPath expression to filter/reshape the response
                             before returning to the LLM.
                           type: string
+                        retryPolicy:
+                          description: |-
+                            retryPolicy configures retry behavior for this HTTP tool.
+                            When nil, tool calls are executed once with no retries.
+                          properties:
+                            backoffMultiplier:
+                              default: "2.0"
+                              description: |-
+                                backoffMultiplier multiplies the delay between successive retries.
+                                Expressed as a decimal string (e.g. "2.0", "1.5"). Must parse as a float >= 1.0.
+                              pattern: ^[0-9]+(\.[0-9]+)?$
+                              type: string
+                            initialBackoff:
+                              default: 100ms
+                              description: |-
+                                initialBackoff is the delay before the first retry attempt.
+                                Subsequent attempts apply exponential backoff via backoffMultiplier.
+                              type: string
+                            maxAttempts:
+                              description: |-
+                                maxAttempts is the maximum total number of attempts, including the first.
+                                A value of 1 means no retries. Must be between 1 and 10.
+                              format: int32
+                              maximum: 10
+                              minimum: 1
+                              type: integer
+                            maxBackoff:
+                              default: 30s
+                              description: |-
+                                maxBackoff is the upper bound on delay between retry attempts.
+                                Must be >= initialBackoff (validated by the controller).
+                              type: string
+                            respectRetryAfter:
+                              default: true
+                              description: |-
+                                respectRetryAfter honors the HTTP Retry-After header on 429 and 503 responses,
+                                overriding backoff calculations for that attempt.
+                              type: boolean
+                            retryOn:
+                              description: |-
+                                retryOn is the list of HTTP status codes that trigger a retry.
+                                Defaults to [408, 429, 500, 502, 503, 504] if unset.
+                                Set to an empty list to disable status-code-based retry entirely.
+                              items:
+                                format: int32
+                                type: integer
+                              type: array
+                            retryOnNetworkError:
+                              default: true
+                              description: |-
+                                retryOnNetworkError enables retries on connection failures, DNS failures,
+                                and request timeouts (errors returned before a status code is received).
+                              type: boolean
+                          required:
+                          - maxAttempts
+                          type: object
                         staticBody:
                           description: |-
                             staticBody contains fixed JSON fields merged into the request body.
@@ -223,6 +321,39 @@ spec:
                             type: string
                           description: env are additional environment variables for
                             stdio transport.
+                          type: object
+                        retryPolicy:
+                          description: |-
+                            retryPolicy configures retry behavior for CallTool failures on this handler.
+                            When nil, tool calls are executed once with no retries.
+                          properties:
+                            backoffMultiplier:
+                              default: "2.0"
+                              description: |-
+                                backoffMultiplier multiplies the delay between successive retries.
+                                Must parse as a float >= 1.0.
+                              pattern: ^[0-9]+(\.[0-9]+)?$
+                              type: string
+                            initialBackoff:
+                              default: 100ms
+                              description: initialBackoff is the delay before the
+                                first retry attempt.
+                              type: string
+                            maxAttempts:
+                              description: |-
+                                maxAttempts is the maximum total number of attempts, including the first.
+                                A value of 1 means no retries. Must be between 1 and 10.
+                              format: int32
+                              maximum: 10
+                              minimum: 1
+                              type: integer
+                            maxBackoff:
+                              default: 30s
+                              description: maxBackoff is the upper bound on delay
+                                between retry attempts.
+                              type: string
+                          required:
+                          - maxAttempts
                           type: object
                         toolFilter:
                           description: toolFilter controls which tools from the MCP
@@ -301,6 +432,62 @@ spec:
                           items:
                             type: string
                           type: array
+                        retryPolicy:
+                          description: |-
+                            retryPolicy configures retry behavior for operations exposed by this OpenAPI handler.
+                            OpenAPI handlers delegate execution to the HTTP executor, so HTTPRetryPolicy is used.
+                          properties:
+                            backoffMultiplier:
+                              default: "2.0"
+                              description: |-
+                                backoffMultiplier multiplies the delay between successive retries.
+                                Expressed as a decimal string (e.g. "2.0", "1.5"). Must parse as a float >= 1.0.
+                              pattern: ^[0-9]+(\.[0-9]+)?$
+                              type: string
+                            initialBackoff:
+                              default: 100ms
+                              description: |-
+                                initialBackoff is the delay before the first retry attempt.
+                                Subsequent attempts apply exponential backoff via backoffMultiplier.
+                              type: string
+                            maxAttempts:
+                              description: |-
+                                maxAttempts is the maximum total number of attempts, including the first.
+                                A value of 1 means no retries. Must be between 1 and 10.
+                              format: int32
+                              maximum: 10
+                              minimum: 1
+                              type: integer
+                            maxBackoff:
+                              default: 30s
+                              description: |-
+                                maxBackoff is the upper bound on delay between retry attempts.
+                                Must be >= initialBackoff (validated by the controller).
+                              type: string
+                            respectRetryAfter:
+                              default: true
+                              description: |-
+                                respectRetryAfter honors the HTTP Retry-After header on 429 and 503 responses,
+                                overriding backoff calculations for that attempt.
+                              type: boolean
+                            retryOn:
+                              description: |-
+                                retryOn is the list of HTTP status codes that trigger a retry.
+                                Defaults to [408, 429, 500, 502, 503, 504] if unset.
+                                Set to an empty list to disable status-code-based retry entirely.
+                              items:
+                                format: int32
+                                type: integer
+                              type: array
+                            retryOnNetworkError:
+                              default: true
+                              description: |-
+                                retryOnNetworkError enables retries on connection failures, DNS failures,
+                                and request timeouts (errors returned before a status code is received).
+                              type: boolean
+                          required:
+                          - maxAttempts
+                          type: object
                         specURL:
                           description: specURL is the URL to the OpenAPI specification
                             (JSON or YAML).
@@ -308,14 +495,6 @@ spec:
                       required:
                       - specURL
                       type: object
-                    retries:
-                      default: 0
-                      description: retries specifies the number of retry attempts
-                        on failure.
-                      format: int32
-                      maximum: 10
-                      minimum: 0
-                      type: integer
                     selector:
                       description: |-
                         selector discovers the handler endpoint from Kubernetes Services.
@@ -341,8 +520,8 @@ spec:
                     timeout:
                       default: 30s
                       description: |-
-                        timeout specifies the maximum duration for tool invocation.
-                        Defaults to "30s".
+                        timeout specifies the maximum duration for a single tool invocation (wall clock).
+                        Applies to all handler types.
                       type: string
                     tool:
                       description: |-

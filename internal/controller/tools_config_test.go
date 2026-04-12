@@ -17,11 +17,16 @@ limitations under the License.
 package controller
 
 import (
+	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	runtimetools "github.com/altairalabs/omnia/internal/runtime/tools"
 )
 
 const schemaTypeObject = "object"
@@ -206,7 +211,10 @@ func TestBuildToolsConfig(t *testing.T) {
 		}
 
 		r := &AgentRuntimeReconciler{}
-		config := r.buildToolsConfig(registry)
+		config, err := r.buildToolsConfig(registry)
+		if err != nil {
+			t.Fatalf("buildToolsConfig: %v", err)
+		}
 
 		if len(config.Handlers) != 1 {
 			t.Fatalf("expected 1 handler, got %d", len(config.Handlers))
@@ -253,7 +261,10 @@ func TestBuildHTTPConfigAdvancedFields(t *testing.T) {
 		},
 	}
 
-	cfg := buildHTTPConfig(h, "https://api.example.com")
+	cfg, err := buildHTTPConfig(h, "https://api.example.com")
+	if err != nil {
+		t.Fatalf("buildHTTPConfig: %v", err)
+	}
 
 	if cfg == nil {
 		t.Fatal("expected non-nil config")
@@ -309,7 +320,10 @@ func TestBuildHTTPConfigNilOptionalFields(t *testing.T) {
 		},
 	}
 
-	cfg := buildHTTPConfig(h, "https://api.example.com")
+	cfg, err := buildHTTPConfig(h, "https://api.example.com")
+	if err != nil {
+		t.Fatalf("buildHTTPConfig: %v", err)
+	}
 
 	if cfg.BodyMapping != "" {
 		t.Errorf("BodyMapping should be empty, got %v", cfg.BodyMapping)
@@ -340,7 +354,10 @@ func TestBuildMCPConfigWithToolFilter(t *testing.T) {
 		},
 	}
 
-	cfg := buildMCPConfig(h)
+	cfg, err := buildMCPConfig(h)
+	if err != nil {
+		t.Fatalf("buildMCPConfig: %v", err)
+	}
 
 	if cfg == nil {
 		t.Fatal("expected non-nil config")
@@ -374,7 +391,10 @@ func TestBuildMCPConfigWithoutToolFilter(t *testing.T) {
 		},
 	}
 
-	cfg := buildMCPConfig(h)
+	cfg, err := buildMCPConfig(h)
+	if err != nil {
+		t.Fatalf("buildMCPConfig: %v", err)
+	}
 	if cfg.ToolFilter != nil {
 		t.Errorf("ToolFilter should be nil, got %v", cfg.ToolFilter)
 	}
@@ -391,7 +411,10 @@ func TestBuildMCPConfigStreamableHTTP(t *testing.T) {
 		},
 	}
 
-	cfg := buildMCPConfig(h)
+	cfg, err := buildMCPConfig(h)
+	if err != nil {
+		t.Fatalf("buildMCPConfig: %v", err)
+	}
 	if cfg.Transport != "streamable-http" {
 		t.Errorf("Transport = %v, want streamable-http", cfg.Transport)
 	}
@@ -412,7 +435,10 @@ func TestBuildOpenAPIConfigWithHeaders(t *testing.T) {
 		},
 	}
 
-	cfg := buildOpenAPIConfig(h)
+	cfg, err := buildOpenAPIConfig(h)
+	if err != nil {
+		t.Fatalf("buildOpenAPIConfig: %v", err)
+	}
 
 	if cfg == nil {
 		t.Fatal("expected non-nil config")
@@ -465,8 +491,7 @@ func TestFindEndpoint(t *testing.T) {
 }
 
 func TestBuildHandlerEntry(t *testing.T) {
-	timeout := "10s"
-	retries := int32(3)
+	timeout := metav1.Duration{Duration: 10 * time.Second}
 
 	t.Run("HTTP handler", func(t *testing.T) {
 		h := &omniav1alpha1.HandlerDefinition{
@@ -482,18 +507,17 @@ func TestBuildHandlerEntry(t *testing.T) {
 				InputSchema: apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
 			},
 			Timeout: &timeout,
-			Retries: &retries,
 		}
 
-		entry := buildHandlerEntry(h, "http://svc:8080")
+		entry, err := buildHandlerEntry(h, "http://svc:8080")
+		if err != nil {
+			t.Fatalf("buildHandlerEntry: %v", err)
+		}
 		if entry.Name != "my-http" {
 			t.Errorf("Name = %v, want my-http", entry.Name)
 		}
 		if entry.Timeout != "10s" {
 			t.Errorf("Timeout = %v, want 10s", entry.Timeout)
-		}
-		if entry.Retries != 3 {
-			t.Errorf("Retries = %v, want 3", entry.Retries)
 		}
 		if entry.HTTPConfig == nil {
 			t.Error("HTTPConfig is nil")
@@ -518,7 +542,10 @@ func TestBuildHandlerEntry(t *testing.T) {
 			},
 		}
 
-		entry := buildHandlerEntry(h, "grpc-svc:50051")
+		entry, err := buildHandlerEntry(h, "grpc-svc:50051")
+		if err != nil {
+			t.Fatalf("buildHandlerEntry: %v", err)
+		}
 		if entry.GRPCConfig == nil {
 			t.Error("GRPCConfig is nil")
 		}
@@ -538,7 +565,10 @@ func TestBuildHandlerEntry(t *testing.T) {
 			},
 		}
 
-		entry := buildHandlerEntry(h, "http://mcp:8080")
+		entry, err := buildHandlerEntry(h, "http://mcp:8080")
+		if err != nil {
+			t.Fatalf("buildHandlerEntry: %v", err)
+		}
 		if entry.MCPConfig == nil {
 			t.Error("MCPConfig is nil")
 		}
@@ -556,7 +586,10 @@ func TestBuildHandlerEntry(t *testing.T) {
 			},
 		}
 
-		entry := buildHandlerEntry(h, "http://api")
+		entry, err := buildHandlerEntry(h, "http://api")
+		if err != nil {
+			t.Fatalf("buildHandlerEntry: %v", err)
+		}
 		if entry.OpenAPIConfig == nil {
 			t.Error("OpenAPIConfig is nil")
 		}
@@ -567,7 +600,11 @@ func TestBuildHTTPConfigNil(t *testing.T) {
 	h := &omniav1alpha1.HandlerDefinition{
 		Type: omniav1alpha1.HandlerTypeHTTP,
 	}
-	if got := buildHTTPConfig(h, "ep"); got != nil {
+	got, err := buildHTTPConfig(h, "ep")
+	if err != nil {
+		t.Fatalf("buildHTTPConfig: %v", err)
+	}
+	if got != nil {
 		t.Errorf("expected nil, got %v", got)
 	}
 }
@@ -576,7 +613,11 @@ func TestBuildGRPCConfigNil(t *testing.T) {
 	h := &omniav1alpha1.HandlerDefinition{
 		Type: omniav1alpha1.HandlerTypeGRPC,
 	}
-	if got := buildGRPCConfig(h, "ep"); got != nil {
+	got, err := buildGRPCConfig(h, "ep")
+	if err != nil {
+		t.Fatalf("buildGRPCConfig: %v", err)
+	}
+	if got != nil {
 		t.Errorf("expected nil, got %v", got)
 	}
 }
@@ -585,7 +626,11 @@ func TestBuildMCPConfigNil(t *testing.T) {
 	h := &omniav1alpha1.HandlerDefinition{
 		Type: omniav1alpha1.HandlerTypeMCP,
 	}
-	if got := buildMCPConfig(h); got != nil {
+	got, err := buildMCPConfig(h)
+	if err != nil {
+		t.Fatalf("buildMCPConfig: %v", err)
+	}
+	if got != nil {
 		t.Errorf("expected nil, got %v", got)
 	}
 }
@@ -594,7 +639,11 @@ func TestBuildOpenAPIConfigNil(t *testing.T) {
 	h := &omniav1alpha1.HandlerDefinition{
 		Type: omniav1alpha1.HandlerTypeOpenAPI,
 	}
-	if got := buildOpenAPIConfig(h); got != nil {
+	got, err := buildOpenAPIConfig(h)
+	if err != nil {
+		t.Fatalf("buildOpenAPIConfig: %v", err)
+	}
+	if got != nil {
 		t.Errorf("expected nil, got %v", got)
 	}
 }
@@ -616,7 +665,10 @@ func TestBuildGRPCConfigAllFields(t *testing.T) {
 		},
 	}
 
-	cfg := buildGRPCConfig(h, "grpc:50051")
+	cfg, err := buildGRPCConfig(h, "grpc:50051")
+	if err != nil {
+		t.Fatalf("buildGRPCConfig: %v", err)
+	}
 	if !cfg.TLS {
 		t.Error("TLS should be true")
 	}
@@ -661,12 +713,440 @@ func TestBuildToolsConfigSkipsUnavailableHandlers(t *testing.T) {
 	}
 
 	r := &AgentRuntimeReconciler{}
-	config := r.buildToolsConfig(registry)
+	config, err := r.buildToolsConfig(registry)
+	if err != nil {
+		t.Fatalf("buildToolsConfig: %v", err)
+	}
 
 	if len(config.Handlers) != 1 {
 		t.Fatalf("expected 1 handler, got %d", len(config.Handlers))
 	}
 	if config.Handlers[0].Name != "available" {
 		t.Errorf("expected handler 'available', got %v", config.Handlers[0].Name)
+	}
+}
+
+func TestBuildHTTPRetryPolicy(t *testing.T) {
+	valid := "2.0"
+	lowMult := "0.5"
+	badMult := "abc"
+	retryOnNetErr := true
+	respectRA := false
+
+	tests := []struct {
+		name    string
+		input   *omniav1alpha1.HTTPRetryPolicy
+		want    *runtimetools.RuntimeHTTPRetryPolicy
+		wantErr string
+	}{
+		{
+			name:  "nil policy returns nil",
+			input: nil,
+			want:  nil,
+		},
+		{
+			name: "minimum valid policy gets defaults",
+			input: &omniav1alpha1.HTTPRetryPolicy{
+				MaxAttempts: 3,
+			},
+			want: &runtimetools.RuntimeHTTPRetryPolicy{
+				MaxAttempts:         3,
+				InitialBackoff:      runtimetools.Duration(100 * time.Millisecond),
+				BackoffMultiplier:   2.0,
+				MaxBackoff:          runtimetools.Duration(30 * time.Second),
+				RetryOn:             []int32{408, 429, 500, 502, 503, 504},
+				RetryOnNetworkError: true,
+				RespectRetryAfter:   true,
+			},
+		},
+		{
+			name: "fully populated policy",
+			input: &omniav1alpha1.HTTPRetryPolicy{
+				MaxAttempts:         5,
+				InitialBackoff:      &metav1.Duration{Duration: 200 * time.Millisecond},
+				BackoffMultiplier:   &valid,
+				MaxBackoff:          &metav1.Duration{Duration: 60 * time.Second},
+				RetryOn:             []int32{502, 503},
+				RetryOnNetworkError: &retryOnNetErr,
+				RespectRetryAfter:   &respectRA,
+			},
+			want: &runtimetools.RuntimeHTTPRetryPolicy{
+				MaxAttempts:         5,
+				InitialBackoff:      runtimetools.Duration(200 * time.Millisecond),
+				BackoffMultiplier:   2.0,
+				MaxBackoff:          runtimetools.Duration(60 * time.Second),
+				RetryOn:             []int32{502, 503},
+				RetryOnNetworkError: true,
+				RespectRetryAfter:   false,
+			},
+		},
+		{
+			name: "empty RetryOn slice stays empty (not defaulted)",
+			input: &omniav1alpha1.HTTPRetryPolicy{
+				MaxAttempts: 2,
+				RetryOn:     []int32{},
+			},
+			want: &runtimetools.RuntimeHTTPRetryPolicy{
+				MaxAttempts:         2,
+				InitialBackoff:      runtimetools.Duration(100 * time.Millisecond),
+				BackoffMultiplier:   2.0,
+				MaxBackoff:          runtimetools.Duration(30 * time.Second),
+				RetryOn:             []int32{},
+				RetryOnNetworkError: true,
+				RespectRetryAfter:   true,
+			},
+		},
+		{
+			name: "invalid BackoffMultiplier string errors",
+			input: &omniav1alpha1.HTTPRetryPolicy{
+				MaxAttempts:       3,
+				BackoffMultiplier: &badMult,
+			},
+			wantErr: "invalid backoffMultiplier",
+		},
+		{
+			name: "BackoffMultiplier below 1.0 errors",
+			input: &omniav1alpha1.HTTPRetryPolicy{
+				MaxAttempts:       3,
+				BackoffMultiplier: &lowMult,
+			},
+			wantErr: "must be >= 1.0",
+		},
+		{
+			name: "MaxBackoff less than InitialBackoff errors",
+			input: &omniav1alpha1.HTTPRetryPolicy{
+				MaxAttempts:    3,
+				InitialBackoff: &metav1.Duration{Duration: 10 * time.Second},
+				MaxBackoff:     &metav1.Duration{Duration: 1 * time.Second},
+			},
+			wantErr: "maxBackoff",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := buildHTTPRetryPolicy(tc.input)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tc.wantErr)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("error = %v, want containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildGRPCRetryPolicy(t *testing.T) {
+	valid := "1.5"
+	badMult := "x"
+
+	tests := []struct {
+		name    string
+		input   *omniav1alpha1.GRPCRetryPolicy
+		want    *runtimetools.RuntimeGRPCRetryPolicy
+		wantErr string
+	}{
+		{
+			name:  "nil policy returns nil",
+			input: nil,
+			want:  nil,
+		},
+		{
+			name: "minimum valid policy gets defaults",
+			input: &omniav1alpha1.GRPCRetryPolicy{
+				MaxAttempts: 3,
+			},
+			want: &runtimetools.RuntimeGRPCRetryPolicy{
+				MaxAttempts:          3,
+				InitialBackoff:       runtimetools.Duration(100 * time.Millisecond),
+				BackoffMultiplier:    2.0,
+				MaxBackoff:           runtimetools.Duration(30 * time.Second),
+				RetryableStatusCodes: []string{"UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED"},
+			},
+		},
+		{
+			name: "fully populated policy",
+			input: &omniav1alpha1.GRPCRetryPolicy{
+				MaxAttempts:          5,
+				InitialBackoff:       &metav1.Duration{Duration: 50 * time.Millisecond},
+				BackoffMultiplier:    &valid,
+				MaxBackoff:           &metav1.Duration{Duration: 10 * time.Second},
+				RetryableStatusCodes: []string{"UNAVAILABLE"},
+			},
+			want: &runtimetools.RuntimeGRPCRetryPolicy{
+				MaxAttempts:          5,
+				InitialBackoff:       runtimetools.Duration(50 * time.Millisecond),
+				BackoffMultiplier:    1.5,
+				MaxBackoff:           runtimetools.Duration(10 * time.Second),
+				RetryableStatusCodes: []string{"UNAVAILABLE"},
+			},
+		},
+		{
+			name: "unknown gRPC status code errors",
+			input: &omniav1alpha1.GRPCRetryPolicy{
+				MaxAttempts:          3,
+				RetryableStatusCodes: []string{"UNAVAILABLE", "FOOBAR"},
+			},
+			wantErr: "unknown gRPC status code \"FOOBAR\"",
+		},
+		{
+			name: "invalid BackoffMultiplier errors",
+			input: &omniav1alpha1.GRPCRetryPolicy{
+				MaxAttempts:       3,
+				BackoffMultiplier: &badMult,
+			},
+			wantErr: "invalid backoffMultiplier",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := buildGRPCRetryPolicy(tc.input)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tc.wantErr)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("error = %v, want containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildMCPRetryPolicy(t *testing.T) {
+	valid := "2.0"
+
+	tests := []struct {
+		name    string
+		input   *omniav1alpha1.MCPRetryPolicy
+		want    *runtimetools.RuntimeMCPRetryPolicy
+		wantErr string
+	}{
+		{
+			name:  "nil policy returns nil",
+			input: nil,
+			want:  nil,
+		},
+		{
+			name: "minimum valid policy gets defaults",
+			input: &omniav1alpha1.MCPRetryPolicy{
+				MaxAttempts: 2,
+			},
+			want: &runtimetools.RuntimeMCPRetryPolicy{
+				MaxAttempts:       2,
+				InitialBackoff:    runtimetools.Duration(100 * time.Millisecond),
+				BackoffMultiplier: 2.0,
+				MaxBackoff:        runtimetools.Duration(30 * time.Second),
+			},
+		},
+		{
+			name: "fully populated policy",
+			input: &omniav1alpha1.MCPRetryPolicy{
+				MaxAttempts:       4,
+				InitialBackoff:    &metav1.Duration{Duration: 500 * time.Millisecond},
+				BackoffMultiplier: &valid,
+				MaxBackoff:        &metav1.Duration{Duration: 60 * time.Second},
+			},
+			want: &runtimetools.RuntimeMCPRetryPolicy{
+				MaxAttempts:       4,
+				InitialBackoff:    runtimetools.Duration(500 * time.Millisecond),
+				BackoffMultiplier: 2.0,
+				MaxBackoff:        runtimetools.Duration(60 * time.Second),
+			},
+		},
+		{
+			name: "MaxBackoff less than InitialBackoff errors",
+			input: &omniav1alpha1.MCPRetryPolicy{
+				MaxAttempts:    2,
+				InitialBackoff: &metav1.Duration{Duration: 10 * time.Second},
+				MaxBackoff:     &metav1.Duration{Duration: 1 * time.Second},
+			},
+			wantErr: "maxBackoff",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := buildMCPRetryPolicy(tc.input)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tc.wantErr)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("error = %v, want containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildHandlerEntry_HTTPWithRetryPolicy(t *testing.T) {
+	backoffMult := "2.0"
+	h := &omniav1alpha1.HandlerDefinition{
+		Name: "retried-http",
+		Type: omniav1alpha1.HandlerTypeHTTP,
+		HTTPConfig: &omniav1alpha1.HTTPConfig{
+			Endpoint: "http://svc:8080",
+			Method:   "GET",
+			RetryPolicy: &omniav1alpha1.HTTPRetryPolicy{
+				MaxAttempts:       3,
+				BackoffMultiplier: &backoffMult,
+			},
+		},
+		Tool: &omniav1alpha1.ToolDefinition{
+			Name:        "my_tool",
+			Description: "A tool",
+			InputSchema: apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
+		},
+	}
+
+	entry, err := buildHandlerEntry(h, "http://svc:8080")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if entry.HTTPConfig == nil || entry.HTTPConfig.RetryPolicy == nil {
+		t.Fatal("retry policy is nil")
+	}
+	if entry.HTTPConfig.RetryPolicy.MaxAttempts != 3 {
+		t.Errorf("MaxAttempts = %d, want 3", entry.HTTPConfig.RetryPolicy.MaxAttempts)
+	}
+	if entry.HTTPConfig.RetryPolicy.BackoffMultiplier != 2.0 {
+		t.Errorf("BackoffMultiplier = %v, want 2.0", entry.HTTPConfig.RetryPolicy.BackoffMultiplier)
+	}
+}
+
+func TestBuildHandlerEntry_InvalidRetryPolicyError(t *testing.T) {
+	badMult := "not-a-number"
+	h := &omniav1alpha1.HandlerDefinition{
+		Name: "bad-http",
+		Type: omniav1alpha1.HandlerTypeHTTP,
+		HTTPConfig: &omniav1alpha1.HTTPConfig{
+			Endpoint: "http://svc:8080",
+			Method:   "GET",
+			RetryPolicy: &omniav1alpha1.HTTPRetryPolicy{
+				MaxAttempts:       3,
+				BackoffMultiplier: &badMult,
+			},
+		},
+		Tool: &omniav1alpha1.ToolDefinition{
+			Name:        "my_tool",
+			Description: "A tool",
+			InputSchema: apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
+		},
+	}
+
+	_, err := buildHandlerEntry(h, "http://svc:8080")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "bad-http") {
+		t.Errorf("error %v should include handler name", err)
+	}
+	if !strings.Contains(err.Error(), "invalid backoffMultiplier") {
+		t.Errorf("error %v should include builder error", err)
+	}
+}
+
+func TestBuildHandlerEntry_GRPCWithRetryPolicy(t *testing.T) {
+	h := &omniav1alpha1.HandlerDefinition{
+		Name: "retried-grpc",
+		Type: omniav1alpha1.HandlerTypeGRPC,
+		GRPCConfig: &omniav1alpha1.GRPCConfig{
+			Endpoint: "grpc:50051",
+			RetryPolicy: &omniav1alpha1.GRPCRetryPolicy{
+				MaxAttempts:          3,
+				RetryableStatusCodes: []string{"UNAVAILABLE"},
+			},
+		},
+		Tool: &omniav1alpha1.ToolDefinition{
+			Name:        "my_tool",
+			Description: "A tool",
+			InputSchema: apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
+		},
+	}
+
+	entry, err := buildHandlerEntry(h, "grpc:50051")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if entry.GRPCConfig == nil || entry.GRPCConfig.RetryPolicy == nil {
+		t.Fatal("retry policy is nil")
+	}
+	if len(entry.GRPCConfig.RetryPolicy.RetryableStatusCodes) != 1 {
+		t.Errorf("RetryableStatusCodes = %v, want [UNAVAILABLE]", entry.GRPCConfig.RetryPolicy.RetryableStatusCodes)
+	}
+}
+
+func TestBuildHandlerEntry_MCPWithRetryPolicy(t *testing.T) {
+	endpoint := "http://mcp:8080"
+	h := &omniav1alpha1.HandlerDefinition{
+		Name: "retried-mcp",
+		Type: omniav1alpha1.HandlerTypeMCP,
+		MCPConfig: &omniav1alpha1.MCPConfig{
+			Transport: omniav1alpha1.MCPTransportSSE,
+			Endpoint:  &endpoint,
+			RetryPolicy: &omniav1alpha1.MCPRetryPolicy{
+				MaxAttempts: 2,
+			},
+		},
+	}
+
+	entry, err := buildHandlerEntry(h, "http://mcp:8080")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if entry.MCPConfig == nil || entry.MCPConfig.RetryPolicy == nil {
+		t.Fatal("retry policy is nil")
+	}
+	if entry.MCPConfig.RetryPolicy.MaxAttempts != 2 {
+		t.Errorf("MaxAttempts = %d, want 2", entry.MCPConfig.RetryPolicy.MaxAttempts)
+	}
+}
+
+func TestBuildHandlerEntry_OpenAPIWithRetryPolicy(t *testing.T) {
+	h := &omniav1alpha1.HandlerDefinition{
+		Name: "retried-openapi",
+		Type: omniav1alpha1.HandlerTypeOpenAPI,
+		OpenAPIConfig: &omniav1alpha1.OpenAPIConfig{
+			SpecURL: "http://api/openapi.json",
+			RetryPolicy: &omniav1alpha1.HTTPRetryPolicy{
+				MaxAttempts: 4,
+			},
+		},
+	}
+
+	entry, err := buildHandlerEntry(h, "http://api")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if entry.OpenAPIConfig == nil || entry.OpenAPIConfig.RetryPolicy == nil {
+		t.Fatal("retry policy is nil")
+	}
+	if entry.OpenAPIConfig.RetryPolicy.MaxAttempts != 4 {
+		t.Errorf("MaxAttempts = %d, want 4", entry.OpenAPIConfig.RetryPolicy.MaxAttempts)
 	}
 }

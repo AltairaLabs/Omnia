@@ -17,7 +17,9 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -193,8 +195,7 @@ func TestMCPTransportConstants(t *testing.T) {
 }
 
 func TestToolRegistryCreation(t *testing.T) {
-	timeout := "60s"
-	retries := int32(3)
+	timeout := metav1.Duration{Duration: 60 * time.Second}
 
 	registry := &ToolRegistry{
 		ObjectMeta: metav1.ObjectMeta{
@@ -218,7 +219,6 @@ func TestToolRegistryCreation(t *testing.T) {
 						},
 					},
 					Timeout: &timeout,
-					Retries: &retries,
 				},
 			},
 		},
@@ -533,5 +533,125 @@ func TestToolRegistryStatus(t *testing.T) {
 
 	if len(status.DiscoveredTools) != 2 {
 		t.Errorf("len(Status.DiscoveredTools) = %v, want 2", len(status.DiscoveredTools))
+	}
+}
+
+func TestHTTPRetryPolicy_JSONRoundTrip(t *testing.T) {
+	backoffMult := "2.0"
+	retryOnNetErr := true
+	respectRetryAfter := false
+
+	original := HTTPRetryPolicy{
+		MaxAttempts:         3,
+		InitialBackoff:      &metav1.Duration{Duration: 100 * time.Millisecond},
+		BackoffMultiplier:   &backoffMult,
+		MaxBackoff:          &metav1.Duration{Duration: 30 * time.Second},
+		RetryOn:             []int32{502, 503, 504},
+		RetryOnNetworkError: &retryOnNetErr,
+		RespectRetryAfter:   &respectRetryAfter,
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var decoded HTTPRetryPolicy
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if decoded.MaxAttempts != original.MaxAttempts {
+		t.Errorf("MaxAttempts = %v, want %v", decoded.MaxAttempts, original.MaxAttempts)
+	}
+	if decoded.InitialBackoff == nil || decoded.InitialBackoff.Duration != 100*time.Millisecond {
+		t.Errorf("InitialBackoff = %v, want 100ms", decoded.InitialBackoff)
+	}
+	if decoded.BackoffMultiplier == nil || *decoded.BackoffMultiplier != "2.0" {
+		t.Errorf("BackoffMultiplier = %v, want 2.0", decoded.BackoffMultiplier)
+	}
+	if decoded.MaxBackoff == nil || decoded.MaxBackoff.Duration != 30*time.Second {
+		t.Errorf("MaxBackoff = %v, want 30s", decoded.MaxBackoff)
+	}
+	if len(decoded.RetryOn) != 3 || decoded.RetryOn[0] != 502 {
+		t.Errorf("RetryOn = %v, want [502 503 504]", decoded.RetryOn)
+	}
+	if decoded.RetryOnNetworkError == nil || *decoded.RetryOnNetworkError != true {
+		t.Errorf("RetryOnNetworkError = %v, want true", decoded.RetryOnNetworkError)
+	}
+	if decoded.RespectRetryAfter == nil || *decoded.RespectRetryAfter != false {
+		t.Errorf("RespectRetryAfter = %v, want false", decoded.RespectRetryAfter)
+	}
+}
+
+func TestGRPCRetryPolicy_JSONRoundTrip(t *testing.T) {
+	backoffMult := "1.5"
+
+	original := GRPCRetryPolicy{
+		MaxAttempts:          5,
+		InitialBackoff:       &metav1.Duration{Duration: 50 * time.Millisecond},
+		BackoffMultiplier:    &backoffMult,
+		MaxBackoff:           &metav1.Duration{Duration: 10 * time.Second},
+		RetryableStatusCodes: []string{"UNAVAILABLE", "DEADLINE_EXCEEDED"},
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var decoded GRPCRetryPolicy
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if decoded.MaxAttempts != 5 {
+		t.Errorf("MaxAttempts = %v, want 5", decoded.MaxAttempts)
+	}
+	if decoded.InitialBackoff == nil || decoded.InitialBackoff.Duration != 50*time.Millisecond {
+		t.Errorf("InitialBackoff = %v, want 50ms", decoded.InitialBackoff)
+	}
+	if decoded.BackoffMultiplier == nil || *decoded.BackoffMultiplier != "1.5" {
+		t.Errorf("BackoffMultiplier = %v, want 1.5", decoded.BackoffMultiplier)
+	}
+	if decoded.MaxBackoff == nil || decoded.MaxBackoff.Duration != 10*time.Second {
+		t.Errorf("MaxBackoff = %v, want 10s", decoded.MaxBackoff)
+	}
+	if len(decoded.RetryableStatusCodes) != 2 || decoded.RetryableStatusCodes[0] != "UNAVAILABLE" {
+		t.Errorf("RetryableStatusCodes = %v, want [UNAVAILABLE DEADLINE_EXCEEDED]", decoded.RetryableStatusCodes)
+	}
+}
+
+func TestMCPRetryPolicy_JSONRoundTrip(t *testing.T) {
+	backoffMult := "2.0"
+
+	original := MCPRetryPolicy{
+		MaxAttempts:       2,
+		InitialBackoff:    &metav1.Duration{Duration: 200 * time.Millisecond},
+		BackoffMultiplier: &backoffMult,
+		MaxBackoff:        &metav1.Duration{Duration: 5 * time.Second},
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var decoded MCPRetryPolicy
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if decoded.MaxAttempts != 2 {
+		t.Errorf("MaxAttempts = %v, want 2", decoded.MaxAttempts)
+	}
+	if decoded.InitialBackoff == nil || decoded.InitialBackoff.Duration != 200*time.Millisecond {
+		t.Errorf("InitialBackoff = %v, want 200ms", decoded.InitialBackoff)
+	}
+	if decoded.BackoffMultiplier == nil || *decoded.BackoffMultiplier != "2.0" {
+		t.Errorf("BackoffMultiplier = %v, want 2.0", decoded.BackoffMultiplier)
+	}
+	if decoded.MaxBackoff == nil || decoded.MaxBackoff.Duration != 5*time.Second {
+		t.Errorf("MaxBackoff = %v, want 5s", decoded.MaxBackoff)
 	}
 }

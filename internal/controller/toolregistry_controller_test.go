@@ -1125,6 +1125,125 @@ var _ = Describe("ToolRegistry Controller", func() {
 			err := reconciler.validateHandler(handler)
 			Expect(err).NotTo(HaveOccurred())
 		})
+
+		It("should accept valid gRPC handler with retry policy", func() {
+			validMult := "3.0"
+			handler := &omniav1alpha1.HandlerDefinition{
+				Name: "grpc-with-retry",
+				Type: omniav1alpha1.HandlerTypeGRPC,
+				GRPCConfig: &omniav1alpha1.GRPCConfig{
+					Endpoint: "localhost:50051",
+					RetryPolicy: &omniav1alpha1.GRPCRetryPolicy{
+						MaxAttempts:       3,
+						BackoffMultiplier: &validMult,
+					},
+				},
+				Tool: &omniav1alpha1.ToolDefinition{
+					Name:        "grpc_tool",
+					Description: "A gRPC tool",
+					InputSchema: apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
+				},
+			}
+			err := reconciler.validateHandler(handler)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should reject gRPC handler with invalid retry backoff multiplier", func() {
+			badMult := "not-a-number"
+			handler := &omniav1alpha1.HandlerDefinition{
+				Name: "grpc-bad-retry",
+				Type: omniav1alpha1.HandlerTypeGRPC,
+				GRPCConfig: &omniav1alpha1.GRPCConfig{
+					Endpoint: "localhost:50051",
+					RetryPolicy: &omniav1alpha1.GRPCRetryPolicy{
+						MaxAttempts:       3,
+						BackoffMultiplier: &badMult,
+					},
+				},
+				Tool: &omniav1alpha1.ToolDefinition{
+					Name:        "grpc_tool",
+					Description: "A gRPC tool",
+					InputSchema: apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
+				},
+			}
+			err := reconciler.validateHandler(handler)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("backoffMultiplier"))
+		})
+
+		It("should accept valid MCP handler with retry policy", func() {
+			command := "/usr/bin/mcp-server"
+			validMult := "2.5"
+			handler := &omniav1alpha1.HandlerDefinition{
+				Name: "mcp-with-retry",
+				Type: omniav1alpha1.HandlerTypeMCP,
+				MCPConfig: &omniav1alpha1.MCPConfig{
+					Transport: omniav1alpha1.MCPTransportStdio,
+					Command:   &command,
+					RetryPolicy: &omniav1alpha1.MCPRetryPolicy{
+						MaxAttempts:       2,
+						BackoffMultiplier: &validMult,
+					},
+				},
+			}
+			err := reconciler.validateHandler(handler)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should reject MCP handler with invalid retry backoff multiplier", func() {
+			command := "/usr/bin/mcp-server"
+			badMult := "abc"
+			handler := &omniav1alpha1.HandlerDefinition{
+				Name: "mcp-bad-retry",
+				Type: omniav1alpha1.HandlerTypeMCP,
+				MCPConfig: &omniav1alpha1.MCPConfig{
+					Transport: omniav1alpha1.MCPTransportStdio,
+					Command:   &command,
+					RetryPolicy: &omniav1alpha1.MCPRetryPolicy{
+						MaxAttempts:       2,
+						BackoffMultiplier: &badMult,
+					},
+				},
+			}
+			err := reconciler.validateHandler(handler)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("backoffMultiplier"))
+		})
+
+		It("should accept valid OpenAPI handler with retry policy", func() {
+			validMult := "1.5"
+			handler := &omniav1alpha1.HandlerDefinition{
+				Name: "openapi-with-retry",
+				Type: omniav1alpha1.HandlerTypeOpenAPI,
+				OpenAPIConfig: &omniav1alpha1.OpenAPIConfig{
+					SpecURL: "http://api/openapi.json",
+					RetryPolicy: &omniav1alpha1.HTTPRetryPolicy{
+						MaxAttempts:       3,
+						BackoffMultiplier: &validMult,
+					},
+				},
+			}
+			err := reconciler.validateHandler(handler)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should reject OpenAPI handler with invalid retry backoff multiplier", func() {
+			badMult := "xyz"
+			handler := &omniav1alpha1.HandlerDefinition{
+				Name: "openapi-bad-retry",
+				Type: omniav1alpha1.HandlerTypeOpenAPI,
+				OpenAPIConfig: &omniav1alpha1.OpenAPIConfig{
+					SpecURL: "http://api/openapi.json",
+					RetryPolicy: &omniav1alpha1.HTTPRetryPolicy{
+						MaxAttempts:       3,
+						BackoffMultiplier: &badMult,
+					},
+				},
+			}
+			err := reconciler.validateHandler(handler)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("backoffMultiplier"))
+		})
 	})
 
 	Context("When resolving endpoints for different handler types", func() {

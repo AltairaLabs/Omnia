@@ -193,6 +193,38 @@ func (r *ToolRegistryReconciler) validateHandler(h *omniav1alpha1.HandlerDefinit
 			return fmt.Errorf("openAPIConfig is required for openapi handlers")
 		}
 	}
+
+	// Retry policy validation: invoke the per-transport builders with discarded
+	// results so any policy-level error (bad BackoffMultiplier, unknown gRPC
+	// status code, MaxBackoff < InitialBackoff, etc.) surfaces as a handler
+	// validation failure and feeds the existing HandlersValid condition.
+	return validateRetryPolicies(h)
+}
+
+// validateRetryPolicies invokes the per-transport retry policy builders on
+// the handler's config, discarding results and returning the first validation
+// error found.
+func validateRetryPolicies(h *omniav1alpha1.HandlerDefinition) error {
+	if h.HTTPConfig != nil && h.HTTPConfig.RetryPolicy != nil {
+		if _, err := buildHTTPRetryPolicy(h.HTTPConfig.RetryPolicy); err != nil {
+			return err
+		}
+	}
+	if h.GRPCConfig != nil && h.GRPCConfig.RetryPolicy != nil {
+		if _, err := buildGRPCRetryPolicy(h.GRPCConfig.RetryPolicy); err != nil {
+			return err
+		}
+	}
+	if h.MCPConfig != nil && h.MCPConfig.RetryPolicy != nil {
+		if _, err := buildMCPRetryPolicy(h.MCPConfig.RetryPolicy); err != nil {
+			return err
+		}
+	}
+	if h.OpenAPIConfig != nil && h.OpenAPIConfig.RetryPolicy != nil {
+		if _, err := buildHTTPRetryPolicy(h.OpenAPIConfig.RetryPolicy); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
