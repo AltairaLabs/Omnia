@@ -2979,6 +2979,17 @@ func TestExecuteHTTP_RetryWithURLTemplate(t *testing.T) {
 
 // --- Integration tests: circuit breaker through OmniaExecutor.Execute() ---
 
+// newHTTPExecutor creates an OmniaExecutor wired to a single HTTP handler.
+// Unlike executeHTTPTool, it returns the executor for repeated calls (needed
+// for circuit breaker state accumulation).
+func newHTTPExecutor(t *testing.T, cfg *HTTPCfg) (*OmniaExecutor, *pktools.ToolDescriptor) {
+	t.Helper()
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.handlers["h"] = &HandlerEntry{Name: "h", Type: ToolTypeHTTP, HTTPConfig: cfg}
+	e.toolHandlers["tool"] = "h"
+	return e, &pktools.ToolDescriptor{Name: "tool"}
+}
+
 func TestExecuteHTTP_CircuitBreakerOpensAfterServerErrors(t *testing.T) {
 	serverCalls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -2989,18 +3000,7 @@ func TestExecuteHTTP_CircuitBreakerOpensAfterServerErrors(t *testing.T) {
 	defer srv.Close()
 
 	// Use a single executor so the breaker accumulates state across calls.
-	e := NewOmniaExecutor(logr.Discard(), nil)
-	e.handlers["cb-http"] = &HandlerEntry{
-		Name: "cb-http",
-		Type: ToolTypeHTTP,
-		HTTPConfig: &HTTPCfg{
-			Endpoint: srv.URL,
-			Method:   "GET",
-		},
-	}
-	e.toolHandlers["cb-tool"] = "cb-http"
-
-	desc := &pktools.ToolDescriptor{Name: "cb-tool"}
+	e, desc := newHTTPExecutor(t, &HTTPCfg{Endpoint: srv.URL, Method: "GET"})
 
 	// Make cbMaxConsecutiveFailures calls — all hit the server and fail.
 	for i := 0; i < cbMaxConsecutiveFailures; i++ {
@@ -3036,18 +3036,7 @@ func TestExecuteHTTP_CircuitBreakerDoesNotTripOn4xx(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := NewOmniaExecutor(logr.Discard(), nil)
-	e.handlers["cb-4xx"] = &HandlerEntry{
-		Name: "cb-4xx",
-		Type: ToolTypeHTTP,
-		HTTPConfig: &HTTPCfg{
-			Endpoint: srv.URL,
-			Method:   "GET",
-		},
-	}
-	e.toolHandlers["cb-4xx-tool"] = "cb-4xx"
-
-	desc := &pktools.ToolDescriptor{Name: "cb-4xx-tool"}
+	e, desc := newHTTPExecutor(t, &HTTPCfg{Endpoint: srv.URL, Method: "GET"})
 
 	// Make more than cbMaxConsecutiveFailures calls with 400 — breaker should NOT open.
 	for i := 0; i < cbMaxConsecutiveFailures+2; i++ {
