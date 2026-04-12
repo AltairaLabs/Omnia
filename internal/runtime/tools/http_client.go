@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -297,11 +298,16 @@ func buildSimpleBodyAndQuery(cfg *HTTPCfg, method, reqURL string, hasArgs bool, 
 // resolveURLTemplate replaces {param} placeholders in the template with values
 // from args, returning the resolved URL and the remaining args (with consumed
 // keys removed).
+// cloneArgs returns a shallow copy of the args map so callers can delete
+// consumed keys without mutating the original.
+func cloneArgs(args map[string]any) map[string]any {
+	out := make(map[string]any, len(args))
+	maps.Copy(out, args)
+	return out
+}
+
 func resolveURLTemplate(tmpl string, args map[string]any) (string, map[string]any) {
-	remaining := make(map[string]any, len(args))
-	for k, v := range args {
-		remaining[k] = v
-	}
+	remaining := cloneArgs(args)
 	for key, val := range args {
 		placeholder := "{" + key + "}"
 		if strings.Contains(tmpl, placeholder) {
@@ -315,10 +321,7 @@ func resolveURLTemplate(tmpl string, args map[string]any) (string, map[string]an
 // extractHeaderParams extracts arg fields listed in headerParams, returning the
 // header map (argField→headerName→value) and the remaining args.
 func extractHeaderParams(headerParams map[string]string, args map[string]any) (map[string]string, map[string]any) {
-	remaining := make(map[string]any, len(args))
-	for k, v := range args {
-		remaining[k] = v
-	}
+	remaining := cloneArgs(args)
 	extracted := make(map[string]string, len(headerParams))
 	for argField, headerName := range headerParams {
 		if val, ok := remaining[argField]; ok {
@@ -332,10 +335,7 @@ func extractHeaderParams(headerParams map[string]string, args map[string]any) (m
 // extractQueryParams extracts the named fields from args, returning the extracted
 // fields and the remaining args.
 func extractQueryParams(paramNames []string, args map[string]any) (map[string]any, map[string]any) {
-	remaining := make(map[string]any, len(args))
-	for k, v := range args {
-		remaining[k] = v
-	}
+	remaining := cloneArgs(args)
 	extracted := make(map[string]any, len(paramNames))
 	for _, name := range paramNames {
 		if val, ok := remaining[name]; ok {
@@ -358,9 +358,7 @@ func mergeStaticBody(staticBody interface{}, args map[string]any) map[string]any
 	switch sb := staticBody.(type) {
 	case map[string]any:
 		base = make(map[string]any, len(sb))
-		for k, v := range sb {
-			base[k] = v
-		}
+		maps.Copy(base, sb)
 	default:
 		// Try JSON round-trip for other types.
 		data, err := json.Marshal(staticBody)
@@ -372,9 +370,7 @@ func mergeStaticBody(staticBody interface{}, args map[string]any) map[string]any
 		}
 	}
 	// Args override static body.
-	for k, v := range args {
-		base[k] = v
-	}
+	maps.Copy(base, args)
 	return base
 }
 
