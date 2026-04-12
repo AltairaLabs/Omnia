@@ -351,6 +351,29 @@ func TestStart_InitialLoadError(t *testing.T) {
 	assert.Contains(t, err.Error(), "initial policy load failed")
 }
 
+func TestEffectivePolicy_IncludesEncryption(t *testing.T) {
+	w := &PolicyWatcher{log: logr.Discard()}
+	policy := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "global", Namespace: "omnia-system"},
+		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
+			Level:     omniav1alpha1.PolicyLevelGlobal,
+			Recording: omniav1alpha1.RecordingConfig{Enabled: true},
+			Encryption: &omniav1alpha1.EncryptionConfig{
+				Enabled:     true,
+				KMSProvider: omniav1alpha1.KMSProviderAWSKMS,
+				KeyID:       "arn:aws:kms:us-east-1:123:key/test",
+			},
+		},
+	}
+	w.policies.Store("omnia-system/global", policy)
+
+	eff := w.GetEffectivePolicy("default", "my-agent")
+	require.NotNil(t, eff)
+	assert.True(t, eff.Encryption.Enabled)
+	assert.Equal(t, "arn:aws:kms:us-east-1:123:key/test", eff.Encryption.KeyID)
+	assert.Equal(t, omniav1alpha1.KMSProviderAWSKMS, eff.Encryption.KMSProvider)
+}
+
 func TestStart_PollPicksUpNewPolicies(t *testing.T) {
 	scheme := testScheme()
 

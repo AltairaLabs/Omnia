@@ -27,6 +27,8 @@ type EffectivePolicy struct {
 	Recording omniav1alpha1.RecordingConfig
 	// UserOptOut holds the effective user opt-out config.
 	UserOptOut *omniav1alpha1.UserOptOutConfig
+	// Encryption holds the effective encryption config for KMS provider selection.
+	Encryption omniav1alpha1.EncryptionConfig
 }
 
 // PolicyWatcher polls SessionPrivacyPolicy CRDs and maintains an in-memory
@@ -117,10 +119,14 @@ func (w *PolicyWatcher) GetEffectivePolicy(namespace, agentName string) *Effecti
 	}
 
 	spec := ComputeEffectivePolicy(chain)
-	return &EffectivePolicy{
+	eff := &EffectivePolicy{
 		Recording:  spec.Recording,
 		UserOptOut: spec.UserOptOut,
 	}
+	if spec.Encryption != nil {
+		eff.Encryption = *spec.Encryption
+	}
+	return eff
 }
 
 // collectPolicies returns all cached policies as a slice.
