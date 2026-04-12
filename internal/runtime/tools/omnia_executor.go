@@ -706,6 +706,8 @@ func (e *OmniaExecutor) buildMCPTransport(cfg *MCPCfg) (mcp.Transport, error) {
 	switch MCPTransportType(cfg.Transport) {
 	case MCPTransportSSE:
 		return &mcp.SSEClientTransport{Endpoint: cfg.Endpoint}, nil
+	case MCPTransportStreamableHTTP:
+		return &mcp.StreamableClientTransport{Endpoint: cfg.Endpoint}, nil
 	case MCPTransportStdio:
 		cmd := exec.Command(cfg.Command, cfg.Args...)
 		if cfg.WorkDir != "" {
