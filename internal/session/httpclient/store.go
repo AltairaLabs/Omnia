@@ -752,7 +752,7 @@ func (s *Store) GetPrivacyPolicy(ctx context.Context, namespace, agent string) (
 	params.Set("agent", agent)
 	path := "/api/v1/privacy-policy?" + params.Encode()
 
-	resp, err := s.doRequest(ctx, http.MethodGet, path, nil)
+	resp, err := s.doWithRetryInner(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("get privacy policy: %w", err)
 	}
