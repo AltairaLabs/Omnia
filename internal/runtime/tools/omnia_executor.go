@@ -256,6 +256,7 @@ func (e *OmniaExecutor) buildDescriptor(toolName string, h *HandlerEntry) *pktoo
 	if h.Tool != nil {
 		desc.Description = h.Tool.Description
 		desc.InputSchema = marshalSchema(h.Tool.InputSchema)
+		desc.OutputSchema = marshalSchema(h.Tool.OutputSchema)
 	}
 
 	switch h.Type {
