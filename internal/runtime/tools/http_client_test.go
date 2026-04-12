@@ -193,3 +193,225 @@ func TestDoHTTPRequest_GETWithQueryParams(t *testing.T) {
 		t.Errorf("expected query to contain 'n=1', got %q", receivedQuery)
 	}
 }
+
+func TestDoHTTPRequest_URLTemplate(t *testing.T) {
+	var receivedPath string
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		receivedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	cfg := &HTTPCfg{
+		Endpoint:    srv.URL, // fallback, should not be used
+		URLTemplate: srv.URL + "/users/{id}/posts",
+		Method:      "POST",
+	}
+	args := json.RawMessage(`{"id":"123","title":"Hello"}`)
+	_, _, err := doHTTPRequest(context.Background(), srv.Client(), cfg, nil, args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedPath != "/users/123/posts" {
+		t.Errorf("expected path /users/123/posts, got %q", receivedPath)
+	}
+	// "id" should be consumed; only "title" should be in the body.
+	var body map[string]any
+	if err := json.Unmarshal(receivedBody, &body); err != nil {
+		t.Fatalf("failed to unmarshal body: %v", err)
+	}
+	if _, ok := body["id"]; ok {
+		t.Error("expected 'id' to be consumed by URL template, but it was in the body")
+	}
+	if body["title"] != "Hello" {
+		t.Errorf("expected title=Hello in body, got %v", body["title"])
+	}
+}
+
+func TestDoHTTPRequest_StaticQuery(t *testing.T) {
+	var receivedQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	cfg := &HTTPCfg{
+		Endpoint: srv.URL,
+		Method:   "POST",
+		StaticQuery: map[string]string{
+			"api_key": "secret123",
+			"format":  "json",
+		},
+	}
+	_, _, err := doHTTPRequest(context.Background(), srv.Client(), cfg, nil, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(receivedQuery, "api_key=secret123") {
+		t.Errorf("expected query to contain 'api_key=secret123', got %q", receivedQuery)
+	}
+	if !strings.Contains(receivedQuery, "format=json") {
+		t.Errorf("expected query to contain 'format=json', got %q", receivedQuery)
+	}
+}
+
+func TestDoHTTPRequest_QueryParams_POST(t *testing.T) {
+	var receivedQuery string
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedQuery = r.URL.RawQuery
+		receivedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	cfg := &HTTPCfg{
+		Endpoint:    srv.URL,
+		Method:      "POST",
+		QueryParams: []string{"page", "limit"},
+	}
+	args := json.RawMessage(`{"page":"1","limit":"10","data":"value"}`)
+	_, _, err := doHTTPRequest(context.Background(), srv.Client(), cfg, nil, args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(receivedQuery, "page=1") {
+		t.Errorf("expected query to contain 'page=1', got %q", receivedQuery)
+	}
+	if !strings.Contains(receivedQuery, "limit=10") {
+		t.Errorf("expected query to contain 'limit=10', got %q", receivedQuery)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(receivedBody, &body); err != nil {
+		t.Fatalf("failed to unmarshal body: %v", err)
+	}
+	if body["data"] != "value" {
+		t.Errorf("expected data=value in body, got %v", body["data"])
+	}
+	if _, ok := body["page"]; ok {
+		t.Error("expected 'page' to be extracted as query param, but it was in the body")
+	}
+	if _, ok := body["limit"]; ok {
+		t.Error("expected 'limit' to be extracted as query param, but it was in the body")
+	}
+}
+
+func TestDoHTTPRequest_HeaderParams(t *testing.T) {
+	var receivedUserID string
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedUserID = r.Header.Get("X-User-ID")
+		receivedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	cfg := &HTTPCfg{
+		Endpoint:     srv.URL,
+		Method:       "POST",
+		HeaderParams: map[string]string{"user_id": "X-User-ID"},
+	}
+	args := json.RawMessage(`{"user_id":"abc","query":"hello"}`)
+	_, _, err := doHTTPRequest(context.Background(), srv.Client(), cfg, nil, args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedUserID != "abc" {
+		t.Errorf("expected X-User-ID header 'abc', got %q", receivedUserID)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(receivedBody, &body); err != nil {
+		t.Fatalf("failed to unmarshal body: %v", err)
+	}
+	if _, ok := body["user_id"]; ok {
+		t.Error("expected 'user_id' to be consumed by HeaderParams, but it was in the body")
+	}
+	if body["query"] != "hello" {
+		t.Errorf("expected query=hello in body, got %v", body["query"])
+	}
+}
+
+func TestDoHTTPRequest_StaticBody(t *testing.T) {
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	cfg := &HTTPCfg{
+		Endpoint: srv.URL,
+		Method:   "POST",
+		StaticBody: map[string]any{
+			"version":  "2.0",
+			"default":  "static_val",
+			"override": "should_be_overridden",
+		},
+	}
+	args := json.RawMessage(`{"override":"from_args","extra":"dynamic"}`)
+	_, _, err := doHTTPRequest(context.Background(), srv.Client(), cfg, nil, args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(receivedBody, &body); err != nil {
+		t.Fatalf("failed to unmarshal body: %v", err)
+	}
+	if body["version"] != "2.0" {
+		t.Errorf("expected version=2.0 from static body, got %v", body["version"])
+	}
+	if body["default"] != "static_val" {
+		t.Errorf("expected default=static_val from static body, got %v", body["default"])
+	}
+	if body["override"] != "from_args" {
+		t.Errorf("expected override=from_args (args win), got %v", body["override"])
+	}
+	if body["extra"] != "dynamic" {
+		t.Errorf("expected extra=dynamic from args, got %v", body["extra"])
+	}
+}
+
+func TestDoHTTPRequest_Redact(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"name":"Alice","ssn":"123-45-6789","age":30}`))
+	}))
+	defer srv.Close()
+
+	cfg := &HTTPCfg{
+		Endpoint: srv.URL,
+		Method:   "GET",
+		Redact:   []string{"ssn"},
+	}
+	result, _, err := doHTTPRequest(context.Background(), srv.Client(), cfg, nil, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(result, &got); err != nil {
+		t.Fatalf("result is not valid JSON: %v", err)
+	}
+	if got["ssn"] != "[REDACTED]" {
+		t.Errorf("expected ssn=[REDACTED], got %v", got["ssn"])
+	}
+	if got["name"] != "Alice" {
+		t.Errorf("expected name=Alice (not redacted), got %v", got["name"])
+	}
+	if got["age"] != float64(30) {
+		t.Errorf("expected age=30 (not redacted), got %v", got["age"])
+	}
+}
