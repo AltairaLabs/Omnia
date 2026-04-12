@@ -104,9 +104,6 @@ func TestOmniaExecutor_New(t *testing.T) {
 	if e.grpcClients == nil {
 		t.Error("grpcClients map not initialized")
 	}
-	if e.httpExecutor == nil {
-		t.Error("httpExecutor not initialized")
-	}
 	if e.breakers == nil {
 		t.Error("breakers not initialized")
 	}
@@ -1442,6 +1439,7 @@ func TestOmniaExecutor_ExecuteGRPC_WithMockClient(t *testing.T) {
 		},
 	}
 	e.grpcClients["grpc-handler"] = mock
+	e.handlers["grpc-handler"] = &HandlerEntry{Name: "grpc-handler", Type: ToolTypeGRPC}
 
 	result, err := e.executeGRPC(context.Background(), "grpc-tool", "grpc-handler", json.RawMessage(`{"q":"test"}`))
 	if err != nil {
@@ -1458,6 +1456,7 @@ func TestOmniaExecutor_ExecuteGRPC_MockClientError(t *testing.T) {
 		executeErr: fmt.Errorf("connection refused"),
 	}
 	e.grpcClients["grpc-handler"] = mock
+	e.handlers["grpc-handler"] = &HandlerEntry{Name: "grpc-handler", Type: ToolTypeGRPC}
 
 	_, err := e.executeGRPC(context.Background(), "grpc-tool", "grpc-handler", nil)
 	if err == nil {
@@ -1477,6 +1476,7 @@ func TestOmniaExecutor_ExecuteGRPC_MockClientToolError(t *testing.T) {
 		},
 	}
 	e.grpcClients["grpc-handler"] = mock
+	e.handlers["grpc-handler"] = &HandlerEntry{Name: "grpc-handler", Type: ToolTypeGRPC}
 
 	_, err := e.executeGRPC(context.Background(), "grpc-tool", "grpc-handler", nil)
 	if err == nil {
@@ -1495,6 +1495,7 @@ func TestOmniaExecutor_ExecuteGRPC_MetadataInjection(t *testing.T) {
 		},
 	}
 	e.grpcClients["grpc-handler"] = mock
+	e.handlers["grpc-handler"] = &HandlerEntry{Name: "grpc-handler", Type: ToolTypeGRPC}
 
 	// Pass args to exercise the metadata injection path
 	args := json.RawMessage(`{"param":"value"}`)
@@ -2182,6 +2183,7 @@ func TestOmniaExecutor_ExecuteMCP_Success(t *testing.T) {
 
 	e := NewOmniaExecutor(logr.Discard(), nil)
 	e.mcpSessions["test-mcp"] = session
+	e.handlers["test-mcp"] = &HandlerEntry{Name: "test-mcp", Type: ToolTypeMCP}
 
 	result, err := e.executeMCP(context.Background(), "echo", "test-mcp", json.RawMessage(`{}`))
 	if err != nil {
@@ -2238,6 +2240,7 @@ func TestOmniaExecutor_ExecuteMCP_WithArgs(t *testing.T) {
 
 	e := NewOmniaExecutor(logr.Discard(), nil)
 	e.mcpSessions["test-mcp"] = session
+	e.handlers["test-mcp"] = &HandlerEntry{Name: "test-mcp", Type: ToolTypeMCP}
 
 	result, err := e.executeMCP(context.Background(), "greet", "test-mcp", json.RawMessage(`{"name":"Alice"}`))
 	if err != nil {
@@ -2288,6 +2291,7 @@ func TestOmniaExecutor_ExecuteMCP_EmptyArgs(t *testing.T) {
 
 	e := NewOmniaExecutor(logr.Discard(), nil)
 	e.mcpSessions["test-mcp"] = session
+	e.handlers["test-mcp"] = &HandlerEntry{Name: "test-mcp", Type: ToolTypeMCP}
 
 	// Empty args (nil)
 	result, err := e.executeMCP(context.Background(), "ping", "test-mcp", nil)
