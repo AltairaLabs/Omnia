@@ -35,6 +35,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sony/gobreaker/v2"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
@@ -2973,5 +2974,123 @@ func TestExecuteHTTP_RetryWithURLTemplate(t *testing.T) {
 	}
 	if string(result) != `{"result":"ok"}` {
 		t.Errorf("unexpected result: %s", result)
+	}
+}
+
+// --- Integration tests: circuit breaker through OmniaExecutor.Execute() ---
+
+func TestExecuteHTTP_CircuitBreakerOpensAfterServerErrors(t *testing.T) {
+	serverCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		serverCalls++
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("bad gateway"))
+	}))
+	defer srv.Close()
+
+	// Use a single executor so the breaker accumulates state across calls.
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.handlers["cb-http"] = &HandlerEntry{
+		Name: "cb-http",
+		Type: ToolTypeHTTP,
+		HTTPConfig: &HTTPCfg{
+			Endpoint: srv.URL,
+			Method:   "GET",
+		},
+	}
+	e.toolHandlers["cb-tool"] = "cb-http"
+
+	desc := &pktools.ToolDescriptor{Name: "cb-tool"}
+
+	// Make cbMaxConsecutiveFailures calls — all hit the server and fail.
+	for i := 0; i < cbMaxConsecutiveFailures; i++ {
+		_, err := e.Execute(context.Background(), desc, json.RawMessage(`{}`))
+		if err == nil {
+			t.Fatalf("call %d: expected error, got nil", i)
+		}
+	}
+	if serverCalls != cbMaxConsecutiveFailures {
+		t.Fatalf("expected %d server calls, got %d", cbMaxConsecutiveFailures, serverCalls)
+	}
+
+	// Next call should be rejected by the breaker WITHOUT hitting the server.
+	serverCallsBefore := serverCalls
+	_, err := e.Execute(context.Background(), desc, json.RawMessage(`{}`))
+	if err == nil {
+		t.Fatal("expected circuit breaker error, got nil")
+	}
+	if !errors.Is(err, gobreaker.ErrOpenState) {
+		t.Fatalf("expected ErrOpenState, got: %v", err)
+	}
+	if serverCalls != serverCallsBefore {
+		t.Fatal("server was called despite open circuit")
+	}
+}
+
+func TestExecuteHTTP_CircuitBreakerDoesNotTripOn4xx(t *testing.T) {
+	serverCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		serverCalls++
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("bad request"))
+	}))
+	defer srv.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.handlers["cb-4xx"] = &HandlerEntry{
+		Name: "cb-4xx",
+		Type: ToolTypeHTTP,
+		HTTPConfig: &HTTPCfg{
+			Endpoint: srv.URL,
+			Method:   "GET",
+		},
+	}
+	e.toolHandlers["cb-4xx-tool"] = "cb-4xx"
+
+	desc := &pktools.ToolDescriptor{Name: "cb-4xx-tool"}
+
+	// Make more than cbMaxConsecutiveFailures calls with 400 — breaker should NOT open.
+	for i := 0; i < cbMaxConsecutiveFailures+2; i++ {
+		_, _ = e.Execute(context.Background(), desc, json.RawMessage(`{}`))
+	}
+
+	// All calls should have hit the server (breaker stayed closed).
+	if serverCalls != cbMaxConsecutiveFailures+2 {
+		t.Errorf("expected %d server calls (breaker should stay closed for 4xx), got %d",
+			cbMaxConsecutiveFailures+2, serverCalls)
+	}
+}
+
+func TestExecuteGRPC_CircuitBreakerOpensAfterServerErrors(t *testing.T) {
+	mock := &failNTimesGRPCClient{
+		failCount: cbMaxConsecutiveFailures + 5,
+		failErr:   grpcStatus.Error(grpcCodes.Internal, "server error"),
+	}
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.grpcClients["cb-grpc"] = mock
+	e.handlers["cb-grpc"] = &HandlerEntry{
+		Name:       "cb-grpc",
+		Type:       ToolTypeGRPC,
+		GRPCConfig: &GRPCCfg{Endpoint: "localhost:50051"},
+	}
+	e.toolHandlers["cb-grpc-tool"] = "cb-grpc"
+
+	// Make cbMaxConsecutiveFailures calls.
+	for i := 0; i < cbMaxConsecutiveFailures; i++ {
+		_, _ = e.executeGRPC(context.Background(), "cb-grpc-tool", "cb-grpc", json.RawMessage(`{}`))
+	}
+
+	// Next call should be rejected by breaker.
+	callsBefore := mock.calls
+	_, err := e.executeGRPC(context.Background(), "cb-grpc-tool", "cb-grpc", json.RawMessage(`{}`))
+	if err == nil {
+		t.Fatal("expected circuit breaker error")
+	}
+	if !errors.Is(err, gobreaker.ErrOpenState) {
+		t.Fatalf("expected ErrOpenState, got: %v", err)
+	}
+	if mock.calls != callsBefore {
+		t.Fatal("gRPC client was called despite open circuit")
 	}
 }
