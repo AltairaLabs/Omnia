@@ -115,6 +115,7 @@ rules:
       - promptpacks
       - providers
       - sessionretentionpolicies
+      - skillsources
       - toolpolicies
       - toolregistries
       - workspaces
@@ -134,6 +135,7 @@ rules:
       - promptpacks/finalizers
       - providers/finalizers
       - sessionretentionpolicies/finalizers
+      - skillsources/finalizers
       - toolregistries/finalizers
       - workspaces/finalizers
     verbs:
@@ -146,6 +148,7 @@ rules:
       - promptpacks/status
       - providers/status
       - sessionretentionpolicies/status
+      - skillsources/status
       - toolregistries/status
       - workspaces/status
     verbs:
