@@ -30,10 +30,10 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
-	"github.com/altairalabs/omnia/ee/pkg/arena/fetcher"
 	arenaTemplate "github.com/altairalabs/omnia/ee/pkg/arena/template"
 	"github.com/altairalabs/omnia/ee/pkg/license"
 	"github.com/altairalabs/omnia/ee/pkg/workspace"
+	"github.com/altairalabs/omnia/internal/sourcesync"
 )
 
 // ArenaTemplateSource condition types
@@ -61,7 +61,7 @@ type templateFetchJob struct {
 
 // templateFetchResult represents the result of a completed fetch operation
 type templateFetchResult struct {
-	artifact  *fetcher.Artifact
+	artifact  *sourcesync.Artifact
 	templates []arenaTemplate.Template
 	err       error
 }
@@ -349,7 +349,7 @@ func (r *ArenaTemplateSourceReconciler) doFetchAsync(
 	}()
 
 	// Create fetcher options
-	opts := fetcher.Options{
+	opts := sourcesync.Options{
 		Timeout: timeout,
 		WorkDir: os.TempDir(),
 	}
@@ -374,7 +374,7 @@ func (r *ArenaTemplateSourceReconciler) doFetchAsync(
 		log.V(1).Info("Content already up to date", "revision", revision)
 		// Return a "no change" result - still scan templates in case definition changed
 		r.results.Store(key, &templateFetchResult{
-			artifact: &fetcher.Artifact{Revision: revision},
+			artifact: &sourcesync.Artifact{Revision: revision},
 			err:      nil,
 		})
 		return
@@ -421,8 +421,8 @@ func (r *ArenaTemplateSourceReconciler) createFetcher(
 	ctx context.Context,
 	spec *omniav1alpha1.ArenaTemplateSourceSpec,
 	namespace string,
-	opts fetcher.Options,
-) (fetcher.Fetcher, error) {
+	opts sourcesync.Options,
+) (sourcesync.Fetcher, error) {
 	switch spec.Type {
 	case omniav1alpha1.ArenaTemplateSourceTypeGit:
 		return r.createGitFetcher(ctx, spec, namespace, opts)
@@ -440,13 +440,13 @@ func (r *ArenaTemplateSourceReconciler) createGitFetcher(
 	ctx context.Context,
 	spec *omniav1alpha1.ArenaTemplateSourceSpec,
 	namespace string,
-	opts fetcher.Options,
-) (fetcher.Fetcher, error) {
+	opts sourcesync.Options,
+) (sourcesync.Fetcher, error) {
 	if spec.Git == nil {
 		return nil, fmt.Errorf("git configuration is required for git source type")
 	}
 
-	config := fetcher.GitFetcherConfig{
+	config := sourcesync.GitFetcherConfig{
 		URL:     spec.Git.URL,
 		Path:    spec.Git.Path,
 		Options: opts,
@@ -454,7 +454,7 @@ func (r *ArenaTemplateSourceReconciler) createGitFetcher(
 
 	// Set Git reference
 	if spec.Git.Ref != nil {
-		config.Ref = fetcher.GitRef{
+		config.Ref = sourcesync.GitRef{
 			Branch: spec.Git.Ref.Branch,
 			Tag:    spec.Git.Ref.Tag,
 			Commit: spec.Git.Ref.Commit,
@@ -463,14 +463,14 @@ func (r *ArenaTemplateSourceReconciler) createGitFetcher(
 
 	// Load credentials if specified
 	if spec.Git.SecretRef != nil {
-		creds, err := LoadGitCredentials(ctx, r.Client, namespace, spec.Git.SecretRef.Name)
+		creds, err := sourcesync.LoadGitCredentials(ctx, r.Client, namespace, spec.Git.SecretRef.Name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load git credentials: %w", err)
 		}
 		config.Credentials = creds
 	}
 
-	return fetcher.NewGitFetcher(config), nil
+	return sourcesync.NewGitFetcher(config), nil
 }
 
 // createOCIFetcher creates an OCI fetcher from the source spec.
@@ -478,13 +478,13 @@ func (r *ArenaTemplateSourceReconciler) createOCIFetcher(
 	ctx context.Context,
 	spec *omniav1alpha1.ArenaTemplateSourceSpec,
 	namespace string,
-	opts fetcher.Options,
-) (fetcher.Fetcher, error) {
+	opts sourcesync.Options,
+) (sourcesync.Fetcher, error) {
 	if spec.OCI == nil {
 		return nil, fmt.Errorf("oci configuration is required for oci source type")
 	}
 
-	config := fetcher.OCIFetcherConfig{
+	config := sourcesync.OCIFetcherConfig{
 		URL:      spec.OCI.URL,
 		Insecure: spec.OCI.Insecure,
 		Options:  opts,
@@ -492,40 +492,40 @@ func (r *ArenaTemplateSourceReconciler) createOCIFetcher(
 
 	// Load credentials if specified
 	if spec.OCI.SecretRef != nil {
-		creds, err := LoadOCICredentials(ctx, r.Client, namespace, spec.OCI.SecretRef.Name)
+		creds, err := sourcesync.LoadOCICredentials(ctx, r.Client, namespace, spec.OCI.SecretRef.Name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load oci credentials: %w", err)
 		}
 		config.Credentials = creds
 	}
 
-	return fetcher.NewOCIFetcher(config), nil
+	return sourcesync.NewOCIFetcher(config), nil
 }
 
 // createConfigMapFetcher creates a ConfigMap fetcher from the source spec.
 func (r *ArenaTemplateSourceReconciler) createConfigMapFetcher(
 	spec *omniav1alpha1.ArenaTemplateSourceSpec,
 	namespace string,
-	opts fetcher.Options,
-) (fetcher.Fetcher, error) {
+	opts sourcesync.Options,
+) (sourcesync.Fetcher, error) {
 	if spec.ConfigMap == nil {
 		return nil, fmt.Errorf("configmap configuration is required for configmap source type")
 	}
 
-	config := fetcher.ConfigMapFetcherConfig{
+	config := sourcesync.ConfigMapFetcherConfig{
 		Name:      spec.ConfigMap.Name,
 		Namespace: namespace,
 		Options:   opts,
 	}
 
-	return fetcher.NewConfigMapFetcher(config, r.Client), nil
+	return sourcesync.NewConfigMapFetcher(config, r.Client), nil
 }
 
 // storeArtifact stores the fetched artifact by syncing to the workspace content filesystem.
 func (r *ArenaTemplateSourceReconciler) storeArtifact(
 	ctx context.Context,
 	source *omniav1alpha1.ArenaTemplateSource,
-	artifact *fetcher.Artifact,
+	artifact *sourcesync.Artifact,
 ) (contentPath, version string, err error) {
 	// If artifact has no path (no-change result), return existing values
 	if artifact.Path == "" && source.Status.Artifact != nil {
@@ -542,13 +542,15 @@ func (r *ArenaTemplateSourceReconciler) storeArtifact(
 	workspaceName := GetWorkspaceForNamespace(ctx, r.Client, source.Namespace)
 	targetPath := fmt.Sprintf("arena/template-sources/%s", source.Name)
 
-	syncer := &FilesystemSyncer{
+	syncer := &sourcesync.FilesystemSyncer{
 		WorkspaceContentPath: r.WorkspaceContentPath,
 		MaxVersionsPerSource: r.MaxVersionsPerSource,
-		StorageManager:       r.StorageManager,
+	}
+	if r.StorageManager != nil {
+		syncer.StorageManager = r.StorageManager
 	}
 
-	return syncer.SyncToFilesystem(ctx, SyncParams{
+	return syncer.SyncToFilesystem(ctx, sourcesync.SyncParams{
 		WorkspaceName: workspaceName,
 		Namespace:     source.Namespace,
 		TargetPath:    targetPath,

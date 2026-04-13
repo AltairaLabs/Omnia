@@ -1,12 +1,10 @@
 /*
 Copyright 2026 Altaira Labs.
 
-SPDX-License-Identifier: FSL-1.1-Apache-2.0
-This file is part of Omnia Enterprise and is subject to the
-Functional Source License. See ee/LICENSE for details.
+SPDX-License-Identifier: Apache-2.0
 */
 
-package controller
+package sourcesync
 
 import (
 	"context"
@@ -14,19 +12,17 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/altairalabs/omnia/ee/pkg/arena/fetcher"
 )
 
 // LoadGitCredentials loads Git credentials from a Kubernetes Secret.
 // It supports both HTTPS (username/password) and SSH (identity/known_hosts) credentials.
-func LoadGitCredentials(ctx context.Context, c client.Reader, namespace, secretName string) (*fetcher.GitCredentials, error) {
+func LoadGitCredentials(ctx context.Context, c client.Reader, namespace, secretName string) (*GitCredentials, error) {
 	secret := &corev1.Secret{}
 	if err := c.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err != nil {
 		return nil, err
 	}
 
-	creds := &fetcher.GitCredentials{}
+	creds := &GitCredentials{}
 
 	// HTTPS credentials
 	if username, ok := secret.Data["username"]; ok {
@@ -49,13 +45,13 @@ func LoadGitCredentials(ctx context.Context, c client.Reader, namespace, secretN
 
 // LoadOCICredentials loads OCI registry credentials from a Kubernetes Secret.
 // It supports basic auth (username/password) and Docker config (.dockerconfigjson) credentials.
-func LoadOCICredentials(ctx context.Context, c client.Reader, namespace, secretName string) (*fetcher.OCICredentials, error) {
+func LoadOCICredentials(ctx context.Context, c client.Reader, namespace, secretName string) (*OCICredentials, error) {
 	secret := &corev1.Secret{}
 	if err := c.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err != nil {
 		return nil, err
 	}
 
-	creds := &fetcher.OCICredentials{}
+	creds := &OCICredentials{}
 
 	// Basic auth credentials
 	if username, ok := secret.Data["username"]; ok {

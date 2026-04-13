@@ -72,11 +72,11 @@ linters:
         text: "main"
       - linters:
           - gocognit
-        path: ee/pkg/arena/fetcher/dir\.go
+        path: internal/sourcesync/dir\.go
         text: "CopyDirectoryExcluding"
       - linters:
           - gocognit
-        path: ee/pkg/arena/fetcher/oci\.go
+        path: internal/sourcesync/oci\.go
         text: "extractOCITarToDir"
       - linters:
           - gocyclo

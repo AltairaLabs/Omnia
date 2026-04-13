@@ -22,9 +22,10 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
-	"github.com/altairalabs/omnia/ee/pkg/arena/fetcher"
 	arenaTemplate "github.com/altairalabs/omnia/ee/pkg/arena/template"
+	"github.com/altairalabs/omnia/internal/sourcesync"
 )
 
 var _ = Describe("ArenaTemplateSource Controller", func() {
@@ -82,7 +83,7 @@ var _ = Describe("ArenaTemplateSource Controller", func() {
 				Spec: omniav1alpha1.ArenaTemplateSourceSpec{
 					Type:    omniav1alpha1.ArenaTemplateSourceTypeConfigMap,
 					Suspend: true,
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: configMapName,
 					},
 				},
@@ -176,7 +177,7 @@ spec:
 				},
 				Spec: omniav1alpha1.ArenaTemplateSourceSpec{
 					Type: omniav1alpha1.ArenaTemplateSourceTypeConfigMap,
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: configMapName,
 					},
 					SyncInterval: "1h",
@@ -352,7 +353,7 @@ spec:
 			Expect(os.WriteFile(filepath.Join(artifactDir, "test.txt"), []byte("test"), 0644)).To(Succeed())
 
 			result := &templateFetchResult{
-				artifact: &fetcher.Artifact{
+				artifact: &sourcesync.Artifact{
 					Revision: "abc123",
 					Checksum: "sha256:1234567890abcdef",
 					Size:     100,
@@ -444,7 +445,7 @@ spec:
 				Type: "unsupported",
 			}
 
-			_, err := reconciler.createFetcher(ctx, spec, "default", fetcher.Options{})
+			_, err := reconciler.createFetcher(ctx, spec, "default", sourcesync.Options{})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("unsupported source type"))
 		})
@@ -459,7 +460,7 @@ spec:
 				Git:  nil,
 			}
 
-			_, err := reconciler.createFetcher(ctx, spec, "default", fetcher.Options{})
+			_, err := reconciler.createFetcher(ctx, spec, "default", sourcesync.Options{})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("git configuration is required"))
 		})
@@ -474,7 +475,7 @@ spec:
 				OCI:  nil,
 			}
 
-			_, err := reconciler.createFetcher(ctx, spec, "default", fetcher.Options{})
+			_, err := reconciler.createFetcher(ctx, spec, "default", sourcesync.Options{})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("oci configuration is required"))
 		})
@@ -489,7 +490,7 @@ spec:
 				ConfigMap: nil,
 			}
 
-			_, err := reconciler.createFetcher(ctx, spec, "default", fetcher.Options{})
+			_, err := reconciler.createFetcher(ctx, spec, "default", sourcesync.Options{})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("configmap configuration is required"))
 		})
@@ -501,15 +502,15 @@ spec:
 
 			spec := &omniav1alpha1.ArenaTemplateSourceSpec{
 				Type: omniav1alpha1.ArenaTemplateSourceTypeGit,
-				Git: &omniav1alpha1.GitSource{
+				Git: &corev1alpha1.GitSource{
 					URL: "https://github.com/example/repo",
-					Ref: &omniav1alpha1.GitReference{
+					Ref: &corev1alpha1.GitReference{
 						Branch: "main",
 					},
 				},
 			}
 
-			f, err := reconciler.createFetcher(ctx, spec, "default", fetcher.Options{})
+			f, err := reconciler.createFetcher(ctx, spec, "default", sourcesync.Options{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f).NotTo(BeNil())
 		})
@@ -521,12 +522,12 @@ spec:
 
 			spec := &omniav1alpha1.ArenaTemplateSourceSpec{
 				Type: omniav1alpha1.ArenaTemplateSourceTypeConfigMap,
-				ConfigMap: &omniav1alpha1.ConfigMapSource{
+				ConfigMap: &corev1alpha1.ConfigMapSource{
 					Name: "test-configmap",
 				},
 			}
 
-			f, err := reconciler.createFetcher(ctx, spec, "default", fetcher.Options{})
+			f, err := reconciler.createFetcher(ctx, spec, "default", sourcesync.Options{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f).NotTo(BeNil())
 		})

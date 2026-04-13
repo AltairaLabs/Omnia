@@ -12,6 +12,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
 // ArenaTemplateSourceType defines the type of source for templates.
@@ -152,17 +154,17 @@ type ArenaTemplateSourceSpec struct {
 	// git specifies the Git repository source.
 	// Required when type is "git".
 	// +optional
-	Git *GitSource `json:"git,omitempty"`
+	Git *corev1alpha1.GitSource `json:"git,omitempty"`
 
 	// oci specifies the OCI registry source.
 	// Required when type is "oci".
 	// +optional
-	OCI *OCISource `json:"oci,omitempty"`
+	OCI *corev1alpha1.OCISource `json:"oci,omitempty"`
 
 	// configMap specifies the ConfigMap source.
 	// Required when type is "configmap".
 	// +optional
-	ConfigMap *ConfigMapSource `json:"configMap,omitempty"`
+	ConfigMap *corev1alpha1.ConfigMapSource `json:"configMap,omitempty"`
 
 	// syncInterval is the interval between sync operations.
 	// Format: duration string (e.g., "5m", "1h").

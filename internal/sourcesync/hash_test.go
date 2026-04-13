@@ -1,14 +1,10 @@
 /*
 Copyright 2026 Altaira Labs.
 
-SPDX-License-Identifier: FSL-1.1-Apache-2.0
-This file is part of Omnia Enterprise and is subject to the
-Functional Source License. See ee/LICENSE for details.
-
-
+SPDX-License-Identifier: Apache-2.0
 */
 
-package fetcher
+package sourcesync
 
 import (
 	"os"

@@ -1,16 +1,14 @@
 /*
 Copyright 2026 Altaira Labs.
 
-SPDX-License-Identifier: FSL-1.1-Apache-2.0
-This file is part of Omnia Enterprise and is subject to the
-Functional Source License. See ee/LICENSE for details.
-
-
+SPDX-License-Identifier: Apache-2.0
 */
 
-// Package fetcher provides interfaces and implementations for fetching
-// PromptKit bundles from various sources (Git, OCI, ConfigMap).
-package fetcher
+// Package sourcesync provides interfaces and implementations for fetching
+// content (PromptKit bundles, skills, templates) from various sources
+// (Git, OCI, ConfigMap), with content-addressable versioning and
+// filesystem synchronisation.
+package sourcesync
 
 import (
 	"context"

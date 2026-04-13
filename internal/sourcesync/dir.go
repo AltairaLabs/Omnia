@@ -1,14 +1,10 @@
 /*
 Copyright 2026 Altaira Labs.
 
-SPDX-License-Identifier: FSL-1.1-Apache-2.0
-This file is part of Omnia Enterprise and is subject to the
-Functional Source License. See ee/LICENSE for details.
-
-
+SPDX-License-Identifier: Apache-2.0
 */
 
-package fetcher
+package sourcesync
 
 import (
 	"io"
@@ -70,7 +66,7 @@ func CopyDirectoryExcluding(src, dst string, exclude []string) error {
 		}
 
 		// Copy regular file
-		return copyFileWithMode(path, targetPath, info.Mode())
+		return CopyFileWithMode(path, targetPath, info.Mode())
 	})
 }
 
@@ -89,8 +85,8 @@ func CalculateDirectorySize(dir string) (int64, error) {
 	return size, err
 }
 
-// copyFileWithMode copies a file preserving its mode.
-func copyFileWithMode(src, dst string, mode os.FileMode) error {
+// CopyFileWithMode copies a file preserving its mode.
+func CopyFileWithMode(src, dst string, mode os.FileMode) error {
 	sourceFile, err := os.Open(src)
 	if err != nil {
 		return err

@@ -1,23 +1,20 @@
 /*
 Copyright 2026 Altaira Labs.
 
-SPDX-License-Identifier: FSL-1.1-Apache-2.0
-This file is part of Omnia Enterprise and is subject to the
-Functional Source License. See ee/LICENSE for details.
+SPDX-License-Identifier: Apache-2.0
 */
 
-package controller
+package sourcesync
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
-	"github.com/altairalabs/omnia/ee/pkg/arena/fetcher"
 )
 
 var _ = Describe("FilesystemSyncer", func() {
@@ -54,7 +51,7 @@ var _ = Describe("FilesystemSyncer", func() {
 
 	Describe("SyncToFilesystem", func() {
 		It("should sync a new artifact to the filesystem", func() {
-			artifact := &fetcher.Artifact{
+			artifact := &Artifact{
 				Path:     srcDir,
 				Checksum: "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
 				Revision: "v1.0.0",
@@ -78,7 +75,7 @@ var _ = Describe("FilesystemSyncer", func() {
 		})
 
 		It("should skip sync when version already exists", func() {
-			artifact := &fetcher.Artifact{
+			artifact := &Artifact{
 				Path:     srcDir,
 				Checksum: "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
 				Revision: "v1.0.0",
@@ -99,7 +96,7 @@ var _ = Describe("FilesystemSyncer", func() {
 			defer func() { _ = os.RemoveAll(srcDir2) }()
 			Expect(os.WriteFile(filepath.Join(srcDir2, "test.txt"), []byte("hello world"), 0644)).To(Succeed())
 
-			artifact2 := &fetcher.Artifact{
+			artifact2 := &Artifact{
 				Path:     srcDir2,
 				Checksum: "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
 				Revision: "v1.0.0",
@@ -119,7 +116,7 @@ var _ = Describe("FilesystemSyncer", func() {
 
 		It("should handle nil StorageManager", func() {
 			syncer.StorageManager = nil
-			artifact := &fetcher.Artifact{
+			artifact := &Artifact{
 				Path:     srcDir,
 				Checksum: "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
 				Revision: "v1.0.0",
@@ -287,7 +284,7 @@ var _ = Describe("GCOldVersions", func() {
 	})
 })
 
-var _ = Describe("copyDirectory", func() {
+var _ = Describe("CopyDirectory", func() {
 	var srcDir string
 	var dstDir string
 
@@ -310,7 +307,7 @@ var _ = Describe("copyDirectory", func() {
 		Expect(os.WriteFile(filepath.Join(srcDir, "file1.txt"), []byte("content1"), 0644)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(srcDir, "subdir", "file2.txt"), []byte("content2"), 0644)).To(Succeed())
 
-		err := copyDirectory(srcDir, dstDir)
+		err := CopyDirectory(srcDir, dstDir)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Verify copied files
@@ -324,14 +321,14 @@ var _ = Describe("copyDirectory", func() {
 	})
 
 	It("should return error for non-existent source", func() {
-		err := copyDirectory("/nonexistent/path", dstDir)
+		err := CopyDirectory("/nonexistent/path", dstDir)
 		Expect(err).To(HaveOccurred())
 	})
 })
 
 var _ = Describe("calculateVersion", func() {
 	It("should extract version from sha256 checksum", func() {
-		artifact := &fetcher.Artifact{
+		artifact := &Artifact{
 			Checksum: "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
 		}
 
@@ -347,7 +344,7 @@ var _ = Describe("calculateVersion", func() {
 
 		Expect(os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("test data"), 0644)).To(Succeed())
 
-		artifact := &fetcher.Artifact{
+		artifact := &Artifact{
 			Path:     tmpDir,
 			Checksum: "",
 		}
@@ -364,7 +361,7 @@ var _ = Describe("calculateVersion", func() {
 
 		Expect(os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("test data"), 0644)).To(Succeed())
 
-		artifact := &fetcher.Artifact{
+		artifact := &Artifact{
 			Path:     tmpDir,
 			Checksum: "md5:abcdef",
 		}
@@ -381,7 +378,7 @@ var _ = Describe("calculateVersion", func() {
 
 		Expect(os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("test data"), 0644)).To(Succeed())
 
-		artifact := &fetcher.Artifact{
+		artifact := &Artifact{
 			Path:     tmpDir,
 			Checksum: "sha256:short",
 		}
@@ -429,5 +426,99 @@ var _ = Describe("collectVersionInfos", func() {
 		names := []string{versions[0].name, versions[1].name}
 		Expect(names).To(ContainElement("dir1"))
 		Expect(names).To(ContainElement("dir2"))
+	})
+})
+
+// fakeStorageManager implements the StorageManager interface for tests.
+type fakeStorageManager struct {
+	pvcName string
+	err     error
+	calls   int
+}
+
+func (f *fakeStorageManager) EnsureWorkspacePVC(_ context.Context, _ string) (string, error) {
+	f.calls++
+	return f.pvcName, f.err
+}
+
+var _ = Describe("FilesystemSyncer.ensureWorkspacePVC", func() {
+	It("returns nil when StorageManager is unset", func() {
+		s := &FilesystemSyncer{}
+		Expect(s.ensureWorkspacePVC(context.Background(), "ws1")).To(Succeed())
+	})
+
+	It("invokes StorageManager when set and succeeds", func() {
+		sm := &fakeStorageManager{pvcName: "pvc-ws1"}
+		s := &FilesystemSyncer{StorageManager: sm}
+		Expect(s.ensureWorkspacePVC(context.Background(), "ws1")).To(Succeed())
+		Expect(sm.calls).To(Equal(1))
+	})
+
+	It("wraps StorageManager errors", func() {
+		sm := &fakeStorageManager{err: errors.New("kaboom")}
+		s := &FilesystemSyncer{StorageManager: sm}
+		err := s.ensureWorkspacePVC(context.Background(), "ws1")
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("failed to ensure workspace PVC"))
+		Expect(err.Error()).To(ContainSubstring("kaboom"))
+	})
+})
+
+var _ = Describe("FilesystemSyncer.SyncToFilesystem error paths", func() {
+	It("surfaces StorageManager errors", func() {
+		tmp, err := os.MkdirTemp("", "sync-fail-*")
+		Expect(err).NotTo(HaveOccurred())
+		defer func() { _ = os.RemoveAll(tmp) }()
+
+		sm := &fakeStorageManager{err: errors.New("no pvc for you")}
+		s := &FilesystemSyncer{
+			WorkspaceContentPath: tmp,
+			MaxVersionsPerSource: 3,
+			StorageManager:       sm,
+		}
+
+		_, _, err = s.SyncToFilesystem(context.Background(), SyncParams{
+			WorkspaceName: "ws1",
+			Namespace:     "ns1",
+			TargetPath:    "arena/src",
+			Artifact: &Artifact{
+				Path:     tmp,
+				Checksum: "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+			},
+		})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("no pvc for you"))
+	})
+
+	It("returns an error when the artifact path is missing for hash calculation", func() {
+		tmp, err := os.MkdirTemp("", "sync-missing-*")
+		Expect(err).NotTo(HaveOccurred())
+		defer func() { _ = os.RemoveAll(tmp) }()
+
+		s := &FilesystemSyncer{
+			WorkspaceContentPath: tmp,
+			MaxVersionsPerSource: 3,
+		}
+
+		// Missing checksum AND non-existent artifact path forces the hash
+		// fallback in calculateVersion to fail.
+		_, _, err = s.SyncToFilesystem(context.Background(), SyncParams{
+			WorkspaceName: "ws1",
+			Namespace:     "ns1",
+			TargetPath:    "arena/src",
+			Artifact: &Artifact{
+				Path:     filepath.Join(tmp, "does-not-exist"),
+				Checksum: "",
+			},
+		})
+		Expect(err).To(HaveOccurred())
+	})
+})
+
+var _ = Describe("storeVersion error paths", func() {
+	It("returns an error when the target is inside an unwritable parent", func() {
+		// /dev/null is not a directory we can MkdirAll under.
+		err := storeVersion("/tmp", "/dev/null/should-fail/versions/v1")
+		Expect(err).To(HaveOccurred())
 	})
 })

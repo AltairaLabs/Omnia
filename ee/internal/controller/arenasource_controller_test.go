@@ -31,8 +31,8 @@ import (
 
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
-	"github.com/altairalabs/omnia/ee/pkg/arena/fetcher"
 	"github.com/altairalabs/omnia/ee/pkg/license"
+	"github.com/altairalabs/omnia/internal/sourcesync"
 )
 
 // generateTestKeyPairForController generates an RSA key pair for testing.
@@ -135,7 +135,7 @@ var _ = Describe("ArenaSource Controller", func() {
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
 					Suspend:  true,
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: configMapName,
 					},
 				},
@@ -277,7 +277,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: configMapName,
 					},
 				},
@@ -427,7 +427,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "nonexistent-configmap",
 					},
 				},
@@ -517,9 +517,9 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeGit,
 					Interval: "5m",
-					Git: &omniav1alpha1.GitSource{
+					Git: &corev1alpha1.GitSource{
 						URL: "https://github.com/example/repo.git",
-						Ref: &omniav1alpha1.GitReference{
+						Ref: &corev1alpha1.GitReference{
 							Branch: "main",
 						},
 						SecretRef: &corev1alpha1.SecretKeyRef{
@@ -568,7 +568,7 @@ var _ = Describe("ArenaSource Controller", func() {
 
 			// The fetcher creation should succeed (though the actual fetch would fail due to invalid repo)
 			// This tests the credential loading logic
-			opts := fetcher.Options{
+			opts := sourcesync.Options{
 				Timeout: 60 * time.Second,
 				WorkDir: artifactDir,
 			}
@@ -607,7 +607,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeOCI,
 					Interval: "5m",
-					OCI: &omniav1alpha1.OCISource{
+					OCI: &corev1alpha1.OCISource{
 						URL:      "oci://registry.example.com/repo:latest",
 						Insecure: false,
 						SecretRef: &corev1alpha1.SecretKeyRef{
@@ -655,7 +655,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			}, source)).To(Succeed())
 
 			// The fetcher creation should succeed (though the actual fetch would fail due to invalid registry)
-			opts := fetcher.Options{
+			opts := sourcesync.Options{
 				Timeout: 60 * time.Second,
 				WorkDir: artifactDir,
 			}
@@ -693,7 +693,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeOCI,
 					Interval: "5m",
-					OCI: &omniav1alpha1.OCISource{
+					OCI: &corev1alpha1.OCISource{
 						URL: "oci://registry.example.com/repo:latest",
 						SecretRef: &corev1alpha1.SecretKeyRef{
 							Name: "docker-config-secret",
@@ -732,7 +732,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Scheme: k8sClient.Scheme(),
 			}
 
-			creds, err := LoadOCICredentials(ctx, reconciler.Client, arenaSourceNamespace, "docker-config-secret")
+			creds, err := sourcesync.LoadOCICredentials(ctx, reconciler.Client, arenaSourceNamespace, "docker-config-secret")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(creds.DockerConfig).NotTo(BeEmpty())
 			Expect(creds.DockerConfig).To(ContainSubstring("registry.example.com"))
@@ -752,7 +752,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeGit,
 					Interval: "5m",
-					Git: &omniav1alpha1.GitSource{
+					Git: &corev1alpha1.GitSource{
 						URL: "https://github.com/example/repo.git",
 						SecretRef: &corev1alpha1.SecretKeyRef{
 							Name: "nonexistent-secret",
@@ -845,7 +845,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeOCI,
 					Interval: "5m",
-					OCI: &omniav1alpha1.OCISource{
+					OCI: &corev1alpha1.OCISource{
 						URL:      "oci://registry.example.com/repo:latest",
 						Insecure: true,
 					},
@@ -909,9 +909,9 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeGit,
 					Interval: "5m",
-					Git: &omniav1alpha1.GitSource{
+					Git: &corev1alpha1.GitSource{
 						URL: "https://github.com/nonexistent/repo.git",
-						Ref: &omniav1alpha1.GitReference{
+						Ref: &corev1alpha1.GitReference{
 							Branch: "main",
 						},
 					},
@@ -991,7 +991,7 @@ var _ = Describe("ArenaSource Controller", func() {
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
 					Timeout:  "30s",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "timeout-test-configmap",
 					},
 				},
@@ -1083,7 +1083,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				},
 			}
 
-			artifact := &fetcher.Artifact{
+			artifact := &sourcesync.Artifact{
 				Path:     artifactPath,
 				Revision: "test-revision",
 				Checksum: "sha256:1234567890123456789012345678901234567890123456789012345678901234",
@@ -1126,7 +1126,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "async-test-configmap",
 					},
 				},
@@ -1276,7 +1276,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "cancel-test-configmap",
 					},
 				},
@@ -1345,7 +1345,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			}
 
 			// Artifact with empty path indicates no change
-			artifact := &fetcher.Artifact{
+			artifact := &sourcesync.Artifact{
 				Path:     "",
 				Revision: "rev1",
 			}
@@ -1387,7 +1387,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				},
 			}
 
-			artifact := &fetcher.Artifact{
+			artifact := &sourcesync.Artifact{
 				Path:     artifactDir,
 				Revision: "test-revision",
 				Checksum: "sha256:1234567890123456789012345678901234567890123456789012345678901234",
@@ -1441,7 +1441,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				},
 			}
 
-			artifact := &fetcher.Artifact{
+			artifact := &sourcesync.Artifact{
 				Path:     artifactDir,
 				Revision: "rev1",
 				Checksum: "sha256:abc123",
@@ -1500,7 +1500,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			})
 			defer func() { _ = os.RemoveAll(artifactDir) }()
 
-			artifact := &fetcher.Artifact{
+			artifact := &sourcesync.Artifact{
 				Path:     artifactDir,
 				Revision: "new-rev",
 				Checksum: "sha256:new123",
@@ -1534,7 +1534,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeOCI,
 					Interval: "5m",
-					OCI: &omniav1alpha1.OCISource{
+					OCI: &corev1alpha1.OCISource{
 						URL: "oci://example.com/repo:latest",
 					},
 				},
@@ -1660,7 +1660,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			defer func() { _ = os.RemoveAll(tmpDir) }()
 
 			By("calling updateHEAD")
-			err = UpdateHEAD(tmpDir, "v1.0.0")
+			err = sourcesync.UpdateHEAD(tmpDir, "v1.0.0")
 			Expect(err).NotTo(HaveOccurred())
 
 			By("verifying HEAD file exists with correct content")
@@ -1676,11 +1676,11 @@ var _ = Describe("ArenaSource Controller", func() {
 			defer func() { _ = os.RemoveAll(tmpDir) }()
 
 			By("creating first version")
-			err = UpdateHEAD(tmpDir, "v1.0.0")
+			err = sourcesync.UpdateHEAD(tmpDir, "v1.0.0")
 			Expect(err).NotTo(HaveOccurred())
 
 			By("updating to second version")
-			err = UpdateHEAD(tmpDir, "v2.0.0")
+			err = sourcesync.UpdateHEAD(tmpDir, "v2.0.0")
 			Expect(err).NotTo(HaveOccurred())
 
 			By("verifying HEAD has new version")
@@ -1706,7 +1706,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			}
 
 			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 5}
-			err = GCOldVersions(tmpDir, reconciler.MaxVersionsPerSource)
+			err = sourcesync.GCOldVersions(tmpDir, reconciler.MaxVersionsPerSource)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Both versions should still exist
@@ -1721,7 +1721,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			defer func() { _ = os.RemoveAll(tmpDir) }()
 
 			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 5}
-			err = GCOldVersions(tmpDir, reconciler.MaxVersionsPerSource)
+			err = sourcesync.GCOldVersions(tmpDir, reconciler.MaxVersionsPerSource)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -1745,7 +1745,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			}
 
 			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 3}
-			err = GCOldVersions(tmpDir, reconciler.MaxVersionsPerSource)
+			err = sourcesync.GCOldVersions(tmpDir, reconciler.MaxVersionsPerSource)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Should have 3 versions left (the newest ones)
@@ -1775,7 +1775,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			}
 
 			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 0} // Should default to 10
-			err = GCOldVersions(tmpDir, reconciler.MaxVersionsPerSource)
+			err = sourcesync.GCOldVersions(tmpDir, reconciler.MaxVersionsPerSource)
 			Expect(err).NotTo(HaveOccurred())
 
 			// All 5 should remain (under default of 10)
@@ -1801,7 +1801,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(os.WriteFile(filepath.Join(versionsDir, "README.txt"), []byte("info"), 0644)).To(Succeed())
 
 			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 5}
-			err = GCOldVersions(tmpDir, reconciler.MaxVersionsPerSource)
+			err = sourcesync.GCOldVersions(tmpDir, reconciler.MaxVersionsPerSource)
 			Expect(err).NotTo(HaveOccurred())
 
 			// All entries should remain
@@ -1840,7 +1840,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				},
 			}
 
-			artifact := &fetcher.Artifact{
+			artifact := &sourcesync.Artifact{
 				Path:     artifactDir,
 				Revision: "rev1",
 				Checksum: "sha256:cache",
@@ -1865,7 +1865,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer func() { _ = os.RemoveAll(tmpDir) }()
 
-			err = UpdateHEAD(tmpDir, "test-version")
+			err = sourcesync.UpdateHEAD(tmpDir, "test-version")
 			Expect(err).NotTo(HaveOccurred())
 
 			content, err := os.ReadFile(filepath.Join(tmpDir, ".arena", "HEAD"))
@@ -1888,13 +1888,13 @@ var _ = Describe("ArenaSource Controller", func() {
 				},
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type: omniav1alpha1.ArenaSourceTypeOCI,
-					OCI: &omniav1alpha1.OCISource{
+					OCI: &corev1alpha1.OCISource{
 						URL: "registry.example.com/my-repo:latest",
 					},
 				},
 			}
 
-			opts := fetcher.Options{
+			opts := sourcesync.Options{
 				Timeout: time.Minute,
 				WorkDir: "/tmp",
 			}
@@ -1921,7 +1921,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer func() { _ = os.RemoveAll(dstDir) }()
 
-			err = copyDirectory(srcDir, dstDir)
+			err = sourcesync.CopyDirectory(srcDir, dstDir)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("verifying copied files")
@@ -1951,7 +1951,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			defer func() { _ = os.RemoveAll(dstDir) }()
 
 			dstFile := filepath.Join(dstDir, "dest.txt")
-			err = copyFileWithMode(srcFile, dstFile, 0755)
+			err = sourcesync.CopyFileWithMode(srcFile, dstFile, 0755)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("verifying content and mode")
@@ -1969,7 +1969,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer func() { _ = os.RemoveAll(dstDir) }()
 
-			err = copyFileWithMode("/nonexistent/file.txt", filepath.Join(dstDir, "dest.txt"), 0644)
+			err = sourcesync.CopyFileWithMode("/nonexistent/file.txt", filepath.Join(dstDir, "dest.txt"), 0644)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -1981,12 +1981,12 @@ var _ = Describe("ArenaSource Controller", func() {
 			srcFile := filepath.Join(srcDir, "source.txt")
 			Expect(os.WriteFile(srcFile, []byte("content"), 0644)).To(Succeed())
 
-			err = copyFileWithMode(srcFile, "/nonexistent/dir/dest.txt", 0644)
+			err = sourcesync.CopyFileWithMode(srcFile, "/nonexistent/dir/dest.txt", 0644)
 			Expect(err).To(HaveOccurred())
 		})
 	})
 
-	Context("When testing fetcher.CalculateDirectoryHash helper", func() {
+	Context("When testing sourcesync.CalculateDirectoryHash helper", func() {
 		It("should calculate hash for directory", func() {
 			By("creating directory with files")
 			tmpDir, err := os.MkdirTemp("", "hash-test-*")
@@ -1996,7 +1996,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("content"), 0644)).To(Succeed())
 
 			By("calculating hash")
-			hash, err := fetcher.CalculateDirectoryHash(tmpDir)
+			hash, err := sourcesync.CalculateDirectoryHash(tmpDir)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(hash).NotTo(BeEmpty())
 			Expect(hash).To(HaveLen(64)) // SHA256 hex = 64 chars
@@ -2016,10 +2016,10 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(os.WriteFile(filepath.Join(dir2, "file.txt"), []byte("content2"), 0644)).To(Succeed())
 
 			By("comparing hashes")
-			hash1, err := fetcher.CalculateDirectoryHash(dir1)
+			hash1, err := sourcesync.CalculateDirectoryHash(dir1)
 			Expect(err).NotTo(HaveOccurred())
 
-			hash2, err := fetcher.CalculateDirectoryHash(dir2)
+			hash2, err := sourcesync.CalculateDirectoryHash(dir2)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(hash1).NotTo(Equal(hash2))
@@ -2036,7 +2036,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(os.MkdirAll(filepath.Join(tmpDir, "subdir2"), 0755)).To(Succeed())
 
 			By("calculating hash")
-			hash, err := fetcher.CalculateDirectoryHash(tmpDir)
+			hash, err := sourcesync.CalculateDirectoryHash(tmpDir)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(hash).NotTo(BeEmpty())
 		})
@@ -2069,7 +2069,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				// No TargetPath specified - should default to arena/{source-name}
 			}
 
-			artifact := &fetcher.Artifact{
+			artifact := &sourcesync.Artifact{
 				Path:     artifactDir,
 				Revision: "rev1",
 				Checksum: "sha256:abc",
@@ -2113,7 +2113,7 @@ var _ = Describe("ArenaSource Controller", func() {
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
 					Suspend:  false,
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "suspend-test-configmap",
 					},
 				},

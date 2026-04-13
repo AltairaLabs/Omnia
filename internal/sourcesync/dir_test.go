@@ -1,14 +1,10 @@
 /*
 Copyright 2026 Altaira Labs.
 
-SPDX-License-Identifier: FSL-1.1-Apache-2.0
-This file is part of Omnia Enterprise and is subject to the
-Functional Source License. See ee/LICENSE for details.
-
-
+SPDX-License-Identifier: Apache-2.0
 */
 
-package fetcher
+package sourcesync
 
 import (
 	"os"
@@ -197,7 +193,7 @@ func TestCopyFileWithMode(t *testing.T) {
 	defer func() { _ = os.RemoveAll(dstDir) }()
 
 	dstFile := filepath.Join(dstDir, "dest.txt")
-	err = copyFileWithMode(srcFile, dstFile, 0755)
+	err = CopyFileWithMode(srcFile, dstFile, 0755)
 	require.NoError(t, err)
 
 	// Verify content
@@ -216,7 +212,7 @@ func TestCopyFileWithMode_NonexistentSource(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = os.RemoveAll(dstDir) }()
 
-	err = copyFileWithMode("/nonexistent/file.txt", filepath.Join(dstDir, "dest.txt"), 0644)
+	err = CopyFileWithMode("/nonexistent/file.txt", filepath.Join(dstDir, "dest.txt"), 0644)
 	assert.Error(t, err)
 }
 
@@ -234,7 +230,7 @@ func TestCopyFileWithMode_CreatesParentDir(t *testing.T) {
 
 	// Destination is in a subdirectory that doesn't exist
 	dstFile := filepath.Join(dstDir, "nested", "subdir", "dest.txt")
-	err = copyFileWithMode(srcFile, dstFile, 0644)
+	err = CopyFileWithMode(srcFile, dstFile, 0644)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(dstFile)
