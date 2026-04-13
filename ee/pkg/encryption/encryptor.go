@@ -39,12 +39,29 @@ type encryptionMetadata struct {
 	Fields     []string `json:"fields"`
 }
 
-// Encryptor performs message-level encryption and decryption.
+// Encryptor performs record-level encryption and decryption for session
+// artifacts (messages, tool calls, runtime events).
 type Encryptor interface {
 	// EncryptMessage encrypts a session message, returning a copy with encrypted fields.
 	EncryptMessage(ctx context.Context, msg *session.Message) (*session.Message, []EncryptionEvent, error)
 	// DecryptMessage decrypts a session message, returning a copy with decrypted fields.
 	DecryptMessage(ctx context.Context, msg *session.Message) (*session.Message, error)
+
+	// EncryptToolCall encrypts the sensitive fields of a ToolCall (Arguments,
+	// Result, ErrorMessage) and returns a copy. Name, Status, and other
+	// analytics-relevant fields remain plaintext.
+	EncryptToolCall(ctx context.Context, tc *session.ToolCall) (*session.ToolCall, []EncryptionEvent, error)
+	// DecryptToolCall reverses EncryptToolCall. Fields without envelope
+	// markers are returned unchanged (legacy plaintext).
+	DecryptToolCall(ctx context.Context, tc *session.ToolCall) (*session.ToolCall, error)
+
+	// EncryptRuntimeEvent encrypts the sensitive fields of a RuntimeEvent
+	// (Data, ErrorMessage) and returns a copy. EventType and timing stay
+	// plaintext.
+	EncryptRuntimeEvent(ctx context.Context, evt *session.RuntimeEvent) (*session.RuntimeEvent, []EncryptionEvent, error)
+	// DecryptRuntimeEvent reverses EncryptRuntimeEvent. Fields without
+	// envelope markers are returned unchanged (legacy plaintext).
+	DecryptRuntimeEvent(ctx context.Context, evt *session.RuntimeEvent) (*session.RuntimeEvent, error)
 }
 
 type encryptor struct {
