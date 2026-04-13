@@ -8,6 +8,22 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ---
 
+## 2026-04-12
+- **Session API**: Added `GET /api/v1/privacy-policy?namespace={ns}&agent={agent}` endpoint
+  - Returns the facade-visible subset of the effective `SessionPrivacyPolicy`: `{"recording":{"enabled":bool,"facadeData":bool,"richData":bool}}`.
+  - Responds with 200 + JSON when a policy applies, or 204 No Content when no policy applies.
+  - Consumed by the facade at WebSocket-connect time (cached 60s per connection) to decide whether to record.
+- **Session API**: Added `GET /api/v1/encryption-status` endpoint
+  - Returns `{"enabled": bool}` indicating whether session-api has at-rest encryption configured via the global `SessionPrivacyPolicy`.
+- **Session API**: Behavior change on recording write endpoints — `POST /api/v1/sessions/{id}/messages`, `POST /api/v1/sessions/{id}/tool-calls`, `POST /api/v1/sessions/{id}/provider-calls`, and `POST /api/v1/sessions/{id}/events`
+  - When the effective `SessionPrivacyPolicy.Recording.Enabled` is `false`, these endpoints now return **204 No Content** and drop the write.
+  - When `SessionPrivacyPolicy.Recording.RichData` is `false`, the middleware blocks assistant messages, tool-call, runtime-event, and provider-call writes (204). User messages, status updates, and TTL refreshes are still accepted.
+  - **Non-breaking** for deployments without a `SessionPrivacyPolicy` — default behavior is unchanged (recording enabled, rich data allowed).
+- **Session API**: At-rest encryption (transparent to callers)
+  - When `SessionPrivacyPolicy.Encryption.Enabled=true` in the global policy, session-api wraps all `Message`, `ToolCall`, and `RuntimeEvent` writes through `ee/pkg/encryption.Encryptor` before persisting and decrypts on read.
+  - Message `Content` and `Metadata` values use the existing envelope format. `ToolCall.Arguments`/`Result` and `RuntimeEvent.Data` JSONB columns use an envelope map (`{"_encryption":{...},"_payload":"base64-ciphertext"}`). `ErrorMessage` fields use an `enc:v1:`-prefixed base64 string.
+  - **Response shapes for GETs are unchanged** — encryption/decryption is transparent to API consumers.
+
 ## 2026-04-07
 - **Session API**: Added `cohortId` and `variant` fields to `CreateSessionRequest` and `Session` schemas
   - Supports rollout cohort tracking: Istio routes set `x-omnia-cohort-id` and `x-omnia-variant` headers,

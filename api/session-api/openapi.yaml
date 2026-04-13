@@ -30,6 +30,8 @@ tags:
     description: Runtime lifecycle event recording
   - name: eval-results
     description: Eval result operations
+  - name: privacy
+    description: Privacy policy and encryption status
 
 paths:
   /healthz:
@@ -525,6 +527,62 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/privacy-policy:
+    get:
+      tags: [privacy]
+      summary: Get effective privacy policy for a namespace/agent
+      description: |
+        Returns the facade-visible subset of the effective SessionPrivacyPolicy
+        (global -> workspace -> agent inheritance chain). Consumed by the facade
+        at WebSocket-connect time to decide whether to record the session.
+      operationId: getPrivacyPolicy
+      parameters:
+        - name: namespace
+          in: query
+          required: true
+          description: Kubernetes namespace
+          schema:
+            type: string
+        - name: agent
+          in: query
+          required: true
+          description: Agent name
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Effective privacy policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrivacyPolicyResponse'
+        '204':
+          description: No policy applies to this namespace/agent
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/encryption-status:
+    get:
+      tags: [privacy]
+      summary: Report whether at-rest encryption is configured
+      description: |
+        Indicates whether session-api has at-rest encryption enabled via the
+        global SessionPrivacyPolicy. When true, Message, ToolCall, and
+        RuntimeEvent payloads are wrapped through ee/pkg/encryption.Encryptor
+        before persisting.
+      operationId: getEncryptionStatus
+      responses:
+        '200':
+          description: Encryption status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EncryptionStatusResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
 components:
   parameters:
     SessionID:
@@ -1016,3 +1074,41 @@ components:
           format: uuid
         message:
           type: string
+
+    PrivacyPolicyResponse:
+      type: object
+      required: [recording]
+      description: |
+        Facade-visible subset of the effective SessionPrivacyPolicy. Only
+        recording flags are exposed; PII, retention, and encryption fields
+        are enforced server-side in session-api.
+      properties:
+        recording:
+          $ref: '#/components/schemas/PrivacyRecordingFlags'
+
+    PrivacyRecordingFlags:
+      type: object
+      required: [enabled, facadeData, richData]
+      properties:
+        enabled:
+          type: boolean
+          description: When false, session-api rejects all recording writes with 204.
+        facadeData:
+          type: boolean
+          description: When false, facade skips recording at the edge.
+        richData:
+          type: boolean
+          description: |
+            When false, assistant messages, tool calls, runtime events, and
+            provider calls are dropped; user messages, status updates, and
+            TTL refreshes are still accepted.
+
+    EncryptionStatusResponse:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+          description: |
+            True when session-api has at-rest encryption configured via the
+            global SessionPrivacyPolicy.Encryption.
