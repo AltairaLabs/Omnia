@@ -228,8 +228,24 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Privacy policy endpoint
 	mux.HandleFunc("GET /api/v1/privacy-policy", h.handleGetPrivacyPolicy)
 
+	// Encryption status endpoint (used by doctor health check)
+	mux.HandleFunc("GET /api/v1/encryption-status", h.handleGetEncryptionStatus)
+
 	// API documentation
 	h.registerDocsRoutes(mux)
+}
+
+// handleGetEncryptionStatus returns whether session-api is encrypting data at rest.
+// Used by the doctor health check to verify that encryption is active when the
+// global SessionPrivacyPolicy has encryption configured.
+func (h *Handler) handleGetEncryptionStatus(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	status := struct {
+		Enabled bool `json:"enabled"`
+	}{
+		Enabled: h.encryptor != nil,
+	}
+	_ = json.NewEncoder(w).Encode(status)
 }
 
 // extractRequestContext extracts client IP and User-Agent from the request.

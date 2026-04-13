@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/go-logr/logr"
 )
 
 // encPrefix marks content that the mock encryptor "encrypted". This is not
@@ -277,5 +278,44 @@ func TestHandleGetRuntimeEvents_DecryptsWhenEncryptorSet(t *testing.T) {
 	resp := decodeJSON[[]*session.RuntimeEvent](t, rec)
 	if len(resp) != 1 || resp[0].ErrorMessage != "boom" {
 		t.Fatalf("expected decrypted ErrorMessage, got %+v", resp)
+	}
+}
+
+// TestHandleGetEncryptionStatus_Disabled verifies the endpoint returns
+// {"enabled":false} when no encryptor is configured.
+func TestHandleGetEncryptionStatus_Disabled(t *testing.T) {
+	h := NewHandler(nil, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/encryption-status", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"enabled":false`) {
+		t.Fatalf("expected enabled:false, got %s", rec.Body.String())
+	}
+}
+
+// TestHandleGetEncryptionStatus_Enabled verifies the endpoint returns
+// {"enabled":true} when an encryptor is configured via SetEncryptor.
+func TestHandleGetEncryptionStatus_Enabled(t *testing.T) {
+	h := NewHandler(nil, logr.Discard())
+	h.SetEncryptor(&mockHandlerEncryptor{})
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/encryption-status", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"enabled":true`) {
+		t.Fatalf("expected enabled:true, got %s", rec.Body.String())
 	}
 }
