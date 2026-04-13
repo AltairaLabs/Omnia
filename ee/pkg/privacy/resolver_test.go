@@ -66,9 +66,8 @@ func TestResolveEffectivePolicy_NilWhenNoPolicy(t *testing.T) {
 func TestResolveEffectivePolicy_ReturnsJSON(t *testing.T) {
 	w := &PolicyWatcher{log: logr.Discard()}
 	policy := &omniav1alpha1.SessionPrivacyPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "global", Namespace: "omnia-system"},
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "omnia-system"},
 		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
-			Level: omniav1alpha1.PolicyLevelGlobal,
 			Recording: omniav1alpha1.RecordingConfig{
 				Enabled:    true,
 				FacadeData: true,
@@ -80,7 +79,7 @@ func TestResolveEffectivePolicy_ReturnsJSON(t *testing.T) {
 			},
 		},
 	}
-	w.policies.Store("omnia-system/global", policy)
+	w.policies.Store("omnia-system/default", policy)
 
 	raw, ok := w.ResolveEffectivePolicy("default", "my-agent")
 	require.True(t, ok)

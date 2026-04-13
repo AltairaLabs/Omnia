@@ -1127,6 +1127,11 @@ type AgentRuntimeSpec struct {
 	// +optional
 	ServiceGroup string `json:"serviceGroup,omitempty"`
 
+	// privacyPolicyRef references a SessionPrivacyPolicy in this agent's namespace
+	// that overrides the service group's policy (if any) for this specific agent.
+	// +optional
+	PrivacyPolicyRef *corev1.LocalObjectReference `json:"privacyPolicyRef,omitempty"`
+
 	// rollout configures a progressive delivery rollout for this AgentRuntime.
 	// When nil, no rollout is active and all traffic goes to the current spec.
 	// +optional

@@ -65,7 +65,6 @@ func ListPresets() []PresetName {
 
 func gdprPreset() *eev1alpha1.SessionPrivacyPolicySpec {
 	return &eev1alpha1.SessionPrivacyPolicySpec{
-		Level: eev1alpha1.PolicyLevelWorkspace,
 		Recording: eev1alpha1.RecordingConfig{
 			Enabled:    true,
 			FacadeData: true,
@@ -97,7 +96,6 @@ func gdprPreset() *eev1alpha1.SessionPrivacyPolicySpec {
 
 func hipaaPreset() *eev1alpha1.SessionPrivacyPolicySpec {
 	return &eev1alpha1.SessionPrivacyPolicySpec{
-		Level: eev1alpha1.PolicyLevelWorkspace,
 		Recording: eev1alpha1.RecordingConfig{
 			Enabled:    true,
 			FacadeData: true,
@@ -132,7 +130,6 @@ func hipaaPreset() *eev1alpha1.SessionPrivacyPolicySpec {
 
 func ccpaPreset() *eev1alpha1.SessionPrivacyPolicySpec {
 	return &eev1alpha1.SessionPrivacyPolicySpec{
-		Level: eev1alpha1.PolicyLevelWorkspace,
 		Recording: eev1alpha1.RecordingConfig{
 			Enabled:    true,
 			FacadeData: true,

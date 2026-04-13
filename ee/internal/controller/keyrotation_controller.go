@@ -46,6 +46,9 @@ const (
 
 	// Re-encryption batch requeue delay.
 	reEncryptionRequeueDelay = 5 * time.Second
+
+	// Namespace for global policy lookups.
+	privacyPolicyNamespace = "omnia-system"
 )
 
 // KeyRotationReconciler reconciles SessionPrivacyPolicy objects for key rotation.

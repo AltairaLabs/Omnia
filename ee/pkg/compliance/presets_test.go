@@ -128,15 +128,15 @@ func TestListPresets(t *testing.T) {
 	}
 }
 
-func TestAllPresetsHaveWorkspaceLevel(t *testing.T) {
+func TestAllPresetsHaveNoLevel(t *testing.T) {
+	// Presets are reusable specs; binding is done by consumer (Workspace/AgentRuntime).
+	// Level field is removed — presets must not set it.
 	for _, name := range ListPresets() {
 		spec, err := GetPreset(string(name))
 		if err != nil {
 			t.Fatalf("unexpected error for preset %s: %v", name, err)
 		}
-		if spec.Level != eev1alpha1.PolicyLevelWorkspace {
-			t.Errorf("preset %s: expected workspace level, got %s", name, spec.Level)
-		}
+		_ = spec // nothing to assert; the field no longer exists
 	}
 }
 

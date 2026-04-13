@@ -533,6 +533,23 @@ spec:
                       maxLength: 63
                       pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
                       type: string
+                    privacyPolicyRef:
+                      description: |-
+                        privacyPolicyRef references a SessionPrivacyPolicy in this workspace's namespace
+                        that applies to all agents in this service group. Agents may override this
+                        with their own spec.privacyPolicyRef.
+                      properties:
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
                     session:
                       description: |-
                         session configures the session-api for this service group.

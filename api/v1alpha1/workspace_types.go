@@ -588,6 +588,12 @@ type WorkspaceServiceGroup struct {
 	// Required when mode is "external".
 	// +optional
 	External *ExternalEndpoints `json:"external,omitempty"`
+
+	// privacyPolicyRef references a SessionPrivacyPolicy in this workspace's namespace
+	// that applies to all agents in this service group. Agents may override this
+	// with their own spec.privacyPolicyRef.
+	// +optional
+	PrivacyPolicyRef *corev1.LocalObjectReference `json:"privacyPolicyRef,omitempty"`
 }
 
 // MemoryServiceConfig defines the configuration for a managed memory-api instance.

@@ -13,12 +13,9 @@ spec:
     listKind: SessionPrivacyPolicyList
     plural: sessionprivacypolicies
     singular: sessionprivacypolicy
-  scope: Cluster
+  scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.level
-      name: Level
-      type: string
     - jsonPath: .spec.recording.enabled
       name: Recording
       type: boolean
@@ -62,23 +59,6 @@ spec:
           spec:
             description: spec defines the desired state of SessionPrivacyPolicy
             properties:
-              agentRef:
-                description: |-
-                  agentRef references the AgentRuntime this policy applies to.
-                  Required when level is "agent".
-                properties:
-                  name:
-                    description: name is the name of the object.
-                    minLength: 1
-                    type: string
-                  namespace:
-                    description: |-
-                      namespace is the namespace of the object.
-                      If not specified, defaults to the same namespace as the referencing object.
-                    type: string
-                required:
-                - name
-                type: object
               auditLog:
                 description: auditLog configures audit logging for privacy-related
                   operations.
@@ -155,13 +135,6 @@ spec:
                   rule: '!self.enabled || has(self.kmsProvider)'
                 - message: keyID is required when encryption is enabled
                   rule: '!self.enabled || has(self.keyID)'
-              level:
-                description: level defines the scope at which this policy applies.
-                enum:
-                - global
-                - workspace
-                - agent
-                type: string
               recording:
                 description: recording configures what session data is recorded.
                 properties:
@@ -263,31 +236,9 @@ spec:
                       requests are honored.
                     type: boolean
                 type: object
-              workspaceRef:
-                description: |-
-                  workspaceRef references the Workspace this policy applies to.
-                  Required when level is "workspace".
-                properties:
-                  name:
-                    description: name is the name of the object.
-                    minLength: 1
-                    type: string
-                required:
-                - name
-                type: object
             required:
-            - level
             - recording
             type: object
-            x-kubernetes-validations:
-            - message: workspaceRef is required when level is 'workspace'
-              rule: self.level != 'workspace' || has(self.workspaceRef)
-            - message: agentRef is required when level is 'agent'
-              rule: self.level != 'agent' || has(self.agentRef)
-            - message: workspaceRef must not be set when level is 'global'
-              rule: self.level != 'global' || !has(self.workspaceRef)
-            - message: agentRef must not be set when level is 'global'
-              rule: self.level != 'global' || !has(self.agentRef)
           status:
             description: status defines the observed state of SessionPrivacyPolicy
             properties:
