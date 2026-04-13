@@ -190,19 +190,28 @@ func WithSkillManifest(path string) ServerOption {
 	return func(s *Server) {
 		manifest, err := skills.Read(path)
 		if err != nil {
-			// Surface as a runtime error on the next op; for now, skip silently.
-			// A startup error doesn't have a great place to land in the
-			// option-pattern API, and the manifest reader already tolerates
-			// "missing" gracefully.
+			s.log.Error(err, "skill manifest read failed", "manifestPath", path)
 			return
 		}
+		names := make([]string, 0, len(manifest.Skills))
+		paths := make([]string, 0, len(manifest.Skills))
 		for _, e := range manifest.Skills {
 			s.sdkOptions = append(s.sdkOptions, sdk.WithSkillsDir(e.ContentPath))
+			names = append(names, e.Name)
+			paths = append(paths, e.ContentPath)
 		}
+		maxActive := 0
 		if manifest.Config != nil && manifest.Config.MaxActive > 0 {
+			maxActive = int(manifest.Config.MaxActive)
 			s.sdkOptions = append(s.sdkOptions,
-				sdk.WithMaxActiveSkillsOption(int(manifest.Config.MaxActive)))
+				sdk.WithMaxActiveSkillsOption(maxActive))
 		}
+		s.log.Info("skill manifest loaded",
+			"manifestPath", path,
+			"skillCount", len(manifest.Skills),
+			"skillNames", names,
+			"skillPaths", paths,
+			"maxActive", maxActive)
 	}
 }
 

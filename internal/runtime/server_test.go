@@ -19,11 +19,15 @@ package runtime
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -1492,4 +1496,102 @@ func TestBuildSendOptions_AudioAndFile(t *testing.T) {
 		opts := buildSendOptions(parts, log)
 		assert.Len(t, opts, 3, "should produce three send options for mixed content")
 	})
+}
+
+func TestWithSkillManifest(t *testing.T) {
+	writeManifest := func(t *testing.T, m map[string]any) string {
+		t.Helper()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "manifest.json")
+		data, err := json.Marshal(m)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(path, data, 0o600))
+		return path
+	}
+
+	newCapturingLogger := func(captured *[]string) logr.Logger {
+		return funcr.NewJSON(func(obj string) {
+			*captured = append(*captured, obj)
+		}, funcr.Options{Verbosity: 1})
+	}
+
+	t.Run("logs loaded skills with names and paths", func(t *testing.T) {
+		path := writeManifest(t, map[string]any{
+			"version": "1",
+			"skills": []map[string]any{
+				{"name": "billing", "mount_as": "billing", "content_path": "/workspace-content/billing"},
+				{"name": "refunds", "mount_as": "refunds", "content_path": "/workspace-content/refunds"},
+			},
+			"config": map[string]any{"max_active": 3},
+		})
+
+		var captured []string
+		log := newCapturingLogger(&captured)
+
+		s := NewServer(WithLogger(log), WithSkillManifest(path))
+		require.NotNil(t, s)
+
+		var found bool
+		for _, l := range captured {
+			if containsAll(l, `"msg":"skill manifest loaded"`, `"skillCount":2`, `"billing"`, `"refunds"`, `"maxActive":3`) {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "expected skill-load log line with skill names and maxActive; got: %v", captured)
+	})
+
+	t.Run("missing file is a no-op with no error log", func(t *testing.T) {
+		var captured []string
+		log := newCapturingLogger(&captured)
+
+		s := NewServer(WithLogger(log), WithSkillManifest("/does/not/exist.json"))
+		require.NotNil(t, s)
+
+		for _, l := range captured {
+			assert.NotContains(t, l, `"msg":"skill manifest read failed"`)
+		}
+	})
+
+	t.Run("empty path is a no-op", func(t *testing.T) {
+		var captured []string
+		log := newCapturingLogger(&captured)
+
+		s := NewServer(WithLogger(log), WithSkillManifest(""))
+		require.NotNil(t, s)
+
+		for _, l := range captured {
+			assert.NotContains(t, l, `"msg":"skill manifest read failed"`)
+		}
+	})
+
+	t.Run("invalid json logs error and skips", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "bad.json")
+		require.NoError(t, os.WriteFile(path, []byte("not json"), 0o600))
+
+		var captured []string
+		log := newCapturingLogger(&captured)
+
+		s := NewServer(WithLogger(log), WithSkillManifest(path))
+		require.NotNil(t, s)
+
+		var found bool
+		for _, l := range captured {
+			if containsAll(l, `"msg":"skill manifest read failed"`) {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "expected read-failed error log; got: %v", captured)
+	})
+}
+
+func containsAll(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if !strings.Contains(s, sub) {
+			return false
+		}
+	}
+	return true
 }
