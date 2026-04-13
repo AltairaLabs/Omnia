@@ -14,7 +14,8 @@
 - Audit logging (enterprise)
 - PII redaction middleware — intercepts all write requests and redacts PII from message content, tool call arguments/results, provider call payloads, event metadata, and eval results based on the effective SessionPrivacyPolicy (enterprise)
 - Privacy opt-out enforcement — silently drops writes (204 No Content) when the user has opted out via preferences (enterprise)
-- SessionPrivacyPolicy CRD watching — shared informer maintains an in-memory cache of policies and computes effective policy per namespace/agent using the global → workspace → agent inheritance chain (enterprise)
+- Recording-flag enforcement — when the effective `SessionPrivacyPolicy.Recording.Enabled=false`, write endpoints return 204; when `RichData=false`, the middleware blocks assistant messages, tool calls, runtime events, and provider calls while allowing user messages, status updates, and TTL refreshes (enterprise)
+- SessionPrivacyPolicy CRD watching — shared informer maintains an in-memory cache of policies and computes effective policy per namespace/agent using the global → workspace → agent inheritance chain; the cached policy drives PII redaction, opt-out enforcement, and recording gating (enterprise)
 - Privacy/GDPR deletion with media artifact cleanup, batch processing, and progress tracking (enterprise)
 - Privacy opt-out preferences (enterprise)
 
@@ -37,6 +38,7 @@
   - `POST /api/v1/sessions/{id}/ttl` — refresh TTL
   - `PATCH /api/v1/sessions/{id}/stats` — update session counters
   - `DELETE /api/v1/sessions/{id}` — delete session
+  - `GET /api/v1/privacy-policy?namespace={ns}&agent={agent}` — returns the facade-visible subset of the effective SessionPrivacyPolicy (`{"recording":{"enabled","facadeData","richData"}}`); 204 when no policy applies
 - **gRPC/HTTP** OTLP trace ingestion (optional)
 
 ## Outputs
@@ -108,4 +110,4 @@ The `X-Omnia-User-ID` header is propagated by the facade and runtime on all writ
 - PostgreSQL (required, warm store)
 - Redis (optional, hot cache + event streaming)
 - Cold storage provider (optional: S3/GCS/Azure, also used for media artifact cleanup)
-- Kubernetes API (enterprise: SessionPrivacyPolicy CRD watching via shared informer)
+- Kubernetes API (enterprise: SessionPrivacyPolicy CRD watching via shared informer — drives PII redaction, opt-out, and recording flags)

@@ -9,6 +9,9 @@ Functional Source License. See ee/LICENSE for details.
 package privacy
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"regexp"
 
@@ -25,6 +28,72 @@ const UserIDHeader = "X-Omnia-User-ID"
 
 // sessionIDPattern extracts the session ID from write endpoint paths.
 var sessionIDPattern = regexp.MustCompile(`/api/v1/sessions/([^/]+)`)
+
+var (
+	messageEndpointRe  = regexp.MustCompile(`/api/v1/sessions/[^/]+/messages$`)
+	toolCallEndpointRe = regexp.MustCompile(`/api/v1/sessions/[^/]+/tool-calls$`)
+	runtimeEventRe     = regexp.MustCompile(`/api/v1/sessions/[^/]+/events$`)
+	providerCallRe     = regexp.MustCompile(`/api/v1/sessions/[^/]+/provider-calls$`)
+)
+
+// isRichDataEndpoint returns true for paths that always carry rich content
+// (tool call payloads, runtime event data, provider call data).
+func isRichDataEndpoint(path string) bool {
+	return toolCallEndpointRe.MatchString(path) ||
+		runtimeEventRe.MatchString(path) ||
+		providerCallRe.MatchString(path)
+}
+
+// checkRecordingPolicy enforces Recording.Enabled and RichData flags.
+// Returns true if the request was blocked (response already written).
+func (m *PrivacyMiddleware) checkRecordingPolicy(
+	w http.ResponseWriter, r *http.Request, policy *EffectivePolicy,
+) bool {
+	if !policy.Recording.Enabled {
+		w.WriteHeader(http.StatusNoContent)
+		return true
+	}
+	if policy.Recording.RichData {
+		return false
+	}
+	// RichData disabled: block rich content endpoints.
+	if isRichDataEndpoint(r.URL.Path) {
+		w.WriteHeader(http.StatusNoContent)
+		return true
+	}
+	if messageEndpointRe.MatchString(r.URL.Path) && isRichMessage(r) {
+		w.WriteHeader(http.StatusNoContent)
+		return true
+	}
+	return false
+}
+
+// isRichMessage peeks at the request body to determine if a message is
+// rich content. User messages are always allowed; assistant/system messages
+// and tool call/result metadata types are rich content.
+func isRichMessage(r *http.Request) bool {
+	body, err := io.ReadAll(r.Body)
+	_ = r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	var msg struct {
+		Role     string            `json:"role"`
+		Metadata map[string]string `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &msg); err != nil {
+		return false
+	}
+	if msg.Role == "user" {
+		return false
+	}
+	if msg.Role == "assistant" || msg.Role == "system" {
+		return true
+	}
+	t := msg.Metadata["type"]
+	return t == "tool_call" || t == "tool_result"
+}
 
 // PrivacyMiddleware intercepts session-api write requests and applies PII
 // redaction and user opt-out according to the effective SessionPrivacyPolicy.
@@ -90,6 +159,11 @@ func (m *PrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 		if policy == nil {
 			m.emitWriteEvent(r, sessionID)
 			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Check recording policy (safety net for stale facade images).
+		if m.checkRecordingPolicy(w, r, policy) {
 			return
 		}
 

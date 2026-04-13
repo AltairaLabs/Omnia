@@ -495,7 +495,12 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	// Privacy middleware (enterprise only): PII redaction + user opt-out.
 	var apiHandler http.Handler = mux
 	if f.enterprise {
-		apiHandler = wrapPrivacyMiddleware(apiHandler, registry, pool, auditLogger, log)
+		wrapped, watcher := wrapPrivacyMiddleware(apiHandler, registry, pool, auditLogger, log)
+		apiHandler = wrapped
+
+		if watcher != nil {
+			handler.SetPolicyResolver(watcher)
+		}
 	}
 
 	// Rate limiting middleware (per-client-IP token bucket).
@@ -765,28 +770,33 @@ func buildAzureObjectStoreClient(f *flags, log logr.Logger) (*privacy.AzureObjec
 	return privacy.NewAzureObjectStoreClient(client, log), nil
 }
 
-// wrapPrivacyMiddleware creates and returns the privacy middleware handler.
+// wrapPrivacyMiddleware creates and returns the privacy middleware handler
+// alongside the PolicyWatcher used to resolve policies. The watcher is
+// returned so callers (e.g., buildAPIMux) can wire it into the session
+// handler's PolicyResolver.
+//
 // When the K8s API is unreachable (e.g., in tests), the middleware is skipped
-// and the original handler is returned unchanged.
+// and the original handler is returned unchanged, with a nil watcher.
 func wrapPrivacyMiddleware(
 	next http.Handler,
 	registry *providers.Registry,
 	pool *pgxpool.Pool,
 	auditLogger *audit.Logger,
 	log logr.Logger,
-) http.Handler {
+) (http.Handler, *privacy.PolicyWatcher) {
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
 		log.Info("privacy middleware skipped", "reason", "no in-cluster kubeconfig")
-		return next
+		return next, nil
 	}
 
 	scheme := k8sruntime.NewScheme()
 	utilruntime.Must(omniav1alpha1.AddToScheme(scheme))
+	utilruntime.Must(corev1.AddToScheme(scheme))
 	k8sClient, err := client.New(kubeConfig, client.Options{Scheme: scheme})
 	if err != nil {
 		log.Error(err, "privacy middleware skipped", "reason", "k8s client creation failed")
-		return next
+		return next, nil
 	}
 
 	watcher := privacy.NewPolicyWatcher(k8sClient, log)
@@ -808,5 +818,5 @@ func wrapPrivacyMiddleware(
 		middleware.SetAuditLogger(auditLogger)
 	}
 	log.Info("privacy middleware enabled")
-	return middleware.Wrap(next)
+	return middleware.Wrap(next), watcher
 }

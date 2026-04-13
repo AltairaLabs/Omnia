@@ -17,6 +17,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -854,6 +855,137 @@ func TestPrivacyIntegration_EmptyBodyPassesThrough(t *testing.T) {
 	require.True(t, cap.called)
 	assert.Equal(t, http.StatusCreated, rec.Code)
 	assert.Empty(t, cap.body)
+}
+
+// ============================================================================
+// Test Suite 4: Recording Control End-to-End (Task 13, Path A)
+//
+// These tests exercise the REAL PrivacyMiddleware (not the local shim
+// privacyMiddleware helper above) to verify that Recording.Enabled=false
+// and RichData=false are enforced end-to-end against the middleware's
+// http.Handler contract.
+// ============================================================================
+
+// integrationBuildMiddleware wires the real PrivacyMiddleware around a capturing
+// handler using the given policy spec for the "default/my-agent" scope.
+func integrationBuildMiddleware(
+	t *testing.T, spec omniav1alpha1.SessionPrivacyPolicySpec,
+) (http.Handler, *bool) {
+	t.Helper()
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	lookup := &mockSessionLookup{ns: "default", agent: "my-agent"}
+	cache := NewSessionMetadataCache(lookup, 100)
+
+	watcher := &PolicyWatcher{}
+	watcher.policies.Store("recording", &omniav1alpha1.SessionPrivacyPolicy{
+		Spec: spec,
+	})
+
+	mw := NewPrivacyMiddleware(watcher, cache, redaction.NewRedactor(), nil, logr.Discard())
+	return mw.Wrap(next), &called
+}
+
+func TestIntegration_RecordingDisabled_BlocksMessages(t *testing.T) {
+	spec := omniav1alpha1.SessionPrivacyPolicySpec{
+		Level: omniav1alpha1.PolicyLevelGlobal,
+		Recording: omniav1alpha1.RecordingConfig{
+			Enabled: false,
+		},
+	}
+	handler, called := integrationBuildMiddleware(t, spec)
+
+	req := postJSON(t, "/api/v1/sessions/sess-1/messages",
+		`{"role":"user","content":"hello"}`, "sess-1", "")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code,
+		"middleware should short-circuit with 204 when Recording.Enabled=false")
+	assert.False(t, *called,
+		"downstream handler must not be invoked when recording is disabled")
+}
+
+func TestIntegration_RecordingDisabled_BlocksToolCalls(t *testing.T) {
+	spec := omniav1alpha1.SessionPrivacyPolicySpec{
+		Level: omniav1alpha1.PolicyLevelGlobal,
+		Recording: omniav1alpha1.RecordingConfig{
+			Enabled: false,
+		},
+	}
+	handler, called := integrationBuildMiddleware(t, spec)
+
+	req := postJSON(t, "/api/v1/sessions/sess-1/tool-calls",
+		`{"name":"t","arguments":{"x":1}}`, "sess-1", "")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.False(t, *called)
+}
+
+func TestIntegration_RichDataDisabled_BlocksAssistantMessage(t *testing.T) {
+	spec := omniav1alpha1.SessionPrivacyPolicySpec{
+		Level: omniav1alpha1.PolicyLevelGlobal,
+		Recording: omniav1alpha1.RecordingConfig{
+			Enabled:  true,
+			RichData: false,
+		},
+	}
+	handler, called := integrationBuildMiddleware(t, spec)
+
+	req := postJSON(t, "/api/v1/sessions/sess-1/messages",
+		`{"role":"assistant","content":"I cannot help with that"}`, "sess-1", "")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code,
+		"assistant messages are rich content and must be dropped when RichData=false")
+	assert.False(t, *called)
+}
+
+func TestIntegration_RichDataDisabled_AllowsUserMessage(t *testing.T) {
+	spec := omniav1alpha1.SessionPrivacyPolicySpec{
+		Level: omniav1alpha1.PolicyLevelGlobal,
+		Recording: omniav1alpha1.RecordingConfig{
+			Enabled:  true,
+			RichData: false,
+		},
+	}
+	handler, called := integrationBuildMiddleware(t, spec)
+
+	req := postJSON(t, "/api/v1/sessions/sess-1/messages",
+		`{"role":"user","content":"what is 2+2?"}`, "sess-1", "")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusCreated, rec.Code,
+		"user messages must pass through even when RichData=false")
+	assert.True(t, *called)
+}
+
+func TestIntegration_RichDataDisabled_BlocksToolCallEndpoint(t *testing.T) {
+	spec := omniav1alpha1.SessionPrivacyPolicySpec{
+		Level: omniav1alpha1.PolicyLevelGlobal,
+		Recording: omniav1alpha1.RecordingConfig{
+			Enabled:  true,
+			RichData: false,
+		},
+	}
+	handler, called := integrationBuildMiddleware(t, spec)
+
+	req := postJSON(t, "/api/v1/sessions/sess-1/tool-calls",
+		`{"name":"t","arguments":{"x":1}}`, "sess-1", "")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code,
+		"tool-call endpoint is always rich content; must be blocked when RichData=false")
+	assert.False(t, *called)
 }
 
 func TestPrivacyIntegration_UnknownSessionPassesThrough(t *testing.T) {

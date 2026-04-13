@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"strconv"
 	"time"
 
@@ -728,6 +729,47 @@ func (s *Store) readError(resp *http.Response) error {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return fmt.Errorf("HTTP %d: %s", resp.StatusCode, errResp.Error)
+}
+
+// PrivacyPolicyResponse is the minimal shape of GET /api/v1/privacy-policy
+// that the facade needs for recording decisions. Encryption config is filtered
+// out server-side before this response is returned.
+type PrivacyPolicyResponse struct {
+	Recording struct {
+		Enabled    bool `json:"enabled"`
+		FacadeData bool `json:"facadeData"`
+		RichData   bool `json:"richData"`
+	} `json:"recording"`
+}
+
+// GetPrivacyPolicy fetches the effective privacy policy for a namespace/agent pair.
+// Returns nil with no error if no policy applies (204 response).
+// Bypasses the circuit breaker — this is a config read, not a session write,
+// and a transient failure must not open the breaker for session writes.
+func (s *Store) GetPrivacyPolicy(ctx context.Context, namespace, agent string) (*PrivacyPolicyResponse, error) {
+	params := neturl.Values{}
+	params.Set("namespace", namespace)
+	params.Set("agent", agent)
+	path := "/api/v1/privacy-policy?" + params.Encode()
+
+	resp, err := s.doWithRetryInner(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get privacy policy: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNoContent {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, s.readError(resp)
+	}
+
+	var policy PrivacyPolicyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&policy); err != nil {
+		return nil, fmt.Errorf("decode privacy policy response: %w", err)
+	}
+	return &policy, nil
 }
 
 // Interface assertion.

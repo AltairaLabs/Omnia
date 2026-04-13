@@ -54,6 +54,10 @@ type Connection struct {
 
 	// rateLimiter enforces per-connection message rate limiting. Nil when disabled.
 	rateLimiter *rate.Limiter
+
+	// policyCache caches the effective recording policy for this connection.
+	// Nil when no PolicyFetcher is configured (memory store, test mode).
+	policyCache *RecordingPolicyCache
 }
 
 // handleConnection manages the lifecycle of a WebSocket connection.
@@ -77,6 +81,11 @@ func (s *Server) handleConnection(ctx context.Context, c *Connection) {
 	if err := s.sendConnected(c, sessionID); err != nil {
 		log.Error(err, "failed to send connected message")
 		return
+	}
+
+	// Initialize recording policy cache for this connection when a fetcher is available.
+	if s.policyFetcher != nil && c.namespace != "" && c.agentName != "" {
+		c.policyCache = NewRecordingPolicyCache(s.policyFetcher, c.namespace, c.agentName, 60*time.Second, log)
 	}
 
 	// Start ping ticker

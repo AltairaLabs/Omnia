@@ -381,48 +381,15 @@ func (r *KeyRotationReconciler) failReEncryption(
 	return ctrl.Result{}, nil
 }
 
-// buildProviderConfig constructs an encryption.ProviderConfig from the policy and its secret.
+// buildProviderConfig constructs an encryption.ProviderConfig from the policy
+// and its referenced Secret. Delegates to the shared helper in ee/pkg/encryption
+// so session-api and the key rotation controller share one source of truth.
 func (r *KeyRotationReconciler) buildProviderConfig(
 	ctx context.Context, policy *omniav1alpha1.SessionPrivacyPolicy,
 ) (encryption.ProviderConfig, error) {
-	enc := policy.Spec.Encryption
-
-	cfg := encryption.ProviderConfig{
-		ProviderType: encryption.ProviderType(enc.KMSProvider),
-		KeyID:        enc.KeyID,
-	}
-
-	if enc.SecretRef != nil {
-		creds, err := r.loadSecretCredentials(ctx, enc.SecretRef.Name)
-		if err != nil {
-			return cfg, err
-		}
-		cfg.Credentials = creds
-		if v, ok := creds["vault-url"]; ok {
-			cfg.VaultURL = v
-		}
-	}
-
-	return cfg, nil
-}
-
-// loadSecretCredentials loads credential data from a Kubernetes Secret.
-func (r *KeyRotationReconciler) loadSecretCredentials(
-	ctx context.Context, secretName string,
-) (map[string]string, error) {
-	secret := &corev1.Secret{}
-	if err := r.Get(ctx, client.ObjectKey{
-		Name:      secretName,
-		Namespace: privacyPolicyNamespace,
-	}, secret); err != nil {
-		return nil, fmt.Errorf("loading secret %q: %w", secretName, err)
-	}
-
-	creds := make(map[string]string, len(secret.Data))
-	for k, v := range secret.Data {
-		creds[k] = string(v)
-	}
-	return creds, nil
+	return encryption.ProviderConfigFromEncryptionSpec(
+		ctx, r.Client, privacyPolicyNamespace, policy.Spec.Encryption,
+	)
 }
 
 // getBatchSize returns the configured batch size or the default.

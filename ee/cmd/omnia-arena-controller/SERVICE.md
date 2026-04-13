@@ -9,6 +9,10 @@
 - Worker pod creation and lifecycle management
 - Template API server for Arena project scaffolding
 - Redis Streams work queue management
+- KeyRotation reconciler — rotates KMS-backed data-encryption keys per `SessionPrivacyPolicy.Encryption` schedule. When the `--session-postgres-conn` flag is set, `KeyRotationReconciler.StoreFactory` opens a session Postgres pool and returns a `ReEncryptionStore`, enabling batch re-encryption of existing records during rotation. Without the flag, key rotation still rotates keys but re-encryption is skipped (previously this was stubbed with a "store factory not configured" log).
+
+## CLI Flags / Config
+- `--session-postgres-conn` — Postgres DSN for the session database. Required to enable batch re-encryption during key rotation. Optional; when unset, key rotation proceeds without re-encrypting existing records.
 
 ## Inputs
 - **K8s API**: watch events for Arena CRDs

@@ -9,6 +9,7 @@
 - Media upload URL negotiation (S3/GCS/Azure/local)
 - Client-side tool result routing to active handler
 - Session recording via HTTP client to Session API
+- Recording-policy gating — on each WebSocket connection, fetches the effective `SessionPrivacyPolicy` from session-api (`GET /api/v1/privacy-policy`) and caches it for 60s. `recordingResponseWriter` skips recording when `Recording.Enabled=false` or restricts writes when `RichData=false`. Fails open (records) on fetch errors so data is never silently dropped.
 
 ## Inputs
 - **WebSocket** from browser/dashboard:
@@ -25,7 +26,7 @@
 ## Outputs
 - **WebSocket** to browser/dashboard: ServerMessage (chunk, done, tool_call, error, connected, media_chunk, upload_ready, upload_complete)
 - **gRPC** to Runtime: ClientMessage (user message, client tool result)
-- **HTTP** to Session API: session create, message append, TTL refresh
+- **HTTP** to Session API: session create, message append, TTL refresh, `GET /api/v1/privacy-policy` (at connection time, cached 60s per WebSocket session)
 
 ## Does NOT Own
 - Tool execution logic (Runtime's job — client or server)

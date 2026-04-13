@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"time"
@@ -19,6 +20,7 @@ import (
 	// Import all Kubernetes client auth plugins (e.g. GCP, Azure, OIDC) for kubeconfig authentication
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -32,6 +34,7 @@ import (
 
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
+	"github.com/altairalabs/omnia/ee/cmd/omnia-arena-controller/api"
 	"github.com/altairalabs/omnia/ee/internal/controller"
 	arenawebhook "github.com/altairalabs/omnia/ee/internal/webhook"
 	"github.com/altairalabs/omnia/ee/pkg/arena/aggregator"
@@ -40,8 +43,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/license"
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/workspace"
-
-	"github.com/altairalabs/omnia/ee/cmd/omnia-arena-controller/api"
+	"github.com/altairalabs/omnia/internal/session/providers/postgres"
 )
 
 const logKeyController = "controller"
@@ -74,6 +76,7 @@ func main() {
 	var workspaceStorageClass string
 	var nfsServer string
 	var nfsPath string
+	var sessionPostgresConn string
 	var redisAddr string
 	var redisPassword string
 	var redisPasswordSecret string
@@ -101,6 +104,8 @@ func main() {
 		"NFS server address for workspace content.")
 	flag.StringVar(&nfsPath, "nfs-path", "",
 		"NFS export path for workspace content.")
+	flag.StringVar(&sessionPostgresConn, "session-postgres-conn", "",
+		"Postgres connection string for session storage (required for key rotation re-encryption).")
 	flag.StringVar(&redisAddr, "redis-addr", "",
 		"Redis server address for Arena work queue.")
 	flag.StringVar(&redisPassword, "redis-password", "",
@@ -320,6 +325,7 @@ func main() {
 		ProviderFactory: func(cfg encryption.ProviderConfig) (encryption.Provider, error) {
 			return encryption.NewProvider(cfg)
 		},
+		StoreFactory: buildReEncryptionStoreFactory(sessionPostgresConn, setupLog),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "KeyRotation")
 		os.Exit(1)
@@ -394,5 +400,23 @@ func main() {
 	defer cancel()
 	if err := apiServer.Shutdown(shutdownCtx); err != nil {
 		setupLog.Error(err, "API server shutdown error")
+	}
+}
+
+// buildReEncryptionStoreFactory returns a factory that opens a session Postgres
+// pool and wraps it as a ReEncryptionStore. Returns nil when connStr is empty,
+// which disables re-encryption but still allows key rotation (rotation without
+// re-encryption rotates keys but leaves existing data encrypted with the old key).
+func buildReEncryptionStoreFactory(connStr string, log logr.Logger) func() (encryption.ReEncryptionStore, error) {
+	if connStr == "" {
+		log.Info("re-encryption disabled", "reason", "no session postgres connection configured")
+		return nil
+	}
+	return func() (encryption.ReEncryptionStore, error) {
+		provider, err := postgres.New(postgres.Config{ConnString: connStr})
+		if err != nil {
+			return nil, fmt.Errorf("open session postgres: %w", err)
+		}
+		return provider, nil
 	}
 }

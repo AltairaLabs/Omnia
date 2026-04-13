@@ -29,6 +29,8 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/sony/gobreaker/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -1489,4 +1491,99 @@ func TestCreateSession_WithCohortFields(t *testing.T) {
 	if sess.Variant != "canary" {
 		t.Errorf("Variant = %q, want %q", sess.Variant, "canary")
 	}
+}
+
+func TestStore_GetPrivacyPolicy_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/privacy-policy", r.URL.Path)
+		assert.Equal(t, "default", r.URL.Query().Get("namespace"))
+		assert.Equal(t, "my-agent", r.URL.Query().Get("agent"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"recording":{"enabled":true,"facadeData":true,"richData":false}}`))
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	defer func() { _ = store.Close() }()
+
+	policy, err := store.GetPrivacyPolicy(context.Background(), "default", "my-agent")
+	require.NoError(t, err)
+	require.NotNil(t, policy)
+	assert.True(t, policy.Recording.Enabled)
+	assert.True(t, policy.Recording.FacadeData)
+	assert.False(t, policy.Recording.RichData)
+}
+
+func TestStore_GetPrivacyPolicy_NoPolicy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	defer func() { _ = store.Close() }()
+
+	policy, err := store.GetPrivacyPolicy(context.Background(), "default", "my-agent")
+	require.NoError(t, err)
+	assert.Nil(t, policy)
+}
+
+func TestStore_GetPrivacyPolicy_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	defer func() { _ = store.Close() }()
+
+	_, err := store.GetPrivacyPolicy(context.Background(), "default", "my-agent")
+	assert.Error(t, err)
+}
+
+// TestStore_GetPrivacyPolicy_BypassesCircuitBreaker verifies that GetPrivacyPolicy
+// succeeds even when the circuit breaker is open. This is a load-bearing contract:
+// a transient failure on a config read must not pollute the CB state for session writes.
+func TestStore_GetPrivacyPolicy_BypassesCircuitBreaker(t *testing.T) {
+	// Session-write server always fails (trips the CB).
+	failSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer failSrv.Close()
+
+	store := newStoreWithLowCBThreshold(t, failSrv.URL)
+
+	// Trip the circuit breaker: 3 failing GetSession calls is enough (minRequests=3, failRatio=0.6).
+	for range 3 {
+		_, _ = store.GetSession(context.Background(), "x")
+	}
+
+	// Confirm the breaker is now open by checking that GetSession fails immediately.
+	attemptsBeforeOpen := int32(0)
+	var sessionAttempts atomic.Int32
+	openSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sessionAttempts.Add(1)
+		if strings.HasPrefix(r.URL.Path, "/api/v1/privacy-policy") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"recording":{"enabled":true,"facadeData":false,"richData":false}}`))
+			return
+		}
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer openSrv.Close()
+
+	// Point the store at the new server that handles privacy-policy correctly.
+	store.baseURL = openSrv.URL
+
+	// GetSession should fail immediately (CB open, no server hit).
+	attemptsBeforeOpen = sessionAttempts.Load()
+	_, err := store.GetSession(context.Background(), "any")
+	require.Error(t, err, "expected CB-open error for GetSession")
+	require.Equal(t, attemptsBeforeOpen, sessionAttempts.Load(), "CB open: GetSession should not hit server")
+
+	// GetPrivacyPolicy must succeed despite the open breaker.
+	policy, err := store.GetPrivacyPolicy(context.Background(), "default", "my-agent")
+	require.NoError(t, err, "GetPrivacyPolicy must succeed when circuit breaker is open")
+	require.NotNil(t, policy)
+	assert.True(t, policy.Recording.Enabled)
 }

@@ -238,6 +238,7 @@ func TestOpenAPIRoutesMatchHandler(t *testing.T) {
 		"POST /api/v1/sessions/{sessionID}/evaluate",
 		"POST /api/v1/eval-results",
 		"GET /api/v1/eval-results",
+		"GET /api/v1/privacy-policy",
 	}
 
 	// Build spec routes.
