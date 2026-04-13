@@ -38,7 +38,42 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 )
+
+// validatePrivacyPolicyRef returns a Condition describing whether the AgentRuntime's
+// privacyPolicyRef is resolvable. A missing ref is not an error — it means the
+// workspace service-group or global default will apply.
+// Missing refs do not block reconciliation — they are informational only.
+func (r *AgentRuntimeReconciler) validatePrivacyPolicyRef(ctx context.Context, ar *omniav1alpha1.AgentRuntime) metav1.Condition {
+	if ar.Spec.PrivacyPolicyRef == nil {
+		return metav1.Condition{
+			Type:    "PrivacyPolicyResolved",
+			Status:  metav1.ConditionTrue,
+			Reason:  "WorkspaceDefault",
+			Message: "no privacyPolicyRef set; using workspace service group or global default",
+		}
+	}
+	p := &eev1alpha1.SessionPrivacyPolicy{}
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      ar.Spec.PrivacyPolicyRef.Name,
+		Namespace: ar.Namespace,
+	}, p)
+	if err != nil {
+		return metav1.Condition{
+			Type:    "PrivacyPolicyResolved",
+			Status:  metav1.ConditionFalse,
+			Reason:  "PolicyNotFound",
+			Message: fmt.Sprintf("privacyPolicyRef %q not found: %v", ar.Spec.PrivacyPolicyRef.Name, err),
+		}
+	}
+	return metav1.Condition{
+		Type:    "PrivacyPolicyResolved",
+		Status:  metav1.ConditionTrue,
+		Reason:  "PolicyResolved",
+		Message: fmt.Sprintf("using SessionPrivacyPolicy %q", ar.Spec.PrivacyPolicyRef.Name),
+	}
+}
 
 // TODO(scalability): Reconcile calls Status().Update() multiple times per reconciliation
 // (once per condition change). Accumulate all condition changes and call Status().Update()
@@ -348,6 +383,11 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Update status from deployment
 	r.updateStatusFromDeployment(agentRuntime, deployment, promptPack)
+
+	// Validate privacyPolicyRef (non-blocking)
+	privacyCond := r.validatePrivacyPolicyRef(ctx, agentRuntime)
+	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation,
+		privacyCond.Type, privacyCond.Status, privacyCond.Reason, privacyCond.Message)
 
 	// Set overall Ready condition
 	if agentRuntime.Status.Replicas != nil && agentRuntime.Status.Replicas.Ready > 0 {

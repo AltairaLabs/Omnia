@@ -28,6 +28,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 )
 
 // testCounter ensures unique names across all workspace tests
@@ -1219,6 +1221,215 @@ var _ = Describe("Workspace Controller Helpers", func() {
 		It("should trim leading and trailing dashes", func() {
 			Expect(sanitizeName("-hello-")).To(Equal("hello"))
 			Expect(sanitizeName("__hello__")).To(Equal("hello"))
+		})
+	})
+
+	Context("PrivacyPolicyResolved condition", func() {
+		var (
+			ctx           context.Context
+			workspaceKey  types.NamespacedName
+			namespaceName string
+			reconciler    *WorkspaceReconciler
+			testID        string
+		)
+
+		BeforeEach(func() {
+			ctx = context.Background()
+			testID = fmt.Sprintf("priv-%d", atomic.AddUint64(&testCounter, 1))
+			workspaceKey = types.NamespacedName{Name: "ws-priv-" + testID}
+			namespaceName = "priv-ns-" + testID
+			reconciler = &WorkspaceReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			// Pre-create the namespace so reconciliation succeeds.
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespaceName}}
+			_ = k8sClient.Create(ctx, ns)
+		})
+
+		AfterEach(func() {
+			ws := &omniav1alpha1.Workspace{}
+			if err := k8sClient.Get(ctx, workspaceKey, ws); err == nil {
+				ws.Finalizers = nil
+				_ = k8sClient.Update(ctx, ws)
+				_ = k8sClient.Delete(ctx, ws)
+			}
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, workspaceKey, &omniav1alpha1.Workspace{}))
+			}, time.Second*10, time.Millisecond*250).Should(BeTrue())
+
+			// Clean up any SessionPrivacyPolicy objects created in this test.
+			sppList := &eev1alpha1.SessionPrivacyPolicyList{}
+			if err := k8sClient.List(ctx, sppList, client.InNamespace(namespaceName)); err == nil {
+				for i := range sppList.Items {
+					_ = k8sClient.Delete(ctx, &sppList.Items[i])
+				}
+			}
+
+			ns := &corev1.Namespace{}
+			if err := k8sClient.Get(ctx, client.ObjectKey{Name: namespaceName}, ns); err == nil {
+				_ = k8sClient.Delete(ctx, ns)
+			}
+		})
+
+		// reconcileWorkspace is a helper that runs the reconciler past the
+		// finalizer-add step and into the main reconciliation path.
+		reconcileWorkspace := func(wsKey types.NamespacedName) {
+			// First reconcile just adds the finalizer.
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: wsKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).NotTo(BeZero())
+			// Second reconcile does the real work.
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: wsKey})
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		It("should set PrivacyPolicyResolved=True/DefaultPolicy when no service group sets a ref", func() {
+			ws := &omniav1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{Name: workspaceKey.Name},
+				Spec: omniav1alpha1.WorkspaceSpec{
+					DisplayName: "Privacy Test",
+					Environment: omniav1alpha1.WorkspaceEnvironmentDevelopment,
+					Namespace:   omniav1alpha1.NamespaceConfig{Name: namespaceName, Create: false},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).To(Succeed())
+			reconcileWorkspace(workspaceKey)
+
+			updated := &omniav1alpha1.Workspace{}
+			Expect(k8sClient.Get(ctx, workspaceKey, updated)).To(Succeed())
+			cond := meta.FindStatusCondition(updated.Status.Conditions, "PrivacyPolicyResolved")
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal("DefaultPolicy"))
+		})
+
+		It("should set PrivacyPolicyResolved=False/PolicyNotFound when a service group references a missing policy", func() {
+			ws := &omniav1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{Name: workspaceKey.Name},
+				Spec: omniav1alpha1.WorkspaceSpec{
+					DisplayName: "Privacy Test",
+					Environment: omniav1alpha1.WorkspaceEnvironmentDevelopment,
+					Namespace:   omniav1alpha1.NamespaceConfig{Name: namespaceName, Create: false},
+					Services: []omniav1alpha1.WorkspaceServiceGroup{
+						{
+							Name: "svc-a",
+							Mode: omniav1alpha1.ServiceModeExternal,
+							External: &omniav1alpha1.ExternalEndpoints{
+								SessionURL: "http://session.example.com",
+								MemoryURL:  "http://memory.example.com",
+							},
+							PrivacyPolicyRef: &corev1.LocalObjectReference{Name: "missing-policy"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).To(Succeed())
+			reconcileWorkspace(workspaceKey)
+
+			updated := &omniav1alpha1.Workspace{}
+			Expect(k8sClient.Get(ctx, workspaceKey, updated)).To(Succeed())
+			cond := meta.FindStatusCondition(updated.Status.Conditions, "PrivacyPolicyResolved")
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal("PolicyNotFound"))
+			Expect(cond.Message).To(ContainSubstring("svc-a"))
+			Expect(cond.Message).To(ContainSubstring("missing-policy"))
+		})
+
+		It("should set PrivacyPolicyResolved=True/PolicyResolved when a service group references an existing policy", func() {
+			// Create the SessionPrivacyPolicy in the workspace namespace.
+			spp := &eev1alpha1.SessionPrivacyPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "my-policy", Namespace: namespaceName},
+				Spec: eev1alpha1.SessionPrivacyPolicySpec{
+					Recording: eev1alpha1.RecordingConfig{Enabled: true},
+				},
+			}
+			Expect(k8sClient.Create(ctx, spp)).To(Succeed())
+
+			ws := &omniav1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{Name: workspaceKey.Name},
+				Spec: omniav1alpha1.WorkspaceSpec{
+					DisplayName: "Privacy Test",
+					Environment: omniav1alpha1.WorkspaceEnvironmentDevelopment,
+					Namespace:   omniav1alpha1.NamespaceConfig{Name: namespaceName, Create: false},
+					Services: []omniav1alpha1.WorkspaceServiceGroup{
+						{
+							Name: "svc-a",
+							Mode: omniav1alpha1.ServiceModeExternal,
+							External: &omniav1alpha1.ExternalEndpoints{
+								SessionURL: "http://session.example.com",
+								MemoryURL:  "http://memory.example.com",
+							},
+							PrivacyPolicyRef: &corev1.LocalObjectReference{Name: "my-policy"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).To(Succeed())
+			reconcileWorkspace(workspaceKey)
+
+			updated := &omniav1alpha1.Workspace{}
+			Expect(k8sClient.Get(ctx, workspaceKey, updated)).To(Succeed())
+			cond := meta.FindStatusCondition(updated.Status.Conditions, "PrivacyPolicyResolved")
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal("PolicyResolved"))
+			Expect(cond.Message).To(ContainSubstring("svc-a"))
+		})
+
+		It("should set PrivacyPolicyResolved=False when one group is missing and one is resolved", func() {
+			// Create the policy for the second group only.
+			spp := &eev1alpha1.SessionPrivacyPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "existing-policy", Namespace: namespaceName},
+				Spec: eev1alpha1.SessionPrivacyPolicySpec{
+					Recording: eev1alpha1.RecordingConfig{Enabled: false},
+				},
+			}
+			Expect(k8sClient.Create(ctx, spp)).To(Succeed())
+
+			ws := &omniav1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{Name: workspaceKey.Name},
+				Spec: omniav1alpha1.WorkspaceSpec{
+					DisplayName: "Privacy Test",
+					Environment: omniav1alpha1.WorkspaceEnvironmentDevelopment,
+					Namespace:   omniav1alpha1.NamespaceConfig{Name: namespaceName, Create: false},
+					Services: []omniav1alpha1.WorkspaceServiceGroup{
+						{
+							Name: "svc-missing",
+							Mode: omniav1alpha1.ServiceModeExternal,
+							External: &omniav1alpha1.ExternalEndpoints{
+								SessionURL: "http://session.example.com",
+								MemoryURL:  "http://memory.example.com",
+							},
+							PrivacyPolicyRef: &corev1.LocalObjectReference{Name: "nonexistent-policy"},
+						},
+						{
+							Name: "svc-ok",
+							Mode: omniav1alpha1.ServiceModeExternal,
+							External: &omniav1alpha1.ExternalEndpoints{
+								SessionURL: "http://session2.example.com",
+								MemoryURL:  "http://memory2.example.com",
+							},
+							PrivacyPolicyRef: &corev1.LocalObjectReference{Name: "existing-policy"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).To(Succeed())
+			reconcileWorkspace(workspaceKey)
+
+			updated := &omniav1alpha1.Workspace{}
+			Expect(k8sClient.Get(ctx, workspaceKey, updated)).To(Succeed())
+			cond := meta.FindStatusCondition(updated.Status.Conditions, "PrivacyPolicyResolved")
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal("PolicyNotFound"))
+			// Only the missing group should appear in the message.
+			Expect(cond.Message).To(ContainSubstring("svc-missing"))
+			Expect(cond.Message).To(ContainSubstring("nonexistent-policy"))
+			Expect(cond.Message).NotTo(ContainSubstring("svc-ok"))
 		})
 	})
 })

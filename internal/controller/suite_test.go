@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -60,6 +61,9 @@ var _ = BeforeSuite(func() {
 
 	var err error
 	err = omniav1alpha1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = eev1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	// +kubebuilder:scaffold:scheme
