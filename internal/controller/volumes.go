@@ -73,10 +73,11 @@ func (r *AgentRuntimeReconciler) buildVolumes(
 		})
 	}
 
-	// Mount the workspace content PVC when configured. Read-only — the
-	// runtime only reads skills from this volume; writes happen via the
-	// PromptPack reconciler in the operator pod.
-	if r.WorkspaceContentPath != "" {
+	// Mount the workspace content PVC only when the operator is configured
+	// AND the pack actually declares skills. Mounting unconditionally would
+	// peg every agent pod to a per-namespace PVC that likely doesn't exist
+	// in clusters that don't use skills.
+	if r.skillsEnabled(promptPack) {
 		volumes = append(volumes, corev1.Volume{
 			Name: workspaceContentVolumeName,
 			VolumeSource: corev1.VolumeSource{
@@ -144,8 +145,10 @@ func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
 	}
 
 	// Mount the workspace content PVC into the runtime container so it can
-	// read the skill manifest emitted by the PromptPack reconciler.
-	if r.WorkspaceContentPath != "" {
+	// read the skill manifest emitted by the PromptPack reconciler. Gated
+	// on the PromptPack actually declaring skills — otherwise the volume
+	// isn't provided by buildVolumes.
+	if r.skillsEnabled(promptPack) {
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
 			Name:      workspaceContentVolumeName,
 			MountPath: workspaceContentMountPath,
@@ -159,6 +162,21 @@ func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
 	}
 
 	return volumeMounts
+}
+
+// skillsEnabled reports whether this AgentRuntime should mount the
+// workspace content PVC for skills. Requires (a) the operator to have a
+// WorkspaceContentPath configured AND (b) the referenced PromptPack to
+// declare at least one skill. Otherwise the agent pod stays skill-free,
+// which lets clusters without a workspace content PVC run agents normally.
+func (r *AgentRuntimeReconciler) skillsEnabled(promptPack *omniav1alpha1.PromptPack) bool {
+	if r.WorkspaceContentPath == "" {
+		return false
+	}
+	if promptPack == nil {
+		return false
+	}
+	return len(promptPack.Spec.Skills) > 0
 }
 
 // skillManifestPath returns the workspace-content path the runtime container

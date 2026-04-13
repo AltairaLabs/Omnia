@@ -41,18 +41,37 @@ func minimalPromptPack() *omniav1alpha1.PromptPack {
 	}
 }
 
+// packWithSkills returns a minimal PromptPack that declares one SkillRef,
+// so the workspace-content volume machinery activates.
+func packWithSkills() *omniav1alpha1.PromptPack {
+	p := minimalPromptPack()
+	p.Spec.Skills = []omniav1alpha1.SkillRef{{Source: "my-skills"}}
+	return p
+}
+
 func TestBuildVolumes_NoWorkspaceContent(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
-	vols := r.buildVolumes(minimalAgentRuntime(), minimalPromptPack(), nil)
+	vols := r.buildVolumes(minimalAgentRuntime(), packWithSkills(), nil)
 	for _, v := range vols {
 		assert.NotEqual(t, workspaceContentVolumeName, v.Name,
 			"workspace-content volume must not appear when WorkspaceContentPath is empty")
 	}
 }
 
-func TestBuildVolumes_WithWorkspaceContent(t *testing.T) {
+func TestBuildVolumes_PackHasNoSkills(t *testing.T) {
+	// Operator configured, but the pack doesn't declare skills — mount must
+	// not happen, otherwise pods peg to a PVC the cluster doesn't provision.
 	r := &AgentRuntimeReconciler{WorkspaceContentPath: "/workspace-content"}
 	vols := r.buildVolumes(minimalAgentRuntime(), minimalPromptPack(), nil)
+	for _, v := range vols {
+		assert.NotEqual(t, workspaceContentVolumeName, v.Name,
+			"workspace-content volume must not appear when the pack declares no skills")
+	}
+}
+
+func TestBuildVolumes_WithWorkspaceContentAndSkills(t *testing.T) {
+	r := &AgentRuntimeReconciler{WorkspaceContentPath: "/workspace-content"}
+	vols := r.buildVolumes(minimalAgentRuntime(), packWithSkills(), nil)
 	var found *corev1.Volume
 	for i := range vols {
 		if vols[i].Name == workspaceContentVolumeName {
@@ -66,9 +85,9 @@ func TestBuildVolumes_WithWorkspaceContent(t *testing.T) {
 	assert.True(t, found.PersistentVolumeClaim.ReadOnly)
 }
 
-func TestBuildRuntimeVolumeMounts_WithWorkspaceContent(t *testing.T) {
+func TestBuildRuntimeVolumeMounts_WithWorkspaceContentAndSkills(t *testing.T) {
 	r := &AgentRuntimeReconciler{WorkspaceContentPath: "/workspace-content"}
-	mounts := r.buildRuntimeVolumeMounts(minimalAgentRuntime(), minimalPromptPack(), nil)
+	mounts := r.buildRuntimeVolumeMounts(minimalAgentRuntime(), packWithSkills(), nil)
 	var found *corev1.VolumeMount
 	for i := range mounts {
 		if mounts[i].Name == workspaceContentVolumeName {
@@ -83,10 +102,29 @@ func TestBuildRuntimeVolumeMounts_WithWorkspaceContent(t *testing.T) {
 
 func TestBuildRuntimeVolumeMounts_NoWorkspaceContent(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
-	mounts := r.buildRuntimeVolumeMounts(minimalAgentRuntime(), minimalPromptPack(), nil)
+	mounts := r.buildRuntimeVolumeMounts(minimalAgentRuntime(), packWithSkills(), nil)
 	for _, m := range mounts {
 		assert.NotEqual(t, workspaceContentVolumeName, m.Name)
 	}
+}
+
+func TestSkillsEnabled(t *testing.T) {
+	t.Run("unconfigured operator", func(t *testing.T) {
+		r := &AgentRuntimeReconciler{}
+		assert.False(t, r.skillsEnabled(packWithSkills()))
+	})
+	t.Run("nil pack", func(t *testing.T) {
+		r := &AgentRuntimeReconciler{WorkspaceContentPath: "/workspace-content"}
+		assert.False(t, r.skillsEnabled(nil))
+	})
+	t.Run("pack without skills", func(t *testing.T) {
+		r := &AgentRuntimeReconciler{WorkspaceContentPath: "/workspace-content"}
+		assert.False(t, r.skillsEnabled(minimalPromptPack()))
+	})
+	t.Run("both configured", func(t *testing.T) {
+		r := &AgentRuntimeReconciler{WorkspaceContentPath: "/workspace-content"}
+		assert.True(t, r.skillsEnabled(packWithSkills()))
+	})
 }
 
 func TestSkillManifestPath(t *testing.T) {
