@@ -129,6 +129,75 @@ func TestBuildAPIMux_NoEnterprise_ConsentRoutesNotWired(t *testing.T) {
 	}
 }
 
+// TestBuildAPIMux_PrivacyPolicyRouteWired verifies that GET /api/v1/privacy-policy
+// is registered on the real mux via buildAPIMux in enterprise mode. This catches
+// the class of bug where the privacy handler exists and is unit-tested but is
+// never connected to the mux.
+//
+// In wiring tests we can't build a real PolicyWatcher (no K8s cluster), so the
+// endpoint returns 204 (graceful degradation when no resolver is set). Either
+// 200 or 204 proves the route is wired; 404 indicates a registration regression.
+func TestBuildAPIMux_PrivacyPolicyRouteWired(t *testing.T) {
+	freshPromRegistry(t)
+	pool := newBogusPool(t)
+	registry := providers.NewRegistry()
+	f := &flags{
+		enterprise:  true,
+		apiAddr:     ":0",
+		healthAddr:  ":0",
+		metricsAddr: ":0",
+	}
+
+	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard())
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/privacy-policy?namespace=default&agent=x", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code == http.StatusNotFound {
+		t.Errorf("GET /api/v1/privacy-policy should be registered on the real mux; "+
+			"buildAPIMux returned 404. body=%q", rr.Body.String())
+	}
+	if rr.Code != http.StatusOK && rr.Code != http.StatusNoContent {
+		t.Errorf("expected 200 or 204 from the privacy policy endpoint, got %d body=%q",
+			rr.Code, rr.Body.String())
+	}
+}
+
+// TestBuildAPIMux_NonEnterprise_PrivacyPolicyReturns204 verifies that in
+// non-enterprise mode the privacy-policy endpoint is registered (route exists)
+// but returns 204 because SetPolicyResolver is only called in the enterprise
+// path. This ensures non-enterprise deployments degrade gracefully rather than
+// accidentally 404 or leak data.
+func TestBuildAPIMux_NonEnterprise_PrivacyPolicyReturns204(t *testing.T) {
+	freshPromRegistry(t)
+	pool := newBogusPool(t)
+	registry := providers.NewRegistry()
+	f := &flags{
+		enterprise:  false,
+		apiAddr:     ":0",
+		healthAddr:  ":0",
+		metricsAddr: ":0",
+	}
+
+	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard())
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/privacy-policy?namespace=default&agent=x", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code == http.StatusNotFound {
+		t.Errorf("GET /api/v1/privacy-policy should be registered even in non-enterprise mode; "+
+			"got 404. body=%q", rr.Body.String())
+	}
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("expected 204 (no resolver in non-enterprise mode), got %d body=%q",
+			rr.Code, rr.Body.String())
+	}
+}
+
 // TestBuildAPIMux_HealthzNotGatedByEnterprise verifies a smoke route exists on
 // the main API handler regardless of enterprise mode. The session API exposes
 // core session CRUD routes on the main mux; this test targets a stable one.
