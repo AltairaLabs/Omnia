@@ -25,6 +25,14 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
   - `DefaultPolicy` — no service group in the workspace sets a ref; the global default (or none) will be used.
   - `WorkspaceDefault` — the AgentRuntime has no override ref; effective policy comes from the service group or global default.
 
+### Added (skills, #806)
+
+- New `SkillSource` CRD (core, namespace-scoped). Syncs AgentSkills.io content from Git/OCI/ConfigMap into the workspace content PVC, with a post-fetch `filter` block (globs + explicit names). Status conditions: `SourceAvailable`, `ContentValid`.
+- `PromptPack.spec.skills[]` (`SkillRef` array): each entry references a `SkillSource` in the pack's namespace and optionally narrows it via `include` and renames the group via `mountAs`.
+- `PromptPack.spec.skillsConfig`: tunes PromptKit's skill runtime (`maxActive`, `selector`).
+- `PromptPack` status conditions: `SkillsResolved`, `SkillsValid`, `SkillToolsResolved`.
+- AgentRuntime runtime container: read-only mount of the workspace content PVC at `/workspace-content` and `OMNIA_PROMPTPACK_MANIFEST_PATH` env var, when the operator's `--workspace-content-path` flag is set (default `/workspace-content`).
+
 ---
 
 ## 2026-04-12
