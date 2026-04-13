@@ -913,6 +913,16 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 		)
 	}
 
+	// Skill manifest path. The runtime reads this on startup, parses the
+	// manifest, and registers each entry via sdk.WithSkillsDir. Empty
+	// when WorkspaceContentPath isn't configured on the reconciler.
+	if path := r.skillManifestPath(agentRuntime.Spec.PromptPackRef.Name); path != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_PROMPTPACK_MANIFEST_PATH",
+			Value: path,
+		})
+	}
+
 	// Add extra env vars from CRD
 	if agentRuntime.Spec.Runtime != nil && agentRuntime.Spec.Runtime.ExtraEnv != nil {
 		envVars = append(envVars, agentRuntime.Spec.Runtime.ExtraEnv...)

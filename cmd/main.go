@@ -82,6 +82,7 @@ func main() {
 	var memoryAPIImage string
 	var memoryAPIImagePullPolicy string
 	var workspaceStorageClass string
+	var workspaceContentPath string
 	var redisAddr string
 	var evalWorkerImage string
 	var policyProxyImage string
@@ -116,6 +117,8 @@ func main() {
 		"Image pull policy for memory-api containers. Valid values: Always, Never, IfNotPresent.")
 	flag.StringVar(&workspaceStorageClass, "workspace-storage-class", "",
 		"Default storage class for workspace PVCs (e.g., omnia-nfs). If empty, uses cluster default.")
+	flag.StringVar(&workspaceContentPath, "workspace-content-path", "/workspace-content",
+		"Base path for the workspace content volume. SkillSource writes synced content here.")
 	flag.StringVar(&redisAddr, "redis-addr", "",
 		"Redis address for eval worker deployments (e.g., redis.omnia-system.svc.cluster.local:6379)")
 	flag.StringVar(&evalWorkerImage, "eval-worker-image", "",
@@ -231,15 +234,17 @@ func main() {
 		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
 		PolicyProxyImage:                policyProxyImageForEnterprise(enterpriseEnabled, policyProxyImage),
 		RolloutMetrics:                  controller.NewRolloutMetrics(prometheus.DefaultRegisterer),
+		WorkspaceContentPath:            workspaceContentPath,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "AgentRuntime")
 		os.Exit(1)
 	}
 	if err := (&controller.PromptPackReconciler{
-		Client:          mgr.GetClient(),
-		Scheme:          mgr.GetScheme(),
-		SchemaValidator: schema.NewSchemaValidatorWithOptions(ctrl.Log, nil, 0),
-		Recorder:        mgr.GetEventRecorderFor("promptpack-controller"),
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		SchemaValidator:      schema.NewSchemaValidatorWithOptions(ctrl.Log, nil, 0),
+		Recorder:             mgr.GetEventRecorderFor("promptpack-controller"),
+		WorkspaceContentPath: workspaceContentPath,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "PromptPack")
 		os.Exit(1)
@@ -295,6 +300,16 @@ func main() {
 		Recorder: mgr.GetEventRecorderFor("agentpolicy-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "AgentPolicy")
+		os.Exit(1)
+	}
+	if err := (&controller.SkillSourceReconciler{
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		Recorder:             mgr.GetEventRecorderFor("skillsource-controller"),
+		WorkspaceContentPath: workspaceContentPath,
+		MaxVersionsPerSource: 10,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, errUnableToCreateController, logKeyController, "SkillSource")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

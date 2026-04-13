@@ -17,8 +17,13 @@ limitations under the License.
 package controller
 
 import (
+	"context"
+
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // SetCondition sets a status condition on the given conditions slice.
@@ -30,4 +35,22 @@ func SetCondition(conditions *[]metav1.Condition, generation int64, condType str
 		Reason:             reason,
 		Message:            message,
 	})
+}
+
+// GetWorkspaceForNamespace looks up the workspace name from a namespace's
+// labels. Returns the namespace name as a fallback when the client is nil,
+// the namespace can't be read, or no workspace label is set. Mirrors the ee
+// helper of the same name.
+func GetWorkspaceForNamespace(ctx context.Context, c client.Reader, namespace string) string {
+	if c == nil {
+		return namespace
+	}
+	ns := &corev1.Namespace{}
+	if err := c.Get(ctx, types.NamespacedName{Name: namespace}, ns); err != nil {
+		return namespace
+	}
+	if wsName, ok := ns.Labels[labelWorkspace]; ok && wsName != "" {
+		return wsName
+	}
+	return namespace
 }

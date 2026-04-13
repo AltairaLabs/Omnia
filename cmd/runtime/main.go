@@ -240,6 +240,11 @@ func main() {
 	if tracingProvider != nil {
 		serverOpts = append(serverOpts, pkruntime.WithTracingProvider(tracingProvider))
 	}
+	// Wire skills if the operator emitted a manifest. Empty path or missing
+	// file is a no-op — skills are optional.
+	if path := os.Getenv("OMNIA_PROMPTPACK_MANIFEST_PATH"); path != "" {
+		serverOpts = append(serverOpts, pkruntime.WithSkillManifest(path))
+	}
 	if cfg.PromptPackVersion != "" {
 		serverOpts = append(serverOpts, pkruntime.WithPromptPackVersion(cfg.PromptPackVersion))
 	}
