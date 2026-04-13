@@ -50,7 +50,6 @@ func (p *PrivacyChecker) Checks() []doctor.Check {
 		{Name: "MemoryOptOutRespected", Category: privacyCategory, Run: p.checkOptOutRespected},
 		{Name: "MemoryDeletionCascade", Category: privacyCategory, Run: p.checkDeletionCascade},
 		{Name: "AuditLogWritten", Category: privacyCategory, Run: p.checkAuditLogWritten},
-		{Name: "SessionEncryptionAtRest", Category: privacyCategory, Run: p.checkSessionEncryption},
 	}
 }
 
@@ -395,52 +394,6 @@ func (p *PrivacyChecker) checkAuditLogWritten(ctx context.Context) doctor.TestRe
 		Status: doctor.StatusFail,
 		Detail: fmt.Sprintf("no audit event found for memory %s (%d total events checked)", memoryID, len(result.Entries)),
 	}
-}
-
-// checkSessionEncryption verifies session-api has encryption at rest enabled.
-// Returns skip if session-api is unreachable, the endpoint is missing, or
-// encryption is not configured. Returns pass when {"enabled": true}.
-func (p *PrivacyChecker) checkSessionEncryption(ctx context.Context) doctor.TestResult {
-	if r := p.requireEnterprise(ctx); r != nil {
-		return *r
-	}
-	if p.sessionAPIURL == "" {
-		return doctor.TestResult{Status: doctor.StatusSkip, Detail: "session-api URL not configured"}
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		p.sessionAPIURL+"/api/v1/encryption-status", nil)
-	if err != nil {
-		return doctor.TestResult{Status: doctor.StatusFail, Detail: "build request failed", Error: err.Error()}
-	}
-
-	resp, err := memoryClient().Do(req)
-	if err != nil {
-		return doctor.TestResult{Status: doctor.StatusSkip, Detail: fmt.Sprintf("session-api unreachable: %v", err)}
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return doctor.TestResult{Status: doctor.StatusSkip, Detail: "session-api does not expose /api/v1/encryption-status (older version)"}
-	}
-	if resp.StatusCode != http.StatusOK {
-		return doctor.TestResult{
-			Status: doctor.StatusFail,
-			Detail: fmt.Sprintf("unexpected status %d from encryption-status endpoint", resp.StatusCode),
-		}
-	}
-
-	var status struct {
-		Enabled bool `json:"enabled"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-		return doctor.TestResult{Status: doctor.StatusFail, Detail: "decode response failed", Error: err.Error()}
-	}
-
-	if !status.Enabled {
-		return doctor.TestResult{Status: doctor.StatusSkip, Detail: "encryption not configured in global SessionPrivacyPolicy"}
-	}
-	return doctor.TestResult{Status: doctor.StatusPass, Detail: "session-api reports encryption enabled"}
 }
 
 // errString returns the error message or an empty string if err is nil.

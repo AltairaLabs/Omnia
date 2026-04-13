@@ -415,10 +415,10 @@ func TestCheckAuditLogWritten_Skip_NoWorkspace(t *testing.T) {
 
 // --- Checks() registration ---
 
-func TestPrivacyChecker_Checks_ReturnsFive(t *testing.T) {
+func TestPrivacyChecker_Checks_ReturnsFour(t *testing.T) {
 	c := NewPrivacyChecker("http://localhost:8080", "", "ws1", "")
 	cs := c.Checks()
-	require.Len(t, cs, 5)
+	require.Len(t, cs, 4)
 	names := make([]string, len(cs))
 	for i, ch := range cs {
 		names[i] = ch.Name
@@ -428,108 +428,8 @@ func TestPrivacyChecker_Checks_ReturnsFive(t *testing.T) {
 		"MemoryOptOutRespected",
 		"MemoryDeletionCascade",
 		"AuditLogWritten",
-		"SessionEncryptionAtRest",
 	}, names)
 	for _, ch := range cs {
 		assert.Equal(t, privacyCategory, ch.Category)
 	}
-}
-
-// --- SessionEncryptionAtRest ---
-
-func TestCheckSessionEncryption_Pass(t *testing.T) {
-	arenaSrv := mockEnterpriseLicenseServer(t)
-	defer arenaSrv.Close()
-
-	sessionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/encryption-status" {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"enabled":true}`))
-			return
-		}
-		http.NotFound(w, r)
-	}))
-	defer sessionSrv.Close()
-
-	c := NewPrivacyChecker("http://memory", sessionSrv.URL, testWorkspace, arenaSrv.URL)
-	result := c.checkSessionEncryption(t.Context())
-	assert.Equal(t, doctor.StatusPass, result.Status)
-	assert.Contains(t, result.Detail, "encryption enabled")
-}
-
-func TestCheckSessionEncryption_Skip_Disabled(t *testing.T) {
-	arenaSrv := mockEnterpriseLicenseServer(t)
-	defer arenaSrv.Close()
-
-	sessionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/encryption-status" {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"enabled":false}`))
-			return
-		}
-		http.NotFound(w, r)
-	}))
-	defer sessionSrv.Close()
-
-	c := NewPrivacyChecker("http://memory", sessionSrv.URL, testWorkspace, arenaSrv.URL)
-	result := c.checkSessionEncryption(t.Context())
-	assert.Equal(t, doctor.StatusSkip, result.Status)
-	assert.Contains(t, result.Detail, "encryption not configured")
-}
-
-func TestCheckSessionEncryption_Skip_EndpointMissing(t *testing.T) {
-	arenaSrv := mockEnterpriseLicenseServer(t)
-	defer arenaSrv.Close()
-
-	sessionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.NotFound(w, r)
-	}))
-	defer sessionSrv.Close()
-
-	c := NewPrivacyChecker("http://memory", sessionSrv.URL, testWorkspace, arenaSrv.URL)
-	result := c.checkSessionEncryption(t.Context())
-	assert.Equal(t, doctor.StatusSkip, result.Status)
-	assert.Contains(t, result.Detail, "older version")
-}
-
-func TestCheckSessionEncryption_Skip_SessionAPIUnreachable(t *testing.T) {
-	arenaSrv := mockEnterpriseLicenseServer(t)
-	defer arenaSrv.Close()
-
-	c := NewPrivacyChecker("http://memory", "https://127.0.0.1:1", testWorkspace, arenaSrv.URL)
-	result := c.checkSessionEncryption(t.Context())
-	assert.Equal(t, doctor.StatusSkip, result.Status)
-	assert.Contains(t, result.Detail, "unreachable")
-}
-
-func TestCheckSessionEncryption_Skip_NoSessionAPIURL(t *testing.T) {
-	arenaSrv := mockEnterpriseLicenseServer(t)
-	defer arenaSrv.Close()
-
-	c := NewPrivacyChecker("http://memory", "", testWorkspace, arenaSrv.URL)
-	result := c.checkSessionEncryption(t.Context())
-	assert.Equal(t, doctor.StatusSkip, result.Status)
-	assert.Contains(t, result.Detail, "session-api URL not configured")
-}
-
-func TestCheckSessionEncryption_Skip_NoEnterprise(t *testing.T) {
-	c := NewPrivacyChecker("http://memory", "http://session", testWorkspace, "")
-	result := c.checkSessionEncryption(t.Context())
-	assert.Equal(t, doctor.StatusSkip, result.Status)
-	assert.Contains(t, result.Detail, "enterprise not configured")
-}
-
-func TestCheckSessionEncryption_Fail_UnexpectedStatus(t *testing.T) {
-	arenaSrv := mockEnterpriseLicenseServer(t)
-	defer arenaSrv.Close()
-
-	sessionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-	}))
-	defer sessionSrv.Close()
-
-	c := NewPrivacyChecker("http://memory", sessionSrv.URL, testWorkspace, arenaSrv.URL)
-	result := c.checkSessionEncryption(t.Context())
-	assert.Equal(t, doctor.StatusFail, result.Status)
-	assert.Contains(t, result.Detail, "unexpected status")
 }

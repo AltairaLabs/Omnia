@@ -563,26 +563,6 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /api/v1/encryption-status:
-    get:
-      tags: [privacy]
-      summary: Report whether at-rest encryption is configured
-      description: |
-        Indicates whether session-api has at-rest encryption enabled via the
-        global SessionPrivacyPolicy. When true, Message, ToolCall, and
-        RuntimeEvent payloads are wrapped through ee/pkg/encryption.Encryptor
-        before persisting.
-      operationId: getEncryptionStatus
-      responses:
-        '200':
-          description: Encryption status
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EncryptionStatusResponse'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
 components:
   parameters:
     SessionID:
@@ -1102,13 +1082,3 @@ components:
             When false, assistant messages, tool calls, runtime events, and
             provider calls are dropped; user messages, status updates, and
             TTL refreshes are still accepted.
-
-    EncryptionStatusResponse:
-      type: object
-      required: [enabled]
-      properties:
-        enabled:
-          type: boolean
-          description: |
-            True when session-api has at-rest encryption configured via the
-            global SessionPrivacyPolicy.Encryption.

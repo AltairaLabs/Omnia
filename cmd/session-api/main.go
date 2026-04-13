@@ -50,11 +50,9 @@ import (
 	coreomniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/audit"
-	"github.com/altairalabs/omnia/ee/pkg/encryption"
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
 	"github.com/altairalabs/omnia/ee/pkg/redaction"
-	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/api"
 	"github.com/altairalabs/omnia/internal/session/otlp"
 	sessionpg "github.com/altairalabs/omnia/internal/session/postgres"
@@ -497,15 +495,11 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	// Privacy middleware (enterprise only): PII redaction + user opt-out.
 	var apiHandler http.Handler = mux
 	if f.enterprise {
-		wrapped, watcher, k8sClient := wrapPrivacyMiddleware(apiHandler, registry, pool, auditLogger, log)
+		wrapped, watcher := wrapPrivacyMiddleware(apiHandler, registry, pool, auditLogger, log)
 		apiHandler = wrapped
 
 		if watcher != nil {
 			handler.SetPolicyResolver(watcher)
-			if enc := buildEncryptorFromPolicy(context.Background(), watcher, k8sClient, log); enc != nil {
-				handler.SetEncryptor(enc)
-				log.Info("session encryption enabled")
-			}
 		}
 	}
 
@@ -777,23 +771,23 @@ func buildAzureObjectStoreClient(f *flags, log logr.Logger) (*privacy.AzureObjec
 }
 
 // wrapPrivacyMiddleware creates and returns the privacy middleware handler
-// alongside the PolicyWatcher and k8s client used to resolve policies. The
-// watcher and client are returned so callers (e.g., buildAPIMux) can wire
-// additional features such as record-level encryption.
+// alongside the PolicyWatcher used to resolve policies. The watcher is
+// returned so callers (e.g., buildAPIMux) can wire it into the session
+// handler's PolicyResolver.
 //
 // When the K8s API is unreachable (e.g., in tests), the middleware is skipped
-// and the original handler is returned unchanged, with a nil watcher/client.
+// and the original handler is returned unchanged, with a nil watcher.
 func wrapPrivacyMiddleware(
 	next http.Handler,
 	registry *providers.Registry,
 	pool *pgxpool.Pool,
 	auditLogger *audit.Logger,
 	log logr.Logger,
-) (http.Handler, *privacy.PolicyWatcher, client.Client) {
+) (http.Handler, *privacy.PolicyWatcher) {
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
 		log.Info("privacy middleware skipped", "reason", "no in-cluster kubeconfig")
-		return next, nil, nil
+		return next, nil
 	}
 
 	scheme := k8sruntime.NewScheme()
@@ -802,7 +796,7 @@ func wrapPrivacyMiddleware(
 	k8sClient, err := client.New(kubeConfig, client.Options{Scheme: scheme})
 	if err != nil {
 		log.Error(err, "privacy middleware skipped", "reason", "k8s client creation failed")
-		return next, nil, nil
+		return next, nil
 	}
 
 	watcher := privacy.NewPolicyWatcher(k8sClient, log)
@@ -824,75 +818,5 @@ func wrapPrivacyMiddleware(
 		middleware.SetAuditLogger(auditLogger)
 	}
 	log.Info("privacy middleware enabled")
-	return middleware.Wrap(next), watcher, k8sClient
-}
-
-// privacyPolicyNamespace is the namespace where SessionPrivacyPolicy-referenced
-// Secrets (e.g., KMS credentials) live. Mirrors the controller constant.
-const privacyPolicyNamespace = "omnia-system"
-
-// buildEncryptorFromPolicy constructs an api.Encryptor from the global
-// SessionPrivacyPolicy's Encryption config, or returns nil if encryption is
-// disabled or the config cannot be resolved (e.g., missing Secret).
-func buildEncryptorFromPolicy(
-	ctx context.Context,
-	watcher *privacy.PolicyWatcher,
-	k8sClient client.Client,
-	log logr.Logger,
-) api.Encryptor {
-	if watcher == nil || k8sClient == nil {
-		return nil
-	}
-	// Empty ns/agent resolves to the global policy through the inheritance chain.
-	eff := watcher.GetEffectivePolicy("", "")
-	if eff == nil || !eff.Encryption.Enabled {
-		return nil
-	}
-
-	encSpec := eff.Encryption
-	cfg, err := encryption.ProviderConfigFromEncryptionSpec(ctx, k8sClient, privacyPolicyNamespace, &encSpec)
-	if err != nil {
-		log.Error(err, "encryption disabled", "reason", "provider config failed")
-		return nil
-	}
-	provider, err := encryption.NewProvider(cfg)
-	if err != nil {
-		log.Error(err, "encryption disabled", "reason", "provider construction failed")
-		return nil
-	}
-	return &encryptorAdapter{inner: encryption.NewEncryptor(provider)}
-}
-
-// encryptorAdapter bridges ee/pkg/encryption.Encryptor (which returns
-// []EncryptionEvent for audit purposes) to the simpler api.Encryptor
-// interface used by the session-api handlers.
-type encryptorAdapter struct {
-	inner encryption.Encryptor
-}
-
-func (a *encryptorAdapter) EncryptMessage(ctx context.Context, msg *session.Message) (*session.Message, error) {
-	out, _, err := a.inner.EncryptMessage(ctx, msg)
-	return out, err
-}
-
-func (a *encryptorAdapter) DecryptMessage(ctx context.Context, msg *session.Message) (*session.Message, error) {
-	return a.inner.DecryptMessage(ctx, msg)
-}
-
-func (a *encryptorAdapter) EncryptToolCall(ctx context.Context, tc *session.ToolCall) (*session.ToolCall, error) {
-	out, _, err := a.inner.EncryptToolCall(ctx, tc)
-	return out, err
-}
-
-func (a *encryptorAdapter) DecryptToolCall(ctx context.Context, tc *session.ToolCall) (*session.ToolCall, error) {
-	return a.inner.DecryptToolCall(ctx, tc)
-}
-
-func (a *encryptorAdapter) EncryptRuntimeEvent(ctx context.Context, evt *session.RuntimeEvent) (*session.RuntimeEvent, error) {
-	out, _, err := a.inner.EncryptRuntimeEvent(ctx, evt)
-	return out, err
-}
-
-func (a *encryptorAdapter) DecryptRuntimeEvent(ctx context.Context, evt *session.RuntimeEvent) (*session.RuntimeEvent, error) {
-	return a.inner.DecryptRuntimeEvent(ctx, evt)
+	return middleware.Wrap(next), watcher
 }

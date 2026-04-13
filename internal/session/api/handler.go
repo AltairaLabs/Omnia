@@ -97,7 +97,6 @@ type Handler struct {
 	service        *SessionService
 	evalService    *EvalService
 	policyResolver PolicyResolver
-	encryptor      Encryptor
 	log            logr.Logger
 	maxBodySize    int64
 }
@@ -125,12 +124,6 @@ func (h *Handler) SetEvalService(svc *EvalService) {
 // When unset, the endpoint returns 204 No Content (non-enterprise mode).
 func (h *Handler) SetPolicyResolver(r PolicyResolver) {
 	h.policyResolver = r
-}
-
-// SetEncryptor configures record-level encryption for messages, tool calls,
-// and runtime events. When nil (default), the handler reads/writes plaintext.
-func (h *Handler) SetEncryptor(e Encryptor) {
-	h.encryptor = e
 }
 
 // TraceLogMiddleware extracts the OTel trace ID from the request's span context
@@ -228,24 +221,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Privacy policy endpoint
 	mux.HandleFunc("GET /api/v1/privacy-policy", h.handleGetPrivacyPolicy)
 
-	// Encryption status endpoint (used by doctor health check)
-	mux.HandleFunc("GET /api/v1/encryption-status", h.handleGetEncryptionStatus)
-
 	// API documentation
 	h.registerDocsRoutes(mux)
-}
-
-// handleGetEncryptionStatus returns whether session-api is encrypting data at rest.
-// Used by the doctor health check to verify that encryption is active when the
-// global SessionPrivacyPolicy has encryption configured.
-func (h *Handler) handleGetEncryptionStatus(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	status := struct {
-		Enabled bool `json:"enabled"`
-	}{
-		Enabled: h.encryptor != nil,
-	}
-	_ = json.NewEncoder(w).Encode(status)
 }
 
 // extractRequestContext extracts client IP and User-Agent from the request.
@@ -436,18 +413,6 @@ func (h *Handler) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 		msgs = msgs[:limit]
 	}
 
-	if h.encryptor != nil {
-		for i, m := range msgs {
-			dec, derr := h.encryptor.DecryptMessage(r.Context(), m)
-			if derr != nil {
-				h.requestLog(r.Context()).Error(derr, "DecryptMessage failed", "sessionID", sessionID)
-				writeError(w, derr)
-				return
-			}
-			msgs[i] = dec
-		}
-	}
-
 	writeJSON(w, MessagesResponse{
 		Messages: msgs,
 		HasMore:  hasMore,
@@ -547,17 +512,7 @@ func (h *Handler) handleAppendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log := h.requestLog(r.Context())
-	toAppend := &msg
-	if h.encryptor != nil {
-		encMsg, err := h.encryptor.EncryptMessage(r.Context(), &msg)
-		if err != nil {
-			log.Error(err, "EncryptMessage failed", "sessionID", sessionID)
-			writeError(w, err)
-			return
-		}
-		toAppend = encMsg
-	}
-	if err := h.service.AppendMessage(r.Context(), sessionID, toAppend); err != nil {
+	if err := h.service.AppendMessage(r.Context(), sessionID, &msg); err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
 			log.Error(err, "AppendMessage failed", "sessionID", sessionID)
 		}
@@ -696,17 +651,7 @@ func (h *Handler) handleRecordToolCall(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log := h.requestLog(r.Context())
-	toRecord := &tc
-	if h.encryptor != nil {
-		encTC, err := h.encryptor.EncryptToolCall(r.Context(), &tc)
-		if err != nil {
-			log.Error(err, "EncryptToolCall failed", "sessionID", sessionID)
-			writeError(w, err)
-			return
-		}
-		toRecord = encTC
-	}
-	if err := h.service.RecordToolCall(r.Context(), sessionID, toRecord); err != nil {
+	if err := h.service.RecordToolCall(r.Context(), sessionID, &tc); err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
 			log.Error(err, "RecordToolCall failed", "sessionID", sessionID)
 		}
@@ -720,37 +665,7 @@ func (h *Handler) handleRecordToolCall(w http.ResponseWriter, r *http.Request) {
 
 // handleGetToolCalls returns tool calls for a session with pagination.
 func (h *Handler) handleGetToolCalls(w http.ResponseWriter, r *http.Request) {
-	servePaginatedDetail(h, w, r, "GetToolCalls", h.service.GetToolCalls, h.decryptToolCalls)
-}
-
-// decryptToolCalls applies the configured encryptor (if any) to each tool call.
-func (h *Handler) decryptToolCalls(ctx context.Context, items []*session.ToolCall) ([]*session.ToolCall, error) {
-	if h.encryptor == nil {
-		return items, nil
-	}
-	for i, tc := range items {
-		dec, err := h.encryptor.DecryptToolCall(ctx, tc)
-		if err != nil {
-			return nil, err
-		}
-		items[i] = dec
-	}
-	return items, nil
-}
-
-// decryptRuntimeEvents applies the configured encryptor (if any) to each event.
-func (h *Handler) decryptRuntimeEvents(ctx context.Context, items []*session.RuntimeEvent) ([]*session.RuntimeEvent, error) {
-	if h.encryptor == nil {
-		return items, nil
-	}
-	for i, evt := range items {
-		dec, err := h.encryptor.DecryptRuntimeEvent(ctx, evt)
-		if err != nil {
-			return nil, err
-		}
-		items[i] = dec
-	}
-	return items, nil
+	servePaginatedDetail(h, w, r, "GetToolCalls", h.service.GetToolCalls)
 }
 
 // handleRecordProviderCall records a provider call for a session.
@@ -787,7 +702,7 @@ func (h *Handler) handleRecordProviderCall(w http.ResponseWriter, r *http.Reques
 
 // handleGetProviderCalls returns provider calls for a session with pagination.
 func (h *Handler) handleGetProviderCalls(w http.ResponseWriter, r *http.Request) {
-	servePaginatedDetail[[]*session.ProviderCall](h, w, r, "GetProviderCalls", h.service.GetProviderCalls, nil)
+	servePaginatedDetail(h, w, r, "GetProviderCalls", h.service.GetProviderCalls)
 }
 
 // handleRecordRuntimeEvent records a runtime event for a session.
@@ -810,17 +725,7 @@ func (h *Handler) handleRecordRuntimeEvent(w http.ResponseWriter, r *http.Reques
 	}
 
 	log := h.requestLog(r.Context())
-	toRecord := &evt
-	if h.encryptor != nil {
-		encEvt, err := h.encryptor.EncryptRuntimeEvent(r.Context(), &evt)
-		if err != nil {
-			log.Error(err, "EncryptRuntimeEvent failed", "sessionID", sessionID)
-			writeError(w, err)
-			return
-		}
-		toRecord = encEvt
-	}
-	if err := h.service.RecordRuntimeEvent(r.Context(), sessionID, toRecord); err != nil {
+	if err := h.service.RecordRuntimeEvent(r.Context(), sessionID, &evt); err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
 			log.Error(err, "RecordRuntimeEvent failed", "sessionID", sessionID)
 		}
@@ -834,20 +739,18 @@ func (h *Handler) handleRecordRuntimeEvent(w http.ResponseWriter, r *http.Reques
 
 // handleGetRuntimeEvents returns runtime events for a session with pagination.
 func (h *Handler) handleGetRuntimeEvents(w http.ResponseWriter, r *http.Request) {
-	servePaginatedDetail(h, w, r, "GetRuntimeEvents", h.service.GetRuntimeEvents, h.decryptRuntimeEvents)
+	servePaginatedDetail(h, w, r, "GetRuntimeEvents", h.service.GetRuntimeEvents)
 }
 
 // servePaginatedDetail is a generic handler for paginated detail endpoints
 // (tool calls, provider calls, runtime events). It extracts the session ID,
-// parses pagination params, calls the service function, optionally transforms
-// the result (for decryption), and writes the response.
+// parses pagination params, calls the service function, and writes the response.
 func servePaginatedDetail[T any](
 	h *Handler,
 	w http.ResponseWriter,
 	r *http.Request,
 	opName string,
 	fn func(context.Context, string, providers.PaginationOpts) (T, error),
-	transform func(context.Context, T) (T, error),
 ) {
 	sessionID, err := sessionIDFromRequest(r)
 	if err != nil {
@@ -864,16 +767,6 @@ func servePaginatedDetail[T any](
 		}
 		writeError(w, err)
 		return
-	}
-
-	if transform != nil {
-		transformed, tErr := transform(ctx, result)
-		if tErr != nil {
-			h.requestLog(r.Context()).Error(tErr, opName+" transform failed", "sessionID", sessionID)
-			writeError(w, tErr)
-			return
-		}
-		result = transformed
 	}
 
 	writeJSON(w, result)
