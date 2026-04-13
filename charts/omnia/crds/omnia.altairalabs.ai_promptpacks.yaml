@@ -53,6 +53,60 @@ spec:
           spec:
             description: spec defines the desired state of PromptPack
             properties:
+              skills:
+                description: |-
+                  skills selects content from SkillSources for the agents using this
+                  pack. All entries go through a SkillSource — the CRD layer does not
+                  accept inline skill content.
+                items:
+                  description: SkillRef selects content from a SkillSource for a PromptPack.
+                  properties:
+                    include:
+                      description: |-
+                        include narrows the set of skills exposed from the source to those
+                        whose SKILL.md frontmatter name matches one of the entries. Empty =
+                        all skills the source has synced (after its own filter).
+                      items:
+                        type: string
+                      type: array
+                    mountAs:
+                      description: |-
+                        mountAs renames the group under which these skills are exposed to
+                        the runtime. Defaults to the source's targetPath basename. Used to
+                        give PromptPack workflow states a stable "skills: ./skills/<group>"
+                        path that doesn't depend on the upstream directory layout.
+                      pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
+                      type: string
+                    source:
+                      description: |-
+                        source is the name of a SkillSource in the same namespace as the
+                        PromptPack. Cross-namespace references are not supported.
+                      minLength: 1
+                      type: string
+                  required:
+                  - source
+                  type: object
+                type: array
+              skillsConfig:
+                description: skillsConfig tunes the PromptKit skill runtime (max active,
+                  selector).
+                properties:
+                  maxActive:
+                    description: |-
+                      maxActive caps the number of concurrently active skills.
+                      Defaults to PromptKit's default (5).
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  selector:
+                    default: model-driven
+                    description: selector picks the skill selection strategy.
+                    enum:
+                    - model-driven
+                    - tag
+                    - embedding
+                    type: string
+                type: object
               source:
                 description: source specifies where the prompt configuration is stored.
                 properties:

@@ -54,6 +54,16 @@ type PromptPackSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^v?(\d+)\.(\d+)\.(\d+)(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?(\+[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$`
 	Version string `json:"version"`
+
+	// skills selects content from SkillSources for the agents using this
+	// pack. All entries go through a SkillSource — the CRD layer does not
+	// accept inline skill content.
+	// +optional
+	Skills []SkillRef `json:"skills,omitempty"`
+
+	// skillsConfig tunes the PromptKit skill runtime (max active, selector).
+	// +optional
+	SkillsConfig *SkillsConfig `json:"skillsConfig,omitempty"`
 }
 
 // PromptPackPhase represents the current phase of the PromptPack

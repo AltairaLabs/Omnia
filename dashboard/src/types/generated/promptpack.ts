@@ -4,6 +4,31 @@
 import type { ObjectMeta } from "../common";
 
 export interface PromptPackSpec {
+  /** skills selects content from SkillSources for the agents using this
+   * pack. All entries go through a SkillSource — the CRD layer does not
+   * accept inline skill content. */
+  skills?: {
+    /** include narrows the set of skills exposed from the source to those
+     * whose SKILL.md frontmatter name matches one of the entries. Empty =
+     * all skills the source has synced (after its own filter). */
+    include?: string[];
+    /** mountAs renames the group under which these skills are exposed to
+     * the runtime. Defaults to the source's targetPath basename. Used to
+     * give PromptPack workflow states a stable "skills: ./skills/<group>"
+     * path that doesn't depend on the upstream directory layout. */
+    mountAs?: string;
+    /** source is the name of a SkillSource in the same namespace as the
+     * PromptPack. Cross-namespace references are not supported. */
+    source: string;
+  }[];
+  /** skillsConfig tunes the PromptKit skill runtime (max active, selector). */
+  skillsConfig?: {
+    /** maxActive caps the number of concurrently active skills.
+     * Defaults to PromptKit's default (5). */
+    maxActive?: number;
+    /** selector picks the skill selection strategy. */
+    selector?: "model-driven" | "tag" | "embedding";
+  };
   /** source specifies where the prompt configuration is stored. */
   source: {
     /** configMapRef references a ConfigMap containing the prompt configuration.
