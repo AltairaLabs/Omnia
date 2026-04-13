@@ -8,7 +8,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/doctor"
 )
 
@@ -415,10 +421,10 @@ func TestCheckAuditLogWritten_Skip_NoWorkspace(t *testing.T) {
 
 // --- Checks() registration ---
 
-func TestPrivacyChecker_Checks_ReturnsFour(t *testing.T) {
+func TestPrivacyChecker_Checks_ReturnsFive(t *testing.T) {
 	c := NewPrivacyChecker("http://localhost:8080", "", "ws1", "")
 	cs := c.Checks()
-	require.Len(t, cs, 4)
+	require.Len(t, cs, 5)
 	names := make([]string, len(cs))
 	for i, ch := range cs {
 		names[i] = ch.Name
@@ -428,8 +434,169 @@ func TestPrivacyChecker_Checks_ReturnsFour(t *testing.T) {
 		"MemoryOptOutRespected",
 		"MemoryDeletionCascade",
 		"AuditLogWritten",
+		"SessionEncryptionAtRest",
 	}, names)
 	for _, ch := range cs {
 		assert.Equal(t, privacyCategory, ch.Category)
 	}
+}
+
+// --- SessionEncryptionAtRest ---
+
+// newPrivacyEncryptionScheme creates a runtime.Scheme with both core Omnia and EE types.
+func newPrivacyEncryptionScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	s := runtime.NewScheme()
+	require.NoError(t, omniav1alpha1.AddToScheme(s))
+	require.NoError(t, eev1alpha1.AddToScheme(s))
+	return s
+}
+
+// newPrivacyCheckerWithK8s builds a PrivacyChecker backed by a fake k8s client
+// pre-populated with the given objects.
+func newPrivacyCheckerWithK8s(t *testing.T, objs ...runtime.Object) *PrivacyChecker {
+	t.Helper()
+	s := newPrivacyEncryptionScheme(t)
+	builder := fake.NewClientBuilder().WithScheme(s)
+	if len(objs) > 0 {
+		builder = builder.WithRuntimeObjects(objs...)
+	}
+	return NewPrivacyChecker("", "", "", "").WithK8sClient(builder.Build())
+}
+
+// TestCheckSessionEncryption_Skip_NoK8sClient verifies skip when no k8s client is set.
+func TestCheckSessionEncryption_Skip_NoK8sClient(t *testing.T) {
+	c := NewPrivacyChecker("", "", "", "")
+	result := c.checkSessionEncryption(t.Context())
+	assert.Equal(t, doctor.StatusSkip, result.Status)
+	assert.Contains(t, result.Detail, "k8s client not available")
+}
+
+// TestCheckSessionEncryption_Skip_NoWorkspaces verifies skip when no Workspace CRDs exist.
+func TestCheckSessionEncryption_Skip_NoWorkspaces(t *testing.T) {
+	c := newPrivacyCheckerWithK8s(t)
+	result := c.checkSessionEncryption(t.Context())
+	assert.Equal(t, doctor.StatusSkip, result.Status)
+	assert.Contains(t, result.Detail, "no Workspaces found")
+}
+
+// TestCheckSessionEncryption_Skip_NoPrivacyPolicyRef verifies skip (info) when a workspace
+// has a service group but no privacyPolicyRef — sessions are in plaintext, which is valid.
+func TestCheckSessionEncryption_Skip_NoPrivacyPolicyRef(t *testing.T) {
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "ws-1"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			DisplayName: "WS 1",
+			Namespace:   omniav1alpha1.NamespaceConfig{Name: "ws-ns-1"},
+			Services: []omniav1alpha1.WorkspaceServiceGroup{
+				{Name: "default", Mode: omniav1alpha1.ServiceModeManaged},
+			},
+		},
+	}
+	c := newPrivacyCheckerWithK8s(t, ws)
+	result := c.checkSessionEncryption(t.Context())
+	assert.Equal(t, doctor.StatusSkip, result.Status)
+	assert.Contains(t, result.Detail, "plaintext")
+}
+
+// TestCheckSessionEncryption_Skip_EncryptionDisabledInPolicy verifies skip (info) when a
+// service group references a policy but that policy has encryption.enabled=false.
+func TestCheckSessionEncryption_Skip_EncryptionDisabledInPolicy(t *testing.T) {
+	policy := &eev1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "no-encrypt-policy",
+			Namespace: "ws-ns-1",
+		},
+		Spec: eev1alpha1.SessionPrivacyPolicySpec{
+			Recording:  eev1alpha1.RecordingConfig{Enabled: true},
+			Encryption: &eev1alpha1.EncryptionConfig{Enabled: false},
+		},
+	}
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "ws-1"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			DisplayName: "WS 1",
+			Namespace:   omniav1alpha1.NamespaceConfig{Name: "ws-ns-1"},
+			Services: []omniav1alpha1.WorkspaceServiceGroup{
+				{
+					Name: "default",
+					Mode: omniav1alpha1.ServiceModeManaged,
+					PrivacyPolicyRef: &corev1.LocalObjectReference{
+						Name: "no-encrypt-policy",
+					},
+				},
+			},
+		},
+	}
+	c := newPrivacyCheckerWithK8s(t, policy, ws)
+	result := c.checkSessionEncryption(t.Context())
+	assert.Equal(t, doctor.StatusSkip, result.Status)
+	assert.Contains(t, result.Detail, "plaintext")
+}
+
+// TestCheckSessionEncryption_Pass_EncryptionEnabled verifies pass when a service group
+// references a policy with encryption enabled, reporting workspace/group/kmsProvider/keyID.
+func TestCheckSessionEncryption_Pass_EncryptionEnabled(t *testing.T) {
+	policy := &eev1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "encrypt-policy",
+			Namespace: "ws-ns-1",
+		},
+		Spec: eev1alpha1.SessionPrivacyPolicySpec{
+			Recording: eev1alpha1.RecordingConfig{Enabled: true},
+			Encryption: &eev1alpha1.EncryptionConfig{
+				Enabled:     true,
+				KMSProvider: eev1alpha1.KMSProviderAWSKMS,
+				KeyID:       "arn:aws:kms:us-east-1:123456789:key/abc-def",
+			},
+		},
+	}
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "ws-prod"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			DisplayName: "Production",
+			Namespace:   omniav1alpha1.NamespaceConfig{Name: "ws-ns-1"},
+			Services: []omniav1alpha1.WorkspaceServiceGroup{
+				{
+					Name: "payments",
+					Mode: omniav1alpha1.ServiceModeManaged,
+					PrivacyPolicyRef: &corev1.LocalObjectReference{
+						Name: "encrypt-policy",
+					},
+				},
+			},
+		},
+	}
+	c := newPrivacyCheckerWithK8s(t, policy, ws)
+	result := c.checkSessionEncryption(t.Context())
+	assert.Equal(t, doctor.StatusPass, result.Status)
+	assert.Contains(t, result.Detail, "ws-prod")
+	assert.Contains(t, result.Detail, "payments")
+	assert.Contains(t, result.Detail, "aws-kms")
+}
+
+// TestCheckSessionEncryption_Fail_MissingPolicy verifies error when a privacyPolicyRef
+// names a policy that does not exist in the cluster.
+func TestCheckSessionEncryption_Fail_MissingPolicy(t *testing.T) {
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "ws-1"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			DisplayName: "WS 1",
+			Namespace:   omniav1alpha1.NamespaceConfig{Name: "ws-ns-1"},
+			Services: []omniav1alpha1.WorkspaceServiceGroup{
+				{
+					Name: "default",
+					Mode: omniav1alpha1.ServiceModeManaged,
+					PrivacyPolicyRef: &corev1.LocalObjectReference{
+						Name: "ghost-policy",
+					},
+				},
+			},
+		},
+	}
+	c := newPrivacyCheckerWithK8s(t, ws)
+	result := c.checkSessionEncryption(t.Context())
+	assert.Equal(t, doctor.StatusFail, result.Status)
+	assert.Contains(t, result.Detail, "ghost-policy")
+	assert.Contains(t, result.Detail, "not found")
 }
