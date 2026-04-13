@@ -15,18 +15,18 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/altairalabs/omnia/ee/pkg/arena/fetcher"
+	"github.com/altairalabs/omnia/internal/sourcesync"
 )
 
 // LoadGitCredentials loads Git credentials from a Kubernetes Secret.
 // It supports both HTTPS (username/password) and SSH (identity/known_hosts) credentials.
-func LoadGitCredentials(ctx context.Context, c client.Reader, namespace, secretName string) (*fetcher.GitCredentials, error) {
+func LoadGitCredentials(ctx context.Context, c client.Reader, namespace, secretName string) (*sourcesync.GitCredentials, error) {
 	secret := &corev1.Secret{}
 	if err := c.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err != nil {
 		return nil, err
 	}
 
-	creds := &fetcher.GitCredentials{}
+	creds := &sourcesync.GitCredentials{}
 
 	// HTTPS credentials
 	if username, ok := secret.Data["username"]; ok {
@@ -49,13 +49,13 @@ func LoadGitCredentials(ctx context.Context, c client.Reader, namespace, secretN
 
 // LoadOCICredentials loads OCI registry credentials from a Kubernetes Secret.
 // It supports basic auth (username/password) and Docker config (.dockerconfigjson) credentials.
-func LoadOCICredentials(ctx context.Context, c client.Reader, namespace, secretName string) (*fetcher.OCICredentials, error) {
+func LoadOCICredentials(ctx context.Context, c client.Reader, namespace, secretName string) (*sourcesync.OCICredentials, error) {
 	secret := &corev1.Secret{}
 	if err := c.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err != nil {
 		return nil, err
 	}
 
-	creds := &fetcher.OCICredentials{}
+	creds := &sourcesync.OCICredentials{}
 
 	// Basic auth credentials
 	if username, ok := secret.Data["username"]; ok {

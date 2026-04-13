@@ -1,17 +1,14 @@
 /*
 Copyright 2026 Altaira Labs.
 
-SPDX-License-Identifier: FSL-1.1-Apache-2.0
-This file is part of Omnia Enterprise and is subject to the
-Functional Source License. See ee/LICENSE for details.
+SPDX-License-Identifier: Apache-2.0
 */
 
-package controller
+package sourcesync
 
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,12 +16,19 @@ import (
 	"time"
 
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-
-	"github.com/altairalabs/omnia/ee/pkg/arena/fetcher"
-	"github.com/altairalabs/omnia/ee/pkg/workspace"
 )
 
-// FilesystemSyncer manages content-addressable filesystem sync for arena sources.
+// StorageManager is the minimal interface FilesystemSyncer needs to ensure a
+// workspace PVC exists before writing artifacts. The ee/pkg/workspace
+// StorageManager type satisfies this interface.
+//
+// May be nil — when nil, the syncer skips lazy storage provisioning and
+// assumes the PVC is already mounted.
+type StorageManager interface {
+	EnsureWorkspacePVC(ctx context.Context, workspaceName string) (string, error)
+}
+
+// FilesystemSyncer manages content-addressable filesystem sync for source content.
 // It provides the shared pipeline: hash calculation, version storage, HEAD pointer update,
 // and garbage collection of old versions.
 type FilesystemSyncer struct {
@@ -35,8 +39,10 @@ type FilesystemSyncer struct {
 	// Default is 10 if not set.
 	MaxVersionsPerSource int
 
-	// StorageManager handles lazy workspace PVC creation.
-	StorageManager *workspace.StorageManager
+	// StorageManager optionally ensures workspace PVCs exist before writes.
+	// When nil, the syncer assumes the PVC is already mounted. The
+	// ee/pkg/workspace StorageManager satisfies this interface.
+	StorageManager StorageManager
 }
 
 // SyncParams contains the parameters for a filesystem sync operation.
@@ -51,7 +57,7 @@ type SyncParams struct {
 	TargetPath string
 
 	// Artifact is the fetched artifact to sync.
-	Artifact *fetcher.Artifact
+	Artifact *Artifact
 }
 
 // SyncToFilesystem copies the artifact directory to the workspace content filesystem
@@ -125,11 +131,11 @@ func (s *FilesystemSyncer) ensureWorkspacePVC(ctx context.Context, workspaceName
 }
 
 // calculateVersion computes a short content-addressable version string from the artifact checksum.
-func calculateVersion(artifact *fetcher.Artifact) (string, error) {
+func calculateVersion(artifact *Artifact) (string, error) {
 	contentHash := strings.TrimPrefix(artifact.Checksum, "sha256:")
 	if contentHash == "" || contentHash == artifact.Checksum || len(contentHash) < 12 {
 		var err error
-		contentHash, err = fetcher.CalculateDirectoryHash(artifact.Path)
+		contentHash, err = CalculateDirectoryHash(artifact.Path)
 		if err != nil {
 			return "", fmt.Errorf("failed to calculate content hash: %w", err)
 		}
@@ -151,7 +157,7 @@ func storeVersion(artifactPath, versionDir string) error {
 		if mkErr := os.MkdirAll(versionDir, 0755); mkErr != nil {
 			return fmt.Errorf("failed to create version directory: %w", mkErr)
 		}
-		if cpErr := copyDirectory(artifactPath, versionDir); cpErr != nil {
+		if cpErr := CopyDirectory(artifactPath, versionDir); cpErr != nil {
 			_ = os.RemoveAll(versionDir)
 			return fmt.Errorf("failed to copy content to version directory: %w", cpErr)
 		}
@@ -242,69 +248,5 @@ func collectVersionInfos(entries []os.DirEntry) []versionInfo {
 	return versions
 }
 
-// copyDirectory recursively copies a directory.
-func copyDirectory(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Get relative path
-		relPath, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-
-		targetPath := filepath.Join(dst, relPath)
-
-		if info.IsDir() {
-			return os.MkdirAll(targetPath, info.Mode())
-		}
-
-		// Handle symlinks
-		if info.Mode()&os.ModeSymlink != 0 {
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			return os.Symlink(link, targetPath)
-		}
-
-		// Copy file
-		return copyFileWithMode(path, targetPath, info.Mode())
-	})
-}
-
-// copyFileWithMode copies a file preserving its mode.
-func copyFileWithMode(src, dst string, mode os.FileMode) error {
-	sourceFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := sourceFile.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to close source file %s: %v\n", src, err)
-		}
-	}()
-
-	destFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
-	if err != nil {
-		return err
-	}
-
-	if _, err := io.Copy(destFile, sourceFile); err != nil {
-		if closeErr := destFile.Close(); closeErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to close dest file %s after copy error: %v\n", dst, closeErr)
-		}
-		return err
-	}
-
-	if err := destFile.Sync(); err != nil {
-		if closeErr := destFile.Close(); closeErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to close dest file %s after sync error: %v\n", dst, closeErr)
-		}
-		return err
-	}
-
-	return destFile.Close()
-}
+// copyDirectory / copyFileWithMode live in dir.go (exported as CopyDirectory,
+// CopyDirectoryExcluding, and the internal copyFileWithMode helper).

@@ -23,8 +23,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
-	"github.com/altairalabs/omnia/ee/pkg/arena/fetcher"
 	arenaTemplate "github.com/altairalabs/omnia/ee/pkg/arena/template"
+	"github.com/altairalabs/omnia/internal/sourcesync"
 )
 
 var _ = Describe("ArenaTemplateSource Controller", func() {
@@ -352,7 +352,7 @@ spec:
 			Expect(os.WriteFile(filepath.Join(artifactDir, "test.txt"), []byte("test"), 0644)).To(Succeed())
 
 			result := &templateFetchResult{
-				artifact: &fetcher.Artifact{
+				artifact: &sourcesync.Artifact{
 					Revision: "abc123",
 					Checksum: "sha256:1234567890abcdef",
 					Size:     100,
@@ -444,7 +444,7 @@ spec:
 				Type: "unsupported",
 			}
 
-			_, err := reconciler.createFetcher(ctx, spec, "default", fetcher.Options{})
+			_, err := reconciler.createFetcher(ctx, spec, "default", sourcesync.Options{})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("unsupported source type"))
 		})
@@ -459,7 +459,7 @@ spec:
 				Git:  nil,
 			}
 
-			_, err := reconciler.createFetcher(ctx, spec, "default", fetcher.Options{})
+			_, err := reconciler.createFetcher(ctx, spec, "default", sourcesync.Options{})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("git configuration is required"))
 		})
@@ -474,7 +474,7 @@ spec:
 				OCI:  nil,
 			}
 
-			_, err := reconciler.createFetcher(ctx, spec, "default", fetcher.Options{})
+			_, err := reconciler.createFetcher(ctx, spec, "default", sourcesync.Options{})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("oci configuration is required"))
 		})
@@ -489,7 +489,7 @@ spec:
 				ConfigMap: nil,
 			}
 
-			_, err := reconciler.createFetcher(ctx, spec, "default", fetcher.Options{})
+			_, err := reconciler.createFetcher(ctx, spec, "default", sourcesync.Options{})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("configmap configuration is required"))
 		})
@@ -509,7 +509,7 @@ spec:
 				},
 			}
 
-			f, err := reconciler.createFetcher(ctx, spec, "default", fetcher.Options{})
+			f, err := reconciler.createFetcher(ctx, spec, "default", sourcesync.Options{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f).NotTo(BeNil())
 		})
@@ -526,7 +526,7 @@ spec:
 				},
 			}
 
-			f, err := reconciler.createFetcher(ctx, spec, "default", fetcher.Options{})
+			f, err := reconciler.createFetcher(ctx, spec, "default", sourcesync.Options{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f).NotTo(BeNil())
 		})
