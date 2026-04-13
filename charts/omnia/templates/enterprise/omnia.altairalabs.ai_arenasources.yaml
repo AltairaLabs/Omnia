@@ -64,7 +64,7 @@ spec:
                   key:
                     default: pack.json
                     description: |-
-                      key is the key within the ConfigMap containing the bundle.
+                      key is the key within the ConfigMap containing the content.
                       Defaults to "pack.json".
                     type: string
                   name:
@@ -87,7 +87,7 @@ spec:
                 properties:
                   path:
                     description: |-
-                      path is the path within the repository to the PromptKit bundle.
+                      path is the path within the repository to the content.
                       Defaults to the repository root.
                     type: string
                   ref:

@@ -22,6 +22,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	arenaTemplate "github.com/altairalabs/omnia/ee/pkg/arena/template"
 	"github.com/altairalabs/omnia/internal/sourcesync"
@@ -82,7 +83,7 @@ var _ = Describe("ArenaTemplateSource Controller", func() {
 				Spec: omniav1alpha1.ArenaTemplateSourceSpec{
 					Type:    omniav1alpha1.ArenaTemplateSourceTypeConfigMap,
 					Suspend: true,
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: configMapName,
 					},
 				},
@@ -176,7 +177,7 @@ spec:
 				},
 				Spec: omniav1alpha1.ArenaTemplateSourceSpec{
 					Type: omniav1alpha1.ArenaTemplateSourceTypeConfigMap,
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: configMapName,
 					},
 					SyncInterval: "1h",
@@ -501,9 +502,9 @@ spec:
 
 			spec := &omniav1alpha1.ArenaTemplateSourceSpec{
 				Type: omniav1alpha1.ArenaTemplateSourceTypeGit,
-				Git: &omniav1alpha1.GitSource{
+				Git: &corev1alpha1.GitSource{
 					URL: "https://github.com/example/repo",
-					Ref: &omniav1alpha1.GitReference{
+					Ref: &corev1alpha1.GitReference{
 						Branch: "main",
 					},
 				},
@@ -521,7 +522,7 @@ spec:
 
 			spec := &omniav1alpha1.ArenaTemplateSourceSpec{
 				Type: omniav1alpha1.ArenaTemplateSourceTypeConfigMap,
-				ConfigMap: &omniav1alpha1.ConfigMapSource{
+				ConfigMap: &corev1alpha1.ConfigMapSource{
 					Name: "test-configmap",
 				},
 			}

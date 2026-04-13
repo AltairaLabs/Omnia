@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/license"
 )
@@ -33,7 +34,7 @@ func TestArenaTemplateSourceValidatorValidateCreate(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "test-source", Namespace: "default"},
 				Spec: omniav1alpha1.ArenaTemplateSourceSpec{
 					Type: omniav1alpha1.ArenaTemplateSourceTypeGit,
-					Git: &omniav1alpha1.GitSource{
+					Git: &corev1alpha1.GitSource{
 						URL: "https://github.com/test/repo",
 					},
 				},
@@ -76,7 +77,7 @@ func TestArenaTemplateSourceValidatorValidateCreate(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "test-source", Namespace: "default"},
 				Spec: omniav1alpha1.ArenaTemplateSourceSpec{
 					Type: omniav1alpha1.ArenaTemplateSourceTypeOCI,
-					OCI: &omniav1alpha1.OCISource{
+					OCI: &corev1alpha1.OCISource{
 						URL: "oci://registry.example.com/templates:latest",
 					},
 				},
@@ -89,7 +90,7 @@ func TestArenaTemplateSourceValidatorValidateCreate(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "test-source", Namespace: "default"},
 				Spec: omniav1alpha1.ArenaTemplateSourceSpec{
 					Type: omniav1alpha1.ArenaTemplateSourceTypeConfigMap,
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "template-config",
 					},
 				},
@@ -126,7 +127,7 @@ func TestArenaTemplateSourceValidatorValidateUpdate(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "test-source", Namespace: "default"},
 				Spec: omniav1alpha1.ArenaTemplateSourceSpec{
 					Type: omniav1alpha1.ArenaTemplateSourceTypeGit,
-					Git: &omniav1alpha1.GitSource{
+					Git: &corev1alpha1.GitSource{
 						URL: "https://github.com/test/repo",
 					},
 					SyncInterval: "1h",
@@ -136,7 +137,7 @@ func TestArenaTemplateSourceValidatorValidateUpdate(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "test-source", Namespace: "default"},
 				Spec: omniav1alpha1.ArenaTemplateSourceSpec{
 					Type: omniav1alpha1.ArenaTemplateSourceTypeGit,
-					Git: &omniav1alpha1.GitSource{
+					Git: &corev1alpha1.GitSource{
 						URL: "https://github.com/test/repo",
 					},
 					SyncInterval: "2h",
@@ -150,7 +151,7 @@ func TestArenaTemplateSourceValidatorValidateUpdate(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "test-source", Namespace: "default"},
 				Spec: omniav1alpha1.ArenaTemplateSourceSpec{
 					Type: omniav1alpha1.ArenaTemplateSourceTypeGit,
-					Git: &omniav1alpha1.GitSource{
+					Git: &corev1alpha1.GitSource{
 						URL: "https://github.com/test/repo",
 					},
 				},
@@ -188,7 +189,7 @@ func TestArenaTemplateSourceValidatorValidateDelete(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test-source", Namespace: "default"},
 		Spec: omniav1alpha1.ArenaTemplateSourceSpec{
 			Type: omniav1alpha1.ArenaTemplateSourceTypeGit,
-			Git: &omniav1alpha1.GitSource{
+			Git: &corev1alpha1.GitSource{
 				URL: "https://github.com/test/repo",
 			},
 		},
@@ -213,7 +214,7 @@ func TestValidateSpec(t *testing.T) {
 			source: &omniav1alpha1.ArenaTemplateSource{
 				Spec: omniav1alpha1.ArenaTemplateSourceSpec{
 					Type: omniav1alpha1.ArenaTemplateSourceTypeGit,
-					Git:  &omniav1alpha1.GitSource{URL: "https://github.com/test/repo"},
+					Git:  &corev1alpha1.GitSource{URL: "https://github.com/test/repo"},
 				},
 			},
 			expectErrs: 0,
@@ -264,7 +265,7 @@ func TestValidateLicenseNoValidator(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test-source", Namespace: "default"},
 		Spec: omniav1alpha1.ArenaTemplateSourceSpec{
 			Type: omniav1alpha1.ArenaTemplateSourceTypeGit,
-			Git:  &omniav1alpha1.GitSource{URL: "https://github.com/test/repo"},
+			Git:  &corev1alpha1.GitSource{URL: "https://github.com/test/repo"},
 		},
 	}
 
@@ -290,7 +291,7 @@ func TestValidateLicenseWithDevModeValidator(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test-source", Namespace: "default"},
 		Spec: omniav1alpha1.ArenaTemplateSourceSpec{
 			Type: omniav1alpha1.ArenaTemplateSourceTypeGit,
-			Git:  &omniav1alpha1.GitSource{URL: "https://github.com/test/repo"},
+			Git:  &corev1alpha1.GitSource{URL: "https://github.com/test/repo"},
 		},
 	}
 
@@ -317,7 +318,7 @@ func TestValidateLicenseWithOCISource(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test-source", Namespace: "default"},
 		Spec: omniav1alpha1.ArenaTemplateSourceSpec{
 			Type: omniav1alpha1.ArenaTemplateSourceTypeOCI,
-			OCI:  &omniav1alpha1.OCISource{URL: "oci://registry.example.com/templates:latest"},
+			OCI:  &corev1alpha1.OCISource{URL: "oci://registry.example.com/templates:latest"},
 		},
 	}
 
@@ -343,7 +344,7 @@ func TestValidateLicenseWithConfigMapSource(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test-source", Namespace: "default"},
 		Spec: omniav1alpha1.ArenaTemplateSourceSpec{
 			Type:      omniav1alpha1.ArenaTemplateSourceTypeConfigMap,
-			ConfigMap: &omniav1alpha1.ConfigMapSource{Name: "template-configmap"},
+			ConfigMap: &corev1alpha1.ConfigMapSource{Name: "template-configmap"},
 		},
 	}
 
@@ -380,7 +381,7 @@ func TestValidateLicenseOpenCoreRestriction(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test-source", Namespace: "default"},
 		Spec: omniav1alpha1.ArenaTemplateSourceSpec{
 			Type: omniav1alpha1.ArenaTemplateSourceTypeOCI,
-			OCI:  &omniav1alpha1.OCISource{URL: "oci://registry.example.com/templates:latest"},
+			OCI:  &corev1alpha1.OCISource{URL: "oci://registry.example.com/templates:latest"},
 		},
 	}
 

@@ -135,7 +135,7 @@ var _ = Describe("ArenaSource Controller", func() {
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
 					Suspend:  true,
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: configMapName,
 					},
 				},
@@ -277,7 +277,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: configMapName,
 					},
 				},
@@ -427,7 +427,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "nonexistent-configmap",
 					},
 				},
@@ -517,9 +517,9 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeGit,
 					Interval: "5m",
-					Git: &omniav1alpha1.GitSource{
+					Git: &corev1alpha1.GitSource{
 						URL: "https://github.com/example/repo.git",
-						Ref: &omniav1alpha1.GitReference{
+						Ref: &corev1alpha1.GitReference{
 							Branch: "main",
 						},
 						SecretRef: &corev1alpha1.SecretKeyRef{
@@ -607,7 +607,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeOCI,
 					Interval: "5m",
-					OCI: &omniav1alpha1.OCISource{
+					OCI: &corev1alpha1.OCISource{
 						URL:      "oci://registry.example.com/repo:latest",
 						Insecure: false,
 						SecretRef: &corev1alpha1.SecretKeyRef{
@@ -693,7 +693,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeOCI,
 					Interval: "5m",
-					OCI: &omniav1alpha1.OCISource{
+					OCI: &corev1alpha1.OCISource{
 						URL: "oci://registry.example.com/repo:latest",
 						SecretRef: &corev1alpha1.SecretKeyRef{
 							Name: "docker-config-secret",
@@ -752,7 +752,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeGit,
 					Interval: "5m",
-					Git: &omniav1alpha1.GitSource{
+					Git: &corev1alpha1.GitSource{
 						URL: "https://github.com/example/repo.git",
 						SecretRef: &corev1alpha1.SecretKeyRef{
 							Name: "nonexistent-secret",
@@ -845,7 +845,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeOCI,
 					Interval: "5m",
-					OCI: &omniav1alpha1.OCISource{
+					OCI: &corev1alpha1.OCISource{
 						URL:      "oci://registry.example.com/repo:latest",
 						Insecure: true,
 					},
@@ -909,9 +909,9 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeGit,
 					Interval: "5m",
-					Git: &omniav1alpha1.GitSource{
+					Git: &corev1alpha1.GitSource{
 						URL: "https://github.com/nonexistent/repo.git",
-						Ref: &omniav1alpha1.GitReference{
+						Ref: &corev1alpha1.GitReference{
 							Branch: "main",
 						},
 					},
@@ -991,7 +991,7 @@ var _ = Describe("ArenaSource Controller", func() {
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
 					Timeout:  "30s",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "timeout-test-configmap",
 					},
 				},
@@ -1126,7 +1126,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "async-test-configmap",
 					},
 				},
@@ -1276,7 +1276,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "cancel-test-configmap",
 					},
 				},
@@ -1534,7 +1534,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeOCI,
 					Interval: "5m",
-					OCI: &omniav1alpha1.OCISource{
+					OCI: &corev1alpha1.OCISource{
 						URL: "oci://example.com/repo:latest",
 					},
 				},
@@ -1888,7 +1888,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				},
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type: omniav1alpha1.ArenaSourceTypeOCI,
-					OCI: &omniav1alpha1.OCISource{
+					OCI: &corev1alpha1.OCISource{
 						URL: "registry.example.com/my-repo:latest",
 					},
 				},
@@ -2113,7 +2113,7 @@ var _ = Describe("ArenaSource Controller", func() {
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
 					Suspend:  false,
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "suspend-test-configmap",
 					},
 				},

@@ -144,7 +144,7 @@ var _ = Describe("ArenaJob Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "test-configmap",
 					},
 				},
@@ -234,7 +234,7 @@ var _ = Describe("ArenaJob Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "test-configmap",
 					},
 				},
@@ -570,7 +570,7 @@ var _ = Describe("ArenaJob Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "test-cm",
 					},
 				},
@@ -705,7 +705,7 @@ var _ = Describe("ArenaJob Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "test-configmap",
 					},
 				},
@@ -795,7 +795,7 @@ var _ = Describe("ArenaJob Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "test-configmap",
 					},
 				},
@@ -904,7 +904,7 @@ var _ = Describe("ArenaJob Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "test-configmap",
 					},
 				},
@@ -1347,7 +1347,7 @@ var _ = Describe("ArenaJob Controller", func() {
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "test-configmap",
 					},
 				},
@@ -2315,7 +2315,7 @@ spec:
 				Spec: omniav1alpha1.ArenaSourceSpec{
 					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
 					Interval: "5m",
-					ConfigMap: &omniav1alpha1.ConfigMapSource{
+					ConfigMap: &corev1alpha1.ConfigMapSource{
 						Name: "test-cm",
 					},
 				},

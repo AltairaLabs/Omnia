@@ -13,6 +13,8 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+
+	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
 func TestArenaTemplateSourceTypesRegistration(t *testing.T) {
@@ -105,9 +107,9 @@ func TestArenaTemplateSourceCreation(t *testing.T) {
 		},
 		Spec: ArenaTemplateSourceSpec{
 			Type: ArenaTemplateSourceTypeGit,
-			Git: &GitSource{
+			Git: &corev1alpha1.GitSource{
 				URL: "https://github.com/test/repo",
-				Ref: &GitReference{
+				Ref: &corev1alpha1.GitReference{
 					Branch: "main",
 				},
 			},
@@ -296,7 +298,7 @@ func TestArenaTemplateSourceDeepCopy(t *testing.T) {
 		},
 		Spec: ArenaTemplateSourceSpec{
 			Type: ArenaTemplateSourceTypeGit,
-			Git: &GitSource{
+			Git: &corev1alpha1.GitSource{
 				URL: "https://github.com/test/repo",
 			},
 			SyncInterval: "1h",
@@ -355,7 +357,7 @@ func TestMinimalArenaTemplateSource(t *testing.T) {
 		},
 		Spec: ArenaTemplateSourceSpec{
 			Type: ArenaTemplateSourceTypeGit,
-			Git: &GitSource{
+			Git: &corev1alpha1.GitSource{
 				URL: "https://github.com/test/repo",
 			},
 		},
