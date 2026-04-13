@@ -15,6 +15,7 @@ import (
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,6 +31,12 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 		interval = time.Millisecond * 250
 	)
 
+	// ensureNamespace creates a namespace if it doesn't exist.
+	ensureNamespace := func(name string) {
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+		_ = k8sClient.Create(ctx, ns)
+	}
+
 	Context("When watching SessionPrivacyPolicy CRDs via a real API server", func() {
 		It("should create a PolicyWatcher with a controller-runtime client", func() {
 			k8s, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
@@ -40,7 +47,7 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 			Expect(pw).NotTo(BeNil())
 		})
 
-		It("should sync cache and detect created policies", func() {
+		It("should return the global default policy (omnia-system/default)", func() {
 			k8s, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -58,13 +65,14 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 			// Initially no policies — GetEffectivePolicy should return nil
 			Expect(pw.GetEffectivePolicy("default", "my-agent")).To(BeNil())
 
-			// Create a global SessionPrivacyPolicy via the real K8s API
+			// Create the global default policy in omnia-system
+			ensureNamespace("omnia-system")
 			policy := &omniav1alpha1.SessionPrivacyPolicy{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "envtest-global-policy",
+					Name:      "default",
+					Namespace: "omnia-system",
 				},
 				Spec: omniav1alpha1.SessionPrivacyPolicySpec{
-					Level: omniav1alpha1.PolicyLevelGlobal,
 					Recording: omniav1alpha1.RecordingConfig{
 						Enabled: true,
 						PII: &omniav1alpha1.PIIConfig{
@@ -82,7 +90,7 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 
 			// The poll loop should pick up the policy within a few seconds
 			Eventually(func(g Gomega) {
-				ep := pw.GetEffectivePolicy("default", "my-agent")
+				ep := pw.GetEffectivePolicy("any-ns", "any-agent")
 				g.Expect(ep).NotTo(BeNil())
 				g.Expect(ep.Recording.Enabled).To(BeTrue())
 				g.Expect(ep.Recording.PII).NotTo(BeNil())
@@ -92,23 +100,21 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 			}, timeout, interval).Should(Succeed())
 		})
 
-		It("should detect policy deletion", func() {
+		It("should detect policy deletion and return nil", func() {
 			k8s, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
 			Expect(err).NotTo(HaveOccurred())
 
 			pw := privacy.NewPolicyWatcher(k8s, logr.Discard())
 			pw.SetPollInterval(500 * time.Millisecond)
 
-			// Create the policy before starting the watcher
+			ensureNamespace("omnia-system")
 			policy := &omniav1alpha1.SessionPrivacyPolicy{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "envtest-delete-policy",
+					Name:      "default",
+					Namespace: "omnia-system",
 				},
 				Spec: omniav1alpha1.SessionPrivacyPolicySpec{
-					Level: omniav1alpha1.PolicyLevelGlobal,
-					Recording: omniav1alpha1.RecordingConfig{
-						Enabled: true,
-					},
+					Recording: omniav1alpha1.RecordingConfig{Enabled: true},
 				},
 			}
 			Expect(k8sClient.Create(ctx, policy)).To(Succeed())
@@ -123,7 +129,7 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 
 			// Wait until the policy appears in cache
 			Eventually(func() *privacy.EffectivePolicy {
-				return pw.GetEffectivePolicy("default", "agent")
+				return pw.GetEffectivePolicy("any-ns", "agent")
 			}, timeout, interval).ShouldNot(BeNil())
 
 			// Delete the policy
@@ -131,11 +137,11 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 
 			// Wait until it disappears from cache
 			Eventually(func() *privacy.EffectivePolicy {
-				return pw.GetEffectivePolicy("default", "agent")
+				return pw.GetEffectivePolicy("any-ns", "agent")
 			}, timeout, interval).Should(BeNil())
 		})
 
-		It("should observe workspace-scoped policies", func() {
+		It("should resolve agent-override policy over global default", func() {
 			k8s, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -150,65 +156,53 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 				_ = pw.Start(watchCtx)
 			}()
 
-			// Create a global policy as the parent
+			testNS := "envtest-agent-override"
+			ensureNamespace("omnia-system")
+			ensureNamespace(testNS)
+
+			// Global default: recording enabled
 			globalPolicy := &omniav1alpha1.SessionPrivacyPolicy{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "envtest-ws-global",
-				},
+				ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "omnia-system"},
 				Spec: omniav1alpha1.SessionPrivacyPolicySpec{
-					Level: omniav1alpha1.PolicyLevelGlobal,
-					Recording: omniav1alpha1.RecordingConfig{
-						Enabled: true,
-						PII: &omniav1alpha1.PIIConfig{
-							Redact:   true,
-							Patterns: []string{"ssn"},
-						},
-					},
+					Recording: omniav1alpha1.RecordingConfig{Enabled: true},
 				},
 			}
 			Expect(k8sClient.Create(ctx, globalPolicy)).To(Succeed())
-			DeferCleanup(func() {
-				_ = k8sClient.Delete(ctx, globalPolicy)
-			})
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, globalPolicy) })
 
-			// Create a workspace-scoped policy
-			wsPolicy := &omniav1alpha1.SessionPrivacyPolicy{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "envtest-ws-policy",
-				},
+			// Agent-specific policy: recording disabled
+			agentPolicy := &omniav1alpha1.SessionPrivacyPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "strict", Namespace: testNS},
 				Spec: omniav1alpha1.SessionPrivacyPolicySpec{
-					Level:        omniav1alpha1.PolicyLevelWorkspace,
-					WorkspaceRef: &corev1alpha1.LocalObjectReference{Name: "test-ns"},
-					Recording: omniav1alpha1.RecordingConfig{
-						Enabled: true,
-						PII: &omniav1alpha1.PIIConfig{
-							Redact:  true,
-							Encrypt: true,
-						},
-					},
+					Recording: omniav1alpha1.RecordingConfig{Enabled: false},
 				},
 			}
-			Expect(k8sClient.Create(ctx, wsPolicy)).To(Succeed())
-			DeferCleanup(func() {
-				_ = k8sClient.Delete(ctx, wsPolicy)
-			})
+			Expect(k8sClient.Create(ctx, agentPolicy)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, agentPolicy) })
 
-			// The effective policy for test-ns should merge global + workspace
+			// AgentRuntime references the strict policy.
+			// Must set required fields: facade.type and promptPackRef.name.
+			ar := &corev1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: testNS},
+			}
+			ar.Spec.Facade.Type = corev1alpha1.FacadeTypeWebSocket
+			ar.Spec.PromptPackRef = corev1alpha1.PromptPackRef{Name: "placeholder"}
+			ar.Spec.PrivacyPolicyRef = &corev1.LocalObjectReference{Name: "strict"}
+			Expect(k8sClient.Create(ctx, ar)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, ar) })
+
+			// Eventually the agent override should apply (recording=false)
 			Eventually(func(g Gomega) {
-				ep := pw.GetEffectivePolicy("test-ns", "some-agent")
+				ep := pw.GetEffectivePolicy(testNS, "test-agent")
 				g.Expect(ep).NotTo(BeNil())
-				g.Expect(ep.Recording.PII).NotTo(BeNil())
-				g.Expect(ep.Recording.PII.Redact).To(BeTrue())
-				g.Expect(ep.Recording.PII.Encrypt).To(BeTrue())
+				g.Expect(ep.Recording.Enabled).To(BeFalse())
 			}, timeout, interval).Should(Succeed())
 
-			// A different namespace should only get the global policy
+			// A different agent in the same namespace should fall back to global
 			Eventually(func(g Gomega) {
-				ep := pw.GetEffectivePolicy("other-ns", "some-agent")
+				ep := pw.GetEffectivePolicy(testNS, "other-agent")
 				g.Expect(ep).NotTo(BeNil())
-				g.Expect(ep.Recording.PII).NotTo(BeNil())
-				g.Expect(ep.Recording.PII.Redact).To(BeTrue())
-				g.Expect(ep.Recording.PII.Encrypt).To(BeFalse())
+				g.Expect(ep.Recording.Enabled).To(BeTrue())
 			}, timeout, interval).Should(Succeed())
 		})
 	})

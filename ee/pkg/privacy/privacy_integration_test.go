@@ -20,6 +20,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/redaction"
@@ -163,7 +164,7 @@ func newCapturingHandler() (http.Handler, *capturedRequest) {
 
 func globalPIIPolicy(patterns []string) *omniav1alpha1.SessionPrivacyPolicySpec {
 	return &omniav1alpha1.SessionPrivacyPolicySpec{
-		Level: omniav1alpha1.PolicyLevelGlobal,
+
 		Recording: omniav1alpha1.RecordingConfig{
 			Enabled:  true,
 			RichData: true,
@@ -177,7 +178,7 @@ func globalPIIPolicy(patterns []string) *omniav1alpha1.SessionPrivacyPolicySpec 
 
 func workspacePIIPolicy(patterns []string) *omniav1alpha1.SessionPrivacyPolicySpec {
 	return &omniav1alpha1.SessionPrivacyPolicySpec{
-		Level: omniav1alpha1.PolicyLevelWorkspace,
+
 		Recording: omniav1alpha1.RecordingConfig{
 			Enabled:  true,
 			RichData: true,
@@ -191,7 +192,7 @@ func workspacePIIPolicy(patterns []string) *omniav1alpha1.SessionPrivacyPolicySp
 
 func optOutPolicy() *omniav1alpha1.SessionPrivacyPolicySpec {
 	return &omniav1alpha1.SessionPrivacyPolicySpec{
-		Level: omniav1alpha1.PolicyLevelGlobal,
+
 		Recording: omniav1alpha1.RecordingConfig{
 			Enabled:  true,
 			RichData: true,
@@ -502,7 +503,7 @@ func TestPrivacyIntegration_WorkspacePolicyOverridesGlobal(t *testing.T) {
 
 	// Global: no redaction.
 	globalSpec := &omniav1alpha1.SessionPrivacyPolicySpec{
-		Level: omniav1alpha1.PolicyLevelGlobal,
+
 		Recording: omniav1alpha1.RecordingConfig{
 			Enabled:  true,
 			RichData: true,
@@ -735,7 +736,7 @@ func TestPrivacyIntegration_AgentPolicyOverridesWorkspace(t *testing.T) {
 
 	// Workspace: no redaction
 	wsSpec := &omniav1alpha1.SessionPrivacyPolicySpec{
-		Level: omniav1alpha1.PolicyLevelWorkspace,
+
 		Recording: omniav1alpha1.RecordingConfig{
 			Enabled:  true,
 			RichData: true,
@@ -748,7 +749,7 @@ func TestPrivacyIntegration_AgentPolicyOverridesWorkspace(t *testing.T) {
 
 	// Agent: redaction enabled
 	agentSpec := &omniav1alpha1.SessionPrivacyPolicySpec{
-		Level: omniav1alpha1.PolicyLevelAgent,
+
 		Recording: omniav1alpha1.RecordingConfig{
 			Enabled:  true,
 			RichData: true,
@@ -787,7 +788,7 @@ func TestPrivacyIntegration_OptOutCombinedWithRedaction(t *testing.T) {
 	watcher := &policyWatcher{}
 	// Policy has both PII redaction and opt-out enabled.
 	spec := &omniav1alpha1.SessionPrivacyPolicySpec{
-		Level: omniav1alpha1.PolicyLevelGlobal,
+
 		Recording: omniav1alpha1.RecordingConfig{
 			Enabled:  true,
 			RichData: true,
@@ -882,8 +883,9 @@ func integrationBuildMiddleware(
 	cache := NewSessionMetadataCache(lookup, 100)
 
 	watcher := &PolicyWatcher{}
-	watcher.policies.Store("recording", &omniav1alpha1.SessionPrivacyPolicy{
-		Spec: spec,
+	watcher.policies.Store("omnia-system/default", &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "omnia-system"},
+		Spec:       spec,
 	})
 
 	mw := NewPrivacyMiddleware(watcher, cache, redaction.NewRedactor(), nil, logr.Discard())
@@ -892,7 +894,7 @@ func integrationBuildMiddleware(
 
 func TestIntegration_RecordingDisabled_BlocksMessages(t *testing.T) {
 	spec := omniav1alpha1.SessionPrivacyPolicySpec{
-		Level: omniav1alpha1.PolicyLevelGlobal,
+
 		Recording: omniav1alpha1.RecordingConfig{
 			Enabled: false,
 		},
@@ -912,7 +914,7 @@ func TestIntegration_RecordingDisabled_BlocksMessages(t *testing.T) {
 
 func TestIntegration_RecordingDisabled_BlocksToolCalls(t *testing.T) {
 	spec := omniav1alpha1.SessionPrivacyPolicySpec{
-		Level: omniav1alpha1.PolicyLevelGlobal,
+
 		Recording: omniav1alpha1.RecordingConfig{
 			Enabled: false,
 		},
@@ -930,7 +932,7 @@ func TestIntegration_RecordingDisabled_BlocksToolCalls(t *testing.T) {
 
 func TestIntegration_RichDataDisabled_BlocksAssistantMessage(t *testing.T) {
 	spec := omniav1alpha1.SessionPrivacyPolicySpec{
-		Level: omniav1alpha1.PolicyLevelGlobal,
+
 		Recording: omniav1alpha1.RecordingConfig{
 			Enabled:  true,
 			RichData: false,
@@ -950,7 +952,7 @@ func TestIntegration_RichDataDisabled_BlocksAssistantMessage(t *testing.T) {
 
 func TestIntegration_RichDataDisabled_AllowsUserMessage(t *testing.T) {
 	spec := omniav1alpha1.SessionPrivacyPolicySpec{
-		Level: omniav1alpha1.PolicyLevelGlobal,
+
 		Recording: omniav1alpha1.RecordingConfig{
 			Enabled:  true,
 			RichData: false,
@@ -970,7 +972,7 @@ func TestIntegration_RichDataDisabled_AllowsUserMessage(t *testing.T) {
 
 func TestIntegration_RichDataDisabled_BlocksToolCallEndpoint(t *testing.T) {
 	spec := omniav1alpha1.SessionPrivacyPolicySpec{
-		Level: omniav1alpha1.PolicyLevelGlobal,
+
 		Recording: omniav1alpha1.RecordingConfig{
 			Enabled:  true,
 			RichData: false,

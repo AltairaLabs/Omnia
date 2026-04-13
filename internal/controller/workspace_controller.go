@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -30,6 +31,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,6 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 )
 
 // Workspace-specific constants
@@ -243,6 +246,11 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Update member count
 	r.updateMemberCount(workspace)
+
+	// Validate privacyPolicyRef across all service groups (non-blocking)
+	privacyCond := r.validatePrivacyPolicyRefs(ctx, workspace)
+	SetCondition(&workspace.Status.Conditions, workspace.Generation,
+		privacyCond.Type, privacyCond.Status, privacyCond.Reason, privacyCond.Message)
 
 	// Set overall Ready condition based on all components
 	if storageProvisioning {
@@ -1125,5 +1133,52 @@ func (r *WorkspaceReconciler) mapPVCToWorkspace(_ context.Context, obj client.Ob
 	// Workspace is cluster-scoped, so we only need the name
 	return []reconcile.Request{
 		{NamespacedName: client.ObjectKey{Name: workspaceName}},
+	}
+}
+
+// validatePrivacyPolicyRefs returns one Condition summarising privacyPolicyRef
+// resolution across all service groups. Status is False if ANY referenced policy
+// is missing, with a Message listing every unresolved (groupName, policyName) pair.
+// Missing refs do not block reconciliation — they are informational only.
+func (r *WorkspaceReconciler) validatePrivacyPolicyRefs(ctx context.Context, ws *omniav1alpha1.Workspace) metav1.Condition {
+	missing := make([]string, 0, len(ws.Spec.Services))
+	resolved := make([]string, 0, len(ws.Spec.Services))
+	for i := range ws.Spec.Services {
+		sg := &ws.Spec.Services[i]
+		if sg.PrivacyPolicyRef == nil {
+			continue
+		}
+		p := &eev1alpha1.SessionPrivacyPolicy{}
+		err := r.Get(ctx, types.NamespacedName{
+			Name:      sg.PrivacyPolicyRef.Name,
+			Namespace: ws.Spec.Namespace.Name,
+		}, p)
+		if err != nil {
+			missing = append(missing, fmt.Sprintf("services[%s] -> %s (%v)", sg.Name, sg.PrivacyPolicyRef.Name, err))
+			continue
+		}
+		resolved = append(resolved, fmt.Sprintf("services[%s] -> %s", sg.Name, sg.PrivacyPolicyRef.Name))
+	}
+	if len(missing) > 0 {
+		return metav1.Condition{
+			Type:    "PrivacyPolicyResolved",
+			Status:  metav1.ConditionFalse,
+			Reason:  "PolicyNotFound",
+			Message: "unresolved privacyPolicyRef(s): " + strings.Join(missing, "; "),
+		}
+	}
+	if len(resolved) == 0 {
+		return metav1.Condition{
+			Type:    "PrivacyPolicyResolved",
+			Status:  metav1.ConditionTrue,
+			Reason:  "DefaultPolicy",
+			Message: "no service group sets privacyPolicyRef; sessions use global default",
+		}
+	}
+	return metav1.Condition{
+		Type:    "PrivacyPolicyResolved",
+		Status:  metav1.ConditionTrue,
+		Reason:  "PolicyResolved",
+		Message: strings.Join(resolved, "; "),
 	}
 }

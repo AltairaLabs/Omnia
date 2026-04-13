@@ -20,6 +20,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/audit"
@@ -143,9 +144,10 @@ func TestPrivacyMiddleware_OptOutReturns204(t *testing.T) {
 
 	// Set up watcher with a policy that enables opt-out
 	watcher := &PolicyWatcher{}
-	watcher.policies.Store("test", &omniav1alpha1.SessionPrivacyPolicy{
+	watcher.policies.Store("omnia-system/default", &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "omnia-system"},
 		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
-			Level: omniav1alpha1.PolicyLevelGlobal,
+
 			Recording: omniav1alpha1.RecordingConfig{
 				Enabled: true,
 			},
@@ -214,9 +216,10 @@ func TestPrivacyMiddleware_RedactsMessageContent(t *testing.T) {
 	cache := NewSessionMetadataCache(lookup, 100)
 
 	watcher := &PolicyWatcher{}
-	watcher.policies.Store("test", &omniav1alpha1.SessionPrivacyPolicy{
+	watcher.policies.Store("omnia-system/default", &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "omnia-system"},
 		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
-			Level: omniav1alpha1.PolicyLevelGlobal,
+
 			Recording: omniav1alpha1.RecordingConfig{
 				Enabled: true,
 				PII: &omniav1alpha1.PIIConfig{
@@ -271,9 +274,10 @@ func TestPrivacyMiddleware_OptOutNoUserID(t *testing.T) {
 	cache := NewSessionMetadataCache(lookup, 100)
 
 	watcher := &PolicyWatcher{}
-	watcher.policies.Store("test", &omniav1alpha1.SessionPrivacyPolicy{
+	watcher.policies.Store("omnia-system/default", &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "omnia-system"},
 		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
-			Level:      omniav1alpha1.PolicyLevelGlobal,
+
 			Recording:  omniav1alpha1.RecordingConfig{Enabled: true},
 			UserOptOut: &omniav1alpha1.UserOptOutConfig{Enabled: true},
 		},
@@ -301,9 +305,10 @@ func TestPrivacyMiddleware_RedactionFailureReturns500(t *testing.T) {
 	cache := NewSessionMetadataCache(lookup, 100)
 
 	watcher := &PolicyWatcher{}
-	watcher.policies.Store("test", &omniav1alpha1.SessionPrivacyPolicy{
+	watcher.policies.Store("omnia-system/default", &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "omnia-system"},
 		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
-			Level: omniav1alpha1.PolicyLevelGlobal,
+
 			Recording: omniav1alpha1.RecordingConfig{
 				Enabled: true,
 				PII: &omniav1alpha1.PIIConfig{
@@ -444,9 +449,10 @@ func TestPrivacyMiddleware_RecordingDisabled_Returns204(t *testing.T) {
 	cache := NewSessionMetadataCache(lookup, 100)
 
 	watcher := &PolicyWatcher{}
-	watcher.policies.Store("test", &omniav1alpha1.SessionPrivacyPolicy{
+	watcher.policies.Store("omnia-system/default", &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "omnia-system"},
 		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
-			Level: omniav1alpha1.PolicyLevelGlobal,
+
 			Recording: omniav1alpha1.RecordingConfig{
 				Enabled: false,
 			},
@@ -474,9 +480,10 @@ func newRichDataDisabledMiddleware() *PrivacyMiddleware {
 	lookup := &mockSessionLookup{ns: "default", agent: "test-agent"}
 	cache := NewSessionMetadataCache(lookup, 100)
 	watcher := &PolicyWatcher{}
-	watcher.policies.Store("test", &omniav1alpha1.SessionPrivacyPolicy{
+	watcher.policies.Store("omnia-system/default", &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "omnia-system"},
 		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
-			Level: omniav1alpha1.PolicyLevelGlobal,
+
 			Recording: omniav1alpha1.RecordingConfig{
 				Enabled:  true,
 				RichData: false,
@@ -551,9 +558,10 @@ func TestPrivacyMiddleware_AuditOptOutNoEvent(t *testing.T) {
 	cache := NewSessionMetadataCache(lookup, 100)
 
 	watcher := &PolicyWatcher{}
-	watcher.policies.Store("test", &omniav1alpha1.SessionPrivacyPolicy{
+	watcher.policies.Store("omnia-system/default", &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "omnia-system"},
 		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
-			Level:      omniav1alpha1.PolicyLevelGlobal,
+
 			Recording:  omniav1alpha1.RecordingConfig{Enabled: true},
 			UserOptOut: &omniav1alpha1.UserOptOutConfig{Enabled: true},
 		},

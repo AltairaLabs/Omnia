@@ -16,8 +16,10 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -26,105 +28,183 @@ import (
 
 func testScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
+	_ = corev1alpha1.AddToScheme(s)
 	_ = omniav1alpha1.AddToScheme(s)
 	return s
 }
 
 const testNamespace = "default"
 
-func newTestPolicy(name string, level omniav1alpha1.PolicyLevel) *omniav1alpha1.SessionPrivacyPolicy {
+// --- helpers ---
+
+func storePolicy(w *PolicyWatcher, namespace, name string, spec omniav1alpha1.SessionPrivacyPolicySpec) {
 	p := &omniav1alpha1.SessionPrivacyPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
-			Level: level,
-			Recording: omniav1alpha1.RecordingConfig{
-				Enabled: true,
-				PII: &omniav1alpha1.PIIConfig{
-					Redact:   true,
-					Patterns: []string{"ssn"},
-				},
-			},
-			UserOptOut: &omniav1alpha1.UserOptOutConfig{Enabled: true},
-		},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec:       spec,
 	}
-	return p
+	w.policies.Store(namespace+"/"+name, p)
 }
 
-func TestPolicyWatcher_GetEffectivePolicy_NoPolices(t *testing.T) {
+//nolint:unparam
+func storeAgentRuntime(w *PolicyWatcher, namespace, name, serviceGroup string, ref *corev1.LocalObjectReference) {
+	ar := &corev1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+	}
+	ar.Spec.ServiceGroup = serviceGroup
+	ar.Spec.PrivacyPolicyRef = ref
+	w.agents.Store(namespace+"/"+name, ar)
+}
+
+func storeWorkspace(w *PolicyWatcher, wsName, targetNamespace string, groups ...corev1alpha1.WorkspaceServiceGroup) {
+	ws := &corev1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: wsName},
+		Spec: corev1alpha1.WorkspaceSpec{
+			Namespace: corev1alpha1.NamespaceConfig{Name: targetNamespace},
+			Services:  groups,
+		},
+	}
+	w.workspaces.Store(wsName, ws)
+}
+
+func basicSpec(enabled bool) omniav1alpha1.SessionPrivacyPolicySpec {
+	return omniav1alpha1.SessionPrivacyPolicySpec{
+		Recording: omniav1alpha1.RecordingConfig{
+			Enabled: enabled,
+			PII:     &omniav1alpha1.PIIConfig{Redact: true},
+		},
+	}
+}
+
+// --- unit tests ---
+
+func TestGetEffectivePolicy_NoPolices(t *testing.T) {
 	w := &PolicyWatcher{log: logr.Discard()}
 	result := w.GetEffectivePolicy("ns", "agent")
 	assert.Nil(t, result)
 }
 
-func TestPolicyWatcher_GetEffectivePolicy_GlobalOnly(t *testing.T) {
+func TestGetEffectivePolicy_AgentOverrideWins(t *testing.T) {
 	w := &PolicyWatcher{log: logr.Discard()}
-	global := newTestPolicy("global", omniav1alpha1.PolicyLevelGlobal)
-	w.policies.Store("global", global)
 
-	result := w.GetEffectivePolicy("ns", "agent")
+	// Global default
+	storePolicy(w, "omnia-system", "default", basicSpec(true))
+
+	// Agent-specific policy (recording disabled)
+	storePolicy(w, "prod", "strict-policy", omniav1alpha1.SessionPrivacyPolicySpec{
+		Recording: omniav1alpha1.RecordingConfig{Enabled: false},
+	})
+
+	// AgentRuntime references the strict policy
+	storeAgentRuntime(w, "prod", "my-agent", "default", &corev1.LocalObjectReference{Name: "strict-policy"})
+
+	result := w.GetEffectivePolicy("prod", "my-agent")
 	require.NotNil(t, result)
-	assert.True(t, result.Recording.Enabled)
-	assert.True(t, result.Recording.PII.Redact)
+	assert.False(t, result.Recording.Enabled, "agent override should win over global default")
 }
 
-func TestPolicyWatcher_GetEffectivePolicy_GlobalAndWorkspace(t *testing.T) {
+func TestGetEffectivePolicy_ServiceGroupFallback(t *testing.T) {
 	w := &PolicyWatcher{log: logr.Discard()}
 
-	global := newTestPolicy("global", omniav1alpha1.PolicyLevelGlobal)
-	w.policies.Store("global", global)
+	// Service-group policy
+	storePolicy(w, "prod", "group-policy", basicSpec(true))
 
-	ws := newTestPolicy("ws", omniav1alpha1.PolicyLevelWorkspace)
-	ws.Spec.WorkspaceRef = &corev1alpha1.LocalObjectReference{Name: "my-ns"}
-	ws.Spec.Recording.PII = &omniav1alpha1.PIIConfig{
-		Redact:   true,
-		Encrypt:  true,
-		Patterns: []string{"email"},
-	}
-	w.policies.Store("ws", ws)
+	// Workspace with a "default" service group referencing the policy
+	storeWorkspace(w, "prod-ws", "prod",
+		corev1alpha1.WorkspaceServiceGroup{
+			Name:             "default",
+			PrivacyPolicyRef: &corev1.LocalObjectReference{Name: "group-policy"},
+		},
+	)
 
-	result := w.GetEffectivePolicy("my-ns", "agent")
+	// Agent with no override
+	storeAgentRuntime(w, "prod", "my-agent", "default", nil)
+
+	result := w.GetEffectivePolicy("prod", "my-agent")
 	require.NotNil(t, result)
-	assert.True(t, result.Recording.PII.Redact)
-	assert.True(t, result.Recording.PII.Encrypt)
-	assert.Contains(t, result.Recording.PII.Patterns, "ssn")
-	assert.Contains(t, result.Recording.PII.Patterns, "email")
+	assert.True(t, result.Recording.Enabled, "service group policy should apply")
 }
 
-func TestPolicyWatcher_GetEffectivePolicy_FullChain(t *testing.T) {
+func TestGetEffectivePolicy_NamedServiceGroup(t *testing.T) {
 	w := &PolicyWatcher{log: logr.Discard()}
 
-	global := newTestPolicy("global", omniav1alpha1.PolicyLevelGlobal)
-	w.policies.Store("global", global)
+	storePolicy(w, "prod", "analytics-policy", omniav1alpha1.SessionPrivacyPolicySpec{
+		Recording: omniav1alpha1.RecordingConfig{Enabled: true, RichData: true},
+	})
 
-	ws := newTestPolicy("ws", omniav1alpha1.PolicyLevelWorkspace)
-	ws.Spec.WorkspaceRef = &corev1alpha1.LocalObjectReference{Name: "my-ns"}
-	w.policies.Store("ws", ws)
+	storeWorkspace(w, "prod-ws", "prod",
+		corev1alpha1.WorkspaceServiceGroup{
+			Name:             "analytics",
+			PrivacyPolicyRef: &corev1.LocalObjectReference{Name: "analytics-policy"},
+		},
+	)
 
-	agent := newTestPolicy("agent", omniav1alpha1.PolicyLevelAgent)
-	agent.Spec.AgentRef = &corev1alpha1.NamespacedObjectReference{
-		Name: "my-agent", Namespace: "my-ns",
-	}
-	w.policies.Store("agent", agent)
+	// Agent uses the "analytics" service group
+	storeAgentRuntime(w, "prod", "analytics-agent", "analytics", nil)
 
-	result := w.GetEffectivePolicy("my-ns", "my-agent")
+	result := w.GetEffectivePolicy("prod", "analytics-agent")
 	require.NotNil(t, result)
-	assert.True(t, result.Recording.Enabled)
-	assert.NotNil(t, result.UserOptOut)
+	assert.True(t, result.Recording.RichData, "named service group policy should apply")
 }
 
-func TestPolicyWatcher_GetEffectivePolicy_WorkspaceMismatch(t *testing.T) {
+func TestGetEffectivePolicy_GlobalDefaultFallback(t *testing.T) {
 	w := &PolicyWatcher{log: logr.Discard()}
 
-	global := newTestPolicy("global", omniav1alpha1.PolicyLevelGlobal)
-	w.policies.Store("global", global)
+	storePolicy(w, "omnia-system", "default", basicSpec(true))
 
-	ws := newTestPolicy("ws", omniav1alpha1.PolicyLevelWorkspace)
-	ws.Spec.WorkspaceRef = &corev1alpha1.LocalObjectReference{Name: "other-ns"}
-	w.policies.Store("ws", ws)
-
-	result := w.GetEffectivePolicy("my-ns", "agent")
+	// No workspace, no agent override
+	result := w.GetEffectivePolicy("any-ns", "any-agent")
 	require.NotNil(t, result)
-	// Only global should match — workspace doesn't match namespace
+	assert.True(t, result.Recording.Enabled, "global default should apply")
+}
+
+func TestGetEffectivePolicy_NoPolicyReturnsNil(t *testing.T) {
+	w := &PolicyWatcher{log: logr.Discard()}
+
+	// No policies at all
+	result := w.GetEffectivePolicy("any-ns", "any-agent")
+	assert.Nil(t, result)
+}
+
+func TestGetEffectivePolicy_AgentOverrideBeforeServiceGroup(t *testing.T) {
+	w := &PolicyWatcher{log: logr.Discard()}
+
+	// Both an agent override and a service group are present; agent should win.
+	storePolicy(w, "prod", "agent-policy", omniav1alpha1.SessionPrivacyPolicySpec{
+		Recording: omniav1alpha1.RecordingConfig{Enabled: false},
+	})
+	storePolicy(w, "prod", "group-policy", omniav1alpha1.SessionPrivacyPolicySpec{
+		Recording: omniav1alpha1.RecordingConfig{Enabled: true},
+	})
+	storeWorkspace(w, "prod-ws", "prod",
+		corev1alpha1.WorkspaceServiceGroup{
+			Name:             "default",
+			PrivacyPolicyRef: &corev1.LocalObjectReference{Name: "group-policy"},
+		},
+	)
+	storeAgentRuntime(w, "prod", "my-agent", "default",
+		&corev1.LocalObjectReference{Name: "agent-policy"})
+
+	result := w.GetEffectivePolicy("prod", "my-agent")
+	require.NotNil(t, result)
+	assert.False(t, result.Recording.Enabled, "agent override must win over service group")
+}
+
+func TestGetEffectivePolicy_EncryptionPropagated(t *testing.T) {
+	w := &PolicyWatcher{log: logr.Discard()}
+
+	storePolicy(w, "omnia-system", "default", omniav1alpha1.SessionPrivacyPolicySpec{
+		Recording: omniav1alpha1.RecordingConfig{Enabled: true},
+		Encryption: &omniav1alpha1.EncryptionConfig{
+			Enabled:     true,
+			KMSProvider: omniav1alpha1.KMSProviderAWSKMS,
+			KeyID:       "arn:aws:kms:us-east-1:123:key/test",
+		},
+	})
+
+	result := w.GetEffectivePolicy("any-ns", "any-agent")
+	require.NotNil(t, result)
+	assert.True(t, result.Encryption.Enabled)
+	assert.Equal(t, "arn:aws:kms:us-east-1:123:key/test", result.Encryption.KeyID)
 }
 
 func TestPolicyKey(t *testing.T) {
@@ -134,101 +214,18 @@ func TestPolicyKey(t *testing.T) {
 	assert.Equal(t, "ns/test", policyKey(p))
 }
 
-func TestCollectPolicies(t *testing.T) {
-	w := &PolicyWatcher{log: logr.Discard()}
-	w.policies.Store("a", newTestPolicy("a", omniav1alpha1.PolicyLevelGlobal))
-	w.policies.Store("b", newTestPolicy("b", omniav1alpha1.PolicyLevelWorkspace))
-
-	result := w.collectPolicies()
-	assert.Len(t, result, 2)
-}
-
-func TestCollectPolicies_SkipsNonPolicyValues(t *testing.T) {
-	w := &PolicyWatcher{log: logr.Discard()}
-	w.policies.Store("valid", newTestPolicy("valid", omniav1alpha1.PolicyLevelGlobal))
-	w.policies.Store("invalid", "not-a-policy")
-
-	result := w.collectPolicies()
-	assert.Len(t, result, 1)
-	assert.Equal(t, "valid", result[0].Name)
-}
-
-func TestBuildPolicyChain_EmptyNamespace(t *testing.T) {
-	global := newTestPolicy("global", omniav1alpha1.PolicyLevelGlobal)
-	chain := buildPolicyChain([]*omniav1alpha1.SessionPrivacyPolicy{global}, "", "")
-	assert.Len(t, chain, 1)
-}
-
-func TestBuildPolicyChain_AgentWithoutNamespace(t *testing.T) {
-	agent := newTestPolicy("agent", omniav1alpha1.PolicyLevelAgent)
-	agent.Spec.AgentRef = &corev1alpha1.NamespacedObjectReference{
-		Name: "my-agent", Namespace: "ns",
-	}
-	// agentName set but namespace empty — agent policy should not be included
-	chain := buildPolicyChain([]*omniav1alpha1.SessionPrivacyPolicy{agent}, "", "my-agent")
-	assert.Len(t, chain, 0)
-}
-
-func TestFindByLevel_GlobalDefault(t *testing.T) {
-	global := newTestPolicy("global", omniav1alpha1.PolicyLevelGlobal)
-	result := findByLevel([]*omniav1alpha1.SessionPrivacyPolicy{global}, omniav1alpha1.PolicyLevelGlobal, "", "")
-	require.NotNil(t, result)
-	assert.Equal(t, "global", result.Name)
-}
-
-func TestFindByLevel_NoMatch(t *testing.T) {
-	global := newTestPolicy("global", omniav1alpha1.PolicyLevelGlobal)
-	result := findByLevel([]*omniav1alpha1.SessionPrivacyPolicy{global}, omniav1alpha1.PolicyLevelWorkspace, "ns", "")
-	assert.Nil(t, result)
-}
-
-func TestFindByLevel_WorkspaceNilRef(t *testing.T) {
-	// Workspace-level policy with nil WorkspaceRef should not match.
-	ws := newTestPolicy("ws", omniav1alpha1.PolicyLevelWorkspace)
-	ws.Spec.WorkspaceRef = nil
-
-	result := findByLevel([]*omniav1alpha1.SessionPrivacyPolicy{ws}, omniav1alpha1.PolicyLevelWorkspace, "ns", "")
-	assert.Nil(t, result)
-}
-
-func TestFindByLevel_AgentNilRef(t *testing.T) {
-	// Agent-level policy with nil AgentRef should not match.
-	agent := newTestPolicy("agent", omniav1alpha1.PolicyLevelAgent)
-	agent.Spec.AgentRef = nil
-
-	result := findByLevel([]*omniav1alpha1.SessionPrivacyPolicy{agent}, omniav1alpha1.PolicyLevelAgent, "ns", "my-agent")
-	assert.Nil(t, result)
-}
-
-func TestFindByLevel_AgentNameMismatch(t *testing.T) {
-	agent := newTestPolicy("agent", omniav1alpha1.PolicyLevelAgent)
-	agent.Spec.AgentRef = &corev1alpha1.NamespacedObjectReference{
-		Name: "other-agent", Namespace: "ns",
-	}
-
-	result := findByLevel([]*omniav1alpha1.SessionPrivacyPolicy{agent}, omniav1alpha1.PolicyLevelAgent, "ns", "my-agent")
-	assert.Nil(t, result)
-}
-
-func TestFindByLevel_AgentNamespaceMismatch(t *testing.T) {
-	agent := newTestPolicy("agent", omniav1alpha1.PolicyLevelAgent)
-	agent.Spec.AgentRef = &corev1alpha1.NamespacedObjectReference{
-		Name: "my-agent", Namespace: "other-ns",
-	}
-
-	result := findByLevel([]*omniav1alpha1.SessionPrivacyPolicy{agent}, omniav1alpha1.PolicyLevelAgent, "ns", "my-agent")
-	assert.Nil(t, result)
-}
-
 // --- loadPolicies tests using fake client ---
 
 func TestLoadPolicies_PopulatesCache(t *testing.T) {
 	scheme := testScheme()
-	p1 := newTestPolicy("policy-1", omniav1alpha1.PolicyLevelGlobal)
-	p1.Namespace = testNamespace
-	p2 := newTestPolicy("policy-2", omniav1alpha1.PolicyLevelWorkspace)
-	p2.Namespace = testNamespace
-	p2.Spec.WorkspaceRef = &corev1alpha1.LocalObjectReference{Name: "my-ns"}
+	p1 := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "policy-1", Namespace: testNamespace},
+		Spec:       basicSpec(true),
+	}
+	p2 := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "policy-2", Namespace: testNamespace},
+		Spec:       basicSpec(false),
+	}
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -236,17 +233,19 @@ func TestLoadPolicies_PopulatesCache(t *testing.T) {
 		Build()
 
 	w := NewPolicyWatcher(fakeClient, logr.Discard())
-	err := w.loadPolicies(context.Background())
-	require.NoError(t, err)
+	require.NoError(t, w.loadPolicies(context.Background()))
 
-	policies := w.collectPolicies()
-	assert.Len(t, policies, 2)
+	count := 0
+	w.policies.Range(func(_, _ any) bool { count++; return true })
+	assert.Equal(t, 2, count)
 }
 
 func TestLoadPolicies_RemovesDeletedPolicies(t *testing.T) {
 	scheme := testScheme()
-	p1 := newTestPolicy("policy-1", omniav1alpha1.PolicyLevelGlobal)
-	p1.Namespace = testNamespace
+	p1 := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "policy-1", Namespace: testNamespace},
+		Spec:       basicSpec(true),
+	}
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -254,63 +253,56 @@ func TestLoadPolicies_RemovesDeletedPolicies(t *testing.T) {
 		Build()
 
 	w := NewPolicyWatcher(fakeClient, logr.Discard())
-
-	// First load — policy-1 should be cached
-	err := w.loadPolicies(context.Background())
-	require.NoError(t, err)
-	assert.Len(t, w.collectPolicies(), 1)
-
-	// Delete the policy from the fake client
-	require.NoError(t, fakeClient.Delete(context.Background(), p1))
-
-	// Second load — cache should be empty
-	err = w.loadPolicies(context.Background())
-	require.NoError(t, err)
-	assert.Len(t, w.collectPolicies(), 0)
-}
-
-func TestLoadPolicies_GetEffectivePolicy_AfterLoad(t *testing.T) {
-	scheme := testScheme()
-	global := newTestPolicy("global-policy", omniav1alpha1.PolicyLevelGlobal)
-	global.Namespace = testNamespace
-
-	ws := newTestPolicy("ws-policy", omniav1alpha1.PolicyLevelWorkspace)
-	ws.Namespace = testNamespace
-	ws.Spec.WorkspaceRef = &corev1alpha1.LocalObjectReference{Name: "prod"}
-	ws.Spec.Recording.PII = &omniav1alpha1.PIIConfig{
-		Redact:   true,
-		Encrypt:  true,
-		Patterns: []string{"email"},
-	}
-
-	fakeClient := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(global, ws).
-		Build()
-
-	w := NewPolicyWatcher(fakeClient, logr.Discard())
 	require.NoError(t, w.loadPolicies(context.Background()))
 
-	// Should merge global + workspace for "prod" namespace
-	ep := w.GetEffectivePolicy("prod", "my-agent")
-	require.NotNil(t, ep)
-	assert.True(t, ep.Recording.Enabled)
-	assert.True(t, ep.Recording.PII.Redact)
-	assert.True(t, ep.Recording.PII.Encrypt)
-	assert.Contains(t, ep.Recording.PII.Patterns, "ssn")
-	assert.Contains(t, ep.Recording.PII.Patterns, "email")
+	count := 0
+	w.policies.Range(func(_, _ any) bool { count++; return true })
+	assert.Equal(t, 1, count)
 
-	// Different namespace should only get global
-	ep2 := w.GetEffectivePolicy("staging", "my-agent")
-	require.NotNil(t, ep2)
-	assert.True(t, ep2.Recording.PII.Redact)
-	assert.False(t, ep2.Recording.PII.Encrypt)
+	require.NoError(t, fakeClient.Delete(context.Background(), p1))
+	require.NoError(t, w.loadPolicies(context.Background()))
+
+	count = 0
+	w.policies.Range(func(_, _ any) bool { count++; return true })
+	assert.Equal(t, 0, count)
+}
+
+func TestLoadWorkspaces_PopulatesCache(t *testing.T) {
+	scheme := testScheme()
+	ws := &corev1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "prod-ws"},
+		Spec: corev1alpha1.WorkspaceSpec{
+			Namespace: corev1alpha1.NamespaceConfig{Name: "prod"},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ws).Build()
+	w := NewPolicyWatcher(fakeClient, logr.Discard())
+	require.NoError(t, w.loadWorkspaces(context.Background()))
+
+	count := 0
+	w.workspaces.Range(func(_, _ any) bool { count++; return true })
+	assert.Equal(t, 1, count)
+}
+
+func TestLoadAgentRuntimes_PopulatesCache(t *testing.T) {
+	scheme := testScheme()
+	ar := &corev1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-agent", Namespace: "prod"},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
+	w := NewPolicyWatcher(fakeClient, logr.Discard())
+	require.NoError(t, w.loadAgentRuntimes(context.Background()))
+
+	count := 0
+	w.agents.Range(func(_, _ any) bool { count++; return true })
+	assert.Equal(t, 1, count)
 }
 
 func TestNewPolicyWatcher(t *testing.T) {
 	scheme := testScheme()
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-
 	w := NewPolicyWatcher(fakeClient, logr.Discard())
 	require.NotNil(t, w)
 	assert.NotNil(t, w.client)
@@ -318,8 +310,10 @@ func TestNewPolicyWatcher(t *testing.T) {
 
 func TestStart_CancellationStopsPolling(t *testing.T) {
 	scheme := testScheme()
-	p := newTestPolicy("start-test", omniav1alpha1.PolicyLevelGlobal)
-	p.Namespace = testNamespace
+	p := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "omnia-system"},
+		Spec:       basicSpec(true),
+	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p).Build()
 
 	w := NewPolicyWatcher(fakeClient, logr.Discard())
@@ -330,7 +324,6 @@ func TestStart_CancellationStopsPolling(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() { errCh <- w.Start(ctx) }()
 
-	// Wait for initial load
 	require.Eventually(t, func() bool {
 		return w.GetEffectivePolicy("", "") != nil
 	}, 2*time.Second, 10*time.Millisecond)
@@ -342,42 +335,16 @@ func TestStart_CancellationStopsPolling(t *testing.T) {
 }
 
 func TestStart_InitialLoadError(t *testing.T) {
-	// A client with no scheme can't list SessionPrivacyPolicy — triggers error.
+	// A client with no scheme can't list any resource — triggers error.
 	badClient := fake.NewClientBuilder().Build()
-
 	w := NewPolicyWatcher(badClient, logr.Discard())
 	err := w.Start(context.Background())
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "initial policy load failed")
 }
 
-func TestEffectivePolicy_IncludesEncryption(t *testing.T) {
-	w := &PolicyWatcher{log: logr.Discard()}
-	policy := &omniav1alpha1.SessionPrivacyPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "global", Namespace: "omnia-system"},
-		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
-			Level:     omniav1alpha1.PolicyLevelGlobal,
-			Recording: omniav1alpha1.RecordingConfig{Enabled: true},
-			Encryption: &omniav1alpha1.EncryptionConfig{
-				Enabled:     true,
-				KMSProvider: omniav1alpha1.KMSProviderAWSKMS,
-				KeyID:       "arn:aws:kms:us-east-1:123:key/test",
-			},
-		},
-	}
-	w.policies.Store("omnia-system/global", policy)
-
-	eff := w.GetEffectivePolicy("default", "my-agent")
-	require.NotNil(t, eff)
-	assert.True(t, eff.Encryption.Enabled)
-	assert.Equal(t, "arn:aws:kms:us-east-1:123:key/test", eff.Encryption.KeyID)
-	assert.Equal(t, omniav1alpha1.KMSProviderAWSKMS, eff.Encryption.KMSProvider)
-}
-
 func TestStart_PollPicksUpNewPolicies(t *testing.T) {
 	scheme := testScheme()
-
-	// Start with an empty cluster.
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
 	w := NewPolicyWatcher(fakeClient, logr.Discard())
@@ -388,17 +355,137 @@ func TestStart_PollPicksUpNewPolicies(t *testing.T) {
 
 	go func() { _ = w.Start(ctx) }()
 
-	// Initially no policies.
 	time.Sleep(30 * time.Millisecond)
 	assert.Nil(t, w.GetEffectivePolicy("", ""))
 
-	// Create a policy in the fake client after startup.
-	p := newTestPolicy("late-arrival", omniav1alpha1.PolicyLevelGlobal)
-	p.Namespace = testNamespace
+	p := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "omnia-system"},
+		Spec:       basicSpec(true),
+	}
 	require.NoError(t, fakeClient.Create(context.Background(), p))
 
-	// Poll loop should pick it up.
 	require.Eventually(t, func() bool {
 		return w.GetEffectivePolicy("", "") != nil
 	}, 2*time.Second, 10*time.Millisecond)
+}
+
+// TestOnPolicyChange_CallbackFiredOnAdd verifies that the OnPolicyChange
+// callback is invoked when a new policy is loaded (nil→policy transition).
+func TestOnPolicyChange_CallbackFiredOnAdd(t *testing.T) {
+	scheme := testScheme()
+	p1 := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: testNamespace},
+		Spec:       basicSpec(true),
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1).Build()
+	w := NewPolicyWatcher(fakeClient, logr.Discard())
+
+	type transition struct {
+		old, new *omniav1alpha1.SessionPrivacyPolicy
+	}
+	var transitions []transition
+	w.OnPolicyChange(func(old, new *omniav1alpha1.SessionPrivacyPolicy) {
+		transitions = append(transitions, transition{old: old, new: new})
+	})
+
+	require.NoError(t, w.loadPolicies(context.Background()))
+
+	require.Len(t, transitions, 1, "callback must fire once on first load")
+	assert.Nil(t, transitions[0].old, "old must be nil on first observation")
+	assert.Equal(t, "p1", transitions[0].new.Name)
+}
+
+// TestOnPolicyChange_CallbackFiredOnSpecChange verifies that the callback
+// fires again when a reload observes an actual spec change — and does NOT
+// fire on no-op reloads where the spec is unchanged.
+func TestOnPolicyChange_CallbackFiredOnSpecChange(t *testing.T) {
+	scheme := testScheme()
+	p1 := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: testNamespace},
+		Spec:       basicSpec(true),
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1).Build()
+	w := NewPolicyWatcher(fakeClient, logr.Discard())
+
+	type transition struct {
+		old, new *omniav1alpha1.SessionPrivacyPolicy
+	}
+	var transitions []transition
+	w.OnPolicyChange(func(old, new *omniav1alpha1.SessionPrivacyPolicy) {
+		transitions = append(transitions, transition{old: old, new: new})
+	})
+
+	// First load: add the policy.
+	require.NoError(t, w.loadPolicies(context.Background()))
+	require.Len(t, transitions, 1)
+
+	// Second load with unchanged spec: no callback (avoids cache churn).
+	require.NoError(t, w.loadPolicies(context.Background()))
+	require.Len(t, transitions, 1, "callback must NOT fire on no-op reload")
+
+	// Mutate the policy spec in the fake client, then reload: callback fires.
+	updated := &omniav1alpha1.SessionPrivacyPolicy{}
+	require.NoError(t, fakeClient.Get(context.Background(),
+		client.ObjectKey{Name: "p1", Namespace: testNamespace}, updated))
+	updated.Spec = basicSpec(false) // different recording.enabled
+	require.NoError(t, fakeClient.Update(context.Background(), updated))
+
+	require.NoError(t, w.loadPolicies(context.Background()))
+	require.Len(t, transitions, 2, "callback must fire on spec change")
+	assert.NotNil(t, transitions[1].old, "old must be the previous version on spec change")
+	assert.Equal(t, "p1", transitions[1].new.Name)
+}
+
+// TestOnPolicyChange_CallbackFiredOnDelete verifies that the callback receives
+// (old, nil) when a policy is evicted from the cache.
+func TestOnPolicyChange_CallbackFiredOnDelete(t *testing.T) {
+	scheme := testScheme()
+	p1 := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: testNamespace},
+		Spec:       basicSpec(true),
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1).Build()
+	w := NewPolicyWatcher(fakeClient, logr.Discard())
+
+	type transition struct {
+		old, new *omniav1alpha1.SessionPrivacyPolicy
+	}
+	var transitions []transition
+	w.OnPolicyChange(func(old, new *omniav1alpha1.SessionPrivacyPolicy) {
+		transitions = append(transitions, transition{old: old, new: new})
+	})
+
+	// First load: policy added.
+	require.NoError(t, w.loadPolicies(context.Background()))
+	require.Len(t, transitions, 1)
+
+	// Delete the policy from the fake client and reload.
+	require.NoError(t, fakeClient.Delete(context.Background(), p1))
+	require.NoError(t, w.loadPolicies(context.Background()))
+
+	require.Len(t, transitions, 2, "callback must fire on deletion")
+	assert.Equal(t, "p1", transitions[1].old.Name, "old must carry the deleted policy")
+	assert.Nil(t, transitions[1].new, "new must be nil on deletion")
+}
+
+// TestOnPolicyChange_ReplacedCallback verifies that a second OnPolicyChange
+// call replaces the first callback rather than chaining them.
+func TestOnPolicyChange_ReplacedCallback(t *testing.T) {
+	scheme := testScheme()
+	p1 := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: testNamespace},
+		Spec:       basicSpec(true),
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1).Build()
+	w := NewPolicyWatcher(fakeClient, logr.Discard())
+
+	first := 0
+	second := 0
+	w.OnPolicyChange(func(_, _ *omniav1alpha1.SessionPrivacyPolicy) { first++ })
+	w.OnPolicyChange(func(_, _ *omniav1alpha1.SessionPrivacyPolicy) { second++ })
+
+	require.NoError(t, w.loadPolicies(context.Background()))
+
+	assert.Zero(t, first, "first callback must be replaced, not chained")
+	assert.Equal(t, 1, second, "second callback must be called once")
 }

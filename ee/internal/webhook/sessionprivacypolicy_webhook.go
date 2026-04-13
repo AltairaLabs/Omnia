@@ -4,8 +4,6 @@ Copyright 2026 Altaira Labs.
 SPDX-License-Identifier: FSL-1.1-Apache-2.0
 This file is part of Omnia Enterprise and is subject to the
 Functional Source License. See ee/LICENSE for details.
-
-
 */
 
 package webhook
@@ -19,11 +17,14 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
+	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 )
 
-// SessionPrivacyPolicyValidator validates SessionPrivacyPolicy resources
-// against inheritance rules (child policies can only be stricter than parents).
+// SessionPrivacyPolicyValidator validates SessionPrivacyPolicy resources.
+// Create and Update are accepted at the webhook layer (CEL handles structural
+// validation in the CRD). Delete is rejected when any consumer still references
+// the policy.
 type SessionPrivacyPolicyValidator struct {
 	Client client.Reader
 }
@@ -42,174 +43,68 @@ func SetupSessionPrivacyPolicyWebhookWithManager(mgr ctrl.Manager) error {
 var _ admission.Validator[*omniav1alpha1.SessionPrivacyPolicy] = &SessionPrivacyPolicyValidator{}
 
 // ValidateCreate implements admission.Validator.
-func (v *SessionPrivacyPolicyValidator) ValidateCreate(ctx context.Context, policy *omniav1alpha1.SessionPrivacyPolicy) (admission.Warnings, error) {
-	privacypolicylog.Info("validating create", "name", policy.Name)
-	return v.validateInheritance(ctx, policy)
+// Structural validation is handled by CEL rules in the CRD.
+func (v *SessionPrivacyPolicyValidator) ValidateCreate(_ context.Context, policy *omniav1alpha1.SessionPrivacyPolicy) (admission.Warnings, error) {
+	privacypolicylog.Info("validating create", "name", policy.Name, "namespace", policy.Namespace)
+	return nil, nil
 }
 
 // ValidateUpdate implements admission.Validator.
-func (v *SessionPrivacyPolicyValidator) ValidateUpdate(ctx context.Context, _ *omniav1alpha1.SessionPrivacyPolicy, policy *omniav1alpha1.SessionPrivacyPolicy) (admission.Warnings, error) {
-	privacypolicylog.Info("validating update", "name", policy.Name)
-	return v.validateInheritance(ctx, policy)
+// Structural validation is handled by CEL rules in the CRD.
+func (v *SessionPrivacyPolicyValidator) ValidateUpdate(_ context.Context, _ *omniav1alpha1.SessionPrivacyPolicy, policy *omniav1alpha1.SessionPrivacyPolicy) (admission.Warnings, error) {
+	privacypolicylog.Info("validating update", "name", policy.Name, "namespace", policy.Namespace)
+	return nil, nil
 }
 
 // ValidateDelete implements admission.Validator.
+// Rejects deletion if any Workspace service group or AgentRuntime references this policy.
 func (v *SessionPrivacyPolicyValidator) ValidateDelete(ctx context.Context, policy *omniav1alpha1.SessionPrivacyPolicy) (admission.Warnings, error) {
-	privacypolicylog.Info("validating delete", "name", policy.Name)
+	privacypolicylog.Info("validating delete", "name", policy.Name, "namespace", policy.Namespace)
 
-	if policy.Spec.Level != omniav1alpha1.PolicyLevelGlobal {
-		return nil, nil
-	}
-
-	// Reject deletion of the last global policy
-	var list omniav1alpha1.SessionPrivacyPolicyList
-	if err := v.Client.List(ctx, &list); err != nil {
-		return nil, fmt.Errorf("failed to list policies: %w", err)
-	}
-
-	globalCount := 0
-	for i := range list.Items {
-		if list.Items[i].Spec.Level == omniav1alpha1.PolicyLevelGlobal {
-			globalCount++
-		}
-	}
-
-	if globalCount <= 1 {
-		return nil, fmt.Errorf("cannot delete the last global-level SessionPrivacyPolicy")
-	}
-
-	return nil, nil
-}
-
-// validateInheritance checks that a child policy is not less restrictive than its parent.
-func (v *SessionPrivacyPolicyValidator) validateInheritance(ctx context.Context, policy *omniav1alpha1.SessionPrivacyPolicy) (admission.Warnings, error) {
-	if policy.Spec.Level == omniav1alpha1.PolicyLevelGlobal {
-		// Global policies have no parent to validate against
-		return nil, nil
-	}
-
-	parent, err := v.findParentPolicy(ctx, policy)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find parent policy: %w", err)
-	}
-	if parent == nil {
-		// No parent found — allow with warning; controller will mark Error in status
-		return admission.Warnings{"no parent policy found; policy will be in Error phase until a parent exists"}, nil
-	}
-
-	// Validate that child is not less restrictive than parent
-	if errs := validateStricterThanParent(policy, parent); len(errs) > 0 {
-		return nil, fmt.Errorf("policy is less restrictive than parent (%s-level %q): %v", parent.Spec.Level, parent.Name, errs)
-	}
-
-	return nil, nil
-}
-
-// findParentPolicy locates the applicable parent policy for inheritance validation.
-// For workspace-level: finds the global policy.
-// For agent-level: finds the workspace policy (if workspaceRef on agent matches), falling back to global.
-func (v *SessionPrivacyPolicyValidator) findParentPolicy(ctx context.Context, policy *omniav1alpha1.SessionPrivacyPolicy) (*omniav1alpha1.SessionPrivacyPolicy, error) {
-	var list omniav1alpha1.SessionPrivacyPolicyList
-	if err := v.Client.List(ctx, &list); err != nil {
+	if err := v.checkWorkspaceReferences(ctx, policy); err != nil {
 		return nil, err
 	}
-
-	switch policy.Spec.Level {
-	case omniav1alpha1.PolicyLevelWorkspace:
-		// Parent is the global policy
-		return findPolicyByLevel(list.Items, omniav1alpha1.PolicyLevelGlobal, ""), nil
-
-	case omniav1alpha1.PolicyLevelAgent:
-		// Try to find a workspace-level parent first
-		wsName := ""
-		if policy.Spec.AgentRef != nil {
-			wsName = policy.Spec.AgentRef.Namespace
-		}
-		if ws := findPolicyByLevel(list.Items, omniav1alpha1.PolicyLevelWorkspace, wsName); ws != nil {
-			return ws, nil
-		}
-		// Fall back to global
-		return findPolicyByLevel(list.Items, omniav1alpha1.PolicyLevelGlobal, ""), nil
+	if err := v.checkAgentRuntimeReferences(ctx, policy); err != nil {
+		return nil, err
 	}
-
 	return nil, nil
 }
 
-// findPolicyByLevel finds the first policy matching the given level.
-// For workspace-level, optionally matches by workspace name.
-func findPolicyByLevel(policies []omniav1alpha1.SessionPrivacyPolicy, level omniav1alpha1.PolicyLevel, workspaceName string) *omniav1alpha1.SessionPrivacyPolicy {
-	for i := range policies {
-		p := &policies[i]
-		if p.Spec.Level != level {
+// checkWorkspaceReferences rejects deletion if any Workspace service group references the policy.
+func (v *SessionPrivacyPolicyValidator) checkWorkspaceReferences(ctx context.Context, policy *omniav1alpha1.SessionPrivacyPolicy) error {
+	var wsList corev1alpha1.WorkspaceList
+	if err := v.Client.List(ctx, &wsList); err != nil {
+		return fmt.Errorf("failed to list workspaces: %w", err)
+	}
+
+	for i := range wsList.Items {
+		ws := &wsList.Items[i]
+		if ws.Spec.Namespace.Name != policy.Namespace {
 			continue
 		}
-		if level == omniav1alpha1.PolicyLevelWorkspace && workspaceName != "" {
-			if p.Spec.WorkspaceRef == nil || p.Spec.WorkspaceRef.Name != workspaceName {
-				continue
+		for _, sg := range ws.Spec.Services {
+			if sg.PrivacyPolicyRef != nil && sg.PrivacyPolicyRef.Name == policy.Name {
+				return fmt.Errorf("policy %q is referenced by Workspace %s service group %q and cannot be deleted",
+					policy.Name, ws.Name, sg.Name)
 			}
 		}
-		return p
 	}
 	return nil
 }
 
-// validateStricterThanParent returns a list of violations where the child is less restrictive.
-func validateStricterThanParent(child, parent *omniav1alpha1.SessionPrivacyPolicy) []string {
-	var errs []string
-
-	// Cannot enable recording if parent disables it
-	if !parent.Spec.Recording.Enabled && child.Spec.Recording.Enabled {
-		errs = append(errs, "cannot enable recording when parent disables it")
+// checkAgentRuntimeReferences rejects deletion if any AgentRuntime in the policy's namespace references it.
+func (v *SessionPrivacyPolicyValidator) checkAgentRuntimeReferences(ctx context.Context, policy *omniav1alpha1.SessionPrivacyPolicy) error {
+	var arList corev1alpha1.AgentRuntimeList
+	if err := v.Client.List(ctx, &arList, client.InNamespace(policy.Namespace)); err != nil {
+		return fmt.Errorf("failed to list agentruntimes: %w", err)
 	}
 
-	// Cannot enable richData if parent disables it
-	if !parent.Spec.Recording.RichData && child.Spec.Recording.RichData {
-		errs = append(errs, "cannot enable recording.richData when parent disables it")
-	}
-
-	// Cannot disable PII redaction if parent enables it
-	if parent.Spec.Recording.PII != nil && parent.Spec.Recording.PII.Redact {
-		if child.Spec.Recording.PII == nil || !child.Spec.Recording.PII.Redact {
-			errs = append(errs, "cannot disable recording.pii.redact when parent enables it")
+	for i := range arList.Items {
+		ar := &arList.Items[i]
+		if ar.Spec.PrivacyPolicyRef != nil && ar.Spec.PrivacyPolicyRef.Name == policy.Name {
+			return fmt.Errorf("policy %q is referenced by AgentRuntime %s/%s and cannot be deleted",
+				policy.Name, ar.Namespace, ar.Name)
 		}
 	}
-
-	// Cannot disable userOptOut if parent enables it
-	if parent.Spec.UserOptOut != nil && parent.Spec.UserOptOut.Enabled {
-		if child.Spec.UserOptOut == nil || !child.Spec.UserOptOut.Enabled {
-			errs = append(errs, "cannot disable userOptOut when parent enables it")
-		}
-	}
-
-	// Retention days cannot exceed parent's days
-	if parent.Spec.Retention != nil && child.Spec.Retention != nil {
-		errs = append(errs, validateRetentionNotExceeded(child.Spec.Retention, parent.Spec.Retention)...)
-	}
-
-	return errs
-}
-
-// validateRetentionNotExceeded checks that child retention does not exceed parent retention.
-func validateRetentionNotExceeded(child, parent *omniav1alpha1.PrivacyRetentionConfig) []string {
-	var errs []string
-
-	if parent.Facade != nil && child.Facade != nil {
-		if parent.Facade.WarmDays != nil && child.Facade.WarmDays != nil && *child.Facade.WarmDays > *parent.Facade.WarmDays {
-			errs = append(errs, fmt.Sprintf("retention.facade.warmDays (%d) exceeds parent (%d)", *child.Facade.WarmDays, *parent.Facade.WarmDays))
-		}
-		if parent.Facade.ColdDays != nil && child.Facade.ColdDays != nil && *child.Facade.ColdDays > *parent.Facade.ColdDays {
-			errs = append(errs, fmt.Sprintf("retention.facade.coldDays (%d) exceeds parent (%d)", *child.Facade.ColdDays, *parent.Facade.ColdDays))
-		}
-	}
-
-	if parent.RichData != nil && child.RichData != nil {
-		if parent.RichData.WarmDays != nil && child.RichData.WarmDays != nil && *child.RichData.WarmDays > *parent.RichData.WarmDays {
-			errs = append(errs, fmt.Sprintf("retention.richData.warmDays (%d) exceeds parent (%d)", *child.RichData.WarmDays, *parent.RichData.WarmDays))
-		}
-		if parent.RichData.ColdDays != nil && child.RichData.ColdDays != nil && *child.RichData.ColdDays > *parent.RichData.ColdDays {
-			errs = append(errs, fmt.Sprintf("retention.richData.coldDays (%d) exceeds parent (%d)", *child.RichData.ColdDays, *parent.RichData.ColdDays))
-		}
-	}
-
-	return errs
+	return nil
 }

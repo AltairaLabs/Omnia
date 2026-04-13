@@ -149,7 +149,6 @@ func newKeyRotationPolicy() *omniav1alpha1.SessionPrivacyPolicy {
 	return &omniav1alpha1.SessionPrivacyPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-policy"},
 		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
-			Level: omniav1alpha1.PolicyLevelGlobal,
 			Recording: omniav1alpha1.RecordingConfig{
 				Enabled: true,
 			},

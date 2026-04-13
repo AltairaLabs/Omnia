@@ -10,6 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/doctor"
 )
 
@@ -30,6 +35,7 @@ type PrivacyChecker struct {
 	sessionAPIURL string
 	workspace     string
 	arenaURL      string
+	k8sClient     client.Client
 }
 
 // NewPrivacyChecker creates a new PrivacyChecker. arenaURL is the base URL of
@@ -43,6 +49,13 @@ func NewPrivacyChecker(memoryAPIURL, sessionAPIURL, workspace, arenaURL string) 
 	}
 }
 
+// WithK8sClient sets the Kubernetes client used by the SessionEncryptionAtRest check.
+// When nil, the encryption check reports a skip (k8s not available).
+func (p *PrivacyChecker) WithK8sClient(c client.Client) *PrivacyChecker {
+	p.k8sClient = c
+	return p
+}
+
 // Checks returns the list of privacy checks to run.
 func (p *PrivacyChecker) Checks() []doctor.Check {
 	return []doctor.Check{
@@ -50,6 +63,7 @@ func (p *PrivacyChecker) Checks() []doctor.Check {
 		{Name: "MemoryOptOutRespected", Category: privacyCategory, Run: p.checkOptOutRespected},
 		{Name: "MemoryDeletionCascade", Category: privacyCategory, Run: p.checkDeletionCascade},
 		{Name: "AuditLogWritten", Category: privacyCategory, Run: p.checkAuditLogWritten},
+		{Name: "SessionEncryptionAtRest", Category: privacyCategory, Run: p.checkSessionEncryption},
 	}
 }
 
@@ -393,6 +407,111 @@ func (p *PrivacyChecker) checkAuditLogWritten(ctx context.Context) doctor.TestRe
 	return doctor.TestResult{
 		Status: doctor.StatusFail,
 		Detail: fmt.Sprintf("no audit event found for memory %s (%d total events checked)", memoryID, len(result.Entries)),
+	}
+}
+
+// encryptionSummary describes a single (workspace, serviceGroup, policy) triple.
+type encryptionSummary struct {
+	workspace    string
+	serviceGroup string
+	policyName   string
+	kmsProvider  string
+	keyID        string
+}
+
+// checkSessionEncryption walks all Workspaces and their service groups, resolves
+// each privacyPolicyRef, and reports which (workspace, service-group) pairs have
+// encryption-at-rest enabled and with what KMS provider/key.
+//
+// This is a configuration-summary check: it reads CRDs only — no probe writes or
+// raw DB reads. It answers the question "does my intent match what's in the CRDs?"
+// without requiring DB access from within the doctor.
+//
+// Exit status:
+//   - skip: k8s client unavailable, or no Workspaces, or no service groups with a privacyPolicyRef
+//   - pass: at least one service group has encryption enabled (summary listed in detail)
+//   - fail: a privacyPolicyRef names a policy that does not exist in the cluster
+func (p *PrivacyChecker) checkSessionEncryption(ctx context.Context) doctor.TestResult {
+	if p.k8sClient == nil {
+		return doctor.TestResult{Status: doctor.StatusSkip, Detail: "k8s client not available — CRD check skipped"}
+	}
+
+	var wsList omniav1alpha1.WorkspaceList
+	if err := p.k8sClient.List(ctx, &wsList); err != nil {
+		return doctor.TestResult{Status: doctor.StatusFail, Detail: "list Workspaces failed", Error: err.Error()}
+	}
+	if len(wsList.Items) == 0 {
+		return doctor.TestResult{Status: doctor.StatusSkip, Detail: "no Workspaces found — encryption configuration cannot be verified"}
+	}
+
+	var (
+		encrypted    []encryptionSummary
+		missingRefs  []string
+		checkedCount int
+	)
+
+	for i := range wsList.Items {
+		ws := &wsList.Items[i]
+		for j := range ws.Spec.Services {
+			grp := &ws.Spec.Services[j]
+			if grp.PrivacyPolicyRef == nil {
+				continue
+			}
+			checkedCount++
+			ref := grp.PrivacyPolicyRef
+			policyNS := ws.Spec.Namespace.Name
+
+			var policy eev1alpha1.SessionPrivacyPolicy
+			key := types.NamespacedName{Name: ref.Name, Namespace: policyNS}
+			if err := p.k8sClient.Get(ctx, key, &policy); err != nil {
+				missingRefs = append(missingRefs,
+					fmt.Sprintf("workspace %s / service group %s → ref %s/%s not found",
+						ws.Name, grp.Name, policyNS, ref.Name))
+				continue
+			}
+
+			if policy.Spec.Encryption == nil || !policy.Spec.Encryption.Enabled {
+				continue
+			}
+			encrypted = append(encrypted, encryptionSummary{
+				workspace:    ws.Name,
+				serviceGroup: grp.Name,
+				policyName:   ref.Name,
+				kmsProvider:  string(policy.Spec.Encryption.KMSProvider),
+				keyID:        policy.Spec.Encryption.KeyID,
+			})
+		}
+	}
+
+	if len(missingRefs) > 0 {
+		return doctor.TestResult{
+			Status: doctor.StatusFail,
+			Detail: fmt.Sprintf("unresolvable privacyPolicyRef(s): %s", strings.Join(missingRefs, "; ")),
+		}
+	}
+
+	if checkedCount == 0 {
+		return doctor.TestResult{
+			Status: doctor.StatusSkip,
+			Detail: "no service groups have a privacyPolicyRef — all sessions stored in plaintext (valid configuration)",
+		}
+	}
+
+	if len(encrypted) == 0 {
+		return doctor.TestResult{
+			Status: doctor.StatusSkip,
+			Detail: fmt.Sprintf("checked %d service group(s); none have encryption enabled — sessions stored in plaintext", checkedCount),
+		}
+	}
+
+	parts := make([]string, 0, len(encrypted))
+	for _, s := range encrypted {
+		parts = append(parts, fmt.Sprintf("workspace=%s group=%s policy=%s kmsProvider=%s keyID=%s",
+			s.workspace, s.serviceGroup, s.policyName, s.kmsProvider, s.keyID))
+	}
+	return doctor.TestResult{
+		Status: doctor.StatusPass,
+		Detail: fmt.Sprintf("%d encryption-enabled service group(s): %s", len(encrypted), strings.Join(parts, "; ")),
 	}
 }
 

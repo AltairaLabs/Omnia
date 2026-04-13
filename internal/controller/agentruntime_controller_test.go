@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 )
 
 var _ = Describe("AgentRuntime Controller", func() {
@@ -4000,6 +4001,82 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 
 				// Should return empty
 				Expect(requests).To(BeEmpty())
+			})
+		})
+
+		Context("PrivacyPolicyResolved condition", func() {
+			const privacyCondType = "PrivacyPolicyResolved"
+
+			var (
+				ctxPriv        context.Context
+				privReconciler *AgentRuntimeReconciler
+				privAgentKey   types.NamespacedName
+				privPolicyName = "my-privacy-policy"
+			)
+
+			BeforeEach(func() {
+				ctxPriv = context.Background()
+				privAgentKey = types.NamespacedName{Name: "priv-agent", Namespace: "default"}
+				privReconciler = &AgentRuntimeReconciler{
+					Client: k8sClient,
+					Scheme: k8sClient.Scheme(),
+				}
+			})
+
+			It("should set PrivacyPolicyResolved=True/WorkspaceDefault when no ref is set", func() {
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{Name: privAgentKey.Name, Namespace: privAgentKey.Namespace},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "pp"},
+						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+					},
+				}
+				cond := privReconciler.validatePrivacyPolicyRef(ctxPriv, ar)
+				Expect(cond.Type).To(Equal(privacyCondType))
+				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+				Expect(cond.Reason).To(Equal("WorkspaceDefault"))
+			})
+
+			It("should set PrivacyPolicyResolved=False/PolicyNotFound when ref points to missing policy", func() {
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{Name: privAgentKey.Name, Namespace: privAgentKey.Namespace},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef:    omniav1alpha1.PromptPackRef{Name: "pp"},
+						Facade:           omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						PrivacyPolicyRef: &corev1.LocalObjectReference{Name: "does-not-exist"},
+					},
+				}
+				cond := privReconciler.validatePrivacyPolicyRef(ctxPriv, ar)
+				Expect(cond.Type).To(Equal(privacyCondType))
+				Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+				Expect(cond.Reason).To(Equal("PolicyNotFound"))
+				Expect(cond.Message).To(ContainSubstring("does-not-exist"))
+			})
+
+			It("should set PrivacyPolicyResolved=True/PolicyResolved when ref points to existing policy", func() {
+				// Create the SessionPrivacyPolicy in the default namespace.
+				spp := &eev1alpha1.SessionPrivacyPolicy{
+					ObjectMeta: metav1.ObjectMeta{Name: privPolicyName, Namespace: "default"},
+					Spec: eev1alpha1.SessionPrivacyPolicySpec{
+						Recording: eev1alpha1.RecordingConfig{Enabled: true},
+					},
+				}
+				Expect(k8sClient.Create(ctxPriv, spp)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(ctxPriv, spp) }()
+
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{Name: privAgentKey.Name, Namespace: privAgentKey.Namespace},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef:    omniav1alpha1.PromptPackRef{Name: "pp"},
+						Facade:           omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						PrivacyPolicyRef: &corev1.LocalObjectReference{Name: privPolicyName},
+					},
+				}
+				cond := privReconciler.validatePrivacyPolicyRef(ctxPriv, ar)
+				Expect(cond.Type).To(Equal(privacyCondType))
+				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+				Expect(cond.Reason).To(Equal("PolicyResolved"))
+				Expect(cond.Message).To(ContainSubstring(privPolicyName))
 			})
 		})
 	})

@@ -525,6 +525,11 @@ func (in *AgentRuntimeSpec) DeepCopyInto(out *AgentRuntimeSpec) {
 			(*out)[key] = val
 		}
 	}
+	if in.PrivacyPolicyRef != nil {
+		in, out := &in.PrivacyPolicyRef, &out.PrivacyPolicyRef
+		*out = new(corev1.LocalObjectReference)
+		**out = **in
+	}
 	if in.Rollout != nil {
 		in, out := &in.Rollout, &out.Rollout
 		*out = new(RolloutConfig)
@@ -3658,6 +3663,11 @@ func (in *WorkspaceServiceGroup) DeepCopyInto(out *WorkspaceServiceGroup) {
 	if in.External != nil {
 		in, out := &in.External, &out.External
 		*out = new(ExternalEndpoints)
+		**out = **in
+	}
+	if in.PrivacyPolicyRef != nil {
+		in, out := &in.PrivacyPolicyRef, &out.PrivacyPolicyRef
+		*out = new(corev1.LocalObjectReference)
 		**out = **in
 	}
 }

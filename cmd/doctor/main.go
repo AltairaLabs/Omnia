@@ -161,6 +161,9 @@ func main() {
 	runner.Register(memoryChecker.Checks()...)
 
 	privacyChecker := checks.NewPrivacyChecker(memoryAPIURL, sessionAPIURL, workspaceUID, arenaURL)
+	if k8sClient != nil {
+		privacyChecker.WithK8sClient(k8sClient)
+	}
 	runner.Register(privacyChecker.Checks()...)
 
 	// Agent → Sessions must run sequentially (Sessions reads Agent's LastSessionID).

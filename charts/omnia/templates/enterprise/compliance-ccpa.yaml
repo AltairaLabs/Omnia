@@ -3,6 +3,7 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: SessionPrivacyPolicy
 metadata:
   name: ccpa-compliant
+  namespace: omnia-system
   labels:
     omnia.altairalabs.ai/compliance-preset: ccpa
     {{- include "omnia.labels" . | nindent 4 }}
@@ -11,7 +12,6 @@ metadata:
     "helm.sh/hook-weight": "10"
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
-  level: workspace
   recording:
     enabled: true
     facadeData: true
