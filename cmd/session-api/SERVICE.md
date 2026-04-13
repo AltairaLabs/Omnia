@@ -15,7 +15,8 @@
 - PII redaction middleware — intercepts all write requests and redacts PII from message content, tool call arguments/results, provider call payloads, event metadata, and eval results based on the effective SessionPrivacyPolicy (enterprise)
 - Privacy opt-out enforcement — silently drops writes (204 No Content) when the user has opted out via preferences (enterprise)
 - Recording-flag enforcement — when the effective `SessionPrivacyPolicy.Recording.Enabled=false`, write endpoints return 204; when `RichData=false`, the middleware blocks assistant messages, tool calls, runtime events, and provider calls while allowing user messages, status updates, and TTL refreshes (enterprise)
-- SessionPrivacyPolicy CRD watching — shared informer maintains an in-memory cache of policies and computes effective policy per namespace/agent using the global → workspace → agent inheritance chain; the cached policy drives PII redaction, opt-out enforcement, and recording gating (enterprise)
+- SessionPrivacyPolicy CRD watching — `PolicyWatcher` polls `SessionPrivacyPolicy`, `Workspace`, and `AgentRuntime` CRDs every 30 s and maintains in-memory sync.Map caches; `GetEffectivePolicy(namespace, agentName)` resolves the policy using a deterministic chain (AgentRuntime override → service group → global default at `omnia-system/default`); the resolved policy drives PII redaction, opt-out enforcement, and recording gating (enterprise)
+- Per-request encryption resolver — on each session-api write, the `PolicyWatcher`-resolved `EncryptionConfig` is used to select a `(kmsProvider, keyID)` pair; the `Encryptor` wraps AES-256-GCM data keys via the selected KMS provider; results are cached per `(kmsProvider, keyID)` tuple (enterprise)
 - Privacy/GDPR deletion with media artifact cleanup, batch processing, and progress tracking (enterprise)
 - Privacy opt-out preferences (enterprise)
 
@@ -110,4 +111,4 @@ The `X-Omnia-User-ID` header is propagated by the facade and runtime on all writ
 - PostgreSQL (required, warm store)
 - Redis (optional, hot cache + event streaming)
 - Cold storage provider (optional: S3/GCS/Azure, also used for media artifact cleanup)
-- Kubernetes API (enterprise: SessionPrivacyPolicy CRD watching via shared informer — drives PII redaction, opt-out, and recording flags)
+- Kubernetes API (enterprise: watches `SessionPrivacyPolicy`, `Workspace`, and `AgentRuntime` CRDs via `PolicyWatcher` — drives PII redaction, opt-out, recording flags, and per-request encryption resolver)

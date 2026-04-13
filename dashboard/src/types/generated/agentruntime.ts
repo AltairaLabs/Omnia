@@ -397,6 +397,16 @@ export interface AgentRuntimeSpec {
       strategy?: "keyword" | "semantic" | "graph" | "composite";
     };
   };
+  /** privacyPolicyRef references a SessionPrivacyPolicy in this agent's namespace
+   * that overrides the service group's policy (if any) for this specific agent. */
+  privacyPolicyRef?: {
+    /** Name of the referent.
+     * This field is effectively required, but due to backwards compatibility is
+     * allowed to be empty. Instances of this type with an empty value here are
+     * almost certainly wrong.
+     * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
+    name?: string;
+  };
   /** promptPackRef references the PromptPack containing agent prompts and configuration. */
   promptPackRef: {
     /** name is the name of the PromptPack resource. */

@@ -8,6 +8,25 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ---
 
+## Unreleased
+
+### Breaking
+
+- `SessionPrivacyPolicy.spec.level`, `spec.workspaceRef`, and `spec.agentRef` removed. Policies are now reusable namespaced documents; binding has moved to consumers (`Workspace` service groups and `AgentRuntime`).
+- `SessionPrivacyPolicy` is now **namespace-scoped** (was cluster-scoped).
+
+### Added
+
+- `Workspace.spec.services[].privacyPolicyRef` (`LocalObjectReference`) — selects the `SessionPrivacyPolicy` applied to sessions managed by that service group's session-api.
+- `AgentRuntime.spec.privacyPolicyRef` (`LocalObjectReference`) — per-agent override that takes precedence over the service group policy.
+- `PrivacyPolicyResolved` status condition on `Workspace` and `AgentRuntime`. Reason values:
+  - `PolicyResolved` — a named policy was found and is active.
+  - `PolicyNotFound` — the `privacyPolicyRef` points to a missing policy.
+  - `DefaultPolicy` — no service group in the workspace sets a ref; the global default (or none) will be used.
+  - `WorkspaceDefault` — the AgentRuntime has no override ref; effective policy comes from the service group or global default.
+
+---
+
 ## 2026-04-12
 - **Session API**: Added `GET /api/v1/privacy-policy?namespace={ns}&agent={agent}` endpoint
   - Returns the facade-visible subset of the effective `SessionPrivacyPolicy`: `{"recording":{"enabled":bool,"facadeData":bool,"richData":bool}}`.
