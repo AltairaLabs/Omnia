@@ -463,7 +463,7 @@ func (r *ArenaTemplateSourceReconciler) createGitFetcher(
 
 	// Load credentials if specified
 	if spec.Git.SecretRef != nil {
-		creds, err := LoadGitCredentials(ctx, r.Client, namespace, spec.Git.SecretRef.Name)
+		creds, err := sourcesync.LoadGitCredentials(ctx, r.Client, namespace, spec.Git.SecretRef.Name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load git credentials: %w", err)
 		}
@@ -492,7 +492,7 @@ func (r *ArenaTemplateSourceReconciler) createOCIFetcher(
 
 	// Load credentials if specified
 	if spec.OCI.SecretRef != nil {
-		creds, err := LoadOCICredentials(ctx, r.Client, namespace, spec.OCI.SecretRef.Name)
+		creds, err := sourcesync.LoadOCICredentials(ctx, r.Client, namespace, spec.OCI.SecretRef.Name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load oci credentials: %w", err)
 		}

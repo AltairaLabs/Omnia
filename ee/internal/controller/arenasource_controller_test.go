@@ -732,7 +732,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Scheme: k8sClient.Scheme(),
 			}
 
-			creds, err := LoadOCICredentials(ctx, reconciler.Client, arenaSourceNamespace, "docker-config-secret")
+			creds, err := sourcesync.LoadOCICredentials(ctx, reconciler.Client, arenaSourceNamespace, "docker-config-secret")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(creds.DockerConfig).NotTo(BeEmpty())
 			Expect(creds.DockerConfig).To(ContainSubstring("registry.example.com"))
