@@ -19,6 +19,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -394,9 +395,10 @@ func TestOnPolicyChange_CallbackFiredOnAdd(t *testing.T) {
 	assert.Equal(t, "p1", transitions[0].new.Name)
 }
 
-// TestOnPolicyChange_CallbackFiredOnUpdate verifies that the callback receives
-// the old value on a subsequent load when the policy is already cached.
-func TestOnPolicyChange_CallbackFiredOnUpdate(t *testing.T) {
+// TestOnPolicyChange_CallbackFiredOnSpecChange verifies that the callback
+// fires again when a reload observes an actual spec change — and does NOT
+// fire on no-op reloads where the spec is unchanged.
+func TestOnPolicyChange_CallbackFiredOnSpecChange(t *testing.T) {
 	scheme := testScheme()
 	p1 := &omniav1alpha1.SessionPrivacyPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: testNamespace},
@@ -417,10 +419,20 @@ func TestOnPolicyChange_CallbackFiredOnUpdate(t *testing.T) {
 	require.NoError(t, w.loadPolicies(context.Background()))
 	require.Len(t, transitions, 1)
 
-	// Second load with same policy: callback fires again (old→new, same name).
+	// Second load with unchanged spec: no callback (avoids cache churn).
 	require.NoError(t, w.loadPolicies(context.Background()))
-	require.Len(t, transitions, 2, "callback must fire again on reload")
-	assert.NotNil(t, transitions[1].old, "old must be the previous version on reload")
+	require.Len(t, transitions, 1, "callback must NOT fire on no-op reload")
+
+	// Mutate the policy spec in the fake client, then reload: callback fires.
+	updated := &omniav1alpha1.SessionPrivacyPolicy{}
+	require.NoError(t, fakeClient.Get(context.Background(),
+		client.ObjectKey{Name: "p1", Namespace: testNamespace}, updated))
+	updated.Spec = basicSpec(false) // different recording.enabled
+	require.NoError(t, fakeClient.Update(context.Background(), updated))
+
+	require.NoError(t, w.loadPolicies(context.Background()))
+	require.Len(t, transitions, 2, "callback must fire on spec change")
+	assert.NotNil(t, transitions[1].old, "old must be the previous version on spec change")
 	assert.Equal(t, "p1", transitions[1].new.Name)
 }
 

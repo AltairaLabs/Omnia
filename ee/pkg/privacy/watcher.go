@@ -11,6 +11,7 @@ package privacy
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -138,7 +139,9 @@ func (w *PolicyWatcher) loadPolicies(ctx context.Context) error {
 		}
 		w.policies.Store(key, newVal)
 		w.log.V(2).Info("policy cached", "key", key)
-		if w.onChange != nil {
+		// Only notify on a genuine spec change to avoid churning downstream
+		// caches on every 30s no-op reload.
+		if w.onChange != nil && (oldPolicy == nil || !reflect.DeepEqual(oldPolicy.Spec, newVal.Spec)) {
 			w.onChange(oldPolicy, newVal)
 		}
 	}
