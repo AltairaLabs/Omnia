@@ -161,19 +161,16 @@ func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
 	return volumeMounts
 }
 
-// SkillManifestPath returns the workspace-content path the runtime container
+// skillManifestPath returns the workspace-content path the runtime container
 // should read for its PromptPack skill manifest. Returns "" when skills are
 // disabled (WorkspaceContentPath unset on the reconciler).
-func (r *AgentRuntimeReconciler) skillManifestPath(agentRuntime *omniav1alpha1.AgentRuntime, promptPackName string) string {
+//
+// The returned path is relative to the runtime container's mount point —
+// the PVC subtree below /workspace-content/ already encodes workspace and
+// namespace, so the manifest lives at .../manifests/<pack>.json.
+func (r *AgentRuntimeReconciler) skillManifestPath(promptPackName string) string {
 	if r.WorkspaceContentPath == "" {
 		return ""
 	}
-	// Layout: /workspace-content/{workspace}/{namespace}/manifests/{pack}.json
-	// PromptPackReconciler writes to {WorkspaceContentPath}/{workspace}/{namespace}/manifests/{pack}.json
-	// — but inside the runtime container we mount at workspaceContentMountPath
-	// directly to the per-namespace PVC subtree, so the workspace name is
-	// already implicit. Resolve the workspace via the namespace label.
-	// In practice GetWorkspaceForNamespace happens on the operator side; here
-	// we're just emitting the path the runtime sees.
 	return fmt.Sprintf("%s/manifests/%s.json", workspaceContentMountPath, promptPackName)
 }

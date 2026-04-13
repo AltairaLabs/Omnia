@@ -92,12 +92,12 @@ func TestBuildRuntimeVolumeMounts_NoWorkspaceContent(t *testing.T) {
 func TestSkillManifestPath(t *testing.T) {
 	t.Run("empty when WorkspaceContentPath is unset", func(t *testing.T) {
 		r := &AgentRuntimeReconciler{}
-		assert.Equal(t, "", r.skillManifestPath(minimalAgentRuntime(), "support-pack"))
+		assert.Equal(t, "", r.skillManifestPath("support-pack"))
 	})
 
 	t.Run("returns mount-relative path when set", func(t *testing.T) {
 		r := &AgentRuntimeReconciler{WorkspaceContentPath: "/workspace-content"}
-		got := r.skillManifestPath(minimalAgentRuntime(), "support-pack")
+		got := r.skillManifestPath("support-pack")
 		assert.Equal(t, "/workspace-content/manifests/support-pack.json", got)
 	})
 }

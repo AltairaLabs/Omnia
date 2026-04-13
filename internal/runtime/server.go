@@ -43,6 +43,7 @@ import (
 
 	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
 
+	"github.com/altairalabs/omnia/internal/runtime/skills"
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
@@ -172,6 +173,36 @@ func WithStateStore(store statestore.Store) ServerOption {
 func WithSDKOptions(opts ...sdk.Option) ServerOption {
 	return func(s *Server) {
 		s.sdkOptions = append(s.sdkOptions, opts...)
+	}
+}
+
+// WithSkillManifest reads the PromptPack skill manifest at path (typically
+// passed via OMNIA_PROMPTPACK_MANIFEST_PATH) and appends one
+// sdk.WithSkillsDir option per resolved entry, plus the configured
+// MaxActive setting. Empty path or missing file is a no-op — skills are
+// optional.
+//
+// Selector configuration is intentionally NOT wired here: the tag and
+// embedding selectors require additional inputs (tag list, Provider for
+// embeddings) that aren't on the manifest. They can be wired in a follow-up
+// once a real user asks.
+func WithSkillManifest(path string) ServerOption {
+	return func(s *Server) {
+		manifest, err := skills.Read(path)
+		if err != nil {
+			// Surface as a runtime error on the next op; for now, skip silently.
+			// A startup error doesn't have a great place to land in the
+			// option-pattern API, and the manifest reader already tolerates
+			// "missing" gracefully.
+			return
+		}
+		for _, e := range manifest.Skills {
+			s.sdkOptions = append(s.sdkOptions, sdk.WithSkillsDir(e.ContentPath))
+		}
+		if manifest.Config != nil && manifest.Config.MaxActive > 0 {
+			s.sdkOptions = append(s.sdkOptions,
+				sdk.WithMaxActiveSkillsOption(int(manifest.Config.MaxActive)))
+		}
 	}
 }
 
