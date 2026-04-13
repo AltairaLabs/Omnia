@@ -367,3 +367,113 @@ func TestStart_PollPicksUpNewPolicies(t *testing.T) {
 		return w.GetEffectivePolicy("", "") != nil
 	}, 2*time.Second, 10*time.Millisecond)
 }
+
+// TestOnPolicyChange_CallbackFiredOnAdd verifies that the OnPolicyChange
+// callback is invoked when a new policy is loaded (nil→policy transition).
+func TestOnPolicyChange_CallbackFiredOnAdd(t *testing.T) {
+	scheme := testScheme()
+	p1 := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: testNamespace},
+		Spec:       basicSpec(true),
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1).Build()
+	w := NewPolicyWatcher(fakeClient, logr.Discard())
+
+	type transition struct {
+		old, new *omniav1alpha1.SessionPrivacyPolicy
+	}
+	var transitions []transition
+	w.OnPolicyChange(func(old, new *omniav1alpha1.SessionPrivacyPolicy) {
+		transitions = append(transitions, transition{old: old, new: new})
+	})
+
+	require.NoError(t, w.loadPolicies(context.Background()))
+
+	require.Len(t, transitions, 1, "callback must fire once on first load")
+	assert.Nil(t, transitions[0].old, "old must be nil on first observation")
+	assert.Equal(t, "p1", transitions[0].new.Name)
+}
+
+// TestOnPolicyChange_CallbackFiredOnUpdate verifies that the callback receives
+// the old value on a subsequent load when the policy is already cached.
+func TestOnPolicyChange_CallbackFiredOnUpdate(t *testing.T) {
+	scheme := testScheme()
+	p1 := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: testNamespace},
+		Spec:       basicSpec(true),
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1).Build()
+	w := NewPolicyWatcher(fakeClient, logr.Discard())
+
+	type transition struct {
+		old, new *omniav1alpha1.SessionPrivacyPolicy
+	}
+	var transitions []transition
+	w.OnPolicyChange(func(old, new *omniav1alpha1.SessionPrivacyPolicy) {
+		transitions = append(transitions, transition{old: old, new: new})
+	})
+
+	// First load: add the policy.
+	require.NoError(t, w.loadPolicies(context.Background()))
+	require.Len(t, transitions, 1)
+
+	// Second load with same policy: callback fires again (old→new, same name).
+	require.NoError(t, w.loadPolicies(context.Background()))
+	require.Len(t, transitions, 2, "callback must fire again on reload")
+	assert.NotNil(t, transitions[1].old, "old must be the previous version on reload")
+	assert.Equal(t, "p1", transitions[1].new.Name)
+}
+
+// TestOnPolicyChange_CallbackFiredOnDelete verifies that the callback receives
+// (old, nil) when a policy is evicted from the cache.
+func TestOnPolicyChange_CallbackFiredOnDelete(t *testing.T) {
+	scheme := testScheme()
+	p1 := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: testNamespace},
+		Spec:       basicSpec(true),
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1).Build()
+	w := NewPolicyWatcher(fakeClient, logr.Discard())
+
+	type transition struct {
+		old, new *omniav1alpha1.SessionPrivacyPolicy
+	}
+	var transitions []transition
+	w.OnPolicyChange(func(old, new *omniav1alpha1.SessionPrivacyPolicy) {
+		transitions = append(transitions, transition{old: old, new: new})
+	})
+
+	// First load: policy added.
+	require.NoError(t, w.loadPolicies(context.Background()))
+	require.Len(t, transitions, 1)
+
+	// Delete the policy from the fake client and reload.
+	require.NoError(t, fakeClient.Delete(context.Background(), p1))
+	require.NoError(t, w.loadPolicies(context.Background()))
+
+	require.Len(t, transitions, 2, "callback must fire on deletion")
+	assert.Equal(t, "p1", transitions[1].old.Name, "old must carry the deleted policy")
+	assert.Nil(t, transitions[1].new, "new must be nil on deletion")
+}
+
+// TestOnPolicyChange_ReplacedCallback verifies that a second OnPolicyChange
+// call replaces the first callback rather than chaining them.
+func TestOnPolicyChange_ReplacedCallback(t *testing.T) {
+	scheme := testScheme()
+	p1 := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: testNamespace},
+		Spec:       basicSpec(true),
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1).Build()
+	w := NewPolicyWatcher(fakeClient, logr.Discard())
+
+	first := 0
+	second := 0
+	w.OnPolicyChange(func(_, _ *omniav1alpha1.SessionPrivacyPolicy) { first++ })
+	w.OnPolicyChange(func(_, _ *omniav1alpha1.SessionPrivacyPolicy) { second++ })
+
+	require.NoError(t, w.loadPolicies(context.Background()))
+
+	assert.Zero(t, first, "first callback must be replaced, not chained")
+	assert.Equal(t, 1, second, "second callback must be called once")
+}

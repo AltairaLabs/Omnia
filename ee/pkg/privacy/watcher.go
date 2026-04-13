@@ -32,6 +32,11 @@ type EffectivePolicy struct {
 	Encryption omniav1alpha1.EncryptionConfig
 }
 
+// PolicyChangeCallback is invoked when the watcher observes a change to a
+// cached SessionPrivacyPolicy. old is nil on first observation; new is nil
+// when the policy has been deleted.
+type PolicyChangeCallback func(old, new *omniav1alpha1.SessionPrivacyPolicy)
+
 // PolicyWatcher polls SessionPrivacyPolicy, Workspace, and AgentRuntime CRDs
 // and maintains an in-memory cache for fast deterministic policy lookup.
 //
@@ -51,6 +56,14 @@ type PolicyWatcher struct {
 	agents       sync.Map // key: "namespace/name" -> *corev1alpha1.AgentRuntime
 	pollInterval time.Duration
 	log          logr.Logger
+	onChange     PolicyChangeCallback
+}
+
+// OnPolicyChange installs a callback invoked on each policy add/update/delete
+// observed by the watcher's reconcile loop. Zero or one callback is supported;
+// a later call replaces the previous one.
+func (w *PolicyWatcher) OnPolicyChange(cb PolicyChangeCallback) {
+	w.onChange = cb
 }
 
 // NewPolicyWatcher creates a watcher that observes privacy-related CRDs
@@ -116,13 +129,27 @@ func (w *PolicyWatcher) loadPolicies(ctx context.Context) error {
 		p := &list.Items[i]
 		key := policyKey(p)
 		seen[key] = true
-		w.policies.Store(key, p.DeepCopy())
+		newVal := p.DeepCopy()
+
+		// Capture old value before storing, then invoke callback outside any lock.
+		var oldPolicy *omniav1alpha1.SessionPrivacyPolicy
+		if prev, ok := w.policies.Load(key); ok {
+			oldPolicy = prev.(*omniav1alpha1.SessionPrivacyPolicy)
+		}
+		w.policies.Store(key, newVal)
 		w.log.V(2).Info("policy cached", "key", key)
+		if w.onChange != nil {
+			w.onChange(oldPolicy, newVal)
+		}
 	}
-	w.policies.Range(func(k, _ any) bool {
+	w.policies.Range(func(k, v any) bool {
 		if !seen[k.(string)] {
 			w.policies.Delete(k)
 			w.log.V(2).Info("policy evicted", "key", k)
+			if w.onChange != nil {
+				oldPolicy := v.(*omniav1alpha1.SessionPrivacyPolicy)
+				w.onChange(oldPolicy, nil)
+			}
 		}
 		return true
 	})

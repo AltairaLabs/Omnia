@@ -495,11 +495,21 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	// Privacy middleware (enterprise only): PII redaction + user opt-out.
 	var apiHandler http.Handler = mux
 	if f.enterprise {
-		wrapped, watcher := wrapPrivacyMiddleware(apiHandler, registry, pool, auditLogger, log)
+		wrapped, watcher, k8sClient := wrapPrivacyMiddleware(apiHandler, registry, pool, auditLogger, log)
 		apiHandler = wrapped
 
 		if watcher != nil {
 			handler.SetPolicyResolver(watcher)
+
+			// Wire per-policy encryption when we have a K8s client.
+			if k8sClient != nil {
+				factory := &kmsEncryptorFactory{
+					kubeClient: k8sClient,
+					namespace:  detectNamespace(),
+					log:        log,
+				}
+				wireEncryptionResolver(handler, sessionService, watcher, factory, log)
+			}
 		}
 	}
 
@@ -771,23 +781,24 @@ func buildAzureObjectStoreClient(f *flags, log logr.Logger) (*privacy.AzureObjec
 }
 
 // wrapPrivacyMiddleware creates and returns the privacy middleware handler
-// alongside the PolicyWatcher used to resolve policies. The watcher is
-// returned so callers (e.g., buildAPIMux) can wire it into the session
-// handler's PolicyResolver.
+// alongside the PolicyWatcher and the Kubernetes client used to build it.
+// The watcher is returned so callers can wire it into the session handler's
+// PolicyResolver and install an OnPolicyChange callback for cache invalidation.
+// The k8s client is returned so callers can build KMS encryptor factories.
 //
 // When the K8s API is unreachable (e.g., in tests), the middleware is skipped
-// and the original handler is returned unchanged, with a nil watcher.
+// and the original handler is returned unchanged, with nil watcher and client.
 func wrapPrivacyMiddleware(
 	next http.Handler,
 	registry *providers.Registry,
 	pool *pgxpool.Pool,
 	auditLogger *audit.Logger,
 	log logr.Logger,
-) (http.Handler, *privacy.PolicyWatcher) {
+) (http.Handler, *privacy.PolicyWatcher, client.Client) {
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
 		log.Info("privacy middleware skipped", "reason", "no in-cluster kubeconfig")
-		return next, nil
+		return next, nil, nil
 	}
 
 	scheme := k8sruntime.NewScheme()
@@ -796,7 +807,7 @@ func wrapPrivacyMiddleware(
 	k8sClient, err := client.New(kubeConfig, client.Options{Scheme: scheme})
 	if err != nil {
 		log.Error(err, "privacy middleware skipped", "reason", "k8s client creation failed")
-		return next, nil
+		return next, nil, nil
 	}
 
 	watcher := privacy.NewPolicyWatcher(k8sClient, log)
@@ -818,5 +829,55 @@ func wrapPrivacyMiddleware(
 		middleware.SetAuditLogger(auditLogger)
 	}
 	log.Info("privacy middleware enabled")
-	return middleware.Wrap(next), watcher
+	return middleware.Wrap(next), watcher, k8sClient
+}
+
+// wireEncryptionResolver builds a PerPolicyEncryptorResolver from the policy
+// watcher and installs it on the handler. It also registers an OnPolicyChange
+// callback so the resolver's cache is invalidated whenever a policy's
+// EncryptionConfig changes.
+//
+// Extracted as a standalone function for testability.
+func wireEncryptionResolver(
+	h *api.Handler,
+	svc *api.SessionService,
+	watcher *privacy.PolicyWatcher,
+	factory EncryptorFactory,
+	log logr.Logger,
+) {
+	encSource := func(sessionID string) (*omniav1alpha1.EncryptionConfig, bool) {
+		sess, err := svc.GetSession(context.Background(), sessionID)
+		if err != nil || sess == nil {
+			return nil, false
+		}
+		eff := watcher.GetEffectivePolicy(sess.Namespace, sess.AgentName)
+		if eff == nil {
+			return nil, false
+		}
+		enc := eff.Encryption
+		if !enc.Enabled {
+			return nil, false
+		}
+		return &enc, true
+	}
+
+	resolver := NewPerPolicyEncryptorResolver(encSource, factory, log)
+	h.SetEncryptorResolver(resolver)
+	watcher.OnPolicyChange(makeEncryptionInvalidator(resolver))
+	log.Info("encryption resolver wired")
+}
+
+// makeEncryptionInvalidator returns a PolicyChangeCallback that drops stale
+// encryptor cache entries when a SessionPrivacyPolicy's encryption config
+// changes. It invalidates both the old (to remove stale entries) and the new
+// (to force a rebuild on the next request) (provider, keyID) pairs.
+func makeEncryptionInvalidator(resolver *PerPolicyEncryptorResolver) privacy.PolicyChangeCallback {
+	return func(oldP, newP *omniav1alpha1.SessionPrivacyPolicy) {
+		if oldP != nil && oldP.Spec.Encryption != nil && oldP.Spec.Encryption.Enabled {
+			resolver.Invalidate(string(oldP.Spec.Encryption.KMSProvider), oldP.Spec.Encryption.KeyID)
+		}
+		if newP != nil && newP.Spec.Encryption != nil && newP.Spec.Encryption.Enabled {
+			resolver.Invalidate(string(newP.Spec.Encryption.KMSProvider), newP.Spec.Encryption.KeyID)
+		}
+	}
 }

@@ -133,6 +133,10 @@ func (h *Handler) SetEncryptorResolver(r EncryptorResolver) {
 	h.encryptorResolver = r
 }
 
+// EncryptorResolver returns the handler's encryption resolver for test introspection.
+// Returns nil when no resolver has been configured.
+func (h *Handler) EncryptorResolver() EncryptorResolver { return h.encryptorResolver }
+
 // encryptorFor returns the Encryptor for sessionID, or nil if none applies.
 func (h *Handler) encryptorFor(sessionID string) Encryptor {
 	if h.encryptorResolver == nil {

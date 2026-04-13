@@ -10,8 +10,11 @@ package api
 import (
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/altairalabs/omnia/internal/session/providers"
 )
 
 type stubEncryptor struct{ tag string }
@@ -57,4 +60,20 @@ func TestEncryptorResolverFunc_ReturnsFalseForUnknownSession(t *testing.T) {
 	enc, ok := resolver.EncryptorForSession("plaintext-session")
 	assert.False(t, ok)
 	assert.Nil(t, enc)
+}
+
+func TestHandler_EncryptorResolver_NilByDefault(t *testing.T) {
+	svc := NewSessionService(providers.NewRegistry(), ServiceConfig{}, logr.Discard())
+	h := NewHandler(svc, logr.Discard())
+	assert.Nil(t, h.EncryptorResolver(), "resolver must be nil before SetEncryptorResolver")
+}
+
+func TestHandler_EncryptorResolver_ReturnedAfterSet(t *testing.T) {
+	svc := NewSessionService(providers.NewRegistry(), ServiceConfig{}, logr.Discard())
+	h := NewHandler(svc, logr.Discard())
+
+	r := EncryptorResolverFunc(func(_ string) (Encryptor, bool) { return nil, false })
+	h.SetEncryptorResolver(r)
+
+	assert.NotNil(t, h.EncryptorResolver(), "resolver must be non-nil after SetEncryptorResolver")
 }
