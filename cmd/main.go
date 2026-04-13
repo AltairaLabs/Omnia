@@ -234,6 +234,7 @@ func main() {
 		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
 		PolicyProxyImage:                policyProxyImageForEnterprise(enterpriseEnabled, policyProxyImage),
 		RolloutMetrics:                  controller.NewRolloutMetrics(prometheus.DefaultRegisterer),
+		WorkspaceContentPath:            workspaceContentPath,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "AgentRuntime")
 		os.Exit(1)

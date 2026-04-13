@@ -103,6 +103,12 @@ type AgentRuntimeReconciler struct {
 	// is injected into the agent pod to evaluate CEL rules before tool execution.
 	// If empty, the default image from policy_proxy_sidecar.go is used.
 	PolicyProxyImage string
+	// WorkspaceContentPath is the base path for the workspace content PVC.
+	// When set, the runtime container mounts the workspace content PVC at
+	// this path (read-only) and receives OMNIA_PROMPTPACK_MANIFEST_PATH
+	// pointing at the per-pack skill manifest the PromptPack reconciler
+	// emits. When empty, no PVC mount happens — skills are disabled.
+	WorkspaceContentPath string
 	// RolloutMetrics holds Prometheus metrics for rollout observability.
 	// Nil in tests that don't need metrics.
 	RolloutMetrics *RolloutMetrics

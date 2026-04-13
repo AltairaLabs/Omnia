@@ -17,10 +17,27 @@ limitations under the License.
 package controller
 
 import (
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
+
+// workspaceContentVolumeName is the volume + mount name that exposes the
+// workspace content PVC to the runtime container, mirroring the arena
+// worker convention.
+const (
+	workspaceContentVolumeName = "workspace-content"
+	workspaceContentMountPath  = "/workspace-content"
+)
+
+// workspaceContentPVCName returns the per-namespace workspace content PVC
+// name, matching the ee arena convention so a single PVC backs both kinds
+// of workload.
+func workspaceContentPVCName(namespace string) string {
+	return fmt.Sprintf("workspace-%s-content", namespace)
+}
 
 func (r *AgentRuntimeReconciler) buildVolumes(
 	agentRuntime *omniav1alpha1.AgentRuntime,
@@ -51,6 +68,21 @@ func (r *AgentRuntimeReconciler) buildVolumes(
 					LocalObjectReference: corev1.LocalObjectReference{
 						Name: agentRuntime.Name + ToolsConfigMapSuffix,
 					},
+				},
+			},
+		})
+	}
+
+	// Mount the workspace content PVC when configured. Read-only — the
+	// runtime only reads skills from this volume; writes happen via the
+	// PromptPack reconciler in the operator pod.
+	if r.WorkspaceContentPath != "" {
+		volumes = append(volumes, corev1.Volume{
+			Name: workspaceContentVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: workspaceContentPVCName(agentRuntime.Namespace),
+					ReadOnly:  true,
 				},
 			},
 		})
@@ -111,10 +143,37 @@ func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
 		})
 	}
 
+	// Mount the workspace content PVC into the runtime container so it can
+	// read the skill manifest emitted by the PromptPack reconciler.
+	if r.WorkspaceContentPath != "" {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      workspaceContentVolumeName,
+			MountPath: workspaceContentMountPath,
+			ReadOnly:  true,
+		})
+	}
+
 	// Add user-specified volume mounts for media files, mock configs, etc.
 	if agentRuntime.Spec.Runtime != nil && len(agentRuntime.Spec.Runtime.VolumeMounts) > 0 {
 		volumeMounts = append(volumeMounts, agentRuntime.Spec.Runtime.VolumeMounts...)
 	}
 
 	return volumeMounts
+}
+
+// SkillManifestPath returns the workspace-content path the runtime container
+// should read for its PromptPack skill manifest. Returns "" when skills are
+// disabled (WorkspaceContentPath unset on the reconciler).
+func (r *AgentRuntimeReconciler) skillManifestPath(agentRuntime *omniav1alpha1.AgentRuntime, promptPackName string) string {
+	if r.WorkspaceContentPath == "" {
+		return ""
+	}
+	// Layout: /workspace-content/{workspace}/{namespace}/manifests/{pack}.json
+	// PromptPackReconciler writes to {WorkspaceContentPath}/{workspace}/{namespace}/manifests/{pack}.json
+	// — but inside the runtime container we mount at workspaceContentMountPath
+	// directly to the per-namespace PVC subtree, so the workspace name is
+	// already implicit. Resolve the workspace via the namespace label.
+	// In practice GetWorkspaceForNamespace happens on the operator side; here
+	// we're just emitting the path the runtime sees.
+	return fmt.Sprintf("%s/manifests/%s.json", workspaceContentMountPath, promptPackName)
 }
