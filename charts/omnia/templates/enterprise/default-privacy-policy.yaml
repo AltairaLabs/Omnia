@@ -3,6 +3,7 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: SessionPrivacyPolicy
 metadata:
   name: default
+  namespace: omnia-system
   labels:
     {{- include "omnia.labels" . | nindent 4 }}
   annotations:
@@ -11,7 +12,6 @@ metadata:
     "helm.sh/hook-weight": "10"
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
-  level: global
   recording:
     enabled: true
     facadeData: true
