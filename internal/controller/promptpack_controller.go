@@ -19,6 +19,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -56,6 +58,11 @@ type PromptPackReconciler struct {
 	Scheme          *runtime.Scheme
 	SchemaValidator *schema.SchemaValidator
 	Recorder        record.EventRecorder
+
+	// WorkspaceContentPath is the base path for workspace content volumes.
+	// Used to read SkillSource artifacts and write the per-pack skill
+	// manifest. Empty disables skill resolution.
+	WorkspaceContentPath string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=promptpacks,verbs=get;list;watch;create;update;patch;delete
@@ -123,6 +130,9 @@ func (r *PromptPackReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	SetCondition(&promptPack.Status.Conditions, promptPack.Generation, PromptPackConditionTypeSchemaValid, metav1.ConditionTrue,
 		"SchemaValid", "pack.json content is valid")
 
+	// Step 3: Resolve spec.skills against SkillSources and emit the manifest.
+	r.reconcileSkills(ctx, promptPack, packJSON)
+
 	// Find all AgentRuntimes referencing this PromptPack
 	referencingRuntimes, err := r.findReferencingAgentRuntimes(ctx, promptPack)
 	if err != nil {
@@ -153,6 +163,75 @@ func (r *PromptPackReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// reconcileSkills resolves spec.skills, validates allowed-tools, emits the
+// manifest, and surfaces SkillsResolved/SkillsValid/SkillToolsResolved
+// conditions. No-ops when WorkspaceContentPath is unset OR spec.skills is
+// empty.
+func (r *PromptPackReconciler) reconcileSkills(ctx context.Context, pack *omniav1alpha1.PromptPack, packJSON string) {
+	log := logf.FromContext(ctx)
+
+	if r.WorkspaceContentPath == "" || len(pack.Spec.Skills) == 0 {
+		SetCondition(&pack.Status.Conditions, pack.Generation,
+			omniav1alpha1.PromptPackConditionSkillsResolved, metav1.ConditionTrue,
+			"NoSkills", "pack does not declare spec.skills")
+		return
+	}
+
+	res := ResolvePromptPackSkills(ctx, r.Client, pack, r.WorkspaceContentPath)
+
+	// SkillsResolved
+	if len(res.LookupErrors) > 0 {
+		msgs := make([]string, 0, len(res.LookupErrors))
+		for _, e := range res.LookupErrors {
+			msgs = append(msgs, e.Error())
+		}
+		SetCondition(&pack.Status.Conditions, pack.Generation,
+			omniav1alpha1.PromptPackConditionSkillsResolved, metav1.ConditionFalse,
+			"LookupFailed", strings.Join(msgs, "; "))
+	} else {
+		SetCondition(&pack.Status.Conditions, pack.Generation,
+			omniav1alpha1.PromptPackConditionSkillsResolved, metav1.ConditionTrue,
+			"AllSkillsResolved", fmt.Sprintf("resolved %d skills", len(res.Manifest.Skills)))
+	}
+
+	// SkillsValid
+	if len(res.CollisionErrors) > 0 {
+		msgs := make([]string, 0, len(res.CollisionErrors))
+		for _, e := range res.CollisionErrors {
+			msgs = append(msgs, e.Error())
+		}
+		SetCondition(&pack.Status.Conditions, pack.Generation,
+			omniav1alpha1.PromptPackConditionSkillsValid, metav1.ConditionFalse,
+			"NameCollision", strings.Join(msgs, "; "))
+	} else {
+		SetCondition(&pack.Status.Conditions, pack.Generation,
+			omniav1alpha1.PromptPackConditionSkillsValid, metav1.ConditionTrue,
+			"NoCollisions", fmt.Sprintf("%d skills, no collisions", len(res.Manifest.Skills)))
+	}
+
+	// SkillToolsResolved
+	packTools := ExtractPackTools(packJSON)
+	bad := ValidateSkillTools(res.AllowedToolsBySkill, packTools)
+	if len(bad) > 0 {
+		SetCondition(&pack.Status.Conditions, pack.Generation,
+			omniav1alpha1.PromptPackConditionSkillToolsResolved, metav1.ConditionFalse,
+			"UnknownTool", "skill allowed-tools not declared by pack: "+strings.Join(bad, ", "))
+	} else {
+		SetCondition(&pack.Status.Conditions, pack.Generation,
+			omniav1alpha1.PromptPackConditionSkillToolsResolved, metav1.ConditionTrue,
+			"AllToolsResolved", "all skill allowed-tools are declared by the pack")
+	}
+
+	// Emit the manifest into the workspace PVC. Failure is non-fatal —
+	// the conditions above record what we know; missing manifest just
+	// means the runtime won't load skills until next reconcile.
+	workspaceName := GetWorkspaceForNamespace(ctx, r.Client, pack.Namespace)
+	manifestRoot := filepath.Join(r.WorkspaceContentPath, workspaceName, pack.Namespace)
+	if err := WriteSkillManifest(manifestRoot, pack.Name, res.Manifest); err != nil {
+		log.Error(err, "write skill manifest", "pack", pack.Name)
+	}
 }
 
 // validateSource validates the source configuration and returns the pack.json content.

@@ -239,10 +239,11 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.PromptPackReconciler{
-		Client:          mgr.GetClient(),
-		Scheme:          mgr.GetScheme(),
-		SchemaValidator: schema.NewSchemaValidatorWithOptions(ctrl.Log, nil, 0),
-		Recorder:        mgr.GetEventRecorderFor("promptpack-controller"),
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		SchemaValidator:      schema.NewSchemaValidatorWithOptions(ctrl.Log, nil, 0),
+		Recorder:             mgr.GetEventRecorderFor("promptpack-controller"),
+		WorkspaceContentPath: workspaceContentPath,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "PromptPack")
 		os.Exit(1)
