@@ -25,6 +25,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -72,6 +74,7 @@ var _ = BeforeSuite(func() {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
+		CRDs:                  minimalIstioCRDs(),
 	}
 
 	// Retrieve the first found binary directory to allow running tests from IDEs
@@ -95,6 +98,56 @@ var _ = AfterSuite(func() {
 	err := testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
 })
+
+// minimalIstioCRDs returns just-enough CRD definitions for networking.istio.io
+// VirtualService and DestinationRule so the rollout controller's unstructured
+// patches can round-trip against the envtest API server. Upstream Istio CRDs
+// aren't checked into this repo and the rollout code only reads/writes a small
+// set of nested fields, so we declare the CRDs with
+// x-kubernetes-preserve-unknown-fields: true and skip schema validation.
+func minimalIstioCRDs() []*apiextensionsv1.CustomResourceDefinition {
+	preserveUnknown := true
+	openAPI := &apiextensionsv1.JSONSchemaProps{
+		Type:                   "object",
+		XPreserveUnknownFields: &preserveUnknown,
+	}
+	versions := []apiextensionsv1.CustomResourceDefinitionVersion{{
+		Name:    "v1",
+		Served:  true,
+		Storage: true,
+		Schema:  &apiextensionsv1.CustomResourceValidation{OpenAPIV3Schema: openAPI},
+	}}
+	return []*apiextensionsv1.CustomResourceDefinition{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "virtualservices.networking.istio.io"},
+			Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+				Group: "networking.istio.io",
+				Names: apiextensionsv1.CustomResourceDefinitionNames{
+					Plural:   "virtualservices",
+					Singular: "virtualservice",
+					Kind:     "VirtualService",
+					ListKind: "VirtualServiceList",
+				},
+				Scope:    apiextensionsv1.NamespaceScoped,
+				Versions: versions,
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "destinationrules.networking.istio.io"},
+			Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+				Group: "networking.istio.io",
+				Names: apiextensionsv1.CustomResourceDefinitionNames{
+					Plural:   "destinationrules",
+					Singular: "destinationrule",
+					Kind:     "DestinationRule",
+					ListKind: "DestinationRuleList",
+				},
+				Scope:    apiextensionsv1.NamespaceScoped,
+				Versions: versions,
+			},
+		},
+	}
+}
 
 // getFirstFoundEnvTestBinaryDir locates the first binary in the specified path.
 // ENVTEST-based tests depend on specific binaries, usually located in paths set by
