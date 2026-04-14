@@ -236,7 +236,6 @@ func (r *AgentRuntimeReconciler) reconcileRolloutUpdateStatus(
 	candidateVersion := resolveRolloutCandidateVersion(ar)
 
 	step := result.currentStep
-	weight := result.desiredWeight
 
 	// Preserve StepStartedAt across reconciles for the same step. Stamp a new
 	// value only when entering a fresh step; otherwise an unrelated reconcile
@@ -244,10 +243,20 @@ func (r *AgentRuntimeReconciler) reconcileRolloutUpdateStatus(
 	prevStepStartedAt, prevStep := previousStepStamp(ar)
 	stepStartedAt := stepStartedAtForStep(prevStepStartedAt, prevStep, step)
 
+	// Preserve the previously-set CurrentWeight when this reconcile didn't
+	// produce one (e.g. pause/analysis steps): the weight reflects the last
+	// setWeight that took effect, not the current step. Pause/analysis must
+	// not clobber it back to 0.
+	weight := result.desiredWeight
+	currentWeight := &weight
+	if weight == 0 && ar.Status.Rollout != nil && ar.Status.Rollout.CurrentWeight != nil {
+		currentWeight = ar.Status.Rollout.CurrentWeight
+	}
+
 	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
 		Active:           true,
 		CurrentStep:      &step,
-		CurrentWeight:    &weight,
+		CurrentWeight:    currentWeight,
 		StableVersion:    stableVersion,
 		CandidateVersion: candidateVersion,
 		StepStartedAt:    stepStartedAt,
