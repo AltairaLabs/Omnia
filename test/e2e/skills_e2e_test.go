@@ -43,6 +43,12 @@ var _ = Describe("Skills", Ordered, Label("skills"), func() {
 			Skip("ENABLE_SKILLS_E2E not set — skipping skills tests")
 		}
 
+		By("ensuring CRDs are installed and the controller-manager is deployed")
+		// Ginkgo randomizes top-level describe ordering, so this describe may
+		// run before Manager's BeforeAll does the install. ensureManagerDeployed
+		// is sync.Once guarded — the first caller wins.
+		Expect(ensureManagerDeployed()).To(Succeed())
+
 		By("ensuring the test-agents namespace is Active")
 		// The Omnia-CRDs Ordered context force-deletes test-agents in its
 		// AfterAll. If Skills runs after that teardown, the namespace is in
