@@ -36,17 +36,29 @@ var _ = Describe("Skills", Ordered, Label("skills"), func() {
 		skillConfigMap    = "test-skills-pack-config"
 		skillProviderName = "test-skills-provider"
 		skillAgentRuntime = "test-skills-agent"
+
+		// Shared workspace-content infrastructure. The operator's pod has
+		// readOnlyRootFilesystem=true, so SkillSource sync writes would fail
+		// against /workspace-content without a volume mount. We stitch two
+		// static-bound PVs pointing at the same kind-node hostPath so the
+		// operator (in omnia-system) and any agent pods (in test-agents) see
+		// the same content.
+		skillsOpPVName      = "skills-e2e-op-workspace-pv"
+		skillsOpPVCName     = "skills-e2e-op-workspace-content"
+		skillsAgentPVName   = "skills-e2e-agent-workspace-pv"
+		skillsAgentPVCName  = "workspace-test-agents-content"
+		skillsHostSharePath = "/tmp/skills-e2e-share"
 	)
 
 	BeforeAll(func() {
 		if os.Getenv("ENABLE_SKILLS_E2E") != "true" {
 			Skip("ENABLE_SKILLS_E2E not set — skipping skills tests")
 		}
+		if predeployed {
+			Skip("Skills e2e patches the operator deployment — incompatible with predeployed mode")
+		}
 
 		By("ensuring CRDs are installed and the controller-manager is deployed")
-		// Ginkgo randomizes top-level describe ordering, so this describe may
-		// run before Manager's BeforeAll does the install. ensureManagerDeployed
-		// is sync.Once guarded — the first caller wins.
 		Expect(ensureManagerDeployed()).To(Succeed())
 
 		By("ensuring the test-agents namespace is Active")
@@ -65,6 +77,82 @@ var _ = Describe("Skills", Ordered, Label("skills"), func() {
 			g.Expect(out).To(Equal("Active"),
 				"namespace %s must be Active, got phase %q", agentsNamespace, out)
 		}, 2*time.Minute, 2*time.Second).Should(Succeed())
+
+		By("creating static-bound PVs for the shared workspace-content hostPath")
+		pvSpec := func(pvName, claimNs, claimName string) string {
+			return fmt.Sprintf(`
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: %s
+spec:
+  capacity:
+    storage: 100Mi
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: ""
+  hostPath:
+    path: %s
+    type: DirectoryOrCreate
+  claimRef:
+    namespace: %s
+    name: %s
+`, pvName, skillsHostSharePath, claimNs, claimName)
+		}
+		for _, body := range []string{
+			pvSpec(skillsOpPVName, namespace, skillsOpPVCName),
+			pvSpec(skillsAgentPVName, agentsNamespace, skillsAgentPVCName),
+		} {
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(body)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create PV")
+		}
+
+		By("creating the matching PVCs")
+		pvcSpec := func(ns, name string) string {
+			return fmt.Sprintf(`
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 100Mi
+`, name, ns)
+		}
+		for _, body := range []string{pvcSpec(namespace, skillsOpPVCName), pvcSpec(agentsNamespace, skillsAgentPVCName)} {
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(body)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create PVC")
+		}
+
+		By("patching the operator deployment to mount the shared PVC at /workspace-content")
+		volPatch := fmt.Sprintf(`{
+  "spec": {
+    "template": {
+      "spec": {
+        "containers": [{"name": "manager", "volumeMounts": [{"name": "workspace-content", "mountPath": "/workspace-content"},{"name": "tmp", "mountPath": "/tmp"}]}],
+        "volumes": [{"name": "workspace-content", "persistentVolumeClaim": {"claimName": "%s"}},{"name": "tmp", "emptyDir": {}}]
+      }
+    }
+  }
+}`, skillsOpPVCName)
+		cmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
+			"-n", namespace, "--type=strategic", "-p", volPatch)
+		_, err := utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to patch operator deployment")
+
+		By("waiting for the operator to roll out with the new mount")
+		rolloutCmd := exec.Command("kubectl", "rollout", "status",
+			"deployment/omnia-controller-manager", "-n", namespace, "--timeout=180s")
+		_, err = utils.Run(rolloutCmd)
+		Expect(err).NotTo(HaveOccurred(), "operator rollout did not complete")
 	})
 
 	AfterAll(func() {
@@ -85,6 +173,17 @@ var _ = Describe("Skills", Ordered, Label("skills"), func() {
 				"-n", agentsNamespace, "--ignore-not-found", "--timeout=30s")
 			_, _ = utils.Run(cmd)
 		}
+		for _, pvc := range []struct{ ns, name string }{
+			{agentsNamespace, skillsAgentPVCName},
+			{namespace, skillsOpPVCName},
+		} {
+			cmd := exec.Command("kubectl", "delete", "pvc", pvc.name,
+				"-n", pvc.ns, "--ignore-not-found", "--timeout=30s")
+			_, _ = utils.Run(cmd)
+		}
+		cmd := exec.Command("kubectl", "delete", "pv", skillsOpPVName, skillsAgentPVName,
+			"--ignore-not-found", "--timeout=30s")
+		_, _ = utils.Run(cmd)
 	})
 
 	// dumpOnFailure captures debug state for all skills-related resources when
@@ -274,131 +373,33 @@ spec:
 		Eventually(verifyActive, 2*time.Minute, 2*time.Second).Should(Succeed())
 	})
 
-	It("loads skills into the runtime container end-to-end (PVC-shared setup)", func() {
-		if predeployed {
-			Skip("PVC-shared runtime-log test patches the operator deployment — incompatible with predeployed mode")
-		}
+	It("loads skills into the runtime container end-to-end", func() {
 		const (
-			arName        = "skills-runtime-test"
-			ssName        = "skills-runtime-source"
-			cmName        = "skills-runtime-content"
-			packName      = "skills-runtime-pack"
-			packCMName    = "skills-runtime-pack-config"
-			provName      = "skills-runtime-provider"
-			provSecret    = "skills-runtime-provider-secret"
-			opPVName      = "skills-e2e-op-workspace-pv"
-			opPVCName     = "skills-e2e-op-workspace-content"
-			agentPVName   = "skills-e2e-agent-workspace-pv"
-			agentPVCName  = "workspace-test-agents-content"
-			hostSharePath = "/tmp/skills-e2e-share"
-			writerJob     = "skills-runtime-writer"
+			arName     = "skills-runtime-test"
+			ssName     = "skills-runtime-source"
+			cmName     = "skills-runtime-content"
+			packName   = "skills-runtime-pack"
+			packCMName = "skills-runtime-pack-config"
+			provName   = "skills-runtime-provider"
+			provSecret = "skills-runtime-provider-secret"
 		)
 
 		DeferCleanup(dumpOnFailure)
 		DeferCleanup(func() {
-			// Tear down only what this spec created. Resources outside
-			// test-agents need explicit cleanup since AfterAll only sweeps
-			// inside agentsNamespace.
-			for _, kind := range []string{"job", "agentruntime", "provider", "promptpack", "configmap", "skillsource", "secret", "persistentvolumeclaim"} {
-				cmd := exec.Command("kubectl", "delete", kind, "--all",
+			for _, res := range []struct{ kind, name string }{
+				{"agentruntime", arName},
+				{"provider", provName},
+				{"secret", provSecret},
+				{"promptpack", packName},
+				{"configmap", packCMName},
+				{"skillsource", ssName},
+				{"configmap", cmName},
+			} {
+				cmd := exec.Command("kubectl", "delete", res.kind, res.name,
 					"-n", agentsNamespace, "--ignore-not-found", "--timeout=30s")
 				_, _ = utils.Run(cmd)
 			}
-			// Restore the operator's original args by patching off the
-			// workspace-content volume + flag we added.
-			restorePatch := `[
-				{"op": "remove", "path": "/spec/template/spec/containers/0/volumeMounts"},
-				{"op": "remove", "path": "/spec/template/spec/volumes"}
-			]`
-			cmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
-				"-n", namespace, "--type=json", "-p", restorePatch)
-			_, _ = utils.Run(cmd)
-			cmd = exec.Command("kubectl", "delete", "pvc", opPVCName,
-				"-n", namespace, "--ignore-not-found", "--timeout=30s")
-			_, _ = utils.Run(cmd)
-			cmd = exec.Command("kubectl", "delete", "pv", opPVName, agentPVName, "--ignore-not-found", "--timeout=30s")
-			_, _ = utils.Run(cmd)
 		})
-
-		By("creating two static-bound PVs that share one hostPath on the kind node")
-		// Both PVs point at the same hostPath. kind has a single node, so both
-		// the operator pod (in omnia-system) and the agent pod (in
-		// test-agents) end up reading/writing the same directory. PVs use
-		// claimRef so the binding is deterministic — no waiting for default
-		// dynamic provisioning. spec.storageClassName="" disables dynamic.
-		pvSpec := func(pvName, claimNs, claimName string) string {
-			return fmt.Sprintf(`
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: %s
-spec:
-  capacity:
-    storage: 100Mi
-  accessModes: ["ReadWriteOnce"]
-  persistentVolumeReclaimPolicy: Delete
-  storageClassName: ""
-  hostPath:
-    path: %s
-    type: DirectoryOrCreate
-  claimRef:
-    namespace: %s
-    name: %s
-`, pvName, hostSharePath, claimNs, claimName)
-		}
-		for _, body := range []string{pvSpec(opPVName, namespace, opPVCName), pvSpec(agentPVName, agentsNamespace, agentPVCName)} {
-			cmd := exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = strings.NewReader(body)
-			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create PV")
-		}
-
-		By("creating the matching PVCs in omnia-system and test-agents")
-		pvcSpec := func(ns, name string) string {
-			return fmt.Sprintf(`
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  accessModes: ["ReadWriteOnce"]
-  storageClassName: ""
-  resources:
-    requests:
-      storage: 100Mi
-`, name, ns)
-		}
-		for _, body := range []string{pvcSpec(namespace, opPVCName), pvcSpec(agentsNamespace, agentPVCName)} {
-			cmd := exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = strings.NewReader(body)
-			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create PVC")
-		}
-
-		By("patching the operator deployment to mount the shared PVC at /workspace-content")
-		// strategic merge — adds a volume + a volumeMount to container[0]
-		// (manager) without disturbing existing fields.
-		volPatch := fmt.Sprintf(`{
-  "spec": {
-    "template": {
-      "spec": {
-        "containers": [{"name": "manager", "volumeMounts": [{"name": "workspace-content", "mountPath": "/workspace-content"}]}],
-        "volumes": [{"name": "workspace-content", "persistentVolumeClaim": {"claimName": "%s"}}]
-      }
-    }
-  }
-}`, opPVCName)
-		cmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
-			"-n", namespace, "--type=strategic", "-p", volPatch)
-		_, err := utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to patch operator deployment with workspace-content mount")
-
-		By("waiting for the operator to roll out with the new mount")
-		rolloutCmd := exec.Command("kubectl", "rollout", "status",
-			"deployment/omnia-controller-manager", "-n", namespace, "--timeout=180s")
-		_, err = utils.Run(rolloutCmd)
-		Expect(err).NotTo(HaveOccurred(), "operator rollout did not complete after patch")
 
 		By("creating a SkillSource backed by a ConfigMap")
 		skillContent := `---
@@ -420,9 +421,9 @@ data:
   e2e-skill__SKILL.md: |
 %s
 `, cmName, agentsNamespace, indentLines(skillContent, "    "))
-		cmd = exec.Command("kubectl", "apply", "-f", "-")
+		cmd := exec.Command("kubectl", "apply", "-f", "-")
 		cmd.Stdin = strings.NewReader(cmYAML)
-		_, err = utils.Run(cmd)
+		_, err := utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred())
 
 		ssYAML := fmt.Sprintf(`
