@@ -4732,6 +4732,13 @@ spec:
                     description: startedAt is the RFC3339 timestamp when the rollout
                       began.
                     type: string
+                  stepStartedAt:
+                    description: |-
+                      stepStartedAt is the RFC3339 timestamp when the controller entered
+                      the step pointed to by currentStep. Used to honour pause durations
+                      across reconciles: a pause step only advances once
+                      (now - stepStartedAt) >= the pause duration.
+                    type: string
                 type: object
               serviceEndpoint:
                 description: |-

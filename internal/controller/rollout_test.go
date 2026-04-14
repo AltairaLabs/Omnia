@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -240,7 +241,9 @@ func TestReconcileRollout_Pause_WithDuration(t *testing.T) {
 
 	result := reconcileRolloutSteps(ar)
 	assert.True(t, result.active)
-	assert.False(t, result.paused)
+	// A pause-with-duration that just started must be paused so the reconciler
+	// doesn't auto-advance currentStep before the duration elapses.
+	assert.True(t, result.paused)
 	assert.Equal(t, 5*time.Minute, result.requeueAfter)
 }
 
@@ -505,7 +508,7 @@ func TestResolveRolloutCandidateVersion_NoVersionAnywhere(t *testing.T) {
 
 func TestEvaluateStep_UnknownStepType(t *testing.T) {
 	step := omniav1alpha1.RolloutStep{} // No SetWeight, Pause, or Analysis
-	result := evaluateStep(step, 3)
+	result := evaluateStep(step, 3, nil)
 	assert.True(t, result.active)
 	assert.Equal(t, int32(3), result.currentStep)
 	assert.Contains(t, result.message, "unknown step type")
@@ -515,10 +518,41 @@ func TestEvaluatePause_InvalidDuration(t *testing.T) {
 	step := omniav1alpha1.RolloutStep{
 		Pause: &omniav1alpha1.RolloutPause{Duration: ptr.To("not-a-duration")},
 	}
-	result := evaluateStep(step, 0)
+	result := evaluateStep(step, 0, nil)
 	assert.True(t, result.active)
 	assert.True(t, result.paused)
 	assert.Contains(t, result.message, "invalid pause duration")
+}
+
+func TestEvaluatePause_DurationStillRunning(t *testing.T) {
+	step := omniav1alpha1.RolloutStep{
+		Pause: &omniav1alpha1.RolloutPause{Duration: ptr.To("10m")},
+	}
+	startedAt := metav1.NewTime(time.Now().Add(-5 * time.Minute))
+	result := evaluateStep(step, 1, &startedAt)
+	assert.True(t, result.paused, "pause within duration should keep paused=true")
+	assert.True(t, result.requeueAfter > 0)
+	assert.True(t, result.requeueAfter <= 5*time.Minute+time.Second,
+		"requeueAfter should be the remaining pause duration, got %v", result.requeueAfter)
+}
+
+func TestEvaluatePause_DurationElapsed(t *testing.T) {
+	step := omniav1alpha1.RolloutStep{
+		Pause: &omniav1alpha1.RolloutPause{Duration: ptr.To("1s")},
+	}
+	startedAt := metav1.NewTime(time.Now().Add(-time.Minute))
+	result := evaluateStep(step, 1, &startedAt)
+	assert.False(t, result.paused, "elapsed pause should release for advancement")
+	assert.Contains(t, result.message, "elapsed")
+}
+
+func TestEvaluatePause_FirstReconcileWithoutStamp(t *testing.T) {
+	step := omniav1alpha1.RolloutStep{
+		Pause: &omniav1alpha1.RolloutPause{Duration: ptr.To("10m")},
+	}
+	result := evaluateStep(step, 1, nil)
+	assert.True(t, result.paused, "first reconcile entering pause should be paused=true")
+	assert.Equal(t, 10*time.Minute, result.requeueAfter)
 }
 
 // --- candidateDiffers edge cases ---
