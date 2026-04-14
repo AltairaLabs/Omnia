@@ -240,6 +240,13 @@ type RolloutStatus struct {
 	// +optional
 	StartedAt *string `json:"startedAt,omitempty"`
 
+	// stepStartedAt is the RFC3339 timestamp when the controller entered
+	// the step pointed to by currentStep. Used to honour pause durations
+	// across reconciles: a pause step only advances once
+	// (now - stepStartedAt) >= the pause duration.
+	// +optional
+	StepStartedAt *string `json:"stepStartedAt,omitempty"`
+
 	// message is a human-readable description of the current rollout state.
 	// +optional
 	Message string `json:"message,omitempty"`

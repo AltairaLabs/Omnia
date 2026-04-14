@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -240,7 +241,9 @@ func TestReconcileRollout_Pause_WithDuration(t *testing.T) {
 
 	result := reconcileRolloutSteps(ar)
 	assert.True(t, result.active)
-	assert.False(t, result.paused)
+	// A pause-with-duration that just started must be paused so the reconciler
+	// doesn't auto-advance currentStep before the duration elapses.
+	assert.True(t, result.paused)
 	assert.Equal(t, 5*time.Minute, result.requeueAfter)
 }
 
@@ -505,7 +508,7 @@ func TestResolveRolloutCandidateVersion_NoVersionAnywhere(t *testing.T) {
 
 func TestEvaluateStep_UnknownStepType(t *testing.T) {
 	step := omniav1alpha1.RolloutStep{} // No SetWeight, Pause, or Analysis
-	result := evaluateStep(step, 3)
+	result := evaluateStep(step, 3, nil)
 	assert.True(t, result.active)
 	assert.Equal(t, int32(3), result.currentStep)
 	assert.Contains(t, result.message, "unknown step type")
@@ -515,10 +518,124 @@ func TestEvaluatePause_InvalidDuration(t *testing.T) {
 	step := omniav1alpha1.RolloutStep{
 		Pause: &omniav1alpha1.RolloutPause{Duration: ptr.To("not-a-duration")},
 	}
-	result := evaluateStep(step, 0)
+	result := evaluateStep(step, 0, nil)
 	assert.True(t, result.active)
 	assert.True(t, result.paused)
 	assert.Contains(t, result.message, "invalid pause duration")
+}
+
+func TestEvaluatePause_DurationStillRunning(t *testing.T) {
+	step := omniav1alpha1.RolloutStep{
+		Pause: &omniav1alpha1.RolloutPause{Duration: ptr.To("10m")},
+	}
+	startedAt := metav1.NewTime(time.Now().Add(-5 * time.Minute))
+	result := evaluateStep(step, 1, &startedAt)
+	assert.True(t, result.paused, "pause within duration should keep paused=true")
+	assert.True(t, result.requeueAfter > 0)
+	assert.True(t, result.requeueAfter <= 5*time.Minute+time.Second,
+		"requeueAfter should be the remaining pause duration, got %v", result.requeueAfter)
+}
+
+func TestEvaluatePause_DurationElapsed(t *testing.T) {
+	step := omniav1alpha1.RolloutStep{
+		Pause: &omniav1alpha1.RolloutPause{Duration: ptr.To("1s")},
+	}
+	startedAt := metav1.NewTime(time.Now().Add(-time.Minute))
+	result := evaluateStep(step, 1, &startedAt)
+	assert.False(t, result.paused, "elapsed pause should release for advancement")
+	assert.Contains(t, result.message, "elapsed")
+}
+
+func TestEvaluatePause_FirstReconcileWithoutStamp(t *testing.T) {
+	step := omniav1alpha1.RolloutStep{
+		Pause: &omniav1alpha1.RolloutPause{Duration: ptr.To("10m")},
+	}
+	result := evaluateStep(step, 1, nil)
+	assert.True(t, result.paused, "first reconcile entering pause should be paused=true")
+	assert.Equal(t, 10*time.Minute, result.requeueAfter)
+}
+
+func TestStepStartedAtFor_NoRollout(t *testing.T) {
+	ar := newRolloutTestAR()
+	assert.Nil(t, stepStartedAtFor(ar, 0))
+}
+
+func TestStepStartedAtFor_NoStamp(t *testing.T) {
+	ar := newRolloutTestAR()
+	step := int32(1)
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{CurrentStep: &step}
+	assert.Nil(t, stepStartedAtFor(ar, 1))
+}
+
+func TestStepStartedAtFor_DifferentStep(t *testing.T) {
+	ar := newRolloutTestAR()
+	step := int32(1)
+	stamp := time.Now().Format(time.RFC3339)
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
+		CurrentStep:   &step,
+		StepStartedAt: &stamp,
+	}
+	assert.Nil(t, stepStartedAtFor(ar, 2),
+		"stamp for step 1 must not be returned when querying step 2")
+}
+
+func TestStepStartedAtFor_ParseError(t *testing.T) {
+	ar := newRolloutTestAR()
+	step := int32(1)
+	bogus := "not-a-timestamp"
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
+		CurrentStep:   &step,
+		StepStartedAt: &bogus,
+	}
+	assert.Nil(t, stepStartedAtFor(ar, 1))
+}
+
+func TestStepStartedAtFor_HappyPath(t *testing.T) {
+	ar := newRolloutTestAR()
+	step := int32(1)
+	stamp := time.Now().Add(-2 * time.Minute).UTC().Format(time.RFC3339)
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
+		CurrentStep:   &step,
+		StepStartedAt: &stamp,
+	}
+	got := stepStartedAtFor(ar, 1)
+	assert.NotNil(t, got)
+	assert.WithinDuration(t, time.Now().Add(-2*time.Minute), got.Time, 5*time.Second)
+}
+
+func TestPreviousStepStamp_NoRollout(t *testing.T) {
+	ar := newRolloutTestAR()
+	stamp, step := previousStepStamp(ar)
+	assert.Nil(t, stamp)
+	assert.Equal(t, int32(0), step)
+}
+
+func TestPreviousStepStamp_NoCurrentStep(t *testing.T) {
+	ar := newRolloutTestAR()
+	prev := "2026-04-14T12:00:00Z"
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{StepStartedAt: &prev}
+	stamp, step := previousStepStamp(ar)
+	assert.Equal(t, &prev, stamp)
+	assert.Equal(t, int32(0), step,
+		"missing CurrentStep defaults to 0")
+}
+
+func TestStepStartedAtForStep_PreservesWhenSameStep(t *testing.T) {
+	prev := "2026-04-14T12:00:00Z"
+	got := stepStartedAtForStep(&prev, 1, 1)
+	assert.Equal(t, &prev, got)
+}
+
+func TestStepStartedAtForStep_StampsWhenStepChanges(t *testing.T) {
+	prev := "2026-04-14T12:00:00Z"
+	got := stepStartedAtForStep(&prev, 1, 2)
+	assert.NotNil(t, got)
+	assert.NotEqual(t, prev, *got, "advancing to a new step must produce a fresh stamp")
+}
+
+func TestStepStartedAtForStep_StampsWhenPriorMissing(t *testing.T) {
+	got := stepStartedAtForStep(nil, 0, 0)
+	assert.NotNil(t, got, "nil prior stamp at step entry must produce a stamp")
 }
 
 // --- candidateDiffers edge cases ---

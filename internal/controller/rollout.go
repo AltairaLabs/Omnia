@@ -236,14 +236,30 @@ func (r *AgentRuntimeReconciler) reconcileRolloutUpdateStatus(
 	candidateVersion := resolveRolloutCandidateVersion(ar)
 
 	step := result.currentStep
+
+	// Preserve StepStartedAt across reconciles for the same step. Stamp a new
+	// value only when entering a fresh step; otherwise an unrelated reconcile
+	// would reset the pause clock and the pause would never elapse.
+	prevStepStartedAt, prevStep := previousStepStamp(ar)
+	stepStartedAt := stepStartedAtForStep(prevStepStartedAt, prevStep, step)
+
+	// Preserve the previously-set CurrentWeight when this reconcile didn't
+	// produce one (e.g. pause/analysis steps): the weight reflects the last
+	// setWeight that took effect, not the current step. Pause/analysis must
+	// not clobber it back to 0.
 	weight := result.desiredWeight
+	currentWeight := &weight
+	if weight == 0 && ar.Status.Rollout != nil && ar.Status.Rollout.CurrentWeight != nil {
+		currentWeight = ar.Status.Rollout.CurrentWeight
+	}
 
 	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
 		Active:           true,
 		CurrentStep:      &step,
-		CurrentWeight:    &weight,
+		CurrentWeight:    currentWeight,
 		StableVersion:    stableVersion,
 		CandidateVersion: candidateVersion,
+		StepStartedAt:    stepStartedAt,
 		Message:          result.message,
 	}
 
@@ -251,10 +267,14 @@ func (r *AgentRuntimeReconciler) reconcileRolloutUpdateStatus(
 		ConditionTypeRolloutActive, metav1.ConditionTrue,
 		"RolloutInProgress", result.message)
 
-	// For setWeight steps (not paused, not analysis), advance to next step.
+	// For non-paused, non-analysis steps (setWeight, or pause whose duration
+	// elapsed), advance to the next step. Stamp StepStartedAt for the new
+	// step so the next pause can measure elapsed time correctly.
 	if !result.paused && !result.analysis {
 		next := step + 1
 		ar.Status.Rollout.CurrentStep = &next
+		nextStamp := metav1.Now().Format(time.RFC3339)
+		ar.Status.Rollout.StepStartedAt = &nextStamp
 		if r.RolloutMetrics != nil {
 			r.RolloutMetrics.StepTransitions.WithLabelValues(ar.Namespace, ar.Name, "setWeight").Inc()
 		}
@@ -267,6 +287,30 @@ func (r *AgentRuntimeReconciler) reconcileRolloutUpdateStatus(
 		return ctrl.Result{RequeueAfter: result.requeueAfter}, nil
 	}
 	return ctrl.Result{}, nil
+}
+
+// previousStepStamp returns the previously-stamped (StepStartedAt, currentStep)
+// from status. Both nil/zero when no prior rollout status exists.
+func previousStepStamp(ar *omniav1alpha1.AgentRuntime) (*string, int32) {
+	if ar.Status.Rollout == nil {
+		return nil, 0
+	}
+	var prevStep int32
+	if ar.Status.Rollout.CurrentStep != nil {
+		prevStep = *ar.Status.Rollout.CurrentStep
+	}
+	return ar.Status.Rollout.StepStartedAt, prevStep
+}
+
+// stepStartedAtForStep keeps the existing stamp when we're still on the same
+// step; produces a fresh RFC3339 stamp when the step changed (or the prior
+// stamp was missing).
+func stepStartedAtForStep(prevStamp *string, prevStep, currentStep int32) *string {
+	if prevStamp != nil && prevStep == currentStep {
+		return prevStamp
+	}
+	now := metav1.Now().Format(time.RFC3339)
+	return &now
 }
 
 // reconcileRolloutAnalysis runs the analysis step and advances or rolls back
@@ -518,7 +562,25 @@ func reconcileRolloutSteps(ar *omniav1alpha1.AgentRuntime) rolloutStepResult {
 	}
 
 	step := steps[stepIdx]
-	return evaluateStep(step, stepIdx)
+	return evaluateStep(step, stepIdx, stepStartedAtFor(ar, stepIdx))
+}
+
+// stepStartedAtFor returns the timestamp the controller stamped when it
+// entered the current step, parsed from RolloutStatus.StepStartedAt. Returns
+// nil when not set or the stamp is for a different step (currentStep was
+// advanced since the timestamp was written).
+func stepStartedAtFor(ar *omniav1alpha1.AgentRuntime, stepIdx int32) *metav1.Time {
+	if ar.Status.Rollout == nil || ar.Status.Rollout.StepStartedAt == nil {
+		return nil
+	}
+	if ar.Status.Rollout.CurrentStep == nil || *ar.Status.Rollout.CurrentStep != stepIdx {
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339, *ar.Status.Rollout.StepStartedAt)
+	if err != nil {
+		return nil
+	}
+	return &metav1.Time{Time: t}
 }
 
 // currentStepIndex returns the current step index from status, defaulting to 0.
@@ -530,12 +592,14 @@ func currentStepIndex(ar *omniav1alpha1.AgentRuntime) int32 {
 }
 
 // evaluateStep evaluates a single rollout step and returns the result.
-func evaluateStep(step omniav1alpha1.RolloutStep, stepIdx int32) rolloutStepResult {
+// stepStartedAt is the timestamp at which the controller entered this step;
+// pauses use it to know whether the configured duration has elapsed.
+func evaluateStep(step omniav1alpha1.RolloutStep, stepIdx int32, stepStartedAt *metav1.Time) rolloutStepResult {
 	switch {
 	case step.SetWeight != nil:
 		return evaluateSetWeight(step, stepIdx)
 	case step.Pause != nil:
-		return evaluatePause(step, stepIdx)
+		return evaluatePause(step, stepIdx, stepStartedAt)
 	case step.Analysis != nil:
 		return evaluateAnalysis(step, stepIdx)
 	default:
@@ -556,7 +620,7 @@ func evaluateSetWeight(step omniav1alpha1.RolloutStep, stepIdx int32) rolloutSte
 	}
 }
 
-func evaluatePause(step omniav1alpha1.RolloutStep, stepIdx int32) rolloutStepResult {
+func evaluatePause(step omniav1alpha1.RolloutStep, stepIdx int32, stepStartedAt *metav1.Time) rolloutStepResult {
 	if step.Pause.Duration == nil {
 		return rolloutStepResult{
 			active:      true,
@@ -574,11 +638,30 @@ func evaluatePause(step omniav1alpha1.RolloutStep, stepIdx int32) rolloutStepRes
 			message:     fmt.Sprintf("step %d: invalid pause duration %q", stepIdx, *step.Pause.Duration),
 		}
 	}
+	// First reconcile entering this pause has no timestamp recorded yet; treat
+	// as still pausing. The reconciler stamps stepStartedAt + requeues, so the
+	// next reconcile after `d` elapses will see it.
+	if stepStartedAt == nil || time.Since(stepStartedAt.Time) < d {
+		remaining := d
+		if stepStartedAt != nil {
+			remaining = d - time.Since(stepStartedAt.Time)
+			if remaining < time.Second {
+				remaining = time.Second
+			}
+		}
+		return rolloutStepResult{
+			active:       true,
+			currentStep:  stepIdx,
+			paused:       true,
+			requeueAfter: remaining,
+			message:      fmt.Sprintf("step %d: pause %s", stepIdx, d),
+		}
+	}
+	// Pause duration elapsed — let the reconciler advance to the next step.
 	return rolloutStepResult{
-		active:       true,
-		currentStep:  stepIdx,
-		requeueAfter: d,
-		message:      fmt.Sprintf("step %d: pause %s", stepIdx, d),
+		active:      true,
+		currentStep: stepIdx,
+		message:     fmt.Sprintf("step %d: pause %s elapsed", stepIdx, d),
 	}
 }
 
