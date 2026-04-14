@@ -407,7 +407,7 @@ build-arena-worker: fmt vet ## Build Arena worker binary (Enterprise).
 
 .PHONY: manifests-ee
 manifests-ee: controller-gen ## Generate CRDs for Enterprise types.
-	"$(CONTROLLER_GEN)" rbac:roleName=arena-manager-role crd webhook paths="./ee/api/..." paths="./ee/internal/..." output:crd:artifacts:config=config/crd/bases output:rbac:artifacts:config=ee/config/rbac
+	"$(CONTROLLER_GEN)" rbac:roleName=arena-manager-role crd webhook paths="./ee/api/..." paths="./ee/internal/..." output:crd:artifacts:config=config/crd/bases output:rbac:artifacts:config=ee/config/rbac output:webhook:artifacts:config=ee/config/webhook
 
 .PHONY: generate-ee
 generate-ee: controller-gen ## Generate code for Enterprise types.
