@@ -134,7 +134,7 @@ describe("GET /api/workspaces/[name]/skills", () => {
     });
     vi.mocked(validateWorkspace).mockResolvedValue({
       ok: true,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       workspace: mockWorkspace as any,
       clientOptions: {
         workspace: "test-ws",
@@ -186,7 +186,7 @@ describe("GET /api/workspaces/[name]/skills", () => {
     });
     vi.mocked(validateWorkspace).mockResolvedValue({
       ok: true,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       workspace: mockWorkspace as any,
       clientOptions: {
         workspace: "test-ws",
@@ -228,7 +228,7 @@ describe("POST /api/workspaces/[name]/skills", () => {
     });
     vi.mocked(validateWorkspace).mockResolvedValue({
       ok: true,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       workspace: mockWorkspace as any,
       clientOptions: {
         workspace: "test-ws",

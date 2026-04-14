@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { Header } from "@/components/layout";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -13,9 +15,24 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { AlertCircle, BookOpen } from "lucide-react";
-import { useSkillSources } from "@/hooks/use-skill-sources";
-import type { SkillSourcePhase, SkillSourceType } from "@/types/skill-source";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { AlertCircle, BookOpen, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  useSkillSources,
+  useSkillSourceMutations,
+} from "@/hooks/use-skill-sources";
+import { SkillSourceDialog } from "@/components/skills/skill-source-dialog";
+import { useWorkspace } from "@/contexts/workspace-context";
+import type {
+  SkillSource,
+  SkillSourcePhase,
+  SkillSourceType,
+} from "@/types/skill-source";
 
 function phaseVariant(
   phase: SkillSourcePhase | undefined
@@ -51,16 +68,59 @@ function formatDate(iso?: string): string {
   return d.toLocaleString();
 }
 
-function EmptyState() {
+function EmptyState({
+  canEdit,
+  onCreate,
+}: Readonly<{ canEdit: boolean; onCreate: () => void }>) {
   return (
     <div className="text-center py-12 text-muted-foreground">
       <BookOpen className="h-12 w-12 mx-auto mb-4 opacity-50" />
       <p className="text-lg font-medium mb-1">No SkillSources</p>
       <p className="text-sm">
-        Create a SkillSource with <code className="font-mono">kubectl apply</code>{" "}
-        to fetch skill content from Git, OCI, or a ConfigMap.
+        SkillSources pull SKILL.md content from Git, OCI, or a ConfigMap so
+        PromptPacks can reference skills.
       </p>
+      {canEdit && (
+        <Button className="mt-4" onClick={onCreate}>
+          <Plus className="h-4 w-4 mr-2" />
+          Create SkillSource
+        </Button>
+      )}
     </div>
+  );
+}
+
+function RowActions({
+  onEdit,
+  onDelete,
+  canEdit,
+}: Readonly<{
+  onEdit: () => void;
+  onDelete: () => void;
+  canEdit: boolean;
+}>) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" disabled={!canEdit}>
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={onEdit} disabled={!canEdit}>
+          <Pencil className="h-4 w-4 mr-2" />
+          Edit
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={onDelete}
+          disabled={!canEdit}
+          className="text-destructive"
+        >
+          <Trash2 className="h-4 w-4 mr-2" />
+          Delete
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -78,7 +138,33 @@ function LoadingSkeleton() {
 }
 
 export default function SkillsPage() {
-  const { sources, loading, error } = useSkillSources();
+  const { sources, loading, error, refetch } = useSkillSources();
+  const { deleteSource } = useSkillSourceMutations();
+  const { currentWorkspace } = useWorkspace();
+  const canEdit = currentWorkspace?.permissions?.write ?? false;
+
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<SkillSource | null>(null);
+
+  const openCreate = () => {
+    setEditing(null);
+    setDialogOpen(true);
+  };
+
+  const openEdit = (source: SkillSource) => {
+    setEditing(source);
+    setDialogOpen(true);
+  };
+
+  const handleDelete = async (name: string) => {
+    if (!confirm(`Delete SkillSource "${name}"?`)) return;
+    try {
+      await deleteSource(name);
+      refetch();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Delete failed");
+    }
+  };
 
   if (loading) {
     return <LoadingSkeleton />;
@@ -107,9 +193,18 @@ export default function SkillsPage() {
       />
 
       <div className="flex-1 p-6 space-y-4 overflow-auto">
+        {sources.length > 0 && canEdit && (
+          <div className="flex justify-end">
+            <Button onClick={openCreate}>
+              <Plus className="h-4 w-4 mr-2" />
+              Create SkillSource
+            </Button>
+          </div>
+        )}
+
         <div className="rounded-lg border bg-card p-6">
           {sources.length === 0 ? (
-            <EmptyState />
+            <EmptyState canEdit={canEdit} onCreate={openCreate} />
           ) : (
             <Table>
               <TableHeader>
@@ -120,6 +215,7 @@ export default function SkillsPage() {
                   <TableHead>Skills</TableHead>
                   <TableHead>Interval</TableHead>
                   <TableHead>Last Fetch</TableHead>
+                  <TableHead className="w-[50px]" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -152,6 +248,13 @@ export default function SkillsPage() {
                       <TableCell className="text-muted-foreground">
                         {formatDate(source.status?.lastFetchTime)}
                       </TableCell>
+                      <TableCell>
+                        <RowActions
+                          canEdit={canEdit}
+                          onEdit={() => openEdit(source)}
+                          onDelete={() => handleDelete(name)}
+                        />
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -160,6 +263,17 @@ export default function SkillsPage() {
           )}
         </div>
       </div>
+
+      <SkillSourceDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        source={editing}
+        onSuccess={() => {
+          setDialogOpen(false);
+          setEditing(null);
+          refetch();
+        }}
+      />
     </div>
   );
 }
