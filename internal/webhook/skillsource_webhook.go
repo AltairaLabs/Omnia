@@ -22,10 +22,7 @@ type SkillSourceValidator struct{}
 
 var skillSourceLog = logf.Log.WithName("skillsource-webhook")
 
-// kubebuilder:webhook annotation intentionally omitted until the core
-// operator wires an admission webhook server. The validator code below is
-// reachable from tests and from a future cmd/main.go SetupWebhookWithManager
-// call; reinstate the annotation when wiring lands.
+// +kubebuilder:webhook:path=/validate-omnia-altairalabs-ai-v1alpha1-skillsource,mutating=false,failurePolicy=fail,sideEffects=None,groups=omnia.altairalabs.ai,resources=skillsources,verbs=create;update,versions=v1alpha1,name=vskillsource.kb.io,admissionReviewVersions=v1
 
 var _ admission.Validator[*corev1alpha1.SkillSource] = &SkillSourceValidator{}
 

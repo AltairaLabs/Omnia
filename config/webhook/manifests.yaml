@@ -10,9 +10,9 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-omnia-altairalabs-ai-v1alpha1-arenajob
+      path: /validate-omnia-altairalabs-ai-v1alpha1-skillsource
   failurePolicy: Fail
-  name: varenajob.kb.io
+  name: vskillsource.kb.io
   rules:
   - apiGroups:
     - omnia.altairalabs.ai
@@ -22,66 +22,5 @@ webhooks:
     - CREATE
     - UPDATE
     resources:
-    - arenajobs
-  sideEffects: None
-- admissionReviewVersions:
-  - v1
-  clientConfig:
-    service:
-      name: webhook-service
-      namespace: system
-      path: /validate-omnia-altairalabs-ai-v1alpha1-arenasource
-  failurePolicy: Fail
-  name: varenasource.kb.io
-  rules:
-  - apiGroups:
-    - omnia.altairalabs.ai
-    apiVersions:
-    - v1alpha1
-    operations:
-    - CREATE
-    - UPDATE
-    resources:
-    - arenasources
-  sideEffects: None
-- admissionReviewVersions:
-  - v1
-  clientConfig:
-    service:
-      name: webhook-service
-      namespace: system
-      path: /validate-omnia-altairalabs-ai-v1alpha1-arenatemplatesource
-  failurePolicy: Fail
-  name: varenatemplatesource.kb.io
-  rules:
-  - apiGroups:
-    - omnia.altairalabs.ai
-    apiVersions:
-    - v1alpha1
-    operations:
-    - CREATE
-    - UPDATE
-    resources:
-    - arenatemplatesources
-  sideEffects: None
-- admissionReviewVersions:
-  - v1
-  clientConfig:
-    service:
-      name: webhook-service
-      namespace: system
-      path: /validate-omnia-altairalabs-ai-v1alpha1-sessionprivacypolicy
-  failurePolicy: Fail
-  name: vsessionprivacypolicy.kb.io
-  rules:
-  - apiGroups:
-    - omnia.altairalabs.ai
-    apiVersions:
-    - v1alpha1
-    operations:
-    - CREATE
-    - UPDATE
-    - DELETE
-    resources:
-    - sessionprivacypolicies
+    - skillsources
   sideEffects: None
