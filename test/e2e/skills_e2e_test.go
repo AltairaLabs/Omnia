@@ -279,9 +279,12 @@ data:
           "system_template": "You are a test assistant with skills."
         }
       },
-      "tools": [
-        {"name": "http_call", "description": "Make an HTTP request"}
-      ]
+      "tools": {
+        "http_call": {
+          "name": "http_call",
+          "description": "Make an HTTP request"
+        }
+      }
     }
 `, skillConfigMap, agentsNamespace)
 		cmd = exec.Command("kubectl", "apply", "-f", "-")
