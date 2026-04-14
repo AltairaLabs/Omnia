@@ -23,6 +23,7 @@ rules:
       - agentpolicies
       - agentruntimes
       - promptpacks
+      - skillsources
       - toolpolicies
       - toolregistries
       - providers
@@ -45,6 +46,7 @@ rules:
       - agentpolicies/status
       - agentruntimes/status
       - promptpacks/status
+      - skillsources/status
       - toolpolicies/status
       - toolregistries/status
       - providers/status
