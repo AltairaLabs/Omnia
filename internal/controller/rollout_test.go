@@ -555,6 +555,89 @@ func TestEvaluatePause_FirstReconcileWithoutStamp(t *testing.T) {
 	assert.Equal(t, 10*time.Minute, result.requeueAfter)
 }
 
+func TestStepStartedAtFor_NoRollout(t *testing.T) {
+	ar := newRolloutTestAR()
+	assert.Nil(t, stepStartedAtFor(ar, 0))
+}
+
+func TestStepStartedAtFor_NoStamp(t *testing.T) {
+	ar := newRolloutTestAR()
+	step := int32(1)
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{CurrentStep: &step}
+	assert.Nil(t, stepStartedAtFor(ar, 1))
+}
+
+func TestStepStartedAtFor_DifferentStep(t *testing.T) {
+	ar := newRolloutTestAR()
+	step := int32(1)
+	stamp := time.Now().Format(time.RFC3339)
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
+		CurrentStep:   &step,
+		StepStartedAt: &stamp,
+	}
+	assert.Nil(t, stepStartedAtFor(ar, 2),
+		"stamp for step 1 must not be returned when querying step 2")
+}
+
+func TestStepStartedAtFor_ParseError(t *testing.T) {
+	ar := newRolloutTestAR()
+	step := int32(1)
+	bogus := "not-a-timestamp"
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
+		CurrentStep:   &step,
+		StepStartedAt: &bogus,
+	}
+	assert.Nil(t, stepStartedAtFor(ar, 1))
+}
+
+func TestStepStartedAtFor_HappyPath(t *testing.T) {
+	ar := newRolloutTestAR()
+	step := int32(1)
+	stamp := time.Now().Add(-2 * time.Minute).UTC().Format(time.RFC3339)
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
+		CurrentStep:   &step,
+		StepStartedAt: &stamp,
+	}
+	got := stepStartedAtFor(ar, 1)
+	assert.NotNil(t, got)
+	assert.WithinDuration(t, time.Now().Add(-2*time.Minute), got.Time, 5*time.Second)
+}
+
+func TestPreviousStepStamp_NoRollout(t *testing.T) {
+	ar := newRolloutTestAR()
+	stamp, step := previousStepStamp(ar)
+	assert.Nil(t, stamp)
+	assert.Equal(t, int32(0), step)
+}
+
+func TestPreviousStepStamp_NoCurrentStep(t *testing.T) {
+	ar := newRolloutTestAR()
+	prev := "2026-04-14T12:00:00Z"
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{StepStartedAt: &prev}
+	stamp, step := previousStepStamp(ar)
+	assert.Equal(t, &prev, stamp)
+	assert.Equal(t, int32(0), step,
+		"missing CurrentStep defaults to 0")
+}
+
+func TestStepStartedAtForStep_PreservesWhenSameStep(t *testing.T) {
+	prev := "2026-04-14T12:00:00Z"
+	got := stepStartedAtForStep(&prev, 1, 1)
+	assert.Equal(t, &prev, got)
+}
+
+func TestStepStartedAtForStep_StampsWhenStepChanges(t *testing.T) {
+	prev := "2026-04-14T12:00:00Z"
+	got := stepStartedAtForStep(&prev, 1, 2)
+	assert.NotNil(t, got)
+	assert.NotEqual(t, prev, *got, "advancing to a new step must produce a fresh stamp")
+}
+
+func TestStepStartedAtForStep_StampsWhenPriorMissing(t *testing.T) {
+	got := stepStartedAtForStep(nil, 0, 0)
+	assert.NotNil(t, got, "nil prior stamp at step entry must produce a stamp")
+}
+
 // --- candidateDiffers edge cases ---
 
 func TestCandidateDiffers_ToolRegistryRef_NilSpec(t *testing.T) {
