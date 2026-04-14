@@ -2463,6 +2463,11 @@ export interface AgentRuntimeStatus {
     stableVersion?: string;
     /** startedAt is the RFC3339 timestamp when the rollout began. */
     startedAt?: string;
+    /** stepStartedAt is the RFC3339 timestamp when the controller entered
+     * the step pointed to by currentStep. Used to honour pause durations
+     * across reconciles: a pause step only advances once
+     * (now - stepStartedAt) >= the pause duration. */
+    stepStartedAt?: string;
   };
   /** serviceEndpoint is the internal Kubernetes service endpoint for the agent facade.
    * Format: {name}.{namespace}.svc.cluster.local:{port}
