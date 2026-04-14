@@ -89,6 +89,8 @@ jobs:
         run: kind version
 
       - name: Running Core E2E Tests
+        env:
+          ENABLE_SKILLS_E2E: "true"
         run: |
           # Run only non-arena tests (excludes Label("arena"))
           make test-e2e-junit GINKGO_LABEL_FILTER='!arena'
