@@ -10,6 +10,7 @@ SPDX-License-Identifier: Apache-2.0
 package e2e
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -494,16 +495,12 @@ spec:
 		// succeeds; this spec proves the runtime-side load. Use a one-shot
 		// Job to write the manifest + skill body into the agent's PVC.
 		writerJobName := "skills-runtime-writer"
-		manifestJSON := fmt.Sprintf(`{
-  "version": "1",
-  "skills": [
-    {
-      "name": "e2e-runtime-skill",
-      "mount_as": "e2e-runtime-skill",
-      "content_path": "/workspace-content/skills/e2e/e2e-skill"
-    }
-  ]
-}`)
+		// Compact single-line JSON so we can echo it without YAML indent
+		// gymnastics. base64 the SKILL.md body for the same reason.
+		manifestJSON := fmt.Sprintf(
+			`{"version":"1","skills":[{"name":"e2e-runtime-skill","mount_as":"e2e-runtime-skill","content_path":"/workspace-content/skills/e2e/e2e-skill"}]}`)
+		skillBody := "---\nname: e2e-runtime-skill\ndescription: Skill seeded by the e2e writer Job\n---\n"
+		skillB64 := base64.StdEncoding.EncodeToString([]byte(skillBody))
 		writerYAML := fmt.Sprintf(`
 apiVersion: batch/v1
 kind: Job
@@ -524,22 +521,10 @@ spec:
       containers:
       - name: writer
         image: busybox:1.36
-        command: ["sh", "-c"]
-        args:
-          - |
-            set -eu
-            mkdir -p /workspace-content/manifests
-            mkdir -p /workspace-content/skills/e2e/e2e-skill
-            cat > /workspace-content/manifests/%s.json <<'EOM'
-%s
-            EOM
-            cat > /workspace-content/skills/e2e/e2e-skill/SKILL.md <<'EOM'
-            ---
-            name: e2e-runtime-skill
-            description: Skill seeded by the e2e writer Job
-            ---
-            EOM
-            ls -la /workspace-content/manifests
+        command:
+          - sh
+          - -c
+          - 'set -eu; mkdir -p /workspace-content/manifests /workspace-content/skills/e2e/e2e-skill; printf %%s %q > /workspace-content/manifests/%s.json; printf %%s %q | base64 -d > /workspace-content/skills/e2e/e2e-skill/SKILL.md; ls -la /workspace-content/manifests'
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -552,7 +537,7 @@ spec:
       - name: workspace-content
         persistentVolumeClaim:
           claimName: %s
-`, writerJobName, agentsNamespace, packName, manifestJSON, skillsAgentPVCName)
+`, writerJobName, agentsNamespace, manifestJSON, packName, skillB64, skillsAgentPVCName)
 		cmd = exec.Command("kubectl", "apply", "-f", "-")
 		cmd.Stdin = strings.NewReader(writerYAML)
 		_, err = utils.Run(cmd)
