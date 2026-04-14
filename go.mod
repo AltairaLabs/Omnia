@@ -6,7 +6,7 @@ require (
 	cloud.google.com/go/kms v1.26.0
 	cloud.google.com/go/storage v1.62.0
 	github.com/AltairaLabs/PromptKit/pkg v1.4.1
-	github.com/AltairaLabs/PromptKit/runtime v1.4.1
+	github.com/AltairaLabs/PromptKit/runtime v1.4.4
 	github.com/AltairaLabs/PromptKit/sdk v1.4.1
 	github.com/AltairaLabs/PromptKit/server/a2a v1.4.1
 	github.com/AltairaLabs/PromptKit/tools/arena v1.4.1
@@ -16,7 +16,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.4
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/aws/aws-sdk-go-v2 v1.41.5
-	github.com/aws/aws-sdk-go-v2/config v1.32.13
+	github.com/aws/aws-sdk-go-v2/config v1.32.14
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.14
 	github.com/aws/aws-sdk-go-v2/service/kms v1.50.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.97.1
