@@ -63,6 +63,56 @@ func envOrDefault(key, fallback string) string {
 	return fallback
 }
 
+// ensureManagerDeployed installs CRDs and deploys the controller-manager with
+// the e2e test images + args. Idempotent: if the deployment already exists
+// with Ready replicas it's a fast no-op. This lets any Ordered container's
+// BeforeAll call it regardless of whether a sibling describe already set it
+// up earlier and tore it down in its AfterAll (Ginkgo randomizes top-level
+// describe order). Skipped entirely in predeployed mode.
+func ensureManagerDeployed() error {
+	if predeployed {
+		return nil
+	}
+	// Fast path: deployment already exists and is Ready.
+	checkCmd := exec.Command("kubectl", "get", "deployment", "omnia-controller-manager",
+		"-n", namespace, "-o", "jsonpath={.status.readyReplicas}")
+	if out, err := utils.Run(checkCmd); err == nil && out != "" && out != "0" {
+		return nil
+	}
+	steps := []struct {
+		msg string
+		cmd *exec.Cmd
+	}{
+		{"creating manager namespace", exec.Command("kubectl", "create", "ns", namespace)},
+		{"labeling namespace restricted", exec.Command("kubectl", "label", "--overwrite", "ns", namespace,
+			"pod-security.kubernetes.io/enforce=restricted")},
+		{"installing CRDs", exec.Command("make", "install")},
+		{"deploying controller-manager", exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", projectImage))},
+		{"initial rollout", exec.Command("kubectl", "rollout", "status",
+			"deployment/omnia-controller-manager", "-n", namespace, "--timeout=120s")},
+		{"patching Recreate strategy", exec.Command("kubectl", "patch", "deployment",
+			"omnia-controller-manager", "-n", namespace, "--type=json",
+			"-p", `[{"op": "replace", "path": "/spec/strategy", "value": {"type": "Recreate"}}]`)},
+		{"patching images and args", exec.Command("kubectl", "patch", "deployment",
+			"omnia-controller-manager", "-n", namespace, "--type=strategic",
+			"-p", fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--metrics-bind-address=:8443","--leader-elect","--health-probe-bind-address=:8081","--facade-image=%s","--framework-image=%s","--session-api-image=%s","--memory-api-image=%s","--agent-workspace-reader-clusterrole=omnia-agent-workspace-reader"]}]}}}}`,
+				facadeImageRef, runtimeImageRef, sessionApiImage, sessionApiImage))},
+		{"patched rollout", exec.Command("kubectl", "rollout", "status",
+			"deployment/omnia-controller-manager", "-n", namespace, "--timeout=120s")},
+	}
+	for _, step := range steps {
+		_, _ = fmt.Fprintf(GinkgoWriter, "ensureManagerDeployed: %s\n", step.msg)
+		if _, err := utils.Run(step.cmd); err != nil {
+			// `kubectl create ns` fails if ns exists — tolerate it.
+			if step.msg == "creating manager namespace" && strings.Contains(err.Error(), "AlreadyExists") {
+				continue
+			}
+			return fmt.Errorf("%s: %w", step.msg, err)
+		}
+	}
+	return nil
+}
+
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
 
@@ -75,53 +125,7 @@ var _ = Describe("Manager", Ordered, func() {
 			_, _ = fmt.Fprintf(GinkgoWriter, "Skipping Manager setup (E2E_PREDEPLOYED=true)\n")
 			return
 		}
-
-		By("creating manager namespace")
-		cmd := exec.Command("kubectl", "create", "ns", namespace)
-		_, err := utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
-
-		By("labeling the namespace to enforce the restricted security policy")
-		cmd = exec.Command("kubectl", "label", "--overwrite", "ns", namespace,
-			"pod-security.kubernetes.io/enforce=restricted")
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to label namespace with restricted policy")
-
-		By("installing CRDs")
-		cmd = exec.Command("make", "install")
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to install CRDs")
-
-		By("deploying the controller-manager")
-		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", projectImage))
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
-
-		By("waiting for initial controller-manager deployment to be ready")
-		initialRolloutCmd := exec.Command("kubectl", "rollout", "status", "deployment/omnia-controller-manager",
-			"-n", namespace, "--timeout=120s")
-		_, err = utils.Run(initialRolloutCmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to wait for initial controller-manager rollout")
-
-		By("patching the controller-manager strategy to Recreate to avoid rolling update issues")
-		strategyPatchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
-			"-n", namespace, "--type=json",
-			"-p", `[{"op": "replace", "path": "/spec/strategy", "value": {"type": "Recreate"}}]`)
-		_, err = utils.Run(strategyPatchCmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager strategy")
-
-		By("patching the controller-manager to use the test facade and framework images")
-		patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
-			"-n", namespace, "--type=strategic",
-			"-p", fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--metrics-bind-address=:8443","--leader-elect","--health-probe-bind-address=:8081","--facade-image=%s","--framework-image=%s","--session-api-image=%s","--memory-api-image=%s","--agent-workspace-reader-clusterrole=omnia-agent-workspace-reader"]}]}}}}`, facadeImageRef, runtimeImageRef, sessionApiImage, sessionApiImage))
-		_, err = utils.Run(patchCmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager")
-
-		By("waiting for patched controller-manager rollout to complete")
-		rolloutCmd := exec.Command("kubectl", "rollout", "status", "deployment/omnia-controller-manager",
-			"-n", namespace, "--timeout=120s")
-		_, err = utils.Run(rolloutCmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to wait for controller-manager rollout")
+		Expect(ensureManagerDeployed()).To(Succeed())
 	})
 
 	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,

@@ -91,6 +91,10 @@ jobs:
       - name: Running Core E2E Tests
         run: |
           # Run only non-arena tests (excludes Label("arena"))
+          # Skills tests are gated by ENABLE_SKILLS_E2E and skipped in CI
+          # for now — the PVC-shared workspace-content setup needs hostPath
+          # permission handling that isn't sorted out yet. Tracked as a
+          # follow-up; the test runs locally.
           make test-e2e-junit GINKGO_LABEL_FILTER='!arena'
 
       - name: Dump debug info on failure
