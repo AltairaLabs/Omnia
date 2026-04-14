@@ -113,8 +113,14 @@ spec:
     "template": {
       "spec": {
         "securityContext": {"fsGroup": 65532},
-        "containers": [{"name": "manager", "volumeMounts": [{"name": "workspace-content", "mountPath": "/workspace-content"}]}],
-        "volumes": [{"name": "workspace-content", "persistentVolumeClaim": {"claimName": "%s"}}]
+        "containers": [{"name": "manager", "volumeMounts": [
+          {"name": "tmp", "mountPath": "/tmp"},
+          {"name": "workspace-content", "mountPath": "/workspace-content"}
+        ]}],
+        "volumes": [
+          {"name": "tmp", "emptyDir": {}},
+          {"name": "workspace-content", "persistentVolumeClaim": {"claimName": "%s"}}
+        ]
       }
     }
   }

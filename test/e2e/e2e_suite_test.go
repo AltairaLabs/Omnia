@@ -65,6 +65,10 @@ var (
 
 	// evalWorkerImage is the name of the arena eval worker image (Enterprise)
 	evalWorkerImage = "example.com/arena-eval-worker:v0.0.1"
+
+	// doctorImage is the name of the omnia-doctor image used by the doctor
+	// e2e smoke test.
+	doctorImage = "example.com/omnia-doctor:v0.0.1"
 )
 
 // buildResult holds the result of an image build operation
@@ -105,6 +109,7 @@ var _ = BeforeSuite(func() {
 		{"arena-worker", "./ee/cmd/arena-worker", arenaWorkerImage},
 		{"arena-controller", "./ee/cmd/omnia-arena-controller", arenaControllerImage},
 		{"arena-eval-worker", "./ee/cmd/arena-eval-worker", evalWorkerImage},
+		{"doctor", "./cmd/doctor", doctorImage},
 	}
 
 	projectDir, err := utils.GetProjectDir()
@@ -185,7 +190,7 @@ var _ = BeforeSuite(func() {
 	// Load images into Kind in parallel
 	By("loading all container images into Kind in parallel")
 	var loadWg sync.WaitGroup
-	loadResults := make(chan buildResult, 6)
+	loadResults := make(chan buildResult, 7)
 
 	images := []struct {
 		name  string
@@ -197,6 +202,7 @@ var _ = BeforeSuite(func() {
 		{"arena-worker", arenaWorkerImage},
 		{"arena-controller", arenaControllerImage},
 		{"session-api", sessionApiImage},
+		{"doctor", doctorImage},
 	}
 
 	for _, img := range images {
