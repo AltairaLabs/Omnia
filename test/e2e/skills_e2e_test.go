@@ -37,17 +37,16 @@ var _ = Describe("Skills", Ordered, Label("skills"), func() {
 		skillProviderName = "test-skills-provider"
 		skillAgentRuntime = "test-skills-agent"
 
-		// Shared workspace-content infrastructure. The operator's pod has
+		// Workspace-content PVCs. The operator pod has
 		// readOnlyRootFilesystem=true, so SkillSource sync writes would fail
-		// against /workspace-content without a volume mount. We stitch two
-		// static-bound PVs pointing at the same kind-node hostPath so the
-		// operator (in omnia-system) and any agent pods (in test-agents) see
-		// the same content.
-		skillsOpPVName      = "skills-e2e-op-workspace-pv"
-		skillsOpPVCName     = "skills-e2e-op-workspace-content"
-		skillsAgentPVName   = "skills-e2e-agent-workspace-pv"
-		skillsAgentPVCName  = "workspace-test-agents-content"
-		skillsHostSharePath = "/tmp/skills-e2e-share"
+		// against /workspace-content without a volume mount. We give each
+		// pod a separate dynamically-provisioned PVC backed by kind's
+		// local-path provisioner. This sidesteps hostPath permission issues
+		// because local-path respects fsGroup. The two PVCs do NOT share
+		// data — operator-side writes and runtime-side reads are verified
+		// independently in separate specs (see #823).
+		skillsOpPVCName    = "skills-e2e-op-workspace-content"
+		skillsAgentPVCName = "workspace-test-agents-content"
 	)
 
 	BeforeAll(func() {
@@ -78,38 +77,10 @@ var _ = Describe("Skills", Ordered, Label("skills"), func() {
 				"namespace %s must be Active, got phase %q", agentsNamespace, out)
 		}, 2*time.Minute, 2*time.Second).Should(Succeed())
 
-		By("creating static-bound PVs for the shared workspace-content hostPath")
-		pvSpec := func(pvName, claimNs, claimName string) string {
-			return fmt.Sprintf(`
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: %s
-spec:
-  capacity:
-    storage: 100Mi
-  accessModes: ["ReadWriteOnce"]
-  persistentVolumeReclaimPolicy: Delete
-  storageClassName: ""
-  hostPath:
-    path: %s
-    type: DirectoryOrCreate
-  claimRef:
-    namespace: %s
-    name: %s
-`, pvName, skillsHostSharePath, claimNs, claimName)
-		}
-		for _, body := range []string{
-			pvSpec(skillsOpPVName, namespace, skillsOpPVCName),
-			pvSpec(skillsAgentPVName, agentsNamespace, skillsAgentPVCName),
-		} {
-			cmd := exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = strings.NewReader(body)
-			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create PV")
-		}
-
-		By("creating the matching PVCs")
+		By("creating dynamically-provisioned PVCs for both pods")
+		// kind ships local-path-provisioner under storageClass=standard. The
+		// PVs it provisions respect fsGroup, so a nonroot pod with
+		// fsGroup=65532 can write to its mount.
 		pvcSpec := func(ns, name string) string {
 			return fmt.Sprintf(`
 apiVersion: v1
@@ -119,7 +90,7 @@ metadata:
   namespace: %s
 spec:
   accessModes: ["ReadWriteOnce"]
-  storageClassName: ""
+  storageClassName: standard
   resources:
     requests:
       storage: 100Mi
@@ -132,13 +103,17 @@ spec:
 			Expect(err).NotTo(HaveOccurred(), "Failed to create PVC")
 		}
 
-		By("patching the operator deployment to mount the shared PVC at /workspace-content")
+		By("patching the operator to mount workspace-content + set fsGroup")
+		// Strategic merge: add the workspace-content volume + mount, plus
+		// fsGroup so the nonroot operator can write to the local-path PV.
+		// The existing tmp emptyDir volume is preserved by the merge.
 		volPatch := fmt.Sprintf(`{
   "spec": {
     "template": {
       "spec": {
-        "containers": [{"name": "manager", "volumeMounts": [{"name": "workspace-content", "mountPath": "/workspace-content"},{"name": "tmp", "mountPath": "/tmp"}]}],
-        "volumes": [{"name": "workspace-content", "persistentVolumeClaim": {"claimName": "%s"}},{"name": "tmp", "emptyDir": {}}]
+        "securityContext": {"fsGroup": 65532},
+        "containers": [{"name": "manager", "volumeMounts": [{"name": "workspace-content", "mountPath": "/workspace-content"}]}],
+        "volumes": [{"name": "workspace-content", "persistentVolumeClaim": {"claimName": "%s"}}]
       }
     }
   }
@@ -181,9 +156,6 @@ spec:
 				"-n", pvc.ns, "--ignore-not-found", "--timeout=30s")
 			_, _ = utils.Run(cmd)
 		}
-		cmd := exec.Command("kubectl", "delete", "pv", skillsOpPVName, skillsAgentPVName,
-			"--ignore-not-found", "--timeout=30s")
-		_, _ = utils.Run(cmd)
 	})
 
 	// dumpOnFailure captures debug state for all skills-related resources when
@@ -512,6 +484,88 @@ spec:
 			g.Expect(runErr).NotTo(HaveOccurred())
 			g.Expect(out).To(Equal("True"))
 		}, 2*time.Minute, 2*time.Second).Should(Succeed())
+
+		By("seeding the agent's workspace-content PVC with the manifest the operator would have written")
+		// Cross-pod data sharing in kind needs NFS (see issue #823). The
+		// reconcile-chain spec already proves the operator-side write
+		// succeeds; this spec proves the runtime-side load. Use a one-shot
+		// Job to write the manifest + skill body into the agent's PVC.
+		writerJobName := "skills-runtime-writer"
+		manifestJSON := fmt.Sprintf(`{
+  "version": "1",
+  "skills": [
+    {
+      "name": "e2e-runtime-skill",
+      "mount_as": "e2e-runtime-skill",
+      "content_path": "/workspace-content/skills/e2e/e2e-skill"
+    }
+  ]
+}`)
+		writerYAML := fmt.Sprintf(`
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  ttlSecondsAfterFinished: 60
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: writer
+        image: busybox:1.36
+        command: ["sh", "-c"]
+        args:
+          - |
+            set -eu
+            mkdir -p /workspace-content/manifests
+            mkdir -p /workspace-content/skills/e2e/e2e-skill
+            cat > /workspace-content/manifests/%s.json <<'EOM'
+%s
+            EOM
+            cat > /workspace-content/skills/e2e/e2e-skill/SKILL.md <<'EOM'
+            ---
+            name: e2e-runtime-skill
+            description: Skill seeded by the e2e writer Job
+            ---
+            EOM
+            ls -la /workspace-content/manifests
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: workspace-content
+          mountPath: /workspace-content
+      volumes:
+      - name: workspace-content
+        persistentVolumeClaim:
+          claimName: %s
+`, writerJobName, agentsNamespace, packName, manifestJSON, skillsAgentPVCName)
+		cmd = exec.Command("kubectl", "apply", "-f", "-")
+		cmd.Stdin = strings.NewReader(writerYAML)
+		_, err = utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to create writer Job")
+		DeferCleanup(func() {
+			cmd := exec.Command("kubectl", "delete", "job", writerJobName,
+				"-n", agentsNamespace, "--ignore-not-found", "--timeout=30s")
+			_, _ = utils.Run(cmd)
+		})
+		Eventually(func(g Gomega) {
+			cmd := exec.Command("kubectl", "get", "job", writerJobName,
+				"-n", agentsNamespace, "-o", "jsonpath={.status.succeeded}")
+			out, runErr := utils.Run(cmd)
+			g.Expect(runErr).NotTo(HaveOccurred())
+			g.Expect(out).To(Equal("1"), "writer Job should complete successfully")
+		}, 2*time.Minute, 5*time.Second).Should(Succeed())
 
 		By("creating a Provider for mock mode and an AgentRuntime")
 		secretCmd := exec.Command("kubectl", "create", "secret", "generic", provSecret,
