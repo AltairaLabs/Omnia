@@ -191,6 +191,7 @@ export const CRD_ARENA_CONFIGS = "arenaconfigs";
 export const CRD_ARENA_JOBS = "arenajobs";
 export const CRD_ARENA_TEMPLATE_SOURCES = "arenatemplatesources";
 export const CRD_ARENA_DEV_SESSIONS = "arenadevsessions";
+export const CRD_SKILL_SOURCES = "skillsources";
 
 /**
  * CRD API version for Omnia resources.
