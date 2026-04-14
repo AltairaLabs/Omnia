@@ -149,14 +149,11 @@ spec:
 				"-n", agentsNamespace, "--ignore-not-found", "--timeout=30s")
 			_, _ = utils.Run(cmd)
 		}
-		for _, pvc := range []struct{ ns, name string }{
-			{agentsNamespace, skillsAgentPVCName},
-			{namespace, skillsOpPVCName},
-		} {
-			cmd := exec.Command("kubectl", "delete", "pvc", pvc.name,
-				"-n", pvc.ns, "--ignore-not-found", "--timeout=30s")
-			_, _ = utils.Run(cmd)
-		}
+		// Intentionally leave the workspace-content PVCs and the operator's
+		// volume mount in place. Deleting the operator's PVC strands the
+		// deployment's volume reference; subsequent Describes that trigger
+		// any operator restart would fail. The kind cluster teardown at the
+		// end of the suite reclaims everything.
 	})
 
 	// dumpOnFailure captures debug state for all skills-related resources when
