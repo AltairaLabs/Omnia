@@ -43,9 +43,22 @@ var _ = Describe("Skills", Ordered, Label("skills"), func() {
 			Skip("ENABLE_SKILLS_E2E not set — skipping skills tests")
 		}
 
-		By("ensuring the test-agents namespace exists")
-		cmd := exec.Command("kubectl", "create", "ns", agentsNamespace)
-		_, _ = utils.Run(cmd) // ignore if exists
+		By("ensuring the test-agents namespace is Active")
+		// The Omnia-CRDs Ordered context force-deletes test-agents in its
+		// AfterAll. If Skills runs after that teardown, the namespace is in
+		// Terminating state and kubectl create returns but the ns hasn't
+		// actually disappeared yet. Wait for it to be Active before any
+		// spec tries to create resources inside it.
+		Eventually(func(g Gomega) {
+			cmd := exec.Command("kubectl", "create", "ns", agentsNamespace)
+			_, _ = utils.Run(cmd) // ignore AlreadyExists; we care about phase
+			cmd = exec.Command("kubectl", "get", "ns", agentsNamespace,
+				"-o", "jsonpath={.status.phase}")
+			out, err := utils.Run(cmd)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(out).To(Equal("Active"),
+				"namespace %s must be Active, got phase %q", agentsNamespace, out)
+		}, 2*time.Minute, 2*time.Second).Should(Succeed())
 	})
 
 	AfterAll(func() {
