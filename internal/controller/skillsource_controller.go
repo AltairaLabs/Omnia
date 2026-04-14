@@ -81,18 +81,18 @@ func (r *SkillSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.errorStatus(ctx, src, "InvalidInterval", err)
 	}
 
-	artifact, revision, contentPath, version, workspaceName, fetchErr := r.fetchAndSync(ctx, src)
+	outcome, fetchErr := r.fetchAndSync(ctx, src)
 	if fetchErr != nil {
 		return r.errorStatus(ctx, src, fetchErr.reason, fetchErr.cause)
 	}
-	defer func() { _ = os.RemoveAll(artifact.Path) }()
+	defer func() { _ = os.RemoveAll(outcome.artifact.Path) }()
 
 	resolved, parseErrs := ResolveSkills(
-		filepath.Join(r.WorkspaceContentPath, workspaceName, src.Namespace, contentPath),
+		filepath.Join(r.WorkspaceContentPath, outcome.workspaceName, src.Namespace, outcome.contentPath),
 		src.Spec.Filter)
 	dupes := findDuplicateNames(resolved)
 
-	r.applySuccessStatus(src, revision, contentPath, version, artifact, resolved, parseErrs, dupes, interval)
+	r.applySuccessStatus(src, outcome, resolved, parseErrs, dupes, interval)
 
 	if err := r.Status().Update(ctx, src); err != nil {
 		log.Error(err, "status update failed")
@@ -100,7 +100,7 @@ func (r *SkillSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 	if r.Recorder != nil {
 		r.Recorder.Event(src, "Normal", "Synced",
-			fmt.Sprintf("synced %d skills at revision %s", len(resolved), revision))
+			fmt.Sprintf("synced %d skills at revision %s", len(resolved), outcome.revision))
 	}
 	return ctrl.Result{RequeueAfter: interval}, nil
 }
@@ -111,12 +111,19 @@ type reconcileFailure struct {
 	cause  error
 }
 
-// fetchAndSync runs the full fetcher → syncer pipeline. Returns the fetched
-// artifact + its location on disk + the resolved workspace name, or a
-// reconcileFailure describing which stage failed.
-func (r *SkillSourceReconciler) fetchAndSync(ctx context.Context, src *corev1alpha1.SkillSource) (
-	*sourcesync.Artifact, string, string, string, string, *reconcileFailure,
-) {
+// syncOutcome bundles everything fetchAndSync produces on success so callers
+// don't have to thread six return values around.
+type syncOutcome struct {
+	artifact      *sourcesync.Artifact
+	revision      string
+	contentPath   string
+	version       string
+	workspaceName string
+}
+
+// fetchAndSync runs the full fetcher → syncer pipeline. Returns a syncOutcome
+// on success or a reconcileFailure describing which stage failed.
+func (r *SkillSourceReconciler) fetchAndSync(ctx context.Context, src *corev1alpha1.SkillSource) (*syncOutcome, *reconcileFailure) {
 	opts := sourcesync.DefaultOptions()
 	if src.Spec.Timeout != "" {
 		if to, err := time.ParseDuration(src.Spec.Timeout); err == nil {
@@ -125,15 +132,15 @@ func (r *SkillSourceReconciler) fetchAndSync(ctx context.Context, src *corev1alp
 	}
 	fetcher, err := r.fetcherFor(ctx, src, opts)
 	if err != nil {
-		return nil, "", "", "", "", &reconcileFailure{reason: "FetcherBuild", cause: err}
+		return nil, &reconcileFailure{reason: "FetcherBuild", cause: err}
 	}
 	revision, err := fetcher.LatestRevision(ctx)
 	if err != nil {
-		return nil, "", "", "", "", &reconcileFailure{reason: "LatestRevision", cause: err}
+		return nil, &reconcileFailure{reason: "LatestRevision", cause: err}
 	}
 	artifact, err := fetcher.Fetch(ctx, revision)
 	if err != nil {
-		return nil, "", "", "", "", &reconcileFailure{reason: "Fetch", cause: err}
+		return nil, &reconcileFailure{reason: "Fetch", cause: err}
 	}
 
 	targetPath := src.Spec.TargetPath
@@ -156,9 +163,15 @@ func (r *SkillSourceReconciler) fetchAndSync(ctx context.Context, src *corev1alp
 	})
 	if err != nil {
 		_ = os.RemoveAll(artifact.Path)
-		return nil, "", "", "", "", &reconcileFailure{reason: "Sync", cause: err}
+		return nil, &reconcileFailure{reason: "Sync", cause: err}
 	}
-	return artifact, revision, contentPath, version, workspaceName, nil
+	return &syncOutcome{
+		artifact:      artifact,
+		revision:      revision,
+		contentPath:   contentPath,
+		version:       version,
+		workspaceName: workspaceName,
+	}, nil
 }
 
 func findDuplicateNames(resolved []ResolvedSkill) []string {
@@ -175,8 +188,7 @@ func findDuplicateNames(resolved []ResolvedSkill) []string {
 
 func (r *SkillSourceReconciler) applySuccessStatus(
 	src *corev1alpha1.SkillSource,
-	revision, contentPath, version string,
-	artifact *sourcesync.Artifact,
+	outcome *syncOutcome,
 	resolved []ResolvedSkill,
 	parseErrs []error,
 	dupes []string,
@@ -188,19 +200,19 @@ func (r *SkillSourceReconciler) applySuccessStatus(
 	src.Status.LastFetchTime = &now
 	src.Status.NextFetchTime = &next
 	src.Status.Artifact = &corev1alpha1.Artifact{
-		Revision:       revision,
-		ContentPath:    contentPath,
-		Version:        version,
-		Checksum:       artifact.Checksum,
-		Size:           artifact.Size,
-		LastUpdateTime: metav1.Time{Time: artifact.LastModified},
+		Revision:       outcome.revision,
+		ContentPath:    outcome.contentPath,
+		Version:        outcome.version,
+		Checksum:       outcome.artifact.Checksum,
+		Size:           outcome.artifact.Size,
+		LastUpdateTime: metav1.Time{Time: outcome.artifact.LastModified},
 	}
 	src.Status.SkillCount = int32(len(resolved))
 	meta.SetStatusCondition(&src.Status.Conditions, metav1.Condition{
 		Type:               SkillSourceConditionSourceAvailable,
 		Status:             metav1.ConditionTrue,
 		Reason:             "FetchSucceeded",
-		Message:            fmt.Sprintf("revision %s", revision),
+		Message:            fmt.Sprintf("revision %s", outcome.revision),
 		ObservedGeneration: src.Generation,
 	})
 
