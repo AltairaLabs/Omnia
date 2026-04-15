@@ -7,14 +7,24 @@ interface ReplayMetricsProps extends ReplaySource {
   readonly currentTimeMs: number;
 }
 
-function StatTile({ label, value, testId }: { label: string; value: string; testId: string }) {
+function Stat({
+  label,
+  value,
+  testId,
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly testId: string;
+}) {
   return (
-    <div className="flex flex-col rounded-md border bg-background px-3 py-2 text-sm">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="font-mono font-semibold" data-testid={testId}>
+    <span className="inline-flex items-baseline gap-1.5">
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <span className="font-mono font-medium" data-testid={testId}>
         {value}
       </span>
-    </div>
+    </span>
   );
 }
 
@@ -30,12 +40,18 @@ export function ReplayMetrics({
     [startedAt, messages, toolCalls, providerCalls, currentTimeMs],
   );
   return (
-    <div className="grid grid-cols-2 gap-2 px-4 py-3 md:grid-cols-5">
-      <StatTile label="Cost" value={`$${m.costUsd.toFixed(4)}`} testId="metric-cost" />
-      <StatTile label="Tokens in" value={m.inputTokens.toLocaleString()} testId="metric-tokens-in" />
-      <StatTile label="Tokens out" value={m.outputTokens.toLocaleString()} testId="metric-tokens-out" />
-      <StatTile label="Messages" value={String(m.messageCount)} testId="metric-messages" />
-      <StatTile label="Tool calls" value={String(m.toolCallCount)} testId="metric-tools" />
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-b bg-muted/20 px-4 py-1.5 text-xs">
+      <Stat label="Cost" value={`$${m.costUsd.toFixed(4)}`} testId="metric-cost" />
+      <Stat
+        label="Tokens"
+        value={`${m.inputTokens.toLocaleString()} / ${m.outputTokens.toLocaleString()}`}
+        testId="metric-tokens-in"
+      />
+      <Stat label="Messages" value={String(m.messageCount)} testId="metric-messages" />
+      <Stat label="Tools" value={String(m.toolCallCount)} testId="metric-tools" />
+      <span className="sr-only" data-testid="metric-tokens-out">
+        {m.outputTokens}
+      </span>
     </div>
   );
 }
