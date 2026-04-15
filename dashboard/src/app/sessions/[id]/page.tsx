@@ -42,12 +42,14 @@ import {
   CheckCircle2,
   XCircle,
   Shield,
+  Play,
 } from "lucide-react";
 import { useSessionDetail, useSessionAllMessages, useSessionEvalResults, useSessionToolCalls, useSessionProviderCalls, useSessionRuntimeEvents } from "@/hooks/sessions";
 import { MemorySidebar } from "@/components/memories/memory-sidebar";
 import type { Message, Session, ToolCall, ProviderCall, RuntimeEvent, EvalResult } from "@/types";
 import { EvalResultsBadge } from "@/components/sessions/eval-results-badge";
 import { ToolCallBadge } from "@/components/sessions/tool-call-badge";
+import { ReplayTab } from "@/components/sessions/replay";
 import { DebugPanel } from "@/components/sessions/debug-panel";
 import { useDebugPanelStore } from "@/stores/debug-panel-store";
 import { collapseToolCalls } from "@/lib/sessions/collapse-tool-calls";
@@ -333,6 +335,8 @@ export default function SessionDetailPage({
   const toolCalls = rawToolCalls ? collapseToolCalls(rawToolCalls) : undefined;
   const { data: providerCalls } = useSessionProviderCalls(id, sessionReady);
   const { data: runtimeEvents } = useSessionRuntimeEvents(id, sessionReady);
+  const { messages: paginatedMessages } = useSessionAllMessages(id, session?.status, sessionReady);
+  const allMessages = paginatedMessages.length > 0 ? paginatedMessages : (session?.messages ?? []);
   const grafana = useGrafana();
   const sessionDashboardUrl = grafana.enabled && session
     ? buildSessionDashboardUrl(grafana, id, session.agentName, session.agentNamespace)
@@ -519,6 +523,10 @@ export default function SessionDetailPage({
         <Tabs defaultValue={defaultTab} className="flex-1 flex flex-col min-h-0">
           <TabsList>
             <TabsTrigger value="conversation">Conversation</TabsTrigger>
+            <TabsTrigger value="replay">
+              <Play className="h-4 w-4 mr-2" />
+              Replay
+            </TabsTrigger>
             <TabsTrigger value="evals" className="gap-1">
               <Shield className="h-3.5 w-3.5" />
               Evals
@@ -541,6 +549,16 @@ export default function SessionDetailPage({
 
           <TabsContent value="conversation" className="flex-1 min-h-0 mt-4">
             <ConversationWithDebugPanel session={session} evalResults={evalResults || []} toolCalls={toolCalls || []} providerCalls={providerCalls || []} runtimeEvents={runtimeEvents || []} />
+          </TabsContent>
+
+          <TabsContent value="replay" className="flex-1 min-h-0">
+            <ReplayTab
+              session={session}
+              messages={allMessages}
+              toolCalls={toolCalls ?? []}
+              providerCalls={providerCalls ?? []}
+              runtimeEvents={runtimeEvents ?? []}
+            />
           </TabsContent>
 
           <TabsContent value="evals" className="mt-4">
