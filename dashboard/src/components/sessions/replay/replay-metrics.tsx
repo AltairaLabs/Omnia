@@ -17,14 +17,14 @@ function Stat({
   readonly testId: string;
 }) {
   return (
-    <span className="inline-flex items-baseline gap-1.5">
+    <div className="flex items-baseline gap-1.5 whitespace-nowrap">
       <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
         {label}
       </span>
       <span className="font-mono font-medium" data-testid={testId}>
         {value}
       </span>
-    </span>
+    </div>
   );
 }
 
