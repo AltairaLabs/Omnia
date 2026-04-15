@@ -117,10 +117,12 @@ nfs:
     enabled: false
 
 # Workspace content storage for dashboard (only used when enterprise.enabled=true)
-# Requires RWX storage - use values-dev-enterprise.yaml with NFS for local dev
+# Dev uses local-path (RWO). Operator + dashboard co-schedule on the single
+# kind node so both can mount the same PVC. Enterprise mode overrides with
+# NFS (RWX) in values-dev-enterprise.yaml.
 workspaceContent:
-  enabled: true  # Gated by enterprise.enabled in templates
+  enabled: true
   persistence:
     accessModes:
-      - ReadWriteMany
+      - ReadWriteOnce
     size: 10Gi
