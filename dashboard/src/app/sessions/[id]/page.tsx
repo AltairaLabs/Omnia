@@ -335,7 +335,7 @@ export default function SessionDetailPage({
   const toolCalls = rawToolCalls ? collapseToolCalls(rawToolCalls) : undefined;
   const { data: providerCalls } = useSessionProviderCalls(id, sessionReady);
   const { data: runtimeEvents } = useSessionRuntimeEvents(id, sessionReady);
-  const { messages: paginatedMessages } = useSessionAllMessages(id, session?.status, sessionReady);
+  const { messages: paginatedMessages, hasMore: messagesHasMore, isFetchingMore: messagesIsFetchingMore, fetchMore: messagesFetchMore } = useSessionAllMessages(id, session?.status, sessionReady);
   const allMessages = paginatedMessages.length > 0 ? paginatedMessages : (session?.messages ?? []);
   const grafana = useGrafana();
   const sessionDashboardUrl = grafana.enabled && session
@@ -548,7 +548,7 @@ export default function SessionDetailPage({
           </TabsList>
 
           <TabsContent value="conversation" className="flex-1 min-h-0 mt-4">
-            <ConversationWithDebugPanel session={session} evalResults={evalResults || []} toolCalls={toolCalls || []} providerCalls={providerCalls || []} runtimeEvents={runtimeEvents || []} />
+            <ConversationWithDebugPanel session={session} messages={allMessages} hasMore={messagesHasMore} isFetchingMore={messagesIsFetchingMore} fetchMore={messagesFetchMore} evalResults={evalResults || []} toolCalls={toolCalls || []} providerCalls={providerCalls || []} runtimeEvents={runtimeEvents || []} />
           </TabsContent>
 
           <TabsContent value="replay" className="flex-1 min-h-0">
@@ -956,23 +956,16 @@ function AggregatedEvalRow({ eval_ }: Readonly<{ eval_: AggregatedEval }>) {
 
 function ConversationWithDebugPanel({
   session,
+  messages,
+  hasMore,
+  isFetchingMore,
+  fetchMore,
   evalResults,
   toolCalls,
   providerCalls,
   runtimeEvents,
-}: Readonly<{ session: Session; evalResults: EvalResult[]; toolCalls: ToolCall[]; providerCalls: ProviderCall[]; runtimeEvents: RuntimeEvent[] }>) {
+}: Readonly<{ session: Session; messages: Message[]; hasMore: boolean; isFetchingMore: boolean; fetchMore: () => void; evalResults: EvalResult[]; toolCalls: ToolCall[]; providerCalls: ProviderCall[]; runtimeEvents: RuntimeEvent[] }>) {
   const debugOpen = useDebugPanelStore((s) => s.isOpen);
-
-  // Use paginated message loading. Falls back to session.messages while loading.
-  const {
-    messages: paginatedMessages,
-    hasMore,
-    isFetchingMore,
-    fetchMore,
-  } = useSessionAllMessages(session.id, session.status);
-
-  // Use paginated messages once loaded, otherwise fall back to session.messages
-  const messages = paginatedMessages.length > 0 ? paginatedMessages : session.messages;
 
   const conversationContent = (
     <ConversationMessages
