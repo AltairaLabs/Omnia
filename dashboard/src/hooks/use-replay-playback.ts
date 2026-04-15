@@ -36,7 +36,7 @@ function clamp(value: number, min: number, max: number): number {
  * react-hooks/immutability disallows).
  */
 export function useReplayPlayback({ durationMs }: UseReplayPlaybackInput): UseReplayPlaybackResult {
-  const [currentTimeMs, setCurrentTimeMs] = useState(0);
+  const [rawTimeMs, setCurrentTimeMs] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeedState] = useState(1);
 
@@ -46,9 +46,16 @@ export function useReplayPlayback({ durationMs }: UseReplayPlaybackInput): UseRe
   const durationRef = useRef(durationMs);
   const tickRef = useRef<FrameRequestCallback>(() => {});
 
-  useEffect(() => {
+  // Update durationRef before the next paint / rAF so the tick loop always
+  // clamps against the latest duration without a render cycle.
+  useLayoutEffect(() => {
     durationRef.current = durationMs;
   }, [durationMs]);
+
+  // Derive the externally visible time as min(raw, duration) so consumers
+  // see a clamped value immediately when durationMs shrinks, without calling
+  // setState inside an effect (which would trigger cascading re-renders).
+  const currentTimeMs = Math.min(rawTimeMs, durationMs);
 
   const stopLoop = useCallback(() => {
     if (frameRef.current !== null) {
@@ -106,8 +113,9 @@ export function useReplayPlayback({ durationMs }: UseReplayPlaybackInput): UseRe
   }, []);
 
   const setSpeed = useCallback((nextSpeed: number) => {
-    speedRef.current = nextSpeed;
-    setSpeedState(nextSpeed);
+    const clamped = nextSpeed > 0 ? nextSpeed : 0.1;
+    speedRef.current = clamped;
+    setSpeedState(clamped);
   }, []);
 
   useEffect(() => {
