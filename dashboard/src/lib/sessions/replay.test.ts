@@ -77,3 +77,19 @@ describe("visibleEventsAt", () => {
     expect(v.toolCalls.map((x) => x.id)).toEqual(["tc1"]);
   });
 });
+
+describe("metricsAt — missing usage fields", () => {
+  it("treats missing provider-call usage fields as zero", () => {
+    const pc: ProviderCall = {
+      id: "pc-missing", sessionId: "s", provider: "claude", model: "sonnet",
+      status: "pending", createdAt: t500,
+      // no costUsd, inputTokens, outputTokens
+    };
+    const m = metricsAt({ startedAt: t0, providerCalls: [pc] }, 1000);
+    expect(m.costUsd).toBe(0);
+    expect(m.inputTokens).toBe(0);
+    expect(m.outputTokens).toBe(0);
+    expect(m.providerCallCount).toBe(1);
+    expect(Number.isNaN(m.costUsd)).toBe(false);
+  });
+});

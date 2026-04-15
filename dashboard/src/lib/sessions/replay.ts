@@ -34,9 +34,19 @@ export interface ReplayMetrics {
   readonly providerCallCount: number;
 }
 
-/** Aggregate metrics over events whose timestamp is <= currentTimeMs. */
+/**
+ * Aggregate metrics over events whose timestamp is <= currentTimeMs.
+ *
+ * Pending / failed provider calls contribute whatever usage fields they
+ * have reported so far; any missing field (costUsd, inputTokens,
+ * outputTokens) counts as 0. For completed sessions (v1 scope) every
+ * call is terminal so this is exact; for live replay (future) the
+ * running total will under-report a just-started call until its usage
+ * lands.
+ */
 export function metricsAt(source: ReplaySource, currentTimeMs: number): ReplayMetrics {
   const { startedAt, messages = [], toolCalls = [], providerCalls = [] } = source;
+  const cutoffMs = new Date(startedAt).getTime() + currentTimeMs;
   let costUsd = 0;
   let inputTokens = 0;
   let outputTokens = 0;
@@ -44,13 +54,13 @@ export function metricsAt(source: ReplaySource, currentTimeMs: number): ReplayMe
   let toolCallCount = 0;
   let providerCallCount = 0;
   for (const m of messages) {
-    if (toElapsedMs(startedAt, m.timestamp) <= currentTimeMs) messageCount++;
+    if (new Date(m.timestamp).getTime() <= cutoffMs) messageCount++;
   }
   for (const tc of toolCalls) {
-    if (toElapsedMs(startedAt, tc.createdAt) <= currentTimeMs) toolCallCount++;
+    if (new Date(tc.createdAt).getTime() <= cutoffMs) toolCallCount++;
   }
   for (const pc of providerCalls) {
-    if (toElapsedMs(startedAt, pc.createdAt) > currentTimeMs) continue;
+    if (new Date(pc.createdAt).getTime() > cutoffMs) continue;
     providerCallCount++;
     costUsd += pc.costUsd ?? 0;
     inputTokens += pc.inputTokens ?? 0;
@@ -70,8 +80,9 @@ export function visibleEventsAt(
   currentTimeMs: number,
 ): VisibleEvents {
   const { startedAt, messages = [], toolCalls = [] } = source;
+  const cutoffMs = new Date(startedAt).getTime() + currentTimeMs;
   return {
-    messages: messages.filter((m) => toElapsedMs(startedAt, m.timestamp) <= currentTimeMs),
-    toolCalls: toolCalls.filter((tc) => toElapsedMs(startedAt, tc.createdAt) <= currentTimeMs),
+    messages: messages.filter((m) => new Date(m.timestamp).getTime() <= cutoffMs),
+    toolCalls: toolCalls.filter((tc) => new Date(tc.createdAt).getTime() <= cutoffMs),
   };
 }
