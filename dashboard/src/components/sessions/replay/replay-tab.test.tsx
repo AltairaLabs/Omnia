@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { ReplayTab } from "./replay-tab";
 import type { Session, Message, ToolCall, ProviderCall } from "@/types/session";
 
-// Same rAF shim + fake timers as the playback hook test — the hook relies on rAF.
+// Shim rAF — the playback hook uses it.
 let rafId = 0;
 const originalRaf = global.requestAnimationFrame;
 const originalCancelRaf = global.cancelAnimationFrame;
@@ -42,7 +42,7 @@ const toolCalls: ToolCall[] = [];
 const providerCalls: ProviderCall[] = [];
 
 describe("ReplayTab", () => {
-  it("renders controls, scrubber, metrics, conversation and event detail", () => {
+  it("renders controls, scrubber, metrics and main conversation", () => {
     render(
       <ReplayTab
         session={session}
@@ -55,6 +55,41 @@ describe("ReplayTab", () => {
     expect(screen.getByRole("button", { name: /play/i })).toBeInTheDocument();
     expect(screen.getByRole("slider")).toBeInTheDocument();
     expect(screen.getByTestId("metric-cost")).toBeInTheDocument();
+  });
+
+  it("keeps the details drawer closed by default", () => {
+    render(
+      <ReplayTab
+        session={session}
+        messages={messages}
+        toolCalls={toolCalls}
+        providerCalls={providerCalls}
+        runtimeEvents={[]}
+      />
+    );
+    const drawer = screen.getByTestId("replay-details-drawer");
+    expect(drawer).toHaveAttribute("aria-hidden", "true");
+    expect(drawer.className).toContain("w-0");
+  });
+
+  it("toggles the details drawer open and closed", () => {
+    render(
+      <ReplayTab
+        session={session}
+        messages={messages}
+        toolCalls={toolCalls}
+        providerCalls={providerCalls}
+        runtimeEvents={[]}
+      />
+    );
+    const toggle = screen.getByRole("button", { name: /show details/i });
+    fireEvent.click(toggle);
+    const drawer = screen.getByTestId("replay-details-drawer");
+    expect(drawer).toHaveAttribute("aria-hidden", "false");
+    expect(drawer.className).toContain("w-96");
+
+    fireEvent.click(screen.getByRole("button", { name: /hide details/i }));
+    expect(screen.getByTestId("replay-details-drawer")).toHaveAttribute("aria-hidden", "true");
   });
 
   it("renders a friendly empty state when the session has no events", () => {
