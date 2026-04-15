@@ -3,10 +3,29 @@
  */
 
 import { Suspense } from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SessionDetailPage from "./page";
+
+// rAF shim — ReplayTab uses useReplayPlayback which drives a requestAnimationFrame loop.
+let rafId = 0;
+const originalRaf = global.requestAnimationFrame;
+const originalCancelRaf = global.cancelAnimationFrame;
+beforeEach(() => {
+  rafId = 0;
+  global.requestAnimationFrame = (cb: FrameRequestCallback) => {
+    rafId++;
+    const id = rafId;
+    setTimeout(() => cb(performance.now()), 16);
+    return id;
+  };
+  global.cancelAnimationFrame = (id: number) => clearTimeout(id as unknown as NodeJS.Timeout);
+});
+afterEach(() => {
+  global.requestAnimationFrame = originalRaf;
+  global.cancelAnimationFrame = originalCancelRaf;
+});
 
 // Mock hooks
 vi.mock("@/hooks/sessions", () => ({
@@ -455,6 +474,57 @@ describe("SessionDetailPage", () => {
 
       // No more button needed
       expect(screen.queryByText(/Show earlier messages/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Replay tab wiring", () => {
+    it("mounts ReplayTab with empty-state when session has no timeline events", async () => {
+      const { useSessionDetail } = await import("@/hooks");
+      // Use a session with no messages so allMessages is empty and the timeline is empty.
+      const emptySession = { ...mockSession, messages: [] };
+      vi.mocked(useSessionDetail).mockReturnValue({
+        data: emptySession,
+        isLoading: false,
+        error: null,
+      } as any);
+
+      await renderPage();
+
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("tab", { name: /replay/i }));
+
+      // ReplayTab renders "Nothing to replay" when the timeline is empty.
+      expect(screen.getByText(/nothing to replay/i)).toBeInTheDocument();
+    });
+
+    it("mounts ReplayTab with controls when useSessionAllMessages returns messages", async () => {
+      const { useSessionDetail, useSessionAllMessages } = await import("@/hooks");
+      const t0 = mockSession.startedAt;
+      vi.mocked(useSessionDetail).mockReturnValue({
+        data: mockSession,
+        isLoading: false,
+        error: null,
+      } as any);
+      vi.mocked(useSessionAllMessages).mockReturnValue({
+        messages: [
+          { id: "m1", role: "user" as const, content: "Hello, I need help", timestamp: t0 },
+        ],
+        totalLoaded: 1,
+        hasMore: false,
+        isLoading: false,
+        isFetchingMore: false,
+        fetchMore: vi.fn(),
+        error: null,
+      } as any);
+
+      await renderPage();
+
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("tab", { name: /replay/i }));
+
+      // ReplayTab renders the Play button and scrubber slider when timeline is non-empty.
+      expect(screen.getByRole("button", { name: /play/i })).toBeInTheDocument();
+      expect(screen.getByRole("slider")).toBeInTheDocument();
     });
   });
 });
