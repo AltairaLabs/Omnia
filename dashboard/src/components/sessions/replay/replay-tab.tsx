@@ -5,7 +5,7 @@ import { ReplayControls } from "./replay-controls";
 import { ReplayScrubber } from "./replay-scrubber";
 import { ReplayMetrics } from "./replay-metrics";
 import { ReplayConversation } from "./replay-conversation";
-import { ReplayEventDetail } from "./replay-event-detail";
+import { ReplayDetails } from "./replay-details";
 import { useReplayPlayback } from "@/hooks/use-replay-playback";
 import { sessionDurationMs } from "@/lib/sessions/replay";
 import { extractTimelineEvents } from "@/lib/sessions/timeline";
@@ -91,7 +91,7 @@ export function ReplayTab({
           messages={messages}
           toolCalls={toolCalls}
         />
-        <ReplayEventDetail
+        <ReplayDetails
           startedAt={session.startedAt}
           currentTimeMs={currentTimeMs}
           events={timeline}
