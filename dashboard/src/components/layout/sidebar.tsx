@@ -21,6 +21,7 @@ import {
   Sparkles,
   ShieldCheck,
   Brain,
+  BookOpen,
 } from "lucide-react";
 
 interface NavItem {
@@ -36,6 +37,7 @@ const navigation: NavItem[] = [
   { name: "Agents", href: "/agents", icon: Bot },
   { name: "Console", href: "/console", icon: Terminal },
   { name: "PromptPacks", href: "/promptpacks", icon: FileText },
+  { name: "Skills", href: "/skills", icon: BookOpen },
   { name: "Tools", href: "/tools", icon: Wrench },
   { name: "Providers", href: "/providers", icon: Cpu },
   { name: "Sessions", href: "/sessions", icon: MessageSquare },

@@ -621,3 +621,21 @@ spec:
       limits:
         cpu: "500m"
         memory: "256Mi"
+---
+# SkillSource - sample skills from https://github.com/anthropics/skills.
+# Syncs every hour; each top-level directory in the repo is a skill
+# (identified by a SKILL.md file). Referenced from PromptPack.spec.skills
+# to make the skill content available to agents.
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: SkillSource
+metadata:
+  name: anthropic-skills
+  namespace: dev-agents
+spec:
+  type: git
+  git:
+    url: https://github.com/anthropics/skills.git
+    ref:
+      branch: main
+  interval: 1h
+  timeout: 2m

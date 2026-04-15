@@ -1,0 +1,29 @@
+# Sample SkillSource - Anthropic skills Git repository.
+# Demonstrates syncing skills from https://github.com/anthropics/skills.
+# Each top-level directory in the repo is a skill (contains a SKILL.md).
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: SkillSource
+metadata:
+  name: anthropic-skills
+  namespace: omnia-system
+spec:
+  type: git
+  git:
+    url: https://github.com/anthropics/skills.git
+    ref:
+      branch: main
+  interval: 1h
+  timeout: 2m
+---
+# Sample SkillSource - ConfigMap-backed inline skill bundle.
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: SkillSource
+metadata:
+  name: inline-skills
+  namespace: omnia-system
+spec:
+  type: configmap
+  configMap:
+    name: inline-skills-bundle
+    key: pack.json
+  interval: 5m

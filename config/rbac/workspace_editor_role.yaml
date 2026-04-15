@@ -21,6 +21,7 @@ rules:
       - agentpolicies
       - agentruntimes
       - promptpacks
+      - skillsources
       - toolpolicies
       - toolregistries
       - arenasources
@@ -42,6 +43,7 @@ rules:
       - agentpolicies/status
       - agentruntimes/status
       - promptpacks/status
+      - skillsources/status
       - toolpolicies/status
       - toolregistries/status
       - arenasources/status

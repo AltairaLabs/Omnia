@@ -8,7 +8,7 @@ import { ImageLightbox } from "./image-lightbox";
 import { AudioPlayer } from "./audio-player";
 import { VideoPlayer } from "./video-player";
 import { DocumentPreview } from "./document-preview";
-import { Markdown } from "./markdown";
+import { Markdown } from "@/components/ui/markdown";
 import type { ConsoleMessage as ConsoleMessageType, FileAttachment } from "@/types/websocket";
 
 interface ConsoleMessageProps {

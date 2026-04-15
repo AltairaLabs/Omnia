@@ -266,6 +266,7 @@ docker_build(
         './cmd/doctor',
         './internal',
         './api',
+        './ee',
         './pkg',
         './go.mod',
         './go.sum',
@@ -854,7 +855,7 @@ k8s_resource(
 # Session-api and memory-api are operator-managed: wait for them, then port-forward.
 local_resource(
     'session-dev-agents-default',
-    serve_cmd='kubectl wait --for=condition=available deployment/session-dev-agents-default -n dev-agents --timeout=300s && kubectl port-forward -n dev-agents deployment/session-dev-agents-default 8082:8080',
+    serve_cmd='kubectl wait --for=condition=available deployment/session-dev-agents-default -n dev-agents --timeout=300s && kubectl port-forward -n dev-agents deployment/session-dev-agents-default 8180:8080',
     labels=['session-api'],
     resource_deps=['omnia-postgres', 'sample-resources'],
 )

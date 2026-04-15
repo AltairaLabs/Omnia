@@ -36,6 +36,11 @@ spec:
       serviceAccountName: {{ include "omnia.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- if not (hasKey .Values.podSecurityContext "fsGroup") }}
+        # fsGroup required for the manager to write into workspace-content
+        # (SkillSource + ArenaSource controllers sync content here).
+        fsGroup: 65532
+        {{- end }}
       containers:
         - name: manager
           image: {{ include "omnia.image" . }}
@@ -114,6 +119,17 @@ spec:
             failureThreshold: {{ .Values.probes.readiness.failureThreshold | default 3 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.workspaceContent.enabled }}
+          volumeMounts:
+            - name: workspace-content
+              mountPath: {{ .Values.workspaceContent.mountPath | default "/workspace-content" }}
+          {{- end }}
+      {{- if .Values.workspaceContent.enabled }}
+      volumes:
+        - name: workspace-content
+          persistentVolumeClaim:
+            claimName: {{ .Values.workspaceContent.persistence.existingClaim | default (printf "%s-workspace-content" (include "omnia.fullname" .)) }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
