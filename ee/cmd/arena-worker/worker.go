@@ -560,8 +560,8 @@ func executeWorkItem(
 	// Fleet providers in LoadedProviders are handled by the registered fleet factory
 	// (ee/pkg/arena/fleet/factory.go) — no special ordering needed.
 	log.Info("building engine components")
-	providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry, a2aCleanup, _, err :=
-		engine.BuildEngineComponents(arenaCfg)
+	providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry, a2aCleanup, _, _, err :=
+		engine.BuildEngineComponents(arenaCfg, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build engine components: %w", err)
 	}

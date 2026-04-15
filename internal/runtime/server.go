@@ -42,6 +42,7 @@ import (
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 
 	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
+	pkskills "github.com/AltairaLabs/PromptKit/runtime/skills"
 
 	"github.com/altairalabs/omnia/internal/runtime/skills"
 	"github.com/altairalabs/omnia/internal/runtime/tools"
@@ -178,9 +179,13 @@ func WithSDKOptions(opts ...sdk.Option) ServerOption {
 
 // WithSkillManifest reads the PromptPack skill manifest at path (typically
 // passed via OMNIA_PROMPTPACK_MANIFEST_PATH) and appends one
-// sdk.WithSkillsDir option per resolved entry, plus the configured
+// sdk.WithSkillSource option per resolved entry, plus the configured
 // MaxActive setting. Empty path or missing file is a no-op — skills are
 // optional.
+//
+// Each manifest entry becomes a PromptKit [pkskills.SkillSource] so the
+// per-PromptPack MountAs can narrow the virtual path the workflow filter
+// sees. ReadResource still hits ContentPath on disk.
 //
 // Selector configuration is intentionally NOT wired here: the tag and
 // embedding selectors require additional inputs (tag list, Provider for
@@ -195,10 +200,15 @@ func WithSkillManifest(path string) ServerOption {
 		}
 		names := make([]string, 0, len(manifest.Skills))
 		paths := make([]string, 0, len(manifest.Skills))
+		mounts := make([]string, 0, len(manifest.Skills))
 		for _, e := range manifest.Skills {
-			s.sdkOptions = append(s.sdkOptions, sdk.WithSkillsDir(e.ContentPath))
+			s.sdkOptions = append(s.sdkOptions, sdk.WithSkillSource(pkskills.SkillSource{
+				Dir:     e.ContentPath,
+				MountAs: e.MountAs,
+			}))
 			names = append(names, e.Name)
 			paths = append(paths, e.ContentPath)
+			mounts = append(mounts, e.MountAs)
 		}
 		maxActive := 0
 		if manifest.Config != nil && manifest.Config.MaxActive > 0 {
@@ -211,6 +221,7 @@ func WithSkillManifest(path string) ServerOption {
 			"skillCount", len(manifest.Skills),
 			"skillNames", names,
 			"skillPaths", paths,
+			"skillMounts", mounts,
 			"maxActive", maxActive)
 	}
 }
