@@ -75,7 +75,6 @@ interface LogRowProps {
 }
 
 function LogRow({ event, elapsedMs, isCurrent, expanded, onToggle }: LogRowProps) {
-  const hasDetails = Boolean(event.detail || event.metadata || event.duration);
   return (
     <div
       data-testid="replay-details-row"
@@ -88,21 +87,15 @@ function LogRow({ event, elapsedMs, isCurrent, expanded, onToggle }: LogRowProps
       <button
         type="button"
         onClick={onToggle}
-        disabled={!hasDetails}
-        className={cn(
-          "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs",
-          hasDetails && "hover:bg-muted/50 cursor-pointer",
-          !hasDetails && "cursor-default",
-        )}
+        aria-expanded={expanded}
+        className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-muted/50"
       >
         <span className="w-3 flex-shrink-0 text-muted-foreground">
-          {hasDetails ? (
-            expanded ? (
-              <ChevronDown className="h-3 w-3" />
-            ) : (
-              <ChevronRight className="h-3 w-3" />
-            )
-          ) : null}
+          {expanded ? (
+            <ChevronDown className="h-3 w-3" />
+          ) : (
+            <ChevronRight className="h-3 w-3" />
+          )}
         </span>
         <span className={cn("flex-shrink-0", KIND_COLOR[event.kind])}>
           {KIND_ICON[event.kind]}
@@ -122,12 +115,32 @@ function LogRow({ event, elapsedMs, isCurrent, expanded, onToggle }: LogRowProps
           </span>
         )}
       </button>
-      {expanded && hasDetails && (
-        <div className="border-t bg-muted/30 px-10 py-2 text-xs">
+      {expanded && (
+        <div className="space-y-2 border-t bg-muted/30 px-10 py-2 text-xs">
+          <div className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5 text-[11px]">
+            <span className="text-muted-foreground">kind</span>
+            <span className="font-mono">{event.kind}</span>
+            <span className="text-muted-foreground">id</span>
+            <span className="font-mono break-all">{event.id}</span>
+            <span className="text-muted-foreground">timestamp</span>
+            <span className="font-mono">{event.timestamp}</span>
+            {event.status && (
+              <>
+                <span className="text-muted-foreground">status</span>
+                <span className="font-mono">{event.status}</span>
+              </>
+            )}
+            {event.toolCallId && (
+              <>
+                <span className="text-muted-foreground">toolCallId</span>
+                <span className="font-mono break-all">{event.toolCallId}</span>
+              </>
+            )}
+          </div>
           {event.detail && (
-            <div className="mb-2 whitespace-pre-wrap break-words">{event.detail}</div>
+            <div className="whitespace-pre-wrap break-words">{event.detail}</div>
           )}
-          {event.metadata && (
+          {event.metadata && Object.keys(event.metadata).length > 0 && (
             <pre className="overflow-x-auto rounded bg-background p-2 font-mono">
               {JSON.stringify(event.metadata, null, 2)}
             </pre>

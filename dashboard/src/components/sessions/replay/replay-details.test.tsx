@@ -64,6 +64,34 @@ describe("ReplayDetails", () => {
     expect(within(pipelineRow).getByText(/"stage": "intro"/)).toBeInTheDocument();
   });
 
+  it("expands events that have no detail/metadata/duration, showing kind + id + timestamp", () => {
+    const sparse: TimelineEvent[] = [
+      { id: "bare", kind: "system_message", timestamp: t0, label: "Nothing to see" },
+    ];
+    render(<ReplayDetails startedAt={t0} currentTimeMs={100} events={sparse} />);
+    const row = screen.getByTestId("replay-details-row");
+    const toggle = within(row).getByRole("button");
+    expect(toggle).not.toBeDisabled();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    // The expanded drawer shows the raw event identifiers.
+    expect(within(row).getByText("bare")).toBeInTheDocument();
+    expect(within(row).getByText("system_message")).toBeInTheDocument();
+  });
+
+  it("collapses again on a second click", () => {
+    const sparse: TimelineEvent[] = [
+      { id: "bare", kind: "system_message", timestamp: t0, label: "Toggle me" },
+    ];
+    render(<ReplayDetails startedAt={t0} currentTimeMs={100} events={sparse} />);
+    const toggle = screen.getByRole("button");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("renders an error badge when a row's status is error", () => {
     const withError: TimelineEvent[] = [
       { id: "e1", kind: "error", timestamp: t0, label: "Boom", status: "error" },
