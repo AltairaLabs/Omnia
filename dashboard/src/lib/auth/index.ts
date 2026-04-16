@@ -160,10 +160,10 @@ async function tryRefreshToken(
     const { refreshAccessToken, extractClaims, mapClaimsToUser, validateClaims } = await import("./oauth");
     const tokens = await refreshAccessToken(session.oauth.refreshToken);
 
-    // Update tokens in session
+    // Update tokens in session. Access token is intentionally not
+    // persisted — see OAuthTokens jsdoc (cookie size limit).
     session.oauth = {
       ...session.oauth,
-      accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token || session.oauth.refreshToken,
       idToken: tokens.id_token || session.oauth.idToken,
       expiresAt: typeof tokens.expires_at === "number" ? tokens.expires_at : session.oauth.expiresAt,

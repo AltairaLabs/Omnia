@@ -41,10 +41,10 @@ export async function POST() {
     // Refresh the tokens
     const tokens = await refreshAccessToken(session.oauth.refreshToken);
 
-    // Update session with new tokens
+    // Update session with new tokens. Access token is intentionally
+    // not persisted — see OAuthTokens jsdoc (cookie size limit).
     session.oauth = {
       ...session.oauth,
-      accessToken: tokens.access_token,
       // Use new refresh token if provided, otherwise keep the old one
       refreshToken: tokens.refresh_token || session.oauth.refreshToken,
       idToken: tokens.id_token || session.oauth.idToken,

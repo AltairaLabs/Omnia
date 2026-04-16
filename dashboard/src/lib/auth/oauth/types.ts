@@ -79,18 +79,34 @@ export interface PKCEData {
 }
 
 /**
- * OAuth tokens stored in session.
+ * OAuth tokens persisted in the iron-session cookie.
+ *
+ * Kept minimal on purpose — iron-session encrypts the whole object
+ * into a single cookie, and browsers reject cookies >= 4096 bytes
+ * (RFC 6265 §4.1.1). Entra ID's ID token alone routinely exceeds
+ * that once the user has any group claims, so anything that isn't
+ * strictly required must stay out.
+ *
+ * What we keep + why:
+ *   - refreshToken: needed for the refresh flow.
+ *   - idToken:      needed for RP-initiated logout (`id_token_hint`).
+ *   - expiresAt:    cheap ~10-byte field that drives refresh scheduling.
+ *   - provider:     needed for UI + logout endpoint selection.
+ *
+ * What we no longer store:
+ *   - accessToken:  never read. The user info it unlocks is captured
+ *                   at callback time via mapClaimsToUser and lives on
+ *                   session.user. If a future flow needs a live access
+ *                   token, fetch via refreshToken and hold in memory.
  */
 export interface OAuthTokens {
-  /** Access token for API calls */
-  accessToken: string;
-  /** Refresh token for token renewal */
+  /** Refresh token for token renewal (+ logout revocation where supported). */
   refreshToken?: string;
-  /** ID token containing user claims */
+  /** ID token; only kept because RP-initiated logout needs id_token_hint. */
   idToken?: string;
-  /** Token expiration timestamp (Unix seconds) */
+  /** Token expiration timestamp (Unix seconds). */
   expiresAt?: number;
-  /** Provider used for authentication */
+  /** Provider used for authentication. */
   provider: OAuthProviderType;
 }
 

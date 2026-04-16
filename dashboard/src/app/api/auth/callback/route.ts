@@ -26,40 +26,41 @@ export async function GET(request: NextRequest) {
   const session = await getSession();
   const { searchParams } = request.nextUrl;
 
+  // Build redirects from config.baseUrl (OMNIA_BASE_URL) rather than
+  // request.url — behind a reverse proxy (Istio Gateway, nginx, Azure
+  // App Gateway, etc.) request.url resolves to the pod-internal
+  // `http://0.0.0.0:3000/...` because Next.js doesn't trust
+  // X-Forwarded-Host by default. We want the browser to land on the
+  // public hostname it originally hit.
+  const loginRedirect = (params: string) =>
+    NextResponse.redirect(new URL(`/login${params}`, config.baseUrl));
+
   // Check for error from IdP
   const error = searchParams.get("error");
   if (error) {
     const description = searchParams.get("error_description") || error;
     console.error("OAuth error from IdP:", error, description);
-    return NextResponse.redirect(
-      new URL(`/login?error=${encodeURIComponent(error)}`, request.url)
-    );
+    return loginRedirect(`?error=${encodeURIComponent(error)}`);
   }
 
   // Verify we have PKCE data from login
   if (!session.pkce) {
     console.error("OAuth callback: No PKCE data in session");
-    return NextResponse.redirect(
-      new URL("/login?error=invalid_state", request.url)
-    );
+    return loginRedirect("?error=invalid_state");
   }
 
   // Verify state parameter
   const state = searchParams.get("state");
   if (!state || state !== session.pkce.state) {
     console.error("OAuth callback: State mismatch");
-    return NextResponse.redirect(
-      new URL("/login?error=invalid_state", request.url)
-    );
+    return loginRedirect("?error=invalid_state");
   }
 
   // Get authorization code
   const code = searchParams.get("code");
   if (!code) {
     console.error("OAuth callback: No authorization code");
-    return NextResponse.redirect(
-      new URL("/login?error=no_code", request.url)
-    );
+    return loginRedirect("?error=no_code");
   }
 
   try {
@@ -80,19 +81,20 @@ export async function GET(request: NextRequest) {
     // Validate we have required claims
     if (!validateClaims(claims)) {
       console.error("OAuth callback: Missing required claims");
-      return NextResponse.redirect(
-        new URL("/login?error=invalid_claims", request.url)
-      );
+      return loginRedirect("?error=invalid_claims");
     }
 
     // Map claims to user
     const user = mapClaimsToUser(claims, config);
 
-    // Store user and tokens in session
+    // Store user + minimum-viable token set in session.
+    // See OAuthTokens jsdoc: the access token is intentionally dropped
+    // to stay under the 4KB cookie limit on Entra tenants with group
+    // claims. Refresh + id tokens are kept because the refresh and
+    // logout flows need them.
     session.user = user;
     session.createdAt = Date.now();
     session.oauth = {
-      accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
       idToken: tokens.id_token,
       expiresAt: typeof tokens.expires_at === "number" ? tokens.expires_at : undefined,
@@ -105,13 +107,13 @@ export async function GET(request: NextRequest) {
 
     await session.save();
 
-    // Redirect to original destination
-    return NextResponse.redirect(new URL(returnTo, request.url));
+    // Redirect to original destination (again: config.baseUrl, not request.url)
+    return NextResponse.redirect(new URL(returnTo, config.baseUrl));
   } catch (error) {
     console.error("OAuth callback error:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.redirect(
-      new URL(`/login?error=callback_failed&message=${encodeURIComponent(message)}`, request.url)
+    return loginRedirect(
+      `?error=callback_failed&message=${encodeURIComponent(message)}`,
     );
   }
 }
