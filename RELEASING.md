@@ -73,12 +73,51 @@ make test
 # Lint the Helm chart
 make helm-lint
 
-# Create the tag
-git tag -a v0.2.0 -m "Release v0.2.0"
+# REQUIRED: bump Chart.yaml to match the tag you're about to push.
+# The release workflow also rewrites these at package time, but
+# main-at-rest must track the released version so that local
+# `helm template` / `helm install` resolves real image tags.
+VERSION="0.9.0-beta.6"
+yq eval -i ".version = \"$VERSION\"" charts/omnia/Chart.yaml
+yq eval -i ".appVersion = \"$VERSION\"" charts/omnia/Chart.yaml
+git add charts/omnia/Chart.yaml
+git commit -m "chore(chart): bump to v$VERSION"
+git push
+
+# Create the tag from the bumped commit
+git tag -a "v$VERSION" -m "Release v$VERSION"
 
 # Push the tag
-git push origin v0.2.0
+git push origin "v$VERSION"
 ```
+
+### Pre-tag verification
+
+Before pushing the tag, verify the release workflow will succeed on
+the target commit. On main, run:
+
+```bash
+# 1. Docker builds — the docker-build-matrix workflow runs on every
+#    PR that touches a Dockerfile, but verify locally when in doubt:
+for df in Dockerfile Dockerfile.agent Dockerfile.runtime \
+          Dockerfile.session-api Dockerfile.memory-api \
+          Dockerfile.doctor Dockerfile.compaction \
+          ee/Dockerfile.*; do
+  docker buildx build -f "$df" . --target builder 2>&1 | tail -5
+done
+docker buildx build -f dashboard/Dockerfile dashboard --target builder
+
+# 2. Helm lint + unittest
+helm lint charts/omnia
+helm unittest charts/omnia
+
+# 3. Confirm latest action versions in .github/workflows/release.yml
+#    haven't been yanked (rare but happened with aquasecurity/trivy-action
+#    v0.28.0 which never existed — now pinned to v0.35.0).
+```
+
+**Never tag-first-check-second.** A failed release workflow shows up
+as a red ❌ on the tag page, which is public.
 
 ## What Gets Released
 
