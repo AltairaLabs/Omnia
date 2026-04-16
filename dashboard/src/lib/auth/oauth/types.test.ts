@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DEFAULT_CLAIM_MAPPING, DEFAULT_SCOPES } from "./types";
-import type { OAuthTokens } from "./types";
+import { DEFAULT_CLAIM_MAPPING, DEFAULT_SCOPES, type OAuthTokens } from "./types";
 
 // This is a pure-type file, so these tests exist only to document the
 // contract + wake up coverage tooling. If someone adds the accessToken

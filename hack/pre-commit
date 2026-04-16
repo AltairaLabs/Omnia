@@ -223,6 +223,7 @@ if [ -n "$STAGED_DASHBOARD_FILES" ]; then
                    [[ "$REL_FILE" == src/lib/image-processor.ts ]] || \
                    [[ "$REL_FILE" == src/lib/mock-data.ts ]] || \
                    [[ "$REL_FILE" == src/lib/auth/types.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/auth/oauth/types.ts ]] || \
                    [[ "$REL_FILE" == server.js ]]; then
                     continue
                 fi
