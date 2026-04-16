@@ -1,0 +1,165 @@
+suite: deployment injection hooks
+# Covers issue #842 — extraVolumes / extraVolumeMounts / extraEnv /
+# extraEnvFrom hooks on the three chart-owned Deployments.
+tests:
+  # --- Dashboard ---
+  - it: dashboard injects extraEnv onto the container
+    template: templates/dashboard/deployment.yaml
+    set:
+      dashboard.extraEnv:
+        - name: OMNIA_AUTH_OAUTH_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: dashboard-oauth
+              key: client_secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNIA_AUTH_OAUTH_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: dashboard-oauth
+                key: client_secret
+
+  - it: dashboard injects extraEnvFrom (appended after the built-in configMapRef)
+    template: templates/dashboard/deployment.yaml
+    set:
+      dashboard.extraEnvFrom:
+        - secretRef:
+            name: dashboard-kv-synced
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].envFrom
+          content:
+            secretRef:
+              name: dashboard-kv-synced
+
+  - it: dashboard injects extraVolumes and extraVolumeMounts
+    template: templates/dashboard/deployment.yaml
+    set:
+      dashboard.extraVolumes:
+        - name: kv-secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: dashboard-oauth-spc
+      dashboard.extraVolumeMounts:
+        - name: kv-secrets
+          mountPath: /mnt/secrets-store
+          readOnly: true
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: kv-secrets
+            csi:
+              driver: secrets-store.csi.k8s.io
+              readOnly: true
+              volumeAttributes:
+                secretProviderClass: dashboard-oauth-spc
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: kv-secrets
+            mountPath: /mnt/secrets-store
+            readOnly: true
+
+  # --- Operator ---
+  - it: operator injects extraEnv onto the manager container
+    template: templates/deployment.yaml
+    set:
+      operator.extraEnv:
+        - name: OMNIA_LICENSE
+          valueFrom:
+            secretKeyRef:
+              name: omnia-license
+              key: token
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNIA_LICENSE
+            valueFrom:
+              secretKeyRef:
+                name: omnia-license
+                key: token
+
+  - it: operator injects extraVolumes without requiring workspaceContent
+    template: templates/deployment.yaml
+    set:
+      operator.extraVolumes:
+        - name: custom-ca
+          secret:
+            secretName: ca-bundle
+      operator.extraVolumeMounts:
+        - name: custom-ca
+          mountPath: /etc/ssl/certs/custom
+          readOnly: true
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: custom-ca
+            secret:
+              secretName: ca-bundle
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: custom-ca
+            mountPath: /etc/ssl/certs/custom
+            readOnly: true
+
+  - it: operator renders neither volumes nor volumeMounts when nothing is set
+    template: templates/deployment.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.volumes
+      - notExists:
+          path: spec.template.spec.containers[0].volumeMounts
+
+  # --- Arena controller (EE) ---
+  - it: arena-controller injects extraEnv + extraEnvFrom
+    template: templates/arena-controller-deployment.yaml
+    set:
+      enterprise.enabled: true
+      enterprise.arena.controller.extraEnv:
+        - name: AZURE_TENANT_ID
+          value: my-tenant
+      enterprise.arena.controller.extraEnvFrom:
+        - configMapRef:
+            name: arena-shared-config
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AZURE_TENANT_ID
+            value: my-tenant
+      - contains:
+          path: spec.template.spec.containers[0].envFrom
+          content:
+            configMapRef:
+              name: arena-shared-config
+
+  - it: arena-controller appends extraVolumes to the existing workspace-content + tmp volumes
+    template: templates/arena-controller-deployment.yaml
+    set:
+      enterprise.enabled: true
+      enterprise.arena.controller.extraVolumes:
+        - name: extra
+          emptyDir: {}
+      enterprise.arena.controller.extraVolumeMounts:
+        - name: extra
+          mountPath: /extra
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: extra
+            emptyDir: {}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: extra
+            mountPath: /extra

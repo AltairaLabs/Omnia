@@ -116,17 +116,31 @@ spec:
             periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
           resources:
             {{- toYaml .Values.enterprise.arena.controller.resources | default .Values.resources | nindent 12 }}
+          {{- with .Values.enterprise.arena.controller.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.enterprise.arena.controller.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: workspace-content
               mountPath: /workspace-content
             - name: tmp
               mountPath: /tmp
+            {{- with .Values.enterprise.arena.controller.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
         - name: workspace-content
           persistentVolumeClaim:
             claimName: {{ include "omnia.fullname" . }}-workspace-content
         - name: tmp
           emptyDir: {}
+        {{- with .Values.enterprise.arena.controller.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -74,6 +74,14 @@ enterprise:
         runAsUser: 65532
         # -- Group ID for volume ownership
         fsGroup: 65532
+      # -- Extra environment variables for the arena-controller container.
+      extraEnv: []
+      # -- Extra envFrom entries (secretRef / configMapRef).
+      extraEnvFrom: []
+      # -- Extra volumes on the arena-controller pod.
+      extraVolumes: []
+      # -- Extra volumeMounts on the arena-controller container.
+      extraVolumeMounts: []
 
     # Worker configuration for ArenaJob execution
     worker:
@@ -313,6 +321,22 @@ operator:
   # Set to a port like ":8083" to enable, or leave empty to disable.
   apiBindAddress: ""
 
+  # -- Extra environment variables to inject into the operator container.
+  # Standard Kubernetes EnvVar shape (each entry has `name` + `value` or
+  # `valueFrom`).
+  extraEnv: []
+
+  # -- Extra envFrom entries (secretRef / configMapRef) for the operator.
+  # Useful for injecting bulk config from a Secret synced by a CSI
+  # secret-store driver (Azure Key Vault, AWS Secrets Manager, Vault).
+  extraEnvFrom: []
+
+  # -- Extra volumes to attach to the operator pod.
+  extraVolumes: []
+
+  # -- Extra volumeMounts on the operator container.
+  extraVolumeMounts: []
+
 # Leader election configuration
 leaderElection:
   # -- Enable leader election for HA
@@ -440,6 +464,36 @@ dashboard:
     requests:
       cpu: 100m
       memory: 256Mi
+
+  # -- Extra environment variables for the dashboard container.
+  # Use this for OAuth client secrets, custom feature flags, or values
+  # synced from a cloud secret store:
+  #   extraEnv:
+  #     - name: OMNIA_AUTH_OAUTH_CLIENT_SECRET
+  #       valueFrom:
+  #         secretKeyRef:
+  #           name: dashboard-oauth
+  #           key: client_secret
+  extraEnv: []
+
+  # -- Extra envFrom entries (secretRef / configMapRef). Common with
+  # CSI secret-store drivers: mount a SecretProviderClass that syncs to
+  # a K8s Secret, then envFrom: secretRef: { name: that-secret } here.
+  extraEnvFrom: []
+
+  # -- Extra volumes on the dashboard pod (CSI secret-store, extra CA
+  # trust bundles, etc.). Example — Azure Key Vault via CSI:
+  #   extraVolumes:
+  #     - name: kv-secrets
+  #       csi:
+  #         driver: secrets-store.csi.k8s.io
+  #         readOnly: true
+  #         volumeAttributes:
+  #           secretProviderClass: dashboard-oauth-spc
+  extraVolumes: []
+
+  # -- Extra volumeMounts on the dashboard container.
+  extraVolumeMounts: []
 
   # Pod Disruption Budget for HA deployments
   podDisruptionBudget:
