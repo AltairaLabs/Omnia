@@ -890,11 +890,21 @@ workspaces:
 # ============================================================================
 
 workspaceContent:
-  # -- Enable workspace content storage for dashboard
-  # This creates a root PVC that the dashboard mounts to browse all workspace content
-  # NOTE: Only effective when enterprise.enabled=true (automatically gated in templates)
-  # Requires RWX storage class (NFS or cloud-native like EFS, Azure Files, Filestore)
-  enabled: true
+  # -- Enable the workspace-content PVC. The operator syncs SkillSource /
+  # ArenaSource content into it, and the dashboard mounts it read-only
+  # to browse that content.
+  #
+  # REQUIRES RWX STORAGE. The default cloud StorageClasses on AKS (Azure
+  # Disk CSI), EKS (EBS CSI) and GKE (pd.csi.storage.gke.io) are block-
+  # mode and will fail to provision this PVC. If you enable this on a
+  # cloud cluster, also set `persistence.storageClass` to an RWX class
+  # (Azure Files CSI, EFS CSI, Filestore CSI) or provide an existing
+  # ReadWriteMany PVC via `persistence.existingClaim`.
+  #
+  # Defaults to false so a vanilla `helm install` on any cloud succeeds
+  # without extra storage setup. Dev mode (values-dev.yaml) overrides
+  # this to true + ReadWriteOnce on kind's local-path provisioner.
+  enabled: false
 
   # -- Mount path in dashboard pod
   mountPath: /workspace-content
