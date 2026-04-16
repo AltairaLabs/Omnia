@@ -74,8 +74,11 @@ data:
   OMNIA_AUTH_ROLE_EDITOR_GROUPS: {{ .Values.dashboard.auth.roleMapping.editorGroups | join "," | quote }}
   {{- end }}
 
-  # Base URL for OAuth callbacks
-  {{- if .Values.dashboard.ingress.enabled }}
+  # Base URL for OAuth callbacks.
+  # Prefer an explicit dashboard.baseUrl; otherwise derive from ingress when enabled.
+  {{- if .Values.dashboard.baseUrl }}
+  OMNIA_BASE_URL: {{ .Values.dashboard.baseUrl | quote }}
+  {{- else if .Values.dashboard.ingress.enabled }}
   {{- $scheme := "http" }}
   {{- if .Values.dashboard.ingress.tls }}
   {{- $scheme = "https" }}

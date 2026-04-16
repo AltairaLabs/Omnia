@@ -1,18 +1,58 @@
-{{- if and .Values.dashboard.enabled .Values.internalGateway.enabled }}
 {{- $fullName := include "omnia.fullname" . }}
-{{- $gatewayName := printf "%s-%s" $fullName .Values.internalGateway.name }}
+{{- $routeName := printf "%s-route" (include "omnia.dashboard.fullname" .) }}
+{{- $useExternal := and .Values.dashboard.enabled .Values.dashboard.externalGateway.enabled .Values.gateway.enabled }}
+{{- $useInternal := and .Values.dashboard.enabled (not .Values.dashboard.externalGateway.enabled) .Values.internalGateway.enabled }}
+
+{{- if $useExternal }}
+{{- $externalGatewayName := printf "%s-%s" $fullName .Values.gateway.name }}
 ---
-# HTTPRoute for Dashboard via Internal Gateway
+# HTTPRoute for Dashboard via External Gateway (TLS-terminated)
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: {{ include "omnia.dashboard.fullname" . }}-route
+  name: {{ $routeName }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "omnia.dashboard.labels" . | nindent 4 }}
 spec:
   parentRefs:
-    - name: {{ $gatewayName }}
+    - name: {{ $externalGatewayName }}
+      namespace: {{ .Release.Namespace }}
+  {{- with .Values.dashboard.externalGateway.hostname }}
+  hostnames:
+    - {{ . | quote }}
+  {{- end }}
+  rules:
+    # WebSocket route for agent connections (must be before catch-all)
+    - matches:
+        - path:
+            type: RegularExpression
+            value: /api/agents/[^/]+/[^/]+/ws
+      backendRefs:
+        - name: {{ include "omnia.dashboard.fullname" . }}
+          port: 3002
+    # Dashboard routes at root path
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "omnia.dashboard.fullname" . }}
+          port: 3000
+{{- else if $useInternal }}
+{{- $internalGatewayName := printf "%s-%s" $fullName .Values.internalGateway.name }}
+---
+# HTTPRoute for Dashboard via Internal Gateway
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $routeName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "omnia.dashboard.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ $internalGatewayName }}
       namespace: {{ .Release.Namespace }}
   rules:
     # WebSocket route for agent connections (must be before catch-all)

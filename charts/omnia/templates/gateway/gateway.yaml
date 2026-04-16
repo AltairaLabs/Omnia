@@ -14,6 +14,11 @@ metadata:
   {{- end }}
 spec:
   gatewayClassName: {{ .Values.gateway.className }}
+  {{- with .Values.gateway.infrastructureAnnotations }}
+  infrastructure:
+    annotations:
+      {{- toYaml . | nindent 6 }}
+  {{- end }}
   listeners:
     - name: http
       port: {{ .Values.gateway.listeners.http.port }}
@@ -47,6 +52,11 @@ metadata:
     omnia.altairalabs.ai/gateway-type: internal
 spec:
   gatewayClassName: {{ .Values.internalGateway.className }}
+  {{- with .Values.internalGateway.infrastructureAnnotations }}
+  infrastructure:
+    annotations:
+      {{- toYaml . | nindent 6 }}
+  {{- end }}
   listeners:
     - name: http
       port: {{ .Values.internalGateway.port }}
