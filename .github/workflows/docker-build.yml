@@ -1,0 +1,101 @@
+name: Docker Build Matrix
+
+# Builds every image the release workflow publishes, on every PR that
+# touches a Dockerfile or the release matrix. Catches broken dockerfile
+# paths, missing build-context files, and syntax errors BEFORE a release
+# tag picks them up.
+#
+# Keep this matrix in sync with the `docker-release` job in release.yml.
+# If you add/remove/rename an image there, update here too.
+
+on:
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - 'Dockerfile.*'
+      - 'ee/Dockerfile.*'
+      - 'dashboard/Dockerfile'
+      - 'dashboard/Dockerfile.*'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/docker-build.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'Dockerfile'
+      - 'Dockerfile.*'
+      - 'ee/Dockerfile.*'
+      - 'dashboard/Dockerfile'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/docker-build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-matrix:
+    name: Build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: omnia-operator
+            dockerfile: Dockerfile
+            context: .
+          - image: omnia-facade
+            dockerfile: Dockerfile.agent
+            context: .
+          - image: omnia-runtime
+            dockerfile: Dockerfile.runtime
+            context: .
+          - image: omnia-dashboard
+            dockerfile: dashboard/Dockerfile
+            context: dashboard
+          - image: omnia-session-api
+            dockerfile: Dockerfile.session-api
+            context: .
+          - image: omnia-memory-api
+            dockerfile: Dockerfile.memory-api
+            context: .
+          - image: omnia-doctor
+            dockerfile: Dockerfile.doctor
+            context: .
+          - image: omnia-compaction
+            dockerfile: Dockerfile.compaction
+            context: .
+          - image: omnia-arena-controller
+            dockerfile: ee/Dockerfile.arena-controller
+            context: .
+          - image: omnia-arena-worker
+            dockerfile: ee/Dockerfile.arena-worker
+            context: .
+          - image: omnia-arena-dev-console
+            dockerfile: ee/Dockerfile.arena-dev-console
+            context: .
+          - image: omnia-eval-worker
+            dockerfile: ee/Dockerfile.eval-worker
+            context: .
+          - image: omnia-policy-proxy
+            dockerfile: ee/Dockerfile.policy-proxy
+            context: .
+          - image: omnia-promptkit-lsp
+            dockerfile: ee/Dockerfile.promptkit-lsp
+            context: .
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build (no push, no attestations — verify-only)
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: false
+          tags: ${{ matrix.image }}:ci-verify
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max
