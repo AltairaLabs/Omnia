@@ -45,6 +45,12 @@ vi.mock("@/hooks/sessions", () => ({
   })),
 }));
 
+// Mock adjacent-session nav hook (uses React Query + workspace context — easier to stub).
+// Tests can override this via vi.mocked(useAdjacentSessions).mockReturnValueOnce(...).
+vi.mock("@/hooks/use-adjacent-sessions", () => ({
+  useAdjacentSessions: vi.fn(() => ({ prevId: null, nextId: null, position: null, total: 0 })),
+}));
+
 // Mock auth and memory hooks (needed by MemorySidebar imported by the page)
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({ user: { id: "test-user" }, isAuthenticated: true }),
@@ -525,6 +531,82 @@ describe("SessionDetailPage", () => {
       // ReplayTab renders the Play button and scrubber slider when timeline is non-empty.
       expect(screen.getByRole("button", { name: /play/i })).toBeInTheDocument();
       expect(screen.getByRole("slider")).toBeInTheDocument();
+    });
+  });
+
+  describe("adjacent session navigation", () => {
+    const setupAdjacent = async (
+      adjacent: { prevId: string | null; nextId: string | null; position: number | null; total: number },
+    ) => {
+      const { useSessionDetail } = await import("@/hooks");
+      vi.mocked(useSessionDetail).mockReturnValue({
+        data: mockSession,
+        isLoading: false,
+        error: null,
+      } as any);
+      const { useAdjacentSessions } = await import("@/hooks/use-adjacent-sessions");
+      vi.mocked(useAdjacentSessions).mockReturnValue(adjacent);
+    };
+
+    it("hides prev/next controls when there are no adjacent sessions", async () => {
+      await setupAdjacent({ prevId: null, nextId: null, position: null, total: 0 });
+      await renderPage();
+      expect(screen.queryByRole("button", { name: /previous session/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /next session/i })).not.toBeInTheDocument();
+    });
+
+    it("renders position label and both buttons enabled in the middle of the list", async () => {
+      await setupAdjacent({ prevId: "sess-a", nextId: "sess-b", position: 2, total: 5 });
+      await renderPage();
+      expect(screen.getByText("2 / 5")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /previous session/i })).not.toBeDisabled();
+      expect(screen.getByRole("button", { name: /next session/i })).not.toBeDisabled();
+    });
+
+    it("disables the prev button at the top of the list", async () => {
+      await setupAdjacent({ prevId: null, nextId: "sess-b", position: 1, total: 5 });
+      await renderPage();
+      expect(screen.getByRole("button", { name: /previous session/i })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /next session/i })).not.toBeDisabled();
+    });
+
+    it("disables the next button at the bottom of the list", async () => {
+      await setupAdjacent({ prevId: "sess-a", nextId: null, position: 5, total: 5 });
+      await renderPage();
+      expect(screen.getByRole("button", { name: /previous session/i })).not.toBeDisabled();
+      expect(screen.getByRole("button", { name: /next session/i })).toBeDisabled();
+    });
+
+    it("navigates to prev/next session on button click", async () => {
+      const user = userEvent.setup();
+      await setupAdjacent({ prevId: "sess-prev", nextId: "sess-next", position: 3, total: 10 });
+      await renderPage();
+      await user.click(screen.getByRole("button", { name: /previous session/i }));
+      expect(mockPush).toHaveBeenCalledWith("/sessions/sess-prev");
+      await user.click(screen.getByRole("button", { name: /next session/i }));
+      expect(mockPush).toHaveBeenCalledWith("/sessions/sess-next");
+    });
+
+    it("navigates on ArrowLeft / ArrowRight key presses", async () => {
+      const user = userEvent.setup();
+      await setupAdjacent({ prevId: "sess-prev", nextId: "sess-next", position: 3, total: 10 });
+      await renderPage();
+      await user.keyboard("{ArrowLeft}");
+      expect(mockPush).toHaveBeenCalledWith("/sessions/sess-prev");
+      await user.keyboard("{ArrowRight}");
+      expect(mockPush).toHaveBeenCalledWith("/sessions/sess-next");
+    });
+
+    it("ignores arrow keys when typing in an input", async () => {
+      const user = userEvent.setup();
+      await setupAdjacent({ prevId: "sess-prev", nextId: "sess-next", position: 3, total: 10 });
+      await renderPage();
+      const input = document.createElement("input");
+      document.body.appendChild(input);
+      input.focus();
+      await user.keyboard("{ArrowLeft}");
+      expect(mockPush).not.toHaveBeenCalledWith("/sessions/sess-prev");
+      document.body.removeChild(input);
     });
   });
 });

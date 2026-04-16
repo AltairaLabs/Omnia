@@ -11,7 +11,6 @@ import { ReplayDetails } from "./replay-details";
 import { useReplayPlayback } from "@/hooks/use-replay-playback";
 import { sessionDurationMs } from "@/lib/sessions/replay";
 import { extractTimelineEvents } from "@/lib/sessions/timeline";
-import { cn } from "@/lib/utils";
 import type { Session, Message, ToolCall, ProviderCall, RuntimeEvent } from "@/types/session";
 
 interface ReplayTabProps {
@@ -91,7 +90,7 @@ export function ReplayTab({
       />
 
       {/* Main + drawer */}
-      <div className="relative flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0">
         <div className="flex flex-1 min-w-0 flex-col p-4">
           <div className="mb-2 flex items-center justify-end">
             <Button
@@ -121,22 +120,18 @@ export function ReplayTab({
           </div>
         </div>
 
-        <aside
-          data-testid="replay-details-drawer"
-          aria-hidden={!detailsOpen}
-          className={cn(
-            "flex-shrink-0 overflow-hidden border-l bg-background transition-[width] duration-200 ease-out",
-            detailsOpen ? "w-96" : "w-0",
-          )}
-        >
-          <div className="h-full w-96 p-4">
+        {detailsOpen && (
+          <aside
+            data-testid="replay-details-drawer"
+            className="w-96 flex-shrink-0 border-l bg-background p-4"
+          >
             <ReplayDetails
               startedAt={session.startedAt}
               currentTimeMs={currentTimeMs}
               events={timeline}
             />
-          </div>
-        </aside>
+          </aside>
+        )}
       </div>
     </div>
   );

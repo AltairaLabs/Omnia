@@ -67,9 +67,8 @@ describe("ReplayTab", () => {
         runtimeEvents={[]}
       />
     );
-    const drawer = screen.getByTestId("replay-details-drawer");
-    expect(drawer).toHaveAttribute("aria-hidden", "true");
-    expect(drawer.className).toContain("w-0");
+    expect(screen.queryByTestId("replay-details-drawer")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /show details/i })).toBeInTheDocument();
   });
 
   it("toggles the details drawer open and closed", () => {
@@ -82,14 +81,11 @@ describe("ReplayTab", () => {
         runtimeEvents={[]}
       />
     );
-    const toggle = screen.getByRole("button", { name: /show details/i });
-    fireEvent.click(toggle);
-    const drawer = screen.getByTestId("replay-details-drawer");
-    expect(drawer).toHaveAttribute("aria-hidden", "false");
-    expect(drawer.className).toContain("w-96");
+    fireEvent.click(screen.getByRole("button", { name: /show details/i }));
+    expect(screen.getByTestId("replay-details-drawer")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /hide details/i }));
-    expect(screen.getByTestId("replay-details-drawer")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.queryByTestId("replay-details-drawer")).not.toBeInTheDocument();
   });
 
   it("renders a friendly empty state when the session has no events", () => {

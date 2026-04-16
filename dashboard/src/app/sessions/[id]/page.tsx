@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout";
@@ -43,8 +43,11 @@ import {
   XCircle,
   Shield,
   Play,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { useSessionDetail, useSessionAllMessages, useSessionEvalResults, useSessionToolCalls, useSessionProviderCalls, useSessionRuntimeEvents } from "@/hooks/sessions";
+import { useAdjacentSessions } from "@/hooks/use-adjacent-sessions";
 import { MemorySidebar } from "@/components/memories/memory-sidebar";
 import type { Message, Session, ToolCall, ProviderCall, RuntimeEvent, EvalResult } from "@/types";
 import { EvalResultsBadge } from "@/components/sessions/eval-results-badge";
@@ -342,6 +345,27 @@ export default function SessionDetailPage({
     ? buildSessionDashboardUrl(grafana, id, session.agentName, session.agentNamespace)
     : null;
 
+  const { prevId, nextId, position, total } = useAdjacentSessions(id);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
+      if (e.key === "ArrowLeft" && prevId) {
+        e.preventDefault();
+        router.push(`/sessions/${prevId}`);
+      } else if (e.key === "ArrowRight" && nextId) {
+        e.preventDefault();
+        router.push(`/sessions/${nextId}`);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [prevId, nextId, router]);
+
   if (isLoading) {
     return <DetailSkeleton />;
   }
@@ -464,11 +488,40 @@ export default function SessionDetailPage({
         title={
           <div className="flex items-center gap-3 min-w-0">
             <Button variant="ghost" size="icon" className="shrink-0" asChild>
-              <Link href="/sessions">
+              <Link href="/sessions" aria-label="Back to sessions list">
                 <ArrowLeft className="h-4 w-4" />
               </Link>
             </Button>
             <span className="truncate">Session {session.id}</span>
+            {position !== null && total > 1 && (
+              <div className="flex items-center gap-0.5 shrink-0">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => prevId && router.push(`/sessions/${prevId}`)}
+                  disabled={!prevId}
+                  aria-label="Previous session"
+                  title="Previous session (←)"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-xs text-muted-foreground tabular-nums px-1">
+                  {position} / {total}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => nextId && router.push(`/sessions/${nextId}`)}
+                  disabled={!nextId}
+                  aria-label="Next session"
+                  title="Next session (→)"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
           </div>
         }
       />

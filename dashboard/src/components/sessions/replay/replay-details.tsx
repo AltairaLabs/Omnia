@@ -17,7 +17,6 @@ import {
   CheckCircle2,
   AlertCircle,
 } from "lucide-react";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { toElapsedMs } from "@/lib/sessions/replay";
 import type { TimelineEvent, TimelineEventKind } from "@/lib/sessions/timeline";
 import { cn } from "@/lib/utils";
@@ -198,24 +197,22 @@ export function ReplayDetails({ startedAt, currentTimeMs, events }: ReplayDetail
       <div className="border-b bg-muted/30 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
         Details ({visible.length})
       </div>
-      <ScrollArea className="flex-1">
-        <div>
-          {visible.map(({ event, elapsedMs }) => (
-            <div
-              key={event.id}
-              ref={event.id === currentId ? currentRowRef : undefined}
-            >
-              <LogRow
-                event={event}
-                elapsedMs={elapsedMs}
-                isCurrent={event.id === currentId}
-                expanded={expandedIds.has(event.id)}
-                onToggle={() => toggle(event.id)}
-              />
-            </div>
-          ))}
-        </div>
-      </ScrollArea>
+      <div className="flex-1 overflow-y-auto">
+        {visible.map(({ event, elapsedMs }) => (
+          <div
+            key={event.id}
+            ref={event.id === currentId ? currentRowRef : undefined}
+          >
+            <LogRow
+              event={event}
+              elapsedMs={elapsedMs}
+              isCurrent={event.id === currentId}
+              expanded={expandedIds.has(event.id)}
+              onToggle={() => toggle(event.id)}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
