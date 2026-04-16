@@ -153,6 +153,57 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Generate in-toto SBOM + provenance attestations attached to
+          # the pushed manifest. Near-zero build overhead; enables
+          # `cosign verify-attestation` and `syft attest` by downstream
+          # consumers without any per-repo tooling.
+          sbom: true
+          provenance: mode=max
+
+  trivy-scan:
+    name: Trivy Image Scan
+    needs: [parse-version, docker-release]
+    runs-on: ubuntu-latest
+    # Scan-only — never blocks the release. Findings surface in the
+    # Security tab via SARIF upload; we triage there.
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - omnia-operator
+          - omnia-facade
+          - omnia-runtime
+          - omnia-dashboard
+          - omnia-session-api
+          - omnia-memory-api
+          - omnia-doctor
+          - omnia-compaction
+          - omnia-arena-controller
+          - omnia-arena-worker
+          - omnia-arena-dev-console
+          - omnia-eval-worker
+          - omnia-policy-proxy
+          - omnia-promptkit-lsp
+    steps:
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.parse-version.outputs.version }}
+          format: sarif
+          output: trivy-${{ matrix.image }}.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: trivy-${{ matrix.image }}.sarif
+          category: trivy-${{ matrix.image }}
 
   helm-release:
     name: Package & Push Helm Chart
