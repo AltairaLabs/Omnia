@@ -63,8 +63,12 @@ async function handleBuiltinAuth(): Promise<User> {
     return sessionUser;
   }
 
-  // No authenticated user - return anonymous
-  // Middleware will handle redirect to login page
+  // No authenticated user — return anonymous. The real gate lives in
+  // dashboard/src/middleware.ts, which redirects unauthenticated
+  // requests to /login before they reach any page or data-fetching
+  // route. This branch still exists for server-side code paths that
+  // run outside the middleware (tests, cron jobs, direct lib imports)
+  // and expect a User object.
   return createAnonymousUser("viewer");
 }
 
@@ -83,8 +87,12 @@ async function handleOAuthAuth(config: AuthConfig): Promise<User> {
     return sessionUser;
   }
 
-  // No authenticated user - return anonymous
-  // Middleware will handle redirect to login page
+  // No authenticated user — return anonymous. The real gate lives in
+  // dashboard/src/middleware.ts, which redirects unauthenticated
+  // requests to /login before they reach any page or data-fetching
+  // route. This branch still exists for server-side code paths that
+  // run outside the middleware (tests, cron jobs, direct lib imports)
+  // and expect a User object.
   return createAnonymousUser("viewer");
 }
 
