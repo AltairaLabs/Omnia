@@ -66,8 +66,11 @@ jobs:
     needs: parse-version
     runs-on: ubuntu-latest
     strategy:
+      # Let all images attempt; one Dockerfile bug shouldn't block the rest.
+      fail-fast: false
       matrix:
         include:
+          # --- Core operator + agent runtime path ---
           - image: omnia
             dockerfile: Dockerfile
             context: .
@@ -76,6 +79,41 @@ jobs:
             context: .
           - image: omnia-runtime
             dockerfile: Dockerfile.runtime
+            context: .
+          # --- Core services referenced by charts/omnia/values.yaml ---
+          - image: omnia-dashboard
+            dockerfile: Dockerfile
+            context: dashboard
+          - image: omnia-session-api
+            dockerfile: Dockerfile.session-api
+            context: .
+          - image: omnia-memory-api
+            dockerfile: Dockerfile.memory-api
+            context: .
+          - image: omnia-doctor
+            dockerfile: Dockerfile.doctor
+            context: .
+          - image: omnia-compaction
+            dockerfile: Dockerfile.compaction
+            context: .
+          # --- Enterprise (chart gates these behind enterprise.enabled) ---
+          - image: omnia-arena-controller
+            dockerfile: ee/Dockerfile.arena-controller
+            context: .
+          - image: omnia-arena-worker
+            dockerfile: ee/Dockerfile.arena-worker
+            context: .
+          - image: omnia-arena-dev-console
+            dockerfile: ee/Dockerfile.arena-dev-console
+            context: .
+          - image: omnia-eval-worker
+            dockerfile: ee/Dockerfile.eval-worker
+            context: .
+          - image: omnia-policy-proxy
+            dockerfile: ee/Dockerfile.policy-proxy
+            context: .
+          - image: omnia-promptkit-lsp
+            dockerfile: ee/Dockerfile.promptkit-lsp
             context: .
     steps:
       - name: Checkout
@@ -409,9 +447,23 @@ jobs:
 
           ### Docker Images
 
+          Core:
           - `ghcr.io/altairalabs/omnia:${{ needs.parse-version.outputs.version }}` (operator)
           - `ghcr.io/altairalabs/omnia-facade:${{ needs.parse-version.outputs.version }}` (agent facade)
           - `ghcr.io/altairalabs/omnia-runtime:${{ needs.parse-version.outputs.version }}` (agent runtime)
+          - `ghcr.io/altairalabs/omnia-dashboard:${{ needs.parse-version.outputs.version }}` (dashboard UI)
+          - `ghcr.io/altairalabs/omnia-session-api:${{ needs.parse-version.outputs.version }}` (session storage API)
+          - `ghcr.io/altairalabs/omnia-memory-api:${{ needs.parse-version.outputs.version }}` (memory API)
+          - `ghcr.io/altairalabs/omnia-doctor:${{ needs.parse-version.outputs.version }}` (in-cluster doctor)
+          - `ghcr.io/altairalabs/omnia-compaction:${{ needs.parse-version.outputs.version }}` (retention/compaction job)
+
+          Enterprise:
+          - `ghcr.io/altairalabs/omnia-arena-controller:${{ needs.parse-version.outputs.version }}`
+          - `ghcr.io/altairalabs/omnia-arena-worker:${{ needs.parse-version.outputs.version }}`
+          - `ghcr.io/altairalabs/omnia-arena-dev-console:${{ needs.parse-version.outputs.version }}`
+          - `ghcr.io/altairalabs/omnia-eval-worker:${{ needs.parse-version.outputs.version }}`
+          - `ghcr.io/altairalabs/omnia-policy-proxy:${{ needs.parse-version.outputs.version }}`
+          - `ghcr.io/altairalabs/omnia-promptkit-lsp:${{ needs.parse-version.outputs.version }}`
 
           ## Documentation
 
