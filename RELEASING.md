@@ -87,9 +87,20 @@ git push origin v0.2.0
 Images are pushed to GHCR:
 
 ```
-ghcr.io/altairalabs/omnia:<version>
+ghcr.io/altairalabs/omnia-operator:<version>
 ghcr.io/altairalabs/omnia-facade:<version>
 ghcr.io/altairalabs/omnia-runtime:<version>
+ghcr.io/altairalabs/omnia-dashboard:<version>
+ghcr.io/altairalabs/omnia-session-api:<version>
+ghcr.io/altairalabs/omnia-memory-api:<version>
+ghcr.io/altairalabs/omnia-doctor:<version>
+ghcr.io/altairalabs/omnia-compaction:<version>
+ghcr.io/altairalabs/omnia-arena-controller:<version>
+ghcr.io/altairalabs/omnia-arena-worker:<version>
+ghcr.io/altairalabs/omnia-arena-dev-console:<version>
+ghcr.io/altairalabs/omnia-eval-worker:<version>
+ghcr.io/altairalabs/omnia-policy-proxy:<version>
+ghcr.io/altairalabs/omnia-promptkit-lsp:<version>
 ```
 
 For stable releases, additional tags are created:
@@ -136,7 +147,7 @@ After a release is complete:
 1. **Verify the release**
    ```bash
    # Check Docker images
-   docker pull ghcr.io/altairalabs/omnia:0.2.0
+   docker pull ghcr.io/altairalabs/omnia-operator:0.2.0
 
    # Check Helm chart
    helm pull oci://ghcr.io/altairalabs/charts/omnia --version 0.2.0

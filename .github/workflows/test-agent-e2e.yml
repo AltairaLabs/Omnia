@@ -64,7 +64,7 @@ jobs:
 
           # Build operator image
           echo "Building omnia (operator) image..."
-          docker build -t ghcr.io/altairalabs/omnia:$IMAGE_TAG -f Dockerfile .
+          docker build -t ghcr.io/altairalabs/omnia-operator:$IMAGE_TAG -f Dockerfile .
 
           # Build facade image
           echo "Building omnia-facade image..."
@@ -107,7 +107,7 @@ jobs:
       - name: Load images into kind
         run: |
           echo "=== Loading images into kind cluster ==="
-          kind load docker-image ghcr.io/altairalabs/omnia:$IMAGE_TAG --name $KIND_CLUSTER
+          kind load docker-image ghcr.io/altairalabs/omnia-operator:$IMAGE_TAG --name $KIND_CLUSTER
           kind load docker-image ghcr.io/altairalabs/omnia-facade:$IMAGE_TAG --name $KIND_CLUSTER
           kind load docker-image ghcr.io/altairalabs/omnia-runtime:$IMAGE_TAG --name $KIND_CLUSTER
           echo "Images loaded into kind"

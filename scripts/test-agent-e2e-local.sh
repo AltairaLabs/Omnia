@@ -34,7 +34,7 @@ echo ""
 echo "=== Building Docker images ==="
 
 echo "Building omnia (operator) image..."
-docker build -t ghcr.io/altairalabs/omnia:$IMAGE_TAG -f Dockerfile .
+docker build -t ghcr.io/altairalabs/omnia-operator:$IMAGE_TAG -f Dockerfile .
 
 echo "Building omnia-facade image..."
 docker build -t ghcr.io/altairalabs/omnia-facade:$IMAGE_TAG -f Dockerfile.agent .
@@ -63,7 +63,7 @@ kubectl cluster-info --context kind-$KIND_CLUSTER
 # Load images into kind
 echo ""
 echo "=== Loading images into kind cluster ==="
-kind load docker-image ghcr.io/altairalabs/omnia:$IMAGE_TAG --name $KIND_CLUSTER
+kind load docker-image ghcr.io/altairalabs/omnia-operator:$IMAGE_TAG --name $KIND_CLUSTER
 kind load docker-image ghcr.io/altairalabs/omnia-facade:$IMAGE_TAG --name $KIND_CLUSTER
 kind load docker-image ghcr.io/altairalabs/omnia-runtime:$IMAGE_TAG --name $KIND_CLUSTER
 echo "Images loaded into kind"

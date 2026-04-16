@@ -71,7 +71,7 @@ jobs:
       matrix:
         include:
           # --- Core operator + agent runtime path ---
-          - image: omnia
+          - image: omnia-operator
             dockerfile: Dockerfile
             context: .
           - image: omnia-facade
@@ -448,7 +448,7 @@ jobs:
           ### Docker Images
 
           Core:
-          - `ghcr.io/altairalabs/omnia:${{ needs.parse-version.outputs.version }}` (operator)
+          - `ghcr.io/altairalabs/omnia-operator:${{ needs.parse-version.outputs.version }}` (operator)
           - `ghcr.io/altairalabs/omnia-facade:${{ needs.parse-version.outputs.version }}` (agent facade)
           - `ghcr.io/altairalabs/omnia-runtime:${{ needs.parse-version.outputs.version }}` (agent runtime)
           - `ghcr.io/altairalabs/omnia-dashboard:${{ needs.parse-version.outputs.version }}` (dashboard UI)

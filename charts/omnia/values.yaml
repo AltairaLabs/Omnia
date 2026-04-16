@@ -222,8 +222,10 @@ license:
   existingSecret: ""
 
 image:
-  # -- Image repository
-  repository: ghcr.io/altairalabs/omnia
+  # -- Image repository for the Omnia operator (controller-manager binary).
+  # NOTE: renamed from `ghcr.io/altairalabs/omnia` in v0.9.0-beta.3 — if you
+  # pinned `image.repository` in your values, update it.
+  repository: ghcr.io/altairalabs/omnia-operator
   # -- Image pull policy
   pullPolicy: IfNotPresent
   # -- Image tag (defaults to Chart appVersion)
