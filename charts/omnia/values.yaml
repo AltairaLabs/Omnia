@@ -222,8 +222,10 @@ license:
   existingSecret: ""
 
 image:
-  # -- Image repository
-  repository: ghcr.io/altairalabs/omnia
+  # -- Image repository for the Omnia operator (controller-manager binary).
+  # NOTE: renamed from `ghcr.io/altairalabs/omnia` in v0.9.0-beta.3 — if you
+  # pinned `image.repository` in your values, update it.
+  repository: ghcr.io/altairalabs/omnia-operator
   # -- Image pull policy
   pullPolicy: IfNotPresent
   # -- Image tag (defaults to Chart appVersion)
@@ -396,6 +398,23 @@ dashboard:
     type: ClusterIP
     # -- Service port
     port: 3000
+
+  # -- Absolute base URL for the dashboard (used for OAuth callbacks as
+  # `${baseUrl}/api/auth/callback`). If empty, falls back to computing a URL
+  # from dashboard.ingress.* when dashboard.ingress.enabled=true. Set this
+  # directly when exposing the dashboard via Gateway API rather than a
+  # Kubernetes Ingress. Example: "https://dashboard.example.com"
+  baseUrl: ""
+
+  # -- Expose the dashboard through the external Gateway (TLS-terminated)
+  # instead of the HTTP-only internalGateway. Requires gateway.enabled=true
+  # and the external Gateway to have a listener matching `hostname` below.
+  # Mutually exclusive with the internalGateway-bound HTTPRoute.
+  externalGateway:
+    enabled: false
+    # -- Optional hostname filter on the HTTPRoute. Leave empty to attach to
+    # all hostnames the external Gateway accepts.
+    hostname: ""
 
   # -- Dashboard ingress configuration
   ingress:
@@ -871,11 +890,21 @@ workspaces:
 # ============================================================================
 
 workspaceContent:
-  # -- Enable workspace content storage for dashboard
-  # This creates a root PVC that the dashboard mounts to browse all workspace content
-  # NOTE: Only effective when enterprise.enabled=true (automatically gated in templates)
-  # Requires RWX storage class (NFS or cloud-native like EFS, Azure Files, Filestore)
-  enabled: true
+  # -- Enable the workspace-content PVC. The operator syncs SkillSource /
+  # ArenaSource content into it, and the dashboard mounts it read-only
+  # to browse that content.
+  #
+  # REQUIRES RWX STORAGE. The default cloud StorageClasses on AKS (Azure
+  # Disk CSI), EKS (EBS CSI) and GKE (pd.csi.storage.gke.io) are block-
+  # mode and will fail to provision this PVC. If you enable this on a
+  # cloud cluster, also set `persistence.storageClass` to an RWX class
+  # (Azure Files CSI, EFS CSI, Filestore CSI) or provide an existing
+  # ReadWriteMany PVC via `persistence.existingClaim`.
+  #
+  # Defaults to false so a vanilla `helm install` on any cloud succeeds
+  # without extra storage setup. Dev mode (values-dev.yaml) overrides
+  # this to true + ReadWriteOnce on kind's local-path provisioner.
+  enabled: false
 
   # -- Mount path in dashboard pod
   mountPath: /workspace-content
@@ -1622,6 +1651,13 @@ gateway:
   #   gateway.envoyproxy.io/timeout-idle: "3600s"
   #   gateway.istio.io/controller-name: "istio.io/gateway-controller"
   annotations: {}
+  # -- Annotations rendered under spec.infrastructure.annotations of the Gateway.
+  # These are forwarded by the Gateway API controller (Istio 1.21+ with GWAPI v1.1+)
+  # onto the provisioned LoadBalancer Service, which is where cloud LB annotations
+  # (static IP, resource group, etc.) actually need to land. Example (AKS):
+  #   service.beta.kubernetes.io/azure-load-balancer-resource-group: my-rg
+  #   service.beta.kubernetes.io/azure-load-balancer-ipv4: 10.0.0.42
+  infrastructureAnnotations: {}
 
 # Internal gateway for observability tools (Grafana, Prometheus, etc.)
 internalGateway:
@@ -1633,6 +1669,10 @@ internalGateway:
   className: istio
   # -- Gateway listener port
   port: 8080
+  # -- Annotations rendered under spec.infrastructure.annotations of the internal
+  # Gateway. Useful for forcing an internal-only LB via cloud-specific annotations,
+  # e.g. (AKS): service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+  infrastructureAnnotations: {}
   # -- Expose Grafana (main observability UI - includes Prometheus, Loki, Tempo datasources)
   grafana:
     enabled: true

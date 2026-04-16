@@ -1,0 +1,151 @@
+suite: Gateway-API-native cloud deployment knobs
+# Covers issues #835 (gateway infrastructureAnnotations), #836
+# (dashboard externalGateway), and #837 (dashboard baseUrl).
+templates:
+  - templates/gateway/gateway.yaml
+  - templates/dashboard/httproute.yaml
+  - templates/dashboard/configmap.yaml
+tests:
+  # --- #835: external gateway infrastructureAnnotations ---
+  - it: external gateway renders infrastructureAnnotations under spec.infrastructure
+    template: templates/gateway/gateway.yaml
+    set:
+      gateway.enabled: true
+      gateway.infrastructureAnnotations:
+        service.beta.kubernetes.io/azure-load-balancer-resource-group: my-rg
+        service.beta.kubernetes.io/azure-load-balancer-ipv4: 10.0.0.42
+    asserts:
+      - equal:
+          path: spec.infrastructure.annotations["service.beta.kubernetes.io/azure-load-balancer-resource-group"]
+          value: my-rg
+        documentIndex: 0
+      - equal:
+          path: spec.infrastructure.annotations["service.beta.kubernetes.io/azure-load-balancer-ipv4"]
+          value: 10.0.0.42
+        documentIndex: 0
+
+  - it: external gateway omits spec.infrastructure when annotations empty (default)
+    template: templates/gateway/gateway.yaml
+    set:
+      gateway.enabled: true
+    asserts:
+      - notExists:
+          path: spec.infrastructure
+        documentIndex: 0
+
+  # --- #835: internal gateway infrastructureAnnotations ---
+  - it: internal gateway renders infrastructureAnnotations under spec.infrastructure
+    template: templates/gateway/gateway.yaml
+    set:
+      gateway.enabled: true
+      internalGateway.enabled: true
+      internalGateway.infrastructureAnnotations:
+        service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+    asserts:
+      - equal:
+          path: spec.infrastructure.annotations["service.beta.kubernetes.io/azure-load-balancer-internal"]
+          value: "true"
+        documentIndex: 1
+
+  # --- #836: dashboard externalGateway ---
+  - it: dashboard HTTPRoute attaches to external gateway when externalGateway.enabled
+    template: templates/dashboard/httproute.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.externalGateway.enabled: true
+      dashboard.externalGateway.hostname: dashboard.example.com
+      gateway.enabled: true
+      gateway.name: agents
+      internalGateway.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: spec.parentRefs[0].name
+          value: RELEASE-NAME-omnia-agents
+      - equal:
+          path: spec.hostnames[0]
+          value: dashboard.example.com
+
+  - it: dashboard HTTPRoute attaches to internal gateway when externalGateway disabled
+    template: templates/dashboard/httproute.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.externalGateway.enabled: false
+      internalGateway.enabled: true
+      internalGateway.name: internal
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: spec.parentRefs[0].name
+          value: RELEASE-NAME-omnia-internal
+
+  - it: dashboard HTTPRoute does not render when both gateways disabled
+    template: templates/dashboard/httproute.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.externalGateway.enabled: false
+      internalGateway.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: dashboard HTTPRoute hostname field omitted when hostname empty
+    template: templates/dashboard/httproute.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.externalGateway.enabled: true
+      gateway.enabled: true
+    asserts:
+      - notExists:
+          path: spec.hostnames
+
+  # --- #837: dashboard.baseUrl ---
+  - it: OMNIA_BASE_URL uses dashboard.baseUrl when set
+    template: templates/dashboard/configmap.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.baseUrl: https://dashboard.example.com
+    asserts:
+      - equal:
+          path: data.OMNIA_BASE_URL
+          value: https://dashboard.example.com
+
+  - it: OMNIA_BASE_URL falls back to ingress host when baseUrl empty
+    template: templates/dashboard/configmap.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.baseUrl: ""
+      dashboard.ingress.enabled: true
+      dashboard.ingress.host: legacy.example.com
+      dashboard.ingress.tls:
+        - secretName: dashboard-tls
+          hosts:
+            - legacy.example.com
+    asserts:
+      - equal:
+          path: data.OMNIA_BASE_URL
+          value: https://legacy.example.com
+
+  - it: OMNIA_BASE_URL is absent when both baseUrl and ingress are unset
+    template: templates/dashboard/configmap.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.baseUrl: ""
+      dashboard.ingress.enabled: false
+    asserts:
+      - notExists:
+          path: data.OMNIA_BASE_URL
+
+  - it: dashboard.baseUrl wins over ingress-derived value
+    template: templates/dashboard/configmap.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.baseUrl: https://dashboard.example.com
+      dashboard.ingress.enabled: true
+      dashboard.ingress.host: should-not-be-used.example.com
+    asserts:
+      - equal:
+          path: data.OMNIA_BASE_URL
+          value: https://dashboard.example.com

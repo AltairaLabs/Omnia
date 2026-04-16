@@ -66,9 +66,12 @@ jobs:
     needs: parse-version
     runs-on: ubuntu-latest
     strategy:
+      # Let all images attempt; one Dockerfile bug shouldn't block the rest.
+      fail-fast: false
       matrix:
         include:
-          - image: omnia
+          # --- Core operator + agent runtime path ---
+          - image: omnia-operator
             dockerfile: Dockerfile
             context: .
           - image: omnia-facade
@@ -76,6 +79,41 @@ jobs:
             context: .
           - image: omnia-runtime
             dockerfile: Dockerfile.runtime
+            context: .
+          # --- Core services referenced by charts/omnia/values.yaml ---
+          - image: omnia-dashboard
+            dockerfile: Dockerfile
+            context: dashboard
+          - image: omnia-session-api
+            dockerfile: Dockerfile.session-api
+            context: .
+          - image: omnia-memory-api
+            dockerfile: Dockerfile.memory-api
+            context: .
+          - image: omnia-doctor
+            dockerfile: Dockerfile.doctor
+            context: .
+          - image: omnia-compaction
+            dockerfile: Dockerfile.compaction
+            context: .
+          # --- Enterprise (chart gates these behind enterprise.enabled) ---
+          - image: omnia-arena-controller
+            dockerfile: ee/Dockerfile.arena-controller
+            context: .
+          - image: omnia-arena-worker
+            dockerfile: ee/Dockerfile.arena-worker
+            context: .
+          - image: omnia-arena-dev-console
+            dockerfile: ee/Dockerfile.arena-dev-console
+            context: .
+          - image: omnia-eval-worker
+            dockerfile: ee/Dockerfile.eval-worker
+            context: .
+          - image: omnia-policy-proxy
+            dockerfile: ee/Dockerfile.policy-proxy
+            context: .
+          - image: omnia-promptkit-lsp
+            dockerfile: ee/Dockerfile.promptkit-lsp
             context: .
     steps:
       - name: Checkout
@@ -115,6 +153,57 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Generate in-toto SBOM + provenance attestations attached to
+          # the pushed manifest. Near-zero build overhead; enables
+          # `cosign verify-attestation` and `syft attest` by downstream
+          # consumers without any per-repo tooling.
+          sbom: true
+          provenance: mode=max
+
+  trivy-scan:
+    name: Trivy Image Scan
+    needs: [parse-version, docker-release]
+    runs-on: ubuntu-latest
+    # Scan-only — never blocks the release. Findings surface in the
+    # Security tab via SARIF upload; we triage there.
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - omnia-operator
+          - omnia-facade
+          - omnia-runtime
+          - omnia-dashboard
+          - omnia-session-api
+          - omnia-memory-api
+          - omnia-doctor
+          - omnia-compaction
+          - omnia-arena-controller
+          - omnia-arena-worker
+          - omnia-arena-dev-console
+          - omnia-eval-worker
+          - omnia-policy-proxy
+          - omnia-promptkit-lsp
+    steps:
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.parse-version.outputs.version }}
+          format: sarif
+          output: trivy-${{ matrix.image }}.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: trivy-${{ matrix.image }}.sarif
+          category: trivy-${{ matrix.image }}
 
   helm-release:
     name: Package & Push Helm Chart
@@ -409,9 +498,23 @@ jobs:
 
           ### Docker Images
 
-          - `ghcr.io/altairalabs/omnia:${{ needs.parse-version.outputs.version }}` (operator)
+          Core:
+          - `ghcr.io/altairalabs/omnia-operator:${{ needs.parse-version.outputs.version }}` (operator)
           - `ghcr.io/altairalabs/omnia-facade:${{ needs.parse-version.outputs.version }}` (agent facade)
           - `ghcr.io/altairalabs/omnia-runtime:${{ needs.parse-version.outputs.version }}` (agent runtime)
+          - `ghcr.io/altairalabs/omnia-dashboard:${{ needs.parse-version.outputs.version }}` (dashboard UI)
+          - `ghcr.io/altairalabs/omnia-session-api:${{ needs.parse-version.outputs.version }}` (session storage API)
+          - `ghcr.io/altairalabs/omnia-memory-api:${{ needs.parse-version.outputs.version }}` (memory API)
+          - `ghcr.io/altairalabs/omnia-doctor:${{ needs.parse-version.outputs.version }}` (in-cluster doctor)
+          - `ghcr.io/altairalabs/omnia-compaction:${{ needs.parse-version.outputs.version }}` (retention/compaction job)
+
+          Enterprise:
+          - `ghcr.io/altairalabs/omnia-arena-controller:${{ needs.parse-version.outputs.version }}`
+          - `ghcr.io/altairalabs/omnia-arena-worker:${{ needs.parse-version.outputs.version }}`
+          - `ghcr.io/altairalabs/omnia-arena-dev-console:${{ needs.parse-version.outputs.version }}`
+          - `ghcr.io/altairalabs/omnia-eval-worker:${{ needs.parse-version.outputs.version }}`
+          - `ghcr.io/altairalabs/omnia-policy-proxy:${{ needs.parse-version.outputs.version }}`
+          - `ghcr.io/altairalabs/omnia-promptkit-lsp:${{ needs.parse-version.outputs.version }}`
 
           ## Documentation
 
@@ -439,3 +542,53 @@ jobs:
             dist/omnia-*.tgz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  bump-chart-version:
+    name: Open PR bumping Chart.yaml
+    needs: [parse-version, github-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Bump Chart.yaml to released version
+        run: |
+          VERSION="${{ needs.parse-version.outputs.version }}"
+          yq eval -i ".version = \"$VERSION\"" charts/omnia/Chart.yaml
+          yq eval -i ".appVersion = \"$VERSION\"" charts/omnia/Chart.yaml
+          echo "Updated Chart.yaml:"
+          head -10 charts/omnia/Chart.yaml
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: chore/bump-chart-${{ needs.parse-version.outputs.version }}
+          commit-message: |
+            chore(chart): bump appVersion to v${{ needs.parse-version.outputs.version }}
+
+            Auto-generated after release of v${{ needs.parse-version.outputs.version }}.
+            Keeps main in sync with the last published chart so local
+            `helm template` / `helm install` from source resolves the right
+            image tags.
+          title: "chore(chart): bump to v${{ needs.parse-version.outputs.version }}"
+          body: |
+            Auto-generated by the release workflow after publishing
+            v${{ needs.parse-version.outputs.version }}.
+
+            Updates `charts/omnia/Chart.yaml` `version` + `appVersion` so
+            local `helm template` / `helm install` from the repo resolves
+            the just-released image set instead of showing stale `0.1.0`
+            tags.
+
+            Safe to merge as-is once CI passes.
+          labels: |
+            chore
+            release
+          delete-branch: true

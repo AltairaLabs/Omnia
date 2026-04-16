@@ -2,8 +2,11 @@ apiVersion: v2
 name: omnia
 description: A Helm chart for deploying Omnia - Kubernetes operator for AI agent orchestration
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+# version / appVersion track the last git-tagged release. When cutting a
+# new release, bump both in a commit before tagging. The release workflow
+# also rewrites these at package-time as a safety net.
+version: 0.9.0-beta.2
+appVersion: "0.9.0-beta.2"
 kubeVersion: ">=1.26.0-0"
 home: https://github.com/AltairaLabs/Omnia
 sources:
