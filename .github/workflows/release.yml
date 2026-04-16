@@ -82,7 +82,11 @@ jobs:
             context: .
           # --- Core services referenced by charts/omnia/values.yaml ---
           - image: omnia-dashboard
-            dockerfile: Dockerfile
+            # `file:` on docker/build-push-action resolves from the runner
+            # workdir (repo root), not the `context:`. Spell out the full
+            # path or buildx picks up the root Go Dockerfile and tries to
+            # COPY go.sum from the dashboard context.
+            dockerfile: dashboard/Dockerfile
             context: dashboard
           - image: omnia-session-api
             dockerfile: Dockerfile.session-api
@@ -157,14 +161,8 @@ jobs:
           # the pushed manifest. Enables `cosign verify-attestation` and
           # `syft attest` by downstream consumers without any per-repo
           # tooling.
-          #
-          # `provenance: true` (mode=min) signs the image; `mode=max`
-          # additionally inlines build-arg / source-URL metadata but
-          # introspects the builder filesystem in ways that break on
-          # Next.js builds ("failed to calculate checksum of go.sum").
-          # mode=min is sufficient for downstream verify flows.
           sbom: true
-          provenance: true
+          provenance: mode=max
 
   trivy-scan:
     name: Trivy Image Scan
