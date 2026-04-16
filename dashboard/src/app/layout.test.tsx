@@ -32,6 +32,7 @@ vi.mock("@/components/layout", () => ({
   LicenseExpiryBanner: () => null,
   DevModeLicenseBanner: () => null,
   WorkspaceContent: ({ children }: { children: React.ReactNode }) => children,
+  AppShell: ({ children }: { children: React.ReactNode }) => children,
 }));
 
 describe("RootLayout", () => {
