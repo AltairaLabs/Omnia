@@ -948,6 +948,11 @@ workspaceContent:
   # ArenaSource content into it, and the dashboard mounts it read-only
   # to browse that content.
   #
+  # REQUIRED when `enterprise.enabled=true` and arena is active — the
+  # arena-controller unconditionally mounts this PVC. If you enable
+  # enterprise, also set `enabled: true` here and provide an RWX-capable
+  # StorageClass (or RWO on single-node clusters).
+  #
   # REQUIRES RWX STORAGE. The default cloud StorageClasses on AKS (Azure
   # Disk CSI), EKS (EBS CSI) and GKE (pd.csi.storage.gke.io) are block-
   # mode and will fail to provision this PVC. If you enable this on a
