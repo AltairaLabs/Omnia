@@ -51,6 +51,9 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "omnia.dashboard.fullname" . }}
+            {{- with .Values.dashboard.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           env:
             {{- if and (ne .Values.dashboard.auth.mode "anonymous") .Values.dashboard.auth.sessionSecret }}
             - name: OMNIA_SESSION_SECRET
@@ -125,6 +128,9 @@ spec:
             - name: ARENA_REDIS_DB
               value: "{{ .Values.enterprise.arena.queue.redis.db | default 0 }}"
             {{- end }}
+            {{- with .Values.dashboard.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           {{- with .Values.dashboard.startupProbe }}
@@ -158,6 +164,9 @@ spec:
             - name: workspace-content
               mountPath: {{ .Values.workspaceContent.mountPath | default "/workspace-content" }}
             {{- end }}
+            {{- with .Values.dashboard.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
         {{- if and .Values.dashboard.persistence.enabled (eq .Values.dashboard.builtin.storeType "sqlite") }}
         - name: data
@@ -168,6 +177,9 @@ spec:
         - name: workspace-content
           persistentVolumeClaim:
             claimName: {{ .Values.workspaceContent.persistence.existingClaim | default (printf "%s-workspace-content" (include "omnia.fullname" .)) }}
+        {{- end }}
+        {{- with .Values.dashboard.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- with .Values.dashboard.nodeSelector }}
       nodeSelector:

@@ -33,6 +33,15 @@ const (
 	istioDestinationRuleKind  = "DestinationRule"
 )
 
+// Istio traffic routing is optional — the operator only touches these
+// resources when AgentRuntime.spec.rollout.istioTrafficRouting is set,
+// and it no-ops gracefully if the Istio CRDs aren't installed. We still
+// need RBAC because the happy-path patches VirtualService weights and
+// DestinationRule subsets for canary rollouts.
+//
+// +kubebuilder:rbac:groups=networking.istio.io,resources=virtualservices,verbs=get;list;watch;patch;update
+// +kubebuilder:rbac:groups=networking.istio.io,resources=destinationrules,verbs=get;list;watch;patch;update
+
 // patchVirtualServiceWeights patches the HTTP route weights of an Istio
 // VirtualService for canary traffic splitting. It uses the unstructured client
 // so the operator does not require Istio type imports.

@@ -119,16 +119,34 @@ spec:
             failureThreshold: {{ .Values.probes.readiness.failureThreshold | default 3 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if .Values.workspaceContent.enabled }}
+          {{- with .Values.operator.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.operator.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if or .Values.workspaceContent.enabled .Values.operator.extraVolumeMounts }}
           volumeMounts:
+            {{- if .Values.workspaceContent.enabled }}
             - name: workspace-content
               mountPath: {{ .Values.workspaceContent.mountPath | default "/workspace-content" }}
+            {{- end }}
+            {{- with .Values.operator.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
-      {{- if .Values.workspaceContent.enabled }}
+      {{- if or .Values.workspaceContent.enabled .Values.operator.extraVolumes }}
       volumes:
+        {{- if .Values.workspaceContent.enabled }}
         - name: workspace-content
           persistentVolumeClaim:
             claimName: {{ .Values.workspaceContent.persistence.existingClaim | default (printf "%s-workspace-content" (include "omnia.fullname" .)) }}
+        {{- end }}
+        {{- with .Values.operator.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
