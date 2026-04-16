@@ -6,3 +6,4 @@ export { LicenseExpiryBanner } from "./license-expiry-banner";
 export { DevModeLicenseBanner } from "./dev-mode-license-banner";
 export { UserMenu } from "./user-menu";
 export { WorkspaceContent } from "./workspace-content";
+export { AppShell } from "./app-shell";

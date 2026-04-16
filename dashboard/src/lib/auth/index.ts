@@ -63,8 +63,12 @@ async function handleBuiltinAuth(): Promise<User> {
     return sessionUser;
   }
 
-  // No authenticated user - return anonymous
-  // Middleware will handle redirect to login page
+  // No authenticated user — return anonymous. The real gate lives in
+  // dashboard/src/middleware.ts, which redirects unauthenticated
+  // requests to /login before they reach any page or data-fetching
+  // route. This branch still exists for server-side code paths that
+  // run outside the middleware (tests, cron jobs, direct lib imports)
+  // and expect a User object.
   return createAnonymousUser("viewer");
 }
 
@@ -83,8 +87,12 @@ async function handleOAuthAuth(config: AuthConfig): Promise<User> {
     return sessionUser;
   }
 
-  // No authenticated user - return anonymous
-  // Middleware will handle redirect to login page
+  // No authenticated user — return anonymous. The real gate lives in
+  // dashboard/src/middleware.ts, which redirects unauthenticated
+  // requests to /login before they reach any page or data-fetching
+  // route. This branch still exists for server-side code paths that
+  // run outside the middleware (tests, cron jobs, direct lib imports)
+  // and expect a User object.
   return createAnonymousUser("viewer");
 }
 
@@ -152,10 +160,10 @@ async function tryRefreshToken(
     const { refreshAccessToken, extractClaims, mapClaimsToUser, validateClaims } = await import("./oauth");
     const tokens = await refreshAccessToken(session.oauth.refreshToken);
 
-    // Update tokens in session
+    // Update tokens in session. Access token is intentionally not
+    // persisted — see OAuthTokens jsdoc (cookie size limit).
     session.oauth = {
       ...session.oauth,
-      accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token || session.oauth.refreshToken,
       idToken: tokens.id_token || session.oauth.idToken,
       expiresAt: typeof tokens.expires_at === "number" ? tokens.expires_at : session.oauth.expiresAt,

@@ -42,8 +42,13 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("OAuth login error:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
+    // Use config.baseUrl, not request.url — behind a reverse proxy
+    // request.url resolves to the pod-internal address.
     return NextResponse.redirect(
-      new URL(`/login?error=config_error&message=${encodeURIComponent(message)}`, request.url)
+      new URL(
+        `/login?error=config_error&message=${encodeURIComponent(message)}`,
+        config.baseUrl,
+      ),
     );
   }
 }
