@@ -154,11 +154,17 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           # Generate in-toto SBOM + provenance attestations attached to
-          # the pushed manifest. Near-zero build overhead; enables
-          # `cosign verify-attestation` and `syft attest` by downstream
-          # consumers without any per-repo tooling.
+          # the pushed manifest. Enables `cosign verify-attestation` and
+          # `syft attest` by downstream consumers without any per-repo
+          # tooling.
+          #
+          # `provenance: true` (mode=min) signs the image; `mode=max`
+          # additionally inlines build-arg / source-URL metadata but
+          # introspects the builder filesystem in ways that break on
+          # Next.js builds ("failed to calculate checksum of go.sum").
+          # mode=min is sufficient for downstream verify flows.
           sbom: true
-          provenance: mode=max
+          provenance: true
 
   trivy-scan:
     name: Trivy Image Scan
