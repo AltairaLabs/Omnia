@@ -45,6 +45,11 @@ vi.mock("@/hooks/sessions", () => ({
   })),
 }));
 
+// Mock adjacent-session nav hook (uses React Query + workspace context — easier to stub).
+vi.mock("@/hooks/use-adjacent-sessions", () => ({
+  useAdjacentSessions: () => ({ prevId: null, nextId: null, position: null, total: 0 }),
+}));
+
 // Mock auth and memory hooks (needed by MemorySidebar imported by the page)
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({ user: { id: "test-user" }, isAuthenticated: true }),
