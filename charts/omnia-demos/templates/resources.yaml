@@ -141,8 +141,6 @@ spec:
     configMapRef:
       name: demo-vision-prompts
   version: "1.0.0"
-  rollout:
-    type: immediate
 ---
 # Demo AgentRuntime using Ollama with vision capabilities
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -334,8 +332,6 @@ spec:
     configMapRef:
       name: demo-audio-prompts
   version: "1.0.0"
-  rollout:
-    type: immediate
 ---
 # Audio Demo AgentRuntime using Gemini with audio capabilities
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -677,8 +673,6 @@ spec:
     configMapRef:
       name: demo-tools-prompts
   version: "1.0.0"
-  rollout:
-    type: immediate
 ---
 # ToolRegistry for tools demo agents
 apiVersion: omnia.altairalabs.ai/v1alpha1

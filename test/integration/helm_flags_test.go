@@ -60,9 +60,13 @@ func TestHelmChartFlagsMatchController(t *testing.T) {
 
 	// Render the Helm chart and extract flags passed to the controller
 	// Use --skip-crds to avoid CRD rendering and focus on deployment
-	// Disable subcharts since we only care about flags in our templates
+	// Disable subcharts since we only care about flags in our templates.
+	// values-chart-tests.yaml satisfies the chart's auth-mode guardrails
+	// (omnia.validateAuth) so this render focuses on flag extraction, not
+	// auth configuration.
 	helmArgs := []string{
 		"template", "omnia", "../../charts/omnia",
+		"-f", "../../charts/omnia/values-chart-tests.yaml",
 		"--set", "arena.enabled=true",
 		"--set", "metrics.enabled=true",
 		"--set", "devMode=true",
@@ -167,7 +171,14 @@ func TestHelmChartRenders(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			args := append([]string{"template", "omnia", "../../charts/omnia"}, tc.values...)
+			// values-chart-tests.yaml satisfies omnia.validateAuth; these
+			// test cases exercise chart render across configurations, not
+			// auth mode.
+			args := []string{
+				"template", "omnia", "../../charts/omnia",
+				"-f", "../../charts/omnia/values-chart-tests.yaml",
+			}
+			args = append(args, tc.values...)
 			// Disable all subcharts to avoid dependency issues in CI
 			args = append(args, disableSubcharts()...)
 			cmd := exec.Command("helm", args...)

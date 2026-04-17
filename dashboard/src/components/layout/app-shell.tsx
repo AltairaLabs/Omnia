@@ -5,6 +5,7 @@ import { type ReactNode } from "react";
 import { Sidebar } from "./sidebar";
 import { ReadOnlyBanner } from "./read-only-banner";
 import { DemoModeBanner } from "./demo-mode-banner";
+import { AnonymousModeBanner } from "./anonymous-mode-banner";
 import { LicenseExpiryBanner } from "./license-expiry-banner";
 import { DevModeLicenseBanner } from "./dev-mode-license-banner";
 import { WorkspaceContent } from "./workspace-content";
@@ -34,6 +35,7 @@ export function AppShell({ children }: Readonly<AppShellProps>) {
     <div className="flex h-screen">
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
+        <AnonymousModeBanner />
         <DemoModeBanner />
         <ReadOnlyBanner />
         <LicenseExpiryBanner />

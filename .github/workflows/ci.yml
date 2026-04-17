@@ -355,15 +355,19 @@ jobs:
     - name: Helm lint
       run: helm lint ./charts/omnia
 
+    # charts/omnia/values-chart-tests.yaml satisfies the auth-mode guardrails
+    # (omnia.validateAuth) so these template-render checks can focus on
+    # syntactic validity, not auth config.
     - name: Validate Helm templates (default values)
-      run: helm template test ./charts/omnia > /dev/null
+      run: helm template test ./charts/omnia -f charts/omnia/values-chart-tests.yaml > /dev/null
 
     - name: Validate Helm templates (enterprise enabled)
-      run: helm template test ./charts/omnia --set enterprise.enabled=true > /dev/null
+      run: helm template test ./charts/omnia -f charts/omnia/values-chart-tests.yaml --set enterprise.enabled=true > /dev/null
 
     - name: Validate Helm templates (full stack)
       run: |
         helm template test ./charts/omnia \
+          -f charts/omnia/values-chart-tests.yaml \
           --set enterprise.enabled=true \
           --set prometheus.enabled=true \
           --set grafana.enabled=true \
@@ -600,9 +604,12 @@ jobs:
 
     - name: Run E2E tests with coverage
       run: |
-        # Start the server in background with demo mode and production settings
-        # OMNIA_AUTH_ANONYMOUS_ROLE=editor allows E2E tests to perform write operations
-        NODE_ENV=production DEMO_MODE=true NEXT_PUBLIC_DEMO_MODE=true OMNIA_AUTH_ANONYMOUS_ROLE=editor npm run start &
+        # Start the server in background with demo mode and production settings.
+        # - OMNIA_AUTH_ANONYMOUS_ROLE=editor lets E2E tests perform write ops.
+        # - OMNIA_ALLOW_ANONYMOUS=true is the explicit opt-in the dashboard's
+        #   boot guard requires when mode=anonymous + NODE_ENV=production.
+        #   This env is a demo server for Playwright, so anonymous is intended.
+        NODE_ENV=production DEMO_MODE=true NEXT_PUBLIC_DEMO_MODE=true OMNIA_AUTH_ANONYMOUS_ROLE=editor OMNIA_ALLOW_ANONYMOUS=true npm run start &
         # Wait for server to be ready
         npx wait-on http://localhost:3000 --timeout 60000
         # Run Playwright tests with coverage collection

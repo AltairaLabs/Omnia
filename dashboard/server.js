@@ -18,6 +18,16 @@ const { createServer } = require("http");
 const { parse } = require("url");
 const next = require("next");
 const { WebSocket, WebSocketServer } = require("ws");
+const { checkAnonymousAuthGuard } = require("./lib/auth-boot-guard");
+
+// Refuse to start if we're configured to run unauthenticated in what looks
+// like production. Mirrors the Helm chart's render-time check
+// (omnia.validateAuth helper). Runs first so nothing else boots.
+const _authGuard = checkAnonymousAuthGuard();
+if (!_authGuard.ok) {
+  console.error(`\n${_authGuard.message}\n`);
+  process.exit(1);
+}
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOSTNAME || "0.0.0.0";

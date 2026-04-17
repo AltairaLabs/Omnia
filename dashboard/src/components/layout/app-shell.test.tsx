@@ -10,6 +10,7 @@ vi.mock("./sidebar", () => ({
 }));
 vi.mock("./read-only-banner", () => ({ ReadOnlyBanner: () => null }));
 vi.mock("./demo-mode-banner", () => ({ DemoModeBanner: () => null }));
+vi.mock("./anonymous-mode-banner", () => ({ AnonymousModeBanner: () => null }));
 vi.mock("./license-expiry-banner", () => ({ LicenseExpiryBanner: () => null }));
 vi.mock("./dev-mode-license-banner", () => ({ DevModeLicenseBanner: () => null }));
 vi.mock("./workspace-content", () => ({

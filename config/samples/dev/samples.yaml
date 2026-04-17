@@ -17,12 +17,14 @@ spec:
   environment: development
   namespace:
     name: dev-agents
-  # Enable anonymous access with editor role for development
-  # WARNING: Only use viewer/none in production. editor/owner grants write access.
-  # Editor role allows creating agents, dev sessions, arena jobs, etc.
+  # Anonymous workspace access is OFF by default. Granting anonymous users
+  # editor/owner privileges bypasses the dashboard's auth enforcement for
+  # workspace-scoped operations, so it has to be explicitly opted into.
+  #
+  # Local dev override: `ALLOW_WORKSPACE_ANONYMOUS=true tilt up` makes the
+  # Tiltfile patch this field on after samples are applied.
   anonymousAccess:
-    enabled: true
-    role: editor
+    enabled: false
   # Per-workspace session-api and memory-api instances.
   # The operator creates Deployments/Services named session-dev-agents-default
   # and memory-dev-agents-default in the dev-agents namespace.

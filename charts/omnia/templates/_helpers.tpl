@@ -1,4 +1,34 @@
 {{/*
+Auth-mode guardrails — emits nothing but fails `helm template|install|upgrade`
+when the deployment would silently run unauthenticated.
+
+Rules:
+  - dashboard.auth.mode MUST be explicitly set when dashboard.enabled=true.
+    (The chart no longer has a safe default — you have to choose.)
+  - Only oauth / builtin / proxy / anonymous are accepted.
+  - mode=anonymous additionally requires dashboard.auth.allowAnonymous=true
+    as an explicit acknowledgement. Anonymous mode disables authentication
+    entirely and is intended for isolated development only.
+
+Include this from every template that renders when dashboard.enabled=true
+so the render aborts early on misconfiguration.
+*/}}
+{{- define "omnia.validateAuth" -}}
+{{- if .Values.dashboard.enabled -}}
+{{- $mode := required "dashboard.auth.mode must be set explicitly to one of: oauth, builtin, proxy, anonymous" .Values.dashboard.auth.mode -}}
+{{- $validModes := list "oauth" "builtin" "proxy" "anonymous" -}}
+{{- if not (has $mode $validModes) -}}
+{{- fail (printf "dashboard.auth.mode=%q is not valid. Must be one of: oauth, builtin, proxy, anonymous" $mode) -}}
+{{- end -}}
+{{- if eq $mode "anonymous" -}}
+{{- if not .Values.dashboard.auth.allowAnonymous -}}
+{{- fail "dashboard.auth.mode=\"anonymous\" disables authentication entirely. Set dashboard.auth.allowAnonymous=true to acknowledge this is intentional. Anonymous mode is intended for isolated development only." -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Expand the name of the chart.
 */}}
 {{- define "omnia.name" -}}
