@@ -37,6 +37,8 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
 COPY --from=builder /app/server.js ./server.js
+# server.js requires modules from /app/lib at runtime (e.g. auth-boot-guard)
+COPY --from=builder /app/lib ./lib
 
 USER nextjs
 
