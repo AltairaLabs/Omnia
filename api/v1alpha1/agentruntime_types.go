@@ -927,6 +927,12 @@ type EvalConfig struct {
 	// for on_session_complete evals.
 	// +optional
 	SessionCompletion *SessionCompletionConfig `json:"sessionCompletion,omitempty"`
+
+	// podOverrides customizes the namespace-level eval-worker Pod. Last
+	// AgentRuntime to reconcile wins (eval-worker is per-namespace, not
+	// per-CRD).
+	// +optional
+	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
 }
 
 // EvalSampling configures sampling rates for evals.
