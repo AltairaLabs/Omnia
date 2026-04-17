@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unsealData } from "iron-session";
+import type { SessionData } from "@/lib/auth/types";
 
 /**
  * Auth middleware — enforces authentication when OMNIA_AUTH_MODE is
@@ -10,16 +12,22 @@ import { NextRequest, NextResponse } from "next/server";
  * Flow:
  *   - `anonymous` mode: pass everything through.
  *   - Otherwise: allow public paths (login, auth API, health, static
- *     assets) + requests carrying a session cookie; redirect pages
- *     without a session to /login?returnTo=<path>, and return 401 JSON
- *     for unauthenticated API requests (so JSON clients don't receive
- *     an HTML redirect).
+ *     assets) + requests carrying a valid session; redirect pages
+ *     without a valid session to /login?returnTo=<path>, and return
+ *     401 JSON for unauthenticated API requests (so JSON clients don't
+ *     receive an HTML redirect).
  *
- * We deliberately only check *presence* of the session cookie here, not
- * validity. Expired or tampered cookies still reach the server-side
- * session reader, which treats them as anonymous — so the actual auth
- * guarantee still lives in lib/auth/session.ts. This middleware is the
- * "you must at least try to log in" guard.
+ * For `oauth` and `builtin` modes we decrypt the iron-session cookie
+ * and verify it carries a user whose `provider` matches the active
+ * mode. A present-but-bogus cookie (stale, tampered, mode-mismatched)
+ * is treated as unauthenticated and cleared from the response — this
+ * closes the "any junk cookie bypasses auth" gap where middleware only
+ * checked cookie *presence*.
+ *
+ * For `proxy` mode we keep the presence check: proxy deployments
+ * mint a session on the first authenticated request and the proxy
+ * itself is the trust anchor, so re-decrypting here would regress
+ * cold-start behaviour.
  */
 
 const PUBLIC_PATH_PREFIXES: readonly string[] = [
@@ -45,6 +53,61 @@ function isPublicPath(pathname: string): boolean {
   return false;
 }
 
+// Kept in sync with lib/auth/config.ts:generateDevSecret(). iron-session
+// requires a password ≥ 32 chars; this lets local dev work when
+// OMNIA_SESSION_SECRET is unset and matches the fallback used by the
+// app so cookies written by the app decode here.
+const DEV_SESSION_SECRET = "omnia-dev-secret-do-not-use-in-production-32";
+
+function getSessionOptions() {
+  return {
+    password: process.env.OMNIA_SESSION_SECRET || DEV_SESSION_SECRET,
+    cookieName: process.env.OMNIA_SESSION_COOKIE_NAME ?? "omnia_session",
+  };
+}
+
+async function hasValidSession(
+  req: NextRequest,
+  mode: "oauth" | "builtin",
+): Promise<boolean> {
+  const opts = getSessionOptions();
+  const cookie = req.cookies.get(opts.cookieName);
+  if (!cookie) return false;
+  try {
+    // unsealData works with a plain sealed string — avoids the CookieStore
+    // type mismatch between NextRequest.cookies (RequestCookies) and
+    // iron-session's expected CookieStore shape, and keeps middleware
+    // out of the full session read/write lifecycle.
+    const session = await unsealData<SessionData>(cookie.value, {
+      password: opts.password,
+    });
+    const user = session.user;
+    if (!user) return false;
+    return user.provider === mode;
+  } catch {
+    // Bad signature / wrong password / corrupt ciphertext — treat as no session.
+    return false;
+  }
+}
+
+function unauthenticatedResponse(
+  req: NextRequest,
+  cookieName: string,
+): NextResponse {
+  const { pathname } = req.nextUrl;
+  let response: NextResponse;
+  if (pathname.startsWith("/api/")) {
+    response = NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  } else {
+    const loginUrl = new URL("/login", req.url);
+    loginUrl.searchParams.set("returnTo", pathname + req.nextUrl.search);
+    response = NextResponse.redirect(loginUrl);
+  }
+  // Clean up the invalid cookie so the next request doesn't repeat the dance.
+  response.cookies.delete(cookieName);
+  return response;
+}
+
 export async function middleware(req: NextRequest) {
   const mode = process.env.OMNIA_AUTH_MODE ?? "anonymous";
   if (mode === "anonymous") {
@@ -57,17 +120,20 @@ export async function middleware(req: NextRequest) {
   }
 
   const cookieName = process.env.OMNIA_SESSION_COOKIE_NAME ?? "omnia_session";
+
+  if (mode === "oauth" || mode === "builtin") {
+    const ok = await hasValidSession(req, mode);
+    if (ok) return NextResponse.next();
+    return unauthenticatedResponse(req, cookieName);
+  }
+
+  // proxy (and any future mode): presence-check is the safest behaviour.
+  // A fresh proxy request with headers but no cookie gets through and
+  // handleProxyAuth in lib/auth/index.ts mints the session.
   if (req.cookies.has(cookieName)) {
     return NextResponse.next();
   }
-
-  if (pathname.startsWith("/api/")) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  }
-
-  const loginUrl = new URL("/login", req.url);
-  loginUrl.searchParams.set("returnTo", pathname + req.nextUrl.search);
-  return NextResponse.redirect(loginUrl);
+  return unauthenticatedResponse(req, cookieName);
 }
 
 export const config = {

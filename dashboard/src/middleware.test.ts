@@ -1,6 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
+import { sealData } from "iron-session";
 import { middleware } from "./middleware";
+import type { User } from "./lib/auth/types";
+
+// iron-session requires a password of ≥ 32 characters.
+const SESSION_SECRET = "test-secret-at-least-32-characters-long-ok";
+const COOKIE_NAME = "omnia_session";
+
+/** Build a real iron-session cookie value that the middleware can decrypt. */
+async function sealSession(data: { user?: User }): Promise<string> {
+  return sealData(data, {
+    password: SESSION_SECRET,
+    ttl: 0,
+  });
+}
 
 function makeRequest(
   path: string,
@@ -12,13 +26,27 @@ function makeRequest(
   return new NextRequest(url, { headers });
 }
 
+const OAUTH_USER: User = {
+  id: "u1",
+  username: "alice",
+  email: "alice@example.com",
+  groups: [],
+  role: "viewer",
+  provider: "oauth",
+};
+
+const BUILTIN_USER: User = { ...OAUTH_USER, provider: "builtin" };
+const ANONYMOUS_USER: User = { ...OAUTH_USER, id: "anonymous", username: "anonymous", provider: "anonymous" };
+
 describe("dashboard auth middleware", () => {
   const originalMode = process.env.OMNIA_AUTH_MODE;
   const originalCookieName = process.env.OMNIA_SESSION_COOKIE_NAME;
+  const originalSessionSecret = process.env.OMNIA_SESSION_SECRET;
 
   beforeEach(() => {
     delete process.env.OMNIA_AUTH_MODE;
     delete process.env.OMNIA_SESSION_COOKIE_NAME;
+    process.env.OMNIA_SESSION_SECRET = SESSION_SECRET;
   });
 
   afterEach(() => {
@@ -31,6 +59,11 @@ describe("dashboard auth middleware", () => {
       delete process.env.OMNIA_SESSION_COOKIE_NAME;
     } else {
       process.env.OMNIA_SESSION_COOKIE_NAME = originalCookieName;
+    }
+    if (originalSessionSecret === undefined) {
+      delete process.env.OMNIA_SESSION_SECRET;
+    } else {
+      process.env.OMNIA_SESSION_SECRET = originalSessionSecret;
     }
     vi.restoreAllMocks();
   });
@@ -69,54 +102,122 @@ describe("dashboard auth middleware", () => {
     expect(nextSpy).toHaveBeenCalled();
   });
 
-  it("redirects unauthenticated page requests to /login with returnTo", async () => {
-    process.env.OMNIA_AUTH_MODE = "oauth";
-    const resp = await middleware(makeRequest("/sessions/abc?tab=replay"));
-    expect(resp.status).toBe(307);
-    const location = resp.headers.get("location")!;
-    const locUrl = new URL(location);
-    expect(locUrl.pathname).toBe("/login");
-    expect(locUrl.searchParams.get("returnTo")).toBe("/sessions/abc?tab=replay");
+  describe("oauth mode", () => {
+    beforeEach(() => {
+      process.env.OMNIA_AUTH_MODE = "oauth";
+    });
+
+    it("redirects unauthenticated page requests to /login with returnTo", async () => {
+      const resp = await middleware(makeRequest("/sessions/abc?tab=replay"));
+      expect(resp.status).toBe(307);
+      const locUrl = new URL(resp.headers.get("location")!);
+      expect(locUrl.pathname).toBe("/login");
+      expect(locUrl.searchParams.get("returnTo")).toBe("/sessions/abc?tab=replay");
+    });
+
+    it("returns 401 JSON for unauthenticated API requests", async () => {
+      const resp = await middleware(makeRequest("/api/workspaces/foo/skills"));
+      expect(resp.status).toBe(401);
+      expect(await resp.json()).toEqual({ error: "unauthenticated" });
+    });
+
+    it("allows page requests carrying a valid oauth session", async () => {
+      const sealed = await sealSession({ user: OAUTH_USER });
+      const nextSpy = vi.spyOn(NextResponse, "next");
+      await middleware(makeRequest("/sessions/abc", { cookie: `${COOKIE_NAME}=${sealed}` }));
+      expect(nextSpy).toHaveBeenCalled();
+    });
+
+    it("rejects page requests with a bogus cookie and clears it", async () => {
+      const resp = await middleware(
+        makeRequest("/sessions/abc", { cookie: `${COOKIE_NAME}=not-a-real-iron-session` }),
+      );
+      expect(resp.status).toBe(307);
+      expect(new URL(resp.headers.get("location")!).pathname).toBe("/login");
+      // Set-Cookie should clear the invalid cookie on the way back.
+      const setCookie = resp.headers.get("set-cookie")!;
+      expect(setCookie).toMatch(/omnia_session=;/);
+      expect(setCookie).toMatch(/Max-Age=0|Expires=/i);
+    });
+
+    it("rejects API requests with a bogus cookie and clears it", async () => {
+      const resp = await middleware(
+        makeRequest("/api/workspaces", { cookie: `${COOKIE_NAME}=bogus` }),
+      );
+      expect(resp.status).toBe(401);
+      expect(await resp.json()).toEqual({ error: "unauthenticated" });
+      expect(resp.headers.get("set-cookie")).toMatch(/omnia_session=;/);
+    });
+
+    it("rejects a session whose provider is anonymous", async () => {
+      const sealed = await sealSession({ user: ANONYMOUS_USER });
+      const resp = await middleware(makeRequest("/", { cookie: `${COOKIE_NAME}=${sealed}` }));
+      expect(resp.status).toBe(307);
+    });
+
+    it("rejects a session whose provider is builtin (mode mismatch)", async () => {
+      const sealed = await sealSession({ user: BUILTIN_USER });
+      const resp = await middleware(makeRequest("/", { cookie: `${COOKIE_NAME}=${sealed}` }));
+      expect(resp.status).toBe(307);
+    });
+
+    it("rejects a session with no user object", async () => {
+      const sealed = await sealSession({});
+      const resp = await middleware(makeRequest("/", { cookie: `${COOKIE_NAME}=${sealed}` }));
+      expect(resp.status).toBe(307);
+    });
+
+    it("respects a custom OMNIA_SESSION_COOKIE_NAME", async () => {
+      process.env.OMNIA_SESSION_COOKIE_NAME = "acme_auth";
+      const sealed = await sealSession({ user: OAUTH_USER });
+      const nextSpy = vi.spyOn(NextResponse, "next");
+      await middleware(makeRequest("/sessions/abc", { cookie: `acme_auth=${sealed}` }));
+      expect(nextSpy).toHaveBeenCalled();
+    });
   });
 
-  it("returns 401 JSON for unauthenticated API requests", async () => {
-    process.env.OMNIA_AUTH_MODE = "oauth";
-    const resp = await middleware(makeRequest("/api/workspaces/foo/skills"));
-    expect(resp.status).toBe(401);
-    const body = await resp.json();
-    expect(body).toEqual({ error: "unauthenticated" });
+  describe("builtin mode", () => {
+    beforeEach(() => {
+      process.env.OMNIA_AUTH_MODE = "builtin";
+    });
+
+    it("redirects unauthenticated page requests", async () => {
+      const resp = await middleware(makeRequest("/"));
+      expect(resp.status).toBe(307);
+      expect(new URL(resp.headers.get("location")!).pathname).toBe("/login");
+    });
+
+    it("allows a valid builtin session", async () => {
+      const sealed = await sealSession({ user: BUILTIN_USER });
+      const nextSpy = vi.spyOn(NextResponse, "next");
+      await middleware(makeRequest("/", { cookie: `${COOKIE_NAME}=${sealed}` }));
+      expect(nextSpy).toHaveBeenCalled();
+    });
+
+    it("rejects an oauth-provider session in builtin mode", async () => {
+      const sealed = await sealSession({ user: OAUTH_USER });
+      const resp = await middleware(makeRequest("/", { cookie: `${COOKIE_NAME}=${sealed}` }));
+      expect(resp.status).toBe(307);
+    });
   });
 
-  it("allows authenticated requests when the session cookie is present", async () => {
-    process.env.OMNIA_AUTH_MODE = "oauth";
-    const nextSpy = vi.spyOn(NextResponse, "next");
-    await middleware(
-      makeRequest("/sessions/abc", { cookie: "omnia_session=opaque" }),
-    );
-    expect(nextSpy).toHaveBeenCalled();
-  });
+  describe("proxy mode", () => {
+    beforeEach(() => {
+      process.env.OMNIA_AUTH_MODE = "proxy";
+    });
 
-  it("respects a custom OMNIA_SESSION_COOKIE_NAME", async () => {
-    process.env.OMNIA_AUTH_MODE = "oauth";
-    process.env.OMNIA_SESSION_COOKIE_NAME = "acme_auth";
-    const nextSpy = vi.spyOn(NextResponse, "next");
-    await middleware(makeRequest("/sessions/abc", { cookie: "acme_auth=opaque" }));
-    expect(nextSpy).toHaveBeenCalled();
-  });
+    it("redirects page requests without any session cookie", async () => {
+      const resp = await middleware(makeRequest("/"));
+      expect(resp.status).toBe(307);
+    });
 
-  it("enforces auth in builtin mode the same way", async () => {
-    process.env.OMNIA_AUTH_MODE = "builtin";
-    const resp = await middleware(makeRequest("/"));
-    expect(resp.status).toBe(307);
-    const location = new URL(resp.headers.get("location")!);
-    expect(location.pathname).toBe("/login");
-  });
-
-  it("enforces auth in proxy mode the same way", async () => {
-    process.env.OMNIA_AUTH_MODE = "proxy";
-    const resp = await middleware(makeRequest("/"));
-    expect(resp.status).toBe(307);
-    const location = new URL(resp.headers.get("location")!);
-    expect(location.pathname).toBe("/login");
+    it("lets through page requests that carry *any* session cookie (presence check)", async () => {
+      // Proxy deployments mint the session on the first authenticated hit;
+      // middleware shouldn't gate that with full decryption or the cold
+      // start round-trips through /login unnecessarily.
+      const nextSpy = vi.spyOn(NextResponse, "next");
+      await middleware(makeRequest("/", { cookie: `${COOKIE_NAME}=whatever` }));
+      expect(nextSpy).toHaveBeenCalled();
+    });
   });
 });
