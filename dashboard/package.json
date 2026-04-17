@@ -122,7 +122,7 @@
     "eslint-plugin-sonarjs": "^3.0.5",
     "eslint-plugin-unicorn": "^62.0.0",
     "jsdom": "^27.4.0",
-    "monocart-reporter": "^2.9.23",
+    "monocart-reporter": "^2.10.1",
     "openapi-typescript": "^7.10.1",
     "os-browserify": "^0.3.0",
     "path-browserify": "^1.0.1",
