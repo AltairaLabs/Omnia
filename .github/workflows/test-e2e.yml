@@ -8,7 +8,6 @@ on:
       - '**.go'
       - 'go.mod'
       - 'go.sum'
-      - 'Dockerfile*'
       - 'api/**'
       - 'cmd/**'
       - 'config/**'
@@ -17,7 +16,13 @@ on:
       - 'pkg/**'
       - 'test/**'
       - 'hack/**'
-      - 'charts/**'
+      # Chart changes that affect deployed behavior. Excludes Chart.yaml
+      # (version bumps), README, NOTES.txt — those can't regress E2E.
+      # Docker Build Matrix already verifies Dockerfile changes on PRs.
+      - 'charts/**/values*.yaml'
+      - 'charts/**/templates/**/*.yaml'
+      - 'charts/**/templates/**/*.tpl'
+      - 'charts/**/crds/**'
       - 'scripts/setup-arena-e2e.sh'
       - '.github/workflows/test-e2e.yml'
   pull_request:
@@ -25,7 +30,6 @@ on:
       - '**.go'
       - 'go.mod'
       - 'go.sum'
-      - 'Dockerfile*'
       - 'api/**'
       - 'cmd/**'
       - 'config/**'
@@ -34,7 +38,10 @@ on:
       - 'pkg/**'
       - 'test/**'
       - 'hack/**'
-      - 'charts/**'
+      - 'charts/**/values*.yaml'
+      - 'charts/**/templates/**/*.yaml'
+      - 'charts/**/templates/**/*.tpl'
+      - 'charts/**/crds/**'
       - 'scripts/setup-arena-e2e.sh'
       - '.github/workflows/test-e2e.yml'
 
