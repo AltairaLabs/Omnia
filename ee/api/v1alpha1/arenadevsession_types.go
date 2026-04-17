@@ -10,6 +10,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
 // ArenaDevSessionSpec defines the desired state of ArenaDevSession.
@@ -36,6 +38,11 @@ type ArenaDevSessionSpec struct {
 	// resources overrides the default resource requests/limits.
 	// +optional
 	Resources *ResourceRequirements `json:"resources,omitempty"`
+
+	// podOverrides customizes the dev-console Pod. Use for GPU scheduling,
+	// CSI-mounted shared secrets, or development-time service-mesh tuning.
+	// +optional
+	PodOverrides *corev1alpha1.PodOverrides `json:"podOverrides,omitempty"`
 }
 
 // ResourceRequirements describes compute resource requirements.
