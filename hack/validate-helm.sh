@@ -42,17 +42,21 @@ fi
 #
 print_info "Testing template rendering..."
 
+# dashboard.auth.mode has no default by design (prevents unauthenticated
+# deploys) — set it explicitly in every template test so pre-commit can run.
+AUTH_VALUES=(--set dashboard.auth.mode=oauth)
+
 # Test default values
-if helm template omnia "$CHART_DIR" > /dev/null 2>&1; then
+if helm template omnia "$CHART_DIR" "${AUTH_VALUES[@]}" > /dev/null 2>&1; then
     print_success "Template renders with default values"
 else
     print_error "Template failed with default values"
-    helm template omnia "$CHART_DIR" 2>&1 | tail -20
+    helm template omnia "$CHART_DIR" "${AUTH_VALUES[@]}" 2>&1 | tail -20
     FAILED=1
 fi
 
 # Test with enterprise enabled
-if helm template omnia "$CHART_DIR" \
+if helm template omnia "$CHART_DIR" "${AUTH_VALUES[@]}" \
     --set enterprise.enabled=true \
     --set enterprise.arena.controller.image.repository=test \
     --set enterprise.arena.worker.image.repository=test \
