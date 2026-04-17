@@ -57,7 +57,11 @@ func (sb *ServiceBuilder) BuildSessionDeployment(workspaceName, namespace string
 		fmt.Sprintf("--workspace=%s", workspaceName),
 		fmt.Sprintf("--service-group=%s", sg.Name),
 	}
-	return buildServiceDeployment(name, namespace, sb.SessionImage, sb.SessionImagePullPolicy, args, labels)
+	var overrides *omniav1alpha1.PodOverrides
+	if sg.Session != nil {
+		overrides = sg.Session.PodOverrides
+	}
+	return buildServiceDeployment(name, namespace, sb.SessionImage, sb.SessionImagePullPolicy, args, labels, overrides)
 }
 
 // BuildMemoryDeployment builds a Deployment for the memory-api service group.
@@ -68,7 +72,11 @@ func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string,
 		fmt.Sprintf("--workspace=%s", workspaceName),
 		fmt.Sprintf("--service-group=%s", sg.Name),
 	}
-	return buildServiceDeployment(name, namespace, sb.MemoryImage, sb.MemoryImagePullPolicy, args, labels)
+	var overrides *omniav1alpha1.PodOverrides
+	if sg.Memory != nil {
+		overrides = sg.Memory.PodOverrides
+	}
+	return buildServiceDeployment(name, namespace, sb.MemoryImage, sb.MemoryImagePullPolicy, args, labels, overrides)
 }
 
 // BuildService builds a ClusterIP Service for the given component.
@@ -106,9 +114,16 @@ func ServiceURL(serviceName, namespace string) string {
 }
 
 // buildServiceDeployment constructs a Deployment with restricted security context,
-// standard health probes, and the given image and args.
-func buildServiceDeployment(name, namespace, image string, pullPolicy corev1.PullPolicy, args []string, labels map[string]string) *appsv1.Deployment {
-	return &appsv1.Deployment{
+// standard health probes, and the given image and args. If overrides is non-nil,
+// pod-level and container-level fields from PodOverrides are merged in.
+func buildServiceDeployment(
+	name, namespace, image string,
+	pullPolicy corev1.PullPolicy,
+	args []string,
+	labels map[string]string,
+	overrides *omniav1alpha1.PodOverrides,
+) *appsv1.Deployment {
+	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
@@ -152,6 +167,15 @@ func buildServiceDeployment(name, namespace, image string, pullPolicy corev1.Pul
 			},
 		},
 	}
+
+	if overrides != nil {
+		ApplyPodOverrides(&dep.Spec.Template.Spec, &dep.Spec.Template.ObjectMeta, overrides)
+		for i := range dep.Spec.Template.Spec.Containers {
+			ApplyContainerOverrides(&dep.Spec.Template.Spec.Containers[i], overrides)
+		}
+	}
+
+	return dep
 }
 
 // serviceLabels returns the standard label set for a service group component.

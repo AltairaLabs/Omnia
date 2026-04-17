@@ -165,3 +165,47 @@ func TestServiceURL(t *testing.T) {
 	url := ServiceURL("session-my-workspace-default", "my-ns")
 	assert.Equal(t, "http://session-my-workspace-default.my-ns:8080", url)
 }
+
+func TestBuildServiceDeployment_PodOverrides(t *testing.T) {
+	overrides := &omniav1alpha1.PodOverrides{
+		ServiceAccountName: "workload-identity-sa",
+		Annotations:        map[string]string{"azure.workload.identity/use": "true"},
+		ExtraVolumes:       []corev1.Volume{{Name: "kv"}},
+		ExtraVolumeMounts:  []corev1.VolumeMount{{Name: "kv", MountPath: "/mnt/kv"}},
+		ExtraEnvFrom: []corev1.EnvFromSource{{
+			SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "db-secret"}},
+		}},
+	}
+	dep := buildServiceDeployment(
+		"session-ws-default", "ns", "img:v1",
+		corev1.PullIfNotPresent,
+		[]string{"--x"},
+		map[string]string{"a": "b"},
+		overrides,
+	)
+	spec := dep.Spec.Template.Spec
+
+	require.Equal(t, "workload-identity-sa", spec.ServiceAccountName)
+	require.Equal(t, "true", dep.Spec.Template.Annotations["azure.workload.identity/use"])
+	require.NotEmpty(t, spec.Volumes)
+	require.Equal(t, "kv", spec.Volumes[0].Name)
+
+	c := spec.Containers[0]
+	require.NotEmpty(t, c.VolumeMounts)
+	require.Equal(t, "kv", c.VolumeMounts[0].Name)
+	require.NotEmpty(t, c.EnvFrom)
+	require.Equal(t, "db-secret", c.EnvFrom[0].SecretRef.Name)
+}
+
+func TestBuildServiceDeployment_NoOverrides(t *testing.T) {
+	dep := buildServiceDeployment(
+		"session-ws-default", "ns", "img:v1",
+		corev1.PullIfNotPresent,
+		[]string{"--x"},
+		map[string]string{"a": "b"},
+		nil,
+	)
+	spec := dep.Spec.Template.Spec
+	// default SA is the deployment name
+	require.Equal(t, "session-ws-default", spec.ServiceAccountName)
+}
