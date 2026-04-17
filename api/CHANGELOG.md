@@ -15,6 +15,18 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 - `SessionPrivacyPolicy.spec.level`, `spec.workspaceRef`, and `spec.agentRef` removed. Policies are now reusable namespaced documents; binding has moved to consumers (`Workspace` service groups and `AgentRuntime`).
 - `SessionPrivacyPolicy` is now **namespace-scoped** (was cluster-scoped).
 
+### Added (podOverrides, #844)
+
+- New shared `PodOverrides` type (`api/v1alpha1/shared_types.go`) with pod-level fields (`serviceAccountName`, `labels`, `annotations`, `nodeSelector`, `tolerations`, `affinity`, `priorityClassName`, `topologySpreadConstraints`, `imagePullSecrets`) and container-level fields (`extraEnv`, `extraEnvFrom`, `extraVolumes`, `extraVolumeMounts`).
+- `AgentRuntime.spec.podOverrides` — facade + runtime Pod customization. Container-level fields apply to both user containers but skip operator-injected sidecars (e.g. `policy-proxy`).
+- `AgentRuntime.spec.evals.podOverrides` — namespace-level eval-worker customization (last-writer-wins, matches existing eval-worker semantics).
+- `Workspace.spec.services[].session.podOverrides` — managed session-api Pod customization.
+- `Workspace.spec.services[].memory.podOverrides` — managed memory-api Pod customization.
+- `ArenaJob.spec.workers.podOverrides` — worker Job Pod customization.
+- `ArenaDevSession.spec.podOverrides` — dev-console Pod customization.
+
+All fields optional; default rendering is byte-identical to before. Existing hooks (`FacadeConfig.ExtraEnv`, `RuntimeConfig.NodeSelector`/`Tolerations`/`Affinity`/`Volumes`/`VolumeMounts`/`ExtraEnv`, `AgentRuntimeSpec.ExtraPodAnnotations`) are preserved and applied first; PodOverrides values are merged or appended after.
+
 ### Added
 
 - `Workspace.spec.services[].privacyPolicyRef` (`LocalObjectReference`) — selects the `SessionPrivacyPolicy` applied to sessions managed by that service group's session-api.
