@@ -609,6 +609,11 @@ type MemoryServiceConfig struct {
 	// retention configures memory retention settings.
 	// +optional
 	Retention *WorkspaceMemoryRetentionConfig `json:"retention,omitempty"`
+
+	// podOverrides customizes the managed memory-api Pod (SA, scheduling,
+	// CSI secret-stores, etc.).
+	// +optional
+	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
 }
 
 // SessionServiceConfig defines the configuration for a managed session-api instance.
@@ -620,6 +625,11 @@ type SessionServiceConfig struct {
 	// retention configures session retention settings.
 	// +optional
 	Retention *SessionRetentionConfig `json:"retention,omitempty"`
+
+	// podOverrides customizes the managed session-api Pod (SA, scheduling,
+	// CSI secret-stores, etc.).
+	// +optional
+	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
 }
 
 // DatabaseConfig holds the reference to a Secret containing database connection details.

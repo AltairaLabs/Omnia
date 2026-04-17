@@ -33,6 +33,7 @@ import (
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/providers"
+	"github.com/altairalabs/omnia/internal/podoverrides"
 )
 
 const (
@@ -626,6 +627,8 @@ func (r *ArenaDevSessionReconciler) reconcileDeployment(ctx context.Context, ses
 		},
 	}
 
+	applyDevSessionPodOverrides(deployment, session)
+
 	if err := controllerutil.SetControllerReference(session, deployment, r.Scheme); err != nil {
 		return err
 	}
@@ -772,4 +775,17 @@ func (r *ArenaDevSessionReconciler) resolveSessionURLForWorkspace(ctx context.Co
 		}
 	}
 	return ""
+}
+
+// applyDevSessionPodOverrides merges ArenaDevSession.spec.podOverrides onto
+// the dev-console Deployment's pod template.
+func applyDevSessionPodOverrides(dep *appsv1.Deployment, session *omniav1alpha1.ArenaDevSession) {
+	if session.Spec.PodOverrides == nil {
+		return
+	}
+	overrides := session.Spec.PodOverrides
+	podoverrides.ApplyPod(&dep.Spec.Template.Spec, &dep.Spec.Template.ObjectMeta, overrides)
+	for i := range dep.Spec.Template.Spec.Containers {
+		podoverrides.ApplyContainer(&dep.Spec.Template.Spec.Containers[i], overrides)
+	}
 }

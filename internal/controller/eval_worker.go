@@ -29,6 +29,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/podoverrides"
 )
 
 // reconcileEvalWorker ensures a per-namespace eval worker Deployment exists when
@@ -144,7 +145,7 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(ctx context.Context, 
 	image := r.evalWorkerImage()
 	replicas := int32(1)
 
-	return &appsv1.Deployment{
+	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      EvalWorkerDeploymentName,
 			Namespace: namespace,
@@ -171,6 +172,15 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(ctx context.Context, 
 			},
 		},
 	}
+
+	if agentRuntime.Spec.Evals != nil && agentRuntime.Spec.Evals.PodOverrides != nil {
+		podoverrides.ApplyPod(&dep.Spec.Template.Spec, &dep.Spec.Template.ObjectMeta, agentRuntime.Spec.Evals.PodOverrides)
+		for i := range dep.Spec.Template.Spec.Containers {
+			podoverrides.ApplyContainer(&dep.Spec.Template.Spec.Containers[i], agentRuntime.Spec.Evals.PodOverrides)
+		}
+	}
+
+	return dep
 }
 
 // buildEvalWorkerEnvVars creates environment variables for the eval worker container.

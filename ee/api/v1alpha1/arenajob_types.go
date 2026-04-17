@@ -186,6 +186,11 @@ type WorkerConfig struct {
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	MaxReplicas *int32 `json:"maxReplicas,omitempty"`
+
+	// podOverrides customizes the worker Job Pods (scheduling, SA, CSI
+	// secret-stores, custom envFrom for provider credentials, etc.).
+	// +optional
+	PodOverrides *corev1alpha1.PodOverrides `json:"podOverrides,omitempty"`
 }
 
 // OutputType represents the type of output destination.
