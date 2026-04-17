@@ -75,6 +75,14 @@ ENABLE_ENTERPRISE = os.getenv('ENABLE_ENTERPRISE', '').lower() in ('true', '1', 
 # Can be set via environment: ENABLE_ENTRA=true tilt up
 ENABLE_ENTRA = os.getenv('ENABLE_ENTRA', '').lower() in ('true', '1', 'yes') or False
 
+# Set to True to grant anonymous users OWNER-level access to the dev-agents
+# workspace. This bypasses dashboard auth for workspace-scoped operations,
+# so it's off by default — even in anonymous-mode Tilt. Opt in explicitly
+# with: ALLOW_WORKSPACE_ANONYMOUS=true tilt up
+# When off (default), `dev-agents.spec.anonymousAccess.enabled=false` and
+# dashboard anonymous users see a read-only shell with no workspace visible.
+ALLOW_WORKSPACE_ANONYMOUS = os.getenv('ALLOW_WORKSPACE_ANONYMOUS', '').lower() in ('true', '1', 'yes') or False
+
 # Enable internal NFS server for workspace content storage
 # Provides ReadWriteMany (RWX) storage for Arena and workspace content
 # Auto-enabled when ENABLE_ENTERPRISE is true, can be explicitly controlled via ENABLE_NFS
@@ -1151,15 +1159,25 @@ if ENABLE_AUDIO_DEMO:
 # Sample Resources for Development
 # ============================================================================
 
-# Apply sample resources using local_resource for better control
-# Note: When ENABLE_DEMO is true, Ollama resources come from Helm chart, not samples
-# After applying, patch the workspace to grant anonymous users owner access for local dev
-local_resource(
-    'sample-resources',
-    cmd='''
+# Apply sample resources using local_resource for better control.
+# Note: When ENABLE_DEMO is true, Ollama resources come from Helm chart, not samples.
+#
+# Anonymous workspace access is OFF by default (the sample YAML has
+# anonymousAccess.enabled=false). Opt in with ALLOW_WORKSPACE_ANONYMOUS=true
+# to grant anonymous users owner-level access — useful when poking around
+# locally without authentication, but dangerous everywhere else.
+if ALLOW_WORKSPACE_ANONYMOUS:
+    print("⚠️  ALLOW_WORKSPACE_ANONYMOUS=true — dev-agents workspace will grant OWNER access to anonymous users. Only appropriate for isolated local dev.")
+    _sample_cmd = '''
         kubectl apply -f config/samples/dev/
         kubectl patch workspace dev-agents --type=merge -p '{"spec":{"anonymousAccess":{"enabled":true,"role":"owner"}}}'
-    ''',
+    '''
+else:
+    _sample_cmd = 'kubectl apply -f config/samples/dev/'
+
+local_resource(
+    'sample-resources',
+    cmd=_sample_cmd,
     deps=['config/samples/dev'],
     labels=['samples'],
     resource_deps=['omnia-controller-manager'],

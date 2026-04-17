@@ -194,24 +194,41 @@ if $CREATE_SECRET; then
     | kubectl apply -f - >/dev/null
 
   # Patch workspace roleBindings — read-modify-write to avoid clobbering
-  # any existing bindings. No-op if the binding for our group is already
-  # present.
+  # any existing bindings. Also force-disables anonymousAccess: real auth
+  # is now in place, so leaving the workspace open to anonymous users is
+  # both redundant and dangerous.
   if kubectl get workspace "$WORKSPACE_NAME" >/dev/null 2>&1; then
     WS_JSON=$(kubectl get workspace "$WORKSPACE_NAME" -o json)
-    NEEDS_PATCH=$(jq --arg gid "$GROUP_ID" '
+    NEEDS_BINDING=$(jq --arg gid "$GROUP_ID" '
       [.spec.roleBindings // []
         | .[]
         | select(.role == "owner" and ((.groups // []) | index($gid)))
       ] | length == 0
     ' <<<"$WS_JSON")
-    if [[ "$NEEDS_PATCH" == "true" ]]; then
-      echo ">> patching workspace $WORKSPACE_NAME: owner roleBinding for $GROUP_NAME" >&2
-      NEW_BINDINGS=$(jq --arg gid "$GROUP_ID" '
-        (.spec.roleBindings // []) + [{"role":"owner","groups":[$gid]}]
-      ' <<<"$WS_JSON")
-      kubectl patch workspace "$WORKSPACE_NAME" --type=merge -p "$(jq -n --argjson rb "$NEW_BINDINGS" '{spec:{roleBindings:$rb}}')" >/dev/null
+    ANON_ENABLED=$(jq '.spec.anonymousAccess.enabled // false' <<<"$WS_JSON")
+
+    NEW_BINDINGS=$(jq --arg gid "$GROUP_ID" '
+      if [.spec.roleBindings // []
+          | .[]
+          | select(.role == "owner" and ((.groups // []) | index($gid)))
+        ] | length > 0
+      then (.spec.roleBindings // [])
+      else (.spec.roleBindings // []) + [{"role":"owner","groups":[$gid]}]
+      end
+    ' <<<"$WS_JSON")
+
+    if [[ "$NEEDS_BINDING" == "true" || "$ANON_ENABLED" == "true" ]]; then
+      if [[ "$NEEDS_BINDING" == "true" ]]; then
+        echo ">> patching workspace $WORKSPACE_NAME: owner roleBinding for $GROUP_NAME" >&2
+      fi
+      if [[ "$ANON_ENABLED" == "true" ]]; then
+        echo ">> disabling anonymousAccess on workspace $WORKSPACE_NAME (real auth is active)" >&2
+      fi
+      PATCH=$(jq -n --argjson rb "$NEW_BINDINGS" \
+        '{spec:{roleBindings:$rb, anonymousAccess:{enabled:false}}}')
+      kubectl patch workspace "$WORKSPACE_NAME" --type=merge -p "$PATCH" >/dev/null
     else
-      echo ">> workspace $WORKSPACE_NAME already has roleBinding for $GROUP_NAME" >&2
+      echo ">> workspace $WORKSPACE_NAME already has roleBinding for $GROUP_NAME and anonymousAccess disabled" >&2
     fi
   else
     echo ">> workspace $WORKSPACE_NAME not found — skipping roleBinding patch" >&2
