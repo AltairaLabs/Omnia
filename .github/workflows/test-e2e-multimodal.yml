@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - 'dashboard/**'
+      # Dashboard Dockerfile is a build-only concern; Docker Build Matrix
+      # covers it on PRs. Multimodal E2E doesn't exercise image build.
+      - '!dashboard/Dockerfile'
       - 'cmd/agent/**'
       - 'internal/agent/**'
       - 'internal/facade/**'
@@ -13,6 +16,7 @@ on:
   pull_request:
     paths:
       - 'dashboard/**'
+      - '!dashboard/Dockerfile'
       - 'cmd/agent/**'
       - 'internal/agent/**'
       - 'internal/facade/**'

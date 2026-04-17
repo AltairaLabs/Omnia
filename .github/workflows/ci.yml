@@ -37,7 +37,6 @@ jobs:
               - '**.go'
               - 'go.mod'
               - 'go.sum'
-              - 'Dockerfile*'
               - 'api/**'
               - 'cmd/**'
               - 'config/**'
