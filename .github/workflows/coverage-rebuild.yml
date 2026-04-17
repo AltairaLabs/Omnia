@@ -135,7 +135,9 @@ jobs:
 
     - name: Run E2E tests with coverage
       run: |
-        NODE_ENV=production DEMO_MODE=true NEXT_PUBLIC_DEMO_MODE=true npm run start &
+        # OMNIA_ALLOW_ANONYMOUS=true satisfies the dashboard's boot guard which
+        # otherwise refuses to start with mode=anonymous + NODE_ENV=production.
+        NODE_ENV=production DEMO_MODE=true NEXT_PUBLIC_DEMO_MODE=true OMNIA_ALLOW_ANONYMOUS=true npm run start &
         sleep 10
         npx playwright test --reporter=list
       env:

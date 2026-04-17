@@ -57,6 +57,10 @@ jobs:
       env:
         PORT: 3000
         DEMO_MODE: 'true'
+        # Satisfy the dashboard's boot guard: npm run start implies
+        # NODE_ENV=production, and without an explicit mode it defaults to
+        # anonymous, which the guard would otherwise reject.
+        OMNIA_ALLOW_ANONYMOUS: 'true'
 
     - name: Capture screenshots
       run: npx playwright test --project=screenshots --reporter=list
