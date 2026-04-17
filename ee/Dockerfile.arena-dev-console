@@ -1,17 +1,25 @@
+# syntax=docker/dockerfile:1
 # Build the arena dev console binary
 FROM golang:1.26 AS builder
 ARG TARGETOS
 ARG TARGETARCH
+ENV GOWORK=off
 
 WORKDIR /workspace
 COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
+
 # Copy only source directories needed for the build
 COPY api/ api/
 COPY ee/ ee/
 COPY pkg/ pkg/
 COPY internal/ internal/
 
-RUN CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH}" \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH}" \
     go build -a -o arena-dev-console ./ee/cmd/arena-dev-console
 
 FROM gcr.io/distroless/static:nonroot

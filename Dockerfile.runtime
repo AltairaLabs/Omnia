@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Build stage
 FROM golang:1.26-alpine AS builder
 
@@ -12,6 +13,15 @@ ARG USE_LOCAL_PROMPTKIT=false
 
 # Copy go mod files first for better caching
 COPY go.mod go.sum ./
+
+# CI (default): download deps up-front so layer caches. Skipped for
+# USE_LOCAL_PROMPTKIT=true since that path uses a go.work that isn't
+# set up yet.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    if [ "$USE_LOCAL_PROMPTKIT" != "true" ]; then \
+        GOWORK=off go mod download; \
+    fi
 
 # Copy local PromptKit source if enabled (must be passed via build context)
 # When USE_LOCAL_PROMPTKIT=true, expects PromptKit source at ./promptkit-local/
@@ -37,7 +47,9 @@ COPY pkg/ pkg/
 COPY api/ api/
 
 # Build the runtime binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s" \
     -o runtime \
     ./cmd/runtime
