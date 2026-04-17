@@ -68,6 +68,13 @@ ENABLE_FULL_STACK = os.getenv('ENABLE_FULL_STACK', '').lower() in ('true', '1', 
 # Can be set via environment: ENABLE_ENTERPRISE=true tilt up
 ENABLE_ENTERPRISE = os.getenv('ENABLE_ENTERPRISE', '').lower() in ('true', '1', 'yes') or False
 
+# Set to True to enable Entra ID (Azure AD) OAuth for the dashboard.
+# Requires a one-time setup: run `./scripts/setup-entra-dev.sh --create-secret`
+# to register the app, create the `dashboard-oauth` Secret, and generate
+# `charts/omnia/values-dev-entra.yaml` (gitignored).
+# Can be set via environment: ENABLE_ENTRA=true tilt up
+ENABLE_ENTRA = os.getenv('ENABLE_ENTRA', '').lower() in ('true', '1', 'yes') or False
+
 # Enable internal NFS server for workspace content storage
 # Provides ReadWriteMany (RWX) storage for Arena and workspace content
 # Auto-enabled when ENABLE_ENTERPRISE is true, can be explicitly controlled via ENABLE_NFS
@@ -748,6 +755,11 @@ if ENABLE_NFS:
     helm_values.append('./charts/omnia/values-dev-enterprise.yaml')
 if ENABLE_FULL_STACK:
     helm_values.append('./charts/omnia/values-istio-prometheus.yaml')
+if ENABLE_ENTRA:
+    _entra_values = './charts/omnia/values-dev-entra.yaml'
+    if not os.path.exists(_entra_values):
+        fail('ENABLE_ENTRA=true but %s is missing. Run ./scripts/setup-entra-dev.sh --create-secret first.' % _entra_values)
+    helm_values.append(_entra_values)
 
 # Deploy the Helm chart with development images
 k8s_yaml(helm(
