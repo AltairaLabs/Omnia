@@ -41,6 +41,7 @@ cover.out
 # Helm
 charts/*/charts/
 charts/*/Chart.lock
+charts/omnia/values-dev-entra.yaml
 
 # Local backlog (not for public repo)
 docs/local-backlog/
