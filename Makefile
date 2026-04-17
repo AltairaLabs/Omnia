@@ -498,7 +498,10 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
-	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" apply -f -
+	@# Server-side apply avoids the 262144-byte client-side last-applied-configuration
+	@# annotation, which overflows on large CRDs embedding corev1.Volume/Affinity/Toleration
+	@# via PodOverrides.
+	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" apply --server-side --force-conflicts -f -
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
@@ -510,7 +513,7 @@ ARENA_IMG ?= arena-controller:latest
 .PHONY: deploy-ee
 deploy-ee: manifests-ee kustomize ## Deploy Arena controller (Enterprise) to the K8s cluster specified in ~/.kube/config.
 	cd ee/config/manager && "$(KUSTOMIZE)" edit set image arena-controller=${ARENA_IMG}
-	"$(KUSTOMIZE)" build ee/config/default | "$(KUBECTL)" apply -f -
+	"$(KUSTOMIZE)" build ee/config/default | "$(KUBECTL)" apply --server-side --force-conflicts -f -
 
 .PHONY: undeploy-ee
 undeploy-ee: kustomize ## Undeploy Arena controller (Enterprise) from the K8s cluster. Call with ignore-not-found=true to ignore resource not found errors.
