@@ -225,8 +225,6 @@ jobs:
               configMapRef:
                 name: e2e-demo-prompts
             version: "1.0.0"
-            rollout:
-              type: immediate
           ---
           apiVersion: omnia.altairalabs.ai/v1alpha1
           kind: AgentRuntime
