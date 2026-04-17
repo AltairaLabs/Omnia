@@ -493,12 +493,19 @@ jobs:
 
           ### Helm (Recommended)
 
+          The chart requires an explicit `dashboard.auth.mode` — pick one of
+          `oauth`, `builtin`, `proxy`, or `anonymous` (with `allowAnonymous: true`
+          for isolated-dev-only anonymous mode). Example for an OAuth deployment:
+
           ```bash
           helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
             --version ${{ needs.parse-version.outputs.version }} \
             --namespace omnia-system \
-            --create-namespace
+            --create-namespace \
+            --set dashboard.auth.mode=oauth
           ```
+
+          See `docs/how-to/configure-dashboard-auth.md` for the full options.
 
           ### Docker Images
 

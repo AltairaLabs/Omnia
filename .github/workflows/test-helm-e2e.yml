@@ -75,7 +75,9 @@ jobs:
       - name: Test - Basic Helm template validation
         run: |
           echo "=== Testing helm template generation ==="
-          helm template omnia ./charts/omnia --debug > /dev/null
+          # values-chart-tests.yaml satisfies the auth-mode guardrails
+          # (omnia.validateAuth) so this check focuses on syntax, not auth.
+          helm template omnia ./charts/omnia -f charts/omnia/values-chart-tests.yaml --debug > /dev/null
           echo "Template generation successful"
 
       # ============================================================
@@ -86,6 +88,7 @@ jobs:
         run: |
           echo "=== Testing basic install (keda.enabled=false) ==="
           helm install omnia ./charts/omnia \
+            -f charts/omnia/values-chart-tests.yaml \
             --namespace omnia-system \
             --create-namespace \
             --set keda.enabled=false \
@@ -107,6 +110,7 @@ jobs:
         run: |
           echo "=== Testing helm upgrade ==="
           helm upgrade omnia ./charts/omnia \
+            -f charts/omnia/values-chart-tests.yaml \
             --namespace omnia-system \
             --set keda.enabled=false \
             --timeout 2m
@@ -178,6 +182,7 @@ jobs:
           echo "Attempting to install omnia with keda.enabled=true (should fail)..."
           set +e
           helm install omnia ./charts/omnia \
+            -f charts/omnia/values-chart-tests.yaml \
             --namespace omnia-system \
             --create-namespace \
             --set keda.enabled=true \
@@ -202,6 +207,7 @@ jobs:
           # Install with keda.enabled=false - should SUCCEED
           echo "Installing omnia with keda.enabled=false (should succeed)..."
           helm install omnia ./charts/omnia \
+            -f charts/omnia/values-chart-tests.yaml \
             --namespace omnia-system \
             --create-namespace \
             --set keda.enabled=false \
@@ -253,6 +259,7 @@ jobs:
           echo "=== Testing observability stack (Prometheus, Grafana, Loki) ==="
 
           helm install omnia ./charts/omnia \
+            -f charts/omnia/values-chart-tests.yaml \
             --namespace omnia-system \
             --create-namespace \
             --set keda.enabled=false \
@@ -309,6 +316,7 @@ jobs:
 
           # Install with Prometheus and tracing enabled
           helm install omnia ./charts/omnia \
+            -f charts/omnia/values-chart-tests.yaml \
             --namespace omnia-system \
             --create-namespace \
             --set keda.enabled=false \
@@ -396,8 +404,10 @@ jobs:
         run: |
           echo "=== Testing tracing configuration in Helm templates ==="
 
-          # Generate template with tracing enabled and check for env vars
+          # Generate template with tracing enabled and check for env vars.
+          # values-chart-tests.yaml satisfies omnia.validateAuth.
           TEMPLATE_OUTPUT=$(helm template omnia ./charts/omnia \
+            -f charts/omnia/values-chart-tests.yaml \
             --set tracing.enabled=true \
             --set tracing.endpoint=tempo.example.com:4317)
 
@@ -426,8 +436,10 @@ jobs:
         run: |
           echo "=== Testing Istio telemetry Helm templates ==="
 
-          # Generate template with Istio enabled
+          # Generate template with Istio enabled.
+          # values-chart-tests.yaml satisfies omnia.validateAuth.
           TEMPLATE_OUTPUT=$(helm template omnia ./charts/omnia \
+            -f charts/omnia/values-chart-tests.yaml \
             --set istio.enabled=true \
             --set istio.tempoService=omnia-tempo.omnia-system.svc.cluster.local \
             --set istio.tempoPort=4317)
@@ -470,6 +482,7 @@ jobs:
           echo "=== Testing Helm template with tracing disabled ==="
 
           TEMPLATE_OUTPUT=$(helm template omnia ./charts/omnia \
+            -f charts/omnia/values-chart-tests.yaml \
             --set tracing.enabled=false)
 
           # Verify tracing flags are NOT present when disabled

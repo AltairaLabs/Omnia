@@ -139,8 +139,11 @@ jobs:
         run: |
           echo "=== Deploying Omnia operator ==="
 
-          # Deploy main omnia chart (without demo - it's in a separate chart now)
+          # Deploy main omnia chart (without demo - it's in a separate chart now).
+          # -f values-chart-tests.yaml satisfies the auth-mode guardrails
+          # (omnia.validateAuth) since this E2E doesn't exercise auth.
           helm install omnia ./charts/omnia \
+            -f charts/omnia/values-chart-tests.yaml \
             --namespace omnia-system \
             --create-namespace \
             --set image.tag=$IMAGE_TAG \

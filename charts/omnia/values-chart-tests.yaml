@@ -1,0 +1,12 @@
+# Values file for Helm render / template-validation CI jobs.
+#
+# These jobs only check that templates render to valid YAML — they don't
+# exercise auth behaviour. But the chart's guardrails (see
+# templates/_helpers.tpl → omnia.validateAuth) require an explicit
+# auth mode decision, so pass this file to satisfy them with the
+# "anonymous but explicitly acknowledged" combination. Not for real
+# deployments.
+dashboard:
+  auth:
+    mode: anonymous
+    allowAnonymous: true
