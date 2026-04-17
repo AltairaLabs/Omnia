@@ -2,6 +2,7 @@
 
 import { ShieldAlert } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { useDemoMode } from "@/hooks/use-runtime-config";
 
 /**
  * Banner warning that the dashboard is running unauthenticated.
@@ -11,10 +12,20 @@ import { useAuth } from "@/hooks/use-auth";
  * opted-in to, or because a misconfiguration slipped past the
  * chart/runtime guardrails. Intentionally red and persistent so it's
  * hard to forget the deployment is unsecured.
+ *
+ * Suppressed when NEXT_PUBLIC_DEMO_MODE=true — demo deployments
+ * already render the amber DemoModeBanner, which carries the "this is
+ * a sandbox" meaning. A second red warning layered on top is
+ * redundant and makes marketing/docs screenshots look alarming. The
+ * Helm chart and runtime boot guard still enforce the real "no silent
+ * anonymous prod" contract; this banner is a UI nicety, not the gate.
  */
 export function AnonymousModeBanner() {
   const { user } = useAuth();
+  const { isDemoMode } = useDemoMode();
+
   if (user.provider !== "anonymous") return null;
+  if (isDemoMode) return null;
 
   return (
     <div
