@@ -1136,6 +1136,18 @@ type AgentRuntimeSpec struct {
 	// When nil, no rollout is active and all traffic goes to the current spec.
 	// +optional
 	Rollout *RolloutConfig `json:"rollout,omitempty"`
+
+	// podOverrides lets operators customize the facade+runtime pod's
+	// scheduling, service account, labels, annotations, volumes, and env
+	// sourced from CSI secret-stores or ConfigMaps.
+	//
+	// Pod-level fields apply to the pod. Container-level fields
+	// (extraEnv, extraEnvFrom, extraVolumeMounts) apply to both the facade
+	// and runtime containers but NOT to operator-injected sidecars
+	// (e.g. policy-proxy). Per-container env overrides remain available
+	// via spec.facade.extraEnv and spec.runtime.extraEnv.
+	// +optional
+	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
 }
 
 // AgentRuntimePhase represents the current phase of the AgentRuntime.

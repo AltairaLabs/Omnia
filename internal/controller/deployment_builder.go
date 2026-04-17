@@ -327,6 +327,23 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		podAnnotations[key] = value
 	}
 
+	// Apply user-supplied PodOverrides. Pod-level fields merge onto podSpec +
+	// podAnnotations here; container-level fields are applied per-container
+	// below to exclude the operator-injected policy-proxy sidecar.
+	if agentRuntime.Spec.PodOverrides != nil {
+		podMeta := metav1.ObjectMeta{Labels: labels, Annotations: podAnnotations}
+		ApplyPodOverrides(&podSpec, &podMeta, agentRuntime.Spec.PodOverrides)
+		labels = podMeta.Labels
+		podAnnotations = podMeta.Annotations
+
+		for i := range podSpec.Containers {
+			if podSpec.Containers[i].Name == PolicyProxyContainerName {
+				continue
+			}
+			ApplyContainerOverrides(&podSpec.Containers[i], agentRuntime.Spec.PodOverrides)
+		}
+	}
+
 	deployment.Labels = labels
 	deployment.Spec = appsv1.DeploymentSpec{
 		Replicas: &replicas,

@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -1058,4 +1059,86 @@ func TestGetConfigHash_EmptyProviders(t *testing.T) {
 
 	assert.Empty(t, r.getConfigHash(ctx, nil), "nil providers should return empty string")
 	assert.Empty(t, r.getConfigHash(ctx, map[string]*omniav1alpha1.Provider{}), "empty providers map should return empty string")
+}
+
+func TestBuildDeploymentSpec_PodOverrides(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "a"
+	ar.Namespace = "ns"
+	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+	ar.Spec.PromptPackRef.Name = "p"
+	ar.Spec.PodOverrides = &omniav1alpha1.PodOverrides{
+		ServiceAccountName: "wli-sa",
+		Annotations:        map[string]string{"azure.workload.identity/use": "true"},
+		NodeSelector:       map[string]string{"gpu": "a100"},
+		ImagePullSecrets:   []corev1.LocalObjectReference{{Name: "regcred"}},
+		ExtraVolumes: []corev1.Volume{{
+			Name: "kv",
+			VolumeSource: corev1.VolumeSource{
+				CSI: &corev1.CSIVolumeSource{Driver: "secrets-store.csi.k8s.io"},
+			},
+		}},
+		ExtraEnvFrom: []corev1.EnvFromSource{{
+			SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "kv-secret"}},
+		}},
+	}
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
+
+	spec := dep.Spec.Template.Spec
+	require.Equal(t, "wli-sa", spec.ServiceAccountName, "ServiceAccountName override")
+	require.Equal(t, "true", dep.Spec.Template.Annotations["azure.workload.identity/use"], "workload-identity annotation")
+	require.Equal(t, "a100", spec.NodeSelector["gpu"], "nodeSelector")
+	require.NotEmpty(t, spec.ImagePullSecrets, "imagePullSecrets")
+	require.Equal(t, "regcred", spec.ImagePullSecrets[0].Name)
+
+	foundVol := false
+	for _, v := range spec.Volumes {
+		if v.Name == "kv" && v.CSI != nil {
+			foundVol = true
+		}
+	}
+	require.True(t, foundVol, "extraVolume kv must be appended")
+
+	require.GreaterOrEqual(t, len(spec.Containers), 2, "facade+runtime containers")
+	for _, c := range spec.Containers {
+		foundEnvFrom := false
+		for _, e := range c.EnvFrom {
+			if e.SecretRef != nil && e.SecretRef.Name == "kv-secret" {
+				foundEnvFrom = true
+			}
+		}
+		require.True(t, foundEnvFrom, "container %s missing extraEnvFrom", c.Name)
+	}
+}
+
+func TestBuildDeploymentSpec_PodOverrides_SkipsPolicyProxy(t *testing.T) {
+	r := &AgentRuntimeReconciler{PolicyProxyImage: "policy-proxy:latest"}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "a"
+	ar.Namespace = "ns"
+	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+	ar.Spec.PromptPackRef.Name = "p"
+	ar.Spec.PodOverrides = &omniav1alpha1.PodOverrides{
+		ExtraEnv: []corev1.EnvVar{{Name: "USER_VAR", Value: "x"}},
+	}
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
+
+	for _, c := range dep.Spec.Template.Spec.Containers {
+		hasUserVar := false
+		for _, e := range c.Env {
+			if e.Name == "USER_VAR" {
+				hasUserVar = true
+			}
+		}
+		if c.Name == PolicyProxyContainerName {
+			require.False(t, hasUserVar, "policy-proxy must NOT receive user extraEnv")
+		} else {
+			require.True(t, hasUserVar, "container %s must receive user extraEnv", c.Name)
+		}
+	}
 }
