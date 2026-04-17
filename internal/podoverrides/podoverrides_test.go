@@ -8,7 +8,7 @@ You may obtain a copy of the License at
     http://www.apache.org/licenses/LICENSE-2.0
 */
 
-package controller
+package podoverrides
 
 import (
 	"testing"
@@ -19,10 +19,10 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
-func TestApplyPodOverrides_Nil(t *testing.T) {
+func TestApplyPod_Nil(t *testing.T) {
 	spec := &corev1.PodSpec{ServiceAccountName: "default"}
 	meta := &metav1.ObjectMeta{Labels: map[string]string{"a": "b"}}
-	ApplyPodOverrides(spec, meta, nil)
+	ApplyPod(spec, meta, nil)
 	if spec.ServiceAccountName != "default" {
 		t.Fatalf("nil overrides must not mutate spec")
 	}
@@ -31,13 +31,13 @@ func TestApplyPodOverrides_Nil(t *testing.T) {
 	}
 }
 
-func TestApplyPodOverrides_NilSpec(t *testing.T) {
-	ApplyPodOverrides(nil, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{ServiceAccountName: "x"})
+func TestApplyPod_NilSpec(t *testing.T) {
+	ApplyPod(nil, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{ServiceAccountName: "x"})
 }
 
-func TestApplyPodOverrides_ServiceAccountReplaces(t *testing.T) {
+func TestApplyPod_ServiceAccountReplaces(t *testing.T) {
 	spec := &corev1.PodSpec{ServiceAccountName: "default"}
-	ApplyPodOverrides(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{
+	ApplyPod(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{
 		ServiceAccountName: "csi-sa",
 	})
 	if spec.ServiceAccountName != "csi-sa" {
@@ -45,17 +45,17 @@ func TestApplyPodOverrides_ServiceAccountReplaces(t *testing.T) {
 	}
 }
 
-func TestApplyPodOverrides_EmptySANoReplace(t *testing.T) {
+func TestApplyPod_EmptySANoReplace(t *testing.T) {
 	spec := &corev1.PodSpec{ServiceAccountName: "default"}
-	ApplyPodOverrides(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{})
+	ApplyPod(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{})
 	if spec.ServiceAccountName != "default" {
 		t.Fatalf("empty SA must not replace existing")
 	}
 }
 
-func TestApplyPodOverrides_LabelsOperatorWins(t *testing.T) {
+func TestApplyPod_LabelsOperatorWins(t *testing.T) {
 	meta := &metav1.ObjectMeta{Labels: map[string]string{"app.kubernetes.io/name": "operator-set"}}
-	ApplyPodOverrides(&corev1.PodSpec{}, meta, &omniav1alpha1.PodOverrides{
+	ApplyPod(&corev1.PodSpec{}, meta, &omniav1alpha1.PodOverrides{
 		Labels: map[string]string{"app.kubernetes.io/name": "user-attempt", "custom": "ok"},
 	})
 	if meta.Labels["app.kubernetes.io/name"] != "operator-set" {
@@ -66,9 +66,9 @@ func TestApplyPodOverrides_LabelsOperatorWins(t *testing.T) {
 	}
 }
 
-func TestApplyPodOverrides_LabelsIntoEmptyMeta(t *testing.T) {
+func TestApplyPod_LabelsIntoEmptyMeta(t *testing.T) {
 	meta := &metav1.ObjectMeta{}
-	ApplyPodOverrides(&corev1.PodSpec{}, meta, &omniav1alpha1.PodOverrides{
+	ApplyPod(&corev1.PodSpec{}, meta, &omniav1alpha1.PodOverrides{
 		Labels: map[string]string{"foo": "bar"},
 	})
 	if meta.Labels["foo"] != "bar" {
@@ -76,9 +76,9 @@ func TestApplyPodOverrides_LabelsIntoEmptyMeta(t *testing.T) {
 	}
 }
 
-func TestApplyPodOverrides_AnnotationsUserWins(t *testing.T) {
+func TestApplyPod_AnnotationsUserWins(t *testing.T) {
 	meta := &metav1.ObjectMeta{Annotations: map[string]string{"sidecar.istio.io/inject": "true"}}
-	ApplyPodOverrides(&corev1.PodSpec{}, meta, &omniav1alpha1.PodOverrides{
+	ApplyPod(&corev1.PodSpec{}, meta, &omniav1alpha1.PodOverrides{
 		Annotations: map[string]string{"sidecar.istio.io/inject": "false"},
 	})
 	if meta.Annotations["sidecar.istio.io/inject"] != "false" {
@@ -86,9 +86,9 @@ func TestApplyPodOverrides_AnnotationsUserWins(t *testing.T) {
 	}
 }
 
-func TestApplyPodOverrides_NodeSelectorMerge(t *testing.T) {
+func TestApplyPod_NodeSelectorMerge(t *testing.T) {
 	spec := &corev1.PodSpec{NodeSelector: map[string]string{"zone": "us-east-1a"}}
-	ApplyPodOverrides(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{
+	ApplyPod(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{
 		NodeSelector: map[string]string{"zone": "us-west-2a", "gpu": "a100"},
 	})
 	if spec.NodeSelector["zone"] != "us-west-2a" {
@@ -99,9 +99,9 @@ func TestApplyPodOverrides_NodeSelectorMerge(t *testing.T) {
 	}
 }
 
-func TestApplyPodOverrides_TolerationsAppend(t *testing.T) {
+func TestApplyPod_TolerationsAppend(t *testing.T) {
 	spec := &corev1.PodSpec{Tolerations: []corev1.Toleration{{Key: "existing"}}}
-	ApplyPodOverrides(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{
+	ApplyPod(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{
 		Tolerations: []corev1.Toleration{{Key: "gpu"}},
 	})
 	if len(spec.Tolerations) != 2 || spec.Tolerations[1].Key != "gpu" {
@@ -109,26 +109,26 @@ func TestApplyPodOverrides_TolerationsAppend(t *testing.T) {
 	}
 }
 
-func TestApplyPodOverrides_AffinityReplace(t *testing.T) {
+func TestApplyPod_AffinityReplace(t *testing.T) {
 	spec := &corev1.PodSpec{Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{}}}
 	custom := &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{}}
-	ApplyPodOverrides(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{Affinity: custom})
+	ApplyPod(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{Affinity: custom})
 	if spec.Affinity.PodAntiAffinity == nil {
 		t.Fatal("user affinity must replace operator-default")
 	}
 }
 
-func TestApplyPodOverrides_PriorityClass(t *testing.T) {
+func TestApplyPod_PriorityClass(t *testing.T) {
 	spec := &corev1.PodSpec{}
-	ApplyPodOverrides(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{PriorityClassName: "critical"})
+	ApplyPod(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{PriorityClassName: "critical"})
 	if spec.PriorityClassName != "critical" {
 		t.Fatalf("priorityClass must be set")
 	}
 }
 
-func TestApplyPodOverrides_TopologySpreadAppend(t *testing.T) {
+func TestApplyPod_TopologySpreadAppend(t *testing.T) {
 	spec := &corev1.PodSpec{TopologySpreadConstraints: []corev1.TopologySpreadConstraint{{MaxSkew: 1}}}
-	ApplyPodOverrides(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{
+	ApplyPod(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{
 		TopologySpreadConstraints: []corev1.TopologySpreadConstraint{{MaxSkew: 2}},
 	})
 	if len(spec.TopologySpreadConstraints) != 2 {
@@ -136,9 +136,9 @@ func TestApplyPodOverrides_TopologySpreadAppend(t *testing.T) {
 	}
 }
 
-func TestApplyPodOverrides_ImagePullSecretsAppend(t *testing.T) {
+func TestApplyPod_ImagePullSecretsAppend(t *testing.T) {
 	spec := &corev1.PodSpec{ImagePullSecrets: []corev1.LocalObjectReference{{Name: "a"}}}
-	ApplyPodOverrides(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{
+	ApplyPod(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{
 		ImagePullSecrets: []corev1.LocalObjectReference{{Name: "b"}},
 	})
 	if len(spec.ImagePullSecrets) != 2 || spec.ImagePullSecrets[1].Name != "b" {
@@ -146,9 +146,9 @@ func TestApplyPodOverrides_ImagePullSecretsAppend(t *testing.T) {
 	}
 }
 
-func TestApplyPodOverrides_ExtraVolumesAppend(t *testing.T) {
+func TestApplyPod_ExtraVolumesAppend(t *testing.T) {
 	spec := &corev1.PodSpec{Volumes: []corev1.Volume{{Name: "existing"}}}
-	ApplyPodOverrides(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{
+	ApplyPod(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{
 		ExtraVolumes: []corev1.Volume{{Name: "kv"}},
 	})
 	if len(spec.Volumes) != 2 || spec.Volumes[1].Name != "kv" {
@@ -156,21 +156,21 @@ func TestApplyPodOverrides_ExtraVolumesAppend(t *testing.T) {
 	}
 }
 
-func TestApplyContainerOverrides_Nil(t *testing.T) {
+func TestApplyContainer_Nil(t *testing.T) {
 	c := &corev1.Container{Env: []corev1.EnvVar{{Name: "A"}}}
-	ApplyContainerOverrides(c, nil)
+	ApplyContainer(c, nil)
 	if len(c.Env) != 1 {
 		t.Fatalf("nil overrides must not mutate container")
 	}
 }
 
-func TestApplyContainerOverrides_NilContainer(t *testing.T) {
-	ApplyContainerOverrides(nil, &omniav1alpha1.PodOverrides{ExtraEnv: []corev1.EnvVar{{Name: "X"}}})
+func TestApplyContainer_NilContainer(t *testing.T) {
+	ApplyContainer(nil, &omniav1alpha1.PodOverrides{ExtraEnv: []corev1.EnvVar{{Name: "X"}}})
 }
 
-func TestApplyContainerOverrides_EnvAppend(t *testing.T) {
+func TestApplyContainer_EnvAppend(t *testing.T) {
 	c := &corev1.Container{Env: []corev1.EnvVar{{Name: "A", Value: "1"}}}
-	ApplyContainerOverrides(c, &omniav1alpha1.PodOverrides{
+	ApplyContainer(c, &omniav1alpha1.PodOverrides{
 		ExtraEnv: []corev1.EnvVar{{Name: "B", Value: "2"}},
 	})
 	if len(c.Env) != 2 || c.Env[1].Name != "B" {
@@ -178,9 +178,9 @@ func TestApplyContainerOverrides_EnvAppend(t *testing.T) {
 	}
 }
 
-func TestApplyContainerOverrides_EnvFromAppend(t *testing.T) {
+func TestApplyContainer_EnvFromAppend(t *testing.T) {
 	c := &corev1.Container{}
-	ApplyContainerOverrides(c, &omniav1alpha1.PodOverrides{
+	ApplyContainer(c, &omniav1alpha1.PodOverrides{
 		ExtraEnvFrom: []corev1.EnvFromSource{{Prefix: "KV_"}},
 	})
 	if len(c.EnvFrom) != 1 || c.EnvFrom[0].Prefix != "KV_" {
@@ -188,9 +188,9 @@ func TestApplyContainerOverrides_EnvFromAppend(t *testing.T) {
 	}
 }
 
-func TestApplyContainerOverrides_VolumeMountsAppend(t *testing.T) {
+func TestApplyContainer_VolumeMountsAppend(t *testing.T) {
 	c := &corev1.Container{VolumeMounts: []corev1.VolumeMount{{Name: "tmp"}}}
-	ApplyContainerOverrides(c, &omniav1alpha1.PodOverrides{
+	ApplyContainer(c, &omniav1alpha1.PodOverrides{
 		ExtraVolumeMounts: []corev1.VolumeMount{{Name: "kv", MountPath: "/mnt/kv"}},
 	})
 	if len(c.VolumeMounts) != 2 || c.VolumeMounts[1].Name != "kv" {

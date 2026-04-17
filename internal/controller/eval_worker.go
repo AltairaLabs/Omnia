@@ -29,6 +29,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/podoverrides"
 )
 
 // reconcileEvalWorker ensures a per-namespace eval worker Deployment exists when
@@ -173,9 +174,9 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(ctx context.Context, 
 	}
 
 	if agentRuntime.Spec.Evals != nil && agentRuntime.Spec.Evals.PodOverrides != nil {
-		ApplyPodOverrides(&dep.Spec.Template.Spec, &dep.Spec.Template.ObjectMeta, agentRuntime.Spec.Evals.PodOverrides)
+		podoverrides.ApplyPod(&dep.Spec.Template.Spec, &dep.Spec.Template.ObjectMeta, agentRuntime.Spec.Evals.PodOverrides)
 		for i := range dep.Spec.Template.Spec.Containers {
-			ApplyContainerOverrides(&dep.Spec.Template.Spec.Containers[i], agentRuntime.Spec.Evals.PodOverrides)
+			podoverrides.ApplyContainer(&dep.Spec.Template.Spec.Containers[i], agentRuntime.Spec.Evals.PodOverrides)
 		}
 	}
 

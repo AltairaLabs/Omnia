@@ -34,6 +34,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/podoverrides"
 )
 
 // Annotation key for config hash - changes to this trigger pod rollouts
@@ -332,7 +333,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	// below to exclude the operator-injected policy-proxy sidecar.
 	if agentRuntime.Spec.PodOverrides != nil {
 		podMeta := metav1.ObjectMeta{Labels: labels, Annotations: podAnnotations}
-		ApplyPodOverrides(&podSpec, &podMeta, agentRuntime.Spec.PodOverrides)
+		podoverrides.ApplyPod(&podSpec, &podMeta, agentRuntime.Spec.PodOverrides)
 		labels = podMeta.Labels
 		podAnnotations = podMeta.Annotations
 
@@ -340,7 +341,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 			if podSpec.Containers[i].Name == PolicyProxyContainerName {
 				continue
 			}
-			ApplyContainerOverrides(&podSpec.Containers[i], agentRuntime.Spec.PodOverrides)
+			podoverrides.ApplyContainer(&podSpec.Containers[i], agentRuntime.Spec.PodOverrides)
 		}
 	}
 

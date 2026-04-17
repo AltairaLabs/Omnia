@@ -26,6 +26,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/podoverrides"
 )
 
 const (
@@ -169,9 +170,9 @@ func buildServiceDeployment(
 	}
 
 	if overrides != nil {
-		ApplyPodOverrides(&dep.Spec.Template.Spec, &dep.Spec.Template.ObjectMeta, overrides)
+		podoverrides.ApplyPod(&dep.Spec.Template.Spec, &dep.Spec.Template.ObjectMeta, overrides)
 		for i := range dep.Spec.Template.Spec.Containers {
-			ApplyContainerOverrides(&dep.Spec.Template.Spec.Containers[i], overrides)
+			podoverrides.ApplyContainer(&dep.Spec.Template.Spec.Containers[i], overrides)
 		}
 	}
 

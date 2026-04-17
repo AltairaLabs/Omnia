@@ -14,7 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+// Package podoverrides applies shared PodOverrides from the API types onto
+// operator-built PodSpec / Container values. Kept in its own package so both
+// core (internal/controller) and enterprise (ee/internal/controller) reconcilers
+// can import it without creating an import cycle (internal/controller already
+// depends on ee/api/v1alpha1).
+package podoverrides
 
 import (
 	"maps"
@@ -25,7 +30,7 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
-// ApplyPodOverrides applies pod-level fields from the user-supplied PodOverrides
+// ApplyPod applies pod-level fields from the user-supplied PodOverrides
 // onto the operator-built PodSpec and pod ObjectMeta. It is nil-safe.
 //
 // Merge semantics:
@@ -36,8 +41,8 @@ import (
 //   - Tolerations, TopologySpreadConstraints, ImagePullSecrets, ExtraVolumes: appended.
 //
 // Container-scoped fields (ExtraEnv, ExtraEnvFrom, ExtraVolumeMounts) are handled
-// separately by ApplyContainerOverrides.
-func ApplyPodOverrides(spec *corev1.PodSpec, meta *metav1.ObjectMeta, overrides *omniav1alpha1.PodOverrides) {
+// separately by ApplyContainer.
+func ApplyPod(spec *corev1.PodSpec, meta *metav1.ObjectMeta, overrides *omniav1alpha1.PodOverrides) {
 	if overrides == nil || spec == nil {
 		return
 	}
@@ -80,11 +85,11 @@ func ApplyPodOverrides(spec *corev1.PodSpec, meta *metav1.ObjectMeta, overrides 
 	}
 }
 
-// ApplyContainerOverrides appends container-scoped fields from PodOverrides
+// ApplyContainer appends container-scoped fields from PodOverrides
 // (ExtraEnv, ExtraEnvFrom, ExtraVolumeMounts) onto the given container. It is
 // nil-safe. Callers MUST skip operator-injected sidecars (e.g. policy-proxy)
 // that should not receive user env/mounts.
-func ApplyContainerOverrides(container *corev1.Container, overrides *omniav1alpha1.PodOverrides) {
+func ApplyContainer(container *corev1.Container, overrides *omniav1alpha1.PodOverrides) {
 	if overrides == nil || container == nil {
 		return
 	}

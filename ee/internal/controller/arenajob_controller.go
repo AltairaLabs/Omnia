@@ -41,6 +41,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/arena/threshold"
 	"github.com/altairalabs/omnia/ee/pkg/license"
 	"github.com/altairalabs/omnia/ee/pkg/workspace"
+	"github.com/altairalabs/omnia/internal/podoverrides"
 )
 
 // Workspace label for namespace association
@@ -982,6 +983,9 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	// Set ServiceAccountName for CRD reads (created by reconcileWorkerRBAC above)
 	job.Spec.Template.Spec.ServiceAccountName = workerSAName
 
+	// Apply user-supplied PodOverrides.
+	applyWorkerPodOverrides(job, arenaJob)
+
 	// Set TTL for automatic cleanup after completion (default: 1 hour)
 	if arenaJob.Spec.TTLSecondsAfterFinished != nil {
 		job.Spec.TTLSecondsAfterFinished = arenaJob.Spec.TTLSecondsAfterFinished
@@ -1712,4 +1716,17 @@ func (r *ArenaJobReconciler) resolveSessionURLForWorkspace(ctx context.Context, 
 		}
 	}
 	return ""
+}
+
+// applyWorkerPodOverrides merges ArenaJob.spec.workers.podOverrides onto the
+// worker Job's pod template.
+func applyWorkerPodOverrides(job *batchv1.Job, arenaJob *omniav1alpha1.ArenaJob) {
+	if arenaJob.Spec.Workers == nil || arenaJob.Spec.Workers.PodOverrides == nil {
+		return
+	}
+	overrides := arenaJob.Spec.Workers.PodOverrides
+	podoverrides.ApplyPod(&job.Spec.Template.Spec, &job.Spec.Template.ObjectMeta, overrides)
+	for i := range job.Spec.Template.Spec.Containers {
+		podoverrides.ApplyContainer(&job.Spec.Template.Spec.Containers[i], overrides)
+	}
 }
