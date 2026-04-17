@@ -1,0 +1,249 @@
+name: Docker Push (main)
+
+# On every merge to main, builds + pushes only the images whose source
+# changed, tagged with the commit SHA and :main. Shared-code changes
+# (api/, pkg/, go.mod, shared internal/ packages, Dockerfiles themselves)
+# rebuild every image — safer than trying to compute a precise Go dep graph
+# as a path filter.
+#
+# Keep the matrix in sync with `.github/workflows/release.yml` (docker-release
+# job) and `.github/workflows/docker-build.yml`.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: docker-push-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  detect:
+    name: Detect changed services
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.resolve.outputs.services }}
+      shared: ${{ steps.filter.outputs.shared }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Need history for path-filter to diff against the previous commit.
+          fetch-depth: 2
+
+      - name: Filter paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            # --- Shared paths: any match → rebuild ALL services ---
+            shared:
+              - 'api/**'
+              - 'pkg/**'
+              - 'internal/podoverrides/**'
+              - 'internal/tracing/**'
+              - 'internal/httputil/**'
+              - 'internal/pgutil/**'
+              - 'go.mod'
+              - 'go.sum'
+              - 'Dockerfile.*'
+              - 'Dockerfile'
+              - 'ee/Dockerfile.*'
+              - '.github/workflows/docker-push.yml'
+              - '.github/workflows/release.yml'
+
+            # --- Per-service filters (core) ---
+            omnia-operator:
+              - 'cmd/main.go'
+              - 'cmd/main_test.go'
+              - 'internal/controller/**'
+              - 'internal/api/**'
+              - 'internal/media/**'
+              - 'internal/session/**'
+
+            omnia-facade:
+              - 'cmd/agent/**'
+              - 'internal/facade/**'
+              - 'internal/agent/**'
+
+            omnia-runtime:
+              - 'cmd/runtime/**'
+
+            omnia-dashboard:
+              - 'dashboard/**'
+              - '!dashboard/node_modules/**'
+
+            omnia-session-api:
+              - 'cmd/session-api/**'
+              - 'internal/session/**'
+
+            omnia-memory-api:
+              - 'cmd/memory-api/**'
+              - 'internal/memory/**'
+
+            omnia-doctor:
+              - 'cmd/doctor/**'
+              - 'internal/doctor/**'
+
+            omnia-compaction:
+              - 'cmd/compaction/**'
+              - 'internal/compaction/**'
+
+            # --- Per-service filters (enterprise) ---
+            omnia-arena-controller:
+              - 'ee/cmd/omnia-arena-controller/**'
+              - 'ee/internal/controller/**'
+              - 'ee/api/**'
+
+            omnia-arena-worker:
+              - 'ee/cmd/arena-worker/**'
+              - 'ee/pkg/arena/**'
+
+            omnia-arena-dev-console:
+              - 'ee/cmd/arena-dev-console/**'
+
+            omnia-eval-worker:
+              - 'ee/cmd/arena-eval-worker/**'
+
+            omnia-policy-proxy:
+              - 'ee/cmd/policy-proxy/**'
+
+            omnia-promptkit-lsp:
+              - 'ee/cmd/promptkit-lsp/**'
+
+      - name: Resolve service list
+        id: resolve
+        env:
+          SHARED: ${{ steps.filter.outputs.shared }}
+          MATCHED: ${{ steps.filter.outputs.changes }}
+        run: |
+          # Full image list — matches docker-build.yml + release.yml matrices.
+          ALL='["omnia-operator","omnia-facade","omnia-runtime","omnia-dashboard","omnia-session-api","omnia-memory-api","omnia-doctor","omnia-compaction","omnia-arena-controller","omnia-arena-worker","omnia-arena-dev-console","omnia-eval-worker","omnia-policy-proxy","omnia-promptkit-lsp"]'
+
+          if [[ "$SHARED" == "true" ]]; then
+            echo "Shared paths changed — rebuilding all services."
+            echo "services=$ALL" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # MATCHED is a JSON array of filter names that matched. Strip the
+          # 'shared' filter (handled above, will always be absent here) and
+          # emit the rest.
+          SERVICES=$(jq -c 'map(select(. != "shared"))' <<<"$MATCHED")
+          echo "Changed services: $SERVICES"
+          echo "services=$SERVICES" >> "$GITHUB_OUTPUT"
+
+  build-push:
+    name: Build & push ${{ matrix.image }}
+    needs: detect
+    if: needs.detect.outputs.services != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.detect.outputs.services) }}
+        include:
+          - image: omnia-operator
+            dockerfile: Dockerfile
+            context: .
+          - image: omnia-facade
+            dockerfile: Dockerfile.agent
+            context: .
+          - image: omnia-runtime
+            dockerfile: Dockerfile.runtime
+            context: .
+          - image: omnia-dashboard
+            dockerfile: dashboard/Dockerfile
+            context: dashboard
+          - image: omnia-session-api
+            dockerfile: Dockerfile.session-api
+            context: .
+          - image: omnia-memory-api
+            dockerfile: Dockerfile.memory-api
+            context: .
+          - image: omnia-doctor
+            dockerfile: Dockerfile.doctor
+            context: .
+          - image: omnia-compaction
+            dockerfile: Dockerfile.compaction
+            context: .
+          - image: omnia-arena-controller
+            dockerfile: ee/Dockerfile.arena-controller
+            context: .
+          - image: omnia-arena-worker
+            dockerfile: ee/Dockerfile.arena-worker
+            context: .
+          - image: omnia-arena-dev-console
+            dockerfile: ee/Dockerfile.arena-dev-console
+            context: .
+          - image: omnia-eval-worker
+            dockerfile: ee/Dockerfile.eval-worker
+            context: .
+          - image: omnia-policy-proxy
+            dockerfile: ee/Dockerfile.policy-proxy
+            context: .
+          - image: omnia-promptkit-lsp
+            dockerfile: ee/Dockerfile.promptkit-lsp
+            context: .
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=sha,format=long,prefix=
+            type=sha,format=short,prefix=
+            type=raw,value=main
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:buildcache,mode=max
+          provenance: true
+          sbom: true
+
+  summary:
+    name: Summary
+    needs: [detect, build-push]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report
+        run: |
+          echo "## Docker push summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Shared-paths changed: \`${{ needs.detect.outputs.shared }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Services built: \`${{ needs.detect.outputs.services }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Result: \`${{ needs.build-push.result }}\`" >> "$GITHUB_STEP_SUMMARY"
