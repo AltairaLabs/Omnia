@@ -25,13 +25,8 @@ vi.mock("@/components/auth-wrapper", () => ({
   AuthWrapper: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-vi.mock("@/components/layout", () => ({
-  Sidebar: () => null,
-  ReadOnlyBanner: () => null,
-  DemoModeBanner: () => null,
-  LicenseExpiryBanner: () => null,
-  DevModeLicenseBanner: () => null,
-  WorkspaceContent: ({ children }: { children: React.ReactNode }) => children,
+vi.mock("@/components/app-shell", () => ({
+  AppShell: ({ children }: { children: React.ReactNode }) => children,
 }));
 
 describe("RootLayout", () => {

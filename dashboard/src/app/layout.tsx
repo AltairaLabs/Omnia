@@ -3,8 +3,7 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { AuthWrapper } from "@/components/auth-wrapper";
-import { ErrorBoundary } from "@/components/error-boundary";
-import { Sidebar, ReadOnlyBanner, DemoModeBanner, LicenseExpiryBanner, DevModeLicenseBanner, WorkspaceContent } from "@/components/layout";
+import { AppShell } from "@/components/app-shell";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -36,22 +35,7 @@ export default function RootLayout({
       >
         <Providers>
           <AuthWrapper>
-            <div className="flex h-screen">
-              <Sidebar />
-              <div className="flex-1 flex flex-col overflow-hidden">
-                <DemoModeBanner />
-                <ReadOnlyBanner />
-                <LicenseExpiryBanner />
-                <DevModeLicenseBanner />
-                <main className="flex-1 overflow-auto bg-background">
-                  <ErrorBoundary>
-                    <WorkspaceContent>
-                      {children}
-                    </WorkspaceContent>
-                  </ErrorBoundary>
-                </main>
-              </div>
-            </div>
+            <AppShell>{children}</AppShell>
           </AuthWrapper>
         </Providers>
       </body>
