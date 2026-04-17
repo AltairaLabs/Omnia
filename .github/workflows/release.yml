@@ -554,12 +554,34 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-# Chart.yaml version/appVersion bumping is a MANUAL pre-release step —
-# see RELEASING.md. An earlier auto-PR job using peter-evans/create-pull-
-# request was removed because the default GITHUB_TOKEN can't create PRs
-# ("GitHub Actions is not permitted to create or approve pull requests")
-# and swapping to a PAT adds a rotation burden. The package-time `yq`
-# rewrite in the helm-release job still guarantees published charts
-# carry the correct version regardless of what's in Chart.yaml at tag
-# time — so forgetting the manual bump only means `helm template` from
-# the repo renders stale tags, not a broken release.
+  chart-bump-pr:
+    name: Open Chart.yaml bump PR
+    needs: [parse-version, github-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.OMNIA_RELEASE_TOKEN }}
+
+      - name: Bump Chart.yaml
+        run: |
+          VERSION="${{ needs.parse-version.outputs.version }}"
+          yq eval -i ".version = \"$VERSION\"" charts/omnia/Chart.yaml
+          yq eval -i ".appVersion = \"$VERSION\"" charts/omnia/Chart.yaml
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.OMNIA_RELEASE_TOKEN }}
+          branch: chore/bump-chart-${{ needs.parse-version.outputs.version }}
+          base: main
+          delete-branch: true
+          title: "chore(chart): bump to v${{ needs.parse-version.outputs.version }}"
+          commit-message: "chore(chart): bump to v${{ needs.parse-version.outputs.version }}"
+          body: |
+            Post-release Chart.yaml bump for v${{ needs.parse-version.outputs.version }}.
+
+            Opened automatically by the `release` workflow after a successful
+            tag build. Keeps `main`-at-rest in sync with the latest published
+            chart so `helm template charts/omnia` resolves real image tags.

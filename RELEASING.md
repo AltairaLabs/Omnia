@@ -73,23 +73,29 @@ make test
 # Lint the Helm chart
 make helm-lint
 
-# REQUIRED: bump Chart.yaml to match the tag you're about to push.
-# The release workflow also rewrites these at package time, but
-# main-at-rest must track the released version so that local
-# `helm template` / `helm install` resolves real image tags.
+# Create and push the tag (Chart.yaml is auto-bumped by the release
+# workflow after it completes — see "Chart.yaml auto-bump" below).
 VERSION="0.9.0-beta.6"
-yq eval -i ".version = \"$VERSION\"" charts/omnia/Chart.yaml
-yq eval -i ".appVersion = \"$VERSION\"" charts/omnia/Chart.yaml
-git add charts/omnia/Chart.yaml
-git commit -m "chore(chart): bump to v$VERSION"
-git push
-
-# Create the tag from the bumped commit
 git tag -a "v$VERSION" -m "Release v$VERSION"
-
-# Push the tag
 git push origin "v$VERSION"
 ```
+
+### Chart.yaml auto-bump
+
+The release workflow's final job (`chart-bump-pr`) opens a PR against
+`main` that bumps `charts/omnia/Chart.yaml`'s `version` and `appVersion`
+to the just-released tag. Merge that PR after each release so
+`main`-at-rest tracks the latest published chart and `helm template`
+from a fresh checkout renders real image tags.
+
+The job authenticates with the `OMNIA_RELEASE_TOKEN` repo secret — a
+fine-grained PAT scoped to `AltairaLabs/Omnia` with
+`Contents: write` + `Pull requests: write`. Rotate it alongside
+`CHARTS_REPO_TOKEN`.
+
+The `helm-release` job also rewrites `version`/`appVersion` at package
+time, so a missing or failed auto-bump never produces a broken release
+— it only means `main` briefly lags the published tag.
 
 ### Pre-tag verification
 
