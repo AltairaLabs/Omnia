@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Build stage
 FROM golang:1.26-alpine AS builder
 
@@ -6,15 +7,13 @@ RUN apk add --no-cache git ca-certificates tzdata
 
 # Set working directory
 WORKDIR /workspace
+ENV GOWORK=off
 
 # Copy go mod files first for better caching
 COPY go.mod go.sum ./
-
-# NOTE: Skipping go mod download due to local replace directives for PromptKit
-# which aren't available in the Docker build context. Dependencies will be
-# downloaded during the build step instead.
-# TODO: Re-enable once PromptKit is published to a module proxy
-# RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
 
 # Copy source code
 COPY cmd/ cmd/
@@ -27,7 +26,9 @@ COPY ee/ ee/
 # TARGETARCH is set automatically by buildx, or passed via --build-arg
 # Default to amd64 for CI environments that don't use buildx
 ARG TARGETARCH=amd64
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -ldflags="-w -s" \
     -o agent \
     ./cmd/agent

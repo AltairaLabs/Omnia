@@ -7,11 +7,13 @@ WORKDIR /app
 
 # Install dependencies first (for better caching)
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
 
 # Copy source and build
 COPY . .
-RUN npm run build
+RUN --mount=type=cache,target=/app/.next/cache \
+    npm run build
 
 # Production stage
 FROM node:20-alpine AS runner
@@ -28,7 +30,8 @@ RUN addgroup --system --gid 1001 nodejs && \
 # Copy production dependencies
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/package-lock.json ./
-RUN npm ci --omit=dev
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev
 
 # Copy build output
 COPY --from=builder /app/public ./public
