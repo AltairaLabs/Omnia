@@ -36,8 +36,6 @@ concurrency:
 env:
   KIND_CLUSTER: agent-e2e-test
   HELM_VERSION: v3.14.0
-  # Use a small, fast model for CI testing
-  OLLAMA_MODEL: qwen2:0.5b
   # Image tag for locally-built images
   IMAGE_TAG: e2e-test
 
@@ -45,7 +43,7 @@ jobs:
   agent-e2e:
     name: Agent Flow Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 45  # Increased for image builds + Ollama model pull
+    timeout-minutes: 20  # Image builds + operator boot — no LLM pull (handler=demo)
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -173,52 +171,78 @@ jobs:
 
           echo "Omnia controller manager is ready"
 
-      - name: Deploy demo agents
+      - name: Deploy demo AgentRuntime (handler=demo, no LLM)
         run: |
-          echo "=== Deploying demo agents (Ollama) ==="
+          echo "=== Deploying demo AgentRuntime with handler=demo (no Ollama) ==="
+          # This test asserts facade/runtime wiring (pod ready, WebSocket
+          # accepts connections) — not LLM behaviour. handler=demo wires
+          # the facade to the in-process DemoHandler (see
+          # internal/agent/demo_handler.go), so no Provider, no runtime
+          # container, and no LLM image pull are needed. Saves pulling
+          # 3 GB of ollama/ollama per PR (it also repeatedly blew the
+          # GitHub runner's disk budget).
+          #
+          # Real-LLM regression coverage lives in a separate scheduled
+          # workflow — see GH issue tracking that follow-up.
+          kubectl apply -f - <<'EOF'
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: omnia-demo
+          ---
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: e2e-demo-prompts
+            namespace: omnia-demo
+          data:
+            pack.json: |
+              {
+                "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
+                "id": "e2e-demo-prompts",
+                "name": "E2E Demo Prompts",
+                "version": "1.0.0",
+                "template_engine": { "version": "v1", "syntax": "{{variable}}" },
+                "prompts": {
+                  "default": {
+                    "id": "default",
+                    "name": "Demo",
+                    "version": "1.0.0",
+                    "system_template": "You are a demo agent used only for E2E wiring tests.",
+                    "parameters": { "temperature": 0.7 }
+                  }
+                }
+              }
+          ---
+          apiVersion: omnia.altairalabs.ai/v1alpha1
+          kind: PromptPack
+          metadata:
+            name: e2e-demo-prompts
+            namespace: omnia-demo
+          spec:
+            source:
+              type: configmap
+              configMapRef:
+                name: e2e-demo-prompts
+            version: "1.0.0"
+            rollout:
+              type: immediate
+          ---
+          apiVersion: omnia.altairalabs.ai/v1alpha1
+          kind: AgentRuntime
+          metadata:
+            name: vision-demo
+            namespace: omnia-demo
+          spec:
+            promptPackRef:
+              name: e2e-demo-prompts
+            facade:
+              type: websocket
+              port: 8080
+              handler: demo
+          EOF
 
-          # Deploy the separate omnia-demos chart
-          helm install omnia-demos ./charts/omnia-demos \
-            --namespace omnia-demo \
-            --create-namespace \
-            --set ollama.model=$OLLAMA_MODEL \
-            --set ollama.resources.requests.memory="2Gi" \
-            --set ollama.resources.limits.memory="4Gi" \
-            --set ollama.persistence.enabled=false \
-            --set opa.enabled=false \
-            --set toolsDemo.enabled=false \
-            --timeout 10m
-
-          echo "Demo agents deployed"
-
-      - name: Wait for Ollama to be ready
-        run: |
-          echo "=== Waiting for Ollama pod to be ready ==="
-
-          # Wait for Ollama StatefulSet pod to be ready
-          echo "Waiting for Ollama StatefulSet..."
-          kubectl wait --for=condition=Ready pod/ollama-0 \
-            -n omnia-demo --timeout=300s || {
-            echo "Ollama pod not ready, checking status..."
-            kubectl get pods -n omnia-demo
-            kubectl describe pod ollama-0 -n omnia-demo || true
-            exit 1
-          }
-
-          echo "Ollama pod ready"
-
-          # Wait for model pull job to complete
-          echo "Waiting for model pull job to complete..."
-          kubectl wait --for=condition=Complete job -l app.kubernetes.io/name=ollama-pull-model \
-            -n omnia-demo --timeout=600s || {
-            echo "Model pull job not complete, checking status..."
-            kubectl get jobs -n omnia-demo
-            kubectl logs -n omnia-demo -l job-name --tail=50 || true
-          }
-
-          # Verify model is available
-          echo "Checking available models..."
-          kubectl exec -n omnia-demo ollama-0 -- ollama list || true
+          echo "Demo AgentRuntime created"
 
       - name: Wait for demo agent to be ready
         run: |
@@ -356,9 +380,6 @@ jobs:
 
           echo "--- AgentRuntime status ---"
           kubectl get agentruntime -n omnia-demo -o yaml || true
-
-          echo "--- Ollama logs ---"
-          kubectl logs -n omnia-demo -l app.kubernetes.io/name=ollama --tail=200 || true
 
           echo "--- Agent logs ---"
           kubectl logs -n omnia-demo -l app.kubernetes.io/instance=vision-demo --tail=200 || true

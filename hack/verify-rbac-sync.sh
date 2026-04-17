@@ -61,13 +61,18 @@ info "Rendering kustomize (config/default)..."
 kustomize build "$REPO_ROOT/config/default" > "$KUSTOMIZE_OUT"
 
 info "Rendering Helm chart (charts/omnia, default values)..."
-helm template omnia "$REPO_ROOT/charts/omnia" > "$HELM_OUT"
+# values-chart-tests.yaml satisfies omnia.validateAuth so this script can
+# focus on RBAC comparison — auth mode doesn't change the RBAC surface.
+helm template omnia "$REPO_ROOT/charts/omnia" \
+  -f "$REPO_ROOT/charts/omnia/values-chart-tests.yaml" > "$HELM_OUT"
 
 # Also render with enterprise enabled so we can compare enterprise-only
 # ClusterRoles (arena-manager-role, eval-worker) against ee/config/rbac/.
 HELM_ENTERPRISE_OUT="$TMP_DIR/helm-enterprise.yaml"
 info "Rendering Helm chart (charts/omnia, enterprise.enabled=true)..."
-helm template omnia "$REPO_ROOT/charts/omnia" --set enterprise.enabled=true > "$HELM_ENTERPRISE_OUT"
+helm template omnia "$REPO_ROOT/charts/omnia" \
+  -f "$REPO_ROOT/charts/omnia/values-chart-tests.yaml" \
+  --set enterprise.enabled=true > "$HELM_ENTERPRISE_OUT"
 
 # Append enterprise kustomize roles to the kustomize output so they're
 # available for comparison. ee/config/rbac/ is controller-gen-owned, just
