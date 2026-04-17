@@ -551,8 +551,16 @@ dashboard:
 
   # -- Authentication configuration
   auth:
-    # -- Authentication mode: anonymous, proxy, oauth, or builtin
-    mode: anonymous
+    # -- Authentication mode: anonymous, proxy, oauth, or builtin.
+    # -- Intentionally has no default: the chart fails if this is unset to
+    # -- prevent accidental unauthenticated deployments. Set this explicitly
+    # -- in your values file.
+    mode: ""
+    # -- Explicit opt-in required when mode=anonymous. Anonymous mode
+    # -- disables authentication entirely; the chart will fail unless
+    # -- this is set to true alongside mode=anonymous. Intended for
+    # -- isolated development only.
+    allowAnonymous: false
     # -- Session secret (required for non-anonymous modes)
     # Generate with: openssl rand -base64 32
     sessionSecret: ""

@@ -58,6 +58,10 @@ dashboard:
   # Development auth settings
   auth:
     mode: anonymous
+    # Required explicit opt-in when mode=anonymous. The chart refuses to
+    # render mode=anonymous without this flag so accidental prod
+    # deployments can't slip through.
+    allowAnonymous: true
     anonymousRole: admin  # Full access for development
   # WebSocket proxy URL for local development (Tilt forwards port 3002)
   wsProxy:

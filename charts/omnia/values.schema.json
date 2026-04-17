@@ -115,7 +115,12 @@
           "properties": {
             "mode": {
               "type": "string",
-              "enum": ["anonymous", "builtin", "oauth"]
+              "description": "Authentication mode. Must be set explicitly (no default) when dashboard.enabled=true.",
+              "enum": ["", "anonymous", "builtin", "oauth", "proxy"]
+            },
+            "allowAnonymous": {
+              "type": "boolean",
+              "description": "Explicit opt-in required when mode=anonymous. Chart refuses to render mode=anonymous without this."
             },
             "sessionSecret": { "type": "string" },
             "anonymousRole": {
