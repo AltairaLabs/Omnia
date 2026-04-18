@@ -1,4 +1,14 @@
 {{- if .Values.podDisruptionBudget.enabled }}
+{{- /*
+     Refuse to render a PDB for a single-replica Deployment with the default
+     minAvailable:1. Combination makes every eviction (drain, rollout, scale-
+     up) impossible until the single replica goes Ready on the new pod. Users
+     hit this when they enable a PDB on a dev cluster with replicaCount:1 and
+     then can't roll the operator. Force the choice to be explicit.
+*/}}
+{{- if and (le (int .Values.replicaCount) 1) (or (not .Values.podDisruptionBudget.minAvailable) (eq (.Values.podDisruptionBudget.minAvailable | toString) "1")) (not .Values.podDisruptionBudget.maxUnavailable) }}
+{{- fail "podDisruptionBudget.enabled=true with replicaCount<=1 and default minAvailable:1 would block every eviction of the operator. Either set replicaCount>=2 or set podDisruptionBudget.maxUnavailable:1." }}
+{{- end }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -20,6 +30,9 @@ spec:
 {{- end }}
 ---
 {{- if and .Values.dashboard.enabled .Values.dashboard.podDisruptionBudget.enabled }}
+{{- if and (le (int .Values.dashboard.replicaCount) 1) (or (not .Values.dashboard.podDisruptionBudget.minAvailable) (eq (.Values.dashboard.podDisruptionBudget.minAvailable | toString) "1")) (not .Values.dashboard.podDisruptionBudget.maxUnavailable) }}
+{{- fail "dashboard.podDisruptionBudget.enabled=true with dashboard.replicaCount<=1 and default minAvailable:1 would block every eviction of the dashboard. Either set dashboard.replicaCount>=2 or set dashboard.podDisruptionBudget.maxUnavailable:1." }}
+{{- end }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
