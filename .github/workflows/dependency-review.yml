@@ -1,0 +1,39 @@
+name: Dependency Review
+
+# Blocks PRs that introduce new dependency vulnerabilities above the
+# configured severity threshold. Compares the base branch's dependency
+# graph to the PR head's — alerts that pre-exist on main don't fail the
+# PR, only newly-introduced ones do. Pair this with Dependabot's
+# remediation PRs (which clean up existing alerts) for full coverage.
+#
+# To make this gate enforcing, add "Dependency Review" to the required
+# status checks on the main branch protection rule.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Review dependencies
+        uses: actions/dependency-review-action@v5
+        with:
+          # Fail the check on NEW high or critical advisories introduced
+          # by the PR. Existing alerts on main stay open (Dependabot
+          # handles those separately).
+          fail-on-severity: high
+          # Post a summary comment on the PR only when the check fails,
+          # so clean PRs stay quiet.
+          comment-summary-in-pr: on-failure
+          # Also block common copyleft licenses unless explicitly vetted.
+          deny-licenses: AGPL-3.0, GPL-3.0
