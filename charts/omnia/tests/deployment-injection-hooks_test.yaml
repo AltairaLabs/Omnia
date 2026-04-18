@@ -1,6 +1,14 @@
 suite: deployment injection hooks
 # Covers issue #842 — extraVolumes / extraVolumeMounts / extraEnv /
 # extraEnvFrom hooks on the three chart-owned Deployments.
+#
+# Suite-wide values: the chart's _helpers.tpl omnia.validateAuth gates
+# renders on an explicit dashboard.auth.mode when dashboard.enabled=true
+# (default). Load the canonical chart-test values file so every test
+# starts from a valid auth config; individual tests can still override
+# with per-test `set:` blocks.
+values:
+  - ../values-chart-tests.yaml
 tests:
   # --- Dashboard ---
   - it: dashboard injects extraEnv onto the container

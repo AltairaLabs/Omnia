@@ -539,11 +539,32 @@ jobs:
           helm dependency build ./charts/omnia
 
       - name: Lint chart
-        # dashboard.auth.mode is schema-required (no default, by design).
-        # Pass a placeholder so the lint can proceed; real installs set it
-        # explicitly per the README.
+        # dashboard.auth.mode has no default by design. values-chart-tests.yaml
+        # supplies a valid (anonymous + allowAnonymous) mode for rendering.
         run: |
-          helm lint ./charts/omnia --set dashboard.auth.mode=oauth
+          helm lint ./charts/omnia -f ./charts/omnia/values-chart-tests.yaml
+
+      - name: helm-unittest
+        run: |
+          helm plugin install https://github.com/helm-unittest/helm-unittest --version v0.8.2 || true
+          helm unittest ./charts/omnia
+
+      - name: Render every example file
+        # Each file in charts/omnia/examples/ should render cleanly. Overlay
+        # files must be combined with values-prod-oauth.yaml per their headers.
+        run: |
+          set -e
+          cd charts/omnia
+          echo "=== standalone examples ==="
+          for f in examples/values-minimal.yaml examples/values-prod-oauth.yaml; do
+            echo "--- $f ---"
+            helm template omnia . -f "$f" > /dev/null
+          done
+          echo "=== overlay examples (combined with values-prod-oauth.yaml) ==="
+          for f in examples/values-prod-enterprise.yaml examples/values-azure-kv-csi.yaml examples/values-aws-irsa.yaml examples/values-gke-workload-identity.yaml examples/values-observability-all-in.yaml examples/values-istio-ambient.yaml; do
+            echo "--- $f (overlay on values-prod-oauth.yaml) ---"
+            helm template omnia . -f examples/values-prod-oauth.yaml -f "$f" > /dev/null
+          done
 
       - name: Validate chart metadata
         run: |
