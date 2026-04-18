@@ -28,7 +28,7 @@ async function fetchArenaStats(workspace: string): Promise<ArenaStatsData> {
   if (jobsResponse.ok) {
     const jobs: ArenaJob[] = await jobsResponse.json();
     recentJobs = jobs
-      .sort((a, b) => {
+      .toSorted((a, b) => {
         const timeA = a.metadata?.creationTimestamp || "";
         const timeB = b.metadata?.creationTimestamp || "";
         return timeB.localeCompare(timeA);

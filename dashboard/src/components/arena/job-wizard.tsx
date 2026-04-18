@@ -989,7 +989,7 @@ export function JobWizard({
         </div>
       )}
 
-      {!toolRegistriesLoading && toolRegistryList && toolRegistryList.length === 0 && (
+      {!toolRegistriesLoading && toolRegistryList?.length === 0 && (
         <p className="text-xs text-muted-foreground italic">
           No tool registries found in this workspace.
         </p>

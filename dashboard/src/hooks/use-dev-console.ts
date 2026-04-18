@@ -61,7 +61,7 @@ function assembleMediaAttachment(
   mimeType: string,
   chunks: MediaChunkInfo[]
 ): FileAttachment {
-  const sorted = chunks.sort((a, b) => a.sequence - b.sequence);
+  const sorted = chunks.toSorted((a, b) => a.sequence - b.sequence);
   const binaryParts = sorted
     .map((c) => c.data)
     .filter(Boolean)
