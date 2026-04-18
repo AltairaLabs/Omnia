@@ -445,11 +445,20 @@ func injectGCPServiceAccount(data map[string][]byte, ref *v1alpha1.SecretKeyRef)
 	if !ok {
 		return fmt.Errorf("secret %s missing key %q", ref.Name, key)
 	}
-	path := "/tmp/gcp-sa.json" //nolint:gosec // known runtime-managed path for ADC
-	if err := os.WriteFile(path, jsonBytes, 0o600); err != nil {
-		return fmt.Errorf("write GCP SA key to %s: %w", path, err)
+	// CreateTemp generates a unique path inside os.TempDir() with 0600 perms,
+	// avoiding the predictable-path risk flagged by go:S5443.
+	f, err := os.CreateTemp("", "gcp-sa-*.json")
+	if err != nil {
+		return fmt.Errorf("create GCP SA temp file: %w", err)
 	}
-	if err := os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", path); err != nil {
+	if _, err := f.Write(jsonBytes); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("write GCP SA key to %s: %w", f.Name(), err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close GCP SA key file %s: %w", f.Name(), err)
+	}
+	if err := os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", f.Name()); err != nil {
 		return fmt.Errorf("set GOOGLE_APPLICATION_CREDENTIALS: %w", err)
 	}
 	return nil

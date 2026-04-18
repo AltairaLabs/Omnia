@@ -768,6 +768,228 @@ func TestLoadFromCRD_MemoryEnvOverride(t *testing.T) {
 	assert.Equal(t, "http://custom-memory-api:9090", cfg.MemoryAPIURL)
 }
 
+func TestInjectAWSAccessKey(t *testing.T) {
+	t.Run("sets required env vars", func(t *testing.T) {
+		t.Setenv("AWS_ACCESS_KEY_ID", "")
+		t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+		err := injectAWSAccessKey(map[string][]byte{
+			"AWS_ACCESS_KEY_ID":     []byte("AKIA-test"),
+			"AWS_SECRET_ACCESS_KEY": []byte("secret-test"),
+		}, "ns", "name")
+		require.NoError(t, err)
+		assert.Equal(t, "AKIA-test", os.Getenv("AWS_ACCESS_KEY_ID"))
+		assert.Equal(t, "secret-test", os.Getenv("AWS_SECRET_ACCESS_KEY"))
+	})
+
+	t.Run("sets session token when provided", func(t *testing.T) {
+		t.Setenv("AWS_SESSION_TOKEN", "")
+		err := injectAWSAccessKey(map[string][]byte{
+			"AWS_ACCESS_KEY_ID":     []byte("AKIA-test"),
+			"AWS_SECRET_ACCESS_KEY": []byte("secret-test"),
+			"AWS_SESSION_TOKEN":     []byte("session-test"),
+		}, "ns", "name")
+		require.NoError(t, err)
+		assert.Equal(t, "session-test", os.Getenv("AWS_SESSION_TOKEN"))
+	})
+
+	t.Run("errors when access key id missing", func(t *testing.T) {
+		err := injectAWSAccessKey(map[string][]byte{
+			"AWS_SECRET_ACCESS_KEY": []byte("secret-test"),
+		}, "ns", "name")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "AWS_ACCESS_KEY_ID")
+	})
+
+	t.Run("errors when secret access key missing", func(t *testing.T) {
+		err := injectAWSAccessKey(map[string][]byte{
+			"AWS_ACCESS_KEY_ID": []byte("AKIA-test"),
+		}, "ns", "name")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "AWS_SECRET_ACCESS_KEY")
+	})
+}
+
+func TestInjectAzureServicePrincipal(t *testing.T) {
+	t.Run("sets all three env vars", func(t *testing.T) {
+		for _, k := range []string{"AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET"} {
+			t.Setenv(k, "")
+		}
+		err := injectAzureServicePrincipal(map[string][]byte{
+			"AZURE_TENANT_ID":     []byte("tenant"),
+			"AZURE_CLIENT_ID":     []byte("client"),
+			"AZURE_CLIENT_SECRET": []byte("secret"),
+		}, "ns", "name")
+		require.NoError(t, err)
+		assert.Equal(t, "tenant", os.Getenv("AZURE_TENANT_ID"))
+		assert.Equal(t, "client", os.Getenv("AZURE_CLIENT_ID"))
+		assert.Equal(t, "secret", os.Getenv("AZURE_CLIENT_SECRET"))
+	})
+
+	t.Run("errors when a required key missing", func(t *testing.T) {
+		err := injectAzureServicePrincipal(map[string][]byte{
+			"AZURE_TENANT_ID": []byte("tenant"),
+			"AZURE_CLIENT_ID": []byte("client"),
+		}, "ns", "name")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "AZURE_CLIENT_SECRET")
+	})
+}
+
+func TestInjectGCPServiceAccount(t *testing.T) {
+	t.Run("writes a secure temp file and sets env", func(t *testing.T) {
+		t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+		json := []byte(`{"type":"service_account"}`)
+		err := injectGCPServiceAccount(
+			map[string][]byte{"credentials.json": json},
+			&v1alpha1.SecretKeyRef{Name: "gcp"},
+		)
+		require.NoError(t, err)
+		path := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+		require.NotEmpty(t, path)
+		defer func() { _ = os.Remove(path) }()
+		written, rErr := os.ReadFile(path) //nolint:gosec // test-only path
+		require.NoError(t, rErr)
+		assert.Equal(t, json, written)
+	})
+
+	t.Run("uses custom secret key when provided", func(t *testing.T) {
+		custom := "my-sa.json"
+		err := injectGCPServiceAccount(
+			map[string][]byte{custom: []byte(`{}`)},
+			&v1alpha1.SecretKeyRef{Name: "gcp", Key: &custom},
+		)
+		require.NoError(t, err)
+		defer func() { _ = os.Remove(os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")) }()
+	})
+
+	t.Run("errors when secret key missing", func(t *testing.T) {
+		err := injectGCPServiceAccount(
+			map[string][]byte{"other-key": []byte(`{}`)},
+			&v1alpha1.SecretKeyRef{Name: "gcp"},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "credentials.json")
+	})
+}
+
+func TestInjectPlatformCredentials(t *testing.T) {
+	build := func(platform v1alpha1.PlatformType, auth v1alpha1.AuthMethod, secretData map[string][]byte) *v1alpha1.Provider {
+		var credRef *v1alpha1.SecretKeyRef
+		if secretData != nil {
+			credRef = &v1alpha1.SecretKeyRef{Name: "creds"}
+		}
+		return &v1alpha1.Provider{
+			ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "test-ns"},
+			Spec: v1alpha1.ProviderSpec{
+				Type:     v1alpha1.ProviderTypeClaude,
+				Platform: &v1alpha1.PlatformConfig{Type: platform},
+				Auth:     &v1alpha1.AuthConfig{Type: auth, CredentialsSecretRef: credRef},
+			},
+		}
+	}
+
+	t.Run("workloadIdentity is a no-op", func(t *testing.T) {
+		c := buildTestClient()
+		p := build(v1alpha1.PlatformTypeBedrock, v1alpha1.AuthMethodWorkloadIdentity, nil)
+		p.Spec.Auth.CredentialsSecretRef = nil
+		err := injectPlatformCredentials(context.Background(), c, p)
+		require.NoError(t, err)
+	})
+
+	t.Run("bedrock + accessKey reads secret and sets env", func(t *testing.T) {
+		t.Setenv("AWS_ACCESS_KEY_ID", "")
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: "test-ns"},
+			Data: map[string][]byte{
+				"AWS_ACCESS_KEY_ID":     []byte("AKIA-test"),
+				"AWS_SECRET_ACCESS_KEY": []byte("secret-test"),
+			},
+		}
+		c := buildTestClient(secret)
+		p := build(v1alpha1.PlatformTypeBedrock, v1alpha1.AuthMethodAccessKey,
+			secret.Data)
+
+		require.NoError(t, injectPlatformCredentials(context.Background(), c, p))
+		assert.Equal(t, "AKIA-test", os.Getenv("AWS_ACCESS_KEY_ID"))
+	})
+
+	t.Run("errors when credentialsSecretRef nil for non-WI", func(t *testing.T) {
+		c := buildTestClient()
+		p := build(v1alpha1.PlatformTypeBedrock, v1alpha1.AuthMethodAccessKey, nil)
+		p.Spec.Auth.CredentialsSecretRef = nil
+		err := injectPlatformCredentials(context.Background(), c, p)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "credentialsSecretRef")
+	})
+
+	t.Run("errors when secret missing in cluster", func(t *testing.T) {
+		c := buildTestClient()
+		p := build(v1alpha1.PlatformTypeBedrock, v1alpha1.AuthMethodAccessKey,
+			map[string][]byte{})
+		err := injectPlatformCredentials(context.Background(), c, p)
+		require.Error(t, err)
+	})
+
+	t.Run("rejects unsupported platform/auth combo", func(t *testing.T) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: "test-ns"},
+			Data:       map[string][]byte{},
+		}
+		c := buildTestClient(secret)
+		// bedrock+servicePrincipal is not a valid combo (CEL rejects this at
+		// admission but the runtime guards it defensively).
+		p := build(v1alpha1.PlatformTypeBedrock, v1alpha1.AuthMethodServicePrincipal,
+			secret.Data)
+		err := injectPlatformCredentials(context.Background(), c, p)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported platform/auth")
+	})
+}
+
+func TestLoadPlatformAndAuthConfig(t *testing.T) {
+	t.Run("platform fields populate Config", func(t *testing.T) {
+		cfg := &Config{}
+		loadPlatformConfig(cfg, &v1alpha1.PlatformConfig{
+			Type:     v1alpha1.PlatformTypeVertex,
+			Region:   "us-central1",
+			Project:  "my-project",
+			Endpoint: "https://example",
+		})
+		assert.Equal(t, "vertex", cfg.PlatformType)
+		assert.Equal(t, "us-central1", cfg.PlatformRegion)
+		assert.Equal(t, "my-project", cfg.PlatformProject)
+		assert.Equal(t, "https://example", cfg.PlatformEndpoint)
+	})
+
+	t.Run("nil platform is no-op", func(t *testing.T) {
+		cfg := &Config{PlatformType: "unchanged"}
+		loadPlatformConfig(cfg, nil)
+		assert.Equal(t, "unchanged", cfg.PlatformType)
+	})
+
+	t.Run("auth fields populate Config", func(t *testing.T) {
+		k := "my-key"
+		cfg := &Config{}
+		loadAuthConfig(cfg, &v1alpha1.AuthConfig{
+			Type:                 v1alpha1.AuthMethodAccessKey,
+			RoleArn:              "arn:aws:iam::1:role/x",
+			ServiceAccountEmail:  "sa@p.iam",
+			CredentialsSecretRef: &v1alpha1.SecretKeyRef{Name: "creds", Key: &k},
+		})
+		assert.Equal(t, "accessKey", cfg.AuthType)
+		assert.Equal(t, "arn:aws:iam::1:role/x", cfg.AuthRoleArn)
+		assert.Equal(t, "sa@p.iam", cfg.AuthServiceAccountEmail)
+		assert.Equal(t, "creds", cfg.AuthCredentialsSecretName)
+		assert.Equal(t, "my-key", cfg.AuthCredentialsSecretKey)
+	})
+
+	t.Run("nil auth is no-op", func(t *testing.T) {
+		cfg := &Config{AuthType: "unchanged"}
+		loadAuthConfig(cfg, nil)
+		assert.Equal(t, "unchanged", cfg.AuthType)
+	})
+}
+
 func strPtr(s string) *string {
 	return &s
 }
