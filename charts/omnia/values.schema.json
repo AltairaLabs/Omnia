@@ -1,77 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "title": "Omnia Helm Chart Values",
-  "description": "Schema for validating Omnia Helm chart values",
+  "description": "Schema for validating Omnia Helm chart values. Covers the common paths a platform engineer will configure; leaves less-common fields permissive.",
   "type": "object",
   "properties": {
     "replicaCount": {
       "type": "integer",
       "minimum": 1,
-      "description": "Number of operator replicas"
+      "description": "Number of operator replicas (use 3+ for HA with leader election)"
     },
     "devMode": {
       "type": "boolean",
-      "description": "Enable development mode with full-featured license (DO NOT USE IN PRODUCTION)"
-    },
-    "enterprise": {
-      "type": "object",
-      "description": "Enterprise features configuration",
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "Enable enterprise features (Arena, licensing)"
-        },
-        "arena": {
-          "type": "object",
-          "properties": {
-            "controller": {
-              "type": "object",
-              "properties": {
-                "replicaCount": { "type": "integer", "minimum": 1 },
-                "image": { "$ref": "#/$defs/image" },
-                "resources": { "$ref": "#/$defs/resources" }
-              }
-            },
-            "worker": {
-              "type": "object",
-              "properties": {
-                "image": { "$ref": "#/$defs/image" },
-                "resources": { "$ref": "#/$defs/resources" }
-              }
-            },
-            "queue": {
-              "type": "object",
-              "properties": {
-                "type": {
-                  "type": "string",
-                  "enum": ["memory", "redis"]
-                },
-                "redis": {
-                  "type": "object",
-                  "properties": {
-                    "host": { "type": "string" },
-                    "port": { "type": "integer" }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "license": {
-      "type": "object",
-      "description": "License configuration",
-      "properties": {
-        "key": {
-          "type": "string",
-          "description": "License key (JWT)"
-        },
-        "existingSecret": {
-          "type": "string",
-          "description": "Use an existing Secret instead of creating one"
-        }
-      }
+      "description": "Enable development mode with full-featured license. DO NOT USE IN PRODUCTION."
     },
     "image": {
       "$ref": "#/$defs/image",
@@ -79,15 +19,11 @@
     },
     "imagePullSecrets": {
       "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "name": { "type": "string" }
-        }
-      }
+      "items": { "$ref": "#/$defs/localObjectReference" }
     },
     "nameOverride": { "type": "string" },
     "fullnameOverride": { "type": "string" },
+
     "serviceAccount": {
       "type": "object",
       "properties": {
@@ -96,88 +32,442 @@
         "name": { "type": "string" }
       }
     },
-    "api": {
+
+    "license": {
       "type": "object",
+      "description": "Enterprise license configuration",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "port": { "type": "integer" }
+        "key": {
+          "type": "string",
+          "description": "License key (JWT). Use existingSecret in production."
+        },
+        "existingSecret": {
+          "type": "string",
+          "description": "Name of existing Secret with the license JWT."
+        }
       }
     },
-    "dashboard": {
+
+    "api": {
       "type": "object",
-      "description": "Dashboard configuration",
+      "description": "Operator REST API server",
       "properties": {
         "enabled": { "type": "boolean" },
-        "image": { "$ref": "#/$defs/image" },
-        "replicas": { "type": "integer", "minimum": 1 },
+        "port": { "$ref": "#/$defs/port" }
+      }
+    },
+
+    "operator": {
+      "type": "object",
+      "description": "Operator binary configuration. These fields apply ONLY to the chart-owned operator Deployment; for operator-generated pods (facade+runtime, session-api, memory-api, arena workers, dev console), use the CRD-level `podOverrides:` field instead.",
+      "properties": {
+        "apiBindAddress": {
+          "type": "string",
+          "description": "Bind address for the operator tool-testing API. Empty to disable."
+        },
+        "extraEnv":          { "type": "array", "items": { "type": "object" } },
+        "extraEnvFrom":      { "type": "array", "items": { "type": "object" } },
+        "extraVolumes":      { "type": "array", "items": { "type": "object" } },
+        "extraVolumeMounts": { "type": "array", "items": { "type": "object" } },
+        "logLevel": {
+          "type": "string",
+          "description": "Go zap log level. Not yet wired; placeholder for W3.",
+          "enum": ["", "debug", "info", "warn", "error"]
+        }
+      }
+    },
+
+    "leaderElection": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+
+    "podDisruptionBudget": {
+      "type": "object",
+      "properties": {
+        "enabled":        { "type": "boolean" },
+        "minAvailable":   { "oneOf": [ { "type": "integer", "minimum": 0 }, { "type": "string" } ] },
+        "maxUnavailable": { "oneOf": [ { "type": "integer", "minimum": 0 }, { "type": "string" } ] }
+      }
+    },
+
+    "probes": {
+      "type": "object",
+      "description": "Operator container liveness/readiness probe tuning",
+      "properties": {
+        "port": { "$ref": "#/$defs/port" },
+        "liveness":  { "$ref": "#/$defs/probe" },
+        "readiness": { "$ref": "#/$defs/probe" }
+      }
+    },
+
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "enabled":       { "type": "boolean" },
+        "port":          { "$ref": "#/$defs/port" },
+        "secure":        { "type": "boolean" },
+        "serviceMonitor": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" }
+          }
+        }
+      }
+    },
+
+    "webhook": {
+      "type": "object",
+      "properties": {
+        "enabled":  { "type": "boolean" },
+        "port":     { "$ref": "#/$defs/port" },
+        "certPath": { "type": "string" }
+      }
+    },
+
+    "resources":     { "$ref": "#/$defs/resources" },
+    "imageResources": {
+      "type": "object",
+      "description": "Per-image resource overrides for chart-owned deployments.",
+      "additionalProperties": { "$ref": "#/$defs/resources" }
+    },
+    "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
+    "tolerations":  { "type": "array", "items": { "type": "object" } },
+    "affinity":     { "type": "object" },
+
+    "enterprise": {
+      "type": "object",
+      "description": "Enterprise features (Arena, compliance, community templates, LSP). Requires a license.",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "arena": {
+          "type": "object",
+          "properties": {
+            "controller": {
+              "type": "object",
+              "properties": {
+                "replicaCount": { "type": "integer", "minimum": 1 },
+                "image":        { "$ref": "#/$defs/image" },
+                "resources":    { "$ref": "#/$defs/resources" },
+                "extraEnv":          { "type": "array", "items": { "type": "object" } },
+                "extraEnvFrom":      { "type": "array", "items": { "type": "object" } },
+                "extraVolumes":      { "type": "array", "items": { "type": "object" } },
+                "extraVolumeMounts": { "type": "array", "items": { "type": "object" } }
+              }
+            },
+            "worker": {
+              "type": "object",
+              "properties": {
+                "image":     { "$ref": "#/$defs/image" },
+                "resources": { "$ref": "#/$defs/resources" }
+              }
+            },
+            "devConsole": {
+              "type": "object",
+              "properties": {
+                "image": { "$ref": "#/$defs/image" }
+              }
+            },
+            "queue": {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "enum": ["memory", "redis"] },
+                "redis": {
+                  "type": "object",
+                  "properties": {
+                    "host": { "type": "string" },
+                    "port": { "$ref": "#/$defs/port" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "evalWorker": {
+          "type": "object",
+          "properties": {
+            "enabled":   { "type": "boolean" },
+            "image":     { "$ref": "#/$defs/image" },
+            "resources": { "$ref": "#/$defs/resources" }
+          }
+        },
+        "communityTemplates": {
+          "type": "object",
+          "description": "ArenaTemplateSource that syncs prompt templates from GitHub. Disabled by default (0.9.0-beta.7+) for air-gap safety.",
+          "properties": {
+            "enabled":        { "type": "boolean" },
+            "name":           { "type": "string" },
+            "namespace":      { "type": "string" },
+            "url":            { "type": "string", "format": "uri" },
+            "branch":         { "type": "string" },
+            "templatesPath":  { "type": "string" },
+            "syncInterval":   { "type": "string" },
+            "timeout":        { "type": "string" }
+          }
+        },
+        "promptkitLsp": {
+          "type": "object",
+          "properties": {
+            "enabled":   { "type": "boolean" },
+            "image":     { "$ref": "#/$defs/image" },
+            "resources": { "$ref": "#/$defs/resources" }
+          }
+        }
+      }
+    },
+
+    "facade": {
+      "type": "object",
+      "description": "Defaults applied to operator-generated facade pods",
+      "properties": {
+        "image": { "$ref": "#/$defs/image" }
+      }
+    },
+
+    "framework": {
+      "type": "object",
+      "description": "Defaults applied to operator-generated runtime (framework) pods",
+      "properties": {
+        "image": { "$ref": "#/$defs/image" }
+      }
+    },
+
+    "dashboard": {
+      "type": "object",
+      "properties": {
+        "enabled":      { "type": "boolean" },
+        "replicaCount": { "type": "integer", "minimum": 1 },
+        "image":        { "$ref": "#/$defs/image" },
+        "resources":    { "$ref": "#/$defs/resources" },
+        "service": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+            "port": { "$ref": "#/$defs/port" }
+          }
+        },
         "auth": {
           "type": "object",
           "properties": {
             "mode": {
               "type": "string",
-              "description": "Authentication mode. Must be set explicitly (no default) when dashboard.enabled=true.",
-              "enum": ["", "anonymous", "builtin", "oauth", "proxy"]
+              "description": "Authentication mode. Required when dashboard.enabled=true — the chart's _helpers.tpl enforces this at render time. Empty string allowed so dashboard.enabled=false installs pass schema validation; real values must be one of oauth/builtin/proxy/anonymous (no typos).",
+              "enum": ["", "oauth", "builtin", "proxy", "anonymous"]
             },
+            "sessionSecret":            { "type": "string" },
+            "sessionSecretExistingSecret": { "type": "string" },
             "allowAnonymous": {
               "type": "boolean",
-              "description": "Explicit opt-in required when mode=anonymous. Chart refuses to render mode=anonymous without this."
+              "description": "Explicit opt-in required when mode=anonymous. Chart fails to render mode=anonymous without this."
             },
-            "sessionSecret": { "type": "string" },
             "anonymousRole": {
               "type": "string",
               "enum": ["viewer", "editor", "owner", "admin"]
             }
           }
         },
+        "oauth": {
+          "type": "object",
+          "properties": {
+            "provider":                   { "type": "string", "enum": ["generic", "google", "github", "azure", "okta"] },
+            "clientId":                   { "type": "string" },
+            "clientIdExistingSecret":     { "type": "string" },
+            "clientSecretExistingSecret": { "type": "string" }
+          }
+        },
+        "builtin": {
+          "type": "object",
+          "properties": {
+            "admin": {
+              "type": "object",
+              "properties": {
+                "username":       { "type": "string" },
+                "email":          { "type": "string", "format": "email" },
+                "password":       { "type": "string" },
+                "existingSecret": { "type": "string" }
+              }
+            }
+          }
+        },
         "persistence": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" },
+            "enabled":       { "type": "boolean" },
             "existingClaim": { "type": "string" },
-            "storageClass": { "type": "string" },
-            "size": { "type": "string" }
+            "storageClass":  { "type": "string" },
+            "size":          { "$ref": "#/$defs/quantity" }
           }
         },
         "ingress": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" },
-            "className": { "type": "string" },
-            "host": { "type": "string" }
+            "enabled":     { "type": "boolean" },
+            "className":   { "type": "string" },
+            "host":        { "type": "string" },
+            "annotations": { "type": "object" },
+            "tls":         { "type": "array", "items": { "type": "object" } }
           }
         },
-        "resources": { "$ref": "#/$defs/resources" }
+        "podDisruptionBudget": {
+          "type": "object",
+          "properties": {
+            "enabled":        { "type": "boolean" },
+            "minAvailable":   { "oneOf": [ { "type": "integer", "minimum": 0 }, { "type": "string" } ] },
+            "maxUnavailable": { "oneOf": [ { "type": "integer", "minimum": 0 }, { "type": "string" } ] }
+          }
+        },
+        "extraEnv":          { "type": "array", "items": { "type": "object" } },
+        "extraEnvFrom":      { "type": "array", "items": { "type": "object" } },
+        "extraVolumes":      { "type": "array", "items": { "type": "object" } },
+        "extraVolumeMounts": { "type": "array", "items": { "type": "object" } }
       }
     },
+
     "workspaces": {
       "type": "object",
-      "description": "Workspace multi-tenancy configuration",
       "properties": {
-        "enabled": { "type": "boolean" },
+        "enabled":            { "type": "boolean" },
         "createDefaultRoles": { "type": "boolean" },
         "storage": {
           "type": "object",
           "properties": {
             "storageClass": { "type": "string" },
-            "accessModes": {
-              "type": "array",
-              "items": { "type": "string" }
+            "accessModes":  { "type": "array", "items": { "type": "string", "enum": ["ReadWriteOnce", "ReadOnlyMany", "ReadWriteMany", "ReadWriteOncePod"] } }
+          }
+        }
+      }
+    },
+
+    "workspaceContent": {
+      "type": "object",
+      "description": "Shared workspace content PVC (requires RWX storage class in production)",
+      "properties": {
+        "enabled":    { "type": "boolean" },
+        "mountPath":  { "type": "string" },
+        "persistence": {
+          "type": "object",
+          "properties": {
+            "enabled":      { "type": "boolean" },
+            "storageClass": { "type": "string" },
+            "accessModes":  { "type": "array", "items": { "type": "string", "enum": ["ReadWriteOnce", "ReadOnlyMany", "ReadWriteMany", "ReadWriteOncePod"] } },
+            "size":         { "$ref": "#/$defs/quantity" }
+          }
+        }
+      }
+    },
+
+    "workspaceServices": {
+      "type": "object",
+      "description": "Operator-generated per-workspace service images (session-api, memory-api)",
+      "properties": {
+        "sessionApi": {
+          "type": "object",
+          "properties": {
+            "image":     { "$ref": "#/$defs/image" },
+            "resources": { "$ref": "#/$defs/resources" }
+          }
+        },
+        "memoryApi": {
+          "type": "object",
+          "properties": {
+            "image":     { "$ref": "#/$defs/image" },
+            "resources": { "$ref": "#/$defs/resources" }
+          }
+        }
+      }
+    },
+
+    "sessionRetention": {
+      "type": "object",
+      "properties": {
+        "defaultPolicy": {
+          "type": "object",
+          "properties": {
+            "create":   { "type": "boolean" },
+            "warmDays": { "type": "integer", "minimum": 0 },
+            "coldDays": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "compaction": {
+          "type": "object",
+          "properties": {
+            "enabled":  { "type": "boolean" },
+            "schedule": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "sessionPrivacy": {
+      "type": "object",
+      "properties": {
+        "defaultPolicy": {
+          "type": "object",
+          "properties": {
+            "create": { "type": "boolean" }
+          }
+        }
+      }
+    },
+
+    "compliance": {
+      "type": "object",
+      "description": "Pre-baked compliance policy CRs. All default to false; enable the preset(s) you need.",
+      "properties": {
+        "gdpr":  { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+        "hipaa": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+        "ccpa":  { "type": "object", "properties": { "enabled": { "type": "boolean" } } }
+      }
+    },
+
+    "postgres": {
+      "type": "object",
+      "description": "Dev-only in-cluster Postgres. NOT FOR PRODUCTION.",
+      "properties": {
+        "dev": {
+          "type": "object",
+          "properties": {
+            "enabled":   { "type": "boolean" },
+            "secretName": { "type": "string" },
+            "secretKey":  { "type": "string" },
+            "pgbouncer": {
+              "type": "object",
+              "properties": {
+                "enabled":          { "type": "boolean" },
+                "image":            { "type": "string", "description": "Full image ref; pinned to avoid silent updates." },
+                "poolMode":         { "type": "string", "enum": ["session", "transaction", "statement"] },
+                "defaultPoolSize":  { "type": "integer", "minimum": 1 },
+                "maxClientConn":    { "type": "integer", "minimum": 1 },
+                "maxDbConnections": { "type": "integer", "minimum": 1 }
+              }
             }
           }
         }
       }
     },
+
+    "doctor": {
+      "type": "object",
+      "properties": {
+        "enabled":   { "type": "boolean" },
+        "image":     { "$ref": "#/$defs/image" },
+        "resources": { "$ref": "#/$defs/resources" }
+      }
+    },
+
     "nfs": {
       "type": "object",
-      "description": "NFS storage configuration",
+      "description": "In-cluster NFS server + CSI driver (dev only; use cloud RWX storage in prod)",
       "properties": {
         "server": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" },
-            "internal": { "type": "boolean" },
+            "enabled":      { "type": "boolean" },
+            "internal":     { "type": "boolean" },
             "storageClass": { "type": "string" },
-            "size": { "type": "string" }
+            "size":         { "$ref": "#/$defs/quantity" }
           }
         },
         "csiDriver": {
@@ -187,79 +477,88 @@
             "storageClass": {
               "type": "object",
               "properties": {
-                "name": { "type": "string" },
-                "reclaimPolicy": { "type": "string" }
+                "name":          { "type": "string" },
+                "reclaimPolicy": { "type": "string", "enum": ["Delete", "Retain"] },
+                "subDir":        { "type": "string" }
               }
             }
           }
         }
       }
     },
-    "prometheus": {
+
+    "observability": {
       "type": "object",
       "properties": {
         "enabled": { "type": "boolean" }
       }
     },
+    "prometheus": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
     "grafana": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
+        "enabled":       { "type": "boolean" },
         "adminPassword": { "type": "string" }
       }
     },
-    "loki": {
-      "type": "object",
-      "properties": {
-        "enabled": { "type": "boolean" }
-      }
-    },
-    "tempo": {
-      "type": "object",
-      "properties": {
-        "enabled": { "type": "boolean" }
-      }
-    },
-    "alloy": {
-      "type": "object",
-      "properties": {
-        "enabled": { "type": "boolean" }
-      }
-    },
+    "loki":  { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+    "tempo": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+    "alloy": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+
     "redis": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "architecture": { "type": "string" }
+        "enabled":      { "type": "boolean" },
+        "architecture": { "type": "string", "enum": ["standalone", "replication"] }
       }
     },
+
     "keda": {
       "type": "object",
-      "properties": {
-        "enabled": { "type": "boolean" }
-      }
+      "properties": { "enabled": { "type": "boolean" } }
     },
+
     "gateway": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "className": { "type": "string" }
+        "enabled":   { "type": "boolean" },
+        "name":      { "type": "string" },
+        "className": { "type": "string" },
+        "listeners": {
+          "type": "object",
+          "properties": {
+            "http":  { "$ref": "#/$defs/gatewayListener" },
+            "https": {
+              "allOf": [
+                { "$ref": "#/$defs/gatewayListener" },
+                { "properties": { "enabled": { "type": "boolean" }, "tlsSecretName": { "type": "string" } } }
+              ]
+            }
+          }
+        },
+        "annotations":               { "type": "object" },
+        "infrastructureAnnotations": { "type": "object" }
       }
     },
+
     "internalGateway": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "className": { "type": "string" }
+        "enabled":   { "type": "boolean" },
+        "name":      { "type": "string" },
+        "className": { "type": "string" },
+        "port":      { "$ref": "#/$defs/port" }
       }
     },
+
     "tracing": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
+        "enabled":  { "type": "boolean" },
         "endpoint": { "type": "string" }
       }
     },
+
     "vscodeServer": {
       "type": "object",
       "properties": {
@@ -267,16 +566,14 @@
       }
     }
   },
+
   "$defs": {
     "image": {
       "type": "object",
       "properties": {
-        "repository": { "type": "string" },
-        "tag": { "type": "string" },
-        "pullPolicy": {
-          "type": "string",
-          "enum": ["Always", "Never", "IfNotPresent"]
-        }
+        "repository": { "type": "string", "minLength": 1 },
+        "tag":        { "type": "string" },
+        "pullPolicy": { "type": "string", "enum": ["Always", "Never", "IfNotPresent"] }
       }
     },
     "resources": {
@@ -285,17 +582,57 @@
         "limits": {
           "type": "object",
           "properties": {
-            "cpu": { "type": "string" },
-            "memory": { "type": "string" }
+            "cpu":    { "$ref": "#/$defs/cpu" },
+            "memory": { "$ref": "#/$defs/quantity" }
           }
         },
         "requests": {
           "type": "object",
           "properties": {
-            "cpu": { "type": "string" },
-            "memory": { "type": "string" }
+            "cpu":    { "$ref": "#/$defs/cpu" },
+            "memory": { "$ref": "#/$defs/quantity" }
           }
         }
+      }
+    },
+    "probe": {
+      "type": "object",
+      "properties": {
+        "initialDelaySeconds": { "type": "integer", "minimum": 0 },
+        "periodSeconds":       { "type": "integer", "minimum": 1 },
+        "timeoutSeconds":      { "type": "integer", "minimum": 1 },
+        "failureThreshold":    { "type": "integer", "minimum": 1 },
+        "successThreshold":    { "type": "integer", "minimum": 1 }
+      }
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "cpu": {
+      "oneOf": [
+        { "type": "number", "minimum": 0 },
+        { "type": "string", "pattern": "^(\\d+)(m)?$" }
+      ]
+    },
+    "quantity": {
+      "type": "string",
+      "pattern": "^([+-]?[0-9.]+)((e|E)[+-]?[0-9]+)?(([KMGTP])|([KMGTPE]i)|m)?$",
+      "description": "Kubernetes resource quantity (e.g. 100m, 512Mi, 2Gi)"
+    },
+    "localObjectReference": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "gatewayListener": {
+      "type": "object",
+      "properties": {
+        "port":     { "$ref": "#/$defs/port" },
+        "protocol": { "type": "string", "enum": ["HTTP", "HTTPS", "TCP", "TLS"] }
       }
     }
   }

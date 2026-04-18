@@ -26,11 +26,16 @@ print_error() { echo -e "${RED}✗${NC} $1"; }
 
 FAILED=0
 
+# dashboard.auth.mode has no default by design (prevents unauthenticated
+# deploys) — set it explicitly in every helm invocation so the script
+# doesn't trip the required-field check it's meant to verify.
+AUTH_VALUES=(--set dashboard.auth.mode=oauth)
+
 #
 # 1. Helm lint with strict mode
 #
 print_info "Running helm lint --strict..."
-if helm lint "$CHART_DIR" --strict 2>&1; then
+if helm lint "$CHART_DIR" "${AUTH_VALUES[@]}" --strict 2>&1; then
     print_success "Helm lint passed"
 else
     print_error "Helm lint failed"
@@ -41,10 +46,6 @@ fi
 # 2. Template rendering with different value combinations
 #
 print_info "Testing template rendering..."
-
-# dashboard.auth.mode has no default by design (prevents unauthenticated
-# deploys) — set it explicitly in every template test so pre-commit can run.
-AUTH_VALUES=(--set dashboard.auth.mode=oauth)
 
 # Test default values
 if helm template omnia "$CHART_DIR" "${AUTH_VALUES[@]}" > /dev/null 2>&1; then
