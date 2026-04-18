@@ -92,9 +92,7 @@ const PLATFORM_ELIGIBLE_TYPES: Set<ProviderSpec["type"]> = new Set([
   "gemini",
 ]);
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- value consumers land in Task 3 UI
-const PLATFORM_TYPES = ["bedrock", "vertex", "azure"] as const;
-type PlatformType = (typeof PLATFORM_TYPES)[number];
+type PlatformType = "bedrock" | "vertex" | "azure";
 
 // Auth methods allowed per platform. Mirrors the CRD's CEL auth matrix.
 const AUTH_BY_PLATFORM: Record<PlatformType, readonly string[]> = {
@@ -577,6 +575,180 @@ function PricingFields({
   );
 }
 
+function PlatformFields({
+  form,
+  updateForm,
+}: Readonly<{
+  form: FormState;
+  updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
+}>) {
+  const authOptions =
+    form.platformType ? AUTH_BY_PLATFORM[form.platformType] : [];
+
+  // Radix Select disallows empty-string item values, so we use "none" as a
+  // sentinel for "no platform" and translate at the boundary.
+  const PLATFORM_NONE = "none";
+
+  const onPlatformChange = (value: string) => {
+    const next = (value === PLATFORM_NONE ? "" : value) as FormState["platformType"];
+    updateForm("platformType", next);
+    updateForm("platformRegion", "");
+    updateForm("platformProject", "");
+    updateForm("platformEndpoint", "");
+    updateForm("authType", "");
+    updateForm("authRoleArn", "");
+    updateForm("authServiceAccountEmail", "");
+    updateForm("authSecretName", "");
+    updateForm("authSecretKey", "");
+  };
+
+  const onAuthTypeChange = (value: string) => {
+    updateForm("authType", value as FormState["authType"]);
+    updateForm("authRoleArn", "");
+    updateForm("authServiceAccountEmail", "");
+    updateForm("authSecretName", "");
+    updateForm("authSecretKey", "");
+  };
+
+  return (
+    <div className="border rounded-lg p-4 space-y-4">
+      <Label className="text-base font-semibold">Hosting Platform (optional)</Label>
+
+      <div className="space-y-2">
+        <Label htmlFor="platform-type">Platform</Label>
+        <Select
+          value={form.platformType || PLATFORM_NONE}
+          onValueChange={onPlatformChange}
+        >
+          <SelectTrigger id="platform-type">
+            <SelectValue placeholder="None (direct API)" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={PLATFORM_NONE}>None (direct API)</SelectItem>
+            <SelectItem value="bedrock">AWS Bedrock</SelectItem>
+            <SelectItem value="vertex">GCP Vertex</SelectItem>
+            <SelectItem value="azure">Azure AI Foundry</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {form.platformType && (
+        <>
+          {(form.platformType === "bedrock" || form.platformType === "vertex") && (
+            <div className="space-y-2">
+              <Label htmlFor="platform-region">Region</Label>
+              <Input
+                id="platform-region"
+                placeholder={form.platformType === "bedrock" ? "us-east-1" : "us-central1"}
+                value={form.platformRegion}
+                onChange={(e) => updateForm("platformRegion", e.target.value)}
+              />
+            </div>
+          )}
+
+          {form.platformType === "vertex" && (
+            <div className="space-y-2">
+              <Label htmlFor="platform-project">Project</Label>
+              <Input
+                id="platform-project"
+                placeholder="my-gcp-project"
+                value={form.platformProject}
+                onChange={(e) => updateForm("platformProject", e.target.value)}
+              />
+            </div>
+          )}
+
+          {form.platformType === "azure" && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="platform-endpoint">Endpoint</Label>
+                <Input
+                  id="platform-endpoint"
+                  placeholder="https://my-resource.openai.azure.com"
+                  value={form.platformEndpoint}
+                  onChange={(e) => updateForm("platformEndpoint", e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="platform-region">Region (optional)</Label>
+                <Input
+                  id="platform-region"
+                  placeholder="eastus"
+                  value={form.platformRegion}
+                  onChange={(e) => updateForm("platformRegion", e.target.value)}
+                />
+              </div>
+            </>
+          )}
+
+          <div className="space-y-2">
+            <Label htmlFor="auth-type">Auth</Label>
+            <Select value={form.authType} onValueChange={onAuthTypeChange}>
+              <SelectTrigger id="auth-type">
+                <SelectValue placeholder="Select auth method" />
+              </SelectTrigger>
+              <SelectContent>
+                {authOptions.map((opt) => (
+                  <SelectItem key={opt} value={opt}>
+                    {opt}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {form.authType === "workloadIdentity" && form.platformType === "bedrock" && (
+            <div className="space-y-2">
+              <Label htmlFor="auth-role-arn">Role ARN (optional)</Label>
+              <Input
+                id="auth-role-arn"
+                placeholder="arn:aws:iam::123456789012:role/omnia-bedrock"
+                value={form.authRoleArn}
+                onChange={(e) => updateForm("authRoleArn", e.target.value)}
+              />
+            </div>
+          )}
+
+          {form.authType === "workloadIdentity" && form.platformType === "vertex" && (
+            <div className="space-y-2">
+              <Label htmlFor="auth-service-account-email">Service Account Email (optional)</Label>
+              <Input
+                id="auth-service-account-email"
+                placeholder="omnia-vertex@my-project.iam.gserviceaccount.com"
+                value={form.authServiceAccountEmail}
+                onChange={(e) => updateForm("authServiceAccountEmail", e.target.value)}
+              />
+            </div>
+          )}
+
+          {form.authType && form.authType !== "workloadIdentity" && (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="auth-secret-name">Credentials Secret Name</Label>
+                <Input
+                  id="auth-secret-name"
+                  placeholder="my-cloud-credentials"
+                  value={form.authSecretName}
+                  onChange={(e) => updateForm("authSecretName", e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="auth-secret-key">Key (optional)</Label>
+                <Input
+                  id="auth-secret-key"
+                  placeholder=""
+                  value={form.authSecretKey}
+                  onChange={(e) => updateForm("authSecretKey", e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function CapabilitiesFields({
   form,
   updateForm,
@@ -736,7 +908,8 @@ function ProviderDialogForm({
     }
   };
 
-  const showCredential = !isLocal(formState.providerType);
+  const showCredential = !isLocal(formState.providerType) && !formState.platformType;
+  const showPlatform = supportsPlatform(formState.providerType);
 
   return (
     <DialogContent className="sm:max-w-[600px] max-h-[90vh] flex flex-col overflow-hidden">
@@ -812,6 +985,8 @@ function ProviderDialogForm({
               onChange={(e) => updateForm("baseURL", e.target.value)}
             />
           </div>
+
+          {showPlatform && <PlatformFields form={formState} updateForm={updateForm} />}
 
           {/* Credential section */}
           {showCredential && (
