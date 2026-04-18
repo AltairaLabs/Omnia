@@ -47,11 +47,31 @@ type Config struct {
 	SessionTTL  time.Duration // Session TTL
 
 	// Provider configuration
-	ProviderType         string // "claude", "openai", "gemini", "ollama", "mock"
+	ProviderType         string // "claude", "openai", "gemini", "ollama", "mock", "vllm", "voyageai"
 	Model                string // Model override (e.g., "claude-3-opus")
 	BaseURL              string // Custom base URL for API calls
 	ProviderRefName      string // Name of the Provider CRD (for metrics, if using providerRef)
 	ProviderRefNamespace string // Namespace of the Provider CRD (for metrics)
+
+	// Custom headers passed to every provider request.
+	// Empty map/nil means no custom headers. Used for gateway providers like OpenRouter.
+	Headers map[string]string
+
+	// Platform hosting configuration. Empty PlatformType means direct provider access.
+	// When set, PlatformType is one of "bedrock", "vertex", "azure".
+	PlatformType     string
+	PlatformRegion   string
+	PlatformProject  string
+	PlatformEndpoint string
+
+	// Auth configuration for platform-hosted providers.
+	// AuthType is one of "workloadIdentity", "accessKey", "serviceAccount", "servicePrincipal".
+	// Empty AuthType means direct provider access (uses API-key credential flow).
+	AuthType                  string
+	AuthRoleArn               string
+	AuthServiceAccountEmail   string
+	AuthCredentialsSecretName string // Secret containing platform credentials
+	AuthCredentialsSecretKey  string // Optional key within the secret
 
 	// Provider pricing (from CRD, passed to PromptKit for cost calculation)
 	InputCostPer1K  float64 // Cost per 1000 input tokens (0 = use provider built-in pricing)

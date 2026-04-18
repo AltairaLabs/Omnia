@@ -90,28 +90,47 @@ func TestResolveHealthURL(t *testing.T) {
 			want: "https://custom-proxy.example.com",
 		},
 		{
-			name: "bedrock has no default endpoint returns empty",
+			name: "claude on bedrock platform returns empty (platform-hosted)",
 			provider: &omniav1alpha1.Provider{
 				Spec: omniav1alpha1.ProviderSpec{
-					Type: omniav1alpha1.ProviderTypeBedrock,
+					Type: omniav1alpha1.ProviderTypeClaude,
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type: omniav1alpha1.PlatformTypeBedrock,
+					},
 				},
 			},
 			want: "",
 		},
 		{
-			name: "vertex has no default endpoint returns empty",
+			name: "gemini on vertex platform returns empty (platform-hosted)",
 			provider: &omniav1alpha1.Provider{
 				Spec: omniav1alpha1.ProviderSpec{
-					Type: omniav1alpha1.ProviderTypeVertex,
+					Type: omniav1alpha1.ProviderTypeGemini,
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type: omniav1alpha1.PlatformTypeVertex,
+					},
 				},
 			},
 			want: "",
 		},
 		{
-			name: "azure-ai has no default endpoint returns empty",
+			name: "openai on azure platform returns empty (platform-hosted)",
 			provider: &omniav1alpha1.Provider{
 				Spec: omniav1alpha1.ProviderSpec{
-					Type: omniav1alpha1.ProviderTypeAzureAI,
+					Type: omniav1alpha1.ProviderTypeOpenAI,
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type:     omniav1alpha1.PlatformTypeAzure,
+						Endpoint: "https://example.openai.azure.com",
+					},
+				},
+			},
+			want: "",
+		},
+		{
+			name: "vllm without base URL returns empty",
+			provider: &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					Type: omniav1alpha1.ProviderTypeVLLM,
 				},
 			},
 			want: "",

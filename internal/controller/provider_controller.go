@@ -48,6 +48,11 @@ const (
 	ProviderConditionTypeEndpointReachable    = "EndpointReachable"
 	// secretKeyAPIKey is the common secret key name for API keys.
 	secretKeyAPIKey = "api-key"
+	// Error message formats (go:S1192 — extracted to avoid duplication).
+	errFmtSecretNotFound      = "secret %q not found in namespace %q"
+	errFmtSecretMissingKey    = "secret %q does not contain key %q"
+	errFmtSecretMissingAnyKey = "secret %q does not contain any expected API key (%v)"
+	errFmtSecretGetFailed     = "failed to get secret %q: %v"
 )
 
 // healthCheckTimeout is how long we wait for a provider endpoint to respond.
@@ -186,7 +191,7 @@ func (r *ProviderReconciler) validateCredentialConfig(ctx context.Context, provi
 	}
 
 	// No credentials specified
-	if providerRequiresCredentials(provider.Spec.Type) {
+	if providerRequiresCredentials(provider) {
 		msg := fmt.Sprintf("provider type %q requires credentials but none are configured", provider.Spec.Type)
 		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
 			"NoSecretRequired", "Provider does not require credentials")
@@ -259,7 +264,7 @@ func (r *ProviderReconciler) validateCredentialSecretRef(ctx context.Context, pr
 
 	if err := r.Get(ctx, key, secret); err != nil {
 		if apierrors.IsNotFound(err) {
-			msg := fmt.Sprintf("secret %q not found in namespace %q", key.Name, key.Namespace)
+			msg := fmt.Sprintf(errFmtSecretNotFound, key.Name, key.Namespace)
 			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
 				"SecretNotFound", msg)
 			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
@@ -267,7 +272,7 @@ func (r *ProviderReconciler) validateCredentialSecretRef(ctx context.Context, pr
 			provider.Status.Phase = omniav1alpha1.ProviderPhaseError
 			return fmt.Errorf("%s", msg)
 		}
-		msg := fmt.Sprintf("failed to get secret %q: %v", key.Name, err)
+		msg := fmt.Sprintf(errFmtSecretGetFailed, key.Name, err)
 		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
 			"SecretNotFound", msg)
 		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
@@ -280,7 +285,7 @@ func (r *ProviderReconciler) validateCredentialSecretRef(ctx context.Context, pr
 	if ref.Key != nil {
 		expectedKey := *ref.Key
 		if _, exists := secret.Data[expectedKey]; !exists {
-			msg := fmt.Sprintf("secret %q does not contain key %q", key.Name, expectedKey)
+			msg := fmt.Sprintf(errFmtSecretMissingKey, key.Name, expectedKey)
 			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
 				"SecretKeyMissing", msg)
 			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
@@ -299,7 +304,7 @@ func (r *ProviderReconciler) validateCredentialSecretRef(ctx context.Context, pr
 			}
 		}
 		if !found {
-			msg := fmt.Sprintf("secret %q does not contain any expected API key (%v)", key.Name, expectedKeys)
+			msg := fmt.Sprintf(errFmtSecretMissingAnyKey, key.Name, expectedKeys)
 			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
 				"SecretKeyMissing", msg)
 			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
@@ -362,28 +367,29 @@ func (r *ProviderReconciler) validateCredentialFilePath(provider *omniav1alpha1.
 	return nil
 }
 
-// isHyperscalerProvider returns whether the given provider type is a hyperscaler provider.
-func isHyperscalerProvider(providerType omniav1alpha1.ProviderType) bool {
-	switch providerType {
-	case omniav1alpha1.ProviderTypeBedrock, omniav1alpha1.ProviderTypeVertex, omniav1alpha1.ProviderTypeAzureAI:
-		return true
-	default:
-		return false
-	}
+// isPlatformHosted returns whether the provider is hosted on a hyperscaler platform.
+// Platform hosting is signalled by spec.platform being set (CEL validation enforces
+// that platform is only legal for claude/openai/gemini).
+func isPlatformHosted(provider *omniav1alpha1.Provider) bool {
+	return provider.Spec.Platform != nil
 }
 
-// validateAuthConfig validates the auth configuration for hyperscaler providers.
+// validateAuthConfig validates the auth configuration for platform-hosted providers.
 func (r *ProviderReconciler) validateAuthConfig(ctx context.Context, provider *omniav1alpha1.Provider) error {
-	if !isHyperscalerProvider(provider.Spec.Type) {
-		// Non-hyperscaler providers don't use auth config
+	if !isPlatformHosted(provider) {
+		// Non-platform-hosted providers don't use auth config. CEL validation
+		// rejects spec.auth without spec.platform, so nothing to do here.
 		return nil
 	}
 
 	if provider.Spec.Auth == nil {
-		// No auth config for hyperscaler - this is fine, workload identity can work without explicit auth
-		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeAuthConfigured, metav1.ConditionTrue,
-			"AuthNotConfigured", "No auth configuration specified; workload identity may be used via default credential chain")
-		return nil
+		// CEL admission enforces spec.auth when spec.platform is set; treat any
+		// slip-through as a configuration error rather than silently accepting.
+		msg := "spec.auth is required when spec.platform is set"
+		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeAuthConfigured, metav1.ConditionFalse,
+			"AuthRequired", msg)
+		provider.Status.Phase = omniav1alpha1.ProviderPhaseError
+		return fmt.Errorf("%s", msg)
 	}
 
 	auth := provider.Spec.Auth
@@ -404,11 +410,11 @@ func (r *ProviderReconciler) validateAuthConfig(ctx context.Context, provider *o
 		return fmt.Errorf("%s", msg)
 	}
 
-	// Validate the referenced secret exists
-	if err := r.validateCredentialSecretRef(ctx, provider, auth.CredentialsSecretRef); err != nil {
+	// Validate the referenced secret exists and has the expected platform keys
+	if err := r.validatePlatformCredentialsSecret(ctx, provider, auth); err != nil {
 		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeAuthConfigured, metav1.ConditionFalse,
 			"CredentialsSecretNotFound", err.Error())
-		// Phase already set by validateCredentialSecretRef
+		provider.Status.Phase = omniav1alpha1.ProviderPhaseError
 		return err
 	}
 
@@ -417,12 +423,65 @@ func (r *ProviderReconciler) validateAuthConfig(ctx context.Context, provider *o
 	return nil
 }
 
-// providerRequiresCredentials returns whether the given provider type requires credentials.
-func providerRequiresCredentials(providerType omniav1alpha1.ProviderType) bool {
-	switch providerType {
-	case omniav1alpha1.ProviderTypeMock, omniav1alpha1.ProviderTypeOllama,
-		omniav1alpha1.ProviderTypeBedrock, omniav1alpha1.ProviderTypeVertex,
-		omniav1alpha1.ProviderTypeAzureAI:
+// validatePlatformCredentialsSecret verifies the auth.credentialsSecretRef
+// secret exists and contains the keys expected for the platform/auth combo.
+func (r *ProviderReconciler) validatePlatformCredentialsSecret(
+	ctx context.Context, provider *omniav1alpha1.Provider, auth *omniav1alpha1.AuthConfig,
+) error {
+	ref := auth.CredentialsSecretRef
+	secret := &corev1.Secret{}
+	key := types.NamespacedName{Name: ref.Name, Namespace: provider.Namespace}
+
+	if err := r.Get(ctx, key, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf(errFmtSecretNotFound, ref.Name, provider.Namespace)
+		}
+		return fmt.Errorf("failed to get secret %q: %w", ref.Name, err)
+	}
+
+	// When a specific key is named, that key alone must exist.
+	if ref.Key != nil && *ref.Key != "" {
+		if _, ok := secret.Data[*ref.Key]; !ok {
+			return fmt.Errorf(errFmtSecretMissingKey, ref.Name, *ref.Key)
+		}
+		return nil
+	}
+
+	// Otherwise check for the platform+auth expected keys.
+	expected := expectedPlatformSecretKeys(provider.Spec.Platform.Type, auth.Type)
+	for _, k := range expected {
+		if _, ok := secret.Data[k]; !ok {
+			return fmt.Errorf("secret %q missing expected key %q for %s/%s", ref.Name, k, provider.Spec.Platform.Type, auth.Type)
+		}
+	}
+	return nil
+}
+
+// expectedPlatformSecretKeys returns the keys that must be present in the
+// auth.credentialsSecretRef secret for each supported platform/auth combo.
+// workloadIdentity combos do not use a secret and are not listed here.
+func expectedPlatformSecretKeys(platform omniav1alpha1.PlatformType, auth omniav1alpha1.AuthMethod) []string {
+	switch {
+	case platform == omniav1alpha1.PlatformTypeBedrock && auth == omniav1alpha1.AuthMethodAccessKey:
+		return []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}
+	case platform == omniav1alpha1.PlatformTypeVertex && auth == omniav1alpha1.AuthMethodServiceAccount:
+		return []string{"credentials.json"}
+	case platform == omniav1alpha1.PlatformTypeAzure && auth == omniav1alpha1.AuthMethodServicePrincipal:
+		return []string{"AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET"}
+	default:
+		return nil
+	}
+}
+
+// providerRequiresCredentials returns whether the given provider requires an
+// API-key credential. Providers hosted on a platform (bedrock/vertex/azure) use
+// the platform auth instead of an API key, so credentials are not required.
+func providerRequiresCredentials(provider *omniav1alpha1.Provider) bool {
+	if isPlatformHosted(provider) {
+		return false
+	}
+	switch provider.Spec.Type {
+	case omniav1alpha1.ProviderTypeMock, omniav1alpha1.ProviderTypeOllama, omniav1alpha1.ProviderTypeVLLM:
 		return false
 	default:
 		return true
@@ -446,7 +505,7 @@ func (r *ProviderReconciler) validateSecretRef(ctx context.Context, provider *om
 
 	if err := r.Get(ctx, key, secret); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("secret %q not found in namespace %q", key.Name, key.Namespace)
+			return fmt.Errorf(errFmtSecretNotFound, key.Name, key.Namespace)
 		}
 		return fmt.Errorf("failed to get secret %q: %w", key.Name, err)
 	}
@@ -455,7 +514,7 @@ func (r *ProviderReconciler) validateSecretRef(ctx context.Context, provider *om
 	if provider.Spec.SecretRef.Key != nil {
 		expectedKey := *provider.Spec.SecretRef.Key
 		if _, exists := secret.Data[expectedKey]; !exists {
-			return fmt.Errorf("secret %q does not contain key %q", key.Name, expectedKey)
+			return fmt.Errorf(errFmtSecretMissingKey, key.Name, expectedKey)
 		}
 		return nil
 	}
@@ -468,7 +527,7 @@ func (r *ProviderReconciler) validateSecretRef(ctx context.Context, provider *om
 		}
 	}
 
-	return fmt.Errorf("secret %q does not contain any expected API key (%v)", key.Name, expectedKeys)
+	return fmt.Errorf(errFmtSecretMissingAnyKey, key.Name, expectedKeys)
 }
 
 // getExpectedKeysForProvider returns the expected secret keys for a provider type.
@@ -480,12 +539,8 @@ func getExpectedKeysForProvider(providerType omniav1alpha1.ProviderType) []strin
 		return []string{"OPENAI_API_KEY", "OPENAI_TOKEN", secretKeyAPIKey}
 	case omniav1alpha1.ProviderTypeGemini:
 		return []string{"GEMINI_API_KEY", "GOOGLE_API_KEY", secretKeyAPIKey}
-	case omniav1alpha1.ProviderTypeBedrock:
-		return []string{"AWS_ACCESS_KEY_ID", secretKeyAPIKey}
-	case omniav1alpha1.ProviderTypeVertex:
-		return []string{"GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_API_KEY", secretKeyAPIKey}
-	case omniav1alpha1.ProviderTypeAzureAI:
-		return []string{"AZURE_OPENAI_API_KEY", "AZURE_API_KEY", secretKeyAPIKey}
+	case omniav1alpha1.ProviderTypeVoyageAI:
+		return []string{"VOYAGE_API_KEY", secretKeyAPIKey}
 	default:
 		return []string{secretKeyAPIKey, "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"}
 	}
@@ -532,9 +587,15 @@ var defaultProviderEndpoints = map[omniav1alpha1.ProviderType]string{
 }
 
 // resolveHealthURL returns the URL to health-check for this provider.
-// Returns empty string if no health check is applicable (mock, hyperscaler SDK-based).
+// Returns empty string if no health check is applicable (mock, platform-hosted
+// providers that use SDK auth rather than a reachable HTTP URL, or providers
+// without a known base URL like voyageai).
 func (r *ProviderReconciler) resolveHealthURL(provider *omniav1alpha1.Provider) string {
 	if provider.Spec.Type == omniav1alpha1.ProviderTypeMock {
+		return ""
+	}
+	// Platform-hosted providers authenticate via cloud SDK, not a reachable HTTP URL.
+	if isPlatformHosted(provider) {
 		return ""
 	}
 
@@ -543,7 +604,7 @@ func (r *ProviderReconciler) resolveHealthURL(provider *omniav1alpha1.Provider) 
 		baseURL = defaultProviderEndpoints[provider.Spec.Type]
 	}
 	if baseURL == "" {
-		return "" // hyperscaler (bedrock, vertex, azure-ai) — skip
+		return "" // no default endpoint (e.g. vllm without baseURL) — skip
 	}
 
 	// Provider-specific health paths

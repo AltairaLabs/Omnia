@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/AltairaLabs/PromptKit/runtime/credentials"
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/providers/mock"
 )
@@ -90,7 +91,6 @@ func (r *defaultScenarioRepo) GetTurn(
 }
 
 // createProviderFromConfig creates a PromptKit provider based on runtime configuration.
-// This is used for explicit provider types (ollama, claude, openai, gemini).
 // Returns nil, nil if provider type is empty (no provider configured).
 func (s *Server) createProviderFromConfig() (providers.Provider, error) {
 	// Skip if no explicit provider type
@@ -98,26 +98,29 @@ func (s *Server) createProviderFromConfig() (providers.Provider, error) {
 		return nil, nil
 	}
 
-	// Create provider from spec
-	spec := providers.ProviderSpec{
-		ID:      s.providerType,
-		Type:    s.providerType,
-		Model:   s.model,
-		BaseURL: s.baseURL,
-	}
+	spec := s.buildProviderSpec()
 
-	// Pass CRD pricing to PromptKit so providers use it for cost calculation
-	if s.inputCostPer1K > 0 && s.outputCostPer1K > 0 {
-		spec.Defaults.Pricing = providers.Pricing{
-			InputCostPer1K:  s.inputCostPer1K,
-			OutputCostPer1K: s.outputCostPer1K,
+	// Resolve platform credential lazily at provider-creation time (not during
+	// spec assembly) so tests that exercise spec wiring don't need cloud
+	// credentials in their environment.
+	if spec.Platform != "" {
+		cred, err := credentials.Resolve(context.Background(), credentials.ResolverConfig{
+			ProviderType:   s.providerType,
+			PlatformConfig: spec.PlatformConfig,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("resolve platform credential: %w", err)
 		}
+		spec.Credential = cred
 	}
 
-	s.log.Info("creating explicit provider from config",
+	s.log.Info("creating provider from config",
 		"type", s.providerType,
-		"model", s.model,
+		"model", spec.Model,
 		"baseURL", s.baseURL,
+		"platform", s.platformType,
+		"authType", s.authType,
+		"hasHeaders", len(s.headers) > 0,
 		"requestTimeout", s.providerRequestTimeout,
 		"streamIdleTimeout", s.providerStreamIdleTimeout)
 
@@ -126,8 +129,57 @@ func (s *Server) createProviderFromConfig() (providers.Provider, error) {
 		return nil, fmt.Errorf("failed to create provider from spec: %w", err)
 	}
 
-	// Apply timeouts via setter interfaces — the fields are not on the
-	// published ProviderSpec struct, but BaseProvider exposes the setters.
+	s.applyProviderTimeouts(provider)
+	return provider, nil
+}
+
+// buildProviderSpec assembles the PromptKit ProviderSpec from Server fields.
+// It fills Platform/PlatformConfig/Headers/Pricing and auto-maps claude
+// release names to Bedrock model IDs when bedrock hosting is used. It does
+// NOT resolve credentials — createProviderFromConfig does that separately so
+// unit tests can exercise spec wiring without cloud credentials.
+func (s *Server) buildProviderSpec() providers.ProviderSpec {
+	spec := providers.ProviderSpec{
+		ID:      s.providerType,
+		Type:    s.providerType,
+		Model:   s.model,
+		BaseURL: s.baseURL,
+		Headers: s.headers,
+	}
+
+	if s.inputCostPer1K > 0 && s.outputCostPer1K > 0 {
+		spec.Defaults.Pricing = providers.Pricing{
+			InputCostPer1K:  s.inputCostPer1K,
+			OutputCostPer1K: s.outputCostPer1K,
+		}
+	}
+
+	if s.platformType == "" {
+		return spec
+	}
+
+	spec.Platform = s.platformType
+	spec.PlatformConfig = &providers.PlatformConfig{
+		Type:     s.platformType,
+		Region:   s.platformRegion,
+		Project:  s.platformProject,
+		Endpoint: s.platformEndpoint,
+	}
+
+	// Auto-map claude release names to Bedrock model IDs.
+	if s.platformType == "bedrock" && s.model != "" {
+		if bedrockID, ok := credentials.BedrockModelMapping[s.model]; ok {
+			spec.Model = bedrockID
+		}
+	}
+
+	return spec
+}
+
+// applyProviderTimeouts sets HTTP and stream-idle timeouts via the setter
+// interfaces exposed by BaseProvider, without requiring those fields on the
+// published ProviderSpec.
+func (s *Server) applyProviderTimeouts(provider providers.Provider) {
 	if s.providerRequestTimeout > 0 {
 		if p, ok := provider.(httpTimeoutSetter); ok {
 			p.SetHTTPTimeout(s.providerRequestTimeout)
@@ -138,6 +190,4 @@ func (s *Server) createProviderFromConfig() (providers.Provider, error) {
 			p.SetStreamIdleTimeout(s.providerStreamIdleTimeout)
 		}
 	}
-
-	return provider, nil
 }

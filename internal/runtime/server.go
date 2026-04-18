@@ -89,11 +89,26 @@ type Server struct {
 	// Provider info (for logging and provider creation)
 	providerType              string
 	model                     string
-	baseURL                   string        // Custom base URL for provider (e.g., Ollama endpoint)
-	inputCostPer1K            float64       // CRD pricing: cost per 1K input tokens
-	outputCostPer1K           float64       // CRD pricing: cost per 1K output tokens
-	providerRequestTimeout    time.Duration // Non-streaming HTTP timeout (0 = provider default)
-	providerStreamIdleTimeout time.Duration // SSE stream idle timeout (0 = 30s default)
+	baseURL                   string            // Custom base URL for provider (e.g., Ollama endpoint)
+	headers                   map[string]string // Custom HTTP headers for every provider request
+	inputCostPer1K            float64           // CRD pricing: cost per 1K input tokens
+	outputCostPer1K           float64           // CRD pricing: cost per 1K output tokens
+	providerRequestTimeout    time.Duration     // Non-streaming HTTP timeout (0 = provider default)
+	providerStreamIdleTimeout time.Duration     // SSE stream idle timeout (0 = 30s default)
+
+	// Platform hosting configuration (empty platformType = direct provider access)
+	platformType     string // "bedrock", "vertex", or "azure"
+	platformRegion   string
+	platformProject  string
+	platformEndpoint string
+
+	// Auth configuration for platform-hosted providers.
+	authType                  string // "workloadIdentity", "accessKey", "serviceAccount", "servicePrincipal"
+	authRoleArn               string
+	authServiceAccountEmail   string
+	authCredentialsSecretName string
+	authCredentialsSecretKey  string
+	authCredentialsNamespace  string // namespace in which to read the credentials secret
 
 	// Session recording (Pattern C)
 	sessionStore session.Store
@@ -275,6 +290,56 @@ func WithProviderInfo(providerType, model string) ServerOption {
 func WithBaseURL(baseURL string) ServerOption {
 	return func(s *Server) {
 		s.baseURL = baseURL
+	}
+}
+
+// WithHeaders sets custom HTTP headers applied to every provider request.
+// Used for gateway providers that require attribution or tenant headers.
+func WithHeaders(headers map[string]string) ServerOption {
+	return func(s *Server) {
+		s.headers = headers
+	}
+}
+
+// PlatformConfig holds the hyperscaler platform hosting configuration.
+type PlatformConfig struct {
+	Type     string // "bedrock", "vertex", or "azure"
+	Region   string
+	Project  string
+	Endpoint string
+}
+
+// AuthConfig holds authentication configuration for platform-hosted providers.
+type AuthConfig struct {
+	Type                       string // "workloadIdentity", "accessKey", "serviceAccount", "servicePrincipal"
+	RoleArn                    string
+	ServiceAccountEmail        string
+	CredentialsSecretName      string
+	CredentialsSecretKey       string
+	CredentialsSecretNamespace string
+}
+
+// WithPlatform sets the hyperscaler hosting configuration. Empty Type means
+// direct provider access (no platform hosting).
+func WithPlatform(p PlatformConfig) ServerOption {
+	return func(s *Server) {
+		s.platformType = p.Type
+		s.platformRegion = p.Region
+		s.platformProject = p.Project
+		s.platformEndpoint = p.Endpoint
+	}
+}
+
+// WithAuth sets the platform auth configuration. Required when WithPlatform
+// is used with a non-empty Type. Ignored otherwise.
+func WithAuth(a AuthConfig) ServerOption {
+	return func(s *Server) {
+		s.authType = a.Type
+		s.authRoleArn = a.RoleArn
+		s.authServiceAccountEmail = a.ServiceAccountEmail
+		s.authCredentialsSecretName = a.CredentialsSecretName
+		s.authCredentialsSecretKey = a.CredentialsSecretKey
+		s.authCredentialsNamespace = a.CredentialsSecretNamespace
 	}
 }
 

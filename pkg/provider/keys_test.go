@@ -28,9 +28,8 @@ func TestAPIKeyEnvVarName(t *testing.T) {
 		{"gemini", "GEMINI_API_KEY"},
 		{"ollama", ""},
 		{"mock", ""},
-		{"bedrock", ""},
-		{"vertex", ""},
-		{"azure-ai", ""},
+		{"vllm", ""},
+		{"voyageai", "VOYAGE_API_KEY"},
 		{"unknown", ""},
 		{"", ""},
 	}

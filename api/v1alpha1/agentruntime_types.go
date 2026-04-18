@@ -255,15 +255,21 @@ type AutoscalingConfig struct {
 }
 
 // ProviderType defines the LLM provider type.
-// +kubebuilder:validation:Enum=claude;openai;gemini;ollama;mock;bedrock;vertex;azure-ai
+// Hyperscaler hosting (Bedrock/Vertex/Azure) is expressed via spec.platform
+// on the Provider CRD, not as a provider type. The provider type describes
+// the wire protocol (message/response format) that the runtime uses.
+// +kubebuilder:validation:Enum=claude;openai;gemini;ollama;mock;vllm;voyageai
 type ProviderType string
 
 const (
-	// ProviderTypeClaude uses Anthropic's Claude models.
+	// ProviderTypeClaude uses Anthropic's Claude message format.
+	// Can run direct-to-Anthropic or hosted on AWS Bedrock via spec.platform.
 	ProviderTypeClaude ProviderType = "claude"
-	// ProviderTypeOpenAI uses OpenAI's GPT models.
+	// ProviderTypeOpenAI uses OpenAI's chat completions format.
+	// Can run direct-to-OpenAI or hosted on Azure AI Foundry via spec.platform.
 	ProviderTypeOpenAI ProviderType = "openai"
-	// ProviderTypeGemini uses Google's Gemini models.
+	// ProviderTypeGemini uses Google's Gemini format.
+	// Can run direct-to-Google or hosted on GCP Vertex AI via spec.platform.
 	ProviderTypeGemini ProviderType = "gemini"
 	// ProviderTypeOllama uses locally-hosted Ollama models.
 	// Does not require secretRef. Requires baseURL to be set.
@@ -271,15 +277,12 @@ const (
 	// ProviderTypeMock uses PromptKit's mock provider for testing.
 	// Does not require secretRef. Returns canned responses based on scenario.
 	ProviderTypeMock ProviderType = "mock"
-	// ProviderTypeBedrock uses AWS Bedrock for LLM access.
-	// Uses IAM-based authentication; does not require traditional API key credentials.
-	ProviderTypeBedrock ProviderType = "bedrock"
-	// ProviderTypeVertex uses GCP Vertex AI for LLM access.
-	// Uses workload identity or service account credentials.
-	ProviderTypeVertex ProviderType = "vertex"
-	// ProviderTypeAzureAI uses Azure AI Foundry for LLM access.
-	// Uses Azure-native authentication.
-	ProviderTypeAzureAI ProviderType = "azure-ai"
+	// ProviderTypeVLLM uses a vLLM-served OpenAI-compatible endpoint.
+	// Requires baseURL. Auth is typically via custom headers (spec.headers).
+	ProviderTypeVLLM ProviderType = "vllm"
+	// ProviderTypeVoyageAI uses Voyage AI embedding models.
+	// Requires an API key via secretRef (VOYAGE_API_KEY).
+	ProviderTypeVoyageAI ProviderType = "voyageai"
 )
 
 // TruncationStrategy defines how to handle context overflow.

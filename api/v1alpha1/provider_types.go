@@ -82,34 +82,43 @@ type CredentialConfig struct {
 	FilePath string `json:"filePath,omitempty"`
 }
 
-// PlatformType defines the cloud platform type.
-// +kubebuilder:validation:Enum=aws;gcp;azure
+// PlatformType defines the hyperscaler hosting platform for a base provider.
+// Values are hosting-layer names (matching PromptKit's PlatformConfig.Type):
+//   - "bedrock" hosts claude on AWS
+//   - "vertex" hosts gemini on GCP
+//   - "azure"  hosts openai on Azure AI Foundry
+//
+// +kubebuilder:validation:Enum=bedrock;vertex;azure
 type PlatformType string
 
 const (
-	// PlatformTypeAWS represents Amazon Web Services.
-	PlatformTypeAWS PlatformType = "aws"
-	// PlatformTypeGCP represents Google Cloud Platform.
-	PlatformTypeGCP PlatformType = "gcp"
-	// PlatformTypeAzure represents Microsoft Azure.
+	// PlatformTypeBedrock hosts the provider on AWS Bedrock.
+	PlatformTypeBedrock PlatformType = "bedrock"
+	// PlatformTypeVertex hosts the provider on GCP Vertex AI.
+	PlatformTypeVertex PlatformType = "vertex"
+	// PlatformTypeAzure hosts the provider on Azure AI Foundry.
 	PlatformTypeAzure PlatformType = "azure"
 )
 
 // PlatformConfig defines hyperscaler-specific configuration.
+// +kubebuilder:validation:XValidation:rule="self.type != 'vertex' || size(self.project) > 0",message="project is required when platform.type is vertex"
+// +kubebuilder:validation:XValidation:rule="self.type != 'azure' || size(self.endpoint) > 0",message="endpoint is required when platform.type is azure"
 type PlatformConfig struct {
-	// type is the cloud platform type.
+	// type is the hyperscaler hosting platform.
 	// +kubebuilder:validation:Required
 	Type PlatformType `json:"type"`
 
 	// region is the cloud region (e.g., us-east-1, us-central1, eastus).
+	// Required for bedrock and vertex; ignored for azure (inferred from endpoint).
 	// +optional
 	Region string `json:"region,omitempty"`
 
-	// project is the GCP project ID. Required for Vertex AI.
+	// project is the GCP project ID. Required for vertex.
 	// +optional
 	Project string `json:"project,omitempty"`
 
 	// endpoint overrides the default platform API endpoint.
+	// Required for azure (the Azure OpenAI resource URL).
 	// +optional
 	Endpoint string `json:"endpoint,omitempty"`
 }
@@ -129,7 +138,7 @@ const (
 	AuthMethodServicePrincipal AuthMethod = "servicePrincipal"
 )
 
-// AuthConfig defines authentication configuration for hyperscaler providers.
+// AuthConfig defines authentication configuration for hyperscaler platforms.
 // +kubebuilder:validation:XValidation:rule="self.type != 'workloadIdentity' || !has(self.credentialsSecretRef)",message="credentialsSecretRef is not used with workloadIdentity auth"
 type AuthConfig struct {
 	// type is the authentication method.
@@ -137,54 +146,74 @@ type AuthConfig struct {
 	Type AuthMethod `json:"type"`
 
 	// roleArn is the AWS IAM role ARN for IRSA (optional override).
-	// Only applicable when platform.type is aws.
+	// Only applicable when platform.type is bedrock.
 	// +optional
 	RoleArn string `json:"roleArn,omitempty"`
 
 	// serviceAccountEmail is the GCP service account email for workload identity.
-	// Only applicable when platform.type is gcp.
+	// Only applicable when platform.type is vertex.
 	// +optional
 	ServiceAccountEmail string `json:"serviceAccountEmail,omitempty"`
 
 	// credentialsSecretRef references a secret containing platform credentials.
 	// Required for accessKey, serviceAccount, and servicePrincipal auth types.
 	// Not used with workloadIdentity.
+	//
+	// Expected secret keys per auth type:
+	//   accessKey        (bedrock):  AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+	//   serviceAccount   (vertex):   credentials.json (GCP SA key JSON)
+	//   servicePrincipal (azure):    AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
 	// +optional
 	CredentialsSecretRef *SecretKeyRef `json:"credentialsSecretRef,omitempty"`
 }
 
 // ProviderSpec defines the desired state of Provider.
 // +kubebuilder:validation:XValidation:rule="!(has(self.secretRef) && has(self.credential))",message="secretRef and credential are mutually exclusive; use credential.secretRef instead"
-// +kubebuilder:validation:XValidation:rule="!(self.type in ['bedrock', 'vertex', 'azure-ai']) || has(self.platform)",message="platform is required for hyperscaler provider types (bedrock, vertex, azure-ai)"
-// +kubebuilder:validation:XValidation:rule="!has(self.auth) || (self.type in ['bedrock', 'vertex', 'azure-ai'])",message="auth is only valid for hyperscaler provider types (bedrock, vertex, azure-ai)"
+// +kubebuilder:validation:XValidation:rule="!has(self.platform) || (self.type in ['claude', 'openai', 'gemini'])",message="platform is only valid for provider types claude, openai, or gemini"
+// +kubebuilder:validation:XValidation:rule="has(self.platform) == has(self.auth)",message="spec.platform and spec.auth must be set together"
+// +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'bedrock' || self.type == 'claude'",message="platform.type bedrock is only valid with provider type claude"
+// +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'vertex' || self.type == 'gemini'",message="platform.type vertex is only valid with provider type gemini"
+// +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'azure' || self.type == 'openai'",message="platform.type azure is only valid with provider type openai"
+// +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'bedrock' || self.auth.type in ['workloadIdentity', 'accessKey']",message="platform.type bedrock requires auth.type of workloadIdentity or accessKey"
+// +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'vertex' || self.auth.type in ['workloadIdentity', 'serviceAccount']",message="platform.type vertex requires auth.type of workloadIdentity or serviceAccount"
+// +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'azure' || self.auth.type in ['workloadIdentity', 'servicePrincipal']",message="platform.type azure requires auth.type of workloadIdentity or servicePrincipal"
 // +kubebuilder:validation:XValidation:rule="!(has(self.auth) && self.auth.type != 'workloadIdentity') || has(self.auth.credentialsSecretRef)",message="credentialsSecretRef is required for non-workloadIdentity auth types"
 type ProviderSpec struct {
-	// type specifies the provider type.
+	// type specifies the provider wire protocol.
 	// +kubebuilder:validation:Required
 	Type ProviderType `json:"type"`
 
 	// model specifies the model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4o").
 	// If not specified, the provider's default model is used.
+	// When platform.type is bedrock, a claude release name is auto-mapped to the
+	// corresponding Bedrock model ID by PromptKit.
 	// +optional
 	Model string `json:"model,omitempty"`
 
 	// baseURL overrides the provider's default API endpoint.
-	// Useful for proxies or self-hosted models.
+	// Useful for proxies, gateways (OpenRouter), or self-hosted models.
 	// +optional
 	BaseURL string `json:"baseURL,omitempty"`
 
-	// platform defines hyperscaler-specific configuration.
-	// Required for provider types: bedrock, vertex, azure-ai.
+	// headers contains custom HTTP headers to include on every provider request.
+	// Useful for gateway providers such as OpenRouter that require custom
+	// attribution headers, or for tenant routing in shared vLLM deployments.
+	// Collisions with built-in provider headers are rejected by PromptKit.
+	// +optional
+	Headers map[string]string `json:"headers,omitempty"`
+
+	// platform defines hyperscaler hosting configuration.
+	// Only valid with provider types claude (bedrock), openai (azure), or gemini (vertex).
 	// +optional
 	Platform *PlatformConfig `json:"platform,omitempty"`
 
-	// auth defines authentication configuration for hyperscaler providers.
-	// Required for provider types that use platform authentication (bedrock, vertex, azure-ai).
+	// auth defines authentication configuration for hyperscaler platforms.
+	// Required when spec.platform is set; forbidden otherwise.
 	// +optional
 	Auth *AuthConfig `json:"auth,omitempty"`
 
 	// secretRef references a Secret containing API credentials.
-	// Optional for providers that don't require credentials (e.g., mock, ollama).
+	// Optional for providers that don't require credentials (e.g., mock, ollama, vllm).
 	// Deprecated: Use credential.secretRef instead.
 	// +optional
 	SecretRef *SecretKeyRef `json:"secretRef,omitempty"`

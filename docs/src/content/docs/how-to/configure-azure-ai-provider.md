@@ -83,7 +83,7 @@ metadata:
   name: azure-openai
   namespace: agents
 spec:
-  type: azure-ai
+  type: openai
   model: gpt-4o
 
   platform:
@@ -142,7 +142,7 @@ metadata:
   name: azure-openai
   namespace: agents
 spec:
-  type: azure-ai
+  type: openai
   model: gpt-4o
 
   platform:

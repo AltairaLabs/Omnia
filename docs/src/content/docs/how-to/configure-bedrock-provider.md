@@ -78,11 +78,11 @@ metadata:
   name: bedrock-claude
   namespace: agents
 spec:
-  type: bedrock
+  type: claude
   model: anthropic.claude-3-5-sonnet-20241022-v2:0
 
   platform:
-    type: aws
+    type: bedrock
     region: us-east-1
 
   auth:
@@ -127,11 +127,11 @@ metadata:
   name: bedrock-claude
   namespace: agents
 spec:
-  type: bedrock
+  type: claude
   model: anthropic.claude-3-5-sonnet-20241022-v2:0
 
   platform:
-    type: aws
+    type: bedrock
     region: us-east-1
 
   auth:

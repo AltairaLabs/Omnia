@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/funcr"
@@ -33,6 +34,8 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/runtime/evals"
 	"github.com/AltairaLabs/PromptKit/runtime/metrics"
+	"github.com/AltairaLabs/PromptKit/runtime/providers"
+	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/altairalabs/omnia/internal/tracing"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 	"github.com/prometheus/client_golang/prometheus"
@@ -157,6 +160,80 @@ func TestServerOptions(t *testing.T) {
 		)
 		assert.InDelta(t, 0.003, server.inputCostPer1K, 1e-9)
 		assert.InDelta(t, 0.015, server.outputCostPer1K, 1e-9)
+	})
+
+	t.Run("WithHeaders", func(t *testing.T) {
+		headers := map[string]string{
+			"HTTP-Referer": "https://example.com",
+			"X-Title":      "omnia",
+		}
+		server := NewServer(
+			WithHeaders(headers),
+		)
+		assert.Equal(t, headers, server.headers)
+	})
+
+	t.Run("WithPlatform", func(t *testing.T) {
+		server := NewServer(
+			WithPlatform(PlatformConfig{
+				Type:     "bedrock",
+				Region:   "us-east-1",
+				Project:  "",
+				Endpoint: "",
+			}),
+		)
+		assert.Equal(t, "bedrock", server.platformType)
+		assert.Equal(t, "us-east-1", server.platformRegion)
+	})
+
+	t.Run("WithPlatform_Vertex", func(t *testing.T) {
+		server := NewServer(
+			WithPlatform(PlatformConfig{
+				Type:    "vertex",
+				Region:  "us-central1",
+				Project: "my-project",
+			}),
+		)
+		assert.Equal(t, "vertex", server.platformType)
+		assert.Equal(t, "my-project", server.platformProject)
+	})
+
+	t.Run("WithPlatform_Azure", func(t *testing.T) {
+		server := NewServer(
+			WithPlatform(PlatformConfig{
+				Type:     "azure",
+				Endpoint: "https://example.openai.azure.com",
+			}),
+		)
+		assert.Equal(t, "azure", server.platformType)
+		assert.Equal(t, "https://example.openai.azure.com", server.platformEndpoint)
+	})
+
+	t.Run("WithAuth", func(t *testing.T) {
+		server := NewServer(
+			WithAuth(AuthConfig{
+				Type:                       "accessKey",
+				RoleArn:                    "arn:aws:iam::1:role/x",
+				ServiceAccountEmail:        "sa@p.iam",
+				CredentialsSecretName:      "creds",
+				CredentialsSecretKey:       "AWS_ACCESS_KEY_ID",
+				CredentialsSecretNamespace: "ns",
+			}),
+		)
+		assert.Equal(t, "accessKey", server.authType)
+		assert.Equal(t, "arn:aws:iam::1:role/x", server.authRoleArn)
+		assert.Equal(t, "sa@p.iam", server.authServiceAccountEmail)
+		assert.Equal(t, "creds", server.authCredentialsSecretName)
+		assert.Equal(t, "AWS_ACCESS_KEY_ID", server.authCredentialsSecretKey)
+		assert.Equal(t, "ns", server.authCredentialsNamespace)
+	})
+
+	t.Run("WithAuth_WorkloadIdentity", func(t *testing.T) {
+		server := NewServer(
+			WithAuth(AuthConfig{Type: "workloadIdentity"}),
+		)
+		assert.Equal(t, "workloadIdentity", server.authType)
+		assert.Empty(t, server.authCredentialsSecretName)
 	})
 
 	t.Run("WithStateStore", func(t *testing.T) {
@@ -1320,6 +1397,75 @@ func TestCreateProviderFromConfig_WithPricing(t *testing.T) {
 	assert.Equal(t, "ollama", provider.ID())
 	// Pricing is passed via ProviderSpec.Defaults.Pricing to PromptKit.
 	// The provider uses it in CalculateCost() — verified by integration test.
+}
+
+func TestCreateProviderFromConfig_WithHeadersAndTimeouts(t *testing.T) {
+	// Exercises the applyProviderTimeouts setter path (BaseProvider
+	// embedded by ollama's OpenAI-compatible provider implements both
+	// timeout setter interfaces) and the spec.Headers passthrough.
+	server := NewServer(
+		WithLogger(logr.Discard()),
+		WithProviderInfo("ollama", "llama3"),
+		WithBaseURL("http://ollama.localhost:11434"),
+		WithHeaders(map[string]string{"X-Tenant": "test"}),
+		WithProviderRequestTimeout(15*time.Second),
+		WithProviderStreamIdleTimeout(45*time.Second),
+	)
+	provider, err := server.createProviderFromConfig()
+	require.NoError(t, err)
+	require.NotNil(t, provider)
+	assert.Equal(t, "ollama", provider.ID())
+}
+
+// timeoutFake implements providers.Provider + both timeout setter
+// interfaces so we can directly unit-test applyProviderTimeouts without
+// relying on a real PromptKit provider instance.
+type timeoutFake struct {
+	requestTimeout    time.Duration
+	streamIdleTimeout time.Duration
+}
+
+func (t *timeoutFake) ID() string    { return "fake" }
+func (t *timeoutFake) Model() string { return "fake-model" }
+func (t *timeoutFake) Predict(context.Context, providers.PredictionRequest) (providers.PredictionResponse, error) {
+	return providers.PredictionResponse{}, nil
+}
+
+func (t *timeoutFake) PredictStream(context.Context, providers.PredictionRequest) (<-chan providers.StreamChunk, error) {
+	ch := make(chan providers.StreamChunk)
+	close(ch)
+	return ch, nil
+}
+func (t *timeoutFake) SupportsStreaming() bool      { return false }
+func (t *timeoutFake) ShouldIncludeRawOutput() bool { return false }
+func (t *timeoutFake) Close() error                 { return nil }
+func (t *timeoutFake) CalculateCost(int, int, int) types.CostInfo {
+	return types.CostInfo{}
+}
+
+func (t *timeoutFake) SetHTTPTimeout(d time.Duration)       { t.requestTimeout = d }
+func (t *timeoutFake) SetStreamIdleTimeout(d time.Duration) { t.streamIdleTimeout = d }
+
+func TestApplyProviderTimeouts(t *testing.T) {
+	t.Run("applies both timeouts when provider implements setters", func(t *testing.T) {
+		fake := &timeoutFake{}
+		server := &Server{
+			log:                       logr.Discard(),
+			providerRequestTimeout:    20 * time.Second,
+			providerStreamIdleTimeout: 40 * time.Second,
+		}
+		server.applyProviderTimeouts(fake)
+		assert.Equal(t, 20*time.Second, fake.requestTimeout)
+		assert.Equal(t, 40*time.Second, fake.streamIdleTimeout)
+	})
+
+	t.Run("skips both when timeouts are zero", func(t *testing.T) {
+		fake := &timeoutFake{}
+		server := &Server{log: logr.Discard()}
+		server.applyProviderTimeouts(fake)
+		assert.Zero(t, fake.requestTimeout)
+		assert.Zero(t, fake.streamIdleTimeout)
+	})
 }
 
 func TestProcessAudioMedia(t *testing.T) {

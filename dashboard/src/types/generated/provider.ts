@@ -4,12 +4,17 @@
 import type { ObjectMeta } from "../common";
 
 export interface ProviderSpec {
-  /** auth defines authentication configuration for hyperscaler providers.
-   * Required for provider types that use platform authentication (bedrock, vertex, azure-ai). */
+  /** auth defines authentication configuration for hyperscaler platforms.
+   * Required when spec.platform is set; forbidden otherwise. */
   auth?: {
     /** credentialsSecretRef references a secret containing platform credentials.
      * Required for accessKey, serviceAccount, and servicePrincipal auth types.
-     * Not used with workloadIdentity. */
+     * Not used with workloadIdentity.
+     * 
+     * Expected secret keys per auth type:
+     *   accessKey        (bedrock):  AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+     *   serviceAccount   (vertex):   credentials.json (GCP SA key JSON)
+     *   servicePrincipal (azure):    AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET */
     credentialsSecretRef?: {
       /** key is the key within the Secret to use.
        * If not specified, the provider-appropriate key is used:
@@ -21,16 +26,16 @@ export interface ProviderSpec {
       name: string;
     };
     /** roleArn is the AWS IAM role ARN for IRSA (optional override).
-     * Only applicable when platform.type is aws. */
+     * Only applicable when platform.type is bedrock. */
     roleArn?: string;
     /** serviceAccountEmail is the GCP service account email for workload identity.
-     * Only applicable when platform.type is gcp. */
+     * Only applicable when platform.type is vertex. */
     serviceAccountEmail?: string;
     /** type is the authentication method. */
     type: "workloadIdentity" | "accessKey" | "serviceAccount" | "servicePrincipal";
   };
   /** baseURL overrides the provider's default API endpoint.
-   * Useful for proxies or self-hosted models. */
+   * Useful for proxies, gateways (OpenRouter), or self-hosted models. */
   baseURL?: string;
   /** capabilities lists what this provider supports.
    * Used for capability-based filtering when binding arena providers. */
@@ -89,20 +94,29 @@ export interface ProviderSpec {
      * - custom: Delegate to custom runtime implementation */
     truncationStrategy?: "sliding" | "summarize" | "custom";
   };
+  /** headers contains custom HTTP headers to include on every provider request.
+   * Useful for gateway providers such as OpenRouter that require custom
+   * attribution headers, or for tenant routing in shared vLLM deployments.
+   * Collisions with built-in provider headers are rejected by PromptKit. */
+  headers?: Record<string, string>;
   /** model specifies the model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4o").
-   * If not specified, the provider's default model is used. */
+   * If not specified, the provider's default model is used.
+   * When platform.type is bedrock, a claude release name is auto-mapped to the
+   * corresponding Bedrock model ID by PromptKit. */
   model?: string;
-  /** platform defines hyperscaler-specific configuration.
-   * Required for provider types: bedrock, vertex, azure-ai. */
+  /** platform defines hyperscaler hosting configuration.
+   * Only valid with provider types claude (bedrock), openai (azure), or gemini (vertex). */
   platform?: {
-    /** endpoint overrides the default platform API endpoint. */
+    /** endpoint overrides the default platform API endpoint.
+     * Required for azure (the Azure OpenAI resource URL). */
     endpoint?: string;
-    /** project is the GCP project ID. Required for Vertex AI. */
+    /** project is the GCP project ID. Required for vertex. */
     project?: string;
-    /** region is the cloud region (e.g., us-east-1, us-central1, eastus). */
+    /** region is the cloud region (e.g., us-east-1, us-central1, eastus).
+     * Required for bedrock and vertex; ignored for azure (inferred from endpoint). */
     region?: string;
-    /** type is the cloud platform type. */
-    type: "aws" | "gcp" | "azure";
+    /** type is the hyperscaler hosting platform. */
+    type: "bedrock" | "vertex" | "azure";
   };
   /** pricing configures cost tracking for this provider.
    * If not specified, PromptKit's built-in pricing is used. */
@@ -116,7 +130,7 @@ export interface ProviderSpec {
     outputCostPer1K?: string;
   };
   /** secretRef references a Secret containing API credentials.
-   * Optional for providers that don't require credentials (e.g., mock, ollama).
+   * Optional for providers that don't require credentials (e.g., mock, ollama, vllm).
    * Deprecated: Use credential.secretRef instead. */
   secretRef?: {
     /** key is the key within the Secret to use.
@@ -128,8 +142,8 @@ export interface ProviderSpec {
     /** name is the name of the Secret. */
     name: string;
   };
-  /** type specifies the provider type. */
-  type: "claude" | "openai" | "gemini" | "ollama" | "mock" | "bedrock" | "vertex" | "azure-ai";
+  /** type specifies the provider wire protocol. */
+  type: "claude" | "openai" | "gemini" | "ollama" | "mock" | "vllm" | "voyageai";
 }
 
 export interface ProviderStatus {

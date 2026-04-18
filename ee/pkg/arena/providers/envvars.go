@@ -124,10 +124,10 @@ func BuildPlatformEnvVars(providers []*corev1alpha1.Provider) []corev1.EnvVar {
 		}
 		platform := provider.Spec.Platform
 		switch platform.Type {
-		case corev1alpha1.PlatformTypeAWS:
+		case corev1alpha1.PlatformTypeBedrock:
 			addEnv("AWS_REGION", platform.Region)
 			addEnv("AWS_DEFAULT_REGION", platform.Region)
-		case corev1alpha1.PlatformTypeGCP:
+		case corev1alpha1.PlatformTypeVertex:
 			addEnv("GOOGLE_CLOUD_PROJECT", platform.Project)
 			addEnv("CLOUD_ML_REGION", platform.Region)
 		case corev1alpha1.PlatformTypeAzure:

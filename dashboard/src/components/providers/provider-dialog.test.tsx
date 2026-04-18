@@ -58,28 +58,6 @@ function createMockProvider(overrides?: Partial<Provider>): Provider {
   };
 }
 
-function createHyperscalerProvider(): Provider {
-  return createMockProvider({
-    metadata: {
-      name: "bedrock-provider",
-      namespace: "test-namespace",
-      uid: "bedrock-uid",
-      creationTimestamp: "2025-01-01T00:00:00Z",
-    },
-    spec: {
-      type: "bedrock",
-      model: "anthropic.claude-v2",
-      platform: {
-        type: "aws",
-        region: "us-east-1",
-      },
-      auth: {
-        type: "workloadIdentity",
-      },
-    },
-  });
-}
-
 function TestWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -244,35 +222,6 @@ describe("ProviderDialog", () => {
       expect(screen.getByText("Credential Source")).toBeInTheDocument();
     });
 
-    it("shows platform/auth sections for hyperscaler type", () => {
-      render(
-        <TestWrapper>
-          <ProviderDialog
-            open={true}
-            onOpenChange={vi.fn()}
-            provider={createHyperscalerProvider()}
-          />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("Platform")).toBeInTheDocument();
-      expect(screen.getByText("Authentication")).toBeInTheDocument();
-    });
-
-    it("hides credential section for hyperscaler type", () => {
-      render(
-        <TestWrapper>
-          <ProviderDialog
-            open={true}
-            onOpenChange={vi.fn()}
-            provider={createHyperscalerProvider()}
-          />
-        </TestWrapper>
-      );
-
-      expect(screen.queryByText("Credential Source")).not.toBeInTheDocument();
-    });
-
     it("hides credential section for local type (ollama)", () => {
       render(
         <TestWrapper>
@@ -287,7 +236,6 @@ describe("ProviderDialog", () => {
       );
 
       expect(screen.queryByText("Credential Source")).not.toBeInTheDocument();
-      expect(screen.queryByText("Platform")).not.toBeInTheDocument();
     });
   });
 
@@ -339,58 +287,6 @@ describe("ProviderDialog", () => {
 
       expect(onSuccess).toHaveBeenCalled();
       expect(onOpenChange).toHaveBeenCalledWith(false);
-    });
-
-    it("creates hyperscaler provider with platform + auth fields", async () => {
-      vi.useRealTimers();
-      const user = userEvent.setup();
-      const onSuccess = vi.fn();
-
-      render(
-        <TestWrapper>
-          <ProviderDialog
-            open={true}
-            onOpenChange={vi.fn()}
-            onSuccess={onSuccess}
-          />
-        </TestWrapper>
-      );
-
-      // Fill name
-      const nameInput = screen.getByLabelText("Name");
-      await user.type(nameInput, "my-bedrock");
-
-      // Change type to bedrock
-      const typeSelect = screen.getByLabelText("Provider Type");
-      fireEvent.click(typeSelect);
-      const bedrockOption = await screen.findByRole("option", {
-        name: "Amazon Bedrock",
-      });
-      fireEvent.click(bedrockOption);
-
-      // Fill region
-      const regionInput = screen.getByLabelText("Region");
-      await user.type(regionInput, "us-west-2");
-
-      // Submit
-      const submitButton = screen.getByRole("button", { name: /create provider/i });
-      fireEvent.click(submitButton);
-
-      await waitFor(() => {
-        expect(mockCreateProvider).toHaveBeenCalledWith(
-          "my-bedrock",
-          expect.objectContaining({
-            type: "bedrock",
-            platform: expect.objectContaining({
-              type: "aws",
-              region: "us-west-2",
-            }),
-            auth: expect.objectContaining({
-              type: "workloadIdentity",
-            }),
-          })
-        );
-      });
     });
 
     it("updates provider in edit mode", async () => {
@@ -670,8 +566,9 @@ describe("ProviderDialog", () => {
   });
 
   describe("provider type change resets fields", () => {
-    it("resets credential fields when switching to hyperscaler", async () => {
+    it("resets credential fields when switching to local-only type", async () => {
       vi.useRealTimers();
+      const user = userEvent.setup();
 
       render(
         <TestWrapper>
@@ -682,16 +579,17 @@ describe("ProviderDialog", () => {
       // Default type is "claude" - should show credential section
       expect(screen.getByText("Credentials")).toBeInTheDocument();
 
-      // Switch to bedrock
+      // Enter a credential secret so there is state to reset
+      await user.type(screen.getByLabelText("Secret Name"), "some-secret");
+
+      // Switch to ollama (local type, no credentials needed)
       const typeSelect = screen.getByLabelText("Provider Type");
       fireEvent.click(typeSelect);
-      const bedrockOption = await screen.findByRole("option", { name: "Amazon Bedrock" });
-      fireEvent.click(bedrockOption);
+      const ollamaOption = await screen.findByRole("option", { name: /Ollama/i });
+      fireEvent.click(ollamaOption);
 
-      // Credential section should be hidden, platform/auth should show
+      // Credential section should be hidden for local types
       expect(screen.queryByText("Credential Source")).not.toBeInTheDocument();
-      expect(screen.getByText("Platform")).toBeInTheDocument();
-      expect(screen.getByText("Authentication")).toBeInTheDocument();
     });
   });
 

@@ -41,22 +41,12 @@ interface FormState {
   model: string;
   baseURL: string;
   capabilities: string[];
-  // Credential (non-hyperscaler)
+  // Credential
   credentialSource: CredentialSource;
   credentialSecretName: string;
   credentialSecretKey: string;
   credentialEnvVar: string;
   credentialFilePath: string;
-  // Platform (hyperscaler only)
-  platformRegion: string;
-  platformProject: string;
-  platformEndpoint: string;
-  // Auth (hyperscaler only)
-  authType: string;
-  authCredentialsSecretName: string;
-  authCredentialsSecretKey: string;
-  authRoleArn: string;
-  authServiceAccountEmail: string;
   // Defaults
   temperature: string;
   topP: string;
@@ -70,19 +60,20 @@ interface FormState {
 
 // --- Constants ---
 
+// NOTE: Platform-hosted providers (claude on bedrock, openai on azure, gemini
+// on vertex) are not yet supported in this dialog. Author a Provider CR
+// manifest directly to configure spec.platform / spec.auth. See issue #909.
 const PROVIDER_TYPES: { value: ProviderSpec["type"]; label: string }[] = [
   { value: "claude", label: "Claude (Anthropic)" },
   { value: "openai", label: "OpenAI" },
   { value: "gemini", label: "Gemini (Google)" },
-  { value: "bedrock", label: "Amazon Bedrock" },
-  { value: "vertex", label: "Vertex AI (Google)" },
-  { value: "azure-ai", label: "Azure AI" },
+  { value: "vllm", label: "vLLM" },
+  { value: "voyageai", label: "Voyage AI" },
   { value: "ollama", label: "Ollama (Local)" },
   { value: "mock", label: "Mock (Testing)" },
 ];
 
-const HYPERSCALER_TYPES: ProviderSpec["type"][] = ["bedrock", "vertex", "azure-ai"];
-const LOCAL_TYPES: ProviderSpec["type"][] = ["ollama", "mock"];
+const LOCAL_TYPES: Set<ProviderSpec["type"]> = new Set(["ollama", "mock", "vllm"]);
 
 const ALL_CAPABILITIES = [
   "text",
@@ -96,35 +87,10 @@ const ALL_CAPABILITIES = [
   "duplex",
 ] as const;
 
-const AUTH_TYPES_BY_PLATFORM: Record<string, { value: string; label: string }[]> = {
-  aws: [
-    { value: "workloadIdentity", label: "Workload Identity (IRSA)" },
-    { value: "accessKey", label: "Access Key" },
-  ],
-  gcp: [
-    { value: "workloadIdentity", label: "Workload Identity Federation" },
-    { value: "serviceAccount", label: "Service Account Key" },
-  ],
-  azure: [
-    { value: "workloadIdentity", label: "Workload Identity" },
-    { value: "servicePrincipal", label: "Service Principal" },
-  ],
-};
-
-const PLATFORM_TYPE_MAP: Record<string, "aws" | "gcp" | "azure"> = {
-  bedrock: "aws",
-  vertex: "gcp",
-  "azure-ai": "azure",
-};
-
 // --- Helpers ---
 
-function isHyperscaler(type: ProviderSpec["type"]): boolean {
-  return HYPERSCALER_TYPES.includes(type);
-}
-
 function isLocal(type: ProviderSpec["type"]): boolean {
-  return LOCAL_TYPES.includes(type);
+  return LOCAL_TYPES.has(type);
 }
 
 function getInitialFormState(provider?: Provider | null): FormState {
@@ -146,14 +112,6 @@ function getInitialFormState(provider?: Provider | null): FormState {
       credentialSecretKey: credential?.secretRef?.key || spec.secretRef?.key || "",
       credentialEnvVar: credential?.envVar || "",
       credentialFilePath: credential?.filePath || "",
-      platformRegion: spec.platform?.region || "",
-      platformProject: spec.platform?.project || "",
-      platformEndpoint: spec.platform?.endpoint || "",
-      authType: spec.auth?.type || "workloadIdentity",
-      authCredentialsSecretName: spec.auth?.credentialsSecretRef?.name || "",
-      authCredentialsSecretKey: spec.auth?.credentialsSecretRef?.key || "",
-      authRoleArn: spec.auth?.roleArn || "",
-      authServiceAccountEmail: spec.auth?.serviceAccountEmail || "",
       temperature: spec.defaults?.temperature || "",
       topP: spec.defaults?.topP || "",
       maxTokens: spec.defaults?.maxTokens?.toString() || "",
@@ -175,14 +133,6 @@ function getInitialFormState(provider?: Provider | null): FormState {
     credentialSecretKey: "",
     credentialEnvVar: "",
     credentialFilePath: "",
-    platformRegion: "",
-    platformProject: "",
-    platformEndpoint: "",
-    authType: "workloadIdentity",
-    authCredentialsSecretName: "",
-    authCredentialsSecretKey: "",
-    authRoleArn: "",
-    authServiceAccountEmail: "",
     temperature: "",
     topP: "",
     maxTokens: "",
@@ -197,14 +147,6 @@ function validateName(name: string): string | null {
   if (!name.trim()) return "Name is required";
   if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(name)) {
     return "Name must be a valid DNS subdomain (lowercase alphanumeric, hyphens, dots)";
-  }
-  return null;
-}
-
-function validateHyperscalerFields(form: FormState): string | null {
-  if (!form.platformRegion.trim()) return "Region is required for hyperscaler providers";
-  if (form.providerType === "vertex" && !form.platformProject.trim()) {
-    return "Project is required for Vertex AI";
   }
   return null;
 }
@@ -225,10 +167,6 @@ function validateCredentialFields(form: FormState): string | null {
 function validateForm(form: FormState): string | null {
   const nameError = validateName(form.name);
   if (nameError) return nameError;
-
-  if (isHyperscaler(form.providerType)) {
-    return validateHyperscalerFields(form);
-  }
 
   if (!isLocal(form.providerType)) {
     return validateCredentialFields(form);
@@ -253,37 +191,6 @@ function buildCredential(form: FormState): ProviderSpec["credential"] | undefine
     return { filePath: form.credentialFilePath };
   }
   return undefined;
-}
-
-function buildPlatform(form: FormState): ProviderSpec["platform"] {
-  const platformType = PLATFORM_TYPE_MAP[form.providerType];
-  return {
-    type: platformType,
-    ...(form.platformRegion ? { region: form.platformRegion } : {}),
-    ...(form.platformProject ? { project: form.platformProject } : {}),
-    ...(form.platformEndpoint ? { endpoint: form.platformEndpoint } : {}),
-  };
-}
-
-function buildAuth(form: FormState): ProviderSpec["auth"] {
-  const platformType = PLATFORM_TYPE_MAP[form.providerType];
-  const auth: NonNullable<ProviderSpec["auth"]> = {
-    type: form.authType as "workloadIdentity" | "accessKey" | "serviceAccount" | "servicePrincipal",
-  };
-
-  if (form.authType !== "workloadIdentity" && form.authCredentialsSecretName) {
-    auth.credentialsSecretRef = {
-      name: form.authCredentialsSecretName,
-      ...(form.authCredentialsSecretKey ? { key: form.authCredentialsSecretKey } : {}),
-    };
-  }
-
-  if (platformType === "aws" && form.authRoleArn) auth.roleArn = form.authRoleArn;
-  if (platformType === "gcp" && form.authServiceAccountEmail) {
-    auth.serviceAccountEmail = form.authServiceAccountEmail;
-  }
-
-  return auth;
 }
 
 function buildDefaults(form: FormState): ProviderSpec["defaults"] | undefined {
@@ -313,13 +220,8 @@ function buildSpec(form: FormState): ProviderSpec {
   if (form.capabilities.length > 0) {
     spec.capabilities = form.capabilities as ProviderSpec["capabilities"];
   }
-  if (!isHyperscaler(form.providerType) && !isLocal(form.providerType)) {
+  if (!isLocal(form.providerType)) {
     spec.credential = buildCredential(form);
-  }
-
-  if (isHyperscaler(form.providerType)) {
-    spec.platform = buildPlatform(form);
-    spec.auth = buildAuth(form);
   }
 
   spec.defaults = buildDefaults(form);
@@ -403,133 +305,6 @@ function CredentialFields({
             value={form.credentialFilePath}
             onChange={(e) => updateForm("credentialFilePath", e.target.value)}
           />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PlatformFields({
-  form,
-  updateForm,
-}: Readonly<{
-  form: FormState;
-  updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-}>) {
-  return (
-    <div className="space-y-4">
-      <Label className="text-base font-semibold">Platform</Label>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="platform-region">Region</Label>
-          <Input
-            id="platform-region"
-            placeholder={form.providerType === "bedrock" ? "us-east-1" : form.providerType === "vertex" ? "us-central1" : "eastus"}
-            value={form.platformRegion}
-            onChange={(e) => updateForm("platformRegion", e.target.value)}
-          />
-        </div>
-        {form.providerType === "vertex" && (
-          <div className="space-y-2">
-            <Label htmlFor="platform-project">GCP Project</Label>
-            <Input
-              id="platform-project"
-              placeholder="my-gcp-project"
-              value={form.platformProject}
-              onChange={(e) => updateForm("platformProject", e.target.value)}
-            />
-          </div>
-        )}
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="platform-endpoint">Endpoint (optional)</Label>
-        <Input
-          id="platform-endpoint"
-          placeholder="Custom endpoint URL"
-          value={form.platformEndpoint}
-          onChange={(e) => updateForm("platformEndpoint", e.target.value)}
-        />
-      </div>
-    </div>
-  );
-}
-
-function AuthFields({
-  form,
-  updateForm,
-}: Readonly<{
-  form: FormState;
-  updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-}>) {
-  const platformType = PLATFORM_TYPE_MAP[form.providerType];
-  const authOptions = AUTH_TYPES_BY_PLATFORM[platformType] || [];
-
-  return (
-    <div className="space-y-4">
-      <Label className="text-base font-semibold">Authentication</Label>
-      <div className="space-y-2">
-        <Label htmlFor="auth-type">Auth Type</Label>
-        <Select
-          value={form.authType}
-          onValueChange={(v) => updateForm("authType", v)}
-        >
-          <SelectTrigger id="auth-type">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {authOptions.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {platformType === "aws" && (
-        <div className="space-y-2">
-          <Label htmlFor="auth-role-arn">Role ARN (optional)</Label>
-          <Input
-            id="auth-role-arn"
-            placeholder="arn:aws:iam::123456789012:role/my-role"
-            value={form.authRoleArn}
-            onChange={(e) => updateForm("authRoleArn", e.target.value)}
-          />
-        </div>
-      )}
-
-      {platformType === "gcp" && (
-        <div className="space-y-2">
-          <Label htmlFor="auth-sa-email">Service Account Email (optional)</Label>
-          <Input
-            id="auth-sa-email"
-            placeholder="sa@project.iam.gserviceaccount.com"
-            value={form.authServiceAccountEmail}
-            onChange={(e) => updateForm("authServiceAccountEmail", e.target.value)}
-          />
-        </div>
-      )}
-
-      {form.authType !== "workloadIdentity" && (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="auth-secret-name">Credentials Secret</Label>
-            <Input
-              id="auth-secret-name"
-              placeholder="platform-credentials"
-              value={form.authCredentialsSecretName}
-              onChange={(e) => updateForm("authCredentialsSecretName", e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="auth-secret-key">Key (optional)</Label>
-            <Input
-              id="auth-secret-key"
-              placeholder="credentials"
-              value={form.authCredentialsSecretKey}
-              onChange={(e) => updateForm("authCredentialsSecretKey", e.target.value)}
-            />
-          </div>
         </div>
       )}
     </div>
@@ -783,16 +558,6 @@ function ProviderDialogForm({
       credentialSecretKey: "",
       credentialEnvVar: "",
       credentialFilePath: "",
-      // Reset platform fields
-      platformRegion: "",
-      platformProject: "",
-      platformEndpoint: "",
-      // Reset auth fields
-      authType: "workloadIdentity",
-      authCredentialsSecretName: "",
-      authCredentialsSecretKey: "",
-      authRoleArn: "",
-      authServiceAccountEmail: "",
     }));
   };
 
@@ -821,8 +586,7 @@ function ProviderDialogForm({
     }
   };
 
-  const showCredential = !isHyperscaler(formState.providerType) && !isLocal(formState.providerType);
-  const showPlatformAuth = isHyperscaler(formState.providerType);
+  const showCredential = !isLocal(formState.providerType);
 
   return (
     <DialogContent className="sm:max-w-[600px] max-h-[90vh] flex flex-col overflow-hidden">
@@ -899,24 +663,12 @@ function ProviderDialogForm({
             />
           </div>
 
-          {/* Credential section (standard types) */}
+          {/* Credential section */}
           {showCredential && (
             <div className="border rounded-lg p-4 space-y-4">
               <Label className="text-base font-semibold">Credentials</Label>
               <CredentialFields form={formState} updateForm={updateForm} />
             </div>
-          )}
-
-          {/* Platform + Auth sections (hyperscaler types) */}
-          {showPlatformAuth && (
-            <>
-              <div className="border rounded-lg p-4">
-                <PlatformFields form={formState} updateForm={updateForm} />
-              </div>
-              <div className="border rounded-lg p-4">
-                <AuthFields form={formState} updateForm={updateForm} />
-              </div>
-            </>
           )}
 
           {/* Capabilities */}

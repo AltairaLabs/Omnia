@@ -56,19 +56,14 @@ func TestGetAPIKeyEnvVars(t *testing.T) {
 			expected:     []string{},
 		},
 		{
-			name:         "bedrock provider",
-			providerType: "bedrock",
-			expected:     []string{"AWS_ACCESS_KEY_ID"},
+			name:         "vllm provider (auth via headers)",
+			providerType: "vllm",
+			expected:     []string{},
 		},
 		{
-			name:         "vertex provider",
-			providerType: "vertex",
-			expected:     []string{"GOOGLE_APPLICATION_CREDENTIALS"},
-		},
-		{
-			name:         "azure-ai provider",
-			providerType: "azure-ai",
-			expected:     []string{"AZURE_OPENAI_API_KEY"},
+			name:         "voyageai provider",
+			providerType: "voyageai",
+			expected:     []string{"VOYAGE_API_KEY"},
 		},
 		{
 			name:         "unknown provider gets standard naming",

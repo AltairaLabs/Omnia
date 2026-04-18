@@ -26,17 +26,15 @@ import (
 )
 
 // ProviderCredentials maps provider types to their required environment variables.
-// Primary and fallback env vars are supported for compatibility.
+// Keys are PromptKit provider type names (the wire protocol). Platform-hosted
+// providers (claude on bedrock, gemini on vertex, openai on azure) use platform
+// auth via spec.platform/spec.auth, not these env vars.
 var ProviderCredentials = map[string][]string{
 	"claude":   {"ANTHROPIC_API_KEY"},
 	"openai":   {"OPENAI_API_KEY"},
 	"gemini":   {"GOOGLE_API_KEY", "GEMINI_API_KEY"},
-	"vllm":     {"VLLM_API_KEY"},
+	"vllm":     {}, // Auth via custom headers; no standard env var
 	"voyageai": {"VOYAGE_API_KEY"},
-	"azure":    {"AZURE_OPENAI_API_KEY"},
-	"azure-ai": {"AZURE_OPENAI_API_KEY"},
-	"bedrock":  {"AWS_ACCESS_KEY_ID"}, // Also requires AWS_SECRET_ACCESS_KEY
-	"vertex":   {"GOOGLE_APPLICATION_CREDENTIALS"},
 	"groq":     {"GROQ_API_KEY"},
 	"together": {"TOGETHER_API_KEY"},
 	"ollama":   {}, // No API key required for local Ollama
