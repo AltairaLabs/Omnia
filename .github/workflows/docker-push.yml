@@ -19,6 +19,7 @@ permissions:
   packages: write
   id-token: write
   attestations: write
+  security-events: write
 
 concurrency:
   group: docker-push-${{ github.ref }}
@@ -26,6 +27,8 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
+  DOCS_BASE: https://omnia.altairalabs.ai
+  SOURCE_URL: https://github.com/${{ github.repository }}
 
 jobs:
   detect:
@@ -156,45 +159,73 @@ jobs:
           - image: omnia-operator
             dockerfile: Dockerfile
             context: .
+            title: Omnia Operator
+            description: Kubernetes controller-manager for Omnia. Reconciles AgentRuntime, PromptPack, ToolRegistry, Provider, Workspace, and SessionRetentionPolicy CRDs; hosts the dashboard and REST API.
           - image: omnia-facade
             dockerfile: Dockerfile.agent
             context: .
+            title: Omnia Facade
+            description: Client-facing WebSocket / gRPC / A2A server. Accepts browser and agent-to-agent connections and bridges them to the runtime over gRPC.
           - image: omnia-runtime
             dockerfile: Dockerfile.runtime
             context: .
+            title: Omnia Runtime
+            description: LLM runtime for Omnia agents. gRPC server that wraps a provider via the PromptKit SDK; executes platform tools and server-side tool calls.
           - image: omnia-dashboard
             dockerfile: dashboard/Dockerfile
             context: dashboard
+            title: Omnia Dashboard
+            description: Next.js frontend for Omnia. Live agent consoles, session browsing, arena runs, and operator admin surface.
           - image: omnia-session-api
             dockerfile: Dockerfile.session-api
             context: .
+            title: Omnia Session API
+            description: Standalone HTTP service for session CRUD and retention. Backed by PostgreSQL with an optional Redis warm cache.
           - image: omnia-memory-api
             dockerfile: Dockerfile.memory-api
             context: .
+            title: Omnia Memory API
+            description: Standalone HTTP service for cross-session agent memory (institutional, agent, and user tiers).
           - image: omnia-doctor
             dockerfile: Dockerfile.doctor
             context: .
+            title: Omnia Doctor
+            description: Cluster-health and diagnostic tool for Omnia installations. Validates CRDs, controllers, and connectivity between components.
           - image: omnia-compaction
             dockerfile: Dockerfile.compaction
             context: .
+            title: Omnia Session Compaction
+            description: Batch job that compacts warm session storage into cold Parquet archives according to SessionRetentionPolicy.
           - image: omnia-arena-controller
             dockerfile: ee/Dockerfile.arena-controller
             context: .
+            title: Omnia Arena Controller (Enterprise)
+            description: Enterprise controller-manager for Arena resources (ArenaJob, ArenaDevSession, ArenaSource, ArenaTemplateSource, RolloutAnalysis).
           - image: omnia-arena-worker
             dockerfile: ee/Dockerfile.arena-worker
             context: .
+            title: Omnia Arena Worker (Enterprise)
+            description: Enterprise Arena worker. Executes evaluation, load-test, and data-gen scenarios against a provider pool.
           - image: omnia-arena-dev-console
             dockerfile: ee/Dockerfile.arena-dev-console
             context: .
+            title: Omnia Arena Dev Console (Enterprise)
+            description: Ephemeral dev-console for interactive Arena testing. Provisioned per ArenaDevSession.
           - image: omnia-eval-worker
             dockerfile: ee/Dockerfile.eval-worker
             context: .
+            title: Omnia Eval Worker (Enterprise)
+            description: Per-namespace worker that executes realtime evals against active agent sessions.
           - image: omnia-policy-proxy
             dockerfile: ee/Dockerfile.policy-proxy
             context: .
+            title: Omnia Policy Proxy (Enterprise)
+            description: Sidecar proxy that intercepts tool calls and evaluates ToolPolicy CEL rules before they reach the runtime.
           - image: omnia-promptkit-lsp
             dockerfile: ee/Dockerfile.promptkit-lsp
             context: .
+            title: Omnia PromptKit LSP (Enterprise)
+            description: Language-server for PromptKit configs and arena YAML. Powers autocomplete and validation in the dev console.
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -230,8 +261,22 @@ jobs:
             type=sha,format=long,prefix=
             type=sha,format=short,prefix=
             type=raw,value=main
+          # Per-image OCI annotations. The action auto-fills revision,
+          # created, source, url, licenses from the build context; we
+          # supply title, description, documentation that vary per service.
+          labels: |
+            org.opencontainers.image.title=${{ matrix.title }}
+            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.documentation=${{ env.DOCS_BASE }}
+            org.opencontainers.image.vendor=Altaira Labs
+          annotations: |
+            org.opencontainers.image.title=${{ matrix.title }}
+            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.documentation=${{ env.DOCS_BASE }}
+            org.opencontainers.image.vendor=Altaira Labs
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
@@ -240,10 +285,57 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=registry,ref=${{ steps.ref.outputs.image }}:buildcache
           cache-to: type=registry,ref=${{ steps.ref.outputs.image }}:buildcache,mode=max
+          # SBOM + SLSA provenance attestations attached to the pushed image
+          # as sigstore OCI referrers. Inspect with:
+          #   docker buildx imagetools inspect <ref> --format '{{json .SBOM}}'
           provenance: true
           sbom: true
+
+      - name: Attest build provenance (GitHub attestation store)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ steps.ref.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Generate SBOM (CycloneDX) for attestation + artifact
+        id: sbom
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ steps.ref.outputs.image }}@${{ steps.build.outputs.digest }}
+          format: cyclonedx-json
+          artifact-name: sbom-${{ matrix.image }}.cdx.json
+          output-file: sbom-${{ matrix.image }}.cdx.json
+
+      - name: Attest SBOM (GitHub attestation store)
+        uses: actions/attest-sbom@v2
+        with:
+          subject-name: ${{ steps.ref.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: sbom-${{ matrix.image }}.cdx.json
+          push-to-registry: true
+
+      - name: Scan image (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.ref.outputs.image }}@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy-${{ matrix.image }}.sarif
+          # Don't fail the job on findings — we upload to the Security tab
+          # where maintainers triage. Tighten to HIGH/CRITICAL once baseline
+          # is clean.
+          exit-code: '0'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH,MEDIUM
+
+      - name: Upload Trivy SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-${{ matrix.image }}.sarif
+          category: trivy-${{ matrix.image }}
 
   summary:
     name: Summary
@@ -259,3 +351,8 @@ jobs:
           echo "Shared-paths changed: \`${{ needs.detect.outputs.shared }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "Services built: \`${{ needs.detect.outputs.services }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "Result: \`${{ needs.build-push.result }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Where to find things" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Images**: https://github.com/orgs/${{ github.repository_owner }}/packages?repo_name=${{ github.event.repository.name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Attestations (SBOM + provenance)**: https://github.com/${{ github.repository }}/attestations" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Vulnerability alerts**: https://github.com/${{ github.repository }}/security/code-scanning?query=tool%3ATrivy" >> "$GITHUB_STEP_SUMMARY"
