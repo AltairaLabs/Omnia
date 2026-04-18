@@ -33,6 +33,11 @@ import (
 	runtimetools "github.com/altairalabs/omnia/internal/runtime/tools"
 )
 
+// errFmtHandler wraps per-handler build errors (HTTP/gRPC/MCP/OpenAPI)
+// so downstream callers can attribute failures to the owning handler. Extracted
+// to silence go:S1192 (was duplicated across every handler-type branch).
+const errFmtHandler = "handler %q: %w"
+
 // ToolConfig represents the tools configuration file format for the runtime.
 // This is passed to the runtime container as a YAML file.
 type ToolConfig struct {
@@ -538,27 +543,27 @@ func buildHandlerEntry(h *omniav1alpha1.HandlerDefinition, endpoint string) (Han
 	case omniav1alpha1.HandlerTypeHTTP:
 		cfg, err := buildHTTPConfig(h, endpoint)
 		if err != nil {
-			return entry, fmt.Errorf("handler %q: %w", h.Name, err)
+			return entry, fmt.Errorf(errFmtHandler, h.Name, err)
 		}
 		entry.HTTPConfig = cfg
 		entry.Tool = buildToolDefinition(h.Tool)
 	case omniav1alpha1.HandlerTypeGRPC:
 		cfg, err := buildGRPCConfig(h, endpoint)
 		if err != nil {
-			return entry, fmt.Errorf("handler %q: %w", h.Name, err)
+			return entry, fmt.Errorf(errFmtHandler, h.Name, err)
 		}
 		entry.GRPCConfig = cfg
 		entry.Tool = buildToolDefinition(h.Tool)
 	case omniav1alpha1.HandlerTypeMCP:
 		cfg, err := buildMCPConfig(h)
 		if err != nil {
-			return entry, fmt.Errorf("handler %q: %w", h.Name, err)
+			return entry, fmt.Errorf(errFmtHandler, h.Name, err)
 		}
 		entry.MCPConfig = cfg
 	case omniav1alpha1.HandlerTypeOpenAPI:
 		cfg, err := buildOpenAPIConfig(h)
 		if err != nil {
-			return entry, fmt.Errorf("handler %q: %w", h.Name, err)
+			return entry, fmt.Errorf(errFmtHandler, h.Name, err)
 		}
 		entry.OpenAPIConfig = cfg
 	case omniav1alpha1.HandlerTypeClient:

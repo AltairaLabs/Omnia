@@ -18,6 +18,11 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+// arenaDirName is the hidden directory under a workspace where Arena source
+// artifacts are materialized (versions/HEAD layout). Extracted to satisfy
+// go:S1192 (duplicated 5x across syncer path construction).
+const arenaDirName = ".arena"
+
 // StorageManager is the minimal interface FilesystemSyncer needs to ensure a
 // workspace PVC exists before writing artifacts. The ee/pkg/workspace
 // StorageManager type satisfies this interface.
@@ -82,10 +87,10 @@ func (s *FilesystemSyncer) SyncToFilesystem(ctx context.Context, params SyncPara
 	}
 
 	// Check if this version already exists
-	versionDir := filepath.Join(workspacePath, ".arena", "versions", version)
+	versionDir := filepath.Join(workspacePath, arenaDirName, "versions", version)
 	if _, statErr := os.Stat(versionDir); statErr == nil {
 		log.V(1).Info("Version already exists, skipping sync", "version", version)
-		contentPath = filepath.Join(params.TargetPath, ".arena", "versions", version)
+		contentPath = filepath.Join(params.TargetPath, arenaDirName, "versions", version)
 		if headErr := UpdateHEAD(workspacePath, version); headErr != nil {
 			return "", "", fmt.Errorf("failed to update HEAD: %w", headErr)
 		}
@@ -112,7 +117,7 @@ func (s *FilesystemSyncer) SyncToFilesystem(ctx context.Context, params SyncPara
 		"path", versionDir,
 	)
 
-	contentPath = filepath.Join(params.TargetPath, ".arena", "versions", version)
+	contentPath = filepath.Join(params.TargetPath, arenaDirName, "versions", version)
 	return contentPath, version, nil
 }
 
@@ -167,7 +172,7 @@ func storeVersion(artifactPath, versionDir string) error {
 
 // UpdateHEAD atomically updates the HEAD pointer to the given version.
 func UpdateHEAD(workspacePath, version string) error {
-	arenaDir := filepath.Join(workspacePath, ".arena")
+	arenaDir := filepath.Join(workspacePath, arenaDirName)
 	if err := os.MkdirAll(arenaDir, 0755); err != nil {
 		return err
 	}
@@ -187,7 +192,7 @@ func UpdateHEAD(workspacePath, version string) error {
 // GCOldVersions removes old versions exceeding maxVersions.
 // If maxVersions is <= 0, defaults to 10.
 func GCOldVersions(workspacePath string, maxVersions int) error {
-	versionsDir := filepath.Join(workspacePath, ".arena", "versions")
+	versionsDir := filepath.Join(workspacePath, arenaDirName, "versions")
 
 	entries, err := os.ReadDir(versionsDir)
 	if err != nil {

@@ -35,6 +35,10 @@ import (
 
 const tracerName = "omnia-redis-cache"
 
+// errFmtRedisCheckExistence wraps EXISTS-style lookup failures. Extracted
+// to satisfy go:S1192 (duplicated 4x across the provider).
+const errFmtRedisCheckExistence = "redis: check existence: %w"
+
 // Compile-time interface check.
 var _ providers.HotCacheProvider = (*Provider)(nil)
 
@@ -181,7 +185,7 @@ func (p *Provider) DeleteSession(ctx context.Context, sessionID string) error {
 	exists, err := p.client.Exists(ctx, p.sessionKey(sessionID)).Result()
 	if err != nil {
 		recordErr(span, err)
-		return fmt.Errorf("redis: check existence: %w", err)
+		return fmt.Errorf(errFmtRedisCheckExistence, err)
 	}
 	if exists == 0 {
 		return session.ErrSessionNotFound
@@ -207,7 +211,7 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 	exists, err := p.client.Exists(ctx, sessionKey).Result()
 	if err != nil {
 		recordErr(span, err)
-		return fmt.Errorf("redis: check existence: %w", err)
+		return fmt.Errorf(errFmtRedisCheckExistence, err)
 	}
 	if exists == 0 {
 		return session.ErrSessionNotFound
@@ -264,7 +268,7 @@ func (p *Provider) GetRecentMessages(ctx context.Context, sessionID string, limi
 	exists, err := p.client.Exists(ctx, p.sessionKey(sessionID)).Result()
 	if err != nil {
 		recordErr(span, err)
-		return nil, fmt.Errorf("redis: check existence: %w", err)
+		return nil, fmt.Errorf(errFmtRedisCheckExistence, err)
 	}
 	if exists == 0 {
 		return nil, session.ErrSessionNotFound
@@ -302,7 +306,7 @@ func (p *Provider) RefreshTTL(ctx context.Context, sessionID string, ttl time.Du
 	exists, err := p.client.Exists(ctx, sessionKey).Result()
 	if err != nil {
 		recordErr(span, err)
-		return fmt.Errorf("redis: check existence: %w", err)
+		return fmt.Errorf(errFmtRedisCheckExistence, err)
 	}
 	if exists == 0 {
 		return session.ErrSessionNotFound
