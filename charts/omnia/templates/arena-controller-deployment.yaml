@@ -1,4 +1,5 @@
 {{- if .Values.enterprise.enabled }}
+{{- $po := .Values.enterprise.arena.controller.podOverrides | default dict }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -19,15 +20,25 @@ spec:
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- with $po.annotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       labels:
+        {{- with $po.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         {{- include "omnia.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: arena-controller
     spec:
-      {{- with .Values.imagePullSecrets }}
+      {{- $pullSecrets := concat (.Values.imagePullSecrets | default list) ($po.imagePullSecrets | default list) }}
+      {{- with $pullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "omnia.serviceAccountName" . }}
+      serviceAccountName: {{ $po.serviceAccountName | default (include "omnia.serviceAccountName" .) }}
+      {{- with $po.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       securityContext:
         runAsNonRoot: {{ .Values.enterprise.arena.controller.podSecurityContext.runAsNonRoot | default true }}
         runAsUser: {{ .Values.enterprise.arena.controller.podSecurityContext.runAsUser | default 65532 }}
@@ -119,11 +130,13 @@ spec:
             periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
           resources:
             {{- toYaml .Values.enterprise.arena.controller.resources | default .Values.resources | nindent 12 }}
-          {{- with .Values.enterprise.arena.controller.extraEnv }}
+          {{- $env := concat (.Values.enterprise.arena.controller.extraEnv | default list) ($po.extraEnv | default list) }}
+          {{- with $env }}
           env:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.enterprise.arena.controller.extraEnvFrom }}
+          {{- $envFrom := concat (.Values.enterprise.arena.controller.extraEnvFrom | default list) ($po.extraEnvFrom | default list) }}
+          {{- with $envFrom }}
           envFrom:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -132,7 +145,8 @@ spec:
               mountPath: /workspace-content
             - name: tmp
               mountPath: /tmp
-            {{- with .Values.enterprise.arena.controller.extraVolumeMounts }}
+            {{- $vm := concat (.Values.enterprise.arena.controller.extraVolumeMounts | default list) ($po.extraVolumeMounts | default list) }}
+            {{- with $vm }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
@@ -141,19 +155,27 @@ spec:
             claimName: {{ include "omnia.fullname" . }}-workspace-content
         - name: tmp
           emptyDir: {}
-        {{- with .Values.enterprise.arena.controller.extraVolumes }}
+        {{- $vols := concat (.Values.enterprise.arena.controller.extraVolumes | default list) ($po.extraVolumes | default list) }}
+        {{- with $vols }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with .Values.nodeSelector }}
+      {{- $nodeSel := mergeOverwrite (deepCopy (.Values.nodeSelector | default dict)) ($po.nodeSelector | default dict) }}
+      {{- with $nodeSel }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.affinity }}
+      {{- $aff := $po.affinity | default .Values.affinity }}
+      {{- with $aff }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.tolerations }}
+      {{- $tols := concat (.Values.tolerations | default list) ($po.tolerations | default list) }}
+      {{- with $tols }}
       tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $po.topologySpreadConstraints }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       terminationGracePeriodSeconds: {{ .Values.enterprise.arena.controller.terminationGracePeriodSeconds | default 10 }}

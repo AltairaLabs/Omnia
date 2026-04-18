@@ -1,4 +1,5 @@
 {{- if .Values.doctor.enabled }}
+{{- $po := .Values.doctor.podOverrides | default dict }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -12,10 +13,24 @@ spec:
       {{- include "omnia.doctor.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      {{- with $po.annotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       labels:
+        {{- with $po.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         {{- include "omnia.doctor.selectorLabels" . | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "omnia.doctor.fullname" . }}
+      {{- with $po.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ $po.serviceAccountName | default (include "omnia.doctor.fullname" .) }}
+      {{- with $po.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -75,10 +90,42 @@ spec:
             {{- end }}
           resources:
             {{- toYaml .Values.doctor.resources | nindent 12 }}
+          {{- with $po.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $po.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $po.extraVolumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
+      {{- with $po.extraVolumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $po.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $po.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $po.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $po.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
 {{- end }}

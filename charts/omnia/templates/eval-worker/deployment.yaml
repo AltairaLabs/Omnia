@@ -1,4 +1,5 @@
 {{- if and .Values.enterprise.enabled .Values.enterprise.evalWorker.enabled }}
+{{- $po := .Values.enterprise.evalWorker.podOverrides | default dict }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,13 +14,26 @@ spec:
   template:
     metadata:
       labels:
+        {{- with $po.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         {{- include "omnia.evalWorker.selectorLabels" . | nindent 8 }}
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
         prometheus.io/path: "/metrics"
+        {{- with $po.annotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
-      serviceAccountName: {{ include "omnia.evalWorker.fullname" . }}
+      {{- with $po.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ $po.serviceAccountName | default (include "omnia.evalWorker.fullname" .) }}
+      {{- with $po.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -85,6 +99,17 @@ spec:
             {{- with .Values.enterprise.evalWorker.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+            {{- with $po.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with $po.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $po.extraVolumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -115,5 +140,25 @@ spec:
               drop:
                 - ALL
             readOnlyRootFilesystem: true
+      {{- with $po.extraVolumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $po.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $po.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $po.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $po.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       terminationGracePeriodSeconds: {{ .Values.enterprise.evalWorker.terminationGracePeriodSeconds | default 30 }}
 {{- end }}

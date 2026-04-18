@@ -1,6 +1,7 @@
 {{- if .Values.enterprise.enabled }}
 {{- if .Values.enterprise.promptkitLsp.enabled }}
 {{- $lsp := .Values.enterprise.promptkitLsp -}}
+{{- $po := $lsp.podOverrides | default dict -}}
 {{- $httpPort := $lsp.port | default 8080 -}}
 {{- $healthPort := $lsp.healthPort | default 8081 -}}
 {{- $dashboardUrl := $lsp.dashboardApiUrl -}}
@@ -26,15 +27,25 @@ spec:
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- with $po.annotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       labels:
+        {{- with $po.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         {{- include "omnia.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: promptkit-lsp
     spec:
-      {{- with .Values.imagePullSecrets }}
+      {{- $pullSecrets := concat (.Values.imagePullSecrets | default list) ($po.imagePullSecrets | default list) }}
+      {{- with $pullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "omnia.serviceAccountName" . }}
+      serviceAccountName: {{ $po.serviceAccountName | default (include "omnia.serviceAccountName" .) }}
+      {{- with $po.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -60,8 +71,17 @@ spec:
             - name: health
               containerPort: {{ $healthPort }}
               protocol: TCP
-          {{- with $lsp.extraEnv }}
+          {{- $env := concat ($lsp.extraEnv | default list) ($po.extraEnv | default list) }}
+          {{- with $env }}
           env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $po.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $po.extraVolumeMounts }}
+          volumeMounts:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           securityContext:
@@ -88,16 +108,27 @@ spec:
             {{- end }}
           resources:
             {{- toYaml $lsp.resources | nindent 12 }}
-      {{- with .Values.nodeSelector }}
+      {{- with $po.extraVolumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $nodeSel := mergeOverwrite (deepCopy (.Values.nodeSelector | default dict)) ($po.nodeSelector | default dict) }}
+      {{- with $nodeSel }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.affinity }}
+      {{- $aff := $po.affinity | default .Values.affinity }}
+      {{- with $aff }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.tolerations }}
+      {{- $tols := concat (.Values.tolerations | default list) ($po.tolerations | default list) }}
+      {{- with $tols }}
       tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $po.topologySpreadConstraints }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       terminationGracePeriodSeconds: {{ $lsp.terminationGracePeriodSeconds | default 30 }}
