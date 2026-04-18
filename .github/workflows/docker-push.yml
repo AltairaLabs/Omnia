@@ -319,7 +319,9 @@ jobs:
           push-to-registry: true
 
       - name: Scan image (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0
+        # 0.35.0 is the first version after the brief supply-chain compromise
+        # disclosed as CVE-2026-33634. Matches the pin in release.yml.
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ${{ steps.ref.outputs.image }}@${{ steps.build.outputs.digest }}
           format: sarif
