@@ -326,7 +326,9 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		r.Recorder.Event(source, corev1.EventTypeNormal, EventReasonFetchStarted, "Started fetching artifact")
 	}
 
-	// Start async fetch
+	// Start async fetch — detached from the Reconcile ctx because the
+	// goroutine must outlive the reconciliation loop that scheduled it.
+	// Lifetime bounded by the caller-supplied timeout.
 	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	job := &fetchJob{
 		startTime: time.Now(),
