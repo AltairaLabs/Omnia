@@ -18,6 +18,7 @@ import (
 
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
+	"github.com/altairalabs/omnia/pkg/intconv"
 )
 
 // Aggregator collects and summarizes results from Arena job executions.
@@ -45,9 +46,9 @@ func StatsToResult(stats *queue.JobStats) *AggregatedResult {
 	total := stats.Passed + stats.Failed
 
 	result := &AggregatedResult{
-		TotalItems:    int(total),
-		PassedItems:   int(stats.Passed),
-		FailedItems:   int(stats.Failed),
+		TotalItems:    intconv.ClampInt(total),
+		PassedItems:   intconv.ClampInt(stats.Passed),
+		FailedItems:   intconv.ClampInt(stats.Failed),
 		TotalDuration: totalDuration,
 		TotalTokens:   stats.TotalTokens,
 		TotalCost:     stats.TotalCost,
