@@ -352,7 +352,10 @@ jobs:
       run: helm dependency build ./charts/omnia
 
     - name: Helm lint
-      run: helm lint ./charts/omnia
+      # dashboard.auth.mode is schema-required — chart fails lint without it.
+      # values-chart-tests.yaml supplies a valid mode; use it here too so the
+      # lint passes with the schema's required-field check.
+      run: helm lint ./charts/omnia -f charts/omnia/values-chart-tests.yaml
 
     # charts/omnia/values-chart-tests.yaml satisfies the auth-mode guardrails
     # (omnia.validateAuth) so these template-render checks can focus on

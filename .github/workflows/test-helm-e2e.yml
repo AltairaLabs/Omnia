@@ -522,8 +522,11 @@ jobs:
           helm dependency build ./charts/omnia
 
       - name: Lint chart
+        # dashboard.auth.mode is schema-required (no default, by design).
+        # Pass a placeholder so the lint can proceed; real installs set it
+        # explicitly per the README.
         run: |
-          helm lint ./charts/omnia
+          helm lint ./charts/omnia --set dashboard.auth.mode=oauth
 
       - name: Validate chart metadata
         run: |
