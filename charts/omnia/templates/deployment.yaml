@@ -1,6 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 {{- $resolvedTracingEndpoint := include "omnia.tracing.endpoint" . | trim }}
+{{- $po := .Values.operator.podOverrides | default dict }}
 metadata:
   name: {{ include "omnia.fullname" . }}-controller-manager
   labels:
@@ -25,15 +26,25 @@ spec:
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- with $po.annotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       labels:
+        {{- with $po.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         {{- include "omnia.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: controller-manager
     spec:
-      {{- with .Values.imagePullSecrets }}
+      {{- $pullSecrets := concat (.Values.imagePullSecrets | default list) ($po.imagePullSecrets | default list) }}
+      {{- with $pullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "omnia.serviceAccountName" . }}
+      serviceAccountName: {{ $po.serviceAccountName | default (include "omnia.serviceAccountName" .) }}
+      {{- with $po.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
         {{- if not (hasKey .Values.podSecurityContext "fsGroup") }}
@@ -125,45 +136,59 @@ spec:
             failureThreshold: {{ .Values.probes.readiness.failureThreshold | default 3 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- with .Values.operator.extraEnv }}
+          {{- $env := concat (.Values.operator.extraEnv | default list) ($po.extraEnv | default list) }}
+          {{- with $env }}
           env:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.operator.extraEnvFrom }}
+          {{- $envFrom := concat (.Values.operator.extraEnvFrom | default list) ($po.extraEnvFrom | default list) }}
+          {{- with $envFrom }}
           envFrom:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or .Values.workspaceContent.enabled .Values.operator.extraVolumeMounts }}
+          {{- $vmMounts := concat (.Values.operator.extraVolumeMounts | default list) ($po.extraVolumeMounts | default list) }}
+          {{- if or .Values.workspaceContent.enabled $vmMounts }}
           volumeMounts:
             {{- if .Values.workspaceContent.enabled }}
             - name: workspace-content
               mountPath: {{ .Values.workspaceContent.mountPath | default "/workspace-content" }}
             {{- end }}
-            {{- with .Values.operator.extraVolumeMounts }}
+            {{- with $vmMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
-      {{- if or .Values.workspaceContent.enabled .Values.operator.extraVolumes }}
+      {{- $volumes := concat (.Values.operator.extraVolumes | default list) ($po.extraVolumes | default list) }}
+      {{- if or .Values.workspaceContent.enabled $volumes }}
       volumes:
         {{- if .Values.workspaceContent.enabled }}
         - name: workspace-content
           persistentVolumeClaim:
             claimName: {{ .Values.workspaceContent.persistence.existingClaim | default (printf "%s-workspace-content" (include "omnia.fullname" .)) }}
         {{- end }}
-        {{- with .Values.operator.extraVolumes }}
+        {{- with $volumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- end }}
-      {{- with .Values.nodeSelector }}
+      {{- /* nodeSelector: user keys merged over chart-wide defaults (user wins). */}}
+      {{- $nodeSelector := mergeOverwrite (deepCopy (.Values.nodeSelector | default dict)) ($po.nodeSelector | default dict) }}
+      {{- with $nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.affinity }}
+      {{- /* affinity: podOverrides replaces chart-wide when set. */}}
+      {{- $affinity := $po.affinity | default .Values.affinity }}
+      {{- with $affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.tolerations }}
+      {{- /* tolerations: append podOverrides to chart-wide. */}}
+      {{- $tolerations := concat (.Values.tolerations | default list) ($po.tolerations | default list) }}
+      {{- with $tolerations }}
       tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $po.topologySpreadConstraints }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       terminationGracePeriodSeconds: 30

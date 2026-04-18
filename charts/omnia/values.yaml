@@ -436,6 +436,37 @@ operator:
   # -- Extra volumeMounts on the operator container.
   extraVolumeMounts: []
 
+  # -- Pod-level customization for the chart-owned operator Deployment.
+  # Same shape as the CRD `PodOverrides` struct (api/v1alpha1/shared_types.go)
+  # so users have one mental model for BOTH chart-owned pods AND
+  # operator-generated CRD pods.
+  #
+  # Additive on top of the legacy `operator.extraEnv`/`extraEnvFrom`/
+  # `extraVolumes`/`extraVolumeMounts` values (kept for backward compat).
+  # `serviceAccountName` here overrides the chart-wide `serviceAccount.name`
+  # on the operator pod only — useful when the operator needs a different
+  # IRSA/WLI identity than other chart components.
+  #
+  # Docs: https://omnia.altairalabs.ai/docs/how-to/configure-pod-overrides
+  podOverrides: {}
+  # Example:
+  #   podOverrides:
+  #     serviceAccountName: omnia-operator-wli
+  #     priorityClassName: system-cluster-critical
+  #     imagePullSecrets:
+  #       - name: ecr-creds
+  #     labels:
+  #       azure.workload.identity/use: "true"
+  #     annotations:
+  #       iam.gke.io/gcp-service-account: omnia-operator@my-project.iam.gserviceaccount.com
+  #     topologySpreadConstraints:
+  #       - maxSkew: 1
+  #         topologyKey: topology.kubernetes.io/zone
+  #         whenUnsatisfiable: ScheduleAnyway
+  #         labelSelector:
+  #           matchLabels:
+  #             app.kubernetes.io/component: controller-manager
+
 # Leader election configuration
 leaderElection:
   # -- Enable leader election for HA
