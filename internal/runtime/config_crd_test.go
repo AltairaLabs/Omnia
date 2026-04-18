@@ -176,6 +176,57 @@ func TestLoadFromCRD_SingleProvider(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("OPENAI_API_KEY") })
 }
 
+// TestLoadFromCRD_Headers verifies spec.headers from the Provider CRD flows
+// through loadFromProviderRef into Config.Headers. Combined with the
+// end-to-end httptest coverage in openrouter_integration_test.go, this closes
+// the CRD -> Config -> Server -> HTTP-request loop that makes OpenRouter and
+// other gateway providers usable via the Provider CRD.
+func TestLoadFromCRD_Headers(t *testing.T) {
+	provider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "openrouter-provider",
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.ProviderSpec{
+			Type:    v1alpha1.ProviderTypeOpenAI,
+			Model:   "anthropic/claude-sonnet-4",
+			BaseURL: "https://openrouter.ai/api/v1",
+			Headers: map[string]string{
+				"HTTP-Referer": "https://my-app.example",
+				"X-Title":      "omnia",
+			},
+			SecretRef: &v1alpha1.SecretKeyRef{Name: "openrouter-secret"},
+		},
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "openrouter-secret",
+			Namespace: "test-ns",
+		},
+		Data: map[string][]byte{"OPENAI_API_KEY": []byte("sk-or-v1-test")},
+	}
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: "test-ns"},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
+			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Providers: []v1alpha1.NamedProviderRef{
+				{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "openrouter-provider"}},
+			},
+		},
+	}
+
+	c := buildTestClient(ar, provider, secret)
+	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.Unsetenv("OPENAI_API_KEY") })
+
+	assert.Equal(t, "openai", cfg.ProviderType)
+	assert.Equal(t, "https://openrouter.ai/api/v1", cfg.BaseURL)
+	assert.Equal(t, "https://my-app.example", cfg.Headers["HTTP-Referer"])
+	assert.Equal(t, "omnia", cfg.Headers["X-Title"])
+}
+
 func TestLoadFromCRD_NoProviders(t *testing.T) {
 	ar := &v1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{
