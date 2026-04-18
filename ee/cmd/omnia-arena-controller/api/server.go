@@ -21,6 +21,10 @@ import (
 	"github.com/altairalabs/omnia/internal/httputil"
 )
 
+// msgMethodNotAllowed is the plaintext body returned for HTTP 405 responses.
+// Extracted to satisfy go:S1192 (duplicated 3x across route handlers).
+const msgMethodNotAllowed = "Method not allowed"
+
 // Server provides HTTP API endpoints for arena operations.
 type Server struct {
 	addr             string
@@ -94,7 +98,7 @@ type RenderTemplateResponse struct {
 // Uses PromptKit's Generator to render templates.
 func (s *Server) handleRenderTemplate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, msgMethodNotAllowed, http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -167,7 +171,7 @@ type PreviewFile struct {
 // then returns the file contents without persisting them.
 func (s *Server) handlePreviewTemplate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, msgMethodNotAllowed, http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -233,7 +237,7 @@ func toLicenseResponse(l *license.License) licenseResponse {
 // Returns the current license information for the dashboard.
 func (s *Server) handleGetLicense(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, msgMethodNotAllowed, http.StatusMethodNotAllowed)
 		return
 	}
 

@@ -25,6 +25,10 @@ const (
 	privacyBatchDeletePath  = "/api/v1/memories/batch"
 	privacyMemoriesPath     = "/api/v1/memories"
 	privacyMemorySearchPath = "/api/v1/memories/search"
+
+	// HTTP header/media-type constants (extracted to satisfy go:S1192).
+	headerContentType = "Content-Type"
+	contentTypeJSON   = "application/json"
 )
 
 // PrivacyChecker runs privacy-related checks against the memory-api service.
@@ -122,10 +126,10 @@ func (p *PrivacyChecker) requireWorkspace() *doctor.TestResult {
 // Returns the memory ID on success, or an error.
 func (p *PrivacyChecker) saveMemory(ctx context.Context, content string, extraHeaders map[string]string) (string, int, error) {
 	payload := map[string]interface{}{
-		"type":       "doctor-privacy-test",
+		"type":       privacyTestUserID,
 		"content":    content,
 		"confidence": 0.9,
-		"scope":      map[string]string{"workspace_id": p.workspace, "user_id": "doctor-privacy-test"},
+		"scope":      map[string]string{"workspace_id": p.workspace, "user_id": privacyTestUserID},
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -136,7 +140,7 @@ func (p *PrivacyChecker) saveMemory(ctx context.Context, content string, extraHe
 	if err != nil {
 		return "", 0, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(headerContentType, contentTypeJSON)
 	for k, v := range extraHeaders {
 		req.Header.Set(k, v)
 	}
@@ -165,7 +169,7 @@ func (p *PrivacyChecker) saveMemory(ctx context.Context, content string, extraHe
 // searchMemories queries the memory search endpoint for a query string.
 // Returns the raw JSON body contents of the memories array items.
 func (p *PrivacyChecker) searchMemories(ctx context.Context, query string) ([]map[string]interface{}, error) {
-	params := url.Values{"workspace": {p.workspace}, "q": {query}, "user_id": {"doctor-privacy-test"}}
+	params := url.Values{"workspace": {p.workspace}, "q": {query}, "user_id": {privacyTestUserID}}
 	searchURL := p.memoryAPIURL + privacyMemorySearchPath + "?" + params.Encode()
 	body, err := fetchBody(ctx, memoryClient(), searchURL)
 	if err != nil {
@@ -251,7 +255,7 @@ func (p *PrivacyChecker) checkOptOutRespected(ctx context.Context) doctor.TestRe
 	if err != nil {
 		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error()}
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(headerContentType, contentTypeJSON)
 
 	resp, err := memoryClient().Do(req)
 	if err != nil {
@@ -270,7 +274,7 @@ func (p *PrivacyChecker) checkOptOutRespected(ctx context.Context) doctor.TestRe
 	defer func() {
 		delReq, _ := http.NewRequestWithContext(ctx, http.MethodDelete, optOutURL, bytes.NewReader(optOutBody))
 		if delReq != nil {
-			delReq.Header.Set("Content-Type", "application/json")
+			delReq.Header.Set(headerContentType, contentTypeJSON)
 			r, e := memoryClient().Do(delReq)
 			if e == nil {
 				r.Body.Close() //nolint:errcheck
@@ -316,7 +320,7 @@ func (p *PrivacyChecker) checkDeletionCascade(ctx context.Context) doctor.TestRe
 	}
 
 	batchURL := fmt.Sprintf("%s%s?workspace=%s&user_id=%s&limit=100",
-		p.memoryAPIURL, privacyBatchDeletePath, p.workspace, "doctor-privacy-test")
+		p.memoryAPIURL, privacyBatchDeletePath, p.workspace, privacyTestUserID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, batchURL, nil)
 	if err != nil {
 		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error()}

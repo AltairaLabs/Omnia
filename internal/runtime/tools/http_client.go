@@ -35,6 +35,11 @@ import (
 const httpBodyMaxBytes = 10 * 1024 * 1024 // 10 MB
 const truncateErrorBodyLen = 512
 
+// errFmtBuildQueryParams wraps query-parameter build errors during URL
+// construction. Extracted to a const to silence go:S1192 (was duplicated
+// across every buildXxxRequest branch).
+const errFmtBuildQueryParams = "building query params: %w"
+
 // doHTTPRequest performs a direct HTTP call using the provided client, returning
 // the response body (as JSON), the raw call result for retry classification, and
 // any error.
@@ -243,7 +248,7 @@ func buildAdvancedBodyMethod(cfg *HTTPCfg, reqURL string, argsMap map[string]any
 			var err error
 			reqURL, err = appendQueryFromMap(reqURL, queryFields)
 			if err != nil {
-				return reqURL, nil, fmt.Errorf("building query params: %w", err)
+				return reqURL, nil, fmt.Errorf(errFmtBuildQueryParams, err)
 			}
 		}
 	}
@@ -267,7 +272,7 @@ func buildAdvancedNonBodyMethod(cfg *HTTPCfg, reqURL string, argsMap map[string]
 		var err error
 		reqURL, err = appendQueryFromMap(reqURL, queryMap)
 		if err != nil {
-			return reqURL, nil, fmt.Errorf("building query params: %w", err)
+			return reqURL, nil, fmt.Errorf(errFmtBuildQueryParams, err)
 		}
 	}
 	return reqURL, nil, nil
@@ -281,7 +286,7 @@ func buildSimpleBodyAndQuery(cfg *HTTPCfg, method, reqURL string, hasArgs bool, 
 		}
 		resolved, err := appendQueryFromJSON(reqURL, args)
 		if err != nil {
-			return reqURL, nil, fmt.Errorf("building query params: %w", err)
+			return reqURL, nil, fmt.Errorf(errFmtBuildQueryParams, err)
 		}
 		return resolved, nil, nil
 	}

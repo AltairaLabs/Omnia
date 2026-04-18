@@ -36,6 +36,10 @@ import (
 const (
 	// TracerName is the name of the tracer used for runtime spans.
 	TracerName = "omnia-runtime"
+
+	// msgSpanStarted is the structured-log message emitted when a new span
+	// is opened. Extracted to satisfy go:S1192 (3x duplication).
+	msgSpanStarted = "span started"
 )
 
 // GenAI semantic convention attribute keys.
@@ -223,7 +227,7 @@ func (p *Provider) StartConversationSpan(ctx context.Context, sessionID, promptP
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(attrs...),
 	)
-	p.log.V(1).Info("span started",
+	p.log.V(1).Info(msgSpanStarted,
 		"spanName", "omnia.runtime.conversation.turn",
 		"sessionID", sessionID,
 		"turnIndex", turnIndex,
@@ -243,7 +247,7 @@ func (p *Provider) StartLLMSpan(ctx context.Context, model string, system string
 			attribute.String(AttrGenAIRequestModel, model),
 		),
 	)
-	p.log.V(1).Info("span started",
+	p.log.V(1).Info(msgSpanStarted,
 		"spanName", "genai.chat",
 		"model", model,
 		"system", system,
@@ -277,7 +281,7 @@ func (p *Provider) StartToolSpan(ctx context.Context, toolName string, meta Tool
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
 	)
-	p.log.V(1).Info("span started",
+	p.log.V(1).Info(msgSpanStarted,
 		"spanName", "omnia.tool.call",
 		"toolName", toolName,
 		"traceID", span.SpanContext().TraceID())

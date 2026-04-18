@@ -49,6 +49,11 @@ import (
 const logKeyController = "controller"
 const errUnableToCreateController = "unable to create controller"
 
+// msgUnableToCreateWebhook is the structured-log message used when a
+// webhook registration call fails in main(). Extracted to satisfy
+// go:S1192 (duplicated 3x for each registered webhook).
+const msgUnableToCreateWebhook = "unable to create webhook"
+
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -334,17 +339,17 @@ func main() {
 	// Setup webhooks (only when webhook server is enabled)
 	if enableWebhooks {
 		if err := arenawebhook.SetupSessionPrivacyPolicyWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "SessionPrivacyPolicy")
+			setupLog.Error(err, msgUnableToCreateWebhook, "webhook", "SessionPrivacyPolicy")
 			os.Exit(1)
 		}
 
 		if enableLicenseWebhooks {
 			if err := arenawebhook.SetupArenaSourceWebhookWithManager(mgr, licenseValidator); err != nil {
-				setupLog.Error(err, "unable to create webhook", "webhook", "ArenaSource")
+				setupLog.Error(err, msgUnableToCreateWebhook, "webhook", "ArenaSource")
 				os.Exit(1)
 			}
 			if err := arenawebhook.SetupArenaJobWebhookWithManager(mgr, licenseValidator); err != nil {
-				setupLog.Error(err, "unable to create webhook", "webhook", "ArenaJob")
+				setupLog.Error(err, msgUnableToCreateWebhook, "webhook", "ArenaJob")
 				os.Exit(1)
 			}
 			setupLog.Info("license validation webhooks enabled")

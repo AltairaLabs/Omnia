@@ -11,7 +11,17 @@ import (
 	"github.com/altairalabs/omnia/internal/doctor"
 )
 
-const healthTimeout = 5 * time.Second
+const (
+	healthTimeout = 5 * time.Second
+
+	// healthzPath is the liveness probe path used across infrastructure checks.
+	// Extracted to satisfy go:S1192 (3x duplication).
+	healthzPath = "/healthz"
+
+	// detailNotConfigured is the Detail string used on skip results when a
+	// service URL is unset. Extracted to satisfy go:S1192 (3x duplication).
+	detailNotConfigured = "not configured"
+)
 
 // InfrastructureChecks returns liveness health checks for all provided services.
 func InfrastructureChecks(services map[string]string) []doctor.Check {
@@ -28,13 +38,13 @@ func OllamaCheck(url string) doctor.Check {
 }
 
 func healthCheck(name, baseURL string) doctor.Check {
-	return probeCheck(name, baseURL, "/healthz", "Healthy")
+	return probeCheck(name, baseURL, healthzPath, "Healthy")
 }
 
 // OperatorAPICheck returns a check that verifies the operator API server responds.
 // It GETs /healthz and expects HTTP 200.
 func OperatorAPICheck(baseURL string) doctor.Check {
-	return probeCheck("OperatorAPI", baseURL, "/healthz", "Healthy")
+	return probeCheck("OperatorAPI", baseURL, healthzPath, "Healthy")
 }
 
 // DashboardCheck returns a check that verifies the dashboard responds.
@@ -54,7 +64,7 @@ func ArenaControllerCheck(baseURL string) doctor.Check {
 			if baseURL == "" {
 				return doctor.TestResult{
 					Status: doctor.StatusSkip,
-					Detail: "not configured",
+					Detail: detailNotConfigured,
 				}
 			}
 
@@ -62,7 +72,7 @@ func ArenaControllerCheck(baseURL string) doctor.Check {
 			ctx, cancel := context.WithTimeout(ctx, healthTimeout)
 			defer cancel()
 
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/healthz", nil)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+healthzPath, nil)
 			if err != nil {
 				return doctor.TestResult{Status: doctor.StatusFail, Detail: err.Error()}
 			}
@@ -106,7 +116,7 @@ func TCPCheck(name, addr string) doctor.Check {
 			if addr == "" {
 				return doctor.TestResult{
 					Status: doctor.StatusSkip,
-					Detail: "not configured",
+					Detail: detailNotConfigured,
 				}
 			}
 
@@ -134,7 +144,7 @@ func probeCheck(name, baseURL, path, suffix string) doctor.Check {
 			if baseURL == "" {
 				return doctor.TestResult{
 					Status: doctor.StatusSkip,
-					Detail: "not configured",
+					Detail: detailNotConfigured,
 				}
 			}
 
