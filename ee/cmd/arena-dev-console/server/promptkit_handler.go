@@ -13,6 +13,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -558,15 +560,17 @@ func (h *PromptKitHandler) buildComponents() error {
 		return fmt.Errorf("no configuration provided")
 	}
 
-	// Ensure output directory is set to a writable location
-	if cfg.Defaults.Output.Dir == "" {
-		cfg.Defaults.Output.Dir = devConsoleOutputDir
-		cfg.Defaults.OutDir = devConsoleOutputDir
-		h.log.Info("buildComponents: set output directory", "path", cfg.Defaults.Output.Dir)
-	}
+	// Ensure output directory is set to a writable location under the
+	// trusted root. The PromptKit config is user-provided, so we clamp
+	// Output.Dir into a safe prefix to prevent config-driven path
+	// traversal (CodeQL go/path-injection at the MkdirAll sink below).
+	cfg.Defaults.Output.Dir = safeOutputDir(cfg.Defaults.Output.Dir, h.log)
+	cfg.Defaults.OutDir = cfg.Defaults.Output.Dir
 
-	// Pre-create the configured media directory
-	mediaDir := cfg.Defaults.Output.Dir + mediaSubdir
+	// Pre-create the configured media directory. filepath.Join both
+	// canonicalises the path and strips any trailing separator the
+	// safe root might carry.
+	mediaDir := filepath.Join(cfg.Defaults.Output.Dir, strings.TrimPrefix(mediaSubdir, "/"))
 	if err := os.MkdirAll(mediaDir, 0750); err != nil {
 		h.log.Error(err, "buildComponents: failed to pre-create media directory", "path", mediaDir)
 	}
@@ -606,6 +610,35 @@ func (h *PromptKitHandler) buildComponents() error {
 	h.providerRegistry = providerRegistry
 	h.log.Info("components built successfully")
 	return nil
+}
+
+// safeOutputDir validates a config-provided output directory before it
+// reaches MkdirAll (CodeQL go/path-injection). Empty values fall back to
+// the trusted default; values that contain any ".." segment are
+// rejected (checked on the raw string — filepath.Clean would silently
+// resolve "/tmp/foo/../../etc" to "/etc" and erase the signal);
+// relative paths are rooted under the default; cleaned absolute paths
+// are allowed (the container's filesystem permissions are the primary
+// defence line for those).
+func safeOutputDir(configured string, log logr.Logger) string {
+	if configured == "" {
+		return devConsoleOutputDir
+	}
+	sep := string(filepath.Separator)
+	if configured == ".." ||
+		strings.HasPrefix(configured, ".."+sep) ||
+		strings.HasSuffix(configured, sep+"..") ||
+		strings.Contains(configured, sep+".."+sep) {
+		log.Info("buildComponents: configured output dir contains traversal; using default",
+			"configured", configured, "default", devConsoleOutputDir)
+		return devConsoleOutputDir
+	}
+	cleaned := filepath.Clean(configured)
+	if !filepath.IsAbs(cleaned) {
+		// Relative paths are interpreted as children of the safe root.
+		return filepath.Join(devConsoleOutputDir, cleaned)
+	}
+	return cleaned
 }
 
 // getOrCreateSession gets or creates session state for the given session ID.

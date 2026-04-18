@@ -267,32 +267,49 @@ func (f *OCIFetcher) extractRegularFile(tr *tar.Reader, target string, header *t
 	return os.Chmod(target, os.FileMode(header.Mode))
 }
 
-// extractSymlink extracts a symlink, validating it doesn't escape the destination.
-// The symlink path is validated using SecureJoin, and the link destination is
-// manually validated to ensure it resolves within destDir.
+// extractSymlink extracts a symlink using SecureJoin for both the link
+// location AND the link target. SecureJoin walks each path component,
+// clamping any traversal back to destDir — so header.Linkname can never
+// produce an out-of-tree resolution. The stored link is written as a
+// path relative to the link's own directory, so the string the OS
+// follows is repo-controlled and validated rather than the raw
+// tar-header value (breaks go/unsafe-unzip-symlink taint flow).
 func (f *OCIFetcher) extractSymlink(header *tar.Header, destDir string) error {
-	// Securely resolve the symlink path within destDir
+	// Where the symlink file itself will live.
 	target, err := securejoin.SecureJoin(destDir, header.Name)
 	if err != nil {
 		return fmt.Errorf("invalid symlink path %q: %w", header.Name, err)
 	}
 
-	// Compute where the symlink would resolve to when followed.
-	// We use filepath.Join (not SecureJoin) because we need to see
-	// where the OS would actually resolve the symlink, not a sanitized version.
-	linkTarget := header.Linkname
-	linkDir := filepath.Dir(target)
-	resolvedPath := filepath.Clean(filepath.Join(linkDir, linkTarget))
-
-	// Validate the resolved path is within destDir
-	cleanDestDir := filepath.Clean(destDir)
-	if !strings.HasPrefix(resolvedPath, cleanDestDir+string(filepath.Separator)) &&
-		resolvedPath != cleanDestDir {
+	// Resolve what the symlink points to, as a tar-relative path. After
+	// filepath.Join+Clean, anything that would escape destDir root
+	// begins with "..". Rejecting here (rather than letting SecureJoin
+	// silently clamp) preserves the "malicious archive" signal for
+	// callers and matches historic behaviour.
+	linknameRel := filepath.Join(filepath.Dir(header.Name), header.Linkname)
+	if linknameRel == ".." || strings.HasPrefix(linknameRel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("symlink escape attempt: %s -> %s resolves outside destDir",
-			header.Name, linkTarget)
+			header.Name, header.Linkname)
 	}
 
-	return os.Symlink(linkTarget, target)
+	// Clamp inside destDir with SecureJoin. This is the taint-break for
+	// CodeQL's go/unsafe-unzip-symlink rule: header.Linkname never
+	// reaches the os.Symlink sink directly — the stored link is derived
+	// from the SecureJoin-validated resolvedPath.
+	resolvedPath, err := securejoin.SecureJoin(destDir, linknameRel)
+	if err != nil {
+		return fmt.Errorf("invalid symlink target %q -> %q: %w", header.Name, header.Linkname, err)
+	}
+
+	// Store the link as a validated relative path anchored at the link's
+	// directory. Same resolution behaviour as the original linkname, but
+	// derived from the SecureJoin-clamped resolvedPath.
+	linkDir := filepath.Dir(target)
+	safeLinkTarget, err := filepath.Rel(linkDir, resolvedPath)
+	if err != nil {
+		return fmt.Errorf("cannot compute safe symlink target for %q: %w", header.Name, err)
+	}
+	return os.Symlink(safeLinkTarget, target)
 }
 
 // parseReference parses the OCI URL into a name.Reference.
