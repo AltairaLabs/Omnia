@@ -31,7 +31,14 @@ RUN addgroup --system --gid 1001 nodejs && \
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --omit=dev
+    npm ci --omit=dev && \
+    # Remove the bundled npm CLI once /app/node_modules is resolved.
+    # `node server.js` is the only entrypoint at runtime; the CLI's own
+    # transitive deps (tar, minimatch, glob, cross-spawn, etc.) are
+    # unused attack surface and trip Trivy scans on every release.
+    rm -rf /usr/local/lib/node_modules/npm \
+           /usr/local/bin/npm \
+           /usr/local/bin/npx
 
 # Copy build output
 COPY --from=builder /app/public ./public
