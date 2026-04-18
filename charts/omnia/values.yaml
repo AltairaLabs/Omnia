@@ -132,8 +132,12 @@ enterprise:
 
   # Community templates source (deployed automatically when enabled)
   communityTemplates:
-    # -- Enable community templates source
-    enabled: true
+    # -- Enable community templates source. When true, the operator reconciles
+    # an ArenaTemplateSource that fetches from github.com/AltairaLabs/promptkit-templates
+    # on the configured syncInterval. Default is `false` so air-gapped and
+    # regulated installs opt in explicitly; enable it when you want the built-in
+    # template gallery to stay in sync.
+    enabled: false
     # -- Name of the ArenaTemplateSource resource
     name: community-templates
     # -- Namespace to deploy the ArenaTemplateSource
@@ -840,6 +844,9 @@ postgres:
     pgbouncer:
       # -- Enable PgBouncer connection pooling sidecar
       enabled: false
+      # -- PgBouncer sidecar image. Pinned (NOT `:latest`) to avoid silent
+      # behavior changes; dev-only, bump deliberately when you want to.
+      image: edoburu/pgbouncer:1.24.0
       poolMode: transaction
       defaultPoolSize: 20
       maxClientConn: 100

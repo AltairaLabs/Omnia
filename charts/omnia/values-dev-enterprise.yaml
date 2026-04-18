@@ -24,6 +24,11 @@ devMode: true
 enterprise:
   enabled: true
 
+  # Community templates default flipped to false in chart 0.9.0-beta.7 (air-gap
+  # safety). Dev Enterprise installs want them on for the fast dev loop.
+  communityTemplates:
+    enabled: true
+
   arena:
     queue:
       type: redis

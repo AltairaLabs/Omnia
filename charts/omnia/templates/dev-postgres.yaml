@@ -139,7 +139,10 @@ spec:
               mountPath: /var/lib/postgresql/data
 {{- if $pgbouncerEnabled }}
         - name: pgbouncer
-          image: edoburu/pgbouncer:latest
+          # Dev-only sidecar. Pinned to avoid silent behavior changes on image
+          # updates; bump deliberately. Full resource + probe tuning is coming
+          # in a follow-up PR (W3 of the chart overhaul).
+          image: {{ .Values.postgres.dev.pgbouncer.image | default "edoburu/pgbouncer:1.24.0" }}
           ports:
             - containerPort: 6432
               protocol: TCP
