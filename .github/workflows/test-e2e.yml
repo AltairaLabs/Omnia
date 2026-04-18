@@ -15,11 +15,17 @@ on:
       - 'internal/**'
       - 'pkg/**'
       - 'test/**'
-      - 'hack/**'
-      # Chart changes that affect deployed behavior. Excludes Chart.yaml
-      # (version bumps), README, NOTES.txt — those can't regress E2E.
-      # Docker Build Matrix already verifies Dockerfile changes on PRs.
-      - 'charts/**/values*.yaml'
+      # Chart changes that materially affect runtime behavior only.
+      #
+      # INTENTIONALLY EXCLUDED:
+      #   - charts/**/values*.yaml        docs-only comments common; default
+      #                                   changes should come with a template
+      #                                   edit or use workflow_dispatch.
+      #                                   `helm lint`/`helm template` in ci.yml
+      #                                   catch schema/rendering regressions.
+      #   - charts/**/*.md, README, NOTES.txt, values.schema.json  docs/schema
+      #   - hack/**                       pre-commit scripts don't affect runtime
+      #   - Dockerfile*                   verified by Docker Build Matrix
       - 'charts/**/templates/**/*.yaml'
       - 'charts/**/templates/**/*.tpl'
       - 'charts/**/crds/**'
@@ -37,13 +43,12 @@ on:
       - 'internal/**'
       - 'pkg/**'
       - 'test/**'
-      - 'hack/**'
-      - 'charts/**/values*.yaml'
       - 'charts/**/templates/**/*.yaml'
       - 'charts/**/templates/**/*.tpl'
       - 'charts/**/crds/**'
       - 'scripts/setup-arena-e2e.sh'
       - '.github/workflows/test-e2e.yml'
+  workflow_dispatch:  # Allow manual trigger for values-only PRs
 
 permissions:
   contents: read
