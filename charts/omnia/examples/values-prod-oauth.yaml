@@ -1,0 +1,99 @@
+# Production OSS Omnia: OAuth, external Postgres, external RWX storage,
+# multi-replica operator + dashboard. No enterprise / Arena.
+#
+# Pre-reqs before install:
+#   1. An OAuth client (GitHub App, Google OAuth, Okta, Azure AD, or generic).
+#   2. A Postgres instance reachable from the cluster (RDS, Cloud SQL,
+#      AlloyDB, Azure Database for PostgreSQL, etc.). Pgvector extension
+#      required for memory-api embeddings.
+#   3. An RWX storage class in the cluster (EFS, Azure Files, Filestore, etc.).
+#
+# Secrets to create OUT-OF-BAND before install:
+#   kubectl create secret generic omnia-oauth \
+#     --from-literal=client-id=<client-id> \
+#     --from-literal=client-secret=<client-secret>
+#   kubectl create secret generic omnia-dashboard-session \
+#     --from-literal=session-secret=<random-base64>
+
+# --- Operator / Dashboard HA ------------------------------------------------
+
+replicaCount: 3
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+dashboard:
+  replicaCount: 2
+  podDisruptionBudget:
+    enabled: true
+
+  # --- OAuth ---------------------------------------------------------------
+  auth:
+    mode: oauth
+    sessionSecretExistingSecret: omnia-dashboard-session  # key: session-secret
+  oauth:
+    # EDIT: provider + details
+    provider: github
+    clientIdExistingSecret: omnia-oauth          # key: client-id
+    clientSecretExistingSecret: omnia-oauth      # key: client-secret
+
+  # Persistent dashboard storage for session cookies across restarts
+  persistence:
+    enabled: true
+    size: 1Gi
+    # EDIT: your RWO storage class (ebs-gp3, pd-standard, etc.)
+    storageClass: ""
+
+  # Behind an external load balancer / ingress — use Gateway API
+  service:
+    type: ClusterIP
+
+# --- No dev-postgres in production ----------------------------------------
+postgres:
+  dev:
+    enabled: false
+
+# --- Workspace content requires RWX ----------------------------------------
+workspaceContent:
+  enabled: true
+  persistence:
+    # EDIT: set to your cluster's RWX class
+    #   AWS:   efs-sc              (with EFS CSI driver)
+    #   Azure: azurefile-csi-nfs   (with Azure File NFS CSI)
+    #   GCP:   filestore-sc        (with Filestore CSI)
+    storageClass: ""
+    accessModes:
+      - ReadWriteMany
+    size: 100Gi
+
+# --- External gateway (public) --------------------------------------------
+gateway:
+  enabled: true
+  # EDIT: className must match your cluster's Gateway controller
+  #   Istio:         istio
+  #   Envoy Gateway: envoy
+  #   GKE:           gke-l7-rilb
+  #   EKS ALB:       eks-alb
+  className: istio
+  listeners:
+    http:
+      port: 80
+      protocol: HTTP
+    https:
+      enabled: true
+      port: 443
+      protocol: HTTPS
+      # EDIT: TLS secret name in the release namespace
+      tlsSecretName: omnia-tls
+
+# --- Optional: subcharts off by default ------------------------------------
+# Overlay `values-observability-all-in.yaml` if you want them on.
+prometheus: { enabled: false }
+grafana:    { enabled: false }
+loki:       { enabled: false }
+tempo:      { enabled: false }
+alloy:      { enabled: false }
+
+enterprise:
+  enabled: false

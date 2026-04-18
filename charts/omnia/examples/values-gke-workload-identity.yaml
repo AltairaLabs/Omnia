@@ -1,0 +1,61 @@
+# GKE Workload Identity + Cloud SQL + GCS. OVERLAY on `values-prod-oauth.yaml`.
+#
+#   helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+#     -f charts/omnia/examples/values-prod-oauth.yaml \
+#     -f charts/omnia/examples/values-gke-workload-identity.yaml
+#
+# Pre-reqs:
+#   - GKE cluster with Workload Identity enabled
+#   - Google Service Account (GSA) bound to the Kubernetes SA below
+#     via `iam.gke.io/gcp-service-account` annotation
+#   - Google Cloud Secret Manager CSI driver (optional) OR External Secrets
+#     Operator syncing into K8s Secrets
+#   - Filestore or similar RWX storage class provisioned
+
+# --- Workload Identity SA -------------------------------------------------
+serviceAccount:
+  create: true
+  annotations:
+    # EDIT: replace with your GSA email
+    iam.gke.io/gcp-service-account: "omnia-operator@my-project.iam.gserviceaccount.com"
+
+# --- Cloud SQL connection (via Auth Proxy sidecar on each Workspace pod) ---
+#
+# Cloud SQL auth proxy is typically injected as a podOverrides sidecar on
+# each session-api / memory-api pod rather than chart-wide. Example on a
+# Workspace CR (set podOverrides on each managed service):
+#
+#   spec:
+#     services:
+#       - name: default
+#         session:
+#           database:
+#             secretRef:
+#               name: session-db-creds
+#           podOverrides:
+#             serviceAccountName: omnia-session-wli
+#             # Cloud SQL Auth Proxy would normally be a sidecar — for that
+#             # you need per-container injection which PodOverrides doesn't
+#             # yet cover. Workaround: connect session-api directly via
+#             # private IP using Workspace.spec.services[].session.database
+#             # pointing at a Secret that contains the private-IP connection
+#             # string.
+
+# --- Workspace content on Filestore ---------------------------------------
+workspaceContent:
+  enabled: true
+  persistence:
+    # EDIT: must match your Filestore StorageClass
+    storageClass: filestore-sc
+    accessModes:
+      - ReadWriteMany
+    size: 100Gi
+
+# --- Artifact Registry image pull -----------------------------------------
+# IRSA-equivalent on GKE: Workload Identity already covers Artifact Registry
+# pulls for the SA, no imagePullSecrets needed in typical setups.
+
+# --- CRD pods -----------------------------------------------------------
+# Same podOverrides pattern as the AWS / Azure examples. Set
+# `serviceAccountName` on the CRD's podOverrides to federate cloud identity
+# into the operator-generated pods.
