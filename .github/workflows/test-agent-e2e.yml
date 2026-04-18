@@ -5,23 +5,19 @@ on:
     branches:
       - main
     paths:
-      # Chart changes that affect deployed behavior only. Excludes
-      # Chart.yaml (version bumps), README, NOTES.txt.
-      - 'charts/**/values*.yaml'
-      - 'charts/**/templates/**/*.yaml'
-      - 'charts/**/templates/**/*.tpl'
-      - 'charts/**/crds/**'
-      - 'dashboard/**'
-      - 'internal/**'
-      - 'cmd/**'
-      - 'pkg/**'
-      - 'api/**'
-      # Dockerfile* intentionally omitted — Docker Build Matrix verifies
-      # every Dockerfile on every PR; build-only changes don't affect E2E.
-      - '.github/workflows/test-agent-e2e.yml'
-  pull_request:
-    paths:
-      - 'charts/**/values*.yaml'
+      # Changes that materially affect runtime behavior only.
+      #
+      # INTENTIONALLY EXCLUDED from these filters:
+      #   - charts/**/values*.yaml        docs-only comments are common; default
+      #                                   behavioural changes should be verified
+      #                                   via a matching template edit or by
+      #                                   triggering E2E manually via
+      #                                   workflow_dispatch. `helm lint` +
+      #                                   `helm template` in the CI workflow
+      #                                   catch schema/rendering regressions.
+      #   - charts/**/*.md, README, NOTES.txt, values.schema.json  docs/schema
+      #   - hack/**                       pre-commit scripts don't affect in-cluster behavior
+      #   - Dockerfile*                   verified by Docker Build Matrix on every PR
       - 'charts/**/templates/**/*.yaml'
       - 'charts/**/templates/**/*.tpl'
       - 'charts/**/crds/**'
@@ -31,7 +27,18 @@ on:
       - 'pkg/**'
       - 'api/**'
       - '.github/workflows/test-agent-e2e.yml'
-  workflow_dispatch:  # Allow manual trigger
+  pull_request:
+    paths:
+      - 'charts/**/templates/**/*.yaml'
+      - 'charts/**/templates/**/*.tpl'
+      - 'charts/**/crds/**'
+      - 'dashboard/**'
+      - 'internal/**'
+      - 'cmd/**'
+      - 'pkg/**'
+      - 'api/**'
+      - '.github/workflows/test-agent-e2e.yml'
+  workflow_dispatch:  # Allow manual trigger for values-only PRs
 
 permissions:
   contents: read

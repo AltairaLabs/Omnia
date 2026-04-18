@@ -5,12 +5,29 @@ on:
     branches:
       - main
     paths:
-      - 'charts/**'
+      # Material chart changes only.
+      #
+      # INTENTIONALLY EXCLUDED:
+      #   - charts/**/*.md, README, NOTES.txt, values.schema.json  docs/schema
+      #   - charts/**/values*.yaml        comment-only edits are common;
+      #                                   real default changes should come
+      #                                   with a template edit or use
+      #                                   workflow_dispatch.
+      - 'charts/**/templates/**/*.yaml'
+      - 'charts/**/templates/**/*.tpl'
+      - 'charts/**/crds/**'
+      - 'charts/**/Chart.yaml'
+      - 'charts/**/Chart.lock'
       - '.github/workflows/test-helm-e2e.yml'
   pull_request:
     paths:
-      - 'charts/**'
+      - 'charts/**/templates/**/*.yaml'
+      - 'charts/**/templates/**/*.tpl'
+      - 'charts/**/crds/**'
+      - 'charts/**/Chart.yaml'
+      - 'charts/**/Chart.lock'
       - '.github/workflows/test-helm-e2e.yml'
+  workflow_dispatch:  # Allow manual trigger for values-only or docs PRs
 
 permissions:
   contents: read

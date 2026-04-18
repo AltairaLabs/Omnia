@@ -1,0 +1,78 @@
+name: CodeQL
+
+# Advanced-setup CodeQL analysis for Go. Replaces the repo's previous
+# Default Setup (configured in Security → Code scanning UI) so we can
+# path-filter: no CodeQL run on helm/docs/workflow changes.
+#
+# Before merging this workflow: flip the repo from Default Setup to
+# Advanced Setup in the Security → Code scanning settings. Otherwise
+# BOTH configurations will run. See:
+#   https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/codeql.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/codeql.yml'
+  schedule:
+    # Weekly baseline in case a PR slipped through with an unexpected filter.
+    # Runs on Monday at 07:00 UTC.
+    - cron: '0 7 * * 1'
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (go)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: go
+          # Build-mode auto — CodeQL runs `go build ./...` itself.
+          build-mode: autobuild
+          # Disable promptkit-local via go.work override; CI uses the
+          # published SDK (matches the rest of the Go checks).
+          config: |
+            paths-ignore:
+              - 'promptkit-local/**'
+              - 'dashboard/**'
+              - 'docs/**'
+              - 'charts/**'
+              - 'test/e2e/**'
+              - '**/*_test.go'
+              - '**/zz_generated*.go'
+              - '**/*.pb.go'
+              - '**/*.gen.go'
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:go"
