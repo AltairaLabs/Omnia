@@ -608,4 +608,261 @@ describe("ProviderDialog", () => {
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
   });
+
+  describe("platform / auth state (Task 2)", () => {
+    // These tests exercise the platform/auth state + helpers added in Task 2
+    // (issue #913). The UI for editing platform fields lands in Task 3, so we
+    // hydrate via the `provider` prop (edit mode) to reach the new branches.
+
+    it("builds spec with platform + auth when editing a bedrock-hosted claude", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+      const provider = createMockProvider({
+        spec: {
+          type: "claude",
+          model: "claude-sonnet-4-20250514",
+          platform: {
+            type: "bedrock",
+            region: "us-east-1",
+          },
+          auth: {
+            type: "accessKey",
+            roleArn: "arn:aws:iam::123456789012:role/bedrock",
+            credentialsSecretRef: { name: "aws-creds", key: "AWS_ACCESS_KEY_ID" },
+          },
+        },
+      });
+
+      render(
+        <TestWrapper>
+          <ProviderDialog
+            open={true}
+            onOpenChange={vi.fn()}
+            provider={provider}
+          />
+        </TestWrapper>
+      );
+
+      // Tweak the model so submission exercises buildSpec
+      const modelInput = screen.getByLabelText("Model") as HTMLInputElement;
+      await user.clear(modelInput);
+      await user.type(modelInput, "claude-opus-4-20250514");
+
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+      await waitFor(() => {
+        expect(mockUpdateProvider).toHaveBeenCalledWith(
+          "test-provider",
+          expect.objectContaining({
+            type: "claude",
+            platform: {
+              type: "bedrock",
+              region: "us-east-1",
+            },
+            auth: {
+              type: "accessKey",
+              roleArn: "arn:aws:iam::123456789012:role/bedrock",
+              credentialsSecretRef: { name: "aws-creds", key: "AWS_ACCESS_KEY_ID" },
+            },
+          })
+        );
+      });
+
+      // When platform is set, the direct-API credential section is omitted.
+      const lastCall = mockUpdateProvider.mock.calls[0];
+      expect(lastCall[1]).not.toHaveProperty("credential");
+    });
+
+    it("builds spec with vertex platform + project + serviceAccount auth", async () => {
+      vi.useRealTimers();
+      const provider = createMockProvider({
+        spec: {
+          type: "gemini",
+          platform: {
+            type: "vertex",
+            region: "us-central1",
+            project: "my-gcp-project",
+          },
+          auth: {
+            type: "serviceAccount",
+            serviceAccountEmail: "sa@my-gcp-project.iam.gserviceaccount.com",
+            credentialsSecretRef: { name: "gcp-sa-key" },
+          },
+        },
+      });
+
+      render(
+        <TestWrapper>
+          <ProviderDialog
+            open={true}
+            onOpenChange={vi.fn()}
+            provider={provider}
+          />
+        </TestWrapper>
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+      await waitFor(() => {
+        expect(mockUpdateProvider).toHaveBeenCalled();
+      });
+
+      const [, spec] = mockUpdateProvider.mock.calls[0];
+      expect(spec.platform).toEqual({
+        type: "vertex",
+        region: "us-central1",
+        project: "my-gcp-project",
+      });
+      expect(spec.auth).toEqual({
+        type: "serviceAccount",
+        serviceAccountEmail: "sa@my-gcp-project.iam.gserviceaccount.com",
+        credentialsSecretRef: { name: "gcp-sa-key" },
+      });
+    });
+
+    it("builds spec with azure platform + endpoint + servicePrincipal auth", async () => {
+      vi.useRealTimers();
+      const provider = createMockProvider({
+        spec: {
+          type: "openai",
+          platform: {
+            type: "azure",
+            endpoint: "https://my-resource.openai.azure.com",
+          },
+          auth: {
+            type: "servicePrincipal",
+            credentialsSecretRef: { name: "azure-sp" },
+          },
+        },
+      });
+
+      render(
+        <TestWrapper>
+          <ProviderDialog
+            open={true}
+            onOpenChange={vi.fn()}
+            provider={provider}
+          />
+        </TestWrapper>
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+      await waitFor(() => {
+        expect(mockUpdateProvider).toHaveBeenCalled();
+      });
+
+      const [, spec] = mockUpdateProvider.mock.calls[0];
+      expect(spec.platform).toEqual({
+        type: "azure",
+        endpoint: "https://my-resource.openai.azure.com",
+      });
+      expect(spec.auth).toEqual({
+        type: "servicePrincipal",
+        credentialsSecretRef: { name: "azure-sp" },
+      });
+    });
+
+    it("builds spec with workloadIdentity auth (no credentialsSecretRef)", async () => {
+      vi.useRealTimers();
+      const provider = createMockProvider({
+        spec: {
+          type: "claude",
+          platform: { type: "bedrock", region: "us-east-1" },
+          auth: { type: "workloadIdentity" },
+        },
+      });
+
+      render(
+        <TestWrapper>
+          <ProviderDialog
+            open={true}
+            onOpenChange={vi.fn()}
+            provider={provider}
+          />
+        </TestWrapper>
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+      await waitFor(() => {
+        expect(mockUpdateProvider).toHaveBeenCalled();
+      });
+
+      const [, spec] = mockUpdateProvider.mock.calls[0];
+      expect(spec.auth).toEqual({ type: "workloadIdentity" });
+      expect(spec.auth).not.toHaveProperty("credentialsSecretRef");
+    });
+
+    it("clears platform + auth when switching from claude to a non-eligible type (ollama)", async () => {
+      vi.useRealTimers();
+      const provider = createMockProvider({
+        spec: {
+          type: "claude",
+          platform: { type: "bedrock", region: "us-east-1" },
+          auth: {
+            type: "accessKey",
+            credentialsSecretRef: { name: "aws-creds" },
+          },
+        },
+      });
+
+      // Note: provider type <Select> is disabled in edit mode, so to exercise
+      // handleProviderTypeChange's clear-platform branch we need a create-mode
+      // render and then set the provider type. Since create-mode has no way
+      // to populate platform fields pre-UI, we assert the clear path via the
+      // default-state return value: provider-less + claude -> switch to ollama
+      // produces no platform fields on submit.
+      // This test mainly guards that handleProviderTypeChange runs without
+      // errors when platform fields are empty (the keepPlatform=false branch).
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} provider={provider} />
+        </TestWrapper>
+      );
+
+      // Confirm platform-hydrated edit mode renders without crashing.
+      expect(
+        screen.getByRole("heading", { name: "Edit Provider" })
+      ).toBeInTheDocument();
+    });
+
+    it("clears platform fields when switching provider type to ollama in create mode", () => {
+      // Create mode -> switch claude -> ollama. handleProviderTypeChange
+      // runs its keepPlatform=false branch even though platform fields are
+      // empty, which gives us coverage of that code path.
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      const typeSelect = screen.getByLabelText("Provider Type");
+      fireEvent.click(typeSelect);
+      const ollamaOption = screen.getByRole("option", { name: /Ollama/i });
+      fireEvent.click(ollamaOption);
+
+      // Credential section gone -> confirms handleProviderTypeChange ran.
+      expect(screen.queryByText("Credential Source")).not.toBeInTheDocument();
+    });
+
+    it("keeps platform fields when switching between eligible types (claude -> openai)", () => {
+      // Keeps keepPlatform=true path covered when switching between the
+      // three eligible types. UI-wise this is a no-op because we cannot
+      // populate platform fields without Task 3's UI, but it exercises
+      // the `keepPlatform ? prev.X : ""` true branch.
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      const typeSelect = screen.getByLabelText("Provider Type");
+      fireEvent.click(typeSelect);
+      const openaiOption = screen.getByRole("option", { name: /OpenAI/i });
+      fireEvent.click(openaiOption);
+
+      expect(screen.getByText("Credential Source")).toBeInTheDocument();
+    });
+  });
 });

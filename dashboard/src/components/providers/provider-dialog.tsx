@@ -56,6 +56,17 @@ interface FormState {
   inputCostPer1K: string;
   outputCostPer1K: string;
   cachedCostPer1K: string;
+  // Platform (hyperscaler hosting)
+  platformType: "" | "bedrock" | "vertex" | "azure";
+  platformRegion: string;
+  platformProject: string;
+  platformEndpoint: string;
+  // Platform auth
+  authType: "" | "workloadIdentity" | "accessKey" | "serviceAccount" | "servicePrincipal";
+  authRoleArn: string;
+  authServiceAccountEmail: string;
+  authSecretName: string;
+  authSecretKey: string;
 }
 
 // --- Constants ---
@@ -74,6 +85,44 @@ const PROVIDER_TYPES: { value: ProviderSpec["type"]; label: string }[] = [
 ];
 
 const LOCAL_TYPES: Set<ProviderSpec["type"]> = new Set(["ollama", "mock", "vllm"]);
+
+const PLATFORM_ELIGIBLE_TYPES: Set<ProviderSpec["type"]> = new Set([
+  "claude",
+  "openai",
+  "gemini",
+]);
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- value consumers land in Task 3 UI
+const PLATFORM_TYPES = ["bedrock", "vertex", "azure"] as const;
+type PlatformType = (typeof PLATFORM_TYPES)[number];
+
+// Auth methods allowed per platform. Mirrors the CRD's CEL auth matrix.
+const AUTH_BY_PLATFORM: Record<PlatformType, readonly string[]> = {
+  bedrock: ["workloadIdentity", "accessKey"],
+  vertex: ["workloadIdentity", "serviceAccount"],
+  azure: ["workloadIdentity", "servicePrincipal"],
+};
+
+// Routing supported today by the PromptKit runtime. All other 6 combos
+// save correctly but surface a non-blocking warning in the UI. Tracked
+// upstream in PromptKit#1009.
+const CANONICAL_ROUTED: ReadonlySet<string> = new Set([
+  "claude/bedrock",
+  "openai/azure",
+  "gemini/vertex",
+]);
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed by Task 4 warning banner
+function isCanonicalRouted(
+  providerType: ProviderSpec["type"],
+  platformType: string,
+): boolean {
+  return CANONICAL_ROUTED.has(`${providerType}/${platformType}`);
+}
+
+function supportsPlatform(type: ProviderSpec["type"]): boolean {
+  return PLATFORM_ELIGIBLE_TYPES.has(type);
+}
 
 const ALL_CAPABILITIES = [
   "text",
@@ -101,6 +150,8 @@ function getInitialFormState(provider?: Provider | null): FormState {
     if (credential?.envVar) credentialSource = "envVar";
     else if (credential?.filePath) credentialSource = "filePath";
 
+    const platform = spec.platform;
+    const auth = spec.auth;
     return {
       name: provider.metadata?.name || "",
       providerType: spec.type,
@@ -119,6 +170,15 @@ function getInitialFormState(provider?: Provider | null): FormState {
       inputCostPer1K: spec.pricing?.inputCostPer1K || "",
       outputCostPer1K: spec.pricing?.outputCostPer1K || "",
       cachedCostPer1K: spec.pricing?.cachedCostPer1K || "",
+      platformType: (platform?.type ?? "") as FormState["platformType"],
+      platformRegion: platform?.region ?? "",
+      platformProject: platform?.project ?? "",
+      platformEndpoint: platform?.endpoint ?? "",
+      authType: (auth?.type ?? "") as FormState["authType"],
+      authRoleArn: auth?.roleArn ?? "",
+      authServiceAccountEmail: auth?.serviceAccountEmail ?? "",
+      authSecretName: auth?.credentialsSecretRef?.name ?? "",
+      authSecretKey: auth?.credentialsSecretRef?.key ?? "",
     };
   }
 
@@ -140,6 +200,15 @@ function getInitialFormState(provider?: Provider | null): FormState {
     inputCostPer1K: "",
     outputCostPer1K: "",
     cachedCostPer1K: "",
+    platformType: "",
+    platformRegion: "",
+    platformProject: "",
+    platformEndpoint: "",
+    authType: "",
+    authRoleArn: "",
+    authServiceAccountEmail: "",
+    authSecretName: "",
+    authSecretKey: "",
   };
 }
 
@@ -164,9 +233,42 @@ function validateCredentialFields(form: FormState): string | null {
   return null;
 }
 
+function validatePlatformFields(form: FormState): string | null {
+  if (!form.platformType) return null;
+
+  if (
+    (form.platformType === "bedrock" || form.platformType === "vertex") &&
+    !form.platformRegion.trim()
+  ) {
+    return "Region is required for bedrock and vertex";
+  }
+  if (form.platformType === "vertex" && !form.platformProject.trim()) {
+    return "Project is required for vertex";
+  }
+  if (form.platformType === "azure" && !form.platformEndpoint.trim()) {
+    return "Endpoint is required for azure";
+  }
+
+  const allowed = AUTH_BY_PLATFORM[form.platformType];
+  if (!form.authType) return "Auth type is required when a platform is configured";
+  if (!allowed.includes(form.authType)) {
+    return `Auth type ${form.authType} is not valid for platform ${form.platformType}`;
+  }
+
+  if (form.authType !== "workloadIdentity" && !form.authSecretName.trim()) {
+    return "Credentials secret name is required for static auth";
+  }
+
+  return null;
+}
+
 function validateForm(form: FormState): string | null {
   const nameError = validateName(form.name);
   if (nameError) return nameError;
+
+  if (form.platformType) {
+    return validatePlatformFields(form);
+  }
 
   if (!isLocal(form.providerType)) {
     return validateCredentialFields(form);
@@ -210,6 +312,35 @@ function buildPricing(form: FormState): ProviderSpec["pricing"] | undefined {
   return Object.keys(pricing).length > 0 ? pricing : undefined;
 }
 
+function buildPlatformAndAuth(
+  form: FormState,
+): Pick<ProviderSpec, "platform" | "auth"> {
+  if (!form.platformType) return {};
+
+  const platform: NonNullable<ProviderSpec["platform"]> = {
+    type: form.platformType,
+  };
+  if (form.platformRegion) platform.region = form.platformRegion;
+  if (form.platformProject) platform.project = form.platformProject;
+  if (form.platformEndpoint) platform.endpoint = form.platformEndpoint;
+
+  const auth: NonNullable<ProviderSpec["auth"]> = {
+    type: form.authType as NonNullable<ProviderSpec["auth"]>["type"],
+  };
+  if (form.authRoleArn) auth.roleArn = form.authRoleArn;
+  if (form.authServiceAccountEmail) {
+    auth.serviceAccountEmail = form.authServiceAccountEmail;
+  }
+  if (form.authSecretName) {
+    auth.credentialsSecretRef = {
+      name: form.authSecretName,
+      ...(form.authSecretKey ? { key: form.authSecretKey } : {}),
+    };
+  }
+
+  return { platform, auth };
+}
+
 function buildSpec(form: FormState): ProviderSpec {
   const spec: ProviderSpec = {
     type: form.providerType,
@@ -220,7 +351,13 @@ function buildSpec(form: FormState): ProviderSpec {
   if (form.capabilities.length > 0) {
     spec.capabilities = form.capabilities as ProviderSpec["capabilities"];
   }
-  if (!isLocal(form.providerType)) {
+
+  const platformPart = buildPlatformAndAuth(form);
+  if (platformPart.platform) {
+    spec.platform = platformPart.platform;
+    spec.auth = platformPart.auth;
+    // Direct-API credential is meaningless when platform is set; omit.
+  } else if (!isLocal(form.providerType)) {
     spec.credential = buildCredential(form);
   }
 
@@ -549,16 +686,29 @@ function ProviderDialogForm({
   };
 
   const handleProviderTypeChange = (type: ProviderSpec["type"]) => {
-    setFormState((prev) => ({
-      ...prev,
-      providerType: type,
-      // Reset credential fields
-      credentialSource: "secret",
-      credentialSecretName: "",
-      credentialSecretKey: "",
-      credentialEnvVar: "",
-      credentialFilePath: "",
-    }));
+    setFormState((prev) => {
+      const keepPlatform = supportsPlatform(type);
+      return {
+        ...prev,
+        providerType: type,
+        // Reset credential fields
+        credentialSource: "secret",
+        credentialSecretName: "",
+        credentialSecretKey: "",
+        credentialEnvVar: "",
+        credentialFilePath: "",
+        // Clear platform/auth when switching to a non-eligible type
+        platformType: keepPlatform ? prev.platformType : "",
+        platformRegion: keepPlatform ? prev.platformRegion : "",
+        platformProject: keepPlatform ? prev.platformProject : "",
+        platformEndpoint: keepPlatform ? prev.platformEndpoint : "",
+        authType: keepPlatform ? prev.authType : "",
+        authRoleArn: keepPlatform ? prev.authRoleArn : "",
+        authServiceAccountEmail: keepPlatform ? prev.authServiceAccountEmail : "",
+        authSecretName: keepPlatform ? prev.authSecretName : "",
+        authSecretKey: keepPlatform ? prev.authSecretKey : "",
+      };
+    });
   };
 
   const handleSubmit = async () => {
