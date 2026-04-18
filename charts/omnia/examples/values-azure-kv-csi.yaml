@@ -1,0 +1,108 @@
+# Azure Key Vault via CSI Secret Store + Workload Identity.
+#
+# OVERLAY on `values-prod-oauth.yaml`. Example:
+#   helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+#     -f charts/omnia/examples/values-prod-oauth.yaml \
+#     -f charts/omnia/examples/values-azure-kv-csi.yaml
+#
+# Pre-reqs in the cluster:
+#   - Azure CSI secret-store driver installed
+#   - AKS workload-identity addon enabled
+#   - A ServiceAccount federated to a User-Assigned Managed Identity:
+#       kubectl apply -f - <<EOF
+#       apiVersion: v1
+#       kind: ServiceAccount
+#       metadata:
+#         name: omnia-wli
+#         namespace: <release-namespace>
+#         annotations:
+#           azure.workload.identity/client-id: "<MI client-id>"
+#       EOF
+#   - A SecretProviderClass in the release namespace that mounts your
+#     Key Vault secrets; populate .secretObjects so CSI syncs into a
+#     K8s Secret (say, `omnia-oauth`, `omnia-dashboard-session`).
+#     Example SPC: https://omnia.altairalabs.ai/docs/how-to/azure-kv-csi
+
+# --- Chart-owned deployments ----------------------------------------------
+#
+# Dashboard + operator mount the CSI volume so rotation is automatic.
+
+dashboard:
+  extraVolumes:
+    - name: azure-kv
+      csi:
+        driver: secrets-store.csi.k8s.io
+        readOnly: true
+        volumeAttributes:
+          secretProviderClass: omnia-dashboard-spc
+  extraVolumeMounts:
+    - name: azure-kv
+      mountPath: /mnt/azure-kv
+      readOnly: true
+  # envFrom pulls the K8s Secret that the SPC `secretObjects` created.
+  extraEnvFrom:
+    - secretRef:
+        name: omnia-oauth
+    - secretRef:
+        name: omnia-dashboard-session
+
+operator:
+  extraVolumes:
+    - name: azure-kv
+      csi:
+        driver: secrets-store.csi.k8s.io
+        readOnly: true
+        volumeAttributes:
+          secretProviderClass: omnia-operator-spc
+  extraVolumeMounts:
+    - name: azure-kv
+      mountPath: /mnt/azure-kv
+      readOnly: true
+
+# --- Workload identity on chart-owned Service Accounts ---------------------
+serviceAccount:
+  create: true
+  annotations:
+    azure.workload.identity/use: "true"
+  # Optional: reuse an externally-managed SA instead of creating one.
+  # name: omnia-wli
+
+# Pod labels required by AKS workload identity
+# (applied via the per-pod annotations mechanism — the operator SA above is
+# sufficient for the chart-owned pods)
+
+# --- CRD pods (facade/runtime, session-api, memory-api, arena workers) ----
+#
+# Set `podOverrides:` on the relevant CRs, NOT here. Example AgentRuntime:
+#
+# apiVersion: omnia.altairalabs.ai/v1alpha1
+# kind: AgentRuntime
+# metadata:
+#   name: my-agent
+# spec:
+#   promptPackRef:
+#     name: my-promptpack
+#   facade:
+#     type: websocket
+#   podOverrides:
+#     serviceAccountName: omnia-wli
+#     labels:
+#       azure.workload.identity/use: "true"
+#     extraVolumes:
+#       - name: azure-kv
+#         csi:
+#           driver: secrets-store.csi.k8s.io
+#           readOnly: true
+#           volumeAttributes:
+#             secretProviderClass: agent-provider-spc
+#     extraVolumeMounts:
+#       - name: azure-kv
+#         mountPath: /mnt/azure-kv
+#         readOnly: true
+#     extraEnvFrom:
+#       - secretRef:
+#           name: agent-provider-keys
+#
+# Workspace.spec.services[].session.podOverrides + .memory.podOverrides take
+# the same shape — use them to inject DB passwords from Key Vault into the
+# per-workspace session-api / memory-api pods.

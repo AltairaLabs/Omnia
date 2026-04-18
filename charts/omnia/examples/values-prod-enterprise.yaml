@@ -1,0 +1,57 @@
+# Enterprise features. OVERLAY on `values-prod-oauth.yaml`:
+#
+#   helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+#     -f charts/omnia/examples/values-prod-oauth.yaml \
+#     -f charts/omnia/examples/values-prod-enterprise.yaml
+#
+# Pre-reqs:
+#   1. An Omnia Enterprise license. Generate at https://omnia.altairalabs.ai/trial
+#      or via your license server.
+#
+# Secrets to create before install:
+#   kubectl create secret generic omnia-license \
+#     --from-literal=license=<JWT>
+
+license:
+  existingSecret: omnia-license
+
+enterprise:
+  enabled: true
+
+  # Community templates fetch from github.com on each sync — disabled by
+  # default for air-gap safety. Enable if you want the gallery.
+  communityTemplates:
+    enabled: false   # EDIT: true if you want community prompt templates
+
+  arena:
+    # Redis-backed queue; use `memory` for single-replica dev only.
+    queue:
+      type: redis
+      redis:
+        host: "omnia-redis-master"
+        port: 6379
+
+  # LSP server powers autocomplete + validation in the dev console.
+  promptkitLsp:
+    enabled: true
+    replicaCount: 2
+
+  # Eval worker for realtime session evals (non-PromptKit agents).
+  evalWorker:
+    enabled: true
+
+# --- Dependencies ---------------------------------------------------------
+
+# Arena queue backing store
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    # EDIT: enable auth in real production via secret
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+      # EDIT: RWO storage class
+      storageClass: ""

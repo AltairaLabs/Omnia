@@ -1,0 +1,98 @@
+# AWS IRSA + Secrets Manager CSI. OVERLAY on `values-prod-oauth.yaml`.
+#
+#   helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+#     -f charts/omnia/examples/values-prod-oauth.yaml \
+#     -f charts/omnia/examples/values-aws-irsa.yaml
+#
+# Pre-reqs:
+#   - EKS cluster with OIDC provider enabled
+#   - IAM roles created and trust-policied for each of the SAs below
+#   - AWS Secrets Manager CSI driver installed
+#   - SecretProviderClass resources that sync from Secrets Manager into
+#     Kubernetes Secrets (omnia-oauth, omnia-dashboard-session, etc.)
+
+# --- IRSA annotations on the chart-owned ServiceAccount ------------------
+serviceAccount:
+  create: true
+  annotations:
+    # EDIT: replace with your IAM role ARN
+    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/omnia-operator"
+
+# --- Operator + dashboard mount secrets from CSI -------------------------
+
+dashboard:
+  extraVolumes:
+    - name: aws-sm
+      csi:
+        driver: secrets-store.csi.k8s.io
+        readOnly: true
+        volumeAttributes:
+          secretProviderClass: omnia-dashboard-spc
+  extraVolumeMounts:
+    - name: aws-sm
+      mountPath: /mnt/aws-sm
+      readOnly: true
+  extraEnvFrom:
+    - secretRef:
+        name: omnia-oauth
+    - secretRef:
+        name: omnia-dashboard-session
+
+operator:
+  extraVolumes:
+    - name: aws-sm
+      csi:
+        driver: secrets-store.csi.k8s.io
+        readOnly: true
+        volumeAttributes:
+          secretProviderClass: omnia-operator-spc
+  extraVolumeMounts:
+    - name: aws-sm
+      mountPath: /mnt/aws-sm
+      readOnly: true
+
+# --- Workspace content on EFS (RWX) ---------------------------------------
+workspaceContent:
+  enabled: true
+  persistence:
+    storageClass: efs-sc
+    accessModes:
+      - ReadWriteMany
+    size: 100Gi
+
+# --- Image pull from ECR --------------------------------------------------
+# Use IRSA for pull too — or attach imagePullSecrets here:
+#   imagePullSecrets:
+#     - name: ecr-creds
+
+# --- CRD pods ------------------------------------------------------------
+#
+# Set podOverrides on Workspace + AgentRuntime to get IRSA on the
+# operator-generated pods. Minimum needed on each Workspace service:
+#
+# apiVersion: omnia.altairalabs.ai/v1alpha1
+# kind: Workspace
+# metadata:
+#   name: prod
+# spec:
+#   services:
+#     - name: default
+#       mode: managed
+#       session:
+#         database:
+#           secretRef:
+#             name: session-db   # synced by a Workspace-level SPC
+#         podOverrides:
+#           serviceAccountName: omnia-session-irsa
+#           extraVolumes:
+#             - name: aws-sm
+#               csi:
+#                 driver: secrets-store.csi.k8s.io
+#                 readOnly: true
+#                 volumeAttributes:
+#                   secretProviderClass: session-db-spc
+#           extraEnvFrom:
+#             - secretRef:
+#                 name: session-db
+#       memory:
+#         # same shape

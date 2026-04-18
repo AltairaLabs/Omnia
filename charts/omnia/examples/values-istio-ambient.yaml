@@ -1,0 +1,56 @@
+# Istio ambient mode (sidecarless) + Gateway API.
+# OVERLAY on `values-prod-oauth.yaml`:
+#
+#   helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+#     -f charts/omnia/examples/values-prod-oauth.yaml \
+#     -f charts/omnia/examples/values-istio-ambient.yaml
+#
+# Pre-reqs in the cluster:
+#   - Istio 1.22+ installed with ambient profile (`istioctl install --set profile=ambient`)
+#   - Gateway API v1.1+ CRDs installed
+#   - ztunnel + waypoint running in the dataplane
+
+# --- Opt pods into the ambient mesh -----------------------------------------
+#
+# Ambient mode reads the label `istio.io/dataplane-mode: ambient` on the
+# pod's NAMESPACE or pod itself. The simplest path: label the release
+# namespace once post-install:
+#
+#   kubectl label namespace <release-ns> istio.io/dataplane-mode=ambient
+#
+# If you prefer per-pod opt-in, use podAnnotations / podOverrides
+# (example below).
+
+# --- Gateway (ambient-ready) ------------------------------------------------
+gateway:
+  enabled: true
+  className: istio                # Istio's Gateway controller
+  listeners:
+    http:
+      port: 80
+      protocol: HTTP
+    https:
+      enabled: true
+      port: 443
+      protocol: HTTPS
+      tlsSecretName: omnia-tls    # EDIT
+  annotations:
+    # Force ambient-mode routing for this gateway instance
+    networking.istio.io/traffic-distribution: "PreferClose"
+
+# --- Internal gateway (observability tools) ---------------------------------
+internalGateway:
+  enabled: true
+  className: istio
+
+# --- Chart-owned pods join ambient mesh via label --------------------------
+#
+# These labels propagate to the pod and let ztunnel adopt them as waypoint
+# clients. Ambient doesn't need a sidecar, so no init-container noise.
+
+dashboard:
+  extraEnv: []  # keep as-is; ambient is an L7 concern, not a container concern
+
+# Nothing else to set — ambient is configured at the namespace / ztunnel level.
+# Omnia's operator-generated pods (facade/runtime, session-api, etc.)
+# inherit the namespace's dataplane mode automatically.

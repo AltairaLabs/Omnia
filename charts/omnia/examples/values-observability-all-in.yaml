@@ -1,0 +1,68 @@
+# Enable the full observability stack (Prometheus, Grafana, Loki, Tempo, Alloy).
+# OVERLAY on any base profile:
+#
+#   helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+#     -f charts/omnia/examples/values-prod-oauth.yaml \
+#     -f charts/omnia/examples/values-observability-all-in.yaml
+#
+# Each subchart has its own tuning surface; this file just enables them with
+# opinionated defaults suitable for a small-to-medium prod cluster.
+#
+# For large clusters you almost certainly want a pre-existing observability
+# platform (managed Prometheus, Grafana Cloud, Datadog, etc.) — skip this
+# file and configure Omnia's `tracing.endpoint` + metrics scrape directly.
+
+observability:
+  enabled: true
+
+tracing:
+  enabled: true
+  # Tempo endpoint auto-constructed when tempo.enabled=true below.
+  # Override to point at Grafana Cloud / Honeycomb / etc.
+  endpoint: ""
+
+prometheus:
+  enabled: true
+  server:
+    retention: 15d
+    persistentVolume:
+      size: 20Gi
+      # EDIT: storage class
+      storageClass: ""
+  serviceMonitor:
+    enabled: true
+
+grafana:
+  enabled: true
+  # EDIT: admin password OR reference an existing secret via adminPassword: ""
+  # and provide an externalSecret above.
+  adminPassword: "CHANGE_ME"
+  persistence:
+    enabled: true
+    size: 2Gi
+
+loki:
+  enabled: true
+  # minio-backed in single-binary mode for getting started; plug into S3/GCS
+  # for serious installs.
+  singleBinary:
+    replicas: 1
+    persistence:
+      enabled: true
+      size: 20Gi
+
+tempo:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 20Gi
+
+alloy:
+  enabled: true
+
+# Internal gateway to expose Grafana / Prometheus inside the cluster
+# (or behind a VPN). Do NOT enable external gateway for these unless you
+# have auth in front.
+internalGateway:
+  enabled: true
+  className: istio

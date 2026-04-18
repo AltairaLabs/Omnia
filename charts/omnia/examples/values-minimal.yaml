@@ -1,0 +1,54 @@
+# Smallest possible Omnia install — works on kind / k3d / Docker Desktop.
+#
+# What you get:
+#   - Operator (1 replica), dashboard (1 replica, anonymous auth)
+#   - Dev Postgres + PgBouncer in-cluster (NOT FOR PRODUCTION — no persistence)
+#   - No enterprise, no observability, no external storage
+#
+# Install:
+#   helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+#     -f charts/omnia/examples/values-minimal.yaml
+#
+# For anything closer to production use, start from `values-prod-oauth.yaml`.
+
+replicaCount: 1
+
+# Disable PDBs — with replicaCount:1 a PDB+minAvailable:1 would
+# permanently block every eviction.
+podDisruptionBudget:
+  enabled: false
+
+dashboard:
+  replicaCount: 1
+  podDisruptionBudget:
+    enabled: false
+  auth:
+    # Anonymous mode — disables authentication entirely. DEV ONLY.
+    mode: anonymous
+    # Explicit opt-in required when mode=anonymous.
+    allowAnonymous: true
+
+postgres:
+  dev:
+    enabled: true
+    pgbouncer:
+      enabled: true
+
+# All optional subcharts off — default behavior, listed here for clarity.
+enterprise:
+  enabled: false
+prometheus:
+  enabled: false
+grafana:
+  enabled: false
+loki:
+  enabled: false
+tempo:
+  enabled: false
+alloy:
+  enabled: false
+nfs:
+  server:
+    enabled: false
+  csiDriver:
+    enabled: false
