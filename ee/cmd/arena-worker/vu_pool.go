@@ -238,6 +238,8 @@ func (p *VUPool) executeAndReport(ctx context.Context, log logr.Logger, item *qu
 		SpanID:     spanID,
 		TraceFlags: trace.FlagsSampled,
 	})
+	// Per-item trace root — NOT a child of the pool context. Same pattern as
+	// worker.go's processItem. Bounded by maxItemTimeout on the next line.
 	itemCtx := trace.ContextWithRemoteSpanContext(context.Background(), remoteCtx)
 	itemCtx, itemCancel := context.WithTimeout(itemCtx, maxItemTimeout)
 	itemCtx, span := otel.Tracer("omnia-arena-worker").Start(itemCtx, "arena.work-item",

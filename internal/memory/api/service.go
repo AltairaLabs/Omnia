@@ -126,6 +126,9 @@ func (s *MemoryService) emitAuditEvent(ctx context.Context, entry *MemoryAuditEn
 		entry.UserAgent = meta.UserAgent
 	}
 	logger := s.auditLogger
+	// Detached background context is intentional: the audit-log write must
+	// complete even if the request context is cancelled (client disconnect,
+	// deadline exceeded). Losing an audit event is worse than wasting work.
 	go logger.LogEvent(context.Background(), entry)
 }
 

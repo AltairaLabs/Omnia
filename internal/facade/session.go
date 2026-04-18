@@ -179,6 +179,7 @@ func sessionIDToTraceID(sessionID string) trace.TraceID {
 func (s *Server) processRegularMessage(ctx context.Context, c *Connection, sessionID string, msg *ClientMessage, writer *connResponseWriter, log logr.Logger) error {
 	// Store user message with a detached context so it completes even if
 	// the WebSocket connection closes before the HTTP call returns.
+	// Lifetime is bounded by the 30s timeout; detachment is intentional.
 	storeCtx, storeCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer storeCancel()
 	if err := s.sessionStore.AppendMessage(storeCtx, sessionID, session.Message{

@@ -337,6 +337,9 @@ func executeAndReport(
 		SpanID:     spanID,
 		TraceFlags: trace.FlagsSampled,
 	})
+	// Per-item trace root — NOT a child of the job context. This keeps traces
+	// small and queryable via arena.job attribute. Lifetime is bounded by
+	// maxItemTimeout on the next line.
 	itemCtx := trace.ContextWithRemoteSpanContext(context.Background(), remoteCtx)
 	itemCtx, itemCancel := context.WithTimeout(itemCtx, maxItemTimeout)
 	itemCtx, span := otel.Tracer("omnia-arena-worker").Start(itemCtx, "arena.work-item",
