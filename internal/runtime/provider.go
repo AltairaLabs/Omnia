@@ -98,9 +98,20 @@ func (s *Server) createProviderFromConfig() (providers.Provider, error) {
 		return nil, nil
 	}
 
-	spec, err := s.buildProviderSpec(context.Background())
-	if err != nil {
-		return nil, err
+	spec := s.buildProviderSpec()
+
+	// Resolve platform credential lazily at provider-creation time (not during
+	// spec assembly) so tests that exercise spec wiring don't need cloud
+	// credentials in their environment.
+	if spec.Platform != "" {
+		cred, err := credentials.Resolve(context.Background(), credentials.ResolverConfig{
+			ProviderType:   s.providerType,
+			PlatformConfig: spec.PlatformConfig,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("resolve platform credential: %w", err)
+		}
+		spec.Credential = cred
 	}
 
 	s.log.Info("creating provider from config",
@@ -123,10 +134,11 @@ func (s *Server) createProviderFromConfig() (providers.Provider, error) {
 }
 
 // buildProviderSpec assembles the PromptKit ProviderSpec from Server fields.
-// It resolves the Bedrock model ID when a claude release name is given on a
-// bedrock platform, constructs the PlatformConfig + Credential for platform
-// hosting, and passes custom headers through.
-func (s *Server) buildProviderSpec(ctx context.Context) (providers.ProviderSpec, error) {
+// It fills Platform/PlatformConfig/Headers/Pricing and auto-maps claude
+// release names to Bedrock model IDs when bedrock hosting is used. It does
+// NOT resolve credentials — createProviderFromConfig does that separately so
+// unit tests can exercise spec wiring without cloud credentials.
+func (s *Server) buildProviderSpec() providers.ProviderSpec {
 	spec := providers.ProviderSpec{
 		ID:      s.providerType,
 		Type:    s.providerType,
@@ -143,10 +155,9 @@ func (s *Server) buildProviderSpec(ctx context.Context) (providers.ProviderSpec,
 	}
 
 	if s.platformType == "" {
-		return spec, nil
+		return spec
 	}
 
-	// Platform hosting: set Platform, PlatformConfig, and resolve Credential.
 	spec.Platform = s.platformType
 	spec.PlatformConfig = &providers.PlatformConfig{
 		Type:     s.platformType,
@@ -162,16 +173,7 @@ func (s *Server) buildProviderSpec(ctx context.Context) (providers.ProviderSpec,
 		}
 	}
 
-	cred, err := credentials.Resolve(ctx, credentials.ResolverConfig{
-		ProviderType:   s.providerType,
-		PlatformConfig: spec.PlatformConfig,
-	})
-	if err != nil {
-		return providers.ProviderSpec{}, fmt.Errorf("resolve platform credential: %w", err)
-	}
-	spec.Credential = cred
-
-	return spec, nil
+	return spec
 }
 
 // applyProviderTimeouts sets HTTP and stream-idle timeouts via the setter

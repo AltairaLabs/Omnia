@@ -100,8 +100,7 @@ func TestBuildProviderSpec_StaticProvider(t *testing.T) {
 		baseURL:      "https://api.anthropic.com",
 	}
 
-	spec, err := s.buildProviderSpec(context.Background())
-	require.NoError(t, err)
+	spec := s.buildProviderSpec()
 	assert.Equal(t, "claude", spec.Type)
 	assert.Equal(t, "claude-sonnet-4-20250514", spec.Model)
 	assert.Equal(t, "https://api.anthropic.com", spec.BaseURL)
@@ -122,8 +121,7 @@ func TestBuildProviderSpec_Headers(t *testing.T) {
 		},
 	}
 
-	spec, err := s.buildProviderSpec(context.Background())
-	require.NoError(t, err)
+	spec := s.buildProviderSpec()
 	assert.Equal(t, "https://example.com", spec.Headers["HTTP-Referer"])
 	assert.Equal(t, "omnia", spec.Headers["X-Title"])
 }
@@ -146,15 +144,12 @@ func TestBuildProviderSpec_BedrockMapsClaudeModel(t *testing.T) {
 		authType:       "workloadIdentity",
 	}
 
-	spec, err := s.buildProviderSpec(context.Background())
-	require.NoError(t, err)
+	spec := s.buildProviderSpec()
 	assert.Equal(t, "bedrock", spec.Platform)
 	require.NotNil(t, spec.PlatformConfig)
 	assert.Equal(t, "us-east-1", spec.PlatformConfig.Region)
 	assert.Equal(t, credentials.BedrockModelMapping[claudeName], spec.Model,
 		"claude release name should map to bedrock model id")
-	require.NotNil(t, spec.Credential)
-	assert.Equal(t, "aws", spec.Credential.Type())
 }
 
 func TestBuildProviderSpec_VertexPlatform(t *testing.T) {
@@ -168,16 +163,13 @@ func TestBuildProviderSpec_VertexPlatform(t *testing.T) {
 		authType:        "workloadIdentity",
 	}
 
-	spec, err := s.buildProviderSpec(context.Background())
-	require.NoError(t, err)
+	spec := s.buildProviderSpec()
 	assert.Equal(t, "vertex", spec.Platform)
 	require.NotNil(t, spec.PlatformConfig)
 	assert.Equal(t, "my-project", spec.PlatformConfig.Project)
 	assert.Equal(t, "us-central1", spec.PlatformConfig.Region)
 	// Model is not auto-mapped for vertex — passed through as-is.
 	assert.Equal(t, "gemini-1.5-pro", spec.Model)
-	require.NotNil(t, spec.Credential)
-	assert.Equal(t, "gcp", spec.Credential.Type())
 }
 
 func TestBuildProviderSpec_AzurePlatform(t *testing.T) {
@@ -190,13 +182,10 @@ func TestBuildProviderSpec_AzurePlatform(t *testing.T) {
 		authType:         "workloadIdentity",
 	}
 
-	spec, err := s.buildProviderSpec(context.Background())
-	require.NoError(t, err)
+	spec := s.buildProviderSpec()
 	assert.Equal(t, "azure", spec.Platform)
 	require.NotNil(t, spec.PlatformConfig)
 	assert.Equal(t, "https://example.openai.azure.com", spec.PlatformConfig.Endpoint)
-	require.NotNil(t, spec.Credential)
-	assert.Equal(t, "azure", spec.Credential.Type())
 }
 
 func TestDefaultScenarioRepo_GetResponse(t *testing.T) {
