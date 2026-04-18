@@ -100,7 +100,8 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: pgvector/pgvector:pg17
+          image: "{{ .Values.postgres.dev.image.repository | default "pgvector/pgvector" }}:{{ .Values.postgres.dev.image.tag | default "pg17" }}"
+          imagePullPolicy: {{ .Values.postgres.dev.image.pullPolicy | default "IfNotPresent" }}
           env:
             - name: POSTGRES_USER
               value: omnia
@@ -125,23 +126,23 @@ spec:
           readinessProbe:
             exec:
               command: ["pg_isready", "-U", "omnia"]
-            initialDelaySeconds: 5
-            periodSeconds: 5
+            {{- with .Values.postgres.dev.readinessProbe }}
+            initialDelaySeconds: {{ .initialDelaySeconds | default 5 }}
+            periodSeconds:       {{ .periodSeconds       | default 5 }}
+            timeoutSeconds:      {{ .timeoutSeconds      | default 1 }}
+            failureThreshold:    {{ .failureThreshold    | default 3 }}
+            {{- end }}
+          {{- with .Values.postgres.dev.resources }}
           resources:
-            limits:
-              cpu: 500m
-              memory: 256Mi
-            requests:
-              cpu: 100m
-              memory: 128Mi
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
 {{- if $pgbouncerEnabled }}
         - name: pgbouncer
           # Dev-only sidecar. Pinned to avoid silent behavior changes on image
-          # updates; bump deliberately. Full resource + probe tuning is coming
-          # in a follow-up PR (W3 of the chart overhaul).
+          # updates; bump deliberately via `postgres.dev.pgbouncer.image`.
           image: {{ .Values.postgres.dev.pgbouncer.image | default "edoburu/pgbouncer:1.24.0" }}
           ports:
             - containerPort: 6432
@@ -149,15 +150,16 @@ spec:
           readinessProbe:
             tcpSocket:
               port: 6432
-            initialDelaySeconds: 5
-            periodSeconds: 5
+            {{- with .Values.postgres.dev.pgbouncer.readinessProbe }}
+            initialDelaySeconds: {{ .initialDelaySeconds | default 5 }}
+            periodSeconds:       {{ .periodSeconds       | default 5 }}
+            timeoutSeconds:      {{ .timeoutSeconds      | default 1 }}
+            failureThreshold:    {{ .failureThreshold    | default 3 }}
+            {{- end }}
+          {{- with .Values.postgres.dev.pgbouncer.resources }}
           resources:
-            limits:
-              cpu: 200m
-              memory: 128Mi
-            requests:
-              cpu: 50m
-              memory: 64Mi
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: pgbouncer-config
               mountPath: /etc/pgbouncer

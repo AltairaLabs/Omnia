@@ -89,14 +89,22 @@ spec:
             httpGet:
               path: /healthz
               port: metrics
-            initialDelaySeconds: 5
-            periodSeconds: 15
+            {{- with .Values.enterprise.evalWorker.livenessProbe }}
+            initialDelaySeconds: {{ .initialDelaySeconds | default 5 }}
+            periodSeconds:       {{ .periodSeconds       | default 15 }}
+            timeoutSeconds:      {{ .timeoutSeconds      | default 1 }}
+            failureThreshold:    {{ .failureThreshold    | default 3 }}
+            {{- end }}
           readinessProbe:
             httpGet:
               path: /readyz
               port: metrics
-            initialDelaySeconds: 3
-            periodSeconds: 10
+            {{- with .Values.enterprise.evalWorker.readinessProbe }}
+            initialDelaySeconds: {{ .initialDelaySeconds | default 3 }}
+            periodSeconds:       {{ .periodSeconds       | default 10 }}
+            timeoutSeconds:      {{ .timeoutSeconds      | default 1 }}
+            failureThreshold:    {{ .failureThreshold    | default 3 }}
+            {{- end }}
           {{- with .Values.enterprise.evalWorker.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -107,4 +115,5 @@ spec:
               drop:
                 - ALL
             readOnlyRootFilesystem: true
+      terminationGracePeriodSeconds: {{ .Values.enterprise.evalWorker.terminationGracePeriodSeconds | default 30 }}
 {{- end }}

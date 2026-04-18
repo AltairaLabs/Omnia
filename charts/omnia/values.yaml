@@ -220,6 +220,21 @@ enterprise:
     #       name: llm-provider-keys
     #       key: openai-api-key
 
+    # -- Liveness probe tuning for the eval-worker container.
+    livenessProbe:
+      initialDelaySeconds: 5
+      periodSeconds: 15
+      timeoutSeconds: 1
+      failureThreshold: 3
+    # -- Readiness probe tuning for the eval-worker container.
+    readinessProbe:
+      initialDelaySeconds: 3
+      periodSeconds: 10
+      timeoutSeconds: 1
+      failureThreshold: 3
+    # -- Graceful-shutdown window in seconds for the eval-worker pod.
+    terminationGracePeriodSeconds: 30
+
   # Policy proxy sidecar for ToolPolicy enforcement
   policyProxy:
     image:
@@ -890,6 +905,27 @@ postgres:
     secretName: omnia-postgres
     # -- Key in the secret containing the connection string
     secretKey: connection-string
+    # -- Postgres container image. Pinned to pgvector (required for memory-api
+    # embeddings). Bump `tag` deliberately when upstream Postgres majors move.
+    image:
+      repository: pgvector/pgvector
+      tag: pg17
+      pullPolicy: IfNotPresent
+    # -- Postgres container resource requests/limits. The 500m/256Mi default
+    # is sized for kind/k3d; bump for serious dev workloads.
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    # -- Postgres readiness probe (uses `pg_isready` exec).
+    readinessProbe:
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 1
+      failureThreshold: 3
     pgbouncer:
       # -- Enable PgBouncer connection pooling sidecar
       enabled: false
@@ -900,6 +936,20 @@ postgres:
       defaultPoolSize: 20
       maxClientConn: 100
       maxDbConnections: 20
+      # -- PgBouncer sidecar resource requests/limits.
+      resources:
+        limits:
+          cpu: 200m
+          memory: 128Mi
+        requests:
+          cpu: 50m
+          memory: 64Mi
+      # -- PgBouncer readiness probe (TCP check on port 6432).
+      readinessProbe:
+        initialDelaySeconds: 5
+        periodSeconds: 5
+        timeoutSeconds: 1
+        failureThreshold: 3
 
 # ============================================================================
 # Doctor Configuration
@@ -938,6 +988,18 @@ doctor:
     requests:
       cpu: 100m
       memory: 128Mi
+  # -- Liveness probe tuning for the doctor container.
+  livenessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 3
+  # -- Readiness probe tuning for the doctor container.
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 3
 
 # ============================================================================
 # Session Privacy Configuration
