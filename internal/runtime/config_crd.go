@@ -231,8 +231,12 @@ func loadFromProviderRef(ctx context.Context, c client.Client, cfg *Config, ref 
 	cfg.ProviderType = string(provider.Spec.Type)
 	cfg.Model = provider.Spec.Model
 	cfg.BaseURL = provider.Spec.BaseURL
+	cfg.Headers = provider.Spec.Headers
 	cfg.ProviderRefName = provider.Name
 	cfg.ProviderRefNamespace = provider.Namespace
+
+	loadPlatformConfig(cfg, provider.Spec.Platform)
+	loadAuthConfig(cfg, provider.Spec.Auth)
 
 	if provider.Spec.Defaults != nil {
 		if err := loadProviderDefaults(cfg, provider.Spec.Defaults); err != nil {
@@ -245,8 +249,40 @@ func loadFromProviderRef(ctx context.Context, c client.Client, cfg *Config, ref 
 		return err
 	}
 
-	// Inject API key from secret
-	return injectAPIKey(ctx, c, cfg, provider)
+	// Inject API key from secret (for non-platform providers)
+	if provider.Spec.Platform == nil {
+		return injectAPIKey(ctx, c, provider)
+	}
+
+	// Inject platform credentials from secret (for static auth types)
+	return injectPlatformCredentials(ctx, c, provider)
+}
+
+// loadPlatformConfig copies spec.platform into the runtime Config.
+func loadPlatformConfig(cfg *Config, platform *v1alpha1.PlatformConfig) {
+	if platform == nil {
+		return
+	}
+	cfg.PlatformType = string(platform.Type)
+	cfg.PlatformRegion = platform.Region
+	cfg.PlatformProject = platform.Project
+	cfg.PlatformEndpoint = platform.Endpoint
+}
+
+// loadAuthConfig copies spec.auth into the runtime Config.
+func loadAuthConfig(cfg *Config, auth *v1alpha1.AuthConfig) {
+	if auth == nil {
+		return
+	}
+	cfg.AuthType = string(auth.Type)
+	cfg.AuthRoleArn = auth.RoleArn
+	cfg.AuthServiceAccountEmail = auth.ServiceAccountEmail
+	if auth.CredentialsSecretRef != nil {
+		cfg.AuthCredentialsSecretName = auth.CredentialsSecretRef.Name
+		if auth.CredentialsSecretRef.Key != nil {
+			cfg.AuthCredentialsSecretKey = *auth.CredentialsSecretRef.Key
+		}
+	}
 }
 
 // loadProviderDefaults populates config fields from Provider CRD defaults.
@@ -304,7 +340,7 @@ func loadProviderPricing(cfg *Config, pricing *v1alpha1.ProviderPricing) error {
 
 // injectAPIKey reads the provider's secret and sets the appropriate env var
 // for the PromptKit SDK (e.g., ANTHROPIC_API_KEY, OPENAI_API_KEY).
-func injectAPIKey(ctx context.Context, c client.Client, cfg *Config, provider *v1alpha1.Provider) error {
+func injectAPIKey(ctx context.Context, c client.Client, provider *v1alpha1.Provider) error {
 	ref := k8s.EffectiveSecretRef(provider)
 	if ref == nil {
 		return nil // No secret configured (e.g., ollama, mock)
@@ -332,5 +368,104 @@ func injectAPIKey(ctx context.Context, c client.Client, cfg *Config, provider *v
 		return fmt.Errorf("set env var %s: %w", envVarName, err)
 	}
 
+	return nil
+}
+
+// injectPlatformCredentials reads a platform auth secret (when static) and
+// sets the corresponding cloud SDK environment variables so PromptKit's
+// default credential chain resolves them. workloadIdentity is a no-op — the
+// pod's federated identity is picked up by the cloud SDK automatically.
+//
+// Expected secret shape by auth type:
+//
+//	accessKey        (bedrock): AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN (optional)
+//	serviceAccount   (vertex):  a single key containing the GCP SA JSON
+//	servicePrincipal (azure):   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+func injectPlatformCredentials(ctx context.Context, c client.Client, provider *v1alpha1.Provider) error {
+	auth := provider.Spec.Auth
+	if auth == nil || auth.Type == v1alpha1.AuthMethodWorkloadIdentity {
+		return nil
+	}
+	if auth.CredentialsSecretRef == nil {
+		return fmt.Errorf("auth type %q requires credentialsSecretRef", auth.Type)
+	}
+
+	secret, err := k8s.GetSecret(ctx, c, auth.CredentialsSecretRef.Name, provider.Namespace)
+	if err != nil {
+		return fmt.Errorf("read platform credentials secret: %w", err)
+	}
+
+	platform := provider.Spec.Platform
+	switch {
+	case platform.Type == v1alpha1.PlatformTypeBedrock && auth.Type == v1alpha1.AuthMethodAccessKey:
+		return injectAWSAccessKey(secret.Data, provider.Namespace, auth.CredentialsSecretRef.Name)
+	case platform.Type == v1alpha1.PlatformTypeVertex && auth.Type == v1alpha1.AuthMethodServiceAccount:
+		return injectGCPServiceAccount(secret.Data, auth.CredentialsSecretRef)
+	case platform.Type == v1alpha1.PlatformTypeAzure && auth.Type == v1alpha1.AuthMethodServicePrincipal:
+		return injectAzureServicePrincipal(secret.Data, provider.Namespace, auth.CredentialsSecretRef.Name)
+	default:
+		return fmt.Errorf("unsupported platform/auth combination: %s/%s", platform.Type, auth.Type)
+	}
+}
+
+// injectAWSAccessKey sets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (and
+// optionally AWS_SESSION_TOKEN) from the secret.
+func injectAWSAccessKey(data map[string][]byte, namespace, name string) error {
+	accessKey, ok := data["AWS_ACCESS_KEY_ID"]
+	if !ok {
+		return fmt.Errorf("secret %s/%s missing AWS_ACCESS_KEY_ID", namespace, name)
+	}
+	secretKey, ok := data["AWS_SECRET_ACCESS_KEY"]
+	if !ok {
+		return fmt.Errorf("secret %s/%s missing AWS_SECRET_ACCESS_KEY", namespace, name)
+	}
+	if err := os.Setenv("AWS_ACCESS_KEY_ID", string(accessKey)); err != nil {
+		return fmt.Errorf("set AWS_ACCESS_KEY_ID: %w", err)
+	}
+	if err := os.Setenv("AWS_SECRET_ACCESS_KEY", string(secretKey)); err != nil {
+		return fmt.Errorf("set AWS_SECRET_ACCESS_KEY: %w", err)
+	}
+	if token, ok := data["AWS_SESSION_TOKEN"]; ok {
+		if err := os.Setenv("AWS_SESSION_TOKEN", string(token)); err != nil {
+			return fmt.Errorf("set AWS_SESSION_TOKEN: %w", err)
+		}
+	}
+	return nil
+}
+
+// injectGCPServiceAccount writes the SA JSON to a file and sets
+// GOOGLE_APPLICATION_CREDENTIALS. The secret key defaults to
+// "credentials.json"; override with spec.auth.credentialsSecretRef.key.
+func injectGCPServiceAccount(data map[string][]byte, ref *v1alpha1.SecretKeyRef) error {
+	key := "credentials.json"
+	if ref.Key != nil && *ref.Key != "" {
+		key = *ref.Key
+	}
+	jsonBytes, ok := data[key]
+	if !ok {
+		return fmt.Errorf("secret %s missing key %q", ref.Name, key)
+	}
+	path := "/tmp/gcp-sa.json" //nolint:gosec // known runtime-managed path for ADC
+	if err := os.WriteFile(path, jsonBytes, 0o600); err != nil {
+		return fmt.Errorf("write GCP SA key to %s: %w", path, err)
+	}
+	if err := os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", path); err != nil {
+		return fmt.Errorf("set GOOGLE_APPLICATION_CREDENTIALS: %w", err)
+	}
+	return nil
+}
+
+// injectAzureServicePrincipal sets AZURE_TENANT_ID / AZURE_CLIENT_ID /
+// AZURE_CLIENT_SECRET so the Azure EnvironmentCredential picks them up.
+func injectAzureServicePrincipal(data map[string][]byte, namespace, name string) error {
+	for _, key := range []string{"AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET"} {
+		value, ok := data[key]
+		if !ok {
+			return fmt.Errorf("secret %s/%s missing %s", namespace, name, key)
+		}
+		if err := os.Setenv(key, string(value)); err != nil {
+			return fmt.Errorf("set %s: %w", key, err)
+		}
+	}
 	return nil
 }

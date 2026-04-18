@@ -142,6 +142,7 @@ func (r *ProviderResolver) resolveOne(
 		Type:    string(provider.Spec.Type),
 		Model:   provider.Spec.Model,
 		BaseURL: provider.Spec.BaseURL,
+		Headers: provider.Spec.Headers,
 	}
 
 	if provider.Spec.Defaults != nil {
@@ -165,7 +166,8 @@ func (r *ProviderResolver) resolveOne(
 func (r *ProviderResolver) resolveCredential(
 	ctx context.Context, provider *v1alpha1.Provider,
 ) (providers.Credential, error) {
-	// Platform providers (bedrock, vertex, azure-ai) use cloud SDK credential chains
+	// Platform-hosted providers (claude on bedrock, gemini on vertex,
+	// openai on azure) use cloud SDK credential chains.
 	if provider.Spec.Platform != nil {
 		return r.resolvePlatformCredential(ctx, provider)
 	}
@@ -204,8 +206,8 @@ func (r *ProviderResolver) resolveAPIKeyCredential(
 	return buildCredential(apiKey, string(provider.Spec.Type)), nil
 }
 
-// resolvePlatformCredential resolves credentials for hyperscaler providers
-// (bedrock, vertex, azure-ai) using PromptKit's credential resolver, which
+// resolvePlatformCredential resolves credentials for platform-hosted providers
+// (bedrock, vertex, azure) using PromptKit's credential resolver, which
 // delegates to the cloud SDK's default credential chain (IRSA, GCP workload
 // identity, Azure managed identity, etc.).
 func (r *ProviderResolver) resolvePlatformCredential(

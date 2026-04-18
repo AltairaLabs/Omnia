@@ -27,6 +27,8 @@ func APIKeyEnvVarName(providerType string) string {
 		return "OPENAI_API_KEY"
 	case TypeGemini:
 		return "GEMINI_API_KEY"
+	case TypeVoyageAI:
+		return "VOYAGE_API_KEY"
 	default:
 		return ""
 	}

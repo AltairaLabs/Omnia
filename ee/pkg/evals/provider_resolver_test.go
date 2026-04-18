@@ -360,14 +360,14 @@ func TestBuildCredential_UnknownProvider(t *testing.T) {
 
 func TestConvertPlatformConfig(t *testing.T) {
 	p := &v1alpha1.PlatformConfig{
-		Type:     v1alpha1.PlatformTypeAWS,
+		Type:     v1alpha1.PlatformTypeBedrock,
 		Region:   "us-west-2",
 		Project:  "my-project",
 		Endpoint: "https://custom.endpoint",
 	}
 
 	pc := convertPlatformConfig(p)
-	assert.Equal(t, "aws", pc.Type)
+	assert.Equal(t, "bedrock", pc.Type)
 	assert.Equal(t, "us-west-2", pc.Region)
 	assert.Equal(t, "my-project", pc.Project)
 	assert.Equal(t, "https://custom.endpoint", pc.Endpoint)
@@ -392,11 +392,14 @@ func TestResolveProviderSpecs_PlatformConfig(t *testing.T) {
 	provider := &v1alpha1.Provider{
 		ObjectMeta: metav1.ObjectMeta{Name: "bedrock-prov", Namespace: ns},
 		Spec: v1alpha1.ProviderSpec{
-			Type:  "bedrock",
-			Model: "anthropic.claude-3-sonnet",
+			Type:  "claude",
+			Model: "claude-sonnet-4-20250514",
 			Platform: &v1alpha1.PlatformConfig{
-				Type:   v1alpha1.PlatformTypeAWS,
+				Type:   v1alpha1.PlatformTypeBedrock,
 				Region: "us-west-2",
+			},
+			Auth: &v1alpha1.AuthConfig{
+				Type: v1alpha1.AuthMethodWorkloadIdentity,
 			},
 		},
 	}
@@ -404,15 +407,16 @@ func TestResolveProviderSpecs_PlatformConfig(t *testing.T) {
 	c := buildFakeClient(ar, provider).Build()
 	resolver := NewProviderResolver(c)
 
-	// ResolveProviderSpecs will attempt to create an AWS credential via
-	// the cloud SDK default chain, which fails in test (no AWS identity).
-	// We verify that:
-	// 1. It reaches the platform credential path (not the API key path)
-	// 2. The error is about AWS credential resolution, not a missing secret
-	_, err := resolver.ResolveProviderSpecs(context.Background(), "agent", ns)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "resolve credential")
-	assert.Contains(t, err.Error(), "platform credential")
+	// ResolveProviderSpecs takes the platform credential path when
+	// spec.Platform is set (instead of looking for an API-key secret).
+	// AWS SDK's LoadDefaultConfig returns a config regardless of whether
+	// credentials exist (they are resolved lazily), so this call succeeds.
+	specs, err := resolver.ResolveProviderSpecs(context.Background(), "agent", ns)
+	require.NoError(t, err)
+	require.Contains(t, specs, "bedrock")
+	assert.Equal(t, "bedrock", specs["bedrock"].Platform)
+	require.NotNil(t, specs["bedrock"].PlatformConfig)
+	assert.Equal(t, "us-west-2", specs["bedrock"].PlatformConfig.Region)
 }
 
 func TestResolveSamplingConfig_WithConfig(t *testing.T) {

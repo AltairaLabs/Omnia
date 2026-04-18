@@ -61,11 +61,11 @@ metadata:
   name: vertex-gemini
   namespace: agents
 spec:
-  type: vertex
+  type: gemini
   model: gemini-1.5-pro
 
   platform:
-    type: gcp
+    type: vertex
     region: us-central1
     project: my-gcp-project
 
@@ -118,11 +118,11 @@ metadata:
   name: vertex-gemini
   namespace: agents
 spec:
-  type: vertex
+  type: gemini
   model: gemini-1.5-pro
 
   platform:
-    type: gcp
+    type: vertex
     region: us-central1
     project: my-gcp-project
 

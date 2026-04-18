@@ -24,16 +24,18 @@ limitations under the License.
 //  4. Run tests to verify consistency
 package provider
 
+import "slices"
+
 // Type defines the LLM provider type.
 type Type string
 
 // Provider type constants.
 const (
-	// TypeClaude uses Anthropic's Claude models.
+	// TypeClaude uses Anthropic's Claude message format (direct or via Bedrock).
 	TypeClaude Type = "claude"
-	// TypeOpenAI uses OpenAI's GPT models.
+	// TypeOpenAI uses OpenAI's chat completions format (direct or via Azure).
 	TypeOpenAI Type = "openai"
-	// TypeGemini uses Google's Gemini models.
+	// TypeGemini uses Google's Gemini format (direct or via Vertex).
 	TypeGemini Type = "gemini"
 	// TypeOllama uses locally-hosted Ollama models.
 	// Does not require API credentials. Requires baseURL to be set.
@@ -41,15 +43,12 @@ const (
 	// TypeMock uses PromptKit's mock provider for testing.
 	// Does not require API credentials. Returns canned responses.
 	TypeMock Type = "mock"
-	// TypeBedrock uses AWS Bedrock for LLM access.
-	// Uses IAM-based authentication; does not require traditional API key credentials.
-	TypeBedrock Type = "bedrock"
-	// TypeVertex uses GCP Vertex AI for LLM access.
-	// Uses workload identity or service account credentials.
-	TypeVertex Type = "vertex"
-	// TypeAzureAI uses Azure AI Foundry for LLM access.
-	// Uses Azure-native authentication.
-	TypeAzureAI Type = "azure-ai"
+	// TypeVLLM uses a vLLM-served OpenAI-compatible endpoint.
+	// Requires baseURL. Auth is typically via custom headers.
+	TypeVLLM Type = "vllm"
+	// TypeVoyageAI uses Voyage AI embedding models.
+	// Requires an API key (VOYAGE_API_KEY).
+	TypeVoyageAI Type = "voyageai"
 )
 
 // ValidTypes contains all valid provider types.
@@ -60,19 +59,13 @@ var ValidTypes = []Type{
 	TypeGemini,
 	TypeOllama,
 	TypeMock,
-	TypeBedrock,
-	TypeVertex,
-	TypeAzureAI,
+	TypeVLLM,
+	TypeVoyageAI,
 }
 
 // IsValid returns true if the provider type is valid.
 func (t Type) IsValid() bool {
-	for _, valid := range ValidTypes {
-		if t == valid {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ValidTypes, t)
 }
 
 // String returns the string representation of the provider type.
@@ -80,10 +73,14 @@ func (t Type) String() string {
 	return string(t)
 }
 
-// RequiresCredentials returns true if the provider type requires API credentials.
+// RequiresCredentials returns true if the provider type requires API credentials
+// out of the box. Note that claude/openai/gemini do NOT require credentials when
+// hosted on a platform (bedrock/azure/vertex) — the platform auth replaces the
+// direct API key. Callers that need platform-awareness must check Provider.Spec.Platform
+// before calling this.
 func (t Type) RequiresCredentials() bool {
 	switch t {
-	case TypeOllama, TypeMock, TypeBedrock, TypeVertex, TypeAzureAI:
+	case TypeOllama, TypeMock, TypeVLLM:
 		return false
 	default:
 		return true

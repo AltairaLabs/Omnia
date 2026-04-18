@@ -328,7 +328,7 @@ func TestBuildEnvVarsFromProviders(t *testing.T) {
 }
 
 func TestBuildPlatformEnvVars(t *testing.T) {
-	t.Run("bedrock provider with AWS platform injects region env vars", func(t *testing.T) {
+	t.Run("claude on bedrock injects region env vars", func(t *testing.T) {
 		providers := []*corev1alpha1.Provider{
 			{
 				ObjectMeta: metav1.ObjectMeta{
@@ -336,10 +336,10 @@ func TestBuildPlatformEnvVars(t *testing.T) {
 					Namespace: "test-ns",
 				},
 				Spec: corev1alpha1.ProviderSpec{
-					Type:  "bedrock",
-					Model: "anthropic.claude-3-sonnet-20240229-v1:0",
+					Type:  "claude",
+					Model: "claude-sonnet-4-20250514",
 					Platform: &corev1alpha1.PlatformConfig{
-						Type:   corev1alpha1.PlatformTypeAWS,
+						Type:   corev1alpha1.PlatformTypeBedrock,
 						Region: "us-east-1",
 					},
 				},
@@ -357,7 +357,7 @@ func TestBuildPlatformEnvVars(t *testing.T) {
 		assert.Equal(t, "us-east-1", envVarMap["AWS_DEFAULT_REGION"])
 	})
 
-	t.Run("vertex provider with GCP platform injects project and region env vars", func(t *testing.T) {
+	t.Run("gemini on vertex injects project and region env vars", func(t *testing.T) {
 		providers := []*corev1alpha1.Provider{
 			{
 				ObjectMeta: metav1.ObjectMeta{
@@ -365,10 +365,10 @@ func TestBuildPlatformEnvVars(t *testing.T) {
 					Namespace: "test-ns",
 				},
 				Spec: corev1alpha1.ProviderSpec{
-					Type:  "vertex",
+					Type:  "gemini",
 					Model: "gemini-1.5-pro",
 					Platform: &corev1alpha1.PlatformConfig{
-						Type:    corev1alpha1.PlatformTypeGCP,
+						Type:    corev1alpha1.PlatformTypeVertex,
 						Region:  "us-central1",
 						Project: "my-gcp-project",
 					},
@@ -387,7 +387,7 @@ func TestBuildPlatformEnvVars(t *testing.T) {
 		assert.Equal(t, "us-central1", envVarMap["CLOUD_ML_REGION"])
 	})
 
-	t.Run("azure-ai provider with Azure platform injects region env var", func(t *testing.T) {
+	t.Run("openai on azure injects region env var", func(t *testing.T) {
 		providers := []*corev1alpha1.Provider{
 			{
 				ObjectMeta: metav1.ObjectMeta{
@@ -395,11 +395,12 @@ func TestBuildPlatformEnvVars(t *testing.T) {
 					Namespace: "test-ns",
 				},
 				Spec: corev1alpha1.ProviderSpec{
-					Type:  "azure-ai",
+					Type:  "openai",
 					Model: "gpt-4o",
 					Platform: &corev1alpha1.PlatformConfig{
-						Type:   corev1alpha1.PlatformTypeAzure,
-						Region: "eastus",
+						Type:     corev1alpha1.PlatformTypeAzure,
+						Region:   "eastus",
+						Endpoint: "https://my-azure.openai.azure.com",
 					},
 				},
 			},
@@ -449,9 +450,9 @@ func TestBuildPlatformEnvVars(t *testing.T) {
 					Namespace: "test-ns",
 				},
 				Spec: corev1alpha1.ProviderSpec{
-					Type: "bedrock",
+					Type: "claude",
 					Platform: &corev1alpha1.PlatformConfig{
-						Type:   corev1alpha1.PlatformTypeAWS,
+						Type:   corev1alpha1.PlatformTypeBedrock,
 						Region: "us-east-1",
 					},
 				},
@@ -462,9 +463,9 @@ func TestBuildPlatformEnvVars(t *testing.T) {
 					Namespace: "test-ns",
 				},
 				Spec: corev1alpha1.ProviderSpec{
-					Type: "bedrock",
+					Type: "claude",
 					Platform: &corev1alpha1.PlatformConfig{
-						Type:   corev1alpha1.PlatformTypeAWS,
+						Type:   corev1alpha1.PlatformTypeBedrock,
 						Region: "eu-west-1",
 					},
 				},
@@ -479,7 +480,7 @@ func TestBuildPlatformEnvVars(t *testing.T) {
 		assert.Equal(t, "us-east-1", envVars[0].Value)
 	})
 
-	t.Run("GCP without project only injects region", func(t *testing.T) {
+	t.Run("vertex without project only injects region", func(t *testing.T) {
 		providers := []*corev1alpha1.Provider{
 			{
 				ObjectMeta: metav1.ObjectMeta{
@@ -487,9 +488,9 @@ func TestBuildPlatformEnvVars(t *testing.T) {
 					Namespace: "test-ns",
 				},
 				Spec: corev1alpha1.ProviderSpec{
-					Type: "vertex",
+					Type: "gemini",
 					Platform: &corev1alpha1.PlatformConfig{
-						Type:   corev1alpha1.PlatformTypeGCP,
+						Type:   corev1alpha1.PlatformTypeVertex,
 						Region: "us-central1",
 						// No project
 					},

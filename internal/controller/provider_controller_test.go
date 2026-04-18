@@ -1716,21 +1716,47 @@ var _ = Describe("Provider Controller", func() {
 		})
 	})
 
-	Context("providerRequiresCredentials for hyperscaler types", func() {
-		It("should return false for bedrock", func() {
-			Expect(providerRequiresCredentials(omniav1alpha1.ProviderTypeBedrock)).To(BeFalse())
+	Context("providerRequiresCredentials for platform-hosted providers", func() {
+		It("should return false when claude is hosted on bedrock", func() {
+			p := &omniav1alpha1.Provider{Spec: omniav1alpha1.ProviderSpec{
+				Type:     omniav1alpha1.ProviderTypeClaude,
+				Platform: &omniav1alpha1.PlatformConfig{Type: omniav1alpha1.PlatformTypeBedrock},
+			}}
+			Expect(providerRequiresCredentials(p)).To(BeFalse())
 		})
 
-		It("should return false for vertex", func() {
-			Expect(providerRequiresCredentials(omniav1alpha1.ProviderTypeVertex)).To(BeFalse())
+		It("should return false when gemini is hosted on vertex", func() {
+			p := &omniav1alpha1.Provider{Spec: omniav1alpha1.ProviderSpec{
+				Type:     omniav1alpha1.ProviderTypeGemini,
+				Platform: &omniav1alpha1.PlatformConfig{Type: omniav1alpha1.PlatformTypeVertex},
+			}}
+			Expect(providerRequiresCredentials(p)).To(BeFalse())
 		})
 
-		It("should return false for azure-ai", func() {
-			Expect(providerRequiresCredentials(omniav1alpha1.ProviderTypeAzureAI)).To(BeFalse())
+		It("should return false when openai is hosted on azure", func() {
+			p := &omniav1alpha1.Provider{Spec: omniav1alpha1.ProviderSpec{
+				Type:     omniav1alpha1.ProviderTypeOpenAI,
+				Platform: &omniav1alpha1.PlatformConfig{Type: omniav1alpha1.PlatformTypeAzure},
+			}}
+			Expect(providerRequiresCredentials(p)).To(BeFalse())
+		})
+
+		It("should return false for vllm (auth via headers)", func() {
+			p := &omniav1alpha1.Provider{Spec: omniav1alpha1.ProviderSpec{
+				Type: omniav1alpha1.ProviderTypeVLLM,
+			}}
+			Expect(providerRequiresCredentials(p)).To(BeFalse())
+		})
+
+		It("should return true for claude without platform", func() {
+			p := &omniav1alpha1.Provider{Spec: omniav1alpha1.ProviderSpec{
+				Type: omniav1alpha1.ProviderTypeClaude,
+			}}
+			Expect(providerRequiresCredentials(p)).To(BeTrue())
 		})
 	})
 
-	Context("reconcile hyperscaler providers without credentials", func() {
+	Context("reconcile platform-hosted providers with workload identity", func() {
 		var (
 			ctx      context.Context
 			provider *omniav1alpha1.Provider
@@ -1746,18 +1772,21 @@ var _ = Describe("Provider Controller", func() {
 			}
 		})
 
-		It("should succeed when bedrock provider has no credentials", func() {
+		It("should succeed for claude on bedrock with workloadIdentity", func() {
 			provider = &omniav1alpha1.Provider{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "bedrock-nocred",
+					Name:      "claude-bedrock-wi",
 					Namespace: providerNamespace,
 				},
 				Spec: omniav1alpha1.ProviderSpec{
-					Type:  omniav1alpha1.ProviderTypeBedrock,
-					Model: "anthropic.claude-3-sonnet-20240229-v1:0",
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
 					Platform: &omniav1alpha1.PlatformConfig{
-						Type:   omniav1alpha1.PlatformTypeAWS,
+						Type:   omniav1alpha1.PlatformTypeBedrock,
 						Region: "us-east-1",
+					},
+					Auth: &omniav1alpha1.AuthConfig{
+						Type: omniav1alpha1.AuthMethodWorkloadIdentity,
 					},
 				},
 			}
@@ -1793,19 +1822,22 @@ var _ = Describe("Provider Controller", func() {
 			Expect(credCondition.Reason).To(Equal("NoCredentialRequired"))
 		})
 
-		It("should succeed when vertex provider has no credentials", func() {
+		It("should succeed for gemini on vertex with workloadIdentity", func() {
 			provider = &omniav1alpha1.Provider{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "vertex-nocred",
+					Name:      "gemini-vertex-wi",
 					Namespace: providerNamespace,
 				},
 				Spec: omniav1alpha1.ProviderSpec{
-					Type:  omniav1alpha1.ProviderTypeVertex,
+					Type:  omniav1alpha1.ProviderTypeGemini,
 					Model: "gemini-1.5-pro",
 					Platform: &omniav1alpha1.PlatformConfig{
-						Type:    omniav1alpha1.PlatformTypeGCP,
+						Type:    omniav1alpha1.PlatformTypeVertex,
 						Region:  "us-central1",
 						Project: "my-project",
+					},
+					Auth: &omniav1alpha1.AuthConfig{
+						Type: omniav1alpha1.AuthMethodWorkloadIdentity,
 					},
 				},
 			}
@@ -1830,18 +1862,22 @@ var _ = Describe("Provider Controller", func() {
 			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
 		})
 
-		It("should succeed when azure-ai provider has no credentials", func() {
+		It("should succeed for openai on azure with workloadIdentity", func() {
 			provider = &omniav1alpha1.Provider{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "azure-ai-nocred",
+					Name:      "openai-azure-wi",
 					Namespace: providerNamespace,
 				},
 				Spec: omniav1alpha1.ProviderSpec{
-					Type:  omniav1alpha1.ProviderTypeAzureAI,
+					Type:  omniav1alpha1.ProviderTypeOpenAI,
 					Model: "gpt-4o",
 					Platform: &omniav1alpha1.PlatformConfig{
-						Type:   omniav1alpha1.PlatformTypeAzure,
-						Region: "eastus",
+						Type:     omniav1alpha1.PlatformTypeAzure,
+						Region:   "eastus",
+						Endpoint: "https://example.openai.azure.com",
+					},
+					Auth: &omniav1alpha1.AuthConfig{
+						Type: omniav1alpha1.AuthMethodWorkloadIdentity,
 					},
 				},
 			}
@@ -1883,17 +1919,17 @@ var _ = Describe("Provider Controller", func() {
 			}
 		})
 
-		It("should set AuthConfigured condition for bedrock with workloadIdentity", func() {
+		It("should set AuthConfigured condition for claude on bedrock with workloadIdentity", func() {
 			provider = &omniav1alpha1.Provider{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "bedrock-wi",
 					Namespace: providerNamespace,
 				},
 				Spec: omniav1alpha1.ProviderSpec{
-					Type:  omniav1alpha1.ProviderTypeBedrock,
-					Model: "anthropic.claude-3-sonnet-20240229-v1:0",
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
 					Platform: &omniav1alpha1.PlatformConfig{
-						Type:   omniav1alpha1.PlatformTypeAWS,
+						Type:   omniav1alpha1.PlatformTypeBedrock,
 						Region: "us-east-1",
 					},
 					Auth: &omniav1alpha1.AuthConfig{
@@ -1933,17 +1969,17 @@ var _ = Describe("Provider Controller", func() {
 			Expect(authCondition.Reason).To(Equal("WorkloadIdentityConfigured"))
 		})
 
-		It("should set AuthConfigured condition for vertex with workloadIdentity", func() {
+		It("should set AuthConfigured condition for gemini on vertex with workloadIdentity", func() {
 			provider = &omniav1alpha1.Provider{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "vertex-wi",
 					Namespace: providerNamespace,
 				},
 				Spec: omniav1alpha1.ProviderSpec{
-					Type:  omniav1alpha1.ProviderTypeVertex,
+					Type:  omniav1alpha1.ProviderTypeGemini,
 					Model: "gemini-1.5-pro",
 					Platform: &omniav1alpha1.PlatformConfig{
-						Type:    omniav1alpha1.PlatformTypeGCP,
+						Type:    omniav1alpha1.PlatformTypeVertex,
 						Region:  "us-central1",
 						Project: "my-project",
 					},
@@ -1991,10 +2027,10 @@ var _ = Describe("Provider Controller", func() {
 					Namespace: providerNamespace,
 				},
 				Spec: omniav1alpha1.ProviderSpec{
-					Type:  omniav1alpha1.ProviderTypeBedrock,
-					Model: "anthropic.claude-3-sonnet-20240229-v1:0",
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
 					Platform: &omniav1alpha1.PlatformConfig{
-						Type:   omniav1alpha1.PlatformTypeAWS,
+						Type:   omniav1alpha1.PlatformTypeBedrock,
 						Region: "us-east-1",
 					},
 					Auth: &omniav1alpha1.AuthConfig{
@@ -2010,14 +2046,15 @@ var _ = Describe("Provider Controller", func() {
 		})
 
 		It("should succeed when accessKey auth has valid credentialsSecretRef", func() {
-			// Create the credentials secret
+			// Create the credentials secret with both AWS keys.
 			authSecret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "aws-credentials",
 					Namespace: providerNamespace,
 				},
 				Data: map[string][]byte{
-					"AWS_ACCESS_KEY_ID": []byte("test-access-key"),
+					"AWS_ACCESS_KEY_ID":     []byte("test-access-key"),
+					"AWS_SECRET_ACCESS_KEY": []byte("test-secret-key"),
 				},
 			}
 			Expect(k8sClient.Create(ctx, authSecret)).To(Succeed())
@@ -2028,10 +2065,10 @@ var _ = Describe("Provider Controller", func() {
 					Namespace: providerNamespace,
 				},
 				Spec: omniav1alpha1.ProviderSpec{
-					Type:  omniav1alpha1.ProviderTypeBedrock,
-					Model: "anthropic.claude-3-sonnet-20240229-v1:0",
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
 					Platform: &omniav1alpha1.PlatformConfig{
-						Type:   omniav1alpha1.PlatformTypeAWS,
+						Type:   omniav1alpha1.PlatformTypeBedrock,
 						Region: "us-east-1",
 					},
 					Auth: &omniav1alpha1.AuthConfig{
@@ -2077,55 +2114,29 @@ var _ = Describe("Provider Controller", func() {
 			_ = k8sClient.Delete(ctx, authSecret)
 		})
 
-		It("should set AuthNotConfigured when hyperscaler has no auth block", func() {
+		It("should reject platform without auth at CRD level", func() {
 			provider = &omniav1alpha1.Provider{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "bedrock-noauth",
 					Namespace: providerNamespace,
 				},
 				Spec: omniav1alpha1.ProviderSpec{
-					Type:  omniav1alpha1.ProviderTypeBedrock,
-					Model: "anthropic.claude-3-sonnet-20240229-v1:0",
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
 					Platform: &omniav1alpha1.PlatformConfig{
-						Type:   omniav1alpha1.PlatformTypeAWS,
+						Type:   omniav1alpha1.PlatformTypeBedrock,
 						Region: "us-east-1",
 					},
-					// No Auth block
+					// No Auth block — CEL must reject this.
 				},
 			}
-			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
-
-			reconciler := &ProviderReconciler{
-				Client:     k8sClient,
-				Scheme:     k8sClient.Scheme(),
-				HTTPClient: alwaysHealthyClient(),
-			}
-
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      provider.Name,
-					Namespace: providerNamespace,
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			var updated omniav1alpha1.Provider
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: providerNamespace}, &updated)).To(Succeed())
-			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
-
-			var authCondition *metav1.Condition
-			for i := range updated.Status.Conditions {
-				if updated.Status.Conditions[i].Type == ProviderConditionTypeAuthConfigured {
-					authCondition = &updated.Status.Conditions[i]
-					break
-				}
-			}
-			Expect(authCondition).NotTo(BeNil())
-			Expect(authCondition.Status).To(Equal(metav1.ConditionTrue))
-			Expect(authCondition.Reason).To(Equal("AuthNotConfigured"))
+			err := k8sClient.Create(ctx, provider)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.platform and spec.auth must be set together"))
+			provider = nil // prevent cleanup of non-existent resource
 		})
 
-		It("should not set AuthConfigured condition for non-hyperscaler providers", func() {
+		It("should not set AuthConfigured condition for non-platform providers", func() {
 			provider = &omniav1alpha1.Provider{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "claude-no-auth-condition",
@@ -2166,29 +2177,43 @@ var _ = Describe("Provider Controller", func() {
 		})
 	})
 
-	Context("isHyperscalerProvider", func() {
-		It("should return true for bedrock", func() {
-			Expect(isHyperscalerProvider(omniav1alpha1.ProviderTypeBedrock)).To(BeTrue())
+	Context("isPlatformHosted", func() {
+		It("should return true when spec.platform is set", func() {
+			p := &omniav1alpha1.Provider{Spec: omniav1alpha1.ProviderSpec{
+				Type:     omniav1alpha1.ProviderTypeClaude,
+				Platform: &omniav1alpha1.PlatformConfig{Type: omniav1alpha1.PlatformTypeBedrock},
+			}}
+			Expect(isPlatformHosted(p)).To(BeTrue())
 		})
 
-		It("should return true for vertex", func() {
-			Expect(isHyperscalerProvider(omniav1alpha1.ProviderTypeVertex)).To(BeTrue())
+		It("should return true for gemini on vertex", func() {
+			p := &omniav1alpha1.Provider{Spec: omniav1alpha1.ProviderSpec{
+				Type:     omniav1alpha1.ProviderTypeGemini,
+				Platform: &omniav1alpha1.PlatformConfig{Type: omniav1alpha1.PlatformTypeVertex},
+			}}
+			Expect(isPlatformHosted(p)).To(BeTrue())
 		})
 
-		It("should return true for azure-ai", func() {
-			Expect(isHyperscalerProvider(omniav1alpha1.ProviderTypeAzureAI)).To(BeTrue())
+		It("should return true for openai on azure", func() {
+			p := &omniav1alpha1.Provider{Spec: omniav1alpha1.ProviderSpec{
+				Type:     omniav1alpha1.ProviderTypeOpenAI,
+				Platform: &omniav1alpha1.PlatformConfig{Type: omniav1alpha1.PlatformTypeAzure},
+			}}
+			Expect(isPlatformHosted(p)).To(BeTrue())
 		})
 
-		It("should return false for claude", func() {
-			Expect(isHyperscalerProvider(omniav1alpha1.ProviderTypeClaude)).To(BeFalse())
+		It("should return false when spec.platform is nil", func() {
+			p := &omniav1alpha1.Provider{Spec: omniav1alpha1.ProviderSpec{
+				Type: omniav1alpha1.ProviderTypeClaude,
+			}}
+			Expect(isPlatformHosted(p)).To(BeFalse())
 		})
 
-		It("should return false for openai", func() {
-			Expect(isHyperscalerProvider(omniav1alpha1.ProviderTypeOpenAI)).To(BeFalse())
-		})
-
-		It("should return false for mock", func() {
-			Expect(isHyperscalerProvider(omniav1alpha1.ProviderTypeMock)).To(BeFalse())
+		It("should return false for mock without platform", func() {
+			p := &omniav1alpha1.Provider{Spec: omniav1alpha1.ProviderSpec{
+				Type: omniav1alpha1.ProviderTypeMock,
+			}}
+			Expect(isPlatformHosted(p)).To(BeFalse())
 		})
 	})
 
@@ -2229,23 +2254,9 @@ var _ = Describe("Provider Controller", func() {
 			Expect(keys).To(ContainElement("api-key"))
 		})
 
-		It("should return correct keys for Bedrock", func() {
-			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeBedrock)
-			Expect(keys).To(ContainElement("AWS_ACCESS_KEY_ID"))
-			Expect(keys).To(ContainElement("api-key"))
-		})
-
-		It("should return correct keys for Vertex", func() {
-			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeVertex)
-			Expect(keys).To(ContainElement("GOOGLE_APPLICATION_CREDENTIALS"))
-			Expect(keys).To(ContainElement("GOOGLE_API_KEY"))
-			Expect(keys).To(ContainElement("api-key"))
-		})
-
-		It("should return correct keys for Azure AI", func() {
-			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeAzureAI)
-			Expect(keys).To(ContainElement("AZURE_OPENAI_API_KEY"))
-			Expect(keys).To(ContainElement("AZURE_API_KEY"))
+		It("should return correct keys for VoyageAI", func() {
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeVoyageAI)
+			Expect(keys).To(ContainElement("VOYAGE_API_KEY"))
 			Expect(keys).To(ContainElement("api-key"))
 		})
 	})

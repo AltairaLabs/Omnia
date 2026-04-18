@@ -19,16 +19,15 @@ kind: Provider
 
 ### `type`
 
-The LLM provider type.
+The provider wire protocol (message/response format).
 
 | Value | Description | Requires Credentials |
 |-------|-------------|----------------------|
-| `claude` | Anthropic's Claude models | Yes |
-| `openai` | OpenAI's GPT models | Yes |
-| `gemini` | Google's Gemini models | Yes |
-| `bedrock` | AWS Bedrock | No — uses `platform` + `auth` |
-| `vertex` | Google Vertex AI | No — uses `platform` + `auth` |
-| `azure-ai` | Azure AI Services | No — uses `platform` + `auth` |
+| `claude` | Anthropic Claude wire protocol | Yes (unless hosted via `platform`) |
+| `openai` | OpenAI chat completions wire protocol | Yes (unless hosted via `platform`) |
+| `gemini` | Google Gemini wire protocol | Yes (unless hosted via `platform`) |
+| `vllm` | vLLM-served OpenAI-compatible endpoint | No (auth via custom `headers`) |
+| `voyageai` | Voyage AI embedding models | Yes (`VOYAGE_API_KEY`) |
 | `ollama` | Local Ollama models (for development) | No |
 | `mock` | Mock provider (for testing) | No |
 
@@ -37,7 +36,7 @@ spec:
   type: claude
 ```
 
-> **Note**: For `ollama` and `mock` providers, credentials are not required. Hyperscaler types (`bedrock`, `vertex`, `azure-ai`) use platform-native authentication via the `platform` and `auth` fields instead of API key credentials.
+> **Hyperscaler hosting** (AWS Bedrock, Azure AI Foundry, GCP Vertex AI) is expressed by setting `spec.platform` (and `spec.auth`) on a `claude`, `openai`, or `gemini` provider — not as a separate provider type. See [`platform`](#platform) below.
 
 ### `model`
 
@@ -45,13 +44,13 @@ The model identifier to use. If not specified, the provider's default model is u
 
 | Provider | Example Models |
 |----------|----------------|
-| Claude | `claude-sonnet-4-20250514`, `claude-opus-4-20250514` |
-| OpenAI | `gpt-4o`, `gpt-4-turbo`, `gpt-3.5-turbo` |
-| Gemini | `gemini-pro`, `gemini-1.5-pro` |
-| Bedrock | `anthropic.claude-3-5-sonnet-20241022-v2:0`, `amazon.titan-text-express-v1` |
-| Vertex | `gemini-1.5-pro`, `gemini-1.5-flash` |
-| Azure AI | `gpt-4o`, `gpt-4-turbo` |
-| Ollama | `llava:13b`, `llama3.2-vision:11b`, `llama3:8b` |
+| Claude (direct) | `claude-sonnet-4-20250514`, `claude-opus-4-20250514` |
+| Claude on Bedrock | `claude-sonnet-4-20250514` — auto-mapped to the Bedrock model ID |
+| OpenAI (direct) | `gpt-4o`, `gpt-4-turbo`, `gpt-3.5-turbo` |
+| OpenAI on Azure | Your Azure deployment name (e.g., `gpt-4o`) |
+| Gemini (direct) | `gemini-pro`, `gemini-1.5-pro` |
+| Gemini on Vertex | `gemini-1.5-pro`, `gemini-1.5-flash` |
+| vLLM / Ollama | Model name served by the endpoint (e.g., `llama3:8b`) |
 
 ```yaml
 spec:
@@ -138,76 +137,93 @@ Hyperscaler-specific configuration. Required for provider types `bedrock`, `vert
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `platform.type` | string | Yes | Cloud platform: `aws`, `gcp`, or `azure` |
-| `platform.region` | string | No | Cloud region (e.g., `us-east-1`, `us-central1`, `eastus`) |
-| `platform.project` | string | No | GCP project ID (required for Vertex AI) |
-| `platform.endpoint` | string | No | Override the default platform API endpoint |
+| `platform.type` | string | Yes | Hyperscaler hosting platform: `bedrock`, `vertex`, or `azure` |
+| `platform.region` | string | No | Cloud region (e.g., `us-east-1`, `us-central1`). Required for `bedrock` and `vertex`. |
+| `platform.project` | string | No | GCP project ID — required when `platform.type` is `vertex`. |
+| `platform.endpoint` | string | No | Override the default platform API endpoint — required when `platform.type` is `azure`. |
 
-A CEL validation rule enforces that `platform` is present when `type` is `bedrock`, `vertex`, or `azure-ai`.
+**Provider-to-platform matrix (enforced by CEL):**
 
-#### AWS Bedrock
+| `spec.type` | allowed `platform.type` |
+|-------------|--------------------------|
+| `claude`    | `bedrock` |
+| `openai`    | `azure` |
+| `gemini`    | `vertex` |
+
+Setting `spec.platform` on any other provider type is rejected at admission. Setting `spec.platform` without `spec.auth` (or vice versa) is also rejected.
+
+#### Claude on AWS Bedrock
 
 ```yaml
 spec:
-  type: bedrock
+  type: claude
+  model: claude-sonnet-4-20250514   # auto-mapped to the Bedrock model ID
   platform:
-    type: aws
+    type: bedrock
     region: us-east-1
 ```
 
-#### GCP Vertex AI
+#### Gemini on GCP Vertex AI
 
 ```yaml
 spec:
-  type: vertex
+  type: gemini
+  model: gemini-1.5-pro
   platform:
-    type: gcp
+    type: vertex
     region: us-central1
     project: my-gcp-project
 ```
 
-#### Azure AI
+#### OpenAI on Azure AI Foundry
 
 ```yaml
 spec:
-  type: azure-ai
+  type: openai
+  model: gpt-4o
   platform:
     type: azure
-    region: eastus
     endpoint: https://my-resource.openai.azure.com
 ```
 
 ### `auth`
 
-Authentication configuration for hyperscaler providers. Only valid for provider types `bedrock`, `vertex`, and `azure-ai`.
+Authentication configuration for platform-hosted providers. Required when `spec.platform` is set; forbidden otherwise.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `auth.type` | string | Yes | Authentication method (see table below) |
-| `auth.roleArn` | string | No | AWS IAM role ARN for IRSA (only when `platform.type` is `aws`) |
-| `auth.serviceAccountEmail` | string | No | GCP service account email (only when `platform.type` is `gcp`) |
-| `auth.credentialsSecretRef` | SecretKeyRef | No | Secret containing platform credentials |
+| `auth.type` | string | Yes | Authentication method (see matrix below) |
+| `auth.roleArn` | string | No | AWS IAM role ARN for IRSA (only when `platform.type` is `bedrock`) |
+| `auth.serviceAccountEmail` | string | No | GCP service account email (only when `platform.type` is `vertex`) |
+| `auth.credentialsSecretRef` | SecretKeyRef | No | Secret containing platform credentials (required for static auth) |
 
-#### Authentication methods
+#### Platform × auth matrix (enforced by CEL)
 
-| Value | Platform | Description |
-|-------|----------|-------------|
-| `workloadIdentity` | All | Kubernetes-native identity federation (IRSA, GCP WI, Azure AD WI) |
-| `accessKey` | AWS | Static AWS access key credentials |
-| `serviceAccount` | GCP | GCP service account key |
-| `servicePrincipal` | Azure | Azure service principal credentials |
+| `platform.type` | allowed `auth.type` |
+|-----------------|---------------------|
+| `bedrock`       | `workloadIdentity`, `accessKey` |
+| `vertex`        | `workloadIdentity`, `serviceAccount` |
+| `azure`         | `workloadIdentity`, `servicePrincipal` |
 
-**CEL validation rules:**
-- `credentialsSecretRef` is **required** for `accessKey`, `serviceAccount`, and `servicePrincipal` auth types.
-- `credentialsSecretRef` is **disallowed** for `workloadIdentity` (workload identity relies on pod-level identity, not secrets).
+**Expected secret keys per static auth type:**
+
+| `auth.type`       | Required keys in `credentialsSecretRef` |
+|-------------------|------------------------------------------|
+| `accessKey`       | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (optional `AWS_SESSION_TOKEN`) |
+| `serviceAccount`  | `credentials.json` (or a custom key set via `credentialsSecretRef.key`) |
+| `servicePrincipal`| `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` |
+
+**CEL rules:**
+- `credentialsSecretRef` is **required** for `accessKey`, `serviceAccount`, and `servicePrincipal`.
+- `credentialsSecretRef` is **disallowed** for `workloadIdentity` (workload identity relies on pod-level identity).
 
 #### Workload identity (recommended)
 
 ```yaml
 spec:
-  type: bedrock
+  type: claude
   platform:
-    type: aws
+    type: bedrock
     region: us-east-1
   auth:
     type: workloadIdentity
@@ -218,9 +234,9 @@ spec:
 
 ```yaml
 spec:
-  type: bedrock
+  type: claude
   platform:
-    type: aws
+    type: bedrock
     region: us-east-1
   auth:
     type: accessKey
@@ -230,13 +246,31 @@ spec:
 
 ### `baseURL`
 
-Override the provider's default API endpoint. Useful for proxies, Azure OpenAI, or self-hosted models.
+Override the provider's default API endpoint. Useful for proxies, gateways (OpenRouter), or self-hosted models.
 
 ```yaml
 spec:
   type: openai
   baseURL: https://my-openai-proxy.internal/v1
 ```
+
+### `headers`
+
+Custom HTTP headers included on every provider request. Typical use: gateway providers that require attribution headers (OpenRouter's `HTTP-Referer` and `X-Title`), or shared vLLM deployments that use tenant routing headers.
+
+```yaml
+spec:
+  type: openai
+  baseURL: https://openrouter.ai/api/v1
+  headers:
+    HTTP-Referer: https://example.com
+    X-Title: omnia
+  credential:
+    secretRef:
+      name: openrouter-credentials
+```
+
+Collisions with built-in provider headers are rejected by PromptKit at request time.
 
 ### `capabilities`
 
@@ -366,7 +400,7 @@ spec:
     outputCostPer1K: "0.015"
 ```
 
-### AWS Bedrock with workload identity
+### Claude on AWS Bedrock with workload identity
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -375,11 +409,11 @@ metadata:
   name: bedrock-production
   namespace: agents
 spec:
-  type: bedrock
-  model: anthropic.claude-3-5-sonnet-20241022-v2:0
+  type: claude
+  model: claude-sonnet-4-20250514   # auto-mapped to the corresponding Bedrock model ID
 
   platform:
-    type: aws
+    type: bedrock
     region: us-east-1
 
   auth:
