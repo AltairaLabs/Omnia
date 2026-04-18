@@ -1,5 +1,6 @@
 {{- include "omnia.validateAuth" . -}}
 {{- if .Values.dashboard.enabled }}
+{{- $po := .Values.dashboard.podOverrides | default dict }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,14 +19,24 @@ spec:
         {{- with .Values.dashboard.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- with $po.annotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       labels:
+        {{- with $po.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         {{- include "omnia.dashboard.selectorLabels" . | nindent 8 }}
     spec:
-      {{- with .Values.imagePullSecrets }}
+      {{- $pullSecrets := concat (.Values.imagePullSecrets | default list) ($po.imagePullSecrets | default list) }}
+      {{- with $pullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "omnia.serviceAccountName" . }}
+      serviceAccountName: {{ $po.serviceAccountName | default (include "omnia.serviceAccountName" .) }}
+      {{- with $po.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       {{- with .Values.dashboard.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -52,7 +63,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "omnia.dashboard.fullname" . }}
-            {{- with .Values.dashboard.extraEnvFrom }}
+            {{- $ef := concat (.Values.dashboard.extraEnvFrom | default list) ($po.extraEnvFrom | default list) }}
+            {{- with $ef }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           env:
@@ -132,6 +144,9 @@ spec:
             {{- with .Values.dashboard.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+            {{- with $po.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           {{- with .Values.dashboard.startupProbe }}
@@ -165,7 +180,8 @@ spec:
             - name: workspace-content
               mountPath: {{ .Values.workspaceContent.mountPath | default "/workspace-content" }}
             {{- end }}
-            {{- with .Values.dashboard.extraVolumeMounts }}
+            {{- $vmMounts := concat (.Values.dashboard.extraVolumeMounts | default list) ($po.extraVolumeMounts | default list) }}
+            {{- with $vmMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
@@ -179,19 +195,27 @@ spec:
           persistentVolumeClaim:
             claimName: {{ .Values.workspaceContent.persistence.existingClaim | default (printf "%s-workspace-content" (include "omnia.fullname" .)) }}
         {{- end }}
-        {{- with .Values.dashboard.extraVolumes }}
+        {{- $vols := concat (.Values.dashboard.extraVolumes | default list) ($po.extraVolumes | default list) }}
+        {{- with $vols }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with .Values.dashboard.nodeSelector }}
+      {{- $nodeSel := mergeOverwrite (deepCopy (.Values.dashboard.nodeSelector | default dict)) ($po.nodeSelector | default dict) }}
+      {{- with $nodeSel }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.dashboard.affinity }}
+      {{- $aff := $po.affinity | default .Values.dashboard.affinity }}
+      {{- with $aff }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.dashboard.tolerations }}
+      {{- $tols := concat (.Values.dashboard.tolerations | default list) ($po.tolerations | default list) }}
+      {{- with $tols }}
       tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $po.topologySpreadConstraints }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
 {{- end }}
