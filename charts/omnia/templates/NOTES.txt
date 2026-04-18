@@ -72,6 +72,12 @@ To deploy your first agent, create an AgentRuntime resource:
     facade:
       type: websocket
       port: 8080
+    # Optional: customize the pod (workload identity, CSI secrets, GPU, etc.).
+    # Full reference: https://omnia.altairalabs.ai/docs/how-to/configure-pod-overrides
+    # podOverrides:
+    #   serviceAccountName: my-workload-identity-sa
+    #   nodeSelector:
+    #     nvidia.com/gpu.product: A100
   EOF
 
 {{- if .Values.grafana.enabled }}

@@ -2,6 +2,30 @@
 # This is a YAML-formatted file.
 #
 # =============================================================================
+# QUICK START
+# =============================================================================
+#
+# Read the full README first: ./README.md
+#
+# Minimum to install (the chart REFUSES to render without this):
+#
+#   helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+#     --set dashboard.auth.mode=oauth       # or: builtin, proxy, anonymous
+#
+# If mode=anonymous, also pass:
+#   --set dashboard.auth.allowAnonymous=true
+#
+# Three starting value profiles — see README.md "Deployment profiles":
+#   - Local dev:        values-dev.yaml
+#   - Local dev + EE:   values-dev-enterprise.yaml
+#   - Observability:    values-demo-observability.yaml
+#
+# Cloud-native use (CSI secret-stores, workload identity, GPU scheduling): set
+# `podOverrides:` on the AgentRuntime / Workspace / ArenaJob / ArenaDevSession
+# CRs. Docs:
+#   https://omnia.altairalabs.ai/docs/how-to/configure-pod-overrides
+#
+# =============================================================================
 # Table of Contents
 # =============================================================================
 #
@@ -320,6 +344,14 @@ affinity:
           topologyKey: kubernetes.io/hostname
 
 # Operator API server configuration
+#
+# The injection hooks below (extraEnv/extraEnvFrom/extraVolumes/extraVolumeMounts)
+# apply ONLY to this chart-owned operator Deployment. For operator-GENERATED
+# pods (facade+runtime, session-api, memory-api, arena workers, dev console)
+# use the per-CRD `podOverrides:` field instead. Docs:
+#   https://omnia.altairalabs.ai/docs/how-to/configure-pod-overrides
+# A unified `podOverrides:` block for chart-owned deployments is planned
+# (tracked in #895 W4).
 operator:
   # -- Bind address for the operator API server (tool testing).
   # Set to a port like ":8083" to enable, or leave empty to disable.
@@ -829,6 +861,23 @@ workspaceServices:
 
 # ============================================================================
 # Dev Postgres
+# ============================================================================
+#
+# DEV-ONLY in-cluster Postgres (single replica, no backups, no persistence
+# unless you set it up yourself). Provided so kind/k3d installs can run
+# without an external database.
+#
+# NOT FOR PRODUCTION. For production, leave `postgres.dev.enabled: false` and
+# supply a Postgres connection string via a Secret referenced on the
+# `Workspace.spec.services[].session.database.secretRef` field.
+#
+# The chart does NOT manage cloud-provider Postgres (RDS, Cloud SQL, AlloyDB,
+# Azure Database for PostgreSQL, Supabase). Provision those out-of-band and
+# point Workspace CRs at them.
+#
+# PgBouncer sidecar (`postgres.dev.pgbouncer.enabled`) mirrors the standard
+# Omnia session-api access pattern in dev so you can debug pool behavior
+# without running a separate stack.
 # ============================================================================
 
 # Dev-only Postgres for local development and CI
@@ -1697,6 +1746,30 @@ istio:
 # ============================================================================
 # Gateway API Configuration
 # Kubernetes Gateway API is required for agent ingress
+#
+# Two gateways — both disabled by default. You want AT MOST one of each.
+#
+#   gateway:          external LB for agent WebSocket traffic (public / VPC-
+#                     facing). Deploy when users/apps connect from outside
+#                     the cluster.
+#
+#   internalGateway:  internal LB (or NodePort / ClusterIP depending on
+#                     controller) for observability tools. Deploy when you
+#                     want browser access to Grafana/Prometheus without
+#                     exposing them publicly. Not required when you use
+#                     `kubectl port-forward` or a VPN.
+#
+# Controllers: set `className` to match what's installed in the cluster.
+# Common values:
+#   className: istio              # Istio 1.21+ ambient or sidecar
+#   className: envoy              # Envoy Gateway
+#   className: cilium             # Cilium Gateway API
+#   className: gke-l7-rilb        # GKE (external regional)
+#   className: eks-alb            # EKS ALB Controller
+#
+# Cloud LB annotations go on `infrastructureAnnotations` (forwarded to the
+# provisioned Service by GWAPI v1.1+), NOT on `annotations` (which land on
+# the Gateway resource only). Per-cloud examples are inline below.
 # ============================================================================
 
 # External gateway for agent traffic (WebSocket connections)
