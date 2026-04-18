@@ -460,7 +460,10 @@ func detectNamespace() string {
 // for the audit logger (no-op when enterprise is disabled).
 func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log logr.Logger) (http.Handler, *api.SessionService, func()) {
 	svcCfg := api.ServiceConfig{}
-	cleanup := func() {}
+	// Default cleanup is a no-op; only the enterprise audit-logger path below
+	// replaces it with a real Close() call. Keeping cleanup non-nil lets the
+	// main() defer site call it unconditionally.
+	cleanup := func() { /* no-op — replaced when enterprise audit is enabled */ }
 
 	// Enterprise: audit logger.
 	var auditLogger *audit.Logger
