@@ -2260,4 +2260,144 @@ var _ = Describe("Provider Controller", func() {
 			Expect(keys).To(ContainElement("api-key"))
 		})
 	})
+
+	Context("expectedPlatformSecretKeys", func() {
+		It("returns AWS access key pair for bedrock + accessKey", func() {
+			keys := expectedPlatformSecretKeys(omniav1alpha1.PlatformTypeBedrock, omniav1alpha1.AuthMethodAccessKey)
+			Expect(keys).To(ConsistOf("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"))
+		})
+
+		It("returns credentials.json for vertex + serviceAccount", func() {
+			keys := expectedPlatformSecretKeys(omniav1alpha1.PlatformTypeVertex, omniav1alpha1.AuthMethodServiceAccount)
+			Expect(keys).To(ConsistOf("credentials.json"))
+		})
+
+		It("returns Azure env trio for azure + servicePrincipal", func() {
+			keys := expectedPlatformSecretKeys(omniav1alpha1.PlatformTypeAzure, omniav1alpha1.AuthMethodServicePrincipal)
+			Expect(keys).To(ConsistOf("AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET"))
+		})
+
+		It("returns nil for workloadIdentity (secret not used)", func() {
+			keys := expectedPlatformSecretKeys(omniav1alpha1.PlatformTypeBedrock, omniav1alpha1.AuthMethodWorkloadIdentity)
+			Expect(keys).To(BeNil())
+		})
+
+		It("returns nil for mismatched platform/auth combo", func() {
+			// CEL normally rejects this at admission; the runtime guards defensively.
+			keys := expectedPlatformSecretKeys(omniav1alpha1.PlatformTypeBedrock, omniav1alpha1.AuthMethodServicePrincipal)
+			Expect(keys).To(BeNil())
+		})
+	})
+
+	Context("validatePlatformCredentialsSecret", func() {
+		var (
+			ctx    context.Context
+			secret *corev1.Secret
+			r      *ProviderReconciler
+		)
+
+		BeforeEach(func() {
+			ctx = context.Background()
+			r = &ProviderReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			secret = &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "plat-creds", Namespace: providerNamespace},
+				Data: map[string][]byte{
+					"AWS_ACCESS_KEY_ID":     []byte("AKIA"),
+					"AWS_SECRET_ACCESS_KEY": []byte("secret"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			if secret != nil {
+				_ = k8sClient.Delete(ctx, secret)
+			}
+		})
+
+		It("accepts a secret with the expected platform keys", func() {
+			p := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{Namespace: providerNamespace},
+				Spec: omniav1alpha1.ProviderSpec{
+					Platform: &omniav1alpha1.PlatformConfig{Type: omniav1alpha1.PlatformTypeBedrock},
+				},
+			}
+			auth := &omniav1alpha1.AuthConfig{
+				Type:                 omniav1alpha1.AuthMethodAccessKey,
+				CredentialsSecretRef: &omniav1alpha1.SecretKeyRef{Name: "plat-creds"},
+			}
+			Expect(r.validatePlatformCredentialsSecret(ctx, p, auth)).To(Succeed())
+		})
+
+		It("rejects when a required platform key is missing", func() {
+			// Missing AWS_SECRET_ACCESS_KEY
+			secret.Data = map[string][]byte{"AWS_ACCESS_KEY_ID": []byte("x")}
+			Expect(k8sClient.Update(ctx, secret)).To(Succeed())
+			p := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{Namespace: providerNamespace},
+				Spec: omniav1alpha1.ProviderSpec{
+					Platform: &omniav1alpha1.PlatformConfig{Type: omniav1alpha1.PlatformTypeBedrock},
+				},
+			}
+			auth := &omniav1alpha1.AuthConfig{
+				Type:                 omniav1alpha1.AuthMethodAccessKey,
+				CredentialsSecretRef: &omniav1alpha1.SecretKeyRef{Name: "plat-creds"},
+			}
+			err := r.validatePlatformCredentialsSecret(ctx, p, auth)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("AWS_SECRET_ACCESS_KEY"))
+		})
+
+		It("accepts when a specific key is named and present", func() {
+			customKey := "AWS_ACCESS_KEY_ID"
+			p := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{Namespace: providerNamespace},
+				Spec: omniav1alpha1.ProviderSpec{
+					Platform: &omniav1alpha1.PlatformConfig{Type: omniav1alpha1.PlatformTypeBedrock},
+				},
+			}
+			auth := &omniav1alpha1.AuthConfig{
+				Type: omniav1alpha1.AuthMethodAccessKey,
+				CredentialsSecretRef: &omniav1alpha1.SecretKeyRef{
+					Name: "plat-creds", Key: &customKey,
+				},
+			}
+			Expect(r.validatePlatformCredentialsSecret(ctx, p, auth)).To(Succeed())
+		})
+
+		It("rejects when the named key is missing", func() {
+			missing := "NOT_PRESENT"
+			p := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{Namespace: providerNamespace},
+				Spec: omniav1alpha1.ProviderSpec{
+					Platform: &omniav1alpha1.PlatformConfig{Type: omniav1alpha1.PlatformTypeBedrock},
+				},
+			}
+			auth := &omniav1alpha1.AuthConfig{
+				Type: omniav1alpha1.AuthMethodAccessKey,
+				CredentialsSecretRef: &omniav1alpha1.SecretKeyRef{
+					Name: "plat-creds", Key: &missing,
+				},
+			}
+			err := r.validatePlatformCredentialsSecret(ctx, p, auth)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("NOT_PRESENT"))
+		})
+
+		It("rejects when the secret does not exist", func() {
+			p := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{Namespace: providerNamespace},
+				Spec: omniav1alpha1.ProviderSpec{
+					Platform: &omniav1alpha1.PlatformConfig{Type: omniav1alpha1.PlatformTypeBedrock},
+				},
+			}
+			auth := &omniav1alpha1.AuthConfig{
+				Type:                 omniav1alpha1.AuthMethodAccessKey,
+				CredentialsSecretRef: &omniav1alpha1.SecretKeyRef{Name: "does-not-exist"},
+			}
+			err := r.validatePlatformCredentialsSecret(ctx, p, auth)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("not found"))
+		})
+	})
 })

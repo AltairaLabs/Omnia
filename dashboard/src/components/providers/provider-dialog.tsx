@@ -73,7 +73,7 @@ const PROVIDER_TYPES: { value: ProviderSpec["type"]; label: string }[] = [
   { value: "mock", label: "Mock (Testing)" },
 ];
 
-const LOCAL_TYPES: ProviderSpec["type"][] = ["ollama", "mock", "vllm"];
+const LOCAL_TYPES: Set<ProviderSpec["type"]> = new Set(["ollama", "mock", "vllm"]);
 
 const ALL_CAPABILITIES = [
   "text",
@@ -90,7 +90,7 @@ const ALL_CAPABILITIES = [
 // --- Helpers ---
 
 function isLocal(type: ProviderSpec["type"]): boolean {
-  return LOCAL_TYPES.includes(type);
+  return LOCAL_TYPES.has(type);
 }
 
 function getInitialFormState(provider?: Provider | null): FormState {

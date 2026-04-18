@@ -48,6 +48,11 @@ const (
 	ProviderConditionTypeEndpointReachable    = "EndpointReachable"
 	// secretKeyAPIKey is the common secret key name for API keys.
 	secretKeyAPIKey = "api-key"
+	// Error message formats (go:S1192 — extracted to avoid duplication).
+	errFmtSecretNotFound      = "secret %q not found in namespace %q"
+	errFmtSecretMissingKey    = "secret %q does not contain key %q"
+	errFmtSecretMissingAnyKey = "secret %q does not contain any expected API key (%v)"
+	errFmtSecretGetFailed     = "failed to get secret %q: %v"
 )
 
 // healthCheckTimeout is how long we wait for a provider endpoint to respond.
@@ -259,7 +264,7 @@ func (r *ProviderReconciler) validateCredentialSecretRef(ctx context.Context, pr
 
 	if err := r.Get(ctx, key, secret); err != nil {
 		if apierrors.IsNotFound(err) {
-			msg := fmt.Sprintf("secret %q not found in namespace %q", key.Name, key.Namespace)
+			msg := fmt.Sprintf(errFmtSecretNotFound, key.Name, key.Namespace)
 			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
 				"SecretNotFound", msg)
 			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
@@ -267,7 +272,7 @@ func (r *ProviderReconciler) validateCredentialSecretRef(ctx context.Context, pr
 			provider.Status.Phase = omniav1alpha1.ProviderPhaseError
 			return fmt.Errorf("%s", msg)
 		}
-		msg := fmt.Sprintf("failed to get secret %q: %v", key.Name, err)
+		msg := fmt.Sprintf(errFmtSecretGetFailed, key.Name, err)
 		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
 			"SecretNotFound", msg)
 		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
@@ -280,7 +285,7 @@ func (r *ProviderReconciler) validateCredentialSecretRef(ctx context.Context, pr
 	if ref.Key != nil {
 		expectedKey := *ref.Key
 		if _, exists := secret.Data[expectedKey]; !exists {
-			msg := fmt.Sprintf("secret %q does not contain key %q", key.Name, expectedKey)
+			msg := fmt.Sprintf(errFmtSecretMissingKey, key.Name, expectedKey)
 			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
 				"SecretKeyMissing", msg)
 			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
@@ -299,7 +304,7 @@ func (r *ProviderReconciler) validateCredentialSecretRef(ctx context.Context, pr
 			}
 		}
 		if !found {
-			msg := fmt.Sprintf("secret %q does not contain any expected API key (%v)", key.Name, expectedKeys)
+			msg := fmt.Sprintf(errFmtSecretMissingAnyKey, key.Name, expectedKeys)
 			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
 				"SecretKeyMissing", msg)
 			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
@@ -429,7 +434,7 @@ func (r *ProviderReconciler) validatePlatformCredentialsSecret(
 
 	if err := r.Get(ctx, key, secret); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("secret %q not found in namespace %q", ref.Name, provider.Namespace)
+			return fmt.Errorf(errFmtSecretNotFound, ref.Name, provider.Namespace)
 		}
 		return fmt.Errorf("failed to get secret %q: %w", ref.Name, err)
 	}
@@ -437,7 +442,7 @@ func (r *ProviderReconciler) validatePlatformCredentialsSecret(
 	// When a specific key is named, that key alone must exist.
 	if ref.Key != nil && *ref.Key != "" {
 		if _, ok := secret.Data[*ref.Key]; !ok {
-			return fmt.Errorf("secret %q does not contain key %q", ref.Name, *ref.Key)
+			return fmt.Errorf(errFmtSecretMissingKey, ref.Name, *ref.Key)
 		}
 		return nil
 	}
@@ -500,7 +505,7 @@ func (r *ProviderReconciler) validateSecretRef(ctx context.Context, provider *om
 
 	if err := r.Get(ctx, key, secret); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("secret %q not found in namespace %q", key.Name, key.Namespace)
+			return fmt.Errorf(errFmtSecretNotFound, key.Name, key.Namespace)
 		}
 		return fmt.Errorf("failed to get secret %q: %w", key.Name, err)
 	}
@@ -509,7 +514,7 @@ func (r *ProviderReconciler) validateSecretRef(ctx context.Context, provider *om
 	if provider.Spec.SecretRef.Key != nil {
 		expectedKey := *provider.Spec.SecretRef.Key
 		if _, exists := secret.Data[expectedKey]; !exists {
-			return fmt.Errorf("secret %q does not contain key %q", key.Name, expectedKey)
+			return fmt.Errorf(errFmtSecretMissingKey, key.Name, expectedKey)
 		}
 		return nil
 	}
@@ -522,7 +527,7 @@ func (r *ProviderReconciler) validateSecretRef(ctx context.Context, provider *om
 		}
 	}
 
-	return fmt.Errorf("secret %q does not contain any expected API key (%v)", key.Name, expectedKeys)
+	return fmt.Errorf(errFmtSecretMissingAnyKey, key.Name, expectedKeys)
 }
 
 // getExpectedKeysForProvider returns the expected secret keys for a provider type.
