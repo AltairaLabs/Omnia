@@ -42,6 +42,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/license"
 	"github.com/altairalabs/omnia/ee/pkg/workspace"
 	"github.com/altairalabs/omnia/internal/podoverrides"
+	"github.com/altairalabs/omnia/pkg/intconv"
 )
 
 // Workspace label for namespace association
@@ -1337,8 +1338,8 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 					arenaJob.Status.Progress.Pending = 0
 				} else if r.Queue != nil {
 					if stats, err := r.Queue.GetStats(ctx, arenaJob.Name); err == nil && stats != nil {
-						arenaJob.Status.Progress.Completed = int32(stats.Passed)
-						arenaJob.Status.Progress.Failed = int32(stats.Failed)
+						arenaJob.Status.Progress.Completed = intconv.ClampInt32(stats.Passed)
+						arenaJob.Status.Progress.Failed = intconv.ClampInt32(stats.Failed)
 						arenaJob.Status.Progress.Pending = 0
 					}
 				}
@@ -1405,8 +1406,8 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 				// JobProgress field tag change).
 				if r.Queue != nil {
 					if stats, err := r.Queue.GetStats(ctx, arenaJob.Name); err == nil && stats != nil {
-						arenaJob.Status.Progress.Completed = int32(stats.Passed)
-						arenaJob.Status.Progress.Failed = int32(stats.Failed)
+						arenaJob.Status.Progress.Completed = intconv.ClampInt32(stats.Passed)
+						arenaJob.Status.Progress.Failed = intconv.ClampInt32(stats.Failed)
 						arenaJob.Status.Progress.Pending = 0
 					}
 				}

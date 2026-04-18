@@ -33,6 +33,7 @@ import (
 	"github.com/altairalabs/omnia/internal/httputil"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/providers"
+	"github.com/altairalabs/omnia/pkg/intconv"
 	"github.com/altairalabs/omnia/pkg/logctx"
 )
 
@@ -412,8 +413,8 @@ func (h *Handler) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	limit := min(parseIntParam(r, "limit", defaultMessageLimit), maxMessageLimit)
-	before := int32(parseIntParam(r, "before", 0))
-	after := int32(parseIntParam(r, "after", 0))
+	before := intconv.ClampInt32(int64(parseIntParam(r, "before", 0)))
+	after := intconv.ClampInt32(int64(parseIntParam(r, "after", 0)))
 
 	opts := providers.MessageQueryOpts{
 		Limit:     limit + 1, // fetch one extra to determine hasMore
