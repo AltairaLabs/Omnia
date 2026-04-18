@@ -142,7 +142,7 @@ Enterprise features live under `ee/`. This includes Arena (prompt testing/evalua
 | `dashboard/src/types/` | Hand-written TypeScript types (source of truth) |
 | `dashboard/src/types/generated/` | Auto-generated TS types from CRDs (reference only) |
 | `dashboard/src/lib/data/` | Data services (operator-service, session-api-service, live-service) |
-| `charts/omnia/` | Helm chart |
+| `charts/omnia/` | Helm chart — see `charts/omnia/CLAUDE.md` for chart-specific conventions (podOverrides, schema, tunables rules) |
 | `ee/` | Enterprise edition code (Arena) |
 | `docs/` | Starlight documentation site |
 | `test/e2e/` | End-to-end tests (kind cluster) |
