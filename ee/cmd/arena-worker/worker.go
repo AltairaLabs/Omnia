@@ -284,6 +284,17 @@ func processWorkItems(
 	return processSingleVU(ctx, log, cfg, q, jobID, bundlePath, wm)
 }
 
+// workerLoopContext bundles the plumbing (ctx, logger, config, queue, job id)
+// threaded through the work-loop helpers. Extracted to keep executeAndReport
+// and handlePopError under Sonar's 7-param threshold (go:S107).
+type workerLoopContext struct {
+	ctx   context.Context
+	log   logr.Logger
+	cfg   *Config
+	queue queue.WorkQueue
+	jobID string
+}
+
 // processSingleVU is the original single-threaded work item processing loop.
 func processSingleVU(
 	ctx context.Context, log logr.Logger, cfg *Config,
@@ -294,6 +305,7 @@ func processSingleVU(
 
 	log.Info("processing work items", "jobID", jobID)
 
+	wlc := &workerLoopContext{ctx: ctx, log: log, cfg: cfg, queue: q, jobID: jobID}
 	for {
 		if checkContextDone(ctx, log) {
 			return nil
@@ -301,7 +313,7 @@ func processSingleVU(
 
 		item, err := q.Pop(ctx, jobID)
 		if err != nil {
-			done, resetCount, retErr := handlePopError(ctx, log, err, emptyCount, maxEmptyPolls, cfg, q, jobID)
+			done, resetCount, retErr := handlePopError(wlc, err, emptyCount, maxEmptyPolls)
 			if retErr != nil {
 				return retErr
 			}
@@ -319,16 +331,18 @@ func processSingleVU(
 			"providerID", item.ProviderID,
 		)
 
-		executeAndReport(ctx, log, cfg, q, jobID, item, bundlePath, wm)
+		executeAndReport(wlc, item, bundlePath, wm)
 	}
 }
 
 // executeAndReport runs a work item and reports the result via Ack/Nack.
 func executeAndReport(
-	ctx context.Context, log logr.Logger, cfg *Config,
-	q queue.WorkQueue, jobID string, item *queue.WorkItem,
-	bundlePath string, wm *WorkerMetrics,
+	wlc *workerLoopContext,
+	item *queue.WorkItem,
+	bundlePath string,
+	wm *WorkerMetrics,
 ) {
+	ctx, log, cfg, q, jobID := wlc.ctx, wlc.log, wlc.cfg, wlc.queue, wlc.jobID
 	// Each work item gets its own trace (not a child of a job-level root).
 	traceID := workItemToTraceID(jobID, item.ID)
 	spanID := workItemToSpanID(item.ID)
@@ -387,9 +401,11 @@ func checkContextDone(ctx context.Context, log logr.Logger) bool {
 //
 //nolint:unparam // maxEmptyPolls kept as parameter for testability
 func handlePopError(
-	ctx context.Context, log logr.Logger, err error, emptyCount, maxEmptyPolls int,
-	cfg *Config, q queue.WorkQueue, jobID string,
+	wlc *workerLoopContext,
+	err error,
+	emptyCount, maxEmptyPolls int,
 ) (bool, int, error) {
+	ctx, log, cfg, q, jobID := wlc.ctx, wlc.log, wlc.cfg, wlc.queue, wlc.jobID
 	if !errors.Is(err, queue.ErrQueueEmpty) {
 		return false, emptyCount, fmt.Errorf("failed to pop work item: %w", err)
 	}

@@ -357,16 +357,11 @@ func TestHandlePopError(t *testing.T) {
 		}
 		q := queue.NewMemoryQueueWithDefaults()
 
-		done, newCount, err := handlePopError(
-			context.Background(),
-			testLog(),
-			context.DeadlineExceeded, // Non-queue error
-			0,
-			10,
-			cfg,
-			q,
-			"test-job",
-		)
+		wlc := &workerLoopContext{
+			ctx: context.Background(), log: testLog(),
+			cfg: cfg, queue: q, jobID: "test-job",
+		}
+		done, newCount, err := handlePopError(wlc, context.DeadlineExceeded, 0, 10)
 
 		if err == nil {
 			t.Error("expected error for non-empty-queue errors")
@@ -385,16 +380,11 @@ func TestHandlePopError(t *testing.T) {
 		}
 		q := queue.NewMemoryQueueWithDefaults()
 
-		done, newCount, err := handlePopError(
-			context.Background(),
-			testLog(),
-			queue.ErrQueueEmpty,
-			5,
-			10,
-			cfg,
-			q,
-			"test-job",
-		)
+		wlc := &workerLoopContext{
+			ctx: context.Background(), log: testLog(),
+			cfg: cfg, queue: q, jobID: "test-job",
+		}
+		done, newCount, err := handlePopError(wlc, queue.ErrQueueEmpty, 5, 10)
 
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -423,16 +413,11 @@ func TestHandlePopError(t *testing.T) {
 		item, _ := q.Pop(context.Background(), jobID)
 		_ = q.Ack(context.Background(), jobID, item.ID, []byte(`{"status":"pass"}`))
 
-		done, _, err := handlePopError(
-			context.Background(),
-			testLog(),
-			queue.ErrQueueEmpty,
-			9, // At max - 1
-			10,
-			cfg,
-			q,
-			jobID,
-		)
+		wlc := &workerLoopContext{
+			ctx: context.Background(), log: testLog(),
+			cfg: cfg, queue: q, jobID: jobID,
+		}
+		done, _, err := handlePopError(wlc, queue.ErrQueueEmpty, 9 /* at max - 1 */, 10)
 
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
