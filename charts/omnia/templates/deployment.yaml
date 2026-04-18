@@ -83,6 +83,12 @@ spec:
             - --enterprise
             - --policy-proxy-image={{ .Values.enterprise.policyProxy.image.repository }}:{{ .Values.enterprise.policyProxy.image.tag | default .Chart.AppVersion }}
             {{- end }}
+            {{- if .Values.operator.logLevel }}
+            - --zap-log-level={{ .Values.operator.logLevel }}
+            {{- end }}
+            {{- with .Values.operator.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           ports:
             {{- if .Values.operator.apiBindAddress }}
             - name: api

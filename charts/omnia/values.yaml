@@ -106,6 +106,17 @@ enterprise:
       extraVolumes: []
       # -- Extra volumeMounts on the arena-controller container.
       extraVolumeMounts: []
+      # -- Extra command-line args appended to the arena-controller binary.
+      # Use for undocumented Go flags or feature toggles not yet surfaced by
+      # first-class values.
+      extraArgs: []
+      # -- Host path the arena-controller mounts the shared workspace content
+      # at. Defaults to `workspaceContent.mountPath` (`/workspace-content`),
+      # which matches the rest of the Omnia stack. Override only if you
+      # remount content under a non-default path inside the pod.
+      workspaceContentPath: ""
+      # -- Graceful-shutdown window in seconds.
+      terminationGracePeriodSeconds: 10
 
     # Worker configuration for ArenaJob execution
     worker:
@@ -261,6 +272,33 @@ enterprise:
     service:
       # -- PromptKit LSP service port
       port: 8080
+    # -- Container HTTP port (passed as `--addr=:<port>`).
+    port: 8080
+    # -- Container health-probe port (passed as `--health-addr=:<port>`).
+    healthPort: 8081
+    # -- Dashboard API URL the LSP calls for runtime data.
+    # Leave empty to auto-construct from the in-release dashboard Service
+    # (`http://<release>-dashboard:<dashboard.service.port>`). Set explicitly
+    # when the dashboard lives in a different release or namespace.
+    dashboardApiUrl: ""
+    # -- Extra command-line args appended to the LSP binary.
+    extraArgs: []
+    # -- Extra environment variables for the LSP container.
+    extraEnv: []
+    # -- Liveness probe tuning.
+    livenessProbe:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 1
+      failureThreshold: 3
+    # -- Readiness probe tuning.
+    readinessProbe:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 1
+      failureThreshold: 3
+    # -- Graceful-shutdown window in seconds.
+    terminationGracePeriodSeconds: 30
     resources: {}
 
 # License configuration
@@ -371,6 +409,16 @@ operator:
   # -- Bind address for the operator API server (tool testing).
   # Set to a port like ":8083" to enable, or leave empty to disable.
   apiBindAddress: ""
+
+  # -- controller-runtime zap logger verbosity. One of:
+  # "" (operator default), "debug", "info", "warn", "error". Set to "debug"
+  # when chasing a reconciler issue; revert for production.
+  logLevel: ""
+
+  # -- Extra command-line args appended to the manager binary. Use for
+  # undocumented Go flags that don't yet have a first-class values entry
+  # (e.g. reconciler worker counts, webhook cert paths).
+  extraArgs: []
 
   # -- Extra environment variables to inject into the operator container.
   # Standard Kubernetes EnvVar shape (each entry has `name` + `value` or
