@@ -655,3 +655,87 @@ func TestOCIFetcher_ExtractSymlink_EscapeAttempt(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "symlink escape attempt")
 }
+
+// TestOCIFetcher_ExtractSymlink_Safe covers the happy path: a symlink
+// pointing at a sibling inside destDir is created successfully and
+// resolves to the expected target.
+func TestOCIFetcher_ExtractSymlink_Safe(t *testing.T) {
+	destDir, err := os.MkdirTemp("", "extract-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(destDir) }()
+
+	// Create a target file the symlink will point at.
+	targetFile := filepath.Join(destDir, "sub", "target.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(targetFile), 0o750))
+	require.NoError(t, os.WriteFile(targetFile, []byte("hello"), 0o600))
+
+	fetcher := NewOCIFetcher(OCIFetcherConfig{URL: "oci://test:latest"})
+
+	header := &tar.Header{
+		Name:     "sub/link.txt",
+		Linkname: "target.txt", // sibling relative link
+	}
+	require.NoError(t, fetcher.extractSymlink(header, destDir))
+
+	// Link exists and resolves to the target we wrote earlier.
+	linkPath := filepath.Join(destDir, "sub", "link.txt")
+	content, err := os.ReadFile(linkPath)
+	require.NoError(t, err)
+	assert.Equal(t, "hello", string(content))
+}
+
+// TestOCIFetcher_ExtractSymlink_CrossDirectorySafe covers a symlink
+// that uses a ".." segment to point at another location inside destDir
+// (legitimate cross-directory link). The SecureJoin clamp keeps this
+// inside destDir; the rejection heuristic only fires when the link
+// would escape above destDir entirely.
+func TestOCIFetcher_ExtractSymlink_CrossDirectorySafe(t *testing.T) {
+	destDir, err := os.MkdirTemp("", "extract-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(destDir) }()
+
+	require.NoError(t, os.MkdirAll(filepath.Join(destDir, "a"), 0o750))
+	require.NoError(t, os.MkdirAll(filepath.Join(destDir, "b"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(destDir, "b", "real.txt"), []byte("x"), 0o600))
+
+	fetcher := NewOCIFetcher(OCIFetcherConfig{URL: "oci://test:latest"})
+
+	header := &tar.Header{
+		Name:     "a/link.txt",
+		Linkname: "../b/real.txt",
+	}
+	require.NoError(t, fetcher.extractSymlink(header, destDir))
+
+	content, err := os.ReadFile(filepath.Join(destDir, "a", "link.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "x", string(content))
+}
+
+// TestOCIFetcher_ExtractSymlink_AbsoluteClamped covers a linkname that
+// uses an absolute system path like "/etc/passwd". SecureJoin clamps
+// this inside destDir — the resulting symlink points at a location
+// under destDir (a safe, broken link), not the real system file.
+func TestOCIFetcher_ExtractSymlink_AbsoluteClamped(t *testing.T) {
+	destDir, err := os.MkdirTemp("", "extract-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(destDir) }()
+
+	require.NoError(t, os.MkdirAll(filepath.Join(destDir, "sub"), 0o750))
+
+	fetcher := NewOCIFetcher(OCIFetcherConfig{URL: "oci://test:latest"})
+
+	header := &tar.Header{
+		Name:     "sub/link.txt",
+		Linkname: "/etc/passwd",
+	}
+	require.NoError(t, fetcher.extractSymlink(header, destDir))
+
+	linkPath := filepath.Join(destDir, "sub", "link.txt")
+	dest, err := os.Readlink(linkPath)
+	require.NoError(t, err)
+	// Resolve the symlink's stored target relative to its own directory
+	// and confirm it stays inside destDir.
+	resolved := filepath.Clean(filepath.Join(filepath.Dir(linkPath), dest))
+	assert.True(t, strings.HasPrefix(resolved, filepath.Clean(destDir)+string(filepath.Separator)),
+		"symlink %q resolved to %q which escaped destDir %q", dest, resolved, destDir)
+}

@@ -614,23 +614,26 @@ func (h *PromptKitHandler) buildComponents() error {
 
 // safeOutputDir validates a config-provided output directory before it
 // reaches MkdirAll (CodeQL go/path-injection). Empty values fall back to
-// the trusted default; values that contain path-traversal segments are
-// rejected; relative paths are rooted under the default; cleaned
-// absolute paths are allowed (the container's filesystem permissions
-// are the primary defence line for those).
+// the trusted default; values that contain any ".." segment are
+// rejected (checked on the raw string — filepath.Clean would silently
+// resolve "/tmp/foo/../../etc" to "/etc" and erase the signal);
+// relative paths are rooted under the default; cleaned absolute paths
+// are allowed (the container's filesystem permissions are the primary
+// defence line for those).
 func safeOutputDir(configured string, log logr.Logger) string {
 	if configured == "" {
 		return devConsoleOutputDir
 	}
-	cleaned := filepath.Clean(configured)
-	// Reject any ".." segments after cleaning — the concrete traversal
-	// signal CodeQL's path-injection rule cares about.
 	sep := string(filepath.Separator)
-	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+sep) || strings.Contains(cleaned, sep+".."+sep) {
+	if configured == ".." ||
+		strings.HasPrefix(configured, ".."+sep) ||
+		strings.HasSuffix(configured, sep+"..") ||
+		strings.Contains(configured, sep+".."+sep) {
 		log.Info("buildComponents: configured output dir contains traversal; using default",
 			"configured", configured, "default", devConsoleOutputDir)
 		return devConsoleOutputDir
 	}
+	cleaned := filepath.Clean(configured)
 	if !filepath.IsAbs(cleaned) {
 		// Relative paths are interpreted as children of the safe root.
 		return filepath.Join(devConsoleOutputDir, cleaned)
