@@ -65,7 +65,7 @@ spec:
             {{- if and .Values.nfs.csiDriver.enabled (or .Values.nfs.server.enabled .Values.nfs.external.server) }}
             - --workspace-storage-class={{ include "omnia.nfsStorageClass" . }}
             {{- end }}
-            - --workspace-content-path=/workspace-content
+            - --workspace-content-path={{ .Values.enterprise.arena.controller.workspaceContentPath | default (.Values.workspaceContent.mountPath | default "/workspace-content") }}
             {{- if .Values.devMode }}
             - --dev-mode
             {{- end }}
@@ -86,6 +86,9 @@ spec:
             - --tracing-endpoint={{ $resolvedTracingEndpoint }}
             {{- end }}
             - --api-bind-address=:{{ ((.Values.enterprise.arena.controller).api).port | default 8082 }}
+            {{- with .Values.enterprise.arena.controller.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           ports:
             - name: api
               containerPort: {{ ((.Values.enterprise.arena.controller).api).port | default 8082 }}
@@ -153,5 +156,5 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      terminationGracePeriodSeconds: 10
+      terminationGracePeriodSeconds: {{ .Values.enterprise.arena.controller.terminationGracePeriodSeconds | default 10 }}
 {{- end }}

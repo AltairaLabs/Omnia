@@ -1,5 +1,12 @@
 {{- if .Values.enterprise.enabled }}
 {{- if .Values.enterprise.promptkitLsp.enabled }}
+{{- $lsp := .Values.enterprise.promptkitLsp -}}
+{{- $httpPort := $lsp.port | default 8080 -}}
+{{- $healthPort := $lsp.healthPort | default 8081 -}}
+{{- $dashboardUrl := $lsp.dashboardApiUrl -}}
+{{- if not $dashboardUrl -}}
+  {{- $dashboardUrl = printf "http://%s-dashboard:%d" (include "omnia.fullname" .) (int (.Values.dashboard.service.port | default 3000)) -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -8,7 +15,7 @@ metadata:
     {{- include "omnia.labels" . | nindent 4 }}
     app.kubernetes.io/component: promptkit-lsp
 spec:
-  replicas: {{ .Values.enterprise.promptkitLsp.replicaCount | default 2 }}
+  replicas: {{ $lsp.replicaCount | default 2 }}
   selector:
     matchLabels:
       {{- include "omnia.selectorLabels" . | nindent 6 }}
@@ -32,40 +39,55 @@ spec:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: lsp
-          image: {{ .Values.enterprise.promptkitLsp.image.repository | default "ghcr.io/altairalabs/omnia-promptkit-lsp" }}:{{ .Values.enterprise.promptkitLsp.image.tag | default .Chart.AppVersion }}
-          imagePullPolicy: {{ .Values.enterprise.promptkitLsp.image.pullPolicy | default "IfNotPresent" }}
+          image: {{ $lsp.image.repository | default "ghcr.io/altairalabs/omnia-promptkit-lsp" }}:{{ $lsp.image.tag | default .Chart.AppVersion }}
+          imagePullPolicy: {{ $lsp.image.pullPolicy | default "IfNotPresent" }}
           command:
             - /promptkit-lsp
           args:
-            - --addr=:8080
-            - --health-addr=:8081
-            - --dashboard-api-url=http://{{ include "omnia.fullname" . }}-dashboard:{{ .Values.dashboard.service.port | default 3000 }}
+            - --addr=:{{ $httpPort }}
+            - --health-addr=:{{ $healthPort }}
+            - --dashboard-api-url={{ $dashboardUrl }}
             {{- if .Values.devMode }}
             - --dev-mode
             {{- end }}
+            {{- with $lsp.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           ports:
             - name: http
-              containerPort: 8080
+              containerPort: {{ $httpPort }}
               protocol: TCP
             - name: health
-              containerPort: 8081
+              containerPort: {{ $healthPort }}
               protocol: TCP
+          {{- with $lsp.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           livenessProbe:
             httpGet:
               path: /healthz
               port: health
-            initialDelaySeconds: 5
-            periodSeconds: 10
+            {{- with $lsp.livenessProbe }}
+            initialDelaySeconds: {{ .initialDelaySeconds | default 5 }}
+            periodSeconds:       {{ .periodSeconds       | default 10 }}
+            timeoutSeconds:      {{ .timeoutSeconds      | default 1 }}
+            failureThreshold:    {{ .failureThreshold    | default 3 }}
+            {{- end }}
           readinessProbe:
             httpGet:
               path: /readyz
               port: health
-            initialDelaySeconds: 5
-            periodSeconds: 10
+            {{- with $lsp.readinessProbe }}
+            initialDelaySeconds: {{ .initialDelaySeconds | default 5 }}
+            periodSeconds:       {{ .periodSeconds       | default 10 }}
+            timeoutSeconds:      {{ .timeoutSeconds      | default 1 }}
+            failureThreshold:    {{ .failureThreshold    | default 3 }}
+            {{- end }}
           resources:
-            {{- toYaml .Values.enterprise.promptkitLsp.resources | nindent 12 }}
+            {{- toYaml $lsp.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -78,6 +100,6 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      terminationGracePeriodSeconds: 30
+      terminationGracePeriodSeconds: {{ $lsp.terminationGracePeriodSeconds | default 30 }}
 {{- end }}
 {{- end }}
