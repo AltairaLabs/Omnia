@@ -39,6 +39,19 @@ type resolvedFleetProvider struct {
 	group string
 }
 
+// resolveContext bundles the plumbing (k8s client, logger, namespace, arena
+// config) threaded through every provider-resolution helper. Extracted to
+// drop every resolveXxx function below Sonar's 7-param threshold (go:S107)
+// and to keep call sites readable — they pass rc instead of 4–6 args.
+type resolveContext struct {
+	ctx         context.Context
+	log         logr.Logger
+	c           client.Client
+	namespace   string
+	agentWSURLs map[string]string
+	arenaCfg    *config.Config
+}
+
 // resolveProvidersFromCRD resolves providers from CRD refs when ARENA_PROVIDER_GROUPS is set.
 // It reads each Provider/AgentRuntime CRD, builds PromptKit provider configs, and populates
 // LoadedProviders. Fleet providers are connected and returned for post-engine registration.
@@ -74,8 +87,16 @@ func resolveProvidersFromCRD(
 	var fleetProviders []*resolvedFleetProvider
 	pricingMap := make(map[string]*providerPricing)
 
+	rc := &resolveContext{
+		ctx:         ctx,
+		log:         log,
+		c:           c,
+		namespace:   jobNamespace,
+		agentWSURLs: agentWSURLs,
+		arenaCfg:    arenaCfg,
+	}
 	for groupName, pg := range arenaJob.Providers {
-		fps, groupPricing, err := resolveProviderGroup(ctx, log, c, jobNamespace, groupName, &pg, agentWSURLs, arenaCfg)
+		fps, groupPricing, err := resolveProviderGroup(rc, groupName, &pg)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -96,32 +117,27 @@ func resolveProvidersFromCRD(
 
 // resolveProviderGroup resolves a single provider group (array or map mode).
 func resolveProviderGroup(
-	ctx context.Context,
-	log logr.Logger,
-	c client.Client,
-	namespace, groupName string,
+	rc *resolveContext,
+	groupName string,
 	pg *arenaProviderGroup,
-	agentWSURLs map[string]string,
-	arenaCfg *config.Config,
 ) ([]*resolvedFleetProvider, map[string]*providerPricing, error) {
 	if pg.isMapMode() {
-		return resolveMapModeGroup(ctx, log, c, namespace, groupName, pg.mapping, agentWSURLs, arenaCfg)
+		return resolveMapModeGroup(rc, groupName, pg.mapping)
 	}
-	return resolveArrayModeGroup(ctx, log, c, namespace, groupName, pg.entries, agentWSURLs, arenaCfg)
+	return resolveArrayModeGroup(rc, groupName, pg.entries)
 }
 
 // resolveMapModeGroup resolves providers in map mode (configID -> entry).
 func resolveMapModeGroup(
-	ctx context.Context, log logr.Logger, c client.Client,
-	namespace, groupName string,
+	rc *resolveContext,
+	groupName string,
 	mapping map[string]arenaProviderEntry,
-	agentWSURLs map[string]string, arenaCfg *config.Config,
 ) ([]*resolvedFleetProvider, map[string]*providerPricing, error) {
 	var fps []*resolvedFleetProvider
 	pricing := make(map[string]*providerPricing)
 
 	for configID, entry := range mapping {
-		fp, p, err := resolveEntry(ctx, log, c, namespace, groupName, configID, &entry, agentWSURLs, arenaCfg)
+		fp, p, err := resolveEntry(rc, groupName, configID, &entry)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -137,16 +153,15 @@ func resolveMapModeGroup(
 
 // resolveArrayModeGroup resolves providers in array mode (sequential entries).
 func resolveArrayModeGroup(
-	ctx context.Context, log logr.Logger, c client.Client,
-	namespace, groupName string,
+	rc *resolveContext,
+	groupName string,
 	entries []arenaProviderEntry,
-	agentWSURLs map[string]string, arenaCfg *config.Config,
 ) ([]*resolvedFleetProvider, map[string]*providerPricing, error) {
 	var fps []*resolvedFleetProvider
 	pricing := make(map[string]*providerPricing)
 
 	for _, entry := range entries {
-		fp, p, err := resolveEntry(ctx, log, c, namespace, groupName, "", &entry, agentWSURLs, arenaCfg)
+		fp, p, err := resolveEntry(rc, groupName, "", &entry)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -163,28 +178,24 @@ func resolveArrayModeGroup(
 // resolveEntry resolves a single provider/agent entry. When configID is non-empty,
 // it is used as the provider ID (map mode); otherwise sanitizeID derives it (array mode).
 func resolveEntry(
-	ctx context.Context,
-	log logr.Logger,
-	c client.Client,
-	namespace, groupName, configID string,
+	rc *resolveContext,
+	groupName, configID string,
 	entry *arenaProviderEntry,
-	agentWSURLs map[string]string,
-	arenaCfg *config.Config,
 ) (*resolvedFleetProvider, *providerPricing, error) {
 	if entry.ProviderRef != nil {
 		if configID != "" {
-			p, err := resolveProviderRefEntryWithID(ctx, log, c, namespace, *entry.ProviderRef, configID, groupName, arenaCfg)
+			p, err := resolveProviderRefEntryWithID(rc, *entry.ProviderRef, configID, groupName)
 			return nil, p, err
 		}
-		p, err := resolveProviderRefEntry(ctx, log, c, namespace, *entry.ProviderRef, groupName, arenaCfg)
+		p, err := resolveProviderRefEntry(rc, *entry.ProviderRef, groupName)
 		return nil, p, err
 	}
 	if entry.AgentRef != nil {
 		if configID != "" {
-			fp, err := resolveAgentRefEntryWithID(ctx, log, entry.AgentRef.Name, configID, groupName, agentWSURLs, arenaCfg)
+			fp, err := resolveAgentRefEntryWithID(rc, entry.AgentRef.Name, configID, groupName)
 			return fp, nil, err
 		}
-		fp, err := resolveAgentRefEntry(ctx, log, entry.AgentRef.Name, groupName, agentWSURLs, arenaCfg)
+		fp, err := resolveAgentRefEntry(rc, entry.AgentRef.Name, groupName)
 		return fp, nil, err
 	}
 	return nil, nil, nil
@@ -193,15 +204,11 @@ func resolveEntry(
 // resolveProviderRefEntry resolves a single Provider CRD and adds it to LoadedProviders.
 // Returns parsed pricing if the provider has spec.pricing configured.
 func resolveProviderRefEntry(
-	ctx context.Context,
-	log logr.Logger,
-	c client.Client,
-	namespace string,
+	rc *resolveContext,
 	ref v1alpha1.ProviderRef,
 	groupName string,
-	arenaCfg *config.Config,
 ) (*providerPricing, error) {
-	provider, err := k8s.GetProvider(ctx, c, ref, namespace)
+	provider, err := k8s.GetProvider(rc.ctx, rc.c, ref, rc.namespace)
 	if err != nil {
 		return nil, fmt.Errorf("group %q: failed to get provider %s: %w", groupName, ref.Name, err)
 	}
@@ -229,10 +236,10 @@ func resolveProviderRefEntry(
 		pkProvider.Defaults = convertProviderDefaults(provider.Spec.Defaults)
 	}
 
-	arenaCfg.LoadedProviders[providerID] = pkProvider
-	arenaCfg.ProviderGroups[providerID] = groupName
+	rc.arenaCfg.LoadedProviders[providerID] = pkProvider
+	rc.arenaCfg.ProviderGroups[providerID] = groupName
 
-	log.V(1).Info("provider resolved from CRD",
+	rc.log.V(1).Info("provider resolved from CRD",
 		"providerID", providerID,
 		"type", pkProvider.Type,
 		"model", pkProvider.Model,
@@ -245,14 +252,11 @@ func resolveProviderRefEntry(
 
 // resolveAgentRefEntry resolves an AgentRuntime CRD and creates a fleet provider.
 func resolveAgentRefEntry(
-	_ context.Context,
-	log logr.Logger,
+	rc *resolveContext,
 	agentName string,
 	groupName string,
-	agentWSURLs map[string]string,
-	arenaCfg *config.Config,
 ) (*resolvedFleetProvider, error) {
-	wsURL, ok := agentWSURLs[agentName]
+	wsURL, ok := rc.agentWSURLs[agentName]
 	if !ok {
 		return nil, fmt.Errorf(
 			"group %q: no WebSocket URL for agent %s (missing from ARENA_AGENT_WS_URLS)",
@@ -264,16 +268,16 @@ func resolveAgentRefEntry(
 	// Add to LoadedProviders with ws_url in AdditionalConfig.
 	// The fleet provider factory (registered via init() in ee/pkg/arena/fleet/factory.go)
 	// will create the Provider instance during BuildEngineComponents.
-	arenaCfg.LoadedProviders[providerID] = &config.Provider{
+	rc.arenaCfg.LoadedProviders[providerID] = &config.Provider{
 		ID:   providerID,
 		Type: "fleet",
 		AdditionalConfig: map[string]interface{}{
 			"ws_url": wsURL,
 		},
 	}
-	arenaCfg.ProviderGroups[providerID] = groupName
+	rc.arenaCfg.ProviderGroups[providerID] = groupName
 
-	log.Info("agent resolved from CRD",
+	rc.log.Info("agent resolved from CRD",
 		"providerID", providerID,
 		"agentName", agentName,
 		"wsURL", wsURL,
@@ -291,16 +295,12 @@ func resolveAgentRefEntry(
 // instead of deriving it from sanitizeID(provider.Name). Used in map mode.
 // Returns parsed pricing if the provider has spec.pricing configured.
 func resolveProviderRefEntryWithID(
-	ctx context.Context,
-	log logr.Logger,
-	c client.Client,
-	namespace string,
+	rc *resolveContext,
 	ref v1alpha1.ProviderRef,
 	configID string,
 	groupName string,
-	arenaCfg *config.Config,
 ) (*providerPricing, error) {
-	provider, err := k8s.GetProvider(ctx, c, ref, namespace)
+	provider, err := k8s.GetProvider(rc.ctx, rc.c, ref, rc.namespace)
 	if err != nil {
 		return nil, fmt.Errorf("group %q: failed to get provider %s: %w", groupName, ref.Name, err)
 	}
@@ -323,10 +323,10 @@ func resolveProviderRefEntryWithID(
 		pkProvider.Defaults = convertProviderDefaults(provider.Spec.Defaults)
 	}
 
-	arenaCfg.LoadedProviders[configID] = pkProvider
-	arenaCfg.ProviderGroups[configID] = groupName
+	rc.arenaCfg.LoadedProviders[configID] = pkProvider
+	rc.arenaCfg.ProviderGroups[configID] = groupName
 
-	log.V(1).Info("provider resolved from CRD (map mode)",
+	rc.log.V(1).Info("provider resolved from CRD (map mode)",
 		"configID", configID,
 		"crdName", provider.Name,
 		"type", pkProvider.Type,
@@ -340,31 +340,28 @@ func resolveProviderRefEntryWithID(
 // resolveAgentRefEntryWithID resolves an AgentRuntime CRD using an explicit config provider ID.
 // Used in map mode where the key IS the config provider ID.
 func resolveAgentRefEntryWithID(
-	_ context.Context,
-	log logr.Logger,
+	rc *resolveContext,
 	agentName string,
 	configID string,
 	groupName string,
-	agentWSURLs map[string]string,
-	arenaCfg *config.Config,
 ) (*resolvedFleetProvider, error) {
-	wsURL, ok := agentWSURLs[agentName]
+	wsURL, ok := rc.agentWSURLs[agentName]
 	if !ok {
 		return nil, fmt.Errorf(
 			"group %q: no WebSocket URL for agent %s (missing from ARENA_AGENT_WS_URLS)",
 			groupName, agentName)
 	}
 
-	arenaCfg.LoadedProviders[configID] = &config.Provider{
+	rc.arenaCfg.LoadedProviders[configID] = &config.Provider{
 		ID:   configID,
 		Type: "fleet",
 		AdditionalConfig: map[string]interface{}{
 			"ws_url": wsURL,
 		},
 	}
-	arenaCfg.ProviderGroups[configID] = groupName
+	rc.arenaCfg.ProviderGroups[configID] = groupName
 
-	log.Info("agent resolved from CRD (map mode)",
+	rc.log.Info("agent resolved from CRD (map mode)",
 		"configID", configID,
 		"agentName", agentName,
 		"wsURL", wsURL,

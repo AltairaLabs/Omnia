@@ -18,17 +18,40 @@ import (
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/fleet"
 	"github.com/altairalabs/omnia/pkg/k8s"
 )
+
+// testRC builds a resolveContext for test call sites. Centralising this keeps
+// the test payload short when the production signature changed from long
+// positional args to a single struct.
+func testRC(
+	ctx context.Context,
+	log logr.Logger,
+	c client.Client,
+	ns string,
+	wsURLs map[string]string,
+	arenaCfg *config.Config,
+) *resolveContext {
+	return &resolveContext{
+		ctx:         ctx,
+		log:         log,
+		c:           c,
+		namespace:   ns,
+		agentWSURLs: wsURLs,
+		arenaCfg:    arenaCfg,
+	}
+}
 
 // mockProvider implements pkproviders.Provider for testing connectFleetProviders
 // type assertion error path.
@@ -514,7 +537,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 		}
 
 		ref := v1alpha1.ProviderRef{Name: "my-openai"}
-		_, err := resolveProviderRefEntry(ctx, log, c, "default", ref, "judge", arenaCfg)
+		_, err := resolveProviderRefEntry(testRC(ctx, log, c, "default", nil, arenaCfg), ref, "judge")
 		require.NoError(t, err)
 
 		providerID := sanitizeID("my-openai")
@@ -548,7 +571,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 		}
 
 		ref := v1alpha1.ProviderRef{Name: "provider-with-cred"}
-		_, err := resolveProviderRefEntry(ctx, log, c, "default", ref, "default", arenaCfg)
+		_, err := resolveProviderRefEntry(testRC(ctx, log, c, "default", nil, arenaCfg), ref, "default")
 		require.NoError(t, err)
 
 		providerID := sanitizeID("provider-with-cred")
@@ -583,7 +606,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 		}
 
 		ref := v1alpha1.ProviderRef{Name: "provider-with-defaults"}
-		_, err := resolveProviderRefEntry(ctx, log, c, "default", ref, "default", arenaCfg)
+		_, err := resolveProviderRefEntry(testRC(ctx, log, c, "default", nil, arenaCfg), ref, "default")
 		require.NoError(t, err)
 
 		providerID := sanitizeID("provider-with-defaults")
@@ -601,7 +624,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 		}
 
 		ref := v1alpha1.ProviderRef{Name: "nonexistent"}
-		_, err := resolveProviderRefEntry(ctx, log, c, "default", ref, "group1", arenaCfg)
+		_, err := resolveProviderRefEntry(testRC(ctx, log, c, "default", nil, arenaCfg), ref, "group1")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "group1")
 		assert.Contains(t, err.Error(), "nonexistent")
@@ -628,7 +651,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 		}
 
 		ref := v1alpha1.ProviderRef{Name: "cross-ns-provider", Namespace: ptr.To("other-ns")}
-		_, err := resolveProviderRefEntry(ctx, log, c, "default", ref, "default", arenaCfg)
+		_, err := resolveProviderRefEntry(testRC(ctx, log, c, "default", nil, arenaCfg), ref, "default")
 		require.NoError(t, err)
 
 		providerID := sanitizeID("cross-ns-provider")
@@ -660,7 +683,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 		}
 
 		ref := v1alpha1.ProviderRef{Name: "priced-provider"}
-		pricing, err := resolveProviderRefEntry(ctx, log, c, testNamespace, ref, "default", arenaCfg)
+		pricing, err := resolveProviderRefEntry(testRC(ctx, log, c, testNamespace, nil, arenaCfg), ref, "default")
 		require.NoError(t, err)
 		require.NotNil(t, pricing)
 		assert.InDelta(t, 0.003, pricing.inputCostPer1K, 1e-9)
@@ -688,7 +711,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 		}
 
 		ref := v1alpha1.ProviderRef{Name: "no-pricing-provider"}
-		pricing, err := resolveProviderRefEntry(ctx, log, c, testNamespace, ref, "default", arenaCfg)
+		pricing, err := resolveProviderRefEntry(testRC(ctx, log, c, testNamespace, nil, arenaCfg), ref, "default")
 		require.NoError(t, err)
 		assert.Nil(t, pricing)
 	})
@@ -711,7 +734,7 @@ func TestResolveAgentRefEntry(t *testing.T) {
 			"other-agent": "ws://other:8080/ws",
 		}
 
-		_, err := resolveAgentRefEntry(ctx, log, "missing-agent", "default", agentWSURLs, arenaCfg)
+		_, err := resolveAgentRefEntry(testRC(ctx, log, nil, "", agentWSURLs, arenaCfg), "missing-agent", "default")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "missing-agent")
 		assert.Contains(t, err.Error(), "ARENA_AGENT_WS_URLS")
@@ -723,7 +746,7 @@ func TestResolveAgentRefEntry(t *testing.T) {
 			ProviderGroups:  make(map[string]string),
 		}
 
-		_, err := resolveAgentRefEntry(ctx, log, "my-agent", "default", nil, arenaCfg)
+		_, err := resolveAgentRefEntry(testRC(ctx, log, nil, "", nil, arenaCfg), "my-agent", "default")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "my-agent")
 	})
@@ -734,7 +757,7 @@ func TestResolveAgentRefEntry(t *testing.T) {
 			ProviderGroups:  make(map[string]string),
 		}
 
-		_, err := resolveAgentRefEntry(ctx, log, "agent-x", "my-group", map[string]string{}, arenaCfg)
+		_, err := resolveAgentRefEntry(testRC(ctx, log, nil, "", map[string]string{}, arenaCfg), "agent-x", "my-group")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "my-group")
 	})
@@ -748,7 +771,7 @@ func TestResolveAgentRefEntry(t *testing.T) {
 			"my-agent": "ws://my-agent.default.svc:8080/ws",
 		}
 
-		fp, err := resolveAgentRefEntry(ctx, log, "my-agent", "fleet-group", agentWSURLs, arenaCfg)
+		fp, err := resolveAgentRefEntry(testRC(ctx, log, nil, "", agentWSURLs, arenaCfg), "my-agent", "fleet-group")
 		require.NoError(t, err)
 		require.NotNil(t, fp)
 
@@ -778,7 +801,8 @@ func TestResolveAgentRefEntryWithID(t *testing.T) {
 			ProviderGroups:  make(map[string]string),
 		}
 
-		_, err := resolveAgentRefEntryWithID(ctx, log, "missing-agent", "my-id", "group1", map[string]string{}, arenaCfg)
+		rc := testRC(ctx, log, nil, "", map[string]string{}, arenaCfg)
+		_, err := resolveAgentRefEntryWithID(rc, "missing-agent", "my-id", "group1")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "missing-agent")
 		assert.Contains(t, err.Error(), "group1")
@@ -793,7 +817,8 @@ func TestResolveAgentRefEntryWithID(t *testing.T) {
 			"my-agent": "ws://my-agent.default.svc:8080/ws",
 		}
 
-		fp, err := resolveAgentRefEntryWithID(ctx, log, "my-agent", "custom-id", "selfplay", agentWSURLs, arenaCfg)
+		rc := testRC(ctx, log, nil, "", agentWSURLs, arenaCfg)
+		fp, err := resolveAgentRefEntryWithID(rc, "my-agent", "custom-id", "selfplay")
 		require.NoError(t, err)
 		require.NotNil(t, fp)
 
@@ -825,7 +850,7 @@ func TestResolveProviderRefEntryWithID(t *testing.T) {
 		}
 
 		ref := v1alpha1.ProviderRef{Name: "nonexistent"}
-		_, err := resolveProviderRefEntryWithID(ctx, log, c, testNamespace, ref, "my-id", "grp", arenaCfg)
+		_, err := resolveProviderRefEntryWithID(testRC(ctx, log, c, testNamespace, nil, arenaCfg), ref, "my-id", "grp")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "nonexistent")
 	})
@@ -859,7 +884,7 @@ func TestResolveProviderRefEntryWithID(t *testing.T) {
 		}
 
 		ref := v1alpha1.ProviderRef{Name: "full-provider"}
-		_, err := resolveProviderRefEntryWithID(ctx, log, c, testNamespace, ref, "custom-id", "judge", arenaCfg)
+		_, err := resolveProviderRefEntryWithID(testRC(ctx, log, c, testNamespace, nil, arenaCfg), ref, "custom-id", "judge")
 		require.NoError(t, err)
 
 		require.Contains(t, arenaCfg.LoadedProviders, "custom-id")
@@ -889,7 +914,7 @@ func TestResolveEntry(t *testing.T) {
 		}
 		entry := &arenaProviderEntry{}
 
-		fp, _, err := resolveEntry(ctx, log, nil, testNamespace, "group", "", entry, nil, arenaCfg)
+		fp, _, err := resolveEntry(testRC(ctx, log, nil, testNamespace, nil, arenaCfg), "group", "", entry)
 		require.NoError(t, err)
 		assert.Nil(t, fp)
 	})
@@ -906,7 +931,7 @@ func TestResolveEntry(t *testing.T) {
 			AgentRef: &v1alpha1.LocalObjectReference{Name: "agent-a"},
 		}
 
-		fp, _, err := resolveEntry(ctx, log, nil, testNamespace, "grp", "my-config-id", entry, agentWSURLs, arenaCfg)
+		fp, _, err := resolveEntry(testRC(ctx, log, nil, testNamespace, agentWSURLs, arenaCfg), "grp", "my-config-id", entry)
 		require.NoError(t, err)
 		require.NotNil(t, fp)
 		assert.Equal(t, "my-config-id", fp.id)
@@ -924,7 +949,7 @@ func TestResolveEntry(t *testing.T) {
 			AgentRef: &v1alpha1.LocalObjectReference{Name: "agent-b"},
 		}
 
-		fp, _, err := resolveEntry(ctx, log, nil, testNamespace, "grp", "", entry, agentWSURLs, arenaCfg)
+		fp, _, err := resolveEntry(testRC(ctx, log, nil, testNamespace, agentWSURLs, arenaCfg), "grp", "", entry)
 		require.NoError(t, err)
 		require.NotNil(t, fp)
 		assert.Equal(t, sanitizeID("agent-agent-b"), fp.id)
