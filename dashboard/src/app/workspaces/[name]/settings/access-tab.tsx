@@ -33,6 +33,11 @@ const WORKSPACE_ROLES: WorkspaceRole[] = ["viewer", "editor", "owner"];
 const ELEVATED_ROLES: WorkspaceRole[] = ["editor", "owner"];
 const DEFAULT_ROLE: WorkspaceRole = "viewer";
 
+function formatExpiry(expires?: string): string {
+  if (!expires) return "Never";
+  return new Date(expires).toLocaleDateString();
+}
+
 interface AccessTabProps {
   workspace: Workspace;
   onPatch: (updates: Partial<WorkspaceSpec>) => void;
@@ -208,11 +213,6 @@ function DirectGrantsCard({ workspace, onPatch }: AccessTabProps) {
     });
     setNewUser("");
     setNewRole(DEFAULT_ROLE);
-  }
-
-  function formatExpiry(expires?: string): string {
-    if (!expires) return "Never";
-    return new Date(expires).toLocaleDateString();
   }
 
   return (

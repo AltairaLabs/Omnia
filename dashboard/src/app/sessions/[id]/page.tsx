@@ -459,7 +459,7 @@ export default function SessionDetailPage({
         });
       }
       exportItems
-        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+        .toSorted((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
         .forEach((item) => item.render());
 
       content = lines.join("\n");
@@ -955,7 +955,7 @@ function AggregatedEvalSection({ title, evals }: Readonly<{ title: string; evals
         </TableHeader>
         <TableBody>
           {evals
-            .sort((a, b) => a.passRate - b.passRate)
+            .toSorted((a, b) => a.passRate - b.passRate)
             .map((e) => (
               <AggregatedEvalRow key={e.key} eval_={e} />
             ))}
