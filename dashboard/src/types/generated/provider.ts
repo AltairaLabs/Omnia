@@ -105,7 +105,10 @@ export interface ProviderSpec {
    * corresponding Bedrock model ID by PromptKit. */
   model?: string;
   /** platform defines hyperscaler hosting configuration.
-   * Only valid with provider types claude (bedrock), openai (azure), or gemini (vertex). */
+   * Valid with provider types claude, openai, or gemini on any of bedrock,
+   * vertex, or azure. Auth method is constrained by platform, not by provider
+   * type (see spec.auth). Request routing for non-canonical combinations
+   * depends on PromptKit runtime support — see PromptKit#1009. */
   platform?: {
     /** endpoint overrides the default platform API endpoint.
      * Required for azure (the Azure OpenAI resource URL). */

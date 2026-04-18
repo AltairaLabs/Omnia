@@ -1822,6 +1822,47 @@ var _ = Describe("Provider Controller", func() {
 			Expect(credCondition.Reason).To(Equal("NoCredentialRequired"))
 		})
 
+		It("should succeed for claude on vertex with workloadIdentity", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "claude-vertex-wi",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type:    omniav1alpha1.PlatformTypeVertex,
+						Region:  "us-east5",
+						Project: "test-project",
+					},
+					Auth: &omniav1alpha1.AuthConfig{
+						Type:                omniav1alpha1.AuthMethodWorkloadIdentity,
+						ServiceAccountEmail: "omnia-vertex@test-project.iam.gserviceaccount.com",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      provider.Name,
+					Namespace: providerNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated omniav1alpha1.Provider
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: providerNamespace}, &updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
+		})
+
 		It("should succeed for gemini on vertex with workloadIdentity", func() {
 			provider = &omniav1alpha1.Provider{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1875,6 +1916,45 @@ var _ = Describe("Provider Controller", func() {
 						Type:     omniav1alpha1.PlatformTypeAzure,
 						Region:   "eastus",
 						Endpoint: "https://example.openai.azure.com",
+					},
+					Auth: &omniav1alpha1.AuthConfig{
+						Type: omniav1alpha1.AuthMethodWorkloadIdentity,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      provider.Name,
+					Namespace: providerNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated omniav1alpha1.Provider
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: providerNamespace}, &updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
+		})
+
+		It("should succeed for openai on bedrock with workloadIdentity", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "openai-bedrock-wi",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeOpenAI,
+					Model: "gpt-4o",
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type:   omniav1alpha1.PlatformTypeBedrock,
+						Region: "us-east-1",
 					},
 					Auth: &omniav1alpha1.AuthConfig{
 						Type: omniav1alpha1.AuthMethodWorkloadIdentity,

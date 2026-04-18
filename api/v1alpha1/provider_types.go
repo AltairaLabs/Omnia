@@ -171,9 +171,6 @@ type AuthConfig struct {
 // +kubebuilder:validation:XValidation:rule="!(has(self.secretRef) && has(self.credential))",message="secretRef and credential are mutually exclusive; use credential.secretRef instead"
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || (self.type in ['claude', 'openai', 'gemini'])",message="platform is only valid for provider types claude, openai, or gemini"
 // +kubebuilder:validation:XValidation:rule="has(self.platform) == has(self.auth)",message="spec.platform and spec.auth must be set together"
-// +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'bedrock' || self.type == 'claude'",message="platform.type bedrock is only valid with provider type claude"
-// +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'vertex' || self.type == 'gemini'",message="platform.type vertex is only valid with provider type gemini"
-// +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'azure' || self.type == 'openai'",message="platform.type azure is only valid with provider type openai"
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'bedrock' || self.auth.type in ['workloadIdentity', 'accessKey']",message="platform.type bedrock requires auth.type of workloadIdentity or accessKey"
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'vertex' || self.auth.type in ['workloadIdentity', 'serviceAccount']",message="platform.type vertex requires auth.type of workloadIdentity or serviceAccount"
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'azure' || self.auth.type in ['workloadIdentity', 'servicePrincipal']",message="platform.type azure requires auth.type of workloadIdentity or servicePrincipal"
@@ -203,7 +200,10 @@ type ProviderSpec struct {
 	Headers map[string]string `json:"headers,omitempty"`
 
 	// platform defines hyperscaler hosting configuration.
-	// Only valid with provider types claude (bedrock), openai (azure), or gemini (vertex).
+	// Valid with provider types claude, openai, or gemini on any of bedrock,
+	// vertex, or azure. Auth method is constrained by platform, not by provider
+	// type (see spec.auth). Request routing for non-canonical combinations
+	// depends on PromptKit runtime support — see PromptKit#1009.
 	// +optional
 	Platform *PlatformConfig `json:"platform,omitempty"`
 
