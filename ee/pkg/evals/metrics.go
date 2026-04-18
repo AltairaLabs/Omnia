@@ -179,20 +179,35 @@ func (m *WorkerMetrics) SetStreamLag(stream string, lag float64) {
 // NoOpWorkerMetrics is a no-op implementation for when metrics are disabled.
 type NoOpWorkerMetrics struct{}
 
-// RecordEventReceived is a no-op.
-func (n *NoOpWorkerMetrics) RecordEventReceived(_ string) {}
+// RecordEventReceived is a no-op for the metrics-disabled build. See
+// WorkerMetrics for the real implementation.
+func (n *NoOpWorkerMetrics) RecordEventReceived(_ string) {
+	// Intentionally empty — NoOpWorkerMetrics is the null-object impl used
+	// when worker metrics are disabled (WORKER_METRICS_DISABLED or missing
+	// Prometheus registry). All record methods drop inputs on the floor.
+}
 
-// RecordEvalExecuted is a no-op.
-func (n *NoOpWorkerMetrics) RecordEvalExecuted(_, _, _ string, _ float64) {}
+// RecordEvalExecuted is a no-op for the metrics-disabled build.
+func (n *NoOpWorkerMetrics) RecordEvalExecuted(_, _, _ string, _ float64) {
+	// Intentionally empty — see RecordEventReceived for rationale.
+}
 
-// RecordSamplingDecision is a no-op.
-func (n *NoOpWorkerMetrics) RecordSamplingDecision(_, _ string) {}
+// RecordSamplingDecision is a no-op for the metrics-disabled build.
+func (n *NoOpWorkerMetrics) RecordSamplingDecision(_, _ string) {
+	// Intentionally empty — see RecordEventReceived for rationale.
+}
 
-// RecordEventProcessing is a no-op.
-func (n *NoOpWorkerMetrics) RecordEventProcessing(_ string, _ float64) {}
+// RecordEventProcessing is a no-op for the metrics-disabled build.
+func (n *NoOpWorkerMetrics) RecordEventProcessing(_ string, _ float64) {
+	// Intentionally empty — see RecordEventReceived for rationale.
+}
 
-// RecordResultsWritten is a no-op.
-func (n *NoOpWorkerMetrics) RecordResultsWritten(_ int, _ bool) {}
+// RecordResultsWritten is a no-op for the metrics-disabled build.
+func (n *NoOpWorkerMetrics) RecordResultsWritten(_ int, _ bool) {
+	// Intentionally empty — see RecordEventReceived for rationale.
+}
 
-// SetStreamLag is a no-op.
-func (n *NoOpWorkerMetrics) SetStreamLag(_ string, _ float64) {}
+// SetStreamLag is a no-op for the metrics-disabled build.
+func (n *NoOpWorkerMetrics) SetStreamLag(_ string, _ float64) {
+	// Intentionally empty — see RecordEventReceived for rationale.
+}

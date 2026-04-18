@@ -125,7 +125,9 @@ func retryWithBackoff(
 // caller to avoid context leaks.
 func withAttemptTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	if timeout <= 0 {
-		return ctx, func() {}
+		// No timeout requested; return a no-op cancel so callers can always
+		// `defer cancel()` without a nil check.
+		return ctx, func() { /* no-op cancel — no derived context to cancel */ }
 	}
 	return context.WithTimeout(ctx, timeout)
 }
