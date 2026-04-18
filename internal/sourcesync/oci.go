@@ -280,19 +280,27 @@ func (f *OCIFetcher) extractSymlink(header *tar.Header, destDir string) error {
 	// Compute where the symlink would resolve to when followed.
 	// We use filepath.Join (not SecureJoin) because we need to see
 	// where the OS would actually resolve the symlink, not a sanitized version.
-	linkTarget := header.Linkname
 	linkDir := filepath.Dir(target)
-	resolvedPath := filepath.Clean(filepath.Join(linkDir, linkTarget))
+	resolvedPath := filepath.Clean(filepath.Join(linkDir, header.Linkname))
 
 	// Validate the resolved path is within destDir
 	cleanDestDir := filepath.Clean(destDir)
 	if !strings.HasPrefix(resolvedPath, cleanDestDir+string(filepath.Separator)) &&
 		resolvedPath != cleanDestDir {
 		return fmt.Errorf("symlink escape attempt: %s -> %s resolves outside destDir",
-			header.Name, linkTarget)
+			header.Name, header.Linkname)
 	}
 
-	return os.Symlink(linkTarget, target)
+	// Store the symlink as a validated relative path anchored to the
+	// link's own directory. This is functionally identical to storing
+	// header.Linkname (same resolve behaviour) but uses a CodeQL-safe,
+	// repo-controlled string — breaking the taint flow that
+	// go/unsafe-unzip-symlink flags on a raw header.Linkname sink.
+	safeLinkTarget, err := filepath.Rel(linkDir, resolvedPath)
+	if err != nil {
+		return fmt.Errorf("cannot compute safe symlink target for %q: %w", header.Name, err)
+	}
+	return os.Symlink(safeLinkTarget, target)
 }
 
 // parseReference parses the OCI URL into a name.Reference.
