@@ -110,7 +110,6 @@ const CANONICAL_ROUTED: ReadonlySet<string> = new Set([
   "gemini/vertex",
 ]);
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed by Task 4 warning banner
 function isCanonicalRouted(
   providerType: ProviderSpec["type"],
   platformType: string,
@@ -634,6 +633,26 @@ function PlatformFields({
 
       {form.platformType && (
         <>
+          {!isCanonicalRouted(form.providerType, form.platformType) && (
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                Request routing for {form.providerType} on {form.platformType} is not
+                yet supported by the PromptKit runtime. Credentials will resolve, but
+                requests will not reach the correct endpoint until{" "}
+                <a
+                  href="https://github.com/AltairaLabs/PromptKit/issues/1009"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline"
+                >
+                  PromptKit#1009
+                </a>{" "}
+                lands.
+              </AlertDescription>
+            </Alert>
+          )}
+
           {(form.platformType === "bedrock" || form.platformType === "vertex") && (
             <div className="space-y-2">
               <Label htmlFor="platform-region">Region</Label>
