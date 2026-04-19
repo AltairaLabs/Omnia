@@ -28,7 +28,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { AlertCircle, Loader2, ChevronDown } from "lucide-react";
+import { AlertCircle, Loader2, ChevronDown, Plus, Trash2 } from "lucide-react";
 import type { Provider, ProviderSpec } from "@/types/generated/provider";
 
 // --- Types ---
@@ -67,6 +67,8 @@ interface FormState {
   authServiceAccountEmail: string;
   authSecretName: string;
   authSecretKey: string;
+  // Custom HTTP headers (gateway providers like OpenRouter, tenant routing, etc.)
+  headerEntries: Array<{ id: string; key: string; value: string }>;
 }
 
 // --- Constants ---
@@ -139,6 +141,15 @@ function isLocal(type: ProviderSpec["type"]): boolean {
   return LOCAL_TYPES.has(type);
 }
 
+// Monotonic counter for stable React keys on added header rows; reset only
+// on full page reload, which is fine because the dialog itself remounts via
+// `formResetKey` whenever it opens.
+let nextHeaderEntryId = 0;
+function makeHeaderEntryId(): string {
+  nextHeaderEntryId += 1;
+  return `h-${nextHeaderEntryId}`;
+}
+
 function getInitialFormState(provider?: Provider | null): FormState {
   if (provider) {
     const spec = provider.spec;
@@ -176,6 +187,11 @@ function getInitialFormState(provider?: Provider | null): FormState {
       authServiceAccountEmail: auth?.serviceAccountEmail ?? "",
       authSecretName: auth?.credentialsSecretRef?.name ?? "",
       authSecretKey: auth?.credentialsSecretRef?.key ?? "",
+      headerEntries: Object.entries(spec.headers ?? {}).map(([key, value]) => ({
+        id: makeHeaderEntryId(),
+        key,
+        value,
+      })),
     };
   }
 
@@ -206,6 +222,7 @@ function getInitialFormState(provider?: Provider | null): FormState {
     authServiceAccountEmail: "",
     authSecretName: "",
     authSecretKey: "",
+    headerEntries: [],
   };
 }
 
@@ -301,6 +318,15 @@ function buildDefaults(form: FormState): ProviderSpec["defaults"] | undefined {
   return Object.keys(defaults).length > 0 ? defaults : undefined;
 }
 
+function buildHeaders(form: FormState): ProviderSpec["headers"] | undefined {
+  const headers: Record<string, string> = {};
+  for (const { key, value } of form.headerEntries) {
+    const k = key.trim();
+    if (k) headers[k] = value;
+  }
+  return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
 function buildPricing(form: FormState): ProviderSpec["pricing"] | undefined {
   const pricing: NonNullable<ProviderSpec["pricing"]> = {};
   if (form.inputCostPer1K) pricing.inputCostPer1K = form.inputCostPer1K;
@@ -360,6 +386,9 @@ function buildSpec(form: FormState): ProviderSpec {
 
   spec.defaults = buildDefaults(form);
   spec.pricing = buildPricing(form);
+
+  const headers = buildHeaders(form);
+  if (headers) spec.headers = headers;
 
   return spec;
 }
@@ -569,6 +598,86 @@ function PricingFields({
             />
           </div>
         </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function HeadersFields({
+  form,
+  updateForm,
+}: Readonly<{
+  form: FormState;
+  updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
+}>) {
+  const [open, setOpen] = useState(form.headerEntries.length > 0);
+
+  const updateEntry = (index: number, field: "key" | "value", next: string) => {
+    const entries = form.headerEntries.map((entry, i) =>
+      i === index ? { ...entry, [field]: next } : entry,
+    );
+    updateForm("headerEntries", entries);
+  };
+
+  const addEntry = () => {
+    updateForm("headerEntries", [
+      ...form.headerEntries,
+      { id: makeHeaderEntryId(), key: "", value: "" },
+    ]);
+  };
+
+  const removeEntry = (index: number) => {
+    updateForm(
+      "headerEntries",
+      form.headerEntries.filter((_, i) => i !== index),
+    );
+  };
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <Button variant="ghost" className="w-full justify-between px-0 font-semibold">
+          HTTP Headers
+          <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-3 pt-2">
+        <p className="text-sm text-muted-foreground">
+          Custom HTTP headers sent on every provider request. Used by gateway providers
+          (e.g., OpenRouter&rsquo;s <code>HTTP-Referer</code> / <code>X-Title</code>) or tenant
+          routing. Collisions with built-in provider headers are rejected by PromptKit.
+        </p>
+        {form.headerEntries.map((entry, index) => (
+          <div key={entry.id} className="flex gap-2 items-start">
+            <Input
+              aria-label={`Header ${index + 1} name`}
+              placeholder="HTTP-Referer"
+              value={entry.key}
+              onChange={(e) => updateEntry(index, "key", e.target.value)}
+              className="flex-1"
+            />
+            <Input
+              aria-label={`Header ${index + 1} value`}
+              placeholder="https://my-app.example.com"
+              value={entry.value}
+              onChange={(e) => updateEntry(index, "value", e.target.value)}
+              className="flex-1"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label={`Remove header ${index + 1}`}
+              onClick={() => removeEntry(index)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        ))}
+        <Button type="button" variant="outline" size="sm" onClick={addEntry}>
+          <Plus className="h-4 w-4 mr-1" />
+          Add header
+        </Button>
       </CollapsibleContent>
     </Collapsible>
   );
@@ -1023,6 +1132,9 @@ function ProviderDialogForm({
 
           {/* Pricing (collapsible) */}
           <PricingFields form={formState} updateForm={updateForm} />
+
+          {/* Headers (collapsible) */}
+          <HeadersFields form={formState} updateForm={updateForm} />
         </div>
       </div>
 

@@ -1066,4 +1066,124 @@ describe("ProviderDialog", () => {
       ).not.toBeInTheDocument();
     });
   });
+
+  describe("HTTP headers", () => {
+    it("round-trips headers via edit mode", async () => {
+      vi.useRealTimers();
+
+      const provider = createMockProvider({
+        spec: {
+          type: "claude",
+          model: "claude-sonnet-4-20250514",
+          credential: { secretRef: { name: "my-key" } },
+          headers: {
+            "HTTP-Referer": "https://my-app.example.com",
+            "X-Title": "My App",
+          },
+        },
+      });
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} provider={provider} />
+        </TestWrapper>
+      );
+
+      expect(
+        (screen.getByLabelText("Header 1 name") as HTMLInputElement).value
+      ).toBe("HTTP-Referer");
+      expect(
+        (screen.getByLabelText("Header 1 value") as HTMLInputElement).value
+      ).toBe("https://my-app.example.com");
+      expect(
+        (screen.getByLabelText("Header 2 name") as HTMLInputElement).value
+      ).toBe("X-Title");
+
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+      await waitFor(() => {
+        expect(mockUpdateProvider).toHaveBeenCalledWith(
+          "test-provider",
+          expect.objectContaining({
+            headers: {
+              "HTTP-Referer": "https://my-app.example.com",
+              "X-Title": "My App",
+            },
+          })
+        );
+      });
+    });
+
+    it("adds and removes header rows and submits non-empty entries only", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText("Name"), "gw-provider");
+      await user.type(screen.getByLabelText("Secret Name"), "my-key");
+
+      // Expand the HTTP Headers section
+      fireEvent.click(screen.getByRole("button", { name: /http headers/i }));
+
+      // Add two header rows
+      fireEvent.click(screen.getByRole("button", { name: /add header/i }));
+      fireEvent.click(screen.getByRole("button", { name: /add header/i }));
+
+      await user.type(screen.getByLabelText("Header 1 name"), "HTTP-Referer");
+      await user.type(
+        screen.getByLabelText("Header 1 value"),
+        "https://my-app.example.com"
+      );
+
+      // Leave row 2 empty — it should be pruned.
+
+      // Add a third, fill it, then delete row 2 (still empty) for good measure
+      fireEvent.click(screen.getByRole("button", { name: /add header/i }));
+      await user.type(screen.getByLabelText("Header 3 name"), "X-Title");
+      await user.type(screen.getByLabelText("Header 3 value"), "My App");
+
+      fireEvent.click(screen.getByRole("button", { name: /remove header 2/i }));
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(mockCreateProvider).toHaveBeenCalledWith(
+          "gw-provider",
+          expect.objectContaining({
+            headers: {
+              "HTTP-Referer": "https://my-app.example.com",
+              "X-Title": "My App",
+            },
+          })
+        );
+      });
+    });
+
+    it("omits spec.headers entirely when the section has no entries", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText("Name"), "no-headers-provider");
+      await user.type(screen.getByLabelText("Secret Name"), "my-key");
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(mockCreateProvider).toHaveBeenCalled();
+      });
+
+      expect(mockCreateProvider.mock.calls[0][1]).not.toHaveProperty("headers");
+    });
+  });
 });
