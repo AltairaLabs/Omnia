@@ -865,4 +865,205 @@ describe("ProviderDialog", () => {
       expect(screen.getByText("Credential Source")).toBeInTheDocument();
     });
   });
+
+  describe("platform-hosted providers (UI)", () => {
+    it("creates claude+bedrock+workloadIdentity with roleArn", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText("Name"), "bedrock-claude");
+      await user.type(screen.getByLabelText("Model"), "claude-sonnet-4-20250514");
+
+      fireEvent.click(screen.getByLabelText("Platform"));
+      fireEvent.click(await screen.findByRole("option", { name: /AWS Bedrock/i }));
+
+      await user.type(screen.getByLabelText("Region"), "us-east-1");
+
+      fireEvent.click(screen.getByLabelText("Auth"));
+      fireEvent.click(await screen.findByRole("option", { name: "workloadIdentity" }));
+
+      await user.type(
+        screen.getByLabelText(/Role ARN/i),
+        "arn:aws:iam::123456789012:role/omnia-bedrock"
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(mockCreateProvider).toHaveBeenCalledWith(
+          "bedrock-claude",
+          expect.objectContaining({
+            type: "claude",
+            model: "claude-sonnet-4-20250514",
+            platform: { type: "bedrock", region: "us-east-1" },
+            auth: {
+              type: "workloadIdentity",
+              roleArn: "arn:aws:iam::123456789012:role/omnia-bedrock",
+            },
+          })
+        );
+      });
+
+      expect(mockCreateProvider.mock.calls[0][1]).not.toHaveProperty("credential");
+    });
+
+    it("creates claude+azure+servicePrincipal and shows the routing warning", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText("Name"), "azure-claude");
+
+      fireEvent.click(screen.getByLabelText("Platform"));
+      fireEvent.click(await screen.findByRole("option", { name: /Azure AI Foundry/i }));
+
+      await user.type(screen.getByLabelText("Endpoint"), "https://example.openai.azure.com");
+
+      fireEvent.click(screen.getByLabelText("Auth"));
+      fireEvent.click(await screen.findByRole("option", { name: "servicePrincipal" }));
+
+      await user.type(screen.getByLabelText("Credentials Secret Name"), "azure-creds");
+
+      expect(screen.getByText(/Request routing for claude on azure/i)).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(mockCreateProvider).toHaveBeenCalledWith(
+          "azure-claude",
+          expect.objectContaining({
+            type: "claude",
+            platform: { type: "azure", endpoint: "https://example.openai.azure.com" },
+            auth: {
+              type: "servicePrincipal",
+              credentialsSecretRef: { name: "azure-creds" },
+            },
+          })
+        );
+      });
+    });
+
+    it("hides the routing warning for canonical combos", async () => {
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText("Name"), "gemini-vertex");
+
+      // Switch provider type to gemini
+      fireEvent.click(screen.getByLabelText("Provider Type"));
+      fireEvent.click(await screen.findByRole("option", { name: /Gemini/i }));
+
+      fireEvent.click(screen.getByLabelText("Platform"));
+      fireEvent.click(await screen.findByRole("option", { name: /GCP Vertex/i }));
+
+      expect(
+        screen.queryByText(/Request routing for gemini on vertex is not yet supported/i)
+      ).not.toBeInTheDocument();
+    });
+
+    it("hides the Credentials section when a platform is configured", async () => {
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText("Name"), "test-cred-hide");
+
+      // Credentials section is visible by default for claude
+      expect(screen.getByText("Credentials")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByLabelText("Platform"));
+      fireEvent.click(await screen.findByRole("option", { name: /AWS Bedrock/i }));
+
+      expect(screen.queryByText("Credential Source")).not.toBeInTheDocument();
+    });
+
+    it("rejects vertex without project", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText("Name"), "bad-vertex");
+
+      fireEvent.click(screen.getByLabelText("Platform"));
+      fireEvent.click(await screen.findByRole("option", { name: /GCP Vertex/i }));
+
+      await user.type(screen.getByLabelText("Region"), "us-central1");
+
+      fireEvent.click(screen.getByLabelText("Auth"));
+      fireEvent.click(await screen.findByRole("option", { name: "workloadIdentity" }));
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Project is required for vertex/i)).toBeInTheDocument();
+      });
+      expect(mockCreateProvider).not.toHaveBeenCalled();
+    });
+
+    it("only shows bedrock-compatible auth options for bedrock", async () => {
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      fireEvent.click(screen.getByLabelText("Platform"));
+      fireEvent.click(await screen.findByRole("option", { name: /AWS Bedrock/i }));
+
+      fireEvent.click(screen.getByLabelText("Auth"));
+
+      expect(await screen.findByRole("option", { name: "workloadIdentity" })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: "accessKey" })).toBeInTheDocument();
+      expect(screen.queryByRole("option", { name: "serviceAccount" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("option", { name: "servicePrincipal" })).not.toBeInTheDocument();
+    });
+
+    it("does not show the routing warning for canonical combos in edit mode", () => {
+      const provider = createMockProvider({
+        spec: {
+          type: "claude",
+          model: "claude-sonnet-4-20250514",
+          platform: { type: "bedrock", region: "us-east-1" },
+          auth: {
+            type: "workloadIdentity",
+          },
+        },
+      });
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} provider={provider} />
+        </TestWrapper>
+      );
+
+      expect(
+        screen.queryByText(/is not yet supported by the PromptKit runtime/i)
+      ).not.toBeInTheDocument();
+    });
+  });
 });
