@@ -17,6 +17,11 @@ resources:
     cpu: 100m
     memory: 192Mi
 
+# Single-replica dev: disable PDB (chart guard in templates/pdb.yaml refuses
+# minAvailable:1 with replicaCount:1 because it would block every eviction).
+podDisruptionBudget:
+  enabled: false
+
 # Dashboard settings
 dashboard:
   enabled: true
