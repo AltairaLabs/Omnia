@@ -142,15 +142,29 @@ Hyperscaler-specific configuration. Required for provider types `bedrock`, `vert
 | `platform.project` | string | No | GCP project ID — required when `platform.type` is `vertex`. |
 | `platform.endpoint` | string | No | Override the default platform API endpoint — required when `platform.type` is `azure`. |
 
-**Provider-to-platform matrix (enforced by CEL):**
+**Provider × platform combinations:**
 
-| `spec.type` | allowed `platform.type` |
-|-------------|--------------------------|
-| `claude`    | `bedrock` |
-| `openai`    | `azure` |
-| `gemini`    | `vertex` |
+Any of `claude`, `openai`, or `gemini` may be configured on any of `bedrock`, `vertex`, or `azure`. The wire protocol (`spec.type`) and the hosting platform (`spec.platform.type`) are independent — the CRD admits all nine combinations.
 
-Setting `spec.platform` on any other provider type is rejected at admission. Setting `spec.platform` without `spec.auth` (or vice versa) is also rejected.
+Setting `spec.platform` on any other provider type (e.g., `vllm`, `ollama`, `mock`) is rejected at admission. Setting `spec.platform` without `spec.auth` (or vice versa) is also rejected.
+
+The authentication method is determined by the platform (see [`auth`](#auth) below):
+
+| platform | allowed auth methods                    |
+|----------|-----------------------------------------|
+| bedrock  | `workloadIdentity`, `accessKey`         |
+| vertex   | `workloadIdentity`, `serviceAccount`    |
+| azure    | `workloadIdentity`, `servicePrincipal`  |
+
+##### Runtime support
+
+Today the PromptKit runtime routes requests correctly only for these three canonical combinations:
+
+- `claude` on `bedrock`
+- `openai` on `azure`
+- `gemini` on `vertex`
+
+The Provider CR accepts all nine combinations, but the other six will resolve credentials successfully and then route requests to the wrong endpoint until [PromptKit#1009](https://github.com/AltairaLabs/PromptKit/issues/1009) lands. The dashboard surfaces an inline warning when you pick one of those combinations.
 
 #### Claude on AWS Bedrock
 

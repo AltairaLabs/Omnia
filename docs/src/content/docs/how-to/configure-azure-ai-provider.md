@@ -5,6 +5,8 @@ sidebar:
   order: 18
 ---
 
+> **Note:** This guide uses the canonical provider type for this platform (`claude` for Bedrock, `gemini` for Vertex, `openai` for Azure). Other provider types are configurable but their request routing depends on [PromptKit#1009](https://github.com/AltairaLabs/PromptKit/issues/1009).
+
 This guide covers how to configure an Omnia Provider to use Azure AI Services (Azure OpenAI) for LLM access. Azure AI providers support two authentication methods: **Azure AD Workload Identity** for production use, and **service principals** for simpler setups.
 
 ## Prerequisites

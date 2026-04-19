@@ -5,6 +5,8 @@ sidebar:
   order: 17
 ---
 
+> **Note:** This guide uses the canonical provider type for this platform (`claude` for Bedrock, `gemini` for Vertex, `openai` for Azure). Other provider types are configurable but their request routing depends on [PromptKit#1009](https://github.com/AltairaLabs/PromptKit/issues/1009).
+
 This guide covers how to configure an Omnia Provider to use Google Vertex AI for LLM access. Vertex AI providers support two authentication methods: **GKE Workload Identity** for production use, and **service account keys** for simpler setups.
 
 ## Prerequisites
