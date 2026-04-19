@@ -769,14 +769,36 @@ if ENABLE_ENTRA:
         fail('ENABLE_ENTRA=true but %s is missing. Run ./scripts/setup-entra-dev.sh --create-secret first.' % _entra_values)
     helm_values.append(_entra_values)
 
-# Deploy the Helm chart with development images
-k8s_yaml(helm(
+# Install CRDs via server-side apply. Client-side apply (what k8s_yaml uses)
+# can't handle the 262144-byte last-applied-configuration annotation limit
+# for large CRDs that embed PodOverrides schemas (agentruntimes ~763K,
+# workspaces ~567K). See charts/omnia/CLAUDE.md rule #6. `make install`
+# does the equivalent `kubectl apply --server-side --force-conflicts`.
+local_resource(
+    'omnia-crds',
+    cmd='make install',
+    # Watch only the Go source — `make install` regenerates config/crd/bases/
+    # as a side-effect, so watching the output dir would cause a loop.
+    deps=['api/v1alpha1'],
+    labels=['setup'],
+)
+
+# Render the chart via Tilt's helm() (which injects the release namespace into
+# resources that omit it) and then strip CRD documents from the blob before
+# feeding to k8s_yaml — CRDs are already applied above via make install.
+# NOTE: when enterprise.enabled=true, EE CRDs under templates/enterprise/ are
+# also filtered out here, but make install only ships core CRDs; revisit the
+# setup resource if you need Tilt-based enterprise deploys.
+_rendered = str(helm(
     './charts/omnia',
     name='omnia',
     namespace='omnia-system',
     values=helm_values,
     set=helm_set,
 ))
+_docs = _rendered.split('\n---\n')
+_non_crd_docs = [d for d in _docs if 'kind: CustomResourceDefinition' not in d]
+k8s_yaml(blob('\n---\n'.join(_non_crd_docs)))
 
 # ============================================================================
 # Demo Charts (separate from main Omnia chart)
@@ -835,12 +857,14 @@ if ENABLE_DEMO or ENABLE_AUDIO_DEMO:
 # referenced in K8s YAML (they're passed as CLI args to the operator).
 # The restart-agents local_resource handles restarting agent pods when these change.
 
-# Build resource dependencies - when NFS is enabled, wait for storage to be ready
-controller_deps = []
-dashboard_deps = []
+# Build resource dependencies - when NFS is enabled, wait for storage to be ready.
+# `omnia-crds` must land before the operator/dashboard come up, or the operator's
+# first reconcile will fail watching CRDs that don't yet exist.
+controller_deps = ['omnia-crds']
+dashboard_deps = ['omnia-crds']
 if ENABLE_NFS:
-    controller_deps = ['csi-nfs-controller', 'omnia-nfs-server']
-    dashboard_deps = ['csi-nfs-controller', 'omnia-nfs-server']
+    controller_deps = ['omnia-crds', 'csi-nfs-controller', 'omnia-nfs-server']
+    dashboard_deps = ['omnia-crds', 'csi-nfs-controller', 'omnia-nfs-server']
 
 k8s_resource(
     'omnia-controller-manager',
@@ -856,7 +880,7 @@ k8s_resource(
         '3000:3000',  # Dashboard UI
         '3002:3002',  # WebSocket proxy for agent connections
     ],
-    resource_deps=dashboard_deps + ['sample-resources'],
+    resource_deps=dashboard_deps,
 )
 
 # Session API server and its dev Postgres
@@ -1043,11 +1067,11 @@ if ENABLE_ENTERPRISE:
         resource_deps=arena_deps + ['omnia-redis-master'],
     )
 
-    # PromptKit LSP server for YAML validation in project editor
+    # PromptKit LSP server for YAML validation in project editor. Independent
+    # of the dashboard — they talk over the network, not via startup order.
     k8s_resource(
         'omnia-promptkit-lsp',
         labels=['enterprise'],
-        resource_deps=['omnia-dashboard'],
     )
 
     # Eval worker for realtime eval execution (consumes Redis stream events)
