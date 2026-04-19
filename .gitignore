@@ -45,6 +45,7 @@ charts/omnia/values-dev-entra.yaml
 
 # Local backlog (not for public repo)
 docs/local-backlog/
+docs/superpowers/
 
 .mcp.json
 .worktrees/
