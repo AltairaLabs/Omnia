@@ -241,6 +241,15 @@
         "replicaCount": { "type": "integer", "minimum": 1 },
         "image":        { "$ref": "#/$defs/image" },
         "resources":    { "$ref": "#/$defs/resources" },
+        "serviceAccount": {
+          "type": "object",
+          "description": "Dedicated ServiceAccount for the dashboard with a narrower ClusterRole than the operator's manager role.",
+          "properties": {
+            "create": { "type": "boolean" },
+            "annotations": { "type": "object" },
+            "name": { "type": "string" }
+          }
+        },
         "service": {
           "type": "object",
           "properties": {

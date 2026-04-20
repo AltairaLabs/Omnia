@@ -545,6 +545,21 @@ dashboard:
   # -- Enable dashboard deployment
   enabled: true
 
+  # -- Dedicated ServiceAccount for the dashboard, bound to a scoped
+  # ClusterRole (omnia-dashboard-role) distinct from the operator's
+  # manager role. See templates/dashboard/{serviceaccount,clusterrole,
+  # clusterrolebinding}.yaml.
+  serviceAccount:
+    # -- Whether to create the dashboard ServiceAccount. Set to false when
+    # binding an externally-managed SA (e.g., cloud workload identity).
+    create: true
+    # -- Annotations to add to the dashboard ServiceAccount. Use this for
+    # cloud workload-identity bindings (AWS IRSA, GCP WI, Azure AD WI).
+    annotations: {}
+    # -- Override the generated ServiceAccount name. Leave empty to use
+    # "<release>-dashboard" (or "default" when create=false).
+    name: ""
+
   # -- Hide enterprise features completely instead of showing upgrade prompts
   # When false (default): Shows enterprise features with upgrade prompts when enterprise.enabled=false
   # When true: Hides enterprise features entirely from the UI

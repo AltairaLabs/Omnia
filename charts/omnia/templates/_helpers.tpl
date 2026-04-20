@@ -137,13 +137,22 @@ Dashboard image
 {{- end }}
 
 {{/*
-Dashboard service account name
+Dashboard service account name.
+
+The dashboard has its own ServiceAccount bound to a narrower ClusterRole
+(omnia-dashboard-role, see templates/dashboard/clusterrole.yaml) so that a
+dashboard compromise cannot escalate via the operator's manager ClusterRole.
+
+Lookup order:
+  1. .Values.dashboard.serviceAccount.name (explicit override)
+  2. Computed: "<release>-dashboard"
+  3. "default" when dashboard.serviceAccount.create=false and no name set.
 */}}
 {{- define "omnia.dashboard.serviceAccountName" -}}
-{{- if .Values.serviceAccount.create }}
-{{- default (include "omnia.dashboard.fullname" .) .Values.serviceAccount.name }}
+{{- if .Values.dashboard.serviceAccount.create }}
+{{- default (include "omnia.dashboard.fullname" .) .Values.dashboard.serviceAccount.name }}
 {{- else }}
-{{- default "default" .Values.serviceAccount.name }}
+{{- default "default" .Values.dashboard.serviceAccount.name }}
 {{- end }}
 {{- end }}
 

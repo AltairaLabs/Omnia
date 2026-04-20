@@ -33,7 +33,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ $po.serviceAccountName | default (include "omnia.serviceAccountName" .) }}
+      serviceAccountName: {{ $po.serviceAccountName | default (include "omnia.dashboard.serviceAccountName" .) }}
       {{- with $po.priorityClassName }}
       priorityClassName: {{ . }}
       {{- end }}
