@@ -175,6 +175,9 @@ type AuthConfig struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'vertex' || self.auth.type in ['workloadIdentity', 'serviceAccount']",message="platform.type vertex requires auth.type of workloadIdentity or serviceAccount"
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'azure' || self.auth.type in ['workloadIdentity', 'servicePrincipal']",message="platform.type azure requires auth.type of workloadIdentity or servicePrincipal"
 // +kubebuilder:validation:XValidation:rule="!(has(self.auth) && self.auth.type != 'workloadIdentity') || has(self.auth.credentialsSecretRef)",message="credentialsSecretRef is required for non-workloadIdentity auth types"
+// +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'vertex' || self.type != 'openai'",message="openai on vertex is not supported: Vertex AI does not host OpenAI as a partner"
+// +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'bedrock' || self.type != 'gemini'",message="gemini on bedrock is not supported: AWS Bedrock does not host Gemini"
+// +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'azure' || self.type != 'gemini'",message="gemini on azure is not supported: Azure AI Foundry does not host Gemini"
 type ProviderSpec struct {
 	// type specifies the provider wire protocol.
 	// +kubebuilder:validation:Required
@@ -200,10 +203,15 @@ type ProviderSpec struct {
 	Headers map[string]string `json:"headers,omitempty"`
 
 	// platform defines hyperscaler hosting configuration.
-	// Valid with provider types claude, openai, or gemini on any of bedrock,
-	// vertex, or azure. Auth method is constrained by platform, not by provider
-	// type (see spec.auth). Request routing for non-canonical combinations
-	// depends on PromptKit runtime support — see PromptKit#1009.
+	// Supported provider × platform pairs (PromptKit v1.4.6+):
+	//   claude:  bedrock, vertex, azure
+	//   openai:  azure, bedrock
+	//   gemini:  vertex
+	// Three pairs are rejected at admission because the hyperscaler does
+	// not host the model vendor as a partner endpoint:
+	//   openai × vertex, gemini × bedrock, gemini × azure.
+	// Auth method is constrained by platform, not by provider type (see
+	// spec.auth).
 	// +optional
 	Platform *PlatformConfig `json:"platform,omitempty"`
 

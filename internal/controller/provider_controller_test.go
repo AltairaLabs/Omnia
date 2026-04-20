@@ -2125,6 +2125,79 @@ var _ = Describe("Provider Controller", func() {
 			provider = nil // prevent cleanup of non-existent resource
 		})
 
+		It("should reject openai on vertex at CRD level", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "openai-vertex-rejected",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeOpenAI,
+					Model: "gpt-4o",
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type:    omniav1alpha1.PlatformTypeVertex,
+						Region:  "us-central1",
+						Project: "p",
+					},
+					Auth: &omniav1alpha1.AuthConfig{
+						Type: omniav1alpha1.AuthMethodWorkloadIdentity,
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, provider)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("openai on vertex is not supported"))
+			provider = nil
+		})
+
+		It("should reject gemini on bedrock at CRD level", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "gemini-bedrock-rejected",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeGemini,
+					Model: "gemini-2.0-flash",
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type:   omniav1alpha1.PlatformTypeBedrock,
+						Region: "us-east-1",
+					},
+					Auth: &omniav1alpha1.AuthConfig{
+						Type: omniav1alpha1.AuthMethodWorkloadIdentity,
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, provider)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("gemini on bedrock is not supported"))
+			provider = nil
+		})
+
+		It("should reject gemini on azure at CRD level", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "gemini-azure-rejected",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeGemini,
+					Model: "gemini-2.0-flash",
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type:     omniav1alpha1.PlatformTypeAzure,
+						Endpoint: "https://example.openai.azure.com",
+					},
+					Auth: &omniav1alpha1.AuthConfig{
+						Type: omniav1alpha1.AuthMethodWorkloadIdentity,
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, provider)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("gemini on azure is not supported"))
+			provider = nil
+		})
+
 		It("should succeed when accessKey auth has valid credentialsSecretRef", func() {
 			// Create the credentials secret with both AWS keys.
 			authSecret := &corev1.Secret{
