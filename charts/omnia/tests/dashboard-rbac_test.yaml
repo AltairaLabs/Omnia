@@ -1,0 +1,127 @@
+suite: dashboard RBAC is scoped separately from the operator
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/dashboard/serviceaccount.yaml
+  - templates/dashboard/clusterrole.yaml
+  - templates/dashboard/clusterrolebinding.yaml
+  - templates/dashboard/deployment.yaml
+  - templates/dashboard/configmap.yaml
+  - templates/serviceaccount.yaml
+  - templates/clusterrole.yaml
+  - templates/clusterrolebinding.yaml
+tests:
+  - it: creates a dedicated dashboard ServiceAccount
+    template: templates/dashboard/serviceaccount.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: kind
+          value: ServiceAccount
+      - equal:
+          path: metadata.name
+          value: omnia-dashboard
+
+  - it: dashboard ServiceAccount is distinct from the operator ServiceAccount
+    template: templates/serviceaccount.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: kind
+          value: ServiceAccount
+      - notEqual:
+          path: metadata.name
+          value: omnia-dashboard
+
+  - it: dashboard Deployment binds the scoped ServiceAccount
+    template: templates/dashboard/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: omnia-dashboard
+
+  - it: dashboard ClusterRole does NOT grant clusterrolebindings create
+    template: templates/dashboard/clusterrole.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: kind
+          value: ClusterRole
+      - notContains:
+          path: rules
+          content:
+            apiGroups: [rbac.authorization.k8s.io]
+            resources: [clusterrolebindings]
+            verbs: [create]
+
+  - it: dashboard ClusterRole does NOT grant serviceaccounts create (only token)
+    template: templates/dashboard/clusterrole.yaml
+    asserts:
+      - notContains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: [serviceaccounts]
+            verbs: [create]
+      # It SHOULD grant serviceaccounts/token create — workspace token exchange.
+      - contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: [serviceaccounts/token]
+            verbs: [create]
+
+  - it: dashboard ClusterRole grants read-only access to secrets (metadata only)
+    template: templates/dashboard/clusterrole.yaml
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: [secrets]
+            verbs: [get, list]
+
+  - it: dashboard ClusterRoleBinding points at the scoped role, not the manager role
+    template: templates/dashboard/clusterrolebinding.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: roleRef.name
+          value: omnia-dashboard-role
+      - equal:
+          path: subjects[0].name
+          value: omnia-dashboard
+
+  - it: disabling dashboard omits all dashboard RBAC
+    set:
+      dashboard.enabled: false
+    template: templates/dashboard/serviceaccount.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: disabling rbac.create omits ClusterRole + binding but keeps the ServiceAccount
+    set:
+      rbac.create: false
+    template: templates/dashboard/clusterrole.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: operator ClusterRoleBinding still binds the operator ServiceAccount (unchanged)
+    template: templates/clusterrolebinding.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: roleRef.name
+          value: omnia-manager-role
+      - equal:
+          path: subjects[0].name
+          value: omnia

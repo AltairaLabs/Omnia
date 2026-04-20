@@ -1,0 +1,74 @@
+{{- if and .Values.dashboard.enabled .Values.rbac.create -}}
+# Scoped ClusterRole for the dashboard ServiceAccount. Distinct from the
+# operator's manager role so that a dashboard-side compromise cannot:
+#   - Create ClusterRoleBindings (privilege escalation).
+#   - Create ServiceAccounts (identity fabrication; tokens can still be
+#     minted for *existing* SAs via serviceaccounts/token create — that's
+#     needed by the workspace token exchange).
+#   - Mutate Deployments / Roles / Services / autoscalers / network policies
+#     (cluster infrastructure; the operator owns those).
+#
+# Resource set is the minimum the Next.js dashboard actually calls against
+# the kube API. Verify via:
+#   grep -rE "k8sClient\.(list|get|create|patch|delete)" dashboard/src
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "omnia.fullname" . }}-dashboard-role
+  labels:
+    {{- include "omnia.dashboard.labels" . | nindent 4 }}
+rules:
+  # Namespace listing: workspace switcher + namespace-picker UIs.
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, watch]
+  # Secret metadata (values never leave the server; code filters by the
+  # `omnia.altairalabs.ai/type=credentials` label. RBAC can't enforce label
+  # filters, so the guarantee is at the application layer — see
+  # dashboard/src/lib/k8s/secrets.ts).
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list]
+  # Workspace-scoped token exchange: mint tokens for *existing* workspace
+  # ServiceAccounts pre-created by the operator. Dashboard cannot create
+  # the ServiceAccount itself — just mint a token bound to its role.
+  - apiGroups: [""]
+    resources: [serviceaccounts/token]
+    verbs: [create]
+  # Pods + pod logs: agent log viewer, liveness displays.
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [get, list, watch]
+  # Events: surface reconcile errors in the UI.
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [get, list, watch]
+  # ConfigMaps: PromptPack bodies are stored as ConfigMaps; dashboard writes
+  # these when the user edits a prompt pack.
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # Omnia CRDs: the full set the dashboard surfaces for CRUD.
+  - apiGroups: [omnia.altairalabs.ai]
+    resources:
+      - agentruntimes
+      - agentpolicies
+      - promptpacks
+      - providers
+      - sessionretentionpolicies
+      - skillsources
+      - toolpolicies
+      - toolregistries
+      - workspaces
+    verbs: [get, list, watch, create, update, patch, delete]
+  # CRD status subresources: the dashboard reads controller-written status
+  # fields for phase/condition displays.
+  - apiGroups: [omnia.altairalabs.ai]
+    resources:
+      - agentruntimes/status
+      - promptpacks/status
+      - providers/status
+      - toolregistries/status
+      - workspaces/status
+    verbs: [get]
+{{- end }}

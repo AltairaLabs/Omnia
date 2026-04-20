@@ -192,6 +192,16 @@ The controller creates actual RoleBindings for ServiceAccounts, allowing direct 
 
 ## Token Management
 
+### Dashboard ServiceAccount
+
+The dashboard runs as its own `omnia-dashboard` ServiceAccount, separate from the operator's `omnia` ServiceAccount and bound to a narrower ClusterRole (`omnia-dashboard-role`). The dashboard role grants only what the Next.js server actually calls against the Kubernetes API:
+
+- **Read-only** on namespaces, pods, pod logs, events, secrets (metadata; values never leave the server).
+- **CRUD** on Omnia CRDs and ConfigMaps (the dashboard's core job).
+- **`serviceaccounts/token` create** for the token-exchange flow below — needed to mint tokens for *existing* workspace ServiceAccounts but not to create new ones.
+
+Notably **absent**: `clusterrolebindings` create, `serviceaccounts` create, Deployment/Service/autoscaler mutations, networking.k8s.io/istio.io writes. Those live on the operator's role. A server-side compromise in the dashboard (RCE, SSRF, auth bypass) is therefore scoped to data mutations the dashboard already mediates — it cannot self-promote to cluster-admin.
+
 ### Short-Lived Tokens
 
 The dashboard uses the Kubernetes TokenRequest API to get short-lived ServiceAccount tokens:

@@ -1142,3 +1142,114 @@ func TestBuildDeploymentSpec_PodOverrides_SkipsPolicyProxy(t *testing.T) {
 		}
 	}
 }
+
+func TestHardenedPodSecurityContext(t *testing.T) {
+	sc := hardenedPodSecurityContext()
+	require.NotNil(t, sc)
+	require.NotNil(t, sc.RunAsNonRoot)
+	assert.True(t, *sc.RunAsNonRoot)
+	require.NotNil(t, sc.RunAsUser)
+	assert.Equal(t, int64(65532), *sc.RunAsUser)
+	require.NotNil(t, sc.RunAsGroup)
+	assert.Equal(t, int64(65532), *sc.RunAsGroup)
+	require.NotNil(t, sc.FSGroup)
+	assert.Equal(t, int64(65532), *sc.FSGroup)
+	require.NotNil(t, sc.SeccompProfile)
+	assert.Equal(t, corev1.SeccompProfileTypeRuntimeDefault, sc.SeccompProfile.Type)
+}
+
+func TestHardenedContainerSecurityContext(t *testing.T) {
+	sc := hardenedContainerSecurityContext()
+	require.NotNil(t, sc)
+	require.NotNil(t, sc.AllowPrivilegeEscalation)
+	assert.False(t, *sc.AllowPrivilegeEscalation)
+	require.NotNil(t, sc.ReadOnlyRootFilesystem)
+	assert.True(t, *sc.ReadOnlyRootFilesystem)
+	require.NotNil(t, sc.RunAsNonRoot)
+	assert.True(t, *sc.RunAsNonRoot)
+	require.NotNil(t, sc.Capabilities)
+	assert.Equal(t, []corev1.Capability{"ALL"}, sc.Capabilities.Drop)
+	require.Empty(t, sc.Capabilities.Add)
+	require.NotNil(t, sc.SeccompProfile)
+	assert.Equal(t, corev1.SeccompProfileTypeRuntimeDefault, sc.SeccompProfile.Type)
+}
+
+func TestBuildDeploymentSpec_HardenedSecurityContext(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Facade: omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+		},
+	}
+	pp := newTestPromptPack()
+	r := &AgentRuntimeReconciler{Scheme: scheme, Client: fake.NewClientBuilder().WithScheme(scheme).Build()}
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, pp, nil, "", nil)
+
+	// Pod-level SecurityContext is hardened
+	spec := dep.Spec.Template.Spec
+	require.NotNil(t, spec.SecurityContext, "pod SecurityContext must be set")
+	require.NotNil(t, spec.SecurityContext.RunAsNonRoot)
+	assert.True(t, *spec.SecurityContext.RunAsNonRoot)
+	require.NotNil(t, spec.SecurityContext.SeccompProfile)
+	assert.Equal(t, corev1.SeccompProfileTypeRuntimeDefault, spec.SecurityContext.SeccompProfile.Type)
+
+	// Every container has hardened container-level SecurityContext
+	require.NotEmpty(t, spec.Containers)
+	for _, c := range spec.Containers {
+		require.NotNilf(t, c.SecurityContext, "container %s missing SecurityContext", c.Name)
+		require.NotNilf(t, c.SecurityContext.ReadOnlyRootFilesystem, "container %s missing ReadOnlyRootFilesystem", c.Name)
+		assert.Truef(t, *c.SecurityContext.ReadOnlyRootFilesystem, "container %s must have ReadOnlyRootFilesystem=true", c.Name)
+		require.NotNilf(t, c.SecurityContext.AllowPrivilegeEscalation, "container %s missing AllowPrivilegeEscalation", c.Name)
+		assert.Falsef(t, *c.SecurityContext.AllowPrivilegeEscalation, "container %s must have AllowPrivilegeEscalation=false", c.Name)
+		require.NotNilf(t, c.SecurityContext.Capabilities, "container %s missing Capabilities", c.Name)
+		assert.Equalf(t, []corev1.Capability{"ALL"}, c.SecurityContext.Capabilities.Drop, "container %s must drop ALL capabilities", c.Name)
+	}
+}
+
+func TestBuildDeploymentSpec_PolicyProxyKeepsOwnSecurityContext(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Facade: omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+		},
+	}
+	pp := newTestPromptPack()
+	r := &AgentRuntimeReconciler{
+		Scheme:           scheme,
+		Client:           fake.NewClientBuilder().WithScheme(scheme).Build(),
+		PolicyProxyImage: "ghcr.io/altairalabs/omnia-policy-proxy:test",
+	}
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, pp, nil, "", nil)
+
+	// Locate the policy-proxy sidecar and check its SecurityContext is its own,
+	// not hardenedContainerSecurityContext — the sidecar configures its own SC.
+	var policyProxy *corev1.Container
+	for i := range dep.Spec.Template.Spec.Containers {
+		c := &dep.Spec.Template.Spec.Containers[i]
+		if c.Name == PolicyProxyContainerName {
+			policyProxy = c
+			break
+		}
+	}
+	require.NotNil(t, policyProxy, "policy-proxy sidecar must be injected when PolicyProxyImage is set")
+	// Either the policy-proxy has no hardened SC (it sets its own or runs with
+	// a different profile) or it has one — but the buildDeploymentSpec loop
+	// must not overwrite with hardenedContainerSecurityContext.
+	// The test's intent is "not our hardened context"; a different SC or nil is acceptable.
+	hardened := hardenedContainerSecurityContext()
+	if policyProxy.SecurityContext != nil {
+		assert.NotEqual(t, hardened, policyProxy.SecurityContext, "policy-proxy must not be overwritten with the facade/runtime hardened SC")
+	}
+}

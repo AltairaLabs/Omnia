@@ -40,6 +40,47 @@ import (
 // Annotation key for config hash - changes to this trigger pod rollouts
 const annotationConfigHash = "omnia.altairalabs.ai/config-hash"
 
+// agentPodUserID is the uid/gid used by the facade and runtime container images
+// (both Dockerfile.agent and Dockerfile.runtime declare USER 65532:65532 on a
+// scratch base). Reflecting it in the pod SecurityContext lets PodSecurity
+// admission enforce runAsNonRoot and makes fsGroup ownership of mounted
+// volumes explicit.
+const agentPodUserID int64 = 65532
+
+// hardenedPodSecurityContext returns a restricted-profile-compliant PodSecurityContext
+// for workspace agent pods (facade + runtime). Matches the controller and dashboard
+// hardening so agent pods are not the soft spot in a restricted namespace.
+func hardenedPodSecurityContext() *corev1.PodSecurityContext {
+	return &corev1.PodSecurityContext{
+		RunAsNonRoot: ptr.To(true),
+		RunAsUser:    ptr.To(agentPodUserID),
+		RunAsGroup:   ptr.To(agentPodUserID),
+		FSGroup:      ptr.To(agentPodUserID),
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
+}
+
+// hardenedContainerSecurityContext returns a restricted-profile-compliant
+// container SecurityContext: no privilege escalation, read-only root, all
+// capabilities dropped, seccomp RuntimeDefault. Applied to facade + runtime
+// containers; the policy-proxy sidecar (injected separately) configures its
+// own SecurityContext.
+func hardenedContainerSecurityContext() *corev1.SecurityContext {
+	return &corev1.SecurityContext{
+		AllowPrivilegeEscalation: ptr.To(false),
+		ReadOnlyRootFilesystem:   ptr.To(true),
+		RunAsNonRoot:             ptr.To(true),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
+}
+
 func (r *AgentRuntimeReconciler) reconcileDeployment(
 	ctx context.Context,
 	agentRuntime *omniav1alpha1.AgentRuntime,
@@ -269,6 +310,17 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		ServiceAccountName: facadeServiceAccountName(agentRuntime),
 		Containers:         containers,
 		Volumes:            volumes,
+		SecurityContext:    hardenedPodSecurityContext(),
+	}
+
+	// Apply hardened container SecurityContext to facade + runtime. The
+	// policy-proxy sidecar (injected separately by buildPolicyProxyContainer)
+	// sets its own SecurityContext and is skipped here.
+	for i := range podSpec.Containers {
+		if podSpec.Containers[i].Name == PolicyProxyContainerName {
+			continue
+		}
+		podSpec.Containers[i].SecurityContext = hardenedContainerSecurityContext()
 	}
 
 	// Termination grace period: 45s allows the 30s shutdown timeout to complete
