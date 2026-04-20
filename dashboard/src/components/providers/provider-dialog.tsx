@@ -103,22 +103,6 @@ const AUTH_BY_PLATFORM: Record<PlatformType, readonly string[]> = {
   azure: ["workloadIdentity", "servicePrincipal"],
 };
 
-// Routing supported today by the PromptKit runtime. All other 6 combos
-// save correctly but surface a non-blocking warning in the UI. Tracked
-// upstream in PromptKit#1009.
-const CANONICAL_ROUTED: ReadonlySet<string> = new Set([
-  "claude/bedrock",
-  "openai/azure",
-  "gemini/vertex",
-]);
-
-function isCanonicalRouted(
-  providerType: ProviderSpec["type"],
-  platformType: string,
-): boolean {
-  return CANONICAL_ROUTED.has(`${providerType}/${platformType}`);
-}
-
 function supportsPlatform(type: ProviderSpec["type"]): boolean {
   return PLATFORM_ELIGIBLE_TYPES.has(type);
 }
@@ -742,26 +726,6 @@ function PlatformFields({
 
       {form.platformType && (
         <>
-          {!isCanonicalRouted(form.providerType, form.platformType) && (
-            <Alert>
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                Request routing for {form.providerType} on {form.platformType} is not
-                yet supported by the PromptKit runtime. Credentials will resolve, but
-                requests will not reach the correct endpoint until{" "}
-                <a
-                  href="https://github.com/AltairaLabs/PromptKit/issues/1009"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline"
-                >
-                  PromptKit#1009
-                </a>{" "}
-                lands.
-              </AlertDescription>
-            </Alert>
-          )}
-
           {(form.platformType === "bedrock" || form.platformType === "vertex") && (
             <div className="space-y-2">
               <Label htmlFor="platform-region">Region</Label>
