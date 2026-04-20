@@ -311,7 +311,7 @@ jobs:
           output-file: sbom-${{ matrix.image }}.cdx.json
 
       - name: Attest SBOM (GitHub attestation store)
-        uses: actions/attest-sbom@v2
+        uses: actions/attest-sbom@v4
         with:
           subject-name: ${{ steps.ref.outputs.image }}
           subject-digest: ${{ steps.build.outputs.digest }}
