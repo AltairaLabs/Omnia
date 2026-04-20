@@ -144,9 +144,21 @@ Hyperscaler-specific configuration. Required for provider types `bedrock`, `vert
 
 **Provider × platform combinations:**
 
-Any of `claude`, `openai`, or `gemini` may be configured on any of `bedrock`, `vertex`, or `azure`. The wire protocol (`spec.type`) and the hosting platform (`spec.platform.type`) are independent — the CRD admits all nine combinations.
+Six pairs of wire protocol (`spec.type`) and hosting platform (`spec.platform.type`) are supported — the CRD admits them and the PromptKit runtime (v1.4.6+) routes requests correctly:
 
-Setting `spec.platform` on any other provider type (e.g., `vllm`, `ollama`, `mock`) is rejected at admission. Setting `spec.platform` without `spec.auth` (or vice versa) is also rejected.
+| provider type | supported platforms        |
+|---------------|----------------------------|
+| `claude`      | `bedrock`, `vertex`, `azure` |
+| `openai`      | `azure`, `bedrock`           |
+| `gemini`      | `vertex`                     |
+
+Three pairs are rejected at admission because the hyperscaler does not host that model vendor as a partner endpoint:
+
+- `openai × vertex` — Vertex AI does not host OpenAI.
+- `gemini × bedrock` — AWS Bedrock does not host Gemini.
+- `gemini × azure` — Azure AI Foundry does not host Gemini.
+
+Setting `spec.platform` on any other provider type (e.g., `vllm`, `ollama`, `mock`) is also rejected at admission. Setting `spec.platform` without `spec.auth` (or vice versa) is likewise rejected.
 
 The authentication method is determined by the platform (see [`auth`](#auth) below):
 
@@ -155,16 +167,6 @@ The authentication method is determined by the platform (see [`auth`](#auth) bel
 | bedrock  | `workloadIdentity`, `accessKey`         |
 | vertex   | `workloadIdentity`, `serviceAccount`    |
 | azure    | `workloadIdentity`, `servicePrincipal`  |
-
-##### Runtime support
-
-Today the PromptKit runtime routes requests correctly only for these three canonical combinations:
-
-- `claude` on `bedrock`
-- `openai` on `azure`
-- `gemini` on `vertex`
-
-The Provider CR accepts all nine combinations, but the other six will resolve credentials successfully and then route requests to the wrong endpoint until [PromptKit#1009](https://github.com/AltairaLabs/PromptKit/issues/1009) lands. The dashboard surfaces an inline warning when you pick one of those combinations.
 
 #### Claude on AWS Bedrock
 

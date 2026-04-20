@@ -5,7 +5,7 @@ sidebar:
   order: 16
 ---
 
-> **Note:** This guide uses the canonical provider type for this platform (`claude` for Bedrock, `gemini` for Vertex, `openai` for Azure). Other provider types are configurable but their request routing depends on [PromptKit#1009](https://github.com/AltairaLabs/PromptKit/issues/1009).
+> **Note:** Bedrock hosts both `claude` and `openai` wire protocols. Examples below use `claude`; substitute `openai` if you want the OpenAI-compatible route on Bedrock. Gemini on Bedrock is rejected at admission (Bedrock doesn't host Gemini).
 
 This guide covers how to configure an Omnia Provider to use AWS Bedrock for LLM access. Bedrock providers support two authentication methods: **workload identity (IRSA)** for production use, and **access keys** for simpler setups.
 

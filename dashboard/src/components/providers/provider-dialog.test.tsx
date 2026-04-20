@@ -913,7 +913,7 @@ describe("ProviderDialog", () => {
       expect(mockCreateProvider.mock.calls[0][1]).not.toHaveProperty("credential");
     });
 
-    it("creates claude+azure+servicePrincipal and shows the routing warning", async () => {
+    it("creates claude+azure+servicePrincipal (supported since PromptKit v1.4.6)", async () => {
       vi.useRealTimers();
       const user = userEvent.setup();
 
@@ -935,8 +935,6 @@ describe("ProviderDialog", () => {
 
       await user.type(screen.getByLabelText("Credentials Secret Name"), "azure-creds");
 
-      expect(screen.getByText(/Request routing for claude on azure/i)).toBeInTheDocument();
-
       fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
 
       await waitFor(() => {
@@ -952,29 +950,6 @@ describe("ProviderDialog", () => {
           })
         );
       });
-    });
-
-    it("hides the routing warning for canonical combos", async () => {
-      const user = userEvent.setup();
-
-      render(
-        <TestWrapper>
-          <ProviderDialog open={true} onOpenChange={vi.fn()} />
-        </TestWrapper>
-      );
-
-      await user.type(screen.getByLabelText("Name"), "gemini-vertex");
-
-      // Switch provider type to gemini
-      fireEvent.click(screen.getByLabelText("Provider Type"));
-      fireEvent.click(await screen.findByRole("option", { name: /Gemini/i }));
-
-      fireEvent.click(screen.getByLabelText("Platform"));
-      fireEvent.click(await screen.findByRole("option", { name: /GCP Vertex/i }));
-
-      expect(
-        screen.queryByText(/Request routing for gemini on vertex is not yet supported/i)
-      ).not.toBeInTheDocument();
     });
 
     it("hides the Credentials section when a platform is configured", async () => {
@@ -1043,28 +1018,6 @@ describe("ProviderDialog", () => {
       expect(screen.queryByRole("option", { name: "servicePrincipal" })).not.toBeInTheDocument();
     });
 
-    it("does not show the routing warning for canonical combos in edit mode", () => {
-      const provider = createMockProvider({
-        spec: {
-          type: "claude",
-          model: "claude-sonnet-4-20250514",
-          platform: { type: "bedrock", region: "us-east-1" },
-          auth: {
-            type: "workloadIdentity",
-          },
-        },
-      });
-
-      render(
-        <TestWrapper>
-          <ProviderDialog open={true} onOpenChange={vi.fn()} provider={provider} />
-        </TestWrapper>
-      );
-
-      expect(
-        screen.queryByText(/is not yet supported by the PromptKit runtime/i)
-      ).not.toBeInTheDocument();
-    });
   });
 
   describe("HTTP headers", () => {
