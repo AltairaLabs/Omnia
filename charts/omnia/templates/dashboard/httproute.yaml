@@ -23,11 +23,16 @@ spec:
     - {{ . | quote }}
   {{- end }}
   rules:
-    # WebSocket route for agent connections (must be before catch-all)
+    # WebSocket route for agent connections (must be before catch-all).
+    # NOTE: uses PathPrefix, not RegularExpression. Istio 1.24 silently drops
+    # Gateway API regex path matches (the rule vanishes from the generated
+    # Envoy config with no warning on HTTPRoute status or in istiod logs).
+    # The /api/agents/ prefix is WS-only — the dashboard has no Next.js
+    # routes under it. See issue #936.
     - matches:
         - path:
-            type: RegularExpression
-            value: /api/agents/[^/]+/[^/]+/ws
+            type: PathPrefix
+            value: /api/agents/
       backendRefs:
         - name: {{ include "omnia.dashboard.fullname" . }}
           port: 3002
@@ -55,11 +60,12 @@ spec:
     - name: {{ $internalGatewayName }}
       namespace: {{ .Release.Namespace }}
   rules:
-    # WebSocket route for agent connections (must be before catch-all)
+    # WebSocket route for agent connections (must be before catch-all).
+    # See comment above for the PathPrefix rationale.
     - matches:
         - path:
-            type: RegularExpression
-            value: /api/agents/[^/]+/[^/]+/ws
+            type: PathPrefix
+            value: /api/agents/
       backendRefs:
         - name: {{ include "omnia.dashboard.fullname" . }}
           port: 3002
