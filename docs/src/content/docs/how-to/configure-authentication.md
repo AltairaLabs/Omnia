@@ -41,7 +41,7 @@ authentication:
 Apply with Helm:
 
 ```bash
-helm upgrade --install omnia oci://ghcr.io/altairalabs/omnia \
+helm upgrade --install omnia oci://ghcr.io/altairalabs/charts/omnia \
   --namespace omnia-system \
   -f values.yaml
 ```
