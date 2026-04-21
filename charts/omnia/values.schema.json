@@ -330,7 +330,38 @@
         "extraEnv":          { "type": "array", "items": { "type": "object" } },
         "extraEnvFrom":      { "type": "array", "items": { "type": "object" } },
         "extraVolumes":      { "type": "array", "items": { "type": "object" } },
-        "extraVolumeMounts": { "type": "array", "items": { "type": "object" } }
+        "extraVolumeMounts": { "type": "array", "items": { "type": "object" } },
+        "session": {
+          "type": "object",
+          "description": "Server-side session store configuration for the dashboard.",
+          "properties": {
+            "store": {
+              "type": "string",
+              "enum": ["memory", "redis"],
+              "description": "Session storage backend. 'memory' is dev only; 'redis' required for multi-replica."
+            },
+            "pkceTtl": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "TTL for in-flight PKCE records in seconds."
+            },
+            "redis": {
+              "type": "object",
+              "properties": {
+                "url":  { "type": "string", "description": "Full redis:// URL (preferred). Overrides addr/password/db if set." },
+                "addr": { "type": "string", "description": "host:port fallback when url is empty." },
+                "db":   { "type": "integer", "minimum": 0, "description": "Redis database number." },
+                "existingSecret": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "key":  { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
 

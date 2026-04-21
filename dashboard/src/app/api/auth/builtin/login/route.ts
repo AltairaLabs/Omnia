@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthConfig } from "@/lib/auth/config";
-import { getSession } from "@/lib/auth/session";
+import { saveUserToSession } from "@/lib/auth/session";
 import {
   getUserStore,
   getBuiltinConfig,
@@ -125,8 +125,7 @@ export async function POST(request: NextRequest) {
     await store.recordLogin(user.id);
 
     // Create session
-    const session = await getSession();
-    session.user = {
+    await saveUserToSession({
       id: user.id,
       username: user.username,
       email: user.email,
@@ -134,10 +133,7 @@ export async function POST(request: NextRequest) {
       groups: [], // Built-in auth doesn't use groups
       role: user.role,
       provider: "builtin",
-    };
-    session.createdAt = Date.now();
-
-    await session.save();
+    });
 
     return NextResponse.json({
       success: true,

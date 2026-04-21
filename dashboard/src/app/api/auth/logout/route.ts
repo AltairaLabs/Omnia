@@ -1,56 +1,35 @@
 /**
  * OAuth logout endpoint.
  *
- * POST /api/auth/logout - Log out user and optionally redirect to IdP logout
- *
- * Returns:
- * - { redirectUrl: string } - URL to redirect to (IdP logout or login page)
+ * Deletes the server-side session record (true revocation — impossible
+ * with cookie-sealed sessions), clears the session cookie, and returns
+ * the IdP end-session URL when the provider supports RP-initiated logout.
  */
 
 import { NextResponse } from "next/server";
 import { getAuthConfig } from "@/lib/auth/config";
-import { getSession, clearSession } from "@/lib/auth/session";
+import { clearSession, getSessionRecord } from "@/lib/auth/session";
 import { buildEndSessionUrl } from "@/lib/auth/oauth";
 
-export async function POST() {
+async function resolveRedirect(): Promise<string> {
   const config = getAuthConfig();
-  const session = await getSession();
+  if (config.mode !== "oauth") return "/login";
+  const record = await getSessionRecord();
+  const idToken = record?.oauth?.idToken;
+  if (!idToken) return "/login";
+  const end = await buildEndSessionUrl(idToken);
+  return end ?? "/login";
+}
 
-  let redirectUrl = "/login";
-
-  // For OAuth mode, try to get IdP logout URL (single sign-out)
-  if (config.mode === "oauth" && session.oauth?.idToken) {
-    const endSessionUrl = await buildEndSessionUrl(session.oauth.idToken);
-    if (endSessionUrl) {
-      redirectUrl = endSessionUrl;
-    }
-  }
-
-  // Clear local session
+export async function POST() {
+  const redirectUrl = await resolveRedirect();
   await clearSession();
-
   return NextResponse.json({ redirectUrl });
 }
 
-/**
- * GET handler for logout (for simple redirects).
- */
 export async function GET() {
   const config = getAuthConfig();
-  const session = await getSession();
-
-  let redirectUrl = "/login";
-
-  // For OAuth mode, try to get IdP logout URL
-  if (config.mode === "oauth" && session.oauth?.idToken) {
-    const endSessionUrl = await buildEndSessionUrl(session.oauth.idToken);
-    if (endSessionUrl) {
-      redirectUrl = endSessionUrl;
-    }
-  }
-
-  // Clear local session
+  const redirectUrl = await resolveRedirect();
   await clearSession();
-
   return NextResponse.redirect(new URL(redirectUrl, config.baseUrl));
 }

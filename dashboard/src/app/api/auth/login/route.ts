@@ -1,54 +1,57 @@
 /**
  * OAuth login endpoint.
  *
- * GET /api/auth/login - Initiate OAuth flow
+ * GET /api/auth/login — start the OAuth flow.
  *
- * Query params:
- * - returnTo: URL to redirect to after successful login (optional)
+ * The PKCE record lives in the server-side session store keyed by the
+ * IdP `state` parameter. A tiny ephemeral `omnia_oauth_state` cookie
+ * binds the login-initiating browser to the state value, so that the
+ * callback can reject cross-origin login attempts even though PKCE is
+ * no longer sealed into the user's session cookie.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthConfig } from "@/lib/auth/config";
-import { getSession } from "@/lib/auth/session";
 import { generatePKCE, buildAuthorizationUrl } from "@/lib/auth/oauth";
+import { getSessionStore } from "@/lib/auth/session-store";
+
+const STATE_COOKIE_NAME = "omnia_oauth_state";
 
 export async function GET(request: NextRequest) {
   const config = getAuthConfig();
 
-  // Only available in OAuth mode
   if (config.mode !== "oauth") {
-    return NextResponse.json(
-      { error: "OAuth authentication is not enabled" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "OAuth authentication is not enabled" }, { status: 400 });
   }
 
   try {
-    // Get return URL from query params
     const returnTo = request.nextUrl.searchParams.get("returnTo") || "/";
-
-    // Generate PKCE challenge and state
     const pkce = await generatePKCE(returnTo);
 
-    // Store PKCE data in session for callback validation
-    const session = await getSession();
-    session.pkce = pkce;
-    await session.save();
+    await getSessionStore().putPkce(
+      pkce.state,
+      { ...pkce, createdAt: Date.now() },
+      config.session.pkceTtl,
+    );
 
-    // Build authorization URL and redirect
     const authUrl = await buildAuthorizationUrl(pkce);
 
-    return NextResponse.redirect(authUrl);
+    const response = NextResponse.redirect(authUrl);
+    response.cookies.set({
+      name: STATE_COOKIE_NAME,
+      value: pkce.state,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: config.session.pkceTtl,
+    });
+    return response;
   } catch (error) {
     console.error("OAuth login error:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
-    // Use config.baseUrl, not request.url — behind a reverse proxy
-    // request.url resolves to the pod-internal address.
     return NextResponse.redirect(
-      new URL(
-        `/login?error=config_error&message=${encodeURIComponent(message)}`,
-        config.baseUrl,
-      ),
+      new URL(`/login?error=config_error&message=${encodeURIComponent(message)}`, config.baseUrl),
     );
   }
 }

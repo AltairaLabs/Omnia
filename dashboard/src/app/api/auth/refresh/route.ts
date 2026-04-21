@@ -1,15 +1,13 @@
 /**
  * OAuth token refresh endpoint.
  *
- * POST /api/auth/refresh - Refresh access token
- *
- * Uses the refresh token stored in the session to obtain new tokens.
- * Updates the session with new tokens.
+ * Reads the current session record from the store, performs the refresh,
+ * and writes the updated record back under the same sid.
  */
 
 import { NextResponse } from "next/server";
 import { getAuthConfig } from "@/lib/auth/config";
-import { getSession } from "@/lib/auth/session";
+import { getSessionRecord, updateSessionOAuth } from "@/lib/auth/session";
 import {
   refreshAccessToken,
   extractClaims,
@@ -19,59 +17,41 @@ import {
 
 export async function POST() {
   const config = getAuthConfig();
-  const session = await getSession();
+  const record = await getSessionRecord();
 
-  // Check we're in OAuth mode
   if (config.mode !== "oauth") {
-    return NextResponse.json(
-      { error: "OAuth authentication is not enabled" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "OAuth authentication is not enabled" }, { status: 400 });
   }
-
-  // Check we have a refresh token
-  if (!session.oauth?.refreshToken) {
-    return NextResponse.json(
-      { error: "No refresh token available" },
-      { status: 400 }
-    );
+  if (!record?.oauth?.refreshToken) {
+    return NextResponse.json({ error: "No refresh token available" }, { status: 400 });
   }
 
   try {
-    // Refresh the tokens
-    const tokens = await refreshAccessToken(session.oauth.refreshToken);
-
-    // Update session with new tokens. Access token is intentionally
-    // not persisted — see OAuthTokens jsdoc (cookie size limit).
-    session.oauth = {
-      ...session.oauth,
-      // Use new refresh token if provided, otherwise keep the old one
-      refreshToken: tokens.refresh_token || session.oauth.refreshToken,
-      idToken: tokens.id_token || session.oauth.idToken,
-      expiresAt: typeof tokens.expires_at === "number" ? tokens.expires_at : session.oauth.expiresAt,
+    const tokens = await refreshAccessToken(record.oauth.refreshToken);
+    const nextOAuth = {
+      ...record.oauth,
+      refreshToken: tokens.refresh_token || record.oauth.refreshToken,
+      idToken: tokens.id_token || record.oauth.idToken,
+      expiresAt:
+        typeof tokens.expires_at === "number" ? tokens.expires_at : record.oauth.expiresAt,
     };
 
-    // Optionally update user from new ID token claims
+    let nextUser = record.user;
     if (tokens.id_token) {
       const claims = extractClaims(tokens);
       if (validateClaims(claims)) {
-        session.user = mapClaimsToUser(claims, config);
+        nextUser = mapClaimsToUser(claims, config);
       }
     }
 
-    await session.save();
+    await updateSessionOAuth(nextOAuth, nextUser);
 
-    return NextResponse.json({
-      success: true,
-      expiresAt: tokens.expires_at,
-    });
-  } catch (error) {
-    console.error("Token refresh error:", error);
-
-    // If refresh fails, the user needs to re-authenticate
+    return NextResponse.json({ success: true, expiresAt: tokens.expires_at });
+  } catch (err) {
+    console.error("Token refresh error:", err);
     return NextResponse.json(
       { error: "Token refresh failed", requiresLogin: true },
-      { status: 401 }
+      { status: 401 },
     );
   }
 }
