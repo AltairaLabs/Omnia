@@ -3,7 +3,7 @@
  */
 
 import type { UserRole } from "./config";
-import type { OAuthTokens, PKCEData } from "./oauth/types";
+import type { OAuthTokens } from "./oauth/types";
 
 // Re-export for convenience
 export type { UserRole } from "./config";
@@ -44,12 +44,6 @@ export interface SessionData {
   user?: User;
   createdAt?: number;
   oauth?: OAuthTokens;
-  /**
-   * @deprecated PKCE data now lives in the server-side store keyed by state.
-   * Retained here so callers in login/callback routes still type-check while
-   * Tasks 8 and 9 migrate those files to the new session-store PKCE API.
-   */
-  pkce?: PKCEData;
 }
 
 /**

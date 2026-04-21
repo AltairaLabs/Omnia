@@ -12,7 +12,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthConfig } from "@/lib/auth/config";
-import { getSession } from "@/lib/auth/session";
+import { saveUserToSession } from "@/lib/auth/session";
 import {
   getUserStore,
   getBuiltinConfig,
@@ -150,8 +150,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Auto-login if no verification required
-    const session = await getSession();
-    session.user = {
+    await saveUserToSession({
       id: user.id,
       username: user.username,
       email: user.email,
@@ -159,10 +158,7 @@ export async function POST(request: NextRequest) {
       groups: [],
       role: user.role,
       provider: "builtin",
-    };
-    session.createdAt = Date.now();
-
-    await session.save();
+    });
 
     return NextResponse.json({
       success: true,

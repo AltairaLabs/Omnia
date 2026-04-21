@@ -14,7 +14,7 @@ import { getAuthConfig } from "./config";
 import { getSessionStore } from "./session-store";
 import type { SessionRecord } from "./session-store/types";
 import type { OAuthTokens } from "./oauth/types";
-import type { SessionCookieData, SessionData, User } from "./types";
+import type { SessionCookieData, User } from "./types";
 
 function getCookieOptions() {
   const config = getAuthConfig();
@@ -91,14 +91,11 @@ export async function updateSessionOAuth(oauth: OAuthTokens, user?: User): Promi
 }
 
 /**
- * Keep existing named export — callers use this directly.
- *
- * Returns a loose session type that tolerates both `SessionCookieData` (new)
- * and `SessionData` (old) field access until callers are migrated in tasks 8–12.
- * @deprecated Migrate callers to `getSessionRecord()` / `getCurrentUser()`.
+ * Returns the current iron-session cookie session.
+ * Use `getSessionRecord()` to read user/oauth data from the server-side store.
  */
-export async function getSession(): Promise<IronSession<SessionCookieData & Partial<SessionData>>> {
-  return getCookieSession() as Promise<IronSession<SessionCookieData & Partial<SessionData>>>;
+export async function getSession(): Promise<IronSession<SessionCookieData>> {
+  return getCookieSession();
 }
 
 /** Delete the server-side record and clear the cookie. */

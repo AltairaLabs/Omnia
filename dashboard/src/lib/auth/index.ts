@@ -25,7 +25,7 @@ export * from "./api-guard";
 
 import { getAuthConfig, type AuthConfig } from "./config";
 import { createAnonymousUser, type User } from "./types";
-import { getCurrentUser, saveUserToSession, getSession } from "./session";
+import { getCurrentUser, saveUserToSession, getSessionRecord, updateSessionOAuth } from "./session";
 import { getUserFromProxyHeaders } from "./proxy";
 import { userHasPermission, type PermissionType } from "./permissions";
 
@@ -80,9 +80,9 @@ async function handleOAuthAuth(config: AuthConfig): Promise<User> {
 
   if (sessionUser?.provider === "oauth") {
     // Check if token needs refresh
-    const session = await getSession();
-    if (session.oauth && shouldRefreshToken(session.oauth.expiresAt)) {
-      await tryRefreshToken(session, config);
+    const record = await getSessionRecord();
+    if (record?.oauth && shouldRefreshToken(record.oauth.expiresAt)) {
+      await tryRefreshToken(record.oauth, config);
     }
     return sessionUser;
   }
@@ -150,34 +150,35 @@ function shouldRefreshToken(expiresAt?: number): boolean {
  * Updates session on success, ignores errors (will re-auth on API call failure).
  */
 async function tryRefreshToken(
-  session: Awaited<ReturnType<typeof getSession>>,
+  currentOAuth: import("./oauth/types").OAuthTokens,
   config: ReturnType<typeof getAuthConfig>
 ): Promise<void> {
-  if (!session.oauth?.refreshToken) return;
+  if (!currentOAuth.refreshToken) return;
 
   try {
     // Lazy-load OAuth module only when token refresh is needed
     const { refreshAccessToken, extractClaims, mapClaimsToUser, validateClaims } = await import("./oauth");
-    const tokens = await refreshAccessToken(session.oauth.refreshToken);
+    const tokens = await refreshAccessToken(currentOAuth.refreshToken);
 
-    // Update tokens in session. Access token is intentionally not
+    // Build updated OAuth tokens. Access token is intentionally not
     // persisted — see OAuthTokens jsdoc (cookie size limit).
-    session.oauth = {
-      ...session.oauth,
-      refreshToken: tokens.refresh_token || session.oauth.refreshToken,
-      idToken: tokens.id_token || session.oauth.idToken,
-      expiresAt: typeof tokens.expires_at === "number" ? tokens.expires_at : session.oauth.expiresAt,
+    const updatedOAuth: import("./oauth/types").OAuthTokens = {
+      ...currentOAuth,
+      refreshToken: tokens.refresh_token || currentOAuth.refreshToken,
+      idToken: tokens.id_token || currentOAuth.idToken,
+      expiresAt: typeof tokens.expires_at === "number" ? tokens.expires_at : currentOAuth.expiresAt,
     };
 
     // Update user from new claims if available
+    let updatedUser: User | undefined;
     if (tokens.id_token) {
       const claims = extractClaims(tokens);
       if (validateClaims(claims)) {
-        session.user = mapClaimsToUser(claims, config);
+        updatedUser = mapClaimsToUser(claims, config);
       }
     }
 
-    await session.save();
+    await updateSessionOAuth(updatedOAuth, updatedUser);
   } catch (error) {
     // Log but don't throw - let the API call fail and trigger re-auth
     console.warn("Token refresh failed:", error);
