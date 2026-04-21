@@ -17,8 +17,6 @@ on:
 permissions:
   contents: read
   packages: write
-  id-token: write
-  attestations: write
   security-events: write
 
 concurrency:
@@ -288,35 +286,22 @@ jobs:
           annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=registry,ref=${{ steps.ref.outputs.image }}:buildcache
           cache-to: type=registry,ref=${{ steps.ref.outputs.image }}:buildcache,mode=max
-          # SBOM + SLSA provenance attestations attached to the pushed image
-          # as sigstore OCI referrers. Inspect with:
+          # SBOM + SLSA provenance attached to the pushed image as OCI
+          # referrers via buildx (no Sigstore involvement). Inspect with:
           #   docker buildx imagetools inspect <ref> --format '{{json .SBOM}}'
           provenance: true
           sbom: true
 
-      - name: Attest build provenance (GitHub attestation store)
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-name: ${{ steps.ref.outputs.image }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          push-to-registry: true
-
-      - name: Generate SBOM (CycloneDX) for attestation + artifact
-        id: sbom
-        uses: anchore/sbom-action@v0
-        with:
-          image: ${{ steps.ref.outputs.image }}@${{ steps.build.outputs.digest }}
-          format: cyclonedx-json
-          artifact-name: sbom-${{ matrix.image }}.cdx.json
-          output-file: sbom-${{ matrix.image }}.cdx.json
-
-      - name: Attest SBOM (GitHub attestation store)
-        uses: actions/attest-sbom@v2
-        with:
-          subject-name: ${{ steps.ref.outputs.image }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          sbom-path: sbom-${{ matrix.image }}.cdx.json
-          push-to-registry: true
+      # The former GitHub-attestation-store steps (actions/attest-build-
+      # provenance + anchore/sbom-action + actions/attest-sbom) pushed
+      # in-toto attestations to Sigstore's public Rekor transparency log.
+      # Rekor tlog timeouts failed the Docker Push job routinely (see
+      # https://status.sigstore.dev/) and the attestations themselves never
+      # showed up in the GitHub UI in a way the team actually used them.
+      # The on-image provenance + SBOM above still satisfies SLSA L2 for
+      # downstream consumers that inspect via `docker buildx imagetools`,
+      # and the release workflow (release.yml) produces tag-anchored
+      # attestations via buildx-native mode as well.
 
       - name: Scan image (Trivy)
         uses: aquasecurity/trivy-action@v0.35.0
@@ -354,5 +339,5 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Where to find things" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Images**: https://github.com/orgs/${{ github.repository_owner }}/packages?repo_name=${{ github.event.repository.name }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Attestations (SBOM + provenance)**: https://github.com/${{ github.repository }}/attestations" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Image-attached SBOM + provenance**: \`docker buildx imagetools inspect <image>@<digest> --format '{{json .SBOM}} {{json .Provenance}}'\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Vulnerability alerts**: https://github.com/${{ github.repository }}/security/code-scanning?query=tool%3ATrivy" >> "$GITHUB_STEP_SUMMARY"
