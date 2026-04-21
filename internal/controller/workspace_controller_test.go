@@ -915,6 +915,142 @@ var _ = Describe("Workspace Controller", func() {
 				return errors.IsNotFound(err)
 			}, timeout, interval).Should(BeTrue())
 		})
+
+		It("auto-allows traffic to/from the operator namespace when configured", func() {
+			By("creating an isolated Workspace with the operator-aware reconciler")
+			operatorReconciler := &WorkspaceReconciler{
+				Client:            k8sClient,
+				Scheme:            k8sClient.Scheme(),
+				OperatorNamespace: "omnia-system",
+			}
+			workspace := &omniav1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: workspaceKey.Name,
+				},
+				Spec: omniav1alpha1.WorkspaceSpec{
+					DisplayName: "Isolated + Operator-aware",
+					Environment: omniav1alpha1.WorkspaceEnvironmentDevelopment,
+					Namespace: omniav1alpha1.NamespaceConfig{
+						Name:   namespaceName,
+						Create: true,
+					},
+					NetworkPolicy: &omniav1alpha1.WorkspaceNetworkPolicy{
+						Isolate: true,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+
+			By("reconciling the Workspace")
+			_, err := operatorReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = operatorReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying the NetworkPolicy admits traffic from the operator namespace")
+			npName := fmt.Sprintf("workspace-%s-isolation", workspaceKey.Name)
+			np := &networkingv1.NetworkPolicy{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{
+				Name:      npName,
+				Namespace: namespaceName,
+			}, np)).To(Succeed())
+
+			matchesOperatorNs := func(peers []networkingv1.NetworkPolicyPeer) bool {
+				for _, peer := range peers {
+					if peer.NamespaceSelector == nil {
+						continue
+					}
+					if peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] == "omnia-system" {
+						return true
+					}
+				}
+				return false
+			}
+
+			By("asserting ingress includes a rule from omnia-system")
+			foundIngress := false
+			for _, rule := range np.Spec.Ingress {
+				if matchesOperatorNs(rule.From) {
+					foundIngress = true
+					break
+				}
+			}
+			Expect(foundIngress).To(BeTrue(), "expected ingress rule from operator namespace omnia-system")
+
+			By("asserting egress includes a rule to omnia-system")
+			foundEgress := false
+			for _, rule := range np.Spec.Egress {
+				if matchesOperatorNs(rule.To) {
+					foundEgress = true
+					break
+				}
+			}
+			Expect(foundEgress).To(BeTrue(), "expected egress rule to operator namespace omnia-system")
+		})
+
+		It("omits the operator-namespace rules when OperatorNamespace is empty (e.g. test harness)", func() {
+			By("creating an isolated Workspace with a reconciler missing OperatorNamespace")
+			bareReconciler := &WorkspaceReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+			workspace := &omniav1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: workspaceKey.Name,
+				},
+				Spec: omniav1alpha1.WorkspaceSpec{
+					DisplayName: "Isolated, no operator NS",
+					Environment: omniav1alpha1.WorkspaceEnvironmentDevelopment,
+					Namespace: omniav1alpha1.NamespaceConfig{
+						Name:   namespaceName,
+						Create: true,
+					},
+					NetworkPolicy: &omniav1alpha1.WorkspaceNetworkPolicy{
+						Isolate: true,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+
+			_, err := bareReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = bareReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			npName := fmt.Sprintf("workspace-%s-isolation", workspaceKey.Name)
+			np := &networkingv1.NetworkPolicy{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{
+				Name:      npName,
+				Namespace: namespaceName,
+			}, np)).To(Succeed())
+
+			hasMetadataNameSelector := func(peers []networkingv1.NetworkPolicyPeer) bool {
+				for _, peer := range peers {
+					if peer.NamespaceSelector == nil {
+						continue
+					}
+					if _, has := peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]; has {
+						// kube-system DNS rule is allowed; everything else with
+						// `kubernetes.io/metadata.name` is a sign the operator-ns
+						// rule leaked in.
+						if peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "kube-system" {
+							return true
+						}
+					}
+				}
+				return false
+			}
+
+			for _, rule := range np.Spec.Ingress {
+				Expect(hasMetadataNameSelector(rule.From)).To(BeFalse(),
+					"ingress must not include a metadata.name selector when OperatorNamespace is empty")
+			}
+			for _, rule := range np.Spec.Egress {
+				// The DNS rule uses metadata.name=kube-system, which the helper ignores.
+				Expect(hasMetadataNameSelector(rule.To)).To(BeFalse(),
+					"egress must not include a non-DNS metadata.name selector when OperatorNamespace is empty")
+			}
+		})
 	})
 })
 

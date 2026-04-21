@@ -96,6 +96,15 @@ type WorkspaceReconciler struct {
 	// get/list/watch on Workspaces. Per-workspace service pods (session-api,
 	// memory-api) need this to resolve their config from the Workspace CRD.
 	AgentWorkspaceReaderClusterRole string
+
+	// OperatorNamespace is the namespace where the operator + dashboard run
+	// (typically "omnia-system"). When a Workspace enables network isolation,
+	// the generated NetworkPolicy auto-allows traffic to/from this namespace
+	// so the dashboard, operator, and Prometheus scrape can reach workspace
+	// pods without the user having to label namespaces. Populated from
+	// POD_NAMESPACE at operator startup; empty string disables the auto-
+	// allow (useful in tests).
+	OperatorNamespace string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=workspaces,verbs=get;list;watch;create;update;patch;delete
@@ -840,12 +849,33 @@ func (r *WorkspaceReconciler) updateStorageStatusIfPVCExists(
 // buildIngressRules builds the ingress rules for the NetworkPolicy
 func (r *WorkspaceReconciler) buildIngressRules(workspace *omniav1alpha1.Workspace) []networkingv1.NetworkPolicyIngressRule {
 	policy := workspace.Spec.NetworkPolicy
-	// Pre-allocate: 1 for same namespace + 1 for shared (if enabled) + custom rules
+	// Pre-allocate: 1 for same namespace + 1 for shared (if enabled) +
+	// 1 for operator namespace (if known) + custom rules.
 	capacity := 1 + len(policy.AllowFrom)
 	if policy.AllowSharedNamespaces == nil || *policy.AllowSharedNamespaces {
 		capacity++
 	}
+	if r.OperatorNamespace != "" {
+		capacity++
+	}
 	rules := make([]networkingv1.NetworkPolicyIngressRule, 0, capacity)
+
+	// Allow from the operator namespace (dashboard, operator, Prometheus).
+	// Matches by the kube-controller-injected namespace label so users
+	// don't have to apply `omnia.altairalabs.ai/shared: true` by hand.
+	if r.OperatorNamespace != "" {
+		rules = append(rules, networkingv1.NetworkPolicyIngressRule{
+			From: []networkingv1.NetworkPolicyPeer{
+				{
+					NamespaceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"kubernetes.io/metadata.name": r.OperatorNamespace,
+						},
+					},
+				},
+			},
+		})
+	}
 
 	// Allow from shared namespaces (default true)
 	if policy.AllowSharedNamespaces == nil || *policy.AllowSharedNamespaces {
@@ -886,12 +916,17 @@ func (r *WorkspaceReconciler) buildIngressRules(workspace *omniav1alpha1.Workspa
 // buildEgressRules builds the egress rules for the NetworkPolicy
 func (r *WorkspaceReconciler) buildEgressRules(workspace *omniav1alpha1.Workspace) []networkingv1.NetworkPolicyEgressRule {
 	policy := workspace.Spec.NetworkPolicy
-	// Pre-allocate: 1 for DNS + 1 for same namespace + 1 for shared (if enabled) + 1 for external (if enabled) + custom rules
+	// Pre-allocate: 1 for DNS + 1 for same namespace + 1 for shared (if
+	// enabled) + 1 for external (if enabled) + 1 for operator namespace
+	// (if known) + custom rules.
 	capacity := 2 + len(policy.AllowTo)
 	if policy.AllowSharedNamespaces == nil || *policy.AllowSharedNamespaces {
 		capacity++
 	}
 	if policy.AllowExternalAPIs == nil || *policy.AllowExternalAPIs {
+		capacity++
+	}
+	if r.OperatorNamespace != "" {
 		capacity++
 	}
 	rules := make([]networkingv1.NetworkPolicyEgressRule, 0, capacity)
@@ -915,6 +950,27 @@ func (r *WorkspaceReconciler) buildEgressRules(workspace *omniav1alpha1.Workspac
 			{Protocol: &protocolTCP, Port: &dnsPort53},
 		},
 	})
+
+	// Allow egress to the operator namespace — the session-api and
+	// memory-api pods in a workspace need to reach Postgres / Redis /
+	// tracing collectors / other chart-managed services running alongside
+	// the operator and dashboard. Chart installs may co-locate Postgres
+	// in `omnia-system` as a StatefulSet; operator managed-DB clusters
+	// will still route through here for the tracing collector and any
+	// enterprise Redis sidecar.
+	if r.OperatorNamespace != "" {
+		rules = append(rules, networkingv1.NetworkPolicyEgressRule{
+			To: []networkingv1.NetworkPolicyPeer{
+				{
+					NamespaceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"kubernetes.io/metadata.name": r.OperatorNamespace,
+						},
+					},
+				},
+			},
+		})
+	}
 
 	// Allow to shared namespaces (default true)
 	if policy.AllowSharedNamespaces == nil || *policy.AllowSharedNamespaces {

@@ -411,10 +411,13 @@ graph TB
 | Default Rule | Direction | Purpose |
 |--------------|-----------|---------|
 | DNS (port 53) | Egress | Allow pods to resolve DNS |
+| Operator namespace (`omnia-system` by default) | Both | Allow dashboard, operator, and Prometheus to reach workspace pods and vice-versa |
 | Same namespace | Both | Allow intra-workspace communication |
-| Shared namespaces | Both | Allow access to shared Providers/Tools |
+| Shared namespaces (label `omnia.altairalabs.ai/shared: true`) | Both | Allow access to shared Providers/Tools |
 | External IPs (0.0.0.0/0) | Egress | Allow LLM API calls |
 | Private IPs (10.x, 172.16.x, 192.168.x) | Blocked | Prevent cross-tenant access |
+
+The **operator namespace** rule matches by the kube-controller-injected `kubernetes.io/metadata.name` label, so no manual labelling is required. It's read from the operator pod's `POD_NAMESPACE` environment variable at startup; if the operator is running outside a pod (e.g., in an envtest harness), the rule is omitted and the shared-namespace label or custom `allowFrom`/`allowTo` become the only cross-namespace paths.
 
 :::tip[Why these IP ranges?]
 The blocked private IP ranges are [RFC 1918](https://datatracker.ietf.org/doc/html/rfc1918) addresses:

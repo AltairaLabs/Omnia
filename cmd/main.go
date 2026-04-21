@@ -277,6 +277,7 @@ func main() {
 			MemoryImagePullPolicy:  corev1.PullPolicy(memoryAPIImagePullPolicy),
 		},
 		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
+		OperatorNamespace:               os.Getenv("POD_NAMESPACE"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "Workspace")
 		os.Exit(1)
