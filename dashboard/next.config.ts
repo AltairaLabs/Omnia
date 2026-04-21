@@ -11,6 +11,12 @@ const nextConfig: NextConfig = {
   // Note: Grafana proxy is handled by /app/grafana/[...path]/route.ts
   // This allows us to add auth headers when proxying to Grafana
 
+  // Drop the default `x-powered-by: Next.js` header so we don't leak the
+  // runtime + version to unauthenticated visitors. Other security headers
+  // (HSTS/CSP/X-Frame-Options/etc.) are applied by src/middleware.ts via
+  // lib/security-headers.ts.
+  poweredByHeader: false,
+
   // Enable source maps in production for E2E code coverage collection.
   // This allows monocart-reporter to map V8 coverage back to original source files.
   // Source maps are only served when explicitly requested, so no security impact.

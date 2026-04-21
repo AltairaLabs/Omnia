@@ -458,6 +458,27 @@ OMNIA_SESSION_TTL=86400
 Always set `OMNIA_SESSION_SECRET` in production. Without it, sessions won't persist across restarts and security is compromised.
 :::
 
+### Session cookie attributes
+
+The dashboard issues its session cookie with `HttpOnly` + `SameSite=Lax`, and `Secure` when `NODE_ENV=production`. The clearing `Set-Cookie` issued on logout / invalid-session paths carries the same attributes, so a transient MITM observing the clear cannot downgrade or leak the cookie value.
+
+## Security response headers
+
+Every dashboard response carries a defence-in-depth header baseline:
+
+| Header | Default | Override |
+|---|---|---|
+| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains; preload` | — |
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' ws: wss:; media-src 'self' blob: data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` | `OMNIA_CSP_POLICY` env var |
+| `X-Frame-Options` | `DENY` | — |
+| `X-Content-Type-Options` | `nosniff` | — |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | — |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=()` | — |
+
+The default CSP includes `'unsafe-inline'` and `'unsafe-eval'` because Next.js uses inline scripts for hydration and runtime-evaluated chunks. Operators with a strict policy can override by setting `OMNIA_CSP_POLICY` in the dashboard environment — the value replaces the default wholesale.
+
+The `x-powered-by: Next.js` header is disabled via `poweredByHeader: false` in `next.config.ts`, so the runtime + framework version are not advertised in responses.
+
 ## API Keys
 
 Enable programmatic access for scripts and CI/CD:

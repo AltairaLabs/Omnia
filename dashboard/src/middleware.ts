@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { unsealData } from "iron-session";
 import type { SessionData } from "@/lib/auth/types";
+import { applySecurityHeaders } from "@/lib/security-headers";
 
 /**
  * Auth middleware — enforces authentication when OMNIA_AUTH_MODE is
@@ -103,37 +104,49 @@ function unauthenticatedResponse(
     loginUrl.searchParams.set("returnTo", pathname + req.nextUrl.search);
     response = NextResponse.redirect(loginUrl);
   }
-  // Clean up the invalid cookie so the next request doesn't repeat the dance.
-  response.cookies.delete(cookieName);
+  // Clean up the invalid cookie so the next request doesn't repeat the
+  // dance. `response.cookies.delete(name)` issues a Set-Cookie with empty
+  // value + past expiry but omits HttpOnly/Secure/SameSite — we set them
+  // explicitly so the clearing cookie carries the same security attributes
+  // as the original (pen-test H-2).
+  response.cookies.set({
+    name: cookieName,
+    value: "",
+    path: "/",
+    maxAge: 0,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+  });
   return response;
 }
 
 export async function middleware(req: NextRequest) {
   const mode = process.env.OMNIA_AUTH_MODE ?? "anonymous";
   if (mode === "anonymous") {
-    return NextResponse.next();
+    return applySecurityHeaders(NextResponse.next());
   }
 
   const { pathname } = req.nextUrl;
   if (isPublicPath(pathname)) {
-    return NextResponse.next();
+    return applySecurityHeaders(NextResponse.next());
   }
 
   const cookieName = process.env.OMNIA_SESSION_COOKIE_NAME ?? "omnia_session";
 
   if (mode === "oauth" || mode === "builtin") {
     const ok = await hasValidSession(req, mode);
-    if (ok) return NextResponse.next();
-    return unauthenticatedResponse(req, cookieName);
+    if (ok) return applySecurityHeaders(NextResponse.next());
+    return applySecurityHeaders(unauthenticatedResponse(req, cookieName));
   }
 
   // proxy (and any future mode): presence-check is the safest behaviour.
   // A fresh proxy request with headers but no cookie gets through and
   // handleProxyAuth in lib/auth/index.ts mints the session.
   if (req.cookies.has(cookieName)) {
-    return NextResponse.next();
+    return applySecurityHeaders(NextResponse.next());
   }
-  return unauthenticatedResponse(req, cookieName);
+  return applySecurityHeaders(unauthenticatedResponse(req, cookieName));
 }
 
 export const config = {
