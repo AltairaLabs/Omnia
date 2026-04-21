@@ -136,7 +136,6 @@ export default defineConfig({
         "src/lib/auth/actions.ts", // Next.js server actions
         "src/lib/auth/api-guard.ts", // API middleware with NextAuth
         "src/lib/auth/proxy.ts", // HTTP proxy utilities
-        "src/lib/auth/session.ts", // NextAuth session handling
         "src/lib/auth/api-keys/**", // File-based API key stores
         "src/lib/auth/oauth/**", // OAuth client (requires providers)
         "src/lib/auth/providers/**", // OAuth provider configs

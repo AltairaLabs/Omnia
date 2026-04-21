@@ -1,18 +1,22 @@
 /**
- * Session management using iron-session.
+ * Session helpers backed by the `SessionStore`.
  *
- * Provides encrypted, stateless sessions stored in HTTP-only cookies.
+ * The iron-session cookie carries only `{ sid }`; the full session
+ * record (user, tokens, metadata) lives in the server-side store.
+ * This keeps the cookie fixed-size across every IDP and lets logout
+ * actually revoke — neither is possible with cookie-sealed sessions.
  */
 
+import { randomBytes } from "node:crypto";
 import { getIronSession, IronSession } from "iron-session";
 import { cookies } from "next/headers";
 import { getAuthConfig } from "./config";
-import type { SessionData, User } from "./types";
+import { getSessionStore } from "./session-store";
+import type { SessionRecord } from "./session-store/types";
+import type { OAuthTokens } from "./oauth/types";
+import type { SessionCookieData, SessionData, User } from "./types";
 
-/**
- * Get the session options from config.
- */
-function getSessionOptions() {
+function getCookieOptions() {
   const config = getAuthConfig();
   return {
     password: config.session.secret,
@@ -26,44 +30,87 @@ function getSessionOptions() {
   };
 }
 
-/**
- * Get the current session.
- */
-export async function getSession(): Promise<IronSession<SessionData>> {
+async function getCookieSession(): Promise<IronSession<SessionCookieData>> {
   const cookieStore = await cookies();
-  return getIronSession<SessionData>(cookieStore, getSessionOptions());
+  return getIronSession<SessionCookieData>(cookieStore, getCookieOptions());
 }
 
-/**
- * Get the current user from session.
- * Returns null if not authenticated.
- */
+function newSid(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+/** Read the server-side record for the current browser session, or null. */
+export async function getSessionRecord(): Promise<SessionRecord | null> {
+  const cookie = await getCookieSession();
+  if (!cookie.sid) return null;
+  return getSessionStore().getSession(cookie.sid);
+}
+
+/** Current user, or null if not authenticated. */
 export async function getCurrentUser(): Promise<User | null> {
-  const session = await getSession();
-  return session.user || null;
+  const record = await getSessionRecord();
+  return record?.user ?? null;
 }
 
 /**
- * Save user to session.
+ * Mint a fresh session id, write the record to the store, seal the sid
+ * into the cookie. Always rotates the sid — defends against session
+ * fixation at the login boundary.
  */
-export async function saveUserToSession(user: User): Promise<void> {
-  const session = await getSession();
-  session.user = user;
-  session.createdAt = Date.now();
-  await session.save();
+export async function saveUserToSession(user: User, oauth?: OAuthTokens): Promise<void> {
+  const config = getAuthConfig();
+  const sid = newSid();
+  const record: SessionRecord = {
+    user,
+    oauth,
+    createdAt: Date.now(),
+  };
+  await getSessionStore().putSession(sid, record, config.session.ttl);
+  const cookie = await getCookieSession();
+  cookie.sid = sid;
+  await cookie.save();
 }
 
 /**
- * Clear the session (logout).
+ * Update the OAuth tokens on the current session (refresh flow). No-op
+ * if the session no longer exists.
  */
+export async function updateSessionOAuth(oauth: OAuthTokens, user?: User): Promise<void> {
+  const cookie = await getCookieSession();
+  if (!cookie.sid) return;
+  const config = getAuthConfig();
+  const store = getSessionStore();
+  const current = await store.getSession(cookie.sid);
+  if (!current) return;
+  const next: SessionRecord = {
+    ...current,
+    oauth,
+    user: user ?? current.user,
+  };
+  await store.putSession(cookie.sid, next, config.session.ttl);
+}
+
+/**
+ * Keep existing named export — callers use this directly.
+ *
+ * Returns a loose session type that tolerates both `SessionCookieData` (new)
+ * and `SessionData` (old) field access until callers are migrated in tasks 8–12.
+ * @deprecated Migrate callers to `getSessionRecord()` / `getCurrentUser()`.
+ */
+export async function getSession(): Promise<IronSession<SessionCookieData & Partial<SessionData>>> {
+  return getCookieSession() as Promise<IronSession<SessionCookieData & Partial<SessionData>>>;
+}
+
+/** Delete the server-side record and clear the cookie. */
 export async function clearSession(): Promise<void> {
-  const session = await getSession();
-  session.destroy();
+  const cookie = await getCookieSession();
+  const sid = cookie.sid;
+  if (sid) {
+    await getSessionStore().deleteSession(sid);
+  }
+  cookie.destroy();
 }
 
-/**
- * Check if user is authenticated.
- */
 export async function isAuthenticated(): Promise<boolean> {
   const user = await getCurrentUser();
   return user !== null && user.provider !== "anonymous";
