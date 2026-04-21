@@ -141,6 +141,28 @@ spec:
             - name: ARENA_REDIS_DB
               value: "{{ .Values.enterprise.arena.queue.redis.db | default 0 }}"
             {{- end }}
+            {{- with .Values.dashboard.session }}
+            - name: OMNIA_SESSION_STORE
+              value: {{ .store | quote }}
+            - name: OMNIA_SESSION_PKCE_TTL
+              value: {{ .pkceTtl | quote }}
+            {{- if .redis.url }}
+            - name: OMNIA_SESSION_REDIS_URL
+              value: {{ .redis.url | quote }}
+            {{- else if .redis.addr }}
+            - name: OMNIA_SESSION_REDIS_ADDR
+              value: {{ .redis.addr | quote }}
+            - name: OMNIA_SESSION_REDIS_DB
+              value: {{ .redis.db | quote }}
+            {{- if and .redis.existingSecret.name .redis.existingSecret.key }}
+            - name: OMNIA_SESSION_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .redis.existingSecret.name | quote }}
+                  key: {{ .redis.existingSecret.key | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.dashboard.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

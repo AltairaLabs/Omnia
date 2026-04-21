@@ -878,6 +878,33 @@ dashboard:
     # -- Existing PVC to use
     existingClaim: ""
 
+  # -- Server-side session store configuration for the dashboard.
+  # Controls where OAuth PKCE records and session metadata are stored.
+  session:
+    # -- Backend for server-side session storage.
+    # "memory" is single-replica dev only; "redis" is required for any
+    # multi-replica deployment (replicaCount > 1) or horizontal pod autoscaling.
+    store: redis
+    # -- TTL for in-flight PKCE records in seconds (default: 300 = 5 minutes).
+    pkceTtl: 300
+    redis:
+      # -- Full redis:// URL (preferred). Overrides addr/password/db if set.
+      # Example: "redis://omnia-redis-master.omnia.svc.cluster.local:6379"
+      # When redis.enabled=true, leave url empty and set addr to use the
+      # in-cluster Bitnami Redis: "<release>-redis-master.<namespace>.svc.cluster.local:6379"
+      url: ""
+      # -- host:port fallback (used when url is empty).
+      addr: ""
+      # -- Secret reference for the Redis password. Leave name and key empty
+      # to connect without authentication.
+      existingSecret:
+        # -- Name of the Kubernetes Secret containing the Redis password.
+        name: ""
+        # -- Key within the Secret whose value is the Redis password.
+        key: ""
+      # -- Redis database number (default: 0).
+      db: 0
+
 # ============================================================================
 # Session Retention Policy Configuration
 # Defines how long session history is retained across hot/warm/cold tiers
