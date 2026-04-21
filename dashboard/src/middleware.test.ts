@@ -220,4 +220,85 @@ describe("dashboard auth middleware", () => {
       expect(nextSpy).toHaveBeenCalled();
     });
   });
+
+  describe("security response headers (H-1)", () => {
+    it("applies HSTS / CSP / X-Frame-Options / nosniff / Referrer-Policy / Permissions-Policy on pass-through", async () => {
+      process.env.OMNIA_AUTH_MODE = "anonymous";
+      const resp = await middleware(makeRequest("/"));
+      expect(resp.headers.get("Strict-Transport-Security")).toContain("max-age=");
+      expect(resp.headers.get("Strict-Transport-Security")).toContain("includeSubDomains");
+      expect(resp.headers.get("Content-Security-Policy")).toContain("default-src 'self'");
+      expect(resp.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
+      expect(resp.headers.get("X-Frame-Options")).toBe("DENY");
+      expect(resp.headers.get("X-Content-Type-Options")).toBe("nosniff");
+      expect(resp.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
+      expect(resp.headers.get("Permissions-Policy")).toContain("camera=()");
+    });
+
+    it("applies security headers on a /login redirect (unauthenticated path response)", async () => {
+      process.env.OMNIA_AUTH_MODE = "oauth";
+      const resp = await middleware(makeRequest("/sessions/abc"));
+      expect(resp.status).toBe(307);
+      expect(resp.headers.get("Strict-Transport-Security")).toContain("max-age=");
+      expect(resp.headers.get("Content-Security-Policy")).toContain("default-src 'self'");
+    });
+
+    it("applies security headers on 401 API responses", async () => {
+      process.env.OMNIA_AUTH_MODE = "oauth";
+      const resp = await middleware(makeRequest("/api/workspaces"));
+      expect(resp.status).toBe(401);
+      expect(resp.headers.get("X-Frame-Options")).toBe("DENY");
+      expect(resp.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    });
+
+    it("respects OMNIA_CSP_POLICY override", async () => {
+      const originalPolicy = process.env.OMNIA_CSP_POLICY;
+      process.env.OMNIA_AUTH_MODE = "anonymous";
+      process.env.OMNIA_CSP_POLICY = "default-src 'self'; script-src 'self'";
+      try {
+        const resp = await middleware(makeRequest("/"));
+        expect(resp.headers.get("Content-Security-Policy")).toBe(
+          "default-src 'self'; script-src 'self'",
+        );
+      } finally {
+        if (originalPolicy === undefined) delete process.env.OMNIA_CSP_POLICY;
+        else process.env.OMNIA_CSP_POLICY = originalPolicy;
+      }
+    });
+  });
+
+  describe("cleared-session cookie security attributes (H-2)", () => {
+    beforeEach(() => {
+      process.env.OMNIA_AUTH_MODE = "oauth";
+    });
+
+    it("sets HttpOnly + SameSite + Path on the cleared cookie", async () => {
+      const resp = await middleware(
+        makeRequest("/sessions/abc", { cookie: `${COOKIE_NAME}=bogus` }),
+      );
+      const setCookie = resp.headers.get("set-cookie")!;
+      // Reflect the original cookie's security posture on the clearing
+      // Set-Cookie header, otherwise a MITM can observe that the session
+      // was cleared over plaintext and JS can read the (empty) cookie.
+      expect(setCookie).toMatch(/HttpOnly/i);
+      expect(setCookie).toMatch(/SameSite=Lax/i);
+      expect(setCookie).toMatch(/Path=\//i);
+      expect(setCookie).toMatch(/Max-Age=0|Expires=/i);
+    });
+
+    it("adds Secure in production NODE_ENV", async () => {
+      const originalEnv = process.env.NODE_ENV;
+      // Next.js typings make NODE_ENV readonly; mutate via Object.assign to
+      // keep vitest happy while still setting the runtime value.
+      Object.assign(process.env, { NODE_ENV: "production" });
+      try {
+        const resp = await middleware(
+          makeRequest("/sessions/abc", { cookie: `${COOKIE_NAME}=bogus` }),
+        );
+        expect(resp.headers.get("set-cookie")!).toMatch(/Secure/i);
+      } finally {
+        Object.assign(process.env, { NODE_ENV: originalEnv });
+      }
+    });
+  });
 });
