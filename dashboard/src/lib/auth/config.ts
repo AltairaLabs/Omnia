@@ -54,6 +54,10 @@ export interface AuthConfig {
     secret: string;
     /** Session TTL in seconds */
     ttl: number;
+    /** Backend for server-side session storage */
+    storeBackend: "memory" | "redis";
+    /** PKCE in-flight TTL in seconds (login-to-callback window) */
+    pkceTtl: number;
   };
   /** Anonymous access configuration */
   anonymous: {
@@ -100,6 +104,8 @@ export function getAuthConfig(): AuthConfig {
       cookieName: process.env.OMNIA_SESSION_COOKIE_NAME || "omnia_session",
       secret: process.env.OMNIA_SESSION_SECRET || generateDevSecret(),
       ttl: Number.parseInt(process.env.OMNIA_SESSION_TTL || "86400", 10), // 24 hours
+      storeBackend: (process.env.OMNIA_SESSION_STORE === "redis" ? "redis" : "memory"),
+      pkceTtl: Number.parseInt(process.env.OMNIA_SESSION_PKCE_TTL || "300", 10), // 5 min
     },
     anonymous: {
       role: (process.env.OMNIA_AUTH_ANONYMOUS_ROLE || "viewer") as UserRole,

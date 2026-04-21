@@ -34,17 +34,30 @@ export interface User {
 }
 
 /**
- * Session data stored in the cookie.
+ * Session data persisted in the server-side store under `sess:<sid>`.
+ * Must not go into the cookie — it exceeds the 4KB browser limit for
+ * any non-trivial IDP token. Kept as an alias for now so callers that
+ * previously imported SessionData still type-check; later tasks will
+ * migrate consumers to SessionRecord from session-store/types.
  */
 export interface SessionData {
-  /** User information */
   user?: User;
-  /** Session creation timestamp */
   createdAt?: number;
-  /** OAuth tokens (when using OAuth mode) */
   oauth?: OAuthTokens;
-  /** PKCE data during OAuth flow */
+  /**
+   * @deprecated PKCE data now lives in the server-side store keyed by state.
+   * Retained here so callers in login/callback routes still type-check while
+   * Tasks 8 and 9 migrate those files to the new session-store PKCE API.
+   */
   pkce?: PKCEData;
+}
+
+/**
+ * Payload sealed into the session cookie. Kept intentionally tiny
+ * (~60 bytes after iron-session sealing) so it is safe across every IDP.
+ */
+export interface SessionCookieData {
+  sid?: string;
 }
 
 /**
