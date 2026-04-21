@@ -156,4 +156,8 @@ export const config = {
   // middleware function at all. The isPublicPath() belt-and-braces
   // check covers the remainder.
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // Node runtime is required because the session store can transitively
+  // import ioredis (Node-only). The Edge runtime would fail to bundle it
+  // and every request would throw at module-load time.
+  runtime: "nodejs",
 };
