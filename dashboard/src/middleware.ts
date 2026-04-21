@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { unsealData } from "iron-session";
-import type { SessionData } from "@/lib/auth/types";
+import type { SessionCookieData } from "@/lib/auth/types";
+import { getSessionStore } from "@/lib/auth/session-store";
 import { applySecurityHeaders } from "@/lib/security-headers";
 
 /**
@@ -18,12 +19,12 @@ import { applySecurityHeaders } from "@/lib/security-headers";
  *     401 JSON for unauthenticated API requests (so JSON clients don't
  *     receive an HTML redirect).
  *
- * For `oauth` and `builtin` modes we decrypt the iron-session cookie
- * and verify it carries a user whose `provider` matches the active
- * mode. A present-but-bogus cookie (stale, tampered, mode-mismatched)
- * is treated as unauthenticated and cleared from the response — this
- * closes the "any junk cookie bypasses auth" gap where middleware only
- * checked cookie *presence*.
+ * For `oauth` and `builtin` modes we unseal the iron-session cookie to
+ * extract the `sid`, then look up the session record in the server-side
+ * store and verify it carries a user whose `provider` matches the active
+ * mode. A present-but-bogus cookie (stale, tampered, mode-mismatched,
+ * or expired from the store) is treated as unauthenticated and cleared
+ * from the response.
  *
  * For `proxy` mode we keep the presence check: proxy deployments
  * mint a session on the first authenticated request and the proxy
@@ -75,16 +76,17 @@ async function hasValidSession(
   const cookie = req.cookies.get(opts.cookieName);
   if (!cookie) return false;
   try {
-    // unsealData works with a plain sealed string — avoids the CookieStore
-    // type mismatch between NextRequest.cookies (RequestCookies) and
-    // iron-session's expected CookieStore shape, and keeps middleware
-    // out of the full session read/write lifecycle.
-    const session = await unsealData<SessionData>(cookie.value, {
+    // Unseal the slim cookie payload to extract the session ID, then
+    // look up the full session record in the server-side store. This
+    // keeps the cookie small (≤ 4 KB) and ensures the session is valid
+    // and hasn't been revoked (e.g. by logout).
+    const { sid } = await unsealData<SessionCookieData>(cookie.value, {
       password: opts.password,
     });
-    const user = session.user;
-    if (!user) return false;
-    return user.provider === mode;
+    if (!sid) return false;
+    const record = await getSessionStore().getSession(sid);
+    if (!record?.user) return false;
+    return record.user.provider === mode;
   } catch {
     // Bad signature / wrong password / corrupt ciphertext — treat as no session.
     return false;
