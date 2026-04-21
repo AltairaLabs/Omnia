@@ -17,6 +17,7 @@ import type { User } from "../types";
 export interface SessionRecord {
   user: User;
   oauth?: OAuthTokens;
+  /** Wall-clock ms when the session was minted; diagnostic only — TTL is driven by ttlSeconds on putSession. */
   createdAt: number;
 }
 
@@ -44,7 +45,7 @@ export interface SessionStore {
   /** Delete a session. No-op if it does not exist. */
   deleteSession(sid: string): Promise<void>;
 
-  /** Write an in-flight PKCE record keyed by its IdP state. */
+  /** Write an in-flight PKCE record keyed by its IdP state. The `state` argument must equal `record.state`. */
   putPkce(state: string, record: PkceRecord, ttlSeconds: number): Promise<void>;
 
   /** Atomic single-use read of a PKCE record. Returns null if missing, expired, or already consumed. */
