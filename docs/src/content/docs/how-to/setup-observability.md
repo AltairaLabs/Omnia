@@ -37,7 +37,7 @@ alloy:
 Install or upgrade with these values:
 
 ```bash
-helm upgrade --install omnia oci://ghcr.io/altairalabs/omnia \
+helm upgrade --install omnia oci://ghcr.io/altairalabs/charts/omnia \
   --namespace omnia-system \
   --create-namespace \
   -f values.yaml

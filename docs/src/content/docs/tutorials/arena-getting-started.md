@@ -22,7 +22,7 @@ Before you begin, ensure you have:
 If you don't have an API key, you can use the `omnia-demos` chart which includes a local Ollama instance:
 
 ```bash
-helm install omnia-demos oci://ghcr.io/altairalabs/omnia-demos \
+helm install omnia-demos oci://ghcr.io/altairalabs/charts/omnia-demos \
   -n omnia-demo --create-namespace \
   --set arenaDemo.enabled=true
 ```

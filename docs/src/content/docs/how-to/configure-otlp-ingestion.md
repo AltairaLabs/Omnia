@@ -38,7 +38,7 @@ sessionApi:
 Deploy the update:
 
 ```bash
-helm upgrade omnia oci://ghcr.io/altairalabs/omnia \
+helm upgrade omnia oci://ghcr.io/altairalabs/charts/omnia \
   --namespace omnia-system \
   -f values.yaml
 ```

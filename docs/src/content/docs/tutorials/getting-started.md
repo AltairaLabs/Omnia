@@ -22,12 +22,12 @@ If you don't have an API key yet, you can try Omnia with the demo charts that us
 
 ```bash
 # Install the Omnia operator with dashboard
-helm install omnia oci://ghcr.io/altairalabs/omnia \
+helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
   -n omnia-system --create-namespace \
   --set dashboard.enabled=true
 
 # Install the demo agents (separate chart)
-helm install omnia-demos oci://ghcr.io/altairalabs/omnia-demos \
+helm install omnia-demos oci://ghcr.io/altairalabs/charts/omnia-demos \
   -n omnia-demo --create-namespace
 ```
 
@@ -35,7 +35,13 @@ This deploys a vision-capable agent using the llava:7b model running locally. No
 
 **Requirements**: 8GB+ RAM, 10GB disk for the model.
 
-Once deployed, access the dashboard at `http://localhost:3000` (after port-forwarding) and connect to the `vision-demo` agent.
+Once deployed, port-forward the dashboard and open it in your browser:
+
+```bash
+kubectl port-forward -n omnia-system svc/omnia-dashboard 3000:3000
+```
+
+Visit `http://localhost:3000` and connect to the `vision-demo` agent.
 :::
 
 ## Step 1: Install the Operator
@@ -43,11 +49,17 @@ Once deployed, access the dashboard at `http://localhost:3000` (after port-forwa
 Add the Omnia Helm repository and install the operator:
 
 ```bash
-helm repo add omnia https://altairalabs.github.io/omnia/charts
+helm repo add altaira https://charts.altairalabs.ai
 helm repo update
 
 kubectl create namespace omnia-system
-helm install omnia omnia/omnia -n omnia-system
+helm install omnia altaira/omnia -n omnia-system
+```
+
+Or install directly from the OCI registry:
+
+```bash
+helm install omnia oci://ghcr.io/altairalabs/charts/omnia -n omnia-system --create-namespace
 ```
 
 Verify the operator is running:
@@ -144,7 +156,7 @@ metadata:
   namespace: default
 type: Opaque
 stringData:
-  ANTHROPIC_API_KEY: "sk-ant-..."  # Or OPENAI_API_KEY for OpenAI
+  ANTHROPIC_API_KEY: "sk-ant-..."  # Or OPENAI_API_KEY / GEMINI_API_KEY
 ---
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: Provider
@@ -152,10 +164,15 @@ metadata:
   name: my-provider
   namespace: default
 spec:
-  type: claude  # Or "openai", "gemini"
+  type: claude  # One of: claude, openai, gemini, ollama, mock
   model: claude-sonnet-4-20250514
-  secretRef:
-    name: llm-credentials
+  credential:
+    secretRef:
+      name: llm-credentials
+      # key is inferred from provider type:
+      #   claude  → ANTHROPIC_API_KEY
+      #   openai  → OPENAI_API_KEY
+      #   gemini  → GEMINI_API_KEY
 ```
 
 ```bash
@@ -169,7 +186,7 @@ kubectl get provider my-provider
 # Should show: my-provider   claude   claude-sonnet-4-20250514   Ready   ...
 ```
 
-> **Tip**: Don't have an API key yet? Use `handler: demo` in your AgentRuntime to test with simulated responses. See [Handler Modes](/reference/agentruntime/#handler-modes) for details.
+> **Tip**: Don't have an API key yet? Use `handler: demo` in your AgentRuntime to test with simulated responses, or set `type: mock` on the Provider for a no-network testing provider. See [Handler Modes](/reference/agentruntime/#handler-modes) for details.
 
 ## Step 4: Deploy the Agent
 
@@ -195,7 +212,12 @@ spec:
     ttl: "1h"
 ```
 
-> **Note**: The `handler: demo` setting provides simulated streaming responses for testing. For production with a real LLM, change to `handler: runtime` (the default).
+> **Note**: Handler modes are:
+> - `runtime` *(default)* — uses the runtime framework in the container for real LLM responses.
+> - `demo` — simulated streaming responses for demos without an API key.
+> - `echo` — echoes the input back; useful for testing connectivity.
+>
+> Session store types are `memory` (single-pod dev only), `redis`, and `postgres`. Redis and Postgres require a `storeRef` pointing at a Secret with connection details.
 
 ```bash
 kubectl apply -f agentruntime.yaml

@@ -11,7 +11,7 @@ This document covers all configuration options for the Omnia Helm chart.
 ## Installation
 
 ```bash
-helm install omnia oci://ghcr.io/altairalabs/omnia \
+helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
   --namespace omnia-system \
   --create-namespace \
   -f values.yaml
@@ -868,12 +868,12 @@ Demo agents are now deployed via a separate `omnia-demos` chart. This provides a
 
 ```bash
 # First, install the main Omnia operator
-helm install omnia oci://ghcr.io/altairalabs/omnia \
+helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
   --namespace omnia-system \
   --create-namespace
 
 # Then, install the demo agents
-helm install omnia-demos oci://ghcr.io/altairalabs/omnia-demos \
+helm install omnia-demos oci://ghcr.io/altairalabs/charts/omnia-demos \
   --namespace omnia-demo \
   --create-namespace
 ```
@@ -1039,12 +1039,12 @@ Quick-start demo with local Ollama LLM. Deploy using two separate charts:
 
 ```bash
 # Main chart with dashboard
-helm install omnia oci://ghcr.io/altairalabs/omnia \
+helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
   -n omnia-system --create-namespace \
   --set dashboard.enabled=true
 
 # Demo agents chart
-helm install omnia-demos oci://ghcr.io/altairalabs/omnia-demos \
+helm install omnia-demos oci://ghcr.io/altairalabs/charts/omnia-demos \
   -n omnia-demo --create-namespace \
   --set ollama.persistence.enabled=true
 ```
