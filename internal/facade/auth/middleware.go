@@ -17,7 +17,6 @@ limitations under the License.
 package auth
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/go-logr/logr"
@@ -29,7 +28,8 @@ import (
 type MiddlewareOption func(*middlewareConfig)
 
 type middlewareConfig struct {
-	log logr.Logger
+	log                  logr.Logger
+	allowUnauthenticated bool
 }
 
 // WithMiddlewareLogger binds a logr.Logger for rejection telemetry. The
@@ -39,47 +39,69 @@ func WithMiddlewareLogger(log logr.Logger) MiddlewareOption {
 	return func(c *middlewareConfig) { c.log = log }
 }
 
+// WithMiddlewareAllowUnauthenticated controls the empty-chain fallback.
+// Defaults to true so dev/test handlers without a chain configured keep
+// working. Set false to reject every unauthenticated request including
+// the empty-chain case.
+//
+// When the chain is non-empty, ErrNoCredential from all validators
+// always 401s regardless of this flag — that's the PR 3 default-flip
+// semantic. Production deployments run a non-empty chain (mgmt-plane
+// at minimum) so this flag is a no-op for them.
+func WithMiddlewareAllowUnauthenticated(allow bool) MiddlewareOption {
+	return func(c *middlewareConfig) { c.allowUnauthenticated = allow }
+}
+
 // Middleware returns an http.Handler wrapper that runs `chain` against
 // each request. On admit it attaches the AuthenticatedIdentity to the
-// request context via policy.WithIdentity and calls next. On
-// ErrNoCredential (or empty chain) it calls next without attaching an
-// identity — the PR 1 unauthenticated-upgrade default stays intact
-// until PR 3 flips it. On any other chain error it returns 401 and
-// short-circuits next.
+// request context via policy.WithIdentity and calls next.
+//
+// PR 3 flipped the ErrNoCredential path: when a non-empty chain is
+// configured and no validator admits, the middleware returns 401
+// instead of falling through to next. Empty chain (no validators
+// configured) still falls through when allowUnauthenticated is true
+// (the default) so dev/test handlers work — production always runs a
+// non-empty chain with mgmt-plane at minimum.
 //
 // Unlike the WS server's inline authenticateRequest, this wrapper works
 // with any http.Handler — used by the A2A HTTP server which the
 // dashboard proxy doesn't front.
 func Middleware(chain Chain, next http.Handler, opts ...MiddlewareOption) http.Handler {
-	cfg := &middlewareConfig{log: logr.Discard()}
+	cfg := &middlewareConfig{
+		log:                  logr.Discard(),
+		allowUnauthenticated: true,
+	}
 	for _, opt := range opts {
 		opt(cfg)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if len(chain) == 0 {
-			next.ServeHTTP(w, r)
+			if cfg.allowUnauthenticated {
+				next.ServeHTTP(w, r)
+				return
+			}
+			reject401(w, r, cfg.log, "empty chain with allowUnauthenticated=false")
 			return
 		}
 		id, err := chain.Run(r.Context(), r)
-		switch {
-		case err == nil:
-			// Admit: attach identity so downstream handlers (and
-			// ToolPolicy CEL) can reason about the caller.
-			ctx := policy.WithIdentity(r.Context(), id)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		case errors.Is(err, ErrNoCredential):
-			// PR 1 default: no credential → proceed unauthenticated.
-			// PR 3 flips this at the caller layer by configuring a
-			// strict chain that returns ErrInvalidCredential instead.
-			next.ServeHTTP(w, r)
-		default:
-			// ErrInvalidCredential / ErrExpired / anything else →
-			// reject. 401 is the right status per the design doc.
-			cfg.log.V(1).Info("auth middleware rejected request",
-				"reason", err.Error(),
-				"path", r.URL.Path,
-				"method", r.Method)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		if err != nil {
+			// ErrNoCredential / ErrInvalidCredential / ErrExpired /
+			// anything else → reject. PR 3 flipped the ErrNoCredential
+			// branch from "pass through" to 401 to close pen-test C-3.
+			reject401(w, r, cfg.log, err.Error())
+			return
 		}
+		// Admit: attach identity so downstream handlers (and
+		// ToolPolicy CEL) can reason about the caller.
+		ctx := policy.WithIdentity(r.Context(), id)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func reject401(w http.ResponseWriter, r *http.Request, log logr.Logger, reason string) {
+	log.V(1).Info("auth middleware rejected request",
+		"reason", reason,
+		"path", r.URL.Path,
+		"method", r.Method)
+	http.Error(w, "unauthorized", http.StatusUnauthorized)
 }

@@ -159,15 +159,23 @@ type Server struct {
 	// authChain, when non-empty, runs every configured Validator against
 	// the upgrade request in order and admits on the first match. On
 	// admit the identity flows into PropagationFields.Identity and the
-	// flat UserID / UserRoles / UserEmail fields. Empty chain (or
-	// chain-wide ErrNoCredential) preserves the PR 1 unauthenticated
-	// upgrade default; invalid/expired credentials always 401.
+	// flat UserID / UserRoles / UserEmail fields.
 	//
-	// PR 1a/c shipped a single mgmtPlaneValidator field; PR 2b promotes
-	// it to a chain so the data-plane validators (sharedToken, apiKeys,
-	// oidc, edgeTrust) can stack with mgmt-plane behind them.
+	// PR 3 flipped the chain-wide ErrNoCredential behaviour from
+	// "proceed unauthenticated" (PR 1 default) to "return 401 before
+	// Upgrade", closing pen-test finding C-3.
+	//
+	// Empty chain still proceeds when allowUnauthenticated is true (the
+	// default) so dev/test binaries without any validator configured
+	// keep working; set WithAllowUnauthenticated(false) to reject those
+	// as well.
 	authChain auth.Chain
-	log       logr.Logger
+	// allowUnauthenticated controls the empty-chain fallback. Default
+	// true for back-compat with dev/test; production always has at
+	// least the mgmt-plane validator in the chain, so this flag is a
+	// no-op in deployed setups.
+	allowUnauthenticated bool
+	log                  logr.Logger
 
 	mu           sync.RWMutex
 	connections  map[*websocket.Conn]*Connection
@@ -241,17 +249,40 @@ func WithMgmtPlaneValidator(v auth.Validator) ServerOption {
 
 // WithAuthChain configures the server to run the supplied auth chain on
 // every upgrade. Admit attaches the resulting identity to the
-// connection's PropagationFields. ErrNoCredential (or empty chain)
-// preserves the PR 1 unauthenticated upgrade default; any other error
-// returns 401 before Upgrade.
+// connection's PropagationFields. ErrNoCredential (no validator admits)
+// now returns 401 before Upgrade — PR 3 flipped this from the
+// behaviour-preserving default of proceeding unauthenticated, closing
+// pen-test finding C-3.
 //
 // Validator order matters — the first validator that admits wins, so
 // list the most specific credential style first. The conventional order
 // shipped by cmd/agent is sharedToken → apiKeys → oidc → edgeTrust →
 // mgmt-plane.
+//
+// Empty chain still proceeds unauthenticated to keep the dev/test path
+// working when no validator can be constructed (no mgmt-plane key, no
+// externalAuth CRD). Set WithAllowUnauthenticated(false) at the server
+// to also reject those requests.
 func WithAuthChain(chain auth.Chain) ServerOption {
 	return func(s *Server) {
 		s.authChain = chain
+	}
+}
+
+// WithAllowUnauthenticated controls the fallback behaviour when the
+// auth chain is empty (no validators configured). Defaults to true so
+// standalone dev/test binaries without a k8s client or mgmt-plane key
+// still accept WebSocket upgrades. Production deployments going through
+// cmd/agent always have at least the mgmt-plane validator in the chain,
+// so this flag does not affect them — they 401 on missing credentials
+// regardless.
+//
+// Set to false to reject every unauthenticated upgrade including the
+// empty-chain case. Useful for integration tests that want to prove the
+// strict default.
+func WithAllowUnauthenticated(allow bool) ServerOption {
+	return func(s *Server) {
+		s.allowUnauthenticated = allow
 	}
 }
 
@@ -264,6 +295,12 @@ func NewServer(cfg ServerConfig, store session.Store, handler MessageHandler, lo
 		metrics:      &NoOpMetrics{}, // Default to no-op
 		log:          log.WithName("websocket-server"),
 		connections:  make(map[*websocket.Conn]*Connection),
+		// Default true so dev/test binaries keep working without an
+		// auth chain configured. Production deployments always have
+		// at least mgmt-plane in the chain so this flag is a no-op
+		// for them — the PR 3 flip applies via the chain's 401 on
+		// ErrNoCredential regardless of this bool.
+		allowUnauthenticated: true,
 	}
 
 	// Apply options first so allowedOrigins is set before building the upgrader
@@ -369,21 +406,32 @@ func ParseAllowedOrigins(raw string) []string {
 }
 
 // authenticateRequest runs the configured auth chain against the request.
-// Returns the admitted identity (or nil when no chain is configured / no
-// credential was presented), or an error when a credential was presented
-// but rejected. A nil error with a nil identity means "fall through to
-// the existing unauthenticated upgrade path" — PR 1 preserves this for
-// back-compat; PR 3 will flip the default at this layer.
+// Returns the admitted identity, or an error when no validator admits.
+//
+// PR 3 flipped the ErrNoCredential branch from "proceed unauthenticated"
+// to "return 401". Empty chain still proceeds iff allowUnauthenticated
+// is true (default); production deployments always have at least the
+// mgmt-plane validator in the chain so the empty-chain path is a
+// dev/test escape hatch.
+//
+// Returning (nil, nil) means "proceed without identity" — callers
+// should treat this as the unauthenticated-but-allowed path. Returning
+// a non-nil error means "reject" — callers translate to 401.
 func (s *Server) authenticateRequest(r *http.Request) (*policy.AuthenticatedIdentity, error) {
 	if len(s.authChain) == 0 {
-		return nil, nil
+		if s.allowUnauthenticated {
+			return nil, nil
+		}
+		return nil, auth.ErrNoCredential
 	}
 	id, err := s.authChain.Run(r.Context(), r)
 	switch {
 	case err == nil:
 		return id, nil
 	case errors.Is(err, auth.ErrNoCredential):
-		return nil, nil
+		// PR 3: no validator admitted. Production = 401. The PR 1
+		// back-compat pass-through is gone.
+		return nil, err
 	default:
 		// ErrInvalidCredential / ErrExpired / anything else — surface as
 		// a rejection so the caller returns 401.

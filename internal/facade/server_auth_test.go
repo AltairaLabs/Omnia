@@ -128,9 +128,11 @@ func dialWS(t *testing.T, ts *httptest.Server, header http.Header) (*websocket.C
 	return websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", header)
 }
 
-func TestServerAuth_NoValidator_AllowsUpgrade(t *testing.T) {
-	// Behaviour-preserving default: with no validator configured, upgrade
-	// proceeds even without Authorization header.
+func TestServerAuth_NoValidator_DevModeAllowsUpgrade(t *testing.T) {
+	// Empty chain is the dev/test escape hatch — allowUnauthenticated
+	// defaults to true at the Server layer so a bare NewServer call
+	// (no WithAuthChain) keeps working for standalone binaries that
+	// have no k8s client or mgmt-plane key.
 	_, ts := newTestServer(t, nil)
 	ws, _, err := dialWS(t, ts, nil)
 	require.NoError(t, err)
@@ -138,26 +140,19 @@ func TestServerAuth_NoValidator_AllowsUpgrade(t *testing.T) {
 	readConnected(t, ws)
 }
 
-func TestServerAuth_ValidatorPresent_NoAuthHeader_AllowsUpgrade(t *testing.T) {
-	// PR 1 preserves the unauthenticated upgrade path even when a validator
-	// is configured. PR 3 flips this default.
+func TestServerAuth_ValidatorPresent_NoAuthHeader_Rejects401(t *testing.T) {
+	// PR 3: with a chain configured, a request carrying no credential
+	// must 401 before Upgrade. This is the default-flip that closes
+	// pen-test C-3 — a customer app reaching the facade without
+	// authentication must not get a WebSocket session.
 	v, _ := newAuthTestValidator(t)
-	ts, observed := newAuthTestServer(t, v)
+	ts, _ := newAuthTestServer(t, v)
 
-	ws, _, err := dialWS(t, ts, nil)
-	require.NoError(t, err)
-	defer func() { _ = ws.Close() }()
-	readConnected(t, ws)
-
-	// Send a message so the handler captures propagation fields.
-	require.NoError(t, ws.WriteJSON(ClientMessage{Type: "user_message", Content: "hi"}))
-
-	select {
-	case fields := <-observed:
-		assert.Nil(t, fields.Identity, "no credential presented → no Identity attached")
-	case <-time.After(2 * time.Second):
-		t.Fatal("handler did not run")
-	}
+	_, resp, err := dialWS(t, ts, nil)
+	require.Error(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
+		"PR 3: missing credential with chain configured must 401")
 }
 
 func TestServerAuth_ValidToken_AttachesIdentity(t *testing.T) {
@@ -228,18 +223,21 @@ func TestServerAuth_MalformedToken_Rejects(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
-func TestServerAuth_NonBearerScheme_FallsThrough(t *testing.T) {
-	// Non-Bearer Authorization header (Basic, Negotiate, etc.) is not a
-	// mgmt-plane credential — the chain falls through and the upgrade
-	// proceeds unauthenticated (PR 1 behaviour).
+func TestServerAuth_NonBearerScheme_Rejects401(t *testing.T) {
+	// PR 3: a non-Bearer Authorization header (Basic, Negotiate, etc.)
+	// is no credential any configured validator recognises. Under PR 3
+	// the chain-wide ErrNoCredential result 401s instead of falling
+	// through to the unauthenticated upgrade path. This closes the
+	// "attacker sends Basic auth and gets a WS session" bypass.
 	v, _ := newAuthTestValidator(t)
 	ts, _ := newAuthTestServer(t, v)
 
 	header := http.Header{"Authorization": []string{"Basic dXNlcjpwYXNz"}}
-	ws, _, err := dialWS(t, ts, header)
-	require.NoError(t, err)
-	defer func() { _ = ws.Close() }()
-	readConnected(t, ws)
+	_, resp, err := dialWS(t, ts, header)
+	require.Error(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
+		"non-Bearer Authorization with chain configured must 401")
 }
 
 // TestServerAuth_SharedTokenChain_AdmitsBeforeMgmtPlane proves that PR
