@@ -55,6 +55,12 @@ const (
 	ContextKeyClaims contextKey = "omnia-claims"
 	// ContextKeyConsentGrants holds per-request consent grants.
 	ContextKeyConsentGrants contextKey = "omnia-consent-grants"
+	// ContextKeyIdentity holds the AuthenticatedIdentity produced by the
+	// facade's auth chain. Not propagated on the wire — the flat UserID /
+	// UserRoles / UserEmail / Claims fields carry what downstream services
+	// need; Identity is retained in-process for the facade and for any
+	// handler that wants richer identity context.
+	ContextKeyIdentity contextKey = "omnia-identity"
 )
 
 // HTTP/gRPC header constants for context propagation.
@@ -125,6 +131,16 @@ type PropagationFields struct {
 	Claims        map[string]string
 	// ConsentGrants holds per-request consent category grants.
 	ConsentGrants []string
+	// Identity is the authenticated identity produced by the facade's auth
+	// chain. When non-nil, it is the source of truth for UserID /
+	// UserRoles / UserEmail / Claims — callers that build PropagationFields
+	// from an Identity should populate those flat fields from it so
+	// downstream consumers (gRPC headers, session logging) keep working
+	// unchanged.
+	//
+	// Identity itself is in-process only; it is not rehydrated from gRPC
+	// metadata on the runtime side.
+	Identity *AuthenticatedIdentity
 }
 
 // WithAgentName returns a context with the agent name set.
@@ -187,6 +203,26 @@ func WithConsentGrants(ctx context.Context, grants []string) context.Context {
 	return context.WithValue(ctx, ContextKeyConsentGrants, grants)
 }
 
+// WithIdentity returns a context with the AuthenticatedIdentity stored under
+// ContextKeyIdentity. Does nothing when id is nil.
+func WithIdentity(ctx context.Context, id *AuthenticatedIdentity) context.Context {
+	if id == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, ContextKeyIdentity, id)
+}
+
+// IdentityFromContext extracts the AuthenticatedIdentity from context, or
+// nil when no identity was attached.
+func IdentityFromContext(ctx context.Context) *AuthenticatedIdentity {
+	if v := ctx.Value(ContextKeyIdentity); v != nil {
+		if id, ok := v.(*AuthenticatedIdentity); ok {
+			return id
+		}
+	}
+	return nil
+}
+
 // ConsentGrantsFromContext extracts consent grants from context.
 func ConsentGrantsFromContext(ctx context.Context) []string {
 	if v := ctx.Value(ContextKeyConsentGrants); v != nil {
@@ -219,6 +255,9 @@ func WithPropagationFields(ctx context.Context, fields *PropagationFields) conte
 	if len(fields.ConsentGrants) > 0 {
 		ctx = WithConsentGrants(ctx, fields.ConsentGrants)
 	}
+	if fields.Identity != nil {
+		ctx = WithIdentity(ctx, fields.Identity)
+	}
 	return ctx
 }
 
@@ -245,6 +284,7 @@ func ExtractPropagationFields(ctx context.Context) PropagationFields {
 		Model:         getString(ctx, ContextKeyModel),
 		Claims:        getClaims(ctx),
 		ConsentGrants: ConsentGrantsFromContext(ctx),
+		Identity:      IdentityFromContext(ctx),
 	}
 }
 

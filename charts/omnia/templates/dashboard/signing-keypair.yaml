@@ -1,0 +1,50 @@
+{{- /*
+Mgmt-plane signing keypair for the dashboard.
+
+The dashboard uses this RSA keypair to mint short-lived JWTs for the
+"Try this agent" debug view; the facade validates them with the public
+half mounted into every agent pod (see internal/controller/deployment_builder.go
+and internal/facade/auth/mgmt_plane.go).
+
+Rotation model:
+  - First install: genSelfSigned produces a 3650-day RSA cert + key.
+  - Subsequent upgrades: `lookup` fetches the existing values so we never
+    regenerate a keypair that already has pods depending on it.
+  - resource-policy: keep prevents `helm uninstall` from deleting the
+    keypair; operators who want to truly rotate must delete the Secret
+    manually, re-run `helm upgrade`, and roll dashboard + facade pods.
+
+Opt-out: set dashboard.signingKey.existingSecret to reference an
+externally-managed Secret (same shape: kubernetes.io/tls with tls.crt +
+tls.key). Required for BYO key deployments — cloud KMS / CSI drivers.
+*/ -}}
+{{- if .Values.dashboard.enabled }}
+{{- if not .Values.dashboard.signingKey.existingSecret }}
+{{- $name := printf "%s-signing-keypair" (include "omnia.dashboard.fullname" .) }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
+{{- $cert := "" }}
+{{- $key := "" }}
+{{- if and $existing $existing.data (hasKey $existing.data "tls.crt") }}
+{{- $cert = index $existing.data "tls.crt" }}
+{{- $key = index $existing.data "tls.key" }}
+{{- else }}
+{{- $generated := genSelfSignedCert "omnia-dashboard" nil nil 3650 }}
+{{- $cert = $generated.Cert | b64enc }}
+{{- $key = $generated.Key | b64enc }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "omnia.dashboard.labels" . | nindent 4 }}
+  annotations:
+    # Never regenerate on upgrade; never delete on uninstall. Rotation is
+    # an explicit operator action (delete Secret + upgrade + roll pods).
+    "helm.sh/resource-policy": keep
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ $cert }}
+  tls.key: {{ $key }}
+{{- end }}
+{{- end }}

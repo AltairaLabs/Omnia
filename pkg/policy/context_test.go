@@ -57,6 +57,49 @@ func TestWithAndExtractPropagationFields(t *testing.T) {
 	assert.Equal(t, fields.Claims, extracted.Claims)
 }
 
+func TestPropagationFields_RoundTripsIdentity(t *testing.T) {
+	t.Parallel()
+	id := &AuthenticatedIdentity{
+		Origin:    OriginManagementPlane,
+		Subject:   "admin@example.com",
+		EndUser:   "admin@example.com",
+		Workspace: "default",
+		Agent:     "test-agent",
+		Role:      RoleAdmin,
+		Claims:    map[string]string{"tier": "pro"},
+	}
+	fields := &PropagationFields{
+		AgentName: "test-agent",
+		Identity:  id,
+	}
+	ctx := WithPropagationFields(context.Background(), fields)
+
+	// ExtractPropagationFields rehydrates Identity.
+	extracted := ExtractPropagationFields(ctx)
+	require.NotNil(t, extracted.Identity)
+	assert.Equal(t, id.Subject, extracted.Identity.Subject)
+	assert.Equal(t, id.Role, extracted.Identity.Role)
+
+	// IdentityFromContext returns the same pointer (no cloning — Identity
+	// is immutable from the consumer's perspective, so aliasing is fine).
+	assert.Same(t, id, IdentityFromContext(ctx))
+}
+
+func TestWithIdentity_Nil(t *testing.T) {
+	t.Parallel()
+	// WithIdentity(ctx, nil) must be a no-op: calling it should not
+	// attach a typed-nil sentinel that breaks downstream consumers.
+	ctx := context.Background()
+	out := WithIdentity(ctx, nil)
+	assert.Equal(t, ctx, out)
+	assert.Nil(t, IdentityFromContext(out))
+}
+
+func TestIdentityFromContext_MissingReturnsNil(t *testing.T) {
+	t.Parallel()
+	assert.Nil(t, IdentityFromContext(context.Background()))
+}
+
 func TestWithPropagationFields_NilFields(t *testing.T) {
 	ctx := context.Background()
 	result := WithPropagationFields(ctx, nil)
