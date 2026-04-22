@@ -253,6 +253,14 @@ jobs:
               type: websocket
               port: 8080
               handler: demo
+              # The HTTP connectivity probe below curls /ws without a
+              # credential and expects 400 (missing upgrade). The B2
+              # strict default (#967) would return 401 first. Opt into
+              # the dev escape hatch so the connectivity probe keeps
+              # its original semantics.
+              extraEnv:
+                - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+                  value: "true"
           EOF
 
           echo "Demo AgentRuntime created"
