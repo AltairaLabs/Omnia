@@ -19,6 +19,7 @@ const { parse } = require("url");
 const next = require("next");
 const { WebSocket, WebSocketServer } = require("ws");
 const { checkAnonymousAuthGuard } = require("./lib/auth-boot-guard");
+const { loadSigningKey, mintToken } = require("./lib/mgmt-plane-token");
 
 // Refuse to start if we're configured to run unauthenticated in what looks
 // like production. Mirrors the Helm chart's render-time check
@@ -34,6 +35,38 @@ const hostname = process.env.HOSTNAME || "0.0.0.0";
 const port = Number.parseInt(process.env.PORT || "3000", 10);
 // WebSocket proxy runs on separate port to avoid interfering with Next.js HMR
 const wsProxyPort = Number.parseInt(process.env.WS_PROXY_PORT || "3002", 10);
+
+// Mgmt-plane signing key path. When set and readable the WS proxy attaches
+// a freshly-minted JWT to every upstream connection so the facade's
+// auth.MgmtPlaneValidator admits it. When unset (dev/test) or unreadable,
+// the proxy connects without an Authorization header and the facade
+// falls through to its PR 1a default (unauthenticated upgrade — closes
+// in PR 3).
+const MGMT_PLANE_SIGNING_KEY_PATH = process.env.OMNIA_MGMT_PLANE_SIGNING_KEY_PATH || "";
+
+let mgmtPlaneSigningKey = null;
+if (MGMT_PLANE_SIGNING_KEY_PATH) {
+  try {
+    mgmtPlaneSigningKey = loadSigningKey(MGMT_PLANE_SIGNING_KEY_PATH);
+    console.log(`> mgmt-plane signing key loaded from ${MGMT_PLANE_SIGNING_KEY_PATH}`);
+  } catch (err) {
+    // Fatal — silently downgrading to "no auth" hides a real
+    // misconfiguration from operators (a typo in the volume mount,
+    // wrong PEM format, etc.). PodSecurity admission keeps secret
+    // material from accidentally leaking; refuse to start instead.
+    console.error(
+      `Failed to load mgmt-plane signing key from ${MGMT_PLANE_SIGNING_KEY_PATH}: ${err.message}`,
+    );
+    process.exit(1);
+  }
+}
+
+// Subject claim on minted mgmt-plane tokens. The dashboard proxy is a
+// single trust boundary — every WS upgrade routed through it has already
+// passed the dashboard's own auth check, so we don't try to mint
+// per-user tokens here. ToolPolicy distinguishes mgmt-plane traffic by
+// `identity.origin == "management-plane"`, not by subject.
+const MGMT_PLANE_SUBJECT = "omnia-dashboard-proxy";
 
 // Service domain for K8s cluster DNS
 const SERVICE_DOMAIN = process.env.SERVICE_DOMAIN || "svc.cluster.local";
@@ -166,6 +199,30 @@ function proxyWebSocket(clientSocket, namespace, name, clientParams = {}) {
   console.log(`[WS Proxy] Connecting to upstream: ${upstreamUrl}`);
   console.log(`[WS Proxy] SERVICE_DOMAIN=${SERVICE_DOMAIN}, DEFAULT_FACADE_PORT=${DEFAULT_FACADE_PORT}`);
 
+  // Mint a fresh mgmt-plane JWT for the upstream connection. The dashboard
+  // proxy is the single trust boundary — every WS upgrade has already
+  // passed the dashboard's own auth, so we sign with a constant subject
+  // and let ToolPolicy distinguish mgmt-plane traffic via identity.origin.
+  // No key loaded -> connect without Authorization (preserves PR 1a's
+  // unauthenticated default).
+  const upstreamHeaders = {};
+  if (mgmtPlaneSigningKey) {
+    try {
+      const token = mintToken({
+        key: mgmtPlaneSigningKey,
+        subject: MGMT_PLANE_SUBJECT,
+        agent: name,
+        workspace: namespace,
+      });
+      upstreamHeaders.Authorization = `Bearer ${token}`;
+    } catch (err) {
+      // Token-minting failure is unexpected (key was validated at boot).
+      // Surface it loudly but still attempt the upgrade unauthenticated
+      // so a transient error doesn't break the entire debug view.
+      console.error(`[WS Proxy] Failed to mint mgmt-plane token: ${err.message}`);
+    }
+  }
+
   let upstream = null;
   let upstreamConnected = false;
   let connectionTimeout = null;
@@ -180,7 +237,7 @@ function proxyWebSocket(clientSocket, namespace, name, clientParams = {}) {
   }, 10000);
 
   try {
-    upstream = new WebSocket(upstreamUrl);
+    upstream = new WebSocket(upstreamUrl, [], { headers: upstreamHeaders });
 
     upstream.on("open", () => {
       upstreamConnected = true;
