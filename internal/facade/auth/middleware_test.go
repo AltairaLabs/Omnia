@@ -104,10 +104,10 @@ func TestMiddleware_AdmitAttachesIdentity(t *testing.T) {
 	}
 }
 
-func TestMiddleware_NoCredentialFallsThrough(t *testing.T) {
-	// ErrNoCredential from all validators → no identity, but next still runs.
-	// This is PR 1a/c's unauthenticated-upgrade default; PR 3 flips it
-	// by configuring a chain that ends with an always-reject validator.
+func TestMiddleware_NoCredentialRejects401(t *testing.T) {
+	// PR 3: ErrNoCredential from every validator in a non-empty chain
+	// now 401s instead of falling through. Non-empty chain = "operator
+	// configured auth", so not presenting a credential is a hard fail.
 	t.Parallel()
 	chain := auth.Chain{&stubMwValidator{err: auth.ErrNoCredential}}
 	next := &observingHandler{}
@@ -115,14 +115,11 @@ func TestMiddleware_NoCredentialFallsThrough(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mw.ServeHTTP(rec, newMwRequest())
 
-	if next.called != 1 {
-		t.Errorf("next called %d, want 1 (fall-through)", next.called)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 (PR 3: no credential with chain configured must reject)", rec.Code)
 	}
-	if next.saw != nil {
-		t.Errorf("expected no identity attached, got %+v", next.saw)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rec.Code)
+	if next.called != 0 {
+		t.Errorf("next called %d, want 0 (must short-circuit)", next.called)
 	}
 }
 
@@ -179,9 +176,10 @@ func TestMiddleware_ChainOrderAdmitsFirstMatch(t *testing.T) {
 	}
 }
 
-func TestMiddleware_FallThroughMultipleValidators(t *testing.T) {
-	// Every validator returns ErrNoCredential; chain ends up returning
-	// ErrNoCredential; middleware falls through to next.
+func TestMiddleware_AllFallThroughRejects401(t *testing.T) {
+	// PR 3: when every validator in a non-empty chain returns
+	// ErrNoCredential, the middleware rejects with 401 regardless of
+	// how many validators are in the chain.
 	t.Parallel()
 	chain := auth.Chain{
 		&stubMwValidator{err: auth.ErrNoCredential},
@@ -193,10 +191,29 @@ func TestMiddleware_FallThroughMultipleValidators(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mw.ServeHTTP(rec, newMwRequest())
 
-	if next.called != 1 {
-		t.Errorf("next called %d, want 1", next.called)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
 	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rec.Code)
+	if next.called != 0 {
+		t.Error("next must not run when chain rejects every request")
+	}
+}
+
+func TestMiddleware_EmptyChainStrictModeRejects401(t *testing.T) {
+	// PR 3 escape hatch: set WithMiddlewareAllowUnauthenticated(false)
+	// to reject empty-chain requests too. Used by integration tests
+	// that want to prove the strict default without configuring a
+	// chain.
+	t.Parallel()
+	next := &observingHandler{}
+	mw := auth.Middleware(auth.Chain{}, next, auth.WithMiddlewareAllowUnauthenticated(false))
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, newMwRequest())
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 with strict empty-chain mode", rec.Code)
+	}
+	if next.called != 0 {
+		t.Error("next must not run in strict mode with empty chain")
 	}
 }
