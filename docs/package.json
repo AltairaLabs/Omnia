@@ -10,10 +10,10 @@
     "check-links": "node check-links.js"
   },
   "dependencies": {
-    "@astrojs/mdx": "^4.0.0",
+    "@astrojs/mdx": "^5.0.3",
     "@astrojs/sitemap": "^3.2.0",
-    "@astrojs/starlight": "^0.37.1",
-    "astro": "^5.18.1",
+    "@astrojs/starlight": "^0.38.3",
+    "astro": "^6.1.8",
     "astro-d2": "^0.8.1",
     "mermaid": "^11.14.0",
     "playwright": "^1.57.0",
