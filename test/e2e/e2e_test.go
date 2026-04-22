@@ -762,6 +762,13 @@ spec:
   facade:
     type: websocket
     port: 8080
+    # The E2E curls /ws without a credential to assert the 101 upgrade.
+    # The B2 strict default would 401 this — opt into the dev escape
+    # hatch so the handshake succeeds. Production installs MUST never
+    # set this env var.
+    extraEnv:
+      - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+        value: "true"
   session:
     type: memory
     ttl: "1h"
@@ -1537,6 +1544,10 @@ spec:
   facade:
     type: websocket
     port: 8080
+    # E2E clients connect without credentials; opt into the dev hatch.
+    extraEnv:
+      - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+        value: "true"
   session:
     type: memory
     ttl: "1h"
@@ -1649,6 +1660,10 @@ spec:
     type: websocket
     port: 8080
     image: %s
+    # E2E clients connect without credentials; opt into the dev hatch.
+    extraEnv:
+      - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+        value: "true"
   framework:
     type: custom
     image: %s
@@ -1728,6 +1743,10 @@ spec:
   facade:
     type: websocket
     port: 8080
+    # E2E clients connect without credentials; opt into the dev hatch.
+    extraEnv:
+      - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+        value: "true"
   session:
     type: memory
     ttl: "1h"
@@ -1800,6 +1819,10 @@ spec:
     type: websocket
     port: 8080
     image: %s
+    # E2E clients connect without credentials; opt into the dev hatch.
+    extraEnv:
+      - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+        value: "true"
   session:
     type: memory
     ttl: "1h"
@@ -1870,6 +1893,10 @@ spec:
     type: websocket
     port: 8080
     handler: demo
+    # E2E clients connect without credentials; opt into the dev hatch.
+    extraEnv:
+      - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+        value: "true"
   session:
     type: memory
     ttl: "1h"
@@ -2186,6 +2213,10 @@ spec:
   facade:
     type: websocket
     port: 8080
+    # E2E clients connect without credentials; opt into the dev hatch.
+    extraEnv:
+      - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+        value: "true"
   session:
     type: memory
     ttl: "1h"

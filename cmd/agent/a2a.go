@@ -60,9 +60,16 @@ func buildA2AHandler(
 			otelhttp.WithTracerProvider(tracingProvider.TracerProvider()),
 		)
 	}
-	if len(authChain) > 0 {
-		handler = auth.Middleware(authChain, handler, auth.WithMiddlewareLogger(log))
-	}
+	// Always wrap in the auth middleware, even when the chain is empty.
+	// The middleware itself handles the empty-chain case: strict mode
+	// (default) rejects all requests with 401; permissive mode (dev
+	// escape hatch via OMNIA_FACADE_ALLOW_UNAUTHENTICATED) falls through.
+	// Dropping the len-gate closes the residual C-3 bypass where a race
+	// between the facade and the Workspace controller could produce an
+	// empty chain and let unauthenticated A2A traffic through.
+	handler = auth.Middleware(authChain, handler,
+		auth.WithMiddlewareLogger(log),
+		auth.WithMiddlewareAllowUnauthenticated(allowUnauthenticatedFallback(log)))
 	return handler
 }
 

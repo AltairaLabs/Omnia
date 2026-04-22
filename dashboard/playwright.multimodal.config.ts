@@ -88,6 +88,11 @@ export default defineConfig({
         OMNIA_SESSION_TYPE: 'memory',
         // Allow cross-origin WebSocket from dashboard (localhost:3000 → agent on :8080)
         OMNIA_ALLOWED_ORIGINS: DASHBOARD_URL,
+        // Multimodal E2E doesn't provision a mgmt-plane pubkey or
+        // spec.externalAuth on the test AgentRuntime — the facade's
+        // strict default (PR #967) would 401 every upgrade. Opt into
+        // the permissive mode; never set this in production.
+        OMNIA_FACADE_ALLOW_UNAUTHENTICATED: 'true',
       },
     },
   ],

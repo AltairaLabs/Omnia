@@ -99,6 +99,10 @@ func (h *captureHandler) ctx() context.Context {
 //   - cmd/agent stopped using the wiring from internal/facade.
 func TestBuildWebSocketServer_PseudonymizesUserIDHeader(t *testing.T) {
 	freshPromRegistry(t)
+	// The pseudonymization contract is the subject here, not auth. Flip
+	// the dev escape hatch so the strict default doesn't 401 the test's
+	// unauthenticated WS dial (B2 wiring).
+	t.Setenv(envFacadeAllowUnauthenticated, "true")
 
 	store := session.NewMemoryStore()
 	t.Cleanup(func() { _ = store.Close() })
@@ -156,6 +160,48 @@ func TestBuildWebSocketServer_PseudonymizesUserIDHeader(t *testing.T) {
 	}
 	if got == "alice-raw" {
 		t.Errorf("user ID is not pseudonymized — raw X-User-Id value leaked into handler context")
+	}
+}
+
+// TestBuildWebSocketServer_StrictDefaultRejectsUnauthenticatedUpgrade
+// proves B2 is fixed: when the env escape hatch is unset and the auth
+// chain ends up empty (no externalAuth configured AND no mgmt-plane
+// pubkey file available — the pod-startup boot-race configuration),
+// the facade 401s the upgrade instead of admitting it. This is the
+// residual C-3 bypass that PR 3 left open in cmd/agent.
+func TestBuildWebSocketServer_StrictDefaultRejectsUnauthenticatedUpgrade(t *testing.T) {
+	freshPromRegistry(t)
+	// Default (unset) means strict rejection. Explicit clear to avoid
+	// pollution from prior tests in the same package.
+	t.Setenv(envFacadeAllowUnauthenticated, "")
+
+	store := session.NewMemoryStore()
+	t.Cleanup(func() { _ = store.Close() })
+
+	handler := &captureHandler{name: "strict"}
+	cfg := &agent.Config{
+		AgentName:     "strict-agent",
+		Namespace:     "test-ns",
+		WorkspaceName: "test-ws",
+		SessionTTL:    5 * time.Minute,
+	}
+	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
+
+	_, mux := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) + "/ws?agent=strict-agent"
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err == nil {
+		t.Fatal("expected dial error under strict default")
+	}
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		var got int
+		if resp != nil {
+			got = resp.StatusCode
+		}
+		t.Errorf("status = %d, want 401 (strict default must reject empty-chain upgrade)", got)
 	}
 }
 
