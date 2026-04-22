@@ -230,6 +230,37 @@ func TestParseAPIKeySecret_EmptyDataErrors(t *testing.T) {
 	}
 }
 
+// TestParseAPIKeySecret_WrongHashLengthRejects proves T5 is fixed:
+// writers that accidentally store a hex-encoded sha256 (64 bytes) or
+// a truncated digest fail loud at load time rather than silently never
+// matching at auth time. The hash must be exactly 32 raw bytes.
+func TestParseAPIKeySecret_WrongHashLengthRejects(t *testing.T) {
+	t.Parallel()
+	cases := map[string][]byte{
+		"too-short (16 bytes)":               make([]byte, 16),
+		"hex-encoded mistake (64 bytes)":     make([]byte, 64),
+		"empty after length check (garbage)": make([]byte, 1),
+	}
+	for name, hash := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "agent-x-apikey-y",
+					Labels: map[string]string{
+						LabelCredentialKind: LabelCredentialKindAgentAPIKey,
+						LabelAgent:          "x",
+					},
+				},
+				Data: map[string][]byte{APIKeyDataKeyHash: hash},
+			}
+			if _, err := parseAPIKeySecret(secret); err == nil {
+				t.Errorf("expected length-check failure for %s", name)
+			}
+		})
+	}
+}
+
 func TestParseAPIKeySecret_NameNotMatchingPatternFallsBackToFullName(t *testing.T) {
 	// A hand-edited Secret without the expected `agent-<agent>-apikey-<id>`
 	// prefix should still load — its ID falls back to the full Secret name

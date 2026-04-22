@@ -68,6 +68,28 @@ if (MGMT_PLANE_SIGNING_KEY_PATH) {
 // `identity.origin == "management-plane"`, not by subject.
 const MGMT_PLANE_SUBJECT = "omnia-dashboard-proxy";
 
+// OMNIA_MGMT_PLANE_TOKEN_TTL_SECONDS overrides the mgmt-plane JWT TTL
+// (default 5 minutes in lib/mgmt-plane-token.js). Long enough that an
+// admin's debug session doesn't drop mid-chat, short enough that a
+// leaked token isn't useful for long. Operators on slow IdP-redirect
+// chains or high-latency networks can tune up; everyone else should
+// leave it alone. Parsed at boot; unparseable / non-positive values
+// fall back to the library default.
+const MGMT_PLANE_TTL_SECONDS = (() => {
+  const raw = process.env.OMNIA_MGMT_PLANE_TOKEN_TTL_SECONDS;
+  if (!raw) {
+    return undefined;
+  }
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) {
+    console.error(
+      `[WS Proxy] OMNIA_MGMT_PLANE_TOKEN_TTL_SECONDS=${raw} is not a positive integer — falling back to default`,
+    );
+    return undefined;
+  }
+  return n;
+})();
+
 // Service domain for K8s cluster DNS
 const SERVICE_DOMAIN = process.env.SERVICE_DOMAIN || "svc.cluster.local";
 // Default facade port
@@ -213,6 +235,7 @@ function proxyWebSocket(clientSocket, namespace, name, clientParams = {}) {
         subject: MGMT_PLANE_SUBJECT,
         agent: name,
         workspace: namespace,
+        ttlSeconds: MGMT_PLANE_TTL_SECONDS,
       });
       upstreamHeaders.Authorization = `Bearer ${token}`;
     } catch (err) {

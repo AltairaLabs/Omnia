@@ -53,16 +53,24 @@ func loadMgmtPlaneValidator(log logr.Logger) (auth.Validator, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			log.V(1).Info("mgmt-plane validator skipped",
-				"reason", "pubkey file missing",
-				"path", path)
+			// Log at info level (not V(1)): the env var was SET, which
+			// means the operator wired a pubkey path, but the file is
+			// missing. Most likely the Workspace controller has not yet
+			// reconciled the mirror ConfigMap — a genuine race at pod
+			// startup. Either way this is operationally interesting
+			// enough that operators should see it at the default log
+			// verbosity; a silent skip was the T2 finding.
+			log.Info("mgmt-plane validator skipped — pubkey file missing",
+				"path", path,
+				"hint", "usually resolves after the Workspace controller reconciles "+
+					"the pubkey ConfigMap; if it persists, verify dashboard.enabled "+
+					"and the workspace's namespace label")
 			return nil, nil
 		}
 		return nil, err
 	}
 	if info.Size() == 0 {
-		log.V(1).Info("mgmt-plane validator skipped",
-			"reason", "pubkey file empty",
+		log.Info("mgmt-plane validator skipped — pubkey file is empty",
 			"path", path)
 		return nil, nil
 	}
