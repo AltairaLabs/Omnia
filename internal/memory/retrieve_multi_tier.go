@@ -26,6 +26,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -193,16 +194,9 @@ func agentTierClause(agentID string, args *[]any) string {
 	return "(agent_id IS NULL OR agent_id=$" + strconv.Itoa(len(*args)) + ")"
 }
 
-// joinAnd is a tiny helper so callers do not need to import strings for one use.
+// joinAnd joins SQL WHERE fragments with " AND ".
 func joinAnd(parts []string) string {
-	out := ""
-	for i, p := range parts {
-		if i > 0 {
-			out += " AND "
-		}
-		out += p
-	}
-	return out
+	return strings.Join(parts, " AND ")
 }
 
 // scanMultiTierRows reads multi-tier query rows into MultiTierMemory values.
