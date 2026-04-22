@@ -117,8 +117,15 @@ func (s *Store) Save(ctx context.Context, mem *pkmemory.Memory) error {
 	return nil
 }
 
-// Retrieve searches memories via GET /api/v1/memories/search.
+// Retrieve searches memories. When the scope carries agent_id we route to
+// the multi-tier endpoint (POST /api/v1/memories/retrieve) so institutional
+// and agent tiers are merged into the results. Otherwise we fall back to the
+// flat GET /api/v1/memories/search path.
 func (s *Store) Retrieve(ctx context.Context, scope map[string]string, query string, opts pkmemory.RetrieveOptions) ([]*pkmemory.Memory, error) {
+	if scope["agent_id"] != "" {
+		return s.retrieveMultiTierToMemories(ctx, scope, query, opts)
+	}
+
 	params := scopeParams(scope)
 	params.Set("q", query)
 	if opts.Limit > 0 {
