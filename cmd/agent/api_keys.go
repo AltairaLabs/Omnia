@@ -51,9 +51,22 @@ const (
 	// Data keys inside the API-key Secret. The hash and scope formats
 	// are stable contracts shared between the dashboard CRUD endpoint
 	// and the facade KeyStore.
+	//
+	// APIKeyDataKeyHash stores the raw 32-byte sha256 digest of the
+	// caller-facing bearer value — NOT hex-encoded. k8s Secret data is
+	// transported as base64 in YAML but resolves to raw bytes in Go, so
+	// writers (dashboard, seed jobs) must pass the 32-byte digest
+	// directly. parseAPIKeySecret re-encodes it as lowercase hex for the
+	// in-memory lookup map.
 	APIKeyDataKeyHash      = "keyHash"
 	APIKeyDataKeyScopes    = "scopes"
 	APIKeyDataKeyExpiresAt = "expiresAt"
+
+	// apiKeyHashLen is the expected sha256 digest length in bytes.
+	// parseAPIKeySecret rejects Secrets with a non-matching length so
+	// accidental hex-encoded payloads (which would be 64 bytes) fail
+	// loud at load time rather than silently never matching at lookup.
+	apiKeyHashLen = 32
 )
 
 // apiKeySecretSuffix is the prefix the dashboard CRUD endpoint uses when
@@ -224,6 +237,16 @@ func parseAPIKeySecret(secret *corev1.Secret) (auth.APIKey, error) {
 	hashRaw, ok := secret.Data[APIKeyDataKeyHash]
 	if !ok || len(hashRaw) == 0 {
 		return auth.APIKey{}, fmt.Errorf("missing %q data key", APIKeyDataKeyHash)
+	}
+	// Guard against the most common writer mistake: storing a 64-byte
+	// hex-encoded digest instead of the raw 32-byte digest. Either would
+	// "work" as bytes but only the raw form round-trips to
+	// HashToken(plaintext). Fail loud on the wrong length so the
+	// misconfig surfaces at load time, not at auth time.
+	if len(hashRaw) != apiKeyHashLen {
+		return auth.APIKey{}, fmt.Errorf("%q data key must be %d raw bytes (got %d) — "+
+			"writers must pass the raw sha256 digest, not a hex-encoded string",
+			APIKeyDataKeyHash, apiKeyHashLen, len(hashRaw))
 	}
 	// The dashboard endpoint stores the binary sha256; we keep the in-
 	// memory representation as lowercase hex so APIKeyValidator's
