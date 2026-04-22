@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 
@@ -37,6 +38,15 @@ const (
 	DefaultMgmtPlaneIssuer   = "omnia-dashboard"
 	DefaultMgmtPlaneAudience = "omnia-facade"
 )
+
+// jwtLeeway tolerates small clock drift between the facade and the
+// token issuer on exp/nbf/iat checks. Without leeway a facade pod
+// running a second ahead of the dashboard 401s freshly-minted tokens —
+// common enough in busy clusters that pen-test finding C-3 triage
+// surfaced it explicitly. 30s is conservative enough that short
+// expiries still work as intended and aggressive enough to catch
+// genuinely-expired tokens.
+const jwtLeeway = 30 * time.Second
 
 // bearerPrefix is the case-sensitive scheme tag on Authorization: Bearer <token>.
 const bearerPrefix = "Bearer "
@@ -112,6 +122,7 @@ func (v *MgmtPlaneValidator) Validate(_ context.Context, r *http.Request) (*poli
 		jwt.WithIssuer(v.issuer),
 		jwt.WithAudience(v.audience),
 		jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}),
+		jwt.WithLeeway(jwtLeeway),
 	)
 	token, parseErr := parser.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {

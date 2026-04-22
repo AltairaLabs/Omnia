@@ -505,3 +505,27 @@ func TestMgmtPlaneValidator_CustomIssuerAudience(t *testing.T) {
 		t.Errorf("custom-issuer token should admit: %v", err)
 	}
 }
+
+// TestMgmtPlaneValidator_LeewayToleratesSmallDrift proves T1 is fixed:
+// tokens just-barely in the future (iat/nbf up to ~15s after the
+// facade's clock) must still admit. Dashboards running on a slightly
+// different clock than the facade's would otherwise 401 their own
+// freshly-minted tokens.
+//
+// The inverse direction — that the leeway does NOT mask a genuinely
+// expired token — is already covered by TestMgmtPlaneValidator_Expired
+// (exp = -1 minute, comfortably outside the 30s leeway).
+func TestMgmtPlaneValidator_LeewayToleratesSmallDrift(t *testing.T) {
+	t.Parallel()
+	v, key := newValidator(t)
+	future := time.Now().Add(15 * time.Second)
+	opts := defaultMintOpts(key)
+	opts.iat = future
+	opts.nbf = future
+	opts.exp = future.Add(5 * time.Minute)
+	token := mintToken(t, opts)
+
+	if _, err := v.Validate(context.Background(), requestWithToken(token)); err != nil {
+		t.Errorf("token with iat/nbf=+15s should admit under 30s leeway: %v", err)
+	}
+}
