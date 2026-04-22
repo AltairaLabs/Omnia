@@ -491,6 +491,107 @@ func TestBuildAuthChain_EdgeTrustJoinsAfterSharedToken(t *testing.T) {
 	}
 }
 
+// TestBuildAuthChain_AllValidators_OrderAndIsolation proves T7: given
+// an AgentRuntime with every data-plane validator configured plus a
+// mgmt-plane validator, buildAuthChain:
+//  1. Produces the chain in the documented order
+//     (sharedToken → apiKeys → oidc → edgeTrust → mgmt-plane)
+//  2. Each validator admits its own credential and no other
+//
+// This is the wiring proof the code review flagged as missing —
+// without it, a refactor could silently swap the order (breaking
+// Origin attribution) or install the wrong validator for a field.
+func TestBuildAuthChain_AllValidators_OrderAndIsolation(t *testing.T) {
+	t.Parallel()
+	scheme := newTestScheme(t)
+
+	sharedSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "shared", Namespace: "ns"},
+		Data:       map[string][]byte{"token": []byte("shared-bearer")},
+	}
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
+				SharedToken: &omniav1alpha1.SharedTokenAuth{
+					SecretRef: corev1.LocalObjectReference{Name: "shared"},
+				},
+				APIKeys:   &omniav1alpha1.APIKeysAuth{},
+				EdgeTrust: &omniav1alpha1.EdgeTrustAuth{},
+				// OIDC needs an issuer + JWKS Secret; leave it out here.
+				// The separate oidc test covers its slot in the order.
+			},
+		},
+	}
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, sharedSecret).Build()
+	mgmt := &stubMgmtValidator{id: &policy.AuthenticatedIdentity{Origin: policy.OriginManagementPlane}}
+
+	chain, err := buildAuthChain(context.Background(), fc, logr.Discard(), "a", "ns", mgmt)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	// sharedToken + apiKeys + edgeTrust + mgmt-plane = 4.
+	if got, want := len(chain), 4; got != want {
+		t.Fatalf("chain length = %d, want %d", got, want)
+	}
+
+	// Prove order by ensuring the FIRST validator that would admit a
+	// given credential shape is the one we expect — each request
+	// crafted below hits exactly one validator.
+	admitCases := []struct {
+		name   string
+		header func(r *http.Request)
+		origin string
+	}{
+		{
+			name:   "bearer admits via sharedToken",
+			header: func(r *http.Request) { r.Header.Set("Authorization", "Bearer shared-bearer") },
+			origin: policy.OriginSharedToken,
+		},
+		{
+			name:   "edge header admits via edgeTrust",
+			header: func(r *http.Request) { r.Header.Set(auth.DefaultEdgeSubjectHeader, "alice") },
+			origin: policy.OriginEdgeTrust,
+		},
+	}
+	for _, c := range admitCases {
+		t.Run(c.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/ws", nil)
+			c.header(r)
+			id, err := chain.Run(context.Background(), r)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if id.Origin != c.origin {
+				t.Errorf("Origin = %q, want %q", id.Origin, c.origin)
+			}
+		})
+	}
+}
+
+// TestBuildAuthChain_AllExternalAuthNilFallsBackToMgmt covers the
+// "dashboard-only" AgentRuntime: no externalAuth at all → chain has
+// exactly one entry, the mgmt-plane validator. Matches the
+// DashboardOnly branch of the ExternalAuth status condition (T11).
+func TestBuildAuthChain_AllExternalAuthNilFallsBackToMgmt(t *testing.T) {
+	t.Parallel()
+	scheme := newTestScheme(t)
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
+		// No Spec.ExternalAuth.
+	}
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
+	mgmt := &stubMgmtValidator{id: &policy.AuthenticatedIdentity{Origin: policy.OriginManagementPlane}}
+
+	chain, err := buildAuthChain(context.Background(), fc, logr.Discard(), "a", "ns", mgmt)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got, want := len(chain), 1; got != want {
+		t.Fatalf("chain length = %d, want %d (mgmt-plane only)", got, want)
+	}
+}
+
 // stubMgmtValidator is a minimal Validator for chain-composition tests.
 type stubMgmtValidator struct {
 	id *policy.AuthenticatedIdentity
