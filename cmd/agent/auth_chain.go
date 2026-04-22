@@ -123,7 +123,10 @@ func buildDataPlaneValidators(
 	} else if v != nil {
 		out = append(out, v)
 	}
-	// Future PRs append oidc (2d), edgeTrust (2e) here.
+	if v := buildEdgeTrustValidator(log, ar); v != nil {
+		out = append(out, v)
+	}
+	// Future PR 2d appends oidc here.
 	return out, nil
 }
 
@@ -160,6 +163,37 @@ func buildAPIKeyValidator(
 		"defaultRole", ak.DefaultRole,
 		"trustEndUserHeader", ak.TrustEndUserHeader)
 	return v, nil
+}
+
+// buildEdgeTrustValidator constructs the edgeTrust validator when
+// spec.externalAuth.edgeTrust is set. Pure-Go construction — no Secret
+// reads, no API calls — so this can never fail. The validator trusts
+// inbound headers the operator has guaranteed (via Istio
+// AuthorizationPolicy or equivalent) cannot be spoofed by external
+// callers.
+func buildEdgeTrustValidator(log logr.Logger, ar *omniav1alpha1.AgentRuntime) auth.Validator {
+	et := ar.Spec.ExternalAuth.EdgeTrust
+	if et == nil {
+		return nil
+	}
+
+	opts := []auth.EdgeTrustOption{}
+	if et.HeaderMapping != nil {
+		opts = append(opts,
+			auth.WithEdgeTrustSubjectHeader(et.HeaderMapping.Subject),
+			auth.WithEdgeTrustRoleHeader(et.HeaderMapping.Role),
+			auth.WithEdgeTrustEndUserHeader(et.HeaderMapping.EndUser),
+			auth.WithEdgeTrustEmailHeader(et.HeaderMapping.Email),
+		)
+	}
+	if len(et.ClaimsFromHeaders) > 0 {
+		opts = append(opts, auth.WithEdgeTrustExtraClaims(et.ClaimsFromHeaders))
+	}
+	v := auth.NewEdgeTrustValidator(opts...)
+	log.Info("edgeTrust validator enabled",
+		"hasHeaderMapping", et.HeaderMapping != nil,
+		"extraClaims", len(et.ClaimsFromHeaders))
+	return v
 }
 
 // buildSharedTokenValidator resolves spec.externalAuth.sharedToken into

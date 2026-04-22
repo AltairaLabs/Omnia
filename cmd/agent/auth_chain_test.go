@@ -224,6 +224,173 @@ func TestBuildAuthChain_TrustEndUserHeaderPropagates(t *testing.T) {
 	}
 }
 
+func TestBuildEdgeTrustValidator_UnsetReturnsNil(t *testing.T) {
+	t.Parallel()
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
+				// EdgeTrust unset → no validator added
+			},
+		},
+	}
+	if v := buildEdgeTrustValidator(logr.Discard(), ar); v != nil {
+		t.Errorf("expected nil validator when spec.externalAuth.edgeTrust unset, got %v", v)
+	}
+}
+
+func TestBuildEdgeTrustValidator_EmptyConfigUsesDefaults(t *testing.T) {
+	// spec.externalAuth.edgeTrust: {} (no HeaderMapping, no ClaimsFromHeaders)
+	// should still produce a functional validator using the shipped
+	// Istio default mapping.
+	t.Parallel()
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
+				EdgeTrust: &omniav1alpha1.EdgeTrustAuth{},
+			},
+		},
+	}
+	v := buildEdgeTrustValidator(logr.Discard(), ar)
+	if v == nil {
+		t.Fatal("expected non-nil validator for empty EdgeTrustAuth block")
+	}
+
+	// Prove it uses the default Istio mapping by exercising it.
+	r := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	r.Header.Set(auth.DefaultEdgeSubjectHeader, "alice")
+	id, err := v.Validate(context.Background(), r)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if got, want := id.Origin, policy.OriginEdgeTrust; got != want {
+		t.Errorf("Origin = %q, want %q", got, want)
+	}
+}
+
+func TestBuildEdgeTrustValidator_HeaderMappingPropagates(t *testing.T) {
+	// Custom HeaderMapping on the CRD should be honoured by the built
+	// validator: a request with the chart's default x-user-id header
+	// should NOT admit, but a request with the custom header should.
+	t.Parallel()
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
+				EdgeTrust: &omniav1alpha1.EdgeTrustAuth{
+					HeaderMapping: &omniav1alpha1.EdgeTrustHeaderMapping{
+						Subject: "X-Custom-Subject",
+						Role:    "X-Custom-Role",
+						EndUser: "X-Custom-EndUser",
+						Email:   "X-Custom-Email",
+					},
+				},
+			},
+		},
+	}
+	v := buildEdgeTrustValidator(logr.Discard(), ar)
+	if v == nil {
+		t.Fatal("expected non-nil validator")
+	}
+
+	// Default header ignored.
+	r1 := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	r1.Header.Set(auth.DefaultEdgeSubjectHeader, "should-not-admit")
+	if _, err := v.Validate(context.Background(), r1); err == nil {
+		t.Error("expected default header to be ignored after override")
+	}
+
+	// Custom header admits.
+	r2 := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	r2.Header.Set("X-Custom-Subject", "bob")
+	if _, err := v.Validate(context.Background(), r2); err != nil {
+		t.Errorf("custom header should admit: %v", err)
+	}
+}
+
+func TestBuildEdgeTrustValidator_ClaimsFromHeadersPropagate(t *testing.T) {
+	t.Parallel()
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
+				EdgeTrust: &omniav1alpha1.EdgeTrustAuth{
+					ClaimsFromHeaders: map[string]string{
+						"X-User-Groups": "groups",
+					},
+				},
+			},
+		},
+	}
+	v := buildEdgeTrustValidator(logr.Discard(), ar)
+	if v == nil {
+		t.Fatal("expected non-nil validator")
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	r.Header.Set(auth.DefaultEdgeSubjectHeader, "alice")
+	r.Header.Set("X-User-Groups", "finance,eng")
+	id, err := v.Validate(context.Background(), r)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if got, want := id.Claims["groups"], "finance,eng"; got != want {
+		t.Errorf("Claims[groups] = %q, want %q (CRD-configured ClaimsFromHeaders must plumb through)", got, want)
+	}
+}
+
+func TestBuildAuthChain_EdgeTrustJoinsAfterSharedToken(t *testing.T) {
+	// End-to-end: buildDataPlaneValidators on an AgentRuntime with both
+	// sharedToken AND edgeTrust configured produces a chain where
+	// sharedToken comes first (matching request that presents a Bearer
+	// admits via sharedToken) and edgeTrust is present for requests
+	// carrying only an x-user-id header.
+	t.Parallel()
+	scheme := newTestScheme(t)
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "shared", Namespace: "ns"},
+		Data:       map[string][]byte{"token": []byte("bearer-value")},
+	}
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
+				SharedToken: &omniav1alpha1.SharedTokenAuth{
+					SecretRef: corev1.LocalObjectReference{Name: "shared"},
+				},
+				EdgeTrust: &omniav1alpha1.EdgeTrustAuth{},
+			},
+		},
+	}
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, secret).Build()
+	chain, err := buildAuthChain(context.Background(), fc, logr.Discard(), "a", "ns", nil)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got, want := len(chain), 2; got != want {
+		t.Fatalf("chain length = %d, want %d (sharedToken + edgeTrust)", got, want)
+	}
+
+	// Request with Bearer admits via sharedToken.
+	r1 := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	r1.Header.Set("Authorization", "Bearer bearer-value")
+	id1, err := chain.Run(context.Background(), r1)
+	if err != nil {
+		t.Fatalf("Run (bearer): %v", err)
+	}
+	if got, want := id1.Origin, policy.OriginSharedToken; got != want {
+		t.Errorf("Origin = %q, want %q (Bearer must admit via sharedToken)", got, want)
+	}
+
+	// Request with just x-user-id admits via edgeTrust.
+	r2 := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	r2.Header.Set(auth.DefaultEdgeSubjectHeader, "alice")
+	id2, err := chain.Run(context.Background(), r2)
+	if err != nil {
+		t.Fatalf("Run (edge): %v", err)
+	}
+	if got, want := id2.Origin, policy.OriginEdgeTrust; got != want {
+		t.Errorf("Origin = %q, want %q (edge header must admit via edgeTrust)", got, want)
+	}
+}
+
 // stubMgmtValidator is a minimal Validator for chain-composition tests.
 type stubMgmtValidator struct {
 	id *policy.AuthenticatedIdentity
