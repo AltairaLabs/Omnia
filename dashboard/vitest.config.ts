@@ -137,7 +137,11 @@ export default defineConfig({
         "src/lib/auth/api-guard.ts", // API middleware with NextAuth
         "src/lib/auth/proxy.ts", // HTTP proxy utilities
         "src/lib/auth/api-keys/**", // File-based API key stores
-        "src/lib/auth/oauth/**", // OAuth client (requires providers)
+        // OAuth provider configs (issuer URLs and scope defaults) —
+        // data tables, not code paths. client.ts now has direct unit
+        // tests (issue #948); fold it back into the coverage report.
+        "src/lib/auth/oauth/providers/**",
+        "src/lib/auth/oauth/types.ts",
         "src/lib/auth/providers/**", // OAuth provider configs
       ],
       thresholds: {

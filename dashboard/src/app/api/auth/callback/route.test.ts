@@ -92,4 +92,37 @@ describe("GET /api/auth/callback", () => {
     const res = await GET(req);
     expect(res.headers.get("location")).toContain("error=no_code");
   });
+
+  // Issue #948: Google advertises RFC 9207 issuer identification via
+  // `authorization_response_iss_parameter_supported: true`. openid-
+  // client v6 then enforces that `iss` is present in the authorization
+  // response — which means the token exchange must receive the REAL
+  // incoming URL (complete with iss), not a rebuilt URL that only
+  // carries code + state. Before the fix, the callback route passed
+  // `(code, pkce)` to exchangeCodeForTokens; it now passes the full
+  // request URL as the third argument. This test pins that contract.
+  it("forwards the full incoming URL to exchangeCodeForTokens (RFC 9207 iss preservation)", async () => {
+    const { exchangeCodeForTokens } = await import("@/lib/auth/oauth");
+    const mockedExchange = vi.mocked(exchangeCodeForTokens);
+    mockedExchange.mockClear();
+
+    // Simulate Google redirecting back with code + state + iss.
+    const url =
+      "https://omnia.example/api/auth/callback?code=code-1" +
+      "&state=state-123&iss=https%3A%2F%2Faccounts.google.com";
+    const req = new NextRequest(url);
+    req.cookies.set("omnia_oauth_state", "state-123");
+
+    const { GET } = await import("./route");
+    await GET(req);
+
+    expect(mockedExchange).toHaveBeenCalledTimes(1);
+    const [passedCode, , passedUrl] = mockedExchange.mock.calls[0];
+    expect(passedCode).toBe("code-1");
+    // Third argument must be the full URL, not undefined — otherwise
+    // openid-client strips iss and Google sign-in 500s.
+    expect(passedUrl).toBeDefined();
+    expect(passedUrl?.searchParams.get("iss")).toBe("https://accounts.google.com");
+    expect(passedUrl?.searchParams.get("code")).toBe("code-1");
+  });
 });
