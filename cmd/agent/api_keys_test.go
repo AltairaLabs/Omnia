@@ -230,6 +230,81 @@ func TestParseAPIKeySecret_EmptyDataErrors(t *testing.T) {
 	}
 }
 
+// TestSecretBackedKeyStore_RejectsUnownedSecretsWhenUIDSet proves T6:
+// when the store is constructed with an expected agent UID, Secrets
+// whose ownerReferences don't name that UID are skipped even if they
+// carry the right labels. Defence against a compromised namespace-
+// admin planting a label-matching Secret to gain admission without
+// going through the dashboard CRUD path.
+func TestSecretBackedKeyStore_RejectsUnownedSecretsWhenUIDSet(t *testing.T) {
+	t.Parallel()
+	scheme := newTestScheme(t)
+	hash := sha256Bytes(testRawKey)
+	unowned := newAPIKeySecret("agent-myagent-apikey-planted", "myagent", hash, "admin", "")
+
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(unowned).Build()
+	store, err := NewSecretBackedKeyStore(context.Background(), fc, "ns", "myagent", logr.Discard(),
+		WithKeyStoreRefreshInterval(time.Hour),
+		WithKeyStoreAgentUID("agent-uid-123"))
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	defer store.Stop()
+
+	if _, ok := store.Lookup(auth.HashToken(testRawKey)); ok {
+		t.Error("unowned Secret must not appear in the store when agent UID is set")
+	}
+}
+
+// TestSecretBackedKeyStore_AcceptsCorrectlyOwnedSecret proves the
+// happy path still works: a Secret whose ownerReferences name the
+// expected UID loads normally.
+func TestSecretBackedKeyStore_AcceptsCorrectlyOwnedSecret(t *testing.T) {
+	t.Parallel()
+	scheme := newTestScheme(t)
+	hash := sha256Bytes(testRawKey)
+	owned := newAPIKeySecret("agent-myagent-apikey-legit", "myagent", hash, "editor", "")
+	owned.OwnerReferences = []metav1.OwnerReference{
+		{APIVersion: "omnia.altairalabs.ai/v1alpha1", Kind: "AgentRuntime",
+			Name: "myagent", UID: "agent-uid-123"},
+	}
+
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(owned).Build()
+	store, err := NewSecretBackedKeyStore(context.Background(), fc, "ns", "myagent", logr.Discard(),
+		WithKeyStoreRefreshInterval(time.Hour),
+		WithKeyStoreAgentUID("agent-uid-123"))
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	defer store.Stop()
+
+	if _, ok := store.Lookup(auth.HashToken(testRawKey)); !ok {
+		t.Error("ownerRef-matched Secret should admit")
+	}
+}
+
+// TestSecretBackedKeyStore_EmptyUIDDisablesOwnerCheck preserves the
+// standalone-binary path: when no UID is supplied the old label-only
+// filtering is restored.
+func TestSecretBackedKeyStore_EmptyUIDDisablesOwnerCheck(t *testing.T) {
+	t.Parallel()
+	scheme := newTestScheme(t)
+	hash := sha256Bytes(testRawKey)
+	unowned := newAPIKeySecret("agent-myagent-apikey-001", "myagent", hash, "editor", "")
+
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(unowned).Build()
+	store, err := NewSecretBackedKeyStore(context.Background(), fc, "ns", "myagent", logr.Discard(),
+		WithKeyStoreRefreshInterval(time.Hour))
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	defer store.Stop()
+
+	if _, ok := store.Lookup(auth.HashToken(testRawKey)); !ok {
+		t.Error("empty UID should fall back to label-only filtering; Secret should load")
+	}
+}
+
 // TestParseAPIKeySecret_WrongHashLengthRejects proves T5 is fixed:
 // writers that accidentally store a hex-encoded sha256 (64 bytes) or
 // a truncated digest fail loud at load time rather than silently never
