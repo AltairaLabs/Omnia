@@ -1,0 +1,116 @@
+suite: edge-trust header strip EnvoyFilter
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/gateway/edge-trust-header-strip.yaml
+tests:
+  - it: renders an EnvoyFilter when authentication + istio + stripInboundClaimHeaders all on
+    set:
+      authentication.enabled: true
+      authentication.jwt.issuer: https://auth.example.com
+      istio.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: kind
+          value: EnvoyFilter
+      - equal:
+          path: metadata.name
+          value: omnia-agent-strip-edge-trust-headers
+      - equal:
+          path: spec.workloadSelector.labels["omnia.altairalabs.ai/component"]
+          value: agent
+      - equal:
+          path: spec.configPatches[0].applyTo
+          value: HTTP_FILTER
+      - equal:
+          path: spec.configPatches[0].match.context
+          value: SIDECAR_INBOUND
+      - equal:
+          path: spec.configPatches[0].patch.operation
+          value: INSERT_BEFORE
+      - matchRegex:
+          path: spec.configPatches[0].patch.value.typed_config.inline_code
+          pattern: '"x-user-id"'
+      - matchRegex:
+          path: spec.configPatches[0].patch.value.typed_config.inline_code
+          pattern: '"x-user-email"'
+      - matchRegex:
+          path: spec.configPatches[0].patch.value.typed_config.inline_code
+          pattern: '"x-user-roles"'
+
+  - it: is suppressed when istio is disabled
+    set:
+      authentication.enabled: true
+      authentication.jwt.issuer: https://auth.example.com
+      istio.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: is suppressed when authentication is disabled
+    set:
+      authentication.enabled: false
+      istio.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: is suppressed when stripInboundClaimHeaders is explicitly false
+    set:
+      authentication.enabled: true
+      authentication.jwt.issuer: https://auth.example.com
+      istio.enabled: true
+      authentication.edgeTrust.stripInboundClaimHeaders: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: merges outputClaimToHeaders into the strip list
+    set:
+      authentication.enabled: true
+      authentication.jwt.issuer: https://auth.example.com
+      istio.enabled: true
+      authentication.jwt.outputClaimToHeaders:
+        - header: X-User-Groups
+          claim: groups
+        - header: X-Org-Id
+          claim: org_id
+    asserts:
+      - matchRegex:
+          path: spec.configPatches[0].patch.value.typed_config.inline_code
+          pattern: '"x-user-groups"'
+      - matchRegex:
+          path: spec.configPatches[0].patch.value.typed_config.inline_code
+          pattern: '"x-org-id"'
+
+  - it: appends additionalStripHeaders to the strip list
+    set:
+      authentication.enabled: true
+      authentication.jwt.issuer: https://auth.example.com
+      istio.enabled: true
+      authentication.edgeTrust.additionalStripHeaders:
+        - x-tenant-id
+        - x-session-id
+    asserts:
+      - matchRegex:
+          path: spec.configPatches[0].patch.value.typed_config.inline_code
+          pattern: '"x-tenant-id"'
+      - matchRegex:
+          path: spec.configPatches[0].patch.value.typed_config.inline_code
+          pattern: '"x-session-id"'
+
+  - it: lowercases header names so the Lua match is case-insensitive
+    set:
+      authentication.enabled: true
+      authentication.jwt.issuer: https://auth.example.com
+      istio.enabled: true
+      authentication.edgeTrust.additionalStripHeaders:
+        - X-Mixed-Case-Header
+    asserts:
+      - matchRegex:
+          path: spec.configPatches[0].patch.value.typed_config.inline_code
+          pattern: '"x-mixed-case-header"'

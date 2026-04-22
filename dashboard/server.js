@@ -15,6 +15,7 @@
  */
 
 const { createServer } = require("http");
+const crypto = require("node:crypto");
 const { parse } = require("url");
 const next = require("next");
 const { WebSocket, WebSocketServer } = require("ws");
@@ -61,12 +62,67 @@ if (MGMT_PLANE_SIGNING_KEY_PATH) {
   }
 }
 
-// Subject claim on minted mgmt-plane tokens. The dashboard proxy is a
-// single trust boundary — every WS upgrade routed through it has already
-// passed the dashboard's own auth check, so we don't try to mint
-// per-user tokens here. ToolPolicy distinguishes mgmt-plane traffic by
-// `identity.origin == "management-plane"`, not by subject.
-const MGMT_PLANE_SUBJECT = "omnia-dashboard-proxy";
+// Fallback subject claim on minted mgmt-plane tokens. Used when the
+// incoming WS upgrade carries no session cookie (standalone dev /
+// anonymous mode). When a session cookie IS present, we derive a
+// per-session pseudonymous subject from its hash (see
+// mgmtPlaneSubjectForRequest) so audit logs can distinguish admin A
+// from admin B without decrypting iron-session payloads or leaking
+// raw email addresses. ToolPolicy still distinguishes mgmt-plane
+// traffic by `identity.origin == "management-plane"`.
+const MGMT_PLANE_FALLBACK_SUBJECT = "omnia-dashboard-proxy";
+
+// SESSION_COOKIE_NAME names the iron-session cookie we hash into the
+// per-session subject pseudonym. Kept in sync with
+// src/lib/auth/session.ts's default (`omnia_session`); override via env
+// when the chart customises session.cookieName.
+const SESSION_COOKIE_NAME =
+  process.env.OMNIA_SESSION_COOKIE_NAME || "omnia_session";
+
+// mgmtPlaneSubjectForRequest extracts a stable per-session pseudonym
+// from the WS upgrade's Cookie header. Same browser session → same
+// subject; different admins → different subjects. Never surfaces the
+// raw cookie value — we only emit a 16-hex-char prefix of sha256.
+function mgmtPlaneSubjectForRequest(req) {
+  const cookieHeader = req && req.headers ? req.headers.cookie : undefined;
+  if (!cookieHeader) {
+    return MGMT_PLANE_FALLBACK_SUBJECT;
+  }
+  const match = cookieHeader.match(
+    new RegExp(`(?:^|; )${SESSION_COOKIE_NAME}=([^;]+)`),
+  );
+  if (!match) {
+    return MGMT_PLANE_FALLBACK_SUBJECT;
+  }
+  const hash = crypto
+    .createHash("sha256")
+    .update(match[1])
+    .digest("hex")
+    .slice(0, 16);
+  return `omnia-admin-${hash}`;
+}
+
+// OMNIA_MGMT_PLANE_TOKEN_TTL_SECONDS overrides the mgmt-plane JWT TTL
+// (default 5 minutes in lib/mgmt-plane-token.js). Long enough that an
+// admin's debug session doesn't drop mid-chat, short enough that a
+// leaked token isn't useful for long. Operators on slow IdP-redirect
+// chains or high-latency networks can tune up; everyone else should
+// leave it alone. Parsed at boot; unparseable / non-positive values
+// fall back to the library default.
+const MGMT_PLANE_TTL_SECONDS = (() => {
+  const raw = process.env.OMNIA_MGMT_PLANE_TOKEN_TTL_SECONDS;
+  if (!raw) {
+    return undefined;
+  }
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) {
+    console.error(
+      `[WS Proxy] OMNIA_MGMT_PLANE_TOKEN_TTL_SECONDS=${raw} is not a positive integer — falling back to default`,
+    );
+    return undefined;
+  }
+  return n;
+})();
 
 // Service domain for K8s cluster DNS
 const SERVICE_DOMAIN = process.env.SERVICE_DOMAIN || "svc.cluster.local";
@@ -194,15 +250,16 @@ function sendError(clientSocket, message, code = "CONNECTION_ERROR") {
 /**
  * Proxy a WebSocket connection to an agent's facade.
  */
-function proxyWebSocket(clientSocket, namespace, name, clientParams = {}) {
+function proxyWebSocket(clientSocket, namespace, name, clientParams = {}, req = null) {
   const upstreamUrl = getAgentWsUrl(namespace, name, clientParams);
   console.log(`[WS Proxy] Connecting to upstream: ${upstreamUrl}`);
   console.log(`[WS Proxy] SERVICE_DOMAIN=${SERVICE_DOMAIN}, DEFAULT_FACADE_PORT=${DEFAULT_FACADE_PORT}`);
 
   // Mint a fresh mgmt-plane JWT for the upstream connection. The dashboard
   // proxy is the single trust boundary — every WS upgrade has already
-  // passed the dashboard's own auth, so we sign with a constant subject
-  // and let ToolPolicy distinguish mgmt-plane traffic via identity.origin.
+  // passed the dashboard's own auth. Subject is derived from the session
+  // cookie so audit logs can distinguish individual admins; falls back to
+  // the constant pseudonym when no session cookie is present.
   // No key loaded -> connect without Authorization (preserves PR 1a's
   // unauthenticated default).
   const upstreamHeaders = {};
@@ -210,9 +267,10 @@ function proxyWebSocket(clientSocket, namespace, name, clientParams = {}) {
     try {
       const token = mintToken({
         key: mgmtPlaneSigningKey,
-        subject: MGMT_PLANE_SUBJECT,
+        subject: mgmtPlaneSubjectForRequest(req),
         agent: name,
         workspace: namespace,
+        ttlSeconds: MGMT_PLANE_TTL_SECONDS,
       });
       upstreamHeaders.Authorization = `Bearer ${token}`;
     } catch (err) {
@@ -610,7 +668,7 @@ app.prepare().then(() => {
 
     if (agent) {
       const clientParams = parseQueryParams(req.url);
-      proxyWebSocket(ws, agent.namespace, agent.name, clientParams);
+      proxyWebSocket(ws, agent.namespace, agent.name, clientParams, req);
     } else if (isLspPath(pathname)) {
       // Parse query params for LSP context
       const params = parseQueryParams(req.url);

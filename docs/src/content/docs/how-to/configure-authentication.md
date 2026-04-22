@@ -1,224 +1,250 @@
 ---
 title: "Configure Agent Authentication"
-description: "Secure agent endpoints with JWT authentication"
+description: "Secure an AgentRuntime's WebSocket and HTTP facades"
 sidebar:
   order: 5
 ---
 
+This guide covers securing **agent endpoints** with the facade's built-in
+validator chain. For dashboard authentication, see:
 
-This guide covers securing **agent endpoints** with JWT authentication using Istio. For dashboard authentication, see:
+- [Configure Dashboard Authentication](/how-to/configure-dashboard-auth/) — set up user authentication
+- [Authentication Architecture](/explanation/authentication/) — the full auth model
 
-- [Configure Dashboard Authentication](/how-to/configure-dashboard-auth/) - Set up user authentication
-- [Authentication Architecture](/explanation/authentication/) - Understand the full auth model
+## How the facade authenticates a request
 
----
+Each agent facade runs an **ordered chain of validators**. A request is
+admitted as soon as any validator accepts it; otherwise the facade
+returns 401.
 
-Omnia supports JWT-based authentication for agent endpoints using Istio's RequestAuthentication. This allows you to integrate with any OIDC provider (Auth0, Okta, Keycloak, Google, etc.).
+By default the chain contains:
 
-## Prerequisites
+1. **management-plane** — admits dashboard-minted JWTs used by the "Try
+   this agent" debug view.
+2. Any data-plane validator configured on the AgentRuntime under
+   `spec.externalAuth` (shared token, API keys, OIDC, edge-trust).
 
-- Istio installed in your cluster
-- Omnia Helm chart with Istio integration enabled
-- An OIDC provider with a JWKS endpoint
+With **no** `spec.externalAuth` configured, the agent is reachable only
+from the dashboard — there is no unauthenticated external path. This is
+the secure default. Add at least one data-plane validator before
+exposing an agent to customer traffic.
 
-## Enable JWT Authentication
+## Recipes
 
-Configure authentication in your Helm values:
+### 1. Dashboard access only (no external traffic)
+
+Leave `spec.externalAuth` unset:
 
 ```yaml
-istio:
-  enabled: true
-
-authentication:
-  enabled: true
-  jwt:
-    issuer: "https://your-auth-provider.com"
-    jwksUri: "https://your-auth-provider.com/.well-known/jwks.json"
-    audiences:
-      - "your-api-audience"
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: internal-agent
+spec:
+  promptPackRef: { name: internal-pack }
+  providerRefs:
+    - name: openai
+  toolRegistryRef: { name: internal-tools }
 ```
 
-Apply with Helm:
+The dashboard proxy mints a short-lived RS256 token per request and
+attaches it to the upstream WebSocket. External callers receive 401.
+
+### 2. Shared bearer token (simplest external access)
+
+Create a Secret holding the token:
 
 ```bash
-helm upgrade --install omnia oci://ghcr.io/altairalabs/charts/omnia \
-  --namespace omnia-system \
-  -f values.yaml
+kubectl create secret generic partner-agent-token \
+  --namespace=my-workspace \
+  --from-literal=token=$(openssl rand -hex 32)
 ```
 
-## Provider Examples
-
-### Auth0
+Reference it on the AgentRuntime:
 
 ```yaml
-authentication:
-  enabled: true
-  jwt:
-    issuer: "https://your-tenant.auth0.com/"
-    jwksUri: "https://your-tenant.auth0.com/.well-known/jwks.json"
-    audiences:
-      - "https://your-api-identifier"
+spec:
+  externalAuth:
+    sharedToken:
+      secretRef:
+        name: partner-agent-token
+      trustEndUserHeader: false  # flip to true only if the calling app is trusted
 ```
 
-### Okta
+All callers share one token. Rotate by editing the Secret — the facade
+reloads within 30s.
+
+### 3. Per-caller API keys (managed in the dashboard)
+
+Opt the agent in:
 
 ```yaml
-authentication:
-  enabled: true
-  jwt:
-    issuer: "https://your-org.okta.com/oauth2/default"
-    jwksUri: "https://your-org.okta.com/oauth2/default/v1/keys"
-    audiences:
-      - "api://default"
+spec:
+  externalAuth:
+    apiKeys:
+      defaultRole: viewer    # viewer | editor | admin
+      trustEndUserHeader: false
 ```
 
-### Google
+Then create keys from the dashboard's **Credentials** page — each key is
+stored as a Secret keyed by its sha256 hash, with a scope and expiry.
+Clients present `Authorization: Bearer <key>`; the facade looks up the
+hash and admits the caller with the role stamped on the Secret.
+
+No CRD edit is required when you add or revoke keys.
+
+### 4. OIDC (customer IdP — no Istio required)
+
+Point the facade at your IdP's issuer. The controller auto-fetches the
+JWKS from the discovery document and refreshes every 6 hours:
 
 ```yaml
-authentication:
-  enabled: true
-  jwt:
-    issuer: "https://accounts.google.com"
-    jwksUri: "https://www.googleapis.com/oauth2/v3/certs"
-    audiences:
-      - "your-client-id.apps.googleusercontent.com"
+spec:
+  externalAuth:
+    oidc:
+      issuer: "https://auth.example.com"
+      audience: "my-agent"
+      claimMapping:                 # optional; shown with defaults
+        subject: sub
+        role: omnia.role
+        endUser: sub
 ```
 
-### Keycloak
+The facade terminates and verifies the JWT in-process — no service mesh
+is needed. A per-agent `agent-<name>-oidc-jwks` Secret appears in the
+workspace namespace after the first reconcile; status conditions surface
+any discovery or fetch failures:
+
+```bash
+kubectl get agentruntime my-agent -o yaml | yq '.status.conditions'
+# look for type: OIDCJWKSReady
+```
+
+Provider-specific issuer values:
+
+| Provider | `issuer` |
+|----------|----------|
+| Auth0 | `https://<tenant>.auth0.com/` |
+| Okta | `https://<org>.okta.com/oauth2/default` |
+| Google | `https://accounts.google.com` |
+| Keycloak | `https://<host>/realms/<realm>` |
+| Azure AD | `https://login.microsoftonline.com/<tenant-id>/v2.0` |
+
+### 5. Edge-trust (Istio or API gateway terminates the JWT)
+
+When an upstream edge (Istio `RequestAuthentication` with
+`outputClaimToHeaders`, Envoy, or a commercial API gateway) already
+terminates the JWT and injects claim headers, trust those headers
+instead of re-verifying:
 
 ```yaml
-authentication:
-  enabled: true
-  jwt:
-    issuer: "https://keycloak.example.com/realms/your-realm"
-    jwksUri: "https://keycloak.example.com/realms/your-realm/protocol/openid-connect/certs"
-    audiences:
-      - "your-client-id"
+spec:
+  externalAuth:
+    edgeTrust:
+      headerMapping:              # defaults match the chart's Istio layout
+        subject: x-user-id
+        role: x-user-roles
+        endUser: x-user-id
+        email: x-user-email
+      claimsFromHeaders:
+        x-user-groups: groups     # exposed to ToolPolicy as identity.claims.groups
 ```
 
-## Forward Claims to Agents
+:::danger[Security requirement]
+The edge **must** strip any inbound headers listed in `headerMapping` or
+`claimsFromHeaders` before they reach the facade — otherwise any caller
+can inject their own claims. The chart's `authentication.enabled=true`
+Istio `AuthorizationPolicy` already does this for the default mapping;
+verify it for any custom edge.
+:::
 
-Extract JWT claims and pass them as headers to your agents:
+## Combining validators
+
+You can configure several at once — they all run:
 
 ```yaml
-authentication:
-  enabled: true
-  jwt:
-    issuer: "https://your-auth-provider.com"
-    forwardOriginalToken: true
-    outputClaimToHeaders:
-      - header: x-user-id
-        claim: sub
-      - header: x-user-email
-        claim: email
-      - header: x-user-roles
-        claim: roles
+spec:
+  externalAuth:
+    allowManagementPlane: true   # dashboard debug view still works
+    sharedToken: { secretRef: { name: partner-token } }
+    apiKeys:    { defaultRole: viewer }
+    oidc:       { issuer: "https://auth.example.com", audience: "my-agent" }
 ```
 
-Your agent can then read these headers from the WebSocket upgrade request.
+The facade tries each in order and admits the first that accepts the
+request. Setting `allowManagementPlane: false` blocks the dashboard
+debug view for this agent — useful for paranoid workloads that want
+data-plane-only isolation.
 
-## Require Specific Claims
+## Connect with a token
 
-Restrict access to users with specific claims:
-
-```yaml
-authentication:
-  enabled: true
-  jwt:
-    issuer: "https://your-auth-provider.com"
-  authorization:
-    requiredClaims:
-      - claim: "scope"
-        values: ["agents:access"]
-      - claim: "role"
-        values: ["user", "admin"]
-```
-
-## Exclude Paths from Authentication
-
-Allow unauthenticated access to specific paths:
-
-```yaml
-authentication:
-  enabled: true
-  jwt:
-    issuer: "https://your-auth-provider.com"
-  authorization:
-    excludePaths:
-      - /healthz
-      - /readyz
-      - /metrics
-```
-
-## Connect with a Token
-
-### WebSocket Client
-
-Include the JWT in the WebSocket connection:
+### WebSocket (browser or Node)
 
 ```javascript
 const token = await getAccessToken();
 const ws = new WebSocket('wss://agents.example.com/my-agent/ws', {
-  headers: {
-    'Authorization': `Bearer ${token}`
-  }
+  headers: { 'Authorization': `Bearer ${token}` },
 });
 ```
 
-### Using wscat
+### CLI
 
 ```bash
 wscat -H "Authorization: Bearer $TOKEN" \
   -c wss://agents.example.com/my-agent/ws
-```
 
-### Using websocat
-
-```bash
 websocat -H "Authorization: Bearer $TOKEN" \
   wss://agents.example.com/my-agent/ws
 ```
 
 ## Troubleshooting
 
-### Check RequestAuthentication
+### Every request returns 401
 
-Verify the Istio RequestAuthentication was created:
-
-```bash
-kubectl get requestauthentication -n omnia-system
-kubectl describe requestauthentication omnia-jwt-auth -n omnia-system
-```
-
-### Check AuthorizationPolicy
-
-Verify the authorization policy:
+Check the facade logs — rejection telemetry is emitted at `V(1)`:
 
 ```bash
-kubectl get authorizationpolicy -n omnia-system
-kubectl describe authorizationpolicy omnia-require-jwt -n omnia-system
+kubectl logs -l app.kubernetes.io/name=omnia-agent -c facade --tail=50
+# look for: "auth middleware rejected request" reason=... path=...
 ```
 
-### Debug Token Issues
+Common causes:
 
-If connections are rejected, check:
+- **`reason=no validator admitted`** — no `spec.externalAuth` validator
+  is configured, or the caller presented no credential.
+- **`reason=invalid credential`** — the credential format/signature is
+  wrong (expired JWT, wrong shared-token, unknown API key hash).
 
-1. **Token expiry**: Ensure the token hasn't expired
-2. **Issuer match**: The `iss` claim must exactly match the configured issuer
-3. **Audience match**: If audiences are configured, the `aud` claim must match
-4. **JWKS accessibility**: Istio must be able to reach the JWKS URI
-
-View Istio proxy logs for auth errors:
+### OIDC tokens are rejected
 
 ```bash
-kubectl logs -l app.kubernetes.io/name=omnia-agent -c istio-proxy -n omnia-system
+kubectl get secret agent-my-agent-oidc-jwks -o yaml
+kubectl get agentruntime my-agent -o yaml | yq '.status.conditions[] | select(.type=="OIDCJWKSReady")'
 ```
 
-## Disable Authentication
+If the Secret is missing or empty, the controller couldn't reach the
+issuer — check reachability from the operator pod and confirm the
+issuer URL has no trailing slash.
 
-To disable authentication (not recommended for production):
+### Edge-trust headers aren't populated downstream
 
-```yaml
-authentication:
-  enabled: false
-```
+Tool handlers see edge-trust claims as `X-Omnia-Claim-<name>` headers
+and ToolPolicy sees them as `identity.claims.<name>`. If they're
+missing:
+
+1. Confirm the edge (Istio/gateway) is injecting the expected headers —
+   use a debug container or Envoy access logs.
+2. Confirm the edge **strips inbound** versions of those headers so
+   clients can't spoof them.
+3. Confirm `spec.externalAuth.edgeTrust.claimsFromHeaders` lists the
+   inbound header names exactly as the edge emits them (header names
+   are case-insensitive).
+
+## Migrating from legacy A2A shared-token
+
+Previously `spec.a2a.authentication.secretRef` set a shared bearer on
+the A2A HTTP endpoint only. The controller now projects that value onto
+`spec.externalAuth.sharedToken.secretRef` in memory so both the WS and
+A2A facades validate against it. Move new work to
+`spec.externalAuth.sharedToken` directly — the legacy field will be
+removed in a future release.

@@ -575,6 +575,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// too — downstream in-process code can inspect it, but it does not
 	// travel over gRPC (the flat UserID/UserRoles/UserEmail/Claims carry
 	// what runtime needs, via ToOutboundHeaders).
+	//
+	// Also propagate the validator's claim map so downstream HTTP tool
+	// calls see X-Omnia-Claim-<name> headers — ToolPolicy's requiredClaims
+	// contract relies on this regardless of which validator admitted.
+	var validatorClaims map[string]string
+	if authIdentity != nil && len(authIdentity.Claims) > 0 {
+		validatorClaims = authIdentity.Claims
+	}
 	connCtx = policy.WithPropagationFields(connCtx, &policy.PropagationFields{
 		AgentName:     agentName,
 		Namespace:     namespace,
@@ -583,6 +591,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		UserRoles:     userRoles,
 		UserEmail:     userEmail,
 		Authorization: authorization,
+		Claims:        validatorClaims,
 		Identity:      authIdentity,
 	})
 

@@ -140,4 +140,12 @@ const (
 	ConditionTypeProviderReady     = "ProviderReady"
 	ConditionTypePackContentValid  = "PackContentValid"
 	ConditionTypeRolloutActive     = "RolloutActive"
+
+	// ConditionTypeExternalAuth surfaces the effective facade auth
+	// configuration. False/Unreachable means the operator explicitly
+	// set spec.externalAuth.allowManagementPlane=false without
+	// configuring any data-plane validator — the agent cannot accept
+	// any callers. Always emitted so operators can assert on it from
+	// kubectl describe / helm unittest.
+	ConditionTypeExternalAuth = "ExternalAuth"
 )

@@ -118,6 +118,11 @@ type AgentRuntimeReconciler struct {
 	// Nil uses a default client with a bounded timeout — tests inject
 	// an httptest.Server-backed client here.
 	OIDCHTTPClient *http.Client
+	// JWKSClock provides the current time for the OIDC JWKS fresh-
+	// cache calculation (T8 fast-path). Nil falls back to time.Now;
+	// tests inject a deterministic clock to make cache-expiry
+	// assertions stable.
+	JWKSClock func() time.Time
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch;create;update;patch;delete
@@ -407,6 +412,14 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	privacyCond := r.validatePrivacyPolicyRef(ctx, agentRuntime)
 	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation,
 		privacyCond.Type, privacyCond.Status, privacyCond.Reason, privacyCond.Message)
+
+	// Surface facade auth configuration as a status condition so
+	// operators can see at a glance whether the agent admits traffic.
+	// Catches the Unreachable combo (allowManagementPlane=false + no
+	// data-plane validator) which otherwise 401s silently at runtime.
+	authCond := evaluateExternalAuthCondition(agentRuntime)
+	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation,
+		authCond.Type, authCond.Status, authCond.Reason, authCond.Message)
 
 	// Mirror the OIDC issuer's JWKS into a per-agent Secret (if
 	// spec.externalAuth.oidc is configured). Non-blocking: failures

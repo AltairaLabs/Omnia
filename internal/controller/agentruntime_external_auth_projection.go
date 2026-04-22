@@ -20,46 +20,11 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
-// projectLegacyA2AAuth folds the deprecated spec.a2a.authentication.secretRef
-// into spec.externalAuth.sharedToken so that the new validator chain can
-// treat both shapes uniformly.
-//
-// Precedence rules:
-//   - If spec.externalAuth.sharedToken is already set, do nothing — the
-//     operator has explicitly chosen the new shape and we don't want to
-//     surprise them by overwriting.
-//   - If spec.a2a.authentication.secretRef is unset, do nothing — there's
-//     no legacy state to project.
-//   - Otherwise, ensure spec.externalAuth exists and copy the SecretRef
-//     into spec.externalAuth.sharedToken.
-//
-// Mutates ar in place. Idempotent: subsequent calls with the same input
-// are no-ops once the projection has happened. PR 2a ships this helper
-// behind no callers — the chain runner in PR 2b is what invokes it.
-//
-// The function does not modify the legacy field. We leave it visible on
-// the spec so operators see exactly what they configured; status emits
-// a deprecation warning condition (added in PR 2b) when the old field is
-// still populated.
+// projectLegacyA2AAuth is a thin wrapper around v1alpha1.ProjectLegacyA2AAuth.
+// The canonical implementation now lives in api/v1alpha1 so cmd/agent's
+// startup chain builder can share the same logic (otherwise legacy CRs
+// without spec.externalAuth would silently 401 at the facade). See the
+// shared helper for precedence rules and rationale.
 func projectLegacyA2AAuth(ar *omniav1alpha1.AgentRuntime) {
-	if ar == nil || ar.Spec.A2A == nil {
-		return
-	}
-	// The whole point of this helper is to migrate the deprecated
-	// authentication shape into the new one, so reading the old field is
-	// the intended behaviour — silence staticcheck's deprecated check.
-	legacy := ar.Spec.A2A.Authentication //nolint:staticcheck // SA1019: intentional read of deprecated field for projection
-	if legacy == nil || legacy.SecretRef == nil {
-		return
-	}
-	if ar.Spec.ExternalAuth == nil {
-		ar.Spec.ExternalAuth = &omniav1alpha1.AgentExternalAuth{}
-	}
-	if ar.Spec.ExternalAuth.SharedToken != nil {
-		// Operator explicitly set the new shape — respect it.
-		return
-	}
-	ar.Spec.ExternalAuth.SharedToken = &omniav1alpha1.SharedTokenAuth{
-		SecretRef: *legacy.SecretRef,
-	}
+	omniav1alpha1.ProjectLegacyA2AAuth(ar)
 }

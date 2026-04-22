@@ -43,11 +43,24 @@ The dashboard is a web UI for managing Omnia resources. It supports multiple aut
 
 ### Agent Authentication
 
-Agent endpoints are protected separately using Istio's JWT validation. This allows:
+Each agent facade runs an **ordered validator chain**. A request is
+admitted when any validator accepts it; otherwise the facade returns
+401. With no `spec.externalAuth` configured, the agent is reachable
+only from the dashboard — there is no unauthenticated external path.
 
-- Different authentication for dashboard vs agents
-- Service-to-service authentication for agent clients
-- Fine-grained access control per agent
+Available validators:
+
+| Validator | Purpose | Verification location |
+|-----------|---------|-----------------------|
+| management-plane | Dashboard "Try this agent" debug view | In-facade (dashboard-signed RS256) |
+| sharedToken | Single bearer for all callers | In-facade (constant-time compare) |
+| apiKeys | Per-caller keys with scopes, managed in UI | In-facade (sha256 lookup) |
+| oidc | Customer IdP JWTs — no service mesh required | In-facade (controller auto-fetches JWKS) |
+| edgeTrust | Upstream edge (Istio/gateway) already verified the JWT | Claim-headers trusted, never re-verified |
+
+Configure these per AgentRuntime under `spec.externalAuth` — see
+[Configure Agent Authentication](/how-to/configure-authentication/) for
+recipes.
 
 ## Dashboard Authentication Modes
 

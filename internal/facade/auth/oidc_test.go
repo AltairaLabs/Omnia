@@ -519,3 +519,117 @@ func TestOIDCValidator_KeySetReplaceAllowsHotReload(t *testing.T) {
 		t.Errorf("after rotate, new key: %v", err)
 	}
 }
+
+// TestOIDCValidator_LeewayToleratesSmallDrift proves T1 is fixed for
+// the OIDC path: a token with nbf/iat a few seconds after the
+// validator's clock must still admit. Cross-cloud IdPs commonly drift
+// ~1-5s; tokens freshly minted by the IdP would otherwise 401.
+//
+// The inverse — leeway doesn't mask genuine expiry — is already
+// covered by TestOIDCValidator_RejectsExpiredToken (exp = -1 minute,
+// beyond the 30s leeway).
+func TestOIDCValidator_LeewayToleratesSmallDrift(t *testing.T) {
+	t.Parallel()
+	v, key := newOIDCValidatorForTest(t)
+	future := time.Now().Add(15 * time.Second)
+	token := mintOIDCToken(t, oidcMintOpts{
+		kid:      testOIDCKid,
+		issuer:   testOIDCIssuer,
+		audience: testOIDCAudience,
+		subject:  "alice",
+		key:      key,
+		exp:      future.Add(5 * time.Minute),
+		extras: map[string]any{
+			"iat": future.Unix(),
+			"nbf": future.Unix(),
+		},
+	})
+
+	if _, err := v.Validate(context.Background(), oidcReq(token)); err != nil {
+		t.Errorf("token with iat/nbf=+15s should admit under 30s leeway: %v", err)
+	}
+}
+
+// TestOIDCValidator_ExtractsArrayAndScalarClaims proves T4 is fixed:
+// array-valued claims (common shape for groups/roles/scopes) surface
+// as comma-joined strings on Identity.Claims, numeric claims become
+// base-10 strings, and booleans serialise to "true"/"false". Previous
+// revisions dropped all non-string claims on the floor.
+func TestOIDCValidator_ExtractsArrayAndScalarClaims(t *testing.T) {
+	t.Parallel()
+	v, key := newOIDCValidatorForTest(t)
+	token := mintOIDCToken(t, oidcMintOpts{
+		kid:      testOIDCKid,
+		issuer:   testOIDCIssuer,
+		audience: testOIDCAudience,
+		subject:  testAliceEmail,
+		key:      key,
+		extras: map[string]any{
+			"groups":     []any{"finance", "platform"}, // typical IdP group list
+			"scopes":     []string{"read", "write"},    // JWT libs sometimes give []string
+			"level":      float64(5),                   // JSON numbers land as float64
+			"admin":      true,                         // booleans coerced to "true"/"false"
+			"empty_list": []any{},                      // dropped, not stored as empty string
+			"empty":      "",                           // dropped
+		},
+	})
+
+	id, err := v.Validate(context.Background(), oidcReq(token))
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	want := map[string]string{
+		"groups": "finance,platform",
+		"scopes": "read,write",
+		"level":  "5",
+		"admin":  "true",
+	}
+	for k, expected := range want {
+		if got := id.Claims[k]; got != expected {
+			t.Errorf("Claims[%q] = %q, want %q", k, got, expected)
+		}
+	}
+	if _, present := id.Claims["empty_list"]; present {
+		t.Error("empty array should be dropped, not stored as empty string")
+	}
+	if _, present := id.Claims["empty"]; present {
+		t.Error("empty string should be dropped")
+	}
+}
+
+// TestOIDCValidator_DropsUnsupportedClaimShapes proves nested objects
+// and mixed-type arrays don't end up in Identity.Claims at all — we
+// would surface garbage to ToolPolicy otherwise.
+func TestOIDCValidator_DropsUnsupportedClaimShapes(t *testing.T) {
+	t.Parallel()
+	v, key := newOIDCValidatorForTest(t)
+	token := mintOIDCToken(t, oidcMintOpts{
+		kid:      testOIDCKid,
+		issuer:   testOIDCIssuer,
+		audience: testOIDCAudience,
+		subject:  testAliceEmail,
+		key:      key,
+		extras: map[string]any{
+			"nested":      map[string]any{"a": "b"}, // unsupported
+			"mixed":       []any{"ok", 5, true},     // non-string elements filtered out
+			"just_number": float64(42),
+		},
+	})
+
+	id, err := v.Validate(context.Background(), oidcReq(token))
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	if _, present := id.Claims["nested"]; present {
+		t.Error("nested object must be dropped, not serialised")
+	}
+	// Mixed arrays keep the string elements only.
+	if got := id.Claims["mixed"]; got != "ok" {
+		t.Errorf("Claims[mixed] = %q, want %q (non-string elements filtered)", got, "ok")
+	}
+	if got := id.Claims["just_number"]; got != "42" {
+		t.Errorf("Claims[just_number] = %q, want %q", got, "42")
+	}
+}
