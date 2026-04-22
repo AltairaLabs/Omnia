@@ -25,6 +25,7 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/altairalabs/omnia/internal/facade/auth"
@@ -209,6 +210,88 @@ func TestSecretBackedKeyStore_NoMatchingSecretsIsValid(t *testing.T) {
 
 	if _, ok := store.Lookup(auth.HashToken(testRawKey)); ok {
 		t.Error("empty store should miss every lookup")
+	}
+}
+
+func TestParseAPIKeySecret_EmptyDataErrors(t *testing.T) {
+	t.Parallel()
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "agent-x-apikey-y",
+			Labels: map[string]string{
+				LabelCredentialKind: LabelCredentialKindAgentAPIKey,
+				LabelAgent:          "x",
+			},
+		},
+		// No Data at all — should reject rather than panic.
+	}
+	if _, err := parseAPIKeySecret(secret); err == nil {
+		t.Error("expected error on empty secret data")
+	}
+}
+
+func TestParseAPIKeySecret_NameNotMatchingPatternFallsBackToFullName(t *testing.T) {
+	// A hand-edited Secret without the expected `agent-<agent>-apikey-<id>`
+	// prefix should still load — its ID falls back to the full Secret name
+	// so ToolPolicy can still distinguish callers by identity.subject.
+	t.Parallel()
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "custom-key-naming",
+			Labels: map[string]string{
+				LabelCredentialKind: LabelCredentialKindAgentAPIKey,
+				LabelAgent:          "x",
+			},
+		},
+		Data: map[string][]byte{APIKeyDataKeyHash: sha256Bytes("k")},
+	}
+	key, err := parseAPIKeySecret(secret)
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if got, want := key.ID, "custom-key-naming"; got != want {
+		t.Errorf("ID = %q, want %q (fallback to full Secret name)", got, want)
+	}
+}
+
+func TestNewSecretBackedKeyStore_InitialLoadListErrorPropagates(t *testing.T) {
+	// Construct a client without Secret kind registered so List errors.
+	// The initial-load failure should propagate as a fatal error, not
+	// silently fall through.
+	t.Parallel()
+	emptyScheme := runtime.NewScheme()
+	fc := fake.NewClientBuilder().WithScheme(emptyScheme).Build()
+
+	_, err := NewSecretBackedKeyStore(context.Background(), fc, "ns", "a", logr.Discard(),
+		WithKeyStoreRefreshInterval(time.Hour))
+	if err == nil {
+		t.Error("expected error when the scheme lacks Secret kind")
+	}
+}
+
+func TestSecretBackedKeyStore_ClockOption(t *testing.T) {
+	// WithKeyStoreClock is plumbed through NewSecretBackedKeyStore; the
+	// test asserts the option takes effect by observing the recorded
+	// lastRefresh timestamp after loadOnce completes.
+	t.Parallel()
+	scheme := newTestScheme(t)
+	fc := fake.NewClientBuilder().WithScheme(scheme).Build()
+	fixed := time.Date(2026, time.May, 1, 12, 0, 0, 0, time.UTC)
+
+	store, err := NewSecretBackedKeyStore(context.Background(), fc, "ns", "a", logr.Discard(),
+		WithKeyStoreRefreshInterval(time.Hour),
+		WithKeyStoreClock(func() time.Time { return fixed }),
+	)
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	defer store.Stop()
+
+	store.mu.RLock()
+	got := store.lastRefresh
+	store.mu.RUnlock()
+	if !got.Equal(fixed) {
+		t.Errorf("lastRefresh = %v, want %v (clock injection should drive the timestamp)", got, fixed)
 	}
 }
 
