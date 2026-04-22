@@ -594,7 +594,7 @@ jobs:
           yq eval -i ".appVersion = \"$VERSION\"" charts/omnia/Chart.yaml
 
       - name: Create pull request
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.OMNIA_RELEASE_TOKEN }}
           branch: chore/bump-chart-${{ needs.parse-version.outputs.version }}
