@@ -408,6 +408,14 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation,
 		privacyCond.Type, privacyCond.Status, privacyCond.Reason, privacyCond.Message)
 
+	// Surface facade auth configuration as a status condition so
+	// operators can see at a glance whether the agent admits traffic.
+	// Catches the Unreachable combo (allowManagementPlane=false + no
+	// data-plane validator) which otherwise 401s silently at runtime.
+	authCond := evaluateExternalAuthCondition(agentRuntime)
+	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation,
+		authCond.Type, authCond.Status, authCond.Reason, authCond.Message)
+
 	// Mirror the OIDC issuer's JWKS into a per-agent Secret (if
 	// spec.externalAuth.oidc is configured). Non-blocking: failures
 	// set the OIDCJWKSReady=False condition and schedule a refresh.
