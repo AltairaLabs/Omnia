@@ -118,8 +118,48 @@ func buildDataPlaneValidators(
 	} else if v != nil {
 		out = append(out, v)
 	}
-	// Future PRs append apiKeys (2c), oidc (2d), edgeTrust (2e) here.
+	if v, err := buildAPIKeyValidator(ctx, k8s, log, ar); err != nil {
+		return nil, err
+	} else if v != nil {
+		out = append(out, v)
+	}
+	// Future PRs append oidc (2d), edgeTrust (2e) here.
 	return out, nil
+}
+
+// buildAPIKeyValidator constructs the api-key validator when
+// spec.externalAuth.apiKeys is set. Returns nil when not configured.
+// The KeyStore lifetime is tied to the validator's — it leaks for the
+// life of the process; that's fine because the facade only constructs
+// the chain once at startup.
+func buildAPIKeyValidator(
+	ctx context.Context,
+	k8s client.Client,
+	log logr.Logger,
+	ar *omniav1alpha1.AgentRuntime,
+) (auth.Validator, error) {
+	ak := ar.Spec.ExternalAuth.APIKeys
+	if ak == nil {
+		return nil, nil
+	}
+
+	store, err := NewSecretBackedKeyStore(ctx, k8s, ar.Namespace, ar.Name, log)
+	if err != nil {
+		return nil, fmt.Errorf("init api-key store: %w", err)
+	}
+
+	opts := []auth.APIKeyOption{}
+	if ak.DefaultRole != "" {
+		opts = append(opts, auth.WithAPIKeyDefaultRole(ak.DefaultRole))
+	}
+	if ak.TrustEndUserHeader {
+		opts = append(opts, auth.WithAPIKeyTrustEndUserHeader(true))
+	}
+	v := auth.NewAPIKeyValidator(store, opts...)
+	log.Info("api-key validator enabled",
+		"defaultRole", ak.DefaultRole,
+		"trustEndUserHeader", ak.TrustEndUserHeader)
+	return v, nil
 }
 
 // buildSharedTokenValidator resolves spec.externalAuth.sharedToken into
