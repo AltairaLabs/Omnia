@@ -163,6 +163,18 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            {{- /*
+              Mgmt-plane signing key path. Pointed at the mounted private
+              half of the dashboard signing keypair. server.js loads it at
+              boot and mints short-lived JWTs that the WS proxy attaches
+              to upstream connections so the facade's mgmt-plane validator
+              admits them. Skipped when an existingSecret override is
+              configured but the operator hasn't actually mounted it via
+              extraVolumeMounts — those deployments take ownership of the
+              path themselves.
+            */}}
+            - name: OMNIA_MGMT_PLANE_SIGNING_KEY_PATH
+              value: /etc/omnia/mgmt-plane/tls.key
             {{- with .Values.dashboard.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -202,6 +214,9 @@ spec:
             - name: workspace-content
               mountPath: {{ .Values.workspaceContent.mountPath | default "/workspace-content" }}
             {{- end }}
+            - name: mgmt-plane-signing-key
+              mountPath: /etc/omnia/mgmt-plane
+              readOnly: true
             {{- $vmMounts := concat (.Values.dashboard.extraVolumeMounts | default list) ($po.extraVolumeMounts | default list) }}
             {{- with $vmMounts }}
             {{- toYaml . | nindent 12 }}
@@ -217,6 +232,10 @@ spec:
           persistentVolumeClaim:
             claimName: {{ .Values.workspaceContent.persistence.existingClaim | default (printf "%s-workspace-content" (include "omnia.fullname" .)) }}
         {{- end }}
+        - name: mgmt-plane-signing-key
+          secret:
+            secretName: {{ .Values.dashboard.signingKey.existingSecret | default (printf "%s-signing-keypair" (include "omnia.dashboard.fullname" .)) }}
+            defaultMode: 0o400
         {{- $vols := concat (.Values.dashboard.extraVolumes | default list) ($po.extraVolumes | default list) }}
         {{- with $vols }}
         {{- toYaml . | nindent 8 }}

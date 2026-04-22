@@ -5,8 +5,11 @@ values:
   - ../values-chart-tests.yaml
 templates:
   - templates/dashboard/signing-keypair.yaml
+  - templates/dashboard/deployment.yaml
+  - templates/dashboard/configmap.yaml
 tests:
   - it: renders a kubernetes.io/tls Secret with tls.crt + tls.key
+    template: templates/dashboard/signing-keypair.yaml
     asserts:
       - hasDocuments:
           count: 1
@@ -25,12 +28,14 @@ tests:
           path: data["tls.key"]
 
   - it: annotates the Secret so Helm never deletes or regenerates it
+    template: templates/dashboard/signing-keypair.yaml
     asserts:
       - equal:
           path: metadata.annotations["helm.sh/resource-policy"]
           value: keep
 
   - it: carries the standard dashboard labels
+    template: templates/dashboard/signing-keypair.yaml
     asserts:
       - equal:
           path: metadata.labels["app.kubernetes.io/component"]
@@ -40,6 +45,7 @@ tests:
           value: omnia-dashboard
 
   - it: is suppressed when dashboard.enabled=false
+    template: templates/dashboard/signing-keypair.yaml
     set:
       dashboard.enabled: false
     asserts:
@@ -47,8 +53,48 @@ tests:
           count: 0
 
   - it: is suppressed when an existingSecret is provided (BYO keypair)
+    template: templates/dashboard/signing-keypair.yaml
     set:
       dashboard.signingKey.existingSecret: my-own-signing-keypair
     asserts:
       - hasDocuments:
           count: 0
+
+  - it: dashboard pod mounts the signing-key Secret read-only at /etc/omnia/mgmt-plane
+    template: templates/dashboard/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: mgmt-plane-signing-key
+            mountPath: /etc/omnia/mgmt-plane
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: mgmt-plane-signing-key
+            secret:
+              secretName: omnia-dashboard-signing-keypair
+              defaultMode: 256
+
+  - it: dashboard pod gets OMNIA_MGMT_PLANE_SIGNING_KEY_PATH pointing at the mount
+    template: templates/dashboard/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNIA_MGMT_PLANE_SIGNING_KEY_PATH
+            value: /etc/omnia/mgmt-plane/tls.key
+
+  - it: dashboard pod mount honours the BYO existingSecret override
+    template: templates/dashboard/deployment.yaml
+    set:
+      dashboard.signingKey.existingSecret: my-own-signing-keypair
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: mgmt-plane-signing-key
+            secret:
+              secretName: my-own-signing-keypair
+              defaultMode: 256
