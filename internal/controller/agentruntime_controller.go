@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -112,6 +113,11 @@ type AgentRuntimeReconciler struct {
 	// RolloutMetrics holds Prometheus metrics for rollout observability.
 	// Nil in tests that don't need metrics.
 	RolloutMetrics *RolloutMetrics
+	// OIDCHTTPClient is the HTTP client used to fetch the OIDC
+	// discovery document and JWKS when spec.externalAuth.oidc is set.
+	// Nil uses a default client with a bounded timeout — tests inject
+	// an httptest.Server-backed client here.
+	OIDCHTTPClient *http.Client
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch;create;update;patch;delete
@@ -402,6 +408,14 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation,
 		privacyCond.Type, privacyCond.Status, privacyCond.Reason, privacyCond.Message)
 
+	// Mirror the OIDC issuer's JWKS into a per-agent Secret (if
+	// spec.externalAuth.oidc is configured). Non-blocking: failures
+	// set the OIDCJWKSReady=False condition and schedule a refresh.
+	jwksNext, err := r.reconcileOIDCJWKS(ctx, agentRuntime)
+	if err != nil {
+		log.Error(err, "OIDC JWKS reconciliation failed")
+	}
+
 	// Set overall Ready condition
 	if agentRuntime.Status.Replicas != nil && agentRuntime.Status.Replicas.Ready > 0 {
 		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhaseRunning
@@ -418,7 +432,7 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, nil
+	return scheduleOIDCJWKSRefresh(jwksNext), nil
 }
 
 func (r *AgentRuntimeReconciler) reconcileDelete(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) (ctrl.Result, error) {
