@@ -339,6 +339,13 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 	}
 
+	// Project the deprecated spec.a2a.authentication.secretRef into
+	// spec.externalAuth.sharedToken so downstream code (cmd/agent's
+	// chain builder, the dashboard UI, etc.) only has to look at one
+	// field. In-memory only — never persisted. PR 2a added the helper;
+	// PR 2b wires it.
+	projectLegacyA2AAuth(agentRuntime)
+
 	// Initialize status if needed
 	if agentRuntime.Status.Phase == "" {
 		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhasePending

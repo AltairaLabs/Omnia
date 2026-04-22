@@ -241,3 +241,73 @@ func TestServerAuth_NonBearerScheme_FallsThrough(t *testing.T) {
 	defer func() { _ = ws.Close() }()
 	readConnected(t, ws)
 }
+
+// TestServerAuth_SharedTokenChain_AdmitsBeforeMgmtPlane proves that PR
+// 2b's chain wiring works end-to-end through the facade — a sharedToken
+// validator placed before the mgmt-plane validator admits a presented-
+// bearer request and tags the identity with origin=shared-token.
+func TestServerAuth_SharedTokenChain_AdmitsBeforeMgmtPlane(t *testing.T) {
+	mgmt, _ := newAuthTestValidator(t)
+	const sharedToken = "shared-bearer-value"
+	stv, err := auth.NewSharedTokenValidator(sharedToken)
+	require.NoError(t, err)
+	chain := auth.Chain{stv, mgmt}
+
+	observed := make(chan policy.PropagationFields, 1)
+	handler := &mockHandler{
+		handleFunc: func(ctx context.Context, _ string, msg *ClientMessage, w ResponseWriter) error {
+			select {
+			case observed <- policy.ExtractPropagationFields(ctx):
+			default:
+			}
+			return w.WriteDone("echo: " + msg.Content)
+		},
+	}
+	store := session.NewMemoryStore()
+	cfg := DefaultServerConfig()
+	cfg.PingInterval = 100 * time.Millisecond
+	cfg.PongTimeout = 200 * time.Millisecond
+	server := NewServer(cfg, store, handler, logr.Discard(), WithAuthChain(chain))
+	ts := httptest.NewServer(server)
+	t.Cleanup(func() { ts.Close(); _ = store.Close() })
+
+	header := http.Header{"Authorization": []string{"Bearer " + sharedToken}}
+	ws, _, err := dialWS(t, ts, header)
+	require.NoError(t, err)
+	defer func() { _ = ws.Close() }()
+	readConnected(t, ws)
+	require.NoError(t, ws.WriteJSON(ClientMessage{Type: "user_message", Content: "hi"}))
+
+	select {
+	case fields := <-observed:
+		require.NotNil(t, fields.Identity)
+		assert.Equal(t, policy.OriginSharedToken, fields.Identity.Origin,
+			"sharedToken must win over mgmt-plane when both could admit")
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not run")
+	}
+}
+
+// TestServerAuth_SharedTokenChain_RejectsWrongToken proves that a
+// presented bearer that fails the sharedToken compare short-circuits
+// the chain — we must NOT fall through to mgmt-plane and accidentally
+// admit a data-plane token via a different validator.
+func TestServerAuth_SharedTokenChain_RejectsWrongToken(t *testing.T) {
+	mgmt, _ := newAuthTestValidator(t)
+	stv, err := auth.NewSharedTokenValidator("expected-token")
+	require.NoError(t, err)
+	chain := auth.Chain{stv, mgmt}
+
+	cfg := DefaultServerConfig()
+	store := session.NewMemoryStore()
+	server := NewServer(cfg, store, &mockHandler{}, logr.Discard(), WithAuthChain(chain))
+	ts := httptest.NewServer(server)
+	t.Cleanup(func() { ts.Close(); _ = store.Close() })
+
+	header := http.Header{"Authorization": []string{"Bearer wrong-token"}}
+	_, resp, err := dialWS(t, ts, header)
+	require.Error(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
+		"sharedToken's ErrInvalidCredential must reject; mgmt-plane must NOT be reached")
+}
