@@ -276,8 +276,16 @@ jobs:
           kubectl get pods -n omnia-system -l app.kubernetes.io/name=omnia
           kubectl logs -n omnia-system -l app.kubernetes.io/name=omnia --tail=50 || true
 
-          # Wait for AgentRuntime to be reconciled
+          # Wait for AgentRuntime to be reconciled.
+          # The reconciler sets Phase=Failed transiently when reference
+          # reconciles race (e.g. PromptPack/ToolRegistry not yet
+          # indexed), so we need to see the failure persist before
+          # bailing — otherwise the test flakes on healthy startup.
+          # FAILED_THRESHOLD=3 means we tolerate up to ~30s of Failed
+          # before treating it as terminal.
           echo "Waiting for AgentRuntime to be reconciled..."
+          FAILED_STREAK=0
+          FAILED_THRESHOLD=3
           for i in {1..60}; do
             STATUS=$(kubectl get agentruntime vision-demo -n omnia-demo -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
             echo "AgentRuntime status: $STATUS ($i/60)"
@@ -286,9 +294,15 @@ jobs:
               break
             fi
             if [ "$STATUS" == "Failed" ]; then
-              echo "AgentRuntime failed!"
-              kubectl describe agentruntime vision-demo -n omnia-demo
-              exit 1
+              FAILED_STREAK=$((FAILED_STREAK + 1))
+              echo "AgentRuntime phase=Failed (streak $FAILED_STREAK/$FAILED_THRESHOLD)"
+              if [ "$FAILED_STREAK" -ge "$FAILED_THRESHOLD" ]; then
+                echo "AgentRuntime failed persistently — bailing"
+                kubectl describe agentruntime vision-demo -n omnia-demo
+                exit 1
+              fi
+            else
+              FAILED_STREAK=0
             fi
             sleep 10
           done
