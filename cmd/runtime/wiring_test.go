@@ -200,3 +200,25 @@ func TestConfigDerivedServerOpts_EmptyMediaBasePathLeavesResolverNil(t *testing.
 			"MediaBasePath is empty — WithMediaBasePath semantics changed")
 	}
 }
+
+// TestConfigDerivedServerOpts_WiresAgentUID asserts that cfg.AgentUID is
+// applied on the resulting Server via WithAgentUID. Without this option the
+// runtime's memory scope never carries agent_id, which silently disables the
+// multi-tier retrieval routing in the httpclient — callers get only the flat
+// user-scoped search endpoint.
+func TestConfigDerivedServerOpts_WiresAgentUID(t *testing.T) {
+	const wantUID = "44444444-4444-4444-4444-444444444444"
+	cfg := &pkruntime.Config{
+		AgentName: "wiring-test",
+		AgentUID:  wantUID,
+		Namespace: "wiring",
+	}
+	opts := configDerivedServerOpts(cfg)
+
+	srv := pkruntime.NewServer(opts...)
+	t.Cleanup(func() { _ = srv.Close() })
+
+	if got := pkruntime.ServerAgentUID(srv); got != wantUID {
+		t.Errorf("AgentUID not propagated: got %q, want %q", got, wantUID)
+	}
+}

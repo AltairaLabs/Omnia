@@ -49,6 +49,7 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 
 	cfg := &Config{
 		AgentName:      name,
+		AgentUID:       string(ar.UID),
 		Namespace:      namespace,
 		WorkspaceName:  workspaceName,
 		PromptPackPath: getEnvOrDefault(envPromptPackPath, defaultPromptPackPath),

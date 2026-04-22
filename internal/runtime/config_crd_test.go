@@ -85,6 +85,7 @@ func TestLoadFromCRD_NamedProviders(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-agent",
 			Namespace: "test-ns",
+			UID:       "44444444-4444-4444-4444-444444444444",
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
@@ -109,6 +110,7 @@ func TestLoadFromCRD_NamedProviders(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "test-agent", cfg.AgentName)
+	assert.Equal(t, "44444444-4444-4444-4444-444444444444", cfg.AgentUID)
 	assert.Equal(t, "test-ns", cfg.Namespace)
 	assert.Equal(t, "test-pack", cfg.PromptPackName)
 	assert.Equal(t, "claude", cfg.ProviderType)

@@ -428,6 +428,7 @@ func configDerivedServerOpts(cfg *pkruntime.Config) []pkruntime.ServerOption {
 		pkruntime.WithPackPath(cfg.PromptPackPath),
 		pkruntime.WithPromptName(cfg.PromptName),
 		pkruntime.WithAgentIdentity(cfg.AgentName, cfg.Namespace),
+		pkruntime.WithAgentUID(cfg.AgentUID),
 		pkruntime.WithPromptPackName(cfg.PromptPackName),
 		pkruntime.WithModel(cfg.Model),
 		pkruntime.WithMockProvider(cfg.MockProvider),

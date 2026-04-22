@@ -31,6 +31,7 @@ import (
 type Config struct {
 	// Agent identification
 	AgentName     string
+	AgentUID      string // Kubernetes UID of the AgentRuntime CR; used as agent_id scope for memory.
 	Namespace     string
 	WorkspaceName string
 
