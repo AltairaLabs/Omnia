@@ -39,11 +39,8 @@ const (
 	testOIDCIssuer   = "https://idp.example.com"
 	testOIDCAudience = "omnia"
 	testOIDCKid      = "test-key-1"
-	// testAliceEmail is referenced across several test files in this
-	// package; defined here since oidc_test.go is the first to need it
-	// under PR 2d. PR 2e's edge_trust_test.go will drop its local
-	// definition on rebase.
-	testAliceEmail = "alice@example.com"
+	// testAliceEmail is defined in edge_trust_test.go (PR 2e, already
+	// on main); referenced here to avoid the goconst lint warning.
 )
 
 // newOIDCTestKey generates an RSA keypair and returns it plus a JWKS
