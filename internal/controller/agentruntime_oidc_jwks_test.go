@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -339,8 +340,10 @@ func TestReconcileOIDCJWKS_JWKSFetchNon200(t *testing.T) {
 
 func TestReconcileOIDCJWKS_UpsertIsIdempotent(t *testing.T) {
 	t.Parallel()
-	// First reconcile upserts; second reconcile with a different JWKS
-	// body overwrites without error.
+	// After a refresh interval has elapsed, a second reconcile with a
+	// different JWKS body overwrites the Secret. The T8 fresh-cache
+	// fast path only short-circuits within the refresh window; the
+	// injectable clock lets us jump past it.
 	first := fakeJWKSBlob()
 	second := `{"keys":[{"kty":"RSA","kid":"k2","use":"sig","n":"other","e":"AQAB"}]}`
 	var active = first
@@ -363,10 +366,16 @@ func TestReconcileOIDCJWKS_UpsertIsIdempotent(t *testing.T) {
 	r := newOIDCReconciler(t, ar)
 	r.OIDCHTTPClient = srv.Client()
 
+	baseTime := time.Date(2026, time.April, 22, 0, 0, 0, 0, time.UTC)
+	r.JWKSClock = func() time.Time { return baseTime }
+
 	if _, err := r.reconcileOIDCJWKS(context.Background(), ar); err != nil {
 		t.Fatalf("first reconcile: %v", err)
 	}
 	active = second
+	// Advance beyond the refresh interval so the fast-path lets us
+	// through to re-fetch.
+	r.JWKSClock = func() time.Time { return baseTime.Add(OIDCJWKSRefreshInterval + time.Minute) }
 	if _, err := r.reconcileOIDCJWKS(context.Background(), ar); err != nil {
 		t.Fatalf("second reconcile: %v", err)
 	}
@@ -380,6 +389,58 @@ func TestReconcileOIDCJWKS_UpsertIsIdempotent(t *testing.T) {
 	if string(got.Data[OIDCJWKSDataKey]) != second {
 		t.Errorf("second reconcile did not overwrite: got %q want %q",
 			got.Data[OIDCJWKSDataKey], second)
+	}
+}
+
+// TestReconcileOIDCJWKS_FreshCacheSkipsFetch proves T8: when the
+// existing Secret's fetched-at annotation is within the refresh
+// window, the reconciler does NOT perform an HTTP round-trip. Proven
+// by pointing the reconciler at a server that would always fail — a
+// fresh cache means the failure is never visited.
+func TestReconcileOIDCJWKS_FreshCacheSkipsFetch(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	mux := http.NewServeMux()
+	var serverURL string
+	mux.HandleFunc(OIDCDiscoveryPath, func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"issuer":   serverURL,
+			"jwks_uri": serverURL + "/jwks",
+		})
+	})
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(fakeJWKSBlob()))
+	})
+	srv := httptest.NewServer(mux)
+	serverURL = srv.URL
+	defer srv.Close()
+
+	ar := newAgentRuntimeWithOIDC(srv.URL)
+	r := newOIDCReconciler(t, ar)
+	r.OIDCHTTPClient = srv.Client()
+	baseTime := time.Date(2026, time.April, 22, 0, 0, 0, 0, time.UTC)
+	r.JWKSClock = func() time.Time { return baseTime }
+
+	// First reconcile populates the Secret (2 HTTP calls: discovery + jwks).
+	if _, err := r.reconcileOIDCJWKS(context.Background(), ar); err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+	initialCalls := calls
+	if initialCalls != 2 {
+		t.Fatalf("first reconcile: got %d HTTP calls, want 2", initialCalls)
+	}
+
+	// Advance the clock by 5 minutes — well within the 6h refresh
+	// window. A second reconcile must use the cache.
+	r.JWKSClock = func() time.Time { return baseTime.Add(5 * time.Minute) }
+	if _, err := r.reconcileOIDCJWKS(context.Background(), ar); err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	if calls != initialCalls {
+		t.Errorf("second reconcile made %d additional HTTP calls — fresh-cache short-circuit failed",
+			calls-initialCalls)
 	}
 }
 

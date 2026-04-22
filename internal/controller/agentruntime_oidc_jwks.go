@@ -65,10 +65,20 @@ const (
 	// OIDCDiscoveryPath is the well-known endpoint per RFC 8414.
 	OIDCDiscoveryPath = "/.well-known/openid-configuration"
 
-	// OIDCJWKSHTTPTimeout bounds the issuer round-trip. Generous so
-	// slow IdPs don't churn the reconcile loop, but short enough that
-	// a wedged issuer doesn't hold up other AgentRuntime work.
-	OIDCJWKSHTTPTimeout = 15 * time.Second
+	// OIDCJWKSHTTPTimeout bounds the issuer round-trip. Aggressive so a
+	// wedged IdP does NOT serialise behind every AgentRuntime reconcile
+	// (the T8 review finding — a previous 15s cap meant a fleet of N
+	// OIDC-backed agents could each pay a 15s hit on a slow issuer per
+	// reconcile pass). 5s is enough for any reasonable IdP; slow
+	// discovery flows fall back to the cached Secret if one exists.
+	OIDCJWKSHTTPTimeout = 5 * time.Second
+
+	// OIDCJWKSFetchedAtAnnotation stamps the Secret with the time of
+	// the last successful fetch in RFC3339 format. The reconciler skips
+	// the HTTP round-trip entirely when the annotation is newer than
+	// now - RefreshInterval, so a reconcile triggered by an unrelated
+	// AgentRuntime change doesn't cause an unconditional fetch.
+	OIDCJWKSFetchedAtAnnotation = "omnia.altairalabs.ai/oidc-jwks-fetched-at"
 )
 
 // ConditionTypeOIDCJWKSReady is the status condition surfacing the
@@ -114,6 +124,16 @@ func (r *AgentRuntimeReconciler) reconcileOIDCJWKS(
 		r.setOIDCJWKSCondition(ar, metav1.ConditionFalse, "MissingIssuer",
 			"spec.externalAuth.oidc.issuer is empty")
 		return 0, fmt.Errorf("oidc issuer is empty")
+	}
+
+	// Fast path: a fresh Secret means we don't need to re-fetch just
+	// because the AgentRuntime reconciled for an unrelated reason
+	// (deployment update, status change, etc.). Costs one Get on the
+	// Secret, saves a blocking HTTP round-trip against the IdP — T8.
+	if remaining, fresh := r.jwksSecretStillFresh(ctx, ar); fresh {
+		r.setOIDCJWKSCondition(ar, metav1.ConditionTrue, "JWKSUpdated",
+			fmt.Sprintf("JWKS mirrored from %s (cached)", oidc.Issuer))
+		return remaining, nil
 	}
 
 	jwks, err := r.fetchOIDCJWKS(ctx, oidc.Issuer)
@@ -246,6 +266,13 @@ func (r *AgentRuntimeReconciler) upsertOIDCJWKSSecret(
 		secret.Labels[labelCredentialKind] = LabelCredentialKindAgentOIDCJWKS
 		secret.Labels[labelAppInstance] = ar.Name
 		secret.Labels[labelAppManagedBy] = labelValueOmniaOperator
+		if secret.Annotations == nil {
+			secret.Annotations = map[string]string{}
+		}
+		// Stamp the fetch time so subsequent reconciles can skip the
+		// HTTP round-trip when the Secret is still within the refresh
+		// window (T8).
+		secret.Annotations[OIDCJWKSFetchedAtAnnotation] = r.jwksNow().UTC().Format(time.RFC3339)
 		if secret.Data == nil {
 			secret.Data = map[string][]byte{}
 		}
@@ -309,4 +336,53 @@ func scheduleOIDCJWKSRefresh(next time.Duration) ctrl.Result {
 		return ctrl.Result{}
 	}
 	return ctrl.Result{RequeueAfter: next}
+}
+
+// jwksNow returns the current time via the reconciler's injectable
+// clock when one is set (tests inject a deterministic clock), or
+// time.Now otherwise.
+func (r *AgentRuntimeReconciler) jwksNow() time.Time {
+	if r.JWKSClock != nil {
+		return r.JWKSClock()
+	}
+	return time.Now()
+}
+
+// jwksSecretStillFresh reads the current mirror Secret and decides
+// whether an HTTP fetch can be skipped. Returns (remaining, true) when
+// the existing Secret is still within the refresh window so the caller
+// can requeue at the exact refresh time; (0, false) means fetch now.
+//
+// Get errors (NotFound, API pressure) fall through to fetch rather
+// than risking a silently-stale cache.
+func (r *AgentRuntimeReconciler) jwksSecretStillFresh(
+	ctx context.Context,
+	ar *omniav1alpha1.AgentRuntime,
+) (time.Duration, bool) {
+	secret := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      oidcJWKSSecretName(ar.Name),
+		Namespace: ar.Namespace,
+	}, secret)
+	if err != nil {
+		return 0, false
+	}
+	raw, ok := secret.Annotations[OIDCJWKSFetchedAtAnnotation]
+	if !ok {
+		return 0, false
+	}
+	fetchedAt, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return 0, false
+	}
+	// Data key must also be present — an annotation without content
+	// suggests a hand-edited Secret.
+	if _, ok := secret.Data[OIDCJWKSDataKey]; !ok {
+		return 0, false
+	}
+	elapsed := r.jwksNow().Sub(fetchedAt)
+	if elapsed >= OIDCJWKSRefreshInterval {
+		return 0, false
+	}
+	return OIDCJWKSRefreshInterval - elapsed, true
 }

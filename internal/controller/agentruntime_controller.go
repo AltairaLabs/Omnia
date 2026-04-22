@@ -118,6 +118,11 @@ type AgentRuntimeReconciler struct {
 	// Nil uses a default client with a bounded timeout — tests inject
 	// an httptest.Server-backed client here.
 	OIDCHTTPClient *http.Client
+	// JWKSClock provides the current time for the OIDC JWKS fresh-
+	// cache calculation (T8 fast-path). Nil falls back to time.Now;
+	// tests inject a deterministic clock to make cache-expiry
+	// assertions stable.
+	JWKSClock func() time.Time
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch;create;update;patch;delete
