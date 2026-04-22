@@ -274,11 +274,29 @@ func startA2AServer(
 		"conversationTTL", cfg.A2AConversationTTL,
 	)
 
-	// Build authenticator
-	var auth a2aserver.Authenticator
+	// Legacy per-SDK bearer authenticator (see a2a.go for rationale).
+	var a2aAuth a2aserver.Authenticator
 	if cfg.A2AAuthToken != "" {
-		auth = facadea2a.NewBearerAuthenticator(cfg.A2AAuthToken)
-		log.Info("A2A bearer auth enabled")
+		a2aAuth = facadea2a.NewBearerAuthenticator(cfg.A2AAuthToken)
+		log.Info("A2A bearer auth enabled (legacy)")
+	}
+
+	// Build the auth chain for this A2A endpoint. In dual-protocol mode
+	// the WebSocket side has already built its chain in
+	// buildWebSocketServer; we rebuild here rather than plumb it across
+	// because the cost is a single AgentRuntime k8s Get at startup and
+	// keeping buildA2AHandler's signature consistent with the standalone
+	// runA2AFacade path is worth more than the saved lookup.
+	mgmtPlane, mgmtErr := loadMgmtPlaneValidator(log)
+	if mgmtErr != nil {
+		log.Error(mgmtErr, "mgmt-plane validator load failed")
+		os.Exit(1)
+	}
+	a2aChain, chainErr := buildAuthChain(
+		context.Background(), buildK8sClient(), log, cfg.AgentName, cfg.Namespace, mgmtPlane)
+	if chainErr != nil {
+		log.Error(chainErr, "auth chain build failed")
+		os.Exit(1)
 	}
 
 	// Build card provider
@@ -304,7 +322,7 @@ func startA2AServer(
 		TaskTTL:         cfg.A2ATaskTTL,
 		ConversationTTL: cfg.A2AConversationTTL,
 		CardProvider:    cardProvider,
-		Authenticator:   auth,
+		Authenticator:   a2aAuth,
 		TaskStore:       taskStore,
 		Log:             log,
 	})
@@ -312,10 +330,11 @@ func startA2AServer(
 	// Create A2A metrics.
 	a2aMetrics := facadea2a.NewMetrics(cfg.AgentName, cfg.Namespace)
 
-	// Wrap with metrics + (optional) tracing middleware. Shared with
-	// standalone mode via buildA2AHandler so both paths get tracing spans
-	// when OMNIA_TRACING_ENABLED=true.
-	a2aHandler := buildA2AHandler(a2aSrv.Handler(), a2aMetrics, tracingProvider)
+	// Wrap with auth + metrics + (optional) tracing middleware. Shared
+	// with standalone mode via buildA2AHandler so both paths get tracing
+	// spans when OMNIA_TRACING_ENABLED=true and the same auth chain as
+	// the WebSocket upgrade path.
+	a2aHandler := buildA2AHandler(a2aSrv.Handler(), a2aMetrics, tracingProvider, a2aChain, log)
 
 	a2aHTTPServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.A2APort),
