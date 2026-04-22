@@ -22,6 +22,7 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/agent"
 	facadea2a "github.com/altairalabs/omnia/internal/facade/a2a"
+	"github.com/altairalabs/omnia/internal/facade/auth"
 	"github.com/altairalabs/omnia/internal/tracing"
 
 	"github.com/AltairaLabs/PromptKit/sdk"
@@ -30,15 +31,18 @@ import (
 
 // buildA2AHandler assembles the HTTP handler chain for an A2A server:
 //
-//	inner handler -> metrics middleware -> OpenTelemetry tracing
+//	auth middleware -> inner handler -> metrics middleware -> OpenTelemetry tracing
 //
-// The tracing wrapper is only applied when tracingProvider is non-nil. This
-// is factored out of runA2AFacade and startA2AServer so both standalone and
+// The tracing wrapper is only applied when tracingProvider is non-nil. The
+// auth middleware is only applied when authChain is non-empty; an empty
+// chain preserves the PR 1 unauthenticated-upgrade default. This is
+// factored out of runA2AFacade and startA2AServer so both standalone and
 // dual-protocol modes share the same middleware stack, and so wiring tests
-// can assert that tracing is wired when the provider is set. A regression
-// that drops the tracing wrapper — or blank-identifies the provider at the
-// call site, like #728 items 3+5 — is caught by
-// TestBuildA2AHandler_WiresTracingProvider.
+// can assert that tracing + auth are wired when configured.
+//
+// Auth wraps OUTERMOST (before metrics/tracing) because rejected requests
+// should be cheap — a caller spamming wrong bearer tokens shouldn't
+// inflate the metrics counters or spawn otel spans for pipeline noise.
 //
 // inner is the handler returned by facadea2a.Server.Handler(). It is taken as
 // an http.Handler (not *facadea2a.Server) so the wiring test can exercise
@@ -47,12 +51,17 @@ func buildA2AHandler(
 	inner http.Handler,
 	metrics *facadea2a.Metrics,
 	tracingProvider *tracing.Provider,
+	authChain auth.Chain,
+	log logr.Logger,
 ) http.Handler {
 	var handler http.Handler = facadea2a.NewMetricsMiddleware(inner, metrics)
 	if tracingProvider != nil {
 		handler = otelhttp.NewHandler(handler, "a2a-facade",
 			otelhttp.WithTracerProvider(tracingProvider.TracerProvider()),
 		)
+	}
+	if len(authChain) > 0 {
+		handler = auth.Middleware(authChain, handler, auth.WithMiddlewareLogger(log))
 	}
 	return handler
 }
@@ -68,11 +77,31 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 		"taskStoreType", cfg.A2ATaskStoreType,
 	)
 
-	// Build authenticator
-	var auth a2aserver.Authenticator
+	// Legacy per-SDK bearer authenticator. Kept for back-compat with
+	// deployments that haven't migrated to spec.externalAuth.sharedToken
+	// yet. Once the projection shim fires (PR 2b), OMNIA_A2A_AUTH_TOKEN
+	// is unset because the shared token reaches the facade via the auth
+	// chain instead — nothing below runs.
+	var a2aAuth a2aserver.Authenticator
 	if cfg.A2AAuthToken != "" {
-		auth = facadea2a.NewBearerAuthenticator(cfg.A2AAuthToken)
-		log.Info("A2A bearer auth enabled")
+		a2aAuth = facadea2a.NewBearerAuthenticator(cfg.A2AAuthToken)
+		log.Info("A2A bearer auth enabled (legacy)")
+	}
+
+	// Build the PR 2b-era auth chain. Reads the agent's own
+	// spec.externalAuth, then combines data-plane validators with the
+	// mgmt-plane validator. Wrapped around buildA2AHandler below so an
+	// A2A caller presenting a valid credential sees the same 200-OK
+	// path as the WS facade.
+	mgmtPlane, err := loadMgmtPlaneValidator(log)
+	if err != nil {
+		log.Error(err, "mgmt-plane validator load failed")
+		os.Exit(1)
+	}
+	chain, err := buildAuthChain(context.Background(), buildK8sClient(), log, cfg.AgentName, cfg.Namespace, mgmtPlane)
+	if err != nil {
+		log.Error(err, "auth chain build failed")
+		os.Exit(1)
 	}
 
 	// Build card provider from CRD config
@@ -105,7 +134,7 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 		TaskTTL:         cfg.A2ATaskTTL,
 		ConversationTTL: cfg.A2AConversationTTL,
 		CardProvider:    cardProvider,
-		Authenticator:   auth,
+		Authenticator:   a2aAuth,
 		TaskStore:       taskStore,
 		SDKOptions:      sdkOptions,
 		Log:             log,
@@ -114,8 +143,8 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 	// Create A2A metrics.
 	a2aMetrics := facadea2a.NewMetrics(cfg.AgentName, cfg.Namespace)
 
-	// Wrap the A2A handler with metrics + (optional) tracing middleware.
-	a2aHandler := buildA2AHandler(a2aSrv.Handler(), a2aMetrics, tracingProvider)
+	// Wrap the A2A handler with auth + metrics + (optional) tracing middleware.
+	a2aHandler := buildA2AHandler(a2aSrv.Handler(), a2aMetrics, tracingProvider, chain, log)
 
 	// Build the mux with metrics endpoint.
 	mux := http.NewServeMux()
