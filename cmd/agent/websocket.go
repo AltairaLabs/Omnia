@@ -144,6 +144,15 @@ func buildWebSocketServer(
 	if len(chain) > 0 {
 		serverOpts = append(serverOpts, facade.WithAuthChain(chain))
 	}
+	// Strict by default. When the chain is empty (no externalAuth
+	// configured AND mgmt-plane pubkey unreadable — typically a boot race
+	// with the Workspace controller or dashboard.enabled=false), the
+	// facade rejects unauthenticated upgrades. This closes the residual
+	// C-3 bypass that PR 3's WithAllowUnauthenticated default preserved
+	// for back-compat. Set OMNIA_FACADE_ALLOW_UNAUTHENTICATED=true only
+	// in dev/CI.
+	serverOpts = append(serverOpts,
+		facade.WithAllowUnauthenticated(allowUnauthenticatedFallback(log)))
 	wsServer := facade.NewServer(wsConfig, store, handler, log, serverOpts...)
 
 	mux := http.NewServeMux()

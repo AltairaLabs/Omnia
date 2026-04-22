@@ -43,6 +43,10 @@ import (
 // points — is caught here.
 func TestBuildA2AHandler_WiresTracingProvider(t *testing.T) {
 	freshPromRegistry(t)
+	// The tracing wiring test doesn't care about auth; flip the dev
+	// escape hatch so the empty-chain strict default doesn't block the
+	// request before otelhttp records a span.
+	t.Setenv(envFacadeAllowUnauthenticated, "true")
 
 	exporter := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
@@ -89,6 +93,9 @@ func TestBuildA2AHandler_WiresTracingProvider(t *testing.T) {
 // handler and no spans are recorded.
 func TestBuildA2AHandler_NoTracingProviderLeavesHandlerClean(t *testing.T) {
 	freshPromRegistry(t)
+	// Same as above — this test probes plumbing, not auth; flip the dev
+	// escape hatch so the empty chain doesn't 401 before the inner runs.
+	t.Setenv(envFacadeAllowUnauthenticated, "true")
 
 	exporter := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
@@ -180,7 +187,13 @@ func TestBuildA2AHandler_WiresAuthChain(t *testing.T) {
 		}
 	})
 
-	t.Run("empty chain preserves unauthenticated default", func(t *testing.T) {
+	t.Run("empty chain strict default rejects (B2 fix)", func(t *testing.T) {
+		// Closes the residual C-3 bypass: an empty chain used to fall
+		// through to the inner handler. With the strict default wired
+		// in cmd/agent, every request 401s unless the dev escape hatch
+		// is set. This test pins the new behaviour so a future refactor
+		// doesn't silently re-open the bypass.
+		t.Setenv(envFacadeAllowUnauthenticated, "")
 		innerCalled = false
 		handler := buildA2AHandler(inner, metrics, nil, nil, logr.Discard())
 
@@ -188,11 +201,11 @@ func TestBuildA2AHandler_WiresAuthChain(t *testing.T) {
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
 
-		if rr.Code != http.StatusOK {
-			t.Errorf("status = %d, want 200 (empty chain → PR 1 default)", rr.Code)
+		if rr.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want 401 (strict default on empty chain)", rr.Code)
 		}
-		if !innerCalled {
-			t.Error("inner must run when no auth chain is configured")
+		if innerCalled {
+			t.Error("inner must NOT run under strict default with empty chain")
 		}
 	})
 }
