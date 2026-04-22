@@ -9,6 +9,7 @@ Functional Source License. See ee/LICENSE for details.
 package policy
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/google/cel-go/ext"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
+	omniapolicy "github.com/altairalabs/omnia/pkg/policy"
 )
 
 // Header name constants for CEL evaluation context.
@@ -93,10 +95,18 @@ func NewEvaluator() (*Evaluator, error) {
 }
 
 // newCELEnv creates the shared CEL environment with the variables available to rules.
+//
+// The `identity` root is populated from policy.AuthenticatedIdentity (pulled
+// from request context). When no identity is attached to the context, all
+// fields are populated with zero values (empty strings, empty claims map) so
+// rules referencing `identity.*` still evaluate without runtime errors.
+// Rules that need to check whether a claim is present should use
+// `has(identity.claims.<name>)` — the same idiom used for `body.<field>`.
 func newCELEnv() (*cel.Env, error) {
 	return cel.NewEnv(
 		cel.Variable("headers", cel.MapType(cel.StringType, cel.StringType)),
 		cel.Variable("body", cel.MapType(cel.StringType, cel.DynType)),
+		cel.Variable("identity", cel.MapType(cel.StringType, cel.DynType)),
 		ext.Strings(),
 	)
 }
@@ -228,14 +238,33 @@ func (e *Evaluator) RemovePolicy(namespace, name string) {
 // It returns a Decision indicating whether the request should be allowed.
 // In audit mode, the decision will be Allowed=true but DeniedBy will be set
 // to indicate which rule would have denied the request.
+//
+// This form does not consult request context, so the `identity` CEL root is
+// populated with zero values. Callers that want identity-gated rules should
+// use EvaluateWithContext.
 func (e *Evaluator) Evaluate(headers map[string]string, body map[string]interface{}) Decision {
+	return e.EvaluateWithContext(context.Background(), headers, body)
+}
+
+// EvaluateWithContext evaluates all matching policies against the given
+// request context. The context is used to pull an AuthenticatedIdentity (via
+// policy.IdentityFromContext) and expose it to CEL rules as `identity`.
+// When no identity is attached, the identity root is populated with
+// zero-valued strings / empty map so rules do not error on missing data.
+func (e *Evaluator) EvaluateWithContext(
+	ctx context.Context,
+	headers map[string]string,
+	body map[string]interface{},
+) Decision {
 	e.mu.RLock()
 	matching := e.findMatchingPolicies(headers)
 	e.mu.RUnlock()
 
+	identity := identityActivation(ctx)
+
 	var auditDecision *Decision
 	for _, p := range matching {
-		decision := e.evaluatePolicy(p, headers, body)
+		decision := e.evaluatePolicy(p, headers, body, identity)
 		if !decision.Allowed {
 			return decision
 		}
@@ -253,7 +282,21 @@ func (e *Evaluator) Evaluate(headers map[string]string, body map[string]interfac
 
 // EvaluateHeaderInjection evaluates header injection rules for all matching policies.
 // It returns a map of header-name to header-value for all injection rules.
+//
+// This form does not consult request context, so the `identity` CEL root is
+// populated with zero values. Callers that need identity-aware header
+// injection should use EvaluateHeaderInjectionWithContext.
 func (e *Evaluator) EvaluateHeaderInjection(
+	headers map[string]string,
+	body map[string]interface{},
+) (map[string]string, error) {
+	return e.EvaluateHeaderInjectionWithContext(context.Background(), headers, body)
+}
+
+// EvaluateHeaderInjectionWithContext evaluates header injection rules using
+// identity information pulled from the given request context.
+func (e *Evaluator) EvaluateHeaderInjectionWithContext(
+	ctx context.Context,
 	headers map[string]string,
 	body map[string]interface{},
 ) (map[string]string, error) {
@@ -262,7 +305,7 @@ func (e *Evaluator) EvaluateHeaderInjection(
 	e.mu.RUnlock()
 
 	result := make(map[string]string)
-	activation := buildActivation(headers, body)
+	activation := buildActivation(headers, body, identityActivation(ctx))
 
 	for _, p := range matching {
 		if err := evaluatePolicyHeaderInjection(p, activation, result); err != nil {
@@ -341,6 +384,7 @@ func (e *Evaluator) evaluatePolicy(
 	policy *CompiledPolicy,
 	headers map[string]string,
 	body map[string]interface{},
+	identity map[string]interface{},
 ) Decision {
 	// Check required claims first
 	if decision := checkRequiredClaims(policy.RequiredClaims, headers); !decision.Allowed {
@@ -348,7 +392,7 @@ func (e *Evaluator) evaluatePolicy(
 	}
 
 	// Evaluate CEL rules
-	activation := buildActivation(headers, body)
+	activation := buildActivation(headers, body, identity)
 	for _, rule := range policy.Rules {
 		decision := evaluateRule(rule, activation, policy.OnFailure)
 		if !decision.Allowed {
@@ -377,10 +421,18 @@ func checkRequiredClaims(claims []omniav1alpha1.RequiredClaim, headers map[strin
 	return Decision{Allowed: true}
 }
 
-// buildActivation creates the CEL activation map from headers and body.
-func buildActivation(headers map[string]string, body map[string]interface{}) map[string]interface{} {
+// buildActivation creates the CEL activation map from headers, body, and
+// identity. The identity map MUST be pre-populated (empty strings + empty
+// claims map when no identity is attached) so rules referencing
+// `identity.<field>` do not error on missing keys.
+func buildActivation(
+	headers map[string]string,
+	body map[string]interface{},
+	identity map[string]interface{},
+) map[string]interface{} {
 	activation := map[string]interface{}{
-		"headers": headers,
+		"headers":  headers,
+		"identity": identity,
 	}
 	if body != nil {
 		activation["body"] = body
@@ -388,6 +440,38 @@ func buildActivation(headers map[string]string, body map[string]interface{}) map
 		activation["body"] = map[string]interface{}{}
 	}
 	return activation
+}
+
+// identityActivation builds the `identity` CEL activation from the given
+// request context. When no AuthenticatedIdentity is attached, returns a map
+// populated with zero-valued strings and an empty claims map — this matches
+// the defensive default used elsewhere in the evaluator for missing data.
+func identityActivation(ctx context.Context) map[string]interface{} {
+	id := omniapolicy.IdentityFromContext(ctx)
+	if id == nil {
+		return map[string]interface{}{
+			"origin":    "",
+			"subject":   "",
+			"endUser":   "",
+			"workspace": "",
+			"agent":     "",
+			"role":      "",
+			"claims":    map[string]string{},
+		}
+	}
+	claims := id.Claims
+	if claims == nil {
+		claims = map[string]string{}
+	}
+	return map[string]interface{}{
+		"origin":    id.Origin,
+		"subject":   id.Subject,
+		"endUser":   id.EndUser,
+		"workspace": id.Workspace,
+		"agent":     id.Agent,
+		"role":      id.Role,
+		"claims":    claims,
+	}
 }
 
 // evaluateRule evaluates a single CEL rule and returns the decision.
