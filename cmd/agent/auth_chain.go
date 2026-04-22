@@ -74,6 +74,13 @@ func buildAuthChain(
 		case err != nil:
 			return nil, fmt.Errorf("get AgentRuntime %s/%s: %w", namespace, agentName, err)
 		default:
+			// Fold the deprecated spec.a2a.authentication.secretRef into
+			// spec.externalAuth.sharedToken. The reconciler does the same
+			// on its in-memory copy, but that copy is never persisted, so
+			// this side needs to re-run the projection — otherwise legacy
+			// CRs without spec.externalAuth produce an empty data-plane
+			// chain and every A2A request 401s after PR 3's default flip.
+			omniav1alpha1.ProjectLegacyA2AAuth(ar)
 			validators, err := buildDataPlaneValidators(ctx, k8s, log, ar)
 			if err != nil {
 				return nil, err

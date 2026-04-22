@@ -145,6 +145,106 @@ func TestBuildAuthChain_SharedTokenAddsValidatorBeforeMgmt(t *testing.T) {
 	}
 }
 
+// TestBuildAuthChain_LegacyA2AAuthenticationProjects proves B1 is fixed:
+// an AgentRuntime that uses only the deprecated
+// spec.a2a.authentication.secretRef (with no spec.externalAuth) must
+// produce a data-plane chain containing the sharedToken validator. The
+// reconciler runs the projection on an in-memory copy that never gets
+// persisted, so cmd/agent has to re-run it at startup or the customer's
+// A2A traffic 401s after PR 3's default flip.
+func TestBuildAuthChain_LegacyA2AAuthenticationProjects(t *testing.T) {
+	t.Parallel()
+	scheme := newTestScheme(t)
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "legacy-token", Namespace: "ns"},
+		Data:       map[string][]byte{"token": []byte("legacy-bearer")},
+	}
+	// Only the deprecated shape is set — the new spec.externalAuth field
+	// is deliberately nil to mirror a CR written before the redesign.
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			A2A: &omniav1alpha1.A2AConfig{
+				Authentication: &omniav1alpha1.A2AAuthConfig{
+					SecretRef: &corev1.LocalObjectReference{Name: "legacy-token"},
+				},
+			},
+		},
+	}
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, secret).Build()
+
+	chain, err := buildAuthChain(context.Background(), fc, logr.Discard(), "agent", "ns", nil)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got, want := len(chain), 1; got != want {
+		t.Fatalf("chain length = %d, want %d (sharedToken projected from legacy a2a)", got, want)
+	}
+
+	// Exercise the chain end-to-end: a request with the legacy bearer
+	// must admit via sharedToken and come out tagged as such.
+	r := httptest.NewRequest(http.MethodGet, "/a2a", nil)
+	r.Header.Set("Authorization", "Bearer legacy-bearer")
+	id, err := chain.Run(context.Background(), r)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got, want := id.Origin, policy.OriginSharedToken; got != want {
+		t.Errorf("Origin = %q, want %q", got, want)
+	}
+}
+
+// TestBuildAuthChain_ExternalAuthWinsOverLegacy proves the precedence
+// rule in ProjectLegacyA2AAuth: when both shapes are set, the new
+// externalAuth.sharedToken stays untouched (operators who migrated
+// deliberately must not get silently overwritten).
+func TestBuildAuthChain_ExternalAuthWinsOverLegacy(t *testing.T) {
+	t.Parallel()
+	scheme := newTestScheme(t)
+	newSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "new-token", Namespace: "ns"},
+		Data:       map[string][]byte{"token": []byte("new-bearer")},
+	}
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			A2A: &omniav1alpha1.A2AConfig{
+				Authentication: &omniav1alpha1.A2AAuthConfig{
+					SecretRef: &corev1.LocalObjectReference{Name: "legacy-token"},
+				},
+			},
+			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
+				SharedToken: &omniav1alpha1.SharedTokenAuth{
+					SecretRef: corev1.LocalObjectReference{Name: "new-token"},
+				},
+			},
+		},
+	}
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, newSecret).Build()
+
+	chain, err := buildAuthChain(context.Background(), fc, logr.Discard(), "agent", "ns", nil)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got, want := len(chain), 1; got != want {
+		t.Fatalf("chain length = %d, want %d", got, want)
+	}
+
+	// Only the new bearer admits — confirms the legacy secret was NOT
+	// projected on top of the already-set externalAuth.
+	r := httptest.NewRequest(http.MethodGet, "/a2a", nil)
+	r.Header.Set("Authorization", "Bearer new-bearer")
+	if _, err := chain.Run(context.Background(), r); err != nil {
+		t.Errorf("new bearer should admit: %v", err)
+	}
+	r2 := httptest.NewRequest(http.MethodGet, "/a2a", nil)
+	r2.Header.Set("Authorization", "Bearer legacy-bearer")
+	if _, err := chain.Run(context.Background(), r2); err == nil {
+		t.Error("legacy bearer must NOT admit when externalAuth.sharedToken is explicitly set")
+	}
+}
+
 func TestBuildAuthChain_SharedTokenSecretMissingErrors(t *testing.T) {
 	t.Parallel()
 	scheme := newTestScheme(t)
