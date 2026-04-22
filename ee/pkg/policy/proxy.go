@@ -61,7 +61,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	headers := extractHeaders(r)
 	body := parseBody(r, h.logger)
 
-	decision := h.evaluator.Evaluate(headers, body)
+	decision := h.evaluator.EvaluateWithContext(r.Context(), headers, body)
 
 	h.logDecision(r, decision)
 
@@ -77,7 +77,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // injectHeaders evaluates header injection rules and adds computed headers to the request.
 func (h *ProxyHandler) injectHeaders(r *http.Request, headers map[string]string, body map[string]interface{}) {
-	injected, err := h.evaluator.EvaluateHeaderInjection(headers, body)
+	injected, err := h.evaluator.EvaluateHeaderInjectionWithContext(r.Context(), headers, body)
 	if err != nil {
 		h.logger.Error("header injection evaluation failed", "error", err.Error())
 		return
