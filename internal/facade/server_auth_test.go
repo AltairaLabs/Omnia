@@ -309,3 +309,71 @@ func TestServerAuth_SharedTokenChain_RejectsWrongToken(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
 		"sharedToken's ErrInvalidCredential must reject; mgmt-plane must NOT be reached")
 }
+
+// stubClaimValidator is an auth.Validator that admits every request
+// and returns a canned AuthenticatedIdentity with a populated Claims
+// map. Good enough to prove the facade copies the map into
+// PropagationFields regardless of which validator did the admit.
+type stubClaimValidator struct {
+	id *policy.AuthenticatedIdentity
+}
+
+func (s *stubClaimValidator) Validate(_ context.Context, _ *http.Request) (*policy.AuthenticatedIdentity, error) {
+	return s.id, nil
+}
+
+// TestServerAuth_IdentityClaims_PropagatedToHeaders proves B3 is fixed:
+// when a validator admits with non-empty Identity.Claims, those claims
+// must reach PropagationFields.Claims so downstream ToOutboundHeaders
+// emits X-Omnia-Claim-<name> headers regardless of which validator
+// admitted.
+func TestServerAuth_IdentityClaims_PropagatedToHeaders(t *testing.T) {
+	want := &policy.AuthenticatedIdentity{
+		Origin:  policy.OriginOIDC,
+		Subject: "alice@example.com",
+		EndUser: "alice@example.com",
+		Role:    policy.RoleEditor,
+		Claims: map[string]string{
+			"team":   "finance",
+			"region": "us-east",
+			"email":  "alice@example.com",
+		},
+	}
+	chain := auth.Chain{&stubClaimValidator{id: want}}
+
+	observed := make(chan policy.PropagationFields, 1)
+	handler := &mockHandler{
+		handleFunc: func(ctx context.Context, _ string, msg *ClientMessage, w ResponseWriter) error {
+			select {
+			case observed <- policy.ExtractPropagationFields(ctx):
+			default:
+			}
+			return w.WriteDone("echo: " + msg.Content)
+		},
+	}
+	store := session.NewMemoryStore()
+	cfg := DefaultServerConfig()
+	cfg.PingInterval = 100 * time.Millisecond
+	cfg.PongTimeout = 200 * time.Millisecond
+	server := NewServer(cfg, store, handler, logr.Discard(), WithAuthChain(chain))
+	ts := httptest.NewServer(server)
+	t.Cleanup(func() { ts.Close(); _ = store.Close() })
+
+	header := http.Header{"Authorization": []string{"Bearer anything"}}
+	ws, _, err := dialWS(t, ts, header)
+	require.NoError(t, err)
+	defer func() { _ = ws.Close() }()
+	readConnected(t, ws)
+	require.NoError(t, ws.WriteJSON(ClientMessage{Type: "user_message", Content: "hi"}))
+
+	select {
+	case fields := <-observed:
+		require.NotNil(t, fields.Identity, "Identity must still be attached")
+		assert.Equal(t, "finance", fields.Claims["team"],
+			"Identity.Claims must be copied into PropagationFields.Claims (B3)")
+		assert.Equal(t, "us-east", fields.Claims["region"])
+		assert.Equal(t, "alice@example.com", fields.Claims["email"])
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not run")
+	}
+}
