@@ -519,3 +519,48 @@ func TestOIDCValidator_KeySetReplaceAllowsHotReload(t *testing.T) {
 		t.Errorf("after rotate, new key: %v", err)
 	}
 }
+
+// TestOIDCValidator_LeewayToleratesSmallDrift proves T1 is fixed for
+// the OIDC path: a token with nbf/iat a few seconds after the
+// validator's clock must still admit. Cross-cloud IdPs commonly drift
+// ~1-5s; tokens freshly minted by the IdP would otherwise 401.
+func TestOIDCValidator_LeewayToleratesSmallDrift(t *testing.T) {
+	t.Parallel()
+	v, key := newOIDCValidatorForTest(t)
+	future := time.Now().Add(15 * time.Second)
+	token := mintOIDCToken(t, oidcMintOpts{
+		kid:      testOIDCKid,
+		issuer:   testOIDCIssuer,
+		audience: testOIDCAudience,
+		subject:  "alice",
+		key:      key,
+		exp:      future.Add(5 * time.Minute),
+		extras: map[string]any{
+			"iat": future.Unix(),
+			"nbf": future.Unix(),
+		},
+	})
+
+	if _, err := v.Validate(context.Background(), oidcReq(token)); err != nil {
+		t.Errorf("token with iat/nbf=+15s should admit under 30s leeway: %v", err)
+	}
+}
+
+// TestOIDCValidator_LeewayDoesNotMaskGenuineExpiry — analogue to the
+// mgmt-plane test. exp 60s in the past must still reject (leeway 30s).
+func TestOIDCValidator_LeewayDoesNotMaskGenuineExpiry(t *testing.T) {
+	t.Parallel()
+	v, key := newOIDCValidatorForTest(t)
+	token := mintOIDCToken(t, oidcMintOpts{
+		kid:      testOIDCKid,
+		issuer:   testOIDCIssuer,
+		audience: testOIDCAudience,
+		subject:  "alice",
+		key:      key,
+		exp:      time.Now().Add(-60 * time.Second),
+	})
+
+	if _, err := v.Validate(context.Background(), oidcReq(token)); !errors.Is(err, auth.ErrExpired) {
+		t.Errorf("token expired 60s ago should reject (leeway 30s): err = %v", err)
+	}
+}

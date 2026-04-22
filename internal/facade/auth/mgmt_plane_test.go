@@ -505,3 +505,40 @@ func TestMgmtPlaneValidator_CustomIssuerAudience(t *testing.T) {
 		t.Errorf("custom-issuer token should admit: %v", err)
 	}
 }
+
+// TestMgmtPlaneValidator_LeewayToleratesSmallDrift proves T1 is fixed:
+// tokens just-barely in the future (iat/nbf up to ~15s after the
+// facade's clock) must still admit. Dashboards running on a slightly
+// different clock than the facade's would otherwise 401 their own
+// freshly-minted tokens.
+func TestMgmtPlaneValidator_LeewayToleratesSmallDrift(t *testing.T) {
+	t.Parallel()
+	v, key := newValidator(t)
+	future := time.Now().Add(15 * time.Second)
+	opts := defaultMintOpts(key)
+	opts.iat = future
+	opts.nbf = future
+	opts.exp = future.Add(5 * time.Minute)
+	token := mintToken(t, opts)
+
+	if _, err := v.Validate(context.Background(), requestWithToken(token)); err != nil {
+		t.Errorf("token with iat/nbf=+15s should admit under 30s leeway: %v", err)
+	}
+}
+
+// TestMgmtPlaneValidator_LeewayDoesNotMaskGenuineExpiry proves the
+// leeway doesn't mask tokens that are genuinely expired — an exp 60s
+// in the past is beyond the 30s leeway and must still reject.
+func TestMgmtPlaneValidator_LeewayDoesNotMaskGenuineExpiry(t *testing.T) {
+	t.Parallel()
+	v, key := newValidator(t)
+	opts := defaultMintOpts(key)
+	opts.exp = time.Now().Add(-60 * time.Second)
+	opts.iat = time.Now().Add(-10 * time.Minute)
+	opts.nbf = time.Now().Add(-10 * time.Minute)
+	token := mintToken(t, opts)
+
+	if _, err := v.Validate(context.Background(), requestWithToken(token)); !errors.Is(err, auth.ErrExpired) {
+		t.Errorf("token expired 60s ago should reject (leeway is 30s): err = %v", err)
+	}
+}

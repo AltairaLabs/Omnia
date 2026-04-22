@@ -238,6 +238,9 @@ func (v *OIDCValidator) Validate(_ context.Context, r *http.Request) (*policy.Au
 		jwt.WithIssuer(v.issuer),
 		jwt.WithAudience(v.audience),
 		jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}),
+		// Tolerate small clock drift between the facade and the IdP on
+		// exp/nbf/iat. See mgmt_plane.go for the full rationale.
+		jwt.WithLeeway(jwtLeeway),
 	)
 	token, parseErr := parser.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
