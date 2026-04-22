@@ -881,6 +881,15 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 		)
 	}
 
+	// Point the facade at the mgmt-plane pubkey file mounted from the
+	// workspace-namespace ConfigMap mirror (Workspace controller's
+	// responsibility). cmd/agent treats a missing file as "no validator"
+	// and the facade runs unauthenticated — PR 1a's default.
+	envVars = append(envVars, corev1.EnvVar{
+		Name:  EnvMgmtPlanePubkeyPath,
+		Value: fmt.Sprintf("%s/%s", MgmtPlanePubkeyMountDir, MgmtPlanePubkeyDataKey),
+	})
+
 	// Add extra env vars from CRD
 	if agentRuntime.Spec.Facade.ExtraEnv != nil {
 		envVars = append(envVars, agentRuntime.Spec.Facade.ExtraEnv...)

@@ -86,6 +86,25 @@ const (
 	promptpackConfigVolumeName = "promptpack-config"
 	// toolsConfigVolumeName is the name of the tools config volume.
 	toolsConfigVolumeName = "tools-config"
+	// MgmtPlanePubkeyConfigMapName is the ConfigMap name the Workspace
+	// controller creates in every workspace namespace. It mirrors the
+	// public half of the dashboard's mgmt-plane signing keypair
+	// (Secret lives in the operator namespace; pods cannot cross-mount
+	// other namespaces' secrets).
+	MgmtPlanePubkeyConfigMapName = "omnia-dashboard-mgmt-plane-pubkey"
+	// MgmtPlanePubkeyDataKey is the key inside the mirror ConfigMap's
+	// data map that holds the PEM-encoded public cert.
+	MgmtPlanePubkeyDataKey = "pubkey.pem"
+	// mgmtPlanePubkeyVolumeName is the volume name in the facade pod.
+	mgmtPlanePubkeyVolumeName = "mgmt-plane-pubkey"
+	// MgmtPlanePubkeyMountDir is the directory the facade mounts the
+	// pubkey ConfigMap into. The file path the facade reads is
+	// MgmtPlanePubkeyMountDir + "/" + MgmtPlanePubkeyDataKey.
+	MgmtPlanePubkeyMountDir = "/etc/omnia/mgmt-plane"
+	// EnvMgmtPlanePubkeyPath is the env var the operator sets on the
+	// facade container pointing at the mounted pubkey file. cmd/agent
+	// reads this and, when present, constructs a mgmt-plane validator.
+	EnvMgmtPlanePubkeyPath = "OMNIA_MGMT_PLANE_PUBKEY_PATH"
 )
 
 // Eval-related constants.

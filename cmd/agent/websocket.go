@@ -126,6 +126,16 @@ func buildWebSocketServer(
 	if pf, ok := store.(facade.PolicyFetcher); ok {
 		serverOpts = append(serverOpts, facade.WithPolicyFetcher(pf))
 	}
+	// Load the mgmt-plane validator when the operator has pointed us at a
+	// mounted dashboard public key. A loading failure (malformed PEM,
+	// non-RSA key) is fatal — silently downgrading to "no auth" would
+	// mask a real misconfiguration.
+	if v, err := loadMgmtPlaneValidator(log); err != nil {
+		log.Error(err, "mgmt-plane validator load failed")
+		os.Exit(1)
+	} else if v != nil {
+		serverOpts = append(serverOpts, facade.WithMgmtPlaneValidator(v))
+	}
 	wsServer := facade.NewServer(wsConfig, store, handler, log, serverOpts...)
 
 	mux := http.NewServeMux()

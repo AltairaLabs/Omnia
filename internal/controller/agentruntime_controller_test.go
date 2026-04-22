@@ -1417,10 +1417,17 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(runtimeContainer.VolumeMounts[0].MountPath).To(Equal(PromptPackMountPath))
 			Expect(runtimeContainer.VolumeMounts[0].ReadOnly).To(BeTrue())
 
-			// Check volumes
-			Expect(deployment.Spec.Template.Spec.Volumes).To(HaveLen(1))
-			Expect(deployment.Spec.Template.Spec.Volumes[0].Name).To(Equal("promptpack-config"))
-			Expect(deployment.Spec.Template.Spec.Volumes[0].ConfigMap.Name).To(Equal("prompts-config"))
+			// Check volumes — promptpack-config plus the unconditional
+			// mgmt-plane pubkey mirror added in PR 1b.
+			var promptVol *corev1.Volume
+			for i := range deployment.Spec.Template.Spec.Volumes {
+				if deployment.Spec.Template.Spec.Volumes[i].Name == "promptpack-config" {
+					promptVol = &deployment.Spec.Template.Spec.Volumes[i]
+					break
+				}
+			}
+			Expect(promptVol).NotTo(BeNil(), "promptpack-config volume must be present")
+			Expect(promptVol.ConfigMap.Name).To(Equal("prompts-config"))
 		})
 
 		It("should handle ToolRegistry in different namespace", func() {
