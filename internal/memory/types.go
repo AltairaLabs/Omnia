@@ -38,8 +38,11 @@ type (
 // ExportAll is needed for DSAR (data subject access request) data export and is
 // not part of the PromptKit SDK contract.
 // BatchDelete is needed for paginated DSAR deletion (Task 4 cascade).
+// RetrieveMultiTier runs a single query across institutional, agent, user and
+// user-for-agent tiers and returns ranked results for RAG context injection.
 type Store interface {
 	pkmemory.Store
 	ExportAll(ctx context.Context, scope map[string]string) ([]*Memory, error)
 	BatchDelete(ctx context.Context, scope map[string]string, limit int) (int, error)
+	RetrieveMultiTier(ctx context.Context, req MultiTierRequest) (*MultiTierResult, error)
 }

@@ -73,6 +73,10 @@ func (m *mockStore) List(_ context.Context, _ map[string]string, _ memory.ListOp
 	return m.memories, nil
 }
 
+func (m *mockStore) RetrieveMultiTier(_ context.Context, _ memory.MultiTierRequest) (*memory.MultiTierResult, error) {
+	return &memory.MultiTierResult{Memories: []*memory.MultiTierMemory{}, Total: 0}, nil
+}
+
 func (m *mockStore) Delete(_ context.Context, _ map[string]string, _ string) error {
 	return m.delErr
 }
@@ -104,6 +108,30 @@ func setupMux(h *Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	return mux
+}
+
+// TestHandler_RegisterRoutes_IncludesRetrieveMultiTier pins the multi-tier
+// retrieval route to the mux. A regression that drops the route (e.g. stale
+// merge or accidental deletion) shows up here as a 404 — every other status
+// proves the route is registered, even if the handler rejects the body.
+func TestHandler_RegisterRoutes_IncludesRetrieveMultiTier(t *testing.T) {
+	store := &mockStore{}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/memories/retrieve",
+		strings.NewReader(`{"workspace_id":"ws"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusNotFound {
+		t.Fatalf("POST /api/v1/memories/retrieve returned 404 — route not registered")
+	}
 }
 
 // --- List memories tests ---

@@ -59,6 +59,7 @@ type Server struct {
 	sdkLogger         *slog.Logger
 	packPath          string
 	agentName         string
+	agentUID          string
 	namespace         string
 	promptPackName    string
 	promptPackVersion string
@@ -161,6 +162,21 @@ func WithAgentIdentity(agentName, namespace string) ServerOption {
 		s.agentName = agentName
 		s.namespace = namespace
 	}
+}
+
+// WithAgentUID sets the AgentRuntime's Kubernetes UID. This is plumbed into
+// the memory scope as agent_id so retrieval queries can merge institutional,
+// agent, and user tiers.
+func WithAgentUID(uid string) ServerOption {
+	return func(s *Server) {
+		s.agentUID = uid
+	}
+}
+
+// ServerAgentUID returns the configured agent UID. Exposed for wiring tests
+// under cmd/runtime; production code should not depend on this accessor.
+func ServerAgentUID(s *Server) string {
+	return s.agentUID
 }
 
 // WithPromptPackName sets the PromptPack CRD name for tracing.

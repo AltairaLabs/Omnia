@@ -95,6 +95,14 @@ func (c *CachedStore) Retrieve(ctx context.Context, scope map[string]string, que
 	return mems, nil
 }
 
+// RetrieveMultiTier delegates to the inner store without caching. The
+// multi-tier result shape carries per-row tier tags and scores that are cheap
+// to recompute; adding a cache layer here would complicate invalidation for
+// modest savings. Revisit if retrieval becomes hot.
+func (c *CachedStore) RetrieveMultiTier(ctx context.Context, req MultiTierRequest) (*MultiTierResult, error) {
+	return c.inner.RetrieveMultiTier(ctx, req)
+}
+
 // List returns cached results when available, falling back to the inner store on miss or Redis error.
 func (c *CachedStore) List(ctx context.Context, scope map[string]string, opts ListOptions) ([]*Memory, error) {
 	key := c.listKey(ctx, scope, opts)

@@ -69,6 +69,10 @@ func (m *cacheTestStore) Retrieve(_ context.Context, _ map[string]string, _ stri
 	return m.memories, nil
 }
 
+func (m *cacheTestStore) RetrieveMultiTier(_ context.Context, _ MultiTierRequest) (*MultiTierResult, error) {
+	return &MultiTierResult{Memories: []*MultiTierMemory{}, Total: 0}, nil
+}
+
 func (m *cacheTestStore) List(_ context.Context, _ map[string]string, _ ListOptions) ([]*Memory, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -77,6 +77,10 @@ func (m *mockMemoryStore) ExportAll(_ context.Context, _ map[string]string) ([]*
 	return nil, nil
 }
 
+func (m *mockMemoryStore) RetrieveMultiTier(_ context.Context, _ memory.MultiTierRequest) (*memory.MultiTierResult, error) {
+	return &memory.MultiTierResult{Memories: []*memory.MultiTierMemory{}, Total: 0}, nil
+}
+
 func (m *mockMemoryStore) BatchDelete(_ context.Context, _ map[string]string, _ int) (int, error) {
 	return 0, nil
 }
