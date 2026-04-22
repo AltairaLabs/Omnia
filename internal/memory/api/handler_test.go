@@ -73,6 +73,10 @@ func (m *mockStore) List(_ context.Context, _ map[string]string, _ memory.ListOp
 	return m.memories, nil
 }
 
+func (m *mockStore) RetrieveMultiTier(_ context.Context, _ memory.MultiTierRequest) (*memory.MultiTierResult, error) {
+	return &memory.MultiTierResult{Memories: []*memory.MultiTierMemory{}, Total: 0}, nil
+}
+
 func (m *mockStore) Delete(_ context.Context, _ map[string]string, _ string) error {
 	return m.delErr
 }
