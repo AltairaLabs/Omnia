@@ -133,13 +133,13 @@ func TestSharedTokenValidator_TrustEndUserHeader(t *testing.T) {
 		auth.WithSharedTokenTrustEndUserHeader(true),
 	)
 	r := newRequestWithBearer(validToken)
-	r.Header.Set(auth.EndUserHeader, "alice@example.com")
+	r.Header.Set(auth.EndUserHeader, testAliceEmail)
 
 	id, err := v.Validate(context.Background(), r)
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	if got, want := id.EndUser, "alice@example.com"; got != want {
+	if got, want := id.EndUser, testAliceEmail; got != want {
 		t.Errorf("EndUser = %q, want %q", got, want)
 	}
 	// Subject MUST stay the token-holder identifier — only EndUser shifts.
@@ -152,7 +152,7 @@ func TestSharedTokenValidator_TrustEndUserHeaderDefaultsOff(t *testing.T) {
 	t.Parallel()
 	v, _ := auth.NewSharedTokenValidator(validToken)
 	r := newRequestWithBearer(validToken)
-	r.Header.Set(auth.EndUserHeader, "alice@example.com") // ignored
+	r.Header.Set(auth.EndUserHeader, testAliceEmail) // ignored
 
 	id, err := v.Validate(context.Background(), r)
 	if err != nil {
