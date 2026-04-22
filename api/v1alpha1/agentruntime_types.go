@@ -660,6 +660,12 @@ type A2AConfig struct {
 	ConversationTTL *string `json:"conversationTTL,omitempty"`
 
 	// authentication configures request authentication for the A2A endpoint.
+	//
+	// Deprecated: use spec.externalAuth.sharedToken instead. The
+	// AgentRuntime controller transparently projects this field into
+	// spec.externalAuth.sharedToken at reconcile time when the new field
+	// is unset; setting both is allowed but spec.externalAuth wins.
+	// Removal scheduled for the next major.
 	// +optional
 	Authentication *A2AAuthConfig `json:"authentication,omitempty"`
 
@@ -1117,6 +1123,17 @@ type AgentRuntimeSpec struct {
 	// A2A as an additional endpoint on a separate port (default 9999).
 	// +optional
 	A2A *A2AConfig `json:"a2a,omitempty"`
+
+	// externalAuth configures authentication for data-plane traffic to
+	// this agent's facade (external apps streaming via WebSocket or A2A).
+	// When unset, the agent is reachable only from the management plane
+	// (the dashboard's debug view) — no customer traffic until at least
+	// one validator is filled in. Subsumes the deprecated
+	// spec.a2a.authentication.secretRef field; the controller projects
+	// the legacy shape into spec.externalAuth.sharedToken at reconcile
+	// time.
+	// +optional
+	ExternalAuth *AgentExternalAuth `json:"externalAuth,omitempty"`
 
 	// memory configures cross-session memory for this agent.
 	// +optional

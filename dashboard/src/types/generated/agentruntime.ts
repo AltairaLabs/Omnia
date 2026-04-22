@@ -44,7 +44,13 @@ export interface AgentRuntimeSpec {
       /** version is the agent's version string. */
       version?: string;
     };
-    /** authentication configures request authentication for the A2A endpoint. */
+    /** authentication configures request authentication for the A2A endpoint.
+     * 
+     * Deprecated: use spec.externalAuth.sharedToken instead. The
+     * AgentRuntime controller transparently projects this field into
+     * spec.externalAuth.sharedToken at reconcile time when the new field
+     * is unset; setting both is allowed but spec.externalAuth wins.
+     * Removal scheduled for the next major. */
     authentication?: {
       /** secretRef references a Secret containing a bearer token.
        * The secret should contain a key named "token". */
@@ -2126,6 +2132,140 @@ export interface AgentRuntimeSpec {
       /** inactivityTimeout is the duration after the last message before a session
        * is considered complete. Uses Go duration format (e.g., "5m", "1h"). */
       inactivityTimeout?: string;
+    };
+  };
+  /** externalAuth configures authentication for data-plane traffic to
+   * this agent's facade (external apps streaming via WebSocket or A2A).
+   * When unset, the agent is reachable only from the management plane
+   * (the dashboard's debug view) — no customer traffic until at least
+   * one validator is filled in. Subsumes the deprecated
+   * spec.a2a.authentication.secretRef field; the controller projects
+   * the legacy shape into spec.externalAuth.sharedToken at reconcile
+   * time. */
+  externalAuth?: {
+    /** allowManagementPlane governs whether dashboard-minted management-
+     * plane tokens (the "Try this agent" debug view) are accepted for
+     * this agent. Defaults to true so the debug view works out of the
+     * box; paranoid customers wanting strict data-plane-only isolation
+     * set this to false explicitly.
+     * 
+     * Pointer with default=true so an explicit `false` stays
+     * distinguishable from "field omitted" for future audit/migration
+     * logic. Only consulted when spec.externalAuth is set; when the whole
+     * block is unset the facade defaults to mgmt-plane-only. */
+    allowManagementPlane?: boolean;
+    /** apiKeys configures per-caller API keys for this agent. Each key is
+     * stored as a Kubernetes Secret in the agent's namespace with a
+     * sha256 hash of the raw value, scopes, and expiry. Created via the
+     * dashboard UI; never stored in the CR. The presence of this field
+     * (even an empty struct) tells the facade to treat keys labelled for
+     * this agent as valid. */
+    apiKeys?: {
+      /** defaultRole is applied to API keys that don't specify one. */
+      defaultRole?: "viewer" | "editor" | "admin";
+      /** trustEndUserHeader — same semantics as SharedTokenAuth; see that
+       * field's doc comment for the security trade-off. */
+      trustEndUserHeader?: boolean;
+    };
+    /** edgeTrust consumes claim-headers injected by an upstream JWT
+     * validator (Istio RequestAuthentication + outputClaimToHeaders, an
+     * API gateway, or any other edge that terminates the JWT). The
+     * facade does NOT re-verify the token — it trusts the configured
+     * headers and maps them onto the Identity struct + the downstream
+     * X-Omnia-Claim-<name> contract.
+     * 
+     * Operator MUST ensure the configured claim-headers cannot be
+     * injected by anyone other than the trusted edge (Istio's
+     * AuthorizationPolicy already strips inbound claim-headers on the
+     * chart's authentication.enabled=true setup). */
+    edgeTrust?: {
+      /** claimsFromHeaders lists any additional inbound headers whose
+       * values should be exposed to ToolPolicy as X-Omnia-Claim-<claim>.
+       * Keyed by the inbound header name (case-insensitive); value is the
+       * claim name to emit.
+       * 
+       * Example: {"x-user-groups": "groups"} makes Istio-injected group
+       * claims visible to CEL rules as identity.claims.groups. */
+      claimsFromHeaders?: Record<string, string>;
+      /** headerMapping maps outbound X-Omnia-Claim-<name> keys to the
+       * inbound headers the upstream edge is known to inject.
+       * 
+       * The defaults cover the chart's current authentication.enabled=true
+       * layout (charts/omnia/templates/gateway/authentication.yaml):
+       *   subject: "x-user-id"
+       *   role:    "x-user-roles"
+       *   endUser: "x-user-id"
+       *   email:   "x-user-email"
+       * 
+       * Operators running a different edge (custom EnvoyFilter, API
+       * gateway, service mesh other than Istio) override these to name the
+       * headers their edge actually emits. */
+      headerMapping?: {
+        email?: string;
+        endUser?: string;
+        role?: string;
+        subject?: string;
+      };
+    };
+    /** oidc validates JWTs issued by a customer's OIDC provider inside
+     * the facade. Uses the standard discovery document at
+     * {issuer}/.well-known/openid-configuration to fetch JWKS. Caches
+     * keys in a Secret alongside the AgentRuntime. */
+    oidc?: {
+      /** audience is the expected `aud` claim value. */
+      audience: string;
+      /** claimMapping maps JWT claim names to the internal identity fields.
+       * Defaults: sub→Subject, omnia.role→Role, sub→EndUser. */
+      claimMapping?: {
+        /** endUser names the claim used to identify the end-user on whose
+         * behalf this token was issued. Defaults to "sub" — correct for
+         * end-user tokens. For service/client-credentials tokens carrying
+         * an actor or on-behalf-of claim, set this to that claim name (e.g.,
+         * "actor", "on_behalf_of") so the end-user is extracted rather than
+         * the calling service.
+         * 
+         * If the named claim is missing from a given token, the validator
+         * falls back to Subject. */
+        endUser?: string;
+        /** role names the claim used to resolve the caller's role. Defaults
+         * to "omnia.role". The claim value must be one of viewer/editor/admin. */
+        role?: string;
+        /** subject names the claim used as the caller's stable identifier
+         * (the token-holder — app or user). Defaults to "sub". */
+        subject?: string;
+      };
+      /** issuer is the OIDC issuer URL (without trailing slash). Controller
+       * fetches {issuer}/.well-known/openid-configuration. */
+      issuer: string;
+    };
+    /** sharedToken validates a single bearer token shared across all
+     * callers of this agent. Simplest partner integration; one token in
+     * a Kubernetes Secret, rotated by editing the Secret.
+     * 
+     * Subsumes the existing spec.a2a.authentication.secretRef field
+     * (which is now deprecated and transparently projected into this
+     * location by the AgentRuntime controller at reconcile time). */
+    sharedToken?: {
+      /** secretRef references a Secret with key "token" holding the bearer
+       * value. */
+      secretRef: {
+        /** Name of the referent.
+         * This field is effectively required, but due to backwards compatibility is
+         * allowed to be empty. Instances of this type with an empty value here are
+         * almost certainly wrong.
+         * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
+        name?: string;
+      };
+      /** trustEndUserHeader lets the caller forward the end-user identity
+       * via the X-End-User-Id request header. Off by default — when off,
+       * Identity.EndUser is set equal to Identity.Subject (the token
+       * itself), so per-user audit granularity is coarse.
+       * 
+       * Turn on only when the calling app is trusted to faithfully forward
+       * user context. A malicious app holding a valid token can spoof
+       * arbitrary end-users, so ToolPolicy rules gating on identity.endUser
+       * must be paired with an app-level trust assessment. */
+      trustEndUserHeader?: boolean;
     };
   };
   /** extraPodAnnotations defines additional annotations to add to the agent pods.
