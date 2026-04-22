@@ -511,6 +511,10 @@ func TestMgmtPlaneValidator_CustomIssuerAudience(t *testing.T) {
 // facade's clock) must still admit. Dashboards running on a slightly
 // different clock than the facade's would otherwise 401 their own
 // freshly-minted tokens.
+//
+// The inverse direction — that the leeway does NOT mask a genuinely
+// expired token — is already covered by TestMgmtPlaneValidator_Expired
+// (exp = -1 minute, comfortably outside the 30s leeway).
 func TestMgmtPlaneValidator_LeewayToleratesSmallDrift(t *testing.T) {
 	t.Parallel()
 	v, key := newValidator(t)
@@ -523,22 +527,5 @@ func TestMgmtPlaneValidator_LeewayToleratesSmallDrift(t *testing.T) {
 
 	if _, err := v.Validate(context.Background(), requestWithToken(token)); err != nil {
 		t.Errorf("token with iat/nbf=+15s should admit under 30s leeway: %v", err)
-	}
-}
-
-// TestMgmtPlaneValidator_LeewayDoesNotMaskGenuineExpiry proves the
-// leeway doesn't mask tokens that are genuinely expired — an exp 60s
-// in the past is beyond the 30s leeway and must still reject.
-func TestMgmtPlaneValidator_LeewayDoesNotMaskGenuineExpiry(t *testing.T) {
-	t.Parallel()
-	v, key := newValidator(t)
-	opts := defaultMintOpts(key)
-	opts.exp = time.Now().Add(-60 * time.Second)
-	opts.iat = time.Now().Add(-10 * time.Minute)
-	opts.nbf = time.Now().Add(-10 * time.Minute)
-	token := mintToken(t, opts)
-
-	if _, err := v.Validate(context.Background(), requestWithToken(token)); !errors.Is(err, auth.ErrExpired) {
-		t.Errorf("token expired 60s ago should reject (leeway is 30s): err = %v", err)
 	}
 }
