@@ -187,13 +187,13 @@ func TestAPIKeyValidator_TrustEndUserHeader(t *testing.T) {
 	store := newAPIKeyStore(t)
 	v := auth.NewAPIKeyValidator(store, auth.WithAPIKeyTrustEndUserHeader(true))
 	r := reqWithBearer(validAPIKey)
-	r.Header.Set(auth.EndUserHeader, "alice@example.com")
+	r.Header.Set(auth.EndUserHeader, testAliceEmail)
 
 	id, err := v.Validate(context.Background(), r)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if got, want := id.EndUser, "alice@example.com"; got != want {
+	if got, want := id.EndUser, testAliceEmail; got != want {
 		t.Errorf("EndUser = %q, want %q (header should propagate)", got, want)
 	}
 	if id.Subject == id.EndUser {
@@ -206,7 +206,7 @@ func TestAPIKeyValidator_TrustEndUserHeaderDefaultsOff(t *testing.T) {
 	store := newAPIKeyStore(t)
 	v := auth.NewAPIKeyValidator(store)
 	r := reqWithBearer(validAPIKey)
-	r.Header.Set(auth.EndUserHeader, "alice@example.com") // ignored
+	r.Header.Set(auth.EndUserHeader, testAliceEmail) // ignored
 
 	id, err := v.Validate(context.Background(), r)
 	if err != nil {

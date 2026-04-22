@@ -123,11 +123,59 @@ func buildDataPlaneValidators(
 	} else if v != nil {
 		out = append(out, v)
 	}
+	if v, err := buildOIDCValidator(ctx, k8s, log, ar); err != nil {
+		return nil, err
+	} else if v != nil {
+		out = append(out, v)
+	}
 	if v := buildEdgeTrustValidator(log, ar); v != nil {
 		out = append(out, v)
 	}
-	// Future PR 2d appends oidc here.
 	return out, nil
+}
+
+// buildOIDCValidator constructs the OIDC validator when
+// spec.externalAuth.oidc is set. Reads the JWKS from the per-agent
+// Secret maintained by the AgentRuntime controller (PR 2d-2); missing
+// or malformed JWKS is fatal so operator misconfig surfaces at pod
+// startup rather than silently 401ing every request.
+func buildOIDCValidator(
+	ctx context.Context,
+	k8s client.Client,
+	log logr.Logger,
+	ar *omniav1alpha1.AgentRuntime,
+) (auth.Validator, error) {
+	oidc := ar.Spec.ExternalAuth.OIDC
+	if oidc == nil {
+		return nil, nil
+	}
+	if oidc.Issuer == "" || oidc.Audience == "" {
+		return nil, fmt.Errorf("spec.externalAuth.oidc requires issuer and audience")
+	}
+
+	secretName := OIDCJWKSSecretNameFor(ar.Name)
+	store, err := NewSecretBackedJWKSStore(ctx, k8s, ar.Namespace, secretName, log)
+	if err != nil {
+		return nil, fmt.Errorf("init OIDC JWKS store: %w", err)
+	}
+
+	opts := []auth.OIDCOption{}
+	if oidc.ClaimMapping != nil {
+		opts = append(opts, auth.WithOIDCClaimMapping(auth.OIDCClaimMapping{
+			Subject: oidc.ClaimMapping.Subject,
+			Role:    oidc.ClaimMapping.Role,
+			EndUser: oidc.ClaimMapping.EndUser,
+		}))
+	}
+	v, err := auth.NewOIDCValidator(oidc.Issuer, oidc.Audience, store, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("construct OIDC validator: %w", err)
+	}
+	log.Info("oidc validator enabled",
+		"issuer", oidc.Issuer,
+		"audience", oidc.Audience,
+		"hasClaimMapping", oidc.ClaimMapping != nil)
+	return v, nil
 }
 
 // buildAPIKeyValidator constructs the api-key validator when
