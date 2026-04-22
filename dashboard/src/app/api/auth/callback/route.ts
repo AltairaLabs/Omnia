@@ -70,7 +70,11 @@ export async function GET(request: NextRequest) {
   if (!code) return loginRedirect("?error=no_code");
 
   try {
-    const tokens = await exchangeCodeForTokens(code, pkce);
+    // Hand the full incoming URL to the token exchange so RFC 9207 iss
+    // (emitted by Google / Google Workspace via
+    // authorization_response_iss_parameter_supported=true) survives
+    // openid-client's strict response validation. Issue #948.
+    const tokens = await exchangeCodeForTokens(code, pkce, request.nextUrl);
 
     let claims = extractClaims(tokens);
     if (!validateClaims(claims) && tokens.access_token) {
