@@ -1,0 +1,81 @@
+{{- if and .Values.authentication.enabled .Values.istio.enabled .Values.authentication.edgeTrust.stripInboundClaimHeaders }}
+{{- $fullName := include "omnia.fullname" . }}
+{{- /*
+Deduplicate the strip list from three sources: the default set the facade's
+edgeTrust validator trusts, any header names listed in
+authentication.jwt.outputClaimToHeaders (so the strip stays in sync with what
+the operator ACTUALLY injects), and authentication.edgeTrust.additionalStripHeaders
+for arbitrary custom claim-headers the operator named in an AgentRuntime's
+spec.externalAuth.edgeTrust.claimsFromHeaders.
+*/}}
+{{- $strip := dict }}
+{{- range .Values.authentication.edgeTrust.defaultStripHeaders }}
+{{-   $_ := set $strip (lower .) true }}
+{{- end }}
+{{- range .Values.authentication.jwt.outputClaimToHeaders }}
+{{-   if .header }}
+{{-     $_ := set $strip (lower .header) true }}
+{{-   end }}
+{{- end }}
+{{- range .Values.authentication.edgeTrust.additionalStripHeaders }}
+{{-   $_ := set $strip (lower .) true }}
+{{- end }}
+{{- $headers := keys $strip | sortAlpha }}
+
+# EnvoyFilter strips edge-trust claim headers on inbound requests BEFORE
+# Istio's jwt_authn filter runs. This closes a cross-tenant impersonation
+# primitive where a caller holding any valid JWT could spoof identity by
+# setting x-user-id / x-user-roles / x-user-email themselves — Istio's
+# RequestAuthentication only ADDS verified claims, it does not strip an
+# attacker-supplied copy.
+#
+# The strip list derives from three sources:
+#   1. authentication.edgeTrust.defaultStripHeaders (facade defaults)
+#   2. authentication.jwt.outputClaimToHeaders (what the operator actually injects)
+#   3. authentication.edgeTrust.additionalStripHeaders (custom claims)
+# Deduped and lowercased at render time.
+#
+# See: https://github.com/AltairaLabs/Omnia/issues/964 (B4 finding)
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: {{ $fullName }}-agent-strip-edge-trust-headers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+spec:
+  workloadSelector:
+    labels:
+      omnia.altairalabs.ai/component: agent
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_INBOUND
+        listener:
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: envoy.filters.http.jwt_authn
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inline_code: |
+              -- Strip spoofable edge-trust claim headers before jwt_authn runs.
+              -- jwt_authn's outputClaimToHeaders (configured on the same agent
+              -- via RequestAuthentication) will then re-add the verified values.
+              function envoy_on_request(request_handle)
+                local headers_to_strip = {
+                {{- range $headers }}
+                  {{ printf "%q" . }},
+                {{- end }}
+                }
+                local headers = request_handle:headers()
+                for _, name in ipairs(headers_to_strip) do
+                  headers:remove(name)
+                end
+              end
+{{- end }}

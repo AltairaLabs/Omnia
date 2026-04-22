@@ -2088,6 +2088,38 @@ authentication:
       - /healthz
       - /readyz
 
+  # -- Edge-trust header strip.
+  # When an AgentRuntime uses spec.externalAuth.edgeTrust, the facade TRUSTS
+  # claim-headers (x-user-id, x-user-roles, x-user-email, etc.) injected by the
+  # upstream edge without re-verifying the JWT. Istio's RequestAuthentication
+  # only ADDS verified claim headers — it does not strip an attacker-supplied
+  # inbound copy, so a caller holding any valid JWT can spoof identity by
+  # setting these headers directly. The EnvoyFilter below uses a Lua filter to
+  # remove the spoofable headers on SIDECAR_INBOUND before Istio's jwt_authn
+  # filter runs, then the RequestAuthentication re-adds the verified claims.
+  #
+  # Enabled by default when authentication.enabled=true — safe for every
+  # deployment (legitimate clients never send these headers). Set to false
+  # only if you have an upstream that legitimately forwards them.
+  edgeTrust:
+    # -- Strip the spoofable claim-headers on SIDECAR_INBOUND before JWT
+    # validation. Defaults to true. Requires istio.enabled=true and
+    # authentication.enabled=true — no effect otherwise.
+    stripInboundClaimHeaders: true
+    # -- Additional header names to strip. The defaults (below) cover
+    # x-user-id, x-user-roles, x-user-email plus whatever is listed in
+    # authentication.jwt.outputClaimToHeaders. Add names here when an
+    # AgentRuntime's spec.externalAuth.edgeTrust.claimsFromHeaders references
+    # headers the defaults don't cover.
+    additionalStripHeaders: []
+    # -- Default headers the facade's edgeTrust validator trusts (see
+    # internal/facade/auth/edge_trust.go). Rarely overridden — adjust
+    # additionalStripHeaders instead.
+    defaultStripHeaders:
+      - x-user-id
+      - x-user-roles
+      - x-user-email
+
 # ============================================================================
 # KEDA Configuration (Advanced Autoscaling)
 # KEDA enables scale-to-zero, custom metrics scaling, and cron-based scaling
