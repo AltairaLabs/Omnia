@@ -181,6 +181,34 @@ func TestEdgeTrustValidator_DistinctEndUserHeader(t *testing.T) {
 	}
 }
 
+func TestEdgeTrustValidator_ExtraClaimsIgnoresEmptyEntries(t *testing.T) {
+	// A mapping entry with an empty header OR an empty claim name is
+	// garbage — the option should skip it rather than admit junk keys.
+	t.Parallel()
+	v := auth.NewEdgeTrustValidator(
+		auth.WithEdgeTrustExtraClaims(map[string]string{
+			"":              "dropped-missing-header",
+			"X-Header":      "",
+			"X-Real-Header": "real-claim",
+		}),
+	)
+	r := reqWithEdgeHeaders(map[string]string{
+		auth.DefaultEdgeSubjectHeader: "alice",
+		"X-Real-Header":               "value",
+	})
+
+	id, err := v.Validate(context.Background(), r)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if got, want := id.Claims["real-claim"], "value"; got != want {
+		t.Errorf("Claims[real-claim] = %q, want %q", got, want)
+	}
+	if _, ok := id.Claims["dropped-missing-header"]; ok {
+		t.Error("empty-header entry should have been dropped")
+	}
+}
+
 func TestEdgeTrustValidator_ExtraClaimsPropagate(t *testing.T) {
 	t.Parallel()
 	v := auth.NewEdgeTrustValidator(
