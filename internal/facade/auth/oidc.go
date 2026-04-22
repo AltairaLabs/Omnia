@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -305,18 +307,31 @@ func (v *OIDCValidator) identityFromClaims(claims jwt.MapClaims) *policy.Authent
 	return id
 }
 
-// extractExtraClaims flattens any string-valued claims not already
-// absorbed into Identity.Subject / Role / EndUser so ToolPolicy CEL
-// can reference them via `identity.claims.<name>`. Returns nil when
-// no extras are present (keeps Identity.Claims nil rather than an
-// empty map, which the CEL evaluator handles via `has()`).
+// extractExtraClaims flattens claims not already absorbed into
+// Identity.Subject / Role / EndUser so ToolPolicy CEL can reference
+// them via `identity.claims.<name>`. Returns nil when no extras are
+// present (keeps Identity.Claims nil rather than an empty map, which
+// the CEL evaluator handles via `has()`).
+//
+// Value coercion rules (T4 — earlier revisions dropped non-string
+// claims silently, which broke array-claim CEL rules):
+//   - string                → verbatim (empty strings dropped)
+//   - []string / []any      → comma-joined ("finance,platform")
+//   - float64 (JSON number) → base-10 formatted ("42", "3.14")
+//   - bool                  → "true" / "false"
+//   - other shapes (nested objects, mixed arrays) → dropped
+//
+// Comma-joined arrays mirror the HTTP multi-value-header convention so
+// ToolPolicy CEL rules can check membership via
+// `identity.claims.groups.contains("finance")` regardless of whether
+// the IdP ships the claim as a string or a list.
 func extractExtraClaims(claims jwt.MapClaims, mapping OIDCClaimMapping) map[string]string {
 	extra := map[string]string{}
 	for k, vv := range claims {
 		if k == mapping.Subject || k == mapping.Role || k == mapping.EndUser {
 			continue
 		}
-		if s, ok := vv.(string); ok && s != "" {
+		if s, ok := claimToString(vv); ok {
 			extra[k] = s
 		}
 	}
@@ -324,6 +339,48 @@ func extractExtraClaims(claims jwt.MapClaims, mapping OIDCClaimMapping) map[stri
 		return nil
 	}
 	return extra
+}
+
+// claimToString coerces a JWT claim value into a string suitable for
+// Identity.Claims. See extractExtraClaims for the full rule set.
+func claimToString(v any) (string, bool) {
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return "", false
+		}
+		return val, true
+	case []any:
+		parts := make([]string, 0, len(val))
+		for _, elem := range val {
+			if s, ok := elem.(string); ok && s != "" {
+				parts = append(parts, s)
+			}
+		}
+		if len(parts) == 0 {
+			return "", false
+		}
+		return strings.Join(parts, ","), true
+	case []string:
+		parts := make([]string, 0, len(val))
+		for _, s := range val {
+			if s != "" {
+				parts = append(parts, s)
+			}
+		}
+		if len(parts) == 0 {
+			return "", false
+		}
+		return strings.Join(parts, ","), true
+	case float64:
+		// JSON numbers land as float64; strip trailing zeros for whole
+		// numbers so `level: 5` round-trips as "5", not "5.000000".
+		return strconv.FormatFloat(val, 'f', -1, 64), true
+	case bool:
+		return strconv.FormatBool(val), true
+	default:
+		return "", false
+	}
 }
 
 // stringClaim extracts a string value from jwt.MapClaims. Falls back
