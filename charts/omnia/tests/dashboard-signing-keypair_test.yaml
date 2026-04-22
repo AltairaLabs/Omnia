@@ -1,0 +1,54 @@
+suite: dashboard mgmt-plane signing keypair
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/dashboard/signing-keypair.yaml
+tests:
+  - it: renders a kubernetes.io/tls Secret with tls.crt + tls.key
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: kind
+          value: Secret
+      - equal:
+          path: type
+          value: kubernetes.io/tls
+      - equal:
+          path: metadata.name
+          value: omnia-dashboard-signing-keypair
+      - exists:
+          path: data["tls.crt"]
+      - exists:
+          path: data["tls.key"]
+
+  - it: annotates the Secret so Helm never deletes or regenerates it
+    asserts:
+      - equal:
+          path: metadata.annotations["helm.sh/resource-policy"]
+          value: keep
+
+  - it: carries the standard dashboard labels
+    asserts:
+      - equal:
+          path: metadata.labels["app.kubernetes.io/component"]
+          value: dashboard
+      - equal:
+          path: metadata.labels["app.kubernetes.io/name"]
+          value: omnia-dashboard
+
+  - it: is suppressed when dashboard.enabled=false
+    set:
+      dashboard.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: is suppressed when an existingSecret is provided (BYO keypair)
+    set:
+      dashboard.signingKey.existingSecret: my-own-signing-keypair
+    asserts:
+      - hasDocuments:
+          count: 0

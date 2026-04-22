@@ -18,6 +18,7 @@ package facade
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"os"
@@ -32,6 +33,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"golang.org/x/time/rate"
 
+	"github.com/altairalabs/omnia/internal/facade/auth"
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
@@ -154,7 +156,15 @@ type Server struct {
 	recordingPool   *RecordingPool
 	allowedOrigins  []string
 	policyFetcher   PolicyFetcher
-	log             logr.Logger
+	// mgmtPlaneValidator, when set, validates dashboard-minted
+	// management-plane JWTs on each upgrade request. On admit, the
+	// resulting identity flows into PropagationFields.Identity and the
+	// flat UserID/UserRoles/UserEmail fields. Nil means no mgmt-plane
+	// auth — the upgrade path is unauthenticated (the PR 1 default,
+	// preserving behaviour). Invalid/expired tokens always 401 regardless
+	// of this toggle.
+	mgmtPlaneValidator auth.Validator
+	log                logr.Logger
 
 	mu           sync.RWMutex
 	connections  map[*websocket.Conn]*Connection
@@ -210,6 +220,18 @@ func WithAllowedOrigins(origins []string) ServerOption {
 func WithPolicyFetcher(f PolicyFetcher) ServerOption {
 	return func(s *Server) {
 		s.policyFetcher = f
+	}
+}
+
+// WithMgmtPlaneValidator configures the server to run the given auth
+// Validator for management-plane JWTs on every upgrade. Admit attaches the
+// validated identity to the connection's PropagationFields. Presentation of
+// an invalid/expired token is rejected with 401. Absence of any Authorization
+// header falls through to the existing unauthenticated upgrade path (PR 1
+// preserves behaviour — PR 3 flips this default to reject).
+func WithMgmtPlaneValidator(v auth.Validator) ServerOption {
+	return func(s *Server) {
+		s.mgmtPlaneValidator = v
 	}
 }
 
@@ -326,6 +348,28 @@ func ParseAllowedOrigins(raw string) []string {
 	return origins
 }
 
+// authenticateRequest runs the configured auth chain against the request.
+// Returns the admitted identity (or nil when no validator is configured /
+// no credential was presented), or an error when a credential was presented
+// but rejected. A nil error with a nil identity means "fall through to the
+// existing unauthenticated upgrade path" — PR 1 preserves this for back-compat.
+func (s *Server) authenticateRequest(r *http.Request) (*policy.AuthenticatedIdentity, error) {
+	if s.mgmtPlaneValidator == nil {
+		return nil, nil
+	}
+	id, err := s.mgmtPlaneValidator.Validate(r.Context(), r)
+	switch {
+	case err == nil:
+		return id, nil
+	case errors.Is(err, auth.ErrNoCredential):
+		return nil, nil
+	default:
+		// ErrInvalidCredential / ErrExpired / anything else — surface as
+		// a rejection so the caller returns 401.
+		return nil, err
+	}
+}
+
 // ServeHTTP handles WebSocket upgrade requests.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
@@ -366,10 +410,38 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract user identity from Istio-injected headers on the upgrade request.
-	// Hash immediately — no raw user IDs are stored or propagated in the platform.
-	// Fall back to device_id query param for anonymous users (dev mode).
-	rawUserID := r.Header.Get(policy.IstioHeaderUserID)
+	// Run the auth chain (PR 1: mgmt-plane validator only). On admit the
+	// returned identity takes precedence over Istio-injected headers for
+	// user fields; on unambiguous reject (invalid/expired) 401 here and
+	// skip the upgrade entirely.
+	authIdentity, authErr := s.authenticateRequest(r)
+	if authErr != nil {
+		s.log.V(1).Info("auth rejected upgrade",
+			"reason", authErr.Error(),
+			"status", http.StatusUnauthorized,
+		)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Extract user identity. When an auth validator admitted the request
+	// its Identity is the source of truth; otherwise fall back to the
+	// Istio-injected headers (preserved for deployments that currently
+	// rely on the chart's authentication.enabled=true gate).
+	var (
+		rawUserID string
+		userRoles string
+		userEmail string
+	)
+	if authIdentity != nil {
+		rawUserID = authIdentity.EndUser
+		userRoles = authIdentity.Role
+		userEmail = authIdentity.Claims["email"]
+	} else {
+		rawUserID = r.Header.Get(policy.IstioHeaderUserID)
+		userRoles = r.Header.Get(policy.IstioHeaderUserRoles)
+		userEmail = r.Header.Get(policy.IstioHeaderUserEmail)
+	}
 	if rawUserID == "" {
 		rawUserID = r.URL.Query().Get("device_id")
 	}
@@ -377,10 +449,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.log.V(1).Info("user identity extracted",
 		"hasRawUserID", rawUserID != "",
 		"hasUserID", userID != "",
+		"hasAuthIdentity", authIdentity != nil,
 		"headerName", policy.IstioHeaderUserID,
 	)
-	userRoles := r.Header.Get(policy.IstioHeaderUserRoles)
-	userEmail := r.Header.Get(policy.IstioHeaderUserEmail)
 	authorization := r.Header.Get("Authorization")
 	cohortID := r.Header.Get(policy.HeaderCohortID)
 	variant := r.Header.Get(policy.HeaderVariant)
@@ -430,7 +501,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// If no traceparent header is present, the context is unchanged (no-op).
 	connCtx = otel.GetTextMapPropagator().Extract(connCtx, propagation.HeaderCarrier(r.Header))
 
-	// Store policy propagation fields for gRPC metadata forwarding
+	// Store policy propagation fields for gRPC metadata forwarding.
+	// When an auth validator admitted the request we attach the Identity
+	// too — downstream in-process code can inspect it, but it does not
+	// travel over gRPC (the flat UserID/UserRoles/UserEmail/Claims carry
+	// what runtime needs, via ToOutboundHeaders).
 	connCtx = policy.WithPropagationFields(connCtx, &policy.PropagationFields{
 		AgentName:     agentName,
 		Namespace:     namespace,
@@ -439,6 +514,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		UserRoles:     userRoles,
 		UserEmail:     userEmail,
 		Authorization: authorization,
+		Identity:      authIdentity,
 	})
 
 	log := logctx.LoggerWithContext(s.log, connCtx)

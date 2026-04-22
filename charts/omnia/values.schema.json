@@ -257,6 +257,16 @@
             "port": { "$ref": "#/$defs/port" }
           }
         },
+        "signingKey": {
+          "type": "object",
+          "description": "Management-plane JWT signing keypair. Auto-generated as a self-signed RSA keypair on first install (helm.sh/resource-policy: keep).",
+          "properties": {
+            "existingSecret": {
+              "type": "string",
+              "description": "Reference an externally-managed Secret (kubernetes.io/tls) instead of the chart-generated keypair."
+            }
+          }
+        },
         "auth": {
           "type": "object",
           "properties": {

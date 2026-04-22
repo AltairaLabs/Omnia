@@ -662,6 +662,19 @@ dashboard:
   # tolerations values.
   podOverrides: {}
 
+  # -- Management-plane JWT signing keypair. The dashboard uses the
+  # private half to mint short-lived tokens for the "Try this agent"
+  # debug view; every facade pod validates those tokens with the public
+  # half. First install generates a self-signed 10-year RSA keypair;
+  # upgrades preserve the existing Secret (helm.sh/resource-policy: keep).
+  # Rotation is a manual operator action — delete the Secret, upgrade,
+  # and roll dashboard + facade pods.
+  signingKey:
+    # -- Reference an externally-managed Secret instead of the chart-generated
+    # keypair. The Secret must be kubernetes.io/tls with tls.crt + tls.key.
+    # Leave empty to use the chart-managed keypair.
+    existingSecret: ""
+
   # Pod Disruption Budget for HA deployments
   podDisruptionBudget:
     # -- Enable PDB for dashboard
