@@ -91,6 +91,7 @@ func main() {
 	var enterpriseEnabled bool
 	var licenseServerURL string
 	var clusterName string
+	var mgmtPlaneSigningSecret string
 	var tlsOpts []func(*tls.Config)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -150,6 +151,12 @@ func main() {
 		"URL of the license activation server for enterprise features")
 	flag.StringVar(&clusterName, "cluster-name", "",
 		"Human-readable name for this cluster in license records")
+	flag.StringVar(&mgmtPlaneSigningSecret, "mgmt-plane-signing-secret", "",
+		"Name of the Secret in POD_NAMESPACE holding the dashboard's mgmt-plane "+
+			"JWT signing keypair (type kubernetes.io/tls). The Workspace controller "+
+			"mirrors the public cert into a ConfigMap per workspace namespace so "+
+			"facade pods can validate dashboard-minted debug tokens. Empty disables "+
+			"the mirror — facade stays mgmt-plane-unaware.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -278,6 +285,7 @@ func main() {
 		},
 		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
 		OperatorNamespace:               os.Getenv("POD_NAMESPACE"),
+		MgmtPlaneSigningSecret:          mgmtPlaneSigningSecret,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "Workspace")
 		os.Exit(1)

@@ -105,6 +105,16 @@ type WorkspaceReconciler struct {
 	// POD_NAMESPACE at operator startup; empty string disables the auto-
 	// allow (useful in tests).
 	OperatorNamespace string
+
+	// MgmtPlaneSigningSecret is the name of the Secret in OperatorNamespace
+	// holding the dashboard's mgmt-plane JWT signing keypair
+	// (type kubernetes.io/tls, tls.crt + tls.key). The reconciler mirrors
+	// the public half (tls.crt) into a ConfigMap in every workspace
+	// namespace so facade pods can validate dashboard-minted debug tokens
+	// without cross-namespace Secret reads. Empty string disables the
+	// mirror — the facade stays mgmt-plane-unaware, matching PR 1a's
+	// behaviour-preserving default.
+	MgmtPlaneSigningSecret string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=workspaces,verbs=get;list;watch;create;update;patch;delete
@@ -122,6 +132,7 @@ type WorkspaceReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=pods;pods/log,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments;replicasets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentpolicies;agentruntimes;promptpacks;toolpolicies;toolregistries;providers;arenasources;arenajobs;arenatemplatesources;arenadevsessions,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentpolicies/status;arenasources/status;arenajobs/status;arenatemplatesources/status;arenadevsessions/status;toolpolicies/status,verbs=get
@@ -252,6 +263,17 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return r.setReconcileError(ctx, workspace, ConditionTypeServicesReady, "ServicesFailed", err, log)
 	}
 	setServicesReadyCondition(&workspace.Status.Conditions, workspace.Generation, workspace.Status.Services)
+
+	// Mirror the dashboard's mgmt-plane public key into this workspace
+	// namespace so facade pods can validate dashboard-minted debug tokens
+	// without cross-namespace Secret reads. Failures here are non-fatal
+	// (logged as warnings) — the facade gracefully runs without mgmt-plane
+	// auth if the ConfigMap is missing, matching PR 1a's default.
+	if err := r.reconcileMgmtPlanePubkey(ctx, workspace); err != nil {
+		log.Error(err, "mgmt-plane pubkey mirror failed",
+			"operatorNamespace", r.OperatorNamespace,
+			"signingSecret", r.MgmtPlaneSigningSecret)
+	}
 
 	// Update member count
 	r.updateMemberCount(workspace)

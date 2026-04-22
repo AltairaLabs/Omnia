@@ -72,6 +72,18 @@ spec:
             - --memory-api-image={{ include "omnia.memoryApi.image" . }}
             - --memory-api-image-pull-policy={{ .Values.workspaceServices.memoryApi.image.pullPolicy }}
             - --agent-workspace-reader-clusterrole={{ include "omnia.fullname" . }}-agent-workspace-reader
+            {{- if .Values.dashboard.enabled }}
+            {{- /*
+              Tell the Workspace controller which Secret holds the dashboard
+              mgmt-plane signing keypair. The controller mirrors the public
+              cert (tls.crt) into a per-workspace ConfigMap so facade pods
+              can validate dashboard-minted debug tokens. When dashboard.enabled
+              is false the flag is omitted -> mirror disabled -> facade keeps
+              its mgmt-plane-unaware default. BYO override pulls from
+              dashboard.signingKey.existingSecret when set.
+            */}}
+            - --mgmt-plane-signing-secret={{ .Values.dashboard.signingKey.existingSecret | default (printf "%s-signing-keypair" (include "omnia.dashboard.fullname" .)) }}
+            {{- end }}
             {{- if and .Values.tracing.enabled $resolvedTracingEndpoint }}
             - --tracing-enabled=true
             - --tracing-endpoint={{ $resolvedTracingEndpoint }}
