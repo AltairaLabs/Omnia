@@ -201,7 +201,11 @@ func buildAPIKeyValidator(
 		return nil, nil
 	}
 
-	store, err := NewSecretBackedKeyStore(ctx, k8s, ar.Namespace, ar.Name, log)
+	// Pass the AgentRuntime's UID so the store rejects label-matching
+	// Secrets that weren't created by the dashboard's CRUD path (the
+	// only sanctioned creator sets ownerRef to the AgentRuntime). T6.
+	store, err := NewSecretBackedKeyStore(ctx, k8s, ar.Namespace, ar.Name, log,
+		WithKeyStoreAgentUID(string(ar.UID)))
 	if err != nil {
 		return nil, fmt.Errorf("init api-key store: %w", err)
 	}

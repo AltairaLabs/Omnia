@@ -92,9 +92,16 @@ type apiKeyScopes struct {
 // agent fan-out (tens of keys at most) that an informer's incremental
 // updates aren't worth the extra plumbing for PR 2c.
 type SecretBackedKeyStore struct {
-	client       client.Client
-	namespace    string
-	agentName    string
+	client    client.Client
+	namespace string
+	agentName string
+	// agentUID is the AgentRuntime CR's UID. When non-empty, loadOnce
+	// requires every candidate Secret's ownerReferences to name this UID
+	// — keys planted by a compromised namespace-admin without going
+	// through the dashboard CRUD path (which sets ownerRef on creation)
+	// are rejected. Empty disables the check, for standalone binaries
+	// that don't hold the CR.
+	agentUID     string
 	refresh      time.Duration
 	log          logr.Logger
 	now          func() time.Time
@@ -120,6 +127,15 @@ func WithKeyStoreRefreshInterval(d time.Duration) SecretBackedKeyStoreOption {
 // WithKeyStoreClock injects a clock for tests.
 func WithKeyStoreClock(now func() time.Time) SecretBackedKeyStoreOption {
 	return func(s *SecretBackedKeyStore) { s.now = now }
+}
+
+// WithKeyStoreAgentUID enables ownerRef verification. Every candidate
+// Secret must carry an ownerReferences entry whose UID matches the
+// passed value; otherwise it is skipped + logged. Defence against a
+// compromised namespace-admin planting a label-matching Secret to gain
+// API-key admission (T6 finding).
+func WithKeyStoreAgentUID(uid string) SecretBackedKeyStoreOption {
+	return func(s *SecretBackedKeyStore) { s.agentUID = uid }
 }
 
 // NewSecretBackedKeyStore loads the initial key set synchronously, then
@@ -185,6 +201,19 @@ func (s *SecretBackedKeyStore) loadOnce(ctx context.Context) error {
 	next := make(map[string]auth.APIKey, len(list.Items))
 	for i := range list.Items {
 		secret := &list.Items[i]
+		// T6 — defence in depth against a namespace-admin planting a
+		// label-matching Secret. When the constructor was handed a UID,
+		// require every candidate Secret to carry an ownerRef naming
+		// that UID. Secrets created through the dashboard CRUD endpoint
+		// (the only sanctioned creation path) always set this; hand-
+		// applied bypasses do not.
+		if s.agentUID != "" && !secretOwnedByAgent(secret, s.agentUID) {
+			s.log.Info("skipping api-key secret — missing matching ownerRef",
+				"secret", secret.Name,
+				"expectedAgentUID", s.agentUID,
+				"hint", "if this is legitimate, have the dashboard CRUD path re-mint the key so ownerRef is set")
+			continue
+		}
 		key, err := parseAPIKeySecret(secret)
 		if err != nil {
 			s.log.V(1).Info("skipping malformed api-key secret",
@@ -229,6 +258,19 @@ func (s *SecretBackedKeyStore) refreshLoop() {
 // parseAPIKeySecret converts a labelled Secret into an APIKey. Returns
 // an error (caller skips + logs) when required fields are missing or
 // malformed — never panics on bad input.
+// secretOwnedByAgent returns true when secret carries an ownerReferences
+// entry whose UID matches the agent's UID. Used by the ownerRef-gated
+// loadOnce path (WithKeyStoreAgentUID) to reject Secrets that didn't go
+// through the dashboard CRUD endpoint.
+func secretOwnedByAgent(secret *corev1.Secret, agentUID string) bool {
+	for _, ref := range secret.OwnerReferences {
+		if string(ref.UID) == agentUID {
+			return true
+		}
+	}
+	return false
+}
+
 func parseAPIKeySecret(secret *corev1.Secret) (auth.APIKey, error) {
 	if len(secret.Data) == 0 {
 		return auth.APIKey{}, fmt.Errorf("empty data")
