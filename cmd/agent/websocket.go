@@ -126,15 +126,23 @@ func buildWebSocketServer(
 	if pf, ok := store.(facade.PolicyFetcher); ok {
 		serverOpts = append(serverOpts, facade.WithPolicyFetcher(pf))
 	}
-	// Load the mgmt-plane validator when the operator has pointed us at a
-	// mounted dashboard public key. A loading failure (malformed PEM,
-	// non-RSA key) is fatal — silently downgrading to "no auth" would
-	// mask a real misconfiguration.
-	if v, err := loadMgmtPlaneValidator(log); err != nil {
+	// Build the auth chain: data-plane validators (sharedToken in PR 2b;
+	// apiKeys/oidc/edgeTrust in PRs 2c–2e) followed by the mgmt-plane
+	// validator. Loading failures (malformed PEM, missing Secret data
+	// key, empty shared token) are fatal — silent downgrade to no-auth
+	// would mask real operator misconfig.
+	mgmtPlane, err := loadMgmtPlaneValidator(log)
+	if err != nil {
 		log.Error(err, "mgmt-plane validator load failed")
 		os.Exit(1)
-	} else if v != nil {
-		serverOpts = append(serverOpts, facade.WithMgmtPlaneValidator(v))
+	}
+	chain, err := buildAuthChain(context.Background(), buildK8sClient(), log, cfg.AgentName, cfg.Namespace, mgmtPlane)
+	if err != nil {
+		log.Error(err, "auth chain build failed")
+		os.Exit(1)
+	}
+	if len(chain) > 0 {
+		serverOpts = append(serverOpts, facade.WithAuthChain(chain))
 	}
 	wsServer := facade.NewServer(wsConfig, store, handler, log, serverOpts...)
 

@@ -156,15 +156,18 @@ type Server struct {
 	recordingPool   *RecordingPool
 	allowedOrigins  []string
 	policyFetcher   PolicyFetcher
-	// mgmtPlaneValidator, when set, validates dashboard-minted
-	// management-plane JWTs on each upgrade request. On admit, the
-	// resulting identity flows into PropagationFields.Identity and the
-	// flat UserID/UserRoles/UserEmail fields. Nil means no mgmt-plane
-	// auth — the upgrade path is unauthenticated (the PR 1 default,
-	// preserving behaviour). Invalid/expired tokens always 401 regardless
-	// of this toggle.
-	mgmtPlaneValidator auth.Validator
-	log                logr.Logger
+	// authChain, when non-empty, runs every configured Validator against
+	// the upgrade request in order and admits on the first match. On
+	// admit the identity flows into PropagationFields.Identity and the
+	// flat UserID / UserRoles / UserEmail fields. Empty chain (or
+	// chain-wide ErrNoCredential) preserves the PR 1 unauthenticated
+	// upgrade default; invalid/expired credentials always 401.
+	//
+	// PR 1a/c shipped a single mgmtPlaneValidator field; PR 2b promotes
+	// it to a chain so the data-plane validators (sharedToken, apiKeys,
+	// oidc, edgeTrust) can stack with mgmt-plane behind them.
+	authChain auth.Chain
+	log       logr.Logger
 
 	mu           sync.RWMutex
 	connections  map[*websocket.Conn]*Connection
@@ -223,15 +226,32 @@ func WithPolicyFetcher(f PolicyFetcher) ServerOption {
 	}
 }
 
-// WithMgmtPlaneValidator configures the server to run the given auth
-// Validator for management-plane JWTs on every upgrade. Admit attaches the
-// validated identity to the connection's PropagationFields. Presentation of
-// an invalid/expired token is rejected with 401. Absence of any Authorization
-// header falls through to the existing unauthenticated upgrade path (PR 1
-// preserves behaviour — PR 3 flips this default to reject).
+// WithMgmtPlaneValidator configures the server to run a single mgmt-plane
+// Validator. Convenience wrapper around WithAuthChain — exists to keep
+// the PR 1a/c API stable while the wider chain machinery (PR 2b+) lands.
+//
+// Identical semantics to WithAuthChain(auth.Chain{v}): the validator
+// runs first; ErrNoCredential falls through to the unauthenticated
+// upgrade path (PR 1 default); invalid/expired returns 401. Combine with
+// WithAuthChain instead of this option once data-plane validators are in
+// the mix.
 func WithMgmtPlaneValidator(v auth.Validator) ServerOption {
+	return WithAuthChain(auth.Chain{v})
+}
+
+// WithAuthChain configures the server to run the supplied auth chain on
+// every upgrade. Admit attaches the resulting identity to the
+// connection's PropagationFields. ErrNoCredential (or empty chain)
+// preserves the PR 1 unauthenticated upgrade default; any other error
+// returns 401 before Upgrade.
+//
+// Validator order matters — the first validator that admits wins, so
+// list the most specific credential style first. The conventional order
+// shipped by cmd/agent is sharedToken → apiKeys → oidc → edgeTrust →
+// mgmt-plane.
+func WithAuthChain(chain auth.Chain) ServerOption {
 	return func(s *Server) {
-		s.mgmtPlaneValidator = v
+		s.authChain = chain
 	}
 }
 
@@ -349,15 +369,16 @@ func ParseAllowedOrigins(raw string) []string {
 }
 
 // authenticateRequest runs the configured auth chain against the request.
-// Returns the admitted identity (or nil when no validator is configured /
-// no credential was presented), or an error when a credential was presented
-// but rejected. A nil error with a nil identity means "fall through to the
-// existing unauthenticated upgrade path" — PR 1 preserves this for back-compat.
+// Returns the admitted identity (or nil when no chain is configured / no
+// credential was presented), or an error when a credential was presented
+// but rejected. A nil error with a nil identity means "fall through to
+// the existing unauthenticated upgrade path" — PR 1 preserves this for
+// back-compat; PR 3 will flip the default at this layer.
 func (s *Server) authenticateRequest(r *http.Request) (*policy.AuthenticatedIdentity, error) {
-	if s.mgmtPlaneValidator == nil {
+	if len(s.authChain) == 0 {
 		return nil, nil
 	}
-	id, err := s.mgmtPlaneValidator.Validate(r.Context(), r)
+	id, err := s.authChain.Run(r.Context(), r)
 	switch {
 	case err == nil:
 		return id, nil
