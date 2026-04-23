@@ -29,50 +29,43 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
-// sampleMessages returns a small conversation for use in extraction tests.
-func sampleMessages() []types.Message {
-	return []types.Message{
-		{Role: "user", Content: "I really enjoy working with Kubernetes"},
-		{Role: "assistant", Content: "Kubernetes is a powerful orchestration platform"},
-	}
+// retrieverMessages builds the minimal conversation prefix OmniaRetriever
+// consumes — one user-role turn whose Content is the keyword the test
+// expects to match.
+func retrieverMessages(query string) []types.Message {
+	return []types.Message{{Role: "user", Content: query}}
 }
 
-// TestMemoryEndToEnd exercises the full stack:
-// populator → extractor → store → retriever → delete → deleteAll.
+// TestMemoryEndToEnd exercises the Omnia side of the memory stack that
+// remains live now that PromptKit's sdk.WithMemory() owns extraction:
+// direct store.Save → Retrieve → OmniaRetriever → Delete → DeleteAll.
 func TestMemoryEndToEnd(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
 	scope := testScope(testWorkspace1)
 	log := zap.New(zap.UseDevMode(true))
 
-	// --- extraction ---
-	populator := NewConversationPopulator()
-	extractor := NewOmniaExtractor(store, populator, nil, log)
-
-	memories, err := extractor.Extract(ctx, scope, sampleMessages())
-	require.NoError(t, err)
-	require.NotEmpty(t, memories, "extractor should produce at least one memory")
-
-	for _, m := range memories {
-		assert.NotEmpty(t, m.ID, "saved memory should have an ID")
+	// Persist a pair of memories the way PromptKit's memory pipeline
+	// does — Omnia just exposes the Store as a pkmemory.Store target.
+	for _, content := range []string{
+		"User really enjoys working with Kubernetes",
+		"Kubernetes is a powerful orchestration platform",
+	} {
+		mem := &Memory{Type: "fact", Content: content, Confidence: 0.9, Scope: scope}
+		require.NoError(t, store.Save(ctx, mem))
+		require.NotEmpty(t, mem.ID, "saved memory should have an ID")
 	}
 
 	// --- retrieve via store (tool-facing) ---
 	retrieved, err := store.Retrieve(ctx, scope, "Kubernetes", RetrieveOptions{})
 	require.NoError(t, err)
-	require.NotEmpty(t, retrieved, "store.Retrieve should find the extracted memory")
+	require.NotEmpty(t, retrieved, "store.Retrieve should find the saved memory")
 
 	// --- retrieve via OmniaRetriever (RAG-facing) ---
 	strategy := &KeywordStrategy{}
 	retriever := NewOmniaRetriever(store, strategy, 10, log)
 
-	// The ConversationPopulator stores content like:
-	// "User asked: I really enjoy working with Kubernetes | ..."
-	// The retriever uses lastUserMessage as the ILIKE query, so we need a word
-	// that appears in the stored content verbatim.
-	ragMessages := []types.Message{
-		{Role: "user", Content: "Kubernetes"},
-	}
+	ragMessages := retrieverMessages("Kubernetes")
 	ragResults, err := retriever.RetrieveContext(ctx, scope, ragMessages)
 	require.NoError(t, err)
 	require.NotEmpty(t, ragResults, "OmniaRetriever should find stored memories")
@@ -136,47 +129,6 @@ func TestMemoryWorkspaceIsolation(t *testing.T) {
 	results, err = store.Retrieve(ctx, scope1, "isolation", RetrieveOptions{})
 	require.NoError(t, err)
 	assert.NotEmpty(t, results, "workspace-1 should find its own memory")
-}
-
-// TestPopulatorToRetriever exercises the full pipeline from ConversationPopulator
-// through to OmniaRetriever via KeywordStrategy.
-func TestPopulatorToRetriever(t *testing.T) {
-	store := newStore(t)
-	ctx := context.Background()
-	scope := testScope(testWorkspace1)
-	log := zap.New(zap.UseDevMode(true))
-
-	// Populate via ConversationPopulator and save directly to store.
-	populator := NewConversationPopulator()
-	source := PopulationSource{
-		Scope:    scope,
-		Messages: sampleMessages(),
-	}
-	result, err := populator.Populate(ctx, source)
-	require.NoError(t, err)
-
-	// Save entities/observations to store.
-	entityIdx := buildEntityIndex(result.Entities)
-	for _, obs := range result.Observations {
-		mem := buildMemory(scope, obs, entityIdx[obs.EntityName])
-		require.NoError(t, store.Save(ctx, mem))
-	}
-
-	// Create retriever with KeywordStrategy.
-	strategy := &KeywordStrategy{}
-	retriever := NewOmniaRetriever(store, strategy, 10, log)
-
-	// RetrieveContext with messages that match the stored observation content.
-	// ConversationPopulator stores content like:
-	//   "User asked: I really enjoy working with Kubernetes | ..."
-	// The retriever extracts lastUserMessage as the ILIKE query, so "Kubernetes"
-	// matches the stored content.
-	queryMessages := []types.Message{
-		{Role: "user", Content: "Kubernetes"},
-	}
-	found, err := retriever.RetrieveContext(ctx, scope, queryMessages)
-	require.NoError(t, err)
-	assert.NotEmpty(t, found, "retriever should find memories matching 'Kubernetes'")
 }
 
 // TestToolProvider_EndToEnd exercises the Tools() integration: relations and timeline.
