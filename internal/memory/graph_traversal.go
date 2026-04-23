@@ -108,7 +108,7 @@ SELECT DISTINCT ON (e.id)
   o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at
 FROM walk w
 JOIN memory_entities e ON e.id = w.id
-JOIN memory_observations o ON o.entity_id = e.id
+JOIN memory_observations o ON o.entity_id = e.id AND o.superseded_by IS NULL
 WHERE w.hop > 0
 ORDER BY e.id, o.observed_at DESC
 LIMIT $4`
