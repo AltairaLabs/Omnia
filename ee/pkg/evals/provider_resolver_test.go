@@ -490,7 +490,8 @@ func TestResolveWorkerGroups_Configured(t *testing.T) {
 	c := buildFakeClient(ar).Build()
 	resolver := NewProviderResolver(c)
 
-	groups := resolver.ResolveWorkerGroups(context.Background(), "agent", ns)
+	groups, found := resolver.ResolveWorkerGroups(context.Background(), "agent", ns)
+	assert.True(t, found, "AgentRuntime exists")
 	assert.Equal(t, []string{"long-running", "tenant-custom"}, groups)
 }
 
@@ -507,7 +508,8 @@ func TestResolveWorkerGroups_WorkerAbsent(t *testing.T) {
 	c := buildFakeClient(ar).Build()
 	resolver := NewProviderResolver(c)
 
-	groups := resolver.ResolveWorkerGroups(context.Background(), "agent", ns)
+	groups, found := resolver.ResolveWorkerGroups(context.Background(), "agent", ns)
+	assert.True(t, found, "AgentRuntime exists even though spec.evals.worker is nil")
 	assert.Nil(t, groups,
 		"absent spec.evals.worker should return nil so callers can apply DefaultWorkerEvalGroups")
 }
@@ -516,7 +518,8 @@ func TestResolveWorkerGroups_AgentNotFound(t *testing.T) {
 	c := buildFakeClient().Build()
 	resolver := NewProviderResolver(c)
 
-	groups := resolver.ResolveWorkerGroups(context.Background(), "missing", "ns")
+	groups, found := resolver.ResolveWorkerGroups(context.Background(), "missing", "ns")
+	assert.False(t, found, "missing AgentRuntime must surface as found=false so callers can distinguish it from WorkerAbsent")
 	assert.Nil(t, groups)
 }
 
@@ -574,6 +577,22 @@ func TestWorker_ResolveWorkerGroups_ResolverReturnsConfigured(t *testing.T) {
 	w := &EvalWorker{providerResolver: NewProviderResolver(c)}
 	got := w.resolveWorkerGroups(context.Background(), api.SessionEvent{AgentName: "agent", Namespace: ns})
 	assert.Equal(t, []string{"long-running"}, got)
+}
+
+// TestWorker_ResolveWorkerGroups_AgentNotFound_NoFilter asserts the #983
+// regression fix: when no AgentRuntime exists for the event's agent, the
+// worker does NOT apply DefaultWorkerEvalGroups. Returning nil (no filter)
+// means the SDK runs every eval in the pack — the right default for
+// orphan events (decommissioned agents, out-of-band test events).
+// Previously the worker fell back to DefaultWorkerEvalGroups which
+// excluded "default", silently dropping contains/regex evals from orphan
+// events and making them invisible to debugging.
+func TestWorker_ResolveWorkerGroups_AgentNotFound_NoFilter(t *testing.T) {
+	c := buildFakeClient().Build()
+	w := &EvalWorker{providerResolver: NewProviderResolver(c)}
+	got := w.resolveWorkerGroups(context.Background(),
+		api.SessionEvent{AgentName: "never-existed", Namespace: "ns"})
+	assert.Nil(t, got, "missing AgentRuntime must produce an empty group filter, not DefaultWorkerEvalGroups")
 }
 
 func TestResolveProviders_NilResolver(t *testing.T) {
