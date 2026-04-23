@@ -33,12 +33,16 @@ const multiTierPath = "/api/v1/memories/retrieve"
 // MultiTierRequest is the client-side body for POST /api/v1/memories/retrieve.
 // Mirrors memory/api.RetrieveMultiTierRequest — redeclared here to preserve
 // dependency direction (httpclient must not import the api package).
+//
+// Purposes narrows the result set to entities tagged with one of the listed
+// purpose values. Omit to return every purpose.
 type MultiTierRequest struct {
 	WorkspaceID   string   `json:"workspace_id"`
 	UserID        string   `json:"user_id,omitempty"`
 	AgentID       string   `json:"agent_id,omitempty"`
 	Query         string   `json:"query,omitempty"`
 	Types         []string `json:"types,omitempty"`
+	Purposes      []string `json:"purposes,omitempty"`
 	MinConfidence float64  `json:"min_confidence,omitempty"`
 	Limit         int      `json:"limit,omitempty"`
 }

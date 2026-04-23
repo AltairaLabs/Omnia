@@ -268,6 +268,93 @@ func TestRetrieveMultiTier_DefaultLimitApplies(t *testing.T) {
 	assert.Len(t, result.Memories, 1)
 }
 
+// insertRawMemoryWithPurpose seeds a memory_entities row with an explicit
+// purpose so purpose-filtered retrieval tests can exercise non-default
+// values without routing through Save()'s user_id-required invariant.
+func insertRawMemoryWithPurpose(t *testing.T, store *PostgresMemoryStore, purpose, user, agent, kind, content string, confidence float64) {
+	t.Helper()
+	var userArg, agentArg any
+	if user != "" {
+		userArg = user
+	}
+	if agent != "" {
+		agentArg = agent
+	}
+	var entityID string
+	err := store.pool.QueryRow(context.Background(),
+		`INSERT INTO memory_entities (workspace_id, virtual_user_id, agent_id, name, kind, metadata, purpose)
+		 VALUES ($1, $2, $3, $4, $5, '{}', $6) RETURNING id`,
+		testWorkspace1, userArg, agentArg, content, kind, purpose,
+	).Scan(&entityID)
+	require.NoError(t, err)
+
+	_, err = store.pool.Exec(context.Background(),
+		`INSERT INTO memory_observations (entity_id, content, confidence) VALUES ($1, $2, $3)`,
+		entityID, content, confidence,
+	)
+	require.NoError(t, err)
+}
+
+func TestRetrieveMultiTier_PurposeFilter(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	insertRawMemoryWithPurpose(t, store, "support_continuity", "user-1", "", "fact", "support row", 1.0)
+	insertRawMemoryWithPurpose(t, store, "personalisation", "user-1", "", "fact", "personalisation row", 1.0)
+	insertRawMemoryWithPurpose(t, store, "compliance", "user-1", "", "fact", "compliance row", 1.0)
+
+	t.Run("single purpose filters to matching rows", func(t *testing.T) {
+		res, err := store.RetrieveMultiTier(ctx, MultiTierRequest{
+			WorkspaceID: testWorkspace1,
+			UserID:      "user-1",
+			Purposes:    []string{"personalisation"},
+			Limit:       10,
+		})
+		require.NoError(t, err)
+		require.Len(t, res.Memories, 1)
+		assert.Equal(t, "personalisation row", res.Memories[0].Content)
+	})
+
+	t.Run("multiple purposes act as OR", func(t *testing.T) {
+		res, err := store.RetrieveMultiTier(ctx, MultiTierRequest{
+			WorkspaceID: testWorkspace1,
+			UserID:      "user-1",
+			Purposes:    []string{"personalisation", "compliance"},
+			Limit:       10,
+		})
+		require.NoError(t, err)
+		require.Len(t, res.Memories, 2)
+		seen := map[string]bool{}
+		for _, m := range res.Memories {
+			seen[m.Content] = true
+		}
+		assert.True(t, seen["personalisation row"])
+		assert.True(t, seen["compliance row"])
+		assert.False(t, seen["support row"])
+	})
+
+	t.Run("empty purposes returns everything", func(t *testing.T) {
+		res, err := store.RetrieveMultiTier(ctx, MultiTierRequest{
+			WorkspaceID: testWorkspace1,
+			UserID:      "user-1",
+			Limit:       10,
+		})
+		require.NoError(t, err)
+		require.Len(t, res.Memories, 3, "no filter should return all 3 rows")
+	})
+
+	t.Run("non-matching purpose returns empty", func(t *testing.T) {
+		res, err := store.RetrieveMultiTier(ctx, MultiTierRequest{
+			WorkspaceID: testWorkspace1,
+			UserID:      "user-1",
+			Purposes:    []string{"never_used"},
+			Limit:       10,
+		})
+		require.NoError(t, err)
+		assert.Empty(t, res.Memories)
+	})
+}
+
 func TestRetrieveMultiTier_TypeAndConfidenceFilters(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()

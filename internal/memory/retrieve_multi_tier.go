@@ -64,6 +64,15 @@ type MultiTierRequest struct {
 	Limit         int
 	Now           time.Time
 
+	// Purposes narrows the result set to memories tagged with one of the
+	// listed purpose values (e.g. "support_continuity", "personalisation").
+	// Empty means "no purpose filter" — all purposes are returned, preserving
+	// the pre-filter default for callers that don't yet supply the field.
+	// A nil-purpose memory (entity.purpose IS NULL) only matches when the
+	// caller doesn't pass a filter; an explicit non-empty Purposes list
+	// requires a match.
+	Purposes []string
+
 	// Multi-mode retrieval additions (Phase 3).
 	SeedEntityIDs     []string
 	MaxGraphHops      int
@@ -260,6 +269,14 @@ func buildMultiTierQuery(req MultiTierRequest) (string, []any, error) {
 	if req.Query != "" {
 		args = append(args, "%"+req.Query+"%")
 		clauses = append(clauses, "o.content ILIKE $"+strconv.Itoa(len(args)))
+	}
+
+	if len(req.Purposes) == 1 {
+		args = append(args, req.Purposes[0])
+		clauses = append(clauses, "e.purpose=$"+strconv.Itoa(len(args)))
+	} else if len(req.Purposes) > 1 {
+		args = append(args, req.Purposes)
+		clauses = append(clauses, "e.purpose = ANY($"+strconv.Itoa(len(args))+")")
 	}
 
 	sql := fmt.Sprintf(`SELECT DISTINCT ON (e.id) e.id, e.kind, e.metadata, e.created_at, e.expires_at, e.virtual_user_id, e.agent_id, o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at, o.access_count FROM memory_entities e JOIN memory_observations o ON o.entity_id = e.id AND o.superseded_by IS NULL WHERE %s ORDER BY e.id, o.observed_at DESC LIMIT %d`,

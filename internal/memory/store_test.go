@@ -212,6 +212,39 @@ func TestPostgresMemoryStore_Save_TrustModelFromProvenance(t *testing.T) {
 	}
 }
 
+func TestPostgresMemoryStore_Save_PurposeFromMetadata(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	mem := &Memory{
+		Type: "fact", Content: "purpose-tagged", Confidence: 1.0, Scope: scope,
+		Metadata: map[string]any{MetaKeyPurpose: "personalisation"},
+	}
+	require.NoError(t, store.Save(ctx, mem))
+
+	var got string
+	require.NoError(t, store.Pool().QueryRow(ctx,
+		`SELECT purpose FROM memory_entities WHERE id = $1`, mem.ID).Scan(&got))
+	assert.Equal(t, "personalisation", got)
+}
+
+func TestPostgresMemoryStore_Save_MissingPurposeUsesSchemaDefault(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	mem := &Memory{
+		Type: "fact", Content: "no purpose tag", Confidence: 1.0, Scope: scope,
+	}
+	require.NoError(t, store.Save(ctx, mem))
+
+	var got string
+	require.NoError(t, store.Pool().QueryRow(ctx,
+		`SELECT purpose FROM memory_entities WHERE id = $1`, mem.ID).Scan(&got))
+	assert.Equal(t, "support_continuity", got, "missing purpose must fall through to schema default")
+}
+
 func TestPostgresMemoryStore_Save_MissingWorkspace(t *testing.T) {
 
 	store := newStore(t)
