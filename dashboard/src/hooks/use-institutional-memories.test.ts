@@ -80,7 +80,7 @@ describe("useInstitutionalMemories", () => {
   });
 
   it("returns empty when no workspace is selected", async () => {
-    mockUseWorkspace.mockReturnValue({ currentWorkspace: null });
+    mockUseWorkspace.mockReturnValue({ currentWorkspace: null as unknown as { name: string } });
 
     const { result } = renderHook(() => useInstitutionalMemories(), { wrapper: createWrapper() });
 
@@ -120,7 +120,7 @@ describe("useCreateInstitutionalMemory", () => {
   });
 
   it("rejects when no workspace", async () => {
-    mockUseWorkspace.mockReturnValue({ currentWorkspace: null });
+    mockUseWorkspace.mockReturnValue({ currentWorkspace: null as unknown as { name: string } });
 
     const { result } = renderHook(() => useCreateInstitutionalMemory(), { wrapper: createWrapper() });
 
@@ -147,7 +147,7 @@ describe("useDeleteInstitutionalMemory", () => {
   });
 
   it("rejects when no workspace", async () => {
-    mockUseWorkspace.mockReturnValue({ currentWorkspace: null });
+    mockUseWorkspace.mockReturnValue({ currentWorkspace: null as unknown as { name: string } });
 
     const { result } = renderHook(() => useDeleteInstitutionalMemory(), { wrapper: createWrapper() });
 
