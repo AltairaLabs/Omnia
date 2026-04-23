@@ -1,0 +1,233 @@
+# Memory summarizer bundle.
+#
+# A reference trio (PromptPack + AgentRuntime + ToolRegistry) plus a
+# Kubernetes CronJob that compacts one memory-service on a 6-hour
+# schedule by calling the agent over A2A. Operators copy this file per
+# memory-service that needs real summarization, then tune the prompt,
+# provider, and schedule for the data domain.
+#
+# Replace every TODO before applying:
+#   * <workspace-namespace>  — the K8s namespace of your memory-api
+#   * <memory-api-host>      — in-cluster DNS of the memory-api service
+#   * <provider-name>        — a Provider CRD you already have (claude,
+#                              haiku, ollama-local, gpt-5-nano, …)
+#
+# See docs/local-backlog/2026-04-23-memory-summarization-via-agent.md
+# for the design rationale.
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memory-summarizer-prompts
+  namespace: <workspace-namespace>
+data:
+  pack.json: |
+    {
+      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
+      "id": "memory-summarizer",
+      "name": "Memory Summarizer",
+      "version": "1.0.0",
+      "description": "Turns stale memory buckets into durable summaries.",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{variable}}",
+        "features": ["basic_substitution"]
+      },
+      "prompts": {
+        "summarize": {
+          "id": "summarize",
+          "name": "Summarize memory bucket",
+          "version": "1.0.0",
+          "system_template": "You are a memory compaction agent. On each turn:\n\n1. Call list_compaction_candidates(workspace_id) to discover buckets.\n2. For each bucket, read the entries — they are timestamped observations that together represent what the agent learned about one (user, agent) pair during a time window.\n3. Produce 3-5 sentences preserving durable facts: preferences, relationships, commitments, stated goals. Drop conversational scaffolding and one-off details.\n4. Never invent facts not present in the observations. If a bucket looks too ambiguous to summarize safely, skip it.\n5. Call save_compaction_summary(workspace_id, user_id, agent_id, content, superseded_observation_ids) with the summary and the observation IDs it replaces.\n6. Treat a 409 response from save_compaction_summary as an idempotent no-op — another worker got there first.\n7. When every bucket has been processed, stop and report a short tally of buckets summarized vs. skipped.\n\nThe workspace_id is supplied by the caller as the message content; do not guess.",
+          "parameters": {
+            "temperature": 0.2,
+            "max_tokens": 800
+          }
+        }
+      },
+      "tools": {
+        "list_compaction_candidates": {
+          "name": "list_compaction_candidates",
+          "description": "Return non-superseded observation buckets older than the configured age threshold. Each bucket is one (workspace, user, agent) group; summarize each separately.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "workspace_id": {"type": "string"},
+              "older_than_hours": {"type": "integer", "default": 720},
+              "limit": {"type": "integer", "default": 20}
+            },
+            "required": ["workspace_id"]
+          }
+        },
+        "save_compaction_summary": {
+          "name": "save_compaction_summary",
+          "description": "Persist the summary and mark originals superseded in one transaction.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "workspace_id": {"type": "string"},
+              "user_id": {"type": "string"},
+              "agent_id": {"type": "string"},
+              "content": {"type": "string"},
+              "superseded_observation_ids": {
+                "type": "array",
+                "items": {"type": "string"}
+              }
+            },
+            "required": ["workspace_id", "content", "superseded_observation_ids"]
+          }
+        }
+      },
+      "metadata": {
+        "domain": "memory-ops",
+        "tags": ["memory", "compaction", "scheduled"]
+      }
+    }
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: memory-summarizer
+  namespace: <workspace-namespace>
+spec:
+  source:
+    type: configmap
+    configMapRef:
+      name: memory-summarizer-prompts
+  version: "1.0.0"
+  rollout:
+    type: immediate
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ToolRegistry
+metadata:
+  name: memory-summarizer-tools
+  namespace: <workspace-namespace>
+spec:
+  handlers:
+    # Bucket discovery.
+    - name: list-compaction-candidates
+      type: http
+      httpConfig:
+        # TODO: replace with your memory-api's in-cluster URL.
+        endpoint: "http://<memory-api-host>:8080/api/v1/compaction/candidates"
+        method: GET
+      tool:
+        name: list_compaction_candidates
+        description: Return non-superseded observation buckets older than the configured age threshold.
+        inputSchema:
+          type: object
+          properties:
+            workspace_id:
+              type: string
+            older_than_hours:
+              type: integer
+            limit:
+              type: integer
+          required: [workspace_id]
+      timeout: "30s"
+      retries: 1
+    # Summary write.
+    - name: save-compaction-summary
+      type: http
+      httpConfig:
+        endpoint: "http://<memory-api-host>:8080/api/v1/compaction/summaries"
+        method: POST
+      tool:
+        name: save_compaction_summary
+        description: Persist the summary and mark originals superseded.
+        inputSchema:
+          type: object
+          properties:
+            workspace_id: {type: string}
+            user_id: {type: string}
+            agent_id: {type: string}
+            content: {type: string}
+            superseded_observation_ids:
+              type: array
+              items: {type: string}
+          required: [workspace_id, content, superseded_observation_ids]
+      timeout: "30s"
+      retries: 1
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: memory-summarizer-agent
+  namespace: <workspace-namespace>
+spec:
+  promptPackRef:
+    name: memory-summarizer
+    track: stable
+  toolRegistryRef:
+    name: memory-summarizer-tools
+  facade:
+    # A2A-only — no browser WebSocket for this agent.
+    type: a2a
+    port: 9999
+  runtime:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+  providers:
+    - name: default
+      providerRef:
+        # TODO: replace with the Provider CRD that should run
+        # summarization. A cheap-but-capable model (Haiku, gpt-5-nano,
+        # Ollama-local) is the usual pick.
+        name: <provider-name>
+        namespace: <workspace-namespace>
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: memory-summarizer-caller
+  namespace: <workspace-namespace>
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: memory-summarizer
+  namespace: <workspace-namespace>
+spec:
+  # Every 6 hours.
+  schedule: "0 */6 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          serviceAccountName: memory-summarizer-caller
+          restartPolicy: Never
+          containers:
+            - name: invoke
+              image: ghcr.io/altairalabs/omnia-a2a-invoker:latest
+              args:
+                - --agent=memory-summarizer-agent
+                - --namespace=<workspace-namespace>
+                - --message=Run memory compaction for this workspace.
+                - --timeout=20m
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "200m"
+                  memory: "128Mi"
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 65532
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
