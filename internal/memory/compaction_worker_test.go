@@ -316,3 +316,69 @@ type failingSummarizer struct{ err error }
 func (f failingSummarizer) Summarize(_ context.Context, _ []CompactionEntry) (string, error) {
 	return "", f.err
 }
+
+// TestListWorkspaceIDs_ReturnsOnlyWorkspacesWithMemories exercises the store
+// helper the compaction worker uses as its default WorkspaceDiscoverer.
+// Without a direct test CI-side coverage reports 0% on the new function
+// because the existing discoverer tests inject an inline func rather than
+// the store method.
+func TestListWorkspaceIDs_ReturnsOnlyWorkspacesWithMemories(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	ws1 := "ab000000-0000-0000-0000-000000000001"
+	ws2 := "ab000000-0000-0000-0000-000000000002"
+	user := "ab000000-0000-0000-0000-000000000003"
+
+	for _, ws := range []string{ws1, ws2} {
+		mem := &Memory{
+			Type: "fact", Content: "ws", Confidence: 0.9,
+			Scope: map[string]string{ScopeWorkspaceID: ws, ScopeUserID: user},
+		}
+		if err := store.Save(ctx, mem); err != nil {
+			t.Fatalf("save %s: %v", ws, err)
+		}
+	}
+
+	got, err := store.ListWorkspaceIDs(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaceIDs: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, id := range got {
+		seen[id] = true
+	}
+	if !seen[ws1] || !seen[ws2] {
+		t.Errorf("expected both %q and %q in list, got %v", ws1, ws2, got)
+	}
+}
+
+// TestListWorkspaceIDs_ExcludesForgotten proves rows soft-deleted via
+// DeleteInstitutional (forgotten=true) drop out of the compaction radar
+// once the last memory in the workspace is retired.
+func TestListWorkspaceIDs_ExcludesForgotten(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	ws := "ab000000-0000-0000-0000-00000000000f"
+	mem := &Memory{
+		Type: "policy", Content: "will be forgotten", Confidence: 1.0,
+		Scope: map[string]string{ScopeWorkspaceID: ws},
+	}
+	if err := store.SaveInstitutional(ctx, mem); err != nil {
+		t.Fatalf("SaveInstitutional: %v", err)
+	}
+	if err := store.DeleteInstitutional(ctx, ws, mem.ID); err != nil {
+		t.Fatalf("DeleteInstitutional: %v", err)
+	}
+
+	got, err := store.ListWorkspaceIDs(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaceIDs: %v", err)
+	}
+	for _, id := range got {
+		if id == ws {
+			t.Errorf("forgotten-only workspace %q still listed: %v", ws, got)
+		}
+	}
+}
