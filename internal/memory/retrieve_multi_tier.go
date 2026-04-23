@@ -46,6 +46,14 @@ const (
 
 // MultiTierRequest describes a single multi-tier retrieval query.
 // WorkspaceID is required; all other fields are optional filters.
+//
+// SeedEntityIDs + MaxGraphHops + RelationTypes enable graph traversal as a
+// supplemental source: entities reachable from the seeds are merged into the
+// result and ranked alongside the tier-filtered rows.
+//
+// StructuredLookups allows the caller to add exact-filter queries (by kind,
+// name-prefix, or purpose). Each entry produces its own result slice which
+// is merged with the same dedupe-and-rank pipeline.
 type MultiTierRequest struct {
 	WorkspaceID   string
 	UserID        string
@@ -55,6 +63,12 @@ type MultiTierRequest struct {
 	MinConfidence float64
 	Limit         int
 	Now           time.Time
+
+	// Multi-mode retrieval additions (Phase 3).
+	SeedEntityIDs     []string
+	MaxGraphHops      int
+	RelationTypes     []string
+	StructuredLookups []StructuredLookup
 }
 
 // MultiTierMemory augments a Memory with the tier it was retrieved from,
@@ -111,6 +125,11 @@ func (s *PostgresMemoryStore) RetrieveMultiTier(ctx context.Context, req MultiTi
 		return nil, err
 	}
 
+	memories, err = s.mergeMultiMode(ctx, req, memories)
+	if err != nil {
+		return nil, err
+	}
+
 	now := req.Now
 	if now.IsZero() {
 		now = time.Now()
@@ -126,6 +145,84 @@ func (s *PostgresMemoryStore) RetrieveMultiTier(ctx context.Context, req MultiTi
 	}
 
 	return &MultiTierResult{Memories: memories, Total: len(memories)}, nil
+}
+
+// mergeMultiMode augments the tier-filtered result with graph traversal and
+// structured lookup rows when the request asks for them. Deduplicates by
+// entity ID with tier-first precedence: if a row is already present (from
+// the tier query), we keep its access_count and tier; otherwise we wrap the
+// supplemental row with a zero access count and tier derived from scope.
+func (s *PostgresMemoryStore) mergeMultiMode(ctx context.Context, req MultiTierRequest, existing []*MultiTierMemory) ([]*MultiTierMemory, error) {
+	seen := make(map[string]bool, len(existing))
+	for _, m := range existing {
+		if m.Memory != nil {
+			seen[m.ID] = true
+		}
+	}
+
+	if len(req.SeedEntityIDs) > 0 {
+		graphRows, err := s.TraverseRelations(ctx, GraphTraversal{
+			WorkspaceID:   req.WorkspaceID,
+			SeedIDs:       req.SeedEntityIDs,
+			RelationTypes: req.RelationTypes,
+			MaxHops:       req.MaxGraphHops,
+			Limit:         multiTierCandidatePool,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("memory: merge graph: %w", err)
+		}
+		existing = appendDeduped(existing, graphRows, seen)
+	}
+
+	for _, q := range req.StructuredLookups {
+		if q.WorkspaceID == "" {
+			q.WorkspaceID = req.WorkspaceID
+		}
+		if q.Limit <= 0 {
+			q.Limit = multiTierCandidatePool
+		}
+		rows, err := s.LookupStructured(ctx, q)
+		if err != nil {
+			return nil, fmt.Errorf("memory: merge structured: %w", err)
+		}
+		existing = appendDeduped(existing, rows, seen)
+	}
+
+	return existing, nil
+}
+
+// appendDeduped wraps each new *Memory in a MultiTierMemory (tier inferred
+// from scope, AccessCount=0) and appends to dst if not already seen.
+func appendDeduped(dst []*MultiTierMemory, rows []*Memory, seen map[string]bool) []*MultiTierMemory {
+	for _, m := range rows {
+		if m == nil || seen[m.ID] {
+			continue
+		}
+		seen[m.ID] = true
+		dst = append(dst, &MultiTierMemory{
+			Memory: m,
+			Tier:   classifyTierFromScope(m.Scope),
+		})
+	}
+	return dst
+}
+
+// classifyTierFromScope returns the tier a row belongs to based on which
+// scope keys are populated. Matches scanMultiTierRow's logic but reads from
+// the scope map rather than *string columns.
+func classifyTierFromScope(scope map[string]string) Tier {
+	hasUser := scope[ScopeUserID] != ""
+	hasAgent := scope[ScopeAgentID] != ""
+	switch {
+	case hasUser && hasAgent:
+		return TierUserForAgent
+	case hasUser:
+		return TierUser
+	case hasAgent:
+		return TierAgent
+	default:
+		return TierInstitutional
+	}
 }
 
 // buildMultiTierQuery constructs the SQL and positional arguments for a
