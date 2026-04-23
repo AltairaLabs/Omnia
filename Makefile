@@ -318,6 +318,7 @@ sync-chart-crds: manifests manifests-ee ## Sync CRDs from config/crd/bases to ch
 	cp config/crd/bases/omnia.altairalabs.ai_toolregistries.yaml charts/omnia/crds/
 	cp config/crd/bases/omnia.altairalabs.ai_workspaces.yaml charts/omnia/crds/
 	cp config/crd/bases/omnia.altairalabs.ai_sessionretentionpolicies.yaml charts/omnia/crds/
+	cp config/crd/bases/omnia.altairalabs.ai_memoryretentionpolicies.yaml charts/omnia/crds/
 	cp config/crd/bases/omnia.altairalabs.ai_agentpolicies.yaml charts/omnia/crds/
 	cp config/crd/bases/omnia.altairalabs.ai_toolpolicies.yaml charts/omnia/crds/
 	cp config/crd/bases/omnia.altairalabs.ai_skillsources.yaml charts/omnia/crds/

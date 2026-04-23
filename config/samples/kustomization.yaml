@@ -8,4 +8,5 @@ resources:
 - omnia_v1alpha1_arenasource.yaml
 - omnia_v1alpha1_arenajob.yaml
 - omnia_v1alpha1_skillsource.yaml
+- omnia_v1alpha1_memoryretentionpolicy.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples
