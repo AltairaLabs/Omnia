@@ -56,7 +56,7 @@ const (
 	colEntityForgot   = "e.forgotten = false"
 	entityKindFilter  = "e.kind=$?"
 	confidenceFilter  = "o.confidence >= $?"
-	observationJoin   = " JOIN memory_observations o ON o.entity_id = e.id"
+	observationJoin   = " JOIN memory_observations o ON o.entity_id = e.id AND o.superseded_by IS NULL"
 	entityTableAlias  = "e"
 	selectEntityCols  = "e.id, e.kind, e.metadata, e.created_at, e.expires_at"
 	selectObserveCols = "o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at"
