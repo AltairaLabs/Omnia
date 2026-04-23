@@ -294,10 +294,14 @@ func TestReconcileSkills_NoWorkspaceContentPath(t *testing.T) {
 
 	r.reconcileSkills(context.Background(), pack, "{}")
 
-	// No-op: only the NoSkills condition is emitted.
+	// With skills declared and no workspace content path, the pack must
+	// surface ContentStorageUnavailable so operators can tell the feature
+	// is disabled rather than confused with a skill-resolution bug.
 	cond := findCondition(pack.Status.Conditions, corev1alpha1.PromptPackConditionSkillsResolved)
 	require.NotNil(t, cond)
-	assert.Equal(t, "NoSkills", cond.Reason)
+	assert.Equal(t, metav1.ConditionFalse, cond.Status)
+	assert.Equal(t, "ContentStorageUnavailable", cond.Reason)
+	assert.Contains(t, cond.Message, "workspaceContent.enabled=false")
 }
 
 func TestReconcileSkills_LookupFailed(t *testing.T) {

@@ -150,6 +150,19 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	// Surface the workspace-content configuration so operators can see at a
+	// glance whether ArenaSource / ArenaTemplateSource / ArenaJob content
+	// sync features are available. Reconcilers for those resources emit a
+	// ContentStorageUnavailable condition when the path is empty.
+	if workspaceContentPath == "" {
+		setupLog.Info("workspace content storage is disabled",
+			"reason", "workspaceContentPathEmpty",
+			"effect", "ArenaSource, ArenaTemplateSource, and ArenaJob content-sync paths will report ContentStorageUnavailable",
+			"fix", "re-install the chart with workspaceContent.enabled=true")
+	} else {
+		setupLog.Info("workspace content storage enabled", "path", workspaceContentPath)
+	}
+
 	disableHTTP2 := func(c *tls.Config) {
 		setupLog.Info("disabling http/2")
 		c.NextProtos = []string{"http/1.1"}

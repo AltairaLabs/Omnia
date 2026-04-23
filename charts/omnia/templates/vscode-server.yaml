@@ -1,4 +1,7 @@
 {{- if and .Values.devMode .Values.vscodeServer.enabled }}
+{{- if not .Values.workspaceContent.enabled -}}
+{{- fail "vscodeServer.enabled=true requires workspaceContent.enabled=true (vscode-server mounts the workspace-content PVC to browse synced content)" -}}
+{{- end -}}
 ---
 apiVersion: apps/v1
 kind: Deployment

@@ -224,6 +224,10 @@ var _ = Describe("ArenaSource Controller", func() {
 			reconciler := &ArenaSourceReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
+				// Provide a WorkspaceContentPath so the ContentStorageUnavailable
+				// gate does NOT fire — this test specifically exercises the
+				// missing-config path, not the storage-gate path.
+				WorkspaceContentPath: artifactDir,
 			}
 
 			req := reconcile.Request{
@@ -246,6 +250,57 @@ var _ = Describe("ArenaSource Controller", func() {
 
 				return updatedSource.Status.Phase
 			}, 10*time.Second, 100*time.Millisecond).Should(Equal(omniav1alpha1.ArenaSourcePhaseError))
+		})
+	})
+
+	Context("When the arena-controller is started with workspaceContent.enabled=false", func() {
+		const name = "content-storage-disabled"
+
+		BeforeEach(func() {
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: arenaSourceNamespace},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
+					Interval: "5m",
+					ConfigMap: &corev1alpha1.ConfigMapSource{
+						Name: configMapName,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, source)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			resource := &omniav1alpha1.ArenaSource{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: arenaSourceNamespace}, resource); err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
+		})
+
+		It("surfaces ContentStorageUnavailable and does not requeue", func() {
+			// Reconciler with NO WorkspaceContentPath — simulates chart
+			// value workspaceContent.enabled=false.
+			reconciler := &ArenaSourceReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(10),
+			}
+
+			res, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: name, Namespace: arenaSourceNamespace},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.RequeueAfter).To(BeZero(), "should not requeue — operator restart required")
+
+			updated := &omniav1alpha1.ArenaSource{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: arenaSourceNamespace}, updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ArenaSourcePhaseError))
+
+			cond := meta.FindStatusCondition(updated.Status.Conditions, ArenaSourceConditionTypeReady)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(ArenaSourceReasonContentStorageUnavailable))
+			Expect(cond.Message).To(ContainSubstring("workspaceContent.enabled=false"))
 		})
 	})
 
