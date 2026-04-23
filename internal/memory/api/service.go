@@ -140,6 +140,17 @@ func (s *MemoryService) SaveMemory(ctx context.Context, mem *memory.Memory) erro
 		exp := time.Now().Add(s.config.DefaultTTL)
 		mem.ExpiresAt = &exp
 	}
+	// Stamp the service-configured purpose when the caller didn't set one.
+	// Same shape as DefaultTTL — the store reads Metadata[MetaKeyPurpose]
+	// into memory_entities.purpose at insert time.
+	if s.config.Purpose != "" {
+		if mem.Metadata == nil {
+			mem.Metadata = map[string]any{}
+		}
+		if _, ok := mem.Metadata[memory.MetaKeyPurpose]; !ok {
+			mem.Metadata[memory.MetaKeyPurpose] = s.config.Purpose
+		}
+	}
 	if err := s.store.Save(ctx, mem); err != nil {
 		return err
 	}

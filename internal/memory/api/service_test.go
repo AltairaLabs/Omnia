@@ -439,6 +439,49 @@ func TestMemoryService_SaveWithExplicitExpiry(t *testing.T) {
 		"explicit ExpiresAt should not be overridden by DefaultTTL")
 }
 
+func TestMemoryService_SaveStampsDefaultPurpose(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	cfg := MemoryServiceConfig{Purpose: "personalisation"}
+	svc := NewMemoryService(store, nil, cfg, logr.Discard())
+
+	ctx := context.Background()
+	mem := &memory.Memory{
+		Type: "fact", Content: "purpose default", Confidence: 1.0,
+		Scope: map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "u"},
+	}
+
+	require.NoError(t, svc.SaveMemory(ctx, mem))
+
+	var got string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT purpose FROM memory_entities WHERE id = $1`, mem.ID).Scan(&got))
+	assert.Equal(t, "personalisation", got,
+		"service Purpose config must propagate to the DB column via Metadata[MetaKeyPurpose]")
+}
+
+func TestMemoryService_SaveRespectsExplicitPurpose(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	cfg := MemoryServiceConfig{Purpose: "personalisation"}
+	svc := NewMemoryService(store, nil, cfg, logr.Discard())
+
+	ctx := context.Background()
+	mem := &memory.Memory{
+		Type: "fact", Content: "explicit purpose", Confidence: 1.0,
+		Scope:    map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "u"},
+		Metadata: map[string]any{memory.MetaKeyPurpose: "compliance"},
+	}
+
+	require.NoError(t, svc.SaveMemory(ctx, mem))
+
+	var got string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT purpose FROM memory_entities WHERE id = $1`, mem.ID).Scan(&got))
+	assert.Equal(t, "compliance", got,
+		"explicit metadata purpose must override service Purpose config")
+}
+
 func TestServiceBatchDeleteMemories(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()

@@ -32,12 +32,17 @@ const (
 )
 
 // RetrieveMultiTierRequest is the JSON body for POST /api/v1/memories/retrieve.
+//
+// Purposes narrows the result set to memories tagged with one of the listed
+// purpose values (e.g. "support_continuity", "personalisation"). Omit to
+// return every purpose — the pre-filter default.
 type RetrieveMultiTierRequest struct {
 	WorkspaceID   string   `json:"workspace_id"`
 	UserID        string   `json:"user_id,omitempty"`
 	AgentID       string   `json:"agent_id,omitempty"`
 	Query         string   `json:"query,omitempty"`
 	Types         []string `json:"types,omitempty"`
+	Purposes      []string `json:"purposes,omitempty"`
 	MinConfidence float64  `json:"min_confidence,omitempty"`
 	Limit         int      `json:"limit,omitempty"`
 }
@@ -83,6 +88,7 @@ func (h *Handler) handleRetrieveMultiTier(w http.ResponseWriter, r *http.Request
 		AgentID:       req.AgentID,
 		Query:         req.Query,
 		Types:         req.Types,
+		Purposes:      req.Purposes,
 		MinConfidence: req.MinConfidence,
 		Limit:         limit,
 	}

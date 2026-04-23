@@ -116,13 +116,21 @@ func (s *PostgresMemoryStore) Save(ctx context.Context, mem *Memory) error {
 	return tx.Commit(ctx)
 }
 
+// MetaKeyPurpose is the metadata key carrying the Omnia purpose tag
+// (e.g. "support_continuity", "personalisation"). The value is read at
+// insert time and written to memory_entities.purpose so retrieval can
+// filter on it without re-parsing JSON metadata. Empty / missing values
+// fall through to the schema default ('support_continuity').
+const MetaKeyPurpose = "purpose"
+
 // insertEntity inserts a new memory_entities row and populates mem.ID / mem.CreatedAt.
 //
 // trust_model and source_type are derived from the provenance metadata key
 // (pkmemory.MetaKeyProvenance) so the redactor and retention pipelines can
 // tell operator-curated / user-requested rows from agent-extracted ones.
-// When the caller didn't set a provenance, we keep the schema defaults
-// (trust_model='inferred', source_type='conversation_extraction').
+// purpose is derived from the MetaKeyPurpose metadata key. In both cases a
+// missing value falls through to the schema default, preserving behaviour
+// for callers that haven't started tagging.
 func insertEntity(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 	metaJSON, err := marshalMetadata(mem.Metadata)
 	if err != nil {
@@ -130,14 +138,17 @@ func insertEntity(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 	}
 
 	trustModel, sourceType := trustFromProvenance(mem.Metadata)
+	purpose := purposeFromMetadata(mem.Metadata)
 
 	row := tx.QueryRow(ctx, `
 		INSERT INTO memory_entities
-		  (workspace_id, virtual_user_id, agent_id, name, kind, metadata, expires_at, trust_model, source_type)
+		  (workspace_id, virtual_user_id, agent_id, name, kind, metadata, expires_at,
+		   trust_model, source_type, purpose)
 		VALUES
 		  ($1, $2, $3, $4, $5, $6, $7,
 		    COALESCE($8, 'inferred'),
-		    COALESCE($9, 'conversation_extraction'))
+		    COALESCE($9, 'conversation_extraction'),
+		    COALESCE($10, 'support_continuity'))
 		RETURNING id, created_at`,
 		mem.Scope[ScopeWorkspaceID],
 		scopeOrNil(mem.Scope, ScopeUserID),
@@ -148,6 +159,7 @@ func insertEntity(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 		mem.ExpiresAt,
 		trustModel,
 		sourceType,
+		purpose,
 	)
 
 	return row.Scan(&mem.ID, &mem.CreatedAt)
@@ -178,6 +190,19 @@ func trustFromProvenance(meta map[string]any) (trustModel, sourceType *string) {
 	default:
 		return nil, nil
 	}
+}
+
+// purposeFromMetadata returns a pointer to the Metadata[MetaKeyPurpose] value
+// when set, or nil so the INSERT falls through to the schema default.
+func purposeFromMetadata(meta map[string]any) *string {
+	if meta == nil {
+		return nil
+	}
+	v, ok := meta[MetaKeyPurpose].(string)
+	if !ok || v == "" {
+		return nil
+	}
+	return &v
 }
 
 // updateEntity updates the entity metadata and updated_at timestamp.
