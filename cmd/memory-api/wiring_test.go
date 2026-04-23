@@ -59,6 +59,11 @@ func (fakeMemoryStore) BatchDelete(_ context.Context, _ map[string]string, _ int
 func (fakeMemoryStore) RetrieveMultiTier(_ context.Context, _ memory.MultiTierRequest) (*memory.MultiTierResult, error) {
 	return &memory.MultiTierResult{Memories: []*memory.MultiTierMemory{}, Total: 0}, nil
 }
+func (fakeMemoryStore) SaveInstitutional(_ context.Context, _ *memory.Memory) error { return nil }
+func (fakeMemoryStore) ListInstitutional(_ context.Context, _ string, _ memory.ListOptions) ([]*memory.Memory, error) {
+	return nil, nil
+}
+func (fakeMemoryStore) DeleteInstitutional(_ context.Context, _, _ string) error { return nil }
 
 // TestBuildAPIMux_POSTMemoryWithoutUserIDReturns400 verifies the wiring
 // contract that the POST /api/v1/memories route is registered and reaches the

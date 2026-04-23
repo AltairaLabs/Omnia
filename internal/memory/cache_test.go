@@ -73,6 +73,14 @@ func (m *cacheTestStore) RetrieveMultiTier(_ context.Context, _ MultiTierRequest
 	return &MultiTierResult{Memories: []*MultiTierMemory{}, Total: 0}, nil
 }
 
+func (m *cacheTestStore) SaveInstitutional(_ context.Context, _ *Memory) error { return nil }
+
+func (m *cacheTestStore) ListInstitutional(_ context.Context, _ string, _ ListOptions) ([]*Memory, error) {
+	return nil, nil
+}
+
+func (m *cacheTestStore) DeleteInstitutional(_ context.Context, _, _ string) error { return nil }
+
 func (m *cacheTestStore) List(_ context.Context, _ map[string]string, _ ListOptions) ([]*Memory, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

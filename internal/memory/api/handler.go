@@ -111,6 +111,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/memories", h.handleDeleteAllMemories)
 	mux.HandleFunc("POST /api/v1/memories/retrieve", h.handleRetrieveMultiTier)
 
+	mux.HandleFunc("POST /api/v1/institutional/memories", h.handleSaveInstitutional)
+	mux.HandleFunc("GET /api/v1/institutional/memories", h.handleListInstitutional)
+	mux.HandleFunc("DELETE /api/v1/institutional/memories/{id}", h.handleDeleteInstitutional)
+
 	h.registerDocsRoutes(mux)
 }
 
