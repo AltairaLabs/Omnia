@@ -64,7 +64,12 @@ func (fakeMemoryStore) SaveInstitutional(_ context.Context, _ *memory.Memory) er
 func (fakeMemoryStore) ListInstitutional(_ context.Context, _ string, _ memory.ListOptions) ([]*memory.Memory, error) {
 	return nil, nil
 }
-func (fakeMemoryStore) DeleteInstitutional(_ context.Context, _, _ string) error { return nil }
+func (fakeMemoryStore) DeleteInstitutional(_ context.Context, _, _ string) error  { return nil }
+func (fakeMemoryStore) SaveAgentScoped(_ context.Context, _ *memory.Memory) error { return nil }
+func (fakeMemoryStore) ListAgentScoped(_ context.Context, _, _ string, _ memory.ListOptions) ([]*memory.Memory, error) {
+	return nil, nil
+}
+func (fakeMemoryStore) DeleteAgentScoped(_ context.Context, _, _, _ string) error { return nil }
 
 // TestBuildAPIMux_POSTMemoryWithoutUserIDReturns400 verifies the wiring
 // contract that the POST /api/v1/memories route is registered and reaches the

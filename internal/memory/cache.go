@@ -129,6 +129,38 @@ func (c *CachedStore) DeleteInstitutional(ctx context.Context, workspaceID, memo
 	return nil
 }
 
+// SaveAgentScoped delegates to the inner store then invalidates the
+// (workspace, agent) cache.
+func (c *CachedStore) SaveAgentScoped(ctx context.Context, mem *Memory) error {
+	if err := c.inner.SaveAgentScoped(ctx, mem); err != nil {
+		return err
+	}
+	c.bumpVersion(ctx, map[string]string{
+		ScopeWorkspaceID: mem.Scope[ScopeWorkspaceID],
+		ScopeAgentID:     mem.Scope[ScopeAgentID],
+	})
+	return nil
+}
+
+// ListAgentScoped delegates to the inner store without caching — the admin
+// list path is infrequent and must reflect writes immediately.
+func (c *CachedStore) ListAgentScoped(ctx context.Context, workspaceID, agentID string, opts ListOptions) ([]*Memory, error) {
+	return c.inner.ListAgentScoped(ctx, workspaceID, agentID, opts)
+}
+
+// DeleteAgentScoped delegates to the inner store then invalidates the
+// (workspace, agent) cache.
+func (c *CachedStore) DeleteAgentScoped(ctx context.Context, workspaceID, agentID, memoryID string) error {
+	if err := c.inner.DeleteAgentScoped(ctx, workspaceID, agentID, memoryID); err != nil {
+		return err
+	}
+	c.bumpVersion(ctx, map[string]string{
+		ScopeWorkspaceID: workspaceID,
+		ScopeAgentID:     agentID,
+	})
+	return nil
+}
+
 // List returns cached results when available, falling back to the inner store on miss or Redis error.
 func (c *CachedStore) List(ctx context.Context, scope map[string]string, opts ListOptions) ([]*Memory, error) {
 	key := c.listKey(ctx, scope, opts)

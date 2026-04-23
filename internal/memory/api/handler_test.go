@@ -85,6 +85,14 @@ func (m *mockStore) ListInstitutional(_ context.Context, _ string, _ memory.List
 
 func (m *mockStore) DeleteInstitutional(_ context.Context, _, _ string) error { return nil }
 
+func (m *mockStore) SaveAgentScoped(_ context.Context, _ *memory.Memory) error { return nil }
+
+func (m *mockStore) ListAgentScoped(_ context.Context, _, _ string, _ memory.ListOptions) ([]*memory.Memory, error) {
+	return nil, nil
+}
+
+func (m *mockStore) DeleteAgentScoped(_ context.Context, _, _, _ string) error { return nil }
+
 func (m *mockStore) Delete(_ context.Context, _ map[string]string, _ string) error {
 	return m.delErr
 }

@@ -51,6 +51,7 @@ var (
 	ErrMissingBody      = errors.New("request body is required")
 	ErrBodyTooLarge     = errors.New("request body too large")
 	ErrExpiresAtInPast  = errors.New("expires_at must be in the future")
+	ErrMissingAgentID   = errors.New("agent_id is required for agent-scoped admin operations")
 )
 
 // MemoryServiceConfig holds runtime configuration for the MemoryService.
