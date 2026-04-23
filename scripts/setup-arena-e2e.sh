@@ -244,6 +244,25 @@ while IFS='|' read -r name repo version required; do
     fi
 done <<< "$DEPS"
 
+# The chart-level workspace-content PVC is mounted by both omnia-controller-manager
+# and omnia-arena-controller. Kind's default `standard` storage class uses
+# volumeBindingMode: WaitForFirstConsumer, which means the PVC stays Pending
+# until a pod schedules. When two pods race to be the first consumer of the
+# same RWO PVC, the scheduler's PreBind optimistic-concurrency retry loop can
+# stall for minutes ("object has been modified" on the PVC). We side-step this
+# by giving workspaceContent its own StorageClass with Immediate binding — the
+# PVC gets a PV at creation time, before any pod tries to schedule.
+log_info "Creating immediate-binding storage class for workspaceContent..."
+kubectl apply -f - <<EOF
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: omnia-workspace-content-immediate
+provisioner: rancher.io/local-path
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+EOF
+
 log_info "Deploying via Helm..."
 
 retry 2 15 helm upgrade --install omnia charts/omnia \
@@ -295,7 +314,7 @@ retry 2 15 helm upgrade --install omnia charts/omnia \
     --set nfs.csiDriver.enabled=false \
     --set workspaceContent.enabled=true \
     --set workspaceContent.persistence.accessModes[0]=ReadWriteOnce \
-    --set workspaceContent.persistence.storageClass=standard \
+    --set workspaceContent.persistence.storageClass=omnia-workspace-content-immediate \
     --set prometheus.enabled=false \
     --set grafana.enabled=false \
     --set loki.enabled=false \
