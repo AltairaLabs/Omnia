@@ -379,6 +379,32 @@ func (s *PostgresMemoryStore) ExpireMemories(ctx context.Context) (int64, error)
 	return tag.RowsAffected(), nil
 }
 
+// ListWorkspaceIDs returns the distinct set of workspace IDs that currently
+// hold at least one non-forgotten memory entity. Used by background workers
+// that need to iterate workspaces without an external discovery mechanism
+// (e.g. the compaction worker).
+func (s *PostgresMemoryStore) ListWorkspaceIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		"SELECT DISTINCT workspace_id FROM memory_entities WHERE forgotten = false")
+	if err != nil {
+		return nil, fmt.Errorf("memory: list workspace ids: %w", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var ws string
+		if err := rows.Scan(&ws); err != nil {
+			return nil, fmt.Errorf("memory: scan workspace id: %w", err)
+		}
+		out = append(out, ws)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory: iterate workspace ids: %w", err)
+	}
+	return out, nil
+}
+
 // --- helpers -----------------------------------------------------------------
 
 // defaultMemoryLimit is applied when no explicit limit is provided.

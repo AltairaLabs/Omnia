@@ -106,6 +106,8 @@ type flags struct {
 	defaultTTL            string // env: DEFAULT_TTL, e.g. "720h"
 	purpose               string // env: MEMORY_PURPOSE, e.g. "support_continuity"
 	retentionInterval     string // env: RETENTION_INTERVAL, e.g. "1h"
+	compactionInterval    string // env: COMPACTION_INTERVAL, e.g. "6h"
+	compactionAge         string // env: COMPACTION_AGE, e.g. "720h" (30d)
 	workspace             string
 	serviceGroup          string
 }
@@ -126,6 +128,8 @@ func parseFlags() *flags {
 	flag.StringVar(&f.defaultTTL, "default-ttl", "", "Default memory TTL duration (e.g. 720h)")
 	flag.StringVar(&f.purpose, "purpose", "", "Default memory purpose tag (e.g. support_continuity)")
 	flag.StringVar(&f.retentionInterval, "retention-interval", "", "Interval for retention worker (e.g. 1h)")
+	flag.StringVar(&f.compactionInterval, "compaction-interval", "", "Interval for temporal-summarization compaction worker (e.g. 6h). Empty disables.")
+	flag.StringVar(&f.compactionAge, "compaction-age", "", "Age threshold for compaction candidates (e.g. 720h = 30d). Empty uses worker default.")
 	flag.StringVar(&f.workspace, "workspace", "", "Workspace name (K8s CRD resolution mode)")
 	flag.StringVar(&f.serviceGroup, "service-group", "", "Service group name within workspace")
 	flag.Parse()
@@ -150,6 +154,8 @@ func (f *flags) applyEnvFallbacks() {
 	envFallback(&f.defaultTTL, "", "DEFAULT_TTL")
 	envFallback(&f.purpose, "", "MEMORY_PURPOSE")
 	envFallback(&f.retentionInterval, "", "RETENTION_INTERVAL")
+	envFallback(&f.compactionInterval, "", "COMPACTION_INTERVAL")
+	envFallback(&f.compactionAge, "", "COMPACTION_AGE")
 	if v := os.Getenv("TRACING_SAMPLE_RATE"); v != "" && f.tracingSample == 0 {
 		if rate, err := strconv.ParseFloat(v, 64); err == nil {
 			f.tracingSample = rate
@@ -173,6 +179,35 @@ func envBoolFallback(dst *bool, envKey string) {
 	if !*dst && os.Getenv(envKey) == "true" {
 		*dst = true
 	}
+}
+
+// compactionWorkerOptions returns the CompactionWorkerOptions derived from
+// flags/env plus a discoverer that pulls the workspace list from the store.
+// enabled=false signals that the caller should skip starting the worker
+// (interval unset or invalid).
+func (f *flags) compactionWorkerOptions(log logr.Logger, store *memory.PostgresMemoryStore) (memory.CompactionWorkerOptions, bool) {
+	if f.compactionInterval == "" {
+		return memory.CompactionWorkerOptions{}, false
+	}
+	interval, err := time.ParseDuration(f.compactionInterval)
+	if err != nil || interval <= 0 {
+		log.Error(err, "invalid COMPACTION_INTERVAL, compaction worker disabled",
+			"value", f.compactionInterval)
+		return memory.CompactionWorkerOptions{}, false
+	}
+	opts := memory.CompactionWorkerOptions{
+		Interval:            interval,
+		WorkspaceDiscoverer: store.ListWorkspaceIDs,
+	}
+	if f.compactionAge != "" {
+		age, ageErr := time.ParseDuration(f.compactionAge)
+		if ageErr != nil {
+			log.Error(ageErr, "invalid COMPACTION_AGE, using worker default", "value", f.compactionAge)
+		} else {
+			opts.Age = age
+		}
+	}
+	return opts, true
 }
 
 func main() {
@@ -253,6 +288,20 @@ func run() error {
 		} else if err != nil {
 			log.Error(err, "invalid RETENTION_INTERVAL, retention worker disabled", "value", f.retentionInterval)
 		}
+	}
+
+	// --- Compaction worker ---
+	// Temporal summarization of old memories. Uses NoopSummarizer by default —
+	// memory growth is still bounded because the worker supersedes originals,
+	// but summaries aren't informative until a real LLM summarizer is wired.
+	if compactionOpts, enabled := f.compactionWorkerOptions(log, store); enabled {
+		worker := memory.NewCompactionWorker(store, memory.NoopSummarizer{}, compactionOpts, log)
+		go worker.Run(ctx)
+		log.Info("compaction worker started",
+			"interval", compactionOpts.Interval,
+			"age", compactionOpts.Age,
+			"summarizer", "noop",
+		)
 	}
 
 	// --- Embedding service ---

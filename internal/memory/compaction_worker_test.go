@@ -89,6 +89,89 @@ func TestCompactionWorker_EmptyWorkspaceListIsNoop(t *testing.T) {
 	}
 }
 
+func TestCompactionWorker_UsesDiscovererWhenListEmpty(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	ws := "aa000000-0000-0000-0000-000000000001"
+	user := "aa000000-0000-0000-0000-000000000002"
+	mustInsertOldEntities(t, store, ws, user, "", 5, "disc", time.Now().Add(-90*24*time.Hour))
+
+	var called int
+	worker := NewCompactionWorker(store, NoopSummarizer{}, CompactionWorkerOptions{
+		Age:          30 * 24 * time.Hour,
+		MinGroupSize: 1,
+		WorkspaceDiscoverer: func(context.Context) ([]string, error) {
+			called++
+			return []string{ws}, nil
+		},
+	}, logr.Discard())
+
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if called != 1 {
+		t.Errorf("expected discoverer called once, got %d", called)
+	}
+
+	// Verify compaction happened — superseded rows should not surface in
+	// retrieval.
+	res, err := store.RetrieveMultiTier(ctx, MultiTierRequest{
+		WorkspaceID: ws, UserID: user, Query: "disc", Limit: 50,
+	})
+	if err != nil {
+		t.Fatalf("retrieve: %v", err)
+	}
+	for _, m := range res.Memories {
+		if m.Content == "disc" {
+			t.Errorf("superseded row leaked: %+v", m)
+		}
+	}
+}
+
+func TestCompactionWorker_StaticListBeatsDiscoverer(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	ws := "bb000000-0000-0000-0000-000000000001"
+	user := "bb000000-0000-0000-0000-000000000002"
+	mustInsertOldEntities(t, store, ws, user, "", 3, "static", time.Now().Add(-90*24*time.Hour))
+
+	var called int
+	worker := NewCompactionWorker(store, NoopSummarizer{}, CompactionWorkerOptions{
+		WorkspaceIDs: []string{ws},
+		Age:          30 * 24 * time.Hour,
+		MinGroupSize: 1,
+		WorkspaceDiscoverer: func(context.Context) ([]string, error) {
+			called++
+			return nil, errors.New("should not be called")
+		},
+	}, logr.Discard())
+
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if called != 0 {
+		t.Errorf("discoverer should not be called when WorkspaceIDs is set, got %d calls", called)
+	}
+}
+
+func TestCompactionWorker_DiscovererErrorSurfaces(t *testing.T) {
+	store := newStore(t)
+	boom := errors.New("k8s down")
+	worker := NewCompactionWorker(store, nil, CompactionWorkerOptions{
+		Age: 30 * 24 * time.Hour,
+		WorkspaceDiscoverer: func(context.Context) ([]string, error) {
+			return nil, boom
+		},
+	}, logr.Discard())
+
+	err := worker.RunOnce(context.Background())
+	if err == nil || !errors.Is(err, boom) {
+		t.Errorf("expected wrapped boom, got %v", err)
+	}
+}
+
 func TestCompactionWorker_PropagatesSummarizerError(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
@@ -152,9 +235,150 @@ func TestCompactionWorker_RunRespectsZeroInterval(t *testing.T) {
 	worker.Run(ctx)
 }
 
+func TestCompactionWorker_RunTicksAndExits(t *testing.T) {
+	store := newStore(t)
+
+	ws := "cc000000-0000-0000-0000-000000000001"
+	user := "cc000000-0000-0000-0000-000000000002"
+	mustInsertOldEntities(t, store, ws, user, "", 2, "ticked", time.Now().Add(-90*24*time.Hour))
+
+	ran := make(chan struct{}, 1)
+	worker := NewCompactionWorker(store, NoopSummarizer{}, CompactionWorkerOptions{
+		Interval:     20 * time.Millisecond,
+		WorkspaceIDs: []string{ws},
+		Age:          30 * 24 * time.Hour,
+		MinGroupSize: 1,
+		WorkspaceDiscoverer: func(context.Context) ([]string, error) {
+			select {
+			case ran <- struct{}{}:
+			default:
+			}
+			return []string{ws}, nil
+		},
+	}, logr.Discard())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		worker.Run(ctx)
+		close(done)
+	}()
+
+	// Wait for at least one tick to have fired, then cancel.
+	time.Sleep(80 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not exit after context cancel")
+	}
+}
+
+func TestCompactionWorker_RunLogsWorkspaceFailureButContinues(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	// One good workspace, one bogus workspace ID that'll fail the bucket query.
+	goodWS := "ff000000-0000-0000-0000-000000000010"
+	user := "ff000000-0000-0000-0000-000000000011"
+	mustInsertOldEntities(t, store, goodWS, user, "", 3, "continues", time.Now().Add(-90*24*time.Hour))
+
+	worker := NewCompactionWorker(store, NoopSummarizer{}, CompactionWorkerOptions{
+		// "bad" is not a UUID — the FindCompactionCandidates query will error.
+		WorkspaceIDs: []string{"not-a-uuid", goodWS},
+		Age:          30 * 24 * time.Hour,
+		MinGroupSize: 1,
+	}, logr.Discard())
+
+	// RunOnce should return the first error but still have processed goodWS.
+	err := worker.RunOnce(ctx)
+	if err == nil {
+		t.Fatal("expected error from bogus workspace")
+	}
+
+	// Verify goodWS was compacted despite the earlier failure.
+	res, retErr := store.RetrieveMultiTier(ctx, MultiTierRequest{
+		WorkspaceID: goodWS, UserID: user, Query: "continues", Limit: 50,
+	})
+	if retErr != nil {
+		t.Fatalf("retrieve: %v", retErr)
+	}
+	for _, m := range res.Memories {
+		if m.Content == "continues" {
+			t.Errorf("goodWS not compacted — originals still present: %+v", m)
+		}
+	}
+}
+
 // failingSummarizer always returns its configured error.
 type failingSummarizer struct{ err error }
 
 func (f failingSummarizer) Summarize(_ context.Context, _ []CompactionEntry) (string, error) {
 	return "", f.err
+}
+
+// TestListWorkspaceIDs_ReturnsOnlyWorkspacesWithMemories exercises the store
+// helper the compaction worker uses as its default WorkspaceDiscoverer.
+// Without a direct test CI-side coverage reports 0% on the new function
+// because the existing discoverer tests inject an inline func rather than
+// the store method.
+func TestListWorkspaceIDs_ReturnsOnlyWorkspacesWithMemories(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	ws1 := "ab000000-0000-0000-0000-000000000001"
+	ws2 := "ab000000-0000-0000-0000-000000000002"
+	user := "ab000000-0000-0000-0000-000000000003"
+
+	for _, ws := range []string{ws1, ws2} {
+		mem := &Memory{
+			Type: "fact", Content: "ws", Confidence: 0.9,
+			Scope: map[string]string{ScopeWorkspaceID: ws, ScopeUserID: user},
+		}
+		if err := store.Save(ctx, mem); err != nil {
+			t.Fatalf("save %s: %v", ws, err)
+		}
+	}
+
+	got, err := store.ListWorkspaceIDs(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaceIDs: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, id := range got {
+		seen[id] = true
+	}
+	if !seen[ws1] || !seen[ws2] {
+		t.Errorf("expected both %q and %q in list, got %v", ws1, ws2, got)
+	}
+}
+
+// TestListWorkspaceIDs_ExcludesForgotten proves rows soft-deleted via
+// DeleteInstitutional (forgotten=true) drop out of the compaction radar
+// once the last memory in the workspace is retired.
+func TestListWorkspaceIDs_ExcludesForgotten(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	ws := "ab000000-0000-0000-0000-00000000000f"
+	mem := &Memory{
+		Type: "policy", Content: "will be forgotten", Confidence: 1.0,
+		Scope: map[string]string{ScopeWorkspaceID: ws},
+	}
+	if err := store.SaveInstitutional(ctx, mem); err != nil {
+		t.Fatalf("SaveInstitutional: %v", err)
+	}
+	if err := store.DeleteInstitutional(ctx, ws, mem.ID); err != nil {
+		t.Fatalf("DeleteInstitutional: %v", err)
+	}
+
+	got, err := store.ListWorkspaceIDs(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaceIDs: %v", err)
+	}
+	for _, id := range got {
+		if id == ws {
+			t.Errorf("forgotten-only workspace %q still listed: %v", ws, got)
+		}
+	}
 }
