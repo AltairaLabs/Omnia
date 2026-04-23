@@ -12,6 +12,12 @@ export interface ParsedMemory {
   content: string;
   confidence?: number;
   metadata?: Record<string, unknown>;
+  /**
+   * Optional ISO-8601 UTC timestamp. Forwarded verbatim to the institutional
+   * POST body; the memory-api rejects past timestamps. Only emitted from the
+   * JSON parser — Markdown import has no syntax for it.
+   */
+  expiresAt?: string;
 }
 
 export interface ParseError {
@@ -69,6 +75,11 @@ export function parseJsonBulk(input: string): ParseResult {
     }
     if (rec.metadata && typeof rec.metadata === "object" && !Array.isArray(rec.metadata)) {
       out.metadata = rec.metadata as Record<string, unknown>;
+    }
+    // Accept camelCase and snake_case; the API expects snake_case.
+    const rawExpiresAt = rec.expiresAt ?? rec.expires_at;
+    if (typeof rawExpiresAt === "string" && rawExpiresAt) {
+      out.expiresAt = rawExpiresAt;
     }
     memories.push(out);
   });

@@ -22,18 +22,27 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/altairalabs/omnia/internal/httputil"
 	"github.com/altairalabs/omnia/internal/memory"
 )
 
 // SaveInstitutionalRequest is the JSON body for POST /api/v1/institutional/memories.
+//
+// ExpiresAt is optional and is NOT defaulted from MemoryServiceConfig.DefaultTTL —
+// institutional memories are operator-curated and permanent by default. Callers
+// opt in to expiry only when they intentionally want a rule or policy to
+// self-retire (e.g. a time-boxed promotion or regulatory freeze). Values in
+// the past are rejected with 400 to prevent accidental insert-then-expire
+// races that would hide the write from ListInstitutional.
 type SaveInstitutionalRequest struct {
 	WorkspaceID string         `json:"workspace_id"`
 	Type        string         `json:"type"`
 	Content     string         `json:"content"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
 	Confidence  float64        `json:"confidence"`
+	ExpiresAt   *time.Time     `json:"expires_at,omitempty"`
 }
 
 // ListInstitutionalResponse is the JSON response for GET /api/v1/institutional/memories.
@@ -60,12 +69,17 @@ func (h *Handler) handleSaveInstitutional(w http.ResponseWriter, r *http.Request
 		writeError(w, ErrMissingWorkspace)
 		return
 	}
+	if req.ExpiresAt != nil && !req.ExpiresAt.After(time.Now()) {
+		writeError(w, ErrExpiresAtInPast)
+		return
+	}
 
 	mem := &memory.Memory{
 		Type:       req.Type,
 		Content:    req.Content,
 		Metadata:   req.Metadata,
 		Confidence: req.Confidence,
+		ExpiresAt:  req.ExpiresAt,
 		Scope:      map[string]string{memory.ScopeWorkspaceID: req.WorkspaceID},
 	}
 	if err := h.service.SaveInstitutionalMemory(r.Context(), mem); err != nil {

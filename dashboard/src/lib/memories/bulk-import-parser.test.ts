@@ -43,6 +43,26 @@ describe("parseJsonBulk", () => {
     expect(res.memories).toHaveLength(1);
     expect(res.memories[0].metadata).toBeUndefined();
   });
+
+  it("forwards expires_at (snake_case) verbatim", () => {
+    const res = parseJsonBulk(
+      `[{"type":"t","content":"c","expires_at":"2027-01-01T00:00:00Z"}]`
+    );
+    expect(res.memories).toHaveLength(1);
+    expect(res.memories[0].expiresAt).toBe("2027-01-01T00:00:00Z");
+  });
+
+  it("accepts expiresAt (camelCase) as a convenience", () => {
+    const res = parseJsonBulk(
+      `[{"type":"t","content":"c","expiresAt":"2027-02-01T00:00:00Z"}]`
+    );
+    expect(res.memories[0].expiresAt).toBe("2027-02-01T00:00:00Z");
+  });
+
+  it("omits expiresAt when absent", () => {
+    const res = parseJsonBulk(`[{"type":"t","content":"c"}]`);
+    expect(res.memories[0].expiresAt).toBeUndefined();
+  });
 });
 
 describe("parseMarkdownBulk", () => {

@@ -9,10 +9,12 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
@@ -71,6 +73,65 @@ func TestHandleSaveInstitutional_RejectsBadJSON(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestHandleSaveInstitutional_ForwardsExpiresAt(t *testing.T) {
+	stub := &institutionalStub{saveMemID: "inst-exp"}
+	mux := newInstitutionalHandler(t, stub)
+
+	future := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+	body := fmt.Sprintf(
+		`{"workspace_id":"ws-1","type":"policy","content":"time-boxed rule","confidence":1.0,"expires_at":%q}`,
+		future.Format(time.RFC3339),
+	)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/institutional/memories", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	require.Len(t, stub.saveCalls, 1)
+	got := stub.saveCalls[0]
+	require.NotNil(t, got.ExpiresAt, "ExpiresAt should be forwarded to the store")
+	assert.True(t, got.ExpiresAt.Equal(future),
+		"ExpiresAt mismatch: want %s got %s", future, got.ExpiresAt)
+}
+
+func TestHandleSaveInstitutional_OmittedExpiresAtIsNil(t *testing.T) {
+	stub := &institutionalStub{saveMemID: "inst-perm"}
+	mux := newInstitutionalHandler(t, stub)
+
+	body := `{"workspace_id":"ws-1","type":"policy","content":"permanent rule","confidence":1.0}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/institutional/memories", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	require.Len(t, stub.saveCalls, 1)
+	assert.Nil(t, stub.saveCalls[0].ExpiresAt,
+		"omitted expires_at must NOT be defaulted — institutional memories are permanent by default")
+}
+
+func TestHandleSaveInstitutional_RejectsExpiresAtInPast(t *testing.T) {
+	stub := &institutionalStub{}
+	mux := newInstitutionalHandler(t, stub)
+
+	past := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	body := fmt.Sprintf(
+		`{"workspace_id":"ws-1","type":"policy","content":"backdated","expires_at":%q}`,
+		past,
+	)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/institutional/memories", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Empty(t, stub.saveCalls, "store should NOT be called when expires_at is in the past")
 }
 
 func TestHandleSaveInstitutional_BodyTooLarge(t *testing.T) {

@@ -22,6 +22,12 @@ export interface InstitutionalCreateInput {
   content: string;
   confidence?: number;
   metadata?: Record<string, unknown>;
+  /**
+   * Optional ISO-8601 UTC timestamp at which the memory should auto-retire.
+   * Omit for permanent operator-curated memories (the default). The backend
+   * rejects past timestamps with HTTP 400.
+   */
+  expiresAt?: string;
 }
 
 /**
@@ -66,6 +72,7 @@ export class InstitutionalMemoryService {
           content: body.content,
           confidence: body.confidence ?? 1.0,
           metadata: body.metadata ?? {},
+          ...(body.expiresAt ? { expires_at: body.expiresAt } : {}),
         }),
       }
     );

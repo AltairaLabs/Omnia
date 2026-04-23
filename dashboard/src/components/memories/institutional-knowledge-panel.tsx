@@ -303,7 +303,7 @@ function BulkImportDialog() {
 
 async function importAll(
   memories: ParsedMemory[],
-  doCreate: (input: { type: string; content: string; confidence?: number; metadata?: Record<string, unknown> }) => Promise<unknown>
+  doCreate: (input: { type: string; content: string; confidence?: number; metadata?: Record<string, unknown>; expiresAt?: string }) => Promise<unknown>
 ): Promise<{ ok: number; failures: string[] }> {
   let ok = 0;
   const failures: string[] = [];

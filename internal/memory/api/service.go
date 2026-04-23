@@ -50,6 +50,7 @@ var (
 	ErrMissingMemoryID  = errors.New("memory ID is required")
 	ErrMissingBody      = errors.New("request body is required")
 	ErrBodyTooLarge     = errors.New("request body too large")
+	ErrExpiresAtInPast  = errors.New("expires_at must be in the future")
 )
 
 // MemoryServiceConfig holds runtime configuration for the MemoryService.
