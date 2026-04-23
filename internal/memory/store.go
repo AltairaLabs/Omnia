@@ -259,6 +259,9 @@ func insertObservation(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 
 // Retrieve returns memories matching scope, a substring query, and options.
 // Results are ordered by observed_at DESC and limited to opts.Limit (default 50).
+// A successful retrieval also fires a detached UPDATE that bumps
+// accessed_at / access_count on the returned entities — the signal LRU
+// pruning and recency-weighted ranking depend on.
 func (s *PostgresMemoryStore) Retrieve(ctx context.Context, scope map[string]string, query string, opts RetrieveOptions) ([]*Memory, error) {
 	if scope[ScopeWorkspaceID] == "" {
 		return nil, errors.New(errWorkspaceRequired)
@@ -272,7 +275,12 @@ func (s *PostgresMemoryStore) Retrieve(ctx context.Context, scope map[string]str
 	}
 	defer rows.Close()
 
-	return scanMemories(rows, scope)
+	mems, err := scanMemories(rows, scope)
+	if err != nil {
+		return nil, err
+	}
+	s.touchAccessedOnRead(entityIDsFromMemories(mems))
+	return mems, nil
 }
 
 // buildRetrieveQuery constructs the SQL and arguments for a Retrieve call.
