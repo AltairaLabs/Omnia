@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useMemo, type ReactNode } from "react";
+import Link from "next/link";
 import { Header } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useWorkspace } from "@/contexts/workspace-context";
 import {
   Select,
   SelectContent,
@@ -24,7 +26,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Brain, Download, Trash2, Search, AlertCircle, LogIn } from "lucide-react";
+import { Brain, Download, Trash2, Search, AlertCircle, LogIn, Library } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useMemories } from "@/hooks/use-memories";
 import {
@@ -110,6 +112,7 @@ function renderMemoriesBody({
 
 export default function MemoriesPage() {
   const { hasMemoryIdentity, memoryUserId } = useAuth();
+  const { currentWorkspace } = useWorkspace();
   // Always filter by userId — memories belong to users, not workspaces.
   // The proxy hashes the userId before querying (pseudonymous storage).
   // For anonymous users with a device ID, we use the device ID as the userId.
@@ -192,6 +195,15 @@ export default function MemoriesPage() {
           </Select>
 
           <div className="flex-1" />
+
+          {currentWorkspace && (
+            <Button asChild variant="outline" size="sm" data-testid="workspace-knowledge-link">
+              <Link href={`/workspaces/${encodeURIComponent(currentWorkspace.name)}/knowledge`}>
+                <Library className="h-4 w-4 mr-2" />
+                Workspace knowledge
+              </Link>
+            </Button>
+          )}
 
           <Button
             variant="outline"
