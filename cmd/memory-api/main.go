@@ -290,15 +290,7 @@ func run() error {
 	}
 
 	// --- Retention worker ---
-	if f.retentionInterval != "" {
-		if interval, err := time.ParseDuration(f.retentionInterval); err == nil && interval > 0 {
-			worker := memory.NewRetentionWorker(store, interval, log)
-			go worker.Run(ctx)
-			log.Info("retention worker started", "interval", interval)
-		} else if err != nil {
-			log.Error(err, "invalid RETENTION_INTERVAL, retention worker disabled", "value", f.retentionInterval)
-		}
-	}
+	startRetentionWorker(ctx, store, f.retentionInterval, log)
 
 	// --- Compaction worker ---
 	// Temporal summarization of old memories. Uses NoopSummarizer by default —
@@ -612,6 +604,52 @@ func (a *embeddingProviderAdapter) Embed(ctx context.Context, texts []string) ([
 
 func (a *embeddingProviderAdapter) Dimensions() int {
 	return a.inner.EmbeddingDimensions()
+}
+
+// startRetentionWorker constructs the composite retention worker from
+// the active policy source and spawns it as a goroutine. No-op when no
+// policy source is available.
+func startRetentionWorker(ctx context.Context, store *memory.PostgresMemoryStore, legacyInterval string, log logr.Logger) {
+	loader := buildRetentionPolicyLoader(legacyInterval, log)
+	if loader == nil {
+		return
+	}
+	worker := memory.NewRetentionWorker(store, loader, log)
+	go worker.Run(ctx)
+}
+
+// buildRetentionPolicyLoader returns the PolicyLoader the composite
+// retention worker should use. Prefers a K8s-backed loader; falls
+// back to a static policy synthesised from RETENTION_INTERVAL so
+// deployments pre-dating the CRD keep working. Returns nil when
+// neither source yields a useful policy, disabling the worker.
+func buildRetentionPolicyLoader(legacyInterval string, log logr.Logger) memory.PolicyLoader {
+	kubeConfig, err := rest.InClusterConfig()
+	if err == nil {
+		scheme := k8sruntime.NewScheme()
+		utilruntime.Must(omniav1alpha1.AddToScheme(scheme))
+		c, clientErr := client.New(kubeConfig, client.Options{Scheme: scheme})
+		if clientErr == nil {
+			log.Info("retention policy loader enabled", "source", "MemoryRetentionPolicy CRD")
+			return memory.NewK8sPolicyLoader(c, log)
+		}
+		log.Error(clientErr, "k8s client creation failed, falling back to legacy interval")
+	} else {
+		log.V(1).Info("no in-cluster kubeconfig", "error", err.Error())
+	}
+	if legacyInterval == "" {
+		log.Info("retention worker disabled", "reason", "no policy source")
+		return nil
+	}
+	d, err := time.ParseDuration(legacyInterval)
+	if err != nil || d <= 0 {
+		log.Error(err, "invalid RETENTION_INTERVAL, retention worker disabled", "value", legacyInterval)
+		return nil
+	}
+	log.Info("retention policy loader enabled",
+		"source", "legacy RETENTION_INTERVAL",
+		"interval", d.String())
+	return &memory.StaticPolicyLoader{Policy: memory.LegacyIntervalPolicy(d)}
 }
 
 // createEmbeddingService reads a Provider CRD by name and creates an
