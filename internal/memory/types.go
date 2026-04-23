@@ -40,9 +40,14 @@ type (
 // BatchDelete is needed for paginated DSAR deletion (Task 4 cascade).
 // RetrieveMultiTier runs a single query across institutional, agent, user and
 // user-for-agent tiers and returns ranked results for RAG context injection.
+// The three Institutional methods are the admin path for workspace-scoped
+// memories (no user_id, no agent_id) — see institutional.go.
 type Store interface {
 	pkmemory.Store
 	ExportAll(ctx context.Context, scope map[string]string) ([]*Memory, error)
 	BatchDelete(ctx context.Context, scope map[string]string, limit int) (int, error)
 	RetrieveMultiTier(ctx context.Context, req MultiTierRequest) (*MultiTierResult, error)
+	SaveInstitutional(ctx context.Context, mem *Memory) error
+	ListInstitutional(ctx context.Context, workspaceID string, opts ListOptions) ([]*Memory, error)
+	DeleteInstitutional(ctx context.Context, workspaceID, memoryID string) error
 }

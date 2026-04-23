@@ -85,6 +85,14 @@ func (m *mockMemoryStore) BatchDelete(_ context.Context, _ map[string]string, _ 
 	return 0, nil
 }
 
+func (m *mockMemoryStore) SaveInstitutional(_ context.Context, _ *memory.Memory) error { return nil }
+
+func (m *mockMemoryStore) ListInstitutional(_ context.Context, _ string, _ memory.ListOptions) ([]*memory.Memory, error) {
+	return nil, nil
+}
+
+func (m *mockMemoryStore) DeleteInstitutional(_ context.Context, _, _ string) error { return nil }
+
 // --- mockMemoryEventPublisher -----------------------------------------------
 
 // mockMemoryEventPublisher records published events and can be configured to

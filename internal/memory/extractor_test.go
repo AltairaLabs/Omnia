@@ -61,6 +61,14 @@ func (m *mockStore) RetrieveMultiTier(_ context.Context, _ MultiTierRequest) (*M
 	return &MultiTierResult{Memories: []*MultiTierMemory{}, Total: 0}, nil
 }
 
+func (m *mockStore) SaveInstitutional(_ context.Context, _ *Memory) error { return nil }
+
+func (m *mockStore) ListInstitutional(_ context.Context, _ string, _ ListOptions) ([]*Memory, error) {
+	return nil, nil
+}
+
+func (m *mockStore) DeleteInstitutional(_ context.Context, _, _ string) error { return nil }
+
 func (m *mockStore) Delete(_ context.Context, _ map[string]string, _ string) error {
 	return nil
 }

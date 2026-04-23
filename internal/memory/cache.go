@@ -103,6 +103,32 @@ func (c *CachedStore) RetrieveMultiTier(ctx context.Context, req MultiTierReques
 	return c.inner.RetrieveMultiTier(ctx, req)
 }
 
+// SaveInstitutional delegates to the inner store then invalidates the
+// workspace-scoped cache so any cached list/search sees the new row.
+func (c *CachedStore) SaveInstitutional(ctx context.Context, mem *Memory) error {
+	if err := c.inner.SaveInstitutional(ctx, mem); err != nil {
+		return err
+	}
+	c.bumpVersion(ctx, map[string]string{ScopeWorkspaceID: mem.Scope[ScopeWorkspaceID]})
+	return nil
+}
+
+// ListInstitutional delegates to the inner store without caching. The admin
+// list path is infrequent and needs to reflect writes immediately.
+func (c *CachedStore) ListInstitutional(ctx context.Context, workspaceID string, opts ListOptions) ([]*Memory, error) {
+	return c.inner.ListInstitutional(ctx, workspaceID, opts)
+}
+
+// DeleteInstitutional delegates to the inner store then invalidates the
+// workspace-scoped cache.
+func (c *CachedStore) DeleteInstitutional(ctx context.Context, workspaceID, memoryID string) error {
+	if err := c.inner.DeleteInstitutional(ctx, workspaceID, memoryID); err != nil {
+		return err
+	}
+	c.bumpVersion(ctx, map[string]string{ScopeWorkspaceID: workspaceID})
+	return nil
+}
+
 // List returns cached results when available, falling back to the inner store on miss or Redis error.
 func (c *CachedStore) List(ctx context.Context, scope map[string]string, opts ListOptions) ([]*Memory, error) {
 	key := c.listKey(ctx, scope, opts)
