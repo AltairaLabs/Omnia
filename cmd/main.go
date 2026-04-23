@@ -172,7 +172,8 @@ func main() {
 	if workspaceContentPath == "" {
 		setupLog.Info("workspace content storage is disabled",
 			"reason", "workspaceContentPathEmpty",
-			"effect", "SkillSource, PromptPack.spec.skills, and ArenaSource reconciliation will report ContentStorageUnavailable",
+			"affectedResources", "SkillSource, PromptPack.spec.skills, ArenaSource",
+			"effect", "these reconcilers will report ContentStorageUnavailable",
 			"fix", "re-install the chart with workspaceContent.enabled=true")
 	} else {
 		setupLog.Info("workspace content storage enabled", "path", workspaceContentPath)

@@ -509,6 +509,9 @@ var _ = Describe("ArenaSource Controller", func() {
 				Client:   k8sClient,
 				Scheme:   k8sClient.Scheme(),
 				Recorder: fakeRecorder,
+				// Provide a WorkspaceContentPath so the ContentStorageUnavailable
+				// gate does NOT fire — this test exercises the FetchError path.
+				WorkspaceContentPath: artifactDir,
 			}
 
 			req := reconcile.Request{
@@ -1624,6 +1627,9 @@ var _ = Describe("ArenaSource Controller", func() {
 				Recorder: fakeRecorder,
 
 				LicenseValidator: licValidator,
+				// Provide a WorkspaceContentPath so the ContentStorageUnavailable
+				// gate does NOT fire — this test exercises the LicenseViolation path.
+				WorkspaceContentPath: artifactDir,
 			}
 
 			By("reconciling the ArenaSource")
