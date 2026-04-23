@@ -106,20 +106,28 @@ func (r *ProviderResolver) ResolveSamplingConfig(
 }
 
 // ResolveWorkerGroups returns the eval group filter configured for the
-// worker path on this agent's AgentRuntime CRD. Returns nil on resolution
-// error or when the agent has no evals.worker.groups set — callers are
-// expected to fall back to DefaultWorkerEvalGroups in that case.
+// worker path on this agent's AgentRuntime CRD.
+//
+// Returns (groups, found) where:
+//   - found=true, groups=<slice>: the AgentRuntime exists and declares
+//     spec.evals.worker.groups — use those groups.
+//   - found=true, groups=nil/empty: the AgentRuntime exists but didn't
+//     declare worker groups — caller should apply DefaultWorkerEvalGroups.
+//   - found=false: the AgentRuntime doesn't exist (e.g. orphaned event
+//     for a deleted agent, or a test that seeds Redis without an AR).
+//     Caller should run all groups rather than apply a filter that a
+//     nonexistent agent can't have opted into.
 func (r *ProviderResolver) ResolveWorkerGroups(
 	ctx context.Context, agentName, namespace string,
-) []string {
+) (groups []string, found bool) {
 	ar, err := k8s.GetAgentRuntime(ctx, r.client, agentName, namespace)
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	if ar.Spec.Evals == nil || ar.Spec.Evals.Worker == nil {
-		return nil
+		return nil, true
 	}
-	return ar.Spec.Evals.Worker.Groups
+	return ar.Spec.Evals.Worker.Groups, true
 }
 
 func (r *ProviderResolver) resolve(

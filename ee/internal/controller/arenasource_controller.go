@@ -39,6 +39,12 @@ const (
 	ArenaSourceConditionTypeReady             = "Ready"
 	ArenaSourceConditionTypeFetching          = "Fetching"
 	ArenaSourceConditionTypeArtifactAvailable = "ArtifactAvailable"
+
+	// ArenaSourceReasonContentStorageUnavailable is emitted when the arena-
+	// controller was started with workspaceContent.enabled=false. The source
+	// cannot write its artifact anywhere, so surface a clean reason rather
+	// than a confusing fetch/sync failure.
+	ArenaSourceReasonContentStorageUnavailable = "ContentStorageUnavailable"
 )
 
 // Event reasons for ArenaSource
@@ -145,6 +151,26 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
+	}
+
+	// Content storage gate — when the arena-controller was started without
+	// workspaceContent.enabled we can't write artifacts anywhere. Emit a
+	// clean condition and stop reconciling until a restart.
+	if r.WorkspaceContentPath == "" {
+		log.Info("ArenaSource reconciliation halted: workspace content storage is disabled",
+			"reason", ArenaSourceReasonContentStorageUnavailable)
+		source.Status.Phase = omniav1alpha1.ArenaSourcePhaseError
+		SetCondition(&source.Status.Conditions, source.Generation, ArenaSourceConditionTypeReady, metav1.ConditionFalse,
+			ArenaSourceReasonContentStorageUnavailable,
+			"workspaceContent.enabled=false — ArenaSource cannot store artifacts. Re-install the chart with workspaceContent.enabled=true and restart the arena-controller.")
+		if r.Recorder != nil {
+			r.Recorder.Event(source, corev1.EventTypeWarning, ArenaSourceReasonContentStorageUnavailable,
+				"workspaceContent is disabled in the chart; ArenaSource cannot sync")
+		}
+		if statusErr := r.Status().Update(ctx, source); statusErr != nil {
+			log.Error(statusErr, "Failed to update status")
+		}
+		return ctrl.Result{}, nil // no requeue — restart required
 	}
 
 	// License check (defense in depth - webhooks are primary enforcement)

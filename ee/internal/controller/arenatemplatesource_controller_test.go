@@ -136,6 +136,58 @@ var _ = Describe("ArenaTemplateSource Controller", func() {
 		})
 	})
 
+	Context("When the arena-controller is started with workspaceContent.enabled=false", func() {
+		const name = "content-storage-disabled-template"
+		var source *omniav1alpha1.ArenaTemplateSource
+
+		BeforeEach(func() {
+			source = &omniav1alpha1.ArenaTemplateSource{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: templateSourceNamespace},
+				Spec: omniav1alpha1.ArenaTemplateSourceSpec{
+					Type:         omniav1alpha1.ArenaTemplateSourceTypeConfigMap,
+					SyncInterval: "1h",
+					ConfigMap: &corev1alpha1.ConfigMapSource{
+						Name: "any",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, source)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			resource := &omniav1alpha1.ArenaTemplateSource{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: templateSourceNamespace}, resource); err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
+		})
+
+		It("surfaces ContentStorageUnavailable and does not requeue", func() {
+			// Reconciler with NO WorkspaceContentPath — simulates chart
+			// value workspaceContent.enabled=false.
+			reconciler := &ArenaTemplateSourceReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(10),
+			}
+
+			res, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: name, Namespace: templateSourceNamespace},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.RequeueAfter).To(BeZero(), "should not requeue — operator restart required")
+
+			updated := &omniav1alpha1.ArenaTemplateSource{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: templateSourceNamespace}, updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ArenaTemplateSourcePhaseError))
+
+			cond := findCondition(updated.Status.Conditions, ArenaTemplateSourceConditionTypeReady)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(ArenaTemplateSourceReasonContentStorageUnavailable))
+			Expect(cond.Message).To(ContainSubstring("workspaceContent.enabled=false"))
+		})
+	})
+
 	Context("When reconciling an ArenaTemplateSource with ConfigMap", func() {
 		var templateSource *omniav1alpha1.ArenaTemplateSource
 		var configMap *corev1.ConfigMap

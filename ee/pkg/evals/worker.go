@@ -807,7 +807,15 @@ func (w *EvalWorker) resolveWorkerGroups(ctx context.Context, event api.SessionE
 	if w.providerResolver == nil || event.AgentName == "" || event.Namespace == "" {
 		return DefaultWorkerEvalGroups
 	}
-	groups := w.providerResolver.ResolveWorkerGroups(ctx, event.AgentName, event.Namespace)
+	groups, found := w.providerResolver.ResolveWorkerGroups(ctx, event.AgentName, event.Namespace)
+	if !found {
+		// No AgentRuntime CR: we have no opt-in signal to apply a restrictive
+		// default. Return nil (no filter) so the SDK runs every eval in the
+		// pack rather than silently dropping events for agents the worker
+		// knows nothing about. Matches the shape of orphaned events from
+		// decommissioned agents as well.
+		return nil
+	}
 	if len(groups) == 0 {
 		return DefaultWorkerEvalGroups
 	}

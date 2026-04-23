@@ -183,6 +183,42 @@ func TestSkillSourceReconcile_InvalidInterval(t *testing.T) {
 	assert.Equal(t, corev1alpha1.SkillSourcePhaseError, got.Status.Phase)
 }
 
+func TestSkillSourceReconcile_ContentStorageUnavailable(t *testing.T) {
+	s := skillTestScheme(t)
+	src := &corev1alpha1.SkillSource{
+		ObjectMeta: metav1.ObjectMeta{Name: "no-content", Namespace: "default"},
+		Spec: corev1alpha1.SkillSourceSpec{
+			Type:      corev1alpha1.SkillSourceTypeConfigMap,
+			Interval:  "1h",
+			ConfigMap: &corev1alpha1.ConfigMapSource{Name: "anything"},
+		},
+	}
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithObjects(src).
+		WithStatusSubresource(&corev1alpha1.SkillSource{}).
+		Build()
+	// WorkspaceContentPath intentionally left empty — simulates chart value
+	// workspaceContent.enabled=false.
+	r := &SkillSourceReconciler{Client: c, Scheme: s}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "no-content", Namespace: "default"},
+	})
+	require.NoError(t, err)
+
+	got := &corev1alpha1.SkillSource{}
+	require.NoError(t, c.Get(context.Background(),
+		types.NamespacedName{Name: "no-content", Namespace: "default"}, got))
+	assert.Equal(t, corev1alpha1.SkillSourcePhaseError, got.Status.Phase)
+
+	cond := meta.FindStatusCondition(got.Status.Conditions, SkillSourceConditionSourceAvailable)
+	require.NotNil(t, cond)
+	assert.Equal(t, metav1.ConditionFalse, cond.Status)
+	assert.Equal(t, SkillSourceReasonContentStorageUnavailable, cond.Reason)
+	assert.Contains(t, cond.Message, "workspaceContent.enabled=false")
+}
+
 func TestSkillSourceReconcile_MissingVariantBlock(t *testing.T) {
 	s := skillTestScheme(t)
 	src := &corev1alpha1.SkillSource{

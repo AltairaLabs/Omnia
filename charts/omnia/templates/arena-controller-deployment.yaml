@@ -76,7 +76,15 @@ spec:
             {{- if and .Values.nfs.csiDriver.enabled (or .Values.nfs.server.enabled .Values.nfs.external.server) }}
             - --workspace-storage-class={{ include "omnia.nfsStorageClass" . }}
             {{- end }}
+            {{- if .Values.workspaceContent.enabled }}
             - --workspace-content-path={{ .Values.enterprise.arena.controller.workspaceContentPath | default (.Values.workspaceContent.mountPath | default "/workspace-content") }}
+            {{- else }}
+            # workspaceContent.enabled=false — pass an empty path so the
+            # arena-controller reports ContentStorageUnavailable on any
+            # ArenaSource/ArenaTemplateSource instead of silently writing
+            # to a non-existent directory.
+            - --workspace-content-path=
+            {{- end }}
             {{- if .Values.devMode }}
             - --dev-mode
             {{- end }}
@@ -141,8 +149,10 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           volumeMounts:
+            {{- if .Values.workspaceContent.enabled }}
             - name: workspace-content
               mountPath: /workspace-content
+            {{- end }}
             - name: tmp
               mountPath: /tmp
             {{- $vm := concat (.Values.enterprise.arena.controller.extraVolumeMounts | default list) ($po.extraVolumeMounts | default list) }}
@@ -150,9 +160,11 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
+        {{- if .Values.workspaceContent.enabled }}
         - name: workspace-content
           persistentVolumeClaim:
-            claimName: {{ include "omnia.fullname" . }}-workspace-content
+            claimName: {{ .Values.workspaceContent.persistence.existingClaim | default (printf "%s-workspace-content" (include "omnia.fullname" .)) }}
+        {{- end }}
         - name: tmp
           emptyDir: {}
         {{- $vols := concat (.Values.enterprise.arena.controller.extraVolumes | default list) ($po.extraVolumes | default list) }}

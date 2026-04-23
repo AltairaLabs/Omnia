@@ -8,6 +8,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,6 +31,12 @@ import (
 const (
 	SkillSourceConditionSourceAvailable = "SourceAvailable"
 	SkillSourceConditionContentValid    = "ContentValid"
+
+	// SkillSourceReasonContentStorageUnavailable is emitted when the operator
+	// was started with workspaceContent.enabled=false. The SkillSource cannot
+	// sync anywhere, so surface a clean reason rather than crashing in the
+	// FilesystemSyncer.
+	SkillSourceReasonContentStorageUnavailable = "ContentStorageUnavailable"
 )
 
 // SkillSourceReconciler reconciles SkillSource objects.
@@ -76,6 +83,15 @@ func (r *SkillSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
+	// Content storage gate — when the operator was started without
+	// workspaceContent.enabled, SkillSource cannot sync anywhere and must
+	// surface that as a clean condition rather than crash-looping on
+	// FilesystemSyncer errors.
+	if r.WorkspaceContentPath == "" {
+		return r.errorStatus(ctx, src, "ContentStorageUnavailable",
+			errContentStorageUnavailable)
+	}
+
 	interval, err := time.ParseDuration(src.Spec.Interval)
 	if err != nil {
 		return r.errorStatus(ctx, src, "InvalidInterval", err)
@@ -104,6 +120,12 @@ func (r *SkillSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 	return ctrl.Result{RequeueAfter: interval}, nil
 }
+
+// errContentStorageUnavailable is the sentinel returned when workspaceContent
+// is disabled at operator startup. Kept as a package-level value so it
+// renders identically in the status condition Message on every reconcile.
+var errContentStorageUnavailable = errors.New(
+	"workspace content storage is not configured (operator started with workspaceContent.enabled=false) — SkillSource cannot sync until the chart is re-installed with workspaceContent.enabled=true and the operator restarted")
 
 // reconcileFailure carries the (reason, cause) pair to errorStatus.
 type reconcileFailure struct {

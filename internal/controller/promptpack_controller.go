@@ -172,10 +172,21 @@ func (r *PromptPackReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 func (r *PromptPackReconciler) reconcileSkills(ctx context.Context, pack *omniav1alpha1.PromptPack, packJSON string) {
 	log := logf.FromContext(ctx)
 
-	if r.WorkspaceContentPath == "" || len(pack.Spec.Skills) == 0 {
+	// Treat "no skills" and "content storage unavailable" as distinct states
+	// so operators can tell why a pack isn't resolving skills.
+	if len(pack.Spec.Skills) == 0 {
 		SetCondition(&pack.Status.Conditions, pack.Generation,
 			omniav1alpha1.PromptPackConditionSkillsResolved, metav1.ConditionTrue,
 			"NoSkills", "pack does not declare spec.skills")
+		return
+	}
+	if r.WorkspaceContentPath == "" {
+		SetCondition(&pack.Status.Conditions, pack.Generation,
+			omniav1alpha1.PromptPackConditionSkillsResolved, metav1.ConditionFalse,
+			"ContentStorageUnavailable",
+			"PromptPack declares spec.skills but the operator was started without workspace content storage (chart value workspaceContent.enabled=false). Enable workspaceContent in the chart and restart the operator to resolve skills.")
+		log.V(1).Info("skill resolution skipped: workspace content storage disabled",
+			"reason", "ContentStorageUnavailable")
 		return
 	}
 
