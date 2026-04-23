@@ -70,6 +70,12 @@ func (fakeMemoryStore) ListAgentScoped(_ context.Context, _, _ string, _ memory.
 	return nil, nil
 }
 func (fakeMemoryStore) DeleteAgentScoped(_ context.Context, _, _, _ string) error { return nil }
+func (fakeMemoryStore) FindCompactionCandidates(_ context.Context, _ memory.FindCompactionCandidatesOptions) ([]memory.CompactionCandidate, error) {
+	return nil, nil
+}
+func (fakeMemoryStore) SaveCompactionSummary(_ context.Context, _ memory.CompactionSummary) (string, error) {
+	return "", nil
+}
 
 // TestBuildAPIMux_POSTMemoryWithoutUserIDReturns400 verifies the wiring
 // contract that the POST /api/v1/memories route is registered and reaches the

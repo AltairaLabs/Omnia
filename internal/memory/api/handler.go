@@ -119,6 +119,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/agent-memories", h.handleListAgentScoped)
 	mux.HandleFunc("DELETE /api/v1/agent-memories/{id}", h.handleDeleteAgentScoped)
 
+	mux.HandleFunc("GET /api/v1/compaction/candidates", h.handleListCompactionCandidates)
+	mux.HandleFunc("POST /api/v1/compaction/summaries", h.handleSaveCompactionSummary)
+
 	h.registerDocsRoutes(mux)
 }
 

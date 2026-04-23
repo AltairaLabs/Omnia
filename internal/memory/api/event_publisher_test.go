@@ -101,6 +101,14 @@ func (m *mockMemoryStore) ListAgentScoped(_ context.Context, _, _ string, _ memo
 
 func (m *mockMemoryStore) DeleteAgentScoped(_ context.Context, _, _, _ string) error { return nil }
 
+func (m *mockMemoryStore) FindCompactionCandidates(_ context.Context, _ memory.FindCompactionCandidatesOptions) ([]memory.CompactionCandidate, error) {
+	return nil, nil
+}
+
+func (m *mockMemoryStore) SaveCompactionSummary(_ context.Context, _ memory.CompactionSummary) (string, error) {
+	return "", nil
+}
+
 // --- mockMemoryEventPublisher -----------------------------------------------
 
 // mockMemoryEventPublisher records published events and can be configured to

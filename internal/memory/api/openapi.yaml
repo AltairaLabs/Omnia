@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Omnia Memory API
   description: Cross-session agentic memory store for Omnia agents.
-  version: 1.0.0
+  version: 1.1.0
   contact:
     name: Altaira Labs
     url: https://altairalabs.ai
@@ -72,13 +72,18 @@ paths:
     post:
       operationId: saveMemory
       summary: Save a memory
-      description: Creates or updates a memory entity with an observation.
+      description: |
+        Creates or updates a memory entity with an observation. Provenance on
+        Metadata[`provenance`] flows through to the `trust_model` and
+        `source_type` columns — user_requested yields (explicit,
+        user_requested), operator_curated yields (curated, operator_curated),
+        agent_extracted / system_generated yield inferred rows.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Memory'
+              $ref: '#/components/schemas/SaveMemoryRequest'
       responses:
         '201':
           description: Memory saved
@@ -87,11 +92,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/MemoryResponse'
         '400':
-          description: Invalid request body
+          description: Invalid request body (e.g. missing user_id)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: Request body too large
     delete:
       operationId: deleteAllMemories
       summary: Delete all memories (DSAR)
@@ -186,6 +193,63 @@ paths:
               schema:
                 $ref: '#/components/schemas/MemoryListResponse'
 
+  /memories/retrieve:
+    post:
+      operationId: retrieveMultiTier
+      summary: Multi-tier retrieval
+      description: |
+        Runs a single query across institutional, agent, user, and user-for-
+        agent tiers and returns ranked results for RAG context injection.
+        Optional `purposes` narrows by `memory_entities.purpose`. Graph and
+        structured-lookup additions are Phase 3 multi-mode extensions.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetrieveMultiTierRequest'
+      responses:
+        '200':
+          description: Ranked multi-tier memories
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrieveMultiTierResponse'
+        '400':
+          description: Missing workspace_id
+
+  /memories/batch:
+    delete:
+      operationId: batchDeleteMemories
+      summary: Batch delete memories (DSAR cascade)
+      description: |
+        Paginated hard delete for a scope — used by the DSAR cascade so
+        large datasets don't need to fit in one transaction. Returns the
+        count of rows deleted in this batch; clients repeat until zero.
+      parameters:
+        - name: workspace
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: user_id
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 500
+            maximum: 10000
+      responses:
+        '200':
+          description: Batch delete result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchDeleteResponse'
+
   /memories/{id}:
     delete:
       operationId: deleteMemory
@@ -211,54 +275,265 @@ paths:
         '404':
           description: Memory not found
 
-  /memories/{id}/related:
+  /institutional/memories:
     get:
-      operationId: getRelatedMemories
-      summary: Get related memories
-      description: Graph traversal — finds entities related to the given memory via the relations table.
+      operationId: listInstitutionalMemories
+      summary: List institutional (workspace-scoped) memories
+      description: |
+        Returns memories with `virtual_user_id IS NULL AND agent_id IS NULL`
+        — the operator-curated tier every user in the workspace sees.
       parameters:
-        - name: id
-          in: path
+        - name: workspace
+          in: query
           required: true
           schema:
             type: string
-            format: uuid
-      responses:
-        '200':
-          description: Related entities
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/RelatedEntity'
-
-  /memories/{id}/timeline:
-    get:
-      operationId: getMemoryTimeline
-      summary: Get memory timeline
-      description: Returns the observation history for a memory entity over time.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
         - name: limit
           in: query
           schema:
             type: integer
-            default: 10
+            default: 20
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
       responses:
         '200':
-          description: Observation timeline
+          description: Institutional memories
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Observation'
+                $ref: '#/components/schemas/ListInstitutionalResponse'
+        '400':
+          description: Missing workspace
+    post:
+      operationId: saveInstitutionalMemory
+      summary: Create an institutional memory
+      description: |
+        Creates a workspace-scoped operator-curated memory. The store
+        forces `trust_model=curated`, `source_type=operator_curated` and
+        `provenance=operator_curated`. Optional `expires_at` lets operators
+        time-box a rule; past values are rejected with 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveInstitutionalRequest'
+      responses:
+        '201':
+          description: Institutional memory created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryResponse'
+        '400':
+          description: Missing workspace_id or expires_at in the past
+
+  /institutional/memories/{id}:
+    delete:
+      operationId: deleteInstitutionalMemory
+      summary: Soft-delete an institutional memory
+      description: |
+        Refuses (400 with `ErrNotInstitutional`) when the target row
+        carries a user_id or agent_id — that prevents misuse of the
+        admin path to erase user data.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: workspace
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Institutional memory forgotten
+        '400':
+          description: Target row isn't institutional
+
+  /agent-memories:
+    get:
+      operationId: listAgentScopedMemories
+      summary: List agent-scoped admin memories
+      description: |
+        Returns memories with `virtual_user_id IS NULL AND agent_id = Y`
+        — operator-curated rows visible to every user of agent Y.
+      parameters:
+        - name: workspace
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: agent
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Agent-scoped memories
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListAgentScopedResponse'
+        '400':
+          description: Missing workspace or agent
+    post:
+      operationId: saveAgentScopedMemory
+      summary: Create an agent-scoped admin memory
+      description: |
+        Creates a (workspace, agent)-scoped operator-curated memory.
+        The store sanitizes scope (strips user_id), forces
+        `trust_model=curated`, and refuses if workspace or agent_id is
+        missing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveAgentScopedRequest'
+      responses:
+        '201':
+          description: Agent-scoped memory created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryResponse'
+        '400':
+          description: Missing workspace_id or agent_id
+
+  /agent-memories/{id}:
+    delete:
+      operationId: deleteAgentScopedMemory
+      summary: Soft-delete an agent-scoped memory
+      description: |
+        Refuses (400 with `ErrNotAgentScoped`) when the target row
+        carries a user_id or belongs to a different agent.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: workspace
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: agent
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent-scoped memory forgotten
+        '400':
+          description: Missing params or target row isn't agent-scoped
+
+  /compaction/candidates:
+    get:
+      operationId: listCompactionCandidates
+      summary: List compaction candidates
+      description: |
+        Returns `(workspace, user, agent)` buckets of non-superseded
+        observations older than `older_than_hours`. Used by a summarizer
+        agent to discover which memories to summarize — read-only, never
+        mutates rows.
+      parameters:
+        - name: workspace
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: older_than_hours
+          in: query
+          schema:
+            type: integer
+            default: 720
+            minimum: 1
+          description: Observations older than this many hours qualify (default 30d).
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 200
+          description: Max buckets returned per call.
+        - name: max_per_bucket
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 500
+          description: Max observations attached to each bucket.
+        - name: min_group_size
+          in: query
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+          description: Skip buckets with fewer observations than this.
+      responses:
+        '200':
+          description: Compaction candidates
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListCompactionCandidatesResponse'
+        '400':
+          description: Missing workspace
+
+  /compaction/summaries:
+    post:
+      operationId: saveCompactionSummary
+      summary: Persist a compaction summary
+      description: |
+        Creates a new summary entity and marks `superseded_by` on each
+        listed observation in a single transaction. Returns 409 Conflict
+        with the `ErrCompactionRaced` sentinel when another writer
+        superseded the targets first — agents should treat that as an
+        idempotent no-op.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveCompactionSummaryRequest'
+      responses:
+        '201':
+          description: Summary created and originals superseded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaveCompactionSummaryResponse'
+        '400':
+          description: Missing workspace_id, content, or superseded_observation_ids
+        '409':
+          description: Another writer already superseded the targets (idempotent)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
 components:
   schemas:
@@ -288,6 +563,10 @@ components:
         metadata:
           type: object
           additionalProperties: true
+          description: |
+            Free-form metadata. Well-known keys the store interprets:
+            `provenance` → maps to trust_model/source_type,
+            `purpose` → maps to the purpose column.
         sessionId:
           type: string
           format: uuid
@@ -302,6 +581,40 @@ components:
         expiresAt:
           type: string
           format: date-time
+      required:
+        - type
+        - content
+        - confidence
+        - scope
+
+    SaveMemoryRequest:
+      type: object
+      properties:
+        type:
+          type: string
+        content:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        confidence:
+          type: number
+          format: float
+        scope:
+          type: object
+          additionalProperties:
+            type: string
+        session_id:
+          type: string
+          format: uuid
+        turn_range:
+          type: array
+          items:
+            type: integer
+          minItems: 2
+          maxItems: 2
+        category:
+          type: string
       required:
         - type
         - content
@@ -330,38 +643,210 @@ components:
         error:
           type: string
 
-    RelatedEntity:
+    BatchDeleteResponse:
       type: object
       properties:
-        id:
+        deleted:
+          type: integer
+          description: Number of memories deleted in this batch.
+
+    RetrieveMultiTierRequest:
+      type: object
+      properties:
+        workspace_id:
           type: string
-          format: uuid
-        name:
+        user_id:
           type: string
-        kind:
+        agent_id:
           type: string
-        relationType:
+        query:
           type: string
-        weight:
+        types:
+          type: array
+          items:
+            type: string
+        purposes:
+          type: array
+          items:
+            type: string
+          description: Filter by `memory_entities.purpose`. Empty returns every purpose.
+        min_confidence:
           type: number
           format: float
+        limit:
+          type: integer
+      required:
+        - workspace_id
 
-    Observation:
+    RetrieveMultiTierResponse:
       type: object
       properties:
-        id:
+        memories:
+          type: array
+          items:
+            $ref: '#/components/schemas/MultiTierMemory'
+        total:
+          type: integer
+
+    MultiTierMemory:
+      allOf:
+        - $ref: '#/components/schemas/Memory'
+        - type: object
+          properties:
+            tier:
+              type: string
+              enum: [institutional, agent, user, user_for_agent]
+            accessCount:
+              type: integer
+            score:
+              type: number
+              format: float
+
+    SaveInstitutionalRequest:
+      type: object
+      properties:
+        workspace_id:
           type: string
-          format: uuid
+        type:
+          type: string
         content:
           type: string
+        metadata:
+          type: object
+          additionalProperties: true
         confidence:
           type: number
           format: float
-        sourceType:
-          type: string
-        observedAt:
+        expires_at:
           type: string
           format: date-time
-        validUntil:
+          description: Optional ISO-8601 UTC timestamp; past values rejected.
+      required:
+        - workspace_id
+        - type
+        - content
+
+    ListInstitutionalResponse:
+      type: object
+      properties:
+        memories:
+          type: array
+          items:
+            $ref: '#/components/schemas/Memory'
+        total:
+          type: integer
+
+    SaveAgentScopedRequest:
+      type: object
+      properties:
+        workspace_id:
+          type: string
+        agent_id:
+          type: string
+        type:
+          type: string
+        content:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        confidence:
+          type: number
+          format: float
+      required:
+        - workspace_id
+        - agent_id
+        - type
+        - content
+
+    ListAgentScopedResponse:
+      type: object
+      properties:
+        memories:
+          type: array
+          items:
+            $ref: '#/components/schemas/Memory'
+        total:
+          type: integer
+
+    CompactionEntry:
+      type: object
+      properties:
+        entity_id:
+          type: string
+          format: uuid
+        observation_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+        content:
+          type: string
+        observed_at:
           type: string
           format: date-time
+
+    CompactionCandidate:
+      type: object
+      properties:
+        workspace_id:
+          type: string
+        user_id:
+          type: string
+        agent_id:
+          type: string
+        observation_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompactionEntry'
+
+    ListCompactionCandidatesResponse:
+      type: object
+      properties:
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompactionCandidate'
+        total:
+          type: integer
+
+    SaveCompactionSummaryRequest:
+      type: object
+      properties:
+        workspace_id:
+          type: string
+        user_id:
+          type: string
+        agent_id:
+          type: string
+        kind:
+          type: string
+          description: Entity kind for the new summary (default `temporal_summary`).
+        content:
+          type: string
+          description: The summarized text that replaces the originals.
+        confidence:
+          type: number
+          format: float
+        superseded_observation_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Observation IDs to mark `superseded_by` the new summary.
+      required:
+        - workspace_id
+        - content
+        - superseded_observation_ids
+
+    SaveCompactionSummaryResponse:
+      type: object
+      properties:
+        summary_entity_id:
+          type: string
+          format: uuid

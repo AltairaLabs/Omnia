@@ -161,6 +161,32 @@ func (c *CachedStore) DeleteAgentScoped(ctx context.Context, workspaceID, agentI
 	return nil
 }
 
+// FindCompactionCandidates delegates to the inner store without caching.
+// Compaction scans are infrequent and need live data — a cached bucket
+// list would defeat the purpose.
+func (c *CachedStore) FindCompactionCandidates(ctx context.Context, opts FindCompactionCandidatesOptions) ([]CompactionCandidate, error) {
+	return c.inner.FindCompactionCandidates(ctx, opts)
+}
+
+// SaveCompactionSummary delegates to the inner store then invalidates the
+// (workspace, user, agent) cache so post-compaction retrieval reflects
+// the new supersede chain without serving stale rows.
+func (c *CachedStore) SaveCompactionSummary(ctx context.Context, summary CompactionSummary) (string, error) {
+	id, err := c.inner.SaveCompactionSummary(ctx, summary)
+	if err != nil {
+		return "", err
+	}
+	scope := map[string]string{ScopeWorkspaceID: summary.WorkspaceID}
+	if summary.UserID != "" {
+		scope[ScopeUserID] = summary.UserID
+	}
+	if summary.AgentID != "" {
+		scope[ScopeAgentID] = summary.AgentID
+	}
+	c.bumpVersion(ctx, scope)
+	return id, nil
+}
+
 // List returns cached results when available, falling back to the inner store on miss or Redis error.
 func (c *CachedStore) List(ctx context.Context, scope map[string]string, opts ListOptions) ([]*Memory, error) {
 	key := c.listKey(ctx, scope, opts)
