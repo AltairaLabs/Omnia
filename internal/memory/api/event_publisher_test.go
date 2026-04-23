@@ -93,6 +93,14 @@ func (m *mockMemoryStore) ListInstitutional(_ context.Context, _ string, _ memor
 
 func (m *mockMemoryStore) DeleteInstitutional(_ context.Context, _, _ string) error { return nil }
 
+func (m *mockMemoryStore) SaveAgentScoped(_ context.Context, _ *memory.Memory) error { return nil }
+
+func (m *mockMemoryStore) ListAgentScoped(_ context.Context, _, _ string, _ memory.ListOptions) ([]*memory.Memory, error) {
+	return nil, nil
+}
+
+func (m *mockMemoryStore) DeleteAgentScoped(_ context.Context, _, _, _ string) error { return nil }
+
 // --- mockMemoryEventPublisher -----------------------------------------------
 
 // mockMemoryEventPublisher records published events and can be configured to

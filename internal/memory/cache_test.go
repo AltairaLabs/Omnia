@@ -42,6 +42,20 @@ type cacheTestStore struct {
 	listErr       error
 	deleteErr     error
 	deleteAllErr  error
+
+	// Counters for the agent-scoped admin wrappers — used by tests that
+	// validate the CachedStore wrappers delegate to the inner store.
+	saveAgentScopedCalls   int
+	listAgentScopedCalls   int
+	deleteAgentScopedCalls int
+	agentScopedErr         error
+
+	// Institutional wrapper counters — same rationale as the agent-scoped
+	// ones; exist so coverage on cache.go reaches the 80% gate without
+	// introducing a second mock type.
+	saveInstitutionalCalls   int
+	listInstitutionalCalls   int
+	deleteInstitutionalCalls int
 }
 
 func (m *cacheTestStore) Save(_ context.Context, mem *Memory) error {
@@ -73,13 +87,50 @@ func (m *cacheTestStore) RetrieveMultiTier(_ context.Context, _ MultiTierRequest
 	return &MultiTierResult{Memories: []*MultiTierMemory{}, Total: 0}, nil
 }
 
-func (m *cacheTestStore) SaveInstitutional(_ context.Context, _ *Memory) error { return nil }
+func (m *cacheTestStore) SaveInstitutional(_ context.Context, _ *Memory) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.saveInstitutionalCalls++
+	return nil
+}
 
 func (m *cacheTestStore) ListInstitutional(_ context.Context, _ string, _ ListOptions) ([]*Memory, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.listInstitutionalCalls++
 	return nil, nil
 }
 
-func (m *cacheTestStore) DeleteInstitutional(_ context.Context, _, _ string) error { return nil }
+func (m *cacheTestStore) DeleteInstitutional(_ context.Context, _, _ string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.deleteInstitutionalCalls++
+	return nil
+}
+
+func (m *cacheTestStore) SaveAgentScoped(_ context.Context, _ *Memory) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.saveAgentScopedCalls++
+	return m.agentScopedErr
+}
+
+func (m *cacheTestStore) ListAgentScoped(_ context.Context, _, _ string, _ ListOptions) ([]*Memory, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.listAgentScopedCalls++
+	if m.agentScopedErr != nil {
+		return nil, m.agentScopedErr
+	}
+	return nil, nil
+}
+
+func (m *cacheTestStore) DeleteAgentScoped(_ context.Context, _, _, _ string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.deleteAgentScopedCalls++
+	return m.agentScopedErr
+}
 
 func (m *cacheTestStore) List(_ context.Context, _ map[string]string, _ ListOptions) ([]*Memory, error) {
 	m.mu.Lock()
@@ -424,6 +475,162 @@ func TestCachedStore_RedisDown_List_Fallthrough(t *testing.T) {
 	}
 	if len(mems) != 1 {
 		t.Fatalf("expected 1 memory, got %d", len(mems))
+	}
+}
+
+// --- Agent-scoped admin wrapper tests -----------------------------------------
+
+func TestCachedStore_SaveAgentScoped_DelegatesAndBumps(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, mr := newTestCache(t, inner)
+	ctx := context.Background()
+
+	mem := &Memory{
+		Scope: map[string]string{ScopeWorkspaceID: "ws-1", ScopeAgentID: "agent-1"},
+	}
+	if err := cs.SaveAgentScoped(ctx, mem); err != nil {
+		t.Fatalf("SaveAgentScoped: %v", err)
+	}
+	if inner.saveAgentScopedCalls != 1 {
+		t.Fatalf("inner SaveAgentScoped calls = %d, want 1", inner.saveAgentScopedCalls)
+	}
+
+	// Save must bump the cache version for the (workspace, agent) scope.
+	sh := scopeHash(map[string]string{ScopeWorkspaceID: "ws-1", ScopeAgentID: "agent-1"})
+	v, err := mr.Get(versionKey(sh))
+	if err != nil {
+		t.Fatalf("version key missing after save: %v", err)
+	}
+	if v != "1" {
+		t.Errorf("version=%q, want %q", v, "1")
+	}
+}
+
+func TestCachedStore_SaveAgentScoped_PropagatesInnerError(t *testing.T) {
+	inner := &cacheTestStore{agentScopedErr: fmt.Errorf("inner save err")}
+	cs, _ := newTestCache(t, inner)
+
+	err := cs.SaveAgentScoped(context.Background(), &Memory{
+		Scope: map[string]string{ScopeWorkspaceID: "ws-1", ScopeAgentID: "agent-1"},
+	})
+	if err == nil || err.Error() != "inner save err" {
+		t.Errorf("expected wrapped inner error, got %v", err)
+	}
+}
+
+func TestCachedStore_ListAgentScoped_Delegates(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, _ := newTestCache(t, inner)
+
+	if _, err := cs.ListAgentScoped(context.Background(), "ws-1", "agent-1", ListOptions{}); err != nil {
+		t.Fatalf("ListAgentScoped: %v", err)
+	}
+	if inner.listAgentScopedCalls != 1 {
+		t.Errorf("inner ListAgentScoped calls = %d, want 1", inner.listAgentScopedCalls)
+	}
+}
+
+func TestCachedStore_DeleteAgentScoped_DelegatesAndBumps(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, mr := newTestCache(t, inner)
+
+	if err := cs.DeleteAgentScoped(context.Background(), "ws-1", "agent-1", "mem-id"); err != nil {
+		t.Fatalf("DeleteAgentScoped: %v", err)
+	}
+	if inner.deleteAgentScopedCalls != 1 {
+		t.Errorf("inner DeleteAgentScoped calls = %d, want 1", inner.deleteAgentScopedCalls)
+	}
+
+	sh := scopeHash(map[string]string{ScopeWorkspaceID: "ws-1", ScopeAgentID: "agent-1"})
+	v, err := mr.Get(versionKey(sh))
+	if err != nil {
+		t.Fatalf("version key missing after delete: %v", err)
+	}
+	if v != "1" {
+		t.Errorf("version=%q, want %q", v, "1")
+	}
+}
+
+func TestCachedStore_DeleteAgentScoped_PropagatesInnerError(t *testing.T) {
+	inner := &cacheTestStore{agentScopedErr: fmt.Errorf("not found")}
+	cs, _ := newTestCache(t, inner)
+
+	err := cs.DeleteAgentScoped(context.Background(), "ws-1", "agent-1", "mem-id")
+	if err == nil || err.Error() != "not found" {
+		t.Errorf("expected inner error, got %v", err)
+	}
+}
+
+// --- Institutional wrapper tests ---------------------------------------------
+
+func TestCachedStore_SaveInstitutional_DelegatesAndBumps(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, mr := newTestCache(t, inner)
+
+	mem := &Memory{Scope: map[string]string{ScopeWorkspaceID: "ws-1"}}
+	if err := cs.SaveInstitutional(context.Background(), mem); err != nil {
+		t.Fatalf("SaveInstitutional: %v", err)
+	}
+	if inner.saveInstitutionalCalls != 1 {
+		t.Errorf("inner SaveInstitutional calls = %d, want 1", inner.saveInstitutionalCalls)
+	}
+	sh := scopeHash(map[string]string{ScopeWorkspaceID: "ws-1"})
+	if v, err := mr.Get(versionKey(sh)); err != nil || v != "1" {
+		t.Errorf("workspace version bump missing: v=%q err=%v", v, err)
+	}
+}
+
+func TestCachedStore_ListInstitutional_Delegates(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, _ := newTestCache(t, inner)
+
+	if _, err := cs.ListInstitutional(context.Background(), "ws-1", ListOptions{}); err != nil {
+		t.Fatalf("ListInstitutional: %v", err)
+	}
+	if inner.listInstitutionalCalls != 1 {
+		t.Errorf("inner ListInstitutional calls = %d, want 1", inner.listInstitutionalCalls)
+	}
+}
+
+func TestCachedStore_DeleteInstitutional_DelegatesAndBumps(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, mr := newTestCache(t, inner)
+
+	if err := cs.DeleteInstitutional(context.Background(), "ws-1", "mem-id"); err != nil {
+		t.Fatalf("DeleteInstitutional: %v", err)
+	}
+	if inner.deleteInstitutionalCalls != 1 {
+		t.Errorf("inner DeleteInstitutional calls = %d, want 1", inner.deleteInstitutionalCalls)
+	}
+	sh := scopeHash(map[string]string{ScopeWorkspaceID: "ws-1"})
+	if v, err := mr.Get(versionKey(sh)); err != nil || v != "1" {
+		t.Errorf("workspace version bump missing: v=%q err=%v", v, err)
+	}
+}
+
+func TestCachedStore_RetrieveMultiTier_Delegates(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, _ := newTestCache(t, inner)
+
+	res, err := cs.RetrieveMultiTier(context.Background(), MultiTierRequest{WorkspaceID: "ws-1"})
+	if err != nil {
+		t.Fatalf("RetrieveMultiTier: %v", err)
+	}
+	if res == nil {
+		t.Fatal("expected non-nil MultiTierResult")
+	}
+}
+
+func TestCachedStore_ExportAll_Delegates(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, _ := newTestCache(t, inner)
+
+	mems, err := cs.ExportAll(context.Background(), cacheTestScope())
+	if err != nil {
+		t.Fatalf("ExportAll: %v", err)
+	}
+	if mems == nil {
+		t.Error("expected non-nil slice from ExportAll")
 	}
 }
 
