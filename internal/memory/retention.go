@@ -134,6 +134,12 @@ func (w *RetentionWorker) runOnce(ctx context.Context) {
 		}
 	}
 
+	cascadeSoft, cascadeHard, cascadeErr := w.runConsentRevocation(ctx,
+		policy.Spec.Default.ConsentRevocation, batchSize)
+	if cascadeErr != nil {
+		anyErr = true
+	}
+
 	hard, err := w.store.HardDeleteForgottenOlderThan(ctx,
 		resolveGraceDays(policy.Spec.Default.ConsentRevocation), int(batchSize))
 	if err != nil {
@@ -147,7 +153,94 @@ func (w *RetentionWorker) runOnce(ctx context.Context) {
 	w.log.V(1).Info("retention pass finished",
 		"duration", time.Since(start).String(),
 		"hardDeleted", hard,
+		"consentSoftDeleted", cascadeSoft,
+		"consentHardDeleted", cascadeHard,
 		"ok", !anyErr)
+}
+
+// runConsentRevocation cascades user consent revocations to memory
+// rows. For action=SoftDelete it flips forgotten=true with
+// forgotten_at=now so the grace-period pass later hard-deletes. For
+// action=HardDelete it removes rows immediately. action=Stop is a
+// no-op — operators chose it explicitly to keep existing rows.
+//
+// Returns (softCount, hardCount, err) so callers can log totals
+// without re-querying.
+func (w *RetentionWorker) runConsentRevocation(
+	ctx context.Context,
+	cfg *omniav1alpha1.MemoryConsentRevocationConfig,
+	batchSize int32,
+) (int64, int64, error) {
+	metrics := defaultRetentionMetrics.Load()
+	action := resolveConsentAction(cfg)
+	switch action {
+	case omniav1alpha1.ConsentRevocationStop:
+		return 0, 0, nil
+	case omniav1alpha1.ConsentRevocationHardDelete:
+		n, err := w.store.HardDeleteRevokedConsent(ctx, int(batchSize))
+		if err != nil {
+			metrics.observeBranchError(TierUser, BranchConsentRevoke)
+			w.log.Error(err, "consent revocation hard-delete failed")
+			return 0, 0, err
+		}
+		metrics.observeHardDelete(n)
+		if n > 0 {
+			w.emitConsentAudit(ctx, action, 0, n)
+		}
+		return 0, n, nil
+	}
+
+	// SoftDelete path (default).
+	soft, err := w.store.SoftDeleteRevokedConsent(ctx, int(batchSize))
+	if err != nil {
+		metrics.observeBranchError(TierUser, BranchConsentRevoke)
+		w.log.Error(err, "consent revocation soft-delete failed")
+		return 0, 0, err
+	}
+	metrics.observeSoftDelete(TierUser, BranchConsentRevoke, soft)
+
+	// Hard-delete rows whose consent-driven soft-delete grace has
+	// elapsed. Keyed on forgotten_at so we don't double-count rows
+	// whose forgotten=true came from TTL/LRU elsewhere.
+	hard, err := w.store.HardDeleteForgottenByConsentOlderThan(ctx,
+		resolveGraceDays(cfg), int(batchSize))
+	if err != nil {
+		metrics.observeBranchError(TierUser, BranchConsentHardClean)
+		w.log.Error(err, "consent revocation grace hard-delete failed")
+		return soft, 0, err
+	}
+	metrics.observeHardDelete(hard)
+
+	if soft > 0 || hard > 0 {
+		w.emitConsentAudit(ctx, action, soft, hard)
+	}
+	return soft, hard, nil
+}
+
+// resolveConsentAction returns the policy's action, defaulting to
+// SoftDelete so absent config doesn't silently skip the cascade.
+func resolveConsentAction(cfg *omniav1alpha1.MemoryConsentRevocationConfig) omniav1alpha1.ConsentRevocationAction {
+	if cfg != nil && cfg.Action != "" {
+		return cfg.Action
+	}
+	return omniav1alpha1.ConsentRevocationSoftDelete
+}
+
+// emitConsentAudit records a consent-cascade event. Audit output is
+// best-effort — failure here must not abort the retention cycle, so
+// we stick to structured log output. The operator's Prometheus
+// omnia_memory_retention_soft_deleted_total / _hard_deleted_total
+// counters carry the same signal and drive alerting.
+func (w *RetentionWorker) emitConsentAudit(
+	_ context.Context,
+	action omniav1alpha1.ConsentRevocationAction,
+	soft, hard int64,
+) {
+	w.log.Info("memory retention consent cascade",
+		"action", string(action),
+		"softDeleted", soft,
+		"hardDeleted", hard,
+	)
 }
 
 // runBranch dispatches one (tier, branch) pair to the appropriate

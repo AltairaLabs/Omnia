@@ -26,10 +26,12 @@ func retentionTiers() []Tier {
 type RetentionBranch string
 
 const (
-	BranchTTL       RetentionBranch = "ttl"
-	BranchLRU       RetentionBranch = "lru"
-	BranchDecay     RetentionBranch = "decay"
-	BranchHardClean RetentionBranch = "hard_clean"
+	BranchTTL              RetentionBranch = "ttl"
+	BranchLRU              RetentionBranch = "lru"
+	BranchDecay            RetentionBranch = "decay"
+	BranchHardClean        RetentionBranch = "hard_clean"
+	BranchConsentRevoke    RetentionBranch = "consent_revoke"
+	BranchConsentHardClean RetentionBranch = "consent_hard_clean"
 )
 
 // sqlPredicate returns the SQL where-clause fragment that isolates rows

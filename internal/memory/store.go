@@ -123,6 +123,15 @@ func (s *PostgresMemoryStore) Save(ctx context.Context, mem *Memory) error {
 // fall through to the schema default ('support_continuity').
 const MetaKeyPurpose = "purpose"
 
+// MetaKeyConsentCategory is the metadata key carrying the consent
+// category tag (e.g. "memory:health", "memory:location"). Read at
+// insert time and written to memory_entities.consent_category so
+// the retention worker's consent revocation cascade can match rows
+// against the user's current grants without scanning JSON metadata.
+// Empty / missing values leave the column NULL — those rows fall
+// under the default (non-per-category) retention policy.
+const MetaKeyConsentCategory = "consent_category"
+
 // insertEntity inserts a new memory_entities row and populates mem.ID / mem.CreatedAt.
 //
 // trust_model and source_type are derived from the provenance metadata key
@@ -139,16 +148,18 @@ func insertEntity(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 
 	trustModel, sourceType := trustFromProvenance(mem.Metadata)
 	purpose := purposeFromMetadata(mem.Metadata)
+	consentCategory := consentCategoryFromMetadata(mem.Metadata)
 
 	row := tx.QueryRow(ctx, `
 		INSERT INTO memory_entities
 		  (workspace_id, virtual_user_id, agent_id, name, kind, metadata, expires_at,
-		   trust_model, source_type, purpose)
+		   trust_model, source_type, purpose, consent_category)
 		VALUES
 		  ($1, $2, $3, $4, $5, $6, $7,
 		    COALESCE($8, 'inferred'),
 		    COALESCE($9, 'conversation_extraction'),
-		    COALESCE($10, 'support_continuity'))
+		    COALESCE($10, 'support_continuity'),
+		    $11)
 		RETURNING id, created_at`,
 		mem.Scope[ScopeWorkspaceID],
 		scopeOrNil(mem.Scope, ScopeUserID),
@@ -160,6 +171,7 @@ func insertEntity(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 		trustModel,
 		sourceType,
 		purpose,
+		consentCategory,
 	)
 
 	return row.Scan(&mem.ID, &mem.CreatedAt)
@@ -199,6 +211,21 @@ func purposeFromMetadata(meta map[string]any) *string {
 		return nil
 	}
 	v, ok := meta[MetaKeyPurpose].(string)
+	if !ok || v == "" {
+		return nil
+	}
+	return &v
+}
+
+// consentCategoryFromMetadata reads MetaKeyConsentCategory from the
+// memory metadata, returning nil when absent so the column stays NULL
+// and the row falls under the default retention policy rather than a
+// per-category override.
+func consentCategoryFromMetadata(meta map[string]any) *string {
+	if meta == nil {
+		return nil
+	}
+	v, ok := meta[MetaKeyConsentCategory].(string)
 	if !ok || v == "" {
 		return nil
 	}
