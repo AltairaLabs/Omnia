@@ -420,6 +420,9 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrBodyTooLarge) || isMaxBytesError(err):
 		status = http.StatusRequestEntityTooLarge
 		msg = ErrBodyTooLarge.Error()
+	case errors.Is(err, ErrExpiresAtInPast):
+		status = http.StatusBadRequest
+		msg = ErrExpiresAtInPast.Error()
 	}
 
 	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
