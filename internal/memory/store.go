@@ -30,6 +30,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	pgvector "github.com/pgvector/pgvector-go"
 
+	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
+
 	"github.com/altairalabs/omnia/internal/pgutil"
 )
 
@@ -115,15 +117,27 @@ func (s *PostgresMemoryStore) Save(ctx context.Context, mem *Memory) error {
 }
 
 // insertEntity inserts a new memory_entities row and populates mem.ID / mem.CreatedAt.
+//
+// trust_model and source_type are derived from the provenance metadata key
+// (pkmemory.MetaKeyProvenance) so the redactor and retention pipelines can
+// tell operator-curated / user-requested rows from agent-extracted ones.
+// When the caller didn't set a provenance, we keep the schema defaults
+// (trust_model='inferred', source_type='conversation_extraction').
 func insertEntity(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 	metaJSON, err := marshalMetadata(mem.Metadata)
 	if err != nil {
 		return err
 	}
 
+	trustModel, sourceType := trustFromProvenance(mem.Metadata)
+
 	row := tx.QueryRow(ctx, `
-		INSERT INTO memory_entities (workspace_id, virtual_user_id, agent_id, name, kind, metadata, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO memory_entities
+		  (workspace_id, virtual_user_id, agent_id, name, kind, metadata, expires_at, trust_model, source_type)
+		VALUES
+		  ($1, $2, $3, $4, $5, $6, $7,
+		    COALESCE($8, 'inferred'),
+		    COALESCE($9, 'conversation_extraction'))
 		RETURNING id, created_at`,
 		mem.Scope[ScopeWorkspaceID],
 		scopeOrNil(mem.Scope, ScopeUserID),
@@ -132,9 +146,38 @@ func insertEntity(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 		mem.Type,
 		metaJSON,
 		mem.ExpiresAt,
+		trustModel,
+		sourceType,
 	)
 
 	return row.Scan(&mem.ID, &mem.CreatedAt)
+}
+
+// trustFromProvenance maps a PromptKit provenance value to the
+// (trust_model, source_type) pair persisted on memory_entities.
+// Returns (nil, nil) when the caller didn't set a provenance so the
+// schema-level defaults apply.
+func trustFromProvenance(meta map[string]any) (trustModel, sourceType *string) {
+	if meta == nil {
+		return nil, nil
+	}
+	prov, _ := meta[pkmemory.MetaKeyProvenance].(string)
+	switch prov {
+	case string(pkmemory.ProvenanceUserRequested):
+		tm, st := "explicit", "user_requested"
+		return &tm, &st
+	case string(pkmemory.ProvenanceOperatorCurated):
+		tm, st := "curated", "operator_curated"
+		return &tm, &st
+	case string(pkmemory.ProvenanceAgentExtracted):
+		tm, st := "inferred", "conversation_extraction"
+		return &tm, &st
+	case string(pkmemory.ProvenanceSystemGenerated):
+		tm, st := "inferred", "system_generated"
+		return &tm, &st
+	default:
+		return nil, nil
+	}
 }
 
 // updateEntity updates the entity metadata and updated_at timestamp.

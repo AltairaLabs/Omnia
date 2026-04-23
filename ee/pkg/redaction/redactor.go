@@ -21,6 +21,16 @@ type TextRedactor interface {
 	RedactText(ctx context.Context, text string) (string, error)
 }
 
+// TrustAwareRedactor is a TextRedactor whose active pattern set varies by
+// trust level — user_requested / operator_curated memories only get
+// structural patterns applied; everything else gets the full set.
+type TrustAwareRedactor interface {
+	TextRedactor
+	// RedactTextWithTrust applies PII redaction using the given trust level.
+	// TrustExplicit drops non-structural patterns; TrustInferred applies all.
+	RedactTextWithTrust(ctx context.Context, text string, trust TrustLevel) (string, error)
+}
+
 // PatternRedactor is a TextRedactor that applies a fixed PIIConfig on every call.
 // It validates and pre-compiles patterns at construction time.
 type PatternRedactor struct {
@@ -60,4 +70,19 @@ func NewPatternRedactor(config *omniav1alpha1.PIIConfig) (TextRedactor, error) {
 func (r *PatternRedactor) RedactText(ctx context.Context, text string) (string, error) {
 	redacted, _, err := r.inner.Redact(ctx, text, r.pii)
 	return redacted, err
+}
+
+// RedactTextWithTrust applies the configured PIIConfig with the given trust
+// level — TrustExplicit content (user_requested / operator_curated) only
+// gets structural patterns redacted, TrustInferred gets the full set.
+func (r *PatternRedactor) RedactTextWithTrust(
+	ctx context.Context, text string, trust TrustLevel,
+) (string, error) {
+	redacted, _, err := r.inner.RedactWithTrust(ctx, text, r.pii, trust)
+	return redacted, err
+}
+
+// RedactTextWithTrust on NoOpRedactor is a no-op like RedactText.
+func (NoOpRedactor) RedactTextWithTrust(_ context.Context, text string, _ TrustLevel) (string, error) {
+	return text, nil
 }

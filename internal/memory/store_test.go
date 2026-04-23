@@ -36,6 +36,8 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
+
 	pgmigrate "github.com/altairalabs/omnia/internal/memory/postgres"
 )
 
@@ -167,6 +169,47 @@ func TestPostgresMemoryStore_Save(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, mem.ID, "ID should be populated after save")
 	assert.False(t, mem.CreatedAt.IsZero(), "CreatedAt should be populated")
+}
+
+func TestPostgresMemoryStore_Save_TrustModelFromProvenance(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	cases := []struct {
+		name           string
+		provenance     string
+		wantTrustModel string
+		wantSourceType string
+	}{
+		{"user_requested", "user_requested", "explicit", "user_requested"},
+		{"operator_curated", "operator_curated", "curated", "operator_curated"},
+		{"agent_extracted", "agent_extracted", "inferred", "conversation_extraction"},
+		{"system_generated", "system_generated", "inferred", "system_generated"},
+		{"no_provenance_uses_schema_defaults", "", "inferred", "conversation_extraction"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			meta := map[string]any{}
+			if tc.provenance != "" {
+				meta[pkmemory.MetaKeyProvenance] = tc.provenance
+			}
+			mem := &Memory{
+				Type: "fact", Content: "trust-" + tc.name, Confidence: 1.0,
+				Scope: scope, Metadata: meta,
+			}
+			require.NoError(t, store.Save(ctx, mem))
+			require.NotEmpty(t, mem.ID)
+
+			var trustModel, sourceType string
+			row := store.Pool().QueryRow(ctx,
+				`SELECT trust_model, source_type FROM memory_entities WHERE id = $1`, mem.ID)
+			require.NoError(t, row.Scan(&trustModel, &sourceType))
+			assert.Equal(t, tc.wantTrustModel, trustModel, "trust_model")
+			assert.Equal(t, tc.wantSourceType, sourceType, "source_type")
+		})
+	}
 }
 
 func TestPostgresMemoryStore_Save_MissingWorkspace(t *testing.T) {

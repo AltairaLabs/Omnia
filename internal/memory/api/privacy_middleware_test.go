@@ -37,7 +37,7 @@ import (
 var passthroughOptOut OptOutChecker = func(_ context.Context, _, _, _ string, _ []string) bool { return true }
 
 // noOpRedact returns content unchanged.
-var noOpRedact ContentRedactor = func(_ context.Context, _, content string) (string, error) {
+var noOpRedact ContentRedactor = func(_ context.Context, _, content, _ string) (string, error) {
 	return content, nil
 }
 
@@ -50,7 +50,7 @@ var panicOptOut OptOutChecker = func(_ context.Context, _, _, _ string, _ []stri
 }
 
 // panicRedact panics if called — use to assert redaction is never invoked.
-var panicRedact ContentRedactor = func(_ context.Context, _, _ string) (string, error) {
+var panicRedact ContentRedactor = func(_ context.Context, _, _, _ string) (string, error) {
 	panic("ContentRedactor must not be called for this request")
 }
 
@@ -154,7 +154,7 @@ func TestMemoryPrivacyMiddleware_PIIRedaction_ContentRedacted(t *testing.T) {
 		receivedContent = req.Content
 	})
 
-	redactor := ContentRedactor(func(_ context.Context, _, content string) (string, error) {
+	redactor := ContentRedactor(func(_ context.Context, _, content, _ string) (string, error) {
 		if content == originalContent {
 			return redactedContent, nil
 		}
@@ -171,12 +171,62 @@ func TestMemoryPrivacyMiddleware_PIIRedaction_ContentRedacted(t *testing.T) {
 	assert.Equal(t, redactedContent, receivedContent, "handler should receive redacted content")
 }
 
+func TestMemoryPrivacyMiddleware_ForwardsProvenance(t *testing.T) {
+	var seenProvenance string
+	redactor := ContentRedactor(func(_ context.Context, _, content, provenance string) (string, error) {
+		seenProvenance = provenance
+		return content, nil
+	})
+
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+	mw := newTestMiddleware(passthroughOptOut, redactor)
+	handler := mw.Wrap(next)
+
+	// Build a request whose metadata carries provenance=user_requested.
+	body := SaveMemoryRequest{
+		Type:    "fact",
+		Content: "my work email is alice@example.com",
+		Scope: map[string]string{
+			"workspace_id": "ws-1",
+			"user_id":      "user-1",
+		},
+		Metadata: map[string]any{"provenance": "user_requested"},
+	}
+	raw, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/memories?workspace=ws-1&user_id=user-1", bytes.NewReader(raw))
+	r.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(httptest.NewRecorder(), r)
+
+	assert.Equal(t, "user_requested", seenProvenance,
+		"redactor must receive the provenance from the request metadata")
+}
+
+func TestMemoryPrivacyMiddleware_EmptyProvenanceWhenMetadataMissing(t *testing.T) {
+	var seenProvenance string
+	redactor := ContentRedactor(func(_ context.Context, _, content, provenance string) (string, error) {
+		seenProvenance = provenance
+		return content, nil
+	})
+
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+	mw := newTestMiddleware(passthroughOptOut, redactor)
+	handler := mw.Wrap(next)
+
+	r := makePostRequest(t, "hello", "ws-1", "user-1")
+	handler.ServeHTTP(httptest.NewRecorder(), r)
+
+	assert.Empty(t, seenProvenance,
+		"redactor must receive empty provenance when metadata is absent")
+}
+
 func TestMemoryPrivacyMiddleware_RedactionError_Returns500(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	})
 
-	errRedact := ContentRedactor(func(_ context.Context, _, _ string) (string, error) {
+	errRedact := ContentRedactor(func(_ context.Context, _, _, _ string) (string, error) {
 		return "", errors.New("regex engine failure")
 	})
 
@@ -232,7 +282,7 @@ func TestMemoryPrivacyMiddleware_NoRedactionWhenContentUnchanged(t *testing.T) {
 
 	// Track that redactor was called but content unchanged.
 	redactorCallCount := 0
-	redactor := ContentRedactor(func(_ context.Context, _, content string) (string, error) {
+	redactor := ContentRedactor(func(_ context.Context, _, content, _ string) (string, error) {
 		redactorCallCount++
 		return content, nil // no change
 	})

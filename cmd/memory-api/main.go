@@ -532,12 +532,13 @@ func wrapPrivacyMiddleware(next http.Handler, pool *pgxpool.Pool, log logr.Logge
 		return privacy.ShouldRememberCategory(ctx, prefStore, source, userID, workspace, "", cat)
 	})
 
-	contentRedactor := memoryapi.ContentRedactor(func(ctx context.Context, workspace, content string) (string, error) {
+	contentRedactor := memoryapi.ContentRedactor(func(ctx context.Context, workspace, content, provenance string) (string, error) {
 		policy := watcher.GetEffectivePolicy(workspace, "")
 		if policy == nil || policy.Recording.PII == nil || !policy.Recording.PII.Redact {
 			return content, nil
 		}
-		redacted, _, err := redactor.Redact(ctx, content, policy.Recording.PII)
+		trust := trustLevelForProvenance(provenance)
+		redacted, _, err := redactor.RedactWithTrust(ctx, content, policy.Recording.PII, trust)
 		return redacted, err
 	})
 
@@ -545,6 +546,22 @@ func wrapPrivacyMiddleware(next http.Handler, pool *pgxpool.Pool, log logr.Logge
 	mw := memoryapi.NewMemoryPrivacyMiddleware(checkOptOut, contentRedactor, classifier, log)
 	log.Info("memory privacy middleware enabled")
 	return mw.Wrap(next)
+}
+
+// trustLevelForProvenance maps a PromptKit provenance string to the
+// redaction trust level. user_requested and operator_curated memories are
+// content the caller intentionally asked to persist, so personal-detail
+// patterns (email, phone) are dropped from the redaction set and only
+// structural identifiers (SSN, credit-card, IP, custom patterns) get
+// scrubbed. Agent-extracted, system-generated, and unrecognised provenance
+// values fall back to TrustInferred so the full pattern set applies.
+func trustLevelForProvenance(provenance string) redaction.TrustLevel {
+	switch provenance {
+	case "user_requested", "operator_curated":
+		return redaction.TrustExplicit
+	default:
+		return redaction.TrustInferred
+	}
 }
 
 // traceLogMiddleware injects the OTel trace ID into the logging context.
