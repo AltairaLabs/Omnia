@@ -271,11 +271,11 @@ flowchart LR
     end
 ```
 
-- **Pattern A (Platform Events)** works with every framework type. The facade records sessions through session-api, which publishes lightweight events to Redis Streams. A per-namespace eval worker subscribes, loads the PromptPack's eval definitions, and runs assertions against the session data.
+- **Pattern A (Platform Events)** uses the eval-worker Deployment. The facade records sessions through session-api, which publishes lightweight events to Redis Streams. A per-namespace eval worker subscribes, loads the PromptPack's eval definitions, and runs assertions against the session data. By default the worker runs the `long-running` and `external` eval groups — LLM judges and external API checks.
 
-- **Pattern C (EventBus-Driven)** is an additional path for PromptKit agents. PromptKit's `RecordingStage` and `EventBus` provide richer event data (provider call metadata, validation events, pipeline timings). An in-process `EventBusEvalListener` triggers evals with lower latency and fuller context.
+- **Pattern C (EventBus-Driven)** runs in-process inside PromptKit agents. PromptKit's `RecordingStage` and `EventBus` provide richer event data (provider call metadata, validation events, pipeline timings). An in-process `EventBusEvalListener` triggers evals synchronously during the turn. By default the inline path runs the `fast-running` group — deterministic handlers (contains, regex) that are cheap enough to gate on.
 
-Eval configuration — judges, sampling rates, rate limits — is defined per-agent on the [AgentRuntime CRD](/reference/agentruntime/#evals). Results are stored in the `eval_results` table and surfaced in the dashboard's quality view.
+Both paths run concurrently for PromptKit agents, split by eval group. The defaults are disjoint so a given eval runs on exactly one path; operators can override the routing per agent. Eval configuration — routing, judges, sampling rates, rate limits — is defined per-agent on the [AgentRuntime CRD](/reference/agentruntime/#evals). Results land in the `eval_results` table tagged `source="worker"` (Pattern A) or `source="runtime-inline"` (Pattern C), and are surfaced in the dashboard's quality view.
 
 For the complete explanation, see [Realtime Evals](/explanation/realtime-evals/).
 
