@@ -59,6 +59,13 @@ const (
 	metaKeyIsError = "is_error"
 
 	metaValueSource = "runtime"
+
+	// evalSourceInline is the Source tag for eval_results rows written by
+	// the inline runtime path (via convertEvalEvent). The eval-worker
+	// path writes rows with Source="worker" — see ee/pkg/evals/worker.go.
+	// The two values together let consumers distinguish which pipeline
+	// produced a row without looking at timing or handler type.
+	evalSourceInline = "runtime-inline"
 )
 
 // asPtr extracts event data as a pointer, handling both value and pointer types.
@@ -687,7 +694,7 @@ func (s *OmniaEventStore) convertEvalEvent(event *events.Event) (eventAction, bo
 		Namespace:         s.agentMeta.Namespace,
 		PromptPackName:    s.agentMeta.PromptPackName,
 		PromptPackVersion: s.agentMeta.PromptPackVersion,
-		Source:            metaValueSource,
+		Source:            evalSourceInline,
 		CreatedAt:         event.Timestamp,
 	}
 	if durationMs > 0 {

@@ -27,7 +27,7 @@
   - Tool calls (first-class records with args, result, duration)
   - Provider calls (first-class records with tokens, cost, duration)
   - Runtime events (pipeline, stage, middleware, validation lifecycle)
-  - Eval results (inline eval scores with explanation, source="runtime")
+  - Eval results (inline eval scores with explanation, source="runtime-inline"; worker-written rows use source="worker")
   - Session stats (token counts, message counts)
 
 ## Does NOT Own

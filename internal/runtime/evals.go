@@ -94,7 +94,17 @@ func ValidateEvalDefs(defs []evals.EvalDef) []string {
 }
 
 // buildEvalOptions builds SDK options for eval middleware when a collector is configured.
-// Eval results are recorded to Prometheus via OmniaEventStore (event-driven).
+//
+// Two result sinks run in parallel:
+//   - Prometheus counters, via sdk.WithMetrics below.
+//   - eval_results rows, via OmniaEventStore.convertEvalEvent — wired
+//     separately through sdk.WithEventStore in buildConversationOptions
+//     and tagged Source="runtime-inline" to distinguish them from
+//     worker-path rows (Source="worker").
+//
+// Inline evals are expected to be lightweight (contains, regex, simple
+// scorers); LLM-as-judge evals run out-of-band in the eval-worker where
+// the full EvalResult is captured without bus serialization loss.
 func (s *Server) buildEvalOptions() []sdk.Option {
 	if s.evalCollector == nil {
 		s.log.V(1).Info("eval options skipped", "reason", "no collector")
