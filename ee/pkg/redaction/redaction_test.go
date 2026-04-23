@@ -338,6 +338,82 @@ func TestRedact_AuditMode(t *testing.T) {
 	})
 }
 
+func TestRedactWithTrust_ExplicitKeepsPersonalDetails(t *testing.T) {
+	ctx := context.Background()
+	r := NewRedactor()
+
+	cfg := piiConfig("ssn", "credit_card", "ip_address", "email", "phone_number")
+	text := "I'm alice@example.com at 555-123-4567, card 4111 1111 1111 1111 SSN 123-45-6789, from 10.0.0.1"
+
+	// Inferred mode (agent-extracted): everything is redacted.
+	inferred, _, err := r.RedactWithTrust(ctx, text, cfg, TrustInferred)
+	require.NoError(t, err)
+	wants := []string{
+		"[REDACTED_EMAIL]",
+		"[REDACTED_PHONE]",
+		"[REDACTED_CC]",
+		"[REDACTED_SSN]",
+		"[REDACTED_IP]",
+	}
+	for _, want := range wants {
+		assert.Contains(t, inferred, want, "inferred: %q should redact %s", text, want)
+	}
+
+	// Explicit mode (user_requested / operator_curated): personal details
+	// (email, phone) stay; structural identifiers still get scrubbed.
+	explicit, _, err := r.RedactWithTrust(ctx, text, cfg, TrustExplicit)
+	require.NoError(t, err)
+	assert.Contains(t, explicit, "alice@example.com", "explicit trust should KEEP email")
+	assert.Contains(t, explicit, "555-123-4567", "explicit trust should KEEP phone")
+	assert.Contains(t, explicit, "[REDACTED_CC]", "explicit trust must still redact credit-card")
+	assert.Contains(t, explicit, "[REDACTED_SSN]", "explicit trust must still redact SSN")
+	assert.Contains(t, explicit, "[REDACTED_IP]", "explicit trust must still redact IP")
+}
+
+func TestRedactWithTrust_ExplicitNoStructuralPatternsIsNoop(t *testing.T) {
+	ctx := context.Background()
+	r := NewRedactor()
+
+	// Only personal-detail patterns configured — explicit mode should be a no-op.
+	cfg := piiConfig("email", "phone_number")
+	text := "alice@example.com at 555-123-4567"
+
+	got, events, err := r.RedactWithTrust(ctx, text, cfg, TrustExplicit)
+	require.NoError(t, err)
+	assert.Equal(t, text, got, "explicit trust + personal-only config should pass through")
+	assert.Empty(t, events)
+}
+
+func TestRedactWithTrust_CustomPatternsAreStructural(t *testing.T) {
+	ctx := context.Background()
+	r := NewRedactor()
+
+	// Custom patterns default to Structural — a compliance-style "token
+	// must never leak" rule keeps firing in explicit mode.
+	cfg := piiConfig(`custom:\bSECRET-\d+\b`)
+	text := "leak: SECRET-123"
+
+	got, _, err := r.RedactWithTrust(ctx, text, cfg, TrustExplicit)
+	require.NoError(t, err)
+	assert.Contains(t, got, "[REDACTED_CUSTOM]", "custom patterns must apply in explicit mode")
+	assert.NotContains(t, got, "SECRET-123")
+}
+
+func TestRedactWithTrust_BackwardCompatibleWithRedact(t *testing.T) {
+	ctx := context.Background()
+	r := NewRedactor()
+
+	cfg := piiConfig("ssn", "email")
+	text := "SSN 123-45-6789, email a@b.com"
+
+	viaRedact, _, err := r.Redact(ctx, text, cfg)
+	require.NoError(t, err)
+	viaInferred, _, err := r.RedactWithTrust(ctx, text, cfg, TrustInferred)
+	require.NoError(t, err)
+	assert.Equal(t, viaRedact, viaInferred,
+		"Redact must remain equivalent to RedactWithTrust(...TrustInferred)")
+}
+
 func TestRedact_EventPositions(t *testing.T) {
 	ctx := context.Background()
 	r := NewRedactor()

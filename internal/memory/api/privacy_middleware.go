@@ -44,7 +44,16 @@ type OptOutChecker func(ctx context.Context, userID, workspace, category string,
 // ContentRedactor redacts PII from memory content text.
 // Returns the redacted string; if redaction is not configured it returns the
 // original text unchanged.
-type ContentRedactor func(ctx context.Context, workspace, content string) (string, error)
+//
+// provenance is the PromptKit Provenance string carried on the memory's
+// metadata (user_requested, agent_extracted, system_generated,
+// operator_curated) — empty when the caller didn't set one. Implementations
+// use it to decide whether to apply the full pattern set (agent-extracted /
+// system-generated / unknown) or only the structural subset
+// (user_requested / operator_curated) so intentionally-persisted personal
+// details (e.g. "my work email is ...") survive while SSN / CC / IP remain
+// scrubbed.
+type ContentRedactor func(ctx context.Context, workspace, content, provenance string) (string, error)
 
 // ContentClassifier infers a consent category from memory content.
 // Returns a category string (e.g. "memory:identity") or empty string for default.
@@ -79,6 +88,21 @@ func NewMemoryPrivacyMiddleware(
 		classifier:  classifier,
 		log:         log.WithName("memory-privacy"),
 	}
+}
+
+// provenanceMetaKey mirrors pkmemory.MetaKeyProvenance — duplicated here as
+// a string literal to keep the middleware dependency-free from the memory
+// package's PromptKit re-export.
+const provenanceMetaKey = "provenance"
+
+// provenanceFromMetadata extracts the provenance string from a memory's
+// metadata map. Returns "" when unset or wrong type.
+func provenanceFromMetadata(meta map[string]any) string {
+	if meta == nil {
+		return ""
+	}
+	v, _ := meta[provenanceMetaKey].(string)
+	return v
 }
 
 // readAndDecode reads the request body and attempts to decode it as a SaveMemoryRequest.
@@ -136,7 +160,8 @@ func (m *MemoryPrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 
 		// Apply PII redaction when body was successfully decoded.
 		if decoded {
-			redacted, redactErr := m.redact(r.Context(), workspace, req.Content)
+			provenance := provenanceFromMetadata(req.Metadata)
+			redacted, redactErr := m.redact(r.Context(), workspace, req.Content, provenance)
 			if redactErr != nil {
 				m.log.Error(redactErr, "content redaction failed, blocking request", "workspace", workspace)
 				http.Error(w, "redaction failed", http.StatusInternalServerError)

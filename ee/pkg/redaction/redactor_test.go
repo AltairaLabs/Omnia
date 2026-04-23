@@ -325,3 +325,72 @@ func TestNoOpRedactor_PassthroughDirectly(t *testing.T) {
 		t.Errorf("expected passthrough, got %q", got)
 	}
 }
+
+// TestNoOpRedactor_RedactTextWithTrustPassthrough ensures the trust-aware
+// entrypoint stays a no-op on NoOpRedactor regardless of trust level.
+func TestNoOpRedactor_RedactTextWithTrustPassthrough(t *testing.T) {
+	var r redaction.NoOpRedactor
+	text := "alice@example.com at 555-867-5309"
+
+	for _, trust := range []redaction.TrustLevel{redaction.TrustInferred, redaction.TrustExplicit} {
+		got, err := r.RedactTextWithTrust(context.Background(), text, trust)
+		if err != nil {
+			t.Fatalf("unexpected error at trust=%d: %v", trust, err)
+		}
+		if got != text {
+			t.Errorf("trust=%d: expected passthrough, got %q", trust, got)
+		}
+	}
+}
+
+// TestPatternRedactor_RedactTextWithTrust_ExplicitKeepsPersonalDetails
+// exercises the trust-aware entrypoint on the PatternRedactor wrapper so the
+// coverage gate on redactor.go is satisfied.
+func TestPatternRedactor_RedactTextWithTrust_ExplicitKeepsPersonalDetails(t *testing.T) {
+	cfg := piiConfig(
+		[]string{"ssn", "credit_card", "ip_address", "email", "phone_number"},
+		omniav1alpha1.RedactionStrategyReplace,
+	)
+	r, err := redaction.NewPatternRedactor(cfg)
+	if err != nil {
+		t.Fatalf("new pattern redactor: %v", err)
+	}
+
+	text := "alice@example.com, 555-867-5309, 4111 1111 1111 1111, 123-45-6789, 10.0.0.1"
+
+	// Inferred: all five patterns apply.
+	inferred, err := r.(redaction.TrustAwareRedactor).
+		RedactTextWithTrust(context.Background(), text, redaction.TrustInferred)
+	if err != nil {
+		t.Fatalf("RedactTextWithTrust inferred: %v", err)
+	}
+	for _, want := range []string{
+		"[REDACTED_EMAIL]", "[REDACTED_PHONE]", "[REDACTED_CC]", "[REDACTED_SSN]", "[REDACTED_IP]",
+	} {
+		if !strings.Contains(inferred, want) {
+			t.Errorf("inferred: expected %s, got %q", want, inferred)
+		}
+	}
+
+	// Explicit: personal patterns drop, structural ones stay.
+	explicit, err := r.(redaction.TrustAwareRedactor).
+		RedactTextWithTrust(context.Background(), text, redaction.TrustExplicit)
+	if err != nil {
+		t.Fatalf("RedactTextWithTrust explicit: %v", err)
+	}
+	if !strings.Contains(explicit, "alice@example.com") {
+		t.Errorf("explicit should KEEP email, got %q", explicit)
+	}
+	if !strings.Contains(explicit, "555-867-5309") {
+		t.Errorf("explicit should KEEP phone, got %q", explicit)
+	}
+	if !strings.Contains(explicit, "[REDACTED_SSN]") {
+		t.Errorf("explicit should still redact SSN, got %q", explicit)
+	}
+	if !strings.Contains(explicit, "[REDACTED_CC]") {
+		t.Errorf("explicit should still redact credit-card, got %q", explicit)
+	}
+	if !strings.Contains(explicit, "[REDACTED_IP]") {
+		t.Errorf("explicit should still redact IP, got %q", explicit)
+	}
+}

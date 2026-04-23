@@ -29,12 +29,41 @@ type RedactionEvent struct {
 	EndIndex int
 }
 
+// TrustLevel controls which patterns a redactor applies. Structural-only mode
+// limits redaction to compliance-relevant identifiers (SSN, credit-card, IP)
+// so user-curated and operator-curated memories can preserve the personal
+// details the caller explicitly asked to remember (phone, email) while still
+// scrubbing identifiers that always require protection.
+type TrustLevel int
+
+const (
+	// TrustInferred applies the full configured pattern set. Default for
+	// agent-extracted memories where the content is not something the user
+	// explicitly asked to store.
+	TrustInferred TrustLevel = iota
+	// TrustExplicit skips non-structural patterns and only redacts
+	// structural identifiers. Used for provenance=user_requested or
+	// provenance=operator_curated memories.
+	TrustExplicit
+)
+
 // Redactor performs PII redaction on text and session messages.
 type Redactor interface {
 	// Redact applies PII redaction to the given text using the provided PIIConfig.
-	Redact(ctx context.Context, text string, pii *omniav1alpha1.PIIConfig) (string, []RedactionEvent, error)
+	Redact(
+		ctx context.Context, text string, pii *omniav1alpha1.PIIConfig,
+	) (string, []RedactionEvent, error)
+	// RedactWithTrust is like Redact but filters the active pattern set by
+	// trust level — TrustExplicit content skips personal-detail patterns so
+	// callers who intentionally asked to persist (e.g.) their work email
+	// keep that detail, while structural identifiers are still redacted.
+	RedactWithTrust(
+		ctx context.Context, text string, pii *omniav1alpha1.PIIConfig, trust TrustLevel,
+	) (string, []RedactionEvent, error)
 	// RedactMessage applies PII redaction to a session Message, returning a copy.
-	RedactMessage(ctx context.Context, msg *session.Message, pii *omniav1alpha1.PIIConfig) (*session.Message, error)
+	RedactMessage(
+		ctx context.Context, msg *session.Message, pii *omniav1alpha1.PIIConfig,
+	) (*session.Message, error)
 }
 
 // Option configures a redactor.
@@ -71,6 +100,16 @@ type match struct {
 func (r *redactor) Redact(
 	ctx context.Context, text string, pii *omniav1alpha1.PIIConfig,
 ) (string, []RedactionEvent, error) {
+	return r.RedactWithTrust(ctx, text, pii, TrustInferred)
+}
+
+// RedactWithTrust is Redact with trust-level-aware pattern filtering.
+// TrustExplicit drops non-structural patterns from the active set before
+// matching — the structural identifiers in the config (SSN, credit-card,
+// IP, custom patterns) are still enforced.
+func (r *redactor) RedactWithTrust(
+	ctx context.Context, text string, pii *omniav1alpha1.PIIConfig, trust TrustLevel,
+) (string, []RedactionEvent, error) {
 	if pii == nil || !pii.Redact || len(pii.Patterns) == 0 || text == "" {
 		return text, nil, nil
 	}
@@ -78,6 +117,11 @@ func (r *redactor) Redact(
 	patterns, err := resolvePatterns(pii.Patterns)
 	if err != nil {
 		return "", nil, err
+	}
+
+	patterns = filterPatternsByTrust(patterns, trust)
+	if len(patterns) == 0 {
+		return text, nil, nil
 	}
 
 	strategy := pii.Strategy
