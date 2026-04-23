@@ -56,6 +56,12 @@ type cacheTestStore struct {
 	saveInstitutionalCalls   int
 	listInstitutionalCalls   int
 	deleteInstitutionalCalls int
+
+	// Compaction wrapper counters.
+	findCompactionCalls int
+	saveCompactionCalls int
+	saveCompactionID    string
+	compactionErr       error
 }
 
 func (m *cacheTestStore) Save(_ context.Context, mem *Memory) error {
@@ -130,6 +136,20 @@ func (m *cacheTestStore) DeleteAgentScoped(_ context.Context, _, _, _ string) er
 	defer m.mu.Unlock()
 	m.deleteAgentScopedCalls++
 	return m.agentScopedErr
+}
+
+func (m *cacheTestStore) FindCompactionCandidates(_ context.Context, _ FindCompactionCandidatesOptions) ([]CompactionCandidate, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.findCompactionCalls++
+	return nil, m.compactionErr
+}
+
+func (m *cacheTestStore) SaveCompactionSummary(_ context.Context, _ CompactionSummary) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.saveCompactionCalls++
+	return m.saveCompactionID, m.compactionErr
 }
 
 func (m *cacheTestStore) List(_ context.Context, _ map[string]string, _ ListOptions) ([]*Memory, error) {

@@ -57,4 +57,10 @@ type Store interface {
 	SaveAgentScoped(ctx context.Context, mem *Memory) error
 	ListAgentScoped(ctx context.Context, workspaceID, agentID string, opts ListOptions) ([]*Memory, error)
 	DeleteAgentScoped(ctx context.Context, workspaceID, agentID, memoryID string) error
+
+	// Compaction surface — exposed on the Store interface so a summarizer
+	// agent can discover buckets and persist summaries via HTTP tools.
+	// See docs/local-backlog/2026-04-23-memory-summarization-via-agent.md.
+	FindCompactionCandidates(ctx context.Context, opts FindCompactionCandidatesOptions) ([]CompactionCandidate, error)
+	SaveCompactionSummary(ctx context.Context, summary CompactionSummary) (string, error)
 }

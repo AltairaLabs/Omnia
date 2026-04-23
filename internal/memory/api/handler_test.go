@@ -93,6 +93,14 @@ func (m *mockStore) ListAgentScoped(_ context.Context, _, _ string, _ memory.Lis
 
 func (m *mockStore) DeleteAgentScoped(_ context.Context, _, _, _ string) error { return nil }
 
+func (m *mockStore) FindCompactionCandidates(_ context.Context, _ memory.FindCompactionCandidatesOptions) ([]memory.CompactionCandidate, error) {
+	return nil, nil
+}
+
+func (m *mockStore) SaveCompactionSummary(_ context.Context, _ memory.CompactionSummary) (string, error) {
+	return "", nil
+}
+
 func (m *mockStore) Delete(_ context.Context, _ map[string]string, _ string) error {
 	return m.delErr
 }

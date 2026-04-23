@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1
+# Build the a2a-invoker binary — a small tool that makes one-shot A2A
+# calls against a target AgentRuntime. Designed to run inside a
+# Kubernetes CronJob that wakes a scheduled agent on an interval.
+FROM golang:1.26 AS builder
+ARG TARGETOS
+ARG TARGETARCH
+ENV GOWORK=off
+
+WORKDIR /workspace
+COPY go.mod go.mod
+COPY go.sum go.sum
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
+
+COPY . .
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
+    go build -a -ldflags="-w -s" -o a2a-invoker ./cmd/a2a-invoker
+
+# Distroless static for a ~10MB final image.
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY --from=builder /workspace/a2a-invoker .
+USER 65532:65532
+
+ENTRYPOINT ["/a2a-invoker"]
