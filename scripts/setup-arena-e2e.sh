@@ -244,6 +244,47 @@ while IFS='|' read -r name repo version required; do
     fi
 done <<< "$DEPS"
 
+# Pre-create a static PV for the workspace-content PVC so the chart's PVC
+# binds via explicit claimRef rather than dynamic provisioning. kind's default
+# rancher.io/local-path provisioner uses volumeBindingMode: WaitForFirstConsumer
+# and the scheduler's PreBind optimistic-concurrency retry collides with the
+# provisioner's own PVC updates, stalling the controller-manager pod for 4+
+# minutes before it can start. Static binding to a hostPath PV side-steps the
+# provisioner entirely — no race, no wait.
+#
+# The PVC created by the chart is
+#   {fullname}-workspace-content = omnia-workspace-content
+# in namespace $NAMESPACE. The PV below reserves itself for that exact PVC
+# via claimRef, so the chart's PVC binds immediately on create.
+log_info "Pre-creating static PV for workspace-content..."
+
+# Create the hostPath directory on every kind node with the fsGroup (65532)
+# ownership the operator container expects, so the pod can write there.
+WORKSPACE_CONTENT_HOST_DIR="/var/lib/omnia/workspace-content"
+for node in $(kind get nodes --name "$KIND_CLUSTER"); do
+    docker exec "$node" bash -c "mkdir -p '$WORKSPACE_CONTENT_HOST_DIR' && chown 65532:65532 '$WORKSPACE_CONTENT_HOST_DIR'"
+done
+
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: omnia-workspace-content-pv
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: omnia-workspace-content-static
+  claimRef:
+    namespace: $NAMESPACE
+    name: omnia-workspace-content
+  hostPath:
+    path: $WORKSPACE_CONTENT_HOST_DIR
+    type: DirectoryOrCreate
+EOF
+
 log_info "Deploying via Helm..."
 
 retry 2 15 helm upgrade --install omnia charts/omnia \
@@ -295,7 +336,8 @@ retry 2 15 helm upgrade --install omnia charts/omnia \
     --set nfs.csiDriver.enabled=false \
     --set workspaceContent.enabled=true \
     --set workspaceContent.persistence.accessModes[0]=ReadWriteOnce \
-    --set workspaceContent.persistence.storageClass=standard \
+    --set workspaceContent.persistence.storageClass=omnia-workspace-content-static \
+    --set workspaceContent.persistence.size=1Gi \
     --set prometheus.enabled=false \
     --set grafana.enabled=false \
     --set loki.enabled=false \
