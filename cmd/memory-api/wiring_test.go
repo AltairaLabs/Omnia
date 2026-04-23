@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
@@ -137,6 +138,52 @@ func TestBuildAPIMux_GETMemoriesWired(t *testing.T) {
 
 	if rr.Code == http.StatusNotFound {
 		t.Errorf("GET /api/v1/memories not registered; buildAPIMux returned 404")
+	}
+}
+
+// TestCompactionWorkerOptions_DisabledWhenIntervalEmpty proves that omitting
+// --compaction-interval keeps the worker off. Without this guard the worker
+// would tick on the zero-duration default and spam RunOnce in a tight loop.
+func TestCompactionWorkerOptions_DisabledWhenIntervalEmpty(t *testing.T) {
+	f := &flags{}
+	_, enabled := f.compactionWorkerOptions(logr.Discard(), nil)
+	if enabled {
+		t.Error("expected compaction worker to be disabled when interval is empty")
+	}
+}
+
+// TestCompactionWorkerOptions_InvalidIntervalDisables proves that a bad
+// duration string keeps the worker off instead of starting it with whatever
+// ParseDuration happens to partially succeed on.
+func TestCompactionWorkerOptions_InvalidIntervalDisables(t *testing.T) {
+	f := &flags{compactionInterval: "not-a-duration"}
+	_, enabled := f.compactionWorkerOptions(logr.Discard(), nil)
+	if enabled {
+		t.Error("expected compaction worker to be disabled when interval is invalid")
+	}
+}
+
+// TestCompactionWorkerOptions_PopulatesAgeAndDiscoverer proves the happy path:
+// a valid interval + age populates options and wires the store's
+// ListWorkspaceIDs as the workspace discoverer.
+func TestCompactionWorkerOptions_PopulatesAgeAndDiscoverer(t *testing.T) {
+	store := &memory.PostgresMemoryStore{}
+	f := &flags{
+		compactionInterval: "6h",
+		compactionAge:      "720h",
+	}
+	opts, enabled := f.compactionWorkerOptions(logr.Discard(), store)
+	if !enabled {
+		t.Fatal("expected compaction worker to be enabled")
+	}
+	if opts.Interval != 6*time.Hour {
+		t.Errorf("expected 6h interval, got %v", opts.Interval)
+	}
+	if opts.Age != 720*time.Hour {
+		t.Errorf("expected 720h age, got %v", opts.Age)
+	}
+	if opts.WorkspaceDiscoverer == nil {
+		t.Error("expected WorkspaceDiscoverer to be wired to store.ListWorkspaceIDs")
 	}
 }
 

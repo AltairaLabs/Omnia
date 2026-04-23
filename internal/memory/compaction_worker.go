@@ -59,8 +59,15 @@ func (NoopSummarizer) Summarize(_ context.Context, entries []CompactionEntry) (s
 type CompactionWorkerOptions struct {
 	// Interval between compaction passes. A few hours is a sensible default.
 	Interval time.Duration
-	// WorkspaceIDs the worker scans each tick. Empty slice = no-op.
+	// WorkspaceIDs the worker scans each tick. If non-empty the worker uses
+	// this fixed list and WorkspaceDiscoverer is ignored — intended for tests
+	// and for operators who want to pin compaction to a subset of workspaces.
 	WorkspaceIDs []string
+	// WorkspaceDiscoverer is called at each RunOnce tick when WorkspaceIDs is
+	// empty. Typical wiring is (*PostgresMemoryStore).ListWorkspaceIDs so
+	// newly-seen workspaces get compacted without a service restart. Nil and
+	// WorkspaceIDs both empty = no-op.
+	WorkspaceDiscoverer func(context.Context) ([]string, error)
 	// Age of observations before they become compaction candidates. 30d is
 	// a sensible default for conversational memory.
 	Age time.Duration
@@ -127,7 +134,11 @@ func (w *CompactionWorker) Run(ctx context.Context) {
 // doesn't stop on per-workspace failures — one bad workspace shouldn't block
 // the others.
 func (w *CompactionWorker) RunOnce(ctx context.Context) error {
-	if len(w.opts.WorkspaceIDs) == 0 {
+	workspaces, err := w.resolveWorkspaces(ctx)
+	if err != nil {
+		return err
+	}
+	if len(workspaces) == 0 {
 		return nil
 	}
 	age := w.opts.Age
@@ -137,7 +148,7 @@ func (w *CompactionWorker) RunOnce(ctx context.Context) error {
 	olderThan := time.Now().Add(-age)
 
 	var firstErr error
-	for _, ws := range w.opts.WorkspaceIDs {
+	for _, ws := range workspaces {
 		if err := w.runWorkspace(ctx, ws, olderThan); err != nil {
 			w.log.Error(err, "compaction workspace failed", "workspace", ws)
 			if firstErr == nil {
@@ -146,6 +157,23 @@ func (w *CompactionWorker) RunOnce(ctx context.Context) error {
 		}
 	}
 	return firstErr
+}
+
+// resolveWorkspaces returns the workspace IDs the worker should scan this
+// pass. Static WorkspaceIDs wins; otherwise WorkspaceDiscoverer is consulted
+// so new workspaces don't require a service restart.
+func (w *CompactionWorker) resolveWorkspaces(ctx context.Context) ([]string, error) {
+	if len(w.opts.WorkspaceIDs) > 0 {
+		return w.opts.WorkspaceIDs, nil
+	}
+	if w.opts.WorkspaceDiscoverer == nil {
+		return nil, nil
+	}
+	ids, err := w.opts.WorkspaceDiscoverer(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("discover workspaces: %w", err)
+	}
+	return ids, nil
 }
 
 func (w *CompactionWorker) runWorkspace(ctx context.Context, workspaceID string, olderThan time.Time) error {
