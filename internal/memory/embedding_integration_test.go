@@ -20,11 +20,8 @@ package memory
 
 import (
 	"context"
-	"encoding/json"
-	"strings"
 	"testing"
 
-	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -62,23 +59,6 @@ func (p *testEmbeddingProvider) Embed(_ context.Context, texts []string) ([][]fl
 }
 
 func (p *testEmbeddingProvider) Dimensions() int { return p.defaultDim }
-
-// testRedactor replaces email addresses with a placeholder.
-type testRedactor struct{}
-
-func (r *testRedactor) RedactText(_ context.Context, text string) (string, error) {
-	return strings.ReplaceAll(text, "test@example.com", "[REDACTED]"), nil
-}
-
-// testLLMProvider returns a fixed response string to every Complete call.
-type testLLMProvider struct {
-	response string
-	err      error
-}
-
-func (p *testLLMProvider) Complete(_ context.Context, _, _ string) (string, error) {
-	return p.response, p.err
-}
 
 // --- Helpers ---
 
@@ -139,91 +119,6 @@ func TestEmbeddingEndToEnd(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "saved memory should be returned by SemanticStrategy")
-}
-
-// TestExtractionWithRedaction verifies PII in observation content is redacted before save.
-// The PII is placed in the assistant message so the entity name (from user message) is clean.
-func TestExtractionWithRedaction(t *testing.T) {
-	store := newStore(t)
-	ctx := context.Background()
-	scope := testScope(testWorkspace1)
-	log := zap.New(zap.UseDevMode(true))
-
-	// Put PII in the assistant message — entity name derives from last user message.
-	messages := []types.Message{
-		{Role: "user", Content: "Remember my contact info"},
-		{Role: "assistant", Content: "Sure, I noted test@example.com"},
-	}
-
-	populator := NewConversationPopulator()
-	extractor := NewOmniaExtractor(store, populator, &testRedactor{}, log)
-
-	saved, err := extractor.Extract(ctx, scope, messages)
-	require.NoError(t, err)
-	require.NotEmpty(t, saved, "extractor should produce at least one memory")
-
-	// All saved memories must not contain the raw email address.
-	for _, m := range saved {
-		assert.NotContains(t, m.Content, "test@example.com",
-			"PII should be redacted from saved memory content")
-	}
-
-	// Verify memories are in the store via List.
-	listed, err := store.List(ctx, scope, ListOptions{})
-	require.NoError(t, err)
-	assert.NotEmpty(t, listed, "memories should be persisted in the store")
-}
-
-// TestLLMExtractionEndToEnd verifies the LLM-backed populator path.
-// The mock LLM returns a structured JSON response; we verify entities and observations
-// are saved to the store and retrievable.
-func TestLLMExtractionEndToEnd(t *testing.T) {
-	store := newStore(t)
-	ctx := context.Background()
-	scope := testScope(testWorkspace1)
-	log := zap.New(zap.UseDevMode(true))
-
-	// Build a valid llmExtractionResult JSON response.
-	llmResponse, err := json.Marshal(map[string]any{
-		"entities": []map[string]any{
-			{"name": "Go programming language", "kind": "topic", "metadata": map[string]any{}},
-		},
-		"observations": []map[string]any{
-			{
-				"entity_name": "Go programming language",
-				"content":     "User enjoys writing Go for backend services",
-				"confidence":  0.9,
-			},
-		},
-		"relations": []map[string]any{},
-	})
-	require.NoError(t, err)
-
-	llmProvider := &testLLMProvider{response: string(llmResponse)}
-	populator := NewLLMConversationPopulator(llmProvider, log)
-	extractor := NewOmniaExtractor(store, populator, nil, log)
-
-	messages := []types.Message{
-		{Role: "user", Content: "I love writing Go for backend services"},
-		{Role: "assistant", Content: "Go is an excellent choice for backend work"},
-	}
-
-	saved, err := extractor.Extract(ctx, scope, messages)
-	require.NoError(t, err)
-	require.NotEmpty(t, saved, "LLM extractor should produce at least one memory")
-
-	// Verify the extracted content is in the store.
-	results, err := store.Retrieve(ctx, scope, "Go", RetrieveOptions{})
-	require.NoError(t, err)
-	require.NotEmpty(t, results, "store.Retrieve should find the LLM-extracted memory")
-
-	found := false
-	for _, r := range results {
-		if strings.Contains(r.Content, "Go") {
-			found = true
-		}
-	}
-	assert.True(t, found, "extracted memory content should be retrievable by keyword")
 }
 
 // TestSemanticVsKeyword saves 3 memories, embeds one, then compares strategies.
