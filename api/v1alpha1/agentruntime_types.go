@@ -926,8 +926,8 @@ type EvalConfig struct {
 
 	// inline configures the evals that run synchronously inside the runtime
 	// (Pattern C). Lightweight evals (contains, regex, deterministic
-	// scorers) belong here. Defaults to groups=["default","fast-running"]
-	// when unset.
+	// scorers) belong here. Defaults to groups=["fast-running"] when unset —
+	// disjoint from the worker default so no eval runs on both paths.
 	// +optional
 	Inline *EvalPathConfig `json:"inline,omitempty"`
 

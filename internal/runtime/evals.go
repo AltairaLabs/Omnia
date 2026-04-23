@@ -95,13 +95,18 @@ func ValidateEvalDefs(defs []evals.EvalDef) []string {
 
 // DefaultInlineEvalGroups is the fallback group filter for the inline
 // eval path when spec.evals.inline.groups is absent or empty on the
-// AgentRuntime. It admits every eval in the "default" group (i.e. every
-// eval) that also classifies as "fast-running" — deterministic,
-// non-network, low-cost handlers. Long-running and external groups are
-// left to the eval-worker so the synchronous turn path is not gated on
-// LLM judges or external APIs.
+// AgentRuntime. It admits evals classified as "fast-running" —
+// deterministic, non-network, low-cost handlers. PromptKit auto-classifies
+// any non-long-running / non-external handler as fast-running, so this
+// catches every cheap handler including user-defined types that aren't
+// registered as long-running or external.
+//
+// Deliberately does NOT include "default", which every eval belongs to —
+// including llm_judge and other expensive handlers. Including "default"
+// here would route expensive evals onto the synchronous turn path and
+// duplicate them with the worker path (which uses ["long-running",
+// "external"], both auto-assigned to llm_judge).
 var DefaultInlineEvalGroups = []string{
-	evals.DefaultEvalGroup,
 	evals.GroupFastRunning,
 }
 

@@ -159,14 +159,14 @@ Each path executes only the evals whose groups match its filter:
 evals:
   enabled: true
   inline:
-    groups: ["default", "fast-running"]      # runs synchronously in the runtime (Pattern C)
+    groups: ["fast-running"]                 # runs synchronously in the runtime (Pattern C)
   worker:
     groups: ["long-running", "external"]     # runs out-of-band in the eval-worker (Pattern A)
 ```
 
 Those values are the built-in defaults — absent or empty lists fall back to them. To disable evals entirely, set `spec.evals.enabled: false`; the groups fields are not an off-switch (an empty list still falls back to defaults, per PromptKit's `FilterByGroups` semantics).
 
-The defaults are deliberately disjoint so an agent never runs the same eval twice. If you override them to overlap, you get duplicate `eval_results` rows — one with `source="runtime-inline"` and one with `source="worker"` — which is occasionally useful for comparing in-line vs. reloaded-session behavior on the same turn.
+The defaults are deliberately disjoint so an agent never runs the same eval twice. `"default"` is *not* in either default because every eval carries it — including `"default"` in the inline filter would route every long-running handler (e.g. `llm_judge`) onto the turn path. PromptKit auto-classifies any non-long-running / non-external handler as `"fast-running"`, so user-defined lightweight handlers are covered by the default without extra registration. If you override the defaults to overlap, you get duplicate `eval_results` rows — one with `source="runtime-inline"` and one with `source="worker"` — which is occasionally useful for comparing in-line vs. reloaded-session behavior on the same turn.
 
 ## Eval Worker
 

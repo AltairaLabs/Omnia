@@ -136,8 +136,9 @@ func TestResolveInlineEvalGroups_DefaultWhenUnset(t *testing.T) {
 	server := NewServer()
 	got := server.resolveInlineEvalGroups()
 	assert.Equal(t, DefaultInlineEvalGroups, got)
-	assert.Contains(t, got, evals.DefaultEvalGroup)
 	assert.Contains(t, got, evals.GroupFastRunning)
+	assert.NotContains(t, got, evals.DefaultEvalGroup,
+		"default group is deliberately excluded so long-running/external evals don't run inline")
 }
 
 func TestResolveInlineEvalGroups_DefaultWhenEmpty(t *testing.T) {

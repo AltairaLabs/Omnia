@@ -210,8 +210,8 @@ export interface AgentRuntimeSpec {
     enabled?: boolean;
     /** inline configures the evals that run synchronously inside the runtime
      * (Pattern C). Lightweight evals (contains, regex, deterministic
-     * scorers) belong here. Defaults to groups=["default","fast-running"]
-     * when unset. */
+     * scorers) belong here. Defaults to groups=["fast-running"] when unset —
+     * disjoint from the worker default so no eval runs on both paths. */
     inline?: {
       /** groups is the set of eval group names this path executes. An
        * absent or empty list uses the built-in default for the path
