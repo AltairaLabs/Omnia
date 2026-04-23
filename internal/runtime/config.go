@@ -107,6 +107,13 @@ type Config struct {
 	// Eval configuration
 	EvalEnabled bool // Enable real-time evals for PromptKit agents
 
+	// InlineEvalGroups is the set of eval group names that run inline in
+	// this runtime. An absent/empty value uses the built-in default
+	// (DefaultInlineEvalGroups) — lightweight, deterministic evals only.
+	// Worker groups (long-running, external) are resolved on the
+	// eval-worker side, not here.
+	InlineEvalGroups []string
+
 	// Tracing configuration
 	TracingEnabled    bool    // Enable OpenTelemetry tracing
 	TracingEndpoint   string  // OTLP collector endpoint (e.g., "localhost:4317")

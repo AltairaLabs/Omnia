@@ -422,6 +422,43 @@ func TestLoadFromCRD_NamedProvidersSortedFallback(t *testing.T) {
 	assert.Equal(t, "sorted-first", cfg.Model)
 }
 
+func TestLoadFromCRD_InlineEvalGroups_Absent(t *testing.T) {
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "test-ns"},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Evals:         &v1alpha1.EvalConfig{Enabled: true},
+		},
+	}
+	c := buildTestClient(ar)
+	cfg, err := LoadFromCRD(context.Background(), c, "agent", "test-ns")
+	require.NoError(t, err)
+	assert.True(t, cfg.EvalEnabled)
+	assert.Empty(t, cfg.InlineEvalGroups,
+		"absent inline.groups leaves Config.InlineEvalGroups unset; Server falls back to DefaultInlineEvalGroups")
+}
+
+func TestLoadFromCRD_InlineEvalGroups_Custom(t *testing.T) {
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "test-ns"},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Evals: &v1alpha1.EvalConfig{
+				Enabled: true,
+				Inline: &v1alpha1.EvalPathConfig{
+					Groups: []string{"pii-checks", "brand-voice"},
+				},
+			},
+		},
+	}
+	c := buildTestClient(ar)
+	cfg, err := LoadFromCRD(context.Background(), c, "agent", "test-ns")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"pii-checks", "brand-voice"}, cfg.InlineEvalGroups)
+}
+
 func TestLoadFromCRD_AgentRuntimeNotFound(t *testing.T) {
 	c := buildTestClient()
 	_, err := LoadFromCRD(context.Background(), c, "missing", "test-ns")

@@ -553,15 +553,16 @@ func TestProcessStreams(t *testing.T) {
 	}
 
 	w := &EvalWorker{
-		redisClient:   client,
-		resultWriter:  writer,
-		messageStore:  store,
-		namespaces:    []string{"ns"},
-		streamKeys:    []string{testStreamKey},
-		consumerGroup: "test-group",
-		consumerName:  "test-consumer",
-		logger:        testLogger(),
-		packLoader:    packLoader,
+		redisClient:          client,
+		resultWriter:         writer,
+		messageStore:         store,
+		namespaces:           []string{"ns"},
+		streamKeys:           []string{testStreamKey},
+		consumerGroup:        "test-group",
+		consumerName:         "test-consumer",
+		logger:               testLogger(),
+		packLoader:           packLoader,
+		workerGroupsOverride: []string{runtimeevals.DefaultEvalGroup},
 	}
 
 	event := api.SessionEvent{
@@ -622,15 +623,16 @@ func TestHandleMessage_SuccessfulProcess(t *testing.T) {
 	}
 
 	w := &EvalWorker{
-		redisClient:   client,
-		resultWriter:  writer,
-		messageStore:  store,
-		namespaces:    []string{"ns"},
-		streamKeys:    []string{testStreamKey},
-		consumerGroup: "test-group",
-		consumerName:  "test-consumer",
-		logger:        testLogger(),
-		packLoader:    packLoader,
+		redisClient:          client,
+		resultWriter:         writer,
+		messageStore:         store,
+		namespaces:           []string{"ns"},
+		streamKeys:           []string{testStreamKey},
+		consumerGroup:        "test-group",
+		consumerName:         "test-consumer",
+		logger:               testLogger(),
+		packLoader:           packLoader,
+		workerGroupsOverride: []string{runtimeevals.DefaultEvalGroup},
 	}
 
 	event := api.SessionEvent{
@@ -700,11 +702,12 @@ func TestProcessEvent_WriteEvalResults(t *testing.T) {
 	}
 
 	w := &EvalWorker{
-		resultWriter: writer,
-		messageStore: store,
-		namespaces:   []string{"ns"},
-		logger:       testLogger(),
-		packLoader:   packLoader,
+		resultWriter:         writer,
+		messageStore:         store,
+		namespaces:           []string{"ns"},
+		logger:               testLogger(),
+		packLoader:           packLoader,
+		workerGroupsOverride: []string{runtimeevals.DefaultEvalGroup},
 	}
 
 	event := api.SessionEvent{
@@ -741,11 +744,12 @@ func TestProcessEvent_WriteError(t *testing.T) {
 	}
 
 	w := &EvalWorker{
-		resultWriter: writer,
-		messageStore: store,
-		namespaces:   []string{"ns"},
-		logger:       testLogger(),
-		packLoader:   packLoader,
+		resultWriter:         writer,
+		messageStore:         store,
+		namespaces:           []string{"ns"},
+		logger:               testLogger(),
+		packLoader:           packLoader,
+		workerGroupsOverride: []string{runtimeevals.DefaultEvalGroup},
 	}
 
 	event := api.SessionEvent{
@@ -1185,11 +1189,12 @@ func TestProcessAssistantMessage_WithPackEvals(t *testing.T) {
 	}
 
 	w := &EvalWorker{
-		resultWriter: writer,
-		messageStore: store,
-		namespaces:   []string{"ns"},
-		logger:       testLogger(),
-		packLoader:   packLoader,
+		resultWriter:         writer,
+		messageStore:         store,
+		namespaces:           []string{"ns"},
+		logger:               testLogger(),
+		packLoader:           packLoader,
+		workerGroupsOverride: []string{runtimeevals.DefaultEvalGroup},
 	}
 
 	event := api.SessionEvent{
@@ -1260,11 +1265,12 @@ func TestOnSessionComplete_WithPackEvals(t *testing.T) {
 	}
 
 	w := &EvalWorker{
-		resultWriter: writer,
-		messageStore: store,
-		namespaces:   []string{"ns"},
-		logger:       testLogger(),
-		packLoader:   packLoader,
+		resultWriter:         writer,
+		messageStore:         store,
+		namespaces:           []string{"ns"},
+		logger:               testLogger(),
+		packLoader:           packLoader,
+		workerGroupsOverride: []string{runtimeevals.DefaultEvalGroup},
 	}
 	w.completionTracker = NewCompletionTracker(DefaultInactivityTimeout, nil, testLogger())
 
@@ -1692,13 +1698,14 @@ func TestProcessAssistantMessage_RecordsEvalMetrics(t *testing.T) {
 
 	runner := NewSDKRunner(WithMetrics(spy))
 	w := &EvalWorker{
-		messageStore: store,
-		resultWriter: rw,
-		namespaces:   []string{"ns"},
-		logger:       testLogger(),
-		packLoader:   packLoader,
-		sdkRunner:    runner,
-		metrics:      spy,
+		messageStore:         store,
+		resultWriter:         rw,
+		namespaces:           []string{"ns"},
+		logger:               testLogger(),
+		packLoader:           packLoader,
+		sdkRunner:            runner,
+		metrics:              spy,
+		workerGroupsOverride: []string{runtimeevals.DefaultEvalGroup},
 	}
 
 	event := api.SessionEvent{
@@ -1728,6 +1735,90 @@ func TestProcessAssistantMessage_RecordsEvalMetrics(t *testing.T) {
 
 	// Verify results were also written.
 	require.NotEmpty(t, rw.written)
+}
+
+// TestProcessAssistantMessage_FiltersByWorkerGroups proves that the worker
+// honors the group filter end-to-end through the real SDK. Two evals are
+// registered — one with default (auto-classified) groups and one with an
+// explicit Groups override. Each filter should let exactly one through.
+//
+// This test exists because the smaller unit tests only assert that the
+// filter is *passed* into sdk.EvaluateOpts; they do not prove the SDK
+// respects it or that our wiring is correct.
+func TestProcessAssistantMessage_FiltersByWorkerGroups(t *testing.T) {
+	packLoader := newTestPackLoader([]runtimeevals.EvalDef{
+		// "fast" has no explicit Groups, so GetGroups() returns the
+		// auto-classification: [default, fast-running].
+		containsEvalDef("fast", runtimeevals.TriggerEveryTurn, "hello"),
+		// "slow" has explicit Groups, which *overrides* auto-classification
+		// per EvalDef.GetGroups(). So it is in "long-running" only.
+		{
+			ID:      "slow",
+			Type:    "contains",
+			Trigger: runtimeevals.TriggerEveryTurn,
+			Params:  map[string]any{"patterns": []any{"hello"}},
+			Groups:  []string{runtimeevals.GroupLongRunning},
+		},
+	})
+
+	baseMsgs := []session.Message{
+		{ID: "m1", Role: session.RoleUser, Content: "say hello"},
+		{ID: "m2", Role: session.RoleAssistant, Content: "hello world"},
+	}
+
+	run := func(filter []string) []string {
+		writer := &mockResultWriter{}
+		store := &mockMessageStore{
+			sess:     &session.Session{ID: "s1", AgentName: "test-agent", Namespace: "ns"},
+			messages: toMessagePtrs(baseMsgs),
+		}
+		w := &EvalWorker{
+			resultWriter:         writer,
+			messageStore:         store,
+			namespaces:           []string{"ns"},
+			logger:               testLogger(),
+			packLoader:           packLoader,
+			workerGroupsOverride: filter,
+		}
+		event := api.SessionEvent{
+			EventType:         eventTypeMessage,
+			SessionID:         "s1",
+			AgentName:         "test-agent",
+			Namespace:         "ns",
+			MessageID:         "m2",
+			MessageRole:       "assistant",
+			PromptPackName:    "test-pack",
+			PromptPackVersion: "v1",
+		}
+		require.NoError(t, w.processEvent(context.Background(), event))
+		ids := make([]string, 0, len(writer.written))
+		for _, r := range writer.written {
+			ids = append(ids, r.EvalID)
+		}
+		return ids
+	}
+
+	t.Run("long-running filter runs only slow", func(t *testing.T) {
+		assert.ElementsMatch(t, []string{"slow"}, run([]string{runtimeevals.GroupLongRunning}))
+	})
+
+	t.Run("fast-running filter runs only fast", func(t *testing.T) {
+		// "fast" has fast-running in its auto groups; "slow" does not
+		// (explicit Groups override kills the auto-classification).
+		assert.ElementsMatch(t, []string{"fast"}, run([]string{runtimeevals.GroupFastRunning}))
+	})
+
+	t.Run("default filter runs only fast", func(t *testing.T) {
+		// "fast" keeps the default group via auto-classification; "slow"
+		// overrode Groups so it is not in "default".
+		assert.ElementsMatch(t, []string{"fast"}, run([]string{runtimeevals.DefaultEvalGroup}))
+	})
+
+	t.Run("production defaults run only slow", func(t *testing.T) {
+		// DefaultWorkerEvalGroups is [long-running, external]. Only "slow"
+		// matches; "fast" does not.
+		assert.ElementsMatch(t, []string{"slow"}, run(DefaultWorkerEvalGroups))
+	})
 }
 
 // Ensure unused import suppressors compile.

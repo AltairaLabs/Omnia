@@ -84,8 +84,9 @@ type Server struct {
 	tracingProvider *tracing.Provider
 
 	// Evals
-	evalCollector *pkmetrics.Collector
-	evalDefs      []evals.EvalDef
+	evalCollector    *pkmetrics.Collector
+	evalDefs         []evals.EvalDef
+	inlineEvalGroups []string // nil/empty => DefaultInlineEvalGroups
 
 	// Provider info (for logging and provider creation)
 	providerType              string
@@ -396,6 +397,16 @@ func WithEvalCollector(c *pkmetrics.Collector) ServerOption {
 func WithEvalDefs(defs []evals.EvalDef) ServerOption {
 	return func(s *Server) {
 		s.evalDefs = defs
+	}
+}
+
+// WithInlineEvalGroups sets the eval group filter for inline execution.
+// A nil or empty value lets buildEvalOptions fall back to
+// DefaultInlineEvalGroups. Non-empty values run only evals in those
+// groups on the inline path; all others are left for the eval-worker.
+func WithInlineEvalGroups(groups []string) ServerOption {
+	return func(s *Server) {
+		s.inlineEvalGroups = groups
 	}
 }
 

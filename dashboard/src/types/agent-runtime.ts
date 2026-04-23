@@ -202,6 +202,8 @@ export interface AgentRuntimeSpec {
 
 export interface EvalConfig {
   enabled?: boolean;
+  inline?: EvalPathConfig;
+  worker?: EvalPathConfig;
   sampling?: {
     defaultRate?: number;
     extendedRate?: number;
@@ -213,6 +215,10 @@ export interface EvalConfig {
   sessionCompletion?: {
     inactivityTimeout?: string;
   };
+}
+
+export interface EvalPathConfig {
+  groups?: string[];
 }
 
 // Status

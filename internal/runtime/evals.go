@@ -93,8 +93,47 @@ func ValidateEvalDefs(defs []evals.EvalDef) []string {
 	return missing
 }
 
+// DefaultInlineEvalGroups is the fallback group filter for the inline
+// eval path when spec.evals.inline.groups is absent or empty on the
+// AgentRuntime. It admits evals classified as "fast-running" —
+// deterministic, non-network, low-cost handlers. PromptKit auto-classifies
+// any non-long-running / non-external handler as fast-running, so this
+// catches every cheap handler including user-defined types that aren't
+// registered as long-running or external.
+//
+// Deliberately does NOT include "default", which every eval belongs to —
+// including llm_judge and other expensive handlers. Including "default"
+// here would route expensive evals onto the synchronous turn path and
+// duplicate them with the worker path (which uses ["long-running",
+// "external"], both auto-assigned to llm_judge).
+var DefaultInlineEvalGroups = []string{
+	evals.GroupFastRunning,
+}
+
+// resolveInlineEvalGroups returns the configured inline group filter or
+// the built-in default when none is configured.
+func (s *Server) resolveInlineEvalGroups() []string {
+	if len(s.inlineEvalGroups) > 0 {
+		return s.inlineEvalGroups
+	}
+	return DefaultInlineEvalGroups
+}
+
 // buildEvalOptions builds SDK options for eval middleware when a collector is configured.
-// Eval results are recorded to Prometheus via OmniaEventStore (event-driven).
+//
+// Two result sinks run in parallel:
+//   - Prometheus counters, via sdk.WithMetrics below.
+//   - eval_results rows, via OmniaEventStore.convertEvalEvent — wired
+//     separately through sdk.WithEventStore in buildConversationOptions
+//     and tagged Source="runtime-inline" to distinguish them from
+//     worker-path rows (Source="worker").
+//
+// Inline evals are constrained to a group filter (defaults to "default"
+// + "fast-running") so only lightweight, deterministic handlers run
+// synchronously in the turn path; LLM-as-judge evals run out-of-band in
+// the eval-worker where the full EvalResult is captured without bus
+// serialization loss. The worker-side filter is the complement, resolved
+// per-event from the same AgentRuntime CRD.
 func (s *Server) buildEvalOptions() []sdk.Option {
 	if s.evalCollector == nil {
 		s.log.V(1).Info("eval options skipped", "reason", "no collector")
@@ -103,13 +142,16 @@ func (s *Server) buildEvalOptions() []sdk.Option {
 
 	registry := evals.NewEvalTypeRegistry()
 	runner := evals.NewEvalRunner(registry)
+	groups := s.resolveInlineEvalGroups()
 
 	s.log.V(1).Info("eval options built",
 		"evalDefCount", len(s.evalDefs),
-		"registeredTypes", registry.Types())
+		"registeredTypes", registry.Types(),
+		"inlineGroups", groups)
 
 	return []sdk.Option{
 		sdk.WithEvalRunner(runner),
 		sdk.WithMetrics(s.evalCollector, nil),
+		sdk.WithEvalGroups(groups...),
 	}
 }

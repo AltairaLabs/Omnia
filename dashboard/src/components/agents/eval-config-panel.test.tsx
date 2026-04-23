@@ -89,7 +89,7 @@ describe("EvalConfigPanel", () => {
 
   it("renders when enterprise is enabled", () => {
     renderPanel();
-    expect(screen.getByText("Inline Eval Execution")).toBeInTheDocument();
+    expect(screen.getByText("Realtime Evals")).toBeInTheDocument();
   });
 
   it("renders nothing when enterprise is disabled", () => {
@@ -114,20 +114,22 @@ describe("EvalConfigPanel", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("shows info alert about offline evals", () => {
+  it("shows info alert describing the split routing", () => {
     renderPanel();
-    expect(screen.getByText(/automatically run offline by the eval worker/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/cheap deterministic evals .* run inline/i),
+    ).toBeInTheDocument();
   });
 
   it("shows toggle enabled for promptkit agents", () => {
     renderPanel({ frameworkType: "promptkit" });
-    const toggle = screen.getByRole("switch", { name: /toggle inline eval/i });
+    const toggle = screen.getByRole("switch", { name: /toggle eval execution/i });
     expect(toggle).not.toBeDisabled();
   });
 
   it("disables toggle for non-promptkit agents", () => {
     renderPanel({ frameworkType: "custom" });
-    const toggle = screen.getByRole("switch", { name: /toggle inline eval/i });
+    const toggle = screen.getByRole("switch", { name: /toggle eval execution/i });
     expect(toggle).toBeDisabled();
     expect(screen.getByText("Only available for PromptKit agents")).toBeInTheDocument();
   });
@@ -148,7 +150,7 @@ describe("EvalConfigPanel", () => {
     const service = createMockDataService({ updateAgentEvals: mockUpdate });
 
     renderPanel({ evalsEnabled: false }, service);
-    const toggle = screen.getByRole("switch", { name: /toggle inline eval/i });
+    const toggle = screen.getByRole("switch", { name: /toggle eval execution/i });
     fireEvent.click(toggle);
 
     await waitFor(() => {
@@ -163,7 +165,7 @@ describe("EvalConfigPanel", () => {
     const service = createMockDataService({ updateAgentEvals: mockUpdate });
 
     renderPanel({ evalsEnabled: false }, service);
-    const toggle = screen.getByRole("switch", { name: /toggle inline eval/i });
+    const toggle = screen.getByRole("switch", { name: /toggle eval execution/i });
     fireEvent.click(toggle);
 
     await waitFor(() => {

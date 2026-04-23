@@ -45,13 +45,15 @@ With just `enabled: true` and no other settings, evals use these defaults:
 
 | Setting | Default |
 |---------|---------|
+| `inline.groups` | `["fast-running"]` |
+| `worker.groups` | `["long-running", "external"]` |
 | `sampling.defaultRate` | 100 (all evals run) |
 | `sampling.extendedRate` | 10 (10% of extended evals run) |
 | `rateLimit.maxEvalsPerSecond` | 50 |
 | `rateLimit.maxConcurrentJudgeCalls` | 5 |
 | `sessionCompletion.inactivityTimeout` | 5m |
 
-Evals will only execute if the referenced PromptPack contains eval definitions.
+Evals will only execute if the referenced PromptPack contains eval definitions. The `inline` and `worker` defaults are deliberately disjoint: lightweight deterministic evals (contains, regex, custom scorers) run synchronously in the runtime; LLM judges and external API checks run out-of-band in the eval-worker. See [Customize Eval Routing](#customize-eval-routing) for how to override.
 
 ## Configure Judge Providers
 
@@ -149,6 +151,34 @@ Eval definitions live in your PromptPack's `pack.json`. Add an `evals` array to 
 | `every_turn` | After each assistant message |
 | `on_session_complete` | When session ends or times out |
 | `on_n_turns` | Every N assistant messages |
+
+## Customize Eval Routing
+
+Each eval runs on exactly one path by default: inline (synchronous, in the runtime) or worker (asynchronous, in the eval-worker Deployment). PromptKit auto-classifies every eval into built-in groups — `fast-running` (deterministic handlers like `contains`, `regex`), `long-running` (LLM calls), and `external` (calls to external APIs) — and each path filters by group:
+
+```yaml
+spec:
+  evals:
+    enabled: true
+    inline:
+      groups: ["fast-running"]               # default
+    worker:
+      groups: ["long-running", "external"]   # default
+```
+
+An eval runs on a path when at least one of its groups appears in the path's filter. Eval authors can add custom groups via the `groups` field on an `EvalDef`, then route a specific agent's worker to include that group:
+
+```yaml
+spec:
+  evals:
+    enabled: true
+    worker:
+      groups: ["long-running", "external", "custom-safety"]
+```
+
+To disable evals entirely for an agent, set `spec.evals.enabled: false`. An empty list in `groups` is **not** an off-switch — PromptKit's `FilterByGroups` treats an empty list as "no filter" and falls back to the built-in default.
+
+Rows in the `eval_results` table include a `source` column identifying which path produced them: `"runtime-inline"` for inline, `"worker"` for the eval-worker. If you deliberately overlap the two filters (e.g. run the same eval on both paths to compare), you'll see two rows per turn per eval, one with each source tag.
 
 ## Control Costs with Sampling
 
@@ -291,6 +321,10 @@ spec:
 
   evals:
     enabled: true
+    inline:
+      groups: ["fast-running"]
+    worker:
+      groups: ["long-running", "external"]
     sampling:
       defaultRate: 100
       extendedRate: 10

@@ -472,6 +472,110 @@ func TestResolveSamplingConfig_AgentNotFound(t *testing.T) {
 	assert.Nil(t, sampling)
 }
 
+func TestResolveWorkerGroups_Configured(t *testing.T) {
+	ns := testNamespace
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: ns},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+			Evals: &v1alpha1.EvalConfig{
+				Enabled: true,
+				Worker: &v1alpha1.EvalPathConfig{
+					Groups: []string{"long-running", "tenant-custom"},
+				},
+			},
+		},
+	}
+
+	c := buildFakeClient(ar).Build()
+	resolver := NewProviderResolver(c)
+
+	groups := resolver.ResolveWorkerGroups(context.Background(), "agent", ns)
+	assert.Equal(t, []string{"long-running", "tenant-custom"}, groups)
+}
+
+func TestResolveWorkerGroups_WorkerAbsent(t *testing.T) {
+	ns := testNamespace
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: ns},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+			Evals:         &v1alpha1.EvalConfig{Enabled: true},
+		},
+	}
+
+	c := buildFakeClient(ar).Build()
+	resolver := NewProviderResolver(c)
+
+	groups := resolver.ResolveWorkerGroups(context.Background(), "agent", ns)
+	assert.Nil(t, groups,
+		"absent spec.evals.worker should return nil so callers can apply DefaultWorkerEvalGroups")
+}
+
+func TestResolveWorkerGroups_AgentNotFound(t *testing.T) {
+	c := buildFakeClient().Build()
+	resolver := NewProviderResolver(c)
+
+	groups := resolver.ResolveWorkerGroups(context.Background(), "missing", "ns")
+	assert.Nil(t, groups)
+}
+
+func TestWorker_ResolveWorkerGroups_OverrideWins(t *testing.T) {
+	w := &EvalWorker{
+		workerGroupsOverride: []string{"only-me"},
+	}
+	got := w.resolveWorkerGroups(context.Background(), api.SessionEvent{AgentName: "a", Namespace: "n"})
+	assert.Equal(t, []string{"only-me"}, got)
+}
+
+func TestWorker_ResolveWorkerGroups_NoResolver_Default(t *testing.T) {
+	w := &EvalWorker{}
+	got := w.resolveWorkerGroups(context.Background(), api.SessionEvent{AgentName: "a", Namespace: "n"})
+	assert.Equal(t, DefaultWorkerEvalGroups, got)
+}
+
+func TestWorker_ResolveWorkerGroups_EmptyAgent_Default(t *testing.T) {
+	c := buildFakeClient().Build()
+	w := &EvalWorker{providerResolver: NewProviderResolver(c)}
+	got := w.resolveWorkerGroups(context.Background(), api.SessionEvent{Namespace: "n"})
+	assert.Equal(t, DefaultWorkerEvalGroups, got)
+}
+
+func TestWorker_ResolveWorkerGroups_ResolverNilFallback(t *testing.T) {
+	// Agent exists but has no evals.worker.groups — resolver returns nil,
+	// worker falls back to the built-in default.
+	ns := testNamespace
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: ns},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+			Evals:         &v1alpha1.EvalConfig{Enabled: true},
+		},
+	}
+	c := buildFakeClient(ar).Build()
+	w := &EvalWorker{providerResolver: NewProviderResolver(c)}
+	got := w.resolveWorkerGroups(context.Background(), api.SessionEvent{AgentName: "agent", Namespace: ns})
+	assert.Equal(t, DefaultWorkerEvalGroups, got)
+}
+
+func TestWorker_ResolveWorkerGroups_ResolverReturnsConfigured(t *testing.T) {
+	ns := testNamespace
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: ns},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+			Evals: &v1alpha1.EvalConfig{
+				Enabled: true,
+				Worker:  &v1alpha1.EvalPathConfig{Groups: []string{"long-running"}},
+			},
+		},
+	}
+	c := buildFakeClient(ar).Build()
+	w := &EvalWorker{providerResolver: NewProviderResolver(c)}
+	got := w.resolveWorkerGroups(context.Background(), api.SessionEvent{AgentName: "agent", Namespace: ns})
+	assert.Equal(t, []string{"long-running"}, got)
+}
+
 func TestResolveProviders_NilResolver(t *testing.T) {
 	w := &EvalWorker{logger: testLogger()}
 	event := api.SessionEvent{AgentName: "agent", Namespace: "ns"}

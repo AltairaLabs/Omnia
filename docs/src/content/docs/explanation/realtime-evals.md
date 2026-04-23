@@ -134,7 +134,7 @@ flowchart TB
     Runner --> RW[Result Writer]
 ```
 
-For PromptKit agents, Pattern C is the primary eval path. Pattern A events still fire but the eval worker skips agents that have Pattern C handling evals in-process.
+PromptKit agents run both patterns concurrently, with eval **groups** deciding which path executes which eval. Inline results land in `eval_results` with `source="runtime-inline"`; worker results land with `source="worker"`.
 
 ### Data Comparison
 
@@ -147,6 +147,26 @@ For PromptKit agents, Pattern C is the primary eval path. Pattern A events still
 | Provider call metadata | No | Yes (model, temperature) |
 | Validation/guardrail events | No | Yes |
 | Pipeline stage timings | No | Yes |
+
+### Group-Based Routing
+
+Every eval belongs to one or more **groups**. PromptKit auto-classifies handlers into `fast-running` (deterministic, no network — e.g. `contains`, `regex`), `long-running` (LLM calls, slow I/O — e.g. `llm_judge`), and `external` (arbitrary external APIs). Every eval also carries the `default` group; authors may add custom groups via `EvalDef.Groups` in the pack.
+
+Each path executes only the evals whose groups match its filter:
+
+```yaml
+# AgentRuntime spec
+evals:
+  enabled: true
+  inline:
+    groups: ["fast-running"]                 # runs synchronously in the runtime (Pattern C)
+  worker:
+    groups: ["long-running", "external"]     # runs out-of-band in the eval-worker (Pattern A)
+```
+
+Those values are the built-in defaults — absent or empty lists fall back to them. To disable evals entirely, set `spec.evals.enabled: false`; the groups fields are not an off-switch (an empty list still falls back to defaults, per PromptKit's `FilterByGroups` semantics).
+
+The defaults are deliberately disjoint so an agent never runs the same eval twice. `"default"` is *not* in either default because every eval carries it — including `"default"` in the inline filter would route every long-running handler (e.g. `llm_judge`) onto the turn path. PromptKit auto-classifies any non-long-running / non-external handler as `"fast-running"`, so user-defined lightweight handlers are covered by the default without extra registration. If you override the defaults to overlap, you get duplicate `eval_results` rows — one with `source="runtime-inline"` and one with `source="worker"` — which is occasionally useful for comparing in-line vs. reloaded-session behavior on the same turn.
 
 ## Eval Worker
 

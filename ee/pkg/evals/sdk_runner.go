@@ -70,11 +70,18 @@ func (s *SDKRunner) EvalCollector() *sdkmetrics.Collector {
 	return s.evalCollector
 }
 
-// EvalLabels carries per-evaluation instance label values for metrics binding.
+// EvalLabels carries per-evaluation context for a single RunTurnEvals /
+// RunSessionEvals call. Agent / Namespace / PromptPackName are bound to
+// Prometheus metric labels. Groups is NOT a metric label — it's passed
+// through to sdk.EvaluateOpts.EvalGroups to filter which evals this
+// invocation executes. An empty or nil Groups leaves the SDK's default
+// behavior (run all defs) in place; callers that want worker-scoped
+// filtering should populate it.
 type EvalLabels struct {
 	Agent          string
 	Namespace      string
 	PromptPackName string
+	Groups         []string
 }
 
 // RunTurnEvals executes per-turn evals via sdk.Evaluate().
@@ -124,6 +131,7 @@ func (s *SDKRunner) evaluate(
 		Logger:               s.logger,
 		PackData:             packData,
 		SkipSchemaValidation: true,
+		EvalGroups:           labels.Groups,
 	}
 
 	if s.evalCollector != nil {

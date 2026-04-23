@@ -392,6 +392,29 @@ spec:
     enabled: true
 ```
 
+#### `evals.inline` and `evals.worker`
+
+Split realtime evals between two paths by group. Each eval's groups — auto-classified by handler type or declared explicitly on the eval — decide which path runs it.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `evals.inline.groups` | string[] | `["fast-running"]` | Groups executed synchronously in the runtime |
+| `evals.worker.groups` | string[] | `["long-running", "external"]` | Groups executed out-of-band in the eval-worker |
+
+```yaml
+spec:
+  evals:
+    enabled: true
+    inline:
+      groups: ["fast-running"]
+    worker:
+      groups: ["long-running", "external"]
+```
+
+The defaults are disjoint — no eval runs on both paths. An absent or empty list falls back to the default; to disable all evals, use `enabled: false` (an empty `groups` list is not an off-switch).
+
+Rows written to the `eval_results` table are tagged `source="runtime-inline"` from the inline path and `source="worker"` from the eval-worker, so aggregation over the table can distinguish them.
+
 #### Judge Provider Resolution
 
 LLM judge evals resolve their provider from the AgentRuntime's `spec.providers` list. Add a provider named `"judge"` (or any custom name referenced in your PromptPack eval definitions):

@@ -924,6 +924,20 @@ type EvalConfig struct {
 	// +optional
 	Enabled bool `json:"enabled,omitempty"`
 
+	// inline configures the evals that run synchronously inside the runtime
+	// (Pattern C). Lightweight evals (contains, regex, deterministic
+	// scorers) belong here. Defaults to groups=["fast-running"] when unset —
+	// disjoint from the worker default so no eval runs on both paths.
+	// +optional
+	Inline *EvalPathConfig `json:"inline,omitempty"`
+
+	// worker configures the evals that run out-of-band in the eval-worker
+	// (Pattern A). LLM-judge evals and other long-running or external
+	// checks belong here. Defaults to groups=["long-running","external"]
+	// when unset.
+	// +optional
+	Worker *EvalPathConfig `json:"worker,omitempty"`
+
 	// sampling configures eval sampling rates to control cost.
 	// +optional
 	Sampling *EvalSampling `json:"sampling,omitempty"`
@@ -942,6 +956,26 @@ type EvalConfig struct {
 	// per-CRD).
 	// +optional
 	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
+}
+
+// EvalPathConfig configures one execution path (inline runtime or worker)
+// for eval execution.
+//
+// Groups filters evals by their declared or auto-classified group names.
+// PromptKit auto-classifies handlers into "fast-running", "long-running",
+// and "external"; every eval also carries the "default" group. Authors
+// may add custom groups via EvalDef.Groups in the pack.
+//
+// An eval runs on a path when at least one of its groups is in the path's
+// Groups list. An absent or empty Groups uses the built-in default for
+// the path. To disable evals entirely for an agent, set
+// EvalConfig.Enabled=false rather than using an empty list.
+type EvalPathConfig struct {
+	// groups is the set of eval group names this path executes. An
+	// absent or empty list uses the built-in default for the path
+	// (see EvalConfig.Inline and EvalConfig.Worker).
+	// +optional
+	Groups []string `json:"groups,omitempty"`
 }
 
 // EvalSampling configures sampling rates for evals.

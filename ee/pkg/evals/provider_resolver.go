@@ -105,6 +105,23 @@ func (r *ProviderResolver) ResolveSamplingConfig(
 	return ar.Spec.Evals.Sampling
 }
 
+// ResolveWorkerGroups returns the eval group filter configured for the
+// worker path on this agent's AgentRuntime CRD. Returns nil on resolution
+// error or when the agent has no evals.worker.groups set — callers are
+// expected to fall back to DefaultWorkerEvalGroups in that case.
+func (r *ProviderResolver) ResolveWorkerGroups(
+	ctx context.Context, agentName, namespace string,
+) []string {
+	ar, err := k8s.GetAgentRuntime(ctx, r.client, agentName, namespace)
+	if err != nil {
+		return nil
+	}
+	if ar.Spec.Evals == nil || ar.Spec.Evals.Worker == nil {
+		return nil
+	}
+	return ar.Spec.Evals.Worker.Groups
+}
+
 func (r *ProviderResolver) resolve(
 	ctx context.Context, agentName, namespace string,
 ) (map[string]providers.ProviderSpec, error) {

@@ -479,6 +479,22 @@ spec:
                     description: enabled activates eval execution for this agent's
                       sessions.
                     type: boolean
+                  inline:
+                    description: |-
+                      inline configures the evals that run synchronously inside the runtime
+                      (Pattern C). Lightweight evals (contains, regex, deterministic
+                      scorers) belong here. Defaults to groups=["fast-running"] when unset —
+                      disjoint from the worker default so no eval runs on both paths.
+                    properties:
+                      groups:
+                        description: |-
+                          groups is the set of eval group names this path executes. An
+                          absent or empty list uses the built-in default for the path
+                          (see EvalConfig.Inline and EvalConfig.Worker).
+                        items:
+                          type: string
+                        type: array
+                    type: object
                   podOverrides:
                     description: |-
                       podOverrides customizes the namespace-level eval-worker Pod. Last
@@ -3917,6 +3933,22 @@ spec:
                           inactivityTimeout is the duration after the last message before a session
                           is considered complete. Uses Go duration format (e.g., "5m", "1h").
                         type: string
+                    type: object
+                  worker:
+                    description: |-
+                      worker configures the evals that run out-of-band in the eval-worker
+                      (Pattern A). LLM-judge evals and other long-running or external
+                      checks belong here. Defaults to groups=["long-running","external"]
+                      when unset.
+                    properties:
+                      groups:
+                        description: |-
+                          groups is the set of eval group names this path executes. An
+                          absent or empty list uses the built-in default for the path
+                          (see EvalConfig.Inline and EvalConfig.Worker).
+                        items:
+                          type: string
+                        type: array
                     type: object
                 type: object
               externalAuth:

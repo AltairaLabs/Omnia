@@ -422,7 +422,7 @@ func TestEvalIntegration_FullPipelineWithMockProvider(t *testing.T) {
 
 	// Verify eval pipeline was wired correctly
 	opts := server.buildEvalOptions()
-	assert.Len(t, opts, 2, "should have WithEvalRunner and WithMetrics options")
+	assert.Len(t, opts, 3, "should have WithEvalRunner, WithMetrics, and WithEvalGroups options")
 
 	// Verify eval metrics were actually recorded in the collector.
 	// This proves the full pipeline: SDK middleware → dispatcher → runner → writer → collector.
@@ -588,4 +588,147 @@ func TestEvalIntegration_PrometheusMetrics(t *testing.T) {
 		"regex URL hallucination eval should have recorded a metric")
 	assert.True(t, metricNames["test_prom_eval_response_contains_expected"],
 		"contains eval should have recorded a metric")
+}
+
+// twoGroupPackJSON is a minimal pack with two evals that classify into
+// different groups via PromptKit's built-in auto-classification:
+//   - "fast" uses `contains`, which PromptKit classifies as
+//     ["default", "fast-running"] (not in longRunningTypes / externalTypes).
+//   - "slow" uses `llm_judge`, which PromptKit classifies as
+//     ["default", "long-running", "external"].
+//
+// Both are exercised by the mock provider — the question being tested is
+// *which ones survive the sdk.WithEvalGroups filter*, not whether a given
+// handler produces a meaningful result. Pack-schema does not accept an
+// `EvalDef.Groups` override in JSON, so we rely on auto-classification.
+const twoGroupPackJSON = `{
+  "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
+  "id": "two-group-test",
+  "name": "Two Group Test",
+  "version": "1.0.0",
+  "description": "Fixture pack with a fast-running and a long-running eval for filter-behavior tests.",
+  "template_engine": {
+    "version": "v1",
+    "syntax": "{{variable}}",
+    "features": ["basic_substitution"]
+  },
+  "prompts": {
+    "default": {
+      "id": "default",
+      "name": "Default",
+      "description": "Default prompt for filter-behavior tests.",
+      "version": "1.0.0",
+      "system_template": "Say the word ok."
+    }
+  },
+  "evals": [
+    {
+      "id": "fast",
+      "type": "contains",
+      "trigger": "every_turn",
+      "description": "Auto-classified fast-running contains eval.",
+      "params": {"patterns": ["ok"]},
+      "metric": {"name": "fast_matched", "type": "boolean"}
+    },
+    {
+      "id": "slow",
+      "type": "llm_judge",
+      "trigger": "every_turn",
+      "description": "Auto-classified long-running + external llm_judge eval.",
+      "params": {
+        "judge_prompt": "Rate the response on a 1-5 scale.",
+        "passing_score": 3
+      },
+      "metric": {
+        "name": "slow_judged",
+        "type": "gauge",
+        "range": {"min": 0, "max": 1}
+      }
+    }
+  ]
+}`
+
+// TestEvalIntegration_InlineGroupFilter proves that sdk.WithEvalGroups,
+// wired into buildEvalOptions, filters which evals execute through the
+// real SDK eval middleware. The earlier unit tests only prove the option
+// is constructed and passed; this one runs a full conversation and
+// asserts the observable effect.
+//
+// Observation strategy: each eval's pack defines a dedicated Prometheus
+// metric name (fast_matched, slow_matched). An eval that is filtered out
+// produces no metric. The collector's namespace is per-subtest so one
+// subtest cannot see another's data.
+func TestEvalIntegration_InlineGroupFilter(t *testing.T) {
+	tmpDir := t.TempDir()
+	packPath := tmpDir + "/pack.json"
+	require.NoError(t, writeTestFile(t, packPath, twoGroupPackJSON))
+
+	evalDefs, err := LoadAllEvalDefs(packPath)
+	require.NoError(t, err)
+	require.Len(t, evalDefs, 2)
+
+	run := func(t *testing.T, namespace string, groups []string) map[string]bool {
+		t.Helper()
+		reg := prometheus.NewRegistry()
+		collector := sdkmetrics.NewEvalOnlyCollector(sdkmetrics.CollectorOpts{
+			Registerer: reg,
+			Namespace:  namespace,
+		})
+		server := NewServer(
+			WithLogger(logr.Discard()),
+			WithPackPath(packPath),
+			WithPromptName("default"),
+			WithMockProvider(true),
+			WithEvalCollector(collector),
+			WithEvalDefs(evalDefs),
+			WithInlineEvalGroups(groups),
+		)
+		t.Cleanup(func() { _ = server.Close() })
+
+		stream := newMockStream(context.Background(), []*runtimev1.ClientMessage{
+			{SessionId: "filter-test-" + namespace, Content: "hi"},
+		})
+		_ = server.Converse(stream)
+
+		// Give async eval dispatch time to complete.
+		time.Sleep(500 * time.Millisecond)
+
+		gathered, err := reg.Gather()
+		require.NoError(t, err)
+		names := make(map[string]bool)
+		for _, mf := range gathered {
+			names[mf.GetName()] = true
+		}
+		return names
+	}
+
+	t.Run("fast-running filter runs only fast eval", func(t *testing.T) {
+		names := run(t, "filter_fast", []string{evals.GroupFastRunning})
+		assert.True(t, names["filter_fast_eval_fast_matched"], "fast eval should record its metric")
+		assert.False(t, names["filter_fast_eval_slow_judged"], "slow eval should be filtered out")
+	})
+
+	t.Run("long-running filter runs only slow eval", func(t *testing.T) {
+		names := run(t, "filter_slow", []string{evals.GroupLongRunning})
+		assert.False(t, names["filter_slow_eval_fast_matched"], "fast eval should be filtered out")
+		assert.True(t, names["filter_slow_eval_slow_judged"], "slow eval should record its metric")
+	})
+
+	t.Run("external filter runs only slow eval", func(t *testing.T) {
+		// "external" is in llm_judge's auto-groups but not in contains's.
+		names := run(t, "filter_ext", []string{evals.GroupExternal})
+		assert.False(t, names["filter_ext_eval_fast_matched"])
+		assert.True(t, names["filter_ext_eval_slow_judged"])
+	})
+
+	t.Run("production inline default runs only fast", func(t *testing.T) {
+		// DefaultInlineEvalGroups = [fast-running]. "fast" matches via its
+		// auto-classification; "slow" (llm_judge) is classified as
+		// [default, long-running, external] — none of those match
+		// "fast-running", so it is left to the eval-worker. This is the
+		// disjoint default that eliminates duplicate compute.
+		names := run(t, "filter_prod", DefaultInlineEvalGroups)
+		assert.True(t, names["filter_prod_eval_fast_matched"])
+		assert.False(t, names["filter_prod_eval_slow_judged"])
+	})
 }
