@@ -85,30 +85,32 @@ export function EvalConfigPanel({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-purple-500" />
-          Inline Eval Execution
+          Realtime Evals
         </CardTitle>
         <CardDescription>
-          Configure real-time eval execution within the agent runtime
+          Configure real-time eval execution for this agent
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <Alert variant="default" className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950">
           <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
           <AlertDescription className="text-blue-700 dark:text-blue-300">
-            Evals are automatically run offline by the eval worker for all agents.
-            Inline execution runs evals within the agent process for immediate results,
-            but may impact latency and throughput at scale.
+            When enabled, cheap deterministic evals (contains, regex) run inline
+            in the agent runtime and expensive ones (LLM judges, external API
+            checks) run in the eval-worker. The sampling rates below control how
+            often each tier fires. For custom group routing, edit the AgentRuntime
+            CRD directly.
           </AlertDescription>
         </Alert>
 
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
             <Label htmlFor="eval-toggle" className="text-sm font-medium">
-              Enable inline evals
+              Enable evals
             </Label>
             <p className="text-xs text-muted-foreground">
               {isPromptKit
-                ? "Run evals in the PromptKit runtime alongside request processing"
+                ? "Runs lightweight evals inline and expensive evals in the eval-worker"
                 : "Only available for PromptKit agents"}
             </p>
           </div>
@@ -117,7 +119,7 @@ export function EvalConfigPanel({
             checked={enabled}
             onCheckedChange={handleToggle}
             disabled={!isPromptKit || saving}
-            aria-label="Toggle inline eval execution"
+            aria-label="Toggle eval execution"
           />
         </div>
 
@@ -139,7 +141,7 @@ export function EvalConfigPanel({
                 aria-label="Lightweight eval sampling rate"
               />
               <p className="text-xs text-muted-foreground">
-                Fast, in-process checks like pattern matching and length validation
+                Inline path — fast-running handlers (contains, regex, deterministic scorers)
               </p>
             </div>
 
@@ -159,7 +161,7 @@ export function EvalConfigPanel({
                 aria-label="Extended eval sampling rate"
               />
               <p className="text-xs text-muted-foreground">
-                Model-powered evaluations that call an external service (higher latency and cost)
+                Worker path — long-running and external handlers (LLM judges, REST, A2A)
               </p>
             </div>
           </div>
