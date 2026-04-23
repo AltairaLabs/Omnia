@@ -153,6 +153,12 @@ func (s *PostgresMemoryStore) RetrieveMultiTier(ctx context.Context, req MultiTi
 		memories = memories[:limit]
 	}
 
+	// Bump accessed_at / access_count on the final (post-ranking, post-
+	// truncation) result. Doing it after truncation means rows that didn't
+	// make it into the caller's response don't get their LRU signal
+	// refreshed — which is correct, they weren't actually used.
+	s.touchAccessedOnRead(entityIDsFromMultiTier(memories))
+
 	return &MultiTierResult{Memories: memories, Total: len(memories)}, nil
 }
 

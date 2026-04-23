@@ -31,6 +31,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	goredis "github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -264,6 +265,15 @@ func run() error {
 
 	// --- Memory store ---
 	store := memory.NewPostgresMemoryStore(pool)
+
+	// --- Read-path metrics ---
+	// accessed_at / access_count are bumped asynchronously on every
+	// retrieval. Register the Prometheus counters + histogram so the
+	// signal is observable in dashboards. Failure to register isn't
+	// fatal — retrieval still works, just without the counters.
+	if err := memory.RegisterAccessMetrics(prometheus.DefaultRegisterer); err != nil {
+		log.Error(err, "memory access metrics registration failed")
+	}
 
 	// --- Service config: TTL + purpose ---
 	var defaultTTL time.Duration
