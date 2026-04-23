@@ -25,6 +25,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
 	sdkmetrics "github.com/AltairaLabs/PromptKit/runtime/metrics"
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 
@@ -110,7 +111,11 @@ type EvalWorker struct {
 	rateLimiter       *RateLimiter
 	packLoader        *PromptPackLoader
 	providerResolver  *ProviderResolver
-	metrics           WorkerMetricsRecorder
+
+	// workerGroupsOverride pins resolveWorkerGroups to a fixed list,
+	// bypassing both the resolver and the default. Test-only.
+	workerGroupsOverride []string
+	metrics              WorkerMetricsRecorder
 }
 
 // NewEvalWorker creates a new eval worker for the given namespace(s).
@@ -430,6 +435,7 @@ func (w *EvalWorker) processAssistantMessage(ctx context.Context, event api.Sess
 		Agent:          sess.AgentName,
 		Namespace:      event.Namespace,
 		PromptPackName: packEvals.PackName,
+		Groups:         w.resolveWorkerGroups(ctx, event),
 	}
 	items := w.getSDKRunner().RunTurnEvals(ctx, packEvals.PackData, messages,
 		event.SessionID, turnIndex, providerSpecs, labels)
@@ -473,6 +479,7 @@ func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) er
 		Agent:          sess.AgentName,
 		Namespace:      event.Namespace,
 		PromptPackName: packEvals.PackName,
+		Groups:         w.resolveWorkerGroups(ctx, event),
 	}
 	items := w.getSDKRunner().RunSessionEvals(ctx, packEvals.PackData, messages,
 		sessionID, turnIndex, providerSpecs, labels)
@@ -772,4 +779,37 @@ func (w *EvalWorker) resolveProviders(ctx context.Context, event api.SessionEven
 	}
 
 	return specs
+}
+
+// DefaultWorkerEvalGroups is the fallback group filter for the worker
+// eval path when spec.evals.worker.groups is absent or empty on the
+// AgentRuntime. It covers the expensive evaluation tiers — LLM judges
+// and external API calls — which are unsuitable for the synchronous
+// inline path. The "default" group is deliberately excluded here so
+// simple handlers (which the runtime already covers) don't run twice.
+var DefaultWorkerEvalGroups = []string{
+	runtimeevals.GroupLongRunning,
+	runtimeevals.GroupExternal,
+}
+
+// resolveWorkerGroups returns the eval group filter for worker-path
+// execution on this agent, falling back to DefaultWorkerEvalGroups when
+// the CRD does not specify one (or the resolver is not configured).
+//
+// When workerGroupsOverride is set on the worker struct, it takes
+// precedence over both the resolver and the default. This is used by
+// tests to pin the filter to match fixture eval types; production
+// pods should leave it nil.
+func (w *EvalWorker) resolveWorkerGroups(ctx context.Context, event api.SessionEvent) []string {
+	if w.workerGroupsOverride != nil {
+		return w.workerGroupsOverride
+	}
+	if w.providerResolver == nil || event.AgentName == "" || event.Namespace == "" {
+		return DefaultWorkerEvalGroups
+	}
+	groups := w.providerResolver.ResolveWorkerGroups(ctx, event.AgentName, event.Namespace)
+	if len(groups) == 0 {
+		return DefaultWorkerEvalGroups
+	}
+	return groups
 }

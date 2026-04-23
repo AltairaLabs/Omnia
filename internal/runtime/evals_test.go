@@ -115,7 +115,7 @@ func TestBuildEvalOptions_WithCollector(t *testing.T) {
 
 	opts := server.buildEvalOptions()
 	require.NotNil(t, opts)
-	assert.Len(t, opts, 2, "should return WithEvalRunner and WithMetrics options")
+	assert.Len(t, opts, 3, "should return WithEvalRunner, WithMetrics, and WithEvalGroups")
 }
 
 func TestBuildEvalOptions_EmptyDefs(t *testing.T) {
@@ -129,5 +129,46 @@ func TestBuildEvalOptions_EmptyDefs(t *testing.T) {
 
 	opts := server.buildEvalOptions()
 	require.NotNil(t, opts)
-	assert.Len(t, opts, 2, "should return options even with empty defs")
+	assert.Len(t, opts, 3, "should return WithEvalRunner, WithMetrics, and WithEvalGroups")
+}
+
+func TestResolveInlineEvalGroups_DefaultWhenUnset(t *testing.T) {
+	server := NewServer()
+	got := server.resolveInlineEvalGroups()
+	assert.Equal(t, DefaultInlineEvalGroups, got)
+	assert.Contains(t, got, evals.DefaultEvalGroup)
+	assert.Contains(t, got, evals.GroupFastRunning)
+}
+
+func TestResolveInlineEvalGroups_DefaultWhenEmpty(t *testing.T) {
+	// Semantic: an empty (non-nil) list also falls back to defaults.
+	// This matches PromptKit's FilterByGroups, which treats len==0 as "no
+	// filter" — so Omnia promotes the built-in default rather than
+	// silently disabling the path. Disabling is done via
+	// EvalConfig.Enabled=false.
+	server := NewServer(WithInlineEvalGroups([]string{}))
+	assert.Equal(t, DefaultInlineEvalGroups, server.resolveInlineEvalGroups())
+}
+
+func TestResolveInlineEvalGroups_CustomGroups(t *testing.T) {
+	custom := []string{"pii-checks", "brand-voice"}
+	server := NewServer(WithInlineEvalGroups(custom))
+	assert.Equal(t, custom, server.resolveInlineEvalGroups())
+}
+
+func TestBuildEvalOptions_UsesConfiguredInlineGroups(t *testing.T) {
+	collector := metrics.NewEvalOnlyCollector(metrics.CollectorOpts{
+		Registerer: prometheus.NewRegistry(),
+		Namespace:  "omnia_eval",
+	})
+	server := NewServer(
+		WithEvalCollector(collector),
+		WithInlineEvalGroups([]string{"custom-group"}),
+	)
+	opts := server.buildEvalOptions()
+	require.Len(t, opts, 3)
+	// We can't introspect WithEvalGroups directly without applying it to
+	// a config. The earlier resolveInlineEvalGroups tests cover the
+	// group-selection logic; here we only assert the options list is
+	// shaped right (3 items) when a custom group is configured.
 }

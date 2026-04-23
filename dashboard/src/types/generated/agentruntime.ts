@@ -208,6 +208,16 @@ export interface AgentRuntimeSpec {
   evals?: {
     /** enabled activates eval execution for this agent's sessions. */
     enabled?: boolean;
+    /** inline configures the evals that run synchronously inside the runtime
+     * (Pattern C). Lightweight evals (contains, regex, deterministic
+     * scorers) belong here. Defaults to groups=["default","fast-running"]
+     * when unset. */
+    inline?: {
+      /** groups is the set of eval group names this path executes. An
+       * absent or empty list uses the built-in default for the path
+       * (see EvalConfig.Inline and EvalConfig.Worker). */
+      groups?: string[];
+    };
     /** podOverrides customizes the namespace-level eval-worker Pod. Last
      * AgentRuntime to reconcile wins (eval-worker is per-namespace, not
      * per-CRD). */
@@ -2132,6 +2142,16 @@ export interface AgentRuntimeSpec {
       /** inactivityTimeout is the duration after the last message before a session
        * is considered complete. Uses Go duration format (e.g., "5m", "1h"). */
       inactivityTimeout?: string;
+    };
+    /** worker configures the evals that run out-of-band in the eval-worker
+     * (Pattern A). LLM-judge evals and other long-running or external
+     * checks belong here. Defaults to groups=["long-running","external"]
+     * when unset. */
+    worker?: {
+      /** groups is the set of eval group names this path executes. An
+       * absent or empty list uses the built-in default for the path
+       * (see EvalConfig.Inline and EvalConfig.Worker). */
+      groups?: string[];
     };
   };
   /** externalAuth configures authentication for data-plane traffic to

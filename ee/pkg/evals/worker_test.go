@@ -553,15 +553,16 @@ func TestProcessStreams(t *testing.T) {
 	}
 
 	w := &EvalWorker{
-		redisClient:   client,
-		resultWriter:  writer,
-		messageStore:  store,
-		namespaces:    []string{"ns"},
-		streamKeys:    []string{testStreamKey},
-		consumerGroup: "test-group",
-		consumerName:  "test-consumer",
-		logger:        testLogger(),
-		packLoader:    packLoader,
+		redisClient:          client,
+		resultWriter:         writer,
+		messageStore:         store,
+		namespaces:           []string{"ns"},
+		streamKeys:           []string{testStreamKey},
+		consumerGroup:        "test-group",
+		consumerName:         "test-consumer",
+		logger:               testLogger(),
+		packLoader:           packLoader,
+		workerGroupsOverride: []string{runtimeevals.DefaultEvalGroup},
 	}
 
 	event := api.SessionEvent{
@@ -622,15 +623,16 @@ func TestHandleMessage_SuccessfulProcess(t *testing.T) {
 	}
 
 	w := &EvalWorker{
-		redisClient:   client,
-		resultWriter:  writer,
-		messageStore:  store,
-		namespaces:    []string{"ns"},
-		streamKeys:    []string{testStreamKey},
-		consumerGroup: "test-group",
-		consumerName:  "test-consumer",
-		logger:        testLogger(),
-		packLoader:    packLoader,
+		redisClient:          client,
+		resultWriter:         writer,
+		messageStore:         store,
+		namespaces:           []string{"ns"},
+		streamKeys:           []string{testStreamKey},
+		consumerGroup:        "test-group",
+		consumerName:         "test-consumer",
+		logger:               testLogger(),
+		packLoader:           packLoader,
+		workerGroupsOverride: []string{runtimeevals.DefaultEvalGroup},
 	}
 
 	event := api.SessionEvent{
@@ -700,11 +702,12 @@ func TestProcessEvent_WriteEvalResults(t *testing.T) {
 	}
 
 	w := &EvalWorker{
-		resultWriter: writer,
-		messageStore: store,
-		namespaces:   []string{"ns"},
-		logger:       testLogger(),
-		packLoader:   packLoader,
+		resultWriter:         writer,
+		messageStore:         store,
+		namespaces:           []string{"ns"},
+		logger:               testLogger(),
+		packLoader:           packLoader,
+		workerGroupsOverride: []string{runtimeevals.DefaultEvalGroup},
 	}
 
 	event := api.SessionEvent{
@@ -741,11 +744,12 @@ func TestProcessEvent_WriteError(t *testing.T) {
 	}
 
 	w := &EvalWorker{
-		resultWriter: writer,
-		messageStore: store,
-		namespaces:   []string{"ns"},
-		logger:       testLogger(),
-		packLoader:   packLoader,
+		resultWriter:         writer,
+		messageStore:         store,
+		namespaces:           []string{"ns"},
+		logger:               testLogger(),
+		packLoader:           packLoader,
+		workerGroupsOverride: []string{runtimeevals.DefaultEvalGroup},
 	}
 
 	event := api.SessionEvent{
@@ -1185,11 +1189,12 @@ func TestProcessAssistantMessage_WithPackEvals(t *testing.T) {
 	}
 
 	w := &EvalWorker{
-		resultWriter: writer,
-		messageStore: store,
-		namespaces:   []string{"ns"},
-		logger:       testLogger(),
-		packLoader:   packLoader,
+		resultWriter:         writer,
+		messageStore:         store,
+		namespaces:           []string{"ns"},
+		logger:               testLogger(),
+		packLoader:           packLoader,
+		workerGroupsOverride: []string{runtimeevals.DefaultEvalGroup},
 	}
 
 	event := api.SessionEvent{
@@ -1260,11 +1265,12 @@ func TestOnSessionComplete_WithPackEvals(t *testing.T) {
 	}
 
 	w := &EvalWorker{
-		resultWriter: writer,
-		messageStore: store,
-		namespaces:   []string{"ns"},
-		logger:       testLogger(),
-		packLoader:   packLoader,
+		resultWriter:         writer,
+		messageStore:         store,
+		namespaces:           []string{"ns"},
+		logger:               testLogger(),
+		packLoader:           packLoader,
+		workerGroupsOverride: []string{runtimeevals.DefaultEvalGroup},
 	}
 	w.completionTracker = NewCompletionTracker(DefaultInactivityTimeout, nil, testLogger())
 
@@ -1692,13 +1698,14 @@ func TestProcessAssistantMessage_RecordsEvalMetrics(t *testing.T) {
 
 	runner := NewSDKRunner(WithMetrics(spy))
 	w := &EvalWorker{
-		messageStore: store,
-		resultWriter: rw,
-		namespaces:   []string{"ns"},
-		logger:       testLogger(),
-		packLoader:   packLoader,
-		sdkRunner:    runner,
-		metrics:      spy,
+		messageStore:         store,
+		resultWriter:         rw,
+		namespaces:           []string{"ns"},
+		logger:               testLogger(),
+		packLoader:           packLoader,
+		sdkRunner:            runner,
+		metrics:              spy,
+		workerGroupsOverride: []string{runtimeevals.DefaultEvalGroup},
 	}
 
 	event := api.SessionEvent{

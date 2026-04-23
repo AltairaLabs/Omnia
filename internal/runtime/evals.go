@@ -93,6 +93,27 @@ func ValidateEvalDefs(defs []evals.EvalDef) []string {
 	return missing
 }
 
+// DefaultInlineEvalGroups is the fallback group filter for the inline
+// eval path when spec.evals.inline.groups is absent or empty on the
+// AgentRuntime. It admits every eval in the "default" group (i.e. every
+// eval) that also classifies as "fast-running" — deterministic,
+// non-network, low-cost handlers. Long-running and external groups are
+// left to the eval-worker so the synchronous turn path is not gated on
+// LLM judges or external APIs.
+var DefaultInlineEvalGroups = []string{
+	evals.DefaultEvalGroup,
+	evals.GroupFastRunning,
+}
+
+// resolveInlineEvalGroups returns the configured inline group filter or
+// the built-in default when none is configured.
+func (s *Server) resolveInlineEvalGroups() []string {
+	if len(s.inlineEvalGroups) > 0 {
+		return s.inlineEvalGroups
+	}
+	return DefaultInlineEvalGroups
+}
+
 // buildEvalOptions builds SDK options for eval middleware when a collector is configured.
 //
 // Two result sinks run in parallel:
@@ -102,9 +123,12 @@ func ValidateEvalDefs(defs []evals.EvalDef) []string {
 //     and tagged Source="runtime-inline" to distinguish them from
 //     worker-path rows (Source="worker").
 //
-// Inline evals are expected to be lightweight (contains, regex, simple
-// scorers); LLM-as-judge evals run out-of-band in the eval-worker where
-// the full EvalResult is captured without bus serialization loss.
+// Inline evals are constrained to a group filter (defaults to "default"
+// + "fast-running") so only lightweight, deterministic handlers run
+// synchronously in the turn path; LLM-as-judge evals run out-of-band in
+// the eval-worker where the full EvalResult is captured without bus
+// serialization loss. The worker-side filter is the complement, resolved
+// per-event from the same AgentRuntime CRD.
 func (s *Server) buildEvalOptions() []sdk.Option {
 	if s.evalCollector == nil {
 		s.log.V(1).Info("eval options skipped", "reason", "no collector")
@@ -113,13 +137,16 @@ func (s *Server) buildEvalOptions() []sdk.Option {
 
 	registry := evals.NewEvalTypeRegistry()
 	runner := evals.NewEvalRunner(registry)
+	groups := s.resolveInlineEvalGroups()
 
 	s.log.V(1).Info("eval options built",
 		"evalDefCount", len(s.evalDefs),
-		"registeredTypes", registry.Types())
+		"registeredTypes", registry.Types(),
+		"inlineGroups", groups)
 
 	return []sdk.Option{
 		sdk.WithEvalRunner(runner),
 		sdk.WithMetrics(s.evalCollector, nil),
+		sdk.WithEvalGroups(groups...),
 	}
 }

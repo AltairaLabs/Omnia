@@ -78,6 +78,9 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 
 	// Eval config from CRD
 	cfg.EvalEnabled = ar.Spec.Evals != nil && ar.Spec.Evals.Enabled
+	if ar.Spec.Evals != nil && ar.Spec.Evals.Inline != nil {
+		cfg.InlineEvalGroups = ar.Spec.Evals.Inline.Groups
+	}
 
 	// Provider resolution: providers map → providerRef → inline provider
 	if err := loadProviderFromCRD(ctx, c, cfg, ar, namespace); err != nil {
