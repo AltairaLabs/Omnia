@@ -36,6 +36,21 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
   Prometheus metric. Suppressed-write log line promoted from V(1) to V(0)
   and enriched with layer + grants.
 
+### Added (analytics:aggregate enforcement foundation, #1007)
+
+- New `memory.AggregateConsentJoin(alias)` helper produces SQL JOIN +
+  WHERE fragments restricting a cross-user aggregate to users who have
+  granted `analytics:aggregate`. Institutional and agent-tier rows pass.
+- New Prometheus metrics:
+  - `omnia_memory_consent_analytics_optin_ratio` (gauge, 0..1)
+  - `omnia_memory_consent_analytics_users_total{granted}` (gauge pair)
+  - `omnia_memory_consent_analytics_worker_errors_total{reason}` (counter)
+- `AnalyticsOptInWorker` queries `user_privacy_preferences` every 5
+  minutes to refresh the gauges.
+- No existing queries retrofitted — memory-api has zero cross-user
+  aggregation today. The helper lands as foundation for the upcoming
+  #1004 dashboard.
+
 ### Breaking
 
 - `SessionPrivacyPolicy.spec.level`, `spec.workspaceRef`, and `spec.agentRef` removed. Policies are now reusable namespaced documents; binding has moved to consumers (`Workspace` service groups and `AgentRuntime`).

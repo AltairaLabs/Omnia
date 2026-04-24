@@ -293,6 +293,22 @@ func run() error {
 	// --- Retention worker ---
 	startRetentionWorker(ctx, store, f.retentionInterval, log)
 
+	// --- Analytics opt-in metric + worker ---
+	// Computes the fraction of users who have granted the
+	// analytics:aggregate consent category. Runs in any mode (EE or
+	// OSS); in OSS the grant is never set so the ratio reports 0 which
+	// is correct (no cross-user analytics consent).
+	optInMetrics := memory.NewAnalyticsOptInMetrics()
+	if err := memory.RegisterAnalyticsOptInMetrics(prometheus.DefaultRegisterer, optInMetrics); err != nil {
+		log.Error(err, "analytics opt-in metrics registration failed")
+	} else {
+		optInWorker := memory.NewAnalyticsOptInWorker(pool, optInMetrics, log)
+		go optInWorker.Run(ctx)
+		log.Info("analytics opt-in worker started",
+			"interval", memory.DefaultAnalyticsOptInInterval,
+		)
+	}
+
 	// --- Compaction worker ---
 	// Temporal summarization of old memories. Uses NoopSummarizer by default —
 	// memory growth is still bounded because the worker supersedes originals,
