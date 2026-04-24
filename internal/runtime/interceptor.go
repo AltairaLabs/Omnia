@@ -90,6 +90,7 @@ func extractPolicyFromMetadata(ctx context.Context) context.Context {
 	if grants := firstValue(md, policy.HeaderConsentGrants); grants != "" {
 		fields.ConsentGrants = strings.Split(grants, ",")
 	}
+	fields.ConsentLayer = firstValue(md, policy.HeaderConsentLayer)
 	return policy.WithPropagationFields(ctx, fields)
 }
 
