@@ -106,6 +106,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/memories/search", h.handleSearchMemories)
 	mux.HandleFunc("GET /api/v1/memories/export", h.handleExportMemories)
 	mux.HandleFunc("POST /api/v1/memories", h.handleSaveMemory)
+	mux.HandleFunc("GET /api/v1/memories/aggregate", h.handleMemoryAggregate)
 	mux.HandleFunc("DELETE /api/v1/memories/{id}", h.handleDeleteMemory)
 	mux.HandleFunc("DELETE /api/v1/memories/batch", h.handleBatchDeleteMemories)
 	mux.HandleFunc("DELETE /api/v1/memories", h.handleDeleteAllMemories)
@@ -420,6 +421,15 @@ func writeJSON(w http.ResponseWriter, data any) {
 func writeError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
 	msg := "internal server error"
+
+	// Per-handler structured errors (httpError) carry their own status + msg.
+	var he httpError
+	if errors.As(err, &he) {
+		w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
+		w.WriteHeader(he.status)
+		_ = json.NewEncoder(w).Encode(ErrorResponse{Error: he.msg})
+		return
+	}
 
 	switch {
 	case errors.Is(err, ErrMissingWorkspace):
