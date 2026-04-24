@@ -555,6 +555,8 @@ func wrapPrivacyMiddleware(ctx context.Context, next http.Handler, pool *pgxpool
 // buildConsentValidator constructs the EE Validator used by the privacy
 // middleware. It always wires the rule classifier; the embedding
 // classifier is wired only when an embedding provider is available.
+// Prometheus metrics are registered on the default registerer; a
+// duplicate registration error is logged but not fatal.
 func buildConsentValidator(ctx context.Context, embeddingSvc *memory.EmbeddingService, log logr.Logger) memoryapi.CategoryValidator {
 	rules := classify.NewRuleClassifier()
 
@@ -578,9 +580,15 @@ func buildConsentValidator(ctx context.Context, embeddingSvc *memory.EmbeddingSe
 			"reason", "no embedding provider configured")
 	}
 
+	metrics := classify.NewMetrics()
+	if err := metrics.Register(prometheus.DefaultRegisterer); err != nil {
+		log.Error(err, "consent classifier metrics registration failed")
+	}
+
 	v := classify.NewValidator(rules, embedding)
 	return func(ctx context.Context, claimed, content string) memoryapi.ValidatorResult {
 		res := v.Apply(ctx, privacy.ConsentCategory(claimed), content)
+		metrics.RecordResult(claimed, res)
 		return memoryapi.ValidatorResult{
 			Category:   string(res.Category),
 			Overridden: res.Overridden,
