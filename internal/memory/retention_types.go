@@ -32,6 +32,7 @@ const (
 	BranchHardClean        RetentionBranch = "hard_clean"
 	BranchConsentRevoke    RetentionBranch = "consent_revoke"
 	BranchConsentHardClean RetentionBranch = "consent_hard_clean"
+	BranchSupersession     RetentionBranch = "supersession"
 )
 
 // sqlPredicate returns the SQL where-clause fragment that isolates rows
