@@ -55,13 +55,27 @@ type OptOutChecker func(ctx context.Context, userID, workspace, category string,
 // scrubbed.
 type ContentRedactor func(ctx context.Context, workspace, content, provenance string) (string, error)
 
-// ContentClassifier infers a consent category from memory content.
-// Returns a category string (e.g. "memory:identity") or empty string for default.
-type ContentClassifier func(content string) string
+// CategoryValidator infers and validates the consent category for a memory
+// write. claimedCategory is whatever the caller put in req.Category (may
+// be empty). Implementations return the final category to use plus enough
+// detail for callers to record overrides. Implementations must not return
+// an error on internal classifier failures — they should fall through to
+// a sensible default and let the caller observe degradation via metrics.
+type CategoryValidator func(ctx context.Context, claimedCategory, content string) ValidatorResult
+
+// ValidatorResult is the structured outcome reported by a CategoryValidator.
+// Mirrors classify.Result but keeps this package free of an EE import.
+type ValidatorResult struct {
+	Category   string
+	Overridden bool
+	From       string
+	Source     string // "regex" | "embedding" | ""
+}
 
 // MemoryPrivacyMiddleware intercepts POST requests to the memory API and:
 //  1. Returns 204 No Content when the user has opted out of memory storage.
 //  2. Redacts PII from the request body's "content" field before forwarding.
+//  3. Optionally upgrades / fills req.Category via a CategoryValidator.
 //
 // Only POST requests are intercepted. GET, DELETE, and other methods pass
 // through without modification. This type is only constructed in enterprise
@@ -70,22 +84,24 @@ type ContentClassifier func(content string) string
 type MemoryPrivacyMiddleware struct {
 	checkOptOut OptOutChecker
 	redact      ContentRedactor
-	classifier  ContentClassifier // optional, nil when not configured
+	validator   CategoryValidator // optional, nil when not configured
 	log         logr.Logger
 }
 
 // NewMemoryPrivacyMiddleware creates a MemoryPrivacyMiddleware.
-// checkOptOut and redact must not be nil. classifier may be nil.
+// checkOptOut and redact must not be nil. validator may be nil — when nil
+// the middleware uses the caller-supplied req.Category verbatim and no
+// classification or override happens.
 func NewMemoryPrivacyMiddleware(
 	checkOptOut OptOutChecker,
 	redact ContentRedactor,
-	classifier ContentClassifier,
+	validator CategoryValidator,
 	log logr.Logger,
 ) *MemoryPrivacyMiddleware {
 	return &MemoryPrivacyMiddleware{
 		checkOptOut: checkOptOut,
 		redact:      redact,
-		classifier:  classifier,
+		validator:   validator,
 		log:         log.WithName("memory-privacy"),
 	}
 }
@@ -140,9 +156,24 @@ func (m *MemoryPrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 			return
 		}
 
-		// Classify content when no explicit category provided.
-		if decoded && req.Category == "" && m.classifier != nil {
-			req.Category = m.classifier(req.Content)
+		// Run the validator to fill / upgrade req.Category. The validator
+		// owns the full decision (caller's claim + classifier results).
+		// Track whether the body needs re-encoding before forwarding.
+		bodyDirty := false
+		if decoded && m.validator != nil {
+			res := m.validator(r.Context(), req.Category, req.Content)
+			if res.Overridden {
+				m.log.V(1).Info("consent category upgraded",
+					"from", res.From,
+					"to", res.Category,
+					"source", res.Source,
+					"workspace", workspace,
+				)
+			}
+			if res.Category != req.Category {
+				req.Category = res.Category
+				bodyDirty = true
+			}
 		}
 
 		// Read per-request consent override from header.
@@ -153,7 +184,11 @@ func (m *MemoryPrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 
 		// Check opt-out with category (empty string if not decoded).
 		if userID != "" && !m.checkOptOut(r.Context(), userID, workspace, req.Category, consentOverride) {
-			m.log.V(1).Info("memory write suppressed", "reason", "user opt-out", "userHash", logging.HashID(userID), "workspace", workspace, "category", req.Category)
+			m.log.V(1).Info("memory write suppressed",
+				"reason", "user opt-out",
+				"userHash", logging.HashID(userID),
+				"workspace", workspace,
+				"category", req.Category)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -169,9 +204,13 @@ func (m *MemoryPrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 			}
 			if redacted != req.Content {
 				req.Content = redacted
-				encoded, _ := json.Marshal(req)
-				data = encoded
+				bodyDirty = true
 			}
+		}
+
+		if bodyDirty {
+			encoded, _ := json.Marshal(req)
+			data = encoded
 		}
 
 		r.Body = io.NopCloser(bytes.NewReader(data))

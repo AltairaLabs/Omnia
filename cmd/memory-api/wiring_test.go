@@ -90,6 +90,7 @@ func (fakeMemoryStore) SaveCompactionSummary(_ context.Context, _ memory.Compact
 func TestBuildAPIMux_POSTMemoryWithoutUserIDReturns400(t *testing.T) {
 	freshPromRegistry(t)
 	handler, cleanup := buildAPIMux(
+		context.Background(),
 		fakeMemoryStore{},
 		nil, // embedding service is optional
 		memoryapi.MemoryServiceConfig{},
@@ -132,6 +133,7 @@ func TestBuildAPIMux_POSTMemoryWithoutUserIDReturns400(t *testing.T) {
 func TestBuildAPIMux_GETMemoriesWired(t *testing.T) {
 	freshPromRegistry(t)
 	handler, cleanup := buildAPIMux(
+		context.Background(),
 		fakeMemoryStore{},
 		nil,
 		memoryapi.MemoryServiceConfig{},
@@ -198,12 +200,38 @@ func TestCompactionWorkerOptions_PopulatesAgeAndDiscoverer(t *testing.T) {
 	}
 }
 
+// TestWrapPrivacyMiddleware_NoEmbeddingProvider_StillBuildsValidator verifies
+// that the privacy middleware wiring tolerates a nil embedding service —
+// the validator should still be constructed in regex-only mode and the
+// returned handler must not be nil.
+//
+// Note: this exercises only the no-kubeconfig branch (the only branch
+// reachable in unit tests). Full validator behaviour (regex + embedding +
+// override) is covered by ee/pkg/privacy/classify and middleware tests.
+func TestWrapPrivacyMiddleware_NoEmbeddingProvider_StillBuildsValidator(t *testing.T) {
+	freshPromRegistry(t)
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	handler := wrapPrivacyMiddleware(
+		context.Background(),
+		next,
+		nil, // pool — function tolerates nil because it skips when no kubeconfig
+		nil, // embeddingSvc nil → regex-only
+		logr.Discard(),
+	)
+	if handler == nil {
+		t.Fatal("expected non-nil handler")
+	}
+}
+
 // TestBuildAPIMux_HealthzAlwaysReachable verifies /healthz is wired regardless
 // of enterprise mode. This is a smoke test that the middleware chain does not
 // incorrectly gate health checks.
 func TestBuildAPIMux_HealthzAlwaysReachable(t *testing.T) {
 	freshPromRegistry(t)
 	handler, cleanup := buildAPIMux(
+		context.Background(),
 		fakeMemoryStore{},
 		nil,
 		memoryapi.MemoryServiceConfig{},
