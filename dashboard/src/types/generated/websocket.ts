@@ -220,6 +220,17 @@ export interface ClientMessage {
    * When present, these override stored consent for this request.
    */
   consent_grants?: string[];
+  /**
+   * SessionConsentGrants captures per-session consent grants. The first
+   * message with a non-empty list stamps the per-session default on the
+   * Connection. Subsequent messages with a non-empty list replace the
+   * cached value (last-writer-wins within the session).
+   * Empty / omitted is treated identically: the facade does NOT clear
+   * the cached value when an empty list arrives. To revoke all
+   * categories for a session use the binary opt-out via the privacy
+   * preferences API; per-session grants are additive only.
+   */
+  session_consent_grants?: string[];
 }
 /**
  * ServerMessage represents a message sent from server to client.
