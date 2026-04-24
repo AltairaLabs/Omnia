@@ -38,6 +38,38 @@ import (
 	"github.com/altairalabs/omnia/pkg/policy"
 )
 
+// captureSessionConsentGrants stamps a non-empty msg.SessionConsentGrants
+// onto the connection. Last-writer-wins: a subsequent non-empty list
+// replaces the previously-cached value. Empty / omitted lists are ignored —
+// they do NOT clear the cache (use the binary opt-out instead). Copies the
+// slice so subsequent client mutation can't corrupt the cached value.
+func captureSessionConsentGrants(c *Connection, msg *ClientMessage) {
+	if len(msg.SessionConsentGrants) == 0 {
+		return
+	}
+	grants := append([]string{}, msg.SessionConsentGrants...)
+	c.mu.Lock()
+	c.sessionConsentGrants = grants
+	c.mu.Unlock()
+}
+
+// effectiveConsentGrants returns the consent grants and layer label to
+// attach to the runtime call. Last-writer-wins: per-message overrides
+// session; session overrides persistent. nil grants + "persistent"
+// means memory-api falls back to its persistent store.
+func effectiveConsentGrants(c *Connection, msg *ClientMessage) ([]string, string) {
+	if len(msg.ConsentGrants) > 0 {
+		return msg.ConsentGrants, "per-message"
+	}
+	c.mu.Lock()
+	cached := c.sessionConsentGrants
+	c.mu.Unlock()
+	if len(cached) > 0 {
+		return cached, "session"
+	}
+	return nil, "persistent"
+}
+
 // processMessage handles processing of an incoming client message.
 func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientMessage, log logr.Logger) error {
 	// Get or create session first — the session ID determines the trace ID.
@@ -63,9 +95,12 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 		ctx = httpclient.WithUserID(ctx, c.userID)
 		ctx = policy.WithUserID(ctx, c.userID)
 	}
-	if len(msg.ConsentGrants) > 0 {
-		ctx = policy.WithConsentGrants(ctx, msg.ConsentGrants)
+	captureSessionConsentGrants(c, msg)
+	effective, layer := effectiveConsentGrants(c, msg)
+	if effective != nil {
+		ctx = policy.WithConsentGrants(ctx, effective)
 	}
+	ctx = policy.WithConsentLayer(ctx, layer)
 	log = logctx.LoggerWithContext(s.log, ctx)
 
 	// Update connection's session ID and mark as persisted
