@@ -322,3 +322,40 @@ func TestExtractPropagationFieldsConsentGrants(t *testing.T) {
 	fields := ExtractPropagationFields(ctx)
 	assert.Equal(t, grants, fields.ConsentGrants)
 }
+
+func TestWithConsentLayer_RoundTrip(t *testing.T) {
+	ctx := context.Background()
+	if got := ConsentLayerFromContext(ctx); got != "" {
+		t.Errorf("empty context: got %q, want \"\"", got)
+	}
+	ctx = WithConsentLayer(ctx, "session")
+	if got := ConsentLayerFromContext(ctx); got != "session" {
+		t.Errorf("after WithConsentLayer: got %q, want \"session\"", got)
+	}
+}
+
+func TestPropagationFields_RoundTripsConsentLayer(t *testing.T) {
+	ctx := WithPropagationFields(context.Background(), &PropagationFields{
+		ConsentGrants: []string{"memory:identity"},
+		ConsentLayer:  "per-message",
+	})
+	got := ExtractPropagationFields(ctx)
+	if got.ConsentLayer != "per-message" {
+		t.Errorf("ConsentLayer = %q, want \"per-message\"", got.ConsentLayer)
+	}
+}
+
+func TestToOutboundHeaders_IncludesConsentLayer(t *testing.T) {
+	ctx := WithConsentLayer(context.Background(), "session")
+	headers := ToOutboundHeaders(ctx)
+	if headers[HeaderConsentLayer] != "session" {
+		t.Errorf("headers[%q] = %q, want \"session\"", HeaderConsentLayer, headers[HeaderConsentLayer])
+	}
+}
+
+func TestToOutboundHeaders_OmitsEmptyConsentLayer(t *testing.T) {
+	headers := ToOutboundHeaders(context.Background())
+	if v, present := headers[HeaderConsentLayer]; present {
+		t.Errorf("HeaderConsentLayer present without value: %q", v)
+	}
+}
