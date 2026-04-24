@@ -339,6 +339,83 @@ func TestHandleSaveMemory_StoreError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 }
 
+func TestHandleSaveMemory_PropagatesCategoryToMetadata(t *testing.T) {
+	store := &mockStore{}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	body := SaveMemoryRequest{
+		Type:     "fact",
+		Content:  "user lives in Edinburgh",
+		Scope:    map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeUserID: "user-1"},
+		Category: "memory:location",
+	}
+	b, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/memories", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusCreated, rr.Code)
+	require.NotNil(t, store.savedMem)
+	got, _ := store.savedMem.Metadata[memory.MetaKeyConsentCategory].(string)
+	assert.Equal(t, "memory:location", got, "Category from request should land in metadata")
+}
+
+func TestHandleSaveMemory_EmptyCategoryLeavesMetadataUntouched(t *testing.T) {
+	store := &mockStore{}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	body := SaveMemoryRequest{
+		Type:    "fact",
+		Content: "no category here",
+		Scope:   map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeUserID: "user-1"},
+	}
+	b, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/memories", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusCreated, rr.Code)
+	require.NotNil(t, store.savedMem)
+	_, present := store.savedMem.Metadata[memory.MetaKeyConsentCategory]
+	assert.False(t, present, "no Category in request → no consent_category in metadata")
+}
+
+func TestHandleSaveMemory_ExplicitMetadataCategoryWins(t *testing.T) {
+	store := &mockStore{}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	body := SaveMemoryRequest{
+		Type:    "fact",
+		Content: "x",
+		Scope:   map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeUserID: "user-1"},
+		Metadata: map[string]any{
+			memory.MetaKeyConsentCategory: "memory:health",
+		},
+		Category: "memory:preferences",
+	}
+	b, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/memories", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusCreated, rr.Code)
+	require.NotNil(t, store.savedMem)
+	got := store.savedMem.Metadata[memory.MetaKeyConsentCategory].(string)
+	assert.Equal(t, "memory:health", got, "explicit metadata wins over req.Category")
+}
+
 func TestHandleSaveMemory_BodyTooLarge(t *testing.T) {
 	store := &mockStore{}
 	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
