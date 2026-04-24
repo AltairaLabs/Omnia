@@ -479,6 +479,13 @@ func buildAPIMux(
 	if auditHandler != nil {
 		auditHandler.RegisterMemoryRoutes(mux)
 	}
+	if enterprise {
+		// Consent stats endpoint for the operator dashboard (#1004).
+		// EE-only because the enforcement (Phase D) and grant capture
+		// (Phases B/C) are EE features; OSS counts would always be 0.
+		consentStatsHandler := privacy.NewConsentStatsHandler(privacy.NewPreferencesStore(pool), log)
+		consentStatsHandler.RegisterRoutes(mux)
+	}
 
 	// AuditMiddleware always applied — populates request context with IP/UA.
 	// The service only emits events when an audit logger is configured.
