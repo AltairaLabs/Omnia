@@ -100,6 +100,9 @@ jobs:
           - image: omnia-compaction
             dockerfile: Dockerfile.compaction
             context: .
+          - image: omnia-a2a-invoker
+            dockerfile: Dockerfile.a2a-invoker
+            context: .
           # --- Enterprise (chart gates these behind enterprise.enabled) ---
           - image: omnia-arena-controller
             dockerfile: ee/Dockerfile.arena-controller
@@ -201,6 +204,7 @@ jobs:
           - omnia-memory-api
           - omnia-doctor
           - omnia-compaction
+          - omnia-a2a-invoker
           - omnia-arena-controller
           - omnia-arena-worker
           - omnia-arena-dev-console
@@ -541,6 +545,7 @@ jobs:
           - `ghcr.io/altairalabs/omnia-memory-api:${{ needs.parse-version.outputs.version }}` (memory API)
           - `ghcr.io/altairalabs/omnia-doctor:${{ needs.parse-version.outputs.version }}` (in-cluster doctor)
           - `ghcr.io/altairalabs/omnia-compaction:${{ needs.parse-version.outputs.version }}` (retention/compaction job)
+          - `ghcr.io/altairalabs/omnia-a2a-invoker:${{ needs.parse-version.outputs.version }}` (A2A one-shot CronJob image)
 
           Enterprise:
           - `ghcr.io/altairalabs/omnia-arena-controller:${{ needs.parse-version.outputs.version }}`
