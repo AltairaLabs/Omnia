@@ -10,6 +10,26 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Breaking (CRD rename, no GitHub issue)
+
+- `MemoryRetentionPolicy` CRD renamed to `MemoryPolicy`. The schema is
+  identical; only the kind / plural / shortname change:
+  - `kind: MemoryRetentionPolicy` → `kind: MemoryPolicy`
+  - plural `memoryretentionpolicies` → `memorypolicies`
+  - shortname `mrp` → `mp`
+- Migration for clusters with existing instances:
+
+  ```bash
+  kubectl get memoryretentionpolicies -o yaml \
+    | sed 's/MemoryRetentionPolicy/MemoryPolicy/g; s/memoryretentionpolicies/memorypolicies/g' \
+    | kubectl apply -f -
+  kubectl delete crd memoryretentionpolicies.omnia.altairalabs.ai
+  ```
+
+- The rename frees up `MemoryPolicy` as the natural home for upcoming
+  per-workspace memory configuration knobs (next: tier-precedence
+  ranking weights for multi-tier retrieval).
+
 ### Added (memory consent classifier, #1005)
 
 - `memory_entities.consent_category` is now populated automatically on EE
