@@ -193,6 +193,79 @@ paths:
               schema:
                 $ref: '#/components/schemas/MemoryListResponse'
 
+  /memories/aggregate:
+    get:
+      operationId: aggregateMemories
+      summary: Workspace-scoped memory aggregate
+      description: |
+        Returns a `[{key, value, count}]` aggregate over `memory_entities`
+        for the specified workspace. Composes the `analytics:aggregate`
+        consent filter so users without that grant are excluded.
+      parameters:
+        - name: workspace
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: groupBy
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [category, agent, day]
+        - name: metric
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [count, distinct_users]
+            default: count
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Inclusive RFC3339 lower bound on `created_at`.
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Exclusive RFC3339 upper bound on `created_at`.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [key, value, count]
+                  properties:
+                    key:
+                      type: string
+                    value:
+                      type: integer
+                      format: int64
+                    count:
+                      type: integer
+                      format: int64
+        '400':
+          description: Invalid query parameter
+        '500':
+          description: Internal error
+
   /memories/retrieve:
     post:
       operationId: retrieveMultiTier

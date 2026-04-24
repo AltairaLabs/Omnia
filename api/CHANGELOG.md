@@ -36,6 +36,20 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
   Prometheus metric. Suppressed-write log line promoted from V(1) to V(0)
   and enriched with layer + grants.
 
+### Added (memory analytics backend, #1004)
+
+- `GET /api/v1/memories/aggregate?workspace=X&groupBy={category|agent|day}&metric={count|distinct_users}` —
+  workspace-scoped aggregate over `memory_entities`. Composes the
+  Phase D `analytics:aggregate` consent filter so users without that
+  grant are excluded by construction. Optional `from`/`to` (RFC3339)
+  for time bounds; `limit` clamped to [1, 1000]. Returns
+  `[{key, value, count}]` matching the eval-results aggregate pilot
+  shape from `docs/local-backlog/2026-04-17-observability-split-design.md`.
+- `GET /api/v1/privacy/consent/stats?workspace=X` (EE only) —
+  workspace-wide consent posture: `totalUsers`, `optedOutAll`,
+  `grantsByCategory`. Workspace param reserved for future per-workspace
+  scoping; currently a no-op (preferences table is user-keyed).
+
 ### Added (analytics:aggregate enforcement foundation, #1007)
 
 - New `memory.AggregateConsentJoin(alias)` helper produces SQL JOIN +

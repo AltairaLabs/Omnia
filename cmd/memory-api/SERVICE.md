@@ -15,7 +15,12 @@ and searches memory entries with optional semantic search via embeddings.
 
 ## Inputs
 
-- HTTP REST API on port 8080 (memory CRUD, search, consent)
+- HTTP REST API on port 8080 (memory CRUD, search, consent, analytics)
+  - `GET /api/v1/memories/aggregate` — workspace-scoped GROUP BY aggregate
+    for the operator dashboard (#1004). Composes the analytics:aggregate
+    consent filter from Phase D.
+  - `GET /api/v1/privacy/consent/stats` (EE only) — workspace-wide consent
+    posture for the operator dashboard.
 - Health/readiness probes on port 8081
 - Metrics on port 9090
 
