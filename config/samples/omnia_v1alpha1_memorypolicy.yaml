@@ -1,5 +1,5 @@
 apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: MemoryRetentionPolicy
+kind: MemoryPolicy
 metadata:
   labels:
     app.kubernetes.io/name: omnia

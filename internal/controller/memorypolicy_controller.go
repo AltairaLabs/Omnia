@@ -40,7 +40,7 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
-// MemoryRetentionPolicy condition types. Mirror the SessionRetentionPolicy
+// MemoryPolicy condition types. Mirror the SessionRetentionPolicy
 // set so operators see the same shape across both policy CRDs.
 const (
 	MemRetentionConditionTypePolicyValid        = "PolicyValid"
@@ -48,7 +48,7 @@ const (
 	MemRetentionConditionTypeReady              = "Ready"
 )
 
-// MemoryRetentionPolicy event reasons.
+// MemoryPolicy event reasons.
 const (
 	MemRetentionEventReasonValidated          = "PolicyValidated"
 	MemRetentionEventReasonValidationFailed   = "PolicyValidationFailed"
@@ -57,27 +57,27 @@ const (
 	MemRetentionEventReasonActive             = "PolicyActive"
 )
 
-// MemoryRetentionPolicyReconciler reconciles a MemoryRetentionPolicy object.
+// MemoryPolicyReconciler reconciles a MemoryPolicy object.
 //
 // Phase 1 only validates the spec and reports status — the retention worker
 // rewrite that actually applies the policy lands in Phase 3.
-type MemoryRetentionPolicyReconciler struct {
+type MemoryPolicyReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 }
 
-// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=memoryretentionpolicies,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=memoryretentionpolicies/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=memoryretentionpolicies/finalizers,verbs=update
+// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=memorypolicies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=memorypolicies/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=memorypolicies/finalizers,verbs=update
 
 // Reconcile validates the spec, checks that per-workspace overrides
 // reference actual Workspaces, and sets status conditions.
-func (r *MemoryRetentionPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *MemoryPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
-	log.V(1).Info("reconciling MemoryRetentionPolicy", "name", req.Name)
+	log.V(1).Info("reconciling MemoryPolicy", "name", req.Name)
 
-	policy := &omniav1alpha1.MemoryRetentionPolicy{}
+	policy := &omniav1alpha1.MemoryPolicy{}
 	if err := r.Get(ctx, req.NamespacedName, policy); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -108,7 +108,7 @@ func (r *MemoryRetentionPolicyReconciler) Reconcile(ctx context.Context, req ctr
 		SetCondition(&policy.Status.Conditions, policy.Generation, MemRetentionConditionTypeReady,
 			metav1.ConditionFalse, "WorkspaceResolutionFailed", "Workspace resolution failed")
 		r.emitEvent(policy, corev1.EventTypeWarning, MemRetentionEventReasonWorkspacesMissing, err.Error())
-		policy.Status.Phase = omniav1alpha1.MemoryRetentionPolicyPhaseError
+		policy.Status.Phase = omniav1alpha1.MemoryPolicyPhaseError
 		policy.Status.ObservedGeneration = policy.Generation
 		policy.Status.WorkspaceCount = resolvedCount
 		if statusErr := r.Status().Update(ctx, policy); statusErr != nil {
@@ -131,7 +131,7 @@ func (r *MemoryRetentionPolicyReconciler) Reconcile(ctx context.Context, req ctr
 	SetCondition(&policy.Status.Conditions, policy.Generation, MemRetentionConditionTypeReady,
 		metav1.ConditionTrue, "AllChecksPass", "Policy is valid and workspaces resolved")
 
-	policy.Status.Phase = omniav1alpha1.MemoryRetentionPolicyPhaseActive
+	policy.Status.Phase = omniav1alpha1.MemoryPolicyPhaseActive
 	policy.Status.ObservedGeneration = policy.Generation
 	policy.Status.WorkspaceCount = resolvedCount
 
@@ -143,7 +143,7 @@ func (r *MemoryRetentionPolicyReconciler) Reconcile(ctx context.Context, req ctr
 	r.emitEvent(policy, corev1.EventTypeNormal, MemRetentionEventReasonActive,
 		fmt.Sprintf("Policy is active with %d workspace overrides", resolvedCount))
 
-	log.V(1).Info("reconciled MemoryRetentionPolicy",
+	log.V(1).Info("reconciled MemoryPolicy",
 		"name", req.Name,
 		"phase", policy.Status.Phase,
 		"workspaces", resolvedCount,
@@ -154,9 +154,9 @@ func (r *MemoryRetentionPolicyReconciler) Reconcile(ctx context.Context, req ctr
 // markError sets the given condition + Ready=false + phase=Error and
 // persists status. Returns the validation error so the caller can
 // propagate it.
-func (r *MemoryRetentionPolicyReconciler) markError(
+func (r *MemoryPolicyReconciler) markError(
 	ctx context.Context,
-	policy *omniav1alpha1.MemoryRetentionPolicy,
+	policy *omniav1alpha1.MemoryPolicy,
 	condType, reason, message string,
 	eventReason string,
 ) (ctrl.Result, error) {
@@ -165,7 +165,7 @@ func (r *MemoryRetentionPolicyReconciler) markError(
 	SetCondition(&policy.Status.Conditions, policy.Generation, MemRetentionConditionTypeReady,
 		metav1.ConditionFalse, reason, "See PolicyValid condition for details")
 	r.emitEvent(policy, corev1.EventTypeWarning, eventReason, message)
-	policy.Status.Phase = omniav1alpha1.MemoryRetentionPolicyPhaseError
+	policy.Status.Phase = omniav1alpha1.MemoryPolicyPhaseError
 	policy.Status.ObservedGeneration = policy.Generation
 	if statusErr := r.Status().Update(ctx, policy); statusErr != nil {
 		logf.FromContext(ctx).Error(statusErr, logMsgFailedToUpdateStatus)
@@ -174,7 +174,7 @@ func (r *MemoryRetentionPolicyReconciler) markError(
 }
 
 // emitEvent is a nil-safe Recorder helper.
-func (r *MemoryRetentionPolicyReconciler) emitEvent(obj runtime.Object, eventType, reason, message string) {
+func (r *MemoryPolicyReconciler) emitEvent(obj runtime.Object, eventType, reason, message string) {
 	if r.Recorder != nil {
 		r.Recorder.Event(obj, eventType, reason, message)
 	}
@@ -184,8 +184,8 @@ func (r *MemoryRetentionPolicyReconciler) emitEvent(obj runtime.Object, eventTyp
 // Workspace that actually exists. Missing workspaces produce a clear
 // error so operators don't discover a typo only when the retention
 // worker skips a workspace silently.
-func (r *MemoryRetentionPolicyReconciler) resolveWorkspaces(
-	ctx context.Context, policy *omniav1alpha1.MemoryRetentionPolicy,
+func (r *MemoryPolicyReconciler) resolveWorkspaces(
+	ctx context.Context, policy *omniav1alpha1.MemoryPolicy,
 ) (int32, error) {
 	if len(policy.Spec.PerWorkspace) == 0 {
 		return 0, nil
@@ -211,8 +211,8 @@ func (r *MemoryRetentionPolicyReconciler) resolveWorkspaces(
 
 // validatePolicy enforces the semantic rules that can't be expressed
 // via kubebuilder markers alone.
-func (r *MemoryRetentionPolicyReconciler) validatePolicy(
-	policy *omniav1alpha1.MemoryRetentionPolicy,
+func (r *MemoryPolicyReconciler) validatePolicy(
+	policy *omniav1alpha1.MemoryPolicy,
 ) error {
 	if err := validateRetentionDefaults(&policy.Spec.Default); err != nil {
 		return fmt.Errorf("default: %w", err)
@@ -450,14 +450,14 @@ func expandDays(s string) (string, error) {
 // findPoliciesForWorkspace watches Workspaces so a retention policy
 // that previously failed validation (missing workspace) re-reconciles
 // when the workspace lands.
-func (r *MemoryRetentionPolicyReconciler) findPoliciesForWorkspace(
+func (r *MemoryPolicyReconciler) findPoliciesForWorkspace(
 	ctx context.Context, obj client.Object,
 ) []reconcile.Request {
 	ws, ok := obj.(*omniav1alpha1.Workspace)
 	if !ok {
 		return nil
 	}
-	policies := &omniav1alpha1.MemoryRetentionPolicyList{}
+	policies := &omniav1alpha1.MemoryPolicyList{}
 	if err := r.List(ctx, policies); err != nil {
 		logf.FromContext(ctx).Error(err,
 			"failed to list MemoryRetentionPolicies for Workspace mapping")
@@ -475,14 +475,14 @@ func (r *MemoryRetentionPolicyReconciler) findPoliciesForWorkspace(
 }
 
 // SetupWithManager wires the controller into the manager.
-func (r *MemoryRetentionPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *MemoryPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 3}).
-		For(&omniav1alpha1.MemoryRetentionPolicy{}).
+		For(&omniav1alpha1.MemoryPolicy{}).
 		Watches(
 			&omniav1alpha1.Workspace{},
 			handler.EnqueueRequestsFromMapFunc(r.findPoliciesForWorkspace),
 		).
-		Named("memoryretentionpolicy").
+		Named("memorypolicy").
 		Complete(r)
 }

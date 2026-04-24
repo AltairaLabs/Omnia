@@ -115,7 +115,7 @@ rules:
   - arenajobs
   - arenasources
   - arenatemplatesources
-  - memoryretentionpolicies
+  - memorypolicies
   - promptpacks
   - providers
   - sessionretentionpolicies
@@ -136,7 +136,7 @@ rules:
   resources:
   - agentpolicies/finalizers
   - agentruntimes/finalizers
-  - memoryretentionpolicies/finalizers
+  - memorypolicies/finalizers
   - promptpacks/finalizers
   - providers/finalizers
   - sessionretentionpolicies/finalizers
@@ -150,7 +150,7 @@ rules:
   resources:
   - agentpolicies/status
   - agentruntimes/status
-  - memoryretentionpolicies/status
+  - memorypolicies/status
   - promptpacks/status
   - providers/status
   - sessionretentionpolicies/status

@@ -28,11 +28,11 @@ import (
 
 var memRetentionTestCounter uint64
 
-var _ = Describe("MemoryRetentionPolicy Controller", func() {
+var _ = Describe("MemoryPolicy Controller", func() {
 	var (
 		rctx       context.Context
 		policyKey  types.NamespacedName
-		reconciler *MemoryRetentionPolicyReconciler
+		reconciler *MemoryPolicyReconciler
 		testID     string
 	)
 
@@ -40,7 +40,7 @@ var _ = Describe("MemoryRetentionPolicy Controller", func() {
 		rctx = context.Background()
 		testID = fmt.Sprintf("%d", atomic.AddUint64(&memRetentionTestCounter, 1))
 		policyKey = types.NamespacedName{Name: "test-mem-retention-" + testID}
-		reconciler = &MemoryRetentionPolicyReconciler{
+		reconciler = &MemoryPolicyReconciler{
 			Client:   k8sClient,
 			Scheme:   k8sClient.Scheme(),
 			Recorder: record.NewFakeRecorder(16),
@@ -48,16 +48,16 @@ var _ = Describe("MemoryRetentionPolicy Controller", func() {
 	})
 
 	AfterEach(func() {
-		policy := &omniav1alpha1.MemoryRetentionPolicy{}
+		policy := &omniav1alpha1.MemoryPolicy{}
 		if err := k8sClient.Get(rctx, policyKey, policy); err == nil {
 			_ = k8sClient.Delete(rctx, policy)
 		}
 	})
 
 	It("reconciles a minimal policy to Active", func() {
-		policy := &omniav1alpha1.MemoryRetentionPolicy{
+		policy := &omniav1alpha1.MemoryPolicy{
 			ObjectMeta: metav1.ObjectMeta{Name: policyKey.Name},
-			Spec: omniav1alpha1.MemoryRetentionPolicySpec{
+			Spec: omniav1alpha1.MemoryPolicySpec{
 				Default: omniav1alpha1.MemoryRetentionDefaults{
 					Tiers: omniav1alpha1.MemoryRetentionTierSet{
 						Institutional: &omniav1alpha1.MemoryTierConfig{
@@ -72,9 +72,9 @@ var _ = Describe("MemoryRetentionPolicy Controller", func() {
 		_, err := reconciler.Reconcile(rctx, reconcile.Request{NamespacedName: policyKey})
 		Expect(err).NotTo(HaveOccurred())
 
-		var updated omniav1alpha1.MemoryRetentionPolicy
+		var updated omniav1alpha1.MemoryPolicy
 		Expect(k8sClient.Get(rctx, policyKey, &updated)).To(Succeed())
-		Expect(updated.Status.Phase).To(Equal(omniav1alpha1.MemoryRetentionPolicyPhaseActive))
+		Expect(updated.Status.Phase).To(Equal(omniav1alpha1.MemoryPolicyPhaseActive))
 		Expect(updated.Status.ObservedGeneration).To(Equal(updated.Generation))
 		Expect(updated.Status.WorkspaceCount).To(Equal(int32(0)))
 
@@ -92,9 +92,9 @@ var _ = Describe("MemoryRetentionPolicy Controller", func() {
 	})
 
 	It("sets Error phase on invalid schedule", func() {
-		policy := &omniav1alpha1.MemoryRetentionPolicy{
+		policy := &omniav1alpha1.MemoryPolicy{
 			ObjectMeta: metav1.ObjectMeta{Name: policyKey.Name},
-			Spec: omniav1alpha1.MemoryRetentionPolicySpec{
+			Spec: omniav1alpha1.MemoryPolicySpec{
 				Default: omniav1alpha1.MemoryRetentionDefaults{
 					Tiers: omniav1alpha1.MemoryRetentionTierSet{
 						Institutional: &omniav1alpha1.MemoryTierConfig{
@@ -110,9 +110,9 @@ var _ = Describe("MemoryRetentionPolicy Controller", func() {
 		_, err := reconciler.Reconcile(rctx, reconcile.Request{NamespacedName: policyKey})
 		Expect(err).To(HaveOccurred())
 
-		var updated omniav1alpha1.MemoryRetentionPolicy
+		var updated omniav1alpha1.MemoryPolicy
 		Expect(k8sClient.Get(rctx, policyKey, &updated)).To(Succeed())
-		Expect(updated.Status.Phase).To(Equal(omniav1alpha1.MemoryRetentionPolicyPhaseError))
+		Expect(updated.Status.Phase).To(Equal(omniav1alpha1.MemoryPolicyPhaseError))
 
 		valid := findMemCondition(updated.Status.Conditions, MemRetentionConditionTypePolicyValid)
 		Expect(valid).NotTo(BeNil())
@@ -121,9 +121,9 @@ var _ = Describe("MemoryRetentionPolicy Controller", func() {
 	})
 
 	It("flags missing per-workspace references", func() {
-		policy := &omniav1alpha1.MemoryRetentionPolicy{
+		policy := &omniav1alpha1.MemoryPolicy{
 			ObjectMeta: metav1.ObjectMeta{Name: policyKey.Name},
-			Spec: omniav1alpha1.MemoryRetentionPolicySpec{
+			Spec: omniav1alpha1.MemoryPolicySpec{
 				Default: omniav1alpha1.MemoryRetentionDefaults{
 					Tiers: omniav1alpha1.MemoryRetentionTierSet{
 						Institutional: &omniav1alpha1.MemoryTierConfig{
@@ -141,9 +141,9 @@ var _ = Describe("MemoryRetentionPolicy Controller", func() {
 		_, err := reconciler.Reconcile(rctx, reconcile.Request{NamespacedName: policyKey})
 		Expect(err).To(HaveOccurred())
 
-		var updated omniav1alpha1.MemoryRetentionPolicy
+		var updated omniav1alpha1.MemoryPolicy
 		Expect(k8sClient.Get(rctx, policyKey, &updated)).To(Succeed())
-		Expect(updated.Status.Phase).To(Equal(omniav1alpha1.MemoryRetentionPolicyPhaseError))
+		Expect(updated.Status.Phase).To(Equal(omniav1alpha1.MemoryPolicyPhaseError))
 		Expect(updated.Status.WorkspaceCount).To(Equal(int32(0)))
 
 		wsResolved := findMemCondition(updated.Status.Conditions, MemRetentionConditionTypeWorkspacesResolved)
@@ -166,9 +166,9 @@ var _ = Describe("MemoryRetentionPolicy Controller", func() {
 			_ = k8sClient.Delete(rctx, ws)
 		}()
 
-		policy := &omniav1alpha1.MemoryRetentionPolicy{
+		policy := &omniav1alpha1.MemoryPolicy{
 			ObjectMeta: metav1.ObjectMeta{Name: policyKey.Name},
-			Spec: omniav1alpha1.MemoryRetentionPolicySpec{
+			Spec: omniav1alpha1.MemoryPolicySpec{
 				Default: omniav1alpha1.MemoryRetentionDefaults{
 					Tiers: omniav1alpha1.MemoryRetentionTierSet{
 						Institutional: &omniav1alpha1.MemoryTierConfig{
@@ -186,9 +186,9 @@ var _ = Describe("MemoryRetentionPolicy Controller", func() {
 		_, err := reconciler.Reconcile(rctx, reconcile.Request{NamespacedName: policyKey})
 		Expect(err).NotTo(HaveOccurred())
 
-		var updated omniav1alpha1.MemoryRetentionPolicy
+		var updated omniav1alpha1.MemoryPolicy
 		Expect(k8sClient.Get(rctx, policyKey, &updated)).To(Succeed())
-		Expect(updated.Status.Phase).To(Equal(omniav1alpha1.MemoryRetentionPolicyPhaseActive))
+		Expect(updated.Status.Phase).To(Equal(omniav1alpha1.MemoryPolicyPhaseActive))
 		Expect(updated.Status.WorkspaceCount).To(Equal(int32(1)))
 
 		wsResolved := findMemCondition(updated.Status.Conditions, MemRetentionConditionTypeWorkspacesResolved)
@@ -207,12 +207,12 @@ var _ = Describe("MemoryRetentionPolicy Controller", func() {
 	It("skips reconciliation when DeletionTimestamp is set", func() {
 		// Create a policy, add finalizer, then delete — Reconcile should
 		// early-return with no status update.
-		policy := &omniav1alpha1.MemoryRetentionPolicy{
+		policy := &omniav1alpha1.MemoryPolicy{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       policyKey.Name,
 				Finalizers: []string{"test-hold"},
 			},
-			Spec: omniav1alpha1.MemoryRetentionPolicySpec{
+			Spec: omniav1alpha1.MemoryPolicySpec{
 				Default: omniav1alpha1.MemoryRetentionDefaults{
 					Tiers: omniav1alpha1.MemoryRetentionTierSet{
 						Institutional: &omniav1alpha1.MemoryTierConfig{
@@ -230,7 +230,7 @@ var _ = Describe("MemoryRetentionPolicy Controller", func() {
 		Expect(result).To(Equal(ctrl.Result{}))
 
 		// Cleanup: drop finalizer so AfterEach can delete.
-		var held omniav1alpha1.MemoryRetentionPolicy
+		var held omniav1alpha1.MemoryPolicy
 		Expect(k8sClient.Get(rctx, policyKey, &held)).To(Succeed())
 		held.Finalizers = nil
 		Expect(k8sClient.Update(rctx, &held)).To(Succeed())
@@ -255,9 +255,9 @@ var _ = Describe("MemoryRetentionPolicy Controller", func() {
 			},
 		})).To(Succeed())
 
-		matching := &omniav1alpha1.MemoryRetentionPolicy{
+		matching := &omniav1alpha1.MemoryPolicy{
 			ObjectMeta: metav1.ObjectMeta{Name: "mrp-match-" + testID},
-			Spec: omniav1alpha1.MemoryRetentionPolicySpec{
+			Spec: omniav1alpha1.MemoryPolicySpec{
 				Default: omniav1alpha1.MemoryRetentionDefaults{
 					Tiers: omniav1alpha1.MemoryRetentionTierSet{
 						Institutional: &omniav1alpha1.MemoryTierConfig{
@@ -270,9 +270,9 @@ var _ = Describe("MemoryRetentionPolicy Controller", func() {
 				},
 			},
 		}
-		unrelated := &omniav1alpha1.MemoryRetentionPolicy{
+		unrelated := &omniav1alpha1.MemoryPolicy{
 			ObjectMeta: metav1.ObjectMeta{Name: "mrp-unrelated-" + testID},
-			Spec: omniav1alpha1.MemoryRetentionPolicySpec{
+			Spec: omniav1alpha1.MemoryPolicySpec{
 				Default: omniav1alpha1.MemoryRetentionDefaults{
 					Tiers: omniav1alpha1.MemoryRetentionTierSet{
 						Institutional: &omniav1alpha1.MemoryTierConfig{
@@ -306,17 +306,17 @@ var _ = Describe("MemoryRetentionPolicy Controller", func() {
 	})
 
 	It("returns nil from findPoliciesForWorkspace when called with a non-Workspace", func() {
-		requests := reconciler.findPoliciesForWorkspace(rctx, &omniav1alpha1.MemoryRetentionPolicy{})
+		requests := reconciler.findPoliciesForWorkspace(rctx, &omniav1alpha1.MemoryPolicy{})
 		Expect(requests).To(BeNil())
 	})
 
 	It("emitEvent is a no-op when Recorder is nil", func() {
-		nilRec := &MemoryRetentionPolicyReconciler{
+		nilRec := &MemoryPolicyReconciler{
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
 		}
 		// Should not panic.
-		nilRec.emitEvent(&omniav1alpha1.MemoryRetentionPolicy{},
+		nilRec.emitEvent(&omniav1alpha1.MemoryPolicy{},
 			"Normal", "TestReason", "test")
 	})
 })

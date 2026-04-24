@@ -131,8 +131,8 @@ func TestRetentionWorker_Supersession_SkipsWhenDisabled(t *testing.T) {
 	createSupersession(t, store, ws, user, 2, 30*24*time.Hour)
 
 	disabled := &omniav1alpha1.MemorySupersessionConfig{Enabled: false}
-	policy := &omniav1alpha1.MemoryRetentionPolicy{
-		Spec: omniav1alpha1.MemoryRetentionPolicySpec{
+	policy := &omniav1alpha1.MemoryPolicy{
+		Spec: omniav1alpha1.MemoryPolicySpec{
 			Default: omniav1alpha1.MemoryRetentionDefaults{
 				Tiers:        omniav1alpha1.MemoryRetentionTierSet{},
 				Schedule:     "@every 1m",
@@ -155,8 +155,8 @@ func TestRetentionWorker_Supersession_DeletesWhenEnabled(t *testing.T) {
 	createSupersession(t, store, ws, user, 2, 30*24*time.Hour)
 
 	grace := int32(14)
-	policy := &omniav1alpha1.MemoryRetentionPolicy{
-		Spec: omniav1alpha1.MemoryRetentionPolicySpec{
+	policy := &omniav1alpha1.MemoryPolicy{
+		Spec: omniav1alpha1.MemoryPolicySpec{
 			Default: omniav1alpha1.MemoryRetentionDefaults{
 				Tiers:    omniav1alpha1.MemoryRetentionTierSet{},
 				Schedule: "@every 1m",

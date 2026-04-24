@@ -17,13 +17,13 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
-// revocationPolicy returns a minimal MemoryRetentionPolicy configured
+// revocationPolicy returns a minimal MemoryPolicy configured
 // with the given consentRevocation action, and no per-tier modes so
 // the TTL/LRU branches stay out of the way.
-func revocationPolicy(action omniav1alpha1.ConsentRevocationAction) *omniav1alpha1.MemoryRetentionPolicy {
+func revocationPolicy(action omniav1alpha1.ConsentRevocationAction) *omniav1alpha1.MemoryPolicy {
 	grace := int32(7)
-	return &omniav1alpha1.MemoryRetentionPolicy{
-		Spec: omniav1alpha1.MemoryRetentionPolicySpec{
+	return &omniav1alpha1.MemoryPolicy{
+		Spec: omniav1alpha1.MemoryPolicySpec{
 			Default: omniav1alpha1.MemoryRetentionDefaults{
 				Tiers:    omniav1alpha1.MemoryRetentionTierSet{},
 				Schedule: "@every 1m",

@@ -12,7 +12,7 @@ resources:
 - bases/omnia.altairalabs.ai_arenatemplatesources.yaml
 - bases/omnia.altairalabs.ai_sessionprivacypolicies.yaml
 - bases/omnia.altairalabs.ai_sessionretentionpolicies.yaml
-- bases/omnia.altairalabs.ai_memoryretentionpolicies.yaml
+- bases/omnia.altairalabs.ai_memorypolicies.yaml
 - bases/omnia.altairalabs.ai_workspaces.yaml
 - bases/omnia.altairalabs.ai_agentpolicies.yaml
 - bases/omnia.altairalabs.ai_toolpolicies.yaml
