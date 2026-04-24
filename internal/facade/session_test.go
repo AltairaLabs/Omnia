@@ -702,3 +702,94 @@ func TestCohortHeaders_SpanOmitsEmptyAttributes(t *testing.T) {
 		t.Error("omnia.variant should not be set when header is empty")
 	}
 }
+
+func TestFacade_FirstMessageCachesSessionConsentGrants(t *testing.T) {
+	c := &Connection{}
+	msg := ClientMessage{
+		Type:                 MessageTypeMessage,
+		Content:              "hi",
+		SessionConsentGrants: []string{"memory:preferences", "memory:context"},
+	}
+	captureSessionConsentGrants(c, &msg)
+
+	c.mu.Lock()
+	cached := c.sessionConsentGrants
+	c.mu.Unlock()
+	if len(cached) != 2 || cached[0] != "memory:preferences" || cached[1] != "memory:context" {
+		t.Errorf("cached = %v, want [memory:preferences memory:context]", cached)
+	}
+}
+
+func TestFacade_EmptySessionGrantsDoNotClearCache(t *testing.T) {
+	c := &Connection{sessionConsentGrants: []string{"memory:preferences"}}
+	msg := ClientMessage{
+		Type:                 MessageTypeMessage,
+		Content:              "hi",
+		SessionConsentGrants: []string{}, // empty must NOT clear
+	}
+	captureSessionConsentGrants(c, &msg)
+
+	c.mu.Lock()
+	cached := c.sessionConsentGrants
+	c.mu.Unlock()
+	if len(cached) != 1 || cached[0] != "memory:preferences" {
+		t.Errorf("cached = %v, want [memory:preferences]", cached)
+	}
+}
+
+func TestFacade_EffectiveGrants_PerMessageWins(t *testing.T) {
+	c := &Connection{sessionConsentGrants: []string{"memory:preferences"}}
+	msg := ClientMessage{
+		Type:          MessageTypeMessage,
+		Content:       "hi",
+		ConsentGrants: []string{"memory:identity"},
+	}
+	effective, layer := effectiveConsentGrants(c, &msg)
+	if layer != "per-message" {
+		t.Errorf("layer = %q, want \"per-message\"", layer)
+	}
+	if len(effective) != 1 || effective[0] != "memory:identity" {
+		t.Errorf("effective = %v, want [memory:identity]", effective)
+	}
+}
+
+func TestFacade_EffectiveGrants_SessionUsedWhenNoPerMessage(t *testing.T) {
+	c := &Connection{sessionConsentGrants: []string{"memory:preferences"}}
+	msg := ClientMessage{Type: MessageTypeMessage, Content: "hi"}
+	effective, layer := effectiveConsentGrants(c, &msg)
+	if layer != "session" {
+		t.Errorf("layer = %q, want \"session\"", layer)
+	}
+	if len(effective) != 1 || effective[0] != "memory:preferences" {
+		t.Errorf("effective = %v, want [memory:preferences]", effective)
+	}
+}
+
+func TestFacade_EffectiveGrants_PersistentWhenNeitherSet(t *testing.T) {
+	c := &Connection{}
+	msg := ClientMessage{Type: MessageTypeMessage, Content: "hi"}
+	effective, layer := effectiveConsentGrants(c, &msg)
+	if layer != "persistent" {
+		t.Errorf("layer = %q, want \"persistent\"", layer)
+	}
+	if effective != nil {
+		t.Errorf("effective = %v, want nil", effective)
+	}
+}
+
+func TestFacade_ResettingSessionGrantsReplaces(t *testing.T) {
+	c := &Connection{sessionConsentGrants: []string{"memory:preferences"}}
+	msg := ClientMessage{
+		Type:                 MessageTypeMessage,
+		Content:              "hi",
+		SessionConsentGrants: []string{"memory:context"},
+	}
+	captureSessionConsentGrants(c, &msg)
+
+	c.mu.Lock()
+	cached := c.sessionConsentGrants
+	c.mu.Unlock()
+	if len(cached) != 1 || cached[0] != "memory:context" {
+		t.Errorf("cached = %v, want [memory:context]", cached)
+	}
+}

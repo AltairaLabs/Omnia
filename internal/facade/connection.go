@@ -52,6 +52,14 @@ type Connection struct {
 	cohortID string
 	variant  string
 
+	// sessionConsentGrants holds the per-session consent grants captured
+	// from the first non-empty ClientMessage.SessionConsentGrants the
+	// facade saw on this connection. Subsequent non-empty lists replace
+	// the cached value (last-writer-wins). Empty / omitted lists are
+	// ignored. nil means "no session-level grants set." Mutex-protected
+	// via c.mu.
+	sessionConsentGrants []string
+
 	// rateLimiter enforces per-connection message rate limiting. Nil when disabled.
 	rateLimiter *rate.Limiter
 
