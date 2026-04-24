@@ -32,6 +32,8 @@ import (
 )
 
 const consentGrantsHeader = "X-Consent-Grants"
+const consentLayerHeader = "X-Consent-Layer"
+const consentDecisionHeader = "X-Consent-Decision"
 
 // OptOutChecker returns false when the user has opted out of memory storage,
 // indicating the write should be silently dropped.
@@ -84,7 +86,8 @@ type ValidatorResult struct {
 type MemoryPrivacyMiddleware struct {
 	checkOptOut OptOutChecker
 	redact      ContentRedactor
-	validator   CategoryValidator // optional, nil when not configured
+	validator   CategoryValidator   // optional, nil when not configured
+	metrics     *SuppressionMetrics // optional, nil when not configured
 	log         logr.Logger
 }
 
@@ -104,6 +107,34 @@ func NewMemoryPrivacyMiddleware(
 		validator:   validator,
 		log:         log.WithName("memory-privacy"),
 	}
+}
+
+// NewMemoryPrivacyMiddlewareWithMetrics is like NewMemoryPrivacyMiddleware
+// but additionally wires a SuppressionMetrics collector for observability
+// on dropped writes. metrics may be nil; nil disables metric recording.
+func NewMemoryPrivacyMiddlewareWithMetrics(
+	checkOptOut OptOutChecker,
+	redact ContentRedactor,
+	validator CategoryValidator,
+	metrics *SuppressionMetrics,
+	log logr.Logger,
+) *MemoryPrivacyMiddleware {
+	mw := NewMemoryPrivacyMiddleware(checkOptOut, redact, validator, log)
+	mw.metrics = metrics
+	return mw
+}
+
+// formatConsentDecision builds the value for the X-Consent-Decision response
+// header. Format: "deny; category=<category>; layer=<layer>". Empty fields
+// become "unknown" to keep the header well-formed.
+func formatConsentDecision(category, layer string) string {
+	if category == "" {
+		category = "unknown"
+	}
+	if layer == "" {
+		layer = "unknown"
+	}
+	return "deny; category=" + category + "; layer=" + layer
 }
 
 // provenanceMetaKey mirrors pkmemory.MetaKeyProvenance — duplicated here as
@@ -184,11 +215,22 @@ func (m *MemoryPrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 
 		// Check opt-out with category (empty string if not decoded).
 		if userID != "" && !m.checkOptOut(r.Context(), userID, workspace, req.Category, consentOverride) {
-			m.log.V(1).Info("memory write suppressed",
-				"reason", "user opt-out",
+			layer := r.Header.Get(consentLayerHeader)
+			if layer == "" {
+				layer = "persistent"
+			}
+			m.log.Info("memory write suppressed",
+				"reason", "opt-out",
+				"category", req.Category,
+				"layer", layer,
+				"grants", consentOverride,
 				"userHash", logging.HashID(userID),
 				"workspace", workspace,
-				"category", req.Category)
+			)
+			if m.metrics != nil {
+				m.metrics.RecordSuppression(layer, req.Category, "opt-out")
+			}
+			w.Header().Set(consentDecisionHeader, formatConsentDecision(req.Category, layer))
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
