@@ -140,6 +140,12 @@ func (w *RetentionWorker) runOnce(ctx context.Context) {
 		anyErr = true
 	}
 
+	superseded, supersessionErr := w.runSupersessionCleanup(ctx,
+		policy.Spec.Default.Supersession, batchSize)
+	if supersessionErr != nil {
+		anyErr = true
+	}
+
 	hard, err := w.store.HardDeleteForgottenOlderThan(ctx,
 		resolveGraceDays(policy.Spec.Default.ConsentRevocation), int(batchSize))
 	if err != nil {
@@ -155,7 +161,53 @@ func (w *RetentionWorker) runOnce(ctx context.Context) {
 		"hardDeleted", hard,
 		"consentSoftDeleted", cascadeSoft,
 		"consentHardDeleted", cascadeHard,
+		"supersededObservations", superseded,
 		"ok", !anyErr)
+}
+
+// runSupersessionCleanup hard-deletes observations that have been
+// superseded by a temporal summary once the policy's grace window
+// has elapsed. The branch is a no-op when the policy's
+// supersession.enabled flag is false (the default) — operators opt
+// in after confirming their summarizer agent is producing summaries
+// they're willing to commit to.
+//
+// Superseded observations are already hidden from retrieval via the
+// `superseded_by IS NULL` filter in retrieve_multi_tier.go, so this
+// branch only reclaims storage and does not change API behaviour.
+func (w *RetentionWorker) runSupersessionCleanup(
+	ctx context.Context,
+	cfg *omniav1alpha1.MemorySupersessionConfig,
+	batchSize int32,
+) (int64, error) {
+	if cfg == nil || !cfg.Enabled {
+		return 0, nil
+	}
+	metrics := defaultRetentionMetrics.Load()
+	grace := resolveSupersessionGraceDays(cfg)
+	n, err := w.store.HardDeleteSupersededObservations(ctx, grace, int(batchSize))
+	if err != nil {
+		metrics.observeBranchError(TierInstitutional, BranchSupersession)
+		w.log.Error(err, "supersession cleanup failed")
+		return 0, err
+	}
+	metrics.observeHardDelete(n)
+	if n > 0 {
+		w.log.Info("memory supersession cleanup",
+			"observationsDeleted", n,
+			"graceDays", grace,
+		)
+	}
+	return n, nil
+}
+
+// resolveSupersessionGraceDays pulls the grace window from the
+// policy, defaulting to the CRD's documented default (14 days).
+func resolveSupersessionGraceDays(cfg *omniav1alpha1.MemorySupersessionConfig) int32 {
+	if cfg != nil && cfg.GraceDays != nil {
+		return *cfg.GraceDays
+	}
+	return 14
 }
 
 // runConsentRevocation cascades user consent revocations to memory
