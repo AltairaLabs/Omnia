@@ -166,6 +166,16 @@ type ClientMessage struct {
 	// ConsentGrants carries per-message consent category grants from the client.
 	// When present, these override stored consent for this request.
 	ConsentGrants []string `json:"consent_grants,omitempty"`
+	// SessionConsentGrants captures per-session consent grants. The first
+	// message with a non-empty list stamps the per-session default on the
+	// Connection. Subsequent messages with a non-empty list replace the
+	// cached value (last-writer-wins within the session).
+	//
+	// Empty / omitted is treated identically: the facade does NOT clear
+	// the cached value when an empty list arrives. To revoke all
+	// categories for a session use the binary opt-out via the privacy
+	// preferences API; per-session grants are additive only.
+	SessionConsentGrants []string `json:"session_consent_grants,omitempty"`
 }
 
 // ServerMessage represents a message sent from server to client.
