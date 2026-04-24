@@ -141,6 +141,40 @@ components:
             type: object
             additionalProperties:
               type: string
+          consent_grants:
+            type: array
+            items:
+              type: string
+              enum:
+                - memory:identity
+                - memory:preferences
+                - memory:context
+                - memory:location
+                - memory:health
+                - memory:history
+                - analytics:aggregate
+            description: |
+              Per-message consent override. Replaces session and persistent
+              grants for this single turn (last-writer-wins).
+          session_consent_grants:
+            type: array
+            items:
+              type: string
+              enum:
+                - memory:identity
+                - memory:preferences
+                - memory:context
+                - memory:location
+                - memory:health
+                - memory:history
+                - analytics:aggregate
+            description: |
+              Per-session consent grants. The first message with a non-empty
+              list stamps the per-session default on the connection.
+              Subsequent messages with a non-empty list replace the cached
+              value (last-writer-wins). Empty / omitted lists are ignored —
+              to revoke all categories for a session use the binary opt-out
+              via the privacy preferences API.
 
     ClientToolResult:
       name: ClientToolResult
