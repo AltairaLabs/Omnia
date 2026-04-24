@@ -10,6 +10,16 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (memory consent classifier, #1005)
+
+- `memory_entities.consent_category` is now populated automatically on EE
+  deployments via the new content classifier (`ee/pkg/privacy/classify`):
+  PII regex + optional embedding similarity, upgrade-only validator. No
+  schema change. OSS deployments unaffected — column stays `NULL`.
+- `SaveMemoryRequest.Category` is now propagated into
+  `mem.Metadata[consent_category]` in the handler (was a silent dropped
+  field). EE middleware classification results now reach the column.
+
 ### Breaking
 
 - `SessionPrivacyPolicy.spec.level`, `spec.workspaceRef`, and `spec.agentRef` removed. Policies are now reusable namespaced documents; binding has moved to consumers (`Workspace` service groups and `AgentRuntime`).

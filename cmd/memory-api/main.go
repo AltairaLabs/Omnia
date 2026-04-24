@@ -53,6 +53,7 @@ import (
 	eeaudit "github.com/altairalabs/omnia/ee/pkg/audit"
 	eemetrics "github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
+	"github.com/altairalabs/omnia/ee/pkg/privacy/classify"
 	"github.com/altairalabs/omnia/ee/pkg/redaction"
 	"github.com/altairalabs/omnia/internal/memory"
 	memoryapi "github.com/altairalabs/omnia/internal/memory/api"
@@ -344,7 +345,7 @@ func run() error {
 	}
 
 	// --- Build API mux ---
-	apiMux, cleanup := buildAPIMux(store, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, log)
+	apiMux, cleanup := buildAPIMux(ctx, store, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, log)
 	defer cleanup()
 
 	// --- Servers ---
@@ -427,6 +428,7 @@ func detectNamespace() string {
 // with rate limiting, privacy (enterprise), metrics, and tracing middleware.
 // Returns the handler and a cleanup function.
 func buildAPIMux(
+	ctx context.Context,
 	store memory.Store,
 	embeddingSvc *memory.EmbeddingService,
 	cfg memoryapi.MemoryServiceConfig,
@@ -466,9 +468,9 @@ func buildAPIMux(
 	// The service only emits events when an audit logger is configured.
 	apiHandler := memoryapi.AuditMiddleware(mux)
 
-	// Enterprise privacy middleware (opt-out + PII redaction).
+	// Enterprise privacy middleware (opt-out + PII redaction + classifier).
 	if enterprise {
-		apiHandler = wrapPrivacyMiddleware(apiHandler, pool, log)
+		apiHandler = wrapPrivacyMiddleware(ctx, apiHandler, pool, embeddingSvc, log)
 	}
 
 	// Rate limiting middleware (per-client-IP token bucket).
@@ -493,7 +495,7 @@ func buildAPIMux(
 // wrapPrivacyMiddleware creates and wires the enterprise privacy middleware.
 // When the K8s API is unreachable (e.g., in tests), the middleware is skipped
 // and the original handler is returned unchanged.
-func wrapPrivacyMiddleware(next http.Handler, pool *pgxpool.Pool, log logr.Logger) http.Handler {
+func wrapPrivacyMiddleware(ctx context.Context, next http.Handler, pool *pgxpool.Pool, embeddingSvc *memory.EmbeddingService, log logr.Logger) http.Handler {
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
 		log.Info("memory privacy middleware skipped", "reason", "no in-cluster kubeconfig")
@@ -544,10 +546,67 @@ func wrapPrivacyMiddleware(next http.Handler, pool *pgxpool.Pool, log logr.Logge
 		return redacted, err
 	})
 
-	classifier := memoryapi.ContentClassifier(privacy.NewContentClassifier())
-	mw := memoryapi.NewMemoryPrivacyMiddleware(checkOptOut, contentRedactor, classifier, log)
+	validator := buildConsentValidator(ctx, embeddingSvc, log)
+	mw := memoryapi.NewMemoryPrivacyMiddleware(checkOptOut, contentRedactor, validator, log)
 	log.Info("memory privacy middleware enabled")
 	return mw.Wrap(next)
+}
+
+// buildConsentValidator constructs the EE Validator used by the privacy
+// middleware. It always wires the rule classifier; the embedding
+// classifier is wired only when an embedding provider is available.
+// Prometheus metrics are registered on the default registerer; a
+// duplicate registration error is logged but not fatal.
+func buildConsentValidator(ctx context.Context, embeddingSvc *memory.EmbeddingService, log logr.Logger) memoryapi.CategoryValidator {
+	rules := classify.NewRuleClassifier()
+
+	var embedding *classify.EmbeddingClassifier
+	if embeddingSvc != nil {
+		embedding = classify.NewEmbeddingClassifier(
+			embedderAdapter{provider: embeddingSvc.Provider()},
+			log.WithName("classifier"),
+		)
+		// Prewarm centroids in a goroutine — failure is non-fatal, the
+		// classifier will retry on first save.
+		go func() {
+			pwCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			if err := embedding.PrewarmCentroids(pwCtx); err != nil {
+				log.Error(err, "centroid prewarm failed; classifier will retry on first save")
+			}
+		}()
+	} else {
+		log.Info("consent classifier running in regex-only mode",
+			"reason", "no embedding provider configured")
+	}
+
+	metrics := classify.NewMetrics()
+	if err := metrics.Register(prometheus.DefaultRegisterer); err != nil {
+		log.Error(err, "consent classifier metrics registration failed")
+	}
+
+	v := classify.NewValidator(rules, embedding)
+	return func(ctx context.Context, claimed, content string) memoryapi.ValidatorResult {
+		res := v.Apply(ctx, privacy.ConsentCategory(claimed), content)
+		metrics.RecordResult(claimed, res)
+		return memoryapi.ValidatorResult{
+			Category:   string(res.Category),
+			Overridden: res.Overridden,
+			From:       string(res.From),
+			Source:     res.Source,
+		}
+	}
+}
+
+// embedderAdapter adapts memory.EmbeddingProvider (Embed + Dimensions)
+// to the smaller classify.Embedder interface used by the consent
+// classifier (Embed only).
+type embedderAdapter struct {
+	provider memory.EmbeddingProvider
+}
+
+func (a embedderAdapter) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	return a.provider.Embed(ctx, texts)
 }
 
 // trustLevelForProvenance maps a PromptKit provenance string to the

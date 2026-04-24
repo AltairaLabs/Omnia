@@ -37,6 +37,13 @@ func NewEmbeddingService(store *PostgresMemoryStore, provider EmbeddingProvider,
 	return &EmbeddingService{store: store, provider: provider, log: log.WithName("embedding")}
 }
 
+// Provider returns the underlying embedding provider so other consumers
+// (e.g. the EE consent classifier) can share it without needing access
+// to internal state. Safe to call after NewEmbeddingService.
+func (s *EmbeddingService) Provider() EmbeddingProvider {
+	return s.provider
+}
+
 // EmbedMemory generates and stores an embedding for the given memory's content.
 func (s *EmbeddingService) EmbedMemory(ctx context.Context, mem *Memory) error {
 	s.log.V(1).Info("embedding memory", "memoryID", mem.ID, "contentLength", len(mem.Content))

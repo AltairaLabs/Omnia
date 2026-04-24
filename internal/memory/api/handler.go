@@ -242,6 +242,19 @@ func (h *Handler) handleSaveMemory(w http.ResponseWriter, r *http.Request) {
 		TurnRange:  req.TurnRange,
 	}
 
+	// Propagate the caller-supplied category into metadata so the store's
+	// consentCategoryFromMetadata path picks it up and writes the column.
+	// In OSS req.Category is always empty so this is a no-op. An explicit
+	// metadata.consent_category set by the caller wins (don't overwrite).
+	if req.Category != "" {
+		if mem.Metadata == nil {
+			mem.Metadata = map[string]any{}
+		}
+		if _, set := mem.Metadata[memory.MetaKeyConsentCategory]; !set {
+			mem.Metadata[memory.MetaKeyConsentCategory] = req.Category
+		}
+	}
+
 	if err := h.service.SaveMemory(r.Context(), mem); err != nil {
 		h.log.Error(err, "SaveMemory failed")
 		writeError(w, err)

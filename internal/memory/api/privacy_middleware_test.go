@@ -452,23 +452,23 @@ func TestMemoryPrivacyMiddleware_CategoryOptedOut_Returns204(t *testing.T) {
 	assert.False(t, handlerCalled)
 }
 
-func TestMemoryPrivacyMiddleware_ClassifiesWhenCategoryEmpty(t *testing.T) {
-	// POST with no category + classifier returns "memory:identity" → opt-out checker receives "memory:identity".
+func TestMemoryPrivacyMiddleware_ValidatorFillsCategoryWhenEmpty(t *testing.T) {
+	// POST with no category + validator returns "memory:identity" → opt-out checker receives "memory:identity".
 	var receivedCategory string
 	checker := OptOutChecker(func(_ context.Context, _, _, category string, _ []string) bool {
 		receivedCategory = category
 		return true // allow
 	})
 
-	classifier := ContentClassifier(func(_ string) string {
-		return "memory:identity"
+	validator := CategoryValidator(func(_ context.Context, _, _ string) ValidatorResult {
+		return ValidatorResult{Category: "memory:identity"}
 	})
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	})
 
-	mw := NewMemoryPrivacyMiddleware(checker, noOpRedact, classifier, logr.Discard())
+	mw := NewMemoryPrivacyMiddleware(checker, noOpRedact, validator, logr.Discard())
 	handler := mw.Wrap(next)
 
 	w := httptest.NewRecorder()
@@ -476,13 +476,16 @@ func TestMemoryPrivacyMiddleware_ClassifiesWhenCategoryEmpty(t *testing.T) {
 	handler.ServeHTTP(w, r)
 
 	assert.Equal(t, http.StatusCreated, w.Code)
-	assert.Equal(t, "memory:identity", receivedCategory, "classifier result should reach opt-out checker")
+	assert.Equal(t, "memory:identity", receivedCategory, "validator result should reach opt-out checker")
 }
 
-func TestMemoryPrivacyMiddleware_SkipsClassifierWhenCategoryProvided(t *testing.T) {
-	// POST with explicit category → classifier must NOT be called.
-	panicClassifier := ContentClassifier(func(_ string) string {
-		panic("ContentClassifier must not be called when category already set")
+func TestMemoryPrivacyMiddleware_ValidatorRunsEvenWithCallerCategory(t *testing.T) {
+	// POST with explicit category → validator is still called (it owns the
+	// upgrade decision), but a pass-through validator leaves the claim alone.
+	var observed string
+	validator := CategoryValidator(func(_ context.Context, claimed, _ string) ValidatorResult {
+		observed = claimed
+		return ValidatorResult{Category: claimed}
 	})
 
 	var receivedCategory string
@@ -495,7 +498,7 @@ func TestMemoryPrivacyMiddleware_SkipsClassifierWhenCategoryProvided(t *testing.
 		w.WriteHeader(http.StatusCreated)
 	})
 
-	mw := NewMemoryPrivacyMiddleware(checker, noOpRedact, panicClassifier, logr.Discard())
+	mw := NewMemoryPrivacyMiddleware(checker, noOpRedact, validator, logr.Discard())
 	handler := mw.Wrap(next)
 
 	w := httptest.NewRecorder()
@@ -503,11 +506,12 @@ func TestMemoryPrivacyMiddleware_SkipsClassifierWhenCategoryProvided(t *testing.
 	handler.ServeHTTP(w, r)
 
 	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Equal(t, "memory:preferences", observed, "validator receives the caller's claim")
 	assert.Equal(t, "memory:preferences", receivedCategory, "explicit category should pass through unchanged")
 }
 
-func TestMemoryPrivacyMiddleware_NilClassifier_CategoryStaysEmpty(t *testing.T) {
-	// POST with no category + nil classifier → opt-out checker receives empty string.
+func TestMemoryPrivacyMiddleware_NilValidator_CategoryStaysEmpty(t *testing.T) {
+	// POST with no category + nil validator → opt-out checker receives empty string.
 	var receivedCategory string
 	checker := OptOutChecker(func(_ context.Context, _, _, category string, _ []string) bool {
 		receivedCategory = category
@@ -518,7 +522,6 @@ func TestMemoryPrivacyMiddleware_NilClassifier_CategoryStaysEmpty(t *testing.T) 
 		w.WriteHeader(http.StatusCreated)
 	})
 
-	// nil classifier explicitly
 	mw := NewMemoryPrivacyMiddleware(checker, noOpRedact, nil, logr.Discard())
 	handler := mw.Wrap(next)
 
@@ -527,17 +530,17 @@ func TestMemoryPrivacyMiddleware_NilClassifier_CategoryStaysEmpty(t *testing.T) 
 	handler.ServeHTTP(w, r)
 
 	assert.Equal(t, http.StatusCreated, w.Code)
-	assert.Equal(t, "", receivedCategory, "category should remain empty when classifier is nil")
+	assert.Equal(t, "", receivedCategory, "category should remain empty when validator is nil")
 }
 
-func TestMemoryPrivacyMiddleware_ClassifierBeforeOptOut(t *testing.T) {
-	// POST + classifier returns "memory:health" + opt-out rejects "memory:health" → 204.
-	classifier := ContentClassifier(func(_ string) string {
-		return "memory:health"
+func TestMemoryPrivacyMiddleware_ValidatorRunsBeforeOptOut(t *testing.T) {
+	// POST + validator returns "memory:health" + opt-out rejects "memory:health" → 204.
+	validator := CategoryValidator(func(_ context.Context, _, _ string) ValidatorResult {
+		return ValidatorResult{Category: "memory:health"}
 	})
 
 	checker := OptOutChecker(func(_ context.Context, _, _, category string, _ []string) bool {
-		return category != "memory:health" // reject memory:health
+		return category != "memory:health"
 	})
 
 	var handlerCalled bool
@@ -546,7 +549,7 @@ func TestMemoryPrivacyMiddleware_ClassifierBeforeOptOut(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 	})
 
-	mw := NewMemoryPrivacyMiddleware(checker, panicRedact, classifier, logr.Discard())
+	mw := NewMemoryPrivacyMiddleware(checker, panicRedact, validator, logr.Discard())
 	handler := mw.Wrap(next)
 
 	w := httptest.NewRecorder()
@@ -555,6 +558,37 @@ func TestMemoryPrivacyMiddleware_ClassifierBeforeOptOut(t *testing.T) {
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
 	assert.False(t, handlerCalled)
+}
+
+func TestMemoryPrivacyMiddleware_OverrideAppliedToOutboundBody(t *testing.T) {
+	// Validator upgrades the category — the outbound body forwarded to the
+	// next handler must carry the upgraded value (not the caller's claim).
+	validator := CategoryValidator(func(_ context.Context, _, _ string) ValidatorResult {
+		return ValidatorResult{
+			Category:   "memory:health",
+			Overridden: true,
+			From:       "memory:preferences",
+			Source:     "regex",
+		}
+	})
+
+	var bodyCategory string
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body SaveMemoryRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		bodyCategory = body.Category
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	mw := NewMemoryPrivacyMiddleware(passthroughOptOut, noOpRedact, validator, logr.Discard())
+	handler := mw.Wrap(next)
+
+	w := httptest.NewRecorder()
+	r := makePostRequestWithCategory(t, "I get migraines", "ws-1", "user-abc", "memory:preferences")
+	handler.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Equal(t, "memory:health", bodyCategory, "upgraded category must reach the next handler")
 }
 
 func TestMemoryPrivacyMiddleware_ConsentOverrideHeader_PassedToChecker(t *testing.T) {

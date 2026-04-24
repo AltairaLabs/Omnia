@@ -110,6 +110,18 @@ func TestEmbeddingService_ProviderError(t *testing.T) {
 	assert.ErrorIs(t, err, providerErr)
 }
 
+func TestEmbeddingService_ProviderAccessor(t *testing.T) {
+	provider := &mockEmbeddingProvider{
+		dimensions: 1536,
+		embedFn:    func(_ context.Context, _ []string) ([][]float32, error) { return nil, nil },
+	}
+	log := zap.New(zap.UseDevMode(true))
+	svc := NewEmbeddingService(nil, provider, log)
+	if got := svc.Provider(); got != provider {
+		t.Errorf("Provider() = %v, want %v", got, provider)
+	}
+}
+
 func TestEmbeddingService_EmptyResult(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
