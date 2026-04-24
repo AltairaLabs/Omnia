@@ -100,6 +100,10 @@ jobs:
               - 'cmd/compaction/**'
               - 'internal/compaction/**'
 
+            omnia-a2a-invoker:
+              - 'cmd/a2a-invoker/**'
+              - 'Dockerfile.a2a-invoker'
+
             # --- Per-service filters (enterprise) ---
             omnia-arena-controller:
               - 'ee/cmd/omnia-arena-controller/**'
@@ -129,7 +133,7 @@ jobs:
           MATCHED: ${{ steps.filter.outputs.changes }}
         run: |
           # Full image list — matches docker-build.yml + release.yml matrices.
-          ALL='["omnia-operator","omnia-facade","omnia-runtime","omnia-dashboard","omnia-session-api","omnia-memory-api","omnia-doctor","omnia-compaction","omnia-arena-controller","omnia-arena-worker","omnia-arena-dev-console","omnia-eval-worker","omnia-policy-proxy","omnia-promptkit-lsp"]'
+          ALL='["omnia-operator","omnia-facade","omnia-runtime","omnia-dashboard","omnia-session-api","omnia-memory-api","omnia-doctor","omnia-compaction","omnia-a2a-invoker","omnia-arena-controller","omnia-arena-worker","omnia-arena-dev-console","omnia-eval-worker","omnia-policy-proxy","omnia-promptkit-lsp"]'
 
           if [[ "$SHARED" == "true" ]]; then
             echo "Shared paths changed — rebuilding all services."
@@ -194,6 +198,11 @@ jobs:
             context: .
             title: Omnia Session Compaction
             description: Batch job that compacts warm session storage into cold Parquet archives according to SessionRetentionPolicy.
+          - image: omnia-a2a-invoker
+            dockerfile: Dockerfile.a2a-invoker
+            context: .
+            title: Omnia A2A Invoker
+            description: Small CLI that makes a one-shot A2A JSON-RPC call to a target AgentRuntime. Intended to run in a Kubernetes CronJob so scheduled agents (e.g. the memory summarizer) fire on an operator-defined cadence.
           - image: omnia-arena-controller
             dockerfile: ee/Dockerfile.arena-controller
             context: .

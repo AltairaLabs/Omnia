@@ -64,6 +64,9 @@ jobs:
           - image: omnia-compaction
             dockerfile: Dockerfile.compaction
             context: .
+          - image: omnia-a2a-invoker
+            dockerfile: Dockerfile.a2a-invoker
+            context: .
           - image: omnia-arena-controller
             dockerfile: ee/Dockerfile.arena-controller
             context: .
