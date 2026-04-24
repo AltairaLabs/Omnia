@@ -271,6 +271,38 @@ func TestStore_Save_ForwardsConsentGrants(t *testing.T) {
 	assert.Equal(t, "memory:identity,memory:preferences", capturedHeader)
 }
 
+func TestStore_Save_ForwardsConsentLayer(t *testing.T) {
+	var capturedLayer string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedLayer = r.Header.Get("X-Consent-Layer")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"memory":{"id":"m1"}}`))
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	ctx := policy.WithConsentLayer(context.Background(), "session")
+	mem := &pkmemory.Memory{Content: "test", Scope: map[string]string{"workspace_id": "ws1"}}
+	err := store.Save(ctx, mem)
+	require.NoError(t, err)
+	assert.Equal(t, "session", capturedLayer)
+}
+
+func TestStore_Save_NoConsentLayer_NoHeader(t *testing.T) {
+	var hasHeader bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hasHeader = r.Header.Get("X-Consent-Layer") != ""
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"memory":{"id":"m1"}}`))
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	mem := &pkmemory.Memory{Content: "test", Scope: map[string]string{"workspace_id": "ws1"}}
+	require.NoError(t, store.Save(context.Background(), mem))
+	assert.False(t, hasHeader)
+}
+
 func TestStore_Save_NoConsentGrants_NoHeader(t *testing.T) {
 	var hasHeader bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

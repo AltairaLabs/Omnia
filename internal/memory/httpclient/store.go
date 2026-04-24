@@ -243,6 +243,10 @@ func (s *Store) doRequest(ctx context.Context, method, path string, body []byte)
 	if grants := policy.ConsentGrantsFromContext(ctx); len(grants) > 0 {
 		req.Header.Set("X-Consent-Grants", strings.Join(grants, ","))
 	}
+	// Forward consent layer (diagnostic, paired with grants).
+	if layer := policy.ConsentLayerFromContext(ctx); layer != "" {
+		req.Header.Set("X-Consent-Layer", layer)
+	}
 
 	s.log.V(2).Info("memory-api request", "method", method, "path", path)
 
