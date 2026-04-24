@@ -547,7 +547,11 @@ func wrapPrivacyMiddleware(ctx context.Context, next http.Handler, pool *pgxpool
 	})
 
 	validator := buildConsentValidator(ctx, embeddingSvc, log)
-	mw := memoryapi.NewMemoryPrivacyMiddleware(checkOptOut, contentRedactor, validator, log)
+	suppressMetrics := memoryapi.NewSuppressionMetrics()
+	if err := suppressMetrics.Register(prometheus.DefaultRegisterer); err != nil {
+		log.Error(err, "memory suppression metrics registration failed")
+	}
+	mw := memoryapi.NewMemoryPrivacyMiddlewareWithMetrics(checkOptOut, contentRedactor, validator, suppressMetrics, log)
 	log.Info("memory privacy middleware enabled")
 	return mw.Wrap(next)
 }

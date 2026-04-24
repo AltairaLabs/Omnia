@@ -1000,3 +1000,38 @@ func TestServerMessageWithMediaChunk(t *testing.T) {
 		t.Errorf("MediaChunk.MediaID = %v, want 'stream-1'", decoded.MediaChunk.MediaID)
 	}
 }
+
+func TestClientMessage_SessionConsentGrants_OmittedRoundTrip(t *testing.T) {
+	raw := []byte(`{"type":"message","content":"hello"}`)
+	var msg ClientMessage
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(msg.SessionConsentGrants) != 0 {
+		t.Errorf("SessionConsentGrants = %v, want empty", msg.SessionConsentGrants)
+	}
+}
+
+func TestClientMessage_SessionConsentGrants_PopulatedRoundTrip(t *testing.T) {
+	raw := []byte(`{"type":"message","content":"hello","session_consent_grants":["memory:identity","memory:preferences"]}`)
+	var msg ClientMessage
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(msg.SessionConsentGrants) != 2 ||
+		msg.SessionConsentGrants[0] != "memory:identity" ||
+		msg.SessionConsentGrants[1] != "memory:preferences" {
+		t.Errorf("SessionConsentGrants = %v, want [memory:identity memory:preferences]", msg.SessionConsentGrants)
+	}
+}
+
+func TestClientMessage_SessionConsentGrants_MarshalsEmptyAsAbsent(t *testing.T) {
+	msg := ClientMessage{Type: MessageTypeMessage, Content: "hi"}
+	b, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "session_consent_grants") {
+		t.Errorf("marshalled %q includes session_consent_grants for empty slice", string(b))
+	}
+}

@@ -29,6 +29,8 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -665,4 +667,82 @@ func TestMemoryPrivacyMiddleware_ConsentOverride_OverridesDB(t *testing.T) {
 
 	assert.Equal(t, http.StatusCreated, w.Code, "header override should allow the write")
 	assert.True(t, handlerCalled)
+}
+
+func TestMemoryPrivacyMiddleware_OptedOut_SetsConsentDecisionHeader(t *testing.T) {
+	mw := newTestMiddleware(optedOutChecker, noOpRedact)
+	handler := mw.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+
+	w := httptest.NewRecorder()
+	body := SaveMemoryRequest{
+		Type:     "fact",
+		Content:  "x",
+		Scope:    map[string]string{"workspace": "ws-1"},
+		Category: "memory:health",
+	}
+	b, err := json.Marshal(body)
+	require.NoError(t, err)
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/memories?workspace=ws-1&user_id=user-abc", bytes.NewReader(b))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set(consentLayerHeader, "session")
+	handler.ServeHTTP(w, r)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+	got := w.Header().Get(consentDecisionHeader)
+	if got == "" {
+		t.Fatal("X-Consent-Decision header missing on 204")
+	}
+	assert.Contains(t, got, "deny")
+	assert.Contains(t, got, "category=memory:health")
+	assert.Contains(t, got, "layer=session")
+}
+
+func TestMemoryPrivacyMiddleware_OptedOut_RecordsMetric(t *testing.T) {
+	metrics := NewSuppressionMetrics()
+	reg := prometheus.NewRegistry()
+	require.NoError(t, metrics.Register(reg))
+
+	mw := NewMemoryPrivacyMiddlewareWithMetrics(optedOutChecker, noOpRedact, nil, metrics, logr.Discard())
+	handler := mw.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+
+	w := httptest.NewRecorder()
+	body := SaveMemoryRequest{
+		Type:     "fact",
+		Content:  "x",
+		Scope:    map[string]string{"workspace": "ws-1"},
+		Category: "memory:identity",
+	}
+	b, err := json.Marshal(body)
+	require.NoError(t, err)
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/memories?workspace=ws-1&user_id=user-abc", bytes.NewReader(b))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set(consentLayerHeader, "per-message")
+	handler.ServeHTTP(w, r)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+	got := testutil.ToFloat64(
+		metrics.WritesSuppressed.WithLabelValues("per-message", "memory:identity", "opt-out"),
+	)
+	if got != 1 {
+		t.Errorf("counter = %v, want 1", got)
+	}
+}
+
+func TestMemoryPrivacyMiddleware_OptedOut_DefaultsLayerToPersistent(t *testing.T) {
+	mw := newTestMiddleware(optedOutChecker, noOpRedact)
+	handler := mw.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+
+	w := httptest.NewRecorder()
+	r := makePostRequest(t, "x", "ws-1", "user-abc")
+	// No consentLayerHeader set — middleware should default to "persistent".
+	handler.ServeHTTP(w, r)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+	assert.Contains(t, w.Header().Get(consentDecisionHeader), "layer=persistent")
 }

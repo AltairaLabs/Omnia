@@ -20,6 +20,22 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
   `mem.Metadata[consent_category]` in the handler (was a silent dropped
   field). EE middleware classification results now reach the column.
 
+### Added (per-session consent grants, #1006)
+
+- WebSocket: `ClientMessage.session_consent_grants` (`[]string`, optional).
+  First message with a non-empty list stamps the per-session default on the
+  Connection. Subsequent messages with a non-empty list replace the cached
+  value (last-writer-wins). Empty / omitted lists are ignored — to revoke
+  all categories for a session use the binary opt-out.
+- gRPC: `x-omnia-consent-layer` metadata key carries which layer
+  (`per-message` | `session` | `persistent`) produced the per-request grants
+  forwarded by the facade.
+- Memory API: `X-Consent-Layer` request header (forwarded by the runtime
+  httpclient). `X-Consent-Decision` response header on 204 dropped writes.
+  New `omnia_memory_writes_suppressed_total{layer,category,reason}`
+  Prometheus metric. Suppressed-write log line promoted from V(1) to V(0)
+  and enriched with layer + grants.
+
 ### Breaking
 
 - `SessionPrivacyPolicy.spec.level`, `spec.workspaceRef`, and `spec.agentRef` removed. Policies are now reusable namespaced documents; binding has moved to consumers (`Workspace` service groups and `AgentRuntime`).

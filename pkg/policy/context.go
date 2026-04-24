@@ -55,6 +55,10 @@ const (
 	ContextKeyClaims contextKey = "omnia-claims"
 	// ContextKeyConsentGrants holds per-request consent grants.
 	ContextKeyConsentGrants contextKey = "omnia-consent-grants"
+	// ContextKeyConsentLayer identifies which layer (per-message, session,
+	// persistent) produced the per-request consent grants. Diagnostic only —
+	// memory-api uses it for log/metric/response-header attribution.
+	ContextKeyConsentLayer contextKey = "omnia-consent-layer"
 	// ContextKeyIdentity holds the AuthenticatedIdentity produced by the
 	// facade's auth chain. Not propagated on the wire — the flat UserID /
 	// UserRoles / UserEmail / Claims fields carry what downstream services
@@ -96,6 +100,10 @@ const (
 	HeaderParamPrefix = "x-omnia-param-"
 	// HeaderConsentGrants carries comma-separated consent category grants.
 	HeaderConsentGrants = "x-omnia-consent-grants"
+	// HeaderConsentLayer attributes per-request consent grants to a layer
+	// (per-message, session, persistent). Used by memory-api for
+	// observability on suppressed writes.
+	HeaderConsentLayer = "x-omnia-consent-layer"
 )
 
 // Istio-injected header names that the facade reads from the WebSocket upgrade request.
@@ -131,6 +139,9 @@ type PropagationFields struct {
 	Claims        map[string]string
 	// ConsentGrants holds per-request consent category grants.
 	ConsentGrants []string
+	// ConsentLayer attributes ConsentGrants to a layer (per-message,
+	// session, persistent). Empty when ConsentGrants is empty.
+	ConsentLayer string
 	// Identity is the authenticated identity produced by the facade's auth
 	// chain. When non-nil, it is the source of truth for UserID /
 	// UserRoles / UserEmail / Claims — callers that build PropagationFields
@@ -233,6 +244,17 @@ func ConsentGrantsFromContext(ctx context.Context) []string {
 	return nil
 }
 
+// WithConsentLayer returns a context with the consent layer label set.
+// Diagnostic only — memory-api uses it for log/metric attribution.
+func WithConsentLayer(ctx context.Context, layer string) context.Context {
+	return context.WithValue(ctx, ContextKeyConsentLayer, layer)
+}
+
+// ConsentLayerFromContext extracts the consent layer label from context.
+func ConsentLayerFromContext(ctx context.Context) string {
+	return getString(ctx, ContextKeyConsentLayer)
+}
+
 // WithPropagationFields returns a context with all propagation fields set.
 // Only non-empty values are stored.
 func WithPropagationFields(ctx context.Context, fields *PropagationFields) context.Context {
@@ -254,6 +276,9 @@ func WithPropagationFields(ctx context.Context, fields *PropagationFields) conte
 	}
 	if len(fields.ConsentGrants) > 0 {
 		ctx = WithConsentGrants(ctx, fields.ConsentGrants)
+	}
+	if fields.ConsentLayer != "" {
+		ctx = WithConsentLayer(ctx, fields.ConsentLayer)
 	}
 	if fields.Identity != nil {
 		ctx = WithIdentity(ctx, fields.Identity)
@@ -284,6 +309,7 @@ func ExtractPropagationFields(ctx context.Context) PropagationFields {
 		Model:         getString(ctx, ContextKeyModel),
 		Claims:        getClaims(ctx),
 		ConsentGrants: ConsentGrantsFromContext(ctx),
+		ConsentLayer:  ConsentLayerFromContext(ctx),
 		Identity:      IdentityFromContext(ctx),
 	}
 }
@@ -371,6 +397,10 @@ func ToOutboundHeaders(ctx context.Context) map[string]string {
 	// Append consent grants header.
 	if grants := ConsentGrantsFromContext(ctx); len(grants) > 0 {
 		headers[HeaderConsentGrants] = strings.Join(grants, ",")
+	}
+	// Append consent layer header (diagnostic, paired with grants).
+	if layer := ConsentLayerFromContext(ctx); layer != "" {
+		headers[HeaderConsentLayer] = layer
 	}
 	return headers
 }
