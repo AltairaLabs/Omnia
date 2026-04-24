@@ -154,6 +154,25 @@ func TestPolicyStreamServerInterceptor(t *testing.T) {
 	assert.Equal(t, "stream-user", policy.UserID(capturedCtx))
 }
 
+func TestExtractPolicyFromMetadata_ConsentLayer(t *testing.T) {
+	md := metadata.Pairs(
+		policy.HeaderConsentGrants, "memory:identity,memory:preferences",
+		policy.HeaderConsentLayer, "session",
+	)
+	ctx := metadata.NewIncomingContext(context.Background(), md)
+	ctx = extractPolicyFromMetadata(ctx)
+	assert.Equal(t, "session", policy.ConsentLayerFromContext(ctx))
+	grants := policy.ConsentGrantsFromContext(ctx)
+	assert.Equal(t, []string{"memory:identity", "memory:preferences"}, grants)
+}
+
+func TestExtractPolicyFromMetadata_NoConsentLayer(t *testing.T) {
+	md := metadata.Pairs()
+	ctx := metadata.NewIncomingContext(context.Background(), md)
+	ctx = extractPolicyFromMetadata(ctx)
+	assert.Equal(t, "", policy.ConsentLayerFromContext(ctx))
+}
+
 // mockServerStream implements grpc.ServerStream for testing.
 type mockServerStream struct {
 	grpc.ServerStream
