@@ -219,6 +219,20 @@ func (s *MemoryService) ListMemories(ctx context.Context, scope map[string]strin
 	return results, nil
 }
 
+// AggregateMemories runs a workspace-scoped aggregate over memory_entities.
+// Thin pass-through to the store; kept here for symmetry with other Service
+// methods so handlers always go through one indirection. Type-asserts to
+// *PostgresMemoryStore because the fake stores in the test suite don't
+// implement Aggregate; an interface addition would break every fake for
+// no real benefit.
+func (s *MemoryService) AggregateMemories(ctx context.Context, opts memory.AggregateOptions) ([]memory.AggregateRow, error) {
+	pgStore, ok := s.store.(*memory.PostgresMemoryStore)
+	if !ok {
+		return nil, errors.New("memory service: aggregate requires a PostgresMemoryStore")
+	}
+	return pgStore.Aggregate(ctx, opts)
+}
+
 // DeleteMemory performs a soft delete (forget) of a single memory.
 func (s *MemoryService) DeleteMemory(ctx context.Context, scope map[string]string, memoryID string) error {
 	if err := s.store.Delete(ctx, scope, memoryID); err != nil {
