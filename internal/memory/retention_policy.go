@@ -20,35 +20,35 @@ import (
 )
 
 // defaultPolicyName is the well-known name the worker looks for first
-// when picking which MemoryRetentionPolicy to apply. Matches the
-// sample in config/samples/omnia_v1alpha1_memoryretentionpolicy.yaml.
+// when picking which MemoryPolicy to apply. Matches the
+// sample in config/samples/omnia_v1alpha1_memorypolicy.yaml.
 const defaultPolicyName = "default"
 
-// PolicyLoader fetches the active MemoryRetentionPolicy. Implementations
+// PolicyLoader fetches the active MemoryPolicy. Implementations
 // may cache; callers must treat the returned policy as read-only.
 type PolicyLoader interface {
-	Load(ctx context.Context) (*omniav1alpha1.MemoryRetentionPolicy, error)
+	Load(ctx context.Context) (*omniav1alpha1.MemoryPolicy, error)
 }
 
 // StaticPolicyLoader wraps a literal policy. Used by unit tests and as
 // a fallback when the memory-api runs outside Kubernetes.
 type StaticPolicyLoader struct {
-	Policy *omniav1alpha1.MemoryRetentionPolicy
+	Policy *omniav1alpha1.MemoryPolicy
 }
 
 // Load returns the stored policy unchanged.
-func (s *StaticPolicyLoader) Load(_ context.Context) (*omniav1alpha1.MemoryRetentionPolicy, error) {
+func (s *StaticPolicyLoader) Load(_ context.Context) (*omniav1alpha1.MemoryPolicy, error) {
 	return s.Policy, nil
 }
 
-// K8sPolicyLoader reads MemoryRetentionPolicy resources from the
+// K8sPolicyLoader reads MemoryPolicy resources from the
 // control plane. Caches the last-known policy so a transient API
 // outage doesn't stall the retention cron.
 type K8sPolicyLoader struct {
 	Client client.Client
 	Log    logr.Logger
 
-	cached atomic.Pointer[omniav1alpha1.MemoryRetentionPolicy]
+	cached atomic.Pointer[omniav1alpha1.MemoryPolicy]
 }
 
 // NewK8sPolicyLoader wires a client-backed loader.
@@ -60,18 +60,18 @@ func NewK8sPolicyLoader(c client.Client, log logr.Logger) *K8sPolicyLoader {
 // policy named "default" if present, otherwise the lexicographically
 // first active one. Falls back to the last-known-good policy when the
 // API call fails.
-func (k *K8sPolicyLoader) Load(ctx context.Context) (*omniav1alpha1.MemoryRetentionPolicy, error) {
-	list := &omniav1alpha1.MemoryRetentionPolicyList{}
+func (k *K8sPolicyLoader) Load(ctx context.Context) (*omniav1alpha1.MemoryPolicy, error) {
+	list := &omniav1alpha1.MemoryPolicyList{}
 	if err := k.Client.List(ctx, list); err != nil {
 		if cached := k.cached.Load(); cached != nil {
 			k.Log.V(1).Info("policy list failed, using cached policy",
 				"cachedName", cached.Name, "error", err.Error())
 			return cached, nil
 		}
-		return nil, fmt.Errorf("list MemoryRetentionPolicy: %w", err)
+		return nil, fmt.Errorf("list MemoryPolicy: %w", err)
 	}
 
-	active := make([]omniav1alpha1.MemoryRetentionPolicy, 0, len(list.Items))
+	active := make([]omniav1alpha1.MemoryPolicy, 0, len(list.Items))
 	for i := range list.Items {
 		if list.Items[i].DeletionTimestamp.IsZero() {
 			active = append(active, list.Items[i])
@@ -98,17 +98,17 @@ func (k *K8sPolicyLoader) Load(ctx context.Context) (*omniav1alpha1.MemoryRetent
 
 // LegacyIntervalPolicy builds a minimal policy from the legacy
 // RETENTION_INTERVAL env var so existing deployments keep working
-// until operators install a MemoryRetentionPolicy CRD. The legacy
+// until operators install a MemoryPolicy CRD. The legacy
 // worker deleted expired rows cluster-wide; this policy reproduces
 // that by applying TTL across all three tiers with no LRU or Decay.
 //
 // Interval is mapped to "@every Xs" because cron's standard 5-field
 // expressions can't express sub-day schedules like "every 10m".
-func LegacyIntervalPolicy(interval time.Duration) *omniav1alpha1.MemoryRetentionPolicy {
+func LegacyIntervalPolicy(interval time.Duration) *omniav1alpha1.MemoryPolicy {
 	schedule := fmt.Sprintf("@every %s", interval.String())
 	mode := omniav1alpha1.MemoryRetentionModeTTL
-	return &omniav1alpha1.MemoryRetentionPolicy{
-		Spec: omniav1alpha1.MemoryRetentionPolicySpec{
+	return &omniav1alpha1.MemoryPolicy{
+		Spec: omniav1alpha1.MemoryPolicySpec{
 			Default: omniav1alpha1.MemoryRetentionDefaults{
 				Tiers: omniav1alpha1.MemoryRetentionTierSet{
 					Institutional: &omniav1alpha1.MemoryTierConfig{Mode: mode},

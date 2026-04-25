@@ -55,7 +55,7 @@ func (t Tier) sqlPredicate() string {
 // tierConfig returns the per-tier config from the cluster default,
 // picking the matching field on the tier set. Nil means the tier is
 // not configured and should be skipped (implicit Manual).
-func tierConfig(policy *omniav1alpha1.MemoryRetentionPolicy, tier Tier) *omniav1alpha1.MemoryTierConfig {
+func tierConfig(policy *omniav1alpha1.MemoryPolicy, tier Tier) *omniav1alpha1.MemoryTierConfig {
 	if policy == nil {
 		return nil
 	}

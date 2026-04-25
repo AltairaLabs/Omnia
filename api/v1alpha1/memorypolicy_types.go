@@ -66,18 +66,18 @@ const (
 	ConsentRevocationStop ConsentRevocationAction = "Stop"
 )
 
-// MemoryRetentionPolicyPhase tracks the lifecycle state the controller
+// MemoryPolicyPhase tracks the lifecycle state the controller
 // reports back on the CRD's status.
 // +kubebuilder:validation:Enum=Active;Error
-type MemoryRetentionPolicyPhase string
+type MemoryPolicyPhase string
 
 const (
-	// MemoryRetentionPolicyPhaseActive means the spec validated and is
+	// MemoryPolicyPhaseActive means the spec validated and is
 	// available to the memory-api retention worker.
-	MemoryRetentionPolicyPhaseActive MemoryRetentionPolicyPhase = "Active"
-	// MemoryRetentionPolicyPhaseError means the spec failed validation —
+	MemoryPolicyPhaseActive MemoryPolicyPhase = "Active"
+	// MemoryPolicyPhaseError means the spec failed validation —
 	// see status.conditions for the reason.
-	MemoryRetentionPolicyPhaseError MemoryRetentionPolicyPhase = "Error"
+	MemoryPolicyPhaseError MemoryPolicyPhase = "Error"
 )
 
 // MemoryTTLConfig configures the TTL branch of retention.
@@ -333,8 +333,8 @@ type MemoryWorkspaceRetentionOverride struct {
 	BatchSize *int32 `json:"batchSize,omitempty"`
 }
 
-// MemoryRetentionPolicySpec is the top-level spec.
-type MemoryRetentionPolicySpec struct {
+// MemoryPolicySpec is the top-level spec.
+type MemoryPolicySpec struct {
 	// default is the cluster-wide policy applied to every workspace
 	// that doesn't have an explicit override.
 	// +kubebuilder:validation:Required
@@ -346,11 +346,11 @@ type MemoryRetentionPolicySpec struct {
 	PerWorkspace map[string]MemoryWorkspaceRetentionOverride `json:"perWorkspace,omitempty"`
 }
 
-// MemoryRetentionPolicyStatus is the observed state.
-type MemoryRetentionPolicyStatus struct {
+// MemoryPolicyStatus is the observed state.
+type MemoryPolicyStatus struct {
 	// phase is the controller's high-level lifecycle state.
 	// +optional
-	Phase MemoryRetentionPolicyPhase `json:"phase,omitempty"`
+	Phase MemoryPolicyPhase `json:"phase,omitempty"`
 
 	// observedGeneration is the spec generation the controller last
 	// reconciled. Lets the dashboard detect "spec changed but status
@@ -381,7 +381,7 @@ type MemoryRetentionPolicyStatus struct {
 // +kubebuilder:printcolumn:name="Schedule",type=string,JSONPath=`.spec.default.schedule`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// MemoryRetentionPolicy is the schema for the memoryretentionpolicies
+// MemoryPolicy is the schema for the memorypolicies
 // API. It defines retention rules for the memory store across the
 // institutional, agent, and user tiers. See
 // docs/local-backlog/memory-retention-and-pruning-proposal.md for the
@@ -391,28 +391,28 @@ type MemoryRetentionPolicyStatus struct {
 // yet — the retention worker still runs the legacy TTL-only logic.
 // Phase 3 will wire the composite worker; Phase 4 wires consent
 // revocation; Phase 5 wires supersession cleanup.
-type MemoryRetentionPolicy struct {
+type MemoryPolicy struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitzero"`
 
 	// +required
-	Spec MemoryRetentionPolicySpec `json:"spec"`
+	Spec MemoryPolicySpec `json:"spec"`
 
 	// +optional
-	Status MemoryRetentionPolicyStatus `json:"status,omitzero"`
+	Status MemoryPolicyStatus `json:"status,omitzero"`
 }
 
 // +kubebuilder:object:root=true
 
-// MemoryRetentionPolicyList contains a list of MemoryRetentionPolicy.
-type MemoryRetentionPolicyList struct {
+// MemoryPolicyList contains a list of MemoryPolicy.
+type MemoryPolicyList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitzero"`
-	Items           []MemoryRetentionPolicy `json:"items"`
+	Items           []MemoryPolicy `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&MemoryRetentionPolicy{}, &MemoryRetentionPolicyList{})
+	SchemeBuilder.Register(&MemoryPolicy{}, &MemoryPolicyList{})
 }

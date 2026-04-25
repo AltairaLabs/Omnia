@@ -20,10 +20,10 @@ import (
 )
 
 // compositeTTLPolicy builds a policy that runs TTL on every tier.
-func compositeTTLPolicy(schedule string) *omniav1alpha1.MemoryRetentionPolicy {
+func compositeTTLPolicy(schedule string) *omniav1alpha1.MemoryPolicy {
 	mode := omniav1alpha1.MemoryRetentionModeTTL
-	return &omniav1alpha1.MemoryRetentionPolicy{
-		Spec: omniav1alpha1.MemoryRetentionPolicySpec{
+	return &omniav1alpha1.MemoryPolicy{
+		Spec: omniav1alpha1.MemoryPolicySpec{
 			Default: omniav1alpha1.MemoryRetentionDefaults{
 				Tiers: omniav1alpha1.MemoryRetentionTierSet{
 					Institutional: &omniav1alpha1.MemoryTierConfig{Mode: mode},
@@ -200,8 +200,8 @@ func TestRetentionWorker_Run_ExecutesAllBranches(t *testing.T) {
 	require.NoError(t, err)
 
 	mode := omniav1alpha1.MemoryRetentionModeComposite
-	policy := &omniav1alpha1.MemoryRetentionPolicy{
-		Spec: omniav1alpha1.MemoryRetentionPolicySpec{
+	policy := &omniav1alpha1.MemoryPolicy{
+		Spec: omniav1alpha1.MemoryPolicySpec{
 			Default: omniav1alpha1.MemoryRetentionDefaults{
 				Tiers: omniav1alpha1.MemoryRetentionTierSet{
 					Institutional: &omniav1alpha1.MemoryTierConfig{
@@ -240,8 +240,8 @@ func TestRetentionWorker_Run_BadLRUConfigIsNonFatal(t *testing.T) {
 	}
 	require.NoError(t, store.SaveInstitutional(ctx, expired))
 
-	policy := &omniav1alpha1.MemoryRetentionPolicy{
-		Spec: omniav1alpha1.MemoryRetentionPolicySpec{
+	policy := &omniav1alpha1.MemoryPolicy{
+		Spec: omniav1alpha1.MemoryPolicySpec{
 			Default: omniav1alpha1.MemoryRetentionDefaults{
 				Tiers: omniav1alpha1.MemoryRetentionTierSet{
 					Institutional: &omniav1alpha1.MemoryTierConfig{

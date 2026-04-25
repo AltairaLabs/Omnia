@@ -716,7 +716,7 @@ func buildRetentionPolicyLoader(legacyInterval string, log logr.Logger) memory.P
 		utilruntime.Must(omniav1alpha1.AddToScheme(scheme))
 		c, clientErr := client.New(kubeConfig, client.Options{Scheme: scheme})
 		if clientErr == nil {
-			log.Info("retention policy loader enabled", "source", "MemoryRetentionPolicy CRD")
+			log.Info("retention policy loader enabled", "source", "MemoryPolicy CRD")
 			return memory.NewK8sPolicyLoader(c, log)
 		}
 		log.Error(clientErr, "k8s client creation failed, falling back to legacy interval")

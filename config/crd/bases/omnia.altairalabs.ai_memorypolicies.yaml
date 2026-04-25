@@ -4,14 +4,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: memoryretentionpolicies.omnia.altairalabs.ai
+  name: memorypolicies.omnia.altairalabs.ai
 spec:
   group: omnia.altairalabs.ai
   names:
-    kind: MemoryRetentionPolicy
-    listKind: MemoryRetentionPolicyList
-    plural: memoryretentionpolicies
-    singular: memoryretentionpolicy
+    kind: MemoryPolicy
+    listKind: MemoryPolicyList
+    plural: memorypolicies
+    singular: memorypolicy
   scope: Cluster
   versions:
   - additionalPrinterColumns:
@@ -37,7 +37,7 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          MemoryRetentionPolicy is the schema for the memoryretentionpolicies
+          MemoryPolicy is the schema for the memorypolicies
           API. It defines retention rules for the memory store across the
           institutional, agent, and user tiers. See
           docs/local-backlog/memory-retention-and-pruning-proposal.md for the
@@ -66,7 +66,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: MemoryRetentionPolicySpec is the top-level spec.
+            description: MemoryPolicySpec is the top-level spec.
             properties:
               default:
                 description: |-
@@ -1593,7 +1593,7 @@ spec:
             - default
             type: object
           status:
-            description: MemoryRetentionPolicyStatus is the observed state.
+            description: MemoryPolicyStatus is the observed state.
             properties:
               conditions:
                 description: conditions reports individual validation / wiring checks.

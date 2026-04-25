@@ -33,15 +33,15 @@ func policySchemeForTest(t *testing.T) *runtime.Scheme {
 
 func TestK8sPolicyLoader_PrefersDefaultName(t *testing.T) {
 	scheme := policySchemeForTest(t)
-	other := &omniav1alpha1.MemoryRetentionPolicy{
+	other := &omniav1alpha1.MemoryPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "alpha"},
-		Spec: omniav1alpha1.MemoryRetentionPolicySpec{
+		Spec: omniav1alpha1.MemoryPolicySpec{
 			Default: omniav1alpha1.MemoryRetentionDefaults{Schedule: "0 1 * * *"},
 		},
 	}
-	def := &omniav1alpha1.MemoryRetentionPolicy{
+	def := &omniav1alpha1.MemoryPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "default"},
-		Spec: omniav1alpha1.MemoryRetentionPolicySpec{
+		Spec: omniav1alpha1.MemoryPolicySpec{
 			Default: omniav1alpha1.MemoryRetentionDefaults{Schedule: "0 3 * * *"},
 		},
 	}
@@ -57,10 +57,10 @@ func TestK8sPolicyLoader_PrefersDefaultName(t *testing.T) {
 
 func TestK8sPolicyLoader_FallsBackToLexFirst(t *testing.T) {
 	scheme := policySchemeForTest(t)
-	alpha := &omniav1alpha1.MemoryRetentionPolicy{
+	alpha := &omniav1alpha1.MemoryPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "alpha"},
 	}
-	beta := &omniav1alpha1.MemoryRetentionPolicy{
+	beta := &omniav1alpha1.MemoryPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "beta"},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(alpha, beta).Build()
@@ -84,14 +84,14 @@ func TestK8sPolicyLoader_ReturnsNilWhenNonePresent(t *testing.T) {
 
 func TestK8sPolicyLoader_SkipsDeletedPolicies(t *testing.T) {
 	scheme := policySchemeForTest(t)
-	deleted := &omniav1alpha1.MemoryRetentionPolicy{
+	deleted := &omniav1alpha1.MemoryPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "default",
 			DeletionTimestamp: &metav1.Time{Time: time.Now()},
 			Finalizers:        []string{"hold"},
 		},
 	}
-	live := &omniav1alpha1.MemoryRetentionPolicy{
+	live := &omniav1alpha1.MemoryPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "live"},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(deleted, live).Build()
@@ -105,9 +105,9 @@ func TestK8sPolicyLoader_SkipsDeletedPolicies(t *testing.T) {
 
 func TestK8sPolicyLoader_ReturnsCachedOnListError(t *testing.T) {
 	scheme := policySchemeForTest(t)
-	initial := &omniav1alpha1.MemoryRetentionPolicy{
+	initial := &omniav1alpha1.MemoryPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "default"},
-		Spec: omniav1alpha1.MemoryRetentionPolicySpec{
+		Spec: omniav1alpha1.MemoryPolicySpec{
 			Default: omniav1alpha1.MemoryRetentionDefaults{Schedule: "0 3 * * *"},
 		},
 	}
@@ -224,7 +224,7 @@ func TestTierPredicate(t *testing.T) {
 }
 
 func TestResolveBatchSize(t *testing.T) {
-	policy := &omniav1alpha1.MemoryRetentionPolicy{}
+	policy := &omniav1alpha1.MemoryPolicy{}
 	assert.Equal(t, defaultRetentionBatchSize, resolveBatchSize(policy))
 
 	b := int32(42)

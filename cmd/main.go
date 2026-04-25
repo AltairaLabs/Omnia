@@ -317,12 +317,12 @@ func main() {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "SessionRetentionPolicy")
 		os.Exit(1)
 	}
-	if err := (&controller.MemoryRetentionPolicyReconciler{
+	if err := (&controller.MemoryPolicyReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("memoryretentionpolicy-controller"),
+		Recorder: mgr.GetEventRecorderFor("memorypolicy-controller"),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, errUnableToCreateController, logKeyController, "MemoryRetentionPolicy")
+		setupLog.Error(err, errUnableToCreateController, logKeyController, "MemoryPolicy")
 		os.Exit(1)
 	}
 	if err := (&controller.AgentPolicyReconciler{

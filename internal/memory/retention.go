@@ -21,7 +21,7 @@ import (
 const defaultRetentionBatchSize int32 = 1000
 
 // RetentionWorker composites TTL and LRU pruning across the three
-// memory tiers, driven by a MemoryRetentionPolicy CRD. Each run is
+// memory tiers, driven by a MemoryPolicy CRD. Each run is
 // one pass per (tier, branch); rows are soft-deleted first then
 // hard-deleted in a separate pass once the policy's grace window
 // has elapsed.
@@ -58,7 +58,7 @@ func (w *RetentionWorker) Run(ctx context.Context) {
 	policy, err := w.loader.Load(ctx)
 	if err != nil || policy == nil {
 		w.log.Info("retention worker not started",
-			"reason", "no active MemoryRetentionPolicy",
+			"reason", "no active MemoryPolicy",
 			"error", errString(err))
 		return
 	}
@@ -336,7 +336,7 @@ func (w *RetentionWorker) runBranch(
 
 // resolveBatchSize pulls the policy's BatchSize, falling back to the
 // CRD default when nil.
-func resolveBatchSize(policy *omniav1alpha1.MemoryRetentionPolicy) int32 {
+func resolveBatchSize(policy *omniav1alpha1.MemoryPolicy) int32 {
 	if b := policy.Spec.Default.BatchSize; b != nil && *b > 0 {
 		return *b
 	}
