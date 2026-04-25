@@ -63,6 +63,11 @@ var (
 	// sessionApiImage is the name of the session-api image
 	sessionApiImage = "example.com/omnia-session-api:v0.0.1"
 
+	// memoryApiImage is the name of the memory-api image. The memory-api hosts
+	// /api/v1/memories* and the memory-aggregate endpoint that powers the
+	// dashboard's memory-analytics page.
+	memoryApiImage = "example.com/omnia-memory-api:v0.0.1"
+
 	// evalWorkerImage is the name of the arena eval worker image (Enterprise)
 	evalWorkerImage = "example.com/arena-eval-worker:v0.0.1"
 
@@ -106,6 +111,7 @@ var _ = BeforeSuite(func() {
 		{"agent", "./cmd/agent", facadeImage},
 		{"runtime", "./cmd/runtime", runtimeImage},
 		{"session-api", "./cmd/session-api", sessionApiImage},
+		{"memory-api", "./cmd/memory-api", memoryApiImage},
 		{"arena-worker", "./ee/cmd/arena-worker", arenaWorkerImage},
 		{"arena-controller", "./ee/cmd/omnia-arena-controller", arenaControllerImage},
 		{"arena-eval-worker", "./ee/cmd/arena-eval-worker", evalWorkerImage},
@@ -190,7 +196,7 @@ var _ = BeforeSuite(func() {
 	// Load images into Kind in parallel
 	By("loading all container images into Kind in parallel")
 	var loadWg sync.WaitGroup
-	loadResults := make(chan buildResult, 7)
+	loadResults := make(chan buildResult, 8)
 
 	images := []struct {
 		name  string
@@ -202,6 +208,7 @@ var _ = BeforeSuite(func() {
 		{"arena-worker", arenaWorkerImage},
 		{"arena-controller", arenaControllerImage},
 		{"session-api", sessionApiImage},
+		{"memory-api", memoryApiImage},
 		{"doctor", doctorImage},
 	}
 
