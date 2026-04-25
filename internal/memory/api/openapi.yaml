@@ -212,7 +212,14 @@ paths:
           required: true
           schema:
             type: string
-            enum: [category, agent, day]
+            enum: [category, agent, day, tier]
+          description: |
+            Dimension to group results by. The `tier` value classifies each row
+            into one of `institutional` / `agent` / `user` based on which scope
+            columns are populated. The user-tier count reflects only memories
+            owned by users who granted `analytics:aggregate` consent;
+            institutional and agent rows have no `virtual_user_id` and are
+            unaffected by the consent filter.
         - name: metric
           in: query
           required: false
