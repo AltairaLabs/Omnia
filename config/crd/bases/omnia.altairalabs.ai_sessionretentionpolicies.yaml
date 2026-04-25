@@ -18,13 +18,13 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .spec.default.hotCache.ttlAfterInactive
+    - jsonPath: .spec.hotCache.ttlAfterInactive
       name: Hot Cache TTL
       type: string
-    - jsonPath: .spec.default.warmStore.retentionDays
+    - jsonPath: .spec.warmStore.retentionDays
       name: Warm Days
       type: integer
-    - jsonPath: .spec.default.coldArchive.enabled
+    - jsonPath: .spec.coldArchive.enabled
       name: Cold Archive
       type: boolean
     - jsonPath: .metadata.creationTimestamp
@@ -57,143 +57,78 @@ spec:
           spec:
             description: spec defines the desired state of SessionRetentionPolicy
             properties:
-              default:
-                description: default defines the default retention configuration across
-                  all storage tiers.
+              coldArchive:
+                description: coldArchive configures the cold archive tier (e.g., S3,
+                  GCS).
                 properties:
-                  coldArchive:
-                    description: coldArchive configures the cold archive tier (e.g.,
-                      S3, GCS).
-                    properties:
-                      compactionSchedule:
-                        default: 0 2 * * *
-                        description: compactionSchedule is a cron expression for when
-                          to run compaction/archival.
-                        type: string
-                      enabled:
-                        default: false
-                        description: enabled specifies whether cold archival is active.
-                        type: boolean
-                      retentionDays:
-                        description: |-
-                          retentionDays is the number of days to retain data in the cold archive.
-                          Required when enabled is true.
-                        format: int32
-                        maximum: 36500
-                        minimum: 1
-                        type: integer
-                    type: object
-                    x-kubernetes-validations:
-                    - message: retentionDays is required when cold archive is enabled
-                      rule: '!self.enabled || (has(self.retentionDays) && self.retentionDays
-                        > 0)'
-                  hotCache:
-                    description: hotCache configures the Redis hot cache tier.
-                    properties:
-                      enabled:
-                        default: true
-                        description: enabled specifies whether the hot cache is active.
-                        type: boolean
-                      maxMessagesPerSession:
-                        description: maxMessagesPerSession is the maximum number of
-                          messages per session in the hot cache.
-                        format: int32
-                        minimum: 1
-                        type: integer
-                      maxSessions:
-                        description: maxSessions is the maximum number of sessions
-                          to keep in the hot cache.
-                        format: int32
-                        minimum: 1
-                        type: integer
-                      ttlAfterInactive:
-                        default: 24h
-                        description: |-
-                          ttlAfterInactive is the duration after which inactive sessions are evicted from the hot cache.
-                          Must be a Go duration string (e.g., "24h", "30m", "1h30m").
-                        pattern: ^([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                        type: string
-                    type: object
-                  warmStore:
-                    description: warmStore configures the Postgres warm store tier.
-                    properties:
-                      partitionBy:
-                        default: week
-                        description: partitionBy defines the partitioning strategy
-                          for warm store tables.
-                        enum:
-                        - week
-                        type: string
-                      retentionDays:
-                        default: 7
-                        description: retentionDays is the number of days to retain
-                          data in the warm store.
-                        format: int32
-                        maximum: 3650
-                        minimum: 1
-                        type: integer
-                    type: object
+                  compactionSchedule:
+                    default: 0 2 * * *
+                    description: compactionSchedule is a cron expression for when
+                      to run compaction/archival.
+                    type: string
+                  enabled:
+                    default: false
+                    description: enabled specifies whether cold archival is active.
+                    type: boolean
+                  retentionDays:
+                    description: |-
+                      retentionDays is the number of days to retain data in the cold archive.
+                      Required when enabled is true.
+                    format: int32
+                    maximum: 36500
+                    minimum: 1
+                    type: integer
                 type: object
-              perWorkspace:
-                additionalProperties:
-                  description: |-
-                    WorkspaceRetentionOverride defines per-workspace retention overrides.
-                    HotCache is not overridable per workspace — it is a shared Redis instance.
-                  properties:
-                    coldArchive:
-                      description: coldArchive overrides the cold archive configuration
-                        for this workspace.
-                      properties:
-                        compactionSchedule:
-                          default: 0 2 * * *
-                          description: compactionSchedule is a cron expression for
-                            when to run compaction/archival.
-                          type: string
-                        enabled:
-                          default: false
-                          description: enabled specifies whether cold archival is
-                            active.
-                          type: boolean
-                        retentionDays:
-                          description: |-
-                            retentionDays is the number of days to retain data in the cold archive.
-                            Required when enabled is true.
-                          format: int32
-                          maximum: 36500
-                          minimum: 1
-                          type: integer
-                      type: object
-                      x-kubernetes-validations:
-                      - message: retentionDays is required when cold archive is enabled
-                        rule: '!self.enabled || (has(self.retentionDays) && self.retentionDays
-                          > 0)'
-                    warmStore:
-                      description: warmStore overrides the warm store configuration
-                        for this workspace.
-                      properties:
-                        partitionBy:
-                          default: week
-                          description: partitionBy defines the partitioning strategy
-                            for warm store tables.
-                          enum:
-                          - week
-                          type: string
-                        retentionDays:
-                          default: 7
-                          description: retentionDays is the number of days to retain
-                            data in the warm store.
-                          format: int32
-                          maximum: 3650
-                          minimum: 1
-                          type: integer
-                      type: object
-                  type: object
-                description: |-
-                  perWorkspace defines per-workspace retention overrides.
-                  Map keys are Workspace resource names.
+                x-kubernetes-validations:
+                - message: retentionDays is required when cold archive is enabled
+                  rule: '!self.enabled || (has(self.retentionDays) && self.retentionDays
+                    > 0)'
+              hotCache:
+                description: hotCache configures the Redis hot cache tier.
+                properties:
+                  enabled:
+                    default: true
+                    description: enabled specifies whether the hot cache is active.
+                    type: boolean
+                  maxMessagesPerSession:
+                    description: maxMessagesPerSession is the maximum number of messages
+                      per session in the hot cache.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  maxSessions:
+                    description: maxSessions is the maximum number of sessions to
+                      keep in the hot cache.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  ttlAfterInactive:
+                    default: 24h
+                    description: |-
+                      ttlAfterInactive is the duration after which inactive sessions are evicted from the hot cache.
+                      Must be a Go duration string (e.g., "24h", "30m", "1h30m").
+                    pattern: ^([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                    type: string
                 type: object
-            required:
-            - default
+              warmStore:
+                description: warmStore configures the Postgres warm store tier.
+                properties:
+                  partitionBy:
+                    default: week
+                    description: partitionBy defines the partitioning strategy for
+                      warm store tables.
+                    enum:
+                    - week
+                    type: string
+                  retentionDays:
+                    default: 7
+                    description: retentionDays is the number of days to retain data
+                      in the warm store.
+                    format: int32
+                    maximum: 3650
+                    minimum: 1
+                    type: integer
+                type: object
             type: object
           status:
             description: status defines the observed state of SessionRetentionPolicy

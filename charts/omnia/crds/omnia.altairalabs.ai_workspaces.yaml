@@ -7441,16 +7441,24 @@ spec:
                                 type: object
                               type: array
                           type: object
-                        retention:
-                          description: retention configures session retention settings.
+                        policyRef:
+                          description: |-
+                            policyRef optionally references a SessionRetentionPolicy that
+                            applies to this service group. The same SessionRetentionPolicy
+                            may be referenced by many workspaces. When unset the session-api
+                            falls back to its baked-in defaults.
                           properties:
-                            warmDays:
+                            name:
+                              default: ""
                               description: |-
-                                warmDays is the number of days to keep sessions in the warm (Redis) cache.
-                                Sessions older than this are evicted to cold storage only.
-                              format: int32
-                              type: integer
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
                           type: object
+                          x-kubernetes-map-type: atomic
                       required:
                       - database
                       type: object

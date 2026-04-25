@@ -25,15 +25,12 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/yaml"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -63,13 +60,9 @@ const (
 const retentionPolicyFinalizer = "sessionretentionpolicy.omnia.altairalabs.ai/configmap-cleanup"
 
 // ResolvedRetentionConfig is the format projected into the ConfigMap.
+// Mirrors the flat CRD spec — workspaces opt in via
+// Workspace.spec.services[].session.policyRef.
 type ResolvedRetentionConfig struct {
-	Default      ResolvedTierConfig            `json:"default"`
-	PerWorkspace map[string]ResolvedTierConfig `json:"perWorkspace,omitempty"`
-}
-
-// ResolvedTierConfig mirrors the CRD tier config in a flat, resolved format.
-type ResolvedTierConfig struct {
 	HotCache    *omniav1alpha1.HotCacheConfig    `json:"hotCache,omitempty"`
 	WarmStore   *omniav1alpha1.WarmStoreConfig   `json:"warmStore,omitempty"`
 	ColdArchive *omniav1alpha1.ColdArchiveConfig `json:"coldArchive,omitempty"`
@@ -152,35 +145,11 @@ func (r *SessionRetentionPolicyReconciler) Reconcile(ctx context.Context, req ct
 		"Valid", "Policy spec is valid")
 	r.emitEvent(policy, corev1.EventTypeNormal, RetentionEventReasonValidated, "Policy spec validated successfully")
 
-	// Resolve workspace references
-	resolvedCount, err := r.resolveWorkspaces(ctx, policy)
-	if err != nil {
-		SetCondition(&policy.Status.Conditions, policy.Generation, RetentionConditionTypeWorkspacesResolved, metav1.ConditionFalse,
-			"ResolutionFailed", err.Error())
-		SetCondition(&policy.Status.Conditions, policy.Generation, RetentionConditionTypeReady, metav1.ConditionFalse,
-			"WorkspaceResolutionFailed", "Workspace resolution failed")
-		r.emitEvent(policy, corev1.EventTypeWarning, RetentionEventReasonWorkspacesMissing, err.Error())
-		policy.Status.Phase = omniav1alpha1.SessionRetentionPolicyPhaseError
-		policy.Status.ObservedGeneration = policy.Generation
-		policy.Status.WorkspaceCount = resolvedCount
-		if statusErr := r.Status().Update(ctx, policy); statusErr != nil {
-			log.Error(statusErr, logMsgFailedToUpdateStatus)
-		}
-		if r.Metrics != nil {
-			r.Metrics.RecordReconcileError(policy.Name, "workspace_resolution")
-		}
-		return ctrl.Result{}, err
-	}
-
-	if len(policy.Spec.PerWorkspace) == 0 {
-		SetCondition(&policy.Status.Conditions, policy.Generation, RetentionConditionTypeWorkspacesResolved, metav1.ConditionTrue,
-			"NoOverrides", "No per-workspace overrides configured")
-	} else {
-		SetCondition(&policy.Status.Conditions, policy.Generation, RetentionConditionTypeWorkspacesResolved, metav1.ConditionTrue,
-			"AllResolved", fmt.Sprintf("All %d workspace references resolved", resolvedCount))
-		r.emitEvent(policy, corev1.EventTypeNormal, RetentionEventReasonWorkspacesResolved,
-			fmt.Sprintf("All %d workspace references resolved", resolvedCount))
-	}
+	// Workspace binding moved to Workspace.spec.services[].session.policyRef
+	// — the policy itself no longer tracks consumers. The condition stays
+	// for backward observability, always reports True.
+	SetCondition(&policy.Status.Conditions, policy.Generation, RetentionConditionTypeWorkspacesResolved, metav1.ConditionTrue,
+		"NotApplicable", "Workspace binding is now via Workspace.spec.services[].session.policyRef")
 
 	// Sync ConfigMap
 	if r.Namespace != "" {
@@ -190,7 +159,7 @@ func (r *SessionRetentionPolicyReconciler) Reconcile(ctx context.Context, req ct
 			r.emitEvent(policy, corev1.EventTypeWarning, RetentionEventReasonConfigSyncFailed, err.Error())
 			policy.Status.Phase = omniav1alpha1.SessionRetentionPolicyPhaseError
 			policy.Status.ObservedGeneration = policy.Generation
-			policy.Status.WorkspaceCount = resolvedCount
+			policy.Status.WorkspaceCount = 0
 			if statusErr := r.Status().Update(ctx, policy); statusErr != nil {
 				log.Error(statusErr, logMsgFailedToUpdateStatus)
 			}
@@ -205,25 +174,24 @@ func (r *SessionRetentionPolicyReconciler) Reconcile(ctx context.Context, req ct
 
 	// Set Ready condition — all sub-conditions passed
 	SetCondition(&policy.Status.Conditions, policy.Generation, RetentionConditionTypeReady, metav1.ConditionTrue,
-		"AllChecksPass", "Policy is valid, workspaces resolved, and config synced")
+		"AllChecksPass", "Policy is valid and config synced")
 
 	// Set final status
 	policy.Status.Phase = omniav1alpha1.SessionRetentionPolicyPhaseActive
 	policy.Status.ObservedGeneration = policy.Generation
-	policy.Status.WorkspaceCount = resolvedCount
+	policy.Status.WorkspaceCount = 0
 
 	if err := r.Status().Update(ctx, policy); err != nil {
 		log.Error(err, "Failed to update SessionRetentionPolicy status")
 		return ctrl.Result{}, err
 	}
 
-	r.emitEvent(policy, corev1.EventTypeNormal, RetentionEventReasonActive,
-		fmt.Sprintf("Policy is active with %d workspace overrides", resolvedCount))
+	r.emitEvent(policy, corev1.EventTypeNormal, RetentionEventReasonActive, "Policy is active")
 
 	// Record metrics
 	if r.Metrics != nil {
 		r.Metrics.ActivePolicies.Inc()
-		r.Metrics.SetWorkspaceOverrides(policy.Name, len(policy.Spec.PerWorkspace))
+		r.Metrics.SetWorkspaceOverrides(policy.Name, 0)
 	}
 
 	log.Info("Successfully reconciled SessionRetentionPolicy", "name", req.Name, "phase", policy.Status.Phase)
@@ -279,25 +247,11 @@ func (r *SessionRetentionPolicyReconciler) reconcileRetentionConfigMap(ctx conte
 
 // buildResolvedConfig constructs the resolved retention config from the policy spec.
 func (r *SessionRetentionPolicyReconciler) buildResolvedConfig(policy *omniav1alpha1.SessionRetentionPolicy) ResolvedRetentionConfig {
-	config := ResolvedRetentionConfig{
-		Default: ResolvedTierConfig{
-			HotCache:    policy.Spec.Default.HotCache,
-			WarmStore:   policy.Spec.Default.WarmStore,
-			ColdArchive: policy.Spec.Default.ColdArchive,
-		},
+	return ResolvedRetentionConfig{
+		HotCache:    policy.Spec.HotCache,
+		WarmStore:   policy.Spec.WarmStore,
+		ColdArchive: policy.Spec.ColdArchive,
 	}
-
-	if len(policy.Spec.PerWorkspace) > 0 {
-		config.PerWorkspace = make(map[string]ResolvedTierConfig, len(policy.Spec.PerWorkspace))
-		for name, override := range policy.Spec.PerWorkspace {
-			config.PerWorkspace[name] = ResolvedTierConfig{
-				WarmStore:   override.WarmStore,
-				ColdArchive: override.ColdArchive,
-			}
-		}
-	}
-
-	return config
 }
 
 // deleteRetentionConfigMap deletes the ConfigMap associated with the policy.
@@ -326,91 +280,20 @@ func (r *SessionRetentionPolicyReconciler) deleteRetentionConfigMap(ctx context.
 // validatePolicy validates the SessionRetentionPolicy spec.
 func (r *SessionRetentionPolicyReconciler) validatePolicy(policy *omniav1alpha1.SessionRetentionPolicy) error {
 	// Validate hot cache TTL if configured
-	if policy.Spec.Default.HotCache != nil && policy.Spec.Default.HotCache.TTLAfterInactive != "" {
-		if _, err := time.ParseDuration(policy.Spec.Default.HotCache.TTLAfterInactive); err != nil {
-			return fmt.Errorf("invalid hot cache TTL %q: %w", policy.Spec.Default.HotCache.TTLAfterInactive, err)
+	if policy.Spec.HotCache != nil && policy.Spec.HotCache.TTLAfterInactive != "" {
+		if _, err := time.ParseDuration(policy.Spec.HotCache.TTLAfterInactive); err != nil {
+			return fmt.Errorf("invalid hot cache TTL %q: %w", policy.Spec.HotCache.TTLAfterInactive, err)
 		}
 	}
 
 	// Validate cold archive: retentionDays is required when enabled
-	if policy.Spec.Default.ColdArchive != nil && policy.Spec.Default.ColdArchive.Enabled {
-		if policy.Spec.Default.ColdArchive.RetentionDays == nil || *policy.Spec.Default.ColdArchive.RetentionDays <= 0 {
+	if policy.Spec.ColdArchive != nil && policy.Spec.ColdArchive.Enabled {
+		if policy.Spec.ColdArchive.RetentionDays == nil || *policy.Spec.ColdArchive.RetentionDays <= 0 {
 			return fmt.Errorf("cold archive retentionDays is required when cold archive is enabled")
 		}
 	}
 
-	// Validate per-workspace overrides
-	for name, override := range policy.Spec.PerWorkspace {
-		if override.ColdArchive != nil && override.ColdArchive.Enabled {
-			if override.ColdArchive.RetentionDays == nil || *override.ColdArchive.RetentionDays <= 0 {
-				return fmt.Errorf("cold archive retentionDays is required when cold archive is enabled for workspace %q", name)
-			}
-		}
-	}
-
 	return nil
-}
-
-// resolveWorkspaces verifies that all workspaces referenced in perWorkspace overrides exist.
-func (r *SessionRetentionPolicyReconciler) resolveWorkspaces(ctx context.Context, policy *omniav1alpha1.SessionRetentionPolicy) (int32, error) {
-	if len(policy.Spec.PerWorkspace) == 0 {
-		return 0, nil
-	}
-
-	var resolved int32
-	var missing []string
-
-	for name := range policy.Spec.PerWorkspace {
-		workspace := &omniav1alpha1.Workspace{}
-		// Workspace is cluster-scoped, so no namespace needed
-		if err := r.Get(ctx, types.NamespacedName{Name: name}, workspace); err != nil {
-			if apierrors.IsNotFound(err) {
-				missing = append(missing, name)
-				continue
-			}
-			return resolved, fmt.Errorf("failed to get workspace %q: %w", name, err)
-		}
-		resolved++
-	}
-
-	if len(missing) > 0 {
-		return resolved, fmt.Errorf("workspaces not found: %v", missing)
-	}
-
-	return resolved, nil
-}
-
-// findPoliciesForWorkspace maps a Workspace to SessionRetentionPolicies that reference it.
-func (r *SessionRetentionPolicyReconciler) findPoliciesForWorkspace(ctx context.Context, obj client.Object) []reconcile.Request {
-	workspace := obj.(*omniav1alpha1.Workspace)
-	log := logf.FromContext(ctx)
-
-	policyList := &omniav1alpha1.SessionRetentionPolicyList{}
-	if err := r.List(ctx, policyList, client.MatchingFields{IndexRetentionPolicyByWorkspace: workspace.Name}); err != nil {
-		// Fall back to list+filter if no index is registered (envtest).
-		if err2 := r.List(ctx, policyList); err2 != nil {
-			log.Error(err2, "Failed to list SessionRetentionPolicies for Workspace mapping")
-			return nil
-		}
-		var requests []reconcile.Request
-		for _, p := range policyList.Items {
-			if _, exists := p.Spec.PerWorkspace[workspace.Name]; exists {
-				requests = append(requests, reconcile.Request{
-					NamespacedName: types.NamespacedName{Name: p.Name},
-				})
-			}
-		}
-		return requests
-	}
-
-	requests := make([]reconcile.Request, 0, len(policyList.Items))
-	for _, p := range policyList.Items {
-		requests = append(requests, reconcile.Request{
-			NamespacedName: types.NamespacedName{Name: p.Name},
-		})
-	}
-
-	return requests
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -418,10 +301,6 @@ func (r *SessionRetentionPolicyReconciler) SetupWithManager(mgr ctrl.Manager) er
 	return ctrl.NewControllerManagedBy(mgr).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 3}).
 		For(&omniav1alpha1.SessionRetentionPolicy{}).
-		Watches(
-			&omniav1alpha1.Workspace{},
-			handler.EnqueueRequestsFromMapFunc(r.findPoliciesForWorkspace),
-		).
 		Named("sessionretentionpolicy").
 		Complete(r)
 }

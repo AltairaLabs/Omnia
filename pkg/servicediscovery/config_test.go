@@ -57,7 +57,6 @@ func makeSecret(name, namespace, connStr string) *corev1.Secret {
 }
 
 func TestResolveSessionConfig(t *testing.T) {
-	warmDays := int32Ptr(7)
 	ws := makeWorkspaceWithServices("my-workspace", []omniav1alpha1.WorkspaceServiceGroup{
 		{
 			Name: "default",
@@ -65,9 +64,7 @@ func TestResolveSessionConfig(t *testing.T) {
 				Database: omniav1alpha1.DatabaseConfig{
 					SecretRef: corev1.LocalObjectReference{Name: "session-db-secret"},
 				},
-				Retention: &omniav1alpha1.SessionRetentionConfig{
-					WarmDays: warmDays,
-				},
+				PolicyRef: &corev1.LocalObjectReference{Name: "my-session-policy"},
 			},
 		},
 	})
@@ -85,37 +82,6 @@ func TestResolveSessionConfig(t *testing.T) {
 	}
 	if cfg.PostgresConn != "postgres://host/db" {
 		t.Errorf("unexpected postgres conn: %s", cfg.PostgresConn)
-	}
-	if cfg.WarmDays == nil || *cfg.WarmDays != 7 {
-		t.Errorf("expected warmDays=7, got %v", cfg.WarmDays)
-	}
-}
-
-func TestResolveSessionConfig_NoRetention(t *testing.T) {
-	ws := makeWorkspaceWithServices("my-workspace", []omniav1alpha1.WorkspaceServiceGroup{
-		{
-			Name: "default",
-			Session: &omniav1alpha1.SessionServiceConfig{
-				Database: omniav1alpha1.DatabaseConfig{
-					SecretRef: corev1.LocalObjectReference{Name: "session-db-secret"},
-				},
-			},
-		},
-	})
-	secret := makeSecret("session-db-secret", "test-ns", "postgres://host/db")
-
-	fakeClient := fake.NewClientBuilder().
-		WithScheme(newTestScheme()).
-		WithObjects(ws, secret).
-		Build()
-
-	cr := NewConfigResolver(fakeClient)
-	cfg, err := cr.ResolveSessionConfig(context.Background(), "my-workspace", "default", "test-ns")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.WarmDays != nil {
-		t.Errorf("expected nil warmDays, got %v", cfg.WarmDays)
 	}
 }
 

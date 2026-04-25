@@ -81,17 +81,15 @@ func TestSessionRetentionPolicyCreation(t *testing.T) {
 			Name: "default",
 		},
 		Spec: SessionRetentionPolicySpec{
-			Default: RetentionTierConfig{
-				HotCache: &HotCacheConfig{
-					Enabled:               &enabled,
-					TTLAfterInactive:      "24h",
-					MaxSessions:           &maxSessions,
-					MaxMessagesPerSession: &maxMessages,
-				},
-				WarmStore: &WarmStoreConfig{
-					RetentionDays: 7,
-					PartitionBy:   PartitionStrategyWeek,
-				},
+			HotCache: &HotCacheConfig{
+				Enabled:               &enabled,
+				TTLAfterInactive:      "24h",
+				MaxSessions:           &maxSessions,
+				MaxMessagesPerSession: &maxMessages,
+			},
+			WarmStore: &WarmStoreConfig{
+				RetentionDays: 7,
+				PartitionBy:   PartitionStrategyWeek,
 			},
 		},
 	}
@@ -100,32 +98,32 @@ func TestSessionRetentionPolicyCreation(t *testing.T) {
 		t.Errorf("SessionRetentionPolicy.Name = %v, want %v", policy.Name, "default")
 	}
 
-	if policy.Spec.Default.HotCache == nil {
+	if policy.Spec.HotCache == nil {
 		t.Fatal("HotCache should not be nil")
 	}
 
-	if *policy.Spec.Default.HotCache.Enabled != true {
-		t.Errorf("HotCache.Enabled = %v, want true", *policy.Spec.Default.HotCache.Enabled)
+	if *policy.Spec.HotCache.Enabled != true {
+		t.Errorf("HotCache.Enabled = %v, want true", *policy.Spec.HotCache.Enabled)
 	}
 
-	if policy.Spec.Default.HotCache.TTLAfterInactive != "24h" {
-		t.Errorf("HotCache.TTLAfterInactive = %v, want 24h", policy.Spec.Default.HotCache.TTLAfterInactive)
+	if policy.Spec.HotCache.TTLAfterInactive != "24h" {
+		t.Errorf("HotCache.TTLAfterInactive = %v, want 24h", policy.Spec.HotCache.TTLAfterInactive)
 	}
 
-	if *policy.Spec.Default.HotCache.MaxSessions != 500 {
-		t.Errorf("HotCache.MaxSessions = %v, want 500", *policy.Spec.Default.HotCache.MaxSessions)
+	if *policy.Spec.HotCache.MaxSessions != 500 {
+		t.Errorf("HotCache.MaxSessions = %v, want 500", *policy.Spec.HotCache.MaxSessions)
 	}
 
-	if *policy.Spec.Default.HotCache.MaxMessagesPerSession != 200 {
-		t.Errorf("HotCache.MaxMessagesPerSession = %v, want 200", *policy.Spec.Default.HotCache.MaxMessagesPerSession)
+	if *policy.Spec.HotCache.MaxMessagesPerSession != 200 {
+		t.Errorf("HotCache.MaxMessagesPerSession = %v, want 200", *policy.Spec.HotCache.MaxMessagesPerSession)
 	}
 
-	if policy.Spec.Default.WarmStore.RetentionDays != 7 {
-		t.Errorf("WarmStore.RetentionDays = %v, want 7", policy.Spec.Default.WarmStore.RetentionDays)
+	if policy.Spec.WarmStore.RetentionDays != 7 {
+		t.Errorf("WarmStore.RetentionDays = %v, want 7", policy.Spec.WarmStore.RetentionDays)
 	}
 
-	if policy.Spec.Default.WarmStore.PartitionBy != PartitionStrategyWeek {
-		t.Errorf("WarmStore.PartitionBy = %v, want week", policy.Spec.Default.WarmStore.PartitionBy)
+	if policy.Spec.WarmStore.PartitionBy != PartitionStrategyWeek {
+		t.Errorf("WarmStore.PartitionBy = %v, want week", policy.Spec.WarmStore.PartitionBy)
 	}
 }
 
@@ -136,71 +134,24 @@ func TestSessionRetentionPolicyWithColdArchive(t *testing.T) {
 			Name: "with-cold",
 		},
 		Spec: SessionRetentionPolicySpec{
-			Default: RetentionTierConfig{
-				ColdArchive: &ColdArchiveConfig{
-					Enabled:            true,
-					RetentionDays:      &retentionDays,
-					CompactionSchedule: "0 2 * * *",
-				},
+			ColdArchive: &ColdArchiveConfig{
+				Enabled:            true,
+				RetentionDays:      &retentionDays,
+				CompactionSchedule: "0 2 * * *",
 			},
 		},
 	}
 
-	if !policy.Spec.Default.ColdArchive.Enabled {
+	if !policy.Spec.ColdArchive.Enabled {
 		t.Error("ColdArchive.Enabled should be true")
 	}
 
-	if *policy.Spec.Default.ColdArchive.RetentionDays != 365 {
-		t.Errorf("ColdArchive.RetentionDays = %v, want 365", *policy.Spec.Default.ColdArchive.RetentionDays)
+	if *policy.Spec.ColdArchive.RetentionDays != 365 {
+		t.Errorf("ColdArchive.RetentionDays = %v, want 365", *policy.Spec.ColdArchive.RetentionDays)
 	}
 
-	if policy.Spec.Default.ColdArchive.CompactionSchedule != "0 2 * * *" {
-		t.Errorf("ColdArchive.CompactionSchedule = %v, want '0 2 * * *'", policy.Spec.Default.ColdArchive.CompactionSchedule)
-	}
-}
-
-func TestSessionRetentionPolicyWithPerWorkspaceOverrides(t *testing.T) {
-	coldDays := int32(730)
-	policy := &SessionRetentionPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "with-overrides",
-		},
-		Spec: SessionRetentionPolicySpec{
-			Default: RetentionTierConfig{
-				WarmStore: &WarmStoreConfig{
-					RetentionDays: 7,
-					PartitionBy:   PartitionStrategyWeek,
-				},
-			},
-			PerWorkspace: map[string]WorkspaceRetentionOverride{
-				"production-ws": {
-					WarmStore: &WarmStoreConfig{
-						RetentionDays: 30,
-					},
-					ColdArchive: &ColdArchiveConfig{
-						Enabled:       true,
-						RetentionDays: &coldDays,
-					},
-				},
-			},
-		},
-	}
-
-	if len(policy.Spec.PerWorkspace) != 1 {
-		t.Fatalf("PerWorkspace length = %d, want 1", len(policy.Spec.PerWorkspace))
-	}
-
-	override, exists := policy.Spec.PerWorkspace["production-ws"]
-	if !exists {
-		t.Fatal("PerWorkspace should contain 'production-ws' key")
-	}
-
-	if override.WarmStore.RetentionDays != 30 {
-		t.Errorf("Override.WarmStore.RetentionDays = %v, want 30", override.WarmStore.RetentionDays)
-	}
-
-	if *override.ColdArchive.RetentionDays != 730 {
-		t.Errorf("Override.ColdArchive.RetentionDays = %v, want 730", *override.ColdArchive.RetentionDays)
+	if policy.Spec.ColdArchive.CompactionSchedule != "0 2 * * *" {
+		t.Errorf("ColdArchive.CompactionSchedule = %v, want '0 2 * * *'", policy.Spec.ColdArchive.CompactionSchedule)
 	}
 }
 
@@ -259,27 +210,18 @@ func TestSessionRetentionPolicyDeepCopy(t *testing.T) {
 			Name: "original",
 		},
 		Spec: SessionRetentionPolicySpec{
-			Default: RetentionTierConfig{
-				HotCache: &HotCacheConfig{
-					Enabled:          &enabled,
-					TTLAfterInactive: "24h",
-					MaxSessions:      &maxSessions,
-				},
-				WarmStore: &WarmStoreConfig{
-					RetentionDays: 7,
-					PartitionBy:   PartitionStrategyWeek,
-				},
-				ColdArchive: &ColdArchiveConfig{
-					Enabled:       true,
-					RetentionDays: &retentionDays,
-				},
+			HotCache: &HotCacheConfig{
+				Enabled:          &enabled,
+				TTLAfterInactive: "24h",
+				MaxSessions:      &maxSessions,
 			},
-			PerWorkspace: map[string]WorkspaceRetentionOverride{
-				"ws1": {
-					WarmStore: &WarmStoreConfig{
-						RetentionDays: 30,
-					},
-				},
+			WarmStore: &WarmStoreConfig{
+				RetentionDays: 7,
+				PartitionBy:   PartitionStrategyWeek,
+			},
+			ColdArchive: &ColdArchiveConfig{
+				Enabled:       true,
+				RetentionDays: &retentionDays,
 			},
 		},
 		Status: SessionRetentionPolicyStatus{
@@ -310,11 +252,11 @@ func TestSessionRetentionPolicyDeepCopy(t *testing.T) {
 	}
 
 	// Verify nested pointer fields are also deep copied
-	if copied.Spec.Default.HotCache == original.Spec.Default.HotCache {
+	if copied.Spec.HotCache == original.Spec.HotCache {
 		t.Error("DeepCopy should create new HotCache pointer")
 	}
 
-	if copied.Spec.Default.ColdArchive.RetentionDays == original.Spec.Default.ColdArchive.RetentionDays {
+	if copied.Spec.ColdArchive.RetentionDays == original.Spec.ColdArchive.RetentionDays {
 		t.Error("DeepCopy should create new RetentionDays pointer")
 	}
 
@@ -333,10 +275,8 @@ func TestSessionRetentionPolicyListDeepCopy(t *testing.T) {
 					Name: "policy1",
 				},
 				Spec: SessionRetentionPolicySpec{
-					Default: RetentionTierConfig{
-						WarmStore: &WarmStoreConfig{
-							RetentionDays: 7,
-						},
+					WarmStore: &WarmStoreConfig{
+						RetentionDays: 7,
 					},
 				},
 			},

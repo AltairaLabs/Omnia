@@ -625,9 +625,12 @@ type SessionServiceConfig struct {
 	// +kubebuilder:validation:Required
 	Database DatabaseConfig `json:"database"`
 
-	// retention configures session retention settings.
+	// policyRef optionally references a SessionRetentionPolicy that
+	// applies to this service group. The same SessionRetentionPolicy
+	// may be referenced by many workspaces. When unset the session-api
+	// falls back to its baked-in defaults.
 	// +optional
-	Retention *SessionRetentionConfig `json:"retention,omitempty"`
+	PolicyRef *corev1.LocalObjectReference `json:"policyRef,omitempty"`
 
 	// podOverrides customizes the managed session-api Pod (SA, scheduling,
 	// CSI secret-stores, etc.).
@@ -641,14 +644,6 @@ type DatabaseConfig struct {
 	// The Secret must have a key "POSTGRES_CONN" with a valid PostgreSQL connection string.
 	// +kubebuilder:validation:Required
 	SecretRef corev1.LocalObjectReference `json:"secretRef"`
-}
-
-// SessionRetentionConfig defines retention policy for sessions.
-type SessionRetentionConfig struct {
-	// warmDays is the number of days to keep sessions in the warm (Redis) cache.
-	// Sessions older than this are evicted to cold storage only.
-	// +optional
-	WarmDays *int32 `json:"warmDays,omitempty"`
 }
 
 // ExternalEndpoints holds user-supplied URLs for a service group using external mode.

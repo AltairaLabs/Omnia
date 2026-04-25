@@ -10,6 +10,53 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Breaking (SessionRetentionPolicy schema flatten + policyRef, #1016)
+
+- `SessionRetentionPolicy.spec.default` and `spec.perWorkspace` removed.
+  Fields promoted to `spec.*`:
+  - `spec.hotCache` (was `spec.default.hotCache`)
+  - `spec.warmStore` (was `spec.default.warmStore`)
+  - `spec.coldArchive` (was `spec.default.coldArchive`)
+- `Workspace.spec.services[].session.retention` removed (and the
+  `SessionRetentionConfig` type deleted). Workspaces now reference a
+  `SessionRetentionPolicy` via `services[].session.policyRef`
+  (`*corev1.LocalObjectReference`). Many workspaces may share one
+  policy. A workspace with no `policyRef` falls back to the session-api's
+  baked-in defaults.
+- `pkg/servicediscovery.SessionConfig.WarmDays` deleted — the bespoke
+  primitive was set in `ResolveSessionConfig` but never read by any
+  consumer (dead plumbing). Operators who relied on per-workspace warm
+  retention express it on a referenced `SessionRetentionPolicy` instead.
+- The `SessionRetentionPolicy` controller no longer tracks per-policy
+  workspace resolution: `resolveWorkspaces`, `findPoliciesForWorkspace`,
+  and the cross-Watches registration are removed. The `WorkspacesResolved`
+  status condition stays for backward observability and always reports
+  `Reason=NotApplicable`.
+- The retention ConfigMap projected by the controller (`retention.yaml`)
+  also flattens — no more `default:` / `perWorkspace:` keys; just
+  `hotCache:`, `warmStore:`, `coldArchive:` at the top level.
+
+- Migration for clusters with existing nested-shape policies — re-author
+  one policy per workspace, then update each Workspace to reference it:
+
+  ```bash
+  # 1. Inspect existing policies (manual; the shape varies per operator).
+  kubectl get sessionretentionpolicies -o yaml > /tmp/old-session-policies.yaml
+
+  # 2. Author one SessionRetentionPolicy per workspace using the flat
+  #    shape (no spec.default wrapper, no spec.perWorkspace map).
+  kubectl apply -f my-workspace-session-policy.yaml
+
+  # 3. Patch each Workspace to reference the policy.
+  kubectl patch workspace my-workspace --type=merge -p '
+    {"spec":{"services":[{"name":"default","session":{"policyRef":{"name":"my-workspace-session-policy"}}}]}}'
+  ```
+
+- This completes the cleanup pattern established in #1018 (MemoryPolicy)
+  for the second of the two retention-policy CRDs. `SessionPrivacyPolicy`
+  already uses the `policyRef` pattern; all three policy CRDs are now
+  consistent.
+
 ### Added (memory-entity tier field, #1017)
 
 - `GET /api/v1/memories`, `/api/v1/memories/search`, `/api/v1/memories/export`,

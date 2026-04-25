@@ -120,31 +120,6 @@ func TestExtractPromptPackRef_Empty(t *testing.T) {
 	assert.Empty(t, refs)
 }
 
-func TestExtractWorkspaceNames(t *testing.T) {
-	policy := &omniav1alpha1.SessionRetentionPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "default-policy"},
-		Spec: omniav1alpha1.SessionRetentionPolicySpec{
-			PerWorkspace: map[string]omniav1alpha1.WorkspaceRetentionOverride{
-				"production": {},
-				"staging":    {},
-			},
-		},
-	}
-
-	names := extractWorkspaceNames(policy)
-	assert.ElementsMatch(t, []string{"production", "staging"}, names)
-}
-
-func TestExtractWorkspaceNames_Empty(t *testing.T) {
-	policy := &omniav1alpha1.SessionRetentionPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "default-policy"},
-		Spec:       omniav1alpha1.SessionRetentionPolicySpec{},
-	}
-
-	names := extractWorkspaceNames(policy)
-	assert.Empty(t, names)
-}
-
 func TestProviderRefKey(t *testing.T) {
 	ns := "other-ns"
 	tests := []struct {

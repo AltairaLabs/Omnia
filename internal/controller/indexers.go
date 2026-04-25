@@ -33,10 +33,6 @@ const (
 
 	// IndexAgentRuntimeByPromptPack indexes AgentRuntimes by the PromptPack name they reference.
 	IndexAgentRuntimeByPromptPack = ".spec.promptPackRef"
-
-	// IndexRetentionPolicyByWorkspace indexes SessionRetentionPolicies by workspace names
-	// in their perWorkspace map.
-	IndexRetentionPolicyByWorkspace = ".spec.perWorkspace"
 )
 
 // SetupIndexers registers field indexers required by watch handlers.
@@ -51,20 +47,11 @@ func SetupIndexers(ctx context.Context, mgr manager.Manager) error {
 		return err
 	}
 
-	if err := mgr.GetFieldIndexer().IndexField(
+	return mgr.GetFieldIndexer().IndexField(
 		ctx,
 		&omniav1alpha1.AgentRuntime{},
 		IndexAgentRuntimeByPromptPack,
 		extractPromptPackRef,
-	); err != nil {
-		return err
-	}
-
-	return mgr.GetFieldIndexer().IndexField(
-		ctx,
-		&omniav1alpha1.SessionRetentionPolicy{},
-		IndexRetentionPolicyByWorkspace,
-		extractWorkspaceNames,
 	)
 }
 
@@ -102,18 +89,4 @@ func extractPromptPackRef(obj client.Object) []string {
 		return nil
 	}
 	return []string{ar.Spec.PromptPackRef.Name}
-}
-
-// extractWorkspaceNames returns the workspace names from a SessionRetentionPolicy's
-// perWorkspace map.
-func extractWorkspaceNames(obj client.Object) []string {
-	policy := obj.(*omniav1alpha1.SessionRetentionPolicy)
-	if len(policy.Spec.PerWorkspace) == 0 {
-		return nil
-	}
-	names := make([]string, 0, len(policy.Spec.PerWorkspace))
-	for name := range policy.Spec.PerWorkspace {
-		names = append(names, name)
-	}
-	return names
 }

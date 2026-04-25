@@ -101,8 +101,12 @@ type ColdArchiveConfig struct {
 	CompactionSchedule string `json:"compactionSchedule,omitempty"`
 }
 
-// RetentionTierConfig defines the retention configuration across all storage tiers.
-type RetentionTierConfig struct {
+// SessionRetentionPolicySpec defines the desired state of SessionRetentionPolicy.
+// Workspaces opt in to a SessionRetentionPolicy via
+// Workspace.spec.services[].session.policyRef — many workspaces may
+// reference one policy. A workspace with no policyRef falls back to
+// the session-api's baked-in defaults.
+type SessionRetentionPolicySpec struct {
 	// hotCache configures the Redis hot cache tier.
 	// +optional
 	HotCache *HotCacheConfig `json:"hotCache,omitempty"`
@@ -114,30 +118,6 @@ type RetentionTierConfig struct {
 	// coldArchive configures the cold archive tier (e.g., S3, GCS).
 	// +optional
 	ColdArchive *ColdArchiveConfig `json:"coldArchive,omitempty"`
-}
-
-// WorkspaceRetentionOverride defines per-workspace retention overrides.
-// HotCache is not overridable per workspace — it is a shared Redis instance.
-type WorkspaceRetentionOverride struct {
-	// warmStore overrides the warm store configuration for this workspace.
-	// +optional
-	WarmStore *WarmStoreConfig `json:"warmStore,omitempty"`
-
-	// coldArchive overrides the cold archive configuration for this workspace.
-	// +optional
-	ColdArchive *ColdArchiveConfig `json:"coldArchive,omitempty"`
-}
-
-// SessionRetentionPolicySpec defines the desired state of SessionRetentionPolicy.
-type SessionRetentionPolicySpec struct {
-	// default defines the default retention configuration across all storage tiers.
-	// +kubebuilder:validation:Required
-	Default RetentionTierConfig `json:"default"`
-
-	// perWorkspace defines per-workspace retention overrides.
-	// Map keys are Workspace resource names.
-	// +optional
-	PerWorkspace map[string]WorkspaceRetentionOverride `json:"perWorkspace,omitempty"`
 }
 
 // SessionRetentionPolicyStatus defines the observed state of SessionRetentionPolicy.
@@ -165,9 +145,9 @@ type SessionRetentionPolicyStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="Hot Cache TTL",type=string,JSONPath=`.spec.default.hotCache.ttlAfterInactive`
-// +kubebuilder:printcolumn:name="Warm Days",type=integer,JSONPath=`.spec.default.warmStore.retentionDays`
-// +kubebuilder:printcolumn:name="Cold Archive",type=boolean,JSONPath=`.spec.default.coldArchive.enabled`
+// +kubebuilder:printcolumn:name="Hot Cache TTL",type=string,JSONPath=`.spec.hotCache.ttlAfterInactive`
+// +kubebuilder:printcolumn:name="Warm Days",type=integer,JSONPath=`.spec.warmStore.retentionDays`
+// +kubebuilder:printcolumn:name="Cold Archive",type=boolean,JSONPath=`.spec.coldArchive.enabled`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // SessionRetentionPolicy is the Schema for the sessionretentionpolicies API.
