@@ -36,7 +36,11 @@ vi.mock("next/link", () => ({
 
 import { MemorySidebar } from "./memory-sidebar";
 
-function makeMemory(id: string, content: string): MemoryEntity {
+function makeMemory(
+  id: string,
+  content: string,
+  tier?: MemoryEntity["tier"],
+): MemoryEntity {
   return {
     id,
     type: "fact",
@@ -44,6 +48,7 @@ function makeMemory(id: string, content: string): MemoryEntity {
     confidence: 0.8,
     scope: { workspace: "ws-1" },
     createdAt: new Date().toISOString(),
+    tier,
   };
 }
 
@@ -155,5 +160,47 @@ describe("MemorySidebar", () => {
     const closeButton = screen.getByRole("button", { name: /close/i });
     await user.click(closeButton);
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("renders the tier filter chips for authenticated users", () => {
+    setup([makeMemory("m1", "hello", "user")]);
+    render(<MemorySidebar agentName="my-agent" open={true} onClose={vi.fn()} />);
+    expect(screen.getByTestId("tier-filter-chips")).toBeInTheDocument();
+    expect(screen.getByTestId("tier-filter-all")).toBeInTheDocument();
+    expect(screen.getByTestId("tier-filter-institutional")).toBeInTheDocument();
+    expect(screen.getByTestId("tier-filter-agent")).toBeInTheDocument();
+    expect(screen.getByTestId("tier-filter-user")).toBeInTheDocument();
+  });
+
+  it("filters memories by tier when a chip is clicked", async () => {
+    const user = userEvent.setup();
+    setup([
+      makeMemory("u1", "user prefers dark mode", "user"),
+      makeMemory("a1", "agent learned support escalation", "agent"),
+      makeMemory("i1", "company refund policy", "institutional"),
+    ]);
+    render(<MemorySidebar agentName="my-agent" open={true} onClose={vi.fn()} />);
+
+    expect(screen.getByText("user prefers dark mode")).toBeInTheDocument();
+    expect(screen.getByText("agent learned support escalation")).toBeInTheDocument();
+    expect(screen.getByText("company refund policy")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("tier-filter-institutional"));
+
+    expect(screen.queryByText("user prefers dark mode")).not.toBeInTheDocument();
+    expect(screen.queryByText("agent learned support escalation")).not.toBeInTheDocument();
+    expect(screen.getByText("company refund policy")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("tier-filter-all"));
+
+    expect(screen.getByText("user prefers dark mode")).toBeInTheDocument();
+    expect(screen.getByText("agent learned support escalation")).toBeInTheDocument();
+    expect(screen.getByText("company refund policy")).toBeInTheDocument();
+  });
+
+  it("does not render filter chips for anonymous users", () => {
+    setupAnonymous();
+    render(<MemorySidebar agentName="my-agent" open={true} onClose={vi.fn()} />);
+    expect(screen.queryByTestId("tier-filter-chips")).not.toBeInTheDocument();
   });
 });

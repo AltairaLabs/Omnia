@@ -182,6 +182,45 @@ func TestHandleListMemories_Success(t *testing.T) {
 	assert.Len(t, resp.Memories, 2)
 }
 
+// TestHandleListMemories_IncludesTier verifies the derived tier field appears
+// on each row. Tier is computed from the scope map: virtual_user_id → "user",
+// agent_id (no user) → "agent", neither → "institutional".
+func TestHandleListMemories_IncludesTier(t *testing.T) {
+	store := &mockStore{
+		memories: []*memory.Memory{
+			{ID: "u-1", Scope: map[string]string{
+				memory.ScopeWorkspaceID: "ws", memory.ScopeUserID: "alice",
+			}},
+			{ID: "a-1", Scope: map[string]string{
+				memory.ScopeWorkspaceID: "ws", memory.ScopeAgentID: "support",
+			}},
+			{ID: "i-1", Scope: map[string]string{
+				memory.ScopeWorkspaceID: "ws",
+			}},
+		},
+	}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/memories?workspace=ws", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var raw struct {
+		Memories []map[string]any `json:"memories"`
+		Total    int              `json:"total"`
+	}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&raw))
+	require.Len(t, raw.Memories, 3)
+	want := map[string]string{"u-1": "user", "a-1": "agent", "i-1": "institutional"}
+	for _, m := range raw.Memories {
+		id, _ := m["id"].(string)
+		tier, _ := m["tier"].(string)
+		assert.Equal(t, want[id], tier, "tier for %s", id)
+	}
+}
+
 func TestHandleListMemories_MissingWorkspace(t *testing.T) {
 	h := newTestHandler(&mockStore{})
 	mux := setupMux(h)

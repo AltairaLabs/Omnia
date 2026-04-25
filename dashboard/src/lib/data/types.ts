@@ -468,6 +468,8 @@ export interface MemoryEntity {
   createdAt: string;
   accessedAt?: string;
   expiresAt?: string;
+  /** Server-derived tier. Absent on legacy mocks; populated by memory-api. */
+  tier?: import("@/lib/memory-analytics/types").Tier;
 }
 
 export interface MemoryListResponse {

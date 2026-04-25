@@ -155,7 +155,10 @@ func TestHandleSaveInstitutional_BodyTooLarge(t *testing.T) {
 
 func TestHandleListInstitutional_HappyPath(t *testing.T) {
 	stub := &institutionalStub{
-		listResult: []*memory.Memory{{ID: "m-1"}, {ID: "m-2"}},
+		listResult: []*memory.Memory{
+			{ID: "m-1", Scope: map[string]string{memory.ScopeWorkspaceID: "ws-1"}},
+			{ID: "m-2", Scope: map[string]string{memory.ScopeWorkspaceID: "ws-1"}},
+		},
 	}
 	mux := newInstitutionalHandler(t, stub)
 
@@ -169,6 +172,9 @@ func TestHandleListInstitutional_HappyPath(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&out))
 	assert.Equal(t, 2, out.Total)
 	assert.Len(t, out.Memories, 2)
+	for _, m := range out.Memories {
+		assert.Equal(t, "institutional", m.Tier, "row %s tier", m.ID)
+	}
 }
 
 func TestHandleListInstitutional_RejectsMissingWorkspace(t *testing.T) {

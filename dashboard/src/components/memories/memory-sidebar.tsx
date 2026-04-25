@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   Sheet,
   SheetContent,
@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Brain, LogIn } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/hooks/use-auth";
@@ -16,6 +17,8 @@ import { useMemories } from "@/hooks/use-memories";
 import { MemoryCard } from "./memory-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { MemoryEntity } from "@/lib/data/types";
+import { TIERS, type Tier } from "@/lib/memory-analytics/types";
+import { TIER_LABELS } from "@/lib/memory-analytics/colors";
 
 interface MemorySidebarProps {
   agentName: string;
@@ -24,6 +27,15 @@ interface MemorySidebarProps {
 }
 
 const SKELETON_KEYS = ["sk-a", "sk-b", "sk-c"];
+
+type TierFilter = Tier | "all";
+
+const TIER_FILTERS: TierFilter[] = ["all", ...TIERS];
+
+const TIER_FILTER_LABELS: Record<TierFilter, string> = {
+  all: "All",
+  ...TIER_LABELS,
+};
 
 function LoadingSkeletons() {
   return (
@@ -57,6 +69,35 @@ function AnonymousNotice() {
   );
 }
 
+function TierFilterChips({
+  active,
+  onChange,
+}: {
+  active: TierFilter;
+  onChange: (next: TierFilter) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1 px-4 pb-2" data-testid="tier-filter-chips">
+      {TIER_FILTERS.map((tier) => (
+        <Button
+          key={tier}
+          size="sm"
+          variant={tier === active ? "default" : "outline"}
+          onClick={() => onChange(tier)}
+          data-testid={`tier-filter-${tier}`}
+        >
+          {TIER_FILTER_LABELS[tier]}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+function applyTierFilter(memories: MemoryEntity[], filter: TierFilter): MemoryEntity[] {
+  if (filter === "all") return memories;
+  return memories.filter((m) => m.tier === filter);
+}
+
 function renderBody(
   isAuthenticated: boolean,
   isLoading: boolean,
@@ -80,10 +121,10 @@ export function MemorySidebar({ agentName: _agentName, open, onClose }: MemorySi
     userId: memoryUserId,
     enabled: hasMemoryIdentity,
   });
+  const [tierFilter, setTierFilter] = useState<TierFilter>("all");
 
-  // No agent-specific filtering for now — show all memories
-  // (agent scoping requires agent_id in scope, which may not be set)
   const memories = data?.memories ?? [];
+  const filtered = applyTierFilter(memories, tierFilter);
 
   return (
     <Sheet open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -98,8 +139,12 @@ export function MemorySidebar({ agentName: _agentName, open, onClose }: MemorySi
           </p>
         </SheetHeader>
 
-        <ScrollArea className="h-[calc(100vh-120px)] px-4">
-          {renderBody(hasMemoryIdentity, isLoading, memories)}
+        {hasMemoryIdentity && (
+          <TierFilterChips active={tierFilter} onChange={setTierFilter} />
+        )}
+
+        <ScrollArea className="h-[calc(100vh-160px)] px-4">
+          {renderBody(hasMemoryIdentity, isLoading, filtered)}
         </ScrollArea>
 
         <div className="border-t p-3">

@@ -46,10 +46,39 @@ const (
 	maxBatchDeleteLimit = 10000
 )
 
+// MemoryWithTier wraps memory.Memory with a derived "tier" string for
+// dashboard rendering. Tier is computed from the scope map; no schema change.
+type MemoryWithTier struct {
+	*memory.Memory
+	Tier string `json:"tier"`
+}
+
+// deriveTier returns "user" / "agent" / "institutional" based on which scope
+// keys are populated. Mirrors the SQL CASE expression used by Aggregate's
+// groupBy=tier branch in internal/memory/stats.go.
+func deriveTier(scope map[string]string) string {
+	if scope[memory.ScopeUserID] != "" {
+		return "user"
+	}
+	if scope[memory.ScopeAgentID] != "" {
+		return "agent"
+	}
+	return "institutional"
+}
+
+// wrapMemoriesWithTier maps a slice of *memory.Memory into the tier-tagged DTO.
+func wrapMemoriesWithTier(rows []*memory.Memory) []*MemoryWithTier {
+	out := make([]*MemoryWithTier, len(rows))
+	for i, m := range rows {
+		out[i] = &MemoryWithTier{Memory: m, Tier: deriveTier(m.Scope)}
+	}
+	return out
+}
+
 // MemoryListResponse is the JSON response for memory list/search endpoints.
 type MemoryListResponse struct {
-	Memories []*memory.Memory `json:"memories"`
-	Total    int              `json:"total"`
+	Memories []*MemoryWithTier `json:"memories"`
+	Total    int               `json:"total"`
 }
 
 // MemoryResponse is the JSON response for a single memory creation.
@@ -148,7 +177,7 @@ func (h *Handler) handleListMemories(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, MemoryListResponse{
-		Memories: memories,
+		Memories: wrapMemoriesWithTier(memories),
 		Total:    len(memories),
 	})
 }
@@ -182,7 +211,7 @@ func (h *Handler) handleSearchMemories(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, MemoryListResponse{
-		Memories: memories,
+		Memories: wrapMemoriesWithTier(memories),
 		Total:    len(memories),
 	})
 }
@@ -209,7 +238,7 @@ func (h *Handler) handleExportMemories(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	w.Header().Set("Content-Disposition", exportFilename)
 	_ = json.NewEncoder(w).Encode(MemoryListResponse{
-		Memories: memories,
+		Memories: wrapMemoriesWithTier(memories),
 		Total:    len(memories),
 	})
 }

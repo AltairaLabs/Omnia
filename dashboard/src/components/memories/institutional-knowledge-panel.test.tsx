@@ -81,6 +81,8 @@ describe("InstitutionalKnowledgePanel", () => {
     expect(screen.getByText("snake_case rule")).toBeInTheDocument();
     expect(screen.getByText("API terms")).toBeInTheDocument();
     expect(screen.getByText(/Workspace knowledge \(2\)/)).toBeInTheDocument();
+    // Each entry shows an Institutional tier badge.
+    expect(screen.getAllByText("Institutional")).toHaveLength(2);
   });
 
   it("renders error alert when load fails", () => {
