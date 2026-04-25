@@ -306,3 +306,70 @@ func TestAggregate_EmptyWorkspace_ReturnsEmpty(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, rows)
 }
+
+// TestAggregate_GroupByTier verifies the tier pivot classifies rows by
+// (virtual_user_id, agent_id) into institutional / agent / user and that the
+// existing AggregateConsentJoin still filters non-consenting users.
+//
+// Baseline from seedAggregateFixtures:
+//   - 3 granted-user rows (user_id + agent_id) → tier=user
+//   - 2 denied-user rows (excluded by consent filter)
+//   - 1 opted-out user row (excluded by consent filter)
+//   - 1 institutional row (no user, no agent) → tier=institutional
+//
+// We add one extra agent-tier row (agent_id but no user_id) so all three
+// tiers appear in the result.
+func TestAggregate_GroupByTier(t *testing.T) {
+	store := newStore(t)
+	workspace := seedAggregateFixtures(t, store)
+
+	// Insert one agent-tier row: agent_id set, virtual_user_id NULL.
+	_, err := store.Pool().Exec(context.Background(), `
+		INSERT INTO memory_entities
+		    (workspace_id, virtual_user_id, agent_id, name, kind, metadata, consent_category)
+		VALUES ($1, NULL, $2, 'agent-fact', 'fact', '{}'::jsonb, 'memory:context')`,
+		workspace, agentAUUID,
+	)
+	require.NoError(t, err)
+
+	rows, err := store.Aggregate(context.Background(), AggregateOptions{
+		Workspace: workspace,
+		GroupBy:   AggregateGroupByTier,
+		Metric:    AggregateMetricCount,
+		Limit:     100,
+	})
+	require.NoError(t, err)
+
+	got := map[string]int64{}
+	for _, r := range rows {
+		got[r.Key] = r.Value
+	}
+	want := map[string]int64{
+		"institutional": 1, // the no-user, no-agent fixture
+		"agent":         1, // the row inserted above
+		"user":          3, // granted user's 3 rows; denied + opted-out excluded
+	}
+	require.Equal(t, want, got)
+}
+
+// TestAggregate_GroupByTier_DistinctUsers verifies the distinct_users metric
+// against tier — only the user tier should have a non-zero distinct count.
+func TestAggregate_GroupByTier_DistinctUsers(t *testing.T) {
+	store := newStore(t)
+	workspace := seedAggregateFixtures(t, store)
+
+	rows, err := store.Aggregate(context.Background(), AggregateOptions{
+		Workspace: workspace,
+		GroupBy:   AggregateGroupByTier,
+		Metric:    AggregateMetricDistinctUsers,
+		Limit:     100,
+	})
+	require.NoError(t, err)
+
+	got := map[string]int64{}
+	for _, r := range rows {
+		got[r.Key] = r.Value
+	}
+	require.Equal(t, int64(1), got["user"], "one consenting user across the fixture set")
+	require.Equal(t, int64(0), got["institutional"], "institutional rows have NULL virtual_user_id")
+}

@@ -24,6 +24,7 @@ const (
 	AggregateGroupByCategory AggregateGroupBy = "category"
 	AggregateGroupByAgent    AggregateGroupBy = "agent"
 	AggregateGroupByDay      AggregateGroupBy = "day"
+	AggregateGroupByTier     AggregateGroupBy = "tier"
 )
 
 // AggregateMetric enumerates the supported metric expressions.
@@ -138,6 +139,19 @@ func groupByFragments(g AggregateGroupBy) (keyExpr, extraWhere, orderClause stri
 	case AggregateGroupByDay:
 		return "to_char(date_trunc('day', e.created_at)::date, 'YYYY-MM-DD')",
 			"", "ORDER BY 1 ASC", nil
+	case AggregateGroupByTier:
+		// Classify each row by which scope columns are populated:
+		//   virtual_user_id present  → user
+		//   agent_id present, no user → agent
+		//   neither                  → institutional
+		// AggregateConsentJoin still filters non-consenting users on the
+		// "user" branch; institutional and agent rows have virtual_user_id
+		// IS NULL and are unaffected.
+		return `CASE
+			WHEN e.virtual_user_id IS NOT NULL THEN 'user'
+			WHEN e.agent_id        IS NOT NULL THEN 'agent'
+			ELSE                                    'institutional'
+		END`, "", "ORDER BY value DESC", nil
 	default:
 		return "", "", "", fmt.Errorf("memory: invalid groupBy %q", g)
 	}
