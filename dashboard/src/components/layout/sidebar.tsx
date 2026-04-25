@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   Brain,
   BookOpen,
+  BarChart3,
 } from "lucide-react";
 
 interface NavItem {
@@ -42,6 +43,7 @@ const navigation: NavItem[] = [
   { name: "Providers", href: "/providers", icon: Cpu },
   { name: "Sessions", href: "/sessions", icon: MessageSquare },
   { name: "Memories", href: "/memories", icon: Brain },
+  { name: "Memory analytics", href: "/memory-analytics", icon: BarChart3 },
   { name: "Quality", href: "/quality", icon: ShieldCheck },
   { name: "Costs", href: "/costs", icon: DollarSign },
   { name: "Arena", href: "/arena", icon: Target, enterprise: true },
