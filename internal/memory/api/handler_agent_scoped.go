@@ -46,8 +46,8 @@ type SaveAgentScopedRequest struct {
 // ListAgentScopedResponse is the JSON response for
 // GET /api/v1/agent-memories.
 type ListAgentScopedResponse struct {
-	Memories []*memory.Memory `json:"memories"`
-	Total    int              `json:"total"`
+	Memories []*MemoryWithTier `json:"memories"`
+	Total    int               `json:"total"`
 }
 
 // handleSaveAgentScoped handles POST /api/v1/agent-memories.
@@ -126,7 +126,10 @@ func (h *Handler) handleListAgentScoped(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, ListAgentScopedResponse{Memories: mems, Total: len(mems)})
+	writeJSON(w, ListAgentScopedResponse{
+		Memories: wrapMemoriesWithTier(mems),
+		Total:    len(mems),
+	})
 }
 
 // handleDeleteAgentScoped handles DELETE /api/v1/agent-memories/{id}?workspace=X&agent=Y.

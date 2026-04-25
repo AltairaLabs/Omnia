@@ -47,8 +47,8 @@ type SaveInstitutionalRequest struct {
 
 // ListInstitutionalResponse is the JSON response for GET /api/v1/institutional/memories.
 type ListInstitutionalResponse struct {
-	Memories []*memory.Memory `json:"memories"`
-	Total    int              `json:"total"`
+	Memories []*MemoryWithTier `json:"memories"`
+	Total    int               `json:"total"`
 }
 
 // handleSaveInstitutional handles POST /api/v1/institutional/memories.
@@ -118,7 +118,10 @@ func (h *Handler) handleListInstitutional(w http.ResponseWriter, r *http.Request
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, ListInstitutionalResponse{Memories: mems, Total: len(mems)})
+	writeJSON(w, ListInstitutionalResponse{
+		Memories: wrapMemoriesWithTier(mems),
+		Total:    len(mems),
+	})
 }
 
 // handleDeleteInstitutional handles DELETE /api/v1/institutional/memories/{id}?workspace=X.

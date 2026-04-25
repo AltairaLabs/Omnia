@@ -142,7 +142,14 @@ func TestHandleSaveAgentScoped_RejectsBadJSON(t *testing.T) {
 
 func TestHandleListAgentScoped_HappyPath(t *testing.T) {
 	stub := &agentScopedStub{
-		listResult: []*memory.Memory{{ID: "m-1"}, {ID: "m-2"}},
+		listResult: []*memory.Memory{
+			{ID: "m-1", Scope: map[string]string{
+				memory.ScopeWorkspaceID: "ws-1", memory.ScopeAgentID: "agent-1",
+			}},
+			{ID: "m-2", Scope: map[string]string{
+				memory.ScopeWorkspaceID: "ws-1", memory.ScopeAgentID: "agent-1",
+			}},
+		},
 	}
 	mux := newAgentScopedHandler(t, stub)
 
@@ -157,6 +164,9 @@ func TestHandleListAgentScoped_HappyPath(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&out))
 	assert.Equal(t, 2, out.Total)
 	assert.Len(t, out.Memories, 2)
+	for _, m := range out.Memories {
+		assert.Equal(t, "agent", m.Tier, "row %s tier", m.ID)
+	}
 	require.Len(t, stub.listCalls, 1)
 	assert.Equal(t, "ws-1", stub.listCalls[0].ws)
 	assert.Equal(t, "agent-1", stub.listCalls[0].agent)
