@@ -278,4 +278,116 @@ describe("MemoryApiService", () => {
       await expect(service.deleteAllMemories("ws", "u1")).rejects.toThrow("Failed to delete all memories");
     });
   });
+
+  describe("getMemoryAggregate", () => {
+    it("calls /memory/aggregate with workspace + groupBy", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve([
+            { key: "institutional", value: 5, count: 5 },
+            { key: "agent", value: 3, count: 3 },
+            { key: "user", value: 8, count: 8 },
+          ]),
+      });
+
+      const rows = await service.getMemoryAggregate({
+        workspace: "default",
+        groupBy: "tier",
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/workspaces/default/memory/aggregate?groupBy=tier",
+      );
+      expect(rows).toHaveLength(3);
+      expect(rows[0]).toEqual({ key: "institutional", value: 5, count: 5 });
+    });
+
+    it("appends metric / from / to / limit when provided", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) });
+
+      await service.getMemoryAggregate({
+        workspace: "default",
+        groupBy: "day",
+        metric: "count",
+        from: "2026-04-01T00:00:00Z",
+        to: "2026-04-25T00:00:00Z",
+        limit: 100,
+      });
+
+      const url = mockFetch.mock.calls[0][0] as string;
+      expect(url).toContain("groupBy=day");
+      expect(url).toContain("metric=count");
+      expect(url).toContain("from=2026-04-01T00%3A00%3A00Z");
+      expect(url).toContain("to=2026-04-25T00%3A00%3A00Z");
+      expect(url).toContain("limit=100");
+    });
+
+    it("returns empty array on 401 / 403 / 404", async () => {
+      for (const status of [401, 403, 404]) {
+        mockFetch.mockResolvedValueOnce({ ok: false, status });
+        const rows = await service.getMemoryAggregate({
+          workspace: "default",
+          groupBy: "tier",
+        });
+        expect(rows).toEqual([]);
+      }
+    });
+
+    it("throws on other server errors", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: "Server Error",
+      });
+      await expect(
+        service.getMemoryAggregate({ workspace: "default", groupBy: "tier" }),
+      ).rejects.toThrow("Failed to fetch memory aggregate");
+    });
+  });
+
+  describe("getConsentStats", () => {
+    it("calls /privacy/consent/stats and returns the body", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            totalUsers: 100,
+            optedOutAll: 5,
+            grantsByCategory: { "memory:context": 90 },
+          }),
+      });
+
+      const stats = await service.getConsentStats("default");
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/workspaces/default/privacy/consent/stats",
+      );
+      expect(stats.totalUsers).toBe(100);
+      expect(stats.optedOutAll).toBe(5);
+    });
+
+    it("returns empty stats on 401 / 403 / 404", async () => {
+      for (const status of [401, 403, 404]) {
+        mockFetch.mockResolvedValueOnce({ ok: false, status });
+        const stats = await service.getConsentStats("default");
+        expect(stats).toEqual({
+          totalUsers: 0,
+          optedOutAll: 0,
+          grantsByCategory: {},
+        });
+      }
+    });
+
+    it("throws on other server errors", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: "Server Error",
+      });
+      await expect(service.getConsentStats("default")).rejects.toThrow(
+        "Failed to fetch consent stats",
+      );
+    });
+  });
 });
