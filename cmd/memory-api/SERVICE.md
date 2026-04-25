@@ -23,6 +23,9 @@ and searches memory entries with optional semantic search via embeddings.
     `virtual_user_id` / `agent_id` columns.
   - `GET /api/v1/privacy/consent/stats` (EE only) — workspace-wide consent
     posture for the operator dashboard.
+  - All memory list responses (`/api/v1/memories`, `/memories/search`,
+    `/memories/export`, `/institutional/memories`, `/agent-memories`) carry a
+    derived `tier` field (institutional / agent / user) on each row (#1017).
 - Health/readiness probes on port 8081
 - Metrics on port 9090
 

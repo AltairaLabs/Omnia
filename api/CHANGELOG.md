@@ -10,6 +10,16 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (memory-entity tier field, #1017)
+
+- `GET /api/v1/memories`, `/api/v1/memories/search`, `/api/v1/memories/export`,
+  `/api/v1/institutional/memories`, and `/api/v1/agent-memories` now return a
+  `tier` field on each memory row (`"institutional" | "agent" | "user"`),
+  derived from the scope map (`user_id` → `user`, `agent_id` without `user_id`
+  → `agent`, neither → `institutional`). No schema change; additive on the
+  JSON response. Mirrors the SQL CASE expression used by the
+  `groupBy=tier` branch of `/memories/aggregate` (#1004).
+
 ### Breaking (MemoryPolicy schema flatten + tier-precedence)
 
 - `MemoryPolicy.spec.default` and `spec.perWorkspace` removed. Fields

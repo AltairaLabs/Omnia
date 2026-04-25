@@ -661,6 +661,16 @@ components:
         expiresAt:
           type: string
           format: date-time
+        tier:
+          type: string
+          enum: [institutional, agent, user]
+          readOnly: true
+          description: |
+            Derived from the scope map at response-build time:
+            `user` if `user_id` is set, `agent` if `agent_id` is set
+            (and no `user_id`), otherwise `institutional`. Mirrors the
+            GROUP BY tier expression on /memories/aggregate. Server-derived;
+            ignored on writes.
       required:
         - type
         - content
