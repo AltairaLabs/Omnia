@@ -35,9 +35,9 @@ export function CategoryDonut({ rows }: Readonly<CategoryDonutProps>) {
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
-                data={rows}
+                data={rows.map((r) => ({ name: r.key, value: r.value }))}
                 dataKey="value"
-                nameKey="key"
+                nameKey="name"
                 innerRadius={60}
                 outerRadius={100}
                 paddingAngle={2}
