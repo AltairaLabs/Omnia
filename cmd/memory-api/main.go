@@ -290,8 +290,11 @@ func run() error {
 		Purpose:    f.purpose,
 	}
 
+	// --- Policy loader (shared by retention worker + retrieval ranker) ---
+	policyLoader := buildRetentionPolicyLoader(f.retentionInterval, f.workspace, f.serviceGroup, log)
+
 	// --- Retention worker ---
-	startRetentionWorker(ctx, store, f.retentionInterval, log)
+	startRetentionWorkerWithLoader(ctx, store, policyLoader, log)
 
 	// --- Analytics opt-in metric + worker ---
 	// Computes the fraction of users who have granted the
@@ -361,7 +364,7 @@ func run() error {
 	}
 
 	// --- Build API mux ---
-	apiMux, cleanup := buildAPIMux(ctx, store, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, log)
+	apiMux, cleanup := buildAPIMux(ctx, store, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, log)
 	defer cleanup()
 
 	// --- Servers ---
@@ -416,9 +419,6 @@ func (f *flags) resolveConfigFromWorkspace(log logr.Logger) error {
 	}
 	f.postgresConn = memCfg.PostgresConn
 	f.embeddingProviderName = memCfg.EmbeddingProviderName
-	if memCfg.DefaultTTL != "" {
-		f.defaultTTL = memCfg.DefaultTTL
-	}
 	log.Info("config resolved from workspace CRD",
 		"workspace", f.workspace,
 		"serviceGroup", f.serviceGroup,
@@ -451,6 +451,7 @@ func buildAPIMux(
 	publisher memoryapi.MemoryEventPublisher,
 	enterprise bool,
 	pool *pgxpool.Pool,
+	policyLoader memory.PolicyLoader,
 	log logr.Logger,
 ) (http.Handler, func()) {
 	httpMetrics := memoryapi.NewHTTPMetrics(nil)
@@ -458,6 +459,11 @@ func buildAPIMux(
 	svc := memoryapi.NewMemoryService(store, embeddingSvc, cfg, log)
 	if publisher != nil {
 		svc.SetEventPublisher(publisher)
+	}
+	if policyLoader != nil {
+		// Retrieval consults the loader to build a per-tier ranker from
+		// the workspace's bound MemoryPolicy.spec.tierPrecedence.
+		svc.SetPolicyLoader(policyLoader)
 	}
 
 	// Enterprise audit logging.
@@ -692,11 +698,10 @@ func (a *embeddingProviderAdapter) Dimensions() int {
 	return a.inner.EmbeddingDimensions()
 }
 
-// startRetentionWorker constructs the composite retention worker from
-// the active policy source and spawns it as a goroutine. No-op when no
-// policy source is available.
-func startRetentionWorker(ctx context.Context, store *memory.PostgresMemoryStore, legacyInterval string, log logr.Logger) {
-	loader := buildRetentionPolicyLoader(legacyInterval, log)
+// startRetentionWorkerWithLoader spawns the composite retention worker
+// using the supplied loader. No-op when loader is nil so callers can
+// share one loader between the worker and the retrieval ranker.
+func startRetentionWorkerWithLoader(ctx context.Context, store *memory.PostgresMemoryStore, loader memory.PolicyLoader, log logr.Logger) {
 	if loader == nil {
 		return
 	}
@@ -709,15 +714,16 @@ func startRetentionWorker(ctx context.Context, store *memory.PostgresMemoryStore
 // back to a static policy synthesised from RETENTION_INTERVAL so
 // deployments pre-dating the CRD keep working. Returns nil when
 // neither source yields a useful policy, disabling the worker.
-func buildRetentionPolicyLoader(legacyInterval string, log logr.Logger) memory.PolicyLoader {
+func buildRetentionPolicyLoader(legacyInterval, workspace, serviceGroup string, log logr.Logger) memory.PolicyLoader {
 	kubeConfig, err := rest.InClusterConfig()
 	if err == nil {
 		scheme := k8sruntime.NewScheme()
 		utilruntime.Must(omniav1alpha1.AddToScheme(scheme))
 		c, clientErr := client.New(kubeConfig, client.Options{Scheme: scheme})
 		if clientErr == nil {
-			log.Info("retention policy loader enabled", "source", "MemoryPolicy CRD")
-			return memory.NewK8sPolicyLoader(c, log)
+			log.Info("retention policy loader enabled",
+				"source", "MemoryPolicy CRD", "workspace", workspace, "serviceGroup", serviceGroup)
+			return memory.NewK8sPolicyLoader(c, log, workspace, serviceGroup)
 		}
 		log.Error(clientErr, "k8s client creation failed, falling back to legacy interval")
 	} else {

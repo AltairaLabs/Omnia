@@ -279,12 +279,53 @@ type MemoryRetentionTierSet struct {
 	User *MemoryTierConfig `json:"user,omitempty"`
 }
 
-// MemoryRetentionDefaults holds the cluster-wide retention policy.
-type MemoryRetentionDefaults struct {
-	// Tiers must be populated — at least one tier needs a mode for the
-	// policy to do anything useful.
+// TierPrecedenceConfig selects a ranking strategy by which of its
+// mutually-exclusive fields is populated. Exactly one must be set;
+// admission rejects zero / multiple. New rankers are added as new
+// sibling fields + a widened CEL rule.
+// +kubebuilder:validation:XValidation:rule="has(self.multiplicative)",message="spec.tierPrecedence.multiplicative must be set"
+type TierPrecedenceConfig struct {
+	// multiplicative scales each memory's base score by a per-tier
+	// weight. Score ordering is preserved within a tier; the weights
+	// bias across tiers.
+	// +optional
+	Multiplicative *MultiplicativeTierPrecedence `json:"multiplicative,omitempty"`
+}
+
+// MultiplicativeTierPrecedence carries the per-tier weights for the
+// multiplicative ranker. Weights parse as decimals; controller enforces
+// 0 ≤ w ≤ 10. user_for_agent inherits the user weight.
+type MultiplicativeTierPrecedence struct {
+	// +kubebuilder:validation:Pattern=`^(10(\.0+)?|[0-9](\.[0-9]+)?)$`
+	// +kubebuilder:default="1.0"
+	// +optional
+	Institutional string `json:"institutional,omitempty"`
+
+	// +kubebuilder:validation:Pattern=`^(10(\.0+)?|[0-9](\.[0-9]+)?)$`
+	// +kubebuilder:default="1.0"
+	// +optional
+	Agent string `json:"agent,omitempty"`
+
+	// +kubebuilder:validation:Pattern=`^(10(\.0+)?|[0-9](\.[0-9]+)?)$`
+	// +kubebuilder:default="1.0"
+	// +optional
+	User string `json:"user,omitempty"`
+}
+
+// MemoryPolicySpec is the top-level spec. Workspaces opt in to a
+// MemoryPolicy via Workspace.spec.services[].memory.policyRef — many
+// workspaces may reference one policy, and a workspace with no
+// policyRef falls back to the baked-in legacy interval policy.
+type MemoryPolicySpec struct {
+	// tiers configures per-tier retention behaviour. At least one tier
+	// needs a mode for the policy to do anything useful.
 	// +kubebuilder:validation:Required
 	Tiers MemoryRetentionTierSet `json:"tiers"`
+
+	// tierPrecedence applies per-tier ranking multipliers to the
+	// retrieval score. Unset tiers default to 1.0 (no-op).
+	// +optional
+	TierPrecedence *TierPrecedenceConfig `json:"tierPrecedence,omitempty"`
 
 	// +optional
 	ConsentRevocation *MemoryConsentRevocationConfig `json:"consentRevocation,omitempty"`
@@ -306,44 +347,6 @@ type MemoryRetentionDefaults struct {
 	// +kubebuilder:default=1000
 	// +optional
 	BatchSize *int32 `json:"batchSize,omitempty"`
-}
-
-// MemoryWorkspaceRetentionOverride lets operators tighten or loosen the
-// policy for a specific workspace. Same fields as the cluster default;
-// missing fields inherit from the default.
-type MemoryWorkspaceRetentionOverride struct {
-	// +optional
-	Tiers *MemoryRetentionTierSet `json:"tiers,omitempty"`
-
-	// +optional
-	ConsentRevocation *MemoryConsentRevocationConfig `json:"consentRevocation,omitempty"`
-
-	// +optional
-	Supersession *MemorySupersessionConfig `json:"supersession,omitempty"`
-
-	// schedule is a cron expression; validated by the controller rather
-	// than a CRD regex pattern because cron regexes are brittle under
-	// OpenAPI schema validation.
-	// +optional
-	Schedule string `json:"schedule,omitempty"`
-
-	// +optional
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=100000
-	BatchSize *int32 `json:"batchSize,omitempty"`
-}
-
-// MemoryPolicySpec is the top-level spec.
-type MemoryPolicySpec struct {
-	// default is the cluster-wide policy applied to every workspace
-	// that doesn't have an explicit override.
-	// +kubebuilder:validation:Required
-	Default MemoryRetentionDefaults `json:"default"`
-
-	// perWorkspace keys are Workspace resource names. Values override
-	// the matching fields in default; unset fields inherit.
-	// +optional
-	PerWorkspace map[string]MemoryWorkspaceRetentionOverride `json:"perWorkspace,omitempty"`
 }
 
 // MemoryPolicyStatus is the observed state.

@@ -24,14 +24,12 @@ func compositeTTLPolicy(schedule string) *omniav1alpha1.MemoryPolicy {
 	mode := omniav1alpha1.MemoryRetentionModeTTL
 	return &omniav1alpha1.MemoryPolicy{
 		Spec: omniav1alpha1.MemoryPolicySpec{
-			Default: omniav1alpha1.MemoryRetentionDefaults{
-				Tiers: omniav1alpha1.MemoryRetentionTierSet{
-					Institutional: &omniav1alpha1.MemoryTierConfig{Mode: mode},
-					Agent:         &omniav1alpha1.MemoryTierConfig{Mode: mode},
-					User:          &omniav1alpha1.MemoryTierConfig{Mode: mode},
-				},
-				Schedule: schedule,
+			Tiers: omniav1alpha1.MemoryRetentionTierSet{
+				Institutional: &omniav1alpha1.MemoryTierConfig{Mode: mode},
+				Agent:         &omniav1alpha1.MemoryTierConfig{Mode: mode},
+				User:          &omniav1alpha1.MemoryTierConfig{Mode: mode},
 			},
+			Schedule: schedule,
 		},
 	}
 }
@@ -202,15 +200,13 @@ func TestRetentionWorker_Run_ExecutesAllBranches(t *testing.T) {
 	mode := omniav1alpha1.MemoryRetentionModeComposite
 	policy := &omniav1alpha1.MemoryPolicy{
 		Spec: omniav1alpha1.MemoryPolicySpec{
-			Default: omniav1alpha1.MemoryRetentionDefaults{
-				Tiers: omniav1alpha1.MemoryRetentionTierSet{
-					Institutional: &omniav1alpha1.MemoryTierConfig{
-						Mode: mode,
-						LRU:  &omniav1alpha1.MemoryLRUConfig{StaleAfter: "30m"},
-					},
+			Tiers: omniav1alpha1.MemoryRetentionTierSet{
+				Institutional: &omniav1alpha1.MemoryTierConfig{
+					Mode: mode,
+					LRU:  &omniav1alpha1.MemoryLRUConfig{StaleAfter: "30m"},
 				},
-				Schedule: "@every 10ms",
 			},
+			Schedule: "@every 10ms",
 		},
 	}
 	w := NewRetentionWorker(store, &StaticPolicyLoader{Policy: policy},
@@ -242,15 +238,13 @@ func TestRetentionWorker_Run_BadLRUConfigIsNonFatal(t *testing.T) {
 
 	policy := &omniav1alpha1.MemoryPolicy{
 		Spec: omniav1alpha1.MemoryPolicySpec{
-			Default: omniav1alpha1.MemoryRetentionDefaults{
-				Tiers: omniav1alpha1.MemoryRetentionTierSet{
-					Institutional: &omniav1alpha1.MemoryTierConfig{
-						Mode: omniav1alpha1.MemoryRetentionModeComposite,
-						LRU:  &omniav1alpha1.MemoryLRUConfig{StaleAfter: "not-a-duration"},
-					},
+			Tiers: omniav1alpha1.MemoryRetentionTierSet{
+				Institutional: &omniav1alpha1.MemoryTierConfig{
+					Mode: omniav1alpha1.MemoryRetentionModeComposite,
+					LRU:  &omniav1alpha1.MemoryLRUConfig{StaleAfter: "not-a-duration"},
 				},
-				Schedule: "@every 1m",
 			},
+			Schedule: "@every 1m",
 		},
 	}
 	w := NewRetentionWorker(store, &StaticPolicyLoader{Policy: policy},

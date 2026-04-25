@@ -133,11 +133,9 @@ func TestRetentionWorker_Supersession_SkipsWhenDisabled(t *testing.T) {
 	disabled := &omniav1alpha1.MemorySupersessionConfig{Enabled: false}
 	policy := &omniav1alpha1.MemoryPolicy{
 		Spec: omniav1alpha1.MemoryPolicySpec{
-			Default: omniav1alpha1.MemoryRetentionDefaults{
-				Tiers:        omniav1alpha1.MemoryRetentionTierSet{},
-				Schedule:     "@every 1m",
-				Supersession: disabled,
-			},
+			Tiers:        omniav1alpha1.MemoryRetentionTierSet{},
+			Schedule:     "@every 1m",
+			Supersession: disabled,
 		},
 	}
 	w := NewRetentionWorker(store, &StaticPolicyLoader{Policy: policy},
@@ -157,13 +155,11 @@ func TestRetentionWorker_Supersession_DeletesWhenEnabled(t *testing.T) {
 	grace := int32(14)
 	policy := &omniav1alpha1.MemoryPolicy{
 		Spec: omniav1alpha1.MemoryPolicySpec{
-			Default: omniav1alpha1.MemoryRetentionDefaults{
-				Tiers:    omniav1alpha1.MemoryRetentionTierSet{},
-				Schedule: "@every 1m",
-				Supersession: &omniav1alpha1.MemorySupersessionConfig{
-					Enabled:   true,
-					GraceDays: &grace,
-				},
+			Tiers:    omniav1alpha1.MemoryRetentionTierSet{},
+			Schedule: "@every 1m",
+			Supersession: &omniav1alpha1.MemorySupersessionConfig{
+				Enabled:   true,
+				GraceDays: &grace,
 			},
 		},
 	}

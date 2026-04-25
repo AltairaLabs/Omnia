@@ -28,14 +28,11 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
@@ -101,39 +98,19 @@ func (r *MemoryPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	r.emitEvent(policy, corev1.EventTypeNormal, MemRetentionEventReasonValidated,
 		"Policy spec validated successfully")
 
-	resolvedCount, err := r.resolveWorkspaces(ctx, policy)
-	if err != nil {
-		SetCondition(&policy.Status.Conditions, policy.Generation, MemRetentionConditionTypeWorkspacesResolved,
-			metav1.ConditionFalse, "ResolutionFailed", err.Error())
-		SetCondition(&policy.Status.Conditions, policy.Generation, MemRetentionConditionTypeReady,
-			metav1.ConditionFalse, "WorkspaceResolutionFailed", "Workspace resolution failed")
-		r.emitEvent(policy, corev1.EventTypeWarning, MemRetentionEventReasonWorkspacesMissing, err.Error())
-		policy.Status.Phase = omniav1alpha1.MemoryPolicyPhaseError
-		policy.Status.ObservedGeneration = policy.Generation
-		policy.Status.WorkspaceCount = resolvedCount
-		if statusErr := r.Status().Update(ctx, policy); statusErr != nil {
-			log.Error(statusErr, logMsgFailedToUpdateStatus)
-		}
-		return ctrl.Result{}, err
-	}
-
-	if len(policy.Spec.PerWorkspace) == 0 {
-		SetCondition(&policy.Status.Conditions, policy.Generation, MemRetentionConditionTypeWorkspacesResolved,
-			metav1.ConditionTrue, "NoOverrides", "No per-workspace overrides configured")
-	} else {
-		SetCondition(&policy.Status.Conditions, policy.Generation, MemRetentionConditionTypeWorkspacesResolved,
-			metav1.ConditionTrue, "AllResolved",
-			fmt.Sprintf("All %d workspace references resolved", resolvedCount))
-		r.emitEvent(policy, corev1.EventTypeNormal, MemRetentionEventReasonWorkspacesResolved,
-			fmt.Sprintf("All %d workspace references resolved", resolvedCount))
-	}
+	// Workspace binding moved to Workspace.spec.services[].memory.policyRef
+	// — the policy itself no longer tracks consumers. The condition stays
+	// for backward observability, always reports True.
+	SetCondition(&policy.Status.Conditions, policy.Generation, MemRetentionConditionTypeWorkspacesResolved,
+		metav1.ConditionTrue, "NotApplicable",
+		"Workspace binding is now via Workspace.spec.services[].memory.policyRef")
 
 	SetCondition(&policy.Status.Conditions, policy.Generation, MemRetentionConditionTypeReady,
-		metav1.ConditionTrue, "AllChecksPass", "Policy is valid and workspaces resolved")
+		metav1.ConditionTrue, "AllChecksPass", "Policy is valid")
 
 	policy.Status.Phase = omniav1alpha1.MemoryPolicyPhaseActive
 	policy.Status.ObservedGeneration = policy.Generation
-	policy.Status.WorkspaceCount = resolvedCount
+	policy.Status.WorkspaceCount = 0
 
 	if err := r.Status().Update(ctx, policy); err != nil {
 		log.Error(err, logMsgFailedToUpdateStatus)
@@ -141,12 +118,11 @@ func (r *MemoryPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	r.emitEvent(policy, corev1.EventTypeNormal, MemRetentionEventReasonActive,
-		fmt.Sprintf("Policy is active with %d workspace overrides", resolvedCount))
+		"Policy is active")
 
 	log.V(1).Info("reconciled MemoryPolicy",
 		"name", req.Name,
 		"phase", policy.Status.Phase,
-		"workspaces", resolvedCount,
 	)
 	return ctrl.Result{}, nil
 }
@@ -180,72 +156,48 @@ func (r *MemoryPolicyReconciler) emitEvent(obj runtime.Object, eventType, reason
 	}
 }
 
-// resolveWorkspaces confirms every per-workspace override targets a
-// Workspace that actually exists. Missing workspaces produce a clear
-// error so operators don't discover a typo only when the retention
-// worker skips a workspace silently.
-func (r *MemoryPolicyReconciler) resolveWorkspaces(
-	ctx context.Context, policy *omniav1alpha1.MemoryPolicy,
-) (int32, error) {
-	if len(policy.Spec.PerWorkspace) == 0 {
-		return 0, nil
-	}
-	var resolved int32
-	var missing []string
-	for name := range policy.Spec.PerWorkspace {
-		ws := &omniav1alpha1.Workspace{}
-		if err := r.Get(ctx, types.NamespacedName{Name: name}, ws); err != nil {
-			if apierrors.IsNotFound(err) {
-				missing = append(missing, name)
-				continue
-			}
-			return resolved, fmt.Errorf("failed to get workspace %q: %w", name, err)
-		}
-		resolved++
-	}
-	if len(missing) > 0 {
-		return resolved, fmt.Errorf("workspaces not found: %v", missing)
-	}
-	return resolved, nil
-}
-
 // validatePolicy enforces the semantic rules that can't be expressed
 // via kubebuilder markers alone.
 func (r *MemoryPolicyReconciler) validatePolicy(
 	policy *omniav1alpha1.MemoryPolicy,
 ) error {
-	if err := validateRetentionDefaults(&policy.Spec.Default); err != nil {
-		return fmt.Errorf("default: %w", err)
-	}
-	for name, override := range policy.Spec.PerWorkspace {
-		if err := validateWorkspaceOverride(&override); err != nil {
-			return fmt.Errorf("perWorkspace[%s]: %w", name, err)
-		}
-	}
-	return nil
-}
-
-func validateRetentionDefaults(d *omniav1alpha1.MemoryRetentionDefaults) error {
-	if err := validateTierSet(&d.Tiers); err != nil {
+	if err := validateTierSet(&policy.Spec.Tiers); err != nil {
 		return err
 	}
-	if d.Schedule != "" {
-		if err := validateCronSchedule(d.Schedule); err != nil {
+	if policy.Spec.Schedule != "" {
+		if err := validateCronSchedule(policy.Spec.Schedule); err != nil {
 			return fmt.Errorf("schedule: %w", err)
+		}
+	}
+	if policy.Spec.TierPrecedence != nil {
+		if err := validateTierPrecedence(policy.Spec.TierPrecedence); err != nil {
+			return fmt.Errorf("tierPrecedence: %w", err)
 		}
 	}
 	return nil
 }
 
-func validateWorkspaceOverride(o *omniav1alpha1.MemoryWorkspaceRetentionOverride) error {
-	if o.Tiers != nil {
-		if err := validateTierSet(o.Tiers); err != nil {
-			return err
-		}
+// validateTierPrecedence checks the multiplicative weights are
+// parseable and within 0..10. The CEL XValidation rule on the CRD
+// enforces sibling-presence; this guards the per-weight numeric range.
+func validateTierPrecedence(tp *omniav1alpha1.TierPrecedenceConfig) error {
+	if tp.Multiplicative == nil {
+		return nil
 	}
-	if o.Schedule != "" {
-		if err := validateCronSchedule(o.Schedule); err != nil {
-			return fmt.Errorf("schedule: %w", err)
+	for tier, raw := range map[string]string{
+		"institutional": tp.Multiplicative.Institutional,
+		"agent":         tp.Multiplicative.Agent,
+		"user":          tp.Multiplicative.User,
+	} {
+		if raw == "" {
+			continue
+		}
+		v, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			return fmt.Errorf("multiplicative.%s: %q is not a valid decimal", tier, raw)
+		}
+		if v < 0 || v > 10 {
+			return fmt.Errorf("multiplicative.%s: weight %v outside [0, 10]", tier, v)
 		}
 	}
 	return nil
@@ -447,42 +399,11 @@ func expandDays(s string) (string, error) {
 	return out.String(), nil
 }
 
-// findPoliciesForWorkspace watches Workspaces so a retention policy
-// that previously failed validation (missing workspace) re-reconciles
-// when the workspace lands.
-func (r *MemoryPolicyReconciler) findPoliciesForWorkspace(
-	ctx context.Context, obj client.Object,
-) []reconcile.Request {
-	ws, ok := obj.(*omniav1alpha1.Workspace)
-	if !ok {
-		return nil
-	}
-	policies := &omniav1alpha1.MemoryPolicyList{}
-	if err := r.List(ctx, policies); err != nil {
-		logf.FromContext(ctx).Error(err,
-			"failed to list MemoryRetentionPolicies for Workspace mapping")
-		return nil
-	}
-	var requests []reconcile.Request
-	for _, p := range policies.Items {
-		if _, exists := p.Spec.PerWorkspace[ws.Name]; exists {
-			requests = append(requests, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: p.Name},
-			})
-		}
-	}
-	return requests
-}
-
 // SetupWithManager wires the controller into the manager.
 func (r *MemoryPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 3}).
 		For(&omniav1alpha1.MemoryPolicy{}).
-		Watches(
-			&omniav1alpha1.Workspace{},
-			handler.EnqueueRequestsFromMapFunc(r.findPoliciesForWorkspace),
-		).
 		Named("memorypolicy").
 		Complete(r)
 }

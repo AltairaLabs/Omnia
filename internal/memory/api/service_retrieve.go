@@ -33,7 +33,19 @@ const retrieveOperationTag = "retrieve_multi_tier"
 // audit event. The store result is returned unchanged so the handler can
 // forward tier annotations and scores to the client. Audit runs only on
 // success so failed queries are not recorded as accesses.
+//
+// When a PolicyLoader is wired and the request doesn't already carry a
+// Ranker, the loaded MemoryPolicy.spec.tierPrecedence is used to build
+// one. Loader errors / nil policy fall through to the identity ranker
+// so retrieval keeps working when policy resolution is degraded.
 func (s *MemoryService) RetrieveMultiTier(ctx context.Context, req memory.MultiTierRequest) (*memory.MultiTierResult, error) {
+	if req.Ranker == nil && s.policyLoader != nil {
+		policy, err := s.policyLoader.Load(ctx)
+		if err != nil {
+			s.log.V(1).Info("policy load failed, using identity ranker", "error", err.Error())
+		}
+		req.Ranker = memory.NewTierRanker(policy)
+	}
 	result, err := s.store.RetrieveMultiTier(ctx, req)
 	if err != nil {
 		return nil, err

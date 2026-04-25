@@ -59,7 +59,7 @@ func tierConfig(policy *omniav1alpha1.MemoryPolicy, tier Tier) *omniav1alpha1.Me
 	if policy == nil {
 		return nil
 	}
-	tiers := policy.Spec.Default.Tiers
+	tiers := policy.Spec.Tiers
 	switch tier {
 	case TierInstitutional:
 		return tiers.Institutional

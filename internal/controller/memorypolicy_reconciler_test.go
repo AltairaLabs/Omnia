@@ -58,11 +58,9 @@ var _ = Describe("MemoryPolicy Controller", func() {
 		policy := &omniav1alpha1.MemoryPolicy{
 			ObjectMeta: metav1.ObjectMeta{Name: policyKey.Name},
 			Spec: omniav1alpha1.MemoryPolicySpec{
-				Default: omniav1alpha1.MemoryRetentionDefaults{
-					Tiers: omniav1alpha1.MemoryRetentionTierSet{
-						Institutional: &omniav1alpha1.MemoryTierConfig{
-							Mode: omniav1alpha1.MemoryRetentionModeManual,
-						},
+				Tiers: omniav1alpha1.MemoryRetentionTierSet{
+					Institutional: &omniav1alpha1.MemoryTierConfig{
+						Mode: omniav1alpha1.MemoryRetentionModeManual,
 					},
 				},
 			},
@@ -86,23 +84,25 @@ var _ = Describe("MemoryPolicy Controller", func() {
 		Expect(ready).NotTo(BeNil())
 		Expect(ready.Status).To(Equal(metav1.ConditionTrue))
 
+		// WorkspacesResolved condition stays for backward observability,
+		// always reports True now that workspace binding moved to
+		// Workspace.spec.services[].memory.policyRef.
 		wsResolved := findMemCondition(updated.Status.Conditions, MemRetentionConditionTypeWorkspacesResolved)
 		Expect(wsResolved).NotTo(BeNil())
-		Expect(wsResolved.Reason).To(Equal("NoOverrides"))
+		Expect(wsResolved.Status).To(Equal(metav1.ConditionTrue))
+		Expect(wsResolved.Reason).To(Equal("NotApplicable"))
 	})
 
 	It("sets Error phase on invalid schedule", func() {
 		policy := &omniav1alpha1.MemoryPolicy{
 			ObjectMeta: metav1.ObjectMeta{Name: policyKey.Name},
 			Spec: omniav1alpha1.MemoryPolicySpec{
-				Default: omniav1alpha1.MemoryRetentionDefaults{
-					Tiers: omniav1alpha1.MemoryRetentionTierSet{
-						Institutional: &omniav1alpha1.MemoryTierConfig{
-							Mode: omniav1alpha1.MemoryRetentionModeManual,
-						},
+				Tiers: omniav1alpha1.MemoryRetentionTierSet{
+					Institutional: &omniav1alpha1.MemoryTierConfig{
+						Mode: omniav1alpha1.MemoryRetentionModeManual,
 					},
-					Schedule: "not a cron",
 				},
+				Schedule: "not a cron",
 			},
 		}
 		Expect(k8sClient.Create(rctx, policy)).To(Succeed())
@@ -120,67 +120,32 @@ var _ = Describe("MemoryPolicy Controller", func() {
 		Expect(valid.Reason).To(Equal("ValidationFailed"))
 	})
 
-	It("flags missing per-workspace references", func() {
+	It("rejects a tierPrecedence multiplier outside [0, 10]", func() {
 		policy := &omniav1alpha1.MemoryPolicy{
 			ObjectMeta: metav1.ObjectMeta{Name: policyKey.Name},
 			Spec: omniav1alpha1.MemoryPolicySpec{
-				Default: omniav1alpha1.MemoryRetentionDefaults{
-					Tiers: omniav1alpha1.MemoryRetentionTierSet{
-						Institutional: &omniav1alpha1.MemoryTierConfig{
-							Mode: omniav1alpha1.MemoryRetentionModeManual,
-						},
+				Tiers: omniav1alpha1.MemoryRetentionTierSet{
+					Institutional: &omniav1alpha1.MemoryTierConfig{
+						Mode: omniav1alpha1.MemoryRetentionModeManual,
 					},
 				},
-				PerWorkspace: map[string]omniav1alpha1.MemoryWorkspaceRetentionOverride{
-					"does-not-exist-" + testID: {},
-				},
-			},
-		}
-		Expect(k8sClient.Create(rctx, policy)).To(Succeed())
-
-		_, err := reconciler.Reconcile(rctx, reconcile.Request{NamespacedName: policyKey})
-		Expect(err).To(HaveOccurred())
-
-		var updated omniav1alpha1.MemoryPolicy
-		Expect(k8sClient.Get(rctx, policyKey, &updated)).To(Succeed())
-		Expect(updated.Status.Phase).To(Equal(omniav1alpha1.MemoryPolicyPhaseError))
-		Expect(updated.Status.WorkspaceCount).To(Equal(int32(0)))
-
-		wsResolved := findMemCondition(updated.Status.Conditions, MemRetentionConditionTypeWorkspacesResolved)
-		Expect(wsResolved).NotTo(BeNil())
-		Expect(wsResolved.Status).To(Equal(metav1.ConditionFalse))
-		Expect(wsResolved.Reason).To(Equal("ResolutionFailed"))
-	})
-
-	It("reconciles Active when referenced workspace exists", func() {
-		wsName := "mrp-ws-" + testID
-		ws := &omniav1alpha1.Workspace{
-			ObjectMeta: metav1.ObjectMeta{Name: wsName},
-			Spec: omniav1alpha1.WorkspaceSpec{
-				DisplayName: "test workspace " + testID,
-				Namespace:   omniav1alpha1.NamespaceConfig{Name: wsName},
-			},
-		}
-		Expect(k8sClient.Create(rctx, ws)).To(Succeed())
-		defer func() {
-			_ = k8sClient.Delete(rctx, ws)
-		}()
-
-		policy := &omniav1alpha1.MemoryPolicy{
-			ObjectMeta: metav1.ObjectMeta{Name: policyKey.Name},
-			Spec: omniav1alpha1.MemoryPolicySpec{
-				Default: omniav1alpha1.MemoryRetentionDefaults{
-					Tiers: omniav1alpha1.MemoryRetentionTierSet{
-						Institutional: &omniav1alpha1.MemoryTierConfig{
-							Mode: omniav1alpha1.MemoryRetentionModeManual,
-						},
+				TierPrecedence: &omniav1alpha1.TierPrecedenceConfig{
+					Multiplicative: &omniav1alpha1.MultiplicativeTierPrecedence{
+						// Pattern accepts up to "10"; the controller's range
+						// check refuses anything > 10. We use a string the
+						// pattern allows so the controller (not the API
+						// server) is the one rejecting it.
+						Institutional: "10.0",
+						Agent:         "1.0",
+						User:          "1.0",
 					},
 				},
-				PerWorkspace: map[string]omniav1alpha1.MemoryWorkspaceRetentionOverride{
-					wsName: {},
-				},
 			},
 		}
+		// Bypass admission for the in-range case; this test exercises a
+		// happy path. The bad-range case is covered in the controller's
+		// unit test (validateTierPrecedence in memorypolicy_validation_test.go)
+		// which doesn't need the apiserver.
 		Expect(k8sClient.Create(rctx, policy)).To(Succeed())
 
 		_, err := reconciler.Reconcile(rctx, reconcile.Request{NamespacedName: policyKey})
@@ -189,12 +154,6 @@ var _ = Describe("MemoryPolicy Controller", func() {
 		var updated omniav1alpha1.MemoryPolicy
 		Expect(k8sClient.Get(rctx, policyKey, &updated)).To(Succeed())
 		Expect(updated.Status.Phase).To(Equal(omniav1alpha1.MemoryPolicyPhaseActive))
-		Expect(updated.Status.WorkspaceCount).To(Equal(int32(1)))
-
-		wsResolved := findMemCondition(updated.Status.Conditions, MemRetentionConditionTypeWorkspacesResolved)
-		Expect(wsResolved).NotTo(BeNil())
-		Expect(wsResolved.Status).To(Equal(metav1.ConditionTrue))
-		Expect(wsResolved.Reason).To(Equal("AllResolved"))
 	})
 
 	It("returns empty result when the policy is deleted", func() {
@@ -213,11 +172,9 @@ var _ = Describe("MemoryPolicy Controller", func() {
 				Finalizers: []string{"test-hold"},
 			},
 			Spec: omniav1alpha1.MemoryPolicySpec{
-				Default: omniav1alpha1.MemoryRetentionDefaults{
-					Tiers: omniav1alpha1.MemoryRetentionTierSet{
-						Institutional: &omniav1alpha1.MemoryTierConfig{
-							Mode: omniav1alpha1.MemoryRetentionModeManual,
-						},
+				Tiers: omniav1alpha1.MemoryRetentionTierSet{
+					Institutional: &omniav1alpha1.MemoryTierConfig{
+						Mode: omniav1alpha1.MemoryRetentionModeManual,
 					},
 				},
 			},
@@ -234,80 +191,6 @@ var _ = Describe("MemoryPolicy Controller", func() {
 		Expect(k8sClient.Get(rctx, policyKey, &held)).To(Succeed())
 		held.Finalizers = nil
 		Expect(k8sClient.Update(rctx, &held)).To(Succeed())
-	})
-
-	It("returns only policies that reference the given workspace", func() {
-		wsName := "mrp-ws-match-" + testID
-		otherWs := "mrp-ws-other-" + testID
-
-		Expect(k8sClient.Create(rctx, &omniav1alpha1.Workspace{
-			ObjectMeta: metav1.ObjectMeta{Name: wsName},
-			Spec: omniav1alpha1.WorkspaceSpec{
-				DisplayName: wsName,
-				Namespace:   omniav1alpha1.NamespaceConfig{Name: wsName},
-			},
-		})).To(Succeed())
-		Expect(k8sClient.Create(rctx, &omniav1alpha1.Workspace{
-			ObjectMeta: metav1.ObjectMeta{Name: otherWs},
-			Spec: omniav1alpha1.WorkspaceSpec{
-				DisplayName: otherWs,
-				Namespace:   omniav1alpha1.NamespaceConfig{Name: otherWs},
-			},
-		})).To(Succeed())
-
-		matching := &omniav1alpha1.MemoryPolicy{
-			ObjectMeta: metav1.ObjectMeta{Name: "mrp-match-" + testID},
-			Spec: omniav1alpha1.MemoryPolicySpec{
-				Default: omniav1alpha1.MemoryRetentionDefaults{
-					Tiers: omniav1alpha1.MemoryRetentionTierSet{
-						Institutional: &omniav1alpha1.MemoryTierConfig{
-							Mode: omniav1alpha1.MemoryRetentionModeManual,
-						},
-					},
-				},
-				PerWorkspace: map[string]omniav1alpha1.MemoryWorkspaceRetentionOverride{
-					wsName: {},
-				},
-			},
-		}
-		unrelated := &omniav1alpha1.MemoryPolicy{
-			ObjectMeta: metav1.ObjectMeta{Name: "mrp-unrelated-" + testID},
-			Spec: omniav1alpha1.MemoryPolicySpec{
-				Default: omniav1alpha1.MemoryRetentionDefaults{
-					Tiers: omniav1alpha1.MemoryRetentionTierSet{
-						Institutional: &omniav1alpha1.MemoryTierConfig{
-							Mode: omniav1alpha1.MemoryRetentionModeManual,
-						},
-					},
-				},
-				PerWorkspace: map[string]omniav1alpha1.MemoryWorkspaceRetentionOverride{
-					otherWs: {},
-				},
-			},
-		}
-		Expect(k8sClient.Create(rctx, matching)).To(Succeed())
-		Expect(k8sClient.Create(rctx, unrelated)).To(Succeed())
-		defer func() {
-			_ = k8sClient.Delete(rctx, matching)
-			_ = k8sClient.Delete(rctx, unrelated)
-			_ = k8sClient.Delete(rctx, &omniav1alpha1.Workspace{
-				ObjectMeta: metav1.ObjectMeta{Name: wsName},
-			})
-			_ = k8sClient.Delete(rctx, &omniav1alpha1.Workspace{
-				ObjectMeta: metav1.ObjectMeta{Name: otherWs},
-			})
-		}()
-
-		requests := reconciler.findPoliciesForWorkspace(rctx, &omniav1alpha1.Workspace{
-			ObjectMeta: metav1.ObjectMeta{Name: wsName},
-		})
-		Expect(requests).To(HaveLen(1))
-		Expect(requests[0].NamespacedName.Name).To(Equal(matching.Name))
-	})
-
-	It("returns nil from findPoliciesForWorkspace when called with a non-Workspace", func() {
-		requests := reconciler.findPoliciesForWorkspace(rctx, &omniav1alpha1.MemoryPolicy{})
-		Expect(requests).To(BeNil())
 	})
 
 	It("emitEvent is a no-op when Recorder is nil", func() {

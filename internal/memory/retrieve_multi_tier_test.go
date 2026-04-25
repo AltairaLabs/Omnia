@@ -128,9 +128,47 @@ func TestRankResults_OrdersByScoreDesc(t *testing.T) {
 		{Memory: &Memory{Confidence: 0.9, AccessedAt: now.Add(-1 * hour)}, Tier: TierUser, AccessCount: 10},
 		{Memory: &Memory{Confidence: 0.7, AccessedAt: now.Add(-30 * 24 * hour)}, Tier: TierInstitutional, AccessCount: 1},
 	}
-	rankResults(results, now)
+	rankResults(results, now, IdentityTierRanker{})
 	if results[0].Confidence != 0.9 {
 		t.Errorf("expected highest-confidence recent result first, got %+v", results[0])
+	}
+}
+
+func TestRankResults_NilRankerActsAsIdentity(t *testing.T) {
+	now := parseTime("2026-04-22T12:00:00Z")
+	results := []*MultiTierMemory{
+		{Memory: &Memory{Confidence: 0.5, AccessedAt: now}, Tier: TierUser, AccessCount: 1},
+		{Memory: &Memory{Confidence: 0.9, AccessedAt: now}, Tier: TierUser, AccessCount: 1},
+	}
+	rankResults(results, now, nil)
+	if results[0].Confidence != 0.9 {
+		t.Errorf("nil ranker must behave as identity; got %+v first", results[0])
+	}
+}
+
+func TestRankResults_TierPrecedenceOverridesScore(t *testing.T) {
+	now := parseTime("2026-04-22T12:00:00Z")
+	// Identical base inputs across three tiers — tier weight is the
+	// only distinguishing factor.
+	results := []*MultiTierMemory{
+		{Memory: &Memory{Confidence: 0.5, AccessedAt: now, CreatedAt: now}, Tier: TierUser, AccessCount: 5},
+		{Memory: &Memory{Confidence: 0.5, AccessedAt: now, CreatedAt: now}, Tier: TierAgent, AccessCount: 5},
+		{Memory: &Memory{Confidence: 0.5, AccessedAt: now, CreatedAt: now}, Tier: TierInstitutional, AccessCount: 5},
+	}
+	ranker := MultiplicativeTierRanker{Weights: map[Tier]float64{
+		TierInstitutional: 2.0,
+		TierAgent:         1.0,
+		TierUser:          0.5,
+	}}
+	rankResults(results, now, ranker)
+	if results[0].Tier != TierInstitutional {
+		t.Errorf("institutional must rank first under 2.0 multiplier; got %s", results[0].Tier)
+	}
+	if results[1].Tier != TierAgent {
+		t.Errorf("agent must rank second; got %s", results[1].Tier)
+	}
+	if results[2].Tier != TierUser {
+		t.Errorf("user must rank last under 0.5 multiplier; got %s", results[2].Tier)
 	}
 }
 

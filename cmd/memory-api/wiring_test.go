@@ -97,6 +97,7 @@ func TestBuildAPIMux_POSTMemoryWithoutUserIDReturns400(t *testing.T) {
 		nil, // event publisher is optional
 		false,
 		nil, // pool is only used by enterprise privacy middleware
+		nil, // policy loader is optional — identity ranker without it
 		logr.Discard(),
 	)
 	defer cleanup()
@@ -140,6 +141,7 @@ func TestBuildAPIMux_GETMemoriesWired(t *testing.T) {
 		nil,
 		false,
 		nil,
+		nil, // policy loader is optional — identity ranker without it
 		logr.Discard(),
 	)
 	defer cleanup()
@@ -286,6 +288,7 @@ func TestBuildAPIMux_HealthzAlwaysReachable(t *testing.T) {
 		nil,
 		false,
 		nil,
+		nil, // policy loader is optional — identity ranker without it
 		logr.Discard(),
 	)
 	defer cleanup()
