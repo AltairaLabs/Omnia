@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -24,6 +25,25 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
+// devWorkspaceWithMemoryPolicyRef builds a Workspace named "dev" whose
+// "default" service group references the named MemoryPolicy via
+// memory.policyRef. The names match the values passed to
+// NewK8sPolicyLoader in these tests; widen if a future test needs
+// different workspace / group names.
+func devWorkspaceWithMemoryPolicyRef(policyName string) *omniav1alpha1.Workspace {
+	return &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "dev"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			Services: []omniav1alpha1.WorkspaceServiceGroup{{
+				Name: "default",
+				Memory: &omniav1alpha1.MemoryServiceConfig{
+					PolicyRef: &corev1.LocalObjectReference{Name: policyName},
+				},
+			}},
+		},
+	}
+}
+
 func policySchemeForTest(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()
@@ -31,128 +51,135 @@ func policySchemeForTest(t *testing.T) *runtime.Scheme {
 	return s
 }
 
-func TestK8sPolicyLoader_PrefersDefaultName(t *testing.T) {
+func TestK8sPolicyLoader_LoadsPolicyViaWorkspacePolicyRef(t *testing.T) {
 	scheme := policySchemeForTest(t)
-	other := &omniav1alpha1.MemoryPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "alpha"},
-		Spec: omniav1alpha1.MemoryPolicySpec{
-			Default: omniav1alpha1.MemoryRetentionDefaults{Schedule: "0 1 * * *"},
-		},
+	policy := &omniav1alpha1.MemoryPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "strict-compliance"},
+		Spec:       omniav1alpha1.MemoryPolicySpec{Schedule: "0 3 * * *"},
 	}
-	def := &omniav1alpha1.MemoryPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "default"},
-		Spec: omniav1alpha1.MemoryPolicySpec{
-			Default: omniav1alpha1.MemoryRetentionDefaults{Schedule: "0 3 * * *"},
-		},
-	}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(other, def).Build()
-	loader := NewK8sPolicyLoader(c, zap.New(zap.UseDevMode(true)))
+	ws := devWorkspaceWithMemoryPolicyRef("strict-compliance")
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(policy, ws).Build()
+	loader := NewK8sPolicyLoader(c, zap.New(zap.UseDevMode(true)), "dev", "default")
 
 	got, err := loader.Load(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	assert.Equal(t, "default", got.Name)
-	assert.Equal(t, "0 3 * * *", got.Spec.Default.Schedule)
+	assert.Equal(t, "strict-compliance", got.Name)
+	assert.Equal(t, "0 3 * * *", got.Spec.Schedule)
 }
 
-func TestK8sPolicyLoader_FallsBackToLexFirst(t *testing.T) {
-	scheme := policySchemeForTest(t)
-	alpha := &omniav1alpha1.MemoryPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "alpha"},
-	}
-	beta := &omniav1alpha1.MemoryPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "beta"},
-	}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(alpha, beta).Build()
-	loader := NewK8sPolicyLoader(c, zap.New(zap.UseDevMode(true)))
-
-	got, err := loader.Load(context.Background())
-	require.NoError(t, err)
-	require.NotNil(t, got)
-	assert.Equal(t, "alpha", got.Name)
-}
-
-func TestK8sPolicyLoader_ReturnsNilWhenNonePresent(t *testing.T) {
+func TestK8sPolicyLoader_NoWorkspaceContextReturnsNil(t *testing.T) {
 	scheme := policySchemeForTest(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	loader := NewK8sPolicyLoader(c, zap.New(zap.UseDevMode(true)))
+	loader := NewK8sPolicyLoader(c, zap.New(zap.UseDevMode(true)), "", "")
 
 	got, err := loader.Load(context.Background())
 	require.NoError(t, err)
 	assert.Nil(t, got)
 }
 
-func TestK8sPolicyLoader_SkipsDeletedPolicies(t *testing.T) {
+func TestK8sPolicyLoader_WorkspaceNotFoundReturnsNil(t *testing.T) {
 	scheme := policySchemeForTest(t)
-	deleted := &omniav1alpha1.MemoryPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              "default",
-			DeletionTimestamp: &metav1.Time{Time: time.Now()},
-			Finalizers:        []string{"hold"},
-		},
-	}
-	live := &omniav1alpha1.MemoryPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "live"},
-	}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(deleted, live).Build()
-	loader := NewK8sPolicyLoader(c, zap.New(zap.UseDevMode(true)))
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	loader := NewK8sPolicyLoader(c, zap.New(zap.UseDevMode(true)), "missing-workspace", "default")
 
 	got, err := loader.Load(context.Background())
 	require.NoError(t, err)
-	require.NotNil(t, got)
-	assert.Equal(t, "live", got.Name)
+	assert.Nil(t, got)
 }
 
-func TestK8sPolicyLoader_ReturnsCachedOnListError(t *testing.T) {
+func TestK8sPolicyLoader_NoPolicyRefReturnsNil(t *testing.T) {
 	scheme := policySchemeForTest(t)
-	initial := &omniav1alpha1.MemoryPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "default"},
-		Spec: omniav1alpha1.MemoryPolicySpec{
-			Default: omniav1alpha1.MemoryRetentionDefaults{Schedule: "0 3 * * *"},
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "dev"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			Services: []omniav1alpha1.WorkspaceServiceGroup{{
+				Name:   "default",
+				Memory: &omniav1alpha1.MemoryServiceConfig{},
+			}},
 		},
 	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ws).Build()
+	loader := NewK8sPolicyLoader(c, zap.New(zap.UseDevMode(true)), "dev", "default")
+
+	got, err := loader.Load(context.Background())
+	require.NoError(t, err)
+	assert.Nil(t, got)
+}
+
+func TestK8sPolicyLoader_ServiceGroupMissingReturnsNil(t *testing.T) {
+	scheme := policySchemeForTest(t)
+	ws := devWorkspaceWithMemoryPolicyRef("any")
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ws).Build()
+	loader := NewK8sPolicyLoader(c, zap.New(zap.UseDevMode(true)), "dev", "other-group")
+
+	got, err := loader.Load(context.Background())
+	require.NoError(t, err)
+	assert.Nil(t, got)
+}
+
+func TestK8sPolicyLoader_NamedPolicyMissingReturnsNil(t *testing.T) {
+	scheme := policySchemeForTest(t)
+	ws := devWorkspaceWithMemoryPolicyRef("missing-policy")
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ws).Build()
+	loader := NewK8sPolicyLoader(c, zap.New(zap.UseDevMode(true)), "dev", "default")
+
+	got, err := loader.Load(context.Background())
+	require.NoError(t, err)
+	assert.Nil(t, got)
+}
+
+func TestK8sPolicyLoader_ReturnsCachedOnGetError(t *testing.T) {
+	scheme := policySchemeForTest(t)
+	policy := &omniav1alpha1.MemoryPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "default-policy"},
+		Spec:       omniav1alpha1.MemoryPolicySpec{Schedule: "0 3 * * *"},
+	}
+	ws := devWorkspaceWithMemoryPolicyRef("default-policy")
 	var callCount int
-	errListAfterFirst := errors.New("simulated API outage")
+	errAfterFirst := errors.New("simulated API outage")
 	c := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(initial).
+		WithObjects(policy, ws).
 		WithInterceptorFuncs(interceptor.Funcs{
-			List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-				callCount++
-				if callCount == 1 {
-					return cl.List(ctx, list, opts...)
+			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if _, ok := obj.(*omniav1alpha1.MemoryPolicy); ok {
+					callCount++
+					if callCount > 1 {
+						return errAfterFirst
+					}
 				}
-				return errListAfterFirst
+				return cl.Get(ctx, key, obj, opts...)
 			},
 		}).
 		Build()
 
-	loader := NewK8sPolicyLoader(c, zap.New(zap.UseDevMode(true)))
+	loader := NewK8sPolicyLoader(c, zap.New(zap.UseDevMode(true)), "dev", "default")
 
 	first, err := loader.Load(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, first)
-	assert.Equal(t, "default", first.Name)
+	assert.Equal(t, "default-policy", first.Name)
 
 	second, err := loader.Load(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, second)
-	assert.Equal(t, "default", second.Name)
+	assert.Equal(t, "default-policy", second.Name)
 }
 
-func TestK8sPolicyLoader_ReturnsErrorWhenListFailsWithoutCache(t *testing.T) {
+func TestK8sPolicyLoader_ReturnsErrorWhenWorkspaceGetFailsWithoutCache(t *testing.T) {
 	scheme := policySchemeForTest(t)
 	simulated := errors.New("simulated API outage")
 	c := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithInterceptorFuncs(interceptor.Funcs{
-			List: func(context.Context, client.WithWatch, client.ObjectList, ...client.ListOption) error {
+			Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
 				return simulated
 			},
 		}).
 		Build()
 
-	loader := NewK8sPolicyLoader(c, zap.New(zap.UseDevMode(true)))
+	loader := NewK8sPolicyLoader(c, zap.New(zap.UseDevMode(true)), "dev", "default")
 	_, err := loader.Load(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "simulated API outage")
@@ -161,12 +188,12 @@ func TestK8sPolicyLoader_ReturnsErrorWhenListFailsWithoutCache(t *testing.T) {
 func TestLegacyIntervalPolicy_ShapesAllTiersTTL(t *testing.T) {
 	p := LegacyIntervalPolicy(15 * time.Minute)
 	require.NotNil(t, p)
-	require.NotNil(t, p.Spec.Default.Tiers.Institutional)
-	require.NotNil(t, p.Spec.Default.Tiers.Agent)
-	require.NotNil(t, p.Spec.Default.Tiers.User)
+	require.NotNil(t, p.Spec.Tiers.Institutional)
+	require.NotNil(t, p.Spec.Tiers.Agent)
+	require.NotNil(t, p.Spec.Tiers.User)
 	assert.Equal(t, omniav1alpha1.MemoryRetentionModeTTL,
-		p.Spec.Default.Tiers.Institutional.Mode)
-	assert.Equal(t, "@every 15m0s", p.Spec.Default.Schedule)
+		p.Spec.Tiers.Institutional.Mode)
+	assert.Equal(t, "@every 15m0s", p.Spec.Schedule)
 }
 
 func TestParseRetentionDuration(t *testing.T) {
@@ -228,7 +255,7 @@ func TestResolveBatchSize(t *testing.T) {
 	assert.Equal(t, defaultRetentionBatchSize, resolveBatchSize(policy))
 
 	b := int32(42)
-	policy.Spec.Default.BatchSize = &b
+	policy.Spec.BatchSize = &b
 	assert.Equal(t, int32(42), resolveBatchSize(policy))
 }
 

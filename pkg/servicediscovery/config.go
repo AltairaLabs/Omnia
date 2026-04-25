@@ -45,9 +45,6 @@ type MemoryConfig struct {
 	// EmbeddingProviderName is the name of the Provider CRD to use for embeddings.
 	// Empty string means no embedding provider is configured.
 	EmbeddingProviderName string
-	// DefaultTTL is the default time-to-live for memory entries (e.g. "720h").
-	// Empty string means no expiry.
-	DefaultTTL string
 }
 
 // ConfigResolver resolves runtime configuration for session-api and memory-api
@@ -105,9 +102,6 @@ func (r *ConfigResolver) ResolveMemoryConfig(
 	cfg := &MemoryConfig{PostgresConn: conn}
 	if group.Memory.ProviderRef != nil {
 		cfg.EmbeddingProviderName = group.Memory.ProviderRef.Name
-	}
-	if group.Memory.Retention != nil {
-		cfg.DefaultTTL = group.Memory.Retention.DefaultTTL
 	}
 	return cfg, nil
 }

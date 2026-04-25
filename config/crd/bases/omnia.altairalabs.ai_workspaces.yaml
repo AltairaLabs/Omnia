@@ -3918,6 +3918,24 @@ spec:
                                 type: object
                               type: array
                           type: object
+                        policyRef:
+                          description: |-
+                            policyRef optionally references a MemoryPolicy that applies to
+                            this service group. The same MemoryPolicy may be referenced by
+                            many workspaces. When unset the memory-api falls back to the
+                            baked-in legacy interval policy.
+                          properties:
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
                         providerRef:
                           description: providerRef optionally references a Provider
                             CRD used for embedding generation.
@@ -3933,15 +3951,6 @@ spec:
                               type: string
                           type: object
                           x-kubernetes-map-type: atomic
-                        retention:
-                          description: retention configures memory retention settings.
-                          properties:
-                            defaultTTL:
-                              description: |-
-                                defaultTTL is the default time-to-live for memory entries (e.g., "720h" for 30 days).
-                                If not set, memories do not expire.
-                              type: string
-                          type: object
                       required:
                       - database
                       type: object

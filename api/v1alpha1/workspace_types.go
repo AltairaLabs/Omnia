@@ -606,9 +606,12 @@ type MemoryServiceConfig struct {
 	// +optional
 	ProviderRef *corev1.LocalObjectReference `json:"providerRef,omitempty"`
 
-	// retention configures memory retention settings.
+	// policyRef optionally references a MemoryPolicy that applies to
+	// this service group. The same MemoryPolicy may be referenced by
+	// many workspaces. When unset the memory-api falls back to the
+	// baked-in legacy interval policy.
 	// +optional
-	Retention *WorkspaceMemoryRetentionConfig `json:"retention,omitempty"`
+	PolicyRef *corev1.LocalObjectReference `json:"policyRef,omitempty"`
 
 	// podOverrides customizes the managed memory-api Pod (SA, scheduling,
 	// CSI secret-stores, etc.).
@@ -638,14 +641,6 @@ type DatabaseConfig struct {
 	// The Secret must have a key "POSTGRES_CONN" with a valid PostgreSQL connection string.
 	// +kubebuilder:validation:Required
 	SecretRef corev1.LocalObjectReference `json:"secretRef"`
-}
-
-// WorkspaceMemoryRetentionConfig defines retention policy for memory entries in a service group.
-type WorkspaceMemoryRetentionConfig struct {
-	// defaultTTL is the default time-to-live for memory entries (e.g., "720h" for 30 days).
-	// If not set, memories do not expire.
-	// +optional
-	DefaultTTL string `json:"defaultTTL,omitempty"`
 }
 
 // SessionRetentionConfig defines retention policy for sessions.

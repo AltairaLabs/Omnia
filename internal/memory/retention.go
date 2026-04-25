@@ -62,7 +62,7 @@ func (w *RetentionWorker) Run(ctx context.Context) {
 			"error", errString(err))
 		return
 	}
-	schedule := policy.Spec.Default.Schedule
+	schedule := policy.Spec.Schedule
 	if schedule == "" {
 		w.log.Info("retention worker not started", "reason", "policy has no schedule")
 		return
@@ -135,19 +135,19 @@ func (w *RetentionWorker) runOnce(ctx context.Context) {
 	}
 
 	cascadeSoft, cascadeHard, cascadeErr := w.runConsentRevocation(ctx,
-		policy.Spec.Default.ConsentRevocation, batchSize)
+		policy.Spec.ConsentRevocation, batchSize)
 	if cascadeErr != nil {
 		anyErr = true
 	}
 
 	superseded, supersessionErr := w.runSupersessionCleanup(ctx,
-		policy.Spec.Default.Supersession, batchSize)
+		policy.Spec.Supersession, batchSize)
 	if supersessionErr != nil {
 		anyErr = true
 	}
 
 	hard, err := w.store.HardDeleteForgottenOlderThan(ctx,
-		resolveGraceDays(policy.Spec.Default.ConsentRevocation), int(batchSize))
+		resolveGraceDays(policy.Spec.ConsentRevocation), int(batchSize))
 	if err != nil {
 		anyErr = true
 		w.log.Error(err, "retention hard-delete failed")
@@ -337,7 +337,7 @@ func (w *RetentionWorker) runBranch(
 // resolveBatchSize pulls the policy's BatchSize, falling back to the
 // CRD default when nil.
 func resolveBatchSize(policy *omniav1alpha1.MemoryPolicy) int32 {
-	if b := policy.Spec.Default.BatchSize; b != nil && *b > 0 {
+	if b := policy.Spec.BatchSize; b != nil && *b > 0 {
 		return *b
 	}
 	return defaultRetentionBatchSize
