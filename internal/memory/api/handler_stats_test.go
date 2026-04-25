@@ -212,3 +212,35 @@ func TestHandleMemoryAggregate_BadTo_400(t *testing.T) {
 	h.ServeHTTP(w, r)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
+
+func TestHandleMemoryAggregate_GroupByTier_Accepted(t *testing.T) {
+	stub := &aggregateStub{rows: []memory.AggregateRow{
+		{Key: "institutional", Value: 5, Count: 5},
+		{Key: "agent", Value: 3, Count: 3},
+		{Key: "user", Value: 12, Count: 12},
+	}}
+	h := newAggregateMux(stub)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/memories/aggregate?workspace=ws&groupBy=tier", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, memory.AggregateGroupByTier, stub.gotOpts.GroupBy)
+
+	var got []memory.AggregateRow
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&got))
+	assert.Equal(t, stub.rows, got)
+}
+
+func TestHandleMemoryAggregate_InvalidGroupBy_MessageMentionsAllValues(t *testing.T) {
+	// Locks the error body so the message stays in sync with the whitelist.
+	stub := &aggregateStub{}
+	h := newAggregateMux(stub)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/memories/aggregate?workspace=ws&groupBy=banana", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	body := w.Body.String()
+	for _, want := range []string{"category", "agent", "day", "tier"} {
+		assert.Contains(t, body, want, "error message should list %q", want)
+	}
+}

@@ -28,7 +28,7 @@ func (e httpError) Error() string { return e.msg }
 var (
 	errAggregateBadGroupBy = httpError{
 		status: http.StatusBadRequest,
-		msg:    "groupBy must be one of: category, agent, day",
+		msg:    "groupBy must be one of: category, agent, day, tier",
 	}
 	errAggregateBadMetric = httpError{
 		status: http.StatusBadRequest,
@@ -116,7 +116,10 @@ func parseAggregateOptions(r *http.Request) (memory.AggregateOptions, error) {
 
 func parseGroupBy(v string) (memory.AggregateGroupBy, error) {
 	switch memory.AggregateGroupBy(v) {
-	case memory.AggregateGroupByCategory, memory.AggregateGroupByAgent, memory.AggregateGroupByDay:
+	case memory.AggregateGroupByCategory,
+		memory.AggregateGroupByAgent,
+		memory.AggregateGroupByDay,
+		memory.AggregateGroupByTier:
 		return memory.AggregateGroupBy(v), nil
 	default:
 		return "", errAggregateBadGroupBy

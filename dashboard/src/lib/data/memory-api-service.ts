@@ -14,6 +14,11 @@ import type {
   MemoryListOptions,
   MemorySearchOptions,
 } from "./types";
+import type {
+  AggregateRow,
+  ConsentStats,
+  MemoryAggregateOptions,
+} from "@/lib/memory-analytics/types";
 
 const MEMORY_API_BASE = "/api/workspaces";
 
@@ -115,5 +120,41 @@ export class MemoryApiService {
     if (!response.ok) {
       throw new Error(`Failed to delete all memories: ${response.statusText}`);
     }
+  }
+
+  async getMemoryAggregate(
+    options: MemoryAggregateOptions & { workspace: string },
+  ): Promise<AggregateRow[]> {
+    const { workspace, groupBy, metric, from, to, limit } = options;
+    const params = new URLSearchParams();
+    params.set("groupBy", groupBy);
+    if (metric) params.set("metric", metric);
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    if (limit !== undefined) params.set("limit", String(limit));
+
+    const response = await fetch(
+      `${MEMORY_API_BASE}/${encodeURIComponent(workspace)}/memory/aggregate?${params.toString()}`,
+    );
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        return [];
+      }
+      throw new Error(`Failed to fetch memory aggregate: ${response.statusText}`);
+    }
+    return (await response.json()) as AggregateRow[];
+  }
+
+  async getConsentStats(workspace: string): Promise<ConsentStats> {
+    const response = await fetch(
+      `${MEMORY_API_BASE}/${encodeURIComponent(workspace)}/privacy/consent/stats`,
+    );
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        return { totalUsers: 0, optedOutAll: 0, grantsByCategory: {} };
+      }
+      throw new Error(`Failed to fetch consent stats: ${response.statusText}`);
+    }
+    return (await response.json()) as ConsentStats;
   }
 }
