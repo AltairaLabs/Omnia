@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Trash2, ExternalLink } from "lucide-react";
 import { CategoryBadge } from "./category-badge";
+import { TierBadge } from "./tier-badge";
 import type { MemoryEntity } from "@/lib/data/types";
 
 interface MemoryDetailPanelProps {
@@ -48,6 +49,7 @@ export function MemoryDetailPanel({ memory, onClose, onDelete }: MemoryDetailPan
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             Memory Detail
+            <TierBadge tier={memory?.tier} />
             <CategoryBadge category={category} />
           </SheetTitle>
           <SheetDescription>

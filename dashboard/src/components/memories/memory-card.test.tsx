@@ -123,4 +123,16 @@ describe("MemoryCard", () => {
 
     expect(screen.queryByText("Session:")).not.toBeInTheDocument();
   });
+
+  it("shows the tier badge when tier is set", () => {
+    render(<MemoryCard memory={makeMemory({ tier: "user" })} />);
+    expect(screen.getByText("User")).toBeInTheDocument();
+  });
+
+  it("does not show a tier badge when tier is absent (legacy mock)", () => {
+    render(<MemoryCard memory={makeMemory({ tier: undefined })} />);
+    expect(screen.queryByText("User")).not.toBeInTheDocument();
+    expect(screen.queryByText("Agent")).not.toBeInTheDocument();
+    expect(screen.queryByText("Institutional")).not.toBeInTheDocument();
+  });
 });

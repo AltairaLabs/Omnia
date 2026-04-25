@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { TierBadge } from "./tier-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Dialog,
@@ -154,8 +155,11 @@ function renderBody({ isLoading, error, memories, onDelete }: BodyProps) {
           className="flex items-start justify-between gap-3 rounded border bg-card p-3"
         >
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-mono text-muted-foreground">{m.type}</p>
-            <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
+            <div className="flex items-center gap-2">
+              <TierBadge tier="institutional" />
+              <p className="text-xs font-mono text-muted-foreground">{m.type}</p>
+            </div>
+            <p className="text-sm whitespace-pre-wrap break-words mt-1">{m.content}</p>
           </div>
           <DeleteButton id={m.id} onConfirm={onDelete} />
         </li>

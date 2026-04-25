@@ -15,6 +15,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { CategoryBadge } from "./category-badge";
+import { TierBadge } from "./tier-badge";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { MemoryEntity } from "@/lib/data/types";
 
@@ -57,6 +58,7 @@ export function MemoryCard({ memory }: { memory: MemoryEntity }) {
               <div className="flex-1 min-w-0">
                 <p className="text-sm leading-snug">{truncate(memory.content, 100)}</p>
                 <div className="flex items-center gap-2 mt-1.5">
+                  <TierBadge tier={memory.tier} />
                   <CategoryBadge category={category} />
                   <div className="h-1.5 w-12 bg-muted rounded-full overflow-hidden">
                     <div

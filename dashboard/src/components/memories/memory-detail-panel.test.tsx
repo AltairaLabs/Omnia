@@ -63,6 +63,30 @@ describe("MemoryDetailPanel", () => {
     expect(screen.getByTestId("category-badge")).toHaveTextContent("Identity");
   });
 
+  it("shows tier badge when memory has a tier", () => {
+    render(
+      <MemoryDetailPanel
+        memory={makeMemory({ tier: "agent" })}
+        onClose={onClose}
+        onDelete={onDelete}
+      />
+    );
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+  });
+
+  it("omits the tier badge when memory has no tier (legacy mock)", () => {
+    render(
+      <MemoryDetailPanel
+        memory={makeMemory({ tier: undefined })}
+        onClose={onClose}
+        onDelete={onDelete}
+      />
+    );
+    expect(screen.queryByText("User")).not.toBeInTheDocument();
+    expect(screen.queryByText("Agent")).not.toBeInTheDocument();
+    expect(screen.queryByText("Institutional")).not.toBeInTheDocument();
+  });
+
   it("shows Unknown badge when no category metadata", () => {
     render(
       <MemoryDetailPanel memory={makeMemory()} onClose={onClose} onDelete={onDelete} />
