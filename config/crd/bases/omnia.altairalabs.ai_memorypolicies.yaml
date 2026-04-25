@@ -66,844 +66,420 @@ spec:
           metadata:
             type: object
           spec:
-            description: MemoryPolicySpec is the top-level spec.
+            description: |-
+              MemoryPolicySpec is the top-level spec. Workspaces opt in to a
+              MemoryPolicy via Workspace.spec.services[].memory.policyRef — many
+              workspaces may reference one policy, and a workspace with no
+              policyRef falls back to the baked-in legacy interval policy.
             properties:
-              default:
+              batchSize:
+                default: 1000
                 description: |-
-                  default is the cluster-wide policy applied to every workspace
-                  that doesn't have an explicit override.
+                  batchSize caps how many rows the worker processes per transaction.
+                  Higher = fewer commits but longer-running locks; lower = gentler
+                  on the DB but more overhead.
+                format: int32
+                maximum: 100000
+                minimum: 1
+                type: integer
+              consentRevocation:
+                description: |-
+                  MemoryConsentRevocationConfig describes how the retention worker
+                  reacts to a user toggling off a consent category. Phase 4 of the
+                  retention proposal wires the event subscription; Phase 1 only
+                  validates the shape.
                 properties:
-                  batchSize:
-                    default: 1000
+                  action:
+                    default: SoftDelete
                     description: |-
-                      batchSize caps how many rows the worker processes per transaction.
-                      Higher = fewer commits but longer-running locks; lower = gentler
-                      on the DB but more overhead.
-                    format: int32
-                    maximum: 100000
-                    minimum: 1
-                    type: integer
-                  consentRevocation:
-                    description: |-
-                      MemoryConsentRevocationConfig describes how the retention worker
-                      reacts to a user toggling off a consent category. Phase 4 of the
-                      retention proposal wires the event subscription; Phase 1 only
-                      validates the shape.
-                    properties:
-                      action:
-                        default: SoftDelete
-                        description: |-
-                          ConsentRevocationAction describes what the retention worker does when
-                          a user revokes a consent category.
-                        enum:
-                        - SoftDelete
-                        - HardDelete
-                        - Stop
-                        type: string
-                      graceDays:
-                        default: 7
-                        description: |-
-                          graceDays is the soft-delete → hard-delete window for
-                          SoftDelete action. Ignored for HardDelete and Stop.
-                        format: int32
-                        maximum: 365
-                        minimum: 0
-                        type: integer
-                    type: object
-                  schedule:
-                    default: 0 3 * * *
-                    description: |-
-                      schedule is a cron expression for when the retention worker runs.
-                      Defaults to 03:00 daily so pruning happens off-peak.
+                      ConsentRevocationAction describes what the retention worker does when
+                      a user revokes a consent category.
+                    enum:
+                    - SoftDelete
+                    - HardDelete
+                    - Stop
                     type: string
-                  supersession:
+                  graceDays:
+                    default: 7
                     description: |-
-                      MemorySupersessionConfig controls cleanup of rows superseded by
-                      temporal-summarization summaries. Gated behind enabled=false until
-                      the summarizer agent described in
-                      docs/local-backlog/2026-04-23-memory-summarization-via-agent.md is
-                      actually generating summaries in your deployment.
-                    properties:
-                      enabled:
-                        default: false
-                        type: boolean
-                      graceDays:
-                        default: 14
-                        description: |-
-                          graceDays gives operators a window to roll back a bad summary
-                          before the originals are hard-deleted.
-                        format: int32
-                        maximum: 365
-                        minimum: 0
-                        type: integer
-                    type: object
-                  tiers:
+                      graceDays is the soft-delete → hard-delete window for
+                      SoftDelete action. Ignored for HardDelete and Stop.
+                    format: int32
+                    maximum: 365
+                    minimum: 0
+                    type: integer
+                type: object
+              schedule:
+                default: 0 3 * * *
+                description: |-
+                  schedule is a cron expression for when the retention worker runs.
+                  Defaults to 03:00 daily so pruning happens off-peak.
+                type: string
+              supersession:
+                description: |-
+                  MemorySupersessionConfig controls cleanup of rows superseded by
+                  temporal-summarization summaries. Gated behind enabled=false until
+                  the summarizer agent described in
+                  docs/local-backlog/2026-04-23-memory-summarization-via-agent.md is
+                  actually generating summaries in your deployment.
+                properties:
+                  enabled:
+                    default: false
+                    type: boolean
+                  graceDays:
+                    default: 14
                     description: |-
-                      Tiers must be populated — at least one tier needs a mode for the
-                      policy to do anything useful.
+                      graceDays gives operators a window to roll back a bad summary
+                      before the originals are hard-deleted.
+                    format: int32
+                    maximum: 365
+                    minimum: 0
+                    type: integer
+                type: object
+              tierPrecedence:
+                description: |-
+                  tierPrecedence applies per-tier ranking multipliers to the
+                  retrieval score. Unset tiers default to 1.0 (no-op).
+                properties:
+                  multiplicative:
+                    description: |-
+                      multiplicative scales each memory's base score by a per-tier
+                      weight. Score ordering is preserved within a tier; the weights
+                      bias across tiers.
                     properties:
                       agent:
-                        description: |-
-                          MemoryTierConfig is the per-tier retention config. Each tier
-                          (institutional / agent / user) can have a different mode and branch
-                          config. Missing branches mean "that branch is off for this tier".
-                        properties:
-                          decay:
-                            description: MemoryDecayConfig configures the Decay branch.
-                            properties:
-                              enabled:
-                                default: true
-                                type: boolean
-                              halfLifeDays:
-                                default: 90
-                                description: |-
-                                  halfLifeDays controls how aggressively recency pulls the score down.
-                                  Shorter half-life = personal memories decay faster; longer = agent
-                                  policies stay relevant longer.
-                                format: int32
-                                maximum: 3650
-                                minimum: 1
-                                type: integer
-                              minScore:
-                                default: "0.2"
-                                description: |-
-                                  minScore is the score below which a row is prunable. Uses the
-                                  0.5/0.3/0.2 confidence/frequency/recency formula by default. The
-                                  controller parses the string and enforces the 0..1 range; bad
-                                  values surface as a status condition rather than a rejected apply.
-                                pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                type: string
-                              scoreFormula:
-                                description: |-
-                                  scoreFormula overrides the default weights. Weights should sum to
-                                  roughly 1.0 — the controller doesn't enforce this strictly because
-                                  operators sometimes want to emphasise one signal.
-                                properties:
-                                  accessFrequencyWeight:
-                                    default: "0.3"
-                                    pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                    type: string
-                                  confidenceWeight:
-                                    default: "0.5"
-                                    pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                    type: string
-                                  recencyWeight:
-                                    default: "0.2"
-                                    pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                    type: string
-                                type: object
-                            type: object
-                          lru:
-                            description: MemoryLRUConfig configures the LRU branch.
-                            properties:
-                              enabled:
-                                default: true
-                                type: boolean
-                              staleAfter:
-                                default: 120d
-                                description: |-
-                                  staleAfter is the accessed_at age beyond which a row is prunable.
-                                  Requires the read-path accessed_at updates shipped in retention
-                                  Phase 2 — without those, every row looks stale forever.
-                                pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                type: string
-                            type: object
-                          mode:
-                            default: Manual
-                            description: |-
-                              MemoryRetentionMode describes how a tier's memories are considered for
-                              auto-pruning. Phase 1 only validates the shape — the RetentionWorker
-                              rewrite in Phase 3 is what actually applies these modes.
-                            enum:
-                            - Manual
-                            - TTL
-                            - Decay
-                            - LRU
-                            - Composite
-                            type: string
-                          perCategory:
-                            additionalProperties:
-                              description: |-
-                                MemoryTierLeafConfig is the per-category retention override. Same
-                                shape as MemoryTierConfig but cannot itself carry a perCategory map —
-                                CRD schema generation rejects arbitrarily-recursive types.
-                              properties:
-                                decay:
-                                  description: MemoryDecayConfig configures the Decay
-                                    branch.
-                                  properties:
-                                    enabled:
-                                      default: true
-                                      type: boolean
-                                    halfLifeDays:
-                                      default: 90
-                                      description: |-
-                                        halfLifeDays controls how aggressively recency pulls the score down.
-                                        Shorter half-life = personal memories decay faster; longer = agent
-                                        policies stay relevant longer.
-                                      format: int32
-                                      maximum: 3650
-                                      minimum: 1
-                                      type: integer
-                                    minScore:
-                                      default: "0.2"
-                                      description: |-
-                                        minScore is the score below which a row is prunable. Uses the
-                                        0.5/0.3/0.2 confidence/frequency/recency formula by default. The
-                                        controller parses the string and enforces the 0..1 range; bad
-                                        values surface as a status condition rather than a rejected apply.
-                                      pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                      type: string
-                                    scoreFormula:
-                                      description: |-
-                                        scoreFormula overrides the default weights. Weights should sum to
-                                        roughly 1.0 — the controller doesn't enforce this strictly because
-                                        operators sometimes want to emphasise one signal.
-                                      properties:
-                                        accessFrequencyWeight:
-                                          default: "0.3"
-                                          pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                          type: string
-                                        confidenceWeight:
-                                          default: "0.5"
-                                          pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                          type: string
-                                        recencyWeight:
-                                          default: "0.2"
-                                          pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                          type: string
-                                      type: object
-                                  type: object
-                                lru:
-                                  description: MemoryLRUConfig configures the LRU
-                                    branch.
-                                  properties:
-                                    enabled:
-                                      default: true
-                                      type: boolean
-                                    staleAfter:
-                                      default: 120d
-                                      description: |-
-                                        staleAfter is the accessed_at age beyond which a row is prunable.
-                                        Requires the read-path accessed_at updates shipped in retention
-                                        Phase 2 — without those, every row looks stale forever.
-                                      pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                      type: string
-                                  type: object
-                                mode:
-                                  default: Manual
-                                  description: |-
-                                    MemoryRetentionMode describes how a tier's memories are considered for
-                                    auto-pruning. Phase 1 only validates the shape — the RetentionWorker
-                                    rewrite in Phase 3 is what actually applies these modes.
-                                  enum:
-                                  - Manual
-                                  - TTL
-                                  - Decay
-                                  - LRU
-                                  - Composite
-                                  type: string
-                                softDeleteGraceDays:
-                                  default: 30
-                                  description: |-
-                                    softDeleteGraceDays is the window between soft-delete (forgotten=true)
-                                    and hard-delete. Applies to every mode.
-                                  format: int32
-                                  maximum: 3650
-                                  minimum: 0
-                                  type: integer
-                                ttl:
-                                  description: MemoryTTLConfig configures the TTL
-                                    branch of retention.
-                                  properties:
-                                    default:
-                                      description: |-
-                                        default is applied at write time when the caller doesn't set an
-                                        explicit expires_at. Must be a Go duration string (e.g. "180d",
-                                        "720h"). Empty means "no default TTL" — rows without an explicit
-                                        expires_at never expire via the TTL branch.
-                                      pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                      type: string
-                                    maxAge:
-                                      description: |-
-                                        maxAge caps any explicit expires_at so a misbehaving client can't
-                                        pin a row in the store for longer than the operator accepts. Empty
-                                        means no cap.
-                                      pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                      type: string
-                                  type: object
-                              type: object
-                            description: |-
-                              perCategory lets operators override the tier policy for specific
-                              consent categories (e.g. "memory:health"). Keys are the consent
-                              category strings from the consent model; values are a nested
-                              tier config applied only to rows carrying that category.
-                            type: object
-                          softDeleteGraceDays:
-                            default: 30
-                            description: |-
-                              softDeleteGraceDays is the window between soft-delete (forgotten=true)
-                              and hard-delete. Applies to every mode.
-                            format: int32
-                            maximum: 3650
-                            minimum: 0
-                            type: integer
-                          ttl:
-                            description: MemoryTTLConfig configures the TTL branch
-                              of retention.
-                            properties:
-                              default:
-                                description: |-
-                                  default is applied at write time when the caller doesn't set an
-                                  explicit expires_at. Must be a Go duration string (e.g. "180d",
-                                  "720h"). Empty means "no default TTL" — rows without an explicit
-                                  expires_at never expire via the TTL branch.
-                                pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                type: string
-                              maxAge:
-                                description: |-
-                                  maxAge caps any explicit expires_at so a misbehaving client can't
-                                  pin a row in the store for longer than the operator accepts. Empty
-                                  means no cap.
-                                pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                type: string
-                            type: object
-                        type: object
+                        default: "1.0"
+                        pattern: ^(10(\.0+)?|[0-9](\.[0-9]+)?)$
+                        type: string
                       institutional:
-                        description: |-
-                          MemoryTierConfig is the per-tier retention config. Each tier
-                          (institutional / agent / user) can have a different mode and branch
-                          config. Missing branches mean "that branch is off for this tier".
+                        default: "1.0"
+                        pattern: ^(10(\.0+)?|[0-9](\.[0-9]+)?)$
+                        type: string
+                      user:
+                        default: "1.0"
+                        pattern: ^(10(\.0+)?|[0-9](\.[0-9]+)?)$
+                        type: string
+                    type: object
+                type: object
+                x-kubernetes-validations:
+                - message: spec.tierPrecedence.multiplicative must be set
+                  rule: has(self.multiplicative)
+              tiers:
+                description: |-
+                  tiers configures per-tier retention behaviour. At least one tier
+                  needs a mode for the policy to do anything useful.
+                properties:
+                  agent:
+                    description: |-
+                      MemoryTierConfig is the per-tier retention config. Each tier
+                      (institutional / agent / user) can have a different mode and branch
+                      config. Missing branches mean "that branch is off for this tier".
+                    properties:
+                      decay:
+                        description: MemoryDecayConfig configures the Decay branch.
                         properties:
-                          decay:
-                            description: MemoryDecayConfig configures the Decay branch.
-                            properties:
-                              enabled:
-                                default: true
-                                type: boolean
-                              halfLifeDays:
-                                default: 90
-                                description: |-
-                                  halfLifeDays controls how aggressively recency pulls the score down.
-                                  Shorter half-life = personal memories decay faster; longer = agent
-                                  policies stay relevant longer.
-                                format: int32
-                                maximum: 3650
-                                minimum: 1
-                                type: integer
-                              minScore:
-                                default: "0.2"
-                                description: |-
-                                  minScore is the score below which a row is prunable. Uses the
-                                  0.5/0.3/0.2 confidence/frequency/recency formula by default. The
-                                  controller parses the string and enforces the 0..1 range; bad
-                                  values surface as a status condition rather than a rejected apply.
-                                pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                type: string
-                              scoreFormula:
-                                description: |-
-                                  scoreFormula overrides the default weights. Weights should sum to
-                                  roughly 1.0 — the controller doesn't enforce this strictly because
-                                  operators sometimes want to emphasise one signal.
-                                properties:
-                                  accessFrequencyWeight:
-                                    default: "0.3"
-                                    pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                    type: string
-                                  confidenceWeight:
-                                    default: "0.5"
-                                    pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                    type: string
-                                  recencyWeight:
-                                    default: "0.2"
-                                    pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                    type: string
-                                type: object
-                            type: object
-                          lru:
-                            description: MemoryLRUConfig configures the LRU branch.
-                            properties:
-                              enabled:
-                                default: true
-                                type: boolean
-                              staleAfter:
-                                default: 120d
-                                description: |-
-                                  staleAfter is the accessed_at age beyond which a row is prunable.
-                                  Requires the read-path accessed_at updates shipped in retention
-                                  Phase 2 — without those, every row looks stale forever.
-                                pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                type: string
-                            type: object
-                          mode:
-                            default: Manual
+                          enabled:
+                            default: true
+                            type: boolean
+                          halfLifeDays:
+                            default: 90
                             description: |-
-                              MemoryRetentionMode describes how a tier's memories are considered for
-                              auto-pruning. Phase 1 only validates the shape — the RetentionWorker
-                              rewrite in Phase 3 is what actually applies these modes.
-                            enum:
-                            - Manual
-                            - TTL
-                            - Decay
-                            - LRU
-                            - Composite
-                            type: string
-                          perCategory:
-                            additionalProperties:
-                              description: |-
-                                MemoryTierLeafConfig is the per-category retention override. Same
-                                shape as MemoryTierConfig but cannot itself carry a perCategory map —
-                                CRD schema generation rejects arbitrarily-recursive types.
-                              properties:
-                                decay:
-                                  description: MemoryDecayConfig configures the Decay
-                                    branch.
-                                  properties:
-                                    enabled:
-                                      default: true
-                                      type: boolean
-                                    halfLifeDays:
-                                      default: 90
-                                      description: |-
-                                        halfLifeDays controls how aggressively recency pulls the score down.
-                                        Shorter half-life = personal memories decay faster; longer = agent
-                                        policies stay relevant longer.
-                                      format: int32
-                                      maximum: 3650
-                                      minimum: 1
-                                      type: integer
-                                    minScore:
-                                      default: "0.2"
-                                      description: |-
-                                        minScore is the score below which a row is prunable. Uses the
-                                        0.5/0.3/0.2 confidence/frequency/recency formula by default. The
-                                        controller parses the string and enforces the 0..1 range; bad
-                                        values surface as a status condition rather than a rejected apply.
-                                      pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                      type: string
-                                    scoreFormula:
-                                      description: |-
-                                        scoreFormula overrides the default weights. Weights should sum to
-                                        roughly 1.0 — the controller doesn't enforce this strictly because
-                                        operators sometimes want to emphasise one signal.
-                                      properties:
-                                        accessFrequencyWeight:
-                                          default: "0.3"
-                                          pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                          type: string
-                                        confidenceWeight:
-                                          default: "0.5"
-                                          pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                          type: string
-                                        recencyWeight:
-                                          default: "0.2"
-                                          pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                          type: string
-                                      type: object
-                                  type: object
-                                lru:
-                                  description: MemoryLRUConfig configures the LRU
-                                    branch.
-                                  properties:
-                                    enabled:
-                                      default: true
-                                      type: boolean
-                                    staleAfter:
-                                      default: 120d
-                                      description: |-
-                                        staleAfter is the accessed_at age beyond which a row is prunable.
-                                        Requires the read-path accessed_at updates shipped in retention
-                                        Phase 2 — without those, every row looks stale forever.
-                                      pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                      type: string
-                                  type: object
-                                mode:
-                                  default: Manual
-                                  description: |-
-                                    MemoryRetentionMode describes how a tier's memories are considered for
-                                    auto-pruning. Phase 1 only validates the shape — the RetentionWorker
-                                    rewrite in Phase 3 is what actually applies these modes.
-                                  enum:
-                                  - Manual
-                                  - TTL
-                                  - Decay
-                                  - LRU
-                                  - Composite
-                                  type: string
-                                softDeleteGraceDays:
-                                  default: 30
-                                  description: |-
-                                    softDeleteGraceDays is the window between soft-delete (forgotten=true)
-                                    and hard-delete. Applies to every mode.
-                                  format: int32
-                                  maximum: 3650
-                                  minimum: 0
-                                  type: integer
-                                ttl:
-                                  description: MemoryTTLConfig configures the TTL
-                                    branch of retention.
-                                  properties:
-                                    default:
-                                      description: |-
-                                        default is applied at write time when the caller doesn't set an
-                                        explicit expires_at. Must be a Go duration string (e.g. "180d",
-                                        "720h"). Empty means "no default TTL" — rows without an explicit
-                                        expires_at never expire via the TTL branch.
-                                      pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                      type: string
-                                    maxAge:
-                                      description: |-
-                                        maxAge caps any explicit expires_at so a misbehaving client can't
-                                        pin a row in the store for longer than the operator accepts. Empty
-                                        means no cap.
-                                      pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                      type: string
-                                  type: object
-                              type: object
-                            description: |-
-                              perCategory lets operators override the tier policy for specific
-                              consent categories (e.g. "memory:health"). Keys are the consent
-                              category strings from the consent model; values are a nested
-                              tier config applied only to rows carrying that category.
-                            type: object
-                          softDeleteGraceDays:
-                            default: 30
-                            description: |-
-                              softDeleteGraceDays is the window between soft-delete (forgotten=true)
-                              and hard-delete. Applies to every mode.
+                              halfLifeDays controls how aggressively recency pulls the score down.
+                              Shorter half-life = personal memories decay faster; longer = agent
+                              policies stay relevant longer.
                             format: int32
                             maximum: 3650
-                            minimum: 0
+                            minimum: 1
                             type: integer
-                          ttl:
-                            description: MemoryTTLConfig configures the TTL branch
-                              of retention.
+                          minScore:
+                            default: "0.2"
+                            description: |-
+                              minScore is the score below which a row is prunable. Uses the
+                              0.5/0.3/0.2 confidence/frequency/recency formula by default. The
+                              controller parses the string and enforces the 0..1 range; bad
+                              values surface as a status condition rather than a rejected apply.
+                            pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
+                            type: string
+                          scoreFormula:
+                            description: |-
+                              scoreFormula overrides the default weights. Weights should sum to
+                              roughly 1.0 — the controller doesn't enforce this strictly because
+                              operators sometimes want to emphasise one signal.
                             properties:
-                              default:
-                                description: |-
-                                  default is applied at write time when the caller doesn't set an
-                                  explicit expires_at. Must be a Go duration string (e.g. "180d",
-                                  "720h"). Empty means "no default TTL" — rows without an explicit
-                                  expires_at never expire via the TTL branch.
-                                pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                              accessFrequencyWeight:
+                                default: "0.3"
+                                pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
                                 type: string
-                              maxAge:
-                                description: |-
-                                  maxAge caps any explicit expires_at so a misbehaving client can't
-                                  pin a row in the store for longer than the operator accepts. Empty
-                                  means no cap.
-                                pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                              confidenceWeight:
+                                default: "0.5"
+                                pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
+                                type: string
+                              recencyWeight:
+                                default: "0.2"
+                                pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
                                 type: string
                             type: object
                         type: object
-                      user:
-                        description: |-
-                          MemoryTierConfig is the per-tier retention config. Each tier
-                          (institutional / agent / user) can have a different mode and branch
-                          config. Missing branches mean "that branch is off for this tier".
+                      lru:
+                        description: MemoryLRUConfig configures the LRU branch.
                         properties:
-                          decay:
-                            description: MemoryDecayConfig configures the Decay branch.
-                            properties:
-                              enabled:
-                                default: true
-                                type: boolean
-                              halfLifeDays:
-                                default: 90
-                                description: |-
-                                  halfLifeDays controls how aggressively recency pulls the score down.
-                                  Shorter half-life = personal memories decay faster; longer = agent
-                                  policies stay relevant longer.
-                                format: int32
-                                maximum: 3650
-                                minimum: 1
-                                type: integer
-                              minScore:
-                                default: "0.2"
-                                description: |-
-                                  minScore is the score below which a row is prunable. Uses the
-                                  0.5/0.3/0.2 confidence/frequency/recency formula by default. The
-                                  controller parses the string and enforces the 0..1 range; bad
-                                  values surface as a status condition rather than a rejected apply.
-                                pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                type: string
-                              scoreFormula:
-                                description: |-
-                                  scoreFormula overrides the default weights. Weights should sum to
-                                  roughly 1.0 — the controller doesn't enforce this strictly because
-                                  operators sometimes want to emphasise one signal.
-                                properties:
-                                  accessFrequencyWeight:
-                                    default: "0.3"
-                                    pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                    type: string
-                                  confidenceWeight:
-                                    default: "0.5"
-                                    pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                    type: string
-                                  recencyWeight:
-                                    default: "0.2"
-                                    pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                    type: string
-                                type: object
-                            type: object
-                          lru:
-                            description: MemoryLRUConfig configures the LRU branch.
-                            properties:
-                              enabled:
-                                default: true
-                                type: boolean
-                              staleAfter:
-                                default: 120d
-                                description: |-
-                                  staleAfter is the accessed_at age beyond which a row is prunable.
-                                  Requires the read-path accessed_at updates shipped in retention
-                                  Phase 2 — without those, every row looks stale forever.
-                                pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                type: string
-                            type: object
-                          mode:
-                            default: Manual
+                          enabled:
+                            default: true
+                            type: boolean
+                          staleAfter:
+                            default: 120d
                             description: |-
-                              MemoryRetentionMode describes how a tier's memories are considered for
-                              auto-pruning. Phase 1 only validates the shape — the RetentionWorker
-                              rewrite in Phase 3 is what actually applies these modes.
-                            enum:
-                            - Manual
-                            - TTL
-                            - Decay
-                            - LRU
-                            - Composite
+                              staleAfter is the accessed_at age beyond which a row is prunable.
+                              Requires the read-path accessed_at updates shipped in retention
+                              Phase 2 — without those, every row looks stale forever.
+                            pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
                             type: string
-                          perCategory:
-                            additionalProperties:
-                              description: |-
-                                MemoryTierLeafConfig is the per-category retention override. Same
-                                shape as MemoryTierConfig but cannot itself carry a perCategory map —
-                                CRD schema generation rejects arbitrarily-recursive types.
+                        type: object
+                      mode:
+                        default: Manual
+                        description: |-
+                          MemoryRetentionMode describes how a tier's memories are considered for
+                          auto-pruning. Phase 1 only validates the shape — the RetentionWorker
+                          rewrite in Phase 3 is what actually applies these modes.
+                        enum:
+                        - Manual
+                        - TTL
+                        - Decay
+                        - LRU
+                        - Composite
+                        type: string
+                      perCategory:
+                        additionalProperties:
+                          description: |-
+                            MemoryTierLeafConfig is the per-category retention override. Same
+                            shape as MemoryTierConfig but cannot itself carry a perCategory map —
+                            CRD schema generation rejects arbitrarily-recursive types.
+                          properties:
+                            decay:
+                              description: MemoryDecayConfig configures the Decay
+                                branch.
                               properties:
-                                decay:
-                                  description: MemoryDecayConfig configures the Decay
-                                    branch.
-                                  properties:
-                                    enabled:
-                                      default: true
-                                      type: boolean
-                                    halfLifeDays:
-                                      default: 90
-                                      description: |-
-                                        halfLifeDays controls how aggressively recency pulls the score down.
-                                        Shorter half-life = personal memories decay faster; longer = agent
-                                        policies stay relevant longer.
-                                      format: int32
-                                      maximum: 3650
-                                      minimum: 1
-                                      type: integer
-                                    minScore:
-                                      default: "0.2"
-                                      description: |-
-                                        minScore is the score below which a row is prunable. Uses the
-                                        0.5/0.3/0.2 confidence/frequency/recency formula by default. The
-                                        controller parses the string and enforces the 0..1 range; bad
-                                        values surface as a status condition rather than a rejected apply.
-                                      pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                      type: string
-                                    scoreFormula:
-                                      description: |-
-                                        scoreFormula overrides the default weights. Weights should sum to
-                                        roughly 1.0 — the controller doesn't enforce this strictly because
-                                        operators sometimes want to emphasise one signal.
-                                      properties:
-                                        accessFrequencyWeight:
-                                          default: "0.3"
-                                          pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                          type: string
-                                        confidenceWeight:
-                                          default: "0.5"
-                                          pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                          type: string
-                                        recencyWeight:
-                                          default: "0.2"
-                                          pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                          type: string
-                                      type: object
-                                  type: object
-                                lru:
-                                  description: MemoryLRUConfig configures the LRU
-                                    branch.
-                                  properties:
-                                    enabled:
-                                      default: true
-                                      type: boolean
-                                    staleAfter:
-                                      default: 120d
-                                      description: |-
-                                        staleAfter is the accessed_at age beyond which a row is prunable.
-                                        Requires the read-path accessed_at updates shipped in retention
-                                        Phase 2 — without those, every row looks stale forever.
-                                      pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                      type: string
-                                  type: object
-                                mode:
-                                  default: Manual
+                                enabled:
+                                  default: true
+                                  type: boolean
+                                halfLifeDays:
+                                  default: 90
                                   description: |-
-                                    MemoryRetentionMode describes how a tier's memories are considered for
-                                    auto-pruning. Phase 1 only validates the shape — the RetentionWorker
-                                    rewrite in Phase 3 is what actually applies these modes.
-                                  enum:
-                                  - Manual
-                                  - TTL
-                                  - Decay
-                                  - LRU
-                                  - Composite
-                                  type: string
-                                softDeleteGraceDays:
-                                  default: 30
-                                  description: |-
-                                    softDeleteGraceDays is the window between soft-delete (forgotten=true)
-                                    and hard-delete. Applies to every mode.
+                                    halfLifeDays controls how aggressively recency pulls the score down.
+                                    Shorter half-life = personal memories decay faster; longer = agent
+                                    policies stay relevant longer.
                                   format: int32
                                   maximum: 3650
-                                  minimum: 0
+                                  minimum: 1
                                   type: integer
-                                ttl:
-                                  description: MemoryTTLConfig configures the TTL
-                                    branch of retention.
+                                minScore:
+                                  default: "0.2"
+                                  description: |-
+                                    minScore is the score below which a row is prunable. Uses the
+                                    0.5/0.3/0.2 confidence/frequency/recency formula by default. The
+                                    controller parses the string and enforces the 0..1 range; bad
+                                    values surface as a status condition rather than a rejected apply.
+                                  pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
+                                  type: string
+                                scoreFormula:
+                                  description: |-
+                                    scoreFormula overrides the default weights. Weights should sum to
+                                    roughly 1.0 — the controller doesn't enforce this strictly because
+                                    operators sometimes want to emphasise one signal.
                                   properties:
-                                    default:
-                                      description: |-
-                                        default is applied at write time when the caller doesn't set an
-                                        explicit expires_at. Must be a Go duration string (e.g. "180d",
-                                        "720h"). Empty means "no default TTL" — rows without an explicit
-                                        expires_at never expire via the TTL branch.
-                                      pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                                    accessFrequencyWeight:
+                                      default: "0.3"
+                                      pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
                                       type: string
-                                    maxAge:
-                                      description: |-
-                                        maxAge caps any explicit expires_at so a misbehaving client can't
-                                        pin a row in the store for longer than the operator accepts. Empty
-                                        means no cap.
-                                      pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                                    confidenceWeight:
+                                      default: "0.5"
+                                      pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
+                                      type: string
+                                    recencyWeight:
+                                      default: "0.2"
+                                      pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
                                       type: string
                                   type: object
                               type: object
+                            lru:
+                              description: MemoryLRUConfig configures the LRU branch.
+                              properties:
+                                enabled:
+                                  default: true
+                                  type: boolean
+                                staleAfter:
+                                  default: 120d
+                                  description: |-
+                                    staleAfter is the accessed_at age beyond which a row is prunable.
+                                    Requires the read-path accessed_at updates shipped in retention
+                                    Phase 2 — without those, every row looks stale forever.
+                                  pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                                  type: string
+                              type: object
+                            mode:
+                              default: Manual
+                              description: |-
+                                MemoryRetentionMode describes how a tier's memories are considered for
+                                auto-pruning. Phase 1 only validates the shape — the RetentionWorker
+                                rewrite in Phase 3 is what actually applies these modes.
+                              enum:
+                              - Manual
+                              - TTL
+                              - Decay
+                              - LRU
+                              - Composite
+                              type: string
+                            softDeleteGraceDays:
+                              default: 30
+                              description: |-
+                                softDeleteGraceDays is the window between soft-delete (forgotten=true)
+                                and hard-delete. Applies to every mode.
+                              format: int32
+                              maximum: 3650
+                              minimum: 0
+                              type: integer
+                            ttl:
+                              description: MemoryTTLConfig configures the TTL branch
+                                of retention.
+                              properties:
+                                default:
+                                  description: |-
+                                    default is applied at write time when the caller doesn't set an
+                                    explicit expires_at. Must be a Go duration string (e.g. "180d",
+                                    "720h"). Empty means "no default TTL" — rows without an explicit
+                                    expires_at never expire via the TTL branch.
+                                  pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                                  type: string
+                                maxAge:
+                                  description: |-
+                                    maxAge caps any explicit expires_at so a misbehaving client can't
+                                    pin a row in the store for longer than the operator accepts. Empty
+                                    means no cap.
+                                  pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                                  type: string
+                              type: object
+                          type: object
+                        description: |-
+                          perCategory lets operators override the tier policy for specific
+                          consent categories (e.g. "memory:health"). Keys are the consent
+                          category strings from the consent model; values are a nested
+                          tier config applied only to rows carrying that category.
+                        type: object
+                      softDeleteGraceDays:
+                        default: 30
+                        description: |-
+                          softDeleteGraceDays is the window between soft-delete (forgotten=true)
+                          and hard-delete. Applies to every mode.
+                        format: int32
+                        maximum: 3650
+                        minimum: 0
+                        type: integer
+                      ttl:
+                        description: MemoryTTLConfig configures the TTL branch of
+                          retention.
+                        properties:
+                          default:
                             description: |-
-                              perCategory lets operators override the tier policy for specific
-                              consent categories (e.g. "memory:health"). Keys are the consent
-                              category strings from the consent model; values are a nested
-                              tier config applied only to rows carrying that category.
-                            type: object
-                          softDeleteGraceDays:
-                            default: 30
+                              default is applied at write time when the caller doesn't set an
+                              explicit expires_at. Must be a Go duration string (e.g. "180d",
+                              "720h"). Empty means "no default TTL" — rows without an explicit
+                              expires_at never expire via the TTL branch.
+                            pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                            type: string
+                          maxAge:
                             description: |-
-                              softDeleteGraceDays is the window between soft-delete (forgotten=true)
-                              and hard-delete. Applies to every mode.
-                            format: int32
-                            maximum: 3650
-                            minimum: 0
-                            type: integer
-                          ttl:
-                            description: MemoryTTLConfig configures the TTL branch
-                              of retention.
-                            properties:
-                              default:
-                                description: |-
-                                  default is applied at write time when the caller doesn't set an
-                                  explicit expires_at. Must be a Go duration string (e.g. "180d",
-                                  "720h"). Empty means "no default TTL" — rows without an explicit
-                                  expires_at never expire via the TTL branch.
-                                pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                type: string
-                              maxAge:
-                                description: |-
-                                  maxAge caps any explicit expires_at so a misbehaving client can't
-                                  pin a row in the store for longer than the operator accepts. Empty
-                                  means no cap.
-                                pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                type: string
-                            type: object
+                              maxAge caps any explicit expires_at so a misbehaving client can't
+                              pin a row in the store for longer than the operator accepts. Empty
+                              means no cap.
+                            pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                            type: string
                         type: object
                     type: object
-                required:
-                - tiers
-                type: object
-              perWorkspace:
-                additionalProperties:
-                  description: |-
-                    MemoryWorkspaceRetentionOverride lets operators tighten or loosen the
-                    policy for a specific workspace. Same fields as the cluster default;
-                    missing fields inherit from the default.
-                  properties:
-                    batchSize:
-                      format: int32
-                      maximum: 100000
-                      minimum: 1
-                      type: integer
-                    consentRevocation:
-                      description: |-
-                        MemoryConsentRevocationConfig describes how the retention worker
-                        reacts to a user toggling off a consent category. Phase 4 of the
-                        retention proposal wires the event subscription; Phase 1 only
-                        validates the shape.
-                      properties:
-                        action:
-                          default: SoftDelete
+                  institutional:
+                    description: |-
+                      MemoryTierConfig is the per-tier retention config. Each tier
+                      (institutional / agent / user) can have a different mode and branch
+                      config. Missing branches mean "that branch is off for this tier".
+                    properties:
+                      decay:
+                        description: MemoryDecayConfig configures the Decay branch.
+                        properties:
+                          enabled:
+                            default: true
+                            type: boolean
+                          halfLifeDays:
+                            default: 90
+                            description: |-
+                              halfLifeDays controls how aggressively recency pulls the score down.
+                              Shorter half-life = personal memories decay faster; longer = agent
+                              policies stay relevant longer.
+                            format: int32
+                            maximum: 3650
+                            minimum: 1
+                            type: integer
+                          minScore:
+                            default: "0.2"
+                            description: |-
+                              minScore is the score below which a row is prunable. Uses the
+                              0.5/0.3/0.2 confidence/frequency/recency formula by default. The
+                              controller parses the string and enforces the 0..1 range; bad
+                              values surface as a status condition rather than a rejected apply.
+                            pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
+                            type: string
+                          scoreFormula:
+                            description: |-
+                              scoreFormula overrides the default weights. Weights should sum to
+                              roughly 1.0 — the controller doesn't enforce this strictly because
+                              operators sometimes want to emphasise one signal.
+                            properties:
+                              accessFrequencyWeight:
+                                default: "0.3"
+                                pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
+                                type: string
+                              confidenceWeight:
+                                default: "0.5"
+                                pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
+                                type: string
+                              recencyWeight:
+                                default: "0.2"
+                                pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
+                                type: string
+                            type: object
+                        type: object
+                      lru:
+                        description: MemoryLRUConfig configures the LRU branch.
+                        properties:
+                          enabled:
+                            default: true
+                            type: boolean
+                          staleAfter:
+                            default: 120d
+                            description: |-
+                              staleAfter is the accessed_at age beyond which a row is prunable.
+                              Requires the read-path accessed_at updates shipped in retention
+                              Phase 2 — without those, every row looks stale forever.
+                            pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                            type: string
+                        type: object
+                      mode:
+                        default: Manual
+                        description: |-
+                          MemoryRetentionMode describes how a tier's memories are considered for
+                          auto-pruning. Phase 1 only validates the shape — the RetentionWorker
+                          rewrite in Phase 3 is what actually applies these modes.
+                        enum:
+                        - Manual
+                        - TTL
+                        - Decay
+                        - LRU
+                        - Composite
+                        type: string
+                      perCategory:
+                        additionalProperties:
                           description: |-
-                            ConsentRevocationAction describes what the retention worker does when
-                            a user revokes a consent category.
-                          enum:
-                          - SoftDelete
-                          - HardDelete
-                          - Stop
-                          type: string
-                        graceDays:
-                          default: 7
-                          description: |-
-                            graceDays is the soft-delete → hard-delete window for
-                            SoftDelete action. Ignored for HardDelete and Stop.
-                          format: int32
-                          maximum: 365
-                          minimum: 0
-                          type: integer
-                      type: object
-                    schedule:
-                      description: |-
-                        schedule is a cron expression; validated by the controller rather
-                        than a CRD regex pattern because cron regexes are brittle under
-                        OpenAPI schema validation.
-                      type: string
-                    supersession:
-                      description: |-
-                        MemorySupersessionConfig controls cleanup of rows superseded by
-                        temporal-summarization summaries. Gated behind enabled=false until
-                        the summarizer agent described in
-                        docs/local-backlog/2026-04-23-memory-summarization-via-agent.md is
-                        actually generating summaries in your deployment.
-                      properties:
-                        enabled:
-                          default: false
-                          type: boolean
-                        graceDays:
-                          default: 14
-                          description: |-
-                            graceDays gives operators a window to roll back a bad summary
-                            before the originals are hard-deleted.
-                          format: int32
-                          maximum: 365
-                          minimum: 0
-                          type: integer
-                      type: object
-                    tiers:
-                      description: |-
-                        MemoryRetentionTierSet groups the three memory tiers so operators
-                        can express tier-specific defaults without repeating the top-level
-                        spec.
-                      properties:
-                        agent:
-                          description: |-
-                            MemoryTierConfig is the per-tier retention config. Each tier
-                            (institutional / agent / user) can have a different mode and branch
-                            config. Missing branches mean "that branch is off for this tier".
+                            MemoryTierLeafConfig is the per-category retention override. Same
+                            shape as MemoryTierConfig but cannot itself carry a perCategory map —
+                            CRD schema generation rejects arbitrarily-recursive types.
                           properties:
                             decay:
                               description: MemoryDecayConfig configures the Decay
@@ -979,124 +555,6 @@ spec:
                               - LRU
                               - Composite
                               type: string
-                            perCategory:
-                              additionalProperties:
-                                description: |-
-                                  MemoryTierLeafConfig is the per-category retention override. Same
-                                  shape as MemoryTierConfig but cannot itself carry a perCategory map —
-                                  CRD schema generation rejects arbitrarily-recursive types.
-                                properties:
-                                  decay:
-                                    description: MemoryDecayConfig configures the
-                                      Decay branch.
-                                    properties:
-                                      enabled:
-                                        default: true
-                                        type: boolean
-                                      halfLifeDays:
-                                        default: 90
-                                        description: |-
-                                          halfLifeDays controls how aggressively recency pulls the score down.
-                                          Shorter half-life = personal memories decay faster; longer = agent
-                                          policies stay relevant longer.
-                                        format: int32
-                                        maximum: 3650
-                                        minimum: 1
-                                        type: integer
-                                      minScore:
-                                        default: "0.2"
-                                        description: |-
-                                          minScore is the score below which a row is prunable. Uses the
-                                          0.5/0.3/0.2 confidence/frequency/recency formula by default. The
-                                          controller parses the string and enforces the 0..1 range; bad
-                                          values surface as a status condition rather than a rejected apply.
-                                        pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                        type: string
-                                      scoreFormula:
-                                        description: |-
-                                          scoreFormula overrides the default weights. Weights should sum to
-                                          roughly 1.0 — the controller doesn't enforce this strictly because
-                                          operators sometimes want to emphasise one signal.
-                                        properties:
-                                          accessFrequencyWeight:
-                                            default: "0.3"
-                                            pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                            type: string
-                                          confidenceWeight:
-                                            default: "0.5"
-                                            pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                            type: string
-                                          recencyWeight:
-                                            default: "0.2"
-                                            pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                            type: string
-                                        type: object
-                                    type: object
-                                  lru:
-                                    description: MemoryLRUConfig configures the LRU
-                                      branch.
-                                    properties:
-                                      enabled:
-                                        default: true
-                                        type: boolean
-                                      staleAfter:
-                                        default: 120d
-                                        description: |-
-                                          staleAfter is the accessed_at age beyond which a row is prunable.
-                                          Requires the read-path accessed_at updates shipped in retention
-                                          Phase 2 — without those, every row looks stale forever.
-                                        pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                        type: string
-                                    type: object
-                                  mode:
-                                    default: Manual
-                                    description: |-
-                                      MemoryRetentionMode describes how a tier's memories are considered for
-                                      auto-pruning. Phase 1 only validates the shape — the RetentionWorker
-                                      rewrite in Phase 3 is what actually applies these modes.
-                                    enum:
-                                    - Manual
-                                    - TTL
-                                    - Decay
-                                    - LRU
-                                    - Composite
-                                    type: string
-                                  softDeleteGraceDays:
-                                    default: 30
-                                    description: |-
-                                      softDeleteGraceDays is the window between soft-delete (forgotten=true)
-                                      and hard-delete. Applies to every mode.
-                                    format: int32
-                                    maximum: 3650
-                                    minimum: 0
-                                    type: integer
-                                  ttl:
-                                    description: MemoryTTLConfig configures the TTL
-                                      branch of retention.
-                                    properties:
-                                      default:
-                                        description: |-
-                                          default is applied at write time when the caller doesn't set an
-                                          explicit expires_at. Must be a Go duration string (e.g. "180d",
-                                          "720h"). Empty means "no default TTL" — rows without an explicit
-                                          expires_at never expire via the TTL branch.
-                                        pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                        type: string
-                                      maxAge:
-                                        description: |-
-                                          maxAge caps any explicit expires_at so a misbehaving client can't
-                                          pin a row in the store for longer than the operator accepts. Empty
-                                          means no cap.
-                                        pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                        type: string
-                                    type: object
-                                type: object
-                              description: |-
-                                perCategory lets operators override the tier policy for specific
-                                consent categories (e.g. "memory:health"). Keys are the consent
-                                category strings from the consent model; values are a nested
-                                tier config applied only to rows carrying that category.
-                              type: object
                             softDeleteGraceDays:
                               default: 30
                               description: |-
@@ -1127,11 +585,127 @@ spec:
                                   type: string
                               type: object
                           type: object
-                        institutional:
+                        description: |-
+                          perCategory lets operators override the tier policy for specific
+                          consent categories (e.g. "memory:health"). Keys are the consent
+                          category strings from the consent model; values are a nested
+                          tier config applied only to rows carrying that category.
+                        type: object
+                      softDeleteGraceDays:
+                        default: 30
+                        description: |-
+                          softDeleteGraceDays is the window between soft-delete (forgotten=true)
+                          and hard-delete. Applies to every mode.
+                        format: int32
+                        maximum: 3650
+                        minimum: 0
+                        type: integer
+                      ttl:
+                        description: MemoryTTLConfig configures the TTL branch of
+                          retention.
+                        properties:
+                          default:
+                            description: |-
+                              default is applied at write time when the caller doesn't set an
+                              explicit expires_at. Must be a Go duration string (e.g. "180d",
+                              "720h"). Empty means "no default TTL" — rows without an explicit
+                              expires_at never expire via the TTL branch.
+                            pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                            type: string
+                          maxAge:
+                            description: |-
+                              maxAge caps any explicit expires_at so a misbehaving client can't
+                              pin a row in the store for longer than the operator accepts. Empty
+                              means no cap.
+                            pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                            type: string
+                        type: object
+                    type: object
+                  user:
+                    description: |-
+                      MemoryTierConfig is the per-tier retention config. Each tier
+                      (institutional / agent / user) can have a different mode and branch
+                      config. Missing branches mean "that branch is off for this tier".
+                    properties:
+                      decay:
+                        description: MemoryDecayConfig configures the Decay branch.
+                        properties:
+                          enabled:
+                            default: true
+                            type: boolean
+                          halfLifeDays:
+                            default: 90
+                            description: |-
+                              halfLifeDays controls how aggressively recency pulls the score down.
+                              Shorter half-life = personal memories decay faster; longer = agent
+                              policies stay relevant longer.
+                            format: int32
+                            maximum: 3650
+                            minimum: 1
+                            type: integer
+                          minScore:
+                            default: "0.2"
+                            description: |-
+                              minScore is the score below which a row is prunable. Uses the
+                              0.5/0.3/0.2 confidence/frequency/recency formula by default. The
+                              controller parses the string and enforces the 0..1 range; bad
+                              values surface as a status condition rather than a rejected apply.
+                            pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
+                            type: string
+                          scoreFormula:
+                            description: |-
+                              scoreFormula overrides the default weights. Weights should sum to
+                              roughly 1.0 — the controller doesn't enforce this strictly because
+                              operators sometimes want to emphasise one signal.
+                            properties:
+                              accessFrequencyWeight:
+                                default: "0.3"
+                                pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
+                                type: string
+                              confidenceWeight:
+                                default: "0.5"
+                                pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
+                                type: string
+                              recencyWeight:
+                                default: "0.2"
+                                pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
+                                type: string
+                            type: object
+                        type: object
+                      lru:
+                        description: MemoryLRUConfig configures the LRU branch.
+                        properties:
+                          enabled:
+                            default: true
+                            type: boolean
+                          staleAfter:
+                            default: 120d
+                            description: |-
+                              staleAfter is the accessed_at age beyond which a row is prunable.
+                              Requires the read-path accessed_at updates shipped in retention
+                              Phase 2 — without those, every row looks stale forever.
+                            pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                            type: string
+                        type: object
+                      mode:
+                        default: Manual
+                        description: |-
+                          MemoryRetentionMode describes how a tier's memories are considered for
+                          auto-pruning. Phase 1 only validates the shape — the RetentionWorker
+                          rewrite in Phase 3 is what actually applies these modes.
+                        enum:
+                        - Manual
+                        - TTL
+                        - Decay
+                        - LRU
+                        - Composite
+                        type: string
+                      perCategory:
+                        additionalProperties:
                           description: |-
-                            MemoryTierConfig is the per-tier retention config. Each tier
-                            (institutional / agent / user) can have a different mode and branch
-                            config. Missing branches mean "that branch is off for this tier".
+                            MemoryTierLeafConfig is the per-category retention override. Same
+                            shape as MemoryTierConfig but cannot itself carry a perCategory map —
+                            CRD schema generation rejects arbitrarily-recursive types.
                           properties:
                             decay:
                               description: MemoryDecayConfig configures the Decay
@@ -1207,124 +781,6 @@ spec:
                               - LRU
                               - Composite
                               type: string
-                            perCategory:
-                              additionalProperties:
-                                description: |-
-                                  MemoryTierLeafConfig is the per-category retention override. Same
-                                  shape as MemoryTierConfig but cannot itself carry a perCategory map —
-                                  CRD schema generation rejects arbitrarily-recursive types.
-                                properties:
-                                  decay:
-                                    description: MemoryDecayConfig configures the
-                                      Decay branch.
-                                    properties:
-                                      enabled:
-                                        default: true
-                                        type: boolean
-                                      halfLifeDays:
-                                        default: 90
-                                        description: |-
-                                          halfLifeDays controls how aggressively recency pulls the score down.
-                                          Shorter half-life = personal memories decay faster; longer = agent
-                                          policies stay relevant longer.
-                                        format: int32
-                                        maximum: 3650
-                                        minimum: 1
-                                        type: integer
-                                      minScore:
-                                        default: "0.2"
-                                        description: |-
-                                          minScore is the score below which a row is prunable. Uses the
-                                          0.5/0.3/0.2 confidence/frequency/recency formula by default. The
-                                          controller parses the string and enforces the 0..1 range; bad
-                                          values surface as a status condition rather than a rejected apply.
-                                        pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                        type: string
-                                      scoreFormula:
-                                        description: |-
-                                          scoreFormula overrides the default weights. Weights should sum to
-                                          roughly 1.0 — the controller doesn't enforce this strictly because
-                                          operators sometimes want to emphasise one signal.
-                                        properties:
-                                          accessFrequencyWeight:
-                                            default: "0.3"
-                                            pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                            type: string
-                                          confidenceWeight:
-                                            default: "0.5"
-                                            pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                            type: string
-                                          recencyWeight:
-                                            default: "0.2"
-                                            pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                            type: string
-                                        type: object
-                                    type: object
-                                  lru:
-                                    description: MemoryLRUConfig configures the LRU
-                                      branch.
-                                    properties:
-                                      enabled:
-                                        default: true
-                                        type: boolean
-                                      staleAfter:
-                                        default: 120d
-                                        description: |-
-                                          staleAfter is the accessed_at age beyond which a row is prunable.
-                                          Requires the read-path accessed_at updates shipped in retention
-                                          Phase 2 — without those, every row looks stale forever.
-                                        pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                        type: string
-                                    type: object
-                                  mode:
-                                    default: Manual
-                                    description: |-
-                                      MemoryRetentionMode describes how a tier's memories are considered for
-                                      auto-pruning. Phase 1 only validates the shape — the RetentionWorker
-                                      rewrite in Phase 3 is what actually applies these modes.
-                                    enum:
-                                    - Manual
-                                    - TTL
-                                    - Decay
-                                    - LRU
-                                    - Composite
-                                    type: string
-                                  softDeleteGraceDays:
-                                    default: 30
-                                    description: |-
-                                      softDeleteGraceDays is the window between soft-delete (forgotten=true)
-                                      and hard-delete. Applies to every mode.
-                                    format: int32
-                                    maximum: 3650
-                                    minimum: 0
-                                    type: integer
-                                  ttl:
-                                    description: MemoryTTLConfig configures the TTL
-                                      branch of retention.
-                                    properties:
-                                      default:
-                                        description: |-
-                                          default is applied at write time when the caller doesn't set an
-                                          explicit expires_at. Must be a Go duration string (e.g. "180d",
-                                          "720h"). Empty means "no default TTL" — rows without an explicit
-                                          expires_at never expire via the TTL branch.
-                                        pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                        type: string
-                                      maxAge:
-                                        description: |-
-                                          maxAge caps any explicit expires_at so a misbehaving client can't
-                                          pin a row in the store for longer than the operator accepts. Empty
-                                          means no cap.
-                                        pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                        type: string
-                                    type: object
-                                type: object
-                              description: |-
-                                perCategory lets operators override the tier policy for specific
-                                consent categories (e.g. "memory:health"). Keys are the consent
-                                category strings from the consent model; values are a nested
-                                tier config applied only to rows carrying that category.
-                              type: object
                             softDeleteGraceDays:
                               default: 30
                               description: |-
@@ -1355,242 +811,45 @@ spec:
                                   type: string
                               type: object
                           type: object
-                        user:
-                          description: |-
-                            MemoryTierConfig is the per-tier retention config. Each tier
-                            (institutional / agent / user) can have a different mode and branch
-                            config. Missing branches mean "that branch is off for this tier".
-                          properties:
-                            decay:
-                              description: MemoryDecayConfig configures the Decay
-                                branch.
-                              properties:
-                                enabled:
-                                  default: true
-                                  type: boolean
-                                halfLifeDays:
-                                  default: 90
-                                  description: |-
-                                    halfLifeDays controls how aggressively recency pulls the score down.
-                                    Shorter half-life = personal memories decay faster; longer = agent
-                                    policies stay relevant longer.
-                                  format: int32
-                                  maximum: 3650
-                                  minimum: 1
-                                  type: integer
-                                minScore:
-                                  default: "0.2"
-                                  description: |-
-                                    minScore is the score below which a row is prunable. Uses the
-                                    0.5/0.3/0.2 confidence/frequency/recency formula by default. The
-                                    controller parses the string and enforces the 0..1 range; bad
-                                    values surface as a status condition rather than a rejected apply.
-                                  pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                  type: string
-                                scoreFormula:
-                                  description: |-
-                                    scoreFormula overrides the default weights. Weights should sum to
-                                    roughly 1.0 — the controller doesn't enforce this strictly because
-                                    operators sometimes want to emphasise one signal.
-                                  properties:
-                                    accessFrequencyWeight:
-                                      default: "0.3"
-                                      pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                      type: string
-                                    confidenceWeight:
-                                      default: "0.5"
-                                      pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                      type: string
-                                    recencyWeight:
-                                      default: "0.2"
-                                      pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                      type: string
-                                  type: object
-                              type: object
-                            lru:
-                              description: MemoryLRUConfig configures the LRU branch.
-                              properties:
-                                enabled:
-                                  default: true
-                                  type: boolean
-                                staleAfter:
-                                  default: 120d
-                                  description: |-
-                                    staleAfter is the accessed_at age beyond which a row is prunable.
-                                    Requires the read-path accessed_at updates shipped in retention
-                                    Phase 2 — without those, every row looks stale forever.
-                                  pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                  type: string
-                              type: object
-                            mode:
-                              default: Manual
-                              description: |-
-                                MemoryRetentionMode describes how a tier's memories are considered for
-                                auto-pruning. Phase 1 only validates the shape — the RetentionWorker
-                                rewrite in Phase 3 is what actually applies these modes.
-                              enum:
-                              - Manual
-                              - TTL
-                              - Decay
-                              - LRU
-                              - Composite
-                              type: string
-                            perCategory:
-                              additionalProperties:
-                                description: |-
-                                  MemoryTierLeafConfig is the per-category retention override. Same
-                                  shape as MemoryTierConfig but cannot itself carry a perCategory map —
-                                  CRD schema generation rejects arbitrarily-recursive types.
-                                properties:
-                                  decay:
-                                    description: MemoryDecayConfig configures the
-                                      Decay branch.
-                                    properties:
-                                      enabled:
-                                        default: true
-                                        type: boolean
-                                      halfLifeDays:
-                                        default: 90
-                                        description: |-
-                                          halfLifeDays controls how aggressively recency pulls the score down.
-                                          Shorter half-life = personal memories decay faster; longer = agent
-                                          policies stay relevant longer.
-                                        format: int32
-                                        maximum: 3650
-                                        minimum: 1
-                                        type: integer
-                                      minScore:
-                                        default: "0.2"
-                                        description: |-
-                                          minScore is the score below which a row is prunable. Uses the
-                                          0.5/0.3/0.2 confidence/frequency/recency formula by default. The
-                                          controller parses the string and enforces the 0..1 range; bad
-                                          values surface as a status condition rather than a rejected apply.
-                                        pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                        type: string
-                                      scoreFormula:
-                                        description: |-
-                                          scoreFormula overrides the default weights. Weights should sum to
-                                          roughly 1.0 — the controller doesn't enforce this strictly because
-                                          operators sometimes want to emphasise one signal.
-                                        properties:
-                                          accessFrequencyWeight:
-                                            default: "0.3"
-                                            pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                            type: string
-                                          confidenceWeight:
-                                            default: "0.5"
-                                            pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                            type: string
-                                          recencyWeight:
-                                            default: "0.2"
-                                            pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
-                                            type: string
-                                        type: object
-                                    type: object
-                                  lru:
-                                    description: MemoryLRUConfig configures the LRU
-                                      branch.
-                                    properties:
-                                      enabled:
-                                        default: true
-                                        type: boolean
-                                      staleAfter:
-                                        default: 120d
-                                        description: |-
-                                          staleAfter is the accessed_at age beyond which a row is prunable.
-                                          Requires the read-path accessed_at updates shipped in retention
-                                          Phase 2 — without those, every row looks stale forever.
-                                        pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                        type: string
-                                    type: object
-                                  mode:
-                                    default: Manual
-                                    description: |-
-                                      MemoryRetentionMode describes how a tier's memories are considered for
-                                      auto-pruning. Phase 1 only validates the shape — the RetentionWorker
-                                      rewrite in Phase 3 is what actually applies these modes.
-                                    enum:
-                                    - Manual
-                                    - TTL
-                                    - Decay
-                                    - LRU
-                                    - Composite
-                                    type: string
-                                  softDeleteGraceDays:
-                                    default: 30
-                                    description: |-
-                                      softDeleteGraceDays is the window between soft-delete (forgotten=true)
-                                      and hard-delete. Applies to every mode.
-                                    format: int32
-                                    maximum: 3650
-                                    minimum: 0
-                                    type: integer
-                                  ttl:
-                                    description: MemoryTTLConfig configures the TTL
-                                      branch of retention.
-                                    properties:
-                                      default:
-                                        description: |-
-                                          default is applied at write time when the caller doesn't set an
-                                          explicit expires_at. Must be a Go duration string (e.g. "180d",
-                                          "720h"). Empty means "no default TTL" — rows without an explicit
-                                          expires_at never expire via the TTL branch.
-                                        pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                        type: string
-                                      maxAge:
-                                        description: |-
-                                          maxAge caps any explicit expires_at so a misbehaving client can't
-                                          pin a row in the store for longer than the operator accepts. Empty
-                                          means no cap.
-                                        pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                        type: string
-                                    type: object
-                                type: object
-                              description: |-
-                                perCategory lets operators override the tier policy for specific
-                                consent categories (e.g. "memory:health"). Keys are the consent
-                                category strings from the consent model; values are a nested
-                                tier config applied only to rows carrying that category.
-                              type: object
-                            softDeleteGraceDays:
-                              default: 30
-                              description: |-
-                                softDeleteGraceDays is the window between soft-delete (forgotten=true)
-                                and hard-delete. Applies to every mode.
-                              format: int32
-                              maximum: 3650
-                              minimum: 0
-                              type: integer
-                            ttl:
-                              description: MemoryTTLConfig configures the TTL branch
-                                of retention.
-                              properties:
-                                default:
-                                  description: |-
-                                    default is applied at write time when the caller doesn't set an
-                                    explicit expires_at. Must be a Go duration string (e.g. "180d",
-                                    "720h"). Empty means "no default TTL" — rows without an explicit
-                                    expires_at never expire via the TTL branch.
-                                  pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                  type: string
-                                maxAge:
-                                  description: |-
-                                    maxAge caps any explicit expires_at so a misbehaving client can't
-                                    pin a row in the store for longer than the operator accepts. Empty
-                                    means no cap.
-                                  pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
-                                  type: string
-                              type: object
-                          type: object
-                      type: object
-                  type: object
-                description: |-
-                  perWorkspace keys are Workspace resource names. Values override
-                  the matching fields in default; unset fields inherit.
+                        description: |-
+                          perCategory lets operators override the tier policy for specific
+                          consent categories (e.g. "memory:health"). Keys are the consent
+                          category strings from the consent model; values are a nested
+                          tier config applied only to rows carrying that category.
+                        type: object
+                      softDeleteGraceDays:
+                        default: 30
+                        description: |-
+                          softDeleteGraceDays is the window between soft-delete (forgotten=true)
+                          and hard-delete. Applies to every mode.
+                        format: int32
+                        maximum: 3650
+                        minimum: 0
+                        type: integer
+                      ttl:
+                        description: MemoryTTLConfig configures the TTL branch of
+                          retention.
+                        properties:
+                          default:
+                            description: |-
+                              default is applied at write time when the caller doesn't set an
+                              explicit expires_at. Must be a Go duration string (e.g. "180d",
+                              "720h"). Empty means "no default TTL" — rows without an explicit
+                              expires_at never expire via the TTL branch.
+                            pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                            type: string
+                          maxAge:
+                            description: |-
+                              maxAge caps any explicit expires_at so a misbehaving client can't
+                              pin a row in the store for longer than the operator accepts. Empty
+                              means no cap.
+                            pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                            type: string
+                        type: object
+                    type: object
                 type: object
             required:
-            - default
+            - tiers
             type: object
           status:
             description: MemoryPolicyStatus is the observed state.

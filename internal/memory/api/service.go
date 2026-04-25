@@ -89,6 +89,7 @@ type MemoryService struct {
 	embeddingSvc   *memory.EmbeddingService // nil if embeddings not configured
 	eventPublisher MemoryEventPublisher     // nil if event publishing not configured
 	auditLogger    MemoryAuditLogger        // nil if audit logging not configured
+	policyLoader   memory.PolicyLoader      // nil if no MemoryPolicy resolution wired
 	config         MemoryServiceConfig
 	log            logr.Logger
 }
@@ -108,6 +109,15 @@ func NewMemoryService(store memory.Store, embeddingSvc *memory.EmbeddingService,
 // It may be called at most once before the service begins handling requests.
 func (s *MemoryService) SetEventPublisher(p MemoryEventPublisher) {
 	s.eventPublisher = p
+}
+
+// SetPolicyLoader wires a MemoryPolicy loader so retrieval can build a
+// per-tier ranker from the workspace's bound policy. May be called at
+// most once before the service begins handling requests. Optional —
+// without a loader the service uses the identity ranker (no per-tier
+// score adjustment).
+func (s *MemoryService) SetPolicyLoader(loader memory.PolicyLoader) {
+	s.policyLoader = loader
 }
 
 // SetAuditLogger configures the audit logger for the service.

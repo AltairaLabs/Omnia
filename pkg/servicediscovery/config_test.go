@@ -208,9 +208,7 @@ func TestResolveMemoryConfig(t *testing.T) {
 					SecretRef: corev1.LocalObjectReference{Name: "memory-db-secret"},
 				},
 				ProviderRef: &corev1.LocalObjectReference{Name: "my-embedding-provider"},
-				Retention: &omniav1alpha1.WorkspaceMemoryRetentionConfig{
-					DefaultTTL: "720h",
-				},
+				PolicyRef:   &corev1.LocalObjectReference{Name: "my-memory-policy"},
 			},
 		},
 	})
@@ -231,9 +229,6 @@ func TestResolveMemoryConfig(t *testing.T) {
 	}
 	if cfg.EmbeddingProviderName != "my-embedding-provider" {
 		t.Errorf("unexpected provider name: %s", cfg.EmbeddingProviderName)
-	}
-	if cfg.DefaultTTL != "720h" {
-		t.Errorf("unexpected default TTL: %s", cfg.DefaultTTL)
 	}
 }
 

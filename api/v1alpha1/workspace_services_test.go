@@ -33,7 +33,7 @@ func TestWorkspaceServiceGroupManagedJSON(t *testing.T) {
 				SecretRef: corev1.LocalObjectReference{Name: "memory-db-secret"},
 			},
 			ProviderRef: &corev1.LocalObjectReference{Name: "openai-provider"},
-			Retention:   &WorkspaceMemoryRetentionConfig{DefaultTTL: "720h"},
+			PolicyRef:   &corev1.LocalObjectReference{Name: "default-memory-policy"},
 		},
 		Session: &SessionServiceConfig{
 			Database: DatabaseConfig{
@@ -68,8 +68,8 @@ func TestWorkspaceServiceGroupManagedJSON(t *testing.T) {
 	if got.Memory.ProviderRef == nil || got.Memory.ProviderRef.Name != "openai-provider" {
 		t.Errorf("Memory.ProviderRef.Name = %v, want openai-provider", got.Memory.ProviderRef)
 	}
-	if got.Memory.Retention == nil || got.Memory.Retention.DefaultTTL != "720h" {
-		t.Errorf("Memory.Retention.DefaultTTL = %v, want 720h", got.Memory.Retention)
+	if got.Memory.PolicyRef == nil || got.Memory.PolicyRef.Name != "default-memory-policy" {
+		t.Errorf("Memory.PolicyRef = %v, want default-memory-policy", got.Memory.PolicyRef)
 	}
 	if got.Session == nil {
 		t.Fatal("Session is nil after round-trip")

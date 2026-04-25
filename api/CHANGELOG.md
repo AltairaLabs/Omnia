@@ -10,6 +10,72 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Breaking (MemoryPolicy schema flatten + tier-precedence)
+
+- `MemoryPolicy.spec.default` and `spec.perWorkspace` removed. Fields
+  promoted to `spec.*`:
+  - `spec.tiers` (was `spec.default.tiers`)
+  - `spec.consentRevocation` (was `spec.default.consentRevocation`)
+  - `spec.supersession` (was `spec.default.supersession`)
+  - `spec.schedule` (was `spec.default.schedule`)
+  - `spec.batchSize` (was `spec.default.batchSize`)
+- `Workspace.spec.services[].memory.retention` removed (and the
+  `WorkspaceMemoryRetentionConfig` type deleted). Workspaces now
+  reference a `MemoryPolicy` via `services[].memory.policyRef`
+  (`*corev1.LocalObjectReference`). Many workspaces may share one
+  policy. A workspace with no `policyRef` falls back to the baked-in
+  `LegacyIntervalPolicy`.
+- New: `MemoryPolicy.spec.tierPrecedence` configures per-tier ranking
+  multipliers via a sibling-presence-dispatched union. Today the only
+  ranker is `multiplicative`:
+
+  ```yaml
+  spec:
+    tierPrecedence:
+      multiplicative:
+        institutional: "1.5"
+        agent:         "1.0"
+        user:          "1.0"
+  ```
+
+  The retrieval service consults the `MemoryPolicy` bound to the
+  workspace and applies the per-tier multiplier inside `rankResults`
+  (after the existing confidence/frequency/recency formula). Future
+  ranker types (e.g. hard precedence) ship as new sibling fields on
+  `TierPrecedenceConfig` plus a widened CEL rule. Existing
+  `multiplicative` manifests keep validating.
+
+- The `K8sPolicyLoader` flips from cluster-wide List-and-pick-default
+  to workspace-driven Get: read `Workspace` by `--workspace` flag,
+  walk to the named `--service-group`, follow `policyRef.Name` to the
+  named `MemoryPolicy`. Any miss returns nil so the existing fallback
+  to `LegacyIntervalPolicy` stands.
+
+- Migration for clusters with existing `MemoryPolicy` instances using
+  the nested shape — re-author one policy per workspace, then update
+  each Workspace to reference it:
+
+  ```bash
+  # 1. Inspect existing policies (manual; the shape varies per operator).
+  kubectl get memorypolicies -o yaml > /tmp/old-policies.yaml
+
+  # 2. Author one MemoryPolicy per workspace (no cluster-wide override
+  #    map; the workspace owns the binding via policyRef).
+  kubectl apply -f my-workspace-policy.yaml
+
+  # 3. Patch each Workspace to reference the policy.
+  kubectl patch workspace my-workspace --type=merge -p '
+    {"spec":{"services":[{"name":"default","memory":{"policyRef":{"name":"my-workspace-policy"}}}]}}'
+  ```
+
+- Migration for `Workspace.services[].memory.retention.defaultTTL`
+  users — author a `MemoryPolicy` with `spec.tiers.user.ttl.default`
+  set to the old TTL and bind it via `policyRef`. The bespoke
+  `retention` block no longer validates.
+
+- The flatten + cleanup unblocks a follow-up to apply the same shape
+  to `SessionRetentionPolicy` (tracked in #1016).
+
 ### Added (memory aggregate tier groupBy, #1004)
 
 - `GET /api/v1/memories/aggregate` now accepts `groupBy=tier`, returning

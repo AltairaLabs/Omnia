@@ -181,34 +181,96 @@ func TestValidateTierConfig_NestedCategoryInvalid(t *testing.T) {
 	assert.Contains(t, err.Error(), "perCategory[memory:health]")
 }
 
-func TestValidateRetentionDefaults_BadSchedule(t *testing.T) {
-	d := &omniav1alpha1.MemoryRetentionDefaults{
-		Tiers:    omniav1alpha1.MemoryRetentionTierSet{},
-		Schedule: "not a cron",
+func TestValidatePolicy_BadSchedule(t *testing.T) {
+	r := &MemoryPolicyReconciler{}
+	policy := &omniav1alpha1.MemoryPolicy{
+		Spec: omniav1alpha1.MemoryPolicySpec{
+			Tiers:    omniav1alpha1.MemoryRetentionTierSet{},
+			Schedule: "not a cron",
+		},
 	}
-	err := validateRetentionDefaults(d)
+	err := r.validatePolicy(policy)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "schedule")
 }
 
-func TestValidateRetentionDefaults_AllModes(t *testing.T) {
-	d := &omniav1alpha1.MemoryRetentionDefaults{
-		Tiers: omniav1alpha1.MemoryRetentionTierSet{
-			Institutional: &omniav1alpha1.MemoryTierConfig{Mode: omniav1alpha1.MemoryRetentionModeManual},
-			Agent: &omniav1alpha1.MemoryTierConfig{
-				Mode: omniav1alpha1.MemoryRetentionModeComposite,
-				TTL:  &omniav1alpha1.MemoryTTLConfig{Default: "180d", MaxAge: "365d"},
-				Decay: &omniav1alpha1.MemoryDecayConfig{
-					MinScore: "0.2",
+func TestValidatePolicy_AllModes(t *testing.T) {
+	r := &MemoryPolicyReconciler{}
+	policy := &omniav1alpha1.MemoryPolicy{
+		Spec: omniav1alpha1.MemoryPolicySpec{
+			Tiers: omniav1alpha1.MemoryRetentionTierSet{
+				Institutional: &omniav1alpha1.MemoryTierConfig{Mode: omniav1alpha1.MemoryRetentionModeManual},
+				Agent: &omniav1alpha1.MemoryTierConfig{
+					Mode: omniav1alpha1.MemoryRetentionModeComposite,
+					TTL:  &omniav1alpha1.MemoryTTLConfig{Default: "180d", MaxAge: "365d"},
+					Decay: &omniav1alpha1.MemoryDecayConfig{
+						MinScore: "0.2",
+					},
+					LRU: &omniav1alpha1.MemoryLRUConfig{StaleAfter: "120d"},
 				},
-				LRU: &omniav1alpha1.MemoryLRUConfig{StaleAfter: "120d"},
+				User: &omniav1alpha1.MemoryTierConfig{
+					Mode: omniav1alpha1.MemoryRetentionModeTTL,
+					TTL:  &omniav1alpha1.MemoryTTLConfig{Default: "90d", MaxAge: "365d"},
+				},
 			},
-			User: &omniav1alpha1.MemoryTierConfig{
-				Mode: omniav1alpha1.MemoryRetentionModeTTL,
-				TTL:  &omniav1alpha1.MemoryTTLConfig{Default: "90d", MaxAge: "365d"},
-			},
+			Schedule: "0 3 * * *",
 		},
-		Schedule: "0 3 * * *",
 	}
-	assert.NoError(t, validateRetentionDefaults(d))
+	assert.NoError(t, r.validatePolicy(policy))
+}
+
+func TestValidateTierPrecedence_NilMultiplicative(t *testing.T) {
+	tp := &omniav1alpha1.TierPrecedenceConfig{}
+	assert.NoError(t, validateTierPrecedence(tp))
+}
+
+func TestValidateTierPrecedence_HappyPath(t *testing.T) {
+	tp := &omniav1alpha1.TierPrecedenceConfig{
+		Multiplicative: &omniav1alpha1.MultiplicativeTierPrecedence{
+			Institutional: "1.5",
+			Agent:         "1.0",
+			User:          "0.5",
+		},
+	}
+	assert.NoError(t, validateTierPrecedence(tp))
+}
+
+func TestValidateTierPrecedence_BadDecimal(t *testing.T) {
+	tp := &omniav1alpha1.TierPrecedenceConfig{
+		Multiplicative: &omniav1alpha1.MultiplicativeTierPrecedence{
+			Institutional: "abc",
+		},
+	}
+	err := validateTierPrecedence(tp)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "institutional")
+}
+
+func TestValidateTierPrecedence_AboveMax(t *testing.T) {
+	tp := &omniav1alpha1.TierPrecedenceConfig{
+		Multiplicative: &omniav1alpha1.MultiplicativeTierPrecedence{
+			Agent: "10.5",
+		},
+	}
+	err := validateTierPrecedence(tp)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outside [0, 10]")
+}
+
+func TestValidateTierPrecedence_NegativeRejected(t *testing.T) {
+	tp := &omniav1alpha1.TierPrecedenceConfig{
+		Multiplicative: &omniav1alpha1.MultiplicativeTierPrecedence{
+			User: "-0.5",
+		},
+	}
+	err := validateTierPrecedence(tp)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outside [0, 10]")
+}
+
+func TestValidateTierPrecedence_EmptyWeightsTreatedAsDefault(t *testing.T) {
+	tp := &omniav1alpha1.TierPrecedenceConfig{
+		Multiplicative: &omniav1alpha1.MultiplicativeTierPrecedence{},
+	}
+	assert.NoError(t, validateTierPrecedence(tp))
 }

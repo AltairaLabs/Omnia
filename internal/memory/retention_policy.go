@@ -9,20 +9,16 @@ package memory
 import (
 	"context"
 	"fmt"
-	"sort"
 	"sync/atomic"
 	"time"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
-
-// defaultPolicyName is the well-known name the worker looks for first
-// when picking which MemoryPolicy to apply. Matches the
-// sample in config/samples/omnia_v1alpha1_memorypolicy.yaml.
-const defaultPolicyName = "default"
 
 // PolicyLoader fetches the active MemoryPolicy. Implementations
 // may cache; callers must treat the returned policy as read-only.
@@ -41,59 +37,100 @@ func (s *StaticPolicyLoader) Load(_ context.Context) (*omniav1alpha1.MemoryPolic
 	return s.Policy, nil
 }
 
-// K8sPolicyLoader reads MemoryPolicy resources from the
-// control plane. Caches the last-known policy so a transient API
-// outage doesn't stall the retention cron.
+// K8sPolicyLoader resolves a MemoryPolicy via the Workspace that owns
+// this memory-api process. The workspace's services[<group>].memory
+// .policyRef names the policy; the loader Gets it by name.
+//
+// Caches the last-known policy so a transient API outage doesn't stall
+// the retention cron. Returns (nil, nil) for any "not found" condition
+// so callers fall back to the baked-in LegacyIntervalPolicy.
 type K8sPolicyLoader struct {
-	Client client.Client
-	Log    logr.Logger
+	Client       client.Client
+	Log          logr.Logger
+	Workspace    string
+	ServiceGroup string
 
 	cached atomic.Pointer[omniav1alpha1.MemoryPolicy]
 }
 
-// NewK8sPolicyLoader wires a client-backed loader.
-func NewK8sPolicyLoader(c client.Client, log logr.Logger) *K8sPolicyLoader {
-	return &K8sPolicyLoader{Client: c, Log: log}
+// NewK8sPolicyLoader constructs a loader bound to a single workspace +
+// service group. workspace and serviceGroup must match the values the
+// memory-api binary was started with — they're used to resolve the
+// Workspace CRD and pick the right service-group entry.
+func NewK8sPolicyLoader(c client.Client, log logr.Logger, workspace, serviceGroup string) *K8sPolicyLoader {
+	return &K8sPolicyLoader{
+		Client:       c,
+		Log:          log,
+		Workspace:    workspace,
+		ServiceGroup: serviceGroup,
+	}
 }
 
-// Load lists MemoryRetentionPolicies cluster-wide and returns the
-// policy named "default" if present, otherwise the lexicographically
-// first active one. Falls back to the last-known-good policy when the
-// API call fails.
+// Load resolves the active MemoryPolicy. Returns (nil, nil) when the
+// workspace, the service group, the policyRef, or the named policy is
+// missing — callers treat nil as "use legacy fallback".
 func (k *K8sPolicyLoader) Load(ctx context.Context) (*omniav1alpha1.MemoryPolicy, error) {
-	list := &omniav1alpha1.MemoryPolicyList{}
-	if err := k.Client.List(ctx, list); err != nil {
-		if cached := k.cached.Load(); cached != nil {
-			k.Log.V(1).Info("policy list failed, using cached policy",
-				"cachedName", cached.Name, "error", err.Error())
-			return cached, nil
-		}
-		return nil, fmt.Errorf("list MemoryPolicy: %w", err)
+	if k.Workspace == "" {
+		// No workspace context (e.g. local dev outside K8s) — bypass.
+		return nil, nil
 	}
 
-	active := make([]omniav1alpha1.MemoryPolicy, 0, len(list.Items))
-	for i := range list.Items {
-		if list.Items[i].DeletionTimestamp.IsZero() {
-			active = append(active, list.Items[i])
+	ws := &omniav1alpha1.Workspace{}
+	if err := k.Client.Get(ctx, client.ObjectKey{Name: k.Workspace}, ws); err != nil {
+		if apierrors.IsNotFound(err) {
+			k.Log.V(1).Info("workspace not found, using legacy policy", "workspace", k.Workspace)
+			return nil, nil
 		}
+		if cached := k.cached.Load(); cached != nil {
+			k.Log.V(1).Info("workspace get failed, using cached policy",
+				"workspace", k.Workspace, "cachedName", cached.Name, "error", err.Error())
+			return cached, nil
+		}
+		return nil, fmt.Errorf("get workspace %q: %w", k.Workspace, err)
 	}
-	if len(active) == 0 {
+
+	ref := findMemoryPolicyRef(ws, k.ServiceGroup)
+	if ref == nil {
+		k.Log.V(1).Info("workspace has no memory policyRef, using legacy",
+			"workspace", k.Workspace, "serviceGroup", k.ServiceGroup)
 		k.cached.Store(nil)
 		return nil, nil
 	}
 
-	sort.Slice(active, func(i, j int) bool {
-		if active[i].Name == defaultPolicyName {
-			return true
+	policy := &omniav1alpha1.MemoryPolicy{}
+	if err := k.Client.Get(ctx, client.ObjectKey{Name: ref.Name}, policy); err != nil {
+		if apierrors.IsNotFound(err) {
+			k.Log.Info("memorypolicy not found, using legacy",
+				"policyRef", ref.Name, "workspace", k.Workspace)
+			k.cached.Store(nil)
+			return nil, nil
 		}
-		if active[j].Name == defaultPolicyName {
-			return false
+		if cached := k.cached.Load(); cached != nil {
+			k.Log.V(1).Info("memorypolicy get failed, using cached policy",
+				"policyRef", ref.Name, "cachedName", cached.Name, "error", err.Error())
+			return cached, nil
 		}
-		return active[i].Name < active[j].Name
-	})
-	chosen := active[0].DeepCopy()
-	k.cached.Store(chosen)
-	return chosen, nil
+		return nil, fmt.Errorf("get memorypolicy %q: %w", ref.Name, err)
+	}
+
+	k.cached.Store(policy)
+	return policy, nil
+}
+
+// findMemoryPolicyRef walks the workspace's service groups and returns
+// the matching group's memory.policyRef (or nil when no match / no ref).
+func findMemoryPolicyRef(ws *omniav1alpha1.Workspace, group string) *corev1.LocalObjectReference {
+	for i := range ws.Spec.Services {
+		svc := &ws.Spec.Services[i]
+		if svc.Name != group {
+			continue
+		}
+		if svc.Memory == nil || svc.Memory.PolicyRef == nil {
+			return nil
+		}
+		return svc.Memory.PolicyRef
+	}
+	return nil
 }
 
 // LegacyIntervalPolicy builds a minimal policy from the legacy
@@ -109,14 +146,12 @@ func LegacyIntervalPolicy(interval time.Duration) *omniav1alpha1.MemoryPolicy {
 	mode := omniav1alpha1.MemoryRetentionModeTTL
 	return &omniav1alpha1.MemoryPolicy{
 		Spec: omniav1alpha1.MemoryPolicySpec{
-			Default: omniav1alpha1.MemoryRetentionDefaults{
-				Tiers: omniav1alpha1.MemoryRetentionTierSet{
-					Institutional: &omniav1alpha1.MemoryTierConfig{Mode: mode},
-					Agent:         &omniav1alpha1.MemoryTierConfig{Mode: mode},
-					User:          &omniav1alpha1.MemoryTierConfig{Mode: mode},
-				},
-				Schedule: schedule,
+			Tiers: omniav1alpha1.MemoryRetentionTierSet{
+				Institutional: &omniav1alpha1.MemoryTierConfig{Mode: mode},
+				Agent:         &omniav1alpha1.MemoryTierConfig{Mode: mode},
+				User:          &omniav1alpha1.MemoryTierConfig{Mode: mode},
 			},
+			Schedule: schedule,
 		},
 	}
 }

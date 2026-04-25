@@ -78,6 +78,11 @@ type MultiTierRequest struct {
 	MaxGraphHops      int
 	RelationTypes     []string
 	StructuredLookups []StructuredLookup
+
+	// Ranker biases per-tier scores after the base score is computed.
+	// Nil means identity (no change), preserving the pre-tier-precedence
+	// behaviour for callers without a MemoryPolicy in scope.
+	Ranker TierRanker
 }
 
 // MultiTierMemory augments a Memory with the tier it was retrieved from,
@@ -143,7 +148,7 @@ func (s *PostgresMemoryStore) RetrieveMultiTier(ctx context.Context, req MultiTi
 	if now.IsZero() {
 		now = time.Now()
 	}
-	rankResults(memories, now)
+	rankResults(memories, now, req.Ranker)
 
 	limit := req.Limit
 	if limit <= 0 {
@@ -417,11 +422,16 @@ func classifyTier(userID, agentID *string) Tier {
 }
 
 // rankResults assigns a Score to each MultiTierMemory and sorts the slice in
-// descending score order. The formula mixes confidence, access-count
-// frequency (log-normalised), and recency (exponential decay).
-func rankResults(results []*MultiTierMemory, now time.Time) {
+// descending score order. The base formula mixes confidence, access-count
+// frequency (log-normalised), and recency (exponential decay); the supplied
+// TierRanker then biases the score per tier (an identity ranker preserves
+// the existing behaviour for callers without a policy).
+func rankResults(results []*MultiTierMemory, now time.Time, ranker TierRanker) {
+	if ranker == nil {
+		ranker = IdentityTierRanker{}
+	}
 	for _, r := range results {
-		r.Score = computeScore(r, now)
+		r.Score = ranker.Adjust(computeScore(r, now), r.Tier)
 	}
 	sort.SliceStable(results, func(i, j int) bool {
 		return results[i].Score > results[j].Score

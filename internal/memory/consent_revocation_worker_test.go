@@ -24,13 +24,11 @@ func revocationPolicy(action omniav1alpha1.ConsentRevocationAction) *omniav1alph
 	grace := int32(7)
 	return &omniav1alpha1.MemoryPolicy{
 		Spec: omniav1alpha1.MemoryPolicySpec{
-			Default: omniav1alpha1.MemoryRetentionDefaults{
-				Tiers:    omniav1alpha1.MemoryRetentionTierSet{},
-				Schedule: "@every 1m",
-				ConsentRevocation: &omniav1alpha1.MemoryConsentRevocationConfig{
-					Action:    action,
-					GraceDays: &grace,
-				},
+			Tiers:    omniav1alpha1.MemoryRetentionTierSet{},
+			Schedule: "@every 1m",
+			ConsentRevocation: &omniav1alpha1.MemoryConsentRevocationConfig{
+				Action:    action,
+				GraceDays: &grace,
 			},
 		},
 	}

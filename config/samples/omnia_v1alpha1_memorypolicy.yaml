@@ -6,94 +6,88 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: default
 spec:
-  default:
-    tiers:
-      # Operator-curated "workspace knowledge" rows are almost always
-      # kept. Manual means only explicit delete or DSAR removes them.
-      institutional:
-        mode: Manual
-        softDeleteGraceDays: 30
+  tiers:
+    # Operator-curated "workspace knowledge" rows are almost always
+    # kept. Manual means only explicit delete or DSAR removes them.
+    institutional:
+      mode: Manual
+      softDeleteGraceDays: 30
 
-      # Agent-scoped admin memories (policies, tool-use rules) —
-      # composite scoring so uninteresting rules age out but the
-      # hard TTL cap saves operators from runaway retention.
-      agent:
-        mode: Composite
-        softDeleteGraceDays: 14
-        ttl:
-          default: 180d
-          maxAge: 365d
-        decay:
-          enabled: true
-          minScore: "0.2"
-          scoreFormula:
-            confidenceWeight: "0.5"
-            accessFrequencyWeight: "0.3"
-            recencyWeight: "0.2"
-          halfLifeDays: 90
-        lru:
-          enabled: true
-          staleAfter: 120d
+    # Agent-scoped admin memories (policies, tool-use rules) —
+    # composite scoring so uninteresting rules age out but the
+    # hard TTL cap saves operators from runaway retention.
+    agent:
+      mode: Composite
+      softDeleteGraceDays: 14
+      ttl:
+        default: 180d
+        maxAge: 365d
+      decay:
+        enabled: true
+        minScore: "0.2"
+        scoreFormula:
+          confidenceWeight: "0.5"
+          accessFrequencyWeight: "0.3"
+          recencyWeight: "0.2"
+        halfLifeDays: 90
+      lru:
+        enabled: true
+        staleAfter: 120d
 
-      # User memories — the personal tier. Tighter decay + shorter LRU
-      # because personal context goes stale faster than agent policy.
-      user:
-        mode: Composite
-        softDeleteGraceDays: 7
-        ttl:
-          default: 90d
-          maxAge: 365d
-        decay:
-          enabled: true
-          minScore: "0.3"
-          scoreFormula:
-            confidenceWeight: "0.5"
-            accessFrequencyWeight: "0.3"
-            recencyWeight: "0.2"
-          halfLifeDays: 30
-        lru:
-          enabled: true
-          staleAfter: 60d
-        perCategory:
-          # Sensitive categories get a short hard TTL regardless of
-          # the base user policy.
-          "memory:health":
-            mode: TTL
-            softDeleteGraceDays: 3
-            ttl:
-              default: 30d
-              maxAge: 90d
-          "memory:location":
-            mode: TTL
-            softDeleteGraceDays: 3
-            ttl:
-              default: 30d
-              maxAge: 90d
+    # User memories — the personal tier. Tighter decay + shorter LRU
+    # because personal context goes stale faster than agent policy.
+    user:
+      mode: Composite
+      softDeleteGraceDays: 7
+      ttl:
+        default: 90d
+        maxAge: 365d
+      decay:
+        enabled: true
+        minScore: "0.3"
+        scoreFormula:
+          confidenceWeight: "0.5"
+          accessFrequencyWeight: "0.3"
+          recencyWeight: "0.2"
+        halfLifeDays: 30
+      lru:
+        enabled: true
+        staleAfter: 60d
+      perCategory:
+        # Sensitive categories get a short hard TTL regardless of
+        # the base user policy.
+        "memory:health":
+          mode: TTL
+          softDeleteGraceDays: 3
+          ttl:
+            default: 30d
+            maxAge: 90d
+        "memory:location":
+          mode: TTL
+          softDeleteGraceDays: 3
+          ttl:
+            default: 30d
+            maxAge: 90d
 
-    consentRevocation:
-      action: SoftDelete
-      graceDays: 7
+  # Bias retrieval ranking towards institutional knowledge. Score
+  # within a tier is preserved; multipliers shift across tiers.
+  tierPrecedence:
+    multiplicative:
+      institutional: "1.5"
+      agent: "1.0"
+      user: "1.0"
 
-    # Gated off until temporal summarization is running in this
-    # workspace (see docs/local-backlog/2026-04-23-memory-summarization-
-    # via-agent.md). Flip to true after the summarizer is live.
-    supersession:
-      enabled: false
-      graceDays: 14
+  consentRevocation:
+    action: SoftDelete
+    graceDays: 7
 
-    schedule: "0 3 * * *"
-    batchSize: 1000
+  # Gated off until temporal summarization is running in this
+  # workspace (see docs/local-backlog/implemented/2026-04-23-memory-
+  # summarization-via-agent.md). Flip to true after the summarizer
+  # is live.
+  supersession:
+    enabled: false
+    graceDays: 14
 
-  # Example per-workspace override — regulated workspaces may need
-  # manual-only retention across every tier.
-  perWorkspace:
-    compliance-workspace:
-      tiers:
-        institutional:
-          mode: Manual
-        agent:
-          mode: Manual
-        user:
-          mode: Manual
-      consentRevocation:
-        action: HardDelete
+  schedule: "0 3 * * *"
+  batchSize: 1000
