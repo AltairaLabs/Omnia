@@ -4,59 +4,35 @@
 import type { ObjectMeta } from "../common";
 
 export interface SessionRetentionPolicySpec {
-  /** default defines the default retention configuration across all storage tiers. */
-  default: {
-    /** coldArchive configures the cold archive tier (e.g., S3, GCS). */
-    coldArchive?: {
-      /** compactionSchedule is a cron expression for when to run compaction/archival. */
-      compactionSchedule?: string;
-      /** enabled specifies whether cold archival is active. */
-      enabled?: boolean;
-      /** retentionDays is the number of days to retain data in the cold archive.
-       * Required when enabled is true. */
-      retentionDays?: number;
-    };
-    /** hotCache configures the Redis hot cache tier. */
-    hotCache?: {
-      /** enabled specifies whether the hot cache is active. */
-      enabled?: boolean;
-      /** maxMessagesPerSession is the maximum number of messages per session in the hot cache. */
-      maxMessagesPerSession?: number;
-      /** maxSessions is the maximum number of sessions to keep in the hot cache. */
-      maxSessions?: number;
-      /** ttlAfterInactive is the duration after which inactive sessions are evicted from the hot cache.
-       * Must be a Go duration string (e.g., "24h", "30m", "1h30m"). */
-      ttlAfterInactive?: string;
-    };
-    /** warmStore configures the Postgres warm store tier. */
-    warmStore?: {
-      /** partitionBy defines the partitioning strategy for warm store tables. */
-      partitionBy?: "week";
-      /** retentionDays is the number of days to retain data in the warm store. */
-      retentionDays?: number;
-    };
+  /** coldArchive configures the cold archive tier (e.g., S3, GCS). */
+  coldArchive?: {
+    /** compactionSchedule is a cron expression for when to run compaction/archival. */
+    compactionSchedule?: string;
+    /** enabled specifies whether cold archival is active. */
+    enabled?: boolean;
+    /** retentionDays is the number of days to retain data in the cold archive.
+     * Required when enabled is true. */
+    retentionDays?: number;
   };
-  /** perWorkspace defines per-workspace retention overrides.
-   * Map keys are Workspace resource names. */
-  perWorkspace?: Record<string, {
-    /** coldArchive overrides the cold archive configuration for this workspace. */
-    coldArchive?: {
-      /** compactionSchedule is a cron expression for when to run compaction/archival. */
-      compactionSchedule?: string;
-      /** enabled specifies whether cold archival is active. */
-      enabled?: boolean;
-      /** retentionDays is the number of days to retain data in the cold archive.
-       * Required when enabled is true. */
-      retentionDays?: number;
-    };
-    /** warmStore overrides the warm store configuration for this workspace. */
-    warmStore?: {
-      /** partitionBy defines the partitioning strategy for warm store tables. */
-      partitionBy?: "week";
-      /** retentionDays is the number of days to retain data in the warm store. */
-      retentionDays?: number;
-    };
-  }>;
+  /** hotCache configures the Redis hot cache tier. */
+  hotCache?: {
+    /** enabled specifies whether the hot cache is active. */
+    enabled?: boolean;
+    /** maxMessagesPerSession is the maximum number of messages per session in the hot cache. */
+    maxMessagesPerSession?: number;
+    /** maxSessions is the maximum number of sessions to keep in the hot cache. */
+    maxSessions?: number;
+    /** ttlAfterInactive is the duration after which inactive sessions are evicted from the hot cache.
+     * Must be a Go duration string (e.g., "24h", "30m", "1h30m"). */
+    ttlAfterInactive?: string;
+  };
+  /** warmStore configures the Postgres warm store tier. */
+  warmStore?: {
+    /** partitionBy defines the partitioning strategy for warm store tables. */
+    partitionBy?: "week";
+    /** retentionDays is the number of days to retain data in the warm store. */
+    retentionDays?: number;
+  };
 }
 
 export interface SessionRetentionPolicyStatus {
