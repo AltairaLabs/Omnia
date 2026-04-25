@@ -10,6 +10,15 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (memory aggregate tier groupBy, #1004)
+
+- `GET /api/v1/memories/aggregate` now accepts `groupBy=tier`, returning
+  rows keyed by `institutional` / `agent` / `user`. Tier is derived from
+  the existing `virtual_user_id` and `agent_id` columns; no schema change.
+  The user-tier count reflects only memories owned by users who granted
+  `analytics:aggregate` consent (institutional and agent rows have no
+  `virtual_user_id` and pass through the consent filter).
+
 ### Breaking (CRD rename, no GitHub issue)
 
 - `MemoryRetentionPolicy` CRD renamed to `MemoryPolicy`. The schema is

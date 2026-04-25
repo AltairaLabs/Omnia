@@ -18,7 +18,9 @@ and searches memory entries with optional semantic search via embeddings.
 - HTTP REST API on port 8080 (memory CRUD, search, consent, analytics)
   - `GET /api/v1/memories/aggregate` — workspace-scoped GROUP BY aggregate
     for the operator dashboard (#1004). Composes the analytics:aggregate
-    consent filter from Phase D.
+    consent filter from Phase D. Supports `groupBy=category|agent|day|tier`;
+    tier returns `institutional` / `agent` / `user` counts derived from
+    `virtual_user_id` / `agent_id` columns.
   - `GET /api/v1/privacy/consent/stats` (EE only) — workspace-wide consent
     posture for the operator dashboard.
 - Health/readiness probes on port 8081
