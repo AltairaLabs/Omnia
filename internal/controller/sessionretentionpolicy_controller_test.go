@@ -75,11 +75,9 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Name: policyKey.Name,
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						WarmStore: &omniav1alpha1.WarmStoreConfig{
-							RetentionDays: 7,
-							PartitionBy:   omniav1alpha1.PartitionStrategyWeek,
-						},
+					WarmStore: &omniav1alpha1.WarmStoreConfig{
+						RetentionDays: 7,
+						PartitionBy:   omniav1alpha1.PartitionStrategyWeek,
 					},
 				},
 			}
@@ -117,22 +115,20 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Name: policyKey.Name,
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						HotCache: &omniav1alpha1.HotCacheConfig{
-							Enabled:               &enabled,
-							TTLAfterInactive:      "24h",
-							MaxSessions:           &maxSessions,
-							MaxMessagesPerSession: &maxMessages,
-						},
-						WarmStore: &omniav1alpha1.WarmStoreConfig{
-							RetentionDays: 7,
-							PartitionBy:   omniav1alpha1.PartitionStrategyWeek,
-						},
-						ColdArchive: &omniav1alpha1.ColdArchiveConfig{
-							Enabled:            true,
-							RetentionDays:      &coldDays,
-							CompactionSchedule: "0 2 * * *",
-						},
+					HotCache: &omniav1alpha1.HotCacheConfig{
+						Enabled:               &enabled,
+						TTLAfterInactive:      "24h",
+						MaxSessions:           &maxSessions,
+						MaxMessagesPerSession: &maxMessages,
+					},
+					WarmStore: &omniav1alpha1.WarmStoreConfig{
+						RetentionDays: 7,
+						PartitionBy:   omniav1alpha1.PartitionStrategyWeek,
+					},
+					ColdArchive: &omniav1alpha1.ColdArchiveConfig{
+						Enabled:            true,
+						RetentionDays:      &coldDays,
+						CompactionSchedule: "0 2 * * *",
 					},
 				},
 			}
@@ -152,10 +148,8 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Name: policyKey.Name,
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						HotCache: &omniav1alpha1.HotCacheConfig{
-							TTLAfterInactive: "invalid-duration",
-						},
+					HotCache: &omniav1alpha1.HotCacheConfig{
+						TTLAfterInactive: "invalid-duration",
 					},
 				},
 			}
@@ -170,124 +164,15 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Name: policyKey.Name,
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						ColdArchive: &omniav1alpha1.ColdArchiveConfig{
-							Enabled: true,
-							// No RetentionDays — CEL validation rejects this
-						},
+					ColdArchive: &omniav1alpha1.ColdArchiveConfig{
+						Enabled: true,
+						// No RetentionDays — CEL validation rejects this
 					},
 				},
 			}
 			err := k8sClient.Create(ctx, policy)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("retentionDays is required"))
-		})
-
-		It("should fail when per-workspace references a non-existent workspace", func() {
-			policy := &omniav1alpha1.SessionRetentionPolicy{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: policyKey.Name,
-				},
-				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						WarmStore: &omniav1alpha1.WarmStoreConfig{
-							RetentionDays: 7,
-						},
-					},
-					PerWorkspace: map[string]omniav1alpha1.WorkspaceRetentionOverride{
-						"nonexistent-workspace": {
-							WarmStore: &omniav1alpha1.WarmStoreConfig{
-								RetentionDays: 30,
-							},
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, policy)).To(Succeed())
-
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: policyKey})
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("workspaces not found"))
-			Expect(err.Error()).To(ContainSubstring("nonexistent-workspace"))
-
-			var updated omniav1alpha1.SessionRetentionPolicy
-			Expect(k8sClient.Get(ctx, policyKey, &updated)).To(Succeed())
-			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.SessionRetentionPolicyPhaseError))
-
-			var wsCond *metav1.Condition
-			for i := range updated.Status.Conditions {
-				if updated.Status.Conditions[i].Type == RetentionConditionTypeWorkspacesResolved {
-					wsCond = &updated.Status.Conditions[i]
-					break
-				}
-			}
-			Expect(wsCond).NotTo(BeNil())
-			Expect(wsCond.Status).To(Equal(metav1.ConditionFalse))
-			Expect(wsCond.Reason).To(Equal("ResolutionFailed"))
-		})
-
-		It("should succeed when per-workspace references an existing workspace", func() {
-			wsName := "retention-ws-" + testID
-			namespaceName := "retention-ns-" + testID
-
-			workspace := &omniav1alpha1.Workspace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: wsName,
-				},
-				Spec: omniav1alpha1.WorkspaceSpec{
-					DisplayName: "Test Workspace",
-					Namespace: omniav1alpha1.NamespaceConfig{
-						Name:   namespaceName,
-						Create: true,
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
-
-			policy := &omniav1alpha1.SessionRetentionPolicy{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: policyKey.Name,
-				},
-				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						WarmStore: &omniav1alpha1.WarmStoreConfig{
-							RetentionDays: 7,
-						},
-					},
-					PerWorkspace: map[string]omniav1alpha1.WorkspaceRetentionOverride{
-						wsName: {
-							WarmStore: &omniav1alpha1.WarmStoreConfig{
-								RetentionDays: 30,
-							},
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, policy)).To(Succeed())
-
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: policyKey})
-			Expect(err).NotTo(HaveOccurred())
-
-			var updated omniav1alpha1.SessionRetentionPolicy
-			Expect(k8sClient.Get(ctx, policyKey, &updated)).To(Succeed())
-			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.SessionRetentionPolicyPhaseActive))
-			Expect(updated.Status.WorkspaceCount).To(Equal(int32(1)))
-
-			var wsCond *metav1.Condition
-			for i := range updated.Status.Conditions {
-				if updated.Status.Conditions[i].Type == RetentionConditionTypeWorkspacesResolved {
-					wsCond = &updated.Status.Conditions[i]
-					break
-				}
-			}
-			Expect(wsCond).NotTo(BeNil())
-			Expect(wsCond.Status).To(Equal(metav1.ConditionTrue))
-			Expect(wsCond.Reason).To(Equal("AllResolved"))
-
-			// Clean up
-			workspace.Finalizers = nil
-			_ = k8sClient.Update(ctx, workspace)
-			_ = k8sClient.Delete(ctx, workspace)
 		})
 
 		It("should handle policy not found", func() {
@@ -300,16 +185,14 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 			Expect(result).To(Equal(reconcile.Result{}))
 		})
 
-		It("should set NoOverrides reason when no per-workspace overrides exist", func() {
+		It("should set NotApplicable reason on WorkspacesResolved (binding moved to Workspace.policyRef)", func() {
 			policy := &omniav1alpha1.SessionRetentionPolicy{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: policyKey.Name,
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						WarmStore: &omniav1alpha1.WarmStoreConfig{
-							RetentionDays: 14,
-						},
+					WarmStore: &omniav1alpha1.WarmStoreConfig{
+						RetentionDays: 14,
 					},
 				},
 			}
@@ -330,7 +213,7 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 			}
 			Expect(wsCond).NotTo(BeNil())
 			Expect(wsCond.Status).To(Equal(metav1.ConditionTrue))
-			Expect(wsCond.Reason).To(Equal("NoOverrides"))
+			Expect(wsCond.Reason).To(Equal("NotApplicable"))
 		})
 
 		It("should add finalizer on first reconcile", func() {
@@ -339,10 +222,8 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Name: policyKey.Name,
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						WarmStore: &omniav1alpha1.WarmStoreConfig{
-							RetentionDays: 7,
-						},
+					WarmStore: &omniav1alpha1.WarmStoreConfig{
+						RetentionDays: 7,
 					},
 				},
 			}
@@ -362,10 +243,8 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Name: policyKey.Name,
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						WarmStore: &omniav1alpha1.WarmStoreConfig{
-							RetentionDays: 7,
-						},
+					WarmStore: &omniav1alpha1.WarmStoreConfig{
+						RetentionDays: 7,
 					},
 				},
 			}
@@ -399,11 +278,9 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Finalizers: []string{retentionPolicyFinalizer},
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						ColdArchive: &omniav1alpha1.ColdArchiveConfig{
-							Enabled:       true,
-							RetentionDays: &zeroDays,
-						},
+					ColdArchive: &omniav1alpha1.ColdArchiveConfig{
+						Enabled:       true,
+						RetentionDays: &zeroDays,
 					},
 				},
 			}
@@ -448,10 +325,8 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Name: policyKey.Name,
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						WarmStore: &omniav1alpha1.WarmStoreConfig{
-							RetentionDays: 7,
-						},
+					WarmStore: &omniav1alpha1.WarmStoreConfig{
+						RetentionDays: 7,
 					},
 				},
 			}
@@ -485,11 +360,9 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Finalizers: []string{retentionPolicyFinalizer},
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						ColdArchive: &omniav1alpha1.ColdArchiveConfig{
-							Enabled:       true,
-							RetentionDays: &zeroDays,
-						},
+					ColdArchive: &omniav1alpha1.ColdArchiveConfig{
+						Enabled:       true,
+						RetentionDays: &zeroDays,
 					},
 				},
 			}
@@ -566,10 +439,8 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Name: policyKey.Name,
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						WarmStore: &omniav1alpha1.WarmStoreConfig{
-							RetentionDays: 14,
-						},
+					WarmStore: &omniav1alpha1.WarmStoreConfig{
+						RetentionDays: 14,
 					},
 				},
 			}
@@ -597,10 +468,8 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Name: policyKey.Name,
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						WarmStore: &omniav1alpha1.WarmStoreConfig{
-							RetentionDays: 7,
-						},
+					WarmStore: &omniav1alpha1.WarmStoreConfig{
+						RetentionDays: 7,
 					},
 				},
 			}
@@ -612,7 +481,7 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 			// Update policy
 			var existing omniav1alpha1.SessionRetentionPolicy
 			Expect(k8sClient.Get(ctx, policyKey, &existing)).To(Succeed())
-			existing.Spec.Default.WarmStore.RetentionDays = 30
+			existing.Spec.WarmStore.RetentionDays = 30
 			Expect(k8sClient.Update(ctx, &existing)).To(Succeed())
 
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: policyKey})
@@ -634,10 +503,8 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Name: policyKey.Name,
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						WarmStore: &omniav1alpha1.WarmStoreConfig{
-							RetentionDays: 7,
-						},
+					WarmStore: &omniav1alpha1.WarmStoreConfig{
+						RetentionDays: 7,
 					},
 				},
 			}
@@ -680,10 +547,8 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Name: policyKey.Name,
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						WarmStore: &omniav1alpha1.WarmStoreConfig{
-							RetentionDays: 7,
-						},
+					WarmStore: &omniav1alpha1.WarmStoreConfig{
+						RetentionDays: 7,
 					},
 				},
 			}
@@ -727,10 +592,8 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Finalizers: []string{retentionPolicyFinalizer},
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						WarmStore: &omniav1alpha1.WarmStoreConfig{
-							RetentionDays: 7,
-						},
+					WarmStore: &omniav1alpha1.WarmStoreConfig{
+						RetentionDays: 7,
 					},
 				},
 			}
@@ -767,11 +630,9 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Finalizers: []string{retentionPolicyFinalizer},
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						ColdArchive: &omniav1alpha1.ColdArchiveConfig{
-							Enabled:       true,
-							RetentionDays: &zeroDays,
-						},
+					ColdArchive: &omniav1alpha1.ColdArchiveConfig{
+						Enabled:       true,
+						RetentionDays: &zeroDays,
 					},
 				},
 			}
@@ -797,101 +658,6 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 		})
 	})
 
-	Context("findPoliciesForWorkspace", func() {
-		var (
-			ctx        context.Context
-			reconciler *SessionRetentionPolicyReconciler
-			testID     string
-		)
-
-		BeforeEach(func() {
-			ctx = context.Background()
-			testID = fmt.Sprintf("%d", atomic.AddUint64(&retentionTestCounter, 1))
-			reconciler = &SessionRetentionPolicyReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-		})
-
-		It("should find policies that reference a workspace", func() {
-			wsName := "map-ws-" + testID
-			namespaceName := "map-ns-" + testID
-
-			workspace := &omniav1alpha1.Workspace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: wsName,
-				},
-				Spec: omniav1alpha1.WorkspaceSpec{
-					DisplayName: "Mapping Test Workspace",
-					Namespace: omniav1alpha1.NamespaceConfig{
-						Name:   namespaceName,
-						Create: true,
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
-
-			policyName := "map-policy-" + testID
-			policy := &omniav1alpha1.SessionRetentionPolicy{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: policyName,
-				},
-				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						WarmStore: &omniav1alpha1.WarmStoreConfig{
-							RetentionDays: 7,
-						},
-					},
-					PerWorkspace: map[string]omniav1alpha1.WorkspaceRetentionOverride{
-						wsName: {
-							WarmStore: &omniav1alpha1.WarmStoreConfig{
-								RetentionDays: 30,
-							},
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, policy)).To(Succeed())
-
-			requests := reconciler.findPoliciesForWorkspace(ctx, workspace)
-			Expect(requests).To(HaveLen(1))
-			Expect(requests[0].Name).To(Equal(policyName))
-
-			// Clean up
-			policy.Finalizers = nil
-			_ = k8sClient.Update(ctx, policy)
-			_ = k8sClient.Delete(ctx, policy)
-			workspace.Finalizers = nil
-			_ = k8sClient.Update(ctx, workspace)
-			_ = k8sClient.Delete(ctx, workspace)
-		})
-
-		It("should return empty when no policies reference the workspace", func() {
-			wsName := "unref-ws-" + testID
-			workspace := &omniav1alpha1.Workspace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: wsName,
-				},
-				Spec: omniav1alpha1.WorkspaceSpec{
-					DisplayName: "Unreferenced Workspace",
-					Namespace: omniav1alpha1.NamespaceConfig{
-						Name:   "unref-ns-" + testID,
-						Create: true,
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
-
-			requests := reconciler.findPoliciesForWorkspace(ctx, workspace)
-			Expect(requests).To(BeEmpty())
-
-			// Clean up
-			workspace.Finalizers = nil
-			_ = k8sClient.Update(ctx, workspace)
-			_ = k8sClient.Delete(ctx, workspace)
-		})
-	})
-
 	Context("Reconcile error paths", func() {
 		It("should set Error phase when validatePolicy fails via reconcile", func() {
 			ctx := context.Background()
@@ -905,11 +671,9 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Name: policyName,
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						ColdArchive: &omniav1alpha1.ColdArchiveConfig{
-							Enabled:       true,
-							RetentionDays: &coldDays,
-						},
+					ColdArchive: &omniav1alpha1.ColdArchiveConfig{
+						Enabled:       true,
+						RetentionDays: &coldDays,
 					},
 				},
 			}
@@ -919,7 +683,7 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 			scheme := k8sClient.Scheme()
 			zeroDays := int32(0)
 			invalidPolicy := policy.DeepCopy()
-			invalidPolicy.Spec.Default.ColdArchive.RetentionDays = &zeroDays
+			invalidPolicy.Spec.ColdArchive.RetentionDays = &zeroDays
 			invalidPolicy.Finalizers = []string{retentionPolicyFinalizer}
 
 			fakeClient := fake.NewClientBuilder().
@@ -992,10 +756,8 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Finalizers: []string{retentionPolicyFinalizer},
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						WarmStore: &omniav1alpha1.WarmStoreConfig{
-							RetentionDays: 7,
-						},
+					WarmStore: &omniav1alpha1.WarmStoreConfig{
+						RetentionDays: 7,
 					},
 				},
 			}
@@ -1023,136 +785,181 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 			Expect(err.Error()).To(ContainSubstring("simulated status update error"))
 		})
 
-		It("should handle workspace Get returning non-NotFound error in resolveWorkspaces", func() {
+		It("should remove finalizer and clean up ConfigMap on deletion", func() {
 			ctx := context.Background()
 			testID := fmt.Sprintf("%d", atomic.AddUint64(&retentionTestCounter, 1))
-			policyName := "ws-get-err-" + testID
+			policyName := "delete-" + testID
 
 			scheme := k8sClient.Scheme()
+			now := metav1.Now()
 			policy := &omniav1alpha1.SessionRetentionPolicy{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:       policyName,
-					Finalizers: []string{retentionPolicyFinalizer},
+					Name:              policyName,
+					Finalizers:        []string{retentionPolicyFinalizer},
+					DeletionTimestamp: &now,
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						WarmStore: &omniav1alpha1.WarmStoreConfig{
-							RetentionDays: 7,
-						},
-					},
-					PerWorkspace: map[string]omniav1alpha1.WorkspaceRetentionOverride{
-						"some-workspace": {
-							WarmStore: &omniav1alpha1.WarmStoreConfig{
-								RetentionDays: 30,
-							},
-						},
-					},
+					WarmStore: &omniav1alpha1.WarmStoreConfig{RetentionDays: 7},
 				},
 			}
-
-			wsGetErrClient := fake.NewClientBuilder().
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      retentionConfigMapName(policyName),
+					Namespace: "test-ns",
+				},
+			}
+			c := fake.NewClientBuilder().
 				WithScheme(scheme).
-				WithObjects(policy).
-				WithStatusSubresource(policy).
-				WithInterceptorFuncs(interceptor.Funcs{
-					Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-						// Let the first Get (for the policy itself) succeed, fail on workspace Get
-						if _, ok := obj.(*omniav1alpha1.Workspace); ok {
-							return fmt.Errorf("simulated workspace API error")
-						}
-						return client.Get(ctx, key, obj, opts...)
-					},
-				}).
+				WithObjects(policy, cm).
 				Build()
-
 			reconciler := &SessionRetentionPolicyReconciler{
-				Client: wsGetErrClient,
-				Scheme: scheme,
+				Client:    c,
+				Scheme:    scheme,
+				Recorder:  record.NewFakeRecorder(16),
+				Namespace: "test-ns",
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{Name: policyName},
 			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// ConfigMap should be deleted.
+			err = c.Get(ctx, types.NamespacedName{Name: cm.Name, Namespace: "test-ns"}, &corev1.ConfigMap{})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("failed to get workspace"))
 		})
 
-		It("should handle List error in findPoliciesForWorkspace", func() {
+		It("should handle Get error other than NotFound", func() {
 			ctx := context.Background()
-
 			scheme := k8sClient.Scheme()
-			listErrClient := fake.NewClientBuilder().
+			c := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithInterceptorFuncs(interceptor.Funcs{
-					List: func(ctx context.Context, client client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-						return fmt.Errorf("simulated list error")
+					Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						return fmt.Errorf("simulated get error")
 					},
 				}).
 				Build()
+			reconciler := &SessionRetentionPolicyReconciler{Client: c, Scheme: scheme}
 
-			reconciler := &SessionRetentionPolicyReconciler{
-				Client: listErrClient,
-				Scheme: scheme,
-			}
-
-			workspace := &omniav1alpha1.Workspace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-ws",
-				},
-			}
-
-			requests := reconciler.findPoliciesForWorkspace(ctx, workspace)
-			Expect(requests).To(BeNil())
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: "any"},
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("simulated get error"))
 		})
 
-		It("should use indexed lookup when field index is available", func() {
+		It("should propagate finalizer Update errors", func() {
 			ctx := context.Background()
 			scheme := k8sClient.Scheme()
-
-			matchingPolicy := &omniav1alpha1.SessionRetentionPolicy{
-				ObjectMeta: metav1.ObjectMeta{Name: "indexed-match"},
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "no-finalizer"},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						WarmStore: &omniav1alpha1.WarmStoreConfig{RetentionDays: 7},
-					},
-					PerWorkspace: map[string]omniav1alpha1.WorkspaceRetentionOverride{
-						"target-ws": {WarmStore: &omniav1alpha1.WarmStoreConfig{RetentionDays: 30}},
-					},
+					WarmStore: &omniav1alpha1.WarmStoreConfig{RetentionDays: 7},
 				},
 			}
-			otherPolicy := &omniav1alpha1.SessionRetentionPolicy{
-				ObjectMeta: metav1.ObjectMeta{Name: "indexed-other"},
-				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						WarmStore: &omniav1alpha1.WarmStoreConfig{RetentionDays: 7},
-					},
-					PerWorkspace: map[string]omniav1alpha1.WorkspaceRetentionOverride{
-						"other-ws": {WarmStore: &omniav1alpha1.WarmStoreConfig{RetentionDays: 14}},
-					},
-				},
-			}
-
-			indexedClient := fake.NewClientBuilder().
+			c := fake.NewClientBuilder().
 				WithScheme(scheme).
-				WithObjects(matchingPolicy, otherPolicy).
-				WithIndex(&omniav1alpha1.SessionRetentionPolicy{}, IndexRetentionPolicyByWorkspace,
-					func(obj client.Object) []string {
-						return extractWorkspaceNames(obj.(*omniav1alpha1.SessionRetentionPolicy))
-					}).
+				WithObjects(policy).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Update: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+						return fmt.Errorf("simulated finalizer update error")
+					},
+				}).
 				Build()
+			reconciler := &SessionRetentionPolicyReconciler{Client: c, Scheme: scheme}
 
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: "no-finalizer"},
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("simulated finalizer update error"))
+		})
+
+		It("should propagate ConfigMap sync errors when Namespace is set", func() {
+			ctx := context.Background()
+			scheme := k8sClient.Scheme()
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "cm-sync-fail",
+					Finalizers: []string{retentionPolicyFinalizer},
+				},
+				Spec: omniav1alpha1.SessionRetentionPolicySpec{
+					WarmStore: &omniav1alpha1.WarmStoreConfig{RetentionDays: 7},
+				},
+			}
+			c := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(policy).
+				WithStatusSubresource(policy).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+						if _, ok := obj.(*corev1.ConfigMap); ok {
+							return fmt.Errorf("simulated ConfigMap create error")
+						}
+						return cl.Create(ctx, obj, opts...)
+					},
+				}).
+				Build()
 			reconciler := &SessionRetentionPolicyReconciler{
-				Client: indexedClient,
-				Scheme: scheme,
+				Client:    c,
+				Scheme:    scheme,
+				Recorder:  record.NewFakeRecorder(16),
+				Namespace: "test-ns",
 			}
 
-			workspace := &omniav1alpha1.Workspace{
-				ObjectMeta: metav1.ObjectMeta{Name: "target-ws"},
-			}
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: "cm-sync-fail"},
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("simulated ConfigMap create error"))
 
-			requests := reconciler.findPoliciesForWorkspace(ctx, workspace)
-			Expect(requests).To(HaveLen(1))
-			Expect(requests[0].Name).To(Equal("indexed-match"))
+			var updated omniav1alpha1.SessionRetentionPolicy
+			Expect(c.Get(ctx, types.NamespacedName{Name: "cm-sync-fail"}, &updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.SessionRetentionPolicyPhaseError))
+		})
+	})
+
+	Context("deleteRetentionConfigMap direct", func() {
+		It("should be a no-op when Namespace is empty", func() {
+			reconciler := &SessionRetentionPolicyReconciler{}
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "noop"},
+			}
+			Expect(reconciler.deleteRetentionConfigMap(context.Background(), policy)).To(Succeed())
+		})
+
+		It("should swallow NotFound when ConfigMap does not exist", func() {
+			scheme := k8sClient.Scheme()
+			c := fake.NewClientBuilder().WithScheme(scheme).Build()
+			reconciler := &SessionRetentionPolicyReconciler{
+				Client: c, Scheme: scheme, Namespace: "test-ns",
+			}
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "missing-cm"},
+			}
+			Expect(reconciler.deleteRetentionConfigMap(context.Background(), policy)).To(Succeed())
+		})
+
+		It("should propagate non-NotFound delete errors", func() {
+			scheme := k8sClient.Scheme()
+			c := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Delete: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+						return fmt.Errorf("simulated delete error")
+					},
+				}).
+				Build()
+			reconciler := &SessionRetentionPolicyReconciler{
+				Client: c, Scheme: scheme, Namespace: "test-ns",
+			}
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "broken-cm"},
+			}
+			err := reconciler.deleteRetentionConfigMap(context.Background(), policy)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("simulated delete error"))
 		})
 	})
 
@@ -1165,19 +972,17 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 
 			policy := &omniav1alpha1.SessionRetentionPolicy{
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						HotCache: &omniav1alpha1.HotCacheConfig{
-							Enabled:          &enabled,
-							TTLAfterInactive: "1h30m",
-							MaxSessions:      &maxSessions,
-						},
-						WarmStore: &omniav1alpha1.WarmStoreConfig{
-							RetentionDays: 14,
-						},
-						ColdArchive: &omniav1alpha1.ColdArchiveConfig{
-							Enabled:       true,
-							RetentionDays: &coldDays,
-						},
+					HotCache: &omniav1alpha1.HotCacheConfig{
+						Enabled:          &enabled,
+						TTLAfterInactive: "1h30m",
+						MaxSessions:      &maxSessions,
+					},
+					WarmStore: &omniav1alpha1.WarmStoreConfig{
+						RetentionDays: 14,
+					},
+					ColdArchive: &omniav1alpha1.ColdArchiveConfig{
+						Enabled:       true,
+						RetentionDays: &coldDays,
 					},
 				},
 			}
@@ -1188,10 +993,8 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 			reconciler := &SessionRetentionPolicyReconciler{}
 			policy := &omniav1alpha1.SessionRetentionPolicy{
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						HotCache: &omniav1alpha1.HotCacheConfig{
-							TTLAfterInactive: "not-a-duration",
-						},
+					HotCache: &omniav1alpha1.HotCacheConfig{
+						TTLAfterInactive: "not-a-duration",
 					},
 				},
 			}
@@ -1204,10 +1007,8 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 			reconciler := &SessionRetentionPolicyReconciler{}
 			policy := &omniav1alpha1.SessionRetentionPolicy{
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{
-						ColdArchive: &omniav1alpha1.ColdArchiveConfig{
-							Enabled: true,
-						},
+					ColdArchive: &omniav1alpha1.ColdArchiveConfig{
+						Enabled: true,
 					},
 				},
 			}
@@ -1216,23 +1017,5 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 			Expect(err.Error()).To(ContainSubstring("retentionDays is required"))
 		})
 
-		It("should reject per-workspace cold archive enabled without retentionDays", func() {
-			reconciler := &SessionRetentionPolicyReconciler{}
-			policy := &omniav1alpha1.SessionRetentionPolicy{
-				Spec: omniav1alpha1.SessionRetentionPolicySpec{
-					Default: omniav1alpha1.RetentionTierConfig{},
-					PerWorkspace: map[string]omniav1alpha1.WorkspaceRetentionOverride{
-						"ws1": {
-							ColdArchive: &omniav1alpha1.ColdArchiveConfig{
-								Enabled: true,
-							},
-						},
-					},
-				},
-			}
-			err := reconciler.validatePolicy(policy)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("workspace \"ws1\""))
-		})
 	})
 })

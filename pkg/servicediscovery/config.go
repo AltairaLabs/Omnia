@@ -33,9 +33,6 @@ const secretKeyPostgresConn = "POSTGRES_CONN"
 type SessionConfig struct {
 	// PostgresConn is the PostgreSQL connection string.
 	PostgresConn string
-	// WarmDays is the number of days to keep sessions in the warm cache.
-	// Nil means use the session-api default.
-	WarmDays *int32
 }
 
 // MemoryConfig holds the resolved configuration for a memory-api instance.
@@ -75,11 +72,7 @@ func (r *ConfigResolver) ResolveSessionConfig(
 		return nil, err
 	}
 
-	cfg := &SessionConfig{PostgresConn: conn}
-	if group.Session.Retention != nil {
-		cfg.WarmDays = group.Session.Retention.WarmDays
-	}
-	return cfg, nil
+	return &SessionConfig{PostgresConn: conn}, nil
 }
 
 // ResolveMemoryConfig reads the Workspace CRD and returns memory-api configuration

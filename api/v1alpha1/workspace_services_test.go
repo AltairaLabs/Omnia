@@ -24,7 +24,6 @@ import (
 )
 
 func TestWorkspaceServiceGroupManagedJSON(t *testing.T) {
-	warmDays := int32(7)
 	group := WorkspaceServiceGroup{
 		Name: "default",
 		Mode: ServiceModeManaged,
@@ -39,7 +38,7 @@ func TestWorkspaceServiceGroupManagedJSON(t *testing.T) {
 			Database: DatabaseConfig{
 				SecretRef: corev1.LocalObjectReference{Name: "session-db-secret"},
 			},
-			Retention: &SessionRetentionConfig{WarmDays: &warmDays},
+			PolicyRef: &corev1.LocalObjectReference{Name: "default-session-policy"},
 		},
 	}
 
@@ -77,8 +76,8 @@ func TestWorkspaceServiceGroupManagedJSON(t *testing.T) {
 	if got.Session.Database.SecretRef.Name != "session-db-secret" {
 		t.Errorf("Session.Database.SecretRef.Name = %q, want %q", got.Session.Database.SecretRef.Name, "session-db-secret")
 	}
-	if got.Session.Retention == nil || got.Session.Retention.WarmDays == nil || *got.Session.Retention.WarmDays != warmDays {
-		t.Errorf("Session.Retention.WarmDays = %v, want %d", got.Session.Retention, warmDays)
+	if got.Session.PolicyRef == nil || got.Session.PolicyRef.Name != "default-session-policy" {
+		t.Errorf("Session.PolicyRef = %v, want default-session-policy", got.Session.PolicyRef)
 	}
 	if got.External != nil {
 		t.Errorf("External should be nil for managed group, got %+v", got.External)
