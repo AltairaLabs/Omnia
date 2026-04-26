@@ -17,6 +17,8 @@ limitations under the License.
 package controller
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -66,6 +68,15 @@ func (sb *ServiceBuilder) BuildSessionDeployment(workspaceName, namespace string
 }
 
 // BuildMemoryDeployment builds a Deployment for the memory-api service group.
+//
+// The pod template carries:
+//   - POD_NAMESPACE (downward API) so memory-api's embedding-provider
+//     lookup defaults to the workspace namespace where the Provider CRD
+//     and its Secret live, instead of falling back to omnia-system.
+//   - A configHash annotation derived from sg.Memory so a workspace
+//     change (e.g. switching memory.providerRef) rolls the pod —
+//     memory-api reads its config once at startup, so without this the
+//     change is invisible until something else triggers a roll.
 func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string, sg omniav1alpha1.WorkspaceServiceGroup) *appsv1.Deployment {
 	name := fmt.Sprintf("memory-%s-%s", workspaceName, sg.Name)
 	labels := serviceLabels("memory-api", workspaceName, sg.Name)
@@ -77,7 +88,47 @@ func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string,
 	if sg.Memory != nil {
 		overrides = sg.Memory.PodOverrides
 	}
-	return buildServiceDeployment(name, namespace, sb.MemoryImage, sb.MemoryImagePullPolicy, args, labels, overrides)
+	dep := buildServiceDeployment(name, namespace, sb.MemoryImage, sb.MemoryImagePullPolicy, args, labels, overrides)
+	addPodNamespaceEnv(dep)
+	if dep.Spec.Template.Annotations == nil {
+		dep.Spec.Template.Annotations = map[string]string{}
+	}
+	dep.Spec.Template.Annotations[annotationConfigHash] = memoryConfigHash(sg)
+	return dep
+}
+
+// addPodNamespaceEnv injects POD_NAMESPACE (sourced from the downward
+// API) into every container in the pod template. memory-api / session-
+// api use it to scope cross-namespace lookups (Provider CRD, Secret).
+func addPodNamespaceEnv(dep *appsv1.Deployment) {
+	containers := dep.Spec.Template.Spec.Containers
+	for i := range containers {
+		containers[i].Env = append(containers[i].Env, corev1.EnvVar{
+			Name: "POD_NAMESPACE",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"},
+			},
+		})
+	}
+}
+
+// memoryConfigHash hashes the runtime-relevant fields of a memory
+// service group (database SecretRef name + embedding provider Ref name)
+// into a short stable string. Hashing only the bits the memory-api
+// actually reads at startup keeps cosmetic edits — labels, pod
+// overrides, comments — from rolling the pod.
+func memoryConfigHash(sg omniav1alpha1.WorkspaceServiceGroup) string {
+	var dbSecret, providerRef string
+	if sg.Memory != nil {
+		if sg.Memory.Database.SecretRef.Name != "" {
+			dbSecret = sg.Memory.Database.SecretRef.Name
+		}
+		if sg.Memory.ProviderRef != nil {
+			providerRef = sg.Memory.ProviderRef.Name
+		}
+	}
+	sum := sha256.Sum256([]byte(dbSecret + "|" + providerRef))
+	return hex.EncodeToString(sum[:8])
 }
 
 // BuildService builds a ClusterIP Service for the given component.

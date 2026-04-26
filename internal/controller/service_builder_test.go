@@ -132,6 +132,55 @@ func TestBuildMemoryDeployment(t *testing.T) {
 	// Args
 	assert.Contains(t, container.Args, "--workspace=acme")
 	assert.Contains(t, container.Args, "--service-group=prod")
+
+	// POD_NAMESPACE downward API — required so the embedding-provider
+	// lookup defaults to the workspace namespace (where the Provider
+	// CRD lives) instead of falling back to omnia-system.
+	var podNS *corev1.EnvVar
+	for i := range container.Env {
+		if container.Env[i].Name == "POD_NAMESPACE" {
+			podNS = &container.Env[i]
+			break
+		}
+	}
+	require.NotNil(t, podNS, "POD_NAMESPACE env var missing on memory-api container")
+	require.NotNil(t, podNS.ValueFrom, "POD_NAMESPACE must come from downward API, not a literal")
+	require.NotNil(t, podNS.ValueFrom.FieldRef)
+	assert.Equal(t, "metadata.namespace", podNS.ValueFrom.FieldRef.FieldPath)
+}
+
+// TestBuildMemoryDeployment_AnnotatesConfigHash proves a providerRef
+// change on the workspace's memory service group flows through to the
+// Deployment's pod template annotations — the only signal Kubernetes
+// uses to roll a Deployment whose container image and args haven't
+// changed. Without this, switching memory.providerRef leaves the
+// running pod with a stale config until something else rolls it.
+func TestBuildMemoryDeployment_AnnotatesConfigHash(t *testing.T) {
+	sb := newTestServiceBuilder()
+
+	baseMem := omniav1alpha1.MemoryServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{
+			SecretRef: corev1.LocalObjectReference{Name: "memory-db"},
+		},
+	}
+
+	sgNoProvider := newTestServiceGroup("prod")
+	memNoProvider := baseMem
+	sgNoProvider.Memory = &memNoProvider
+	depA := sb.BuildMemoryDeployment("acme", "acme-ns", sgNoProvider)
+
+	sgWithProvider := newTestServiceGroup("prod")
+	memWithProvider := baseMem
+	memWithProvider.ProviderRef = &corev1.LocalObjectReference{Name: "gemini-embeddings"}
+	sgWithProvider.Memory = &memWithProvider
+	depB := sb.BuildMemoryDeployment("acme", "acme-ns", sgWithProvider)
+
+	annoA := depA.Spec.Template.Annotations[annotationConfigHash]
+	annoB := depB.Spec.Template.Annotations[annotationConfigHash]
+	require.NotEmpty(t, annoA, "configHash annotation missing on memory-api pod template")
+	require.NotEmpty(t, annoB)
+	assert.NotEqual(t, annoA, annoB,
+		"providerRef change must alter the configHash so the pod rolls")
 }
 
 func TestBuildService(t *testing.T) {
