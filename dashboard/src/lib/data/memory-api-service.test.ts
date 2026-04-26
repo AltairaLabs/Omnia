@@ -390,4 +390,52 @@ describe("MemoryApiService", () => {
       );
     });
   });
+
+  describe("getAgentMemories", () => {
+    it("calls /agent-memories with workspace + agent", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            memories: [
+              { id: "a-1", tier: "agent", scope: { agent_id: "support" } },
+              { id: "a-2", tier: "agent", scope: { agent_id: "support" } },
+            ],
+            total: 2,
+          }),
+      });
+
+      const result = await service.getAgentMemories("default", "support");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/workspaces/default/agent-memories?agent=support",
+      );
+      expect(result.total).toBe(2);
+      expect(result.memories).toHaveLength(2);
+    });
+
+    it("returns empty when agentId is blank without hitting the network", async () => {
+      const result = await service.getAgentMemories("default", "");
+      expect(result).toEqual({ memories: [], total: 0 });
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("returns empty on 401 / 403 / 404", async () => {
+      for (const status of [401, 403, 404]) {
+        mockFetch.mockResolvedValueOnce({ ok: false, status });
+        const result = await service.getAgentMemories("default", "agent-x");
+        expect(result).toEqual({ memories: [], total: 0 });
+      }
+    });
+
+    it("throws on other server errors", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: "Server Error",
+      });
+      await expect(
+        service.getAgentMemories("default", "agent-x"),
+      ).rejects.toThrow("Failed to fetch agent memories");
+    });
+  });
 });
