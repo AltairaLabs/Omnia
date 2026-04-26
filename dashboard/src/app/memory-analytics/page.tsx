@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Header } from "@/components/layout";
 import { useMemoryAggregate } from "@/hooks/use-memory-aggregate";
 import { useConsentStats } from "@/hooks/use-consent-stats";
 import { TierLegend } from "@/components/memory-analytics/tier-legend";
@@ -89,42 +90,41 @@ export default function MemoryAnalyticsPage() {
     todayQuery.isLoading;
 
   return (
-    <main className="container mx-auto p-6 space-y-6">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-bold">Memory analytics</h1>
-        <p className="text-sm text-muted-foreground">
-          How memory is being collected, distributed, and consented to across
-          this workspace.
-        </p>
-      </header>
-
-      <TierLegend />
-
-      <SummaryCards
-        totalMemories={totalMemories}
-        activeUsers={activeUsers}
-        memoriesToday={memoriesToday}
-        piiBlocked={0}
-        loading={summaryLoading}
+    <div className="flex flex-col h-full">
+      <Header
+        title="Memory analytics"
+        description="How memory is being collected, distributed, and consented to across this workspace."
       />
 
-      <TierTriCard
-        rows={tierQuery.data ?? []}
-        loading={tierQuery.isLoading}
-      />
+      <main className="flex-1 overflow-auto p-6 space-y-6">
+        <TierLegend />
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <CategoryDonut rows={categoryQuery.data ?? []} />
-        <GrowthChart
-          rows={dayQuery.data ?? []}
-          rangeDays={rangeDays}
-          onRangeChange={setRangeDays}
+        <SummaryCards
+          totalMemories={totalMemories}
+          activeUsers={activeUsers}
+          memoriesToday={memoriesToday}
+          piiBlocked={0}
+          loading={summaryLoading}
         />
-      </div>
 
-      <AgentChart rows={agentQuery.data ?? []} />
+        <TierTriCard
+          rows={tierQuery.data ?? []}
+          loading={tierQuery.isLoading}
+        />
 
-      <PrivacyPosture stats={consentQuery.data ?? EMPTY_CONSENT} />
-    </main>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <CategoryDonut rows={categoryQuery.data ?? []} />
+          <GrowthChart
+            rows={dayQuery.data ?? []}
+            rangeDays={rangeDays}
+            onRangeChange={setRangeDays}
+          />
+        </div>
+
+        <AgentChart rows={agentQuery.data ?? []} />
+
+        <PrivacyPosture stats={consentQuery.data ?? EMPTY_CONSENT} />
+      </main>
+    </div>
   );
 }

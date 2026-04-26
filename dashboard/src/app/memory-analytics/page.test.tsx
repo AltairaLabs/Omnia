@@ -4,6 +4,23 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import MemoryAnalyticsPage from "./page";
 
+// Mock layout components that pull in complex infrastructure
+// (WorkspaceSwitcher, UserMenu, theme provider, next/navigation router).
+vi.mock("@/components/layout", () => ({
+  Header: ({
+    title,
+    description,
+  }: {
+    title: string;
+    description?: string;
+  }) => (
+    <div data-testid="header">
+      <h1>{title}</h1>
+      {description && <p>{description}</p>}
+    </div>
+  ),
+}));
+
 vi.mock("@/contexts/workspace-context", () => ({
   useWorkspace: () => ({
     currentWorkspace: { name: "default" },
