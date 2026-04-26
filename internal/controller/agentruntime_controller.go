@@ -123,6 +123,11 @@ type AgentRuntimeReconciler struct {
 	// tests inject a deterministic clock to make cache-expiry
 	// assertions stable.
 	JWKSClock func() time.Time
+	// MgmtPlaneJWKSURL is the dashboard's JWKS endpoint, set on every
+	// facade container as OMNIA_MGMT_PLANE_JWKS_URL so cmd/agent can
+	// build a JWKS-backed mgmt-plane validator. Empty disables wiring
+	// (Arena E2E, headless installs without a dashboard).
+	MgmtPlaneJWKSURL string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch;create;update;patch;delete

@@ -664,16 +664,26 @@ dashboard:
 
   # -- Management-plane JWT signing keypair. The dashboard uses the
   # private half to mint short-lived tokens for the "Try this agent"
-  # debug view; every facade pod validates those tokens with the public
-  # half. First install generates a self-signed 10-year RSA keypair;
-  # upgrades preserve the existing Secret (helm.sh/resource-policy: keep).
-  # Rotation is a manual operator action — delete the Secret, upgrade,
-  # and roll dashboard + facade pods.
+  # debug view and serves the public half over /api/auth/jwks for
+  # facade pods to verify against. First install generates a self-
+  # signed 10-year RSA keypair; upgrades preserve the existing Secret
+  # (helm.sh/resource-policy: keep). Rotation is a manual operator
+  # action — delete the Secret, upgrade, and roll dashboard + facade
+  # pods.
   signingKey:
     # -- Reference an externally-managed Secret instead of the chart-generated
     # keypair. The Secret must be kubernetes.io/tls with tls.crt + tls.key.
     # Leave empty to use the chart-managed keypair.
     existingSecret: ""
+
+  # -- Override the JWKS URL the operator passes to facade pods as
+  # OMNIA_MGMT_PLANE_JWKS_URL. Empty = derive from the in-cluster
+  # dashboard service (http://<dashboard-fullname>.<release-namespace>.
+  # svc.cluster.local:<dashboard.service.port>/api/auth/jwks). Set
+  # this when the facade pods reach the dashboard via a non-default
+  # path (Ingress, Gateway API, an external proxy) or when running in
+  # a cluster with a non-default DNS suffix.
+  jwksUrl: ""
 
   # Pod Disruption Budget for HA deployments
   podDisruptionBudget:

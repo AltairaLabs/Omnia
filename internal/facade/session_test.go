@@ -20,12 +20,12 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/x509"
-	"encoding/pem"
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -831,16 +831,16 @@ func TestProcessMessage_MgmtPlaneJWTPrefersDeviceIDForUserScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rsa.GenerateKey: %v", err)
 	}
-	pubPath := writeTestPubKeyPEM(t, t.TempDir(), &key.PublicKey)
-	validator, err := auth.NewMgmtPlaneValidator(pubPath)
-	if err != nil {
-		t.Fatalf("NewMgmtPlaneValidator: %v", err)
+	kid := testKidForKey(t, &key.PublicKey)
+	resolver := &auth.StaticKeyResolver{
+		Keys: map[string]*rsa.PublicKey{kid: &key.PublicKey},
 	}
+	validator := auth.NewMgmtPlaneValidatorWithResolver(resolver)
 
 	const operatorSubject = "omnia-admin-deadbeef00000000"
 	const deviceID = "fc725bcc-c5d7-4bef-bef4-a441d29ba7ec"
 	now := time.Now()
-	tokenString := mintTestMgmtPlaneToken(t, key, operatorSubject, now)
+	tokenString := mintTestMgmtPlaneToken(t, key, kid, operatorSubject, now)
 
 	store := session.NewMemoryStore()
 	cfg := DefaultServerConfig()
@@ -893,30 +893,21 @@ func TestProcessMessage_MgmtPlaneJWTPrefersDeviceIDForUserScope(t *testing.T) {
 	}
 }
 
-// writeTestPubKeyPEM writes an RSA public key as a PKIX PEM file and
-// returns the path. The MgmtPlaneValidator accepts both PUBLIC KEY and
-// CERTIFICATE blocks; PUBLIC KEY is the simpler test fixture.
-func writeTestPubKeyPEM(t *testing.T, dir string, pub *rsa.PublicKey) string {
+// testKidForKey returns the RFC 7638 thumbprint for an RSA public key.
+// Matches the kid the dashboard's lib/jwks.js produces.
+func testKidForKey(t *testing.T, pub *rsa.PublicKey) string {
 	t.Helper()
-	der, err := x509.MarshalPKIXPublicKey(pub)
-	if err != nil {
-		t.Fatalf("MarshalPKIXPublicKey: %v", err)
-	}
-	path := filepath.Join(dir, "pub.pem")
-	f, err := os.Create(path)
-	if err != nil {
-		t.Fatalf("create pub.pem: %v", err)
-	}
-	defer func() { _ = f.Close() }()
-	if err := pem.Encode(f, &pem.Block{Type: "PUBLIC KEY", Bytes: der}); err != nil {
-		t.Fatalf("encode pub.pem: %v", err)
-	}
-	return path
+	n := base64.RawURLEncoding.EncodeToString(pub.N.Bytes())
+	e := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes())
+	canonical := fmt.Sprintf(`{"e":%q,"kty":"RSA","n":%q}`, e, n)
+	sum := sha256.Sum256([]byte(canonical))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // mintTestMgmtPlaneToken signs a mgmt-plane JWT matching the validator's
-// default issuer/audience so the facade admits it.
-func mintTestMgmtPlaneToken(t *testing.T, key *rsa.PrivateKey, subject string, now time.Time) string {
+// default issuer/audience so the facade admits it. kid identifies the
+// signing key in the JWKS resolver the test installs.
+func mintTestMgmtPlaneToken(t *testing.T, key *rsa.PrivateKey, kid, subject string, now time.Time) string {
 	t.Helper()
 	type claims struct {
 		jwt.RegisteredClaims
@@ -938,6 +929,7 @@ func mintTestMgmtPlaneToken(t *testing.T, key *rsa.PrivateKey, subject string, n
 		Workspace: "default",
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, c)
+	token.Header["kid"] = kid
 	signed, err := token.SignedString(key)
 	if err != nil {
 		t.Fatalf("sign token: %v", err)

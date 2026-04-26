@@ -74,15 +74,16 @@ spec:
             - --agent-workspace-reader-clusterrole={{ include "omnia.fullname" . }}-agent-workspace-reader
             {{- if .Values.dashboard.enabled }}
             {{- /*
-              Tell the Workspace controller which Secret holds the dashboard
-              mgmt-plane signing keypair. The controller mirrors the public
-              cert (tls.crt) into a per-workspace ConfigMap so facade pods
-              can validate dashboard-minted debug tokens. When dashboard.enabled
-              is false the flag is omitted -> mirror disabled -> facade keeps
-              its mgmt-plane-unaware default. BYO override pulls from
-              dashboard.signingKey.existingSecret when set.
+              Tell the operator the dashboard's JWKS URL. Set on every
+              facade pod as OMNIA_MGMT_PLANE_JWKS_URL so cmd/agent can
+              build a JWKS-backed mgmt-plane validator that fetches the
+              dashboard's signing pubkey on demand. Replaces the older
+              per-workspace ConfigMap mirror, which silently went stale
+              on key rotation. dashboard.jwksUrl wins when set; default
+              points at the in-cluster service. dashboard.enabled=false
+              omits the flag -> facade stays mgmt-plane-unaware.
             */}}
-            - --mgmt-plane-signing-secret={{ .Values.dashboard.signingKey.existingSecret | default (printf "%s-signing-keypair" (include "omnia.dashboard.fullname" .)) }}
+            - --mgmt-plane-jwks-url={{ .Values.dashboard.jwksUrl | default (printf "http://%s.%s.svc.cluster.local:%d/api/auth/jwks" (include "omnia.dashboard.fullname" .) .Release.Namespace (int .Values.dashboard.service.port)) }}
             {{- end }}
             {{- if and .Values.tracing.enabled $resolvedTracingEndpoint }}
             - --tracing-enabled=true
@@ -159,11 +160,9 @@ spec:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- $env := concat (.Values.operator.extraEnv | default list) ($po.extraEnv | default list) }}
           env:
-            # POD_NAMESPACE is read by the Workspace controller to mirror the
-            # dashboard's mgmt-plane signing pubkey into each workspace
-            # namespace (workspace_mgmt_plane_pubkey.go). Without it the
-            # controller silently skips the mirror — facade pods then have
-            # no pubkey ConfigMap and reject dashboard-minted JWTs with 401.
+            # POD_NAMESPACE is read by the Workspace controller for the
+            # NetworkPolicy auto-allow that lets dashboard / operator /
+            # Prometheus traffic reach workspace pods when isolation is on.
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:

@@ -20,12 +20,12 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/x509"
-	"encoding/pem"
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -40,6 +40,18 @@ import (
 	"github.com/altairalabs/omnia/pkg/policy"
 )
 
+// kidForKey returns the RFC 7638 thumbprint of an RSA public key.
+// Matches the kid the dashboard's lib/jwks.js produces, so JWTs minted
+// here verify against an auth.StaticKeyResolver keyed by it.
+func kidForKey(t *testing.T, pub *rsa.PublicKey) string {
+	t.Helper()
+	n := base64.RawURLEncoding.EncodeToString(pub.N.Bytes())
+	e := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes())
+	canonical := fmt.Sprintf(`{"e":%q,"kty":"RSA","n":%q}`, e, n)
+	sum := sha256.Sum256([]byte(canonical))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
 type authTestClaims struct {
 	jwt.RegisteredClaims
 	Origin    string `json:"origin"`
@@ -47,24 +59,19 @@ type authTestClaims struct {
 	Workspace string `json:"workspace,omitempty"`
 }
 
-// newAuthTestValidator returns a configured MgmtPlaneValidator and the RSA
-// private key used to sign tokens for it.
+// newAuthTestValidator returns a MgmtPlaneValidator backed by a static
+// resolver and the RSA private key used to sign tokens for it. Tests
+// must include the kid header (kidForKey) so the validator can find
+// the matching public key.
 func newAuthTestValidator(t *testing.T) (*auth.MgmtPlaneValidator, *rsa.PrivateKey) {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
-	der, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
-	require.NoError(t, err)
-
-	path := filepath.Join(t.TempDir(), "pub.pem")
-	f, err := os.Create(path)
-	require.NoError(t, err)
-	require.NoError(t, pem.Encode(f, &pem.Block{Type: "PUBLIC KEY", Bytes: der}))
-	require.NoError(t, f.Close())
-
-	v, err := auth.NewMgmtPlaneValidator(path)
-	require.NoError(t, err)
-	return v, key
+	kid := kidForKey(t, &key.PublicKey)
+	resolver := &auth.StaticKeyResolver{
+		Keys: map[string]*rsa.PublicKey{kid: &key.PublicKey},
+	}
+	return auth.NewMgmtPlaneValidatorWithResolver(resolver), key
 }
 
 func mintMgmtToken(t *testing.T, key *rsa.PrivateKey, override func(*authTestClaims)) string {
@@ -87,6 +94,7 @@ func mintMgmtToken(t *testing.T, key *rsa.PrivateKey, override func(*authTestCla
 		override(&claims)
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = kidForKey(t, &key.PublicKey)
 	signed, err := token.SignedString(key)
 	require.NoError(t, err)
 	return signed

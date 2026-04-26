@@ -20,15 +20,13 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -43,6 +41,18 @@ const (
 	testAudience = "omnia-facade"
 )
 
+// thumbprintForKey computes the RFC 7638 JWK thumbprint for an RSA
+// public key, matching what dashboard/lib/jwks.js produces. Used as
+// the kid the validator sees on minted tokens.
+func thumbprintForKey(t *testing.T, key *rsa.PublicKey) string {
+	t.Helper()
+	n := base64.RawURLEncoding.EncodeToString(key.N.Bytes())
+	e := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes())
+	canonical := fmt.Sprintf(`{"e":%q,"kty":"RSA","n":%q}`, e, n)
+	sum := sha256.Sum256([]byte(canonical))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
 // testMintOpts tunes a single token's claims. Missing fields get safe defaults.
 type testMintOpts struct {
 	issuer    string
@@ -55,6 +65,8 @@ type testMintOpts struct {
 	nbf       time.Time
 	iat       time.Time
 	key       *rsa.PrivateKey // override signing key
+	kid       string          // override JWT header kid (default: thumbprint of key)
+	noKid     bool            // omit kid entirely (for negative tests)
 	noClaims  bool            // mint a token with jwt.RegisteredClaims only, no origin
 }
 
@@ -99,6 +111,13 @@ func mintToken(t *testing.T, opts testMintOpts) string {
 		claims.Workspace = opts.workspace
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	if !opts.noKid {
+		kid := opts.kid
+		if kid == "" {
+			kid = thumbprintForKey(t, &opts.key.PublicKey)
+		}
+		token.Header["kid"] = kid
+	}
 	signed, err := token.SignedString(opts.key)
 	if err != nil {
 		t.Fatalf("sign token: %v", err)
@@ -115,49 +134,6 @@ func newRSAKey(t *testing.T) *rsa.PrivateKey {
 	return k
 }
 
-func writePubKeyPEM(t *testing.T, dir string, key *rsa.PublicKey) string {
-	t.Helper()
-	der, err := x509.MarshalPKIXPublicKey(key)
-	if err != nil {
-		t.Fatalf("marshal pkix: %v", err)
-	}
-	path := filepath.Join(dir, "pub.pem")
-	f, err := os.Create(path)
-	if err != nil {
-		t.Fatalf("create pub.pem: %v", err)
-	}
-	defer func() { _ = f.Close() }()
-	if err := pem.Encode(f, &pem.Block{Type: "PUBLIC KEY", Bytes: der}); err != nil {
-		t.Fatalf("encode pub.pem: %v", err)
-	}
-	return path
-}
-
-func writeSelfSignedCertPEM(t *testing.T, dir string, key *rsa.PrivateKey) string {
-	t.Helper()
-	tpl := x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "omnia-dashboard-test"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-	}
-	der, err := x509.CreateCertificate(rand.Reader, &tpl, &tpl, &key.PublicKey, key)
-	if err != nil {
-		t.Fatalf("create cert: %v", err)
-	}
-	path := filepath.Join(dir, "pub.pem")
-	f, err := os.Create(path)
-	if err != nil {
-		t.Fatalf("create pub.pem: %v", err)
-	}
-	defer func() { _ = f.Close() }()
-	if err := pem.Encode(f, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
-		t.Fatalf("encode cert: %v", err)
-	}
-	return path
-}
-
 func requestWithToken(token string) *http.Request {
 	r := httptest.NewRequest(http.MethodGet, "/ws", nil)
 	if token != "" {
@@ -166,18 +142,18 @@ func requestWithToken(token string) *http.Request {
 	return r
 }
 
-// newValidator constructs an MgmtPlaneValidator with a random RSA keypair
-// written to disk as PKIX public-key PEM. Returns the validator and the
+// newValidator constructs an MgmtPlaneValidator backed by a static
+// resolver keyed by the kid the dashboard would emit (RFC 7638
+// thumbprint of the public half). Returns the validator and the
 // matching private key for the tests to sign tokens with.
 func newValidator(t *testing.T) (*auth.MgmtPlaneValidator, *rsa.PrivateKey) {
 	t.Helper()
 	key := newRSAKey(t)
-	path := writePubKeyPEM(t, t.TempDir(), &key.PublicKey)
-	v, err := auth.NewMgmtPlaneValidator(path)
-	if err != nil {
-		t.Fatalf("NewMgmtPlaneValidator: %v", err)
+	kid := thumbprintForKey(t, &key.PublicKey)
+	resolver := &auth.StaticKeyResolver{
+		Keys: map[string]*rsa.PublicKey{kid: &key.PublicKey},
 	}
-	return v, key
+	return auth.NewMgmtPlaneValidatorWithResolver(resolver), key
 }
 
 func TestMgmtPlaneValidator_ValidToken(t *testing.T) {
@@ -212,26 +188,6 @@ func TestMgmtPlaneValidator_ValidToken(t *testing.T) {
 	}
 	if id.ExpiresAt.IsZero() {
 		t.Error("ExpiresAt should be populated from exp claim")
-	}
-}
-
-func TestMgmtPlaneValidator_AcceptsCertificatePEM(t *testing.T) {
-	// Helm's genSelfSigned emits a certificate (tls.crt). The validator
-	// must accept that shape too, not just raw PKIX public-key PEM.
-	t.Parallel()
-	key := newRSAKey(t)
-	path := writeSelfSignedCertPEM(t, t.TempDir(), key)
-	v, err := auth.NewMgmtPlaneValidator(path)
-	if err != nil {
-		t.Fatalf("NewMgmtPlaneValidator with cert: %v", err)
-	}
-	token := mintToken(t, defaultMintOpts(key))
-	id, err := v.Validate(context.Background(), requestWithToken(token))
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-	if id == nil || id.Origin != policy.OriginManagementPlane {
-		t.Errorf("expected mgmt-plane identity, got %+v", id)
 	}
 }
 
@@ -284,9 +240,40 @@ func TestMgmtPlaneValidator_MalformedJWT(t *testing.T) {
 
 func TestMgmtPlaneValidator_BadSignature(t *testing.T) {
 	t.Parallel()
-	v, _ := newValidator(t)
-	otherKey := newRSAKey(t) // different key than the validator trusts
-	token := mintToken(t, defaultMintOpts(otherKey))
+	v, key := newValidator(t)
+	otherKey := newRSAKey(t) // different key the validator has not registered
+	opts := defaultMintOpts(otherKey)
+	// Override kid to one the resolver KNOWS (key's), so the resolver
+	// returns key's pubkey but the signature was made with otherKey —
+	// classic kid spoof. Validator must reject on signature.
+	opts.kid = thumbprintForKey(t, &key.PublicKey)
+	token := mintToken(t, opts)
+
+	_, err := v.Validate(context.Background(), requestWithToken(token))
+	if !errors.Is(err, auth.ErrInvalidCredential) {
+		t.Errorf("err = %v, want ErrInvalidCredential", err)
+	}
+}
+
+func TestMgmtPlaneValidator_UnknownKid(t *testing.T) {
+	t.Parallel()
+	v, key := newValidator(t)
+	opts := defaultMintOpts(key)
+	opts.kid = "no-such-kid"
+	token := mintToken(t, opts)
+
+	_, err := v.Validate(context.Background(), requestWithToken(token))
+	if !errors.Is(err, auth.ErrInvalidCredential) {
+		t.Errorf("err = %v, want ErrInvalidCredential", err)
+	}
+}
+
+func TestMgmtPlaneValidator_MissingKidHeader(t *testing.T) {
+	t.Parallel()
+	v, key := newValidator(t)
+	opts := defaultMintOpts(key)
+	opts.noKid = true
+	token := mintToken(t, opts)
 
 	_, err := v.Validate(context.Background(), requestWithToken(token))
 	if !errors.Is(err, auth.ErrInvalidCredential) {
@@ -362,9 +349,7 @@ func TestMgmtPlaneValidator_Expired(t *testing.T) {
 }
 
 func TestMgmtPlaneValidator_WrongSigningMethod(t *testing.T) {
-	// HMAC-signed token against an RSA validator must be rejected. If we
-	// naively handed the validator's *rsa.PublicKey to jwt.Parse it would
-	// panic or accept, depending on library version — guard explicitly.
+	// HMAC-signed token against an RSA validator must be rejected.
 	t.Parallel()
 	v, _ := newValidator(t)
 	claims := jwt.RegisteredClaims{
@@ -388,90 +373,38 @@ func TestMgmtPlaneValidator_WrongSigningMethod(t *testing.T) {
 func TestMgmtPlaneValidator_ConstructorErrors(t *testing.T) {
 	t.Parallel()
 
-	t.Run("missing file", func(t *testing.T) {
+	t.Run("empty JWKS URL", func(t *testing.T) {
 		t.Parallel()
-		_, err := auth.NewMgmtPlaneValidator(filepath.Join(t.TempDir(), "nonexistent.pem"))
+		_, err := auth.NewMgmtPlaneValidator("")
 		if err == nil {
-			t.Fatal("expected error for missing file")
-		}
-	})
-
-	t.Run("bad pem", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		path := filepath.Join(dir, "bad.pem")
-		if err := os.WriteFile(path, []byte("not pem"), 0o600); err != nil {
-			t.Fatalf("write bad.pem: %v", err)
-		}
-		_, err := auth.NewMgmtPlaneValidator(path)
-		if err == nil {
-			t.Fatal("expected error for bad PEM")
-		}
-	})
-
-	t.Run("non-rsa key", func(t *testing.T) {
-		t.Parallel()
-		// Write an EC key — PKIX-parseable but not RSA.
-		dir := t.TempDir()
-		ecPEM := []byte(`-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEhE0DGbdcbGP/ECD0W99dd6BlMaBL
-Rum0+43T0SPpPJUdGuzc3rI80AJ+yAv3MZD3j6SS4Qh5ET7nFyGoiPkfbw==
------END PUBLIC KEY-----
-`)
-		path := filepath.Join(dir, "ec.pem")
-		if err := os.WriteFile(path, ecPEM, 0o600); err != nil {
-			t.Fatalf("write ec.pem: %v", err)
-		}
-		_, err := auth.NewMgmtPlaneValidator(path)
-		if err == nil {
-			t.Fatal("expected error for non-RSA key")
+			t.Fatal("expected error for empty JWKS URL")
 		}
 	})
 }
 
-func TestMgmtPlaneValidator_AcceptsPKCS1PublicKey(t *testing.T) {
-	// Some operators may hand-roll a PKCS1 "RSA PUBLIC KEY" PEM — the
-	// validator must accept it too.
+func TestMgmtPlaneValidator_FetchesFromJWKSEndpoint(t *testing.T) {
+	// End-to-end: spin up a real JWKS server, build a validator pointed
+	// at it, and verify a token signed with the matching key admits.
 	t.Parallel()
 	key := newRSAKey(t)
-	der := x509.MarshalPKCS1PublicKey(&key.PublicKey)
-	dir := t.TempDir()
-	path := filepath.Join(dir, "pkcs1.pem")
-	f, err := os.Create(path)
-	if err != nil {
-		t.Fatalf("create pkcs1.pem: %v", err)
-	}
-	if err := pem.Encode(f, &pem.Block{Type: "RSA PUBLIC KEY", Bytes: der}); err != nil {
-		_ = f.Close()
-		t.Fatalf("encode pkcs1.pem: %v", err)
-	}
-	_ = f.Close()
+	kid := thumbprintForKey(t, &key.PublicKey)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		nB := base64.RawURLEncoding.EncodeToString(key.N.Bytes())
+		eB := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes())
+		_, _ = fmt.Fprintf(w, `{"keys":[{"kty":"RSA","alg":"RS256","use":"sig","kid":%q,"n":%q,"e":%q}]}`, kid, nB, eB)
+	}))
+	t.Cleanup(srv.Close)
 
-	v, err := auth.NewMgmtPlaneValidator(path)
+	v, err := auth.NewMgmtPlaneValidator(srv.URL + "/jwks")
 	if err != nil {
 		t.Fatalf("NewMgmtPlaneValidator: %v", err)
 	}
-	token := mintToken(t, defaultMintOpts(key))
-	if _, err := v.Validate(context.Background(), requestWithToken(token)); err != nil {
-		t.Errorf("PKCS1 pubkey should admit: %v", err)
+	id, err := v.Validate(context.Background(), requestWithToken(mintToken(t, defaultMintOpts(key))))
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
-}
-
-func TestMgmtPlaneValidator_UnsupportedPEMType(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "ec-priv.pem")
-	data := []byte(`-----BEGIN EC PRIVATE KEY-----
-MHcCAQEEIAP4HDzRgFNdYaqy5EZGDA4Gz7k7B1JjSoC3bM8XxBYboAoGCCqGSM49
-AwEHoUQDQgAEhE0DGbdcbGP/ECD0W99dd6BlMaBLRum0+43T0SPpPJUdGuzc3rI8
-0AJ+yAv3MZD3j6SS4Qh5ET7nFyGoiPkfbw==
------END EC PRIVATE KEY-----
-`)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write ec.pem: %v", err)
-	}
-	if _, err := auth.NewMgmtPlaneValidator(path); err == nil {
-		t.Error("expected error for unsupported PEM block type")
+	if id == nil || id.Origin != policy.OriginManagementPlane {
+		t.Errorf("expected mgmt-plane identity, got %+v", id)
 	}
 }
 
@@ -481,48 +414,39 @@ func TestMgmtPlaneValidator_CustomIssuerAudience(t *testing.T) {
 	// options.
 	t.Parallel()
 	key := newRSAKey(t)
-	path := writePubKeyPEM(t, t.TempDir(), &key.PublicKey)
-	v, err := auth.NewMgmtPlaneValidator(
-		path,
+	kid := thumbprintForKey(t, &key.PublicKey)
+	resolver := &auth.StaticKeyResolver{Keys: map[string]*rsa.PublicKey{kid: &key.PublicKey}}
+	v := auth.NewMgmtPlaneValidatorWithResolver(
+		resolver,
 		auth.WithMgmtPlaneIssuer("custom-iss"),
 		auth.WithMgmtPlaneAudience("custom-aud"),
 	)
-	if err != nil {
-		t.Fatalf("NewMgmtPlaneValidator: %v", err)
-	}
-
-	// Default-minted token has issuer=omnia-dashboard — wrong for this validator.
-	wrongToken := mintToken(t, defaultMintOpts(key))
-	if _, err := v.Validate(context.Background(), requestWithToken(wrongToken)); !errors.Is(err, auth.ErrInvalidCredential) {
-		t.Errorf("default-issuer token should be rejected: err = %v", err)
-	}
 
 	opts := defaultMintOpts(key)
 	opts.issuer = "custom-iss"
 	opts.audience = "custom-aud"
-	rightToken := mintToken(t, opts)
-	if _, err := v.Validate(context.Background(), requestWithToken(rightToken)); err != nil {
+	token := mintToken(t, opts)
+	if _, err := v.Validate(context.Background(), requestWithToken(token)); err != nil {
 		t.Errorf("custom-issuer token should admit: %v", err)
+	}
+
+	defaultsToken := mintToken(t, defaultMintOpts(key))
+	if _, err := v.Validate(context.Background(), requestWithToken(defaultsToken)); err == nil {
+		t.Error("default-issuer token should be rejected by a custom-issuer validator")
 	}
 }
 
-// TestMgmtPlaneValidator_LeewayToleratesSmallDrift proves T1 is fixed:
-// tokens just-barely in the future (iat/nbf up to ~15s after the
-// facade's clock) must still admit. Dashboards running on a slightly
-// different clock than the facade's would otherwise 401 their own
-// freshly-minted tokens.
-//
-// The inverse direction — that the leeway does NOT mask a genuinely
-// expired token — is already covered by TestMgmtPlaneValidator_Expired
-// (exp = -1 minute, comfortably outside the 30s leeway).
 func TestMgmtPlaneValidator_LeewayToleratesSmallDrift(t *testing.T) {
+	// nbf/iat slightly in the future (within jwtLeeway = 30s) must still
+	// admit. Without leeway a facade pod a second ahead of the dashboard
+	// 401s freshly minted tokens — the C-3 finding.
 	t.Parallel()
 	v, key := newValidator(t)
-	future := time.Now().Add(15 * time.Second)
 	opts := defaultMintOpts(key)
-	opts.iat = future
-	opts.nbf = future
-	opts.exp = future.Add(5 * time.Minute)
+	now := time.Now()
+	opts.iat = now.Add(15 * time.Second) // future, but within leeway
+	opts.nbf = now.Add(15 * time.Second)
+	opts.exp = now.Add(5 * time.Minute)
 	token := mintToken(t, opts)
 
 	if _, err := v.Validate(context.Background(), requestWithToken(token)); err != nil {

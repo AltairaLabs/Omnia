@@ -91,7 +91,7 @@ func main() {
 	var enterpriseEnabled bool
 	var licenseServerURL string
 	var clusterName string
-	var mgmtPlaneSigningSecret string
+	var mgmtPlaneJWKSURL string
 	var tlsOpts []func(*tls.Config)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -151,12 +151,13 @@ func main() {
 		"URL of the license activation server for enterprise features")
 	flag.StringVar(&clusterName, "cluster-name", "",
 		"Human-readable name for this cluster in license records")
-	flag.StringVar(&mgmtPlaneSigningSecret, "mgmt-plane-signing-secret", "",
-		"Name of the Secret in POD_NAMESPACE holding the dashboard's mgmt-plane "+
-			"JWT signing keypair (type kubernetes.io/tls). The Workspace controller "+
-			"mirrors the public cert into a ConfigMap per workspace namespace so "+
-			"facade pods can validate dashboard-minted debug tokens. Empty disables "+
-			"the mirror — facade stays mgmt-plane-unaware.")
+	flag.StringVar(&mgmtPlaneJWKSURL, "mgmt-plane-jwks-url", "",
+		"URL of the dashboard's JWKS endpoint, set on every facade container "+
+			"as OMNIA_MGMT_PLANE_JWKS_URL so cmd/agent can build a JWKS-backed "+
+			"mgmt-plane validator. Typically the in-cluster service URL, e.g. "+
+			"http://omnia-dashboard.omnia-system.svc.cluster.local:3000/api/auth/jwks. "+
+			"Empty disables wiring — facade stays mgmt-plane-unaware (Arena E2E, "+
+			"headless installs).")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -256,6 +257,7 @@ func main() {
 		PolicyProxyImage:                policyProxyImageForEnterprise(enterpriseEnabled, policyProxyImage),
 		RolloutMetrics:                  controller.NewRolloutMetrics(prometheus.DefaultRegisterer),
 		WorkspaceContentPath:            workspaceContentPath,
+		MgmtPlaneJWKSURL:                mgmtPlaneJWKSURL,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "AgentRuntime")
 		os.Exit(1)
@@ -299,7 +301,6 @@ func main() {
 		},
 		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
 		OperatorNamespace:               os.Getenv("POD_NAMESPACE"),
-		MgmtPlaneSigningSecret:          mgmtPlaneSigningSecret,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "Workspace")
 		os.Exit(1)

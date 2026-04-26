@@ -21,6 +21,7 @@
 
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const { publicJwkFromKey } = require("./jwks.js");
 
 /**
  * Default issuer/audience values. Kept in sync with the Go-side defaults
@@ -108,7 +109,12 @@ function mintToken(opts) {
   const nowMs = opts.now ? opts.now() : Date.now();
   const nowSec = Math.floor(nowMs / 1000);
 
-  const header = { alg: "RS256", typ: "JWT" };
+  // Derive the kid from the corresponding public JWK so facade-side
+  // JWKS lookup can pick the right key during rotation. createPublicKey
+  // accepts the private KeyObject and yields the matching public half.
+  const publicKey = crypto.createPublicKey(opts.key);
+  const kid = publicJwkFromKey(publicKey).kid;
+  const header = { alg: "RS256", typ: "JWT", kid };
   const payload = {
     iss: issuer,
     sub: opts.subject,

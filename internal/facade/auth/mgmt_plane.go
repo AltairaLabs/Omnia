@@ -18,13 +18,9 @@ package auth
 
 import (
 	"context"
-	"crypto/rsa"
-	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -53,11 +49,13 @@ const bearerPrefix = "Bearer "
 
 // MgmtPlaneValidator verifies JWTs minted by the dashboard's signing key
 // and presented by an admin against the facade (for example, the "Try this
-// agent" debug view). It is one entry in the facade's auth chain.
+// agent" debug view). Keys are resolved by JWT kid through a KeyResolver
+// — production wiring uses JWKSResolver pointed at the dashboard's
+// /api/auth/jwks endpoint, tests use StaticKeyResolver.
 type MgmtPlaneValidator struct {
-	publicKey *rsa.PublicKey
-	issuer    string
-	audience  string
+	keys     KeyResolver
+	issuer   string
+	audience string
 }
 
 // MgmtPlaneOption tunes a MgmtPlaneValidator.
@@ -75,30 +73,30 @@ func WithMgmtPlaneAudience(aud string) MgmtPlaneOption {
 	return func(v *MgmtPlaneValidator) { v.audience = aud }
 }
 
-// NewMgmtPlaneValidator constructs a validator that trusts JWTs signed by
-// the RSA public key at pubKeyPath. The file may contain either a PKIX
-// "PUBLIC KEY" PEM block or an x509 "CERTIFICATE" PEM block — Helm's
-// genSelfSigned emits the latter, operators supplying their own key may
-// use either.
-func NewMgmtPlaneValidator(pubKeyPath string, opts ...MgmtPlaneOption) (*MgmtPlaneValidator, error) {
-	data, err := os.ReadFile(pubKeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("read mgmt-plane public key %q: %w", pubKeyPath, err)
-	}
-	key, err := parseRSAPublicKey(data)
-	if err != nil {
-		return nil, fmt.Errorf("parse mgmt-plane public key %q: %w", pubKeyPath, err)
-	}
-
+// NewMgmtPlaneValidatorWithResolver constructs a validator that delegates
+// public-key lookup to the supplied KeyResolver. Useful for tests and
+// for callers that want to plug in a non-HTTP key source.
+func NewMgmtPlaneValidatorWithResolver(r KeyResolver, opts ...MgmtPlaneOption) *MgmtPlaneValidator {
 	v := &MgmtPlaneValidator{
-		publicKey: key,
-		issuer:    DefaultMgmtPlaneIssuer,
-		audience:  DefaultMgmtPlaneAudience,
+		keys:     r,
+		issuer:   DefaultMgmtPlaneIssuer,
+		audience: DefaultMgmtPlaneAudience,
 	}
 	for _, opt := range opts {
 		opt(v)
 	}
-	return v, nil
+	return v
+}
+
+// NewMgmtPlaneValidator constructs a validator backed by a JWKS endpoint.
+// jwksURL is typically the dashboard's in-cluster service URL, e.g.
+// http://omnia-dashboard.omnia-system.svc.cluster.local:3000/api/auth/jwks.
+// Returns an error if jwksURL is empty.
+func NewMgmtPlaneValidator(jwksURL string, opts ...MgmtPlaneOption) (*MgmtPlaneValidator, error) {
+	if jwksURL == "" {
+		return nil, errors.New("mgmt-plane: JWKS URL required")
+	}
+	return NewMgmtPlaneValidatorWithResolver(NewJWKSResolver(jwksURL), opts...), nil
 }
 
 // mgmtPlaneClaims is the dashboard-minted JWT shape.
@@ -111,7 +109,7 @@ type mgmtPlaneClaims struct {
 
 // Validate implements Validator. It admits requests carrying a valid
 // mgmt-plane JWT and rejects everything else with one of the typed errors.
-func (v *MgmtPlaneValidator) Validate(_ context.Context, r *http.Request) (*policy.AuthenticatedIdentity, error) {
+func (v *MgmtPlaneValidator) Validate(ctx context.Context, r *http.Request) (*policy.AuthenticatedIdentity, error) {
 	tokenString, err := extractBearer(r)
 	if err != nil {
 		return nil, err
@@ -128,7 +126,11 @@ func (v *MgmtPlaneValidator) Validate(_ context.Context, r *http.Request) (*poli
 		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, fmt.Errorf("unexpected signing method %q", t.Header["alg"])
 		}
-		return v.publicKey, nil
+		kid, _ := t.Header["kid"].(string)
+		if kid == "" {
+			return nil, errors.New("mgmt-plane JWT missing kid header")
+		}
+		return v.keys.Resolve(ctx, kid)
 	})
 	if parseErr != nil {
 		if errors.Is(parseErr, jwt.ErrTokenExpired) {
@@ -182,46 +184,4 @@ func extractBearer(r *http.Request) (string, error) {
 		return "", fmt.Errorf("%w: empty bearer token", ErrInvalidCredential)
 	}
 	return token, nil
-}
-
-// parseRSAPublicKey accepts either a PKIX "PUBLIC KEY" PEM block or an
-// x509 "CERTIFICATE" PEM block and returns the RSA public key. Helm's
-// genSelfSigned template produces certificates; operators BYO-ing a raw
-// public key may use the other form.
-func parseRSAPublicKey(data []byte) (*rsa.PublicKey, error) {
-	block, _ := pem.Decode(data)
-	if block == nil {
-		return nil, errors.New("no PEM block found")
-	}
-
-	switch block.Type {
-	case "CERTIFICATE":
-		cert, err := x509.ParseCertificate(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("parse certificate: %w", err)
-		}
-		key, ok := cert.PublicKey.(*rsa.PublicKey)
-		if !ok {
-			return nil, fmt.Errorf("certificate public key is %T, want *rsa.PublicKey", cert.PublicKey)
-		}
-		return key, nil
-	case "PUBLIC KEY":
-		pub, err := x509.ParsePKIXPublicKey(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("parse PKIX public key: %w", err)
-		}
-		key, ok := pub.(*rsa.PublicKey)
-		if !ok {
-			return nil, fmt.Errorf("public key is %T, want *rsa.PublicKey", pub)
-		}
-		return key, nil
-	case "RSA PUBLIC KEY":
-		key, err := x509.ParsePKCS1PublicKey(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("parse PKCS1 public key: %w", err)
-		}
-		return key, nil
-	default:
-		return nil, fmt.Errorf("unsupported PEM block type %q", block.Type)
-	}
 }
