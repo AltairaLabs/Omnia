@@ -94,6 +94,75 @@ describe("collapseToolCalls", () => {
     expect(result[0].status).toBe("pending");
   });
 
+  it("keeps sequential tool calls that share a repeating callId distinct", () => {
+    // Providers that reset their per-round call indexer (e.g. Gemini's
+    // `call_0`, `call_0`, `call_0` across three sequential rounds) emit
+    // the same callId for every distinct invocation. FIFO pairing matches
+    // each pending with the next chronologically-following resolution of
+    // the same callId, so all three calls appear in the timeline instead
+    // of collapsing into one row.
+    const events = [
+      makeTc({
+        id: "p1", callId: "call_0", status: "pending",
+        arguments: { content: "first" },
+        createdAt: "2026-01-01T00:00:01Z",
+      }),
+      makeTc({
+        id: "s1", callId: "call_0", status: "success",
+        result: '{"id":"m1"}',
+        durationMs: 100,
+        createdAt: "2026-01-01T00:00:02Z",
+      }),
+      makeTc({
+        id: "p2", callId: "call_0", status: "pending",
+        arguments: { content: "second" },
+        createdAt: "2026-01-01T00:00:10Z",
+      }),
+      makeTc({
+        id: "s2", callId: "call_0", status: "success",
+        result: '{"id":"m2"}',
+        durationMs: 50,
+        createdAt: "2026-01-01T00:00:11Z",
+      }),
+      makeTc({
+        id: "p3", callId: "call_0", status: "pending",
+        arguments: { content: "third" },
+        createdAt: "2026-01-01T00:00:20Z",
+      }),
+      makeTc({
+        id: "s3", callId: "call_0", status: "success",
+        result: '{"id":"m3"}',
+        durationMs: 75,
+        createdAt: "2026-01-01T00:00:21Z",
+      }),
+    ];
+
+    const result = collapseToolCalls(events);
+    expect(result).toHaveLength(3);
+    expect(result.map((tc) => tc.arguments)).toEqual([
+      { content: "first" },
+      { content: "second" },
+      { content: "third" },
+    ]);
+    expect(result.map((tc) => tc.result)).toEqual([
+      '{"id":"m1"}',
+      '{"id":"m2"}',
+      '{"id":"m3"}',
+    ]);
+    expect(result.every((tc) => tc.status === "success")).toBe(true);
+  });
+
+  it("emits an orphan resolution as its own row when no matching pending exists", () => {
+    const orphan = makeTc({
+      id: "1", callId: "c1", status: "success",
+      result: "ok",
+      createdAt: "2026-01-01T00:00:01Z",
+    });
+    const result = collapseToolCalls([orphan]);
+    expect(result).toHaveLength(1);
+    expect(result[0].status).toBe("success");
+  });
+
   it("sorts output by started timestamp", () => {
     const events = [
       makeTc({ id: "4", callId: "c2", status: "success", createdAt: "2026-01-01T00:00:04Z" }),

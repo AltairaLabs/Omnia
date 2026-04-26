@@ -3,70 +3,78 @@ import type { ToolCall } from "@/types/session";
 /**
  * Collapse tool call lifecycle events into one entry per logical call.
  *
- * The backend records each lifecycle event (pending, success, error) as a
- * separate row sharing the same `callId`. This function merges them so the
- * UI shows one item per logical tool invocation with the most resolved state.
+ * The backend records each lifecycle event (pending, then success/error) as a
+ * separate row sharing the same `callId`. This function pairs them so the UI
+ * shows one item per logical tool invocation with the most resolved state.
  *
- * Priority: success > error > pending.
- * Fields from the most resolved event win (result, errorMessage, durationMs, status).
- * Arguments and labels come from the earliest event (the started event).
+ * `callId` is NOT globally unique within a session — providers reset their
+ * call indexer on each tool-calling round (e.g. Gemini emits `call_0` again
+ * for the first tool call of round 2). Pairing must therefore walk events
+ * in chronological order and match each `pending` with the next
+ * chronologically-following `success`/`error` carrying the same callId
+ * (FIFO). Anything left unmatched (an orphan pending or an orphan resolution)
+ * is returned as a standalone entry.
+ *
+ * The merged entry keeps `arguments` / `labels` from the `pending` row and
+ * `result` / `errorMessage` / `durationMs` / `status` from the resolution.
+ * Output is sorted by the started timestamp.
  */
 export function collapseToolCalls(events: ToolCall[]): ToolCall[] {
-  const byCallId = new Map<string, ToolCall[]>();
+  // Sort chronologically so FIFO pairing matches user-visible order.
+  const sorted = [...events].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  );
 
-  for (const tc of events) {
+  // Pending queue per callId, in arrival order.
+  const pendingByCallId = new Map<string, ToolCall[]>();
+  const merged: ToolCall[] = [];
+
+  for (const tc of sorted) {
     const key = tc.callId || tc.id;
-    const group = byCallId.get(key);
-    if (group) {
-      group.push(tc);
-    } else {
-      byCallId.set(key, [tc]);
-    }
-  }
 
-  const statusPriority: Record<string, number> = {
-    pending: 0,
-    error: 1,
-    success: 2,
-  };
-
-  const result: ToolCall[] = [];
-
-  for (const group of byCallId.values()) {
-    if (group.length === 1) {
-      result.push(group[0]);
+    if (tc.status === "pending") {
+      const queue = pendingByCallId.get(key) ?? [];
+      queue.push(tc);
+      pendingByCallId.set(key, queue);
       continue;
     }
 
-    // Sort by status priority (highest wins)
-    group.sort(
-      (a, b) => (statusPriority[b.status] ?? 0) - (statusPriority[a.status] ?? 0),
-    );
+    // Resolution event (success / error). Pair with the oldest pending of
+    // the same callId, if one exists.
+    const queue = pendingByCallId.get(key);
+    const started = queue?.shift();
+    if (queue && queue.length === 0) {
+      pendingByCallId.delete(key);
+    }
 
-    const resolved = group[0]; // highest priority status
+    if (!started) {
+      // Orphan resolution — no matching pending was seen. Surface as-is so
+      // the user still sees the row instead of dropping it on the floor.
+      merged.push(tc);
+      continue;
+    }
 
-    // Find the started event for arguments/labels (earliest by timestamp)
-    const started = group.reduce((earliest, tc) =>
-      new Date(tc.createdAt).getTime() < new Date(earliest.createdAt).getTime()
-        ? tc
-        : earliest,
-      group[0],
-    );
-
-    result.push({
-      ...resolved,
-      // Preserve arguments and labels from the started event
-      arguments: started.arguments ?? resolved.arguments,
-      labels: started.labels ?? resolved.labels,
-      // Use the started event's timestamp for timeline ordering
+    merged.push({
+      ...tc,
+      // Preserve arguments / labels from the started event.
+      arguments: started.arguments ?? tc.arguments,
+      labels: started.labels ?? tc.labels,
+      // Use the started event's timestamp so the row sorts by call start.
       createdAt: started.createdAt,
     });
   }
 
-  // Sort by timestamp
-  result.sort(
+  // Any pendings still in the queue never resolved — emit them so the user
+  // sees the in-flight call instead of losing it.
+  for (const queue of pendingByCallId.values()) {
+    for (const orphan of queue) {
+      merged.push(orphan);
+    }
+  }
+
+  merged.sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   );
 
-  return result;
+  return merged;
 }
