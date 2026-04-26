@@ -329,6 +329,64 @@ func TestPostgresMemoryStore_Retrieve(t *testing.T) {
 	assert.Len(t, results, 1)
 }
 
+// TestPostgresMemoryStore_Retrieve_FTSQueryFindsTokenizedMatches reproduces
+// the bug where a recall query like "my name" returned zero hits against a
+// memory whose content was "User's name is Slim Shard" — ILIKE substring
+// matching ignored stopwords and word boundaries. With Postgres FTS
+// (000003_observation_fts) the query tokenises to {name}, matches the
+// stored vector, and ranks via ts_rank_cd. This test fails with the old
+// ILIKE implementation and passes with FTS.
+func TestPostgresMemoryStore_Retrieve_FTSQueryFindsTokenizedMatches(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	require.NoError(t, store.Save(ctx, &Memory{
+		Type: "fact", Content: "User's name is Slim Shard", Confidence: 0.9, Scope: scope,
+	}))
+	require.NoError(t, store.Save(ctx, &Memory{
+		Type: "preference", Content: "Slim Shard likes blue", Confidence: 0.9, Scope: scope,
+	}))
+	require.NoError(t, store.Save(ctx, &Memory{
+		Type: "fact", Content: "Works at Acme Corp", Confidence: 0.8, Scope: scope,
+	}))
+
+	results, err := store.Retrieve(ctx, scope, "my name", RetrieveOptions{})
+	require.NoError(t, err)
+	require.NotEmpty(t, results, "FTS should find the 'name'-bearing memory")
+
+	contents := make([]string, 0, len(results))
+	for _, m := range results {
+		contents = append(contents, m.Content)
+	}
+	assert.Contains(t, contents, "User's name is Slim Shard")
+}
+
+// TestPostgresMemoryStore_Retrieve_FTSRanksByRelevance verifies that when
+// multiple observations match the FTS query, ts_rank_cd surfaces the
+// most-relevant one first — the agent's recall tool can then trust the
+// ordering and stop at the first few results.
+func TestPostgresMemoryStore_Retrieve_FTSRanksByRelevance(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	// First memory mentions "name" once in passing; second is entirely
+	// about the user's name — the FTS rank should put the second first.
+	require.NoError(t, store.Save(ctx, &Memory{
+		Type: "context", Content: "Works at Acme Corp under that name", Confidence: 0.8, Scope: scope,
+	}))
+	require.NoError(t, store.Save(ctx, &Memory{
+		Type: "fact", Content: "User's name is Slim Shard", Confidence: 0.9, Scope: scope,
+	}))
+
+	results, err := store.Retrieve(ctx, scope, "name", RetrieveOptions{})
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(results), 1)
+	assert.Equal(t, "User's name is Slim Shard", results[0].Content,
+		"strongest 'name' match should rank first")
+}
+
 func TestPostgresMemoryStore_Retrieve_MissingWorkspace(t *testing.T) {
 
 	store := newStore(t)

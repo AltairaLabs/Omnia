@@ -38,8 +38,11 @@ func TestRetrieve_TouchesAccessedAt(t *testing.T) {
 	scope := testScope(testWorkspace1)
 
 	mem := &Memory{
-		Type:       "fact",
-		Content:    "accessed-at-test",
+		Type: "fact",
+		// Plain words so the FTS websearch_to_tsquery match below is
+		// straightforward — this test is about the accessed_at touch
+		// path, not search semantics.
+		Content:    "accessed marker fact",
 		Confidence: 0.9,
 		Scope:      scope,
 	}
@@ -59,7 +62,7 @@ func TestRetrieve_TouchesAccessedAt(t *testing.T) {
 
 	// Do a retrieve that will return the row. The touch is async, so we
 	// poll briefly for it to land.
-	res, err := store.Retrieve(ctx, scope, "accessed-at", RetrieveOptions{Limit: 10})
+	res, err := store.Retrieve(ctx, scope, "marker", RetrieveOptions{Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, res, 1)
 

@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -284,8 +285,16 @@ func insertObservation(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 	return nil
 }
 
-// Retrieve returns memories matching scope, a substring query, and options.
-// Results are ordered by observed_at DESC and limited to opts.Limit (default 50).
+// Retrieve returns memories matching scope, a free-text query, and options.
+//
+// Query handling:
+//   - Empty query: returns the most recent observation per entity, ordered
+//     by observed_at DESC.
+//   - Non-empty query: runs Postgres full-text search (websearch_to_tsquery
+//     against the GENERATED search_vector column) and orders results by
+//     ts_rank_cd. Stopwords ("my", "the", "is") are dropped, so a query
+//     like "my name" matches a memory whose content is "User's name is X".
+//
 // A successful retrieval also fires a detached UPDATE that bumps
 // accessed_at / access_count on the returned entities — the signal LRU
 // pruning and recency-weighted ranking depend on.
@@ -311,17 +320,61 @@ func (s *PostgresMemoryStore) Retrieve(ctx context.Context, scope map[string]str
 }
 
 // buildRetrieveQuery constructs the SQL and arguments for a Retrieve call.
+// When query is non-empty it builds a FTS-scored variant; otherwise it
+// returns the standard recency-ordered query.
 func buildRetrieveQuery(scope map[string]string, query string, opts RetrieveOptions) (string, *pgutil.QueryBuilder) {
 	qb := buildBaseMemoryQuery(scope, opts.Types, "")
 
 	if opts.MinConfidence > 0 {
 		qb.Add(confidenceFilter, opts.MinConfidence)
 	}
-	if query != "" {
-		qb.Add("o.content ILIKE $?", "%"+query+"%")
+
+	if query == "" {
+		return formatMemorySQL(qb, opts.Limit, 0), qb
 	}
 
-	return formatMemorySQL(qb, opts.Limit, 0), qb
+	// FTS path: filter observations by tsquery match, pick the highest-
+	// ranked observation per entity, then sort entities by that rank.
+	// The query argument is referenced twice (WHERE + ORDER BY rank); we
+	// capture its placeholder index so both spots see the same parameter.
+	queryArgIdx := len(qb.Args()) + 1
+	qb.Add("o.search_vector @@ websearch_to_tsquery('english', $?)", query)
+	return formatMemoryFTSSQL(qb, queryArgIdx, opts.Limit, 0), qb
+}
+
+// formatMemoryFTSSQL renders a Retrieve query that ranks matching
+// observations via ts_rank_cd against websearch_to_tsquery. queryArgIdx
+// is the 1-based placeholder of the user query already added to qb.
+func formatMemoryFTSSQL(qb *pgutil.QueryBuilder, queryArgIdx, limit, offset int) string {
+	if limit <= 0 {
+		limit = defaultMemoryLimit
+	}
+	// Inner query: per entity pick the observation with the highest
+	// ts_rank_cd (DISTINCT ON requires the ORDER BY to start with the
+	// distinct key). Outer query: re-sort entities by that score.
+	tsqueryExpr := fmt.Sprintf("websearch_to_tsquery('english', $%d)", queryArgIdx)
+	rankExpr := fmt.Sprintf("ts_rank_cd(o.search_vector, %s)", tsqueryExpr)
+
+	inner := fmt.Sprintf(`
+		SELECT DISTINCT ON (e.id) %s, %s, %s AS rank
+		FROM memory_entities %s%s
+		WHERE %s%s
+		ORDER BY e.id, rank DESC, o.observed_at DESC`,
+		selectEntityCols, selectObserveCols, rankExpr,
+		entityTableAlias, observationJoin,
+		colEntityForgot, qb.Where())
+
+	// Outer SELECT projects only the original entity + observation columns
+	// (unprefixed, since the subquery exposes them by their bare names) so
+	// the scanner sees the same column count as the non-FTS path; rank is
+	// used purely for ordering.
+	outerCols := strings.ReplaceAll(selectEntityCols, "e.", "") + ", " +
+		strings.ReplaceAll(selectObserveCols, "o.", "")
+	sql := fmt.Sprintf(
+		"SELECT %s FROM (%s) AS scored ORDER BY rank DESC, observed_at DESC",
+		outerCols, inner,
+	)
+	return qb.AppendPagination(sql, limit, offset)
 }
 
 // List returns memories filtered by scope and options with pagination.
