@@ -135,12 +135,22 @@ spec:
 		logsOut, err := utils.Run(logsCmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to read doctor pod logs")
 
-		// The doctor's logger writes structured info to stderr; --run-once
-		// writes the RunResult JSON object to stdout. Find the start of the
-		// JSON object and decode from there.
-		jsonStart := strings.Index(logsOut, "{\n")
-		Expect(jsonStart).To(BeNumerically(">=", 0),
-			"could not locate JSON object in doctor logs; got:\n%s", logsOut)
+		// The doctor wraps the RunResult JSON in begin/end sentinels because
+		// `kubectl logs` returns merged stdout+stderr — zap log lines (also
+		// JSON-shaped) interleave with the RunResult on stdout. Sentinels
+		// give the parser an unambiguous slice. See cmd/doctor/main.go.
+		const (
+			runOnceResultBegin = "=== DOCTOR-RUN-RESULT-BEGIN ==="
+			runOnceResultEnd   = "=== DOCTOR-RUN-RESULT-END ==="
+		)
+		beginIdx := strings.Index(logsOut, runOnceResultBegin)
+		Expect(beginIdx).To(BeNumerically(">=", 0),
+			"could not locate %q sentinel in doctor logs; got:\n%s", runOnceResultBegin, logsOut)
+		jsonStart := beginIdx + len(runOnceResultBegin)
+		endIdx := strings.Index(logsOut[jsonStart:], runOnceResultEnd)
+		Expect(endIdx).To(BeNumerically(">=", 0),
+			"could not locate %q sentinel after begin marker; got:\n%s", runOnceResultEnd, logsOut)
+		jsonBytes := []byte(logsOut[jsonStart : jsonStart+endIdx])
 
 		type doctorTest struct {
 			Name   string `json:"name"`
@@ -161,7 +171,7 @@ spec:
 				Tests []doctorTest `json:"tests"`
 			} `json:"categories"`
 		}
-		Expect(json.Unmarshal([]byte(logsOut[jsonStart:]), &run)).To(Succeed(),
+		Expect(json.Unmarshal(jsonBytes, &run)).To(Succeed(),
 			"failed to parse doctor RunResult JSON")
 
 		By("asserting the doctor produced a structured report")
