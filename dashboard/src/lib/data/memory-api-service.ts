@@ -155,6 +155,13 @@ export class MemoryApiService {
       }
       throw new Error(`Failed to fetch consent stats: ${response.statusText}`);
     }
-    return (await response.json()) as ConsentStats;
+    // Normalize: the backend may omit grantsByCategory when there are no
+    // grants. Defaulting here keeps callers from defending against undefined.
+    const raw = (await response.json()) as Partial<ConsentStats>;
+    return {
+      totalUsers: raw.totalUsers ?? 0,
+      optedOutAll: raw.optedOutAll ?? 0,
+      grantsByCategory: raw.grantsByCategory ?? {},
+    };
   }
 }

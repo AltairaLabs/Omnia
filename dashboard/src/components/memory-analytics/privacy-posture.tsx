@@ -22,7 +22,11 @@ function optOutPercent(stats: ConsentStats): number {
 }
 
 function grantRows(stats: ConsentStats) {
-  return Object.entries(stats.grantsByCategory)
+  // Backend may omit grantsByCategory when there are no consent grants
+  // (or send null on certain edge cases). Default to {} so Object.entries
+  // doesn't throw.
+  const grants = stats.grantsByCategory ?? {};
+  return Object.entries(grants)
     .map(([key, value]) => ({ name: key, value }))
     .sort((a, b) => b.value - a.value);
 }
