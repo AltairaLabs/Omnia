@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -236,21 +237,43 @@ func resolveWorkspaceURLs(log interface {
 	)
 }
 
+// runOnceResultBegin and runOnceResultEnd bracket the RunResult JSON written
+// to stdout in --run-once mode. Container runtimes merge the doctor pod's
+// stderr (zap log lines, also JSON-shaped) with stdout into a single
+// `kubectl logs` stream, so a downstream parser cannot rely on "the first
+// `{\n` is the result". The sentinels give parsers an unambiguous slice.
+const (
+	runOnceResultBegin = "=== DOCTOR-RUN-RESULT-BEGIN ==="
+	runOnceResultEnd   = "=== DOCTOR-RUN-RESULT-END ==="
+)
+
 func runOnceMode(runner *doctor.Runner, log interface {
 	Info(msg string, keysAndValues ...interface{})
 }, exitOnFail bool) {
 	results := make(chan doctor.TestResult, 100)
+	// Drain the results channel so runner.Run can make progress. The
+	// per-test data is also present in the aggregate `run` value emitted
+	// below; we don't log per-result here because those lines would
+	// interleave with the RunResult JSON in `kubectl logs` output.
 	go func() {
-		for r := range results {
-			log.Info("test completed", "name", r.Name, "status", r.Status, "detail", r.Detail)
+		for range results {
 		}
 	}()
 
 	run := runner.Run(context.Background(), results)
 
-	enc := json.NewEncoder(os.Stdout)
+	// Buffer the JSON before writing so the begin/result/end triplet hits
+	// stdout in a single Write call, minimising the chance of stderr log
+	// lines slicing through it on a noisy run.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(run); err != nil {
+		log.Info("failed to encode run-once result", "error", err.Error())
+		os.Exit(1)
+	}
+	out := fmt.Sprintf("\n%s\n%s%s\n", runOnceResultBegin, buf.String(), runOnceResultEnd)
+	if _, err := os.Stdout.WriteString(out); err != nil {
 		os.Exit(1)
 	}
 
