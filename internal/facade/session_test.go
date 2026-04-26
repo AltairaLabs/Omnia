@@ -18,13 +18,20 @@ package facade
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -33,6 +40,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/altairalabs/omnia/internal/facade/auth"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/identity"
@@ -792,4 +800,147 @@ func TestFacade_ResettingSessionGrantsReplaces(t *testing.T) {
 	if len(cached) != 1 || cached[0] != "memory:context" {
 		t.Errorf("cached = %v, want [memory:context]", cached)
 	}
+}
+
+// TestProcessMessage_MgmtPlaneJWTPrefersDeviceIDForUserScope reproduces a
+// bug where the dashboard's "Try this agent" debug WS upgrade caused the
+// facade to use the mgmt-plane operator pseudonym (`omnia-admin-<hash>` /
+// `omnia-dashboard-proxy`) as the end-user identity for memory/session
+// scoping. The dashboard's "My Memories" page queries memories under
+// `pseudonymize(deviceId)`, so the two pseudonyms never matched and saved
+// memories were invisible to the user.
+//
+// The mgmt-plane JWT subject identifies the *operator* (used in audit so
+// we can tell admins apart). It is NOT the end user. When the request also
+// carries a `device_id` query param (always set by the dashboard's WS
+// upgrade), the facade must scope to the deviceId so memories saved during
+// a debug session show up in the user's memory list.
+func TestProcessMessage_MgmtPlaneJWTPrefersDeviceIDForUserScope(t *testing.T) {
+	var capturedCtx context.Context
+
+	handler := &mockHandler{
+		handleFunc: func(ctx context.Context, _ string, _ *ClientMessage, writer ResponseWriter) error {
+			capturedCtx = ctx
+			return writer.WriteDone("ok")
+		},
+	}
+
+	// Mint a real mgmt-plane JWT signed by an RSA key we control, then
+	// install the validator so the facade actually parses it.
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey: %v", err)
+	}
+	pubPath := writeTestPubKeyPEM(t, t.TempDir(), &key.PublicKey)
+	validator, err := auth.NewMgmtPlaneValidator(pubPath)
+	if err != nil {
+		t.Fatalf("NewMgmtPlaneValidator: %v", err)
+	}
+
+	const operatorSubject = "omnia-admin-deadbeef00000000"
+	const deviceID = "fc725bcc-c5d7-4bef-bef4-a441d29ba7ec"
+	now := time.Now()
+	tokenString := mintTestMgmtPlaneToken(t, key, operatorSubject, now)
+
+	store := session.NewMemoryStore()
+	cfg := DefaultServerConfig()
+	cfg.PingInterval = 100 * time.Millisecond
+	cfg.PongTimeout = 200 * time.Millisecond
+
+	log := logr.Discard()
+	server := NewServer(cfg, store, handler, log, WithMgmtPlaneValidator(validator))
+
+	ts := httptest.NewServer(server)
+	t.Cleanup(func() {
+		ts.Close()
+		_ = store.Close()
+	})
+
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+tokenString)
+	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) +
+		"?agent=test-agent&device_id=" + deviceID
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	var connMsg ServerMessage
+	if err := ws.ReadJSON(&connMsg); err != nil {
+		t.Fatalf("Failed to read connected: %v", err)
+	}
+	if err := ws.WriteJSON(ClientMessage{
+		Type: MessageTypeMessage, SessionID: connMsg.SessionID, Content: "hi",
+	}); err != nil {
+		t.Fatalf("Failed to send: %v", err)
+	}
+	var doneMsg ServerMessage
+	if err := ws.ReadJSON(&doneMsg); err != nil {
+		t.Fatalf("Failed to read done: %v", err)
+	}
+
+	got := policy.UserID(capturedCtx)
+	wantDevice := identity.PseudonymizeID(deviceID)
+	wantOperator := identity.PseudonymizeID(operatorSubject)
+
+	if got == wantOperator {
+		t.Fatalf("policy.UserID(ctx) = %q (operator pseudonym); "+
+			"facade should scope memories to the device_id, not the mgmt-plane JWT subject", got)
+	}
+	if got != wantDevice {
+		t.Fatalf("policy.UserID(ctx) = %q, want %q (pseudonymize(device_id))", got, wantDevice)
+	}
+}
+
+// writeTestPubKeyPEM writes an RSA public key as a PKIX PEM file and
+// returns the path. The MgmtPlaneValidator accepts both PUBLIC KEY and
+// CERTIFICATE blocks; PUBLIC KEY is the simpler test fixture.
+func writeTestPubKeyPEM(t *testing.T, dir string, pub *rsa.PublicKey) string {
+	t.Helper()
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		t.Fatalf("MarshalPKIXPublicKey: %v", err)
+	}
+	path := filepath.Join(dir, "pub.pem")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create pub.pem: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	if err := pem.Encode(f, &pem.Block{Type: "PUBLIC KEY", Bytes: der}); err != nil {
+		t.Fatalf("encode pub.pem: %v", err)
+	}
+	return path
+}
+
+// mintTestMgmtPlaneToken signs a mgmt-plane JWT matching the validator's
+// default issuer/audience so the facade admits it.
+func mintTestMgmtPlaneToken(t *testing.T, key *rsa.PrivateKey, subject string, now time.Time) string {
+	t.Helper()
+	type claims struct {
+		jwt.RegisteredClaims
+		Origin    string `json:"origin,omitempty"`
+		Agent     string `json:"agent,omitempty"`
+		Workspace string `json:"workspace,omitempty"`
+	}
+	c := claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    auth.DefaultMgmtPlaneIssuer,
+			Subject:   subject,
+			Audience:  jwt.ClaimStrings{auth.DefaultMgmtPlaneAudience},
+			ExpiresAt: jwt.NewNumericDate(now.Add(5 * time.Minute)),
+			NotBefore: jwt.NewNumericDate(now.Add(-time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(now),
+		},
+		Origin:    policy.OriginManagementPlane,
+		Agent:     "test-agent",
+		Workspace: "default",
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, c)
+	signed, err := token.SignedString(key)
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	return signed
 }
