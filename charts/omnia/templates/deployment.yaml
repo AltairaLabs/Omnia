@@ -158,10 +158,19 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- $env := concat (.Values.operator.extraEnv | default list) ($po.extraEnv | default list) }}
-          {{- with $env }}
           env:
+            # POD_NAMESPACE is read by the Workspace controller to mirror the
+            # dashboard's mgmt-plane signing pubkey into each workspace
+            # namespace (workspace_mgmt_plane_pubkey.go). Without it the
+            # controller silently skips the mirror — facade pods then have
+            # no pubkey ConfigMap and reject dashboard-minted JWTs with 401.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- with $env }}
             {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- end }}
           {{- $envFrom := concat (.Values.operator.extraEnvFrom | default list) ($po.extraEnvFrom | default list) }}
           {{- with $envFrom }}
           envFrom:
