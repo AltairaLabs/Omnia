@@ -67,6 +67,26 @@ func (sb *ServiceBuilder) BuildSessionDeployment(workspaceName, namespace string
 	return buildServiceDeployment(name, namespace, sb.SessionImage, sb.SessionImagePullPolicy, args, labels, overrides)
 }
 
+// Default worker intervals for the operator-managed memory-api. Each
+// memory-api flag for a worker defaults to empty (= disabled) on the binary
+// side, so an operator that never passes them silently runs no workers. We
+// pass safe defaults here so a fresh memory-api Deployment runs every worker
+// out of the box; advanced operators can swap MemoryPolicy in later for
+// per-workspace tuning.
+//
+// These defaults were chosen so behaviour matches the spec promises (the
+// "compaction worker", "tombstone GC worker", and "re-embed backfill worker"
+// described in agentic-memory-design.md and memory-retention-and-pruning-
+// proposal.md) without requiring a MemoryPolicy CRD for basic operation.
+//
+// Re-embed runs frequently because it's cheap when there's nothing to do;
+// compaction and tombstone GC walk the table so they run daily.
+const (
+	defaultMemoryCompactionInterval = "24h"
+	defaultMemoryTombstoneInterval  = "24h"
+	defaultMemoryReembedInterval    = "60m"
+)
+
 // BuildMemoryDeployment builds a Deployment for the memory-api service group.
 //
 // The pod template carries:
@@ -77,13 +97,17 @@ func (sb *ServiceBuilder) BuildSessionDeployment(workspaceName, namespace string
 //     change (e.g. switching memory.providerRef) rolls the pod —
 //     memory-api reads its config once at startup, so without this the
 //     change is invisible until something else triggers a roll.
+//
+// Args bridge the Workspace's MemoryServiceConfig to memory-api flags. Until
+// this PR the operator only passed --workspace + --service-group, which left
+// every worker disabled and the embedding provider unconfigured even when
+// MemoryServiceConfig.ProviderRef was set — a wiring gap that hid behind
+// "the workers are implemented" status reports while none of them ran. See
+// issue #1038.
 func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string, sg omniav1alpha1.WorkspaceServiceGroup) *appsv1.Deployment {
 	name := fmt.Sprintf("memory-%s-%s", workspaceName, sg.Name)
 	labels := serviceLabels("memory-api", workspaceName, sg.Name)
-	args := []string{
-		fmt.Sprintf("--workspace=%s", workspaceName),
-		fmt.Sprintf("--service-group=%s", sg.Name),
-	}
+	args := buildMemoryAPIArgs(workspaceName, sg)
 	var overrides *omniav1alpha1.PodOverrides
 	if sg.Memory != nil {
 		overrides = sg.Memory.PodOverrides
@@ -95,6 +119,24 @@ func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string,
 	}
 	dep.Spec.Template.Annotations[annotationConfigHash] = memoryConfigHash(sg)
 	return dep
+}
+
+// buildMemoryAPIArgs assembles the CLI args passed to memory-api. The operator
+// is the canonical source of these because each one is a wiring boundary
+// crossing — the binary's flag default is "off", so anything the operator
+// doesn't pass silently doesn't run.
+func buildMemoryAPIArgs(workspaceName string, sg omniav1alpha1.WorkspaceServiceGroup) []string {
+	args := []string{
+		fmt.Sprintf("--workspace=%s", workspaceName),
+		fmt.Sprintf("--service-group=%s", sg.Name),
+		fmt.Sprintf("--compaction-interval=%s", defaultMemoryCompactionInterval),
+		fmt.Sprintf("--tombstone-interval=%s", defaultMemoryTombstoneInterval),
+		fmt.Sprintf("--reembed-interval=%s", defaultMemoryReembedInterval),
+	}
+	if sg.Memory != nil && sg.Memory.ProviderRef != nil && sg.Memory.ProviderRef.Name != "" {
+		args = append(args, fmt.Sprintf("--embedding-provider=%s", sg.Memory.ProviderRef.Name))
+	}
+	return args
 }
 
 // addPodNamespaceEnv injects POD_NAMESPACE (sourced from the downward
