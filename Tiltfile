@@ -1235,6 +1235,44 @@ _restart_cmd = '''
     kubectl delete po -n omnia-demo -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
 '''
 
+# Memory-api and session-api Deployments are operator-managed; Tilt builds the
+# images but doesn't own the workloads, so source edits never reach the
+# running pod without an explicit roll. Without this, fixes to the memory-api
+# binary silently sit in the image while the cluster runs the old code —
+# exactly the wiring trap that bit hybrid recall on the multi-tier path.
+_rebuild_memory_api_cmd = 'docker build --no-cache -f Dockerfile.memory-api -t omnia-memory-api-dev:latest .'
+_rebuild_session_api_cmd = 'docker build --no-cache -f Dockerfile.session-api -t omnia-session-api-dev:latest .'
+# Delete the pod (not the deployment): the operator owns the Deployment spec
+# and reconciles `kubectl rollout restart` annotations away. Pod deletion lets
+# the existing ReplicaSet recreate with the same `:latest` image we just
+# rebuilt (imagePullPolicy: Never picks up the new image without an image-tag
+# bump). Same pattern as agent auto-rebuild.
+_restart_memory_api_cmd = 'kubectl delete po -n dev-agents -l app.kubernetes.io/component=memory-api 2>/dev/null || true'
+_restart_session_api_cmd = 'kubectl delete po -n dev-agents -l app.kubernetes.io/component=session-api 2>/dev/null || true'
+
+_memory_api_deps = [
+    './cmd/memory-api',
+    './api',
+    './internal/memory',
+    './internal/session',
+    './internal/pgutil',
+    './internal/httputil',
+    './internal/tracing',
+    './pkg',
+    './go.mod',
+]
+
+_session_api_deps = [
+    './cmd/session-api',
+    './api',
+    './internal/session',
+    './internal/pgutil',
+    './internal/httputil',
+    './internal/tracing',
+    './pkg',
+    './go.mod',
+]
+
 # Auto-rebuild agent images when their specific source files change.
 # Separated into facade and runtime to avoid unnecessary rebuilds — a change to
 # runtime code no longer triggers a facade rebuild (and vice versa).
@@ -1277,6 +1315,20 @@ local_resource(
     cmd=_rebuild_runtime_cmd + ' && ' + _restart_cmd,
     deps=_runtime_deps,
     labels=['agents'],
+)
+
+local_resource(
+    'auto-rebuild-memory-api',
+    cmd=_rebuild_memory_api_cmd + ' && ' + _restart_memory_api_cmd,
+    deps=_memory_api_deps,
+    labels=['memory-api'],
+)
+
+local_resource(
+    'auto-rebuild-session-api',
+    cmd=_rebuild_session_api_cmd + ' && ' + _restart_session_api_cmd,
+    deps=_session_api_deps,
+    labels=['session-api'],
 )
 
 # ============================================================================
