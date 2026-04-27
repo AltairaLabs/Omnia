@@ -160,7 +160,7 @@ metadata:
   namespace: dev-agents
 spec:
   type: gemini
-  model: gemini-2.0-flash
+  model: gemini-2.5-flash
   secretRef:
     name: gemini-credentials
   defaults:
@@ -201,7 +201,7 @@ data:
       "id": "demo-prompts",
       "name": "Demo Prompts",
       "version": "2.0.0",
-      "description": "Demo pack showcasing evals, validators, tools, and workflow features.",
+      "description": "Demo pack showcasing validators, tools, and workflow features.",
       "template_engine": {
         "version": "v1",
         "syntax": "{{variable}}",
@@ -230,114 +230,6 @@ data:
               "fail_on_violation": false,
               "params": {
                 "max_characters": 2000
-              }
-            }
-          ],
-          "evals": [
-            {
-              "id": "helpfulness",
-              "type": "llm_judge",
-              "trigger": "sample_turns",
-              "sample_percentage": 20,
-              "description": "Assess response helpfulness",
-              "params": {
-                "judge_prompt": "Rate the response for helpfulness and accuracy on a 1-5 scale.",
-                "passing_score": 3
-              },
-              "metric": {
-                "name": "helpfulness_score",
-                "type": "gauge",
-                "range": { "min": 0, "max": 1 }
-              }
-            },
-            {
-              "id": "contains-mock",
-              "type": "contains",
-              "trigger": "every_turn",
-              "description": "Verify response contains expected content",
-              "params": {
-                "patterns": ["response"]
-              },
-              "metric": {
-                "name": "response_contains_expected",
-                "type": "boolean"
-              }
-            },
-            {
-              "id": "response-max-length",
-              "type": "max_length",
-              "trigger": "every_turn",
-              "description": "Responses should stay under 2000 characters",
-              "params": {
-                "max_characters": 2000
-              },
-              "metric": {
-                "name": "response_max_length",
-                "type": "boolean"
-              }
-            },
-            {
-              "id": "response-min-length",
-              "type": "min_length",
-              "trigger": "every_turn",
-              "description": "Responses should be at least 10 characters (not empty)",
-              "params": {
-                "min_characters": 10
-              },
-              "metric": {
-                "name": "response_min_length",
-                "type": "boolean"
-              }
-            },
-            {
-              "id": "tools-used",
-              "type": "tools_called",
-              "trigger": "on_session_complete",
-              "description": "Agent should use available tools when relevant",
-              "params": {
-                "tool_names": ["search_places", "get_weather", "calculate"]
-              },
-              "metric": {
-                "name": "tools_used",
-                "type": "boolean"
-              }
-            },
-            {
-              "id": "tool-chain-weather",
-              "type": "tool_call_chain",
-              "trigger": "on_session_complete",
-              "description": "For weather queries, agent should search places before getting weather",
-              "params": {
-                "chain": ["search_places", "get_weather"]
-              },
-              "metric": {
-                "name": "tool_chain_weather",
-                "type": "boolean"
-              }
-            },
-            {
-              "id": "no-tool-errors",
-              "type": "no_tool_errors",
-              "trigger": "on_session_complete",
-              "description": "All tool calls should complete without errors",
-              "params": {},
-              "metric": {
-                "name": "no_tool_errors",
-                "type": "boolean"
-              }
-            },
-            {
-              "id": "tool-efficiency",
-              "type": "tool_efficiency",
-              "trigger": "on_session_complete",
-              "description": "Agent should not make excessive or failing tool calls",
-              "params": {
-                "max_calls": 10,
-                "max_error_rate": 0.2
-              },
-              "metric": {
-                "name": "tool_efficiency",
-                "type": "boolean"
               }
             }
           ]
@@ -395,35 +287,6 @@ data:
           }
         }
       },
-      "evals": [
-        {
-          "id": "no-hallucination-urls",
-          "type": "regex",
-          "trigger": "every_turn",
-          "description": "Flag responses that fabricate URLs",
-          "params": {
-            "pattern": "https?://[a-zA-Z0-9.-]+\\.[a-z]{2,}",
-            "expect_match": false
-          },
-          "metric": {
-            "name": "no_hallucinated_urls",
-            "type": "boolean"
-          }
-        },
-        {
-          "id": "no-forbidden-content",
-          "type": "content_excludes",
-          "trigger": "every_turn",
-          "description": "Responses should not contain disclaimers about being an AI",
-          "params": {
-            "patterns": ["as an AI", "as a language model", "I'm just an AI"]
-          },
-          "metric": {
-            "name": "no_forbidden_content",
-            "type": "boolean"
-          }
-        }
-      ],
       "skills": [
         {
           "name": "demo-guidelines",
