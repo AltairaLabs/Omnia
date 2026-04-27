@@ -392,6 +392,62 @@ func TestHandleSearchMemories_StoreError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 }
 
+// TestHandleSearchMemories_LargeBodyReturnsPreview proves the recall
+// handler swaps the full content for a preview + has_full_body=true
+// when an observation's body_size_bytes is over the inline
+// threshold. The agent then calls memory__open to fetch the full
+// body when needed — short memories still ride inline.
+func TestHandleSearchMemories_LargeBodyReturnsPreview(t *testing.T) {
+	largeBody := strings.Repeat("x", InlineBodyThresholdBytes*2)
+	store := &mockStore{
+		memories: []*memory.Memory{
+			{ID: "doc-1", Type: "document", Content: largeBody, Confidence: 0.9,
+				Metadata: map[string]any{
+					memory.MetaKeyTitle:    "Engineering handbook",
+					memory.MetaKeySummary:  "Coding standards and review process",
+					memory.MetaKeyBodySize: len(largeBody),
+				}},
+			{ID: "pref-1", Type: "preference", Content: "prefers dark mode", Confidence: 0.9,
+				Metadata: map[string]any{memory.MetaKeyBodySize: len("prefers dark mode")}},
+		},
+	}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/memories/search?workspace=ws1&q=anything", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var resp MemoryListResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	require.Len(t, resp.Memories, 2)
+
+	var doc, pref *MemoryWithTier
+	for _, m := range resp.Memories {
+		switch m.ID {
+		case "doc-1":
+			doc = m
+		case "pref-1":
+			pref = m
+		}
+	}
+	require.NotNil(t, doc)
+	require.NotNil(t, pref)
+
+	assert.True(t, doc.HasFullBody, "large memory must advertise has_full_body")
+	assert.Empty(t, doc.Content, "large memory's full body must not be inlined")
+	assert.NotEmpty(t, doc.ContentPreview, "large memory must carry preview")
+	assert.LessOrEqual(t, len(doc.ContentPreview), previewBytes)
+	assert.Equal(t, "Engineering handbook", doc.Title)
+	assert.Equal(t, "Coding standards and review process", doc.Summary)
+
+	assert.False(t, pref.HasFullBody, "small memory keeps full content inline")
+	assert.Equal(t, "prefers dark mode", pref.Content)
+	assert.Empty(t, pref.ContentPreview, "small memory has no preview")
+}
+
 // TestHandleSearchMemories_AttachesRelated proves the recall response
 // carries the per-memory `related[]` slice the agent uses to navigate
 // the memory graph and decide which memories share an entity (the

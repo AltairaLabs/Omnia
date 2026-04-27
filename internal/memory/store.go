@@ -73,8 +73,8 @@ const (
 		" AND o.superseded_by IS NULL" +
 		" AND (o.valid_until IS NULL OR o.valid_until > now())"
 	entityTableAlias  = "e"
-	selectEntityCols  = "e.id, e.kind, e.metadata, e.created_at, e.expires_at"
-	selectObserveCols = "o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at"
+	selectEntityCols  = "e.id, e.kind, e.metadata, e.created_at, e.expires_at, e.title"
+	selectObserveCols = "o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at, o.summary, o.body_size_bytes"
 )
 
 // PostgresMemoryStore implements Store against the memory_entities / memory_observations
@@ -311,9 +311,15 @@ const (
 // Written to memory_entities.title and memory_observations.summary
 // respectively so the recall path can return a synopsis instead of
 // the full body.
+//
+// MetaKeyBodySize is the server-stamped octet length of the active
+// observation's content. Surfaced via Memory.Metadata so the API DTO
+// can decide whether to inline the full body or return a preview +
+// has_full_body=true and let the agent fetch via memory__open.
 const (
-	MetaKeyTitle   = "title"
-	MetaKeySummary = "summary"
+	MetaKeyTitle    = "title"
+	MetaKeySummary  = "summary"
+	MetaKeyBodySize = "body_size_bytes"
 )
 
 // stringFromMeta returns the trimmed lowercased value of meta[key]
@@ -458,6 +464,10 @@ func updateEntity(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 }
 
 // insertObservation appends an observation row linked to the entity.
+// Carries the optional summary from MetaKeySummary so large memories
+// (workspace docs, session compactions) surface a short blurb on
+// recall without the agent paying the full body in context every
+// time.
 func insertObservation(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 	var turnRange []int
 	if mem.TurnRange != [2]int{} {
@@ -469,11 +479,17 @@ func insertObservation(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 		sessionID = &mem.SessionID
 	}
 
+	var summary *string
+	if s := stringFromMeta(mem.Metadata, MetaKeySummary); s != "" {
+		summary = &s
+	}
+
 	_, err := tx.Exec(ctx, `
-		INSERT INTO memory_observations (entity_id, content, confidence, session_id, turn_range)
-		VALUES ($1, $2, $3, $4, $5)`,
+		INSERT INTO memory_observations (entity_id, content, summary, confidence, session_id, turn_range)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
 		mem.ID,
 		mem.Content,
+		summary,
 		mem.Confidence,
 		sessionID,
 		turnRange,
@@ -748,9 +764,10 @@ func (s *PostgresMemoryStore) GetMemory(ctx context.Context, scope map[string]st
 	}
 
 	row := s.pool.QueryRow(ctx, `
-		SELECT e.id, e.kind, e.metadata, e.created_at, e.expires_at,
+		SELECT e.id, e.kind, e.metadata, e.created_at, e.expires_at, e.title,
 		       o.content, o.confidence, o.session_id, o.turn_range,
-		       o.observed_at, o.accessed_at
+		       o.observed_at, o.accessed_at,
+		       o.summary, o.body_size_bytes
 		FROM memory_entities e
 		JOIN memory_observations o ON o.entity_id = e.id
 		  AND o.superseded_by IS NULL
@@ -828,7 +845,10 @@ func (s *PostgresMemoryStore) LinkEntities(ctx context.Context, scope map[string
 
 // scanSingleMemory decodes one row in the same shape as scanMemories
 // returns. Inlined here so the hot path of GetMemory doesn't allocate
-// for the multi-row scanner.
+// for the multi-row scanner. Carries the title (entity), summary +
+// body_size_bytes (observation) extracted in selectEntityCols /
+// selectObserveCols — they get stamped onto Metadata so the recall
+// DTO can decide between inline content and a preview.
 func scanSingleMemory(row pgx.Row, scope map[string]string) (*Memory, error) {
 	var (
 		id, kind, content     string
@@ -838,9 +858,12 @@ func scanSingleMemory(row pgx.Row, scope map[string]string) (*Memory, error) {
 		confidence            float64
 		sessionID             *string
 		turnRange             []int
+		title, summary        *string
+		bodySizeBytes         *int32
 	)
-	if err := row.Scan(&id, &kind, &metaJSON, &createdAt, &expiresAt,
-		&content, &confidence, &sessionID, &turnRange, &observedAt, &accessedAt); err != nil {
+	if err := row.Scan(&id, &kind, &metaJSON, &createdAt, &expiresAt, &title,
+		&content, &confidence, &sessionID, &turnRange, &observedAt, &accessedAt,
+		&summary, &bodySizeBytes); err != nil {
 		return nil, err
 	}
 
@@ -870,11 +893,36 @@ func scanSingleMemory(row pgx.Row, scope map[string]string) (*Memory, error) {
 	if accessedAt != nil {
 		mem.AccessedAt = *accessedAt
 	}
+	stampLargeMemoryFields(mem, title, summary, bodySizeBytes)
 	// observedAt isn't on the PromptKit Memory struct; if we ever
 	// surface "when was this observed" separately from CreatedAt
 	// it'll need to ride in metadata.
 	_ = observedAt
 	return mem, nil
+}
+
+// stampLargeMemoryFields populates Metadata with the title / summary
+// / body-size fields read from dedicated columns. They round-trip
+// the same keys callers used at write time so the API DTO can
+// extract them without having to know about column-vs-JSON
+// duality. Existing JSON metadata values are overwritten — the
+// dedicated columns are the source of truth post-migration.
+func stampLargeMemoryFields(mem *Memory, title, summary *string, bodySizeBytes *int32) {
+	if title == nil && summary == nil && bodySizeBytes == nil {
+		return
+	}
+	if mem.Metadata == nil {
+		mem.Metadata = map[string]any{}
+	}
+	if title != nil && *title != "" {
+		mem.Metadata[MetaKeyTitle] = *title
+	}
+	if summary != nil && *summary != "" {
+		mem.Metadata[MetaKeySummary] = *summary
+	}
+	if bodySizeBytes != nil {
+		mem.Metadata[MetaKeyBodySize] = int(*bodySizeBytes)
+	}
 }
 
 // FindRelatedEntities returns outgoing memory_relations rows from
@@ -1118,8 +1166,9 @@ WITH fts AS (
     FROM fts_ranked f FULL OUTER JOIN cosine_ranked c USING (entity_id)
 )
 SELECT DISTINCT ON (e.id)
-    e.id, e.kind, e.metadata, e.created_at, e.expires_at,
+    e.id, e.kind, e.metadata, e.created_at, e.expires_at, e.title,
     o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at,
+    o.summary, o.body_size_bytes,
     fused.rrf
         * (CASE e.source_type
               WHEN 'user_requested'           THEN 1.0
@@ -1225,19 +1274,22 @@ func scanHybridMemories(rows pgx.Rows, scope map[string]string) ([]*Memory, erro
 // so the row order is deterministic).
 func scanHybridMemory(row pgx.Rows, scope map[string]string) (*Memory, error) {
 	var (
-		mem          Memory
-		metadataJSON []byte
-		expiresAt    *time.Time
-		sessionID    *string
-		turnRange    []int
-		observedAt   *time.Time
-		accessedAt   *time.Time
-		finalScore   float64
+		mem            Memory
+		metadataJSON   []byte
+		expiresAt      *time.Time
+		sessionID      *string
+		turnRange      []int
+		observedAt     *time.Time
+		accessedAt     *time.Time
+		title, summary *string
+		bodySizeBytes  *int32
+		finalScore     float64
 	)
 
 	if err := row.Scan(
-		&mem.ID, &mem.Type, &metadataJSON, &mem.CreatedAt, &expiresAt,
+		&mem.ID, &mem.Type, &metadataJSON, &mem.CreatedAt, &expiresAt, &title,
 		&mem.Content, &mem.Confidence, &sessionID, &turnRange, &observedAt, &accessedAt,
+		&summary, &bodySizeBytes,
 		&finalScore,
 	); err != nil {
 		return nil, fmt.Errorf("memory: scan hybrid row: %w", err)
@@ -1257,6 +1309,7 @@ func scanHybridMemory(row pgx.Rows, scope map[string]string) (*Memory, error) {
 	if len(metadataJSON) > 0 {
 		_ = json.Unmarshal(metadataJSON, &mem.Metadata)
 	}
+	stampLargeMemoryFields(&mem, title, summary, bodySizeBytes)
 	_ = observedAt // observed_at influenced ordering; not surfaced on Memory
 	return &mem, nil
 }
@@ -1399,18 +1452,21 @@ func scanMemories(rows pgx.Rows, scope map[string]string) ([]*Memory, error) {
 // scanMemory scans a single row into a Memory.
 func scanMemory(row pgx.Rows, scope map[string]string) (*Memory, error) {
 	var (
-		mem          Memory
-		metadataJSON []byte
-		expiresAt    *time.Time
-		sessionID    *string
-		turnRange    []int
-		observedAt   *time.Time
-		accessedAt   *time.Time
+		mem            Memory
+		metadataJSON   []byte
+		expiresAt      *time.Time
+		sessionID      *string
+		turnRange      []int
+		observedAt     *time.Time
+		accessedAt     *time.Time
+		title, summary *string
+		bodySizeBytes  *int32
 	)
 
 	err := row.Scan(
-		&mem.ID, &mem.Type, &metadataJSON, &mem.CreatedAt, &expiresAt,
+		&mem.ID, &mem.Type, &metadataJSON, &mem.CreatedAt, &expiresAt, &title,
 		&mem.Content, &mem.Confidence, &sessionID, &turnRange, &observedAt, &accessedAt,
+		&summary, &bodySizeBytes,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("memory: scan row: %w", err)
@@ -1424,6 +1480,7 @@ func scanMemory(row pgx.Rows, scope map[string]string) (*Memory, error) {
 	if len(turnRange) == 2 {
 		mem.TurnRange = [2]int{turnRange[0], turnRange[1]}
 	}
+	stampLargeMemoryFields(&mem, title, summary, bodySizeBytes)
 	if accessedAt != nil {
 		mem.AccessedAt = *accessedAt
 	}

@@ -132,8 +132,9 @@ func (s *PostgresMemoryStore) ListAgentScoped(ctx context.Context, workspaceID, 
 	}
 	sql := `
 		SELECT DISTINCT ON (e.id)
-		  e.id, e.kind, e.metadata, e.created_at, e.expires_at,
-		  o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at
+		  e.id, e.kind, e.metadata, e.created_at, e.expires_at, e.title,
+		  o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at,
+		  o.summary, o.body_size_bytes
 		FROM memory_entities e
 		JOIN memory_observations o ON o.entity_id = e.id AND o.superseded_by IS NULL
 		WHERE e.workspace_id = $1

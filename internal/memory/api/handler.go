@@ -55,11 +55,38 @@ const (
 // workspace doc) and decide which ones a fresh observation should
 // supersede or update. Empty / nil for list / institutional / agent-
 // scoped responses where graph navigation isn't meaningful.
+//
+// Title, Summary, ContentPreview, BodySizeBytes, HasFullBody power
+// the large-memory inline-vs-open contract. When the active
+// observation's body is larger than InlineBodyThresholdBytes, the
+// recall handler swaps Content for ContentPreview (the first
+// previewBytes characters) and sets HasFullBody=true so the agent
+// knows to call memory__open(id) when it needs the full text. For
+// small memories they're omitted and Content carries the whole body
+// inline. List / open responses always carry full content.
 type MemoryWithTier struct {
 	*memory.Memory
-	Tier    string                  `json:"tier"`
-	Related []memory.EntityRelation `json:"related,omitempty"`
+	Tier           string                  `json:"tier"`
+	Title          string                  `json:"title,omitempty"`
+	Summary        string                  `json:"summary,omitempty"`
+	ContentPreview string                  `json:"content_preview,omitempty"`
+	BodySizeBytes  int                     `json:"body_size_bytes,omitempty"`
+	HasFullBody    bool                    `json:"has_full_body,omitempty"`
+	Related        []memory.EntityRelation `json:"related,omitempty"`
 }
+
+// InlineBodyThresholdBytes is the cutoff above which recall returns
+// only a content preview rather than the full body. 2 KiB keeps
+// short observations (preferences, names, single-line notes) inline
+// while still summarising workspace docs and session compactions.
+// The agent fetches the full body via GET /api/v1/memories/{id}.
+const InlineBodyThresholdBytes = 2048
+
+// previewBytes is the size of the inline ContentPreview that recall
+// returns for memories above the threshold. 240 chars is enough for
+// the agent to recognise the memory and decide whether to open it,
+// without paying the full body in context every time recall runs.
+const previewBytes = 240
 
 // deriveTier returns "user" / "agent" / "institutional" based on which scope
 // keys are populated. Mirrors the SQL CASE expression used by Aggregate's
@@ -75,12 +102,86 @@ func deriveTier(scope map[string]string) string {
 }
 
 // wrapMemoriesWithTier maps a slice of *memory.Memory into the tier-tagged DTO.
+// Title / Summary fields populate from Metadata in every code path; the
+// body-size driven preview behaviour is opt-in via wrapMemoriesWithPreview
+// for the recall handler only — list/open paths return full content.
 func wrapMemoriesWithTier(rows []*memory.Memory) []*MemoryWithTier {
 	out := make([]*MemoryWithTier, len(rows))
 	for i, m := range rows {
-		out[i] = &MemoryWithTier{Memory: m, Tier: deriveTier(m.Scope)}
+		out[i] = newMemoryWithTier(m)
 	}
 	return out
+}
+
+// wrapMemoriesWithPreview is the recall variant: large bodies are
+// replaced with a preview + has_full_body=true so the agent can
+// decide whether to fetch the full content via memory__open.
+func wrapMemoriesWithPreview(rows []*memory.Memory) []*MemoryWithTier {
+	out := make([]*MemoryWithTier, len(rows))
+	for i, m := range rows {
+		mw := newMemoryWithTier(m)
+		applyInlinePreview(mw)
+		out[i] = mw
+	}
+	return out
+}
+
+// newMemoryWithTier builds the base DTO and pulls Title / Summary /
+// BodySizeBytes out of Metadata so the JSON shape advertises them as
+// first-class fields rather than buried under Metadata.
+func newMemoryWithTier(m *memory.Memory) *MemoryWithTier {
+	if m == nil {
+		return &MemoryWithTier{}
+	}
+	mw := &MemoryWithTier{Memory: m, Tier: deriveTier(m.Scope)}
+	if m.Metadata == nil {
+		return mw
+	}
+	if title, ok := m.Metadata[memory.MetaKeyTitle].(string); ok {
+		mw.Title = title
+	}
+	if summary, ok := m.Metadata[memory.MetaKeySummary].(string); ok {
+		mw.Summary = summary
+	}
+	if size, ok := readBodySize(m.Metadata[memory.MetaKeyBodySize]); ok {
+		mw.BodySizeBytes = size
+	}
+	return mw
+}
+
+// applyInlinePreview swaps full content for a preview when the body
+// exceeds the inline threshold. Mutates in place.
+func applyInlinePreview(mw *MemoryWithTier) {
+	if mw.Memory == nil || mw.BodySizeBytes <= InlineBodyThresholdBytes {
+		return
+	}
+	if len(mw.Content) <= previewBytes {
+		// Body size says "large" but content is shorter than the
+		// preview cap (rare — happens with multi-byte UTF-8 where
+		// octet length > rune count). Just keep content as-is.
+		mw.HasFullBody = false
+		return
+	}
+	mw.ContentPreview = mw.Content[:previewBytes]
+	mw.Content = ""
+	mw.HasFullBody = true
+}
+
+// readBodySize tolerates both int and float64 — the latter is what
+// Go's json package decodes integer fields to when round-tripping
+// metadata through JSON.
+func readBodySize(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int32:
+		return int(n), true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	}
+	return 0, false
 }
 
 // MemoryListResponse is the JSON response for memory list/search endpoints.
@@ -288,7 +389,7 @@ func (h *Handler) handleSearchMemories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	wrapped := wrapMemoriesWithTier(memories)
+	wrapped := wrapMemoriesWithPreview(memories)
 	related := h.service.RelatedForMemories(r.Context(), scope, memories)
 	for _, mw := range wrapped {
 		if mw.Memory != nil {

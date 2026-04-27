@@ -25,6 +25,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -264,6 +265,48 @@ func TestServiceSearchMemories(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
 	assert.Equal(t, "dark mode", results[0].Content)
+}
+
+// TestServiceLargeMemory_SaveRecallOpen proves the round-trip for
+// large workspace-document-class memories: a Save with
+// title/summary/large content persists all three; the row's
+// observation gets a body_size_bytes auto-stamped by the schema
+// (octet_length); open returns the full content unchanged. The
+// body-size column is what the recall handler uses to swap the body
+// for a preview.
+func TestServiceLargeMemory_SaveRecallOpen(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	ctx := context.Background()
+	scope := map[string]string{
+		memory.ScopeWorkspaceID: testWorkspaceID,
+		memory.ScopeUserID:      "test-user",
+	}
+
+	largeBody := strings.Repeat("payload ", 500) // ~4000 bytes
+	mem := &memory.Memory{
+		Type:       "document",
+		Content:    largeBody,
+		Confidence: 0.9,
+		Scope:      scope,
+		Metadata: map[string]any{
+			memory.MetaKeyTitle:   "Engineering handbook",
+			memory.MetaKeySummary: "Coding standards and review process",
+		},
+	}
+	require.NoError(t, svc.SaveMemory(ctx, mem))
+
+	got, err := svc.OpenMemory(ctx, scope, mem.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, largeBody, got.Content,
+		"open must return the full body, not a preview")
+	assert.Equal(t, "Engineering handbook", got.Metadata[memory.MetaKeyTitle])
+	assert.Equal(t, "Coding standards and review process", got.Metadata[memory.MetaKeySummary])
+	bodySize, ok := got.Metadata[memory.MetaKeyBodySize].(int)
+	require.True(t, ok, "body_size_bytes must be stamped on Metadata")
+	assert.Equal(t, len(largeBody), bodySize)
 }
 
 // TestServiceSearchMemories_HybridSurfacesSemanticMatch proves the

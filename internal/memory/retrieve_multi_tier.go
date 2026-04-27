@@ -290,7 +290,7 @@ func buildMultiTierQuery(req MultiTierRequest) (string, []any, error) {
 		clauses = append(clauses, "e.purpose = ANY($"+strconv.Itoa(len(args))+")")
 	}
 
-	sql := fmt.Sprintf(`SELECT DISTINCT ON (e.id) e.id, e.kind, e.metadata, e.created_at, e.expires_at, e.virtual_user_id, e.agent_id, o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at, o.access_count FROM memory_entities e JOIN memory_observations o ON o.entity_id = e.id AND o.superseded_by IS NULL WHERE %s ORDER BY e.id, o.observed_at DESC LIMIT %d`,
+	sql := fmt.Sprintf(`SELECT DISTINCT ON (e.id) e.id, e.kind, e.metadata, e.created_at, e.expires_at, e.title, e.virtual_user_id, e.agent_id, o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at, o.access_count, o.summary, o.body_size_bytes FROM memory_entities e JOIN memory_observations o ON o.entity_id = e.id AND o.superseded_by IS NULL WHERE %s ORDER BY e.id, o.observed_at DESC LIMIT %d`,
 		joinAnd(clauses), multiTierCandidatePool)
 
 	return sql, args, nil
@@ -348,22 +348,25 @@ func scanMultiTierRows(rows pgx.Rows, workspaceID string) ([]*MultiTierMemory, e
 // scanMultiTierRow scans a single row from the multi-tier query.
 func scanMultiTierRow(row pgx.Rows, workspaceID string) (*MultiTierMemory, error) {
 	var (
-		mem          Memory
-		metadataJSON []byte
-		expiresAt    *time.Time
-		userID       *string
-		agentID      *string
-		sessionID    *string
-		turnRange    []int
-		observedAt   *time.Time
-		accessedAt   *time.Time
-		accessCount  int
+		mem            Memory
+		metadataJSON   []byte
+		expiresAt      *time.Time
+		userID         *string
+		agentID        *string
+		sessionID      *string
+		turnRange      []int
+		observedAt     *time.Time
+		accessedAt     *time.Time
+		accessCount    int
+		title, summary *string
+		bodySizeBytes  *int32
 	)
 
 	err := row.Scan(
-		&mem.ID, &mem.Type, &metadataJSON, &mem.CreatedAt, &expiresAt,
+		&mem.ID, &mem.Type, &metadataJSON, &mem.CreatedAt, &expiresAt, &title,
 		&userID, &agentID,
 		&mem.Content, &mem.Confidence, &sessionID, &turnRange, &observedAt, &accessedAt, &accessCount,
+		&summary, &bodySizeBytes,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("memory: scan multi-tier row: %w", err)
@@ -383,6 +386,7 @@ func scanMultiTierRow(row pgx.Rows, workspaceID string) (*MultiTierMemory, error
 	if len(metadataJSON) > 0 {
 		_ = json.Unmarshal(metadataJSON, &mem.Metadata)
 	}
+	stampLargeMemoryFields(&mem, title, summary, bodySizeBytes)
 
 	return &MultiTierMemory{
 		Memory:      &mem,
