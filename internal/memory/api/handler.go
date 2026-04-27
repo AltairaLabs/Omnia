@@ -330,6 +330,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/memories/{id}", h.handleOpenMemory)
 	mux.HandleFunc("PATCH /api/v1/memories/{id}", h.handleUpdateMemory)
 	mux.HandleFunc("POST /api/v1/memories/supersede", h.handleSupersedeMemories)
+	mux.HandleFunc("GET /api/v1/memories/conflicts", h.handleListConflicts)
 	mux.HandleFunc("POST /api/v1/relations", h.handleLinkMemories)
 	mux.HandleFunc("DELETE /api/v1/memories/{id}", h.handleDeleteMemory)
 	mux.HandleFunc("DELETE /api/v1/memories/batch", h.handleBatchDeleteMemories)
@@ -630,6 +631,34 @@ func (h *Handler) handleUpdateMemory(w http.ResponseWriter, r *http.Request) {
 		SupersededObservationIDs: res.SupersededObservationIDs,
 		SupersedeReason:          res.SupersedeReason,
 	})
+}
+
+// ConflictsResponse is the JSON shape returned by GET
+// /api/v1/memories/conflicts. Carries the list of triage rows
+// plus a count for dashboard pagination.
+type ConflictsResponse struct {
+	Conflicts []memory.ConflictedEntity `json:"conflicts"`
+	Total     int                       `json:"total"`
+}
+
+// handleListConflicts returns entities whose active observation
+// count is > 1 — a signal that some write path bypassed the
+// supersede / dedup machinery. Operators triage these in the
+// dashboard.
+func (h *Handler) handleListConflicts(w http.ResponseWriter, r *http.Request) {
+	scope, err := parseWorkspaceScope(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	limit := min(max(parseIntParam(r, "limit", defaultListLimit), 1), maxListLimit)
+	conflicts, err := h.service.FindConflicts(r.Context(), scope[memory.ScopeWorkspaceID], limit)
+	if err != nil {
+		h.log.Error(err, "FindConflicts failed", "workspace", scope[memory.ScopeWorkspaceID])
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, ConflictsResponse{Conflicts: conflicts, Total: len(conflicts)})
 }
 
 // handleSupersedeMemories collapses N source entities into one

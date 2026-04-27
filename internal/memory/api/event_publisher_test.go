@@ -112,6 +112,10 @@ func (m *mockMemoryStore) SupersedeMany(_ context.Context, sourceIDs []string, m
 	return sourceIDs[0], nil, nil
 }
 
+func (m *mockMemoryStore) FindConflictedEntities(_ context.Context, _ string, _ int) ([]memory.ConflictedEntity, error) {
+	return nil, nil
+}
+
 func (m *mockMemoryStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	return nil, nil
 }

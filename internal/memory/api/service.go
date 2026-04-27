@@ -509,6 +509,24 @@ func (s *MemoryService) UpdateMemory(ctx context.Context, entityID string, mem *
 	}, nil
 }
 
+// FindConflicts returns entities whose dedup machinery missed —
+// i.e. those holding more than one active observation. The dashboard
+// renders this as a triage queue so operators can see when the
+// `about` discipline (or the embedding-similarity threshold) has
+// drifted.
+func (s *MemoryService) FindConflicts(ctx context.Context, workspaceID string, limit int) ([]memory.ConflictedEntity, error) {
+	out, err := s.store.FindConflictedEntities(ctx, workspaceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	s.emitAuditEvent(ctx, &MemoryAuditEntry{
+		EventType:   auditEventMemoryAccessed,
+		WorkspaceID: workspaceID,
+		Metadata:    map[string]string{"operation": "list_conflicts"},
+	})
+	return out, nil
+}
+
 // SupersedeManyMemories collapses multiple stale entities into one
 // canonical truth: every source entity's active observations are
 // marked inactive and a single new observation is written under the

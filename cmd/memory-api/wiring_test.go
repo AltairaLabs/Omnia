@@ -74,6 +74,9 @@ func (fakeMemoryStore) SupersedeMany(_ context.Context, sourceIDs []string, mem 
 	mem.ID = sourceIDs[0]
 	return sourceIDs[0], nil, nil
 }
+func (fakeMemoryStore) FindConflictedEntities(_ context.Context, _ string, _ int) ([]memory.ConflictedEntity, error) {
+	return nil, nil
+}
 func (fakeMemoryStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	return nil, nil
 }

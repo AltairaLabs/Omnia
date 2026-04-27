@@ -224,4 +224,23 @@ type Store interface {
 	// See docs/local-backlog/2026-04-23-memory-summarization-via-agent.md.
 	FindCompactionCandidates(ctx context.Context, opts FindCompactionCandidatesOptions) ([]CompactionCandidate, error)
 	SaveCompactionSummary(ctx context.Context, summary CompactionSummary) (string, error)
+
+	// FindConflictedEntities returns entities that hold more than
+	// one active observation simultaneously. Under normal operation
+	// the supersede / dedup machinery keeps active count at 1 per
+	// entity; a row here is a signal that some path bypassed the
+	// dedup (direct SQL, an upgraded client that lost a header,
+	// etc.). The dashboard surfaces these as a review queue.
+	FindConflictedEntities(ctx context.Context, workspaceID string, limit int) ([]ConflictedEntity, error)
+}
+
+// ConflictedEntity is one entity returned by FindConflictedEntities
+// — carries enough info for the dashboard to render a triage row
+// and link out to the entity for resolution.
+type ConflictedEntity struct {
+	EntityID    string `json:"entity_id"`
+	Kind        string `json:"kind"`
+	UserID      string `json:"user_id,omitempty"`
+	AgentID     string `json:"agent_id,omitempty"`
+	ActiveCount int    `json:"active_count"`
 }

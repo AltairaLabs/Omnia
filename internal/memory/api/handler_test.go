@@ -56,6 +56,10 @@ type mockStore struct {
 	// response per source entity ID — used to assert the recall
 	// handler attaches related[] correctly.
 	relatedBySource map[string][]memory.EntityRelation
+	// conflicts canned response for FindConflictedEntities so the
+	// /memories/conflicts handler test can assert end-to-end shape
+	// without a real DB.
+	conflicts []memory.ConflictedEntity
 }
 
 func (m *mockStore) Save(_ context.Context, mem *memory.Memory) error {
@@ -142,6 +146,10 @@ func (m *mockStore) SupersedeMany(_ context.Context, sourceIDs []string, mem *me
 		out[i] = "obs-" + id
 	}
 	return sourceIDs[0], out, nil
+}
+
+func (m *mockStore) FindConflictedEntities(_ context.Context, _ string, _ int) ([]memory.ConflictedEntity, error) {
+	return m.conflicts, nil
 }
 
 func (m *mockStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
@@ -690,6 +698,43 @@ func TestHandleUpdateMemory_AtomicSupersede(t *testing.T) {
 	var resp SaveMemoryResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, memory.SaveActionAutoSuperseded, resp.Action)
+}
+
+// TestHandleListConflicts proves GET /memories/conflicts returns
+// the dedup-bypass triage rows in the documented response shape.
+func TestHandleListConflicts(t *testing.T) {
+	store := &mockStore{
+		conflicts: []memory.ConflictedEntity{
+			{EntityID: "ent-1", Kind: "fact", UserID: "u1", ActiveCount: 3},
+			{EntityID: "ent-2", Kind: "preference", UserID: "u1", ActiveCount: 2},
+		},
+	}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/memories/conflicts?workspace=ws1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var resp ConflictsResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, 2, resp.Total)
+	assert.Equal(t, "ent-1", resp.Conflicts[0].EntityID)
+	assert.Equal(t, 3, resp.Conflicts[0].ActiveCount)
+}
+
+// TestHandleListConflicts_RequiresWorkspace proves the workspace
+// guard fires — the endpoint is admin-class and must not leak
+// across tenants.
+func TestHandleListConflicts_RequiresWorkspace(t *testing.T) {
+	h := newTestHandler(&mockStore{})
+	mux := setupMux(h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/memories/conflicts", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 // TestHandleSupersedeMemories proves POST /memories/supersede maps

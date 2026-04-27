@@ -256,6 +256,13 @@ func (c *CachedStore) FindCompactionCandidates(ctx context.Context, opts FindCom
 	return c.inner.FindCompactionCandidates(ctx, opts)
 }
 
+// FindConflictedEntities passes through to the inner store. Not
+// cached: the conflicts queue is an admin / dashboard view that
+// must reflect live state for triage to be useful.
+func (c *CachedStore) FindConflictedEntities(ctx context.Context, workspaceID string, limit int) ([]ConflictedEntity, error) {
+	return c.inner.FindConflictedEntities(ctx, workspaceID, limit)
+}
+
 // SaveCompactionSummary delegates to the inner store then invalidates the
 // (workspace, user, agent) cache so post-compaction retrieval reflects
 // the new supersede chain without serving stale rows.

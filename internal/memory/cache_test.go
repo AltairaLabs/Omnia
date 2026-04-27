@@ -129,6 +129,10 @@ func (m *cacheTestStore) SupersedeMany(_ context.Context, sourceIDs []string, me
 	return sourceIDs[0], nil, nil
 }
 
+func (m *cacheTestStore) FindConflictedEntities(_ context.Context, _ string, _ int) ([]ConflictedEntity, error) {
+	return nil, nil
+}
+
 func (m *cacheTestStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ RetrieveOptions) ([]*Memory, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -439,6 +443,19 @@ func TestCachedStore_GetMemory_Passthrough(t *testing.T) {
 	inner := &cacheTestStore{}
 	cs, _ := newTestCache(t, inner)
 	_, _ = cs.GetMemory(context.Background(), cacheTestScope(), "any-id")
+}
+
+// TestCachedStore_FindConflictedEntities_Passthrough proves the
+// cache wrapper delegates conflict-queue queries straight to the
+// inner store — the dashboard view must reflect live state for
+// triage to be useful, so caching would be wrong here.
+func TestCachedStore_FindConflictedEntities_Passthrough(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, _ := newTestCache(t, inner)
+	_, err := cs.FindConflictedEntities(context.Background(), "ws-1", 10)
+	if err != nil {
+		t.Fatalf("FindConflictedEntities: %v", err)
+	}
 }
 
 // TestCachedStore_RetrieveHybrid_Passthrough proves the cache
