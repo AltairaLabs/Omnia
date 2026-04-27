@@ -37,20 +37,38 @@ func (s *StaticPolicyLoader) Load(_ context.Context) (*omniav1alpha1.MemoryPolic
 	return s.Policy, nil
 }
 
+// DefaultPolicyCacheTTL is the freshness window after which the
+// K8sPolicyLoader re-fetches from the API server. 30 seconds is
+// short enough that operator changes propagate quickly and long
+// enough that high-throughput Save calls don't burn the K8s API.
+const DefaultPolicyCacheTTL = 30 * time.Second
+
 // K8sPolicyLoader resolves a MemoryPolicy via the Workspace that owns
 // this memory-api process. The workspace's services[<group>].memory
 // .policyRef names the policy; the loader Gets it by name.
 //
-// Caches the last-known policy so a transient API outage doesn't stall
-// the retention cron. Returns (nil, nil) for any "not found" condition
-// so callers fall back to the baked-in LegacyIntervalPolicy.
+// Caches the last-known policy with a TTL (DefaultPolicyCacheTTL by
+// default). Within the freshness window Load returns the cached value
+// without hitting the K8s API — important because Load runs on the
+// hot Save path (enforceAboutForKind) and was previously doing two
+// API GETs per write.
+//
+// Outside the TTL Load re-fetches; on transient error it falls back
+// to the cached value (so an API outage doesn't stall writes), and
+// on "not found" it clears the cache so callers see the legacy
+// fallback.
 type K8sPolicyLoader struct {
 	Client       client.Client
 	Log          logr.Logger
 	Workspace    string
 	ServiceGroup string
+	// CacheTTL is the freshness window. Zero uses
+	// DefaultPolicyCacheTTL.
+	CacheTTL time.Duration
 
-	cached atomic.Pointer[omniav1alpha1.MemoryPolicy]
+	cached     atomic.Pointer[omniav1alpha1.MemoryPolicy]
+	cachedAt   atomic.Int64 // unix nanos of the last successful fetch
+	cachedNoop atomic.Bool  // true when the last fetch resolved to "no policy" (nil)
 }
 
 // NewK8sPolicyLoader constructs a loader bound to a single workspace +
@@ -75,10 +93,23 @@ func (k *K8sPolicyLoader) Load(ctx context.Context) (*omniav1alpha1.MemoryPolicy
 		return nil, nil
 	}
 
+	// Cache hit within TTL — short-circuit without touching the
+	// K8s API. cachedNoop covers the case where the last fetch
+	// resolved to "no policy bound" (cached.Load returns nil but
+	// the answer is still fresh).
+	ttl := k.CacheTTL
+	if ttl <= 0 {
+		ttl = DefaultPolicyCacheTTL
+	}
+	if k.fresh(ttl) {
+		return k.cached.Load(), nil
+	}
+
 	ws := &omniav1alpha1.Workspace{}
 	if err := k.Client.Get(ctx, client.ObjectKey{Name: k.Workspace}, ws); err != nil {
 		if apierrors.IsNotFound(err) {
 			k.Log.V(1).Info("workspace not found, using legacy policy", "workspace", k.Workspace)
+			k.markNoop()
 			return nil, nil
 		}
 		if cached := k.cached.Load(); cached != nil {
@@ -93,7 +124,7 @@ func (k *K8sPolicyLoader) Load(ctx context.Context) (*omniav1alpha1.MemoryPolicy
 	if ref == nil {
 		k.Log.V(1).Info("workspace has no memory policyRef, using legacy",
 			"workspace", k.Workspace, "serviceGroup", k.ServiceGroup)
-		k.cached.Store(nil)
+		k.markNoop()
 		return nil, nil
 	}
 
@@ -102,7 +133,7 @@ func (k *K8sPolicyLoader) Load(ctx context.Context) (*omniav1alpha1.MemoryPolicy
 		if apierrors.IsNotFound(err) {
 			k.Log.Info("memorypolicy not found, using legacy",
 				"policyRef", ref.Name, "workspace", k.Workspace)
-			k.cached.Store(nil)
+			k.markNoop()
 			return nil, nil
 		}
 		if cached := k.cached.Load(); cached != nil {
@@ -114,7 +145,28 @@ func (k *K8sPolicyLoader) Load(ctx context.Context) (*omniav1alpha1.MemoryPolicy
 	}
 
 	k.cached.Store(policy)
+	k.cachedNoop.Store(false)
+	k.cachedAt.Store(time.Now().UnixNano())
 	return policy, nil
+}
+
+// fresh reports whether the cached value (including the "no policy"
+// sentinel) is within the TTL.
+func (k *K8sPolicyLoader) fresh(ttl time.Duration) bool {
+	last := k.cachedAt.Load()
+	if last == 0 {
+		return false
+	}
+	return time.Since(time.Unix(0, last)) < ttl
+}
+
+// markNoop records that the most recent successful fetch resolved
+// to "no policy" so subsequent Loads within the TTL skip the K8s
+// round trip.
+func (k *K8sPolicyLoader) markNoop() {
+	k.cached.Store(nil)
+	k.cachedNoop.Store(true)
+	k.cachedAt.Store(time.Now().UnixNano())
 }
 
 // findMemoryPolicyRef walks the workspace's service groups and returns
