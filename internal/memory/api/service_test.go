@@ -267,6 +267,54 @@ func TestServiceSearchMemories(t *testing.T) {
 	assert.Equal(t, "dark mode", results[0].Content)
 }
 
+// TestServiceSaveMemory_RequiresAboutForConfiguredKinds proves
+// the mandatory-about guard: a Save for a kind listed in
+// MemoryServiceConfig.RequireAboutForKinds without an about
+// metadata hint returns ErrAboutRequired so the agent must retry
+// with about populated. Other kinds are unaffected.
+func TestServiceSaveMemory_RequiresAboutForConfiguredKinds(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{
+		RequireAboutForKinds: []string{"fact", "preference"},
+	}, logr.Discard())
+	ctx := context.Background()
+	scope := map[string]string{
+		memory.ScopeWorkspaceID: testWorkspaceID,
+		memory.ScopeUserID:      "test-user",
+	}
+
+	// fact without about → reject.
+	err := svc.SaveMemory(ctx, &memory.Memory{
+		Type: "fact", Content: "no anchor", Confidence: 0.9, Scope: scope,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrAboutRequired)
+
+	// fact WITH about → allowed.
+	err = svc.SaveMemory(ctx, &memory.Memory{
+		Type: "fact", Content: "name: Phil", Confidence: 0.9, Scope: scope,
+		Metadata: map[string]any{
+			memory.MetaKeyAboutKind: "user",
+			memory.MetaKeyAboutKey:  "name",
+		},
+	})
+	require.NoError(t, err)
+
+	// document (not in the configured list) → allowed without about.
+	err = svc.SaveMemory(ctx, &memory.Memory{
+		Type: "document", Content: "free-form note", Confidence: 0.9, Scope: scope,
+	})
+	require.NoError(t, err)
+
+	// Empty config → all kinds allowed without about (back-compat).
+	relaxed := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	err = relaxed.SaveMemory(ctx, &memory.Memory{
+		Type: "preference", Content: "no anchor here", Confidence: 0.9, Scope: scope,
+	})
+	require.NoError(t, err)
+}
+
 // TestServiceLargeMemory_SaveRecallOpen proves the round-trip for
 // large workspace-document-class memories: a Save with
 // title/summary/large content persists all three; the row's

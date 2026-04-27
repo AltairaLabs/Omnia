@@ -52,6 +52,12 @@ var (
 	ErrBodyTooLarge     = errors.New("request body too large")
 	ErrExpiresAtInPast  = errors.New("expires_at must be in the future")
 	ErrMissingAgentID   = errors.New("agent_id is required for agent-scoped admin operations")
+	// ErrAboutRequired fires when a Save targets a kind listed in
+	// MemoryServiceConfig.RequireAboutForKinds without supplying an
+	// about={kind, key} metadata hint. The handler maps this to 400
+	// — the agent must retry with about populated so the structured-
+	// key dedup path can engage.
+	ErrAboutRequired = errors.New("about={kind, key} is required for this memory kind — supply about in the request body")
 )
 
 // MemoryServiceConfig holds runtime configuration for the MemoryService.
@@ -61,6 +67,13 @@ type MemoryServiceConfig struct {
 	DefaultTTL time.Duration
 	// Purpose is the default purpose tag sourced from the CRD configuration.
 	Purpose string
+	// RequireAboutForKinds enumerates memory kinds (e.g. "fact",
+	// "preference") that must carry an `about={kind, key}` metadata
+	// hint on Save. Without it, the structured-key dedup path can't
+	// engage, and identity-class memories pile up as duplicates
+	// instead of atomic supersedes — the Phil/Slim Shard failure mode.
+	// Empty disables the check (back-compat default).
+	RequireAboutForKinds []string
 }
 
 // MemoryAuditLogger is the audit logging interface for memory operations.
@@ -176,6 +189,9 @@ func (s *MemoryService) SaveMemory(ctx context.Context, mem *memory.Memory) erro
 //     matches as PotentialDuplicates so the agent can decide on a
 //     later turn.
 func (s *MemoryService) SaveMemoryWithResult(ctx context.Context, mem *memory.Memory) (*memory.SaveResult, error) {
+	if err := s.enforceAboutForKind(mem); err != nil {
+		return nil, err
+	}
 	if mem.ExpiresAt == nil && s.config.DefaultTTL > 0 {
 		exp := time.Now().Add(s.config.DefaultTTL)
 		mem.ExpiresAt = &exp
@@ -267,6 +283,24 @@ func hasAboutKeyInMetadata(mem *memory.Memory) bool {
 	kind, _ := mem.Metadata[memory.MetaKeyAboutKind].(string)
 	key, _ := mem.Metadata[memory.MetaKeyAboutKey].(string)
 	return kind != "" && key != ""
+}
+
+// enforceAboutForKind returns ErrAboutRequired when a memory's
+// kind is in MemoryServiceConfig.RequireAboutForKinds but the caller
+// didn't set about={kind, key} in metadata. Identity-class kinds
+// (fact, preference) need the structured-key path to dedup
+// correctly — without about they pile up as duplicates that can't
+// be atomically superseded on rename or update.
+func (s *MemoryService) enforceAboutForKind(mem *memory.Memory) error {
+	if mem == nil || len(s.config.RequireAboutForKinds) == 0 {
+		return nil
+	}
+	for _, k := range s.config.RequireAboutForKinds {
+		if mem.Type == k && !hasAboutKeyInMetadata(mem) {
+			return ErrAboutRequired
+		}
+	}
+	return nil
 }
 
 // findSimilarForDedup embeds the new content (synchronously — adds

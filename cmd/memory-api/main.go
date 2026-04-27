@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -119,6 +120,7 @@ type flags struct {
 	compactionAge         string // env: COMPACTION_AGE, e.g. "720h" (30d)
 	reembedInterval       string // env: REEMBED_INTERVAL, e.g. "30m"
 	reembedBatchSize      int    // env: REEMBED_BATCH_SIZE
+	requireAboutForKinds  string // env: REQUIRE_ABOUT_FOR_KINDS, e.g. "fact,preference"
 	workspace             string
 	serviceGroup          string
 }
@@ -143,6 +145,7 @@ func parseFlags() *flags {
 	flag.StringVar(&f.compactionAge, "compaction-age", "", "Age threshold for compaction candidates (e.g. 720h = 30d). Empty uses worker default.")
 	flag.StringVar(&f.reembedInterval, "reembed-interval", "", "Interval for re-embed backfill worker (e.g. 30m). Empty disables.")
 	flag.IntVar(&f.reembedBatchSize, "reembed-batch-size", 0, "Re-embed batch size per pass. Zero uses worker default (50).")
+	flag.StringVar(&f.requireAboutForKinds, "require-about-for-kinds", "", "Comma-separated list of memory kinds requiring an about={kind, key} hint on save (e.g. fact,preference). Empty disables.")
 	flag.StringVar(&f.workspace, "workspace", "", "Workspace name (K8s CRD resolution mode)")
 	flag.StringVar(&f.serviceGroup, "service-group", "", "Service group name within workspace")
 	flag.Parse()
@@ -175,6 +178,7 @@ func (f *flags) applyEnvFallbacks() {
 			f.reembedBatchSize = n
 		}
 	}
+	envFallback(&f.requireAboutForKinds, "", "REQUIRE_ABOUT_FOR_KINDS")
 	if v := os.Getenv("TRACING_SAMPLE_RATE"); v != "" && f.tracingSample == 0 {
 		if rate, err := strconv.ParseFloat(v, 64); err == nil {
 			f.tracingSample = rate
@@ -227,6 +231,22 @@ func (f *flags) compactionWorkerOptions(log logr.Logger, store *memory.PostgresM
 		}
 	}
 	return opts, true
+}
+
+// parseCSV splits a comma-separated string into a trimmed, non-empty
+// slice. Used for list-shaped flags / env vars (kinds, providers).
+func parseCSV(in string) []string {
+	if in == "" {
+		return nil
+	}
+	parts := strings.Split(in, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // reembedWorkerOptions returns the ReembedWorkerOptions derived from
@@ -322,8 +342,9 @@ func run() error {
 		}
 	}
 	svcCfg := memoryapi.MemoryServiceConfig{
-		DefaultTTL: defaultTTL,
-		Purpose:    f.purpose,
+		DefaultTTL:           defaultTTL,
+		Purpose:              f.purpose,
+		RequireAboutForKinds: parseCSV(f.requireAboutForKinds),
 	}
 
 	// --- Policy loader (shared by retention worker + retrieval ranker) ---

@@ -847,6 +847,9 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrMissingAgentID):
 		status = http.StatusBadRequest
 		msg = ErrMissingAgentID.Error()
+	case errors.Is(err, ErrAboutRequired):
+		status = http.StatusBadRequest
+		msg = ErrAboutRequired.Error()
 	}
 
 	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)

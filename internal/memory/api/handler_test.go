@@ -392,6 +392,39 @@ func TestHandleSearchMemories_StoreError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 }
 
+// TestHandleSaveMemory_RejectsMissingAboutForRequiredKind proves
+// the wiring of MemoryServiceConfig.RequireAboutForKinds through
+// the handler: a save for a configured kind without about returns
+// 400 with ErrAboutRequired's message. The agent retries with about
+// populated; without this the agent silently drops identity-class
+// updates.
+func TestHandleSaveMemory_RejectsMissingAboutForRequiredKind(t *testing.T) {
+	store := &mockStore{}
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{
+		RequireAboutForKinds: []string{"fact"},
+	}, logr.Discard())
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := SaveMemoryRequest{
+		Type:       "fact",
+		Content:    "no anchor",
+		Confidence: 0.9,
+		Scope:      map[string]string{"workspace_id": "ws1", "user_id": "u1"},
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/memories", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	var resp ErrorResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Contains(t, resp.Error, "about")
+}
+
 // TestHandleSearchMemories_LargeBodyReturnsPreview proves the recall
 // handler swaps the full content for a preview + has_full_body=true
 // when an observation's body_size_bytes is over the inline
