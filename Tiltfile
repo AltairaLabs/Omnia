@@ -75,13 +75,13 @@ ENABLE_ENTERPRISE = os.getenv('ENABLE_ENTERPRISE', '').lower() in ('true', '1', 
 # Can be set via environment: ENABLE_ENTRA=true tilt up
 ENABLE_ENTRA = os.getenv('ENABLE_ENTRA', '').lower() in ('true', '1', 'yes') or False
 
-# Set to True to grant anonymous users OWNER-level access to the dev-agents
-# workspace. This bypasses dashboard auth for workspace-scoped operations,
-# so it's off by default — even in anonymous-mode Tilt. Opt in explicitly
-# with: ALLOW_WORKSPACE_ANONYMOUS=true tilt up
-# When off (default), `dev-agents.spec.anonymousAccess.enabled=false` and
-# dashboard anonymous users see a read-only shell with no workspace visible.
-ALLOW_WORKSPACE_ANONYMOUS = os.getenv('ALLOW_WORKSPACE_ANONYMOUS', '').lower() in ('true', '1', 'yes') or False
+# Grants anonymous users OWNER-level access to the dev-agents workspace.
+# Defaults to True for local Tilt because without it, an unauthenticated
+# dashboard user sees an empty shell with no workspace visible — fine for
+# anonymous-auth testing but the wrong default for the day-to-day "tilt up
+# and click around" loop. Opt out with ALLOW_WORKSPACE_ANONYMOUS=false
+# when you want to exercise the real auth path locally.
+ALLOW_WORKSPACE_ANONYMOUS = os.getenv('ALLOW_WORKSPACE_ANONYMOUS', 'true').lower() in ('true', '1', 'yes')
 
 # Enable internal NFS server for workspace content storage
 # Provides ReadWriteMany (RWX) storage for Arena and workspace content
