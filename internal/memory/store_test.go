@@ -665,6 +665,45 @@ func TestPostgresMemoryStore_RetrieveHybrid_FusesLexicalAndSemantic(t *testing.T
 	assert.True(t, got[semantic.ID], "cosine-only match should surface via RRF")
 }
 
+// TestPostgresMemoryStore_RetrieveHybrid_RanksByFinalScore proves
+// the LIMIT picks top-K entities by final_score, not by entity id.
+// Three matches with deliberately staggered confidence; the highest-
+// confidence row must be first regardless of UUID order.
+func TestPostgresMemoryStore_RetrieveHybrid_RanksByFinalScore(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+	queryEmb := oneHotFloat(0, 1536)
+
+	mid := &Memory{Type: "preference", Content: "User prefers tea", Confidence: 0.6, Scope: scope}
+	require.NoError(t, store.Save(ctx, mid))
+	require.NoError(t, store.UpdateEmbedding(ctx, mid.ID, queryEmb))
+
+	top := &Memory{Type: "preference", Content: "User prefers espresso", Confidence: 0.99, Scope: scope}
+	require.NoError(t, store.Save(ctx, top))
+	require.NoError(t, store.UpdateEmbedding(ctx, top.ID, queryEmb))
+
+	low := &Memory{Type: "preference", Content: "User prefers cocoa", Confidence: 0.3, Scope: scope}
+	require.NoError(t, store.Save(ctx, low))
+	require.NoError(t, store.UpdateEmbedding(ctx, low.ID, queryEmb))
+
+	// Limit=1 must return the highest-scoring memory (top), not
+	// whichever entity ID sorts smallest.
+	results, err := store.RetrieveHybrid(ctx, scope, "prefer", queryEmb, RetrieveOptions{Limit: 1})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, top.ID, results[0].ID,
+		"LIMIT must pick highest-scoring memory, not alphabetically-first entity")
+
+	// Limit=3 returns all three in descending final_score order.
+	results, err = store.RetrieveHybrid(ctx, scope, "prefer", queryEmb, RetrieveOptions{Limit: 3})
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+	assert.Equal(t, top.ID, results[0].ID, "first result must be highest-confidence")
+	assert.Equal(t, mid.ID, results[1].ID, "second result must be mid-confidence")
+	assert.Equal(t, low.ID, results[2].ID, "third result must be lowest-confidence")
+}
+
 // TestPostgresMemoryStore_RetrieveHybrid_AppliesConfidenceFilter
 // proves the MinConfidence option carries through to both CTEs in
 // the hybrid query — low-confidence rows shouldn't pollute either

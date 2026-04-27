@@ -1208,7 +1208,7 @@ WITH fts AS (
       AND ($2::text IS NULL OR e.virtual_user_id = $2)
       AND ($3::uuid IS NULL OR e.agent_id = $3)
       AND e.forgotten = false
-      AND coalesce(o.confidence, 0.7) >= $8
+      AND o.confidence >= $8
       AND o.search_vector @@ websearch_to_tsquery('english', $4)
     ORDER BY e.id, fts_rank DESC
     LIMIT $6
@@ -1227,7 +1227,7 @@ WITH fts AS (
       AND ($2::text IS NULL OR e.virtual_user_id = $2)
       AND ($3::uuid IS NULL OR e.agent_id = $3)
       AND e.forgotten = false
-      AND coalesce(o.confidence, 0.7) >= $8
+      AND o.confidence >= $8
       AND o.embedding IS NOT NULL
     ORDER BY e.id, cos_dist
     LIMIT $6
@@ -1245,27 +1245,38 @@ WITH fts AS (
           + coalesce(1.0/(60.0 + c.cos_rn), 0) AS rrf
     FROM fts_ranked f FULL OUTER JOIN cosine_ranked c USING (entity_id)
 )
-SELECT DISTINCT ON (e.id)
-    e.id, e.kind, e.metadata, e.created_at, e.expires_at, e.title,
-    o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at,
-    o.summary, o.body_size_bytes,
-    fused.rrf
-        * (CASE e.source_type
-              WHEN 'user_requested'           THEN 1.0
-              WHEN 'operator_curated'         THEN 1.0
-              WHEN 'reflection'               THEN 0.85
-              WHEN 'conversation_extraction'  THEN 0.7
-              WHEN 'system_generated'         THEN 0.5
-              ELSE 0.7 END)
-        * coalesce(o.confidence, 0.7)
-        * exp(-EXTRACT(EPOCH FROM (now() - o.observed_at)) / 2592000.0) AS final_score
-FROM fused
-JOIN memory_entities e ON e.id = fused.entity_id
-JOIN memory_observations o ON o.entity_id = e.id
-    AND o.superseded_by IS NULL
-    AND (o.valid_until IS NULL OR o.valid_until > now())
-WHERE e.forgotten = false
-ORDER BY e.id, o.observed_at DESC, final_score DESC
+SELECT id, kind, metadata, created_at, expires_at, title,
+       content, confidence, session_id, turn_range, observed_at, accessed_at,
+       summary, body_size_bytes, final_score
+FROM (
+    -- DISTINCT ON requires ORDER BY to start with the distinct key,
+    -- so the per-entity tiebreak (newest active observation wins on
+    -- equal score) lives here. The outer query then re-sorts the
+    -- one-row-per-entity result set by final_score so LIMIT picks
+    -- the top-K entities by score, not by entity id.
+    SELECT DISTINCT ON (e.id)
+        e.id, e.kind, e.metadata, e.created_at, e.expires_at, e.title,
+        o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at,
+        o.summary, o.body_size_bytes,
+        fused.rrf
+            * (CASE e.source_type
+                  WHEN 'user_requested'           THEN 1.0
+                  WHEN 'operator_curated'         THEN 1.0
+                  WHEN 'reflection'               THEN 0.85
+                  WHEN 'conversation_extraction'  THEN 0.7
+                  WHEN 'system_generated'         THEN 0.5
+                  ELSE 0.7 END)
+            * o.confidence
+            * exp(-EXTRACT(EPOCH FROM (now() - o.observed_at)) / 2592000.0) AS final_score
+    FROM fused
+    JOIN memory_entities e ON e.id = fused.entity_id
+    JOIN memory_observations o ON o.entity_id = e.id
+        AND o.superseded_by IS NULL
+        AND (o.valid_until IS NULL OR o.valid_until > now())
+    WHERE e.forgotten = false
+    ORDER BY e.id, o.observed_at DESC
+) ranked
+ORDER BY final_score DESC
 LIMIT $7`
 
 // RetrieveHybrid runs the hybrid (lexical + semantic) recall path
