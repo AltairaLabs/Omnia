@@ -493,7 +493,7 @@ func TestHandleSearchMemories_LargeBodyReturnsPreview(t *testing.T) {
 	assert.True(t, doc.HasFullBody, "large memory must advertise has_full_body")
 	assert.Empty(t, doc.Content, "large memory's full body must not be inlined")
 	assert.NotEmpty(t, doc.ContentPreview, "large memory must carry preview")
-	assert.LessOrEqual(t, len(doc.ContentPreview), previewBytes)
+	assert.LessOrEqual(t, len([]rune(doc.ContentPreview)), previewRunes)
 	assert.Equal(t, "Engineering handbook", doc.Title)
 	assert.Equal(t, "Coding standards and review process", doc.Summary)
 

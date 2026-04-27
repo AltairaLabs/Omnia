@@ -268,6 +268,93 @@ func TestServiceSearchMemories(t *testing.T) {
 	assert.Equal(t, "dark mode", results[0].Content)
 }
 
+// TestServiceMemoryService_PolicyOverridesDedupThresholds proves
+// the embedding-similarity dedup thresholds resolve from the bound
+// MemoryPolicy. Setting autoSupersedeAbove=0.5 lifts what would
+// otherwise be a "potential duplicate" (cosine 0.6) into an
+// auto-supersede.
+func TestServiceMemoryService_PolicyOverridesDedupThresholds(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	provider := newMockEmbeddingProvider(8)
+	provider.fixedEmbedding = oneHotEmbedding(0)
+	embSvc := memory.NewEmbeddingService(store, provider, zap.New(zap.UseDevMode(true)))
+	svc := NewMemoryService(store, embSvc, MemoryServiceConfig{}, logr.Discard())
+
+	// Tight threshold lifts cosine ≥ 0.5 into auto-supersede.
+	svc.SetPolicyLoader(&memory.StaticPolicyLoader{
+		Policy: &omniav1alpha1.MemoryPolicy{
+			Spec: omniav1alpha1.MemoryPolicySpec{
+				Tiers: omniav1alpha1.MemoryRetentionTierSet{},
+				Dedup: &omniav1alpha1.MemoryDedupConfig{
+					EmbeddingSimilarity: &omniav1alpha1.MemoryEmbeddingDedupConfig{
+						AutoSupersedeAbove:     "0.5",
+						SurfaceDuplicatesAbove: "0.3",
+					},
+				},
+			},
+		},
+	})
+
+	if got := svc.autoSupersedeThreshold(context.Background()); got != 0.5 {
+		t.Errorf("auto-supersede: want 0.5, got %v", got)
+	}
+	if got := svc.surfaceDuplicateThreshold(context.Background()); got != 0.3 {
+		t.Errorf("surface-duplicate: want 0.3, got %v", got)
+	}
+}
+
+// TestServiceMemoryService_PolicyDisablesEmbeddingDedup proves the
+// embeddingSimilarity.enabled=false branch: when the policy turns
+// off embedding dedup, free-form Save calls bypass the embedding
+// path entirely (no `potential_duplicates` returned even when a
+// match exists).
+func TestServiceMemoryService_PolicyDisablesEmbeddingDedup(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	provider := newMockEmbeddingProvider(8)
+	provider.fixedEmbedding = oneHotEmbedding(0)
+	embSvc := memory.NewEmbeddingService(store, provider, zap.New(zap.UseDevMode(true)))
+	svc := NewMemoryService(store, embSvc, MemoryServiceConfig{}, logr.Discard())
+
+	disabled := false
+	svc.SetPolicyLoader(&memory.StaticPolicyLoader{
+		Policy: &omniav1alpha1.MemoryPolicy{
+			Spec: omniav1alpha1.MemoryPolicySpec{
+				Dedup: &omniav1alpha1.MemoryDedupConfig{
+					EmbeddingSimilarity: &omniav1alpha1.MemoryEmbeddingDedupConfig{
+						Enabled: &disabled,
+					},
+				},
+			},
+		},
+	})
+	if svc.embeddingDedupEnabled(context.Background()) {
+		t.Error("embeddingDedupEnabled must be false when policy disables it")
+	}
+}
+
+// TestServiceMemoryService_PolicyOverridesInlineThreshold proves
+// the recall preview cutoff resolves from MemoryPolicy.recall.
+func TestServiceMemoryService_PolicyOverridesInlineThreshold(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	customThreshold := int32(512)
+	svc.SetPolicyLoader(&memory.StaticPolicyLoader{
+		Policy: &omniav1alpha1.MemoryPolicy{
+			Spec: omniav1alpha1.MemoryPolicySpec{
+				Recall: &omniav1alpha1.MemoryRecallConfig{
+					InlineThresholdBytes: &customThreshold,
+				},
+			},
+		},
+	})
+	if got := svc.InlineThresholdBytes(context.Background()); got != 512 {
+		t.Errorf("inline threshold: want 512, got %d", got)
+	}
+}
+
 // TestServiceSaveMemory_PolicyAndConfigUnion proves the union
 // behaviour when both the static config and the policy supply
 // kinds: a write that violates either source is rejected.

@@ -82,11 +82,13 @@ type MemoryWithTier struct {
 // The agent fetches the full body via GET /api/v1/memories/{id}.
 const InlineBodyThresholdBytes = 2048
 
-// previewBytes is the size of the inline ContentPreview that recall
-// returns for memories above the threshold. 240 chars is enough for
+// previewRunes is the size of the inline ContentPreview that recall
+// returns for memories above the threshold. 240 runes is enough for
 // the agent to recognise the memory and decide whether to open it,
 // without paying the full body in context every time recall runs.
-const previewBytes = 240
+// Counted in runes (not bytes) so multi-byte UTF-8 content can't
+// produce an invalid string mid-truncation.
+const previewRunes = 240
 
 // deriveTier returns "user" / "agent" / "institutional" based on which scope
 // keys are populated. Mirrors the SQL CASE expression used by Aggregate's
@@ -115,12 +117,17 @@ func wrapMemoriesWithTier(rows []*memory.Memory) []*MemoryWithTier {
 
 // wrapMemoriesWithPreview is the recall variant: large bodies are
 // replaced with a preview + has_full_body=true so the agent can
-// decide whether to fetch the full content via memory__open.
-func wrapMemoriesWithPreview(rows []*memory.Memory) []*MemoryWithTier {
+// decide whether to fetch the full content via memory__open. The
+// inline cutoff comes from MemoryPolicy.recall.inlineThresholdBytes
+// when configured; falls back to InlineBodyThresholdBytes.
+func wrapMemoriesWithPreview(rows []*memory.Memory, inlineThreshold int) []*MemoryWithTier {
+	if inlineThreshold <= 0 {
+		inlineThreshold = InlineBodyThresholdBytes
+	}
 	out := make([]*MemoryWithTier, len(rows))
 	for i, m := range rows {
 		mw := newMemoryWithTier(m)
-		applyInlinePreview(mw)
+		applyInlinePreview(mw, inlineThreshold)
 		out[i] = mw
 	}
 	return out
@@ -150,19 +157,25 @@ func newMemoryWithTier(m *memory.Memory) *MemoryWithTier {
 }
 
 // applyInlinePreview swaps full content for a preview when the body
-// exceeds the inline threshold. Mutates in place.
-func applyInlinePreview(mw *MemoryWithTier) {
-	if mw.Memory == nil || mw.BodySizeBytes <= InlineBodyThresholdBytes {
+// exceeds the supplied inline threshold. Mutates in place.
+//
+// Counts runes (not bytes) so the preview never splits a multi-byte
+// UTF-8 sequence mid-character — an agent reading a corrupted
+// preview would see a U+FFFD replacement glyph and have to fetch
+// the full body anyway.
+func applyInlinePreview(mw *MemoryWithTier, inlineThreshold int) {
+	if mw.Memory == nil || mw.BodySizeBytes <= inlineThreshold {
 		return
 	}
-	if len(mw.Content) <= previewBytes {
-		// Body size says "large" but content is shorter than the
-		// preview cap (rare — happens with multi-byte UTF-8 where
-		// octet length > rune count). Just keep content as-is.
+	runes := []rune(mw.Content)
+	if len(runes) <= previewRunes {
+		// Content fits in the preview window — leave it inline. This
+		// happens when octet_length(content) > inlineThreshold but
+		// the rune count is small (multi-byte content).
 		mw.HasFullBody = false
 		return
 	}
-	mw.ContentPreview = mw.Content[:previewBytes]
+	mw.ContentPreview = string(runes[:previewRunes])
 	mw.Content = ""
 	mw.HasFullBody = true
 }
@@ -406,7 +419,7 @@ func (h *Handler) handleSearchMemories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	wrapped := wrapMemoriesWithPreview(memories)
+	wrapped := wrapMemoriesWithPreview(memories, h.service.InlineThresholdBytes(r.Context()))
 	related := h.service.RelatedForMemories(r.Context(), scope, memories)
 	for _, mw := range wrapped {
 		if mw.Memory != nil {

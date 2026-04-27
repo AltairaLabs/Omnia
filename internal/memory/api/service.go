@@ -27,6 +27,7 @@ import (
 
 	"github.com/go-logr/logr"
 
+	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/memory"
 )
 
@@ -210,11 +211,12 @@ func (s *MemoryService) SaveMemoryWithResult(ctx context.Context, mem *memory.Me
 	}
 
 	// Embedding-similarity dedup — only when no structured about key
-	// (the structured path is more reliable) AND embedding service is
-	// available. Failures here log + fall through to a normal insert
-	// rather than failing the write.
+	// (the structured path is more reliable), embedding service is
+	// available, AND the resolved policy hasn't disabled it.
+	// Failures here log + fall through to a normal insert rather
+	// than failing the write.
 	var preMatches []memory.SimilarObservation
-	if !hasAboutKeyInMetadata(mem) && s.embeddingSvc != nil {
+	if !hasAboutKeyInMetadata(mem) && s.embeddingSvc != nil && s.embeddingDedupEnabled(ctx) {
 		matches, simErr := s.findSimilarForDedup(ctx, mem)
 		if simErr != nil {
 			s.log.V(1).Info("similarity dedup skipped",
@@ -224,7 +226,7 @@ func (s *MemoryService) SaveMemoryWithResult(ctx context.Context, mem *memory.Me
 			preMatches = matches
 		}
 	}
-	if len(preMatches) > 0 && preMatches[0].Similarity >= memory.DefaultAutoSupersedeSimilarity {
+	if len(preMatches) > 0 && preMatches[0].Similarity >= s.autoSupersedeThreshold(ctx) {
 		return s.applyAutoSupersedeViaSimilarity(ctx, mem, preMatches[0])
 	}
 
@@ -358,8 +360,10 @@ func (s *MemoryService) policyRequireAboutKinds(ctx context.Context) []string {
 
 // findSimilarForDedup embeds the new content (synchronously — adds
 // ~one embedding-API roundtrip to the write path) and asks the
-// store for active observations within DefaultSurfaceDuplicateSimilarity.
-// Returns nil when embedding fails or yields no result.
+// store for active observations within the surface-duplicates
+// similarity floor. Returns nil when embedding fails or yields no
+// result. Thresholds and limit derive from MemoryPolicy.dedup when
+// configured, otherwise the package-level defaults.
 func (s *MemoryService) findSimilarForDedup(ctx context.Context, mem *memory.Memory) ([]memory.SimilarObservation, error) {
 	embeddings, err := s.embeddingSvc.Provider().Embed(ctx, []string{mem.Content})
 	if err != nil {
@@ -369,8 +373,108 @@ func (s *MemoryService) findSimilarForDedup(ctx context.Context, mem *memory.Mem
 		return nil, errors.New("embed returned empty result")
 	}
 	return s.store.FindSimilarObservations(ctx, mem.Scope, embeddings[0],
-		memory.DefaultDuplicateCandidateLimit,
-		memory.DefaultSurfaceDuplicateSimilarity)
+		s.duplicateCandidateLimit(ctx),
+		s.surfaceDuplicateThreshold(ctx))
+}
+
+// embeddingDedupEnabled resolves whether the embedding-similarity
+// dedup path runs. Defaults to true (the existing behaviour) when
+// no policy is configured or the policy doesn't speak to it.
+func (s *MemoryService) embeddingDedupEnabled(ctx context.Context) bool {
+	policy := s.loadPolicy(ctx)
+	if policy == nil {
+		return true
+	}
+	return policy.DedupEmbeddingEnabled()
+}
+
+// autoSupersedeThreshold resolves the cosine floor above which the
+// server auto-supersedes a near-duplicate. Falls back to the
+// package-level DefaultAutoSupersedeSimilarity (0.95) when the
+// policy doesn't override.
+func (s *MemoryService) autoSupersedeThreshold(ctx context.Context) float64 {
+	if v := s.policyFloat(ctx, (*omniav1alpha1.MemoryPolicy).DedupAutoSupersedeAbove); v > 0 {
+		return v
+	}
+	return memory.DefaultAutoSupersedeSimilarity
+}
+
+// surfaceDuplicateThreshold resolves the cosine floor above which
+// the server surfaces a near-duplicate as a `potential_duplicates`
+// hint. Falls back to DefaultSurfaceDuplicateSimilarity (0.85).
+func (s *MemoryService) surfaceDuplicateThreshold(ctx context.Context) float64 {
+	if v := s.policyFloat(ctx, (*omniav1alpha1.MemoryPolicy).DedupSurfaceDuplicatesAbove); v > 0 {
+		return v
+	}
+	return memory.DefaultSurfaceDuplicateSimilarity
+}
+
+// duplicateCandidateLimit resolves the cap on `potential_duplicates`
+// returned to the agent. Falls back to DefaultDuplicateCandidateLimit
+// (5).
+func (s *MemoryService) duplicateCandidateLimit(ctx context.Context) int {
+	policy := s.loadPolicy(ctx)
+	if policy != nil {
+		if n := policy.DedupCandidateLimit(); n > 0 {
+			return n
+		}
+	}
+	return memory.DefaultDuplicateCandidateLimit
+}
+
+// policyFloat is the shared accessor for the string-typed similarity
+// thresholds. It loads the policy once and applies the supplied
+// extractor.
+func (s *MemoryService) policyFloat(ctx context.Context, get func(*omniav1alpha1.MemoryPolicy) float64) float64 {
+	policy := s.loadPolicy(ctx)
+	if policy == nil {
+		return 0
+	}
+	return get(policy)
+}
+
+// maxRelatedPerMemory resolves the per-memory cap on `related[]`
+// returned in recall responses. Falls back to defaultRelatedPerMemory
+// (3) when no policy is configured.
+func (s *MemoryService) maxRelatedPerMemory(ctx context.Context) int {
+	policy := s.loadPolicy(ctx)
+	if policy != nil {
+		if n := policy.RecallMaxRelatedPerMemory(); n > 0 {
+			return n
+		}
+	}
+	return defaultRelatedPerMemory
+}
+
+// InlineThresholdBytes returns the body-size cutoff above which
+// recall returns title + summary + content_preview rather than the
+// full body. Exported for the handler — it builds the response DTO
+// and needs to know the cutoff per-request. Falls back to the
+// package-level default when no policy is configured.
+func (s *MemoryService) InlineThresholdBytes(ctx context.Context) int {
+	policy := s.loadPolicy(ctx)
+	if policy != nil {
+		if n := policy.RecallInlineThresholdBytes(); n > 0 {
+			return n
+		}
+	}
+	return InlineBodyThresholdBytes
+}
+
+// loadPolicy fetches the bound MemoryPolicy via the loader. Returns
+// nil on missing loader, no policy bound, or transient failure —
+// callers fall through to package-level defaults in any of those
+// cases. The K8sPolicyLoader has its own TTL cache so repeated calls
+// from the same Save don't hit the K8s API more than once.
+func (s *MemoryService) loadPolicy(ctx context.Context) *omniav1alpha1.MemoryPolicy {
+	if s.policyLoader == nil {
+		return nil
+	}
+	policy, err := s.policyLoader.Load(ctx)
+	if err != nil {
+		return nil
+	}
+	return policy
 }
 
 // applyAutoSupersedeViaSimilarity attaches the new observation to
@@ -685,7 +789,7 @@ func (s *MemoryService) RelatedForMemories(ctx context.Context, scope map[string
 	if len(ids) == 0 {
 		return out
 	}
-	rels, err := s.store.FindRelatedEntities(ctx, scope, ids, defaultRelatedPerMemory)
+	rels, err := s.store.FindRelatedEntities(ctx, scope, ids, s.maxRelatedPerMemory(ctx))
 	if err != nil {
 		s.log.V(1).Info("recall related lookup failed", "error", err, "ids", len(ids))
 		return out
