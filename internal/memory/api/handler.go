@@ -548,7 +548,7 @@ func (h *Handler) handleSaveMemory(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(SaveMemoryResponse{
-		Memory:                   MemoryWithTier{Memory: mem, Tier: deriveTier(mem.Scope)},
+		Memory:                   *newMemoryWithTier(mem),
 		Action:                   res.Action,
 		SupersededObservationIDs: res.SupersededObservationIDs,
 		SupersedeReason:          res.SupersedeReason,
@@ -639,7 +639,7 @@ func (h *Handler) handleUpdateMemory(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(SaveMemoryResponse{
-		Memory:                   MemoryWithTier{Memory: mem, Tier: deriveTier(mem.Scope)},
+		Memory:                   *newMemoryWithTier(mem),
 		Action:                   res.Action,
 		SupersededObservationIDs: res.SupersededObservationIDs,
 		SupersedeReason:          res.SupersedeReason,
@@ -723,7 +723,7 @@ func (h *Handler) handleSupersedeMemories(w http.ResponseWriter, r *http.Request
 	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(SaveMemoryResponse{
-		Memory:                   MemoryWithTier{Memory: mem, Tier: deriveTier(mem.Scope)},
+		Memory:                   *newMemoryWithTier(mem),
 		Action:                   res.Action,
 		SupersededObservationIDs: res.SupersededObservationIDs,
 		SupersedeReason:          res.SupersedeReason,

@@ -63,3 +63,14 @@ func (s *EmbeddingService) EmbedMemory(ctx context.Context, mem *Memory) error {
 	s.log.V(1).Info("memory embedded", "memoryID", mem.ID, "dimensions", len(embeddings[0]))
 	return nil
 }
+
+// WriteEmbedding stores an already-computed embedding vector for an
+// entity, skipping the provider Embed round trip. Used by callers
+// that computed the embedding for another reason (e.g. dedup
+// similarity) and want to avoid embedding the same content twice.
+func (s *EmbeddingService) WriteEmbedding(ctx context.Context, entityID string, vec []float32) error {
+	if err := s.store.UpdateEmbedding(ctx, entityID, vec); err != nil {
+		return fmt.Errorf("memory: store embedding: %w", err)
+	}
+	return nil
+}

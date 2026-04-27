@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -215,19 +216,23 @@ func (s *MemoryService) SaveMemoryWithResult(ctx context.Context, mem *memory.Me
 	// available, AND the resolved policy hasn't disabled it.
 	// Failures here log + fall through to a normal insert rather
 	// than failing the write.
-	var preMatches []memory.SimilarObservation
+	var (
+		preMatches  []memory.SimilarObservation
+		queryVector []float32 // cached so the post-write embed call doesn't re-embed
+	)
 	if !hasAboutKeyInMetadata(mem) && s.embeddingSvc != nil && s.embeddingDedupEnabled(ctx) {
-		matches, simErr := s.findSimilarForDedup(ctx, mem)
+		matches, vec, simErr := s.findSimilarForDedup(ctx, mem)
 		if simErr != nil {
 			s.log.V(1).Info("similarity dedup skipped",
 				"reason", "embedding/query failed",
 				"error", simErr.Error())
 		} else {
 			preMatches = matches
+			queryVector = vec
 		}
 	}
 	if len(preMatches) > 0 && preMatches[0].Similarity >= s.autoSupersedeThreshold(ctx) {
-		return s.applyAutoSupersedeViaSimilarity(ctx, mem, preMatches[0])
+		return s.applyAutoSupersedeViaSimilarity(ctx, mem, preMatches[0], queryVector)
 	}
 
 	res, err := s.store.SaveWithResult(ctx, mem)
@@ -256,15 +261,7 @@ func (s *MemoryService) SaveMemoryWithResult(ctx context.Context, mem *memory.Me
 			}
 		}()
 	}
-	if s.embeddingSvc != nil {
-		go func() {
-			embedCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if err := s.embeddingSvc.EmbedMemory(embedCtx, mem); err != nil {
-				s.log.Error(err, "async embedding failed", "memoryID", mem.ID)
-			}
-		}()
-	}
+	s.embedAsync(mem, queryVector)
 	s.emitAuditEvent(ctx, &MemoryAuditEntry{
 		EventType:   eventTypeMemoryCreated,
 		MemoryID:    mem.ID,
@@ -295,6 +292,9 @@ func hasAboutKeyInMetadata(mem *memory.Memory) bool {
 // preference) need the structured-key path to dedup correctly —
 // without about they pile up as duplicates that can't be atomically
 // superseded on rename or update.
+//
+// Kind comparison is case-insensitive: an operator listing "fact"
+// in the policy must also catch agents that send "Fact" or "FACT".
 func (s *MemoryService) enforceAboutForKind(ctx context.Context, mem *memory.Memory) error {
 	if mem == nil {
 		return nil
@@ -303,8 +303,9 @@ func (s *MemoryService) enforceAboutForKind(ctx context.Context, mem *memory.Mem
 	if len(kinds) == 0 {
 		return nil
 	}
+	memType := strings.ToLower(strings.TrimSpace(mem.Type))
 	for _, k := range kinds {
-		if mem.Type == k && !hasAboutKeyInMetadata(mem) {
+		if strings.ToLower(strings.TrimSpace(k)) == memType && !hasAboutKeyInMetadata(mem) {
 			return ErrAboutRequired
 		}
 	}
@@ -361,20 +362,50 @@ func (s *MemoryService) policyRequireAboutKinds(ctx context.Context) []string {
 // findSimilarForDedup embeds the new content (synchronously — adds
 // ~one embedding-API roundtrip to the write path) and asks the
 // store for active observations within the surface-duplicates
-// similarity floor. Returns nil when embedding fails or yields no
-// result. Thresholds and limit derive from MemoryPolicy.dedup when
-// configured, otherwise the package-level defaults.
-func (s *MemoryService) findSimilarForDedup(ctx context.Context, mem *memory.Memory) ([]memory.SimilarObservation, error) {
+// similarity floor. Returns the matches AND the embedding vector
+// so the caller can reuse it for the post-write store update —
+// without that the auto-supersede / clean-insert path embeds the
+// same content a second time. Returns (nil, nil, err) when
+// embedding fails or yields no result.
+func (s *MemoryService) findSimilarForDedup(ctx context.Context, mem *memory.Memory) ([]memory.SimilarObservation, []float32, error) {
 	embeddings, err := s.embeddingSvc.Provider().Embed(ctx, []string{mem.Content})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(embeddings) == 0 || len(embeddings[0]) == 0 {
-		return nil, errors.New("embed returned empty result")
+		return nil, nil, errors.New("embed returned empty result")
 	}
-	return s.store.FindSimilarObservations(ctx, mem.Scope, embeddings[0],
+	matches, err := s.store.FindSimilarObservations(ctx, mem.Scope, embeddings[0],
 		s.duplicateCandidateLimit(ctx),
 		s.surfaceDuplicateThreshold(ctx))
+	if err != nil {
+		return nil, embeddings[0], err
+	}
+	return matches, embeddings[0], nil
+}
+
+// embedAsync writes the embedding for the new observation in the
+// background. When cachedVector is non-nil (the dedup path already
+// computed it) it skips the provider call and writes directly to
+// avoid double-embedding the same content. When the cache is nil it
+// falls back to embeddingSvc.EmbedMemory which embeds + writes.
+func (s *MemoryService) embedAsync(mem *memory.Memory, cachedVector []float32) {
+	if s.embeddingSvc == nil {
+		return
+	}
+	go func() {
+		embedCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if len(cachedVector) > 0 {
+			if err := s.embeddingSvc.WriteEmbedding(embedCtx, mem.ID, cachedVector); err != nil {
+				s.log.Error(err, "async embedding write failed", "memoryID", mem.ID)
+			}
+			return
+		}
+		if err := s.embeddingSvc.EmbedMemory(embedCtx, mem); err != nil {
+			s.log.Error(err, "async embedding failed", "memoryID", mem.ID)
+		}
+	}()
 }
 
 // embeddingDedupEnabled resolves whether the embedding-similarity
@@ -487,6 +518,7 @@ func (s *MemoryService) applyAutoSupersedeViaSimilarity(
 	ctx context.Context,
 	mem *memory.Memory,
 	match memory.SimilarObservation,
+	cachedVector []float32,
 ) (*memory.SaveResult, error) {
 	supersededIDs, err := s.store.AppendObservationToEntity(ctx, match.EntityID, mem)
 	if err != nil {
@@ -511,15 +543,7 @@ func (s *MemoryService) applyAutoSupersedeViaSimilarity(
 			}
 		}()
 	}
-	if s.embeddingSvc != nil {
-		go func() {
-			embedCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if err := s.embeddingSvc.EmbedMemory(embedCtx, mem); err != nil {
-				s.log.Error(err, "async embedding failed", "memoryID", mem.ID)
-			}
-		}()
-	}
+	s.embedAsync(mem, cachedVector)
 	s.emitAuditEvent(ctx, &MemoryAuditEntry{
 		EventType:   eventTypeMemoryCreated,
 		MemoryID:    mem.ID,

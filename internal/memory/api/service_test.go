@@ -268,6 +268,31 @@ func TestServiceSearchMemories(t *testing.T) {
 	assert.Equal(t, "dark mode", results[0].Content)
 }
 
+// TestServiceSaveMemory_RequireAboutCaseInsensitive proves the
+// kind comparison is case-insensitive: an operator listing "fact"
+// in policy must also catch agents that send "Fact" or " FACT ".
+func TestServiceSaveMemory_RequireAboutCaseInsensitive(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{
+		RequireAboutForKinds: []string{"fact"},
+	}, logr.Discard())
+
+	ctx := context.Background()
+	scope := map[string]string{
+		memory.ScopeWorkspaceID: testWorkspaceID,
+		memory.ScopeUserID:      "test-user",
+	}
+
+	for _, variant := range []string{"Fact", "FACT", " fact "} {
+		err := svc.SaveMemory(ctx, &memory.Memory{
+			Type: variant, Content: "no anchor", Confidence: 0.9, Scope: scope,
+		})
+		require.ErrorIs(t, err, ErrAboutRequired,
+			"variant %q must be rejected", variant)
+	}
+}
+
 // TestServiceMemoryService_PolicyOverridesDedupThresholds proves
 // the embedding-similarity dedup thresholds resolve from the bound
 // MemoryPolicy. Setting autoSupersedeAbove=0.5 lifts what would
