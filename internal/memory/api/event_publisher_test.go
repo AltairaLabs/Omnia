@@ -92,6 +92,12 @@ func (m *mockMemoryStore) LinkEntities(_ context.Context, _ map[string]string,
 	return "rel-mock", nil
 }
 
+func (m *mockMemoryStore) FindRelatedEntities(_ context.Context, _ map[string]string,
+	_ []string, _ int,
+) ([]memory.EntityRelation, error) {
+	return nil, nil
+}
+
 func (m *mockMemoryStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	return nil, nil
 }

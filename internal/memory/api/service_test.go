@@ -266,6 +266,43 @@ func TestServiceSearchMemories(t *testing.T) {
 	assert.Equal(t, "dark mode", results[0].Content)
 }
 
+// TestServiceRelatedForMemories proves the recall-enrichment helper
+// returns the per-memory relations the agent uses to navigate the
+// memory graph. Covers the three branches: an entity with relations,
+// an entity with none, and the no-op early returns (empty mems and
+// memories with empty IDs).
+func TestServiceRelatedForMemories(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+
+	user := &memory.Memory{Type: "fact", Content: "name: Phil", Confidence: 0.9, Scope: scope}
+	require.NoError(t, svc.SaveMemory(ctx, user))
+	pref := &memory.Memory{Type: "preference", Content: "prefers dark mode", Confidence: 0.9, Scope: scope}
+	require.NoError(t, svc.SaveMemory(ctx, pref))
+
+	_, err := svc.LinkMemories(ctx, scope, user.ID, pref.ID, "MENTIONS", 1.0)
+	require.NoError(t, err)
+
+	got := svc.RelatedForMemories(ctx, scope, []*memory.Memory{user, pref})
+	require.Len(t, got[user.ID], 1, "user identity entity should carry its outgoing MENTIONS relation")
+	assert.Equal(t, pref.ID, got[user.ID][0].TargetEntityID)
+	assert.Equal(t, "MENTIONS", got[user.ID][0].RelationType)
+	assert.Empty(t, got[pref.ID], "preference entity has no outgoing relations")
+
+	// Empty memory slice returns an empty (non-nil) map so the
+	// handler can index into it without nil guards.
+	emptyMap := svc.RelatedForMemories(ctx, scope, nil)
+	assert.NotNil(t, emptyMap)
+	assert.Empty(t, emptyMap)
+
+	// Memories with empty IDs are skipped and short-circuit before
+	// hitting the store.
+	noIDMap := svc.RelatedForMemories(ctx, scope, []*memory.Memory{{}})
+	assert.NotNil(t, noIDMap)
+	assert.Empty(t, noIDMap)
+}
+
 func TestServiceDeleteMemory(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()

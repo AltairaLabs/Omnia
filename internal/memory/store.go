@@ -877,6 +877,66 @@ func scanSingleMemory(row pgx.Row, scope map[string]string) (*Memory, error) {
 	return mem, nil
 }
 
+// FindRelatedEntities returns outgoing memory_relations rows from
+// the given source entity IDs, capped at maxPerEntity per source.
+// Used by recall enrichment so each returned memory carries a
+// `related[]` list — the agent uses these refs to navigate the
+// memory graph (preferences → user identity, derived facts →
+// anchors).
+func (s *PostgresMemoryStore) FindRelatedEntities(
+	ctx context.Context,
+	scope map[string]string,
+	entityIDs []string,
+	maxPerEntity int,
+) ([]EntityRelation, error) {
+	if scope[ScopeWorkspaceID] == "" {
+		return nil, errors.New(errWorkspaceRequired)
+	}
+	if len(entityIDs) == 0 {
+		return nil, nil
+	}
+	if maxPerEntity <= 0 {
+		maxPerEntity = 3
+	}
+
+	// Per-source LIMIT via window function. Returns rows ordered by
+	// weight DESC then created_at DESC so the most-relevant relations
+	// surface when the cap clips.
+	rows, err := s.pool.Query(ctx, `
+		WITH ranked AS (
+			SELECT source_entity_id, target_entity_id, relation_type,
+			       coalesce(weight, 1.0) AS w,
+			       row_number() OVER (
+			           PARTITION BY source_entity_id
+			           ORDER BY coalesce(weight, 1.0) DESC, created_at DESC
+			       ) AS rn
+			FROM memory_relations
+			WHERE workspace_id = $1
+			  AND source_entity_id = ANY($2)
+			  AND (expires_at IS NULL OR expires_at > now())
+		)
+		SELECT source_entity_id, target_entity_id, relation_type, w
+		FROM ranked
+		WHERE rn <= $3`,
+		scope[ScopeWorkspaceID], entityIDs, maxPerEntity,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("memory: find related: %w", err)
+	}
+	defer rows.Close()
+
+	var out []EntityRelation
+	for rows.Next() {
+		var rel EntityRelation
+		if err := rows.Scan(&rel.SourceEntityID, &rel.TargetEntityID,
+			&rel.RelationType, &rel.Weight); err != nil {
+			return nil, fmt.Errorf("memory: find related scan: %w", err)
+		}
+		out = append(out, rel)
+	}
+	return out, rows.Err()
+}
+
 // AppendObservationToEntity attaches a new observation to an existing
 // entity, marking all prior active observations as superseded in the
 // same transaction. Used by the embedding-similarity dedup path: when

@@ -129,6 +129,16 @@ func (c *CachedStore) AppendObservationToEntity(ctx context.Context, entityID st
 	return ids, nil
 }
 
+// FindRelatedEntities passes through to the inner store. Not cached:
+// the recall path already gates on a versioned key for the search
+// itself, and per-entity related[] is cheap to recompute alongside
+// the rest of the recall enrichment.
+func (c *CachedStore) FindRelatedEntities(ctx context.Context, scope map[string]string,
+	entityIDs []string, maxPerEntity int,
+) ([]EntityRelation, error) {
+	return c.inner.FindRelatedEntities(ctx, scope, entityIDs, maxPerEntity)
+}
+
 // Retrieve returns cached results when available, falling back to the inner store on miss or Redis error.
 func (c *CachedStore) Retrieve(ctx context.Context, scope map[string]string, query string, opts RetrieveOptions) ([]*Memory, error) {
 	key := c.retrieveKey(ctx, scope, query, opts)

@@ -107,6 +107,12 @@ func (m *cacheTestStore) LinkEntities(_ context.Context, _ map[string]string,
 	return "rel-mock", nil
 }
 
+func (m *cacheTestStore) FindRelatedEntities(_ context.Context, _ map[string]string,
+	_ []string, _ int,
+) ([]EntityRelation, error) {
+	return nil, nil
+}
+
 func (m *cacheTestStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ RetrieveOptions) ([]*Memory, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

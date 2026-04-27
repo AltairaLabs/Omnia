@@ -71,6 +71,18 @@ type DuplicateCandidate struct {
 	Similarity float64 `json:"similarity"`
 }
 
+// EntityRelation is the store-level row returned by
+// FindRelatedEntities — one outgoing edge from the source entity
+// in memory_relations. The recall enrichment path collects these
+// per memory and serialises them as `related[]` in the response so
+// the agent can navigate the memory graph.
+type EntityRelation struct {
+	SourceEntityID string  `json:"source_entity_id"`
+	TargetEntityID string  `json:"target_entity_id"`
+	RelationType   string  `json:"relation_type"`
+	Weight         float64 `json:"weight"`
+}
+
 // SimilarObservation is the store-level match returned by
 // FindSimilarObservations. The service layer turns it into either
 // an auto-supersede (≥ AutoSupersedeThreshold) or a
@@ -160,6 +172,15 @@ type Store interface {
 	// 1.0 when zero. Returns the relation ID.
 	LinkEntities(ctx context.Context, scope map[string]string,
 		sourceEntityID, targetEntityID, relationType string, weight float64) (string, error)
+
+	// FindRelatedEntities returns the memory_relations rows whose
+	// source_entity_id is in entityIDs, capped at maxPerEntity per
+	// source. Used by the recall enrichment path to surface a per-
+	// memory related[] list — the agent uses these refs to know
+	// which memories share an entity (the user identity, a project,
+	// etc.) so it can decide updates and supersessions correctly.
+	FindRelatedEntities(ctx context.Context, scope map[string]string,
+		entityIDs []string, maxPerEntity int) ([]EntityRelation, error)
 	ExportAll(ctx context.Context, scope map[string]string) ([]*Memory, error)
 	BatchDelete(ctx context.Context, scope map[string]string, limit int) (int, error)
 	RetrieveMultiTier(ctx context.Context, req MultiTierRequest) (*MultiTierResult, error)

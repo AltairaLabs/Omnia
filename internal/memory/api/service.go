@@ -463,6 +463,46 @@ func (s *MemoryService) SearchMemories(ctx context.Context, scope map[string]str
 	return results, nil
 }
 
+// defaultRelatedPerMemory caps the per-memory related[] list. Three keeps
+// the recall payload lean while still letting the agent see the strongest
+// graph neighbours (an identity entity's preferences, a workspace doc's
+// related skills) it might want to update or supersede.
+const defaultRelatedPerMemory = 3
+
+// RelatedForMemories returns a map keyed by source entity ID, with each
+// value being the relations originating from that entity. Used by the
+// recall path to attach `related[]` to each result so the agent can
+// navigate the memory graph and reason about supersession candidates
+// without making a second round-trip per memory.
+//
+// Returns an empty map (not nil) when there are no memories so the
+// handler can call this unconditionally and look up by ID without nil
+// guards.
+func (s *MemoryService) RelatedForMemories(ctx context.Context, scope map[string]string, mems []*memory.Memory) map[string][]memory.EntityRelation {
+	out := make(map[string][]memory.EntityRelation, len(mems))
+	if len(mems) == 0 {
+		return out
+	}
+	ids := make([]string, 0, len(mems))
+	for _, m := range mems {
+		if m != nil && m.ID != "" {
+			ids = append(ids, m.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return out
+	}
+	rels, err := s.store.FindRelatedEntities(ctx, scope, ids, defaultRelatedPerMemory)
+	if err != nil {
+		s.log.V(1).Info("recall related lookup failed", "error", err, "ids", len(ids))
+		return out
+	}
+	for _, r := range rels {
+		out[r.SourceEntityID] = append(out[r.SourceEntityID], r)
+	}
+	return out
+}
+
 // ListMemories returns memories for a given scope with pagination.
 func (s *MemoryService) ListMemories(ctx context.Context, scope map[string]string, opts memory.ListOptions) ([]*memory.Memory, error) {
 	results, err := s.store.List(ctx, scope, opts)

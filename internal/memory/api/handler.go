@@ -48,9 +48,17 @@ const (
 
 // MemoryWithTier wraps memory.Memory with a derived "tier" string for
 // dashboard rendering. Tier is computed from the scope map; no schema change.
+//
+// Related is the per-memory neighbour list. The recall handler
+// populates it from the memory_relations graph so the agent can see
+// which memories share an entity (a user identity, a project, a
+// workspace doc) and decide which ones a fresh observation should
+// supersede or update. Empty / nil for list / institutional / agent-
+// scoped responses where graph navigation isn't meaningful.
 type MemoryWithTier struct {
 	*memory.Memory
-	Tier string `json:"tier"`
+	Tier    string                  `json:"tier"`
+	Related []memory.EntityRelation `json:"related,omitempty"`
 }
 
 // deriveTier returns "user" / "agent" / "institutional" based on which scope
@@ -280,9 +288,19 @@ func (h *Handler) handleSearchMemories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	wrapped := wrapMemoriesWithTier(memories)
+	related := h.service.RelatedForMemories(r.Context(), scope, memories)
+	for _, mw := range wrapped {
+		if mw.Memory != nil {
+			if rels, ok := related[mw.ID]; ok {
+				mw.Related = rels
+			}
+		}
+	}
+
 	writeJSON(w, MemoryListResponse{
-		Memories: wrapMemoriesWithTier(memories),
-		Total:    len(memories),
+		Memories: wrapped,
+		Total:    len(wrapped),
 	})
 }
 

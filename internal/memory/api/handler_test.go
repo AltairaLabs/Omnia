@@ -52,6 +52,10 @@ type mockStore struct {
 	// Tests use this to exercise the auto_superseded surface without
 	// standing up a real Postgres.
 	nextSaveResult *memory.SaveResult
+	// relatedBySource lets tests pre-populate the FindRelatedEntities
+	// response per source entity ID — used to assert the recall
+	// handler attaches related[] correctly.
+	relatedBySource map[string][]memory.EntityRelation
 }
 
 func (m *mockStore) Save(_ context.Context, mem *memory.Memory) error {
@@ -103,6 +107,19 @@ func (m *mockStore) LinkEntities(_ context.Context, _ map[string]string,
 	_, _, _ string, _ float64,
 ) (string, error) {
 	return "rel-mock", nil
+}
+
+func (m *mockStore) FindRelatedEntities(_ context.Context, _ map[string]string,
+	entityIDs []string, _ int,
+) ([]memory.EntityRelation, error) {
+	if m.relatedBySource == nil {
+		return nil, nil
+	}
+	out := make([]memory.EntityRelation, 0)
+	for _, id := range entityIDs {
+		out = append(out, m.relatedBySource[id]...)
+	}
+	return out, nil
 }
 
 func (m *mockStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
@@ -364,6 +381,54 @@ func TestHandleSearchMemories_StoreError(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+// TestHandleSearchMemories_AttachesRelated proves the recall response
+// carries the per-memory `related[]` slice the agent uses to navigate
+// the memory graph and decide which memories share an entity (the
+// user identity, a project) so it can update / supersede them
+// correctly.
+func TestHandleSearchMemories_AttachesRelated(t *testing.T) {
+	store := &mockStore{
+		memories: []*memory.Memory{
+			{ID: "ent-user", Content: "name: Phil"},
+			{ID: "ent-pref", Content: "prefers dark mode"},
+		},
+		relatedBySource: map[string][]memory.EntityRelation{
+			"ent-user": {
+				{SourceEntityID: "ent-user", TargetEntityID: "ent-pref",
+					RelationType: "MENTIONS", Weight: 1.0},
+			},
+		},
+	}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/memories/search?workspace=ws1&q=phil", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var resp MemoryListResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	require.Len(t, resp.Memories, 2)
+
+	var userMem, prefMem *MemoryWithTier
+	for _, m := range resp.Memories {
+		switch m.ID {
+		case "ent-user":
+			userMem = m
+		case "ent-pref":
+			prefMem = m
+		}
+	}
+	require.NotNil(t, userMem)
+	require.NotNil(t, prefMem)
+	require.Len(t, userMem.Related, 1, "user identity memory should carry its outgoing relation")
+	assert.Equal(t, "ent-pref", userMem.Related[0].TargetEntityID)
+	assert.Equal(t, "MENTIONS", userMem.Related[0].RelationType)
+	assert.Empty(t, prefMem.Related, "preference memory has no outgoing relations in this fixture")
 }
 
 // --- Save memory tests ---
