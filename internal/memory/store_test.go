@@ -524,7 +524,9 @@ func TestPostgresMemoryStore_SupersedeMany_RejectsCrossWorkspace(t *testing.T) {
 }
 
 // TestPostgresMemoryStore_SupersedeMany_RequiresInputs proves the
-// guard fires on empty source lists and missing workspace.
+// guard fires on empty source lists, missing workspace, and missing
+// user_id (the store-level user-scope check that mirrors the HTTP
+// handler so every caller path — gRPC, in-process — is protected).
 func TestPostgresMemoryStore_SupersedeMany_RequiresInputs(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
@@ -538,6 +540,58 @@ func TestPostgresMemoryStore_SupersedeMany_RequiresInputs(t *testing.T) {
 	_, _, err = store.SupersedeMany(ctx, []string{"a"},
 		&Memory{Content: "x", Scope: map[string]string{}})
 	require.Error(t, err)
+
+	// Missing user_id (workspace-only scope) must be rejected so a
+	// caller can't supersede across all users in a workspace.
+	_, _, err = store.SupersedeMany(ctx, []string{"a"},
+		&Memory{Content: "x", Scope: map[string]string{
+			ScopeWorkspaceID: testWorkspace1,
+		}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "user_id")
+}
+
+// TestPostgresMemoryStore_AppendObservationToEntity_RejectsCrossScope
+// proves the defence-in-depth scope assertion fires when a caller
+// passes an entityID that belongs to a different user inside the
+// same workspace. Without this check the embedding-similarity dedup
+// path could supersede across users if FindSimilarObservations ever
+// regressed on its scope filter.
+func TestPostgresMemoryStore_AppendObservationToEntity_RejectsCrossScope(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	scopeAlice := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "alice"}
+	memAlice := &Memory{Type: "fact", Content: "alice fact", Confidence: 0.9, Scope: scopeAlice}
+	require.NoError(t, store.Save(ctx, memAlice))
+
+	scopeBob := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "bob"}
+	updateAsBob := &Memory{Type: "fact", Content: "bob trying to overwrite", Confidence: 0.9, Scope: scopeBob}
+	_, err := store.AppendObservationToEntity(ctx, memAlice.ID, updateAsBob)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found in scope")
+}
+
+// TestPostgresMemoryStore_Save_RejectsCrossScopeUpdate proves the
+// updateEntity scope guard: a caller in workspace W cannot rewrite
+// entity metadata for a different user's entity in W just by
+// passing the target's entity ID and a workspace-matching scope.
+func TestPostgresMemoryStore_Save_RejectsCrossScopeUpdate(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	scopeAlice := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "alice"}
+	memAlice := &Memory{Type: "fact", Content: "alice fact", Confidence: 0.9, Scope: scopeAlice}
+	require.NoError(t, store.Save(ctx, memAlice))
+
+	scopeBob := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "bob"}
+	hijack := &Memory{
+		ID: memAlice.ID, Type: "fact", Content: "bob hijacks alice's entity",
+		Confidence: 0.9, Scope: scopeBob,
+	}
+	err := store.Save(ctx, hijack)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found in scope")
 }
 
 // TestPostgresMemoryStore_FindRelatedEntities exercises the

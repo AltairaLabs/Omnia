@@ -445,20 +445,30 @@ func updateEntity(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 		return err
 	}
 
+	// Scope guard: a workspace-only check would let a caller in
+	// workspace W rewrite any user's entity in W. Always require the
+	// caller's user/agent partition match the row's; missing scope
+	// keys mean "must also be NULL on the row" so an institutional
+	// caller can't mutate user-scoped rows and vice versa.
 	tag, err := tx.Exec(ctx, `
 		UPDATE memory_entities
 		SET metadata = $1, updated_at = now(), expires_at = $2
-		WHERE id = $3 AND workspace_id = $4`,
+		WHERE id = $3
+		  AND workspace_id = $4
+		  AND ($5::text IS NULL OR virtual_user_id = $5)
+		  AND ($6::uuid IS NULL OR agent_id = $6)`,
 		metaJSON,
 		mem.ExpiresAt,
 		mem.ID,
 		mem.Scope[ScopeWorkspaceID],
+		scopeOrNil(mem.Scope, ScopeUserID),
+		scopeOrNil(mem.Scope, ScopeAgentID),
 	)
 	if err != nil {
 		return fmt.Errorf("memory: update entity: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("memory: entity %s not found in workspace", mem.ID)
+		return fmt.Errorf("memory: entity %s not found in scope", mem.ID)
 	}
 	return nil
 }
@@ -1014,6 +1024,15 @@ func (s *PostgresMemoryStore) AppendObservationToEntity(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Defence in depth: callers (embedding-similarity auto-supersede)
+	// pass an entityID that the store-level FindSimilarObservations
+	// returned. Re-check the entity is in the caller's scope before
+	// mutating it — a future bug in similarity scoping must not
+	// silently let one user's observation supersede another's.
+	if err := assertEntitiesInScope(ctx, tx, []string{entityID}, mem.Scope); err != nil {
+		return nil, err
+	}
+
 	mem.ID = entityID
 
 	supersededIDs, err := supersedePriorObservations(ctx, tx, entityID)
@@ -1047,6 +1066,13 @@ func (s *PostgresMemoryStore) SupersedeMany(
 	}
 	if mem.Scope[ScopeWorkspaceID] == "" {
 		return "", nil, errors.New(errWorkspaceRequired)
+	}
+	// User scope is mandatory at the store layer too — the HTTP
+	// handler already enforces this, but other callers (gRPC,
+	// in-process) must not be able to supersede across all users
+	// in a workspace by omitting user_id.
+	if mem.Scope[ScopeUserID] == "" {
+		return "", nil, errors.New(errUserIDRequired)
 	}
 
 	tx, err := s.pool.Begin(ctx)
