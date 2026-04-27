@@ -1119,23 +1119,37 @@ func (s *PostgresMemoryStore) SupersedeMany(
 // many times the id appears in the array, so without dedup a
 // duplicate caller-side would always trip the missing-rows path
 // with a confusing "1 of 2 source entities not found" message.
+//
+// Uses SELECT … FOR UPDATE to hold a row-level lock for the
+// duration of the surrounding transaction. Without that, a
+// concurrent Delete (which sets forgotten=true) racing the
+// assertion could let a supersede land on a row another tx already
+// considered logically gone.
 func assertEntitiesInScope(ctx context.Context, tx pgx.Tx, entityIDs []string, scope map[string]string) error {
 	uniqueIDs := dedupeStrings(entityIDs)
-	row := tx.QueryRow(ctx, `
-		SELECT count(*) FROM memory_entities
+	rows, err := tx.Query(ctx, `
+		SELECT id FROM memory_entities
 		WHERE id = ANY($1)
 		  AND workspace_id = $2
 		  AND ($3::text IS NULL OR virtual_user_id = $3)
 		  AND ($4::uuid IS NULL OR agent_id = $4)
-		  AND NOT forgotten`,
+		  AND NOT forgotten
+		FOR UPDATE`,
 		uniqueIDs,
 		scope[ScopeWorkspaceID],
 		scopeOrNil(scope, ScopeUserID),
 		scopeOrNil(scope, ScopeAgentID),
 	)
-	var n int
-	if err := row.Scan(&n); err != nil {
+	if err != nil {
 		return fmt.Errorf("memory: scope assertion: %w", err)
+	}
+	defer rows.Close()
+	var n int
+	for rows.Next() {
+		n++
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("memory: scope assertion iter: %w", err)
 	}
 	if n != len(uniqueIDs) {
 		return fmt.Errorf("memory: %d of %d source entities not found in scope",

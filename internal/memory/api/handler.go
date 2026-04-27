@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-logr/logr"
 
@@ -163,21 +164,39 @@ func newMemoryWithTier(m *memory.Memory) *MemoryWithTier {
 // UTF-8 sequence mid-character — an agent reading a corrupted
 // preview would see a U+FFFD replacement glyph and have to fetch
 // the full body anyway.
+//
+// Uses utf8.DecodeRuneInString so we walk only previewRunes ahead
+// of the cutoff (or detect "fits inline" early), avoiding a full
+// rune-slice allocation for every recall result.
 func applyInlinePreview(mw *MemoryWithTier, inlineThreshold int) {
 	if mw.Memory == nil || mw.BodySizeBytes <= inlineThreshold {
 		return
 	}
-	runes := []rune(mw.Content)
-	if len(runes) <= previewRunes {
-		// Content fits in the preview window — leave it inline. This
-		// happens when octet_length(content) > inlineThreshold but
-		// the rune count is small (multi-byte content).
+	cutByte, fits := previewByteOffset(mw.Content, previewRunes)
+	if fits {
+		// Content fits inside the preview window even though the
+		// byte count crossed the inline threshold (multi-byte UTF-8).
+		// Leave it inline.
 		mw.HasFullBody = false
 		return
 	}
-	mw.ContentPreview = string(runes[:previewRunes])
+	mw.ContentPreview = mw.Content[:cutByte]
 	mw.Content = ""
 	mw.HasFullBody = true
+}
+
+// previewByteOffset returns the byte index after the maxRunes-th
+// rune of s, plus a "fits" flag set when s is shorter than that.
+// Walks at most maxRunes+1 runes from the start — O(maxRunes), not
+// O(len(s)).
+func previewByteOffset(s string, maxRunes int) (int, bool) {
+	i, runes := 0, 0
+	for i < len(s) && runes < maxRunes {
+		_, size := utf8.DecodeRuneInString(s[i:])
+		i += size
+		runes++
+	}
+	return i, i >= len(s)
 }
 
 // readBodySize tolerates both int and float64 — the latter is what
