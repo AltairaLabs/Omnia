@@ -63,9 +63,20 @@ func (p *MemoryPolicy) DedupEmbeddingEnabled() bool {
 
 // DedupAutoSupersedeAbove returns the cosine-similarity threshold
 // above which the server auto-supersedes a near-duplicate. Returns
-// 0 when unset; callers fall back to the default.
+// 0 when unset OR when the value parsed out of range / unparseable;
+// callers fall back to the default. Use DedupAutoSupersedeAboveRaw
+// to distinguish "unset" from "set but invalid" for logging.
 func (p *MemoryPolicy) DedupAutoSupersedeAbove() float64 {
 	return parsePolicyFloat(p, func(d *MemoryEmbeddingDedupConfig) string {
+		return d.AutoSupersedeAbove
+	})
+}
+
+// DedupAutoSupersedeAboveRaw returns the raw string the operator
+// set on the CRD, before parsing. Empty when unset. Lets callers
+// warn when a non-empty value parsed to 0 (set but invalid).
+func (p *MemoryPolicy) DedupAutoSupersedeAboveRaw() string {
+	return rawPolicyFloat(p, func(d *MemoryEmbeddingDedupConfig) string {
 		return d.AutoSupersedeAbove
 	})
 }
@@ -76,6 +87,13 @@ func (p *MemoryPolicy) DedupAutoSupersedeAbove() float64 {
 // unset.
 func (p *MemoryPolicy) DedupSurfaceDuplicatesAbove() float64 {
 	return parsePolicyFloat(p, func(d *MemoryEmbeddingDedupConfig) string {
+		return d.SurfaceDuplicatesAbove
+	})
+}
+
+// DedupSurfaceDuplicatesAboveRaw — see DedupAutoSupersedeAboveRaw.
+func (p *MemoryPolicy) DedupSurfaceDuplicatesAboveRaw() string {
+	return rawPolicyFloat(p, func(d *MemoryEmbeddingDedupConfig) string {
 		return d.SurfaceDuplicatesAbove
 	})
 }
@@ -110,4 +128,15 @@ func parsePolicyFloat(p *MemoryPolicy, get func(*MemoryEmbeddingDedupConfig) str
 		return 0
 	}
 	return v
+}
+
+// rawPolicyFloat returns the string the operator set on the CRD
+// without parsing. "" means unset; any non-empty value that
+// parsePolicyFloat returns 0 for is "set but invalid" — useful for
+// the caller to log a warning.
+func rawPolicyFloat(p *MemoryPolicy, get func(*MemoryEmbeddingDedupConfig) string) string {
+	if p == nil || p.Spec.Dedup == nil || p.Spec.Dedup.EmbeddingSimilarity == nil {
+		return ""
+	}
+	return get(p.Spec.Dedup.EmbeddingSimilarity)
 }

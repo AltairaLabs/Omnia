@@ -66,9 +66,23 @@ type K8sPolicyLoader struct {
 	// DefaultPolicyCacheTTL.
 	CacheTTL time.Duration
 
-	cached     atomic.Pointer[omniav1alpha1.MemoryPolicy]
-	cachedAt   atomic.Int64 // unix nanos of the last successful fetch
-	cachedNoop atomic.Bool  // true when the last fetch resolved to "no policy" (nil)
+	// cache packs (policy, fetchedAt, noopFlag) into one atomic
+	// pointer so concurrent Loads always see a consistent triple.
+	// Earlier separate atomic.Pointer + atomic.Int64 + atomic.Bool
+	// fields could tear: a successful fetch racing with a markNoop
+	// call could leave the cache reading "no policy at fresh
+	// timestamp" when one was actually bound, defeating the cache
+	// for up to one TTL window.
+	cache atomic.Pointer[policyCacheEntry]
+}
+
+// policyCacheEntry is the atomic unit. Policy is nil when the most
+// recent successful fetch resolved to "no policy bound" (workspace
+// missing, no policyRef, named policy not found) — distinguished
+// from "cache empty" by FetchedAt being non-zero.
+type policyCacheEntry struct {
+	Policy    *omniav1alpha1.MemoryPolicy
+	FetchedAt time.Time
 }
 
 // NewK8sPolicyLoader constructs a loader bound to a single workspace +
@@ -93,16 +107,12 @@ func (k *K8sPolicyLoader) Load(ctx context.Context) (*omniav1alpha1.MemoryPolicy
 		return nil, nil
 	}
 
-	// Cache hit within TTL — short-circuit without touching the
-	// K8s API. cachedNoop covers the case where the last fetch
-	// resolved to "no policy bound" (cached.Load returns nil but
-	// the answer is still fresh).
 	ttl := k.CacheTTL
 	if ttl <= 0 {
 		ttl = DefaultPolicyCacheTTL
 	}
-	if k.fresh(ttl) {
-		return k.cached.Load(), nil
+	if entry := k.cache.Load(); entry != nil && time.Since(entry.FetchedAt) < ttl {
+		return entry.Policy, nil
 	}
 
 	ws := &omniav1alpha1.Workspace{}
@@ -112,7 +122,7 @@ func (k *K8sPolicyLoader) Load(ctx context.Context) (*omniav1alpha1.MemoryPolicy
 			k.markNoop()
 			return nil, nil
 		}
-		if cached := k.cached.Load(); cached != nil {
+		if cached := k.cachedPolicy(); cached != nil {
 			k.Log.V(1).Info("workspace get failed, using cached policy",
 				"workspace", k.Workspace, "cachedName", cached.Name, "error", err.Error())
 			return cached, nil
@@ -136,7 +146,7 @@ func (k *K8sPolicyLoader) Load(ctx context.Context) (*omniav1alpha1.MemoryPolicy
 			k.markNoop()
 			return nil, nil
 		}
-		if cached := k.cached.Load(); cached != nil {
+		if cached := k.cachedPolicy(); cached != nil {
 			k.Log.V(1).Info("memorypolicy get failed, using cached policy",
 				"policyRef", ref.Name, "cachedName", cached.Name, "error", err.Error())
 			return cached, nil
@@ -144,29 +154,27 @@ func (k *K8sPolicyLoader) Load(ctx context.Context) (*omniav1alpha1.MemoryPolicy
 		return nil, fmt.Errorf("get memorypolicy %q: %w", ref.Name, err)
 	}
 
-	k.cached.Store(policy)
-	k.cachedNoop.Store(false)
-	k.cachedAt.Store(time.Now().UnixNano())
+	k.cache.Store(&policyCacheEntry{Policy: policy, FetchedAt: time.Now()})
 	return policy, nil
 }
 
-// fresh reports whether the cached value (including the "no policy"
-// sentinel) is within the TTL.
-func (k *K8sPolicyLoader) fresh(ttl time.Duration) bool {
-	last := k.cachedAt.Load()
-	if last == 0 {
-		return false
+// cachedPolicy returns the last cached policy (or nil if cache is
+// empty / the last fetch resolved to "no policy"). Used by the
+// transient-error fallback paths to keep serving stale-but-known
+// content during an API outage.
+func (k *K8sPolicyLoader) cachedPolicy() *omniav1alpha1.MemoryPolicy {
+	if entry := k.cache.Load(); entry != nil {
+		return entry.Policy
 	}
-	return time.Since(time.Unix(0, last)) < ttl
+	return nil
 }
 
 // markNoop records that the most recent successful fetch resolved
 // to "no policy" so subsequent Loads within the TTL skip the K8s
-// round trip.
+// round trip. Stored as one atomic write to avoid the read-tear
+// window the previous separate-fields implementation had.
 func (k *K8sPolicyLoader) markNoop() {
-	k.cached.Store(nil)
-	k.cachedNoop.Store(true)
-	k.cachedAt.Store(time.Now().UnixNano())
+	k.cache.Store(&policyCacheEntry{Policy: nil, FetchedAt: time.Now()})
 }
 
 // findMemoryPolicyRef walks the workspace's service groups and returns

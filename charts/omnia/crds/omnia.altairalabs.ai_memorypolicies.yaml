@@ -18,16 +18,16 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .spec.default.tiers.institutional.mode
+    - jsonPath: .spec.tiers.institutional.mode
       name: Inst Mode
       type: string
-    - jsonPath: .spec.default.tiers.agent.mode
+    - jsonPath: .spec.tiers.agent.mode
       name: Agent Mode
       type: string
-    - jsonPath: .spec.default.tiers.user.mode
+    - jsonPath: .spec.tiers.user.mode
       name: User Mode
       type: string
-    - jsonPath: .spec.default.schedule
+    - jsonPath: .spec.schedule
       name: Schedule
       type: string
     - jsonPath: .metadata.creationTimestamp
@@ -145,6 +145,10 @@ spec:
                         pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
                         type: string
                     type: object
+                    x-kubernetes-validations:
+                    - message: surfaceDuplicatesAbove must be strictly less than autoSupersedeAbove
+                      rule: '!has(self.autoSupersedeAbove) || !has(self.surfaceDuplicatesAbove)
+                        || double(self.surfaceDuplicatesAbove) < double(self.autoSupersedeAbove)'
                   requireAboutForKinds:
                     description: |-
                       requireAboutForKinds enumerates kinds (e.g. "fact",

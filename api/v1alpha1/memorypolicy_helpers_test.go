@@ -100,3 +100,38 @@ func TestMemoryPolicy_DedupHelpers_RejectInvalidThresholds(t *testing.T) {
 		}
 	}
 }
+
+// TestMemoryPolicy_DedupRawAccessors proves the *Raw() accessors
+// surface the operator-set string verbatim — used by the runtime
+// to distinguish "field unset" (raw == "") from "set but invalid"
+// (raw != "" && parsed == 0) so misconfig logs fire.
+func TestMemoryPolicy_DedupRawAccessors(t *testing.T) {
+	var nilP *MemoryPolicy
+	if got := nilP.DedupAutoSupersedeAboveRaw(); got != "" {
+		t.Errorf("nil policy raw: want \"\", got %q", got)
+	}
+	if got := nilP.DedupSurfaceDuplicatesAboveRaw(); got != "" {
+		t.Errorf("nil policy raw: want \"\", got %q", got)
+	}
+
+	empty := &MemoryPolicy{}
+	if got := empty.DedupAutoSupersedeAboveRaw(); got != "" {
+		t.Errorf("empty policy raw: want \"\", got %q", got)
+	}
+
+	bad := &MemoryPolicy{Spec: MemoryPolicySpec{Dedup: &MemoryDedupConfig{
+		EmbeddingSimilarity: &MemoryEmbeddingDedupConfig{
+			AutoSupersedeAbove:     "1.5",
+			SurfaceDuplicatesAbove: "not-a-number",
+		},
+	}}}
+	if got := bad.DedupAutoSupersedeAboveRaw(); got != "1.5" {
+		t.Errorf("raw must surface invalid value verbatim, got %q", got)
+	}
+	if got := bad.DedupAutoSupersedeAbove(); got != 0 {
+		t.Errorf("parsed must reject invalid value, got %v", got)
+	}
+	if got := bad.DedupSurfaceDuplicatesAboveRaw(); got != "not-a-number" {
+		t.Errorf("raw must surface unparseable value verbatim, got %q", got)
+	}
+}

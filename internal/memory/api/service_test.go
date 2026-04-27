@@ -682,7 +682,7 @@ func TestServiceSearchMemories_HybridSurfacesSemanticMatch(t *testing.T) {
 	require.NoError(t, store.Save(ctx, a))
 	b := &memory.Memory{Type: "preference", Content: "User loves the colour blue", Confidence: 0.9, Scope: scope}
 	require.NoError(t, store.Save(ctx, b))
-	require.NoError(t, store.UpdateEmbedding(ctx, b.ID, provider.fixedEmbedding))
+	require.NoError(t, store.UpdateEmbedding(ctx, b.ID, provider.fixedEmbedding, ""))
 	c := &memory.Memory{Type: "fact", Content: "Random unrelated note", Confidence: 0.7, Scope: scope}
 	require.NoError(t, store.Save(ctx, c))
 
@@ -915,7 +915,7 @@ func TestMemoryService_AutoSupersedesByEmbeddingSimilarity(t *testing.T) {
 		Scope:      scope,
 	}
 	require.NoError(t, store.Save(ctx, original))
-	require.NoError(t, store.UpdateEmbedding(ctx, original.ID, provider.fixedEmbedding))
+	require.NoError(t, store.UpdateEmbedding(ctx, original.ID, provider.fixedEmbedding, ""))
 
 	// Drain the seed-side embed channel signals (Save will fire one
 	// async embed per call); without this the channel fills and the

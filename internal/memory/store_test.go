@@ -421,11 +421,11 @@ func TestPostgresMemoryStore_FindSimilarObservations_RanksByCosine(t *testing.T)
 
 	near := &Memory{Type: "preference", Content: "User likes blue", Confidence: 0.9, Scope: scope}
 	require.NoError(t, store.Save(ctx, near))
-	require.NoError(t, store.UpdateEmbedding(ctx, near.ID, repeatFloat(0.1, 1536)))
+	require.NoError(t, store.UpdateEmbedding(ctx, near.ID, repeatFloat(0.1, 1536), ""))
 
 	far := &Memory{Type: "fact", Content: "Works at Acme", Confidence: 0.9, Scope: scope}
 	require.NoError(t, store.Save(ctx, far))
-	require.NoError(t, store.UpdateEmbedding(ctx, far.ID, repeatFloat(0.9, 1536)))
+	require.NoError(t, store.UpdateEmbedding(ctx, far.ID, repeatFloat(0.9, 1536), ""))
 
 	// Query embedding nearly identical to `near` → matches it strongly.
 	matches, err := store.FindSimilarObservations(ctx, scope, repeatFloat(0.1, 1536), 5, 0.5)
@@ -695,18 +695,18 @@ func TestPostgresMemoryStore_RetrieveHybrid_FusesLexicalAndSemantic(t *testing.T
 	// FTS-only match: lexical hit on "prefer", embedding orthogonal.
 	lexical := &Memory{Type: "preference", Content: "User prefers dark mode", Confidence: 0.9, Scope: scope}
 	require.NoError(t, store.Save(ctx, lexical))
-	require.NoError(t, store.UpdateEmbedding(ctx, lexical.ID, oneHotFloat(0, 1536)))
+	require.NoError(t, store.UpdateEmbedding(ctx, lexical.ID, oneHotFloat(0, 1536), ""))
 
 	// Cosine-only match: no lexical hit on "prefer", embedding
 	// equals query → cosine 1.0.
 	semantic := &Memory{Type: "preference", Content: "User loves blue", Confidence: 0.9, Scope: scope}
 	require.NoError(t, store.Save(ctx, semantic))
-	require.NoError(t, store.UpdateEmbedding(ctx, semantic.ID, queryEmb))
+	require.NoError(t, store.UpdateEmbedding(ctx, semantic.ID, queryEmb, ""))
 
 	// Neither lexical nor semantic match.
 	noise := &Memory{Type: "fact", Content: "Random unrelated note", Confidence: 0.7, Scope: scope}
 	require.NoError(t, store.Save(ctx, noise))
-	require.NoError(t, store.UpdateEmbedding(ctx, noise.ID, oneHotFloat(99, 1536)))
+	require.NoError(t, store.UpdateEmbedding(ctx, noise.ID, oneHotFloat(99, 1536), ""))
 
 	results, err := store.RetrieveHybrid(ctx, scope, "prefer", queryEmb, RetrieveOptions{Limit: 10})
 	require.NoError(t, err)
@@ -731,15 +731,15 @@ func TestPostgresMemoryStore_RetrieveHybrid_RanksByFinalScore(t *testing.T) {
 
 	mid := &Memory{Type: "preference", Content: "User prefers tea", Confidence: 0.6, Scope: scope}
 	require.NoError(t, store.Save(ctx, mid))
-	require.NoError(t, store.UpdateEmbedding(ctx, mid.ID, queryEmb))
+	require.NoError(t, store.UpdateEmbedding(ctx, mid.ID, queryEmb, ""))
 
 	top := &Memory{Type: "preference", Content: "User prefers espresso", Confidence: 0.99, Scope: scope}
 	require.NoError(t, store.Save(ctx, top))
-	require.NoError(t, store.UpdateEmbedding(ctx, top.ID, queryEmb))
+	require.NoError(t, store.UpdateEmbedding(ctx, top.ID, queryEmb, ""))
 
 	low := &Memory{Type: "preference", Content: "User prefers cocoa", Confidence: 0.3, Scope: scope}
 	require.NoError(t, store.Save(ctx, low))
-	require.NoError(t, store.UpdateEmbedding(ctx, low.ID, queryEmb))
+	require.NoError(t, store.UpdateEmbedding(ctx, low.ID, queryEmb, ""))
 
 	// Limit=1 must return the highest-scoring memory (top), not
 	// whichever entity ID sorts smallest.
@@ -770,11 +770,11 @@ func TestPostgresMemoryStore_RetrieveHybrid_AppliesConfidenceFilter(t *testing.T
 
 	low := &Memory{Type: "fact", Content: "User prefers tea", Confidence: 0.3, Scope: scope}
 	require.NoError(t, store.Save(ctx, low))
-	require.NoError(t, store.UpdateEmbedding(ctx, low.ID, queryEmb))
+	require.NoError(t, store.UpdateEmbedding(ctx, low.ID, queryEmb, ""))
 
 	high := &Memory{Type: "fact", Content: "User prefers coffee", Confidence: 0.95, Scope: scope}
 	require.NoError(t, store.Save(ctx, high))
-	require.NoError(t, store.UpdateEmbedding(ctx, high.ID, queryEmb))
+	require.NoError(t, store.UpdateEmbedding(ctx, high.ID, queryEmb, ""))
 
 	results, err := store.RetrieveHybrid(ctx, scope, "prefer", queryEmb,
 		RetrieveOptions{Limit: 10, MinConfidence: 0.8})
@@ -890,7 +890,7 @@ func TestPostgresMemoryStore_FindSimilarObservations_HonoursThreshold(t *testing
 
 	mem := &Memory{Type: "fact", Content: "Vegetarian", Confidence: 0.9, Scope: scope}
 	require.NoError(t, store.Save(ctx, mem))
-	require.NoError(t, store.UpdateEmbedding(ctx, mem.ID, oneHotFloat(0, 1536)))
+	require.NoError(t, store.UpdateEmbedding(ctx, mem.ID, oneHotFloat(0, 1536), ""))
 
 	// Query embedding orthogonal to the stored one (different one-hot
 	// position). Cosine similarity = 0 → threshold 0.5 rejects it.
@@ -1193,7 +1193,7 @@ func TestPostgresMemoryStore_UpdateEmbedding(t *testing.T) {
 		embedding[i] = float32(i) * 0.001
 	}
 
-	err := store.UpdateEmbedding(ctx, mem.ID, embedding)
+	err := store.UpdateEmbedding(ctx, mem.ID, embedding, "")
 	require.NoError(t, err)
 
 	// Verify via direct SQL that the embedding is non-null.
@@ -1214,7 +1214,7 @@ func TestPostgresMemoryStore_UpdateEmbedding_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	embedding := make([]float32, 1536)
-	err := store.UpdateEmbedding(ctx, "00000000-0000-0000-0000-000000000000", embedding)
+	err := store.UpdateEmbedding(ctx, "00000000-0000-0000-0000-000000000000", embedding, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no observation found")
 }

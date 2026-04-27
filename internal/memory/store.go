@@ -1431,17 +1431,27 @@ func scanHybridMemory(row pgx.Rows, scope map[string]string) (*Memory, error) {
 	return &mem, nil
 }
 
-// UpdateEmbedding sets the embedding vector on the latest observation for an entity.
-func (s *PostgresMemoryStore) UpdateEmbedding(ctx context.Context, entityID string, embedding []float32) error {
+// UpdateEmbedding sets the embedding vector and model name on the
+// latest observation for an entity. modelName is the identifier of
+// the embedding provider that produced the vector — written so the
+// re-embed worker can detect when a new model has been configured
+// and re-embed everything from the old generation. Empty modelName
+// is allowed (tests and back-compat callers without a known
+// provider) and clears the column.
+func (s *PostgresMemoryStore) UpdateEmbedding(ctx context.Context, entityID string, embedding []float32, modelName string) error {
+	var modelArg any
+	if modelName != "" {
+		modelArg = modelName
+	}
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE memory_observations
-		SET embedding = $1
+		SET embedding = $1, embedding_model = $2
 		WHERE id = (
 			SELECT id FROM memory_observations
-			WHERE entity_id = $2
+			WHERE entity_id = $3
 			ORDER BY observed_at DESC
 			LIMIT 1
-		)`, pgvector.NewVector(embedding), entityID)
+		)`, pgvector.NewVector(embedding), modelArg, entityID)
 	if err != nil {
 		return fmt.Errorf("memory: update embedding: %w", err)
 	}

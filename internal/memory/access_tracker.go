@@ -54,7 +54,9 @@ func (s *PostgresMemoryStore) touchAccessedOnRead(entityIDs []string) {
 		tag, err := s.pool.Exec(ctx, `
 			UPDATE memory_observations
 			SET accessed_at = now(), access_count = access_count + 1
-			WHERE entity_id = ANY($1::uuid[]) AND superseded_by IS NULL`,
+			WHERE entity_id = ANY($1::uuid[])
+			  AND superseded_by IS NULL
+			  AND (valid_until IS NULL OR valid_until > now())`,
 			ids,
 		)
 		dur := time.Since(start)

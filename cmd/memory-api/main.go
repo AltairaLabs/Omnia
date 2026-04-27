@@ -926,7 +926,7 @@ func createEmbeddingService(ctx context.Context, providerName string, store *mem
 	}
 
 	adapter := &embeddingProviderAdapter{inner: embeddingProvider}
-	svc := memory.NewEmbeddingService(store, adapter, log)
+	svc := memory.NewEmbeddingService(store, adapter, log).WithModelName(providerName)
 	log.Info("embedding service enabled",
 		"provider", providerName,
 		"type", provider.Spec.Type,

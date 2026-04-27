@@ -142,6 +142,23 @@ func (s *MemoryService) SetAuditLogger(l MemoryAuditLogger) {
 	s.auditLogger = l
 }
 
+// safeGo runs fn in a goroutine that recovers from panics. Used
+// for fire-and-forget side effects (audit log, event publish, async
+// embedding) where a panic in the side-effect path must not take
+// down memory-api. Logs the panic with the supplied label so the
+// caller is identifiable in the log stream.
+func (s *MemoryService) safeGo(label string, fn func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.log.Error(fmt.Errorf("panic: %v", r),
+					"async side effect panicked", "label", label)
+			}
+		}()
+		fn()
+	}()
+}
+
 // emitAuditEvent fires an audit log entry asynchronously. If no audit logger is
 // configured the call is a no-op. Request metadata (IP, User-Agent) is extracted
 // from the context when present.
@@ -157,7 +174,7 @@ func (s *MemoryService) emitAuditEvent(ctx context.Context, entry *MemoryAuditEn
 	// Detached background context is intentional: the audit-log write must
 	// complete even if the request context is cancelled (client disconnect,
 	// deadline exceeded). Losing an audit event is worse than wasting work.
-	go logger.LogEvent(context.Background(), entry)
+	s.safeGo("audit_log", func() { logger.LogEvent(context.Background(), entry) })
 }
 
 // SaveMemory persists a memory entry and, if an embedding service is
@@ -255,11 +272,11 @@ func (s *MemoryService) SaveMemoryWithResult(ctx context.Context, mem *memory.Me
 			Kind:        mem.Type,
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		}
-		go func() {
+		s.safeGo("event_publish", func() {
 			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
 				s.log.Error(err, "memory event publish failed", "eventType", event.EventType, "memoryID", event.MemoryID)
 			}
-		}()
+		})
 	}
 	s.embedAsync(mem, queryVector)
 	s.emitAuditEvent(ctx, &MemoryAuditEntry{
@@ -393,7 +410,7 @@ func (s *MemoryService) embedAsync(mem *memory.Memory, cachedVector []float32) {
 	if s.embeddingSvc == nil {
 		return
 	}
-	go func() {
+	s.safeGo("embed", func() {
 		embedCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if len(cachedVector) > 0 {
@@ -405,7 +422,7 @@ func (s *MemoryService) embedAsync(mem *memory.Memory, cachedVector []float32) {
 		if err := s.embeddingSvc.EmbedMemory(embedCtx, mem); err != nil {
 			s.log.Error(err, "async embedding failed", "memoryID", mem.ID)
 		}
-	}()
+	})
 }
 
 // embeddingDedupEnabled resolves whether the embedding-similarity
@@ -424,7 +441,9 @@ func (s *MemoryService) embeddingDedupEnabled(ctx context.Context) bool {
 // package-level DefaultAutoSupersedeSimilarity (0.95) when the
 // policy doesn't override.
 func (s *MemoryService) autoSupersedeThreshold(ctx context.Context) float64 {
-	if v := s.policyFloat(ctx, (*omniav1alpha1.MemoryPolicy).DedupAutoSupersedeAbove); v > 0 {
+	if v := s.policyFloat(ctx, "autoSupersedeAbove",
+		(*omniav1alpha1.MemoryPolicy).DedupAutoSupersedeAbove,
+		(*omniav1alpha1.MemoryPolicy).DedupAutoSupersedeAboveRaw); v > 0 {
 		return v
 	}
 	return memory.DefaultAutoSupersedeSimilarity
@@ -434,7 +453,9 @@ func (s *MemoryService) autoSupersedeThreshold(ctx context.Context) float64 {
 // the server surfaces a near-duplicate as a `potential_duplicates`
 // hint. Falls back to DefaultSurfaceDuplicateSimilarity (0.85).
 func (s *MemoryService) surfaceDuplicateThreshold(ctx context.Context) float64 {
-	if v := s.policyFloat(ctx, (*omniav1alpha1.MemoryPolicy).DedupSurfaceDuplicatesAbove); v > 0 {
+	if v := s.policyFloat(ctx, "surfaceDuplicatesAbove",
+		(*omniav1alpha1.MemoryPolicy).DedupSurfaceDuplicatesAbove,
+		(*omniav1alpha1.MemoryPolicy).DedupSurfaceDuplicatesAboveRaw); v > 0 {
 		return v
 	}
 	return memory.DefaultSurfaceDuplicateSimilarity
@@ -454,14 +475,28 @@ func (s *MemoryService) duplicateCandidateLimit(ctx context.Context) int {
 }
 
 // policyFloat is the shared accessor for the string-typed similarity
-// thresholds. It loads the policy once and applies the supplied
-// extractor.
-func (s *MemoryService) policyFloat(ctx context.Context, get func(*omniav1alpha1.MemoryPolicy) float64) float64 {
+// thresholds. It loads the policy once, calls the parsed-value
+// extractor, and warns when the raw extractor reports the field was
+// set on the CRD but parsed to 0 (operator misconfig vs. the silent
+// "use the default" path).
+func (s *MemoryService) policyFloat(ctx context.Context, fieldName string,
+	getParsed func(*omniav1alpha1.MemoryPolicy) float64,
+	getRaw func(*omniav1alpha1.MemoryPolicy) string,
+) float64 {
 	policy := s.loadPolicy(ctx)
 	if policy == nil {
 		return 0
 	}
-	return get(policy)
+	v := getParsed(policy)
+	if v == 0 {
+		if raw := getRaw(policy); raw != "" {
+			s.log.Info("memory policy float invalid; falling back to default",
+				"field", fieldName,
+				"value", raw,
+				"policy", policy.Name)
+		}
+	}
+	return v
 }
 
 // maxRelatedPerMemory resolves the per-memory cap on `related[]`
@@ -537,11 +572,11 @@ func (s *MemoryService) applyAutoSupersedeViaSimilarity(
 			Kind:        mem.Type,
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		}
-		go func() {
+		s.safeGo("event_publish", func() {
 			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
 				s.log.Error(err, "memory event publish failed", "eventType", event.EventType, "memoryID", event.MemoryID)
 			}
-		}()
+		})
 	}
 	s.embedAsync(mem, cachedVector)
 	s.emitAuditEvent(ctx, &MemoryAuditEntry{
@@ -604,21 +639,21 @@ func (s *MemoryService) UpdateMemory(ctx context.Context, entityID string, mem *
 			Kind:        mem.Type,
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		}
-		go func() {
+		s.safeGo("event_publish", func() {
 			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
 				s.log.Error(err, "memory event publish failed",
 					"eventType", event.EventType, "memoryID", event.MemoryID)
 			}
-		}()
+		})
 	}
 	if s.embeddingSvc != nil {
-		go func() {
+		s.safeGo("embed", func() {
 			embedCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if err := s.embeddingSvc.EmbedMemory(embedCtx, mem); err != nil {
 				s.log.Error(err, "async embedding failed", "memoryID", mem.ID)
 			}
-		}()
+		})
 	}
 	s.emitAuditEvent(ctx, &MemoryAuditEntry{
 		EventType:   eventTypeMemoryCreated,
@@ -682,21 +717,21 @@ func (s *MemoryService) SupersedeManyMemories(ctx context.Context, sourceMemoryI
 			Kind:        mem.Type,
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		}
-		go func() {
+		s.safeGo("event_publish", func() {
 			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
 				s.log.Error(err, "memory event publish failed",
 					"eventType", event.EventType, "memoryID", event.MemoryID)
 			}
-		}()
+		})
 	}
 	if s.embeddingSvc != nil {
-		go func() {
+		s.safeGo("embed", func() {
 			embedCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if err := s.embeddingSvc.EmbedMemory(embedCtx, mem); err != nil {
 				s.log.Error(err, "async embedding failed", "memoryID", mem.ID)
 			}
-		}()
+		})
 	}
 	s.emitAuditEvent(ctx, &MemoryAuditEntry{
 		EventType:   eventTypeMemoryCreated,
@@ -866,11 +901,11 @@ func (s *MemoryService) DeleteMemory(ctx context.Context, scope map[string]strin
 			UserID:      scope[memory.ScopeUserID],
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		}
-		go func() {
+		s.safeGo("event_publish", func() {
 			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
 				s.log.Error(err, "memory event publish failed", "eventType", event.EventType, "memoryID", event.MemoryID)
 			}
-		}()
+		})
 	}
 	s.emitAuditEvent(ctx, &MemoryAuditEntry{
 		EventType:   eventTypeMemoryDeleted,
@@ -909,11 +944,11 @@ func (s *MemoryService) BatchDeleteMemories(ctx context.Context, scope map[strin
 			UserID:      scope[memory.ScopeUserID],
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		}
-		go func() {
+		s.safeGo("event_publish_batch_delete", func() {
 			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
 				s.log.Error(err, "memory batch delete event publish failed", "eventType", event.EventType, "count", n)
 			}
-		}()
+		})
 	}
 	if n > 0 {
 		s.emitAuditEvent(ctx, &MemoryAuditEntry{

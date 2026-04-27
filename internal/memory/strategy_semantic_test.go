@@ -96,7 +96,7 @@ func TestSemanticStrategy_Retrieve(t *testing.T) {
 	require.NotEmpty(t, mem.ID)
 
 	// Set its embedding.
-	require.NoError(t, store.UpdateEmbedding(ctx, mem.ID, unitEmbedding()))
+	require.NoError(t, store.UpdateEmbedding(ctx, mem.ID, unitEmbedding(), ""))
 
 	// Provider returns a very similar embedding.
 	provider := &mockEmbeddingProvider{
@@ -172,7 +172,7 @@ func TestSemanticStrategy_DefaultLimit(t *testing.T) {
 		Scope:      scope,
 	}
 	require.NoError(t, store.Save(ctx, mem))
-	require.NoError(t, store.UpdateEmbedding(ctx, mem.ID, unitEmbedding()))
+	require.NoError(t, store.UpdateEmbedding(ctx, mem.ID, unitEmbedding(), ""))
 
 	provider := &mockEmbeddingProvider{
 		dimensions: embeddingDims,

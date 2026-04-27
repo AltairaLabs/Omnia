@@ -81,6 +81,48 @@ func TestReembedWorker_BackfillsNullEmbeddings(t *testing.T) {
 	assert.Len(t, provider.calls, 1, "second pass must not re-embed already-stamped rows")
 }
 
+// TestReembedWorker_HonoursEmbeddingServiceModel proves a row
+// embedded via EmbeddingService (which stamps model name) is NOT
+// re-embedded by the worker on its next pass — without the model
+// stamp the worker would re-embed every row the API just embedded
+// and burn provider quota forever.
+func TestReembedWorker_HonoursEmbeddingServiceModel(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	mem := &Memory{Type: "fact", Content: "alpha", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, mem))
+
+	provider := &fixedReembedProvider{vec: oneHotFloat(0, 1536)}
+	embSvc := NewEmbeddingService(store, embeddingProviderShim{provider}, logr.Discard()).
+		WithModelName("openai-text-embed-3")
+	require.NoError(t, embSvc.EmbedMemory(ctx, mem))
+
+	// Now run the re-embed worker with the same model name. It must
+	// see the row as already embedded and skip it.
+	worker := NewReembedWorker(store, provider, ReembedWorkerOptions{
+		BatchSize: 10, CurrentModel: "openai-text-embed-3",
+	}, logr.Discard())
+	priorCalls := len(provider.calls)
+	require.NoError(t, worker.RunOnce(ctx))
+	assert.Equal(t, priorCalls, len(provider.calls),
+		"worker must not re-embed a row already stamped with the current model")
+}
+
+// embeddingProviderShim adapts the local fixedReembedProvider (which
+// satisfies ReembedProvider) to the wider EmbeddingProvider
+// interface EmbeddingService consumes. Test-only.
+type embeddingProviderShim struct {
+	inner *fixedReembedProvider
+}
+
+func (s embeddingProviderShim) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	return s.inner.Embed(ctx, texts)
+}
+
+func (s embeddingProviderShim) Dimensions() int { return 1536 }
+
 // TestReembedWorker_RestampsOnModelChange proves rows previously
 // embedded with a different model get re-embedded when the worker
 // runs with a new CurrentModel. This is the model-swap migration

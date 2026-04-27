@@ -377,6 +377,15 @@ type MemoryDedupConfig struct {
 
 // MemoryEmbeddingDedupConfig configures the cosine-similarity dedup
 // thresholds and surface limits.
+//
+// surfaceDuplicatesAbove must be < autoSupersedeAbove. Without this
+// the surface threshold is permanently shadowed by auto-supersede:
+// every match that would surface as a `potential_duplicates` hint
+// is already above the auto-supersede floor and never reaches the
+// agent. The CEL guard fires at admission time so operators see the
+// misconfig immediately rather than wondering why no candidates
+// ever surface.
+// +kubebuilder:validation:XValidation:rule="!has(self.autoSupersedeAbove) || !has(self.surfaceDuplicatesAbove) || double(self.surfaceDuplicatesAbove) < double(self.autoSupersedeAbove)",message="surfaceDuplicatesAbove must be strictly less than autoSupersedeAbove"
 type MemoryEmbeddingDedupConfig struct {
 	// +kubebuilder:default=true
 	// +optional
@@ -481,10 +490,10 @@ type MemoryPolicyStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="Inst Mode",type=string,JSONPath=`.spec.default.tiers.institutional.mode`
-// +kubebuilder:printcolumn:name="Agent Mode",type=string,JSONPath=`.spec.default.tiers.agent.mode`
-// +kubebuilder:printcolumn:name="User Mode",type=string,JSONPath=`.spec.default.tiers.user.mode`
-// +kubebuilder:printcolumn:name="Schedule",type=string,JSONPath=`.spec.default.schedule`
+// +kubebuilder:printcolumn:name="Inst Mode",type=string,JSONPath=`.spec.tiers.institutional.mode`
+// +kubebuilder:printcolumn:name="Agent Mode",type=string,JSONPath=`.spec.tiers.agent.mode`
+// +kubebuilder:printcolumn:name="User Mode",type=string,JSONPath=`.spec.tiers.user.mode`
+// +kubebuilder:printcolumn:name="Schedule",type=string,JSONPath=`.spec.schedule`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // MemoryPolicy is the schema for the memorypolicies
