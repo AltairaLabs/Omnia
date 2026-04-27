@@ -17,14 +17,17 @@ spec:
   environment: development
   namespace:
     name: dev-agents
-  # Anonymous workspace access is OFF by default. Granting anonymous users
-  # editor/owner privileges bypasses the dashboard's auth enforcement for
-  # workspace-scoped operations, so it has to be explicitly opted into.
-  #
-  # Local dev override: `ALLOW_WORKSPACE_ANONYMOUS=true tilt up` makes the
-  # Tiltfile patch this field on after samples are applied.
+  # Anonymous owner access is the default here because this file is the
+  # local-dev sample set — `tilt up` deploys it into a kind/orbstack
+  # cluster with no OAuth wired up, and without anonymous owner access
+  # the dashboard renders an empty shell with no workspace visible.
+  # This file ships only to dev clusters; production Workspaces leave
+  # anonymousAccess off (or unset) and rely on real auth.
+  # Override locally with: kubectl patch workspace dev-agents \
+  #   --type=merge -p '{"spec":{"anonymousAccess":{"enabled":false}}}'
   anonymousAccess:
-    enabled: false
+    enabled: true
+    role: owner
   # Per-workspace session-api and memory-api instances.
   # The operator creates Deployments/Services named session-dev-agents-default
   # and memory-dev-agents-default in the dev-agents namespace.
@@ -94,6 +97,20 @@ type: Opaque
 stringData:
   OPENAI_API_KEY: "sk-demo-key-replace-with-real-key"
 ---
+# Gemini credentials (used by gemini-provider)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gemini-credentials
+  namespace: dev-agents
+  labels:
+    omnia.altairalabs.ai/type: credentials
+  annotations:
+    omnia.altairalabs.ai/provider: gemini
+type: Opaque
+stringData:
+  GEMINI_API_KEY: "ya29-demo-key-replace-with-real-key"
+---
 # =============================================================================
 # Provider CRDs
 # Reusable LLM provider configurations that reference credential secrets
@@ -134,6 +151,24 @@ spec:
   pricing:
     inputCostPer1K: "0.005"
     outputCostPer1K: "0.015"
+---
+# Gemini provider using Google AI Studio credentials
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: gemini-provider
+  namespace: dev-agents
+spec:
+  type: gemini
+  model: gemini-2.0-flash
+  secretRef:
+    name: gemini-credentials
+  defaults:
+    temperature: "0.7"
+    maxTokens: 4096
+  pricing:
+    inputCostPer1K: "0.0001"
+    outputCostPer1K: "0.0004"
 ---
 # Ollama provider for local LLM with tool calling
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -568,6 +603,46 @@ spec:
     extraEnv:
       - name: LOG_LEVEL
         value: debug
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: 1
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "200m"
+        memory: "128Mi"
+---
+# Gemini agent — uses Google AI Studio's Gemini 2.0 Flash
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: gemini-agent
+  namespace: dev-agents
+spec:
+  promptPackRef:
+    name: demo-prompts
+  toolRegistryRef:
+    name: demo-tools
+  providers:
+    - name: default
+      providerRef:
+        name: gemini-provider
+  facade:
+    type: websocket
+    port: 8080
+    handler: demo
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
+  memory:
+    enabled: true
   session:
     type: memory
     ttl: "1h"

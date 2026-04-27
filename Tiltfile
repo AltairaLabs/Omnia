@@ -75,14 +75,6 @@ ENABLE_ENTERPRISE = os.getenv('ENABLE_ENTERPRISE', '').lower() in ('true', '1', 
 # Can be set via environment: ENABLE_ENTRA=true tilt up
 ENABLE_ENTRA = os.getenv('ENABLE_ENTRA', '').lower() in ('true', '1', 'yes') or False
 
-# Grants anonymous users OWNER-level access to the dev-agents workspace.
-# Defaults to True for local Tilt because without it, an unauthenticated
-# dashboard user sees an empty shell with no workspace visible — fine for
-# anonymous-auth testing but the wrong default for the day-to-day "tilt up
-# and click around" loop. Opt out with ALLOW_WORKSPACE_ANONYMOUS=false
-# when you want to exercise the real auth path locally.
-ALLOW_WORKSPACE_ANONYMOUS = os.getenv('ALLOW_WORKSPACE_ANONYMOUS', 'true').lower() in ('true', '1', 'yes')
-
 # Enable internal NFS server for workspace content storage
 # Provides ReadWriteMany (RWX) storage for Arena and workspace content
 # Auto-enabled when ENABLE_ENTERPRISE is true, can be explicitly controlled via ENABLE_NFS
@@ -1198,22 +1190,12 @@ if ENABLE_AUDIO_DEMO:
 # Apply sample resources using local_resource for better control.
 # Note: When ENABLE_DEMO is true, Ollama resources come from Helm chart, not samples.
 #
-# Anonymous workspace access is OFF by default (the sample YAML has
-# anonymousAccess.enabled=false). Opt in with ALLOW_WORKSPACE_ANONYMOUS=true
-# to grant anonymous users owner-level access — useful when poking around
-# locally without authentication, but dangerous everywhere else.
-if ALLOW_WORKSPACE_ANONYMOUS:
-    print("⚠️  ALLOW_WORKSPACE_ANONYMOUS=true — dev-agents workspace will grant OWNER access to anonymous users. Only appropriate for isolated local dev.")
-    _sample_cmd = '''
-        kubectl apply -f config/samples/dev/
-        kubectl patch workspace dev-agents --type=merge -p '{"spec":{"anonymousAccess":{"enabled":true,"role":"owner"}}}'
-    '''
-else:
-    _sample_cmd = 'kubectl apply -f config/samples/dev/'
-
+# The dev-agents Workspace ships with anonymousAccess.enabled=true,role=owner
+# directly in samples.yaml — required for local "tilt up and click around"
+# without OAuth. Production Workspaces don't use these samples.
 local_resource(
     'sample-resources',
-    cmd=_sample_cmd,
+    cmd='kubectl apply -f config/samples/dev/',
     deps=['config/samples/dev'],
     labels=['samples'],
     resource_deps=['omnia-controller-manager'],
