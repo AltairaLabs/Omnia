@@ -32,6 +32,20 @@ vi.mock("@/contexts/workspace-context", () => ({
   }),
 }));
 
+vi.mock("@/hooks/use-agents", () => ({
+  useAgents: () => ({
+    data: [
+      {
+        apiVersion: "omnia.altairalabs.ai/v1alpha1",
+        kind: "AgentRuntime",
+        metadata: { name: "support-agent", uid: "uid-support" },
+        spec: {},
+      },
+    ],
+    isLoading: false,
+  }),
+}));
+
 function wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -73,7 +87,7 @@ beforeEach(() => {
     if (url.includes("groupBy=agent")) {
       return {
         ok: true,
-        json: async () => [{ key: "support-agent", value: 50, count: 50 }],
+        json: async () => [{ key: "uid-support", value: 50, count: 50 }],
       };
     }
     if (url.includes("/privacy/consent/stats")) {
@@ -108,4 +122,5 @@ describe("MemoryAnalyticsPage", () => {
     expect(screen.getByText(/Privacy posture/i)).toBeInTheDocument();
     expect(screen.getByText(/How memory is organized/i)).toBeInTheDocument();
   });
+
 });

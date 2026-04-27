@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type {
   ArenaTemplateSource,
@@ -11,6 +12,17 @@ import type {
 } from "@/types/arena-template";
 
 const NO_WORKSPACE_ERROR = "No workspace selected";
+
+function templateSourcesKey(workspace: string | undefined) {
+  return ["template-sources", workspace] as const;
+}
+
+function allTemplatesKey(
+  workspace: string | undefined,
+  readySourceNames: string[],
+) {
+  return ["all-templates", workspace, ...readySourceNames] as const;
+}
 
 // =============================================================================
 // Template Sources List Hook
@@ -23,52 +35,36 @@ interface UseTemplateSourcesResult {
   refetch: () => void;
 }
 
+async function fetchTemplateSources(
+  workspace: string,
+): Promise<ArenaTemplateSource[]> {
+  const response = await fetch(
+    `/api/workspaces/${workspace}/arena/template-sources`,
+  );
+  if (!response.ok) {
+    throw new Error(`Failed to fetch template sources: ${response.statusText}`);
+  }
+  return response.json();
+}
+
 /**
  * Hook to fetch template sources for the current workspace.
  */
 export function useTemplateSources(): UseTemplateSourcesResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
-  const [sources, setSources] = useState<ArenaTemplateSource[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
 
-  const fetchData = useCallback(async () => {
-    if (!workspace) {
-      setSources([]);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await fetch(
-        `/api/workspaces/${workspace}/arena/template-sources`
-      );
-      if (!response.ok) {
-        throw new Error(`Failed to fetch template sources: ${response.statusText}`);
-      }
-      const data = await response.json();
-      setSources(data);
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)));
-      setSources([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [workspace]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  const query = useQuery({
+    queryKey: templateSourcesKey(workspace),
+    queryFn: () => fetchTemplateSources(workspace!),
+    enabled: !!workspace,
+  });
 
   return {
-    sources,
-    loading,
-    error,
-    refetch: fetchData,
+    sources: query.data ?? [],
+    loading: query.isLoading,
+    error: (query.error as Error | null) ?? null,
+    refetch: async () => { await query.refetch(); },
   };
 }
 
@@ -79,11 +75,11 @@ export function useTemplateSources(): UseTemplateSourcesResult {
 interface UseTemplateSourceMutationsResult {
   createSource: (
     name: string,
-    spec: ArenaTemplateSource["spec"]
+    spec: ArenaTemplateSource["spec"],
   ) => Promise<ArenaTemplateSource>;
   updateSource: (
     name: string,
-    spec: ArenaTemplateSource["spec"]
+    spec: ArenaTemplateSource["spec"],
   ) => Promise<ArenaTemplateSource>;
   deleteSource: (name: string) => Promise<void>;
   syncSource: (name: string) => Promise<void>;
@@ -97,154 +93,109 @@ interface UseTemplateSourceMutationsResult {
 export function useTemplateSourceMutations(): UseTemplateSourceMutationsResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
+  const queryClient = useQueryClient();
 
-  const createSource = useCallback(
-    async (
-      name: string,
-      spec: ArenaTemplateSource["spec"]
+  const invalidateSources = () =>
+    queryClient.invalidateQueries({ queryKey: templateSourcesKey(workspace) });
+
+  const createMutation = useMutation({
+    mutationFn: async (
+      args: { name: string; spec: ArenaTemplateSource["spec"] },
     ): Promise<ArenaTemplateSource> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
+      if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
+      const response = await fetch(
+        `/api/workspaces/${workspace}/arena/template-sources`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ metadata: { name: args.name }, spec: args.spec }),
+        },
+      );
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to create template source");
       }
-
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/template-sources`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ metadata: { name }, spec }),
-          }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to create template source");
-        }
-
-        return response.json();
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
+      return response.json();
     },
-    [workspace]
-  );
+    onSuccess: () => {
+      invalidateSources();
+    },
+  });
 
-  const updateSource = useCallback(
-    async (
-      name: string,
-      spec: ArenaTemplateSource["spec"]
+  const updateMutation = useMutation({
+    mutationFn: async (
+      args: { name: string; spec: ArenaTemplateSource["spec"] },
     ): Promise<ArenaTemplateSource> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
+      if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
+      const response = await fetch(
+        `/api/workspaces/${workspace}/arena/template-sources/${args.name}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ spec: args.spec }),
+        },
+      );
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to update template source");
       }
+      return response.json();
+    },
+    onSuccess: () => {
+      invalidateSources();
+    },
+  });
 
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/template-sources/${name}`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ spec }),
-          }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to update template source");
-        }
-
-        return response.json();
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
+  const deleteMutation = useMutation({
+    mutationFn: async (name: string): Promise<void> => {
+      if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
+      const response = await fetch(
+        `/api/workspaces/${workspace}/arena/template-sources/${name}`,
+        { method: "DELETE" },
+      );
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to delete template source");
       }
     },
-    [workspace]
-  );
+    onSuccess: () => {
+      invalidateSources();
+    },
+  });
 
-  const deleteSource = useCallback(
-    async (name: string): Promise<void> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/template-sources/${name}`,
-          { method: "DELETE" }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to delete template source");
-        }
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
+  const syncMutation = useMutation({
+    mutationFn: async (name: string): Promise<void> => {
+      if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
+      const response = await fetch(
+        `/api/workspaces/${workspace}/arena/template-sources/${name}/sync`,
+        { method: "POST" },
+      );
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to sync template source");
       }
     },
-    [workspace]
-  );
-
-  const syncSource = useCallback(
-    async (name: string): Promise<void> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/template-sources/${name}/sync`,
-          { method: "POST" }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to sync template source");
-        }
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
+    onSuccess: () => {
+      invalidateSources();
     },
-    [workspace]
-  );
+  });
 
   return {
-    createSource,
-    updateSource,
-    deleteSource,
-    syncSource,
-    loading,
-    error,
+    createSource: (name, spec) => createMutation.mutateAsync({ name, spec }),
+    updateSource: (name, spec) => updateMutation.mutateAsync({ name, spec }),
+    deleteSource: (name) => deleteMutation.mutateAsync(name),
+    syncSource: (name) => syncMutation.mutateAsync(name),
+    loading:
+      createMutation.isPending ||
+      updateMutation.isPending ||
+      deleteMutation.isPending ||
+      syncMutation.isPending,
+    error:
+      (createMutation.error as Error | null) ??
+      (updateMutation.error as Error | null) ??
+      (deleteMutation.error as Error | null) ??
+      (syncMutation.error as Error | null) ??
+      null,
   };
 }
 
@@ -259,6 +210,41 @@ interface UseAllTemplatesResult {
   refetch: () => void;
 }
 
+async function fetchTemplatesFromSource(
+  workspace: string,
+  sourceName: string,
+): Promise<{ sourceName: string; templates: TemplateMetadata[] }> {
+  const response = await fetch(
+    `/api/workspaces/${workspace}/arena/template-sources/${sourceName}/templates`,
+  );
+  if (!response.ok) {
+    console.warn(
+      `Failed to fetch templates from ${sourceName}: ${response.statusText}`,
+    );
+    return { sourceName, templates: [] };
+  }
+  const data = await response.json();
+  return { sourceName, templates: data.templates || [] };
+}
+
+async function fetchAllTemplates(
+  workspace: string,
+  readySourceNames: string[],
+): Promise<Array<TemplateMetadata & { sourceName: string }>> {
+  const results = await Promise.allSettled(
+    readySourceNames.map((name) => fetchTemplatesFromSource(workspace, name)),
+  );
+  const out: Array<TemplateMetadata & { sourceName: string }> = [];
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      for (const template of result.value.templates) {
+        out.push({ ...template, sourceName: result.value.sourceName });
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Hook to fetch all templates from all sources.
  * Templates are fetched from the API endpoint for each ready source.
@@ -266,82 +252,27 @@ interface UseAllTemplatesResult {
 export function useAllTemplates(): UseAllTemplatesResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
-  const { sources, loading: sourcesLoading, error: sourcesError, refetch: refetchSources } =
-    useTemplateSources();
-  const [templates, setTemplates] = useState<Array<TemplateMetadata & { sourceName: string }>>([]);
-  const [templatesLoading, setTemplatesLoading] = useState(false);
-  const [templatesError, setTemplatesError] = useState<Error | null>(null);
+  const {
+    sources,
+    loading: sourcesLoading,
+    error: sourcesError,
+  } = useTemplateSources();
 
-  // Fetch templates from API for each ready source
-  const fetchTemplates = useCallback(async () => {
-    if (!workspace || sources.length === 0) {
-      setTemplates([]);
-      return;
-    }
+  const readySourceNames = sources
+    .filter((s) => s.status?.phase === "Ready")
+    .map((s) => s.metadata.name);
 
-    const readySources = sources.filter(s => s.status?.phase === "Ready");
-    if (readySources.length === 0) {
-      setTemplates([]);
-      return;
-    }
-
-    setTemplatesLoading(true);
-    setTemplatesError(null);
-
-    try {
-      const allTemplates: Array<TemplateMetadata & { sourceName: string }> = [];
-
-      // Fetch templates from each ready source in parallel
-      const results = await Promise.allSettled(
-        readySources.map(async (source) => {
-          const response = await fetch(
-            `/api/workspaces/${workspace}/arena/template-sources/${source.metadata.name}/templates`
-          );
-          if (!response.ok) {
-            console.warn(`Failed to fetch templates from ${source.metadata.name}: ${response.statusText}`);
-            return { sourceName: source.metadata.name, templates: [] };
-          }
-          const data = await response.json();
-          return { sourceName: source.metadata.name, templates: data.templates || [] };
-        })
-      );
-
-      for (const result of results) {
-        if (result.status === "fulfilled") {
-          for (const template of result.value.templates) {
-            allTemplates.push({
-              ...template,
-              sourceName: result.value.sourceName,
-            });
-          }
-        }
-      }
-
-      setTemplates(allTemplates);
-    } catch (err) {
-      setTemplatesError(err instanceof Error ? err : new Error(String(err)));
-      setTemplates([]);
-    } finally {
-      setTemplatesLoading(false);
-    }
-  }, [workspace, sources]);
-
-  // Fetch templates when sources change
-  useEffect(() => {
-    if (!sourcesLoading) {
-      fetchTemplates();
-    }
-  }, [sourcesLoading, fetchTemplates]);
-
-  const refetch = useCallback(() => {
-    refetchSources();
-  }, [refetchSources]);
+  const query = useQuery({
+    queryKey: allTemplatesKey(workspace, readySourceNames),
+    queryFn: () => fetchAllTemplates(workspace!, readySourceNames),
+    enabled: !!workspace && !sourcesLoading,
+  });
 
   return {
-    templates,
-    loading: sourcesLoading || templatesLoading,
-    error: sourcesError || templatesError,
-    refetch,
+    templates: query.data ?? [],
+    loading: sourcesLoading || (query.isLoading && !!workspace),
+    error: sourcesError || ((query.error as Error | null) ?? null),
+    refetch: async () => { await query.refetch(); },
   };
 }
 
@@ -353,12 +284,12 @@ interface UseTemplateRenderingResult {
   preview: (
     sourceName: string,
     templateName: string,
-    input: Omit<TemplateRenderInput, "projectName">
+    input: Omit<TemplateRenderInput, "projectName">,
   ) => Promise<TemplatePreviewResponse>;
   render: (
     sourceName: string,
     templateName: string,
-    input: TemplateRenderInput
+    input: TemplateRenderInput,
   ) => Promise<TemplateRenderOutput>;
   loading: boolean;
   error: Error | null;
@@ -366,6 +297,9 @@ interface UseTemplateRenderingResult {
 
 /**
  * Hook to handle template preview and rendering.
+ *
+ * Both operations are user-triggered (called from event handlers), so they
+ * stay imperative and share a single loading/error state.
  */
 export function useTemplateRendering(): UseTemplateRenderingResult {
   const { currentWorkspace } = useWorkspace();
@@ -373,84 +307,68 @@ export function useTemplateRendering(): UseTemplateRenderingResult {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
+  const wrap = useCallback(async function <T>(fn: () => Promise<T>): Promise<T> {
+    setLoading(true);
+    setError(null);
+    try {
+      return await fn();
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      setError(e);
+      throw e;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   const preview = useCallback(
-    async (
+    (
       sourceName: string,
       templateName: string,
-      input: Omit<TemplateRenderInput, "projectName">
-    ): Promise<TemplatePreviewResponse> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
+      input: Omit<TemplateRenderInput, "projectName">,
+    ): Promise<TemplatePreviewResponse> =>
+      wrap(async () => {
+        if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
         const response = await fetch(
           `/api/workspaces/${workspace}/arena/template-sources/${sourceName}/templates/${templateName}/preview`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(input),
-          }
+          },
         );
-
         if (!response.ok) {
           const errorText = await response.text();
           throw new Error(errorText || "Failed to preview template");
         }
-
         return response.json();
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [workspace]
+      }),
+    [workspace, wrap],
   );
 
   const render = useCallback(
-    async (
+    (
       sourceName: string,
       templateName: string,
-      input: TemplateRenderInput
-    ): Promise<TemplateRenderOutput> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
+      input: TemplateRenderInput,
+    ): Promise<TemplateRenderOutput> =>
+      wrap(async () => {
+        if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
         const response = await fetch(
           `/api/workspaces/${workspace}/arena/template-sources/${sourceName}/templates/${templateName}/render`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(input),
-          }
+          },
         );
-
         if (!response.ok) {
           const errorText = await response.text();
           throw new Error(errorText || "Failed to render template");
         }
-
         return response.json();
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [workspace]
+      }),
+    [workspace, wrap],
   );
 
   return {

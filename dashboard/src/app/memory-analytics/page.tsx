@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Header } from "@/components/layout";
 import { useMemoryAggregate } from "@/hooks/use-memory-aggregate";
 import { useConsentStats } from "@/hooks/use-consent-stats";
+import { useAgents } from "@/hooks/use-agents";
 import { TierLegend } from "@/components/memory-analytics/tier-legend";
 import { TierTriCard } from "@/components/memory-analytics/tier-tri-card";
 import { SummaryCards } from "@/components/memory-analytics/summary-cards";
@@ -15,6 +16,10 @@ import {
 import { AgentChart } from "@/components/memory-analytics/agent-chart";
 import { PrivacyPosture } from "@/components/memory-analytics/privacy-posture";
 import { isTier } from "@/lib/memory-analytics/types";
+import {
+  agentNameByUidMap,
+  resolveAgentRows,
+} from "@/lib/memory-analytics/agent-names";
 
 const DEFAULT_RANGE_DAYS: RangeDays = 30;
 
@@ -70,6 +75,17 @@ export default function MemoryAnalyticsPage() {
     metric: "distinct_users",
   });
   const consentQuery = useConsentStats();
+  const agentsQuery = useAgents();
+
+  const agentNameByUid = useMemo(
+    () => agentNameByUidMap(agentsQuery.data ?? []),
+    [agentsQuery.data],
+  );
+
+  const agentRows = useMemo(
+    () => resolveAgentRows(agentQuery.data ?? [], agentNameByUid),
+    [agentQuery.data, agentNameByUid],
+  );
 
   const totalMemories = (categoryQuery.data ?? []).reduce(
     (acc, r) => acc + r.value,
@@ -121,7 +137,7 @@ export default function MemoryAnalyticsPage() {
           />
         </div>
 
-        <AgentChart rows={agentQuery.data ?? []} />
+        <AgentChart rows={agentRows} />
 
         <PrivacyPosture stats={consentQuery.data ?? EMPTY_CONSENT} />
       </main>

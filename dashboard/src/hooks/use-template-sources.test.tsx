@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import type { ArenaTemplateSource, TemplateMetadata } from "@/types/arena-template";
+import { createQueryWrapper } from "@/test/query-wrapper";
 
 // Mock dependencies
 vi.mock("@/contexts/workspace-context", () => ({
@@ -21,6 +22,9 @@ import {
 // Mock fetch
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
+
+const renderH = <T,>(cb: () => T) =>
+  renderHook(cb, { wrapper: createQueryWrapper() });
 
 // Test data factories
 function createMockSource(overrides: Partial<ArenaTemplateSource> = {}): ArenaTemplateSource {
@@ -89,7 +93,7 @@ describe("use-template-sources hooks", () => {
         refetch: vi.fn(),
       });
 
-      const { result } = renderHook(() => useTemplateSources());
+      const { result } = renderH(() => useTemplateSources());
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
@@ -106,7 +110,7 @@ describe("use-template-sources hooks", () => {
         json: () => Promise.resolve(sources),
       });
 
-      const { result } = renderHook(() => useTemplateSources());
+      const { result } = renderH(() => useTemplateSources());
 
       expect(result.current.loading).toBe(true);
 
@@ -127,7 +131,7 @@ describe("use-template-sources hooks", () => {
         statusText: "Internal Server Error",
       });
 
-      const { result } = renderHook(() => useTemplateSources());
+      const { result } = renderH(() => useTemplateSources());
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
@@ -140,7 +144,7 @@ describe("use-template-sources hooks", () => {
     it("handles network error", async () => {
       mockFetch.mockRejectedValueOnce(new Error("Network error"));
 
-      const { result } = renderHook(() => useTemplateSources());
+      const { result } = renderH(() => useTemplateSources());
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
@@ -157,7 +161,7 @@ describe("use-template-sources hooks", () => {
         json: () => Promise.resolve(sources),
       });
 
-      const { result } = renderHook(() => useTemplateSources());
+      const { result } = renderH(() => useTemplateSources());
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
@@ -186,7 +190,7 @@ describe("use-template-sources hooks", () => {
         json: () => Promise.resolve(newSource),
       });
 
-      const { result } = renderHook(() => useTemplateSourceMutations());
+      const { result } = renderH(() => useTemplateSourceMutations());
 
       const created = await result.current.createSource("new-source", {
         type: "git",
@@ -210,7 +214,7 @@ describe("use-template-sources hooks", () => {
         json: () => Promise.resolve(updatedSource),
       });
 
-      const { result } = renderHook(() => useTemplateSourceMutations());
+      const { result } = renderH(() => useTemplateSourceMutations());
 
       const updated = await result.current.updateSource("test-source", {
         type: "git",
@@ -232,7 +236,7 @@ describe("use-template-sources hooks", () => {
         json: () => Promise.resolve({ success: true }),
       });
 
-      const { result } = renderHook(() => useTemplateSourceMutations());
+      const { result } = renderH(() => useTemplateSourceMutations());
 
       await result.current.deleteSource("test-source");
 
@@ -253,7 +257,7 @@ describe("use-template-sources hooks", () => {
         json: () => Promise.resolve({ error: "Invalid spec" }),
       });
 
-      const { result } = renderHook(() => useTemplateSourceMutations());
+      const { result } = renderH(() => useTemplateSourceMutations());
 
       await expect(
         result.current.createSource("test-source", { type: "git" })
@@ -270,7 +274,7 @@ describe("use-template-sources hooks", () => {
         refetch: vi.fn(),
       });
 
-      const { result } = renderHook(() => useTemplateSourceMutations());
+      const { result } = renderH(() => useTemplateSourceMutations());
 
       await expect(
         result.current.createSource("test-source", { type: "git" })
@@ -283,7 +287,7 @@ describe("use-template-sources hooks", () => {
         json: () => Promise.resolve({ success: true }),
       });
 
-      const { result } = renderHook(() => useTemplateSourceMutations());
+      const { result } = renderH(() => useTemplateSourceMutations());
 
       await result.current.syncSource("test-source");
 
@@ -303,7 +307,7 @@ describe("use-template-sources hooks", () => {
         text: () => Promise.resolve("Sync failed"),
       });
 
-      const { result } = renderHook(() => useTemplateSourceMutations());
+      const { result } = renderH(() => useTemplateSourceMutations());
 
       await expect(result.current.syncSource("test-source")).rejects.toThrow("Sync failed");
     });
@@ -316,7 +320,7 @@ describe("use-template-sources hooks", () => {
         text: () => Promise.resolve("Update failed"),
       });
 
-      const { result } = renderHook(() => useTemplateSourceMutations());
+      const { result } = renderH(() => useTemplateSourceMutations());
 
       await expect(
         result.current.updateSource("test-source", { type: "git" })
@@ -331,7 +335,7 @@ describe("use-template-sources hooks", () => {
         text: () => Promise.resolve("Delete failed"),
       });
 
-      const { result } = renderHook(() => useTemplateSourceMutations());
+      const { result } = renderH(() => useTemplateSourceMutations());
 
       await expect(result.current.deleteSource("test-source")).rejects.toThrow("Delete failed");
     });
@@ -346,7 +350,7 @@ describe("use-template-sources hooks", () => {
         refetch: vi.fn(),
       });
 
-      const { result } = renderHook(() => useTemplateSourceMutations());
+      const { result } = renderH(() => useTemplateSourceMutations());
 
       await expect(
         result.current.updateSource("test-source", { type: "git" })
@@ -363,7 +367,7 @@ describe("use-template-sources hooks", () => {
         refetch: vi.fn(),
       });
 
-      const { result } = renderHook(() => useTemplateSourceMutations());
+      const { result } = renderH(() => useTemplateSourceMutations());
 
       await expect(result.current.deleteSource("test-source")).rejects.toThrow("No workspace selected");
     });
@@ -378,7 +382,7 @@ describe("use-template-sources hooks", () => {
         refetch: vi.fn(),
       });
 
-      const { result } = renderHook(() => useTemplateSourceMutations());
+      const { result } = renderH(() => useTemplateSourceMutations());
 
       await expect(result.current.syncSource("test-source")).rejects.toThrow("No workspace selected");
     });
@@ -416,7 +420,7 @@ describe("use-template-sources hooks", () => {
         json: () => Promise.resolve({ templates: [createMockTemplate({ name: "t2" })] }),
       });
 
-      const { result } = renderHook(() => useAllTemplates());
+      const { result } = renderH(() => useAllTemplates());
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
@@ -452,7 +456,7 @@ describe("use-template-sources hooks", () => {
         json: () => Promise.resolve({ templates: [createMockTemplate({ name: "t1" })] }),
       });
 
-      const { result } = renderHook(() => useAllTemplates());
+      const { result } = renderH(() => useAllTemplates());
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
@@ -476,7 +480,7 @@ describe("use-template-sources hooks", () => {
         json: () => Promise.resolve(previewResult),
       });
 
-      const { result } = renderHook(() => useTemplateRendering());
+      const { result } = renderH(() => useTemplateRendering());
 
       const preview = await result.current.preview("source-1", "template-1", {
         variables: { name: "test" },
@@ -501,7 +505,7 @@ describe("use-template-sources hooks", () => {
         json: () => Promise.resolve(renderResult),
       });
 
-      const { result } = renderHook(() => useTemplateRendering());
+      const { result } = renderH(() => useTemplateRendering());
 
       const rendered = await result.current.render("source-1", "template-1", {
         variables: { name: "test" },
@@ -526,7 +530,7 @@ describe("use-template-sources hooks", () => {
         json: () => Promise.resolve({ error: "Invalid variables" }),
       });
 
-      const { result } = renderHook(() => useTemplateRendering());
+      const { result } = renderH(() => useTemplateRendering());
 
       await expect(
         result.current.preview("source-1", "template-1", { variables: {} })
@@ -543,7 +547,7 @@ describe("use-template-sources hooks", () => {
         refetch: vi.fn(),
       });
 
-      const { result } = renderHook(() => useTemplateRendering());
+      const { result } = renderH(() => useTemplateRendering());
 
       await expect(
         result.current.preview("source-1", "template-1", { variables: {} })
@@ -558,7 +562,7 @@ describe("use-template-sources hooks", () => {
         text: () => Promise.resolve("Render failed"),
       });
 
-      const { result } = renderHook(() => useTemplateRendering());
+      const { result } = renderH(() => useTemplateRendering());
 
       await expect(
         result.current.render("source-1", "template-1", {
@@ -578,7 +582,7 @@ describe("use-template-sources hooks", () => {
         refetch: vi.fn(),
       });
 
-      const { result } = renderHook(() => useTemplateRendering());
+      const { result } = renderH(() => useTemplateRendering());
 
       await expect(
         result.current.render("source-1", "template-1", {

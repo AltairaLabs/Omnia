@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
+import { createQueryWrapper } from "@/test/query-wrapper";
 
 // Mock workspace context
 vi.mock("@/contexts/workspace-context", () => ({
@@ -15,6 +16,9 @@ import {
   useProjectDeployment,
 } from "./use-project-deployment";
 
+const renderH = <T,>(cb: () => T) =>
+  renderHook(cb, { wrapper: createQueryWrapper() });
+
 describe("use-project-deployment", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -27,7 +31,7 @@ describe("use-project-deployment", () => {
 
   describe("useProjectDeploymentStatus", () => {
     it("should set loading false when projectId is undefined", async () => {
-      const { result } = renderHook(() =>
+      const { result } = renderH(() =>
         useProjectDeploymentStatus(undefined)
       );
 
@@ -45,7 +49,7 @@ describe("use-project-deployment", () => {
         json: () => Promise.resolve(mockStatus),
       } as Response);
 
-      const { result } = renderHook(() =>
+      const { result } = renderH(() =>
         useProjectDeploymentStatus("test-project")
       );
 
@@ -68,7 +72,7 @@ describe("use-project-deployment", () => {
         json: () => Promise.resolve(mockStatus),
       } as Response);
 
-      const { result } = renderHook(() =>
+      const { result } = renderH(() =>
         useProjectDeploymentStatus("test-project")
       );
 
@@ -80,7 +84,7 @@ describe("use-project-deployment", () => {
     it("should handle fetch errors", async () => {
       vi.mocked(global.fetch).mockRejectedValueOnce(new Error("Network error"));
 
-      const { result } = renderHook(() =>
+      const { result } = renderH(() =>
         useProjectDeploymentStatus("test-project")
       );
 
@@ -94,7 +98,7 @@ describe("use-project-deployment", () => {
 
   describe("useProjectDeploymentMutations", () => {
     it("should have deploy function", () => {
-      const { result } = renderHook(() => useProjectDeploymentMutations());
+      const { result } = renderH(() => useProjectDeploymentMutations());
 
       expect(typeof result.current.deploy).toBe("function");
     });
@@ -110,7 +114,7 @@ describe("use-project-deployment", () => {
         json: () => Promise.resolve(mockResponse),
       } as Response);
 
-      const { result } = renderHook(() => useProjectDeploymentMutations());
+      const { result } = renderH(() => useProjectDeploymentMutations());
 
       await act(async () => {
         await result.current.deploy("test-project");
@@ -130,7 +134,7 @@ describe("use-project-deployment", () => {
         text: () => Promise.resolve("Deploy failed"),
       } as Response);
 
-      const { result } = renderHook(() => useProjectDeploymentMutations());
+      const { result } = renderH(() => useProjectDeploymentMutations());
 
       await expect(
         act(() => result.current.deploy("test-project"))
@@ -145,7 +149,7 @@ describe("use-project-deployment", () => {
         json: () => Promise.resolve({ deployed: false }),
       } as Response);
 
-      const { result } = renderHook(() =>
+      const { result } = renderH(() =>
         useProjectDeployment("test-project")
       );
 

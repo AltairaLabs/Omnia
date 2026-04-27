@@ -10,15 +10,7 @@ import { LicenseExpiryBanner } from "./license-expiry-banner";
 import { DevModeLicenseBanner } from "./dev-mode-license-banner";
 import { WorkspaceContent } from "./workspace-content";
 import { ErrorBoundary } from "@/components/error-boundary";
-
-const CHROMELESS_PATH_PREFIXES: readonly string[] = ["/login"];
-
-function isChromelessPath(pathname: string): boolean {
-  for (const prefix of CHROMELESS_PATH_PREFIXES) {
-    if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return true;
-  }
-  return false;
-}
+import { isChromelessPath } from "@/lib/routes";
 
 interface AppShellProps {
   children: ReactNode;

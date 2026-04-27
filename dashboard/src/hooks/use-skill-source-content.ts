@@ -1,11 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type {
   ArenaSourceContentNode,
   ArenaSourceContentResponse,
 } from "@/types/arena";
+
+const EMPTY_CONTENT: ArenaSourceContentResponse = {
+  sourceName: "",
+  tree: [],
+  fileCount: 0,
+  directoryCount: 0,
+};
 
 export interface UseSkillSourceContentResult {
   tree: ArenaSourceContentNode[];
@@ -16,60 +23,41 @@ export interface UseSkillSourceContentResult {
   refetch: () => void;
 }
 
+async function fetchSkillSourceContent(
+  workspace: string,
+  sourceName: string,
+): Promise<ArenaSourceContentResponse> {
+  const response = await fetch(
+    `/api/workspaces/${workspace}/skills/${sourceName}/content`,
+  );
+  // 404 = source not ready / no content yet — surface as empty, not an error.
+  if (response.status === 404) return EMPTY_CONTENT;
+  if (!response.ok) {
+    throw new Error(`Failed to fetch content: ${response.statusText}`);
+  }
+  return response.json();
+}
+
 export function useSkillSourceContent(
-  sourceName: string | undefined
+  sourceName: string | undefined,
 ): UseSkillSourceContentResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
-  const [tree, setTree] = useState<ArenaSourceContentNode[]>([]);
-  const [fileCount, setFileCount] = useState(0);
-  const [directoryCount, setDirectoryCount] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
 
-  const fetchData = useCallback(async () => {
-    if (!workspace || !sourceName) {
-      setTree([]);
-      setFileCount(0);
-      setDirectoryCount(0);
-      setLoading(false);
-      return;
-    }
+  const query = useQuery({
+    queryKey: ["skill-source-content", workspace, sourceName],
+    queryFn: () => fetchSkillSourceContent(workspace!, sourceName!),
+    enabled: !!workspace && !!sourceName,
+  });
 
-    setLoading(true);
-    setError(null);
+  const data = query.data ?? EMPTY_CONTENT;
 
-    try {
-      const response = await fetch(
-        `/api/workspaces/${workspace}/skills/${sourceName}/content`
-      );
-      if (!response.ok) {
-        if (response.status === 404) {
-          setTree([]);
-          setFileCount(0);
-          setDirectoryCount(0);
-          setLoading(false);
-          return;
-        }
-        throw new Error(`Failed to fetch content: ${response.statusText}`);
-      }
-      const data: ArenaSourceContentResponse = await response.json();
-      setTree(data.tree);
-      setFileCount(data.fileCount);
-      setDirectoryCount(data.directoryCount);
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)));
-      setTree([]);
-      setFileCount(0);
-      setDirectoryCount(0);
-    } finally {
-      setLoading(false);
-    }
-  }, [workspace, sourceName]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
-  return { tree, fileCount, directoryCount, loading, error, refetch: fetchData };
+  return {
+    tree: data.tree,
+    fileCount: data.fileCount,
+    directoryCount: data.directoryCount,
+    loading: query.isLoading,
+    error: (query.error as Error | null) ?? null,
+    refetch: async () => { await query.refetch(); },
+  };
 }
