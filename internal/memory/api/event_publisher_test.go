@@ -104,6 +104,14 @@ func (m *mockMemoryStore) RetrieveHybrid(_ context.Context, _ map[string]string,
 	return nil, nil
 }
 
+func (m *mockMemoryStore) SupersedeMany(_ context.Context, sourceIDs []string, mem *memory.Memory) (string, []string, error) {
+	if len(sourceIDs) == 0 {
+		return "", nil, nil
+	}
+	mem.ID = sourceIDs[0]
+	return sourceIDs[0], nil, nil
+}
+
 func (m *mockMemoryStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	return nil, nil
 }

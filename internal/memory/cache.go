@@ -129,6 +129,18 @@ func (c *CachedStore) AppendObservationToEntity(ctx context.Context, entityID st
 	return ids, nil
 }
 
+// SupersedeMany passes through to the inner store and invalidates
+// the workspace-scoped cache so post-supersede recall reflects the
+// new active observation across every source entity.
+func (c *CachedStore) SupersedeMany(ctx context.Context, sourceMemoryIDs []string, mem *Memory) (string, []string, error) {
+	id, ids, err := c.inner.SupersedeMany(ctx, sourceMemoryIDs, mem)
+	if err != nil {
+		return "", nil, err
+	}
+	c.bumpVersion(ctx, mem.Scope)
+	return id, ids, nil
+}
+
 // FindRelatedEntities passes through to the inner store. Not cached:
 // the recall path already gates on a versioned key for the search
 // itself, and per-entity related[] is cheap to recompute alongside

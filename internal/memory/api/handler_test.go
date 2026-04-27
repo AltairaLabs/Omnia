@@ -131,6 +131,19 @@ func (m *mockStore) RetrieveHybrid(_ context.Context, _ map[string]string,
 	return m.memories, nil
 }
 
+func (m *mockStore) SupersedeMany(_ context.Context, sourceIDs []string, mem *memory.Memory) (string, []string, error) {
+	if len(sourceIDs) == 0 {
+		return "", nil, nil
+	}
+	mem.ID = sourceIDs[0]
+	// Return canned superseded IDs so handler tests can assert them.
+	out := make([]string, len(sourceIDs))
+	for i, id := range sourceIDs {
+		out[i] = "obs-" + id
+	}
+	return sourceIDs[0], out, nil
+}
+
 func (m *mockStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	if m.retErr != nil {
 		return nil, m.retErr
@@ -677,6 +690,70 @@ func TestHandleUpdateMemory_AtomicSupersede(t *testing.T) {
 	var resp SaveMemoryResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, memory.SaveActionAutoSuperseded, resp.Action)
+}
+
+// TestHandleSupersedeMemories proves POST /memories/supersede maps
+// the multi-id supersede flow to the wire response. The mock store
+// returns canned superseded observation IDs so the handler test can
+// assert the agent sees them.
+func TestHandleSupersedeMemories(t *testing.T) {
+	store := &mockStore{}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	body := SupersedeRequest{
+		SourceIDs:  []string{"ent-a", "ent-b", "ent-c"},
+		Content:    "User's name is Phil",
+		Type:       "fact",
+		Confidence: 1.0,
+		Scope:      map[string]string{"workspace_id": "ws1", "user_id": "u1"},
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/memories/supersede",
+		bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var resp SaveMemoryResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, memory.SaveActionAutoSuperseded, resp.Action)
+	assert.Len(t, resp.SupersededObservationIDs, 3)
+}
+
+// TestHandleSupersedeMemories_RequiresFields proves the validation
+// guards fire when source_ids or content are missing.
+func TestHandleSupersedeMemories_RequiresFields(t *testing.T) {
+	h := newTestHandler(&mockStore{})
+	mux := setupMux(h)
+
+	cases := []struct {
+		name string
+		body SupersedeRequest
+	}{
+		{"no_sources", SupersedeRequest{
+			Content: "x", Scope: map[string]string{"workspace_id": "ws1", "user_id": "u1"},
+		}},
+		{"no_content", SupersedeRequest{
+			SourceIDs: []string{"a"},
+			Scope:     map[string]string{"workspace_id": "ws1", "user_id": "u1"},
+		}},
+		{"no_user", SupersedeRequest{
+			SourceIDs: []string{"a"}, Content: "x",
+			Scope: map[string]string{"workspace_id": "ws1"},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b, _ := json.Marshal(tc.body)
+			req := httptest.NewRequest(http.MethodPost,
+				"/api/v1/memories/supersede", bytes.NewReader(b))
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, req)
+			assert.Equal(t, http.StatusBadRequest, rr.Code)
+		})
+	}
 }
 
 // TestHandleLinkMemories proves POST /relations writes a row into

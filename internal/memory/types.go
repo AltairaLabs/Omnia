@@ -160,6 +160,17 @@ type Store interface {
 	// has its own ON CONFLICT route inside SaveWithResult.
 	AppendObservationToEntity(ctx context.Context, entityID string, mem *Memory) ([]string, error)
 
+	// SupersedeMany atomically marks the active observations of every
+	// source entity ID inactive and writes a new active observation
+	// under the FIRST source entity. Powers the memory__supersede
+	// agent tool: the agent can collapse N stale memories about the
+	// same fact (different entities — a common consequence of the
+	// agent forgetting to set `about`) into one canonical truth in a
+	// single round trip. Returns the entity ID the new observation
+	// lives under (always sourceMemoryIDs[0]) plus the IDs of every
+	// observation marked inactive across all source entities.
+	SupersedeMany(ctx context.Context, sourceMemoryIDs []string, mem *Memory) (anchorEntityID string, supersededObservationIDs []string, err error)
+
 	// GetMemory returns a single memory by entity ID with its current
 	// active observation (full content; no inline-vs-summary
 	// truncation). Returns ErrNotFound when the entity doesn't exist

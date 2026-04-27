@@ -267,6 +267,73 @@ func TestServiceSearchMemories(t *testing.T) {
 	assert.Equal(t, "dark mode", results[0].Content)
 }
 
+// TestServiceSupersedeMany_CollapsesAcrossEntities proves the
+// multi-id supersede flow: three stale memories about the user's
+// name (different entities, no `about`) are collapsed into one
+// canonical truth under the first source entity. After supersede,
+// recall returns only the new content; the older entities have no
+// active observations.
+func TestServiceSupersedeMany_CollapsesAcrossEntities(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	scope := map[string]string{
+		memory.ScopeWorkspaceID: testWorkspaceID,
+		memory.ScopeUserID:      "test-user",
+	}
+
+	older := &memory.Memory{Type: "fact", Content: "name: Slim Shard", Confidence: 0.9, Scope: scope}
+	require.NoError(t, svc.SaveMemory(ctx, older))
+	mid := &memory.Memory{Type: "fact", Content: "name: Slim Shady", Confidence: 0.9, Scope: scope}
+	require.NoError(t, svc.SaveMemory(ctx, mid))
+	newer := &memory.Memory{Type: "fact", Content: "name: Phil Collins", Confidence: 0.9, Scope: scope}
+	require.NoError(t, svc.SaveMemory(ctx, newer))
+
+	canonical := &memory.Memory{
+		Type: "fact", Content: "User's name is Phil", Confidence: 1.0, Scope: scope,
+	}
+	res, err := svc.SupersedeManyMemories(ctx,
+		[]string{older.ID, mid.ID, newer.ID}, canonical)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, memory.SaveActionAutoSuperseded, res.Action)
+	assert.Equal(t, older.ID, res.ID, "anchor entity is the first source ID")
+	assert.Len(t, res.SupersededObservationIDs, 3,
+		"every source entity contributed one inactive observation")
+
+	// Recall now returns one row — the canonical truth — and the
+	// old names are gone.
+	results, err := svc.SearchMemories(ctx, scope, "name", memory.RetrieveOptions{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Contains(t, results[0].Content, "Phil")
+}
+
+// TestServiceSupersedeMany_RejectsCrossWorkspace proves the scope
+// guard fires when a source entity belongs to a different workspace
+// — a cross-tenant supersede must fail loudly rather than silently
+// updating a row in the wrong scope.
+func TestServiceSupersedeMany_RejectsCrossWorkspace(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	scopeA := map[string]string{
+		memory.ScopeWorkspaceID: testWorkspaceID,
+		memory.ScopeUserID:      "user-a",
+	}
+	memA := &memory.Memory{Type: "fact", Content: "in workspace A", Confidence: 0.9, Scope: scopeA}
+	require.NoError(t, svc.SaveMemory(ctx, memA))
+
+	// Try to supersede memA from a different workspace.
+	scopeOther := map[string]string{
+		memory.ScopeWorkspaceID: "00000000-0000-0000-0000-000000000099",
+		memory.ScopeUserID:      "user-other",
+	}
+	canonical := &memory.Memory{Type: "fact", Content: "stolen", Confidence: 0.9, Scope: scopeOther}
+	_, err := svc.SupersedeManyMemories(ctx, []string{memA.ID}, canonical)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found in scope")
+}
+
 // TestServiceSaveMemory_RequiresAboutForConfiguredKinds proves
 // the mandatory-about guard: a Save for a kind listed in
 // MemoryServiceConfig.RequireAboutForKinds without an about

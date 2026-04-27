@@ -1031,6 +1031,86 @@ func (s *PostgresMemoryStore) AppendObservationToEntity(
 	return supersededIDs, nil
 }
 
+// SupersedeMany atomically marks every source entity's active
+// observations inactive and writes a new active observation under
+// the first source entity. See Store.SupersedeMany for the agent-
+// facing semantics. The two-step pattern (supersede then insert)
+// runs inside one transaction so a failure between steps doesn't
+// strand the caller with half-applied state.
+func (s *PostgresMemoryStore) SupersedeMany(
+	ctx context.Context,
+	sourceMemoryIDs []string,
+	mem *Memory,
+) (string, []string, error) {
+	if len(sourceMemoryIDs) == 0 {
+		return "", nil, errors.New("memory: at least one source memory ID is required")
+	}
+	if mem.Scope[ScopeWorkspaceID] == "" {
+		return "", nil, errors.New(errWorkspaceRequired)
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return "", nil, fmt.Errorf("memory: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Verify every source entity belongs to the requested workspace
+	// (and user / agent when those scope keys are set). Cross-tenant
+	// supersede must fail loudly, not silently miss rows.
+	if err := assertEntitiesInScope(ctx, tx, sourceMemoryIDs, mem.Scope); err != nil {
+		return "", nil, err
+	}
+
+	var allSuperseded []string
+	for _, id := range sourceMemoryIDs {
+		ids, err := supersedePriorObservations(ctx, tx, id)
+		if err != nil {
+			return "", nil, err
+		}
+		allSuperseded = append(allSuperseded, ids...)
+	}
+
+	anchor := sourceMemoryIDs[0]
+	mem.ID = anchor
+	if err := insertObservation(ctx, tx, mem); err != nil {
+		return "", nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return "", nil, fmt.Errorf("memory: commit supersede: %w", err)
+	}
+	return anchor, allSuperseded, nil
+}
+
+// assertEntitiesInScope rejects the request if any of entityIDs
+// resolves to a row outside the requested workspace / user / agent
+// scope. Cheap single-statement guard so the supersede transaction
+// can't bleed across tenants.
+func assertEntitiesInScope(ctx context.Context, tx pgx.Tx, entityIDs []string, scope map[string]string) error {
+	row := tx.QueryRow(ctx, `
+		SELECT count(*) FROM memory_entities
+		WHERE id = ANY($1)
+		  AND workspace_id = $2
+		  AND ($3::text IS NULL OR virtual_user_id = $3)
+		  AND ($4::uuid IS NULL OR agent_id = $4)
+		  AND NOT forgotten`,
+		entityIDs,
+		scope[ScopeWorkspaceID],
+		scopeOrNil(scope, ScopeUserID),
+		scopeOrNil(scope, ScopeAgentID),
+	)
+	var n int
+	if err := row.Scan(&n); err != nil {
+		return fmt.Errorf("memory: scope assertion: %w", err)
+	}
+	if n != len(entityIDs) {
+		return fmt.Errorf("memory: %d of %d source entities not found in scope",
+			len(entityIDs)-n, len(entityIDs))
+	}
+	return nil
+}
+
 // FindSimilarObservations returns active observations under the
 // scope whose embedding's cosine similarity to queryEmbedding is at
 // least minSimilarity, ordered most-similar first. Limited to k

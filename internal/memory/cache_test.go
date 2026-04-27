@@ -121,6 +121,14 @@ func (m *cacheTestStore) RetrieveHybrid(_ context.Context, _ map[string]string,
 	return m.memories, nil
 }
 
+func (m *cacheTestStore) SupersedeMany(_ context.Context, sourceIDs []string, mem *Memory) (string, []string, error) {
+	if len(sourceIDs) == 0 {
+		return "", nil, nil
+	}
+	mem.ID = sourceIDs[0]
+	return sourceIDs[0], nil, nil
+}
+
 func (m *cacheTestStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ RetrieveOptions) ([]*Memory, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -267,6 +267,21 @@ type UpdateMemoryRequest struct {
 	Scope      map[string]string `json:"scope"`
 }
 
+// SupersedeRequest is the JSON body for POST /api/v1/memories/supersede.
+// SourceIDs lists the entity IDs whose active observations should
+// be marked inactive; the new content lands as a fresh active
+// observation under SourceIDs[0]. The agent uses this to collapse
+// N stale memories about the same fact (typically duplicates the
+// agent created before it learned to set `about`) into one canonical
+// truth in a single round trip.
+type SupersedeRequest struct {
+	SourceIDs  []string          `json:"source_ids"`
+	Content    string            `json:"content"`
+	Type       string            `json:"type,omitempty"`
+	Confidence float64           `json:"confidence,omitempty"`
+	Scope      map[string]string `json:"scope"`
+}
+
 // LinkRequest is the JSON body for POST /api/v1/relations. Connects
 // source_id to target_id with the given relation_type so derived
 // facts (preferences, notes) survive renames of the anchor entity.
@@ -314,6 +329,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/memories/aggregate", h.handleMemoryAggregate)
 	mux.HandleFunc("GET /api/v1/memories/{id}", h.handleOpenMemory)
 	mux.HandleFunc("PATCH /api/v1/memories/{id}", h.handleUpdateMemory)
+	mux.HandleFunc("POST /api/v1/memories/supersede", h.handleSupersedeMemories)
 	mux.HandleFunc("POST /api/v1/relations", h.handleLinkMemories)
 	mux.HandleFunc("DELETE /api/v1/memories/{id}", h.handleDeleteMemory)
 	mux.HandleFunc("DELETE /api/v1/memories/batch", h.handleBatchDeleteMemories)
@@ -602,6 +618,62 @@ func (h *Handler) handleUpdateMemory(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.log.Error(err, "UpdateMemory failed", "memoryID", id)
+		writeError(w, err)
+		return
+	}
+
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(SaveMemoryResponse{
+		Memory:                   MemoryWithTier{Memory: mem, Tier: deriveTier(mem.Scope)},
+		Action:                   res.Action,
+		SupersededObservationIDs: res.SupersededObservationIDs,
+		SupersedeReason:          res.SupersedeReason,
+	})
+}
+
+// handleSupersedeMemories collapses N source entities into one
+// canonical truth: each source's active observation is marked
+// inactive and a single new observation lands under SourceIDs[0].
+// Powers memory__supersede so the agent can resolve duplicate-fact
+// noise (e.g. three pre-`about` memories about the user's name) in
+// a single round trip.
+func (h *Handler) handleSupersedeMemories(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, h.maxBodySize)
+
+	var req SupersedeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isMaxBytesError(err) {
+			writeError(w, ErrBodyTooLarge)
+			return
+		}
+		writeError(w, ErrMissingBody)
+		return
+	}
+	if len(req.SourceIDs) == 0 {
+		http.Error(w, `{"error":"source_ids must contain at least one entity ID"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Content == "" {
+		http.Error(w, `{"error":"content is required"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Scope[memory.ScopeUserID] == "" {
+		writeError(w, ErrMissingUserID)
+		return
+	}
+
+	mem := &memory.Memory{
+		Type:       req.Type,
+		Content:    req.Content,
+		Confidence: req.Confidence,
+		Scope:      req.Scope,
+	}
+
+	res, err := h.service.SupersedeManyMemories(r.Context(), req.SourceIDs, mem)
+	if err != nil {
+		h.log.Error(err, "SupersedeManyMemories failed",
+			"sourceCount", len(req.SourceIDs))
 		writeError(w, err)
 		return
 	}

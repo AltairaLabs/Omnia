@@ -22,6 +22,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -453,6 +454,70 @@ func (s *MemoryService) UpdateMemory(ctx context.Context, entityID string, mem *
 		Action:                   memory.SaveActionAutoSuperseded,
 		SupersededObservationIDs: supersededIDs,
 		SupersedeReason:          memory.SaveSupersedeReason("explicit"),
+	}, nil
+}
+
+// SupersedeManyMemories collapses multiple stale entities into one
+// canonical truth: every source entity's active observations are
+// marked inactive and a single new observation is written under the
+// first source entity. Powers the memory__supersede agent tool —
+// the agent surfaces a recall result, sees N memories about the
+// same fact (different entities because the agent forgot to set
+// `about`), and consolidates them in one round trip.
+//
+// Returns the same SaveResult shape as UpdateMemory so the agent's
+// reply ("Got it — I had three memories about your name; collapsed
+// them into the new value") can be honest about the count of rows
+// it took inactive.
+func (s *MemoryService) SupersedeManyMemories(ctx context.Context, sourceMemoryIDs []string, mem *memory.Memory) (*memory.SaveResult, error) {
+	anchorID, supersededIDs, err := s.store.SupersedeMany(ctx, sourceMemoryIDs, mem)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.eventPublisher != nil {
+		event := MemoryEvent{
+			EventType:   eventTypeMemoryCreated,
+			MemoryID:    anchorID,
+			WorkspaceID: mem.Scope[memory.ScopeWorkspaceID],
+			UserID:      mem.Scope[memory.ScopeUserID],
+			Kind:        mem.Type,
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		}
+		go func() {
+			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
+				s.log.Error(err, "memory event publish failed",
+					"eventType", event.EventType, "memoryID", event.MemoryID)
+			}
+		}()
+	}
+	if s.embeddingSvc != nil {
+		go func() {
+			embedCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := s.embeddingSvc.EmbedMemory(embedCtx, mem); err != nil {
+				s.log.Error(err, "async embedding failed", "memoryID", mem.ID)
+			}
+		}()
+	}
+	s.emitAuditEvent(ctx, &MemoryAuditEntry{
+		EventType:   eventTypeMemoryCreated,
+		MemoryID:    anchorID,
+		WorkspaceID: mem.Scope[memory.ScopeWorkspaceID],
+		UserID:      mem.Scope[memory.ScopeUserID],
+		Kind:        mem.Type,
+		Metadata: map[string]string{
+			"dedup_reason": "supersede_many",
+			"source_count": fmt.Sprintf("%d", len(sourceMemoryIDs)),
+			"superseded_n": fmt.Sprintf("%d", len(supersededIDs)),
+		},
+	})
+
+	return &memory.SaveResult{
+		ID:                       anchorID,
+		Action:                   memory.SaveActionAutoSuperseded,
+		SupersededObservationIDs: supersededIDs,
+		SupersedeReason:          memory.SaveSupersedeReason("supersede_many"),
 	}, nil
 }
 

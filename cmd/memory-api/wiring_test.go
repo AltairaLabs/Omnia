@@ -67,6 +67,13 @@ func (fakeMemoryStore) FindRelatedEntities(_ context.Context, _ map[string]strin
 func (fakeMemoryStore) RetrieveHybrid(_ context.Context, _ map[string]string, _ string, _ []float32, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	return nil, nil
 }
+func (fakeMemoryStore) SupersedeMany(_ context.Context, sourceIDs []string, mem *memory.Memory) (string, []string, error) {
+	if len(sourceIDs) == 0 {
+		return "", nil, nil
+	}
+	mem.ID = sourceIDs[0]
+	return sourceIDs[0], nil, nil
+}
 func (fakeMemoryStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	return nil, nil
 }

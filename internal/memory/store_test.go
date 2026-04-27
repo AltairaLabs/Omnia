@@ -475,6 +475,71 @@ func TestPostgresMemoryStore_Retrieve_SourceTypeWeighting(t *testing.T) {
 		"user_requested should rank above conversation_extraction at equal relevance")
 }
 
+// TestPostgresMemoryStore_SupersedeMany_CollapsesAcrossEntities
+// exercises the multi-id supersede path: each source entity's
+// active observations are marked inactive and a single new
+// observation lands under the first source entity. Recall returns
+// only the new observation; the older entities have no active rows.
+func TestPostgresMemoryStore_SupersedeMany_CollapsesAcrossEntities(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	a := &Memory{Type: "fact", Content: "name: Slim Shard", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, a))
+	b := &Memory{Type: "fact", Content: "name: Slim Shady", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, b))
+	c := &Memory{Type: "fact", Content: "name: Phil Collins", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, c))
+
+	canonical := &Memory{Type: "fact", Content: "name: Phil", Confidence: 1.0, Scope: scope}
+	anchor, supersededIDs, err := store.SupersedeMany(ctx,
+		[]string{a.ID, b.ID, c.ID}, canonical)
+	require.NoError(t, err)
+	assert.Equal(t, a.ID, anchor, "first source ID is the anchor entity")
+	assert.Len(t, supersededIDs, 3, "one observation per source entity went inactive")
+
+	// Retrieve returns only the new active observation.
+	results, err := store.Retrieve(ctx, scope, "name", RetrieveOptions{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Contains(t, results[0].Content, "Phil")
+}
+
+// TestPostgresMemoryStore_SupersedeMany_RejectsCrossWorkspace
+// proves the scope guard fires when a source entity belongs to a
+// different workspace — cross-tenant supersede must fail loudly.
+func TestPostgresMemoryStore_SupersedeMany_RejectsCrossWorkspace(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scopeA := testScope(testWorkspace1)
+	mem := &Memory{Type: "fact", Content: "in A", Confidence: 0.9, Scope: scopeA}
+	require.NoError(t, store.Save(ctx, mem))
+
+	scopeOther := testScope(testWorkspace2)
+	canonical := &Memory{Type: "fact", Content: "stolen", Confidence: 0.9, Scope: scopeOther}
+	_, _, err := store.SupersedeMany(ctx, []string{mem.ID}, canonical)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found in scope")
+}
+
+// TestPostgresMemoryStore_SupersedeMany_RequiresInputs proves the
+// guard fires on empty source lists and missing workspace.
+func TestPostgresMemoryStore_SupersedeMany_RequiresInputs(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	// No source IDs.
+	_, _, err := store.SupersedeMany(ctx, nil,
+		&Memory{Content: "x", Scope: testScope(testWorkspace1)})
+	require.Error(t, err)
+
+	// Missing workspace.
+	_, _, err = store.SupersedeMany(ctx, []string{"a"},
+		&Memory{Content: "x", Scope: map[string]string{}})
+	require.Error(t, err)
+}
+
 // TestPostgresMemoryStore_FindRelatedEntities exercises the
 // per-source LIMIT and weight ordering on the recall-enrichment
 // graph walk. Two relations from one source, one from another;
