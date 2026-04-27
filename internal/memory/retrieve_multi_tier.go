@@ -278,8 +278,13 @@ func buildMultiTierQuery(req MultiTierRequest) (string, []any, error) {
 	}
 
 	if req.Query != "" {
-		args = append(args, "%"+req.Query+"%")
-		clauses = append(clauses, "o.content ILIKE $"+strconv.Itoa(len(args)))
+		// Tokenized FTS match against the stored tsvector (mirrors the
+		// single-tier path in store.go). ILIKE was a literal-substring
+		// filter — "when I was in Morocco" against "User was in Morocco"
+		// returned zero rows. websearch_to_tsquery handles stopwords and
+		// word boundaries the way the agent expects.
+		args = append(args, req.Query)
+		clauses = append(clauses, "o.search_vector @@ websearch_to_tsquery('english', $"+strconv.Itoa(len(args))+")")
 	}
 
 	if len(req.Purposes) == 1 {

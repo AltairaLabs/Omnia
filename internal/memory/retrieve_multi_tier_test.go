@@ -67,7 +67,12 @@ func TestBuildMultiTierQuery_UserAndAgent(t *testing.T) {
 	}
 }
 
-func TestBuildMultiTierQuery_QueryAddsILIKE(t *testing.T) {
+// TestBuildMultiTierQuery_QueryUsesFTS is a wiring test: the multi-tier path
+// must use the same Postgres FTS as Retrieve. The previous ILIKE-based filter
+// silently broke agent recall because "when I was in Morocco" never appeared
+// as a literal substring of stored content. If anyone reverts this to ILIKE
+// the test fails and the FTS migration stays connected.
+func TestBuildMultiTierQuery_QueryUsesFTS(t *testing.T) {
 	sql, args, err := buildMultiTierQuery(MultiTierRequest{
 		WorkspaceID: "ws-1",
 		UserID:      "u-1",
@@ -77,11 +82,17 @@ func TestBuildMultiTierQuery_QueryAddsILIKE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if !strings.Contains(sql, "o.content ILIKE") {
-		t.Errorf("ILIKE filter missing: %s", sql)
+	if strings.Contains(sql, "ILIKE") {
+		t.Errorf("multi-tier query reintroduced ILIKE: %s", sql)
 	}
-	if args[len(args)-1] != "%dark mode%" {
-		t.Errorf("ILIKE arg missing: %v", args)
+	if !strings.Contains(sql, "websearch_to_tsquery('english'") {
+		t.Errorf("FTS predicate missing: %s", sql)
+	}
+	if !strings.Contains(sql, "o.search_vector @@") {
+		t.Errorf("tsvector match missing: %s", sql)
+	}
+	if args[len(args)-1] != "dark mode" {
+		t.Errorf("query arg should be passed verbatim to websearch_to_tsquery, got: %v", args)
 	}
 }
 
