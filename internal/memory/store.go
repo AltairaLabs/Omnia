@@ -542,31 +542,41 @@ func buildRetrieveQuery(scope map[string]string, query string, opts RetrieveOpti
 }
 
 // formatMemoryFTSSQL renders a Retrieve query that ranks matching
-// observations via ts_rank_cd against websearch_to_tsquery. queryArgIdx
-// is the 1-based placeholder of the user query already added to qb.
+// observations by a fused score combining lexical relevance with
+// per-row signal multipliers:
+//
+//	score = ts_rank_cd(search_vector, query)
+//	      × source_type_weight(entity.source_type)
+//	      × confidence
+//	      × recency_decay(observed_at, half_life=30d)
+//
+// At equal lexical relevance, a fact the user explicitly asked us to
+// remember (source_type=user_requested, weight 1.0) outranks one we
+// inferred from a conversation (conversation_extraction, weight 0.7).
+// Newer beats older via the exponential decay. queryArgIdx is the
+// 1-based placeholder of the user query already added to qb.
 func formatMemoryFTSSQL(qb *pgutil.QueryBuilder, queryArgIdx, limit, offset int) string {
 	if limit <= 0 {
 		limit = defaultMemoryLimit
 	}
-	// Inner query: per entity pick the observation with the highest
-	// ts_rank_cd (DISTINCT ON requires the ORDER BY to start with the
-	// distinct key). Outer query: re-sort entities by that score.
 	tsqueryExpr := fmt.Sprintf("websearch_to_tsquery('english', $%d)", queryArgIdx)
-	rankExpr := fmt.Sprintf("ts_rank_cd(o.search_vector, %s)", tsqueryExpr)
+	scoreExpr := fmt.Sprintf(
+		"(ts_rank_cd(o.search_vector, %s)) * (%s) * coalesce(o.confidence, 0.7) * (%s)",
+		tsqueryExpr, sourceTypeWeightSQL, recencyDecaySQL,
+	)
 
+	// Inner query: per entity pick the observation with the highest
+	// fused score (DISTINCT ON requires the ORDER BY to start with
+	// the distinct key). Outer query: re-sort entities by that score.
 	inner := fmt.Sprintf(`
 		SELECT DISTINCT ON (e.id) %s, %s, %s AS rank
 		FROM memory_entities %s%s
 		WHERE %s%s
 		ORDER BY e.id, rank DESC, o.observed_at DESC`,
-		selectEntityCols, selectObserveCols, rankExpr,
+		selectEntityCols, selectObserveCols, scoreExpr,
 		entityTableAlias, observationJoin,
 		colEntityForgot, qb.Where())
 
-	// Outer SELECT projects only the original entity + observation columns
-	// (unprefixed, since the subquery exposes them by their bare names) so
-	// the scanner sees the same column count as the non-FTS path; rank is
-	// used purely for ordering.
 	outerCols := strings.ReplaceAll(selectEntityCols, "e.", "") + ", " +
 		strings.ReplaceAll(selectObserveCols, "o.", "")
 	sql := fmt.Sprintf(
@@ -575,6 +585,30 @@ func formatMemoryFTSSQL(qb *pgutil.QueryBuilder, queryArgIdx, limit, offset int)
 	)
 	return qb.AppendPagination(sql, limit, offset)
 }
+
+// sourceTypeWeightSQL maps the schema's source_type strings to a
+// confidence-style multiplier. The agent's explicit user_requested
+// writes get full weight; passive conversation_extraction signals
+// are discounted; system-generated rows are discounted further.
+// Inlined as a CASE so it's free per row (no JOIN, no function call).
+const sourceTypeWeightSQL = `
+		CASE e.source_type
+			WHEN 'user_requested'           THEN 1.0
+			WHEN 'operator_curated'         THEN 1.0
+			WHEN 'reflection'               THEN 0.85
+			WHEN 'conversation_extraction'  THEN 0.7
+			WHEN 'system_generated'         THEN 0.5
+			ELSE 0.7
+		END`
+
+// recencyDecaySQL applies an exponential decay to observation age.
+// Half-life is currently a single value (30 days = 2,592,000 s);
+// per-tier half-lives (institutional / agent / user) live in
+// MemoryPolicy.recall.halfLife and will replace this constant in a
+// follow-up. exp(-age/half_life) gives 1.0 for fresh rows, 0.5 at
+// the half-life, ~0 at 5×half-life.
+const recencyDecaySQL = `
+		exp(-EXTRACT(EPOCH FROM (now() - o.observed_at)) / 2592000.0)`
 
 // List returns memories filtered by scope and options with pagination.
 func (s *PostgresMemoryStore) List(ctx context.Context, scope map[string]string, opts ListOptions) ([]*Memory, error) {

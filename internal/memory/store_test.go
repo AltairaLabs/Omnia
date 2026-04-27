@@ -436,6 +436,45 @@ func TestPostgresMemoryStore_FindSimilarObservations_RanksByCosine(t *testing.T)
 		"near-identical embedding should score ~1.0")
 }
 
+// TestPostgresMemoryStore_Retrieve_SourceTypeWeighting proves the
+// source_type multiplier in the scoring expression: at equal lexical
+// relevance, an explicit user_requested fact outranks an inferred
+// conversation_extraction one. This is what stops the agent from
+// trusting passive observations as much as things the user actually
+// asked us to remember.
+func TestPostgresMemoryStore_Retrieve_SourceTypeWeighting(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	// Inferred (conversation_extraction → weight 0.7).
+	inferred := &Memory{
+		Type: "fact", Content: "User likes coffee", Confidence: 1.0, Scope: scope,
+		Metadata: map[string]any{
+			pkmemory.MetaKeyProvenance: string(pkmemory.ProvenanceAgentExtracted),
+		},
+	}
+	require.NoError(t, store.Save(ctx, inferred))
+
+	// Explicit (user_requested → weight 1.0). Same content, same
+	// confidence — only the provenance differs.
+	explicit := &Memory{
+		Type: "fact", Content: "User likes coffee", Confidence: 1.0, Scope: scope,
+		Metadata: map[string]any{
+			pkmemory.MetaKeyProvenance: string(pkmemory.ProvenanceUserRequested),
+		},
+	}
+	require.NoError(t, store.Save(ctx, explicit))
+
+	results, err := store.Retrieve(ctx, scope, "coffee", RetrieveOptions{})
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	// First result must be the explicit one — the source_type
+	// multiplier (1.0 vs 0.7) breaks the tie.
+	assert.Equal(t, explicit.ID, results[0].ID,
+		"user_requested should rank above conversation_extraction at equal relevance")
+}
+
 // TestPostgresMemoryStore_GetMemory_ReturnsActiveObservation proves
 // GetMemory returns the entity's current active observation and
 // excludes superseded predecessors. This is what memory__open
