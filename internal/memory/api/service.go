@@ -190,7 +190,7 @@ func (s *MemoryService) SaveMemory(ctx context.Context, mem *memory.Memory) erro
 //     matches as PotentialDuplicates so the agent can decide on a
 //     later turn.
 func (s *MemoryService) SaveMemoryWithResult(ctx context.Context, mem *memory.Memory) (*memory.SaveResult, error) {
-	if err := s.enforceAboutForKind(mem); err != nil {
+	if err := s.enforceAboutForKind(ctx, mem); err != nil {
 		return nil, err
 	}
 	if mem.ExpiresAt == nil && s.config.DefaultTTL > 0 {
@@ -287,21 +287,73 @@ func hasAboutKeyInMetadata(mem *memory.Memory) bool {
 }
 
 // enforceAboutForKind returns ErrAboutRequired when a memory's
-// kind is in MemoryServiceConfig.RequireAboutForKinds but the caller
-// didn't set about={kind, key} in metadata. Identity-class kinds
-// (fact, preference) need the structured-key path to dedup
-// correctly — without about they pile up as duplicates that can't
-// be atomically superseded on rename or update.
-func (s *MemoryService) enforceAboutForKind(mem *memory.Memory) error {
-	if mem == nil || len(s.config.RequireAboutForKinds) == 0 {
+// kind is in either the static config or the resolved MemoryPolicy's
+// dedup.requireAboutForKinds list, and the caller didn't set
+// about={kind, key} in metadata. Identity-class kinds (fact,
+// preference) need the structured-key path to dedup correctly —
+// without about they pile up as duplicates that can't be atomically
+// superseded on rename or update.
+func (s *MemoryService) enforceAboutForKind(ctx context.Context, mem *memory.Memory) error {
+	if mem == nil {
 		return nil
 	}
-	for _, k := range s.config.RequireAboutForKinds {
+	kinds := s.requireAboutKinds(ctx)
+	if len(kinds) == 0 {
+		return nil
+	}
+	for _, k := range kinds {
 		if mem.Type == k && !hasAboutKeyInMetadata(mem) {
 			return ErrAboutRequired
 		}
 	}
 	return nil
+}
+
+// requireAboutKinds merges the static config kinds list with the
+// policy-derived list. Either source can require `about` for a
+// kind; the union is what's enforced. Returns nil if neither
+// source has any entries (back-compat default — no enforcement).
+func (s *MemoryService) requireAboutKinds(ctx context.Context) []string {
+	policyKinds := s.policyRequireAboutKinds(ctx)
+	if len(policyKinds) == 0 {
+		return s.config.RequireAboutForKinds
+	}
+	if len(s.config.RequireAboutForKinds) == 0 {
+		return policyKinds
+	}
+	// Dedup the union so a kind listed in both sources doesn't get
+	// double-evaluated downstream.
+	seen := make(map[string]struct{}, len(policyKinds)+len(s.config.RequireAboutForKinds))
+	out := make([]string, 0, len(policyKinds)+len(s.config.RequireAboutForKinds))
+	for _, k := range s.config.RequireAboutForKinds {
+		if _, ok := seen[k]; !ok {
+			seen[k] = struct{}{}
+			out = append(out, k)
+		}
+	}
+	for _, k := range policyKinds {
+		if _, ok := seen[k]; !ok {
+			seen[k] = struct{}{}
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// policyRequireAboutKinds resolves the current MemoryPolicy and
+// returns its dedup.requireAboutForKinds list. Failures (loader
+// nil, transient API outage, no policy bound) silently return nil
+// so policy unavailability doesn't block writes — the static config
+// is still in force.
+func (s *MemoryService) policyRequireAboutKinds(ctx context.Context) []string {
+	if s.policyLoader == nil {
+		return nil
+	}
+	policy, err := s.policyLoader.Load(ctx)
+	if err != nil || policy == nil {
+		return nil
+	}
+	return policy.DedupRequireAboutForKinds()
 }
 
 // findSimilarForDedup embeds the new content (synchronously — adds

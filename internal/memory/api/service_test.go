@@ -39,6 +39,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/memory"
 	pgmigrate "github.com/altairalabs/omnia/internal/memory/postgres"
 )
@@ -265,6 +266,125 @@ func TestServiceSearchMemories(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
 	assert.Equal(t, "dark mode", results[0].Content)
+}
+
+// TestServiceSaveMemory_PolicyAndConfigUnion proves the union
+// behaviour when both the static config and the policy supply
+// kinds: a write that violates either source is rejected.
+func TestServiceSaveMemory_PolicyAndConfigUnion(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{
+		RequireAboutForKinds: []string{"fact"},
+	}, logr.Discard())
+	svc.SetPolicyLoader(&memory.StaticPolicyLoader{
+		Policy: &omniav1alpha1.MemoryPolicy{
+			Spec: omniav1alpha1.MemoryPolicySpec{
+				Tiers: omniav1alpha1.MemoryRetentionTierSet{},
+				Dedup: &omniav1alpha1.MemoryDedupConfig{
+					RequireAboutForKinds: []string{"preference"},
+				},
+			},
+		},
+	})
+
+	ctx := context.Background()
+	scope := map[string]string{
+		memory.ScopeWorkspaceID: testWorkspaceID,
+		memory.ScopeUserID:      "test-user",
+	}
+
+	// fact (in static config) without about → reject.
+	err := svc.SaveMemory(ctx, &memory.Memory{
+		Type: "fact", Content: "no anchor", Confidence: 0.9, Scope: scope,
+	})
+	require.ErrorIs(t, err, ErrAboutRequired)
+
+	// preference (in policy list) without about → reject.
+	err = svc.SaveMemory(ctx, &memory.Memory{
+		Type: "preference", Content: "no anchor", Confidence: 0.9, Scope: scope,
+	})
+	require.ErrorIs(t, err, ErrAboutRequired)
+
+	// document (in neither list) → allowed.
+	err = svc.SaveMemory(ctx, &memory.Memory{
+		Type: "document", Content: "free", Confidence: 0.9, Scope: scope,
+	})
+	require.NoError(t, err)
+}
+
+// TestServiceSaveMemory_PolicyLoaderError proves a transient policy
+// loader failure falls back to the static config without blocking
+// the write — recall is too central to make brittle on policy
+// availability.
+func TestServiceSaveMemory_PolicyLoaderError(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{
+		RequireAboutForKinds: []string{"fact"},
+	}, logr.Discard())
+	svc.SetPolicyLoader(&erroringPolicyLoader{})
+
+	ctx := context.Background()
+	scope := map[string]string{
+		memory.ScopeWorkspaceID: testWorkspaceID,
+		memory.ScopeUserID:      "test-user",
+	}
+	// Static config still in force when the loader errs.
+	err := svc.SaveMemory(ctx, &memory.Memory{
+		Type: "fact", Content: "no anchor", Confidence: 0.9, Scope: scope,
+	})
+	require.ErrorIs(t, err, ErrAboutRequired)
+}
+
+// erroringPolicyLoader returns an error on every Load — proves the
+// service degrades gracefully.
+type erroringPolicyLoader struct{}
+
+func (erroringPolicyLoader) Load(_ context.Context) (*omniav1alpha1.MemoryPolicy, error) {
+	return nil, errors.New("transient failure")
+}
+
+// TestServiceSaveMemory_PolicyRequireAboutForKinds proves the
+// MemoryPolicy.dedup.requireAboutForKinds list is honoured at
+// runtime. A workspace operator can attach a policy that requires
+// `about` on certain kinds without redeploying memory-api with new
+// flags — the policy loader fetches the policy and the union of
+// (static config kinds + policy kinds) is enforced.
+func TestServiceSaveMemory_PolicyRequireAboutForKinds(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	// Static config has no kinds — only the policy supplies them.
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetPolicyLoader(&memory.StaticPolicyLoader{
+		Policy: &omniav1alpha1.MemoryPolicy{
+			Spec: omniav1alpha1.MemoryPolicySpec{
+				Tiers: omniav1alpha1.MemoryRetentionTierSet{},
+				Dedup: &omniav1alpha1.MemoryDedupConfig{
+					RequireAboutForKinds: []string{"preference"},
+				},
+			},
+		},
+	})
+
+	ctx := context.Background()
+	scope := map[string]string{
+		memory.ScopeWorkspaceID: testWorkspaceID,
+		memory.ScopeUserID:      "test-user",
+	}
+
+	// preference without about → policy rejects.
+	err := svc.SaveMemory(ctx, &memory.Memory{
+		Type: "preference", Content: "no anchor", Confidence: 0.9, Scope: scope,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrAboutRequired)
+
+	// fact (not in policy list) → allowed.
+	err = svc.SaveMemory(ctx, &memory.Memory{
+		Type: "fact", Content: "free-form", Confidence: 0.9, Scope: scope,
+	})
+	require.NoError(t, err)
 }
 
 // TestServiceSupersedeMany_CollapsesAcrossEntities proves the
