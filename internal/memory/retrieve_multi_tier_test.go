@@ -258,6 +258,54 @@ func TestRetrieveMultiTier_SpansAllTiers(t *testing.T) {
 	assert.Equal(t, multiTierAgentID, uForA.Scope[ScopeAgentID])
 }
 
+// TestRetrieveMultiTier_HidesStructuredKeySupersedes proves the
+// active-only filter on the multi-tier path: a memory whose prior
+// observation was superseded via the structured-key dedup route
+// (which sets valid_until = now() but leaves superseded_by NULL)
+// must not surface in recall. This is the failure mode the
+// stateful-memory design exists to fix.
+func TestRetrieveMultiTier_HidesStructuredKeySupersedes(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := map[string]string{
+		ScopeWorkspaceID: testWorkspace1,
+		ScopeUserID:      "user-1",
+	}
+
+	about := map[string]any{
+		MetaKeyAboutKind: "user",
+		MetaKeyAboutKey:  "name",
+	}
+
+	original := &Memory{Type: "fact", Content: "name: Slim Shard", Confidence: 1.0,
+		Scope: scope, Metadata: cloneMap(about)}
+	require.NoError(t, store.Save(ctx, original))
+
+	updated := &Memory{Type: "fact", Content: "name: Phil Collins", Confidence: 1.0,
+		Scope: scope, Metadata: cloneMap(about)}
+	require.NoError(t, store.Save(ctx, updated))
+
+	// After the second Save's structured-key path runs, the prior
+	// observation has valid_until set. RetrieveMultiTier must hide it.
+	result, err := store.RetrieveMultiTier(ctx, MultiTierRequest{
+		WorkspaceID: testWorkspace1,
+		UserID:      "user-1",
+		Limit:       10,
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Memories, 1, "only the active observation should surface")
+	assert.Contains(t, result.Memories[0].Content, "Phil Collins",
+		"old name must not be in recall")
+}
+
+func cloneMap(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
 func TestRetrieveMultiTier_InstitutionalOnlyDoesNotBleed(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()

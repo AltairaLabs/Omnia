@@ -290,7 +290,7 @@ func buildMultiTierQuery(req MultiTierRequest) (string, []any, error) {
 		clauses = append(clauses, "e.purpose = ANY($"+strconv.Itoa(len(args))+")")
 	}
 
-	sql := fmt.Sprintf(`SELECT DISTINCT ON (e.id) e.id, e.kind, e.metadata, e.created_at, e.expires_at, e.title, e.virtual_user_id, e.agent_id, o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at, o.access_count, o.summary, o.body_size_bytes FROM memory_entities e JOIN memory_observations o ON o.entity_id = e.id AND o.superseded_by IS NULL WHERE %s ORDER BY e.id, o.observed_at DESC LIMIT %d`,
+	sql := fmt.Sprintf(`SELECT DISTINCT ON (e.id) e.id, e.kind, e.metadata, e.created_at, e.expires_at, e.title, e.virtual_user_id, e.agent_id, o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at, o.access_count, o.summary, o.body_size_bytes FROM memory_entities e JOIN memory_observations o ON o.entity_id = e.id AND o.superseded_by IS NULL AND (o.valid_until IS NULL OR o.valid_until > now()) WHERE %s ORDER BY e.id, o.observed_at DESC LIMIT %d`,
 		joinAnd(clauses), multiTierCandidatePool)
 
 	return sql, args, nil

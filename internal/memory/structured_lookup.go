@@ -72,7 +72,9 @@ func (s *PostgresMemoryStore) LookupStructured(ctx context.Context, q Structured
 		  o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at,
 		  o.summary, o.body_size_bytes
 		FROM memory_entities e
-		JOIN memory_observations o ON o.entity_id = e.id AND o.superseded_by IS NULL
+		JOIN memory_observations o ON o.entity_id = e.id
+		  AND o.superseded_by IS NULL
+		  AND (o.valid_until IS NULL OR o.valid_until > now())
 		WHERE %s
 		ORDER BY e.id, o.observed_at DESC
 		LIMIT $%d`, joinAnd(where), len(args))

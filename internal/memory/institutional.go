@@ -120,7 +120,9 @@ func (s *PostgresMemoryStore) ListInstitutional(ctx context.Context, workspaceID
 		  o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at,
 		  o.summary, o.body_size_bytes
 		FROM memory_entities e
-		JOIN memory_observations o ON o.entity_id = e.id AND o.superseded_by IS NULL
+		JOIN memory_observations o ON o.entity_id = e.id
+		  AND o.superseded_by IS NULL
+		  AND (o.valid_until IS NULL OR o.valid_until > now())
 		WHERE e.workspace_id = $1
 		  AND e.virtual_user_id IS NULL
 		  AND e.agent_id IS NULL

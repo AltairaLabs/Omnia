@@ -109,7 +109,9 @@ SELECT DISTINCT ON (e.id)
   o.summary, o.body_size_bytes
 FROM walk w
 JOIN memory_entities e ON e.id = w.id
-JOIN memory_observations o ON o.entity_id = e.id AND o.superseded_by IS NULL
+JOIN memory_observations o ON o.entity_id = e.id
+  AND o.superseded_by IS NULL
+  AND (o.valid_until IS NULL OR o.valid_until > now())
 WHERE w.hop > 0
 ORDER BY e.id, o.observed_at DESC
 LIMIT $4`
