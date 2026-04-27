@@ -86,6 +86,14 @@ func (s *PostgresMemoryStore) RunTombstoneGC(ctx context.Context, opts Tombstone
 	if opts.KeepRecentInactive <= 0 {
 		opts.KeepRecentInactive = defaultTombstoneKeepRecentInactive
 	}
+	// Misconfiguration guard: if the keep window is at or above the
+	// chain-length threshold, the GC is a no-op (ranked rn 1..keep
+	// always survives). Refuse the call so operators see the bug
+	// immediately rather than silently accumulating tombstones.
+	if opts.KeepRecentInactive >= opts.MinInactiveCount {
+		return 0, fmt.Errorf("memory: KeepRecentInactive (%d) must be less than MinInactiveCount (%d)",
+			opts.KeepRecentInactive, opts.MinInactiveCount)
+	}
 
 	tag, err := s.pool.Exec(ctx, `
 		WITH chains AS (
@@ -99,6 +107,9 @@ func (s *PostgresMemoryStore) RunTombstoneGC(ctx context.Context, opts Tombstone
 			GROUP BY o.entity_id
 			HAVING count(*) > $3
 		), ranked AS (
+			-- Defence in depth: re-assert workspace scope inside the
+			-- ranked CTE so a future schema change that broke the
+			-- entity-id workspace partition couldn't cross-pollinate.
 			SELECT o.id,
 			       row_number() OVER (
 			           PARTITION BY o.entity_id
@@ -106,6 +117,7 @@ func (s *PostgresMemoryStore) RunTombstoneGC(ctx context.Context, opts Tombstone
 			       ) AS rn
 			FROM memory_observations o
 			JOIN chains c ON c.entity_id = o.entity_id
+			JOIN memory_entities e ON e.id = o.entity_id AND e.workspace_id = $1
 			WHERE (o.superseded_by IS NOT NULL
 			       OR (o.valid_until IS NOT NULL AND o.valid_until <= now()))
 		)

@@ -128,11 +128,34 @@ func TestRunTombstoneGC_RespectsMinAge(t *testing.T) {
 	deleted, err := store.RunTombstoneGC(ctx, TombstoneGCOptions{
 		WorkspaceID:        testWorkspace1,
 		MinAge:             30 * 24 * time.Hour,
-		MinInactiveCount:   5,
+		MinInactiveCount:   10,
 		KeepRecentInactive: 5,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), deleted, "fresh observations are protected by MinAge")
+}
+
+// TestRunTombstoneGC_RejectsKeepWindowAtOrAboveThreshold proves
+// the misconfiguration guard: when KeepRecentInactive >= MinInactive
+// the GC would silently no-op (ranked rn 1..keep always survives).
+// The guard refuses the call so operators see the bug immediately
+// rather than wondering why tombstones never shrink.
+func TestRunTombstoneGC_RejectsKeepWindowAtOrAboveThreshold(t *testing.T) {
+	store := newStore(t)
+	_, err := store.RunTombstoneGC(context.Background(), TombstoneGCOptions{
+		WorkspaceID:        testWorkspace1,
+		MinInactiveCount:   5,
+		KeepRecentInactive: 5,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "KeepRecentInactive")
+
+	_, err = store.RunTombstoneGC(context.Background(), TombstoneGCOptions{
+		WorkspaceID:        testWorkspace1,
+		MinInactiveCount:   5,
+		KeepRecentInactive: 10,
+	})
+	require.Error(t, err)
 }
 
 // TestRunTombstoneGC_RequiresWorkspace proves the global-delete

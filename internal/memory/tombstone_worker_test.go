@@ -56,7 +56,7 @@ func TestTombstoneWorker_RunOnce_DeletesAcrossWorkspaces(t *testing.T) {
 		Interval:           0, // RunOnce only
 		WorkspaceIDs:       []string{testWorkspace1, testWorkspace2},
 		MinAge:             30 * 24 * time.Hour,
-		MinInactiveCount:   5,
+		MinInactiveCount:   10,
 		KeepRecentInactive: 5,
 	}, logr.Discard())
 
@@ -130,7 +130,7 @@ func TestTombstoneWorker_RunFiresAndExitsOnCancel(t *testing.T) {
 		Interval:           50 * time.Millisecond,
 		WorkspaceIDs:       []string{testWorkspace1},
 		MinAge:             30 * 24 * time.Hour,
-		MinInactiveCount:   5,
+		MinInactiveCount:   10,
 		KeepRecentInactive: 5,
 	}, logr.Discard())
 
