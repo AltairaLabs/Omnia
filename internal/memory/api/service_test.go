@@ -151,6 +151,11 @@ func newTestService(t *testing.T) *MemoryService {
 type mockEmbeddingProvider struct {
 	embedCh chan []string // receives the text slice on each Embed call
 	err     error         // if non-nil, Embed returns this error
+	// fixedEmbedding overrides the default [0.1, 0.2, 0.3] result —
+	// useful for the embedding-similarity dedup tests which need a
+	// known vector at the right dimensionality (vector(1536)) to
+	// drive cosine matching against pre-seeded observations.
+	fixedEmbedding []float32
 }
 
 func newMockEmbeddingProvider(bufSize int) *mockEmbeddingProvider {
@@ -164,13 +169,22 @@ func (m *mockEmbeddingProvider) Embed(_ context.Context, texts []string) ([][]fl
 	}
 	result := make([][]float32, len(texts))
 	for i := range texts {
-		result[i] = []float32{0.1, 0.2, 0.3}
+		if m.fixedEmbedding != nil {
+			result[i] = m.fixedEmbedding
+		} else {
+			result[i] = []float32{0.1, 0.2, 0.3}
+		}
 	}
 	m.embedCh <- texts
 	return result, nil
 }
 
-func (m *mockEmbeddingProvider) Dimensions() int { return 3 }
+func (m *mockEmbeddingProvider) Dimensions() int {
+	if m.fixedEmbedding != nil {
+		return len(m.fixedEmbedding)
+	}
+	return 3
+}
 
 func TestServiceSaveMemory(t *testing.T) {
 	svc := newTestService(t)
@@ -341,6 +355,88 @@ func TestMemoryService_SaveWithEmbedding(t *testing.T) {
 		assert.Equal(t, []string{"likes Go"}, texts)
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for async embedding call")
+	}
+}
+
+// oneHotEmbedding returns a length-1536 vector with a 1.0 at pos
+// for use as a deterministic test embedding. Two oneHotEmbeddings
+// at the same position have cosine similarity 1.0; at different
+// positions, similarity 0.0.
+func oneHotEmbedding(pos int) []float32 {
+	v := make([]float32, 1536)
+	if pos >= 0 && pos < len(v) {
+		v[pos] = 1.0
+	}
+	return v
+}
+
+// TestMemoryService_AutoSupersedesByEmbeddingSimilarity proves the
+// embedding-similarity dedup path: a free-form remember whose
+// embedding is identical to a pre-existing observation auto-
+// supersedes that observation under the same entity, returning a
+// SaveResult.action=auto_superseded with reason=high_similarity.
+func TestMemoryService_AutoSupersedesByEmbeddingSimilarity(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	provider := newMockEmbeddingProvider(4)
+	provider.fixedEmbedding = oneHotEmbedding(0)
+	logger := zap.New(zap.UseDevMode(true))
+	embSvc := memory.NewEmbeddingService(store, provider, logger)
+	svc := NewMemoryService(store, embSvc, MemoryServiceConfig{}, logr.Discard())
+
+	ctx := context.Background()
+	scope := map[string]string{
+		memory.ScopeWorkspaceID: testWorkspaceID,
+		memory.ScopeUserID:      "test-user",
+	}
+
+	// Seed an existing memory and stamp it with the same embedding
+	// the provider returns for new content.
+	original := &memory.Memory{
+		Type:       "preference",
+		Content:    "User likes blue",
+		Confidence: 0.9,
+		Scope:      scope,
+	}
+	require.NoError(t, store.Save(ctx, original))
+	require.NoError(t, store.UpdateEmbedding(ctx, original.ID, provider.fixedEmbedding))
+
+	// Drain the seed-side embed channel signals (Save will fire one
+	// async embed per call); without this the channel fills and the
+	// next dedup call's embed channel push would block.
+	drainEmbed(provider, time.Second)
+
+	// New write — provider returns the same embedding → cosine 1.0 →
+	// auto-supersede.
+	updated := &memory.Memory{
+		Type:       "preference",
+		Content:    "User loves blue",
+		Confidence: 0.9,
+		Scope:      scope,
+	}
+	res, err := svc.SaveMemoryWithResult(ctx, updated)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, memory.SaveActionAutoSuperseded, res.Action)
+	assert.Equal(t, memory.ReasonHighSimilarity, res.SupersedeReason)
+	assert.NotEmpty(t, res.SupersededObservationIDs)
+	assert.Equal(t, original.ID, updated.ID,
+		"new observation lives under the existing entity")
+}
+
+// drainEmbed pulls any pending texts off the mock provider's embedCh
+// (the async embed-on-save fire-and-forget) so subsequent test ops
+// don't block on a full channel buffer.
+func drainEmbed(p *mockEmbeddingProvider, timeout time.Duration) {
+	deadline := time.After(timeout)
+	for {
+		select {
+		case <-p.embedCh:
+		case <-deadline:
+			return
+		default:
+			return
+		}
 	}
 }
 

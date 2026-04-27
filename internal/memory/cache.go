@@ -87,6 +87,27 @@ func (c *CachedStore) SaveWithResult(ctx context.Context, mem *Memory) (*SaveRes
 	return res, nil
 }
 
+// FindSimilarObservations passes through to the inner store. No
+// caching: dedup-on-write needs the live state to decide between
+// auto-supersede and surface-as-duplicate.
+func (c *CachedStore) FindSimilarObservations(ctx context.Context, scope map[string]string,
+	queryEmbedding []float32, k int, minSimilarity float64,
+) ([]SimilarObservation, error) {
+	return c.inner.FindSimilarObservations(ctx, scope, queryEmbedding, k, minSimilarity)
+}
+
+// AppendObservationToEntity passes through to the inner store and
+// invalidates the workspace-scoped cache so post-supersede recall
+// reflects the new active observation.
+func (c *CachedStore) AppendObservationToEntity(ctx context.Context, entityID string, mem *Memory) ([]string, error) {
+	ids, err := c.inner.AppendObservationToEntity(ctx, entityID, mem)
+	if err != nil {
+		return nil, err
+	}
+	c.bumpVersion(ctx, mem.Scope)
+	return ids, nil
+}
+
 // Retrieve returns cached results when available, falling back to the inner store on miss or Redis error.
 func (c *CachedStore) Retrieve(ctx context.Context, scope map[string]string, query string, opts RetrieveOptions) ([]*Memory, error) {
 	key := c.retrieveKey(ctx, scope, query, opts)

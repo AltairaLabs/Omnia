@@ -46,6 +46,15 @@ func (fakeMemoryStore) Save(_ context.Context, _ *memory.Memory) error { return 
 func (fakeMemoryStore) SaveWithResult(_ context.Context, mem *memory.Memory) (*memory.SaveResult, error) {
 	return &memory.SaveResult{ID: mem.ID, Action: memory.SaveActionAdded}, nil
 }
+func (fakeMemoryStore) FindSimilarObservations(_ context.Context, _ map[string]string,
+	_ []float32, _ int, _ float64,
+) ([]memory.SimilarObservation, error) {
+	return nil, nil
+}
+func (fakeMemoryStore) AppendObservationToEntity(_ context.Context, entityID string, mem *memory.Memory) ([]string, error) {
+	mem.ID = entityID
+	return nil, nil
+}
 func (fakeMemoryStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	return nil, nil
 }

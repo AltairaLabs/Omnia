@@ -64,6 +64,17 @@ func (m *mockMemoryStore) SaveWithResult(ctx context.Context, mem *memory.Memory
 	return &memory.SaveResult{ID: mem.ID, Action: memory.SaveActionAdded}, nil
 }
 
+func (m *mockMemoryStore) FindSimilarObservations(_ context.Context, _ map[string]string,
+	_ []float32, _ int, _ float64,
+) ([]memory.SimilarObservation, error) {
+	return nil, nil
+}
+
+func (m *mockMemoryStore) AppendObservationToEntity(_ context.Context, entityID string, mem *memory.Memory) ([]string, error) {
+	mem.ID = entityID
+	return nil, nil
+}
+
 func (m *mockMemoryStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	return nil, nil
 }

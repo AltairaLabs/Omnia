@@ -699,6 +699,122 @@ func (s *PostgresMemoryStore) ExportAll(ctx context.Context, scope map[string]st
 	return scanMemories(rows, scope)
 }
 
+// AppendObservationToEntity attaches a new observation to an existing
+// entity, marking all prior active observations as superseded in the
+// same transaction. Used by the embedding-similarity dedup path: when
+// SaveMemoryWithResult finds a match above the auto-supersede
+// threshold, it routes the write through this helper instead of
+// creating a new entity. The structured-key path doesn't need this —
+// upsertEntityByAboutKey + supersedePriorObservations already do the
+// equivalent in Save.
+//
+// Mutates mem.ID to entityID. Returns the observation IDs that were
+// marked superseded so SaveResult can surface them to the agent.
+func (s *PostgresMemoryStore) AppendObservationToEntity(
+	ctx context.Context,
+	entityID string,
+	mem *Memory,
+) ([]string, error) {
+	if entityID == "" {
+		return nil, errors.New("memory: entityID required")
+	}
+	if mem.Scope[ScopeWorkspaceID] == "" {
+		return nil, errors.New(errWorkspaceRequired)
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("memory: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	mem.ID = entityID
+
+	supersededIDs, err := supersedePriorObservations(ctx, tx, entityID)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := insertObservation(ctx, tx, mem); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("memory: commit append: %w", err)
+	}
+	return supersededIDs, nil
+}
+
+// FindSimilarObservations returns active observations under the
+// scope whose embedding's cosine similarity to queryEmbedding is at
+// least minSimilarity, ordered most-similar first. Limited to k
+// results. Used by the dedup-on-write path: SaveMemoryWithResult
+// embeds the new content and either auto-supersedes a high-
+// similarity match (≥0.95) or surfaces mid-similarity matches
+// (≥0.85) as PotentialDuplicates.
+//
+// Scope filtering matches the recall path: workspace + virtual_user
+// (when set) + agent (when set). Observations without an embedding
+// are skipped — the caller has no signal to dedup against, and the
+// embedding service will fill them in async (next cosine run will
+// catch them).
+func (s *PostgresMemoryStore) FindSimilarObservations(
+	ctx context.Context,
+	scope map[string]string,
+	queryEmbedding []float32,
+	k int,
+	minSimilarity float64,
+) ([]SimilarObservation, error) {
+	if scope[ScopeWorkspaceID] == "" {
+		return nil, errors.New(errWorkspaceRequired)
+	}
+	if k <= 0 {
+		k = DefaultDuplicateCandidateLimit
+	}
+
+	// pgvector cosine distance is in [0, 2]; cosine similarity is
+	// (1 - distance) clamped to [-1, 1]. minSimilarity converts to a
+	// max-distance bound for indexed range filtering.
+	maxDistance := 1.0 - minSimilarity
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT o.id, e.id, o.content,
+		       1 - (o.embedding <=> $1) AS similarity
+		FROM memory_entities e
+		JOIN memory_observations o ON o.entity_id = e.id
+		WHERE e.workspace_id = $2
+		  AND ($3::text IS NULL OR e.virtual_user_id = $3)
+		  AND ($4::uuid IS NULL OR e.agent_id = $4)
+		  AND NOT e.forgotten
+		  AND o.superseded_by IS NULL
+		  AND (o.valid_until IS NULL OR o.valid_until > now())
+		  AND o.embedding IS NOT NULL
+		  AND o.embedding <=> $1 <= $5
+		ORDER BY o.embedding <=> $1
+		LIMIT $6`,
+		pgvector.NewVector(queryEmbedding),
+		scope[ScopeWorkspaceID],
+		scopeOrNil(scope, ScopeUserID),
+		scopeOrNil(scope, ScopeAgentID),
+		maxDistance,
+		k,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("memory: similar observations: %w", err)
+	}
+	defer rows.Close()
+
+	var out []SimilarObservation
+	for rows.Next() {
+		var m SimilarObservation
+		if err := rows.Scan(&m.ObservationID, &m.EntityID, &m.Content, &m.Similarity); err != nil {
+			return nil, fmt.Errorf("memory: similar scan: %w", err)
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // UpdateEmbedding sets the embedding vector on the latest observation for an entity.
 func (s *PostgresMemoryStore) UpdateEmbedding(ctx context.Context, entityID string, embedding []float32) error {
 	tag, err := s.pool.Exec(ctx, `

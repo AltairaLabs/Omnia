@@ -161,11 +161,20 @@ func (s *MemoryService) SaveMemory(ctx context.Context, mem *memory.Memory) erro
 // "Updated your name from X to Y") and follow-up tool calls can be
 // honest about what happened.
 //
-// Today this method covers the structured-key dedup path (the
-// agent passed about_kind+about_key in metadata). Embedding-
-// similarity dedup is layered on top in a follow-on commit; when
-// it lands the same SaveResult shape carries its action /
-// potential_duplicates.
+// Two dedup paths run before the write commits:
+//
+//  1. Structured key. When the caller set about_kind+about_key in
+//     metadata the store's ON CONFLICT path supersedes any prior
+//     observation under the same entity (handled inside
+//     store.SaveWithResult).
+//  2. Embedding similarity. When no about key is set AND an
+//     embedding service is configured, the service embeds the new
+//     content and queries for similar active observations under the
+//     same scope. cosine ≥ 0.95 routes through
+//     AppendObservationToEntity to atomically supersede the match;
+//     0.85 ≤ cosine < 0.95 lands the write normally and surfaces the
+//     matches as PotentialDuplicates so the agent can decide on a
+//     later turn.
 func (s *MemoryService) SaveMemoryWithResult(ctx context.Context, mem *memory.Memory) (*memory.SaveResult, error) {
 	if mem.ExpiresAt == nil && s.config.DefaultTTL > 0 {
 		exp := time.Now().Add(s.config.DefaultTTL)
@@ -182,9 +191,36 @@ func (s *MemoryService) SaveMemoryWithResult(ctx context.Context, mem *memory.Me
 			mem.Metadata[memory.MetaKeyPurpose] = s.config.Purpose
 		}
 	}
+
+	// Embedding-similarity dedup — only when no structured about key
+	// (the structured path is more reliable) AND embedding service is
+	// available. Failures here log + fall through to a normal insert
+	// rather than failing the write.
+	var preMatches []memory.SimilarObservation
+	if !hasAboutKeyInMetadata(mem) && s.embeddingSvc != nil {
+		matches, simErr := s.findSimilarForDedup(ctx, mem)
+		if simErr != nil {
+			s.log.V(1).Info("similarity dedup skipped",
+				"reason", "embedding/query failed",
+				"error", simErr.Error())
+		} else {
+			preMatches = matches
+		}
+	}
+	if len(preMatches) > 0 && preMatches[0].Similarity >= memory.DefaultAutoSupersedeSimilarity {
+		return s.applyAutoSupersedeViaSimilarity(ctx, mem, preMatches[0])
+	}
+
 	res, err := s.store.SaveWithResult(ctx, mem)
 	if err != nil {
 		return nil, err
+	}
+	for _, m := range preMatches {
+		res.PotentialDuplicates = append(res.PotentialDuplicates, memory.DuplicateCandidate{
+			ID:         m.ObservationID,
+			Content:    m.Content,
+			Similarity: m.Similarity,
+		})
 	}
 	if s.eventPublisher != nil {
 		event := MemoryEvent{
@@ -218,6 +254,98 @@ func (s *MemoryService) SaveMemoryWithResult(ctx context.Context, mem *memory.Me
 		Kind:        mem.Type,
 	})
 	return res, nil
+}
+
+// hasAboutKeyInMetadata reports whether the caller set the
+// structured-dedup metadata keys; if so the store handles dedup
+// via the unique index path and the embedding-similarity path is
+// skipped.
+func hasAboutKeyInMetadata(mem *memory.Memory) bool {
+	if mem == nil || mem.Metadata == nil {
+		return false
+	}
+	kind, _ := mem.Metadata[memory.MetaKeyAboutKind].(string)
+	key, _ := mem.Metadata[memory.MetaKeyAboutKey].(string)
+	return kind != "" && key != ""
+}
+
+// findSimilarForDedup embeds the new content (synchronously — adds
+// ~one embedding-API roundtrip to the write path) and asks the
+// store for active observations within DefaultSurfaceDuplicateSimilarity.
+// Returns nil when embedding fails or yields no result.
+func (s *MemoryService) findSimilarForDedup(ctx context.Context, mem *memory.Memory) ([]memory.SimilarObservation, error) {
+	embeddings, err := s.embeddingSvc.Provider().Embed(ctx, []string{mem.Content})
+	if err != nil {
+		return nil, err
+	}
+	if len(embeddings) == 0 || len(embeddings[0]) == 0 {
+		return nil, errors.New("embed returned empty result")
+	}
+	return s.store.FindSimilarObservations(ctx, mem.Scope, embeddings[0],
+		memory.DefaultDuplicateCandidateLimit,
+		memory.DefaultSurfaceDuplicateSimilarity)
+}
+
+// applyAutoSupersedeViaSimilarity attaches the new observation to
+// the matched entity and supersedes the entity's prior active
+// observations atomically. Returns a SaveResult marked
+// auto_superseded with reason=high_similarity. The agent uses this
+// to phrase its reply honestly ("I already had something like that
+// — refreshed").
+func (s *MemoryService) applyAutoSupersedeViaSimilarity(
+	ctx context.Context,
+	mem *memory.Memory,
+	match memory.SimilarObservation,
+) (*memory.SaveResult, error) {
+	supersededIDs, err := s.store.AppendObservationToEntity(ctx, match.EntityID, mem)
+	if err != nil {
+		return nil, err
+	}
+
+	// Audit + async embed for the new observation, mirroring the
+	// happy-path behaviour. Event publish + audit fire even on
+	// supersede so dashboards see "this entity was updated".
+	if s.eventPublisher != nil {
+		event := MemoryEvent{
+			EventType:   eventTypeMemoryCreated,
+			MemoryID:    mem.ID,
+			WorkspaceID: mem.Scope[memory.ScopeWorkspaceID],
+			UserID:      mem.Scope[memory.ScopeUserID],
+			Kind:        mem.Type,
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		}
+		go func() {
+			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
+				s.log.Error(err, "memory event publish failed", "eventType", event.EventType, "memoryID", event.MemoryID)
+			}
+		}()
+	}
+	if s.embeddingSvc != nil {
+		go func() {
+			embedCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := s.embeddingSvc.EmbedMemory(embedCtx, mem); err != nil {
+				s.log.Error(err, "async embedding failed", "memoryID", mem.ID)
+			}
+		}()
+	}
+	s.emitAuditEvent(ctx, &MemoryAuditEntry{
+		EventType:   eventTypeMemoryCreated,
+		MemoryID:    mem.ID,
+		WorkspaceID: mem.Scope[memory.ScopeWorkspaceID],
+		UserID:      mem.Scope[memory.ScopeUserID],
+		Kind:        mem.Type,
+		Metadata: map[string]string{
+			"dedup_reason": string(memory.ReasonHighSimilarity),
+		},
+	})
+
+	return &memory.SaveResult{
+		ID:                       mem.ID,
+		Action:                   memory.SaveActionAutoSuperseded,
+		SupersededObservationIDs: supersededIDs,
+		SupersedeReason:          memory.ReasonHighSimilarity,
+	}, nil
 }
 
 // SearchMemories retrieves memories matching a query and scope.

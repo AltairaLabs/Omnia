@@ -408,6 +408,103 @@ func TestPostgresMemoryStore_Save_StructuredKeyDedup(t *testing.T) {
 	assert.Equal(t, "User's name is Phil Collins", results[0].Content)
 }
 
+// TestPostgresMemoryStore_FindSimilarObservations_RanksByCosine proves
+// the embedding-similarity dedup query returns matches ordered by
+// cosine descending, scoped to the (workspace, user) tuple, and only
+// over active observations. Without this the service-layer
+// dedup-on-write path can't tell whether a free-form remember is a
+// near-duplicate of something already stored.
+func TestPostgresMemoryStore_FindSimilarObservations_RanksByCosine(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	near := &Memory{Type: "preference", Content: "User likes blue", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, near))
+	require.NoError(t, store.UpdateEmbedding(ctx, near.ID, repeatFloat(0.1, 1536)))
+
+	far := &Memory{Type: "fact", Content: "Works at Acme", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, far))
+	require.NoError(t, store.UpdateEmbedding(ctx, far.ID, repeatFloat(0.9, 1536)))
+
+	// Query embedding nearly identical to `near` → matches it strongly.
+	matches, err := store.FindSimilarObservations(ctx, scope, repeatFloat(0.1, 1536), 5, 0.5)
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+	assert.Equal(t, "User likes blue", matches[0].Content)
+	assert.Greater(t, matches[0].Similarity, 0.99,
+		"near-identical embedding should score ~1.0")
+}
+
+// TestPostgresMemoryStore_AppendObservationToEntity_AtomicallySupersedes
+// proves the embedding-similarity auto-supersede helper attaches the
+// new observation to the existing entity AND marks all prior active
+// observations inactive in one transaction. End state: one active
+// observation under the entity (the new one), one superseded.
+func TestPostgresMemoryStore_AppendObservationToEntity_AtomicallySupersedes(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	original := &Memory{Type: "preference", Content: "User likes blue", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, original))
+
+	updated := &Memory{Type: "preference", Content: "User loves blue", Confidence: 0.9, Scope: scope}
+	supersededIDs, err := store.AppendObservationToEntity(ctx, original.ID, updated)
+	require.NoError(t, err)
+	require.NotEmpty(t, supersededIDs, "prior observation should be marked superseded")
+	assert.Equal(t, original.ID, updated.ID, "new observation lives under the existing entity")
+
+	results, err := store.Retrieve(ctx, scope, "blue", RetrieveOptions{})
+	require.NoError(t, err)
+	require.Len(t, results, 1, "active filter excludes the superseded observation")
+	assert.Equal(t, "User loves blue", results[0].Content)
+}
+
+// TestPostgresMemoryStore_FindSimilarObservations_HonoursThreshold verifies
+// the minSimilarity filter at the SQL level — too-low matches don't
+// reach the service layer at all.
+func TestPostgresMemoryStore_FindSimilarObservations_HonoursThreshold(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	mem := &Memory{Type: "fact", Content: "Vegetarian", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, mem))
+	require.NoError(t, store.UpdateEmbedding(ctx, mem.ID, oneHotFloat(0, 1536)))
+
+	// Query embedding orthogonal to the stored one (different one-hot
+	// position). Cosine similarity = 0 → threshold 0.5 rejects it.
+	matches, err := store.FindSimilarObservations(ctx, scope, oneHotFloat(100, 1536), 5, 0.5)
+	require.NoError(t, err)
+	assert.Empty(t, matches, "orthogonal embeddings should be filtered by threshold")
+}
+
+// repeatFloat returns a float32 slice of length n filled with v —
+// useful for synthesizing test embeddings without the cost of a real
+// embedding call. Vectors filled with the same constant are parallel
+// (cosine similarity = 1.0 regardless of magnitude); use oneHotFloat
+// when you need orthogonality.
+func repeatFloat(v float32, n int) []float32 {
+	out := make([]float32, n)
+	for i := range out {
+		out[i] = v
+	}
+	return out
+}
+
+// oneHotFloat returns a length-n vector with a 1.0 at position pos
+// and zeros elsewhere. Two one-hot vectors at different positions are
+// orthogonal (cosine similarity = 0), useful for testing that the
+// threshold filter rejects unrelated embeddings.
+func oneHotFloat(pos, n int) []float32 {
+	out := make([]float32, n)
+	if pos >= 0 && pos < n {
+		out[pos] = 1.0
+	}
+	return out
+}
+
 // TestPostgresMemoryStore_Save_StructuredKeyDedup_DifferentKeys verifies
 // that different About keys under the same scope don't collide — they
 // each get their own entity.

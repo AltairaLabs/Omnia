@@ -86,6 +86,17 @@ func (m *cacheTestStore) SaveWithResult(ctx context.Context, mem *Memory) (*Save
 	return &SaveResult{ID: mem.ID, Action: SaveActionAdded}, nil
 }
 
+func (m *cacheTestStore) FindSimilarObservations(_ context.Context, _ map[string]string,
+	_ []float32, _ int, _ float64,
+) ([]SimilarObservation, error) {
+	return nil, nil
+}
+
+func (m *cacheTestStore) AppendObservationToEntity(_ context.Context, entityID string, mem *Memory) ([]string, error) {
+	mem.ID = entityID
+	return nil, nil
+}
+
 func (m *cacheTestStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ RetrieveOptions) ([]*Memory, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -370,6 +381,38 @@ func TestCachedStore_SaveWithResult_InnerError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error from inner SaveWithResult, got nil")
+	}
+}
+
+// TestCachedStore_FindSimilarObservations_Passthrough proves the
+// cache wrapper doesn't add caching to dedup-on-write similarity
+// queries — those need live state to decide between auto-supersede
+// and surface-as-duplicate.
+func TestCachedStore_FindSimilarObservations_Passthrough(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, _ := newTestCache(t, inner)
+
+	_, err := cs.FindSimilarObservations(context.Background(), cacheTestScope(),
+		[]float32{1, 2, 3}, 5, 0.85)
+	if err != nil {
+		t.Fatalf("FindSimilarObservations: %v", err)
+	}
+}
+
+// TestCachedStore_AppendObservationToEntity_BumpsCacheVersion proves
+// that the auto-supersede path invalidates the workspace cache so
+// subsequent recall reflects the new active observation.
+func TestCachedStore_AppendObservationToEntity_BumpsCacheVersion(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, _ := newTestCache(t, inner)
+
+	mem := &Memory{Type: "fact", Content: "x", Scope: cacheTestScope()}
+	_, err := cs.AppendObservationToEntity(context.Background(), "entity-id", mem)
+	if err != nil {
+		t.Fatalf("AppendObservationToEntity: %v", err)
+	}
+	if mem.ID != "entity-id" {
+		t.Errorf("mem.ID = %q, want entity-id", mem.ID)
 	}
 }
 

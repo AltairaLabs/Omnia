@@ -71,6 +71,27 @@ type DuplicateCandidate struct {
 	Similarity float64 `json:"similarity"`
 }
 
+// SimilarObservation is the store-level match returned by
+// FindSimilarObservations. The service layer turns it into either
+// an auto-supersede (≥ AutoSupersedeThreshold) or a
+// DuplicateCandidate (≥ SurfaceDuplicateThreshold).
+type SimilarObservation struct {
+	ObservationID string
+	EntityID      string
+	Content       string
+	Similarity    float64
+}
+
+// Default similarity thresholds. Configurable later via
+// MemoryPolicy.dedup.embeddingSimilarity. The 0.95 / 0.85 split
+// errs on the side of *not* auto-superseding — surprising silent
+// merges of distinct facts are worse than one extra observation.
+const (
+	DefaultAutoSupersedeSimilarity    = 0.95
+	DefaultSurfaceDuplicateSimilarity = 0.85
+	DefaultDuplicateCandidateLimit    = 5
+)
+
 // SaveResult is the rich response returned by SaveWithResult,
 // surfacing what the server's dedup pipeline did. Older callers
 // using the plain pkmemory.Store.Save signature get just an error
@@ -113,6 +134,19 @@ type Store interface {
 	// PromptKit-compatible Save method on this same store is a
 	// backwards-compatible wrapper that discards the result.
 	SaveWithResult(ctx context.Context, mem *Memory) (*SaveResult, error)
+
+	// FindSimilarObservations powers the embedding-similarity dedup
+	// path: SaveMemoryWithResult uses it to decide whether a free-form
+	// remember is a near-duplicate of something already stored.
+	FindSimilarObservations(ctx context.Context, scope map[string]string,
+		queryEmbedding []float32, k int, minSimilarity float64) ([]SimilarObservation, error)
+
+	// AppendObservationToEntity attaches a new observation to an
+	// existing entity and supersedes that entity's prior active
+	// observations atomically. Used by the embedding-similarity
+	// auto-supersede path; not needed by structured-key dedup which
+	// has its own ON CONFLICT route inside SaveWithResult.
+	AppendObservationToEntity(ctx context.Context, entityID string, mem *Memory) ([]string, error)
 	ExportAll(ctx context.Context, scope map[string]string) ([]*Memory, error)
 	BatchDelete(ctx context.Context, scope map[string]string, limit int) (int, error)
 	RetrieveMultiTier(ctx context.Context, req MultiTierRequest) (*MultiTierResult, error)
