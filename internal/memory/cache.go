@@ -166,10 +166,17 @@ func (c *CachedStore) RetrieveHybrid(ctx context.Context, scope map[string]strin
 // Retrieve returns cached results when available, falling back to the inner store on miss or Redis error.
 func (c *CachedStore) Retrieve(ctx context.Context, scope map[string]string, query string, opts RetrieveOptions) ([]*Memory, error) {
 	key := c.retrieveKey(ctx, scope, query, opts)
-	if key != "" {
-		if mems, ok := c.cacheGet(ctx, key); ok {
-			return mems, nil
-		}
+	if key == "" {
+		// retrieveKey returned "" because getVersion failed — already
+		// counted as redis_dependency_errors_total{op=get_version}.
+		// Surface it as a cache lookup error too so the lookup-side
+		// metric reflects every attempt.
+		recordCacheLookup("retrieve", "error")
+	} else if mems, ok := c.cacheGet(ctx, key); ok {
+		recordCacheLookup("retrieve", "hit")
+		return mems, nil
+	} else {
+		recordCacheLookup("retrieve", "miss")
 	}
 
 	mems, err := c.inner.Retrieve(ctx, scope, query, opts)
@@ -285,10 +292,17 @@ func (c *CachedStore) SaveCompactionSummary(ctx context.Context, summary Compact
 // List returns cached results when available, falling back to the inner store on miss or Redis error.
 func (c *CachedStore) List(ctx context.Context, scope map[string]string, opts ListOptions) ([]*Memory, error) {
 	key := c.listKey(ctx, scope, opts)
-	if key != "" {
-		if mems, ok := c.cacheGet(ctx, key); ok {
-			return mems, nil
-		}
+	if key == "" {
+		// listKey returned "" because getVersion failed — already
+		// counted as redis_dependency_errors_total{op=get_version}.
+		// Surface it as a cache lookup error too so the lookup-side
+		// metric reflects every attempt.
+		recordCacheLookup("list", "error")
+	} else if mems, ok := c.cacheGet(ctx, key); ok {
+		recordCacheLookup("list", "hit")
+		return mems, nil
+	} else {
+		recordCacheLookup("list", "miss")
 	}
 
 	mems, err := c.inner.List(ctx, scope, opts)
@@ -349,12 +363,17 @@ func versionKey(sh string) string {
 func (c *CachedStore) getVersion(ctx context.Context, sh string) string {
 	v, err := c.redis.Get(ctx, versionKey(sh)).Result()
 	if err == nil {
+		recordRedisOK()
 		return v
 	}
 	if errors.Is(err, redis.Nil) {
+		// Empty version key is the cold-start case, not an error —
+		// counts as a successful Redis interaction.
+		recordRedisOK()
 		return "0"
 	}
 	c.log.V(1).Info("cache version get failed", "scopeHash", sh, "error", err)
+	recordRedisError("get_version")
 	return ""
 }
 
@@ -363,7 +382,11 @@ func (c *CachedStore) bumpVersion(ctx context.Context, scope map[string]string) 
 	sh := scopeHash(scope)
 	if err := c.redis.Incr(ctx, versionKey(sh)).Err(); err != nil {
 		c.log.V(1).Info("cache version bump failed", "scopeHash", sh, "error", err)
+		recordRedisError("bump_version")
+		return
 	}
+	recordRedisOK()
+	recordCacheVersionBump()
 }
 
 // retrieveKey builds a versioned cache key for a Retrieve call.
@@ -394,11 +417,17 @@ func (c *CachedStore) listKey(ctx context.Context, scope map[string]string, opts
 func (c *CachedStore) cacheGet(ctx context.Context, key string) ([]*Memory, bool) {
 	data, err := c.redis.Get(ctx, key).Bytes()
 	if err != nil {
-		if !errors.Is(err, redis.Nil) {
+		if errors.Is(err, redis.Nil) {
+			// Cache miss is a normal Redis interaction, not a dependency
+			// error — record it as OK so redis_up doesn't flap on cold keys.
+			recordRedisOK()
+		} else {
 			c.log.V(1).Info("cache get failed", "key", key, "error", err)
+			recordRedisError("get_cache")
 		}
 		return nil, false
 	}
+	recordRedisOK()
 
 	var mems []*Memory
 	if err := json.Unmarshal(data, &mems); err != nil {
@@ -417,7 +446,10 @@ func (c *CachedStore) cacheSet(ctx context.Context, key string, mems []*Memory) 
 	}
 	if err := c.redis.Set(ctx, key, data, c.ttl).Err(); err != nil {
 		c.log.V(1).Info("cache set failed", "key", key, "error", err)
+		recordRedisError("set_cache")
+		return
 	}
+	recordRedisOK()
 }
 
 // --- key helpers ---------------------------------------------------------------

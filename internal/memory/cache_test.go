@@ -27,8 +27,29 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/redis/go-redis/v9"
 )
+
+// readCounter returns the current value of a prometheus counter. Used by
+// metrics-wiring tests to assert label cardinality + increments.
+func readCounter(c prometheus.Counter) float64 {
+	var m dto.Metric
+	if err := c.Write(&m); err != nil {
+		return 0
+	}
+	return m.GetCounter().GetValue()
+}
+
+// readGauge returns the current value of a prometheus gauge.
+func readGauge(g prometheus.Gauge) float64 {
+	var m dto.Metric
+	if err := g.Write(&m); err != nil {
+		return 0
+	}
+	return m.GetGauge().GetValue()
+}
 
 // cacheTestStore is a test double for the Store interface used by CachedStore tests.
 type cacheTestStore struct {
@@ -947,3 +968,128 @@ func TestCachedStore_BatchDelete_InnerError(t *testing.T) {
 
 // errTest is a sentinel error for injection.
 var errTest = fmt.Errorf("injected error")
+
+// TestCachedStore_PassthroughWrappers covers the small wrappers that are
+// otherwise pure delegation: SupersedeMany, FindRelatedEntities,
+// FindCompactionCandidates, SaveCompactionSummary. They exist so the cache
+// store implements Store; the test exists so the file stays above the 80%
+// per-file coverage gate.
+func TestCachedStore_PassthroughWrappers(t *testing.T) {
+	inner := &cacheTestStore{saveCompactionID: "c1"}
+	cs, _ := newTestCache(t, inner)
+	ctx := context.Background()
+	scope := cacheTestScope()
+
+	mem := &Memory{Scope: scope, Content: "x"}
+	if _, _, err := cs.SupersedeMany(ctx, []string{"src"}, mem); err != nil {
+		t.Fatalf("SupersedeMany: %v", err)
+	}
+
+	if _, err := cs.FindRelatedEntities(ctx, scope, []string{"e1"}, 10); err != nil {
+		t.Fatalf("FindRelatedEntities: %v", err)
+	}
+
+	if _, err := cs.FindCompactionCandidates(ctx, FindCompactionCandidatesOptions{}); err != nil {
+		t.Fatalf("FindCompactionCandidates: %v", err)
+	}
+
+	id, err := cs.SaveCompactionSummary(ctx, CompactionSummary{
+		WorkspaceID: "ws-1", UserID: "u-1", AgentID: "a-1",
+	})
+	if err != nil {
+		t.Fatalf("SaveCompactionSummary: %v", err)
+	}
+	if id != "c1" {
+		t.Fatalf("expected id c1, got %q", id)
+	}
+}
+
+// TestCachedStore_SaveCompactionSummary_InnerError covers the error branch
+// of SaveCompactionSummary — the cache must propagate the inner error
+// without bumping the version.
+func TestCachedStore_SaveCompactionSummary_InnerError(t *testing.T) {
+	inner := &cacheTestStore{compactionErr: errTest}
+	cs, _ := newTestCache(t, inner)
+
+	if _, err := cs.SaveCompactionSummary(context.Background(), CompactionSummary{WorkspaceID: "ws-1"}); err == nil {
+		t.Fatal("expected SaveCompactionSummary to propagate error")
+	}
+}
+
+// --- Metrics wiring tests -----------------------------------------------------
+
+// TestCachedStore_Metrics_Retrieve verifies that the cache_lookups counter
+// increments with the right (op,result) labels for hit, miss, and error paths,
+// and that redis_up flips on Redis outage. Without these, the cache thrash
+// failure mode (H-P12) is invisible to operators.
+func TestCachedStore_Metrics_Retrieve(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{{ID: "m1", Content: "x"}}}
+	cs, mr := newTestCache(t, inner)
+	ctx := context.Background()
+	scope := cacheTestScope()
+
+	missBefore := readCounter(cacheLookupsTotal.WithLabelValues("retrieve", "miss"))
+	hitBefore := readCounter(cacheLookupsTotal.WithLabelValues("retrieve", "hit"))
+	errBefore := readCounter(cacheLookupsTotal.WithLabelValues("retrieve", "error"))
+	bumpsBefore := readCounter(cacheVersionBumpsTotal)
+	getVerErrBefore := readCounter(redisDependencyErrorsTotal.WithLabelValues("get_version"))
+
+	if _, err := cs.Retrieve(ctx, scope, "", RetrieveOptions{}); err != nil {
+		t.Fatalf("first Retrieve: %v", err)
+	}
+	if got := readCounter(cacheLookupsTotal.WithLabelValues("retrieve", "miss")) - missBefore; got != 1 {
+		t.Fatalf("expected 1 miss after cold Retrieve, got %v", got)
+	}
+
+	if _, err := cs.Retrieve(ctx, scope, "", RetrieveOptions{}); err != nil {
+		t.Fatalf("second Retrieve: %v", err)
+	}
+	if got := readCounter(cacheLookupsTotal.WithLabelValues("retrieve", "hit")) - hitBefore; got != 1 {
+		t.Fatalf("expected 1 hit after warm Retrieve, got %v", got)
+	}
+
+	if err := cs.Save(ctx, &Memory{Scope: scope, Content: "y"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if got := readCounter(cacheVersionBumpsTotal) - bumpsBefore; got != 1 {
+		t.Fatalf("expected 1 version bump after Save, got %v", got)
+	}
+
+	mr.Close()
+	if _, err := cs.Retrieve(ctx, scope, "", RetrieveOptions{}); err != nil {
+		t.Fatalf("Retrieve with redis down: %v", err)
+	}
+	if got := readCounter(cacheLookupsTotal.WithLabelValues("retrieve", "error")) - errBefore; got != 1 {
+		t.Fatalf("expected 1 error after redis down, got %v", got)
+	}
+	if got := readCounter(redisDependencyErrorsTotal.WithLabelValues("get_version")) - getVerErrBefore; got != 1 {
+		t.Fatalf("expected 1 get_version dependency error, got %v", got)
+	}
+	if g := readGauge(redisUp); g != 0 {
+		t.Fatalf("expected redis_up=0 after outage, got %v", g)
+	}
+}
+
+// TestCachedStore_Metrics_List mirrors the Retrieve test for the list op label.
+func TestCachedStore_Metrics_List(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{{ID: "m1", Content: "x"}}}
+	cs, _ := newTestCache(t, inner)
+	ctx := context.Background()
+	scope := cacheTestScope()
+
+	missBefore := readCounter(cacheLookupsTotal.WithLabelValues("list", "miss"))
+	hitBefore := readCounter(cacheLookupsTotal.WithLabelValues("list", "hit"))
+
+	if _, err := cs.List(ctx, scope, ListOptions{}); err != nil {
+		t.Fatalf("first List: %v", err)
+	}
+	if got := readCounter(cacheLookupsTotal.WithLabelValues("list", "miss")) - missBefore; got != 1 {
+		t.Fatalf("expected 1 miss after cold List, got %v", got)
+	}
+	if _, err := cs.List(ctx, scope, ListOptions{}); err != nil {
+		t.Fatalf("second List: %v", err)
+	}
+	if got := readCounter(cacheLookupsTotal.WithLabelValues("list", "hit")) - hitBefore; got != 1 {
+		t.Fatalf("expected 1 hit after warm List, got %v", got)
+	}
+}
