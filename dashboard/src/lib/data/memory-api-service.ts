@@ -122,6 +122,28 @@ export class MemoryApiService {
     }
   }
 
+  async getAgentMemories(
+    workspace: string,
+    agentId: string,
+  ): Promise<MemoryListResponse> {
+    if (!agentId) return { memories: [], total: 0 };
+    const params = new URLSearchParams({ agent: agentId });
+    const response = await fetch(
+      `${MEMORY_API_BASE}/${encodeURIComponent(workspace)}/agent-memories?${params.toString()}`,
+    );
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        return { memories: [], total: 0 };
+      }
+      throw new Error(`Failed to fetch agent memories: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return {
+      memories: data.memories || [],
+      total: data.total ?? 0,
+    };
+  }
+
   async getMemoryAggregate(
     options: MemoryAggregateOptions & { workspace: string },
   ): Promise<AggregateRow[]> {
