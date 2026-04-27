@@ -800,6 +800,18 @@ _docs = _rendered.split('\n---\n')
 _non_crd_docs = [d for d in _docs if 'kind: CustomResourceDefinition' not in d]
 k8s_yaml(blob('\n---\n'.join(_non_crd_docs)))
 
+# The chart renders a `default` SessionRetentionPolicy CR (controlled by
+# `sessionRetention.defaultPolicy.create`). Without an explicit dep it races
+# `omnia-crds` and Tilt fails with "no matches for kind SessionRetentionPolicy"
+# when the CRD isn't established yet. Group it with omnia-crds so the apply
+# waits.
+k8s_resource(
+    new_name='default-retention-policy',
+    objects=['default:sessionretentionpolicy'],
+    labels=['setup'],
+    resource_deps=['omnia-crds'],
+)
+
 # ============================================================================
 # Demo Charts (separate from main Omnia chart)
 # ============================================================================
