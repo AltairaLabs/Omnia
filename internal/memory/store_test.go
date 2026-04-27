@@ -362,6 +362,83 @@ func TestPostgresMemoryStore_Retrieve_FTSQueryFindsTokenizedMatches(t *testing.T
 	assert.Contains(t, contents, "User's name is Slim Shard")
 }
 
+// TestPostgresMemoryStore_Save_StructuredKeyDedup proves that two writes
+// with the same About={kind, key} on the same scope land under one
+// entity, with the older observation marked superseded. This is the
+// fix for the "user changes name and old name memory still remains"
+// bug: the agent passes about={kind:"user", key:"name"} on both
+// writes, the server detects the conflict via the unique index, and
+// atomically supersedes the prior value.
+func TestPostgresMemoryStore_Save_StructuredKeyDedup(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	first := &Memory{
+		Type: "fact", Content: "User's name is Slim Shard",
+		Confidence: 1.0, Scope: scope,
+		Metadata: map[string]any{
+			MetaKeyAboutKind: "user",
+			MetaKeyAboutKey:  "name",
+		},
+	}
+	require.NoError(t, store.Save(ctx, first))
+	require.NotEmpty(t, first.ID)
+
+	second := &Memory{
+		Type: "fact", Content: "User's name is Phil Collins",
+		Confidence: 1.0, Scope: scope,
+		Metadata: map[string]any{
+			MetaKeyAboutKind: "user",
+			MetaKeyAboutKey:  "name",
+		},
+	}
+	require.NoError(t, store.Save(ctx, second))
+
+	// Both observations should live under the SAME entity — second
+	// reuses first's entity_id via the unique index conflict path.
+	assert.Equal(t, first.ID, second.ID,
+		"second write should land under the same entity as first")
+
+	// Recall should return only the latest active observation for that
+	// entity (the older one is superseded).
+	results, err := store.Retrieve(ctx, scope, "name", RetrieveOptions{})
+	require.NoError(t, err)
+	require.Len(t, results, 1, "only one active observation per entity")
+	assert.Equal(t, "User's name is Phil Collins", results[0].Content)
+}
+
+// TestPostgresMemoryStore_Save_StructuredKeyDedup_DifferentKeys verifies
+// that different About keys under the same scope don't collide — they
+// each get their own entity.
+func TestPostgresMemoryStore_Save_StructuredKeyDedup_DifferentKeys(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	name := &Memory{
+		Type: "fact", Content: "User's name is Phil",
+		Confidence: 1.0, Scope: scope,
+		Metadata: map[string]any{
+			MetaKeyAboutKind: "user",
+			MetaKeyAboutKey:  "name",
+		},
+	}
+	require.NoError(t, store.Save(ctx, name))
+
+	loc := &Memory{
+		Type: "fact", Content: "User lives in Berlin",
+		Confidence: 1.0, Scope: scope,
+		Metadata: map[string]any{
+			MetaKeyAboutKind: "user",
+			MetaKeyAboutKey:  "location",
+		},
+	}
+	require.NoError(t, store.Save(ctx, loc))
+
+	assert.NotEqual(t, name.ID, loc.ID, "different keys → different entities")
+}
+
 // TestPostgresMemoryStore_Retrieve_FTSRanksByRelevance verifies that when
 // multiple observations match the FTS query, ts_rank_cd surfaces the
 // most-relevant one first — the agent's recall tool can then trust the
