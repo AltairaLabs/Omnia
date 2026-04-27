@@ -147,6 +147,19 @@ type Store interface {
 	// auto-supersede path; not needed by structured-key dedup which
 	// has its own ON CONFLICT route inside SaveWithResult.
 	AppendObservationToEntity(ctx context.Context, entityID string, mem *Memory) ([]string, error)
+
+	// GetMemory returns a single memory by entity ID with its current
+	// active observation (full content; no inline-vs-summary
+	// truncation). Returns ErrNotFound when the entity doesn't exist
+	// in the scope. Powers the memory__open tool.
+	GetMemory(ctx context.Context, scope map[string]string, entityID string) (*Memory, error)
+
+	// LinkEntities inserts a directed edge in memory_relations so
+	// derived facts attached via relationType ("ABOUT", "MENTIONS",
+	// etc.) survive renames of the target entity. weight defaults to
+	// 1.0 when zero. Returns the relation ID.
+	LinkEntities(ctx context.Context, scope map[string]string,
+		sourceEntityID, targetEntityID, relationType string, weight float64) (string, error)
 	ExportAll(ctx context.Context, scope map[string]string) ([]*Memory, error)
 	BatchDelete(ctx context.Context, scope map[string]string, limit int) (int, error)
 	RetrieveMultiTier(ctx context.Context, req MultiTierRequest) (*MultiTierResult, error)

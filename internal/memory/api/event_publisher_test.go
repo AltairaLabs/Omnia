@@ -75,6 +75,23 @@ func (m *mockMemoryStore) AppendObservationToEntity(_ context.Context, entityID 
 	return nil, nil
 }
 
+func (m *mockMemoryStore) GetMemory(_ context.Context, _ map[string]string, entityID string) (*memory.Memory, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, mem := range m.saved {
+		if mem.ID == entityID {
+			return mem, nil
+		}
+	}
+	return nil, memory.ErrNotFound
+}
+
+func (m *mockMemoryStore) LinkEntities(_ context.Context, _ map[string]string,
+	_, _, _ string, _ float64,
+) (string, error) {
+	return "rel-mock", nil
+}
+
 func (m *mockMemoryStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	return nil, nil
 }

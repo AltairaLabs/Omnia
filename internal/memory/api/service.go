@@ -348,6 +348,106 @@ func (s *MemoryService) applyAutoSupersedeViaSimilarity(
 	}, nil
 }
 
+// OpenMemory returns the full content of a single memory by entity
+// ID. Mirrors the recall scope filter; the active-only filter
+// applies so superseded observations are not returned. Used by
+// memory__open when the agent needs the body of a large memory.
+func (s *MemoryService) OpenMemory(ctx context.Context, scope map[string]string, entityID string) (*memory.Memory, error) {
+	mem, err := s.store.GetMemory(ctx, scope, entityID)
+	if err != nil {
+		return nil, err
+	}
+	s.emitAuditEvent(ctx, &MemoryAuditEntry{
+		EventType:   auditEventMemoryAccessed,
+		MemoryID:    entityID,
+		WorkspaceID: scope[memory.ScopeWorkspaceID],
+		UserID:      scope[memory.ScopeUserID],
+		Metadata:    map[string]string{"operation": "open"},
+	})
+	return mem, nil
+}
+
+// UpdateMemory atomically supersedes the prior active observation
+// under the given entity and inserts a new one with the supplied
+// content. Returns a SaveResult shaped for the agent's reply
+// (action=auto_superseded with reason=explicit). The agent uses
+// memory__update for cases where it knows the entity ID — most
+// commonly when recall surfaced the prior observation and the agent
+// decides this is a replacement.
+func (s *MemoryService) UpdateMemory(ctx context.Context, entityID string, mem *memory.Memory) (*memory.SaveResult, error) {
+	supersededIDs, err := s.store.AppendObservationToEntity(ctx, entityID, mem)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.eventPublisher != nil {
+		event := MemoryEvent{
+			EventType:   eventTypeMemoryCreated,
+			MemoryID:    mem.ID,
+			WorkspaceID: mem.Scope[memory.ScopeWorkspaceID],
+			UserID:      mem.Scope[memory.ScopeUserID],
+			Kind:        mem.Type,
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		}
+		go func() {
+			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
+				s.log.Error(err, "memory event publish failed",
+					"eventType", event.EventType, "memoryID", event.MemoryID)
+			}
+		}()
+	}
+	if s.embeddingSvc != nil {
+		go func() {
+			embedCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := s.embeddingSvc.EmbedMemory(embedCtx, mem); err != nil {
+				s.log.Error(err, "async embedding failed", "memoryID", mem.ID)
+			}
+		}()
+	}
+	s.emitAuditEvent(ctx, &MemoryAuditEntry{
+		EventType:   eventTypeMemoryCreated,
+		MemoryID:    mem.ID,
+		WorkspaceID: mem.Scope[memory.ScopeWorkspaceID],
+		UserID:      mem.Scope[memory.ScopeUserID],
+		Kind:        mem.Type,
+		Metadata:    map[string]string{"dedup_reason": "explicit"},
+	})
+
+	return &memory.SaveResult{
+		ID:                       mem.ID,
+		Action:                   memory.SaveActionAutoSuperseded,
+		SupersededObservationIDs: supersededIDs,
+		SupersedeReason:          memory.SaveSupersedeReason("explicit"),
+	}, nil
+}
+
+// LinkMemories inserts a directed edge in memory_relations so
+// derived facts (preferences, notes) attached to an anchor entity
+// (the user identity) survive renames of the target. Returns the
+// new relation ID.
+func (s *MemoryService) LinkMemories(ctx context.Context, scope map[string]string,
+	sourceEntityID, targetEntityID, relationType string, weight float64,
+) (string, error) {
+	id, err := s.store.LinkEntities(ctx, scope, sourceEntityID, targetEntityID, relationType, weight)
+	if err != nil {
+		return "", err
+	}
+	s.emitAuditEvent(ctx, &MemoryAuditEntry{
+		EventType:   eventTypeMemoryCreated,
+		MemoryID:    id,
+		WorkspaceID: scope[memory.ScopeWorkspaceID],
+		UserID:      scope[memory.ScopeUserID],
+		Metadata: map[string]string{
+			"operation":     "link",
+			"source_id":     sourceEntityID,
+			"target_id":     targetEntityID,
+			"relation_type": relationType,
+		},
+	})
+	return id, nil
+}
+
 // SearchMemories retrieves memories matching a query and scope.
 func (s *MemoryService) SearchMemories(ctx context.Context, scope map[string]string, query string, opts memory.RetrieveOptions) ([]*memory.Memory, error) {
 	results, err := s.store.Retrieve(ctx, scope, query, opts)

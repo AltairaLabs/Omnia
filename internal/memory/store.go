@@ -52,6 +52,10 @@ const (
 	errUserIDRequired    = "memory: user_id scope is required"
 )
 
+// ErrNotFound is returned by GetMemory when the requested entity
+// doesn't exist in the scope. The HTTP handler maps it to 404.
+var ErrNotFound = errors.New("memory: not found")
+
 // SQL column/filter constants to avoid duplication (SonarCloud S1192).
 const (
 	colWorkspaceID   = "workspace_id=$?"
@@ -697,6 +701,146 @@ func (s *PostgresMemoryStore) ExportAll(ctx context.Context, scope map[string]st
 	defer rows.Close()
 
 	return scanMemories(rows, scope)
+}
+
+// GetMemory returns the entity by ID with its current active
+// observation. The active filter mirrors recall — superseded /
+// expired observations are excluded. Returns ErrNotFound when
+// nothing matches in scope. Used by memory__open to fetch the full
+// content of large memories that recall returned only summarised.
+func (s *PostgresMemoryStore) GetMemory(ctx context.Context, scope map[string]string, entityID string) (*Memory, error) {
+	if scope[ScopeWorkspaceID] == "" {
+		return nil, errors.New(errWorkspaceRequired)
+	}
+
+	row := s.pool.QueryRow(ctx, `
+		SELECT e.id, e.kind, e.metadata, e.created_at, e.expires_at,
+		       o.content, o.confidence, o.session_id, o.turn_range,
+		       o.observed_at, o.accessed_at
+		FROM memory_entities e
+		JOIN memory_observations o ON o.entity_id = e.id
+		  AND o.superseded_by IS NULL
+		  AND (o.valid_until IS NULL OR o.valid_until > now())
+		WHERE e.id = $1
+		  AND e.workspace_id = $2
+		  AND ($3::text IS NULL OR e.virtual_user_id = $3)
+		  AND ($4::uuid IS NULL OR e.agent_id = $4)
+		  AND NOT e.forgotten
+		ORDER BY o.observed_at DESC
+		LIMIT 1`,
+		entityID,
+		scope[ScopeWorkspaceID],
+		scopeOrNil(scope, ScopeUserID),
+		scopeOrNil(scope, ScopeAgentID),
+	)
+
+	mem, err := scanSingleMemory(row, scope)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("memory: get memory: %w", err)
+	}
+	return mem, nil
+}
+
+// LinkEntities inserts a row into memory_relations connecting source
+// to target with the given relation_type. weight defaults to 1.0
+// when zero. Returns the relation ID. Validates that both entities
+// belong to the requested workspace before linking.
+func (s *PostgresMemoryStore) LinkEntities(ctx context.Context, scope map[string]string,
+	sourceEntityID, targetEntityID, relationType string, weight float64,
+) (string, error) {
+	if scope[ScopeWorkspaceID] == "" {
+		return "", errors.New(errWorkspaceRequired)
+	}
+	if sourceEntityID == "" || targetEntityID == "" {
+		return "", errors.New("memory: source and target entity IDs are required")
+	}
+	if relationType == "" {
+		return "", errors.New("memory: relation_type is required")
+	}
+	if weight == 0 {
+		weight = 1.0
+	}
+
+	var relationID string
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO memory_relations
+		  (workspace_id, source_entity_id, target_entity_id, relation_type, weight)
+		SELECT $1, $2, $3, $4, $5
+		WHERE EXISTS (
+		    SELECT 1 FROM memory_entities
+		    WHERE id = $2 AND workspace_id = $1 AND NOT forgotten
+		) AND EXISTS (
+		    SELECT 1 FROM memory_entities
+		    WHERE id = $3 AND workspace_id = $1 AND NOT forgotten
+		)
+		RETURNING id`,
+		scope[ScopeWorkspaceID],
+		sourceEntityID,
+		targetEntityID,
+		relationType,
+		weight,
+	).Scan(&relationID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("memory: link entities: %w", err)
+	}
+	return relationID, nil
+}
+
+// scanSingleMemory decodes one row in the same shape as scanMemories
+// returns. Inlined here so the hot path of GetMemory doesn't allocate
+// for the multi-row scanner.
+func scanSingleMemory(row pgx.Row, scope map[string]string) (*Memory, error) {
+	var (
+		id, kind, content     string
+		metaJSON              []byte
+		createdAt, observedAt time.Time
+		expiresAt, accessedAt *time.Time
+		confidence            float64
+		sessionID             *string
+		turnRange             []int
+	)
+	if err := row.Scan(&id, &kind, &metaJSON, &createdAt, &expiresAt,
+		&content, &confidence, &sessionID, &turnRange, &observedAt, &accessedAt); err != nil {
+		return nil, err
+	}
+
+	var meta map[string]any
+	if len(metaJSON) > 0 {
+		if err := json.Unmarshal(metaJSON, &meta); err != nil {
+			return nil, fmt.Errorf("memory: decode metadata: %w", err)
+		}
+	}
+
+	mem := &Memory{
+		ID:         id,
+		Type:       kind,
+		Content:    content,
+		Confidence: confidence,
+		Metadata:   meta,
+		Scope:      maps.Clone(scope),
+		CreatedAt:  createdAt,
+		ExpiresAt:  expiresAt,
+	}
+	if sessionID != nil {
+		mem.SessionID = *sessionID
+	}
+	if len(turnRange) >= 2 {
+		mem.TurnRange = [2]int{turnRange[0], turnRange[1]}
+	}
+	if accessedAt != nil {
+		mem.AccessedAt = *accessedAt
+	}
+	// observedAt isn't on the PromptKit Memory struct; if we ever
+	// surface "when was this observed" separately from CreatedAt
+	// it'll need to ride in metadata.
+	_ = observedAt
+	return mem, nil
 }
 
 // AppendObservationToEntity attaches a new observation to an existing

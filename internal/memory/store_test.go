@@ -436,6 +436,76 @@ func TestPostgresMemoryStore_FindSimilarObservations_RanksByCosine(t *testing.T)
 		"near-identical embedding should score ~1.0")
 }
 
+// TestPostgresMemoryStore_GetMemory_ReturnsActiveObservation proves
+// GetMemory returns the entity's current active observation and
+// excludes superseded predecessors. This is what memory__open
+// returns when the agent asks for the body of a large memory.
+func TestPostgresMemoryStore_GetMemory_ReturnsActiveObservation(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	mem := &Memory{Type: "fact", Content: "first version", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, mem))
+
+	// Append a new observation that supersedes the first.
+	newer := &Memory{Type: "fact", Content: "second version", Confidence: 0.9, Scope: scope}
+	_, err := store.AppendObservationToEntity(ctx, mem.ID, newer)
+	require.NoError(t, err)
+
+	got, err := store.GetMemory(ctx, scope, mem.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "second version", got.Content,
+		"GetMemory returns the active observation, not the superseded one")
+}
+
+// TestPostgresMemoryStore_GetMemory_NotFound proves the sentinel
+// ErrNotFound is returned when the entity doesn't exist in scope.
+// The HTTP handler maps this to 404.
+func TestPostgresMemoryStore_GetMemory_NotFound(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	_, err := store.GetMemory(ctx, scope, "00000000-0000-0000-0000-000000000999")
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// TestPostgresMemoryStore_LinkEntities_InsertsRelation proves
+// LinkEntities writes a row into memory_relations connecting the
+// two entities with the requested type. Used by memory__link to
+// attach derived facts to anchor entities.
+func TestPostgresMemoryStore_LinkEntities_InsertsRelation(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	source := &Memory{Type: "preference", Content: "User likes blue", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, source))
+	target := &Memory{Type: "fact", Content: "User", Confidence: 1.0, Scope: scope}
+	require.NoError(t, store.Save(ctx, target))
+
+	id, err := store.LinkEntities(ctx, scope, source.ID, target.ID, "ABOUT", 1.0)
+	require.NoError(t, err)
+	assert.NotEmpty(t, id)
+}
+
+// TestPostgresMemoryStore_LinkEntities_RejectsNonexistentEntity
+// proves the existence guard fires when either side of the relation
+// references a missing entity. The handler maps this to 404.
+func TestPostgresMemoryStore_LinkEntities_RejectsNonexistentEntity(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	_, err := store.LinkEntities(ctx, scope,
+		"00000000-0000-0000-0000-000000000001",
+		"00000000-0000-0000-0000-000000000002",
+		"ABOUT", 1.0)
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
 // TestPostgresMemoryStore_AppendObservationToEntity_AtomicallySupersedes
 // proves the embedding-similarity auto-supersede helper attaches the
 // new observation to the existing entity AND marks all prior active

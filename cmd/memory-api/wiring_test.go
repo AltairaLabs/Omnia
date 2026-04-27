@@ -55,6 +55,12 @@ func (fakeMemoryStore) AppendObservationToEntity(_ context.Context, entityID str
 	mem.ID = entityID
 	return nil, nil
 }
+func (fakeMemoryStore) GetMemory(_ context.Context, _ map[string]string, _ string) (*memory.Memory, error) {
+	return nil, memory.ErrNotFound
+}
+func (fakeMemoryStore) LinkEntities(_ context.Context, _ map[string]string, _, _, _ string, _ float64) (string, error) {
+	return "", nil
+}
 func (fakeMemoryStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	return nil, nil
 }

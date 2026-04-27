@@ -97,6 +97,16 @@ func (m *cacheTestStore) AppendObservationToEntity(_ context.Context, entityID s
 	return nil, nil
 }
 
+func (m *cacheTestStore) GetMemory(_ context.Context, _ map[string]string, _ string) (*Memory, error) {
+	return nil, nil
+}
+
+func (m *cacheTestStore) LinkEntities(_ context.Context, _ map[string]string,
+	_, _, _ string, _ float64,
+) (string, error) {
+	return "rel-mock", nil
+}
+
 func (m *cacheTestStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ RetrieveOptions) ([]*Memory, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -396,6 +406,32 @@ func TestCachedStore_FindSimilarObservations_Passthrough(t *testing.T) {
 		[]float32{1, 2, 3}, 5, 0.85)
 	if err != nil {
 		t.Fatalf("FindSimilarObservations: %v", err)
+	}
+}
+
+// TestCachedStore_GetMemory_Passthrough proves the cache wrapper
+// delegates open requests to the inner store without caching —
+// memory__open is infrequent and must reflect post-supersede writes
+// immediately.
+func TestCachedStore_GetMemory_Passthrough(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, _ := newTestCache(t, inner)
+	_, _ = cs.GetMemory(context.Background(), cacheTestScope(), "any-id")
+}
+
+// TestCachedStore_LinkEntities_BumpsCacheVersion proves a new
+// relation invalidates the workspace cache so subsequent recall's
+// related[] walk sees the link.
+func TestCachedStore_LinkEntities_BumpsCacheVersion(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, _ := newTestCache(t, inner)
+	id, err := cs.LinkEntities(context.Background(), cacheTestScope(),
+		"src", "tgt", "ABOUT", 1.0)
+	if err != nil {
+		t.Fatalf("LinkEntities: %v", err)
+	}
+	if id == "" {
+		t.Error("expected non-empty relation id")
 	}
 }
 

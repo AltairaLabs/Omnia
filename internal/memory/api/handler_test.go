@@ -87,7 +87,22 @@ func (m *mockStore) FindSimilarObservations(_ context.Context, _ map[string]stri
 
 func (m *mockStore) AppendObservationToEntity(_ context.Context, entityID string, mem *memory.Memory) ([]string, error) {
 	mem.ID = entityID
-	return nil, nil
+	return []string{"prior-obs"}, nil
+}
+
+func (m *mockStore) GetMemory(_ context.Context, _ map[string]string, entityID string) (*memory.Memory, error) {
+	for _, mem := range m.memories {
+		if mem.ID == entityID {
+			return mem, nil
+		}
+	}
+	return nil, memory.ErrNotFound
+}
+
+func (m *mockStore) LinkEntities(_ context.Context, _ map[string]string,
+	_, _, _ string, _ float64,
+) (string, error) {
+	return "rel-mock", nil
 }
 
 func (m *mockStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
@@ -443,6 +458,134 @@ func TestHandleSaveMemory_PropagatesAboutKeyToMetadata(t *testing.T) {
 	require.NotNil(t, store.savedMem.Metadata)
 	assert.Equal(t, "User", store.savedMem.Metadata[memory.MetaKeyAboutKind])
 	assert.Equal(t, "Name", store.savedMem.Metadata[memory.MetaKeyAboutKey])
+}
+
+// TestHandleOpenMemory_ReturnsFullContent proves GET /memories/{id}
+// returns the full content even for large memories where recall
+// would have returned only the title + summary + preview. This is
+// what the agent calls when its working set decides it needs the
+// body of a workspace document.
+func TestHandleOpenMemory_ReturnsFullContent(t *testing.T) {
+	store := &mockStore{
+		memories: []*memory.Memory{
+			{ID: "doc-1", Type: "document", Content: "long body content",
+				Scope: map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeUserID: "u1"}},
+		},
+	}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/memories/doc-1?workspace=ws1&user_id=u1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var resp MemoryResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	require.NotNil(t, resp.Memory)
+	assert.Equal(t, "doc-1", resp.Memory.ID)
+	assert.Equal(t, "long body content", resp.Memory.Content)
+}
+
+// TestHandleUpdateMemory_AtomicSupersede proves PATCH /memories/{id}
+// routes through AppendObservationToEntity, returning a SaveResult
+// shaped for the agent to phrase its reply.
+func TestHandleUpdateMemory_AtomicSupersede(t *testing.T) {
+	store := &mockStore{}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	body := UpdateMemoryRequest{
+		Content:    "User's name is Phil",
+		Type:       "fact",
+		Confidence: 1.0,
+		Scope:      map[string]string{"workspace_id": "ws1", "user_id": "u1"},
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/memories/entity-x",
+		bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp SaveMemoryResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, memory.SaveActionAutoSuperseded, resp.Action)
+}
+
+// TestHandleLinkMemories proves POST /relations writes a row into
+// memory_relations with the requested type. Relations attach
+// derived facts (preferences, notes) to anchor entities (the user
+// identity) so name changes don't strand them.
+func TestHandleLinkMemories(t *testing.T) {
+	store := &mockStore{}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	body := LinkRequest{
+		SourceID:     "obs-1",
+		TargetID:     "user-entity",
+		RelationType: "ABOUT",
+		Scope:        map[string]string{"workspace_id": "ws1", "user_id": "u1"},
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/relations",
+		bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusCreated, rr.Code)
+}
+
+// TestHandleOpenMemory_NotFound proves the 404 path: an unknown
+// entity ID produces a 404 with a meaningful body, not a 500.
+func TestHandleOpenMemory_NotFound(t *testing.T) {
+	store := &mockStore{}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/memories/missing-id?workspace=ws1&user_id=u1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+// TestHandleUpdateMemory_RequiresContent proves the validation
+// guard fires when the agent sends an empty content string —
+// updating to nothing isn't a valid operation.
+func TestHandleUpdateMemory_RequiresContent(t *testing.T) {
+	h := newTestHandler(&mockStore{})
+	mux := setupMux(h)
+
+	body := UpdateMemoryRequest{
+		Scope: map[string]string{"workspace_id": "ws1", "user_id": "u1"},
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/memories/x",
+		bytes.NewReader(b))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// TestHandleLinkMemories_RequiresFields proves the source / target /
+// relation_type validation fires.
+func TestHandleLinkMemories_RequiresFields(t *testing.T) {
+	h := newTestHandler(&mockStore{})
+	mux := setupMux(h)
+
+	body := LinkRequest{Scope: map[string]string{"workspace_id": "ws1", "user_id": "u1"}}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/relations",
+		bytes.NewReader(b))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 func TestHandleSaveMemory_BadJSON(t *testing.T) {

@@ -146,6 +146,35 @@ type SaveMemoryResponse struct {
 	PotentialDuplicates      []memory.DuplicateCandidate `json:"potential_duplicates,omitempty"`
 }
 
+// UpdateMemoryRequest is the JSON body for PATCH /api/v1/memories/{id}.
+// The path parameter identifies the entity to attach the new
+// observation to; the body carries the new content. The server
+// supersedes the entity's prior active observation in the same
+// transaction so recall sees the new value immediately.
+type UpdateMemoryRequest struct {
+	Content    string            `json:"content"`
+	Type       string            `json:"type,omitempty"`
+	Confidence float64           `json:"confidence,omitempty"`
+	Scope      map[string]string `json:"scope"`
+}
+
+// LinkRequest is the JSON body for POST /api/v1/relations. Connects
+// source_id to target_id with the given relation_type so derived
+// facts (preferences, notes) survive renames of the anchor entity.
+type LinkRequest struct {
+	SourceID     string            `json:"source_id"`
+	TargetID     string            `json:"target_id"`
+	RelationType string            `json:"relation_type"`
+	Weight       float64           `json:"weight,omitempty"`
+	Scope        map[string]string `json:"scope"`
+}
+
+// LinkResponse carries the newly-created relation ID so callers can
+// reference it from later updates / inspections.
+type LinkResponse struct {
+	ID string `json:"id"`
+}
+
 // Handler provides HTTP endpoints for the memory API.
 type Handler struct {
 	service     *MemoryService
@@ -174,6 +203,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/memories/export", h.handleExportMemories)
 	mux.HandleFunc("POST /api/v1/memories", h.handleSaveMemory)
 	mux.HandleFunc("GET /api/v1/memories/aggregate", h.handleMemoryAggregate)
+	mux.HandleFunc("GET /api/v1/memories/{id}", h.handleOpenMemory)
+	mux.HandleFunc("PATCH /api/v1/memories/{id}", h.handleUpdateMemory)
+	mux.HandleFunc("POST /api/v1/relations", h.handleLinkMemories)
 	mux.HandleFunc("DELETE /api/v1/memories/{id}", h.handleDeleteMemory)
 	mux.HandleFunc("DELETE /api/v1/memories/batch", h.handleBatchDeleteMemories)
 	mux.HandleFunc("DELETE /api/v1/memories", h.handleDeleteAllMemories)
@@ -373,6 +405,139 @@ func (h *Handler) handleSaveMemory(w http.ResponseWriter, r *http.Request) {
 		SupersedeReason:          res.SupersedeReason,
 		PotentialDuplicates:      res.PotentialDuplicates,
 	})
+}
+
+// handleOpenMemory returns the full content of a single memory by ID.
+// Used by memory__open when the agent decides it needs the body of
+// a large memory that recall returned only summarised. Mirrors the
+// recall scope filter (workspace + user + agent).
+func (h *Handler) handleOpenMemory(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, ErrMissingMemoryID)
+		return
+	}
+	scope, err := parseWorkspaceScope(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	mem, err := h.service.OpenMemory(r.Context(), scope, id)
+	if err != nil {
+		if errors.Is(err, memory.ErrNotFound) {
+			http.Error(w, `{"error":"memory not found"}`, http.StatusNotFound)
+			return
+		}
+		h.log.Error(err, "OpenMemory failed", "memoryID", id)
+		writeError(w, err)
+		return
+	}
+
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(MemoryResponse{Memory: mem})
+}
+
+// handleUpdateMemory atomically supersedes an entity's prior active
+// observation and inserts a new one with the request body's content.
+// Returns SaveMemoryResponse with action=auto_superseded so the
+// agent can phrase its reply ("Updated X from Y to Z").
+func (h *Handler) handleUpdateMemory(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, ErrMissingMemoryID)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, h.maxBodySize)
+
+	var req UpdateMemoryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isMaxBytesError(err) {
+			writeError(w, ErrBodyTooLarge)
+			return
+		}
+		writeError(w, ErrMissingBody)
+		return
+	}
+	if req.Content == "" {
+		http.Error(w, `{"error":"content is required"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Scope[memory.ScopeUserID] == "" {
+		writeError(w, ErrMissingUserID)
+		return
+	}
+
+	mem := &memory.Memory{
+		Type:       req.Type,
+		Content:    req.Content,
+		Confidence: req.Confidence,
+		Scope:      req.Scope,
+	}
+
+	res, err := h.service.UpdateMemory(r.Context(), id, mem)
+	if err != nil {
+		if errors.Is(err, memory.ErrNotFound) {
+			http.Error(w, `{"error":"memory not found"}`, http.StatusNotFound)
+			return
+		}
+		h.log.Error(err, "UpdateMemory failed", "memoryID", id)
+		writeError(w, err)
+		return
+	}
+
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(SaveMemoryResponse{
+		Memory:                   MemoryWithTier{Memory: mem, Tier: deriveTier(mem.Scope)},
+		Action:                   res.Action,
+		SupersededObservationIDs: res.SupersededObservationIDs,
+		SupersedeReason:          res.SupersedeReason,
+	})
+}
+
+// handleLinkMemories inserts a row into memory_relations connecting
+// source_id to target_id with the given relation_type. Used by
+// memory__link to attach derived facts (preferences, notes) to anchor
+// entities (the user identity) so name changes don't strand them.
+func (h *Handler) handleLinkMemories(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, h.maxBodySize)
+
+	var req LinkRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isMaxBytesError(err) {
+			writeError(w, ErrBodyTooLarge)
+			return
+		}
+		writeError(w, ErrMissingBody)
+		return
+	}
+	if req.SourceID == "" || req.TargetID == "" || req.RelationType == "" {
+		http.Error(w, `{"error":"source_id, target_id, and relation_type are required"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Scope[memory.ScopeWorkspaceID] == "" {
+		writeError(w, ErrMissingWorkspace)
+		return
+	}
+
+	id, err := h.service.LinkMemories(r.Context(), req.Scope,
+		req.SourceID, req.TargetID, req.RelationType, req.Weight)
+	if err != nil {
+		if errors.Is(err, memory.ErrNotFound) {
+			http.Error(w, `{"error":"source or target entity not found"}`, http.StatusNotFound)
+			return
+		}
+		h.log.Error(err, "LinkMemories failed",
+			"sourceID", req.SourceID, "targetID", req.TargetID)
+		writeError(w, err)
+		return
+	}
+
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(LinkResponse{ID: id})
 }
 
 // handleDeleteMemory soft-deletes a single memory.

@@ -96,6 +96,27 @@ func (c *CachedStore) FindSimilarObservations(ctx context.Context, scope map[str
 	return c.inner.FindSimilarObservations(ctx, scope, queryEmbedding, k, minSimilarity)
 }
 
+// GetMemory passes through to the inner store. Not cached: the
+// memory__open path is infrequent and needs live data so post-
+// supersede reads reflect the new observation.
+func (c *CachedStore) GetMemory(ctx context.Context, scope map[string]string, entityID string) (*Memory, error) {
+	return c.inner.GetMemory(ctx, scope, entityID)
+}
+
+// LinkEntities passes through to the inner store and invalidates
+// the workspace-scoped cache so subsequent recall sees the new
+// relation when it walks `related[]`.
+func (c *CachedStore) LinkEntities(ctx context.Context, scope map[string]string,
+	sourceEntityID, targetEntityID, relationType string, weight float64,
+) (string, error) {
+	id, err := c.inner.LinkEntities(ctx, scope, sourceEntityID, targetEntityID, relationType, weight)
+	if err != nil {
+		return "", err
+	}
+	c.bumpVersion(ctx, scope)
+	return id, nil
+}
+
 // AppendObservationToEntity passes through to the inner store and
 // invalidates the workspace-scoped cache so post-supersede recall
 // reflects the new active observation.
