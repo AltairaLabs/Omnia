@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -53,12 +54,20 @@ const (
 
 // SQL column/filter constants to avoid duplication (SonarCloud S1192).
 const (
-	colWorkspaceID    = "workspace_id=$?"
-	colVirtualUserID  = "virtual_user_id=$?"
-	colEntityForgot   = "e.forgotten = false"
-	entityKindFilter  = "e.kind=$?"
-	confidenceFilter  = "o.confidence >= $?"
-	observationJoin   = " JOIN memory_observations o ON o.entity_id = e.id AND o.superseded_by IS NULL"
+	colWorkspaceID   = "workspace_id=$?"
+	colVirtualUserID = "virtual_user_id=$?"
+	colEntityForgot  = "e.forgotten = false"
+	entityKindFilter = "e.kind=$?"
+	confidenceFilter = "o.confidence >= $?"
+	// Active-observation filter: superseded rows AND valid_until-expired
+	// rows both disappear from recall. The structured-key supersede path
+	// (Save) sets valid_until = now() on the prior observation; the
+	// resolution-event path (separate update/supersede tools) sets
+	// superseded_by to the new observation's id. Either is sufficient
+	// to hide the row.
+	observationJoin = " JOIN memory_observations o ON o.entity_id = e.id" +
+		" AND o.superseded_by IS NULL" +
+		" AND (o.valid_until IS NULL OR o.valid_until > now())"
 	entityTableAlias  = "e"
 	selectEntityCols  = "e.id, e.kind, e.metadata, e.created_at, e.expires_at"
 	selectObserveCols = "o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at"
@@ -99,12 +108,31 @@ func (s *PostgresMemoryStore) Save(ctx context.Context, mem *Memory) error {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if mem.ID == "" {
+	// Structured-key dedup path: when the caller passed
+	// about_kind+about_key, look up (or atomically create) the entity
+	// keyed by (scope, about_kind, about_key) and supersede any prior
+	// active observation under it. This is what fixes the "user
+	// changes name and old name still shows up" failure.
+	switch {
+	case mem.ID == "" && hasAboutKey(mem):
+		if err := upsertEntityByAboutKey(ctx, tx, mem); err != nil {
+			return err
+		}
+	case mem.ID == "":
 		if err := insertEntity(ctx, tx, mem); err != nil {
 			return err
 		}
-	} else {
+	default:
 		if err := updateEntity(ctx, tx, mem); err != nil {
+			return err
+		}
+	}
+
+	// When this Save reused an existing entity via the structured-key
+	// path, supersede the prior active observation(s). Done before the
+	// new observation insert so the new row's superseded_by stays NULL.
+	if hasAboutKey(mem) {
+		if err := supersedePriorObservations(ctx, tx, mem.ID); err != nil {
 			return err
 		}
 	}
@@ -114,6 +142,91 @@ func (s *PostgresMemoryStore) Save(ctx context.Context, mem *Memory) error {
 	}
 
 	return tx.Commit(ctx)
+}
+
+// hasAboutKey reports whether the caller asked for structured-key
+// dedup by setting both metadata keys.
+func hasAboutKey(mem *Memory) bool {
+	return stringFromMeta(mem.Metadata, MetaKeyAboutKind) != "" &&
+		stringFromMeta(mem.Metadata, MetaKeyAboutKey) != ""
+}
+
+// upsertEntityByAboutKey atomically returns the existing entity for
+// (scope, about_kind, about_key) — creating it if absent. Sets mem.ID
+// and mem.CreatedAt either way. Implements the structured-key
+// dedup path via ON CONFLICT against the partial unique index.
+func upsertEntityByAboutKey(ctx context.Context, tx pgx.Tx, mem *Memory) error {
+	metaJSON, err := marshalMetadata(mem.Metadata)
+	if err != nil {
+		return err
+	}
+	trustModel, sourceType := trustFromProvenance(mem.Metadata)
+	purpose := purposeFromMetadata(mem.Metadata)
+	consentCategory := consentCategoryFromMetadata(mem.Metadata)
+	aboutKind := stringFromMeta(mem.Metadata, MetaKeyAboutKind)
+	aboutKey := stringFromMeta(mem.Metadata, MetaKeyAboutKey)
+	title := stringFromMeta(mem.Metadata, MetaKeyTitle)
+
+	// ON CONFLICT against the partial unique index. The DO UPDATE
+	// SET clause is what unblocks RETURNING on conflict — without an
+	// update Postgres skips the row entirely. Bumping updated_at
+	// also signals "this entity got new content" for downstream
+	// consumers (dashboard "last activity" timestamps, retention
+	// freshness checks).
+	row := tx.QueryRow(ctx, `
+		INSERT INTO memory_entities
+		  (workspace_id, virtual_user_id, agent_id, name, kind, metadata, expires_at,
+		   trust_model, source_type, purpose, consent_category,
+		   about_kind, about_key, title)
+		VALUES
+		  ($1, $2, $3, $4, $5, $6, $7,
+		    COALESCE($8, 'inferred'),
+		    COALESCE($9, 'conversation_extraction'),
+		    COALESCE($10, 'support_continuity'),
+		    $11, $12, $13, NULLIF($14, ''))
+		ON CONFLICT (workspace_id, virtual_user_id, agent_id,
+		             about_kind, about_key)
+		WHERE about_kind IS NOT NULL AND NOT forgotten
+		DO UPDATE SET updated_at = now(),
+		              metadata = EXCLUDED.metadata,
+		              title = COALESCE(EXCLUDED.title, memory_entities.title)
+		RETURNING id, created_at`,
+		mem.Scope[ScopeWorkspaceID],
+		scopeOrNil(mem.Scope, ScopeUserID),
+		scopeOrNil(mem.Scope, ScopeAgentID),
+		mem.Content,
+		mem.Type,
+		metaJSON,
+		mem.ExpiresAt,
+		trustModel,
+		sourceType,
+		purpose,
+		consentCategory,
+		aboutKind,
+		aboutKey,
+		title,
+	)
+	return row.Scan(&mem.ID, &mem.CreatedAt)
+}
+
+// supersedePriorObservations marks any active observation under the
+// entity as superseded by the next insert. Uses NOW() for both
+// superseded_by-marker (NULL — set when the new observation lands)
+// and valid_until, so recall's active-only filter excludes them
+// immediately. Idempotent.
+func supersedePriorObservations(ctx context.Context, tx pgx.Tx, entityID string) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE memory_observations
+		SET valid_until = now()
+		WHERE entity_id = $1
+		  AND superseded_by IS NULL
+		  AND valid_until IS NULL`,
+		entityID,
+	)
+	if err != nil {
+		return fmt.Errorf("memory: supersede prior observations: %w", err)
+	}
+	return nil
 }
 
 // MetaKeyPurpose is the metadata key carrying the Omnia purpose tag
@@ -131,6 +244,45 @@ const MetaKeyPurpose = "purpose"
 // Empty / missing values leave the column NULL — those rows fall
 // under the default (non-per-category) retention policy.
 const MetaKeyConsentCategory = "consent_category"
+
+// MetaKeyAboutKind / MetaKeyAboutKey carry the structured-dedup hint
+// from PromptKit's `about` parameter. When both are set, Save treats
+// (workspace, user, agent, about_kind, about_key) as a soft-unique
+// key: a second write atomically supersedes the first under the same
+// entity. Used for identity-class facts where the agent knows what
+// attribute it is writing (name, location, single-valued
+// preference). Free-form writes leave both empty and fall through
+// to similarity-based dedup.
+const (
+	MetaKeyAboutKind = "about_kind"
+	MetaKeyAboutKey  = "about_key"
+)
+
+// MetaKeyTitle / MetaKeySummary carry display fields for large
+// memories (workspace docs, session summaries, skill manifests).
+// Written to memory_entities.title and memory_observations.summary
+// respectively so the recall path can return a synopsis instead of
+// the full body.
+const (
+	MetaKeyTitle   = "title"
+	MetaKeySummary = "summary"
+)
+
+// stringFromMeta returns the trimmed lowercased value of meta[key]
+// for the about_* keys (where consistent normalisation prevents
+// silent dedup misses across casing or whitespace), and the raw
+// trimmed value otherwise. Empty / missing → "".
+func stringFromMeta(meta map[string]any, key string) string {
+	if meta == nil {
+		return ""
+	}
+	v, _ := meta[key].(string)
+	v = strings.TrimSpace(v)
+	if key == MetaKeyAboutKind || key == MetaKeyAboutKey {
+		return strings.ToLower(v)
+	}
+	return v
+}
 
 // insertEntity inserts a new memory_entities row and populates mem.ID / mem.CreatedAt.
 //
@@ -284,8 +436,16 @@ func insertObservation(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 	return nil
 }
 
-// Retrieve returns memories matching scope, a substring query, and options.
-// Results are ordered by observed_at DESC and limited to opts.Limit (default 50).
+// Retrieve returns memories matching scope, a free-text query, and options.
+//
+// Query handling:
+//   - Empty query: returns the most recent observation per entity, ordered
+//     by observed_at DESC.
+//   - Non-empty query: runs Postgres full-text search (websearch_to_tsquery
+//     against the GENERATED search_vector column) and orders results by
+//     ts_rank_cd. Stopwords ("my", "the", "is") are dropped, so a query
+//     like "my name" matches a memory whose content is "User's name is X".
+//
 // A successful retrieval also fires a detached UPDATE that bumps
 // accessed_at / access_count on the returned entities — the signal LRU
 // pruning and recency-weighted ranking depend on.
@@ -311,17 +471,61 @@ func (s *PostgresMemoryStore) Retrieve(ctx context.Context, scope map[string]str
 }
 
 // buildRetrieveQuery constructs the SQL and arguments for a Retrieve call.
+// When query is non-empty it builds a FTS-scored variant; otherwise it
+// returns the standard recency-ordered query.
 func buildRetrieveQuery(scope map[string]string, query string, opts RetrieveOptions) (string, *pgutil.QueryBuilder) {
 	qb := buildBaseMemoryQuery(scope, opts.Types, "")
 
 	if opts.MinConfidence > 0 {
 		qb.Add(confidenceFilter, opts.MinConfidence)
 	}
-	if query != "" {
-		qb.Add("o.content ILIKE $?", "%"+query+"%")
+
+	if query == "" {
+		return formatMemorySQL(qb, opts.Limit, 0), qb
 	}
 
-	return formatMemorySQL(qb, opts.Limit, 0), qb
+	// FTS path: filter observations by tsquery match, pick the highest-
+	// ranked observation per entity, then sort entities by that rank.
+	// The query argument is referenced twice (WHERE + ORDER BY rank); we
+	// capture its placeholder index so both spots see the same parameter.
+	queryArgIdx := len(qb.Args()) + 1
+	qb.Add("o.search_vector @@ websearch_to_tsquery('english', $?)", query)
+	return formatMemoryFTSSQL(qb, queryArgIdx, opts.Limit, 0), qb
+}
+
+// formatMemoryFTSSQL renders a Retrieve query that ranks matching
+// observations via ts_rank_cd against websearch_to_tsquery. queryArgIdx
+// is the 1-based placeholder of the user query already added to qb.
+func formatMemoryFTSSQL(qb *pgutil.QueryBuilder, queryArgIdx, limit, offset int) string {
+	if limit <= 0 {
+		limit = defaultMemoryLimit
+	}
+	// Inner query: per entity pick the observation with the highest
+	// ts_rank_cd (DISTINCT ON requires the ORDER BY to start with the
+	// distinct key). Outer query: re-sort entities by that score.
+	tsqueryExpr := fmt.Sprintf("websearch_to_tsquery('english', $%d)", queryArgIdx)
+	rankExpr := fmt.Sprintf("ts_rank_cd(o.search_vector, %s)", tsqueryExpr)
+
+	inner := fmt.Sprintf(`
+		SELECT DISTINCT ON (e.id) %s, %s, %s AS rank
+		FROM memory_entities %s%s
+		WHERE %s%s
+		ORDER BY e.id, rank DESC, o.observed_at DESC`,
+		selectEntityCols, selectObserveCols, rankExpr,
+		entityTableAlias, observationJoin,
+		colEntityForgot, qb.Where())
+
+	// Outer SELECT projects only the original entity + observation columns
+	// (unprefixed, since the subquery exposes them by their bare names) so
+	// the scanner sees the same column count as the non-FTS path; rank is
+	// used purely for ordering.
+	outerCols := strings.ReplaceAll(selectEntityCols, "e.", "") + ", " +
+		strings.ReplaceAll(selectObserveCols, "o.", "")
+	sql := fmt.Sprintf(
+		"SELECT %s FROM (%s) AS scored ORDER BY rank DESC, observed_at DESC",
+		outerCols, inner,
+	)
+	return qb.AppendPagination(sql, limit, offset)
 }
 
 // List returns memories filtered by scope and options with pagination.

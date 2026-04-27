@@ -12,6 +12,11 @@ vi.mock("@/hooks/resources", () => ({
   useWorkspaces: vi.fn(),
 }));
 
+vi.mock("next/navigation", () => ({
+  usePathname: vi.fn(() => "/sessions"),
+}));
+
+import { usePathname } from "next/navigation";
 import { useWorkspaces, type WorkspaceListItem } from "@/hooks/resources";
 
 const mockWorkspaces: WorkspaceListItem[] = [
@@ -280,6 +285,48 @@ describe("WorkspaceContext", () => {
     }).toThrow("useWorkspace must be used within a WorkspaceProvider");
 
     consoleSpy.mockRestore();
+  });
+
+  it("disables the workspace fetch on chromeless routes (e.g. /login)", () => {
+    vi.mocked(usePathname).mockReturnValue("/login");
+    vi.mocked(useWorkspaces).mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useWorkspaces>);
+
+    const Wrapper = createWrapper();
+    render(
+      <Wrapper>
+        <WorkspaceProvider>
+          <TestConsumer />
+        </WorkspaceProvider>
+      </Wrapper>
+    );
+
+    expect(useWorkspaces).toHaveBeenCalledWith({ enabled: false });
+  });
+
+  it("enables the workspace fetch on regular routes", () => {
+    vi.mocked(usePathname).mockReturnValue("/sessions");
+    vi.mocked(useWorkspaces).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useWorkspaces>);
+
+    const Wrapper = createWrapper();
+    render(
+      <Wrapper>
+        <WorkspaceProvider>
+          <TestConsumer />
+        </WorkspaceProvider>
+      </Wrapper>
+    );
+
+    expect(useWorkspaces).toHaveBeenCalledWith({ enabled: true });
   });
 
   it("returns null for currentWorkspace when no workspaces exist", async () => {

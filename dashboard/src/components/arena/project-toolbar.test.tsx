@@ -32,6 +32,32 @@ vi.mock("@/hooks/use-agents", () => ({
   useAgents: () => ({ data: [], isLoading: false }),
 }));
 
+// Mock useProjectJobs hooks (used by RunDropdown). Avoids needing a
+// QueryClientProvider wrapper around every render in this test.
+vi.mock("@/hooks/use-project-jobs", () => ({
+  useProjectJobs: () => ({
+    jobs: [],
+    deployed: false,
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+  useProjectRunMutations: () => ({
+    run: vi.fn(),
+    running: false,
+    error: null,
+  }),
+  useProjectJobsWithRun: () => ({
+    jobs: [],
+    deployed: false,
+    loading: false,
+    running: false,
+    error: null,
+    run: vi.fn(),
+    refetch: vi.fn(),
+  }),
+}));
+
 describe("ProjectToolbar", () => {
   const mockProject: ArenaProject = {
     id: "project-1",

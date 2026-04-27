@@ -181,10 +181,13 @@ func TestBuildRetrieveQuery_WithAllFilters(t *testing.T) {
 		MinConfidence: 0.8,
 	})
 
-	assert.Contains(t, sql, "ILIKE")
+	// FTS path: query goes through websearch_to_tsquery + ts_rank_cd,
+	// not ILIKE. The MinConfidence filter still applies in WHERE.
+	assert.Contains(t, sql, "websearch_to_tsquery")
+	assert.Contains(t, sql, "ts_rank_cd")
 	assert.Contains(t, sql, "confidence")
 	assert.Contains(t, sql, "LIMIT")
-	// workspace_id, user_id, kind, confidence, ilike, limit = 6 args
+	// workspace_id, user_id, kind, confidence, query, limit = 6 args
 	assert.Len(t, qb.Args(), 6)
 }
 

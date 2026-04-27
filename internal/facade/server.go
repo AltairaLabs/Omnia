@@ -503,7 +503,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		userEmail string
 	)
 	if authIdentity != nil {
-		rawUserID = authIdentity.EndUser
+		// Mgmt-plane JWTs identify the *dashboard operator* (the human
+		// using "Try this agent"), not the end user whose memories /
+		// sessions we're scoping. The dashboard always sends a device_id
+		// query param on the WS upgrade — when the auth came from the
+		// management plane, scope to that so memories saved during a
+		// debug session show up in the user's "My Memories" view.
+		// (The operator pseudonym still flows separately into audit
+		// logs via authIdentity.Subject.)
+		if authIdentity.Origin == policy.OriginManagementPlane {
+			if dev := r.URL.Query().Get("device_id"); dev != "" {
+				rawUserID = dev
+			} else {
+				rawUserID = authIdentity.EndUser
+			}
+		} else {
+			rawUserID = authIdentity.EndUser
+		}
 		userRoles = authIdentity.Role
 		userEmail = authIdentity.Claims["email"]
 	} else {

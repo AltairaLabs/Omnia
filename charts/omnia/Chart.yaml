@@ -5,8 +5,8 @@ type: application
 # version / appVersion track the last git-tagged release. When cutting a
 # new release, bump both in a commit before tagging. The release workflow
 # also rewrites these at package-time as a safety net.
-version: 0.9.0-beta.11
-appVersion: "0.9.0-beta.11"
+version: 0.9.0-beta.13
+appVersion: "0.9.0-beta.13"
 kubeVersion: ">=1.26.0-0"
 home: https://github.com/AltairaLabs/Omnia
 sources:

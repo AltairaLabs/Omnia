@@ -21,6 +21,7 @@ const next = require("next");
 const { WebSocket, WebSocketServer } = require("ws");
 const { checkAnonymousAuthGuard } = require("./lib/auth-boot-guard");
 const { loadSigningKey, mintToken } = require("./lib/mgmt-plane-token");
+const { serveJwks, JWKS_PATH } = require("./lib/jwks");
 
 // Refuse to start if we're configured to run unauthenticated in what looks
 // like production. Mirrors the Helm chart's render-time check
@@ -46,9 +47,14 @@ const wsProxyPort = Number.parseInt(process.env.WS_PROXY_PORT || "3002", 10);
 const MGMT_PLANE_SIGNING_KEY_PATH = process.env.OMNIA_MGMT_PLANE_SIGNING_KEY_PATH || "";
 
 let mgmtPlaneSigningKey = null;
+let mgmtPlanePublicKey = null;
 if (MGMT_PLANE_SIGNING_KEY_PATH) {
   try {
     mgmtPlaneSigningKey = loadSigningKey(MGMT_PLANE_SIGNING_KEY_PATH);
+    // Derive the public half once for the JWKS endpoint. Done here (not
+    // on every request) so a corrupt key trips boot rather than the
+    // first JWKS fetch from a facade.
+    mgmtPlanePublicKey = crypto.createPublicKey(mgmtPlaneSigningKey);
     console.log(`> mgmt-plane signing key loaded from ${MGMT_PLANE_SIGNING_KEY_PATH}`);
   } catch (err) {
     // Fatal — silently downgrading to "no auth" hides a real
@@ -640,6 +646,22 @@ app.prepare().then(() => {
   const server = createServer(async (req, res) => {
     try {
       const parsedUrl = parse(req.url, true);
+
+      // Serve the JWKS endpoint directly from the custom server so the
+      // facade's JWKS validator can fetch the dashboard's mgmt-plane
+      // public key without traversing the Next.js auth gate. Returns
+      // 404-equivalent behaviour (passthrough) when no signing key is
+      // configured, so test/dev installs without a key still get a
+      // sensible response.
+      if (parsedUrl.pathname === JWKS_PATH) {
+        if (mgmtPlanePublicKey) {
+          serveJwks(mgmtPlanePublicKey, req, res);
+        } else {
+          res.writeHead(503, { "Content-Type": "text/plain" });
+          res.end("mgmt-plane signing key not configured");
+        }
+        return;
+      }
 
       // Cache hashed static assets for 1 year (immutable content-addressed files)
       if (parsedUrl.pathname && parsedUrl.pathname.startsWith("/_next/static/")) {

@@ -267,6 +267,10 @@
             }
           }
         },
+        "jwksUrl": {
+          "type": "string",
+          "description": "Override the JWKS URL the operator hands to facade pods as OMNIA_MGMT_PLANE_JWKS_URL. Empty derives the in-cluster service URL."
+        },
         "auth": {
           "type": "object",
           "properties": {

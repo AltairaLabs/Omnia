@@ -17,7 +17,6 @@ limitations under the License.
 package main
 
 import (
-	"errors"
 	"os"
 
 	"github.com/go-logr/logr"
@@ -25,60 +24,39 @@ import (
 	"github.com/altairalabs/omnia/internal/facade/auth"
 )
 
-// envMgmtPlanePubkeyPath is the env var the operator sets on the facade
-// container pointing at the mounted dashboard mgmt-plane public key. Kept
-// in sync with internal/controller/constants.go:EnvMgmtPlanePubkeyPath.
+// envMgmtPlaneJWKSURL is the env var the operator sets on the facade
+// container pointing at the dashboard's JWKS endpoint
+// (e.g. http://omnia-dashboard.omnia-system.svc.cluster.local:3000/api/auth/jwks).
+// Kept in sync with internal/controller/constants.go:EnvMgmtPlaneJWKSURL.
 // Duplicated as a literal here to avoid importing the controller package
 // into the facade binary.
-const envMgmtPlanePubkeyPath = "OMNIA_MGMT_PLANE_PUBKEY_PATH"
+const envMgmtPlaneJWKSURL = "OMNIA_MGMT_PLANE_JWKS_URL"
 
-// loadMgmtPlaneValidator constructs an auth.MgmtPlaneValidator when the
-// env var points at an existing, readable PEM file. Returns (nil, nil)
-// when the var is unset, the file is absent (the ConfigMap mirror hasn't
-// landed yet, or the dashboard isn't deployed), or the file is empty —
-// in every case the caller runs without mgmt-plane validation, which is
-// PR 1a's default.
+// loadMgmtPlaneValidator constructs an auth.MgmtPlaneValidator backed by
+// a JWKS resolver pointed at the dashboard's signing-key endpoint.
 //
-// Any other error (malformed PEM, non-RSA key) is surfaced so the facade
-// startup fails loudly rather than silently running without auth — an
-// actively-broken keypair shouldn't downgrade to "no mgmt plane".
+// Returns (nil, nil) when the env var is unset — that's the expected
+// shape for installs without a dashboard (Arena E2E, headless runtimes).
+// Any construction error is surfaced so a misconfigured URL trips boot
+// rather than silently downgrading to "no mgmt-plane validation".
+//
+// Errors at JWT-validation time (DNS lookup failure, dashboard down,
+// 5xx response) bubble up to the auth chain as ErrInvalidCredential —
+// see auth.JWKSResolver. Tested in
+// internal/facade/auth/mgmt_plane_test.go's
+// TestMgmtPlaneValidator_FetchesFromJWKSEndpoint.
 func loadMgmtPlaneValidator(log logr.Logger) (auth.Validator, error) {
-	path := os.Getenv(envMgmtPlanePubkeyPath)
-	if path == "" {
+	url := os.Getenv(envMgmtPlaneJWKSURL)
+	if url == "" {
 		log.V(1).Info("mgmt-plane validator skipped",
 			"reason", "env var unset",
-			"envVar", envMgmtPlanePubkeyPath)
+			"envVar", envMgmtPlaneJWKSURL)
 		return nil, nil
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			// Log at info level (not V(1)): the env var was SET, which
-			// means the operator wired a pubkey path, but the file is
-			// missing. Most likely the Workspace controller has not yet
-			// reconciled the mirror ConfigMap — a genuine race at pod
-			// startup. Either way this is operationally interesting
-			// enough that operators should see it at the default log
-			// verbosity; a silent skip was the T2 finding.
-			log.Info("mgmt-plane validator skipped — pubkey file missing",
-				"path", path,
-				"hint", "usually resolves after the Workspace controller reconciles "+
-					"the pubkey ConfigMap; if it persists, verify dashboard.enabled "+
-					"and the workspace's namespace label")
-			return nil, nil
-		}
-		return nil, err
-	}
-	if info.Size() == 0 {
-		log.Info("mgmt-plane validator skipped — pubkey file is empty",
-			"path", path)
-		return nil, nil
-	}
-
-	v, err := auth.NewMgmtPlaneValidator(path)
+	v, err := auth.NewMgmtPlaneValidator(url)
 	if err != nil {
 		return nil, err
 	}
-	log.Info("mgmt-plane validator enabled", "pubkeyPath", path)
+	log.Info("mgmt-plane validator enabled", "jwksURL", url)
 	return v, nil
 }

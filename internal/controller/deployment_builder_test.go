@@ -824,10 +824,22 @@ func TestResolveSessionURLForWorkspace(t *testing.T) {
 	}
 }
 
+// findPromptpackConfigMount returns the promptpack-config VolumeMount
+// or nil. Inlined here because the previous shared helper lived in
+// mgmt_plane_pubkey_wiring_test.go, which was removed when the JWKS-
+// based mgmt-plane validator replaced the per-workspace pubkey
+// ConfigMap mirror — and it's only ever asked for promptpack-config.
+func findPromptpackConfigMount(mounts []corev1.VolumeMount) *corev1.VolumeMount {
+	for i := range mounts {
+		if mounts[i].Name == "promptpack-config" {
+			return &mounts[i]
+		}
+	}
+	return nil
+}
+
 // TestBuildFacadeVolumeMounts_WithConfigMap verifies that a PromptPack backed by a
-// ConfigMap produces a promptpack-config volume mount. The mgmt-plane pubkey
-// mount is always present and validated separately in
-// mgmt_plane_pubkey_wiring_test.go.
+// ConfigMap produces a promptpack-config volume mount.
 func TestBuildFacadeVolumeMounts_WithConfigMap(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 	pp := &omniav1alpha1.PromptPack{}
@@ -836,7 +848,7 @@ func TestBuildFacadeVolumeMounts_WithConfigMap(t *testing.T) {
 
 	mounts := r.buildFacadeVolumeMounts(pp)
 
-	mount := findMount(mounts, "promptpack-config")
+	mount := findPromptpackConfigMount(mounts)
 	if mount == nil {
 		t.Fatalf("expected promptpack-config mount, got %+v", mounts)
 	}
@@ -849,8 +861,7 @@ func TestBuildFacadeVolumeMounts_WithConfigMap(t *testing.T) {
 }
 
 // TestBuildFacadeVolumeMounts_NoConfigMapRef verifies that a PromptPack without a
-// ConfigMapRef produces no promptpack-config mount (the mgmt-plane mount is
-// unconditional and covered by its own test).
+// ConfigMapRef produces no promptpack-config mount.
 func TestBuildFacadeVolumeMounts_NoConfigMapRef(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 	pp := &omniav1alpha1.PromptPack{}
@@ -859,7 +870,7 @@ func TestBuildFacadeVolumeMounts_NoConfigMapRef(t *testing.T) {
 
 	mounts := r.buildFacadeVolumeMounts(pp)
 
-	if m := findMount(mounts, "promptpack-config"); m != nil {
+	if m := findPromptpackConfigMount(mounts); m != nil {
 		t.Errorf("did not expect promptpack-config mount, got %+v", m)
 	}
 }
@@ -874,7 +885,7 @@ func TestBuildFacadeVolumeMounts_NonConfigMapSource(t *testing.T) {
 
 	mounts := r.buildFacadeVolumeMounts(pp)
 
-	if m := findMount(mounts, "promptpack-config"); m != nil {
+	if m := findPromptpackConfigMount(mounts); m != nil {
 		t.Errorf("did not expect promptpack-config mount for non-configmap source, got %+v", m)
 	}
 }
@@ -893,7 +904,7 @@ func TestBuildFacadeContainer_VolumeMounts(t *testing.T) {
 
 	container := r.buildFacadeContainer(ar, pp, 8080)
 
-	mount := findMount(container.VolumeMounts, "promptpack-config")
+	mount := findPromptpackConfigMount(container.VolumeMounts)
 	if mount == nil {
 		t.Fatalf("expected promptpack-config on facade container, got %+v", container.VolumeMounts)
 	}
@@ -904,7 +915,7 @@ func TestBuildFacadeContainer_VolumeMounts(t *testing.T) {
 
 // TestBuildFacadeContainer_NoVolumeMounts verifies that buildFacadeContainer has
 // no promptpack-config VolumeMount when the PromptPack does not reference a
-// ConfigMap. Other unconditional mounts (mgmt-plane pubkey) may still be present.
+// ConfigMap.
 func TestBuildFacadeContainer_NoVolumeMounts(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 	ar := &omniav1alpha1.AgentRuntime{}
@@ -916,7 +927,7 @@ func TestBuildFacadeContainer_NoVolumeMounts(t *testing.T) {
 
 	container := r.buildFacadeContainer(ar, pp, 8080)
 
-	if m := findMount(container.VolumeMounts, "promptpack-config"); m != nil {
+	if m := findPromptpackConfigMount(container.VolumeMounts); m != nil {
 		t.Errorf("did not expect promptpack-config mount, got %+v", m)
 	}
 }

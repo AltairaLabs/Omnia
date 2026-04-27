@@ -20,7 +20,9 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
+import { usePathname } from "next/navigation";
 import { useWorkspaces, type WorkspaceListItem } from "@/hooks/resources";
+import { isChromelessPath } from "@/lib/routes";
 
 const STORAGE_KEY = "omnia-selected-workspace";
 
@@ -62,7 +64,10 @@ interface WorkspaceProviderProps {
  * using React's key prop to remount the content tree.
  */
 export function WorkspaceProvider({ children }: Readonly<WorkspaceProviderProps>) {
-  const { data: workspaces = [], isLoading, error, refetch } = useWorkspaces();
+  const pathname = usePathname();
+  const { data: workspaces = [], isLoading, error, refetch } = useWorkspaces({
+    enabled: !isChromelessPath(pathname ?? ""),
+  });
   // Initialize state with stored value (lazy initializer runs once on mount)
   const [selectedWorkspaceName, setSelectedWorkspaceName] = useState<string | null>(
     () => getStoredWorkspaceName()

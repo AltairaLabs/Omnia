@@ -84,6 +84,13 @@ describe("mintToken", () => {
     workspace: "default",
   };
 
+  it("includes the JWK thumbprint as kid in the header", () => {
+    const { publicJwkFromKey } = require("./jwks.js");
+    const expectedKid = publicJwkFromKey(publicKey).kid;
+    const { header } = decodeJwt(mintToken({ key: signingKey, ...baseOpts }));
+    expect(header.kid).toBe(expectedKid);
+  });
+
   it("returns a three-segment JWT", () => {
     const jwt = mintToken({ key: signingKey, ...baseOpts });
     expect(jwt.split(".")).toHaveLength(3);

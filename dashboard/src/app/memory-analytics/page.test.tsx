@@ -4,6 +4,23 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import MemoryAnalyticsPage from "./page";
 
+// Mock layout components that pull in complex infrastructure
+// (WorkspaceSwitcher, UserMenu, theme provider, next/navigation router).
+vi.mock("@/components/layout", () => ({
+  Header: ({
+    title,
+    description,
+  }: {
+    title: string;
+    description?: string;
+  }) => (
+    <div data-testid="header">
+      <h1>{title}</h1>
+      {description && <p>{description}</p>}
+    </div>
+  ),
+}));
+
 vi.mock("@/contexts/workspace-context", () => ({
   useWorkspace: () => ({
     currentWorkspace: { name: "default" },
@@ -12,6 +29,20 @@ vi.mock("@/contexts/workspace-context", () => ({
     isLoading: false,
     error: null,
     refetch: vi.fn(),
+  }),
+}));
+
+vi.mock("@/hooks/use-agents", () => ({
+  useAgents: () => ({
+    data: [
+      {
+        apiVersion: "omnia.altairalabs.ai/v1alpha1",
+        kind: "AgentRuntime",
+        metadata: { name: "support-agent", uid: "uid-support" },
+        spec: {},
+      },
+    ],
+    isLoading: false,
   }),
 }));
 
@@ -56,7 +87,7 @@ beforeEach(() => {
     if (url.includes("groupBy=agent")) {
       return {
         ok: true,
-        json: async () => [{ key: "support-agent", value: 50, count: 50 }],
+        json: async () => [{ key: "uid-support", value: 50, count: 50 }],
       };
     }
     if (url.includes("/privacy/consent/stats")) {
@@ -91,4 +122,5 @@ describe("MemoryAnalyticsPage", () => {
     expect(screen.getByText(/Privacy posture/i)).toBeInTheDocument();
     expect(screen.getByText(/How memory is organized/i)).toBeInTheDocument();
   });
+
 });

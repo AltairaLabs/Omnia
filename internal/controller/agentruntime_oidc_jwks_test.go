@@ -29,12 +29,32 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
+
+// newScheme builds a runtime scheme that includes both Kubernetes core
+// types and the omnia v1alpha1 types — what every fake-client backed
+// AgentRuntime test needs. Inlined here because the previous shared
+// helper lived in workspace_mgmt_plane_pubkey_test.go, which was
+// removed when the JWKS-based mgmt-plane validator replaced the
+// per-workspace pubkey ConfigMap mirror.
+func newScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("add core scheme: %v", err)
+	}
+	if err := omniav1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add omnia scheme: %v", err)
+	}
+	return scheme
+}
 
 // fakeJWKSBlob returns a minimal JWKS JSON blob with a single RSA key
 // stub. Good enough to satisfy the reconciler's sanity probe without

@@ -45,8 +45,14 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/AltairaLabs/PromptKit/runtime/credentials"
 	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
-	ollamaProvider "github.com/AltairaLabs/PromptKit/runtime/providers/ollama"
+	// Side-effect imports register each provider's embedding factory with
+	// pkproviders.CreateEmbeddingProviderFromSpec — keeps this file out of
+	// the per-provider option-builder business.
+	_ "github.com/AltairaLabs/PromptKit/runtime/providers/gemini"
+	_ "github.com/AltairaLabs/PromptKit/runtime/providers/ollama"
+	_ "github.com/AltairaLabs/PromptKit/runtime/providers/openai"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
@@ -60,6 +66,7 @@ import (
 	memorypg "github.com/altairalabs/omnia/internal/memory/postgres"
 	sessionapi "github.com/altairalabs/omnia/internal/session/api"
 	"github.com/altairalabs/omnia/internal/tracing"
+	omniak8s "github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/altairalabs/omnia/pkg/logctx"
 	"github.com/altairalabs/omnia/pkg/logging"
 	"github.com/altairalabs/omnia/pkg/servicediscovery"
@@ -756,6 +763,8 @@ func createEmbeddingService(ctx context.Context, providerName string, store *mem
 
 	scheme := k8sruntime.NewScheme()
 	utilruntime.Must(omniav1alpha1.AddToScheme(scheme))
+	// Secrets live in core/v1 — register so we can read embedding API keys.
+	utilruntime.Must(corev1.AddToScheme(scheme))
 	k8sClient, err := client.New(kubeConfig, client.Options{Scheme: scheme})
 	if err != nil {
 		log.Error(err, "embedding service skipped", "reason", "k8s client creation failed")
@@ -777,7 +786,7 @@ func createEmbeddingService(ctx context.Context, providerName string, store *mem
 		return nil
 	}
 
-	embeddingProvider, err := createEmbeddingProviderFromCRD(&provider, log)
+	embeddingProvider, err := createEmbeddingProviderFromCRD(ctx, k8sClient, &provider, ns, log)
 	if err != nil {
 		log.Error(err, "failed to create embedding provider", "name", providerName, "type", provider.Spec.Type)
 		return nil
@@ -793,28 +802,73 @@ func createEmbeddingService(ctx context.Context, providerName string, store *mem
 	return svc
 }
 
-// createEmbeddingProviderFromCRD creates a PromptKit EmbeddingProvider from
-// the Provider CRD spec.
-func createEmbeddingProviderFromCRD(provider *omniav1alpha1.Provider, log logr.Logger) (pkproviders.EmbeddingProvider, error) {
-	switch provider.Spec.Type {
-	case omniav1alpha1.ProviderTypeOllama:
-		var opts []ollamaProvider.EmbeddingOption
-		if provider.Spec.BaseURL != "" {
-			opts = append(opts, ollamaProvider.WithEmbeddingBaseURL(provider.Spec.BaseURL))
-		}
-		if provider.Spec.Model != "" {
-			opts = append(opts, ollamaProvider.WithEmbeddingModel(provider.Spec.Model))
-		}
-		p := ollamaProvider.NewEmbeddingProvider(opts...)
-		log.V(1).Info("created Ollama embedding provider",
-			"baseURL", provider.Spec.BaseURL,
-			"model", provider.Spec.Model,
-		)
-		return p, nil
-
-	default:
-		return nil, fmt.Errorf("unsupported embedding provider type: %s (supported: ollama)", provider.Spec.Type)
+// createEmbeddingProviderFromCRD translates an Omnia Provider CRD into a
+// PromptKit EmbeddingProviderSpec and hands construction off to PromptKit's
+// shared factory. We stay out of per-provider option-building entirely —
+// the per-provider factories registered in pkproviders own that.
+//
+// The only provider-specific concern that lives on the Omnia side is
+// reading the API key from the Secret referenced by the CRD's
+// credential.secretRef; PromptKit's resolver fallbacks (env, file) are
+// not appropriate here because the memory-api pod doesn't carry per-
+// provider env vars.
+func createEmbeddingProviderFromCRD(
+	ctx context.Context,
+	c client.Client,
+	provider *omniav1alpha1.Provider,
+	namespace string,
+	log logr.Logger,
+) (pkproviders.EmbeddingProvider, error) {
+	cred, err := embeddingCredentialForCRD(ctx, c, provider, namespace)
+	if err != nil {
+		return nil, err
 	}
+	spec := pkproviders.EmbeddingProviderSpec{
+		ID:         provider.Name,
+		Type:       string(provider.Spec.Type),
+		Model:      provider.Spec.Model,
+		BaseURL:    provider.Spec.BaseURL,
+		Credential: cred,
+	}
+	p, err := pkproviders.CreateEmbeddingProviderFromSpec(spec)
+	if err != nil {
+		return nil, fmt.Errorf("create embedding provider %q: %w", provider.Name, err)
+	}
+	log.V(1).Info("created embedding provider",
+		"name", provider.Name,
+		"type", provider.Spec.Type,
+		"model", provider.Spec.Model,
+	)
+	return p, nil
+}
+
+// embeddingCredentialForCRD resolves a CRD's credential block into a
+// PromptKit Credential. Returns nil credential for keyless providers
+// (today: ollama). Errors surface so a misconfiguration trips boot
+// loudly instead of silently disabling embeddings.
+func embeddingCredentialForCRD(
+	ctx context.Context,
+	c client.Client,
+	provider *omniav1alpha1.Provider,
+	namespace string,
+) (credentials.Credential, error) {
+	if provider.Spec.Type == omniav1alpha1.ProviderTypeOllama {
+		return nil, nil
+	}
+	ref := omniak8s.EffectiveSecretRef(provider)
+	if ref == nil {
+		return nil, fmt.Errorf("provider %q has no credential.secretRef — required for type %s", provider.Name, provider.Spec.Type)
+	}
+	secret, err := omniak8s.GetSecret(ctx, c, ref.Name, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("get embedding api key Secret %q: %w", ref.Name, err)
+	}
+	keyName := omniak8s.DetermineSecretKey(ref, provider.Spec.Type)
+	val, ok := secret.Data[keyName]
+	if !ok || len(val) == 0 {
+		return nil, fmt.Errorf("secret %q missing key %q for embedding provider %s", ref.Name, keyName, provider.Spec.Type)
+	}
+	return credentials.NewAPIKeyCredential(string(val)), nil
 }
 
 // shutdownServers gracefully stops all HTTP servers with a 30-second timeout.

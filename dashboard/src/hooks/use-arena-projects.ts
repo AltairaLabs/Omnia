@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type {
   ArenaProject,
@@ -14,6 +15,14 @@ import type {
 
 const NO_WORKSPACE_ERROR = "No workspace selected";
 
+function projectsKey(workspace: string | undefined) {
+  return ["arena-projects", workspace] as const;
+}
+
+function projectKey(workspace: string | undefined, projectId: string | undefined) {
+  return ["arena-project", workspace, projectId] as const;
+}
+
 // =============================================================================
 // Project List Hook
 // =============================================================================
@@ -25,69 +34,39 @@ interface UseArenaProjectsResult {
   refetch: () => void;
 }
 
+async function fetchArenaProjects(workspace: string): Promise<ArenaProject[]> {
+  try {
+    const response = await fetch(`/api/workspaces/${workspace}/arena/projects`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch projects: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data.projects || [];
+  } catch (err) {
+    // Normalize non-Error throws (e.g. raw string rejections) to Error so
+    // consumers can rely on `.message`.
+    throw err instanceof Error ? err : new Error(String(err));
+  }
+}
+
 /**
  * Hook to fetch Arena projects for the current workspace.
  */
 export function useArenaProjects(): UseArenaProjectsResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
-  const [projects, setProjects] = useState<ArenaProject[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-  const [refetchTrigger, setRefetchTrigger] = useState(0);
 
-  // Use effect with primitive dependencies only to avoid double-fetch
-  useEffect(() => {
-    if (!workspace) {
-      setProjects([]);
-      setLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    const fetchData = async () => {
-      try {
-        const response = await fetch(`/api/workspaces/${workspace}/arena/projects`);
-        if (cancelled) return;
-        if (!response.ok) {
-          throw new Error(`Failed to fetch projects: ${response.statusText}`);
-        }
-        const data = await response.json();
-        if (!cancelled) {
-          setProjects(data.projects || []);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err : new Error(String(err)));
-          setProjects([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
-    fetchData();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [workspace, refetchTrigger]);
-
-  // Stable refetch function
-  const refetch = useCallback(() => {
-    setRefetchTrigger((prev) => prev + 1);
-  }, []);
+  const query = useQuery({
+    queryKey: projectsKey(workspace),
+    queryFn: () => fetchArenaProjects(workspace!),
+    enabled: !!workspace,
+  });
 
   return {
-    projects,
-    loading,
-    error,
-    refetch,
+    projects: query.data ?? [],
+    loading: query.isLoading,
+    error: (query.error as Error | null) ?? null,
+    refetch: async () => { await query.refetch(); },
   };
 }
 
@@ -102,77 +81,38 @@ interface UseArenaProjectResult {
   refetch: () => void;
 }
 
+async function fetchArenaProject(
+  workspace: string,
+  projectId: string,
+): Promise<ArenaProjectWithTree> {
+  const response = await fetch(
+    `/api/workspaces/${workspace}/arena/projects/${projectId}`,
+  );
+  if (!response.ok) {
+    if (response.status === 404) throw new Error("Project not found");
+    throw new Error(`Failed to fetch project: ${response.statusText}`);
+  }
+  return response.json();
+}
+
 /**
  * Hook to fetch a single Arena project with its file tree.
  */
 export function useArenaProject(projectId: string | undefined): UseArenaProjectResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
-  const [project, setProject] = useState<ArenaProjectWithTree | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-  const [refetchTrigger, setRefetchTrigger] = useState(0);
 
-  // Use effect with primitive dependencies only to avoid double-fetch
-  useEffect(() => {
-    if (!workspace || !projectId) {
-      setProject(null);
-      setLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    const fetchData = async () => {
-      try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/projects/${projectId}`
-        );
-
-        if (cancelled) return;
-
-        if (!response.ok) {
-          if (response.status === 404) {
-            throw new Error("Project not found");
-          }
-          throw new Error(`Failed to fetch project: ${response.statusText}`);
-        }
-
-        const projectData = await response.json();
-        if (!cancelled) {
-          setProject(projectData);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err : new Error(String(err)));
-          setProject(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
-    fetchData();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [workspace, projectId, refetchTrigger]);
-
-  // Stable refetch function
-  const refetch = useCallback(() => {
-    setRefetchTrigger((prev) => prev + 1);
-  }, []);
+  const query = useQuery({
+    queryKey: projectKey(workspace, projectId),
+    queryFn: () => fetchArenaProject(workspace!, projectId!),
+    enabled: !!workspace && !!projectId,
+  });
 
   return {
-    project,
-    loading,
-    error,
-    refetch,
+    project: query.data ?? null,
+    loading: query.isLoading,
+    error: (query.error as Error | null) ?? null,
+    refetch: async () => { await query.refetch(); },
   };
 }
 
@@ -193,77 +133,53 @@ interface UseArenaProjectMutationsResult {
 export function useArenaProjectMutations(): UseArenaProjectMutationsResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
+  const queryClient = useQueryClient();
 
-  const createProject = useCallback(
-    async (data: ProjectCreateRequest): Promise<ArenaProject> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
+  const createMutation = useMutation({
+    mutationFn: async (data: ProjectCreateRequest): Promise<ArenaProject> => {
+      if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
+      const response = await fetch(`/api/workspaces/${workspace}/arena/projects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to create project");
       }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: projectsKey(workspace) });
+    },
+  });
 
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetch(`/api/workspaces/${workspace}/arena/projects`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to create project");
-        }
-
-        return response.json();
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
+  const deleteMutation = useMutation({
+    mutationFn: async (projectId: string): Promise<void> => {
+      if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
+      const response = await fetch(
+        `/api/workspaces/${workspace}/arena/projects/${projectId}`,
+        { method: "DELETE" },
+      );
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to delete project");
       }
     },
-    [workspace]
-  );
-
-  const deleteProject = useCallback(
-    async (projectId: string): Promise<void> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/projects/${projectId}`,
-          { method: "DELETE" }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to delete project");
-        }
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
+    onSuccess: (_data, projectId) => {
+      queryClient.invalidateQueries({ queryKey: projectsKey(workspace) });
+      queryClient.invalidateQueries({ queryKey: projectKey(workspace, projectId) });
     },
-    [workspace]
-  );
+  });
 
   return {
-    createProject,
-    deleteProject,
-    loading,
-    error,
+    createProject: createMutation.mutateAsync,
+    deleteProject: deleteMutation.mutateAsync,
+    loading: createMutation.isPending || deleteMutation.isPending,
+    error:
+      (createMutation.error as Error | null) ??
+      (deleteMutation.error as Error | null) ??
+      null,
   };
 }
 
@@ -283,186 +199,146 @@ interface UseArenaProjectFilesResult {
 
 /**
  * Hook to provide file operations for Arena projects.
+ *
+ * File ops stay imperative (called from event handlers, not on mount).
+ * Successful writes invalidate the parent project query so the file tree
+ * refreshes for any consumer.
  */
 export function useArenaProjectFiles(): UseArenaProjectFilesResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
+  const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
+  const invalidateProject = useCallback(
+    (projectId: string) => {
+      queryClient.invalidateQueries({
+        queryKey: projectKey(workspace, projectId),
+      });
+    },
+    [queryClient, workspace],
+  );
+
+  const wrap = useCallback(async function <T>(fn: () => Promise<T>): Promise<T> {
+    setLoading(true);
+    setError(null);
+    try {
+      return await fn();
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      setError(e);
+      throw e;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   const getFileContent = useCallback(
-    async (projectId: string, filePath: string): Promise<FileContentResponse> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
+    (projectId: string, filePath: string): Promise<FileContentResponse> =>
+      wrap(async () => {
+        if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
         const response = await fetch(
-          `/api/workspaces/${workspace}/arena/projects/${projectId}/files/${filePath}`
+          `/api/workspaces/${workspace}/arena/projects/${projectId}/files/${filePath}`,
         );
-
         if (!response.ok) {
-          if (response.status === 404) {
-            throw new Error("File not found");
-          }
+          if (response.status === 404) throw new Error("File not found");
           const errorText = await response.text();
           throw new Error(errorText || "Failed to get file content");
         }
-
         return response.json();
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [workspace]
+      }),
+    [workspace, wrap],
   );
 
   const updateFileContent = useCallback(
-    async (projectId: string, filePath: string, content: string): Promise<FileUpdateResponse> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
+    (
+      projectId: string,
+      filePath: string,
+      content: string,
+    ): Promise<FileUpdateResponse> =>
+      wrap(async () => {
+        if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
         const response = await fetch(
           `/api/workspaces/${workspace}/arena/projects/${projectId}/files/${filePath}`,
           {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ content }),
-          }
+          },
         );
-
         if (!response.ok) {
           const errorText = await response.text();
           throw new Error(errorText || "Failed to update file");
         }
-
-        return response.json();
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [workspace]
+        const result = await response.json();
+        invalidateProject(projectId);
+        return result;
+      }),
+    [workspace, wrap, invalidateProject],
   );
 
   const createFile = useCallback(
-    async (
+    (
       projectId: string,
       parentPath: string | null,
       name: string,
       isDirectory: boolean,
-      content?: string
-    ): Promise<FileCreateResponse> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
+      content?: string,
+    ): Promise<FileCreateResponse> =>
+      wrap(async () => {
+        if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
         const url = parentPath
           ? `/api/workspaces/${workspace}/arena/projects/${projectId}/files/${parentPath}`
           : `/api/workspaces/${workspace}/arena/projects/${projectId}/files`;
-
         const response = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name, isDirectory, content }),
         });
-
         if (!response.ok) {
           const errorText = await response.text();
           throw new Error(errorText || "Failed to create file");
         }
-
-        return response.json();
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [workspace]
+        const result = await response.json();
+        invalidateProject(projectId);
+        return result;
+      }),
+    [workspace, wrap, invalidateProject],
   );
 
   const deleteFile = useCallback(
-    async (projectId: string, filePath: string): Promise<void> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
+    (projectId: string, filePath: string): Promise<void> =>
+      wrap(async () => {
+        if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
         const response = await fetch(
           `/api/workspaces/${workspace}/arena/projects/${projectId}/files/${filePath}`,
-          { method: "DELETE" }
+          { method: "DELETE" },
         );
-
         if (!response.ok) {
           const errorText = await response.text();
           throw new Error(errorText || "Failed to delete file");
         }
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [workspace]
+        invalidateProject(projectId);
+      }),
+    [workspace, wrap, invalidateProject],
   );
 
   const refreshFileTree = useCallback(
-    async (projectId: string): Promise<FileTreeNode[]> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
+    (projectId: string): Promise<FileTreeNode[]> =>
+      wrap(async () => {
+        if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
         const response = await fetch(
-          `/api/workspaces/${workspace}/arena/projects/${projectId}/files`
+          `/api/workspaces/${workspace}/arena/projects/${projectId}/files`,
         );
-
         if (!response.ok) {
           const errorText = await response.text();
           throw new Error(errorText || "Failed to refresh file tree");
         }
-
         const data = await response.json();
         return data.tree || [];
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [workspace]
+      }),
+    [workspace, wrap],
   );
 
   return {

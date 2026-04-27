@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { useArenaSourceVersions, useArenaSourceVersionMutations } from "./use-arena-source-versions";
+import { createQueryWrapper } from "@/test/query-wrapper";
 
 // Mock workspace context
 vi.mock("@/contexts/workspace-context", () => ({
@@ -14,6 +15,9 @@ vi.mock("@/contexts/workspace-context", () => ({
 // Mock fetch
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
+
+const renderH = <T,>(cb: () => T) =>
+  renderHook(cb, { wrapper: createQueryWrapper() });
 
 describe("useArenaSourceVersions", () => {
   beforeEach(() => {
@@ -35,7 +39,7 @@ describe("useArenaSourceVersions", () => {
       refetch: vi.fn(),
     });
 
-    const { result } = renderHook(() => useArenaSourceVersions("test-source"));
+    const { result } = renderH(() => useArenaSourceVersions("test-source"));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -65,7 +69,7 @@ describe("useArenaSourceVersions", () => {
       refetch: vi.fn(),
     });
 
-    const { result } = renderHook(() => useArenaSourceVersions(undefined));
+    const { result } = renderH(() => useArenaSourceVersions(undefined));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -108,7 +112,7 @@ describe("useArenaSourceVersions", () => {
       }),
     });
 
-    const { result } = renderHook(() => useArenaSourceVersions("test-source"));
+    const { result } = renderH(() => useArenaSourceVersions("test-source"));
 
     expect(result.current.loading).toBe(true);
 
@@ -146,7 +150,7 @@ describe("useArenaSourceVersions", () => {
       statusText: "Not Found",
     });
 
-    const { result } = renderHook(() => useArenaSourceVersions("test-source"));
+    const { result } = renderH(() => useArenaSourceVersions("test-source"));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -181,7 +185,7 @@ describe("useArenaSourceVersions", () => {
       statusText: "Internal Server Error",
     });
 
-    const { result } = renderHook(() => useArenaSourceVersions("test-source"));
+    const { result } = renderH(() => useArenaSourceVersions("test-source"));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -213,7 +217,7 @@ describe("useArenaSourceVersions", () => {
 
     mockFetch.mockRejectedValueOnce(new Error("Network error"));
 
-    const { result } = renderHook(() => useArenaSourceVersions("test-source"));
+    const { result } = renderH(() => useArenaSourceVersions("test-source"));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -250,7 +254,7 @@ describe("useArenaSourceVersions", () => {
       }),
     });
 
-    const { result } = renderHook(() => useArenaSourceVersions("test-source"));
+    const { result } = renderH(() => useArenaSourceVersions("test-source"));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -289,7 +293,7 @@ describe("useArenaSourceVersionMutations", () => {
       refetch: vi.fn(),
     });
 
-    const { result } = renderHook(() => useArenaSourceVersionMutations("test-source"));
+    const { result } = renderH(() => useArenaSourceVersionMutations("test-source"));
 
     await expect(result.current.switchVersion("abc123")).rejects.toThrow("No workspace selected");
   });
@@ -312,7 +316,7 @@ describe("useArenaSourceVersionMutations", () => {
       refetch: vi.fn(),
     });
 
-    const { result } = renderHook(() => useArenaSourceVersionMutations(undefined));
+    const { result } = renderH(() => useArenaSourceVersionMutations(undefined));
 
     await expect(result.current.switchVersion("abc123")).rejects.toThrow("No source name provided");
   });
@@ -346,7 +350,7 @@ describe("useArenaSourceVersionMutations", () => {
     });
 
     const onSuccess = vi.fn();
-    const { result } = renderHook(() => useArenaSourceVersionMutations("test-source", onSuccess));
+    const { result } = renderH(() => useArenaSourceVersionMutations("test-source", onSuccess));
 
     expect(result.current.switching).toBe(false);
 
@@ -390,7 +394,7 @@ describe("useArenaSourceVersionMutations", () => {
       json: () => Promise.resolve({ error: "Version not found" }),
     });
 
-    const { result } = renderHook(() => useArenaSourceVersionMutations("test-source"));
+    const { result } = renderH(() => useArenaSourceVersionMutations("test-source"));
 
     // Expect the promise to reject with the error
     await expect(result.current.switchVersion("nonexistent")).rejects.toThrow("Version not found");
@@ -420,7 +424,7 @@ describe("useArenaSourceVersionMutations", () => {
       json: () => Promise.reject(new Error("Invalid JSON")),
     });
 
-    const { result } = renderHook(() => useArenaSourceVersionMutations("test-source"));
+    const { result } = renderH(() => useArenaSourceVersionMutations("test-source"));
 
     await expect(
       act(async () => {
@@ -457,7 +461,7 @@ describe("useArenaSourceVersionMutations", () => {
 
     mockFetch.mockReturnValueOnce(fetchPromise);
 
-    const { result } = renderHook(() => useArenaSourceVersionMutations("test-source"));
+    const { result } = renderH(() => useArenaSourceVersionMutations("test-source"));
 
     expect(result.current.switching).toBe(false);
 
@@ -478,6 +482,8 @@ describe("useArenaSourceVersionMutations", () => {
       await switchPromise;
     });
 
-    expect(result.current.switching).toBe(false);
+    await waitFor(() => {
+      expect(result.current.switching).toBe(false);
+    });
   });
 });

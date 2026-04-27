@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { ArenaSource, ArenaJob, ArenaJobType, ScenarioFilter } from "@/types/arena";
 
@@ -34,6 +34,43 @@ export interface ProjectJobsFilter {
   limit?: number;
 }
 
+const EMPTY_RESPONSE: ProjectJobsResponse = { jobs: [], deployed: false };
+
+function jobsKey(
+  workspace: string | undefined,
+  projectId: string | undefined,
+  filter: ProjectJobsFilter | undefined,
+) {
+  return [
+    "project-jobs",
+    workspace,
+    projectId,
+    filter?.type ?? null,
+    filter?.status ?? null,
+    filter?.limit ?? null,
+  ] as const;
+}
+
+async function fetchProjectJobs(
+  workspace: string,
+  projectId: string,
+  filter: ProjectJobsFilter | undefined,
+): Promise<ProjectJobsResponse> {
+  const params = new URLSearchParams();
+  if (filter?.type) params.set("type", filter.type);
+  if (filter?.status) params.set("status", filter.status);
+  if (filter?.limit) params.set("limit", String(filter.limit));
+  const queryString = params.toString();
+  const url = `/api/workspaces/${workspace}/arena/projects/${projectId}/jobs${
+    queryString ? `?${queryString}` : ""
+  }`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to list jobs: ${response.statusText}`);
+  }
+  return response.json();
+}
+
 // =============================================================================
 // Project Jobs List Hook
 // =============================================================================
@@ -52,70 +89,26 @@ interface UseProjectJobsResult {
  */
 export function useProjectJobs(
   projectId: string | undefined,
-  filter?: ProjectJobsFilter
+  filter?: ProjectJobsFilter,
 ): UseProjectJobsResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
-  const [jobs, setJobs] = useState<ArenaJob[]>([]);
-  const [source, setSource] = useState<ArenaSource | undefined>(undefined);
-  const [deployed, setDeployed] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
 
-  const fetchData = useCallback(async () => {
-    if (!workspace || !projectId) {
-      setJobs([]);
-      setSource(undefined);
-      setDeployed(false);
-      setLoading(false);
-      return;
-    }
+  const query = useQuery({
+    queryKey: jobsKey(workspace, projectId, filter),
+    queryFn: () => fetchProjectJobs(workspace!, projectId!, filter),
+    enabled: !!workspace && !!projectId,
+  });
 
-    setLoading(true);
-    setError(null);
-
-    try {
-      const params = new URLSearchParams();
-      if (filter?.type) params.set("type", filter.type);
-      if (filter?.status) params.set("status", filter.status);
-      if (filter?.limit) params.set("limit", String(filter.limit));
-
-      const queryString = params.toString();
-      const url = `/api/workspaces/${workspace}/arena/projects/${projectId}/jobs${
-        queryString ? `?${queryString}` : ""
-      }`;
-
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`Failed to list jobs: ${response.statusText}`);
-      }
-
-      const data: ProjectJobsResponse = await response.json();
-      setJobs(data.jobs);
-      setSource(data.source);
-      setDeployed(data.deployed);
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)));
-      setJobs([]);
-      setSource(undefined);
-      setDeployed(false);
-    } finally {
-      setLoading(false);
-    }
-  }, [workspace, projectId, filter?.type, filter?.status, filter?.limit]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  const data = query.data ?? EMPTY_RESPONSE;
 
   return {
-    jobs,
-    source,
-    deployed,
-    loading,
-    error,
-    refetch: fetchData,
+    jobs: data.jobs,
+    source: data.source,
+    deployed: data.deployed,
+    loading: query.isLoading,
+    error: (query.error as Error | null) ?? null,
+    refetch: async () => { await query.refetch(); },
   };
 }
 
@@ -135,51 +128,41 @@ interface UseProjectRunMutationsResult {
 export function useProjectRunMutations(): UseProjectRunMutationsResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
+  const queryClient = useQueryClient();
 
-  const run = useCallback(
-    async (projectId: string, options: QuickRunRequest): Promise<QuickRunResponse> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
+  const mutation = useMutation({
+    mutationFn: async (
+      args: { projectId: string; options: QuickRunRequest },
+    ): Promise<QuickRunResponse> => {
+      if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
+      const response = await fetch(
+        `/api/workspaces/${workspace}/arena/projects/${args.projectId}/run`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(args.options),
+        },
+      );
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        const message =
+          errorData?.message || errorData?.error || "Failed to run project";
+        throw new Error(message);
       }
-
-      setRunning(true);
-      setError(null);
-
-      try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/projects/${projectId}/run`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(options),
-          }
-        );
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => null);
-          const message =
-            errorData?.message || errorData?.error || "Failed to run project";
-          throw new Error(message);
-        }
-
-        return response.json();
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setRunning(false);
-      }
+      return response.json();
     },
-    [workspace]
-  );
+    onSuccess: (_data, variables) => {
+      // Invalidate any jobs query for this project, regardless of filter.
+      queryClient.invalidateQueries({
+        queryKey: ["project-jobs", workspace, variables.projectId],
+      });
+    },
+  });
 
   return {
-    run,
-    running,
-    error,
+    run: (projectId, options) => mutation.mutateAsync({ projectId, options }),
+    running: mutation.isPending,
+    error: (mutation.error as Error | null) ?? null,
   };
 }
 
@@ -203,27 +186,18 @@ interface UseProjectJobsWithRunResult {
  */
 export function useProjectJobsWithRun(
   projectId: string | undefined,
-  filter?: ProjectJobsFilter
+  filter?: ProjectJobsFilter,
 ): UseProjectJobsWithRunResult {
   const { jobs, source, deployed, loading, error: listError, refetch } = useProjectJobs(
     projectId,
-    filter
+    filter,
   );
   const { run: runMutation, running, error: runError } = useProjectRunMutations();
 
-  const run = useCallback(
-    async (options: QuickRunRequest): Promise<QuickRunResponse> => {
-      if (!projectId) {
-        throw new Error("No project selected");
-      }
-
-      const result = await runMutation(projectId, options);
-      // Refresh jobs list after successful run
-      refetch();
-      return result;
-    },
-    [projectId, runMutation, refetch]
-  );
+  const run = async (options: QuickRunRequest): Promise<QuickRunResponse> => {
+    if (!projectId) throw new Error("No project selected");
+    return runMutation(projectId, options);
+  };
 
   return {
     jobs,

@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
+import { createQueryWrapper } from "@/test/query-wrapper";
 
 // Mock workspace context
 vi.mock("@/contexts/workspace-context", () => ({
@@ -13,6 +14,12 @@ vi.mock("@/contexts/workspace-context", () => ({
 // Mock fetch
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
+
+const renderH = <T,>(cb: () => T) =>
+  renderHook(cb, { wrapper: createQueryWrapper() });
+
+const renderHWithRerender = <T, P>(cb: (p: P) => T, initialProps: P) =>
+  renderHook(cb, { wrapper: createQueryWrapper(), initialProps });
 
 const mockWorkspace = {
   name: "test-workspace",
@@ -61,7 +68,7 @@ describe("useArenaSourceContent", () => {
     });
 
     const { useArenaSourceContent } = await import("./use-arena-source-content");
-    const { result } = renderHook(() => useArenaSourceContent("test-source"));
+    const { result } = renderH(() => useArenaSourceContent("test-source"));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -86,7 +93,7 @@ describe("useArenaSourceContent", () => {
     });
 
     const { useArenaSourceContent } = await import("./use-arena-source-content");
-    const { result } = renderHook(() => useArenaSourceContent(undefined));
+    const { result } = renderH(() => useArenaSourceContent(undefined));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -113,7 +120,7 @@ describe("useArenaSourceContent", () => {
     });
 
     const { useArenaSourceContent } = await import("./use-arena-source-content");
-    const { result } = renderHook(() => useArenaSourceContent("test-source"));
+    const { result } = renderH(() => useArenaSourceContent("test-source"));
 
     // Initially loading
     expect(result.current.loading).toBe(true);
@@ -149,7 +156,7 @@ describe("useArenaSourceContent", () => {
     });
 
     const { useArenaSourceContent } = await import("./use-arena-source-content");
-    const { result } = renderHook(() => useArenaSourceContent("test-source"));
+    const { result } = renderH(() => useArenaSourceContent("test-source"));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -180,7 +187,7 @@ describe("useArenaSourceContent", () => {
     });
 
     const { useArenaSourceContent } = await import("./use-arena-source-content");
-    const { result } = renderHook(() => useArenaSourceContent("test-source"));
+    const { result } = renderH(() => useArenaSourceContent("test-source"));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -205,7 +212,7 @@ describe("useArenaSourceContent", () => {
     mockFetch.mockRejectedValueOnce(new Error("Network error"));
 
     const { useArenaSourceContent } = await import("./use-arena-source-content");
-    const { result } = renderHook(() => useArenaSourceContent("test-source"));
+    const { result } = renderH(() => useArenaSourceContent("test-source"));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -233,7 +240,7 @@ describe("useArenaSourceContent", () => {
     });
 
     const { useArenaSourceContent } = await import("./use-arena-source-content");
-    const { result } = renderHook(() => useArenaSourceContent("test-source"));
+    const { result } = renderH(() => useArenaSourceContent("test-source"));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -268,9 +275,10 @@ describe("useArenaSourceContent", () => {
     });
 
     const { useArenaSourceContent } = await import("./use-arena-source-content");
-    const { result, rerender } = renderHook(
-      ({ sourceName }) => useArenaSourceContent(sourceName),
-      { initialProps: { sourceName: "source-a" } }
+    const { result, rerender } = renderHWithRerender(
+      ({ sourceName }: { sourceName: string }) =>
+        useArenaSourceContent(sourceName),
+      { sourceName: "source-a" },
     );
 
     await waitFor(() => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { ArenaSource } from "@/types/arena";
 
@@ -36,6 +36,23 @@ export interface DeployResponse {
   isNew: boolean;
 }
 
+function deploymentKey(workspace: string | undefined, projectId: string | undefined) {
+  return ["project-deployment-status", workspace, projectId] as const;
+}
+
+async function fetchDeploymentStatus(
+  workspace: string,
+  projectId: string,
+): Promise<DeploymentStatus> {
+  const response = await fetch(
+    `/api/workspaces/${workspace}/arena/projects/${projectId}/deployment`,
+  );
+  if (!response.ok) {
+    throw new Error(`Failed to get deployment status: ${response.statusText}`);
+  }
+  return response.json();
+}
+
 // =============================================================================
 // Deployment Status Hook
 // =============================================================================
@@ -51,52 +68,22 @@ interface UseProjectDeploymentStatusResult {
  * Hook to get the deployment status of a project.
  */
 export function useProjectDeploymentStatus(
-  projectId: string | undefined
+  projectId: string | undefined,
 ): UseProjectDeploymentStatusResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
-  const [status, setStatus] = useState<DeploymentStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
 
-  const fetchData = useCallback(async () => {
-    if (!workspace || !projectId) {
-      setStatus(null);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await fetch(
-        `/api/workspaces/${workspace}/arena/projects/${projectId}/deployment`
-      );
-
-      if (!response.ok) {
-        throw new Error(`Failed to get deployment status: ${response.statusText}`);
-      }
-
-      const data: DeploymentStatus = await response.json();
-      setStatus(data);
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)));
-      setStatus(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [workspace, projectId]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  const query = useQuery({
+    queryKey: deploymentKey(workspace, projectId),
+    queryFn: () => fetchDeploymentStatus(workspace!, projectId!),
+    enabled: !!workspace && !!projectId,
+  });
 
   return {
-    status,
-    loading,
-    error,
-    refetch: fetchData,
+    status: query.data ?? null,
+    loading: query.isLoading,
+    error: (query.error as Error | null) ?? null,
+    refetch: async () => { await query.refetch(); },
   };
 }
 
@@ -116,49 +103,38 @@ interface UseProjectDeploymentMutationsResult {
 export function useProjectDeploymentMutations(): UseProjectDeploymentMutationsResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
-  const [deploying, setDeploying] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
+  const queryClient = useQueryClient();
 
-  const deploy = useCallback(
-    async (projectId: string, options?: DeployRequest): Promise<DeployResponse> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
+  const mutation = useMutation({
+    mutationFn: async (
+      args: { projectId: string; options?: DeployRequest },
+    ): Promise<DeployResponse> => {
+      if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
+      const response = await fetch(
+        `/api/workspaces/${workspace}/arena/projects/${args.projectId}/deploy`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(args.options || {}),
+        },
+      );
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to deploy project");
       }
-
-      setDeploying(true);
-      setError(null);
-
-      try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/projects/${projectId}/deploy`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(options || {}),
-          }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to deploy project");
-        }
-
-        return response.json();
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setDeploying(false);
-      }
+      return response.json();
     },
-    [workspace]
-  );
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: deploymentKey(workspace, variables.projectId),
+      });
+    },
+  });
 
   return {
-    deploy,
-    deploying,
-    error,
+    deploy: (projectId, options) => mutation.mutateAsync({ projectId, options }),
+    deploying: mutation.isPending,
+    error: (mutation.error as Error | null) ?? null,
   };
 }
 
@@ -179,24 +155,15 @@ interface UseProjectDeploymentResult {
  * Combined hook for project deployment status and mutations.
  */
 export function useProjectDeployment(
-  projectId: string | undefined
+  projectId: string | undefined,
 ): UseProjectDeploymentResult {
   const { status, loading, error: statusError, refetch } = useProjectDeploymentStatus(projectId);
   const { deploy: deployMutation, deploying, error: deployError } = useProjectDeploymentMutations();
 
-  const deploy = useCallback(
-    async (options?: DeployRequest): Promise<DeployResponse> => {
-      if (!projectId) {
-        throw new Error("No project selected");
-      }
-
-      const result = await deployMutation(projectId, options);
-      // Refresh status after successful deploy
-      refetch();
-      return result;
-    },
-    [projectId, deployMutation, refetch]
-  );
+  const deploy = async (options?: DeployRequest): Promise<DeployResponse> => {
+    if (!projectId) throw new Error("No project selected");
+    return deployMutation(projectId, options);
+  };
 
   return {
     status,

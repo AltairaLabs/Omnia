@@ -20,7 +20,6 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/ptr"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
@@ -90,25 +89,6 @@ func (r *AgentRuntimeReconciler) buildVolumes(
 		})
 	}
 
-	// Mount the mgmt-plane pubkey ConfigMap the Workspace controller
-	// mirrors into every workspace namespace. Marked optional so the
-	// facade pod still starts when the ConfigMap is absent (e.g., before
-	// the Workspace controller has reconciled it, or when the dashboard
-	// is not deployed at all). cmd/agent/main.go treats a missing file
-	// as "no mgmt-plane validator" and runs unauthenticated — matching
-	// the PR 1a default.
-	volumes = append(volumes, corev1.Volume{
-		Name: mgmtPlanePubkeyVolumeName,
-		VolumeSource: corev1.VolumeSource{
-			ConfigMap: &corev1.ConfigMapVolumeSource{
-				LocalObjectReference: corev1.LocalObjectReference{
-					Name: MgmtPlanePubkeyConfigMapName,
-				},
-				Optional: ptr.To(true),
-			},
-		},
-	})
-
 	// Add user-specified volumes for media files, mock configs, etc.
 	if agentRuntime.Spec.Runtime != nil && len(agentRuntime.Spec.Runtime.Volumes) > 0 {
 		volumes = append(volumes, agentRuntime.Spec.Runtime.Volumes...)
@@ -133,16 +113,6 @@ func (r *AgentRuntimeReconciler) buildFacadeVolumeMounts(
 			ReadOnly:  true,
 		})
 	}
-
-	// Mount the optional mgmt-plane pubkey ConfigMap. When the ConfigMap
-	// exists the file at <MgmtPlanePubkeyMountDir>/<MgmtPlanePubkeyDataKey>
-	// is the PEM the facade validator loads; when it doesn't, kubelet
-	// projects an empty directory and cmd/agent skips validator wiring.
-	volumeMounts = append(volumeMounts, corev1.VolumeMount{
-		Name:      mgmtPlanePubkeyVolumeName,
-		MountPath: MgmtPlanePubkeyMountDir,
-		ReadOnly:  true,
-	})
 
 	return volumeMounts
 }
