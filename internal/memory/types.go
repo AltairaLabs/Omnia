@@ -109,8 +109,13 @@ const (
 // using the plain pkmemory.Store.Save signature get just an error
 // and never see this — that path is for compatibility.
 type SaveResult struct {
-	// ID is the entity ID the new observation lives under (may be
-	// existing, may be newly created).
+	// ID is the entity ID the new observation lives under. When
+	// Action == SaveActionAdded this is a freshly minted entity;
+	// when Action == SaveActionAutoSuperseded it is the ID of the
+	// pre-existing entity the new observation got attached to (the
+	// structured-key match's anchor or the high-similarity match's
+	// entity). The agent should treat this as "the canonical entity
+	// for this fact going forward" regardless of which action fired.
 	ID string `json:"id"`
 	// Action describes the high-level outcome.
 	Action SaveAction `json:"action"`

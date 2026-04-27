@@ -646,15 +646,7 @@ func (s *MemoryService) UpdateMemory(ctx context.Context, entityID string, mem *
 			}
 		})
 	}
-	if s.embeddingSvc != nil {
-		s.safeGo("embed", func() {
-			embedCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if err := s.embeddingSvc.EmbedMemory(embedCtx, mem); err != nil {
-				s.log.Error(err, "async embedding failed", "memoryID", mem.ID)
-			}
-		})
-	}
+	s.embedAsync(mem, nil)
 	s.emitAuditEvent(ctx, &MemoryAuditEntry{
 		EventType:   eventTypeMemoryCreated,
 		MemoryID:    mem.ID,
@@ -724,15 +716,7 @@ func (s *MemoryService) SupersedeManyMemories(ctx context.Context, sourceMemoryI
 			}
 		})
 	}
-	if s.embeddingSvc != nil {
-		s.safeGo("embed", func() {
-			embedCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if err := s.embeddingSvc.EmbedMemory(embedCtx, mem); err != nil {
-				s.log.Error(err, "async embedding failed", "memoryID", mem.ID)
-			}
-		})
-	}
+	s.embedAsync(mem, nil)
 	s.emitAuditEvent(ctx, &MemoryAuditEntry{
 		EventType:   eventTypeMemoryCreated,
 		MemoryID:    anchorID,

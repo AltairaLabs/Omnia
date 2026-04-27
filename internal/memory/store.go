@@ -1113,7 +1113,14 @@ func (s *PostgresMemoryStore) SupersedeMany(
 // resolves to a row outside the requested workspace / user / agent
 // scope. Cheap single-statement guard so the supersede transaction
 // can't bleed across tenants.
+//
+// Duplicate IDs in the input are deduped before the count check —
+// `id = ANY($1)` returns one row per matching id regardless of how
+// many times the id appears in the array, so without dedup a
+// duplicate caller-side would always trip the missing-rows path
+// with a confusing "1 of 2 source entities not found" message.
 func assertEntitiesInScope(ctx context.Context, tx pgx.Tx, entityIDs []string, scope map[string]string) error {
+	uniqueIDs := dedupeStrings(entityIDs)
 	row := tx.QueryRow(ctx, `
 		SELECT count(*) FROM memory_entities
 		WHERE id = ANY($1)
@@ -1121,7 +1128,7 @@ func assertEntitiesInScope(ctx context.Context, tx pgx.Tx, entityIDs []string, s
 		  AND ($3::text IS NULL OR virtual_user_id = $3)
 		  AND ($4::uuid IS NULL OR agent_id = $4)
 		  AND NOT forgotten`,
-		entityIDs,
+		uniqueIDs,
 		scope[ScopeWorkspaceID],
 		scopeOrNil(scope, ScopeUserID),
 		scopeOrNil(scope, ScopeAgentID),
@@ -1130,9 +1137,9 @@ func assertEntitiesInScope(ctx context.Context, tx pgx.Tx, entityIDs []string, s
 	if err := row.Scan(&n); err != nil {
 		return fmt.Errorf("memory: scope assertion: %w", err)
 	}
-	if n != len(entityIDs) {
+	if n != len(uniqueIDs) {
 		return fmt.Errorf("memory: %d of %d source entities not found in scope",
-			len(entityIDs)-n, len(entityIDs))
+			len(uniqueIDs)-n, len(uniqueIDs))
 	}
 	return nil
 }
@@ -1275,11 +1282,13 @@ SELECT id, kind, metadata, created_at, expires_at, title,
        content, confidence, session_id, turn_range, observed_at, accessed_at,
        summary, body_size_bytes, final_score
 FROM (
-    -- DISTINCT ON requires ORDER BY to start with the distinct key,
-    -- so the per-entity tiebreak (newest active observation wins on
-    -- equal score) lives here. The outer query then re-sorts the
-    -- one-row-per-entity result set by final_score so LIMIT picks
-    -- the top-K entities by score, not by entity id.
+    -- DISTINCT ON requires ORDER BY to start with the distinct key.
+    -- Per entity we pick the newest active observation (the active
+    -- filter on the JOIN keeps observation count to ~1 in practice;
+    -- this is the deterministic tiebreak in the rare race where
+    -- two active observations briefly coexist). The outer query
+    -- re-sorts the one-row-per-entity result set by final_score so
+    -- LIMIT picks the top-K entities by score, not by entity id.
     SELECT DISTINCT ON (e.id)
         e.id, e.kind, e.metadata, e.created_at, e.expires_at, e.title,
         o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at,
