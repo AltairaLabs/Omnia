@@ -75,16 +75,36 @@ func (s *SemanticStrategy) Retrieve(ctx context.Context, pool *pgxpool.Pool, sco
 		return nil, errors.New(errWorkspaceRequired)
 	}
 
-	// pgvector cosine distance: <=> operator, ORDER BY ascending = most similar first.
-	// DISTINCT ON (e.id) picks the observation with smallest cosine distance per entity.
+	// pgvector ANN: ORDER BY o.embedding <=> $vec LIMIT N is what
+	// unlocks the HNSW index. DISTINCT ON / GROUP BY in front of the
+	// vector ORDER BY forces a seq-scan + sort. We over-fetch
+	// (limit × 4) into the inner ANN, then dedup by entity_id and
+	// truncate to the caller's limit.
 	rows, err := pool.Query(ctx, `
-        SELECT DISTINCT ON (e.id) `+selectEntityCols+`, `+selectObserveCols+`
-        FROM memory_entities `+entityTableAlias+observationJoin+`
+        SELECT `+selectEntityCols+`, `+selectObserveCols+`
+        FROM memory_entities `+entityTableAlias+`
+        JOIN (
+            SELECT entity_id, observation_id
+            FROM (
+                SELECT o.entity_id,
+                       o.id AS observation_id,
+                       row_number() OVER (PARTITION BY o.entity_id ORDER BY o.embedding <=> $2) AS rn
+                FROM memory_observations o
+                JOIN memory_entities e2 ON e2.id = o.entity_id
+                    AND e2.workspace_id = $1
+                    AND e2.forgotten = false
+                WHERE o.superseded_by IS NULL
+                  AND (o.valid_until IS NULL OR o.valid_until > now())
+                  AND o.embedding IS NOT NULL
+                ORDER BY o.embedding <=> $2
+                LIMIT $3 * 4
+            ) ann
+            WHERE rn = 1
+            LIMIT $3
+        ) picked ON picked.entity_id = e.id
+        JOIN memory_observations o ON o.id = picked.observation_id
         WHERE `+colEntityForgot+`
-          AND e.workspace_id = $1
-          AND o.embedding IS NOT NULL
-        ORDER BY e.id, o.embedding <=> $2
-        LIMIT $3`,
+          AND e.workspace_id = $1`,
 		wsID, pgvector.NewVector(embeddings[0]), limit)
 	if err != nil {
 		return nil, fmt.Errorf("memory: semantic query: %w", err)

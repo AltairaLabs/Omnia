@@ -1263,20 +1263,30 @@ WITH fts AS (
     SELECT entity_id, row_number() OVER (ORDER BY fts_rank DESC) AS fts_rn
     FROM fts
 ), cosine AS (
-    SELECT DISTINCT ON (e.id)
-        e.id AS entity_id,
-        o.embedding <=> $5 AS cos_dist
-    FROM memory_entities e
-    JOIN memory_observations o ON o.entity_id = e.id
-        AND o.superseded_by IS NULL
-        AND (o.valid_until IS NULL OR o.valid_until > now())
-    WHERE e.workspace_id = $1
-      AND ($2::text IS NULL OR e.virtual_user_id = $2)
-      AND ($3::uuid IS NULL OR e.agent_id = $3)
-      AND e.forgotten = false
-      AND o.confidence >= $8
-      AND o.embedding IS NOT NULL
-    ORDER BY e.id, cos_dist
+    -- The inner ORDER BY o.embedding <=> $5 LIMIT N is what unlocks
+    -- the HNSW index — putting DISTINCT ON / GROUP BY in front of
+    -- it forces the planner to seq-scan and sort. We over-fetch
+    -- (fanout × 4) to give the per-entity dedup enough candidates
+    -- to land $6 distinct entities even when one entity has many
+    -- close-by observations.
+    SELECT entity_id, cos_dist
+    FROM (
+        SELECT o.entity_id, o.embedding <=> $5 AS cos_dist,
+               row_number() OVER (PARTITION BY o.entity_id ORDER BY o.embedding <=> $5) AS rn
+        FROM memory_observations o
+        JOIN memory_entities e ON e.id = o.entity_id
+            AND e.workspace_id = $1
+            AND ($2::text IS NULL OR e.virtual_user_id = $2)
+            AND ($3::uuid IS NULL OR e.agent_id = $3)
+            AND e.forgotten = false
+        WHERE o.superseded_by IS NULL
+          AND (o.valid_until IS NULL OR o.valid_until > now())
+          AND o.embedding IS NOT NULL
+          AND o.confidence >= $8
+        ORDER BY o.embedding <=> $5
+        LIMIT $6 * 4
+    ) ann
+    WHERE rn = 1
     LIMIT $6
 ), cosine_ranked AS (
     SELECT entity_id, row_number() OVER (ORDER BY cos_dist) AS cos_rn
