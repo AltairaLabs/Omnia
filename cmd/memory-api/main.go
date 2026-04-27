@@ -120,6 +120,10 @@ type flags struct {
 	compactionAge         string // env: COMPACTION_AGE, e.g. "720h" (30d)
 	reembedInterval       string // env: REEMBED_INTERVAL, e.g. "30m"
 	reembedBatchSize      int    // env: REEMBED_BATCH_SIZE
+	tombstoneInterval     string // env: TOMBSTONE_INTERVAL, e.g. "6h"
+	tombstoneMinAge       string // env: TOMBSTONE_MIN_AGE, e.g. "720h" (30d)
+	tombstoneMinInactive  int    // env: TOMBSTONE_MIN_INACTIVE
+	tombstoneKeepRecent   int    // env: TOMBSTONE_KEEP_RECENT
 	requireAboutForKinds  string // env: REQUIRE_ABOUT_FOR_KINDS, e.g. "fact,preference"
 	workspace             string
 	serviceGroup          string
@@ -145,6 +149,10 @@ func parseFlags() *flags {
 	flag.StringVar(&f.compactionAge, "compaction-age", "", "Age threshold for compaction candidates (e.g. 720h = 30d). Empty uses worker default.")
 	flag.StringVar(&f.reembedInterval, "reembed-interval", "", "Interval for re-embed backfill worker (e.g. 30m). Empty disables.")
 	flag.IntVar(&f.reembedBatchSize, "reembed-batch-size", 0, "Re-embed batch size per pass. Zero uses worker default (50).")
+	flag.StringVar(&f.tombstoneInterval, "tombstone-interval", "", "Interval for tombstone GC worker (e.g. 6h). Empty disables.")
+	flag.StringVar(&f.tombstoneMinAge, "tombstone-min-age", "", "Minimum age before an inactive observation is GC-eligible (e.g. 720h). Empty uses worker default.")
+	flag.IntVar(&f.tombstoneMinInactive, "tombstone-min-inactive", 0, "Chain length below which tombstone GC leaves observations alone. Zero uses worker default (20).")
+	flag.IntVar(&f.tombstoneKeepRecent, "tombstone-keep-recent", 0, "Most-recent inactive observations preserved per chain for audit. Zero uses worker default (5).")
 	flag.StringVar(&f.requireAboutForKinds, "require-about-for-kinds", "", "Comma-separated list of memory kinds requiring an about={kind, key} hint on save (e.g. fact,preference). Empty disables.")
 	flag.StringVar(&f.workspace, "workspace", "", "Workspace name (K8s CRD resolution mode)")
 	flag.StringVar(&f.serviceGroup, "service-group", "", "Service group name within workspace")
@@ -179,6 +187,18 @@ func (f *flags) applyEnvFallbacks() {
 		}
 	}
 	envFallback(&f.requireAboutForKinds, "", "REQUIRE_ABOUT_FOR_KINDS")
+	envFallback(&f.tombstoneInterval, "", "TOMBSTONE_INTERVAL")
+	envFallback(&f.tombstoneMinAge, "", "TOMBSTONE_MIN_AGE")
+	if v := os.Getenv("TOMBSTONE_MIN_INACTIVE"); v != "" && f.tombstoneMinInactive == 0 {
+		if n, err := strconv.Atoi(v); err == nil {
+			f.tombstoneMinInactive = n
+		}
+	}
+	if v := os.Getenv("TOMBSTONE_KEEP_RECENT"); v != "" && f.tombstoneKeepRecent == 0 {
+		if n, err := strconv.Atoi(v); err == nil {
+			f.tombstoneKeepRecent = n
+		}
+	}
 	if v := os.Getenv("TRACING_SAMPLE_RATE"); v != "" && f.tracingSample == 0 {
 		if rate, err := strconv.ParseFloat(v, 64); err == nil {
 			f.tracingSample = rate
@@ -247,6 +267,38 @@ func parseCSV(in string) []string {
 		}
 	}
 	return out
+}
+
+// tombstoneWorkerOptions returns the TombstoneWorkerOptions derived
+// from flags/env. enabled=false when the interval flag is missing or
+// invalid — the worker exits cleanly in that case anyway, but the
+// guard avoids the noisy "disabled" log line.
+func (f *flags) tombstoneWorkerOptions(log logr.Logger, store *memory.PostgresMemoryStore) (memory.TombstoneWorkerOptions, bool) {
+	if f.tombstoneInterval == "" {
+		return memory.TombstoneWorkerOptions{}, false
+	}
+	interval, err := time.ParseDuration(f.tombstoneInterval)
+	if err != nil || interval <= 0 {
+		log.Error(err, "invalid TOMBSTONE_INTERVAL, tombstone worker disabled",
+			"value", f.tombstoneInterval)
+		return memory.TombstoneWorkerOptions{}, false
+	}
+	opts := memory.TombstoneWorkerOptions{
+		Interval:            interval,
+		WorkspaceDiscoverer: store.ListWorkspaceIDs,
+		MinInactiveCount:    f.tombstoneMinInactive,
+		KeepRecentInactive:  f.tombstoneKeepRecent,
+	}
+	if f.tombstoneMinAge != "" {
+		age, ageErr := time.ParseDuration(f.tombstoneMinAge)
+		if ageErr != nil {
+			log.Error(ageErr, "invalid TOMBSTONE_MIN_AGE, using worker default",
+				"value", f.tombstoneMinAge)
+		} else {
+			opts.MinAge = age
+		}
+	}
+	return opts, true
 }
 
 // reembedWorkerOptions returns the ReembedWorkerOptions derived from
@@ -387,6 +439,22 @@ func run() error {
 	var embeddingSvc *memory.EmbeddingService
 	if f.embeddingProviderName != "" {
 		embeddingSvc = createEmbeddingService(ctx, f.embeddingProviderName, store, log)
+	}
+
+	// --- Tombstone GC worker ---
+	// Hard-deletes old superseded observations on long supersession
+	// chains, keeping the most recent K per chain for audit. Bounds
+	// storage growth without losing the agent-visible "this got
+	// updated" history.
+	if tombstoneOpts, enabled := f.tombstoneWorkerOptions(log, store); enabled {
+		worker := memory.NewTombstoneWorker(store, tombstoneOpts, log)
+		go worker.Run(ctx)
+		log.Info("tombstone worker started",
+			"interval", tombstoneOpts.Interval,
+			"minAge", tombstoneOpts.MinAge,
+			"minInactiveCount", tombstoneOpts.MinInactiveCount,
+			"keepRecent", tombstoneOpts.KeepRecentInactive,
+		)
 	}
 
 	// --- Re-embed backfill worker ---

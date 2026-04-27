@@ -256,6 +256,60 @@ func TestReembedWorkerOptions_DisabledWhenIntervalEmpty(t *testing.T) {
 	}
 }
 
+// TestTombstoneWorkerOptions_DisabledWhenIntervalEmpty proves the
+// guard fires when no interval is set — without it the worker
+// would tick on the zero-duration default and spam RunOnce.
+func TestTombstoneWorkerOptions_DisabledWhenIntervalEmpty(t *testing.T) {
+	f := &flags{}
+	_, enabled := f.tombstoneWorkerOptions(logr.Discard(), nil)
+	if enabled {
+		t.Error("expected tombstone worker to be disabled when interval is empty")
+	}
+}
+
+// TestTombstoneWorkerOptions_InvalidIntervalDisables proves a bad
+// duration string keeps the worker off rather than starting it
+// with whatever ParseDuration partially succeeded on.
+func TestTombstoneWorkerOptions_InvalidIntervalDisables(t *testing.T) {
+	f := &flags{tombstoneInterval: "not-a-duration"}
+	_, enabled := f.tombstoneWorkerOptions(logr.Discard(), nil)
+	if enabled {
+		t.Error("expected tombstone worker to be disabled when interval is invalid")
+	}
+}
+
+// TestTombstoneWorkerOptions_PopulatesFromFlags proves the happy
+// path: a valid interval populates the options including the
+// store-backed workspace discoverer.
+func TestTombstoneWorkerOptions_PopulatesFromFlags(t *testing.T) {
+	store := &memory.PostgresMemoryStore{}
+	f := &flags{
+		tombstoneInterval:    "6h",
+		tombstoneMinAge:      "720h",
+		tombstoneMinInactive: 30,
+		tombstoneKeepRecent:  10,
+	}
+	opts, enabled := f.tombstoneWorkerOptions(logr.Discard(), store)
+	if !enabled {
+		t.Fatal("expected tombstone worker to be enabled")
+	}
+	if opts.Interval != 6*time.Hour {
+		t.Errorf("expected 6h interval, got %v", opts.Interval)
+	}
+	if opts.MinAge != 720*time.Hour {
+		t.Errorf("expected 720h min-age, got %v", opts.MinAge)
+	}
+	if opts.MinInactiveCount != 30 {
+		t.Errorf("expected min-inactive 30, got %d", opts.MinInactiveCount)
+	}
+	if opts.KeepRecentInactive != 10 {
+		t.Errorf("expected keep-recent 10, got %d", opts.KeepRecentInactive)
+	}
+	if opts.WorkspaceDiscoverer == nil {
+		t.Error("expected WorkspaceDiscoverer to be wired to store.ListWorkspaceIDs")
+	}
+}
+
 // TestReembedWorkerOptions_PopulatesFromFlags proves the happy
 // path: a valid interval + an embedding service produces enabled
 // options carrying the configured CurrentModel (the provider name)
