@@ -144,9 +144,29 @@ func (s *MemoryService) emitAuditEvent(ctx context.Context, entry *MemoryAuditEn
 	go logger.LogEvent(context.Background(), entry)
 }
 
-// SaveMemory persists a memory entry and, if an embedding service is configured,
-// asynchronously generates and stores its embedding.
+// SaveMemory persists a memory entry and, if an embedding service is
+// configured, asynchronously generates and stores its embedding.
+// Backwards-compatible thin wrapper around SaveMemoryWithResult that
+// discards the dedup result. New callers prefer SaveMemoryWithResult
+// so the agent sees auto_superseded / potential_duplicates info.
 func (s *MemoryService) SaveMemory(ctx context.Context, mem *memory.Memory) error {
+	_, err := s.SaveMemoryWithResult(ctx, mem)
+	return err
+}
+
+// SaveMemoryWithResult is the rich Omnia write API. Returns a
+// SaveResult describing how the dedup pipeline resolved the write
+// (added vs auto_superseded; supersedes ids; reason). The HTTP
+// handler surfaces this to the agent so its reply ("Got it" vs
+// "Updated your name from X to Y") and follow-up tool calls can be
+// honest about what happened.
+//
+// Today this method covers the structured-key dedup path (the
+// agent passed about_kind+about_key in metadata). Embedding-
+// similarity dedup is layered on top in a follow-on commit; when
+// it lands the same SaveResult shape carries its action /
+// potential_duplicates.
+func (s *MemoryService) SaveMemoryWithResult(ctx context.Context, mem *memory.Memory) (*memory.SaveResult, error) {
 	if mem.ExpiresAt == nil && s.config.DefaultTTL > 0 {
 		exp := time.Now().Add(s.config.DefaultTTL)
 		mem.ExpiresAt = &exp
@@ -162,8 +182,9 @@ func (s *MemoryService) SaveMemory(ctx context.Context, mem *memory.Memory) erro
 			mem.Metadata[memory.MetaKeyPurpose] = s.config.Purpose
 		}
 	}
-	if err := s.store.Save(ctx, mem); err != nil {
-		return err
+	res, err := s.store.SaveWithResult(ctx, mem)
+	if err != nil {
+		return nil, err
 	}
 	if s.eventPublisher != nil {
 		event := MemoryEvent{
@@ -196,7 +217,7 @@ func (s *MemoryService) SaveMemory(ctx context.Context, mem *memory.Memory) erro
 		UserID:      mem.Scope[memory.ScopeUserID],
 		Kind:        mem.Type,
 	})
-	return nil
+	return res, nil
 }
 
 // SearchMemories retrieves memories matching a query and scope.

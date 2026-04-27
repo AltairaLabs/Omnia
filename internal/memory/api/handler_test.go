@@ -48,6 +48,10 @@ type mockStore struct {
 	batchDeleteN   int
 	exportAllErr   error
 	savedMem       *memory.Memory
+	// nextSaveResult overrides the default SaveActionAdded result.
+	// Tests use this to exercise the auto_superseded surface without
+	// standing up a real Postgres.
+	nextSaveResult *memory.SaveResult
 }
 
 func (m *mockStore) Save(_ context.Context, mem *memory.Memory) error {
@@ -57,6 +61,22 @@ func (m *mockStore) Save(_ context.Context, mem *memory.Memory) error {
 	mem.ID = "mock-id-001"
 	m.savedMem = mem
 	return nil
+}
+
+func (m *mockStore) SaveWithResult(ctx context.Context, mem *memory.Memory) (*memory.SaveResult, error) {
+	if err := m.Save(ctx, mem); err != nil {
+		return nil, err
+	}
+	if m.nextSaveResult != nil {
+		// Stamp the freshly-allocated mock id so the caller sees a
+		// consistent SaveResult.ID.
+		out := *m.nextSaveResult
+		if out.ID == "" {
+			out.ID = mem.ID
+		}
+		return &out, nil
+	}
+	return &memory.SaveResult{ID: mem.ID, Action: memory.SaveActionAdded}, nil
 }
 
 func (m *mockStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
@@ -345,6 +365,73 @@ func TestHandleSaveMemory_Success(t *testing.T) {
 	var resp MemoryResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, "mock-id-001", resp.Memory.ID)
+}
+
+// TestHandleSaveMemory_SurfacesAutoSupersedeAction proves the
+// HTTP response carries the dedup result so the agent can phrase
+// its reply ("Updated your name from Slim Shard to Phil") and
+// know which observation IDs the server superseded.
+func TestHandleSaveMemory_SurfacesAutoSupersedeAction(t *testing.T) {
+	store := &mockStore{
+		nextSaveResult: &memory.SaveResult{
+			Action:                   memory.SaveActionAutoSuperseded,
+			SupersededObservationIDs: []string{"obs-old"},
+			SupersedeReason:          memory.ReasonStructuredKey,
+		},
+	}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	body := SaveMemoryRequest{
+		Type:       "fact",
+		Content:    "User's name is Phil",
+		Confidence: 1.0,
+		Scope:      map[string]string{"workspace_id": "ws1", "user_id": "u1"},
+		About:      &AboutKey{Kind: "user", Key: "name"},
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/memories", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusCreated, rr.Code)
+
+	var resp SaveMemoryResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, memory.SaveActionAutoSuperseded, resp.Action)
+	assert.Equal(t, []string{"obs-old"}, resp.SupersededObservationIDs)
+	assert.Equal(t, memory.ReasonStructuredKey, resp.SupersedeReason)
+}
+
+// TestHandleSaveMemory_PropagatesAboutKeyToMetadata proves the
+// top-level `about` field on the request is translated into the
+// store's metadata keys (MetaKeyAboutKind / MetaKeyAboutKey) so
+// PostgresMemoryStore.SaveWithResult engages the structured-key
+// dedup path. Without this translation the dedup index never fires.
+func TestHandleSaveMemory_PropagatesAboutKeyToMetadata(t *testing.T) {
+	store := &mockStore{}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	body := SaveMemoryRequest{
+		Type:       "fact",
+		Content:    "User's name is Phil",
+		Confidence: 1.0,
+		Scope:      map[string]string{"workspace_id": "ws1", "user_id": "u1"},
+		About:      &AboutKey{Kind: "User", Key: "Name"}, // mixed case → store normalizes
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/memories", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusCreated, rr.Code)
+	require.NotNil(t, store.savedMem, "Save not called")
+	require.NotNil(t, store.savedMem.Metadata)
+	assert.Equal(t, "User", store.savedMem.Metadata[memory.MetaKeyAboutKind])
+	assert.Equal(t, "Name", store.savedMem.Metadata[memory.MetaKeyAboutKey])
 }
 
 func TestHandleSaveMemory_BadJSON(t *testing.T) {

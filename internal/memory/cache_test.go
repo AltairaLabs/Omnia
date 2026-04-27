@@ -79,6 +79,13 @@ func (m *cacheTestStore) Save(_ context.Context, mem *Memory) error {
 	return nil
 }
 
+func (m *cacheTestStore) SaveWithResult(ctx context.Context, mem *Memory) (*SaveResult, error) {
+	if err := m.Save(ctx, mem); err != nil {
+		return nil, err
+	}
+	return &SaveResult{ID: mem.ID, Action: SaveActionAdded}, nil
+}
+
 func (m *cacheTestStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ RetrieveOptions) ([]*Memory, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -329,6 +336,40 @@ func TestCachedStore_Save_InnerError(t *testing.T) {
 	err := cs.Save(context.Background(), &Memory{Type: "fact", Content: "x", Scope: cacheTestScope()})
 	if err == nil {
 		t.Fatal("expected error from inner save, got nil")
+	}
+}
+
+// TestCachedStore_SaveWithResult_PassesThroughResult proves the
+// inner store's dedup result (action / supersedes) reaches the
+// caller unchanged. Without this the agent never sees auto_superseded
+// even when the structured-key index fired in the inner store.
+func TestCachedStore_SaveWithResult_PassesThroughResult(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, _ := newTestCache(t, inner)
+
+	res, err := cs.SaveWithResult(context.Background(), &Memory{
+		Type: "fact", Content: "x", Scope: cacheTestScope(),
+	})
+	if err != nil {
+		t.Fatalf("SaveWithResult: %v", err)
+	}
+	if res == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if res.Action != SaveActionAdded {
+		t.Errorf("Action = %q, want %q", res.Action, SaveActionAdded)
+	}
+}
+
+func TestCachedStore_SaveWithResult_InnerError(t *testing.T) {
+	inner := &cacheTestStore{saveErr: errTest}
+	cs, _ := newTestCache(t, inner)
+
+	_, err := cs.SaveWithResult(context.Background(), &Memory{
+		Type: "fact", Content: "x", Scope: cacheTestScope(),
+	})
+	if err == nil {
+		t.Fatal("expected error from inner SaveWithResult, got nil")
 	}
 }
 

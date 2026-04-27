@@ -57,6 +57,13 @@ func (m *mockMemoryStore) Save(_ context.Context, mem *memory.Memory) error {
 	return nil
 }
 
+func (m *mockMemoryStore) SaveWithResult(ctx context.Context, mem *memory.Memory) (*memory.SaveResult, error) {
+	if err := m.Save(ctx, mem); err != nil {
+		return nil, err
+	}
+	return &memory.SaveResult{ID: mem.ID, Action: memory.SaveActionAdded}, nil
+}
+
 func (m *mockMemoryStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	return nil, nil
 }

@@ -94,19 +94,36 @@ func (s *PostgresMemoryStore) Pool() *pgxpool.Pool {
 // inserted. When Memory.ID is set the entity metadata is updated and a new observation
 // is appended (upsert pattern). The Memory is mutated in place: ID and CreatedAt are
 // populated on return.
+// Save implements pkmemory.Store. Backwards-compatible thin wrapper
+// around SaveWithResult that discards the rich result. New Omnia
+// callers prefer SaveWithResult so they can surface dedup info to
+// the agent.
 func (s *PostgresMemoryStore) Save(ctx context.Context, mem *Memory) error {
+	_, err := s.SaveWithResult(ctx, mem)
+	return err
+}
+
+// SaveWithResult is Omnia's enriched write API. Returns SaveResult
+// describing whether the write was a fresh INSERT or an
+// auto-supersede via the structured-key dedup path. Embedding-
+// similarity dedup is layered on top by the api/service.go caller
+// (which has the embedding provider) — this method covers the
+// structured-key path only.
+func (s *PostgresMemoryStore) SaveWithResult(ctx context.Context, mem *Memory) (*SaveResult, error) {
 	if mem.Scope[ScopeWorkspaceID] == "" {
-		return errors.New(errWorkspaceRequired)
+		return nil, errors.New(errWorkspaceRequired)
 	}
 	if mem.Scope[ScopeUserID] == "" {
-		return errors.New(errUserIDRequired)
+		return nil, errors.New(errUserIDRequired)
 	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("memory: begin tx: %w", err)
+		return nil, fmt.Errorf("memory: begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	res := &SaveResult{Action: SaveActionAdded}
 
 	// Structured-key dedup path: when the caller passed
 	// about_kind+about_key, look up (or atomically create) the entity
@@ -115,33 +132,38 @@ func (s *PostgresMemoryStore) Save(ctx context.Context, mem *Memory) error {
 	// changes name and old name still shows up" failure.
 	switch {
 	case mem.ID == "" && hasAboutKey(mem):
-		if err := upsertEntityByAboutKey(ctx, tx, mem); err != nil {
-			return err
+		conflicted, err := upsertEntityByAboutKey(ctx, tx, mem)
+		if err != nil {
+			return nil, err
+		}
+		if conflicted {
+			supersededIDs, err := supersedePriorObservations(ctx, tx, mem.ID)
+			if err != nil {
+				return nil, err
+			}
+			res.Action = SaveActionAutoSuperseded
+			res.SupersededObservationIDs = supersededIDs
+			res.SupersedeReason = ReasonStructuredKey
 		}
 	case mem.ID == "":
 		if err := insertEntity(ctx, tx, mem); err != nil {
-			return err
+			return nil, err
 		}
 	default:
 		if err := updateEntity(ctx, tx, mem); err != nil {
-			return err
-		}
-	}
-
-	// When this Save reused an existing entity via the structured-key
-	// path, supersede the prior active observation(s). Done before the
-	// new observation insert so the new row's superseded_by stays NULL.
-	if hasAboutKey(mem) {
-		if err := supersedePriorObservations(ctx, tx, mem.ID); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	if err := insertObservation(ctx, tx, mem); err != nil {
-		return err
+		return nil, err
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	res.ID = mem.ID
+	return res, nil
 }
 
 // hasAboutKey reports whether the caller asked for structured-key
@@ -155,10 +177,12 @@ func hasAboutKey(mem *Memory) bool {
 // (scope, about_kind, about_key) — creating it if absent. Sets mem.ID
 // and mem.CreatedAt either way. Implements the structured-key
 // dedup path via ON CONFLICT against the partial unique index.
-func upsertEntityByAboutKey(ctx context.Context, tx pgx.Tx, mem *Memory) error {
+// Returns conflicted=true when an existing entity was reused (the
+// caller will then supersede the entity's prior active observations).
+func upsertEntityByAboutKey(ctx context.Context, tx pgx.Tx, mem *Memory) (bool, error) {
 	metaJSON, err := marshalMetadata(mem.Metadata)
 	if err != nil {
-		return err
+		return false, err
 	}
 	trustModel, sourceType := trustFromProvenance(mem.Metadata)
 	purpose := purposeFromMetadata(mem.Metadata)
@@ -173,6 +197,10 @@ func upsertEntityByAboutKey(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 	// also signals "this entity got new content" for downstream
 	// consumers (dashboard "last activity" timestamps, retention
 	// freshness checks).
+	//
+	// xmax = 0 marks freshly inserted rows; on the ON CONFLICT path
+	// xmax holds the conflicting xact's id and is non-zero. We use
+	// that to tell the caller whether dedup fired.
 	row := tx.QueryRow(ctx, `
 		INSERT INTO memory_entities
 		  (workspace_id, virtual_user_id, agent_id, name, kind, metadata, expires_at,
@@ -190,7 +218,7 @@ func upsertEntityByAboutKey(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 		DO UPDATE SET updated_at = now(),
 		              metadata = EXCLUDED.metadata,
 		              title = COALESCE(EXCLUDED.title, memory_entities.title)
-		RETURNING id, created_at`,
+		RETURNING id, created_at, (xmax <> 0) AS conflicted`,
 		mem.Scope[ScopeWorkspaceID],
 		scopeOrNil(mem.Scope, ScopeUserID),
 		scopeOrNil(mem.Scope, ScopeAgentID),
@@ -206,27 +234,43 @@ func upsertEntityByAboutKey(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 		aboutKey,
 		title,
 	)
-	return row.Scan(&mem.ID, &mem.CreatedAt)
+	var conflicted bool
+	if err := row.Scan(&mem.ID, &mem.CreatedAt, &conflicted); err != nil {
+		return false, err
+	}
+	return conflicted, nil
 }
 
 // supersedePriorObservations marks any active observation under the
-// entity as superseded by the next insert. Uses NOW() for both
-// superseded_by-marker (NULL — set when the new observation lands)
-// and valid_until, so recall's active-only filter excludes them
-// immediately. Idempotent.
-func supersedePriorObservations(ctx context.Context, tx pgx.Tx, entityID string) error {
-	_, err := tx.Exec(ctx, `
+// entity as superseded. Uses valid_until = now() so recall's
+// active-only filter excludes them immediately; superseded_by stays
+// NULL because the new observation hasn't been inserted yet (and the
+// observation-level explicit-update path sets superseded_by when it
+// has the new id available). Idempotent. Returns the IDs that were
+// marked so SaveResult can surface them to the agent.
+func supersedePriorObservations(ctx context.Context, tx pgx.Tx, entityID string) ([]string, error) {
+	rows, err := tx.Query(ctx, `
 		UPDATE memory_observations
 		SET valid_until = now()
 		WHERE entity_id = $1
 		  AND superseded_by IS NULL
-		  AND valid_until IS NULL`,
+		  AND valid_until IS NULL
+		RETURNING id`,
 		entityID,
 	)
 	if err != nil {
-		return fmt.Errorf("memory: supersede prior observations: %w", err)
+		return nil, fmt.Errorf("memory: supersede prior observations: %w", err)
 	}
-	return nil
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("memory: supersede scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // MetaKeyPurpose is the metadata key carrying the Omnia purpose tag

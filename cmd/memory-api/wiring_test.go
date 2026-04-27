@@ -43,6 +43,9 @@ func freshPromRegistry(t *testing.T) {
 type fakeMemoryStore struct{}
 
 func (fakeMemoryStore) Save(_ context.Context, _ *memory.Memory) error { return nil }
+func (fakeMemoryStore) SaveWithResult(_ context.Context, mem *memory.Memory) (*memory.SaveResult, error) {
+	return &memory.SaveResult{ID: mem.ID, Action: memory.SaveActionAdded}, nil
+}
 func (fakeMemoryStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	return nil, nil
 }

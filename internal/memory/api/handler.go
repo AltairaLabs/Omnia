@@ -97,6 +97,18 @@ type BatchDeleteResponse struct {
 }
 
 // SaveMemoryRequest is the JSON body for POST /api/v1/memories.
+//
+// About is the structured-dedup hint. When set, the server uses
+// (workspace, user, agent, About.Kind, About.Key) as a soft-unique
+// key — a second write with the same About atomically supersedes
+// the first under the same entity. Use for identity-class facts
+// where the user has one current value (name, location, single-
+// valued preference). Omit for free-form notes; the embedding-
+// similarity path catches near-duplicates without a key.
+//
+// Title and Summary apply to large memories (workspace docs,
+// session summaries). Recall returns the title + summary for
+// memories above the inline threshold, full content otherwise.
 type SaveMemoryRequest struct {
 	Type       string            `json:"type"`
 	Content    string            `json:"content"`
@@ -106,6 +118,32 @@ type SaveMemoryRequest struct {
 	SessionID  string            `json:"session_id,omitempty"`
 	TurnRange  [2]int            `json:"turn_range,omitempty"`
 	Category   string            `json:"category,omitempty"`
+	About      *AboutKey         `json:"about,omitempty"`
+	Title      string            `json:"title,omitempty"`
+	Summary    string            `json:"summary,omitempty"`
+}
+
+// AboutKey is the structured-dedup hint surface. Both Kind and Key
+// are required for the server to engage the structured-key dedup
+// path; an empty value on either side falls through to the
+// embedding-similarity path.
+type AboutKey struct {
+	Kind string `json:"kind"`
+	Key  string `json:"key"`
+}
+
+// SaveMemoryResponse is the JSON body returned from POST
+// /api/v1/memories. The Memory field carries the same shape as the
+// existing MemoryResponse for backwards compatibility; the
+// `action`/`supersedes`/`potential_duplicates` fields are new and
+// surface what the dedup pipeline did, so the agent's reply can be
+// honest ("Got it" vs "Updated your name from Slim Shard to Phil").
+type SaveMemoryResponse struct {
+	Memory                   MemoryWithTier              `json:"memory"`
+	Action                   memory.SaveAction           `json:"action"`
+	SupersededObservationIDs []string                    `json:"supersedes,omitempty"`
+	SupersedeReason          memory.SaveSupersedeReason  `json:"supersede_reason,omitempty"`
+	PotentialDuplicates      []memory.DuplicateCandidate `json:"potential_duplicates,omitempty"`
 }
 
 // Handler provides HTTP endpoints for the memory API.
@@ -272,6 +310,36 @@ func (h *Handler) handleSaveMemory(w http.ResponseWriter, r *http.Request) {
 		TurnRange:  req.TurnRange,
 	}
 
+	// Propagate top-level dedup / display fields into metadata so the
+	// store's helpers pick them up at write time. The store keys
+	// (MetaKeyAboutKind, MetaKeyAboutKey, MetaKeyTitle, MetaKeySummary)
+	// are the canonical carrier — these top-level fields are an
+	// ergonomic alias for callers that don't want to assemble a
+	// metadata map by hand.
+	if req.About != nil && req.About.Kind != "" && req.About.Key != "" {
+		if mem.Metadata == nil {
+			mem.Metadata = map[string]any{}
+		}
+		mem.Metadata[memory.MetaKeyAboutKind] = req.About.Kind
+		mem.Metadata[memory.MetaKeyAboutKey] = req.About.Key
+	}
+	if req.Title != "" {
+		if mem.Metadata == nil {
+			mem.Metadata = map[string]any{}
+		}
+		if _, set := mem.Metadata[memory.MetaKeyTitle]; !set {
+			mem.Metadata[memory.MetaKeyTitle] = req.Title
+		}
+	}
+	if req.Summary != "" {
+		if mem.Metadata == nil {
+			mem.Metadata = map[string]any{}
+		}
+		if _, set := mem.Metadata[memory.MetaKeySummary]; !set {
+			mem.Metadata[memory.MetaKeySummary] = req.Summary
+		}
+	}
+
 	// Propagate the caller-supplied category into metadata so the store's
 	// consentCategoryFromMetadata path picks it up and writes the column.
 	// In OSS req.Category is always empty so this is a no-op. An explicit
@@ -285,16 +353,26 @@ func (h *Handler) handleSaveMemory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.service.SaveMemory(r.Context(), mem); err != nil {
+	res, err := h.service.SaveMemoryWithResult(r.Context(), mem)
+	if err != nil {
 		h.log.Error(err, "SaveMemory failed")
 		writeError(w, err)
 		return
 	}
 
-	h.log.V(1).Info("memory saved", "memoryID", mem.ID, "type", mem.Type)
+	h.log.V(1).Info("memory saved",
+		"memoryID", mem.ID,
+		"type", mem.Type,
+		"action", res.Action)
 	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(MemoryResponse{Memory: mem})
+	_ = json.NewEncoder(w).Encode(SaveMemoryResponse{
+		Memory:                   MemoryWithTier{Memory: mem, Tier: deriveTier(mem.Scope)},
+		Action:                   res.Action,
+		SupersededObservationIDs: res.SupersededObservationIDs,
+		SupersedeReason:          res.SupersedeReason,
+		PotentialDuplicates:      res.PotentialDuplicates,
+	})
 }
 
 // handleDeleteMemory soft-deletes a single memory.

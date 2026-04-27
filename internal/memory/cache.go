@@ -75,6 +75,18 @@ func (c *CachedStore) Save(ctx context.Context, mem *Memory) error {
 	return nil
 }
 
+// SaveWithResult delegates to the inner store and invalidates the
+// cache. The inner store's dedup result is passed through unchanged
+// so the agent sees auto_superseded / potential_duplicates info.
+func (c *CachedStore) SaveWithResult(ctx context.Context, mem *Memory) (*SaveResult, error) {
+	res, err := c.inner.SaveWithResult(ctx, mem)
+	if err != nil {
+		return nil, err
+	}
+	c.bumpVersion(ctx, mem.Scope)
+	return res, nil
+}
+
 // Retrieve returns cached results when available, falling back to the inner store on miss or Redis error.
 func (c *CachedStore) Retrieve(ctx context.Context, scope map[string]string, query string, opts RetrieveOptions) ([]*Memory, error) {
 	key := c.retrieveKey(ctx, scope, query, opts)
