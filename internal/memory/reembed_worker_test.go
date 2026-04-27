@@ -239,6 +239,48 @@ func TestReembedWorker_RunFiresInitialPassAndLoops(t *testing.T) {
 	}
 }
 
+// TestReembedWorker_SkipsEmptyEmbeddings proves a per-row empty
+// embedding (which happens when a provider returns a zero-length
+// vector for one of N inputs) is skipped without aborting the
+// pass. The other rows still get updated.
+func TestReembedWorker_SkipsEmptyEmbeddings(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	require.NoError(t, store.Save(ctx, &Memory{
+		Type: "fact", Content: "alpha", Confidence: 0.9, Scope: scope,
+	}))
+
+	provider := &mixedProvider{}
+	worker := NewReembedWorker(store, provider, ReembedWorkerOptions{
+		BatchSize: 10, CurrentModel: "test-embed-v1",
+	}, logr.Discard())
+	require.NoError(t, worker.RunOnce(ctx))
+}
+
+// mixedProvider returns one zero-length vector per call so the
+// worker exercises the skip-empty branch.
+type mixedProvider struct{}
+
+func (mixedProvider) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, len(texts))
+	// All-empty result; worker should skip every row but not error.
+	return out, nil
+}
+
+// TestReembedWorker_UpdateBadIDError exercises the
+// UpdateObservationEmbedding "no rows" path: passing a bogus
+// observation ID returns an error rather than silently no-oping.
+func TestReembedWorker_UpdateBadIDError(t *testing.T) {
+	store := newStore(t)
+	err := store.UpdateObservationEmbedding(context.Background(),
+		"00000000-0000-0000-0000-000000000000",
+		oneHotFloat(0, 1536), "test-embed-v1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
 // TestReembedWorker_EmbedError surfaces provider failures up the
 // pass return so callers (or test loops) can detect them. The next
 // pass will retry the same rows.
