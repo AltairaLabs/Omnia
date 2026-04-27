@@ -438,4 +438,123 @@ spec:
 			g.Expect(output).To(Equal("Succeeded"))
 		}, 5*time.Minute, 2*time.Second).Should(Succeed())
 	})
+
+	// Prevention test for the wiring trap that hid the multi-tier ILIKE bug
+	// for weeks (issue #1038): exercise the path the agent runtime actually
+	// uses (POST /api/v1/memories/retrieve, multi-tier) with a tokenized
+	// query whose terms appear in the stored content but NOT as a literal
+	// substring. The pre-FTS implementation returned 0; FTS returns the
+	// matching row. If anyone reverts retrieve_multi_tier.go to ILIKE this
+	// fails loudly in CI before merge.
+	It("multi-tier retrieve uses tokenized FTS, not literal-substring match (issue #1038 regression test)", func() {
+		const recallTestPod = "memory-recall-test"
+
+		recallPodManifest := fmt.Sprintf(`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+  - name: test
+    image: python:3.13-slim
+    env:
+    - name: WORKSPACE_UID
+      value: %q
+    - name: MEMORY_API
+      value: "http://%s"
+    securityContext:
+      readOnlyRootFilesystem: false
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+    command: ["python3", "-c"]
+    args:
+    - |
+      import json
+      import os
+      import sys
+      import urllib.request
+
+      MEMORY_API = os.environ["MEMORY_API"]
+      WORKSPACE_UID = os.environ["WORKSPACE_UID"]
+      AGENT_ID = "00000000-0000-0000-0000-0000000d0c14"
+      USER_ID = "e2e-recall-user"
+
+      def post(path, body):
+          req = urllib.request.Request(
+              f"{MEMORY_API}{path}",
+              data=json.dumps(body).encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=10) as r:
+              return r.status, r.read().decode()
+
+      # Step 1: store a memory with the AGENT scope set so subsequent recall
+      # routes through the multi-tier path (the runtime's actual recall path).
+      print("=== storing memory ===", flush=True)
+      status, body = post("/api/v1/memories", {
+          "type": "fact",
+          "content": "User went to Morocco a few years ago and it was hot.",
+          "confidence": 0.9,
+          "scope": {
+              "workspace_id": WORKSPACE_UID,
+              "user_id": USER_ID,
+              "agent_id": AGENT_ID,
+          },
+      })
+      assert status < 300, f"save failed: {status} {body}"
+
+      # Step 2: tokenized recall via the runtime's path. The query is a
+      # stopword-bearing phrase that NEVER appears as a literal substring
+      # of the stored content. Pre-FTS this returned 0; FTS returns 1.
+      print("=== multi-tier recall with tokenized query ===", flush=True)
+      status, body = post("/api/v1/memories/retrieve", {
+          "workspace_id": WORKSPACE_UID,
+          "user_id": USER_ID,
+          "agent_id": AGENT_ID,
+          "query": "when was my Morocco trip",
+          "limit": 10,
+      })
+      assert status < 300, f"recall failed: {status} {body}"
+      result = json.loads(body)
+      total = result.get("total", 0)
+      memories = result.get("memories", [])
+      assert total >= 1, (
+          f"multi-tier recall returned {total} for tokenized query — "
+          f"this is the ILIKE-regression failure mode from issue #1038. "
+          f"Body: {body}"
+      )
+      contents = []
+      for m in memories:
+          inner = m.get("Memory") or m
+          contents.append(inner.get("content", ""))
+      assert any("Morocco" in c for c in contents), (
+          f"recall returned rows but none mentioned Morocco: {contents}"
+      )
+      print(f"PASS: recalled {total} memory/memories with tokenized query", flush=True)
+`, recallTestPod, memoryE2ENamespace, memoryE2EWorkspaceUID, memoryE2EApiServiceFQDN)
+
+		applyCmd := exec.Command("kubectl", "apply", "-f", "-")
+		applyCmd.Stdin = strings.NewReader(recallPodManifest)
+		_, err := utils.Run(applyCmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to create memory-recall-test pod")
+
+		By("waiting for the memory-recall test pod to complete")
+		Eventually(func(g Gomega) {
+			cmd := exec.Command("kubectl", "get", "pod", recallTestPod,
+				"-n", memoryE2ENamespace, "-o", "jsonpath={.status.phase}")
+			output, err := utils.Run(cmd)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(output).To(Equal("Succeeded"))
+		}, 3*time.Minute, 2*time.Second).Should(Succeed())
+	})
 })
