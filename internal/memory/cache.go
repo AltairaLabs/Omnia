@@ -139,6 +139,18 @@ func (c *CachedStore) FindRelatedEntities(ctx context.Context, scope map[string]
 	return c.inner.FindRelatedEntities(ctx, scope, entityIDs, maxPerEntity)
 }
 
+// RetrieveHybrid passes through to the inner store. Not cached:
+// hybrid retrieval keys would have to encode the query embedding
+// (variable-dimensional) for correctness, which dilutes the cache
+// benefit. Recall is already a read-mostly path; pgvector + FTS in
+// one query is fast enough that we'd rather pay the round trip than
+// risk a stale-but-fast hit.
+func (c *CachedStore) RetrieveHybrid(ctx context.Context, scope map[string]string,
+	query string, queryEmbedding []float32, opts RetrieveOptions,
+) ([]*Memory, error) {
+	return c.inner.RetrieveHybrid(ctx, scope, query, queryEmbedding, opts)
+}
+
 // Retrieve returns cached results when available, falling back to the inner store on miss or Redis error.
 func (c *CachedStore) Retrieve(ctx context.Context, scope map[string]string, query string, opts RetrieveOptions) ([]*Memory, error) {
 	key := c.retrieveKey(ctx, scope, query, opts)

@@ -1053,6 +1053,214 @@ func (s *PostgresMemoryStore) FindSimilarObservations(
 	return out, rows.Err()
 }
 
+// hybridRetrieveSQL is the canonical RRF query template. Two ranked
+// CTEs (FTS and cosine) are computed up to a fanout cap, joined via
+// FULL OUTER JOIN so a memory present in either list still scores,
+// then multiplied by the same source_type × confidence × recency
+// quality multipliers used by the FTS-only path. Argument order:
+//
+//	$1  workspace_id (uuid)
+//	$2  user_id      (text or NULL)
+//	$3  agent_id     (uuid or NULL)
+//	$4  query        (text)
+//	$5  embedding    (pgvector)
+//	$6  fanout       (int — candidates per ranker)
+//	$7  limit        (int — final result cap)
+//	$8  min_confidence (float — applied inside both CTEs)
+const hybridRetrieveSQL = `
+WITH fts AS (
+    SELECT DISTINCT ON (e.id)
+        e.id AS entity_id,
+        ts_rank_cd(o.search_vector, websearch_to_tsquery('english', $4)) AS fts_rank
+    FROM memory_entities e
+    JOIN memory_observations o ON o.entity_id = e.id
+        AND o.superseded_by IS NULL
+        AND (o.valid_until IS NULL OR o.valid_until > now())
+    WHERE e.workspace_id = $1
+      AND ($2::text IS NULL OR e.virtual_user_id = $2)
+      AND ($3::uuid IS NULL OR e.agent_id = $3)
+      AND e.forgotten = false
+      AND coalesce(o.confidence, 0.7) >= $8
+      AND o.search_vector @@ websearch_to_tsquery('english', $4)
+    ORDER BY e.id, fts_rank DESC
+    LIMIT $6
+), fts_ranked AS (
+    SELECT entity_id, row_number() OVER (ORDER BY fts_rank DESC) AS fts_rn
+    FROM fts
+), cosine AS (
+    SELECT DISTINCT ON (e.id)
+        e.id AS entity_id,
+        o.embedding <=> $5 AS cos_dist
+    FROM memory_entities e
+    JOIN memory_observations o ON o.entity_id = e.id
+        AND o.superseded_by IS NULL
+        AND (o.valid_until IS NULL OR o.valid_until > now())
+    WHERE e.workspace_id = $1
+      AND ($2::text IS NULL OR e.virtual_user_id = $2)
+      AND ($3::uuid IS NULL OR e.agent_id = $3)
+      AND e.forgotten = false
+      AND coalesce(o.confidence, 0.7) >= $8
+      AND o.embedding IS NOT NULL
+    ORDER BY e.id, cos_dist
+    LIMIT $6
+), cosine_ranked AS (
+    SELECT entity_id, row_number() OVER (ORDER BY cos_dist) AS cos_rn
+    FROM cosine
+), fused AS (
+    -- Reciprocal Rank Fusion. The 60.0 constant is the k from
+    -- Cormack 2009 reproduced by Weaviate, Vespa, OpenSearch,
+    -- Elastic, et al. — larger flattens per-list contribution,
+    -- smaller amplifies the top of each list.
+    SELECT
+        coalesce(f.entity_id, c.entity_id) AS entity_id,
+        coalesce(1.0/(60.0 + f.fts_rn), 0)
+          + coalesce(1.0/(60.0 + c.cos_rn), 0) AS rrf
+    FROM fts_ranked f FULL OUTER JOIN cosine_ranked c USING (entity_id)
+)
+SELECT DISTINCT ON (e.id)
+    e.id, e.kind, e.metadata, e.created_at, e.expires_at,
+    o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at,
+    fused.rrf
+        * (CASE e.source_type
+              WHEN 'user_requested'           THEN 1.0
+              WHEN 'operator_curated'         THEN 1.0
+              WHEN 'reflection'               THEN 0.85
+              WHEN 'conversation_extraction'  THEN 0.7
+              WHEN 'system_generated'         THEN 0.5
+              ELSE 0.7 END)
+        * coalesce(o.confidence, 0.7)
+        * exp(-EXTRACT(EPOCH FROM (now() - o.observed_at)) / 2592000.0) AS final_score
+FROM fused
+JOIN memory_entities e ON e.id = fused.entity_id
+JOIN memory_observations o ON o.entity_id = e.id
+    AND o.superseded_by IS NULL
+    AND (o.valid_until IS NULL OR o.valid_until > now())
+WHERE e.forgotten = false
+ORDER BY e.id, o.observed_at DESC, final_score DESC
+LIMIT $7`
+
+// RetrieveHybrid runs the hybrid (lexical + semantic) recall path
+// described on the Store interface. See hybridRetrieveSQL for the
+// query shape and rrfK for the fusion constant.
+//
+// When the query text is empty there is nothing for FTS to match on,
+// and when queryEmbedding is empty there is nothing for cosine to
+// score; both cases fall through to plain Retrieve so callers don't
+// need to special-case them.
+func (s *PostgresMemoryStore) RetrieveHybrid(
+	ctx context.Context,
+	scope map[string]string,
+	query string,
+	queryEmbedding []float32,
+	opts RetrieveOptions,
+) ([]*Memory, error) {
+	if scope[ScopeWorkspaceID] == "" {
+		return nil, errors.New(errWorkspaceRequired)
+	}
+	if query == "" || len(queryEmbedding) == 0 {
+		return s.Retrieve(ctx, scope, query, opts)
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = defaultMemoryLimit
+	}
+	fanout := limit * 5
+	if fanout < 50 {
+		fanout = 50
+	}
+	minConfidence := opts.MinConfidence
+	if minConfidence < 0 {
+		minConfidence = 0
+	}
+
+	rows, err := s.pool.Query(ctx, hybridRetrieveSQL,
+		scope[ScopeWorkspaceID],
+		scopeOrNil(scope, ScopeUserID),
+		scopeOrNil(scope, ScopeAgentID),
+		query,
+		pgvector.NewVector(queryEmbedding),
+		fanout,
+		limit,
+		minConfidence,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("memory: hybrid retrieve: %w", err)
+	}
+	defer rows.Close()
+
+	mems, err := scanHybridMemories(rows, scope)
+	if err != nil {
+		return nil, err
+	}
+	s.touchAccessedOnRead(entityIDsFromMemories(mems))
+	return mems, nil
+}
+
+// scanHybridMemories scans the hybrid-retrieve row set, which carries
+// one trailing column (final_score) beyond the standard scanMemory
+// shape. The score is read and discarded — it influenced ordering at
+// the SQL layer; callers don't need it on the returned Memory.
+func scanHybridMemories(rows pgx.Rows, scope map[string]string) ([]*Memory, error) {
+	var results []*Memory
+	for rows.Next() {
+		mem, err := scanHybridMemory(rows, scope)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, mem)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory: hybrid rows iteration: %w", err)
+	}
+	if results == nil {
+		results = []*Memory{}
+	}
+	return results, nil
+}
+
+// scanHybridMemory scans a single row from the hybrid-retrieve query.
+// Mirrors scanMemory but with one extra trailing float64 column for
+// the final_score (consumed and discarded — present in SELECT only
+// so the row order is deterministic).
+func scanHybridMemory(row pgx.Rows, scope map[string]string) (*Memory, error) {
+	var (
+		mem          Memory
+		metadataJSON []byte
+		expiresAt    *time.Time
+		sessionID    *string
+		turnRange    []int
+		observedAt   *time.Time
+		accessedAt   *time.Time
+		finalScore   float64
+	)
+
+	if err := row.Scan(
+		&mem.ID, &mem.Type, &metadataJSON, &mem.CreatedAt, &expiresAt,
+		&mem.Content, &mem.Confidence, &sessionID, &turnRange, &observedAt, &accessedAt,
+		&finalScore,
+	); err != nil {
+		return nil, fmt.Errorf("memory: scan hybrid row: %w", err)
+	}
+
+	mem.Scope = copyScope(scope)
+	mem.ExpiresAt = expiresAt
+	if sessionID != nil {
+		mem.SessionID = *sessionID
+	}
+	if len(turnRange) == 2 {
+		mem.TurnRange = [2]int{turnRange[0], turnRange[1]}
+	}
+	if accessedAt != nil {
+		mem.AccessedAt = *accessedAt
+	}
+	if len(metadataJSON) > 0 {
+		_ = json.Unmarshal(metadataJSON, &mem.Metadata)
+	}
+	_ = observedAt // observed_at influenced ordering; not surfaced on Memory
+	return &mem, nil
+}
+
 // UpdateEmbedding sets the embedding vector on the latest observation for an entity.
 func (s *PostgresMemoryStore) UpdateEmbedding(ctx context.Context, entityID string, embedding []float32) error {
 	tag, err := s.pool.Exec(ctx, `

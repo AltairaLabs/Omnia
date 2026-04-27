@@ -475,6 +475,158 @@ func TestPostgresMemoryStore_Retrieve_SourceTypeWeighting(t *testing.T) {
 		"user_requested should rank above conversation_extraction at equal relevance")
 }
 
+// TestPostgresMemoryStore_FindRelatedEntities exercises the
+// per-source LIMIT and weight ordering on the recall-enrichment
+// graph walk. Two relations from one source, one from another;
+// maxPerEntity caps the response.
+func TestPostgresMemoryStore_FindRelatedEntities(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	a := &Memory{Type: "fact", Content: "user identity", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, a))
+	b := &Memory{Type: "preference", Content: "prefers dark", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, b))
+	c := &Memory{Type: "preference", Content: "likes coffee", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, c))
+
+	_, err := store.LinkEntities(ctx, scope, a.ID, b.ID, "MENTIONS", 0.8)
+	require.NoError(t, err)
+	_, err = store.LinkEntities(ctx, scope, a.ID, c.ID, "MENTIONS", 0.6)
+	require.NoError(t, err)
+	_, err = store.LinkEntities(ctx, scope, b.ID, c.ID, "ABOUT", 1.0)
+	require.NoError(t, err)
+
+	rels, err := store.FindRelatedEntities(ctx, scope, []string{a.ID, b.ID}, 5)
+	require.NoError(t, err)
+	require.Len(t, rels, 3)
+
+	// Empty entityIDs short-circuits to nil without hitting the DB.
+	rels, err = store.FindRelatedEntities(ctx, scope, nil, 5)
+	require.NoError(t, err)
+	assert.Nil(t, rels)
+
+	// Cap at 1 per source — only the highest-weight relation from a
+	// (the 0.8 one to b) should survive.
+	rels, err = store.FindRelatedEntities(ctx, scope, []string{a.ID}, 1)
+	require.NoError(t, err)
+	require.Len(t, rels, 1)
+	assert.Equal(t, b.ID, rels[0].TargetEntityID)
+
+	// Workspace guard.
+	_, err = store.FindRelatedEntities(ctx, map[string]string{}, []string{a.ID}, 5)
+	require.Error(t, err)
+}
+
+// TestPostgresMemoryStore_RetrieveHybrid_FallsBackOnEmptyInputs
+// proves the hybrid path short-circuits to the FTS-only Retrieve
+// when either the query or the embedding is empty — callers without
+// an embedder shouldn't have to special-case the hybrid signature.
+func TestPostgresMemoryStore_RetrieveHybrid_FallsBackOnEmptyInputs(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	require.NoError(t, store.Save(ctx, &Memory{
+		Type: "preference", Content: "prefers dark mode", Confidence: 0.9, Scope: scope,
+	}))
+
+	// Empty embedding falls through to Retrieve with the query.
+	results, err := store.RetrieveHybrid(ctx, scope, "dark", nil, RetrieveOptions{Limit: 5})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Contains(t, results[0].Content, "dark")
+
+	// Empty query falls through to Retrieve which then returns
+	// recency-ordered rows.
+	results, err = store.RetrieveHybrid(ctx, scope, "", []float32{0.1}, RetrieveOptions{Limit: 5})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+}
+
+// TestPostgresMemoryStore_RetrieveHybrid_RequiresWorkspace proves
+// the workspace guard fires on the hybrid path. Cross-tenant leaks
+// here would be catastrophic so the check has to happen before any
+// query work runs.
+func TestPostgresMemoryStore_RetrieveHybrid_RequiresWorkspace(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	_, err := store.RetrieveHybrid(ctx, map[string]string{}, "q", []float32{0.1, 0.2}, RetrieveOptions{Limit: 5})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "workspace_id")
+}
+
+// TestPostgresMemoryStore_RetrieveHybrid_FusesLexicalAndSemantic
+// exercises the full RRF SQL: a memory matched only by FTS and
+// another matched only by cosine both surface, demonstrating the
+// FULL OUTER JOIN of the two ranked CTEs. Without RRF the cosine-
+// only match would never appear in a query for "prefer".
+func TestPostgresMemoryStore_RetrieveHybrid_FusesLexicalAndSemantic(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	// Build a 1536-dim vector matching the schema; pos 7 is arbitrary
+	// — what matters is that the seed and the query share the same
+	// position so cosine = 1.0.
+	queryEmb := oneHotFloat(7, 1536)
+
+	// FTS-only match: lexical hit on "prefer", embedding orthogonal.
+	lexical := &Memory{Type: "preference", Content: "User prefers dark mode", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, lexical))
+	require.NoError(t, store.UpdateEmbedding(ctx, lexical.ID, oneHotFloat(0, 1536)))
+
+	// Cosine-only match: no lexical hit on "prefer", embedding
+	// equals query → cosine 1.0.
+	semantic := &Memory{Type: "preference", Content: "User loves blue", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, semantic))
+	require.NoError(t, store.UpdateEmbedding(ctx, semantic.ID, queryEmb))
+
+	// Neither lexical nor semantic match.
+	noise := &Memory{Type: "fact", Content: "Random unrelated note", Confidence: 0.7, Scope: scope}
+	require.NoError(t, store.Save(ctx, noise))
+	require.NoError(t, store.UpdateEmbedding(ctx, noise.ID, oneHotFloat(99, 1536)))
+
+	results, err := store.RetrieveHybrid(ctx, scope, "prefer", queryEmb, RetrieveOptions{Limit: 10})
+	require.NoError(t, err)
+
+	got := make(map[string]bool, len(results))
+	for _, m := range results {
+		got[m.ID] = true
+	}
+	assert.True(t, got[lexical.ID], "FTS-only match should surface")
+	assert.True(t, got[semantic.ID], "cosine-only match should surface via RRF")
+}
+
+// TestPostgresMemoryStore_RetrieveHybrid_AppliesConfidenceFilter
+// proves the MinConfidence option carries through to both CTEs in
+// the hybrid query — low-confidence rows shouldn't pollute either
+// ranker.
+func TestPostgresMemoryStore_RetrieveHybrid_AppliesConfidenceFilter(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+	queryEmb := oneHotFloat(0, 1536)
+
+	low := &Memory{Type: "fact", Content: "User prefers tea", Confidence: 0.3, Scope: scope}
+	require.NoError(t, store.Save(ctx, low))
+	require.NoError(t, store.UpdateEmbedding(ctx, low.ID, queryEmb))
+
+	high := &Memory{Type: "fact", Content: "User prefers coffee", Confidence: 0.95, Scope: scope}
+	require.NoError(t, store.Save(ctx, high))
+	require.NoError(t, store.UpdateEmbedding(ctx, high.ID, queryEmb))
+
+	results, err := store.RetrieveHybrid(ctx, scope, "prefer", queryEmb,
+		RetrieveOptions{Limit: 10, MinConfidence: 0.8})
+	require.NoError(t, err)
+
+	for _, m := range results {
+		assert.NotEqual(t, low.ID, m.ID, "low-confidence row must be filtered before fusion")
+	}
+}
+
 // TestPostgresMemoryStore_GetMemory_ReturnsActiveObservation proves
 // GetMemory returns the entity's current active observation and
 // excludes superseded predecessors. This is what memory__open

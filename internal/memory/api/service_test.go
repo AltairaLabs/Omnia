@@ -266,6 +266,95 @@ func TestServiceSearchMemories(t *testing.T) {
 	assert.Equal(t, "dark mode", results[0].Content)
 }
 
+// TestServiceSearchMemories_HybridSurfacesSemanticMatch proves the
+// RRF path lifts a semantic-only result into the recall response.
+// Setup: seed three memories. Only A is a lexical hit for the query
+// "prefer". B carries no matching keyword but its observation's
+// embedding equals the query embedding (cosine 1.0). C matches
+// neither. Without hybrid retrieval B would never appear; with RRF
+// it ranks alongside A.
+func TestServiceSearchMemories_HybridSurfacesSemanticMatch(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	provider := newMockEmbeddingProvider(8)
+	provider.fixedEmbedding = oneHotEmbedding(0)
+	logger := zap.New(zap.UseDevMode(true))
+	embSvc := memory.NewEmbeddingService(store, provider, logger)
+	svc := NewMemoryService(store, embSvc, MemoryServiceConfig{}, logr.Discard())
+
+	ctx := context.Background()
+	scope := map[string]string{
+		memory.ScopeWorkspaceID: testWorkspaceID,
+		memory.ScopeUserID:      "test-user",
+	}
+
+	a := &memory.Memory{Type: "preference", Content: "User prefers dark mode", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, a))
+	b := &memory.Memory{Type: "preference", Content: "User loves the colour blue", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, b))
+	require.NoError(t, store.UpdateEmbedding(ctx, b.ID, provider.fixedEmbedding))
+	c := &memory.Memory{Type: "fact", Content: "Random unrelated note", Confidence: 0.7, Scope: scope}
+	require.NoError(t, store.Save(ctx, c))
+
+	// Drain async embedding writes triggered by Save so the next call
+	// can push without blocking on a full channel.
+	drainEmbed(provider, time.Second)
+
+	results, err := svc.SearchMemories(ctx, scope, "prefer", memory.RetrieveOptions{Limit: 10})
+	require.NoError(t, err)
+
+	ids := make(map[string]bool, len(results))
+	for _, m := range results {
+		ids[m.ID] = true
+	}
+	assert.True(t, ids[a.ID], "FTS-only match should surface")
+	assert.True(t, ids[b.ID], "semantic-only match should surface via RRF")
+	assert.False(t, ids[c.ID], "non-matching memory must not appear")
+}
+
+// TestServiceSearchMemories_FallsBackWhenNoEmbedder proves recall
+// without an embedding service still works (FTS only). Guards
+// against accidental nil-deref in the hybrid path.
+func TestServiceSearchMemories_FallsBackWhenNoEmbedder(t *testing.T) {
+	svc := newTestService(t) // no embedder configured
+	ctx := context.Background()
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+
+	require.NoError(t, svc.SaveMemory(ctx, &memory.Memory{
+		Type: "preference", Content: "loves dark mode", Confidence: 0.9, Scope: scope,
+	}))
+
+	results, err := svc.SearchMemories(ctx, scope, "dark", memory.RetrieveOptions{Limit: 5})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Contains(t, results[0].Content, "dark mode")
+}
+
+// TestServiceSearchMemories_HybridFallsBackOnEmbedError proves a
+// transient embedder failure degrades to FTS rather than 500-ing.
+// Recall is too central to the agent loop to make brittle on
+// embedder availability.
+func TestServiceSearchMemories_HybridFallsBackOnEmbedError(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	provider := newMockEmbeddingProvider(4)
+	provider.err = errors.New("provider unavailable")
+	logger := zap.New(zap.UseDevMode(true))
+	embSvc := memory.NewEmbeddingService(store, provider, logger)
+	svc := NewMemoryService(store, embSvc, MemoryServiceConfig{}, logr.Discard())
+
+	ctx := context.Background()
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	require.NoError(t, store.Save(ctx, &memory.Memory{
+		Type: "preference", Content: "User prefers dark mode", Confidence: 0.9, Scope: scope,
+	}))
+	drainEmbed(provider, time.Second)
+
+	results, err := svc.SearchMemories(ctx, scope, "prefer", memory.RetrieveOptions{Limit: 5})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+}
+
 // TestServiceRelatedForMemories proves the recall-enrichment helper
 // returns the per-memory relations the agent uses to navigate the
 // memory graph. Covers the three branches: an entity with relations,

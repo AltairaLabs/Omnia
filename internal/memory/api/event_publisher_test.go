@@ -98,6 +98,12 @@ func (m *mockMemoryStore) FindRelatedEntities(_ context.Context, _ map[string]st
 	return nil, nil
 }
 
+func (m *mockMemoryStore) RetrieveHybrid(_ context.Context, _ map[string]string,
+	_ string, _ []float32, _ memory.RetrieveOptions,
+) ([]*memory.Memory, error) {
+	return nil, nil
+}
+
 func (m *mockMemoryStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	return nil, nil
 }

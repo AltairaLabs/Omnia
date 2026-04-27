@@ -64,6 +64,9 @@ func (fakeMemoryStore) LinkEntities(_ context.Context, _ map[string]string, _, _
 func (fakeMemoryStore) FindRelatedEntities(_ context.Context, _ map[string]string, _ []string, _ int) ([]memory.EntityRelation, error) {
 	return nil, nil
 }
+func (fakeMemoryStore) RetrieveHybrid(_ context.Context, _ map[string]string, _ string, _ []float32, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
+	return nil, nil
+}
 func (fakeMemoryStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	return nil, nil
 }

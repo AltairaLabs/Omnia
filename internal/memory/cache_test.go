@@ -113,6 +113,14 @@ func (m *cacheTestStore) FindRelatedEntities(_ context.Context, _ map[string]str
 	return nil, nil
 }
 
+func (m *cacheTestStore) RetrieveHybrid(_ context.Context, _ map[string]string,
+	_ string, _ []float32, _ RetrieveOptions,
+) ([]*Memory, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.memories, nil
+}
+
 func (m *cacheTestStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ RetrieveOptions) ([]*Memory, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -423,6 +431,23 @@ func TestCachedStore_GetMemory_Passthrough(t *testing.T) {
 	inner := &cacheTestStore{}
 	cs, _ := newTestCache(t, inner)
 	_, _ = cs.GetMemory(context.Background(), cacheTestScope(), "any-id")
+}
+
+// TestCachedStore_RetrieveHybrid_Passthrough proves the cache
+// wrapper delegates the hybrid (lexical + semantic) recall path to
+// the inner store without caching — query-embedding-keyed entries
+// would dilute the cache.
+func TestCachedStore_RetrieveHybrid_Passthrough(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{{ID: "m1", Content: "x"}}}
+	cs, _ := newTestCache(t, inner)
+	got, err := cs.RetrieveHybrid(context.Background(), cacheTestScope(),
+		"q", []float32{0.1, 0.2}, RetrieveOptions{Limit: 5})
+	if err != nil {
+		t.Fatalf("RetrieveHybrid: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 memory from inner, got %d", len(got))
+	}
 }
 
 // TestCachedStore_LinkEntities_BumpsCacheVersion proves a new

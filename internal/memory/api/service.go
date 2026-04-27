@@ -449,8 +449,14 @@ func (s *MemoryService) LinkMemories(ctx context.Context, scope map[string]strin
 }
 
 // SearchMemories retrieves memories matching a query and scope.
+// When an embedding service is configured and the query is non-empty,
+// the call routes through Store.RetrieveHybrid so semantic-only
+// matches (e.g. "what do I prefer?" → "user likes dark mode") surface
+// alongside lexical hits via Reciprocal Rank Fusion. Without an
+// embedder, or for empty queries, it falls through to the FTS-only
+// Retrieve path.
 func (s *MemoryService) SearchMemories(ctx context.Context, scope map[string]string, query string, opts memory.RetrieveOptions) ([]*memory.Memory, error) {
-	results, err := s.store.Retrieve(ctx, scope, query, opts)
+	results, err := s.searchMemoriesInner(ctx, scope, query, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -461,6 +467,24 @@ func (s *MemoryService) SearchMemories(ctx context.Context, scope map[string]str
 		Metadata:    map[string]string{"operation": "search"},
 	})
 	return results, nil
+}
+
+// searchMemoriesInner picks between the FTS-only Retrieve and the
+// hybrid RRF path based on embedder availability. If the embedding
+// call fails the call falls back to FTS so a transient embedder
+// outage degrades recall quality rather than hard-failing the
+// request — recall is too central to the agent loop to make brittle.
+func (s *MemoryService) searchMemoriesInner(ctx context.Context, scope map[string]string, query string, opts memory.RetrieveOptions) ([]*memory.Memory, error) {
+	if s.embeddingSvc == nil || query == "" {
+		return s.store.Retrieve(ctx, scope, query, opts)
+	}
+	embeddings, err := s.embeddingSvc.Provider().Embed(ctx, []string{query})
+	if err != nil || len(embeddings) == 0 || len(embeddings[0]) == 0 {
+		s.log.V(1).Info("hybrid recall fallback to FTS",
+			"reason", "embed_query_failed", "error", err)
+		return s.store.Retrieve(ctx, scope, query, opts)
+	}
+	return s.store.RetrieveHybrid(ctx, scope, query, embeddings[0], opts)
 }
 
 // defaultRelatedPerMemory caps the per-memory related[] list. Three keeps

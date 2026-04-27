@@ -181,6 +181,23 @@ type Store interface {
 	// etc.) so it can decide updates and supersessions correctly.
 	FindRelatedEntities(ctx context.Context, scope map[string]string,
 		entityIDs []string, maxPerEntity int) ([]EntityRelation, error)
+
+	// RetrieveHybrid runs a hybrid lexical + semantic recall and
+	// returns memories ordered by Reciprocal Rank Fusion of FTS
+	// rank and pgvector cosine rank, then multiplied by the standard
+	// source_type / confidence / recency quality weights.
+	//
+	// Both rankers are computed independently up to a fanout cap
+	// (defaulting to max(opts.Limit*5, 50)) and merged via RRF with
+	// k=60. A memory that scores in either list contributes to the
+	// final ranking — semantic-only matches surface even when the
+	// query text isn't a lexical hit, and vice versa.
+	//
+	// queryEmbedding must match the dimensionality of stored
+	// embeddings. Callers without an embedding provider should
+	// fall back to plain Retrieve.
+	RetrieveHybrid(ctx context.Context, scope map[string]string,
+		query string, queryEmbedding []float32, opts RetrieveOptions) ([]*Memory, error)
 	ExportAll(ctx context.Context, scope map[string]string) ([]*Memory, error)
 	BatchDelete(ctx context.Context, scope map[string]string, limit int) (int, error)
 	RetrieveMultiTier(ctx context.Context, req MultiTierRequest) (*MultiTierResult, error)

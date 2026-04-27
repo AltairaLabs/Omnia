@@ -122,6 +122,15 @@ func (m *mockStore) FindRelatedEntities(_ context.Context, _ map[string]string,
 	return out, nil
 }
 
+func (m *mockStore) RetrieveHybrid(_ context.Context, _ map[string]string,
+	_ string, _ []float32, _ memory.RetrieveOptions,
+) ([]*memory.Memory, error) {
+	if m.retErr != nil {
+		return nil, m.retErr
+	}
+	return m.memories, nil
+}
+
 func (m *mockStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	if m.retErr != nil {
 		return nil, m.retErr
