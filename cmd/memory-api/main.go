@@ -117,6 +117,8 @@ type flags struct {
 	retentionInterval     string // env: RETENTION_INTERVAL, e.g. "1h"
 	compactionInterval    string // env: COMPACTION_INTERVAL, e.g. "6h"
 	compactionAge         string // env: COMPACTION_AGE, e.g. "720h" (30d)
+	reembedInterval       string // env: REEMBED_INTERVAL, e.g. "30m"
+	reembedBatchSize      int    // env: REEMBED_BATCH_SIZE
 	workspace             string
 	serviceGroup          string
 }
@@ -139,6 +141,8 @@ func parseFlags() *flags {
 	flag.StringVar(&f.retentionInterval, "retention-interval", "", "Interval for retention worker (e.g. 1h)")
 	flag.StringVar(&f.compactionInterval, "compaction-interval", "", "Interval for temporal-summarization compaction worker (e.g. 6h). Empty disables.")
 	flag.StringVar(&f.compactionAge, "compaction-age", "", "Age threshold for compaction candidates (e.g. 720h = 30d). Empty uses worker default.")
+	flag.StringVar(&f.reembedInterval, "reembed-interval", "", "Interval for re-embed backfill worker (e.g. 30m). Empty disables.")
+	flag.IntVar(&f.reembedBatchSize, "reembed-batch-size", 0, "Re-embed batch size per pass. Zero uses worker default (50).")
 	flag.StringVar(&f.workspace, "workspace", "", "Workspace name (K8s CRD resolution mode)")
 	flag.StringVar(&f.serviceGroup, "service-group", "", "Service group name within workspace")
 	flag.Parse()
@@ -165,6 +169,12 @@ func (f *flags) applyEnvFallbacks() {
 	envFallback(&f.retentionInterval, "", "RETENTION_INTERVAL")
 	envFallback(&f.compactionInterval, "", "COMPACTION_INTERVAL")
 	envFallback(&f.compactionAge, "", "COMPACTION_AGE")
+	envFallback(&f.reembedInterval, "", "REEMBED_INTERVAL")
+	if v := os.Getenv("REEMBED_BATCH_SIZE"); v != "" && f.reembedBatchSize == 0 {
+		if n, err := strconv.Atoi(v); err == nil {
+			f.reembedBatchSize = n
+		}
+	}
 	if v := os.Getenv("TRACING_SAMPLE_RATE"); v != "" && f.tracingSample == 0 {
 		if rate, err := strconv.ParseFloat(v, 64); err == nil {
 			f.tracingSample = rate
@@ -217,6 +227,25 @@ func (f *flags) compactionWorkerOptions(log logr.Logger, store *memory.PostgresM
 		}
 	}
 	return opts, true
+}
+
+// reembedWorkerOptions returns the ReembedWorkerOptions derived from
+// flags/env. enabled=false when no interval is set OR no embedding
+// service is configured — without a provider the worker has nothing
+// to call, and without an interval it would never tick.
+func (f *flags) reembedWorkerOptions(embeddingSvc *memory.EmbeddingService) (memory.ReembedWorkerOptions, bool) {
+	if embeddingSvc == nil || f.reembedInterval == "" {
+		return memory.ReembedWorkerOptions{}, false
+	}
+	interval, err := time.ParseDuration(f.reembedInterval)
+	if err != nil || interval <= 0 {
+		return memory.ReembedWorkerOptions{}, false
+	}
+	return memory.ReembedWorkerOptions{
+		Interval:     interval,
+		BatchSize:    f.reembedBatchSize,
+		CurrentModel: f.embeddingProviderName,
+	}, true
 }
 
 func main() {
@@ -337,6 +366,21 @@ func run() error {
 	var embeddingSvc *memory.EmbeddingService
 	if f.embeddingProviderName != "" {
 		embeddingSvc = createEmbeddingService(ctx, f.embeddingProviderName, store, log)
+	}
+
+	// --- Re-embed backfill worker ---
+	// Backfills observations missing an embedding (pre-wiring rows
+	// or rows stamped with a now-superseded model) so the hybrid
+	// recall path doesn't silently miss them. Requires both an
+	// embedding service AND a configured interval.
+	if reembedOpts, enabled := f.reembedWorkerOptions(embeddingSvc); enabled {
+		worker := memory.NewReembedWorker(store, embeddingSvc.Provider(), reembedOpts, log)
+		go worker.Run(ctx)
+		log.Info("reembed worker started",
+			"interval", reembedOpts.Interval,
+			"batchSize", reembedOpts.BatchSize,
+			"currentModel", reembedOpts.CurrentModel,
+		)
 	}
 
 	// --- Tracing ---

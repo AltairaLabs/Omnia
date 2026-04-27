@@ -226,6 +226,55 @@ func TestCompactionWorkerOptions_PopulatesAgeAndDiscoverer(t *testing.T) {
 	}
 }
 
+// TestReembedWorkerOptions_DisabledWithoutEmbeddingService proves
+// the wiring guard: without an embedding service the worker would
+// have nothing to call, so it must stay off.
+func TestReembedWorkerOptions_DisabledWithoutEmbeddingService(t *testing.T) {
+	f := &flags{reembedInterval: "30m"}
+	_, enabled := f.reembedWorkerOptions(nil)
+	if enabled {
+		t.Error("expected reembed worker to be disabled when embedding service is nil")
+	}
+}
+
+// TestReembedWorkerOptions_DisabledWhenIntervalEmpty proves the
+// other half of the guard: an embedding service alone is not enough
+// — without an interval the worker would tick on zero duration.
+func TestReembedWorkerOptions_DisabledWhenIntervalEmpty(t *testing.T) {
+	f := &flags{}
+	svc := memory.NewEmbeddingService(&memory.PostgresMemoryStore{}, nil, logr.Discard())
+	_, enabled := f.reembedWorkerOptions(svc)
+	if enabled {
+		t.Error("expected reembed worker to be disabled when interval is empty")
+	}
+}
+
+// TestReembedWorkerOptions_PopulatesFromFlags proves the happy
+// path: a valid interval + an embedding service produces enabled
+// options carrying the configured CurrentModel (the provider name)
+// and BatchSize.
+func TestReembedWorkerOptions_PopulatesFromFlags(t *testing.T) {
+	f := &flags{
+		reembedInterval:       "15m",
+		reembedBatchSize:      25,
+		embeddingProviderName: "openai-embed-3-small",
+	}
+	svc := memory.NewEmbeddingService(&memory.PostgresMemoryStore{}, nil, logr.Discard())
+	opts, enabled := f.reembedWorkerOptions(svc)
+	if !enabled {
+		t.Fatal("expected reembed worker to be enabled")
+	}
+	if opts.Interval != 15*time.Minute {
+		t.Errorf("expected 15m interval, got %v", opts.Interval)
+	}
+	if opts.BatchSize != 25 {
+		t.Errorf("expected batch size 25, got %d", opts.BatchSize)
+	}
+	if opts.CurrentModel != "openai-embed-3-small" {
+		t.Errorf("expected provider name as model, got %q", opts.CurrentModel)
+	}
+}
+
 // TestWrapPrivacyMiddleware_NoEmbeddingProvider_StillBuildsValidator verifies
 // that the privacy middleware wiring tolerates a nil embedding service —
 // the validator should still be constructed in regex-only mode and the

@@ -1334,6 +1334,75 @@ func (s *PostgresMemoryStore) UpdateEmbedding(ctx context.Context, entityID stri
 	return nil
 }
 
+// MissingEmbedding describes one observation that needs re-embedding.
+// Returned by FindObservationsMissingEmbedding so the worker has the
+// content to feed the provider plus the row identity to write back.
+type MissingEmbedding struct {
+	ObservationID string
+	EntityID      string
+	Content       string
+}
+
+// FindObservationsMissingEmbedding returns active observations that
+// either have no embedding at all or were embedded with a different
+// model name. Used by the re-embed worker on startup and on a slow
+// ticker to backfill rows that pre-date the embedding wiring or
+// were stamped by a now-superseded model. Bounded by limit so the
+// worker can stream the catalogue without loading it all at once.
+func (s *PostgresMemoryStore) FindObservationsMissingEmbedding(
+	ctx context.Context, currentModel string, limit int,
+) ([]MissingEmbedding, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT o.id, o.entity_id, o.content
+		FROM memory_observations o
+		JOIN memory_entities e ON e.id = o.entity_id AND e.forgotten = false
+		WHERE o.superseded_by IS NULL
+		  AND (o.valid_until IS NULL OR o.valid_until > now())
+		  AND (o.embedding IS NULL
+		       OR ($1 <> '' AND coalesce(o.embedding_model, '') <> $1))
+		ORDER BY o.observed_at
+		LIMIT $2`, currentModel, limit)
+	if err != nil {
+		return nil, fmt.Errorf("memory: find missing embeddings: %w", err)
+	}
+	defer rows.Close()
+
+	var out []MissingEmbedding
+	for rows.Next() {
+		var m MissingEmbedding
+		if err := rows.Scan(&m.ObservationID, &m.EntityID, &m.Content); err != nil {
+			return nil, fmt.Errorf("memory: scan missing embedding: %w", err)
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// UpdateObservationEmbedding writes the embedding + the model name
+// for one specific observation. Distinct from UpdateEmbedding (which
+// targets the latest observation per entity) — the re-embed worker
+// needs to address rows by ID since one entity may have several
+// observations all needing different embeddings.
+func (s *PostgresMemoryStore) UpdateObservationEmbedding(
+	ctx context.Context, observationID string, embedding []float32, modelName string,
+) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE memory_observations
+		SET embedding = $1, embedding_model = $2
+		WHERE id = $3`,
+		pgvector.NewVector(embedding), modelName, observationID)
+	if err != nil {
+		return fmt.Errorf("memory: update observation embedding: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("memory: observation %s not found", observationID)
+	}
+	return nil
+}
+
 // ExpireMemories deletes entities past their expires_at timestamp.
 // Returns the number of expired entities.
 func (s *PostgresMemoryStore) ExpireMemories(ctx context.Context) (int64, error) {
