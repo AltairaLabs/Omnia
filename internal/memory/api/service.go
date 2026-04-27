@@ -142,14 +142,45 @@ func (s *MemoryService) SetAuditLogger(l MemoryAuditLogger) {
 	s.auditLogger = l
 }
 
+// safeGoMaxInFlight bounds the total number of fire-and-forget
+// side-effect goroutines (audit log, event publish, async embedding)
+// in flight at any moment. Without a bound a degraded embedding
+// provider sitting on the 30s timeout context lets a write burst
+// pile up unbounded goroutines all racing for the same provider
+// HTTP client and Postgres pool.
+//
+// 1024 is wide enough to absorb normal bursts yet narrow enough to
+// surface backpressure (via dropped-side-effect metrics) before
+// memory pressure hits the GC.
+const safeGoMaxInFlight = 1024
+
+// safeGoSem is the package-level semaphore. Token in flight = one
+// goroutine spawned via safeGo currently running. A non-blocking
+// acquire on the recall hot path means we drop side effects under
+// burst rather than back-pressuring the caller.
+var safeGoSem = make(chan struct{}, safeGoMaxInFlight)
+
 // safeGo runs fn in a goroutine that recovers from panics. Used
 // for fire-and-forget side effects (audit log, event publish, async
 // embedding) where a panic in the side-effect path must not take
 // down memory-api. Logs the panic with the supplied label so the
 // caller is identifiable in the log stream.
+//
+// Bounded by safeGoSem: when the in-flight count is at capacity the
+// side effect is dropped (with a warning + metric increment via
+// recordSafeGoDrop) rather than queuing unbounded goroutines.
 func (s *MemoryService) safeGo(label string, fn func()) {
+	select {
+	case safeGoSem <- struct{}{}:
+	default:
+		s.log.V(1).Info("safeGo dropped side effect",
+			"label", label, "reason", "in_flight_at_capacity")
+		recordSafeGoDrop(label)
+		return
+	}
 	go func() {
 		defer func() {
+			<-safeGoSem
 			if r := recover(); r != nil {
 				s.log.Error(fmt.Errorf("panic: %v", r),
 					"async side effect panicked", "label", label)
@@ -209,6 +240,14 @@ func (s *MemoryService) SaveMemory(ctx context.Context, mem *memory.Memory) erro
 //     matches as PotentialDuplicates so the agent can decide on a
 //     later turn.
 func (s *MemoryService) SaveMemoryWithResult(ctx context.Context, mem *memory.Memory) (*memory.SaveResult, error) {
+	// Resolve the policy once at the top of the request so every
+	// helper called below (enforceAboutForKind, embeddingDedupEnabled,
+	// autoSupersedeThreshold, surfaceDuplicateThreshold,
+	// duplicateCandidateLimit) reads the same snapshot. Without this
+	// each helper goes through loadPolicy → atomic.Pointer.Load and a
+	// TTL flip mid-request can change thresholds between dedup and
+	// supersede.
+	ctx = withPolicyContext(ctx, s.fetchPolicy(ctx))
 	if err := s.enforceAboutForKind(ctx, mem); err != nil {
 		return nil, err
 	}
@@ -532,7 +571,26 @@ func (s *MemoryService) InlineThresholdBytes(ctx context.Context) int {
 // callers fall through to package-level defaults in any of those
 // cases. The K8sPolicyLoader has its own TTL cache so repeated calls
 // from the same Save don't hit the K8s API more than once.
+//
+// When the same Save calls multiple resolver helpers
+// (autoSupersedeThreshold, surfaceDuplicateThreshold,
+// duplicateCandidateLimit, embeddingDedupEnabled, requireAboutKinds…)
+// each one would otherwise call this and read the cache pointer.
+// Stash the resolved policy on the request context to avoid those
+// repeated atomic.Loads AND to give the whole Save a single
+// consistent snapshot — a TTL flip mid-Save can otherwise change
+// thresholds between dedup and supersede.
 func (s *MemoryService) loadPolicy(ctx context.Context) *omniav1alpha1.MemoryPolicy {
+	if cached, ok := policyFromContext(ctx); ok {
+		return cached
+	}
+	return s.fetchPolicy(ctx)
+}
+
+// fetchPolicy is the uncached path — reads from the loader, swallows
+// transient errors. Exported via withPolicyContext for the request
+// pre-load.
+func (s *MemoryService) fetchPolicy(ctx context.Context) *omniav1alpha1.MemoryPolicy {
 	if s.policyLoader == nil {
 		return nil
 	}
@@ -541,6 +599,39 @@ func (s *MemoryService) loadPolicy(ctx context.Context) *omniav1alpha1.MemoryPol
 		return nil
 	}
 	return policy
+}
+
+// policyContextKey distinguishes the per-request policy snapshot
+// stash from other context values. Unexported to prevent external
+// packages from poisoning the cache.
+type policyContextKey struct{}
+
+// withPolicyContext returns a child context carrying the supplied
+// policy snapshot. Resolver helpers called via that context skip the
+// loader and read the snapshot directly. The snapshot may be nil
+// (no policy bound or loader failure) — that case is also cached so
+// helpers don't retry the loader within the same request.
+func withPolicyContext(ctx context.Context, policy *omniav1alpha1.MemoryPolicy) context.Context {
+	return context.WithValue(ctx, policyContextKey{}, policySnapshot{policy: policy})
+}
+
+// policyFromContext extracts a previously-stashed policy snapshot.
+// The boolean is true when withPolicyContext was called on this
+// context (even if the wrapped policy is nil), false when no
+// snapshot is present and the caller should fetch fresh.
+func policyFromContext(ctx context.Context) (*omniav1alpha1.MemoryPolicy, bool) {
+	v, ok := ctx.Value(policyContextKey{}).(policySnapshot)
+	if !ok {
+		return nil, false
+	}
+	return v.policy, true
+}
+
+// policySnapshot wraps the resolved policy so the type assertion in
+// policyFromContext can distinguish "snapshot present, nil policy"
+// from "no snapshot at all".
+type policySnapshot struct {
+	policy *omniav1alpha1.MemoryPolicy
 }
 
 // applyAutoSupersedeViaSimilarity attaches the new observation to

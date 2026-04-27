@@ -80,12 +80,26 @@ const (
 // PostgresMemoryStore implements Store against the memory_entities / memory_observations
 // PostgreSQL tables created by the memory database initial schema migration.
 type PostgresMemoryStore struct {
-	pool *pgxpool.Pool
+	pool        *pgxpool.Pool
+	accessTouch *accessTouchBatcher
 }
 
 // NewPostgresMemoryStore creates a new store backed by the given connection pool.
+// The store starts a debounced batcher goroutine that coalesces accessed_at
+// updates from the recall hot path; call Close to stop it.
 func NewPostgresMemoryStore(pool *pgxpool.Pool) *PostgresMemoryStore {
-	return &PostgresMemoryStore{pool: pool}
+	s := &PostgresMemoryStore{pool: pool}
+	s.accessTouch = newAccessTouchBatcher(s.runBatchedAccessUpdate)
+	return s
+}
+
+// Close stops the background access-touch batcher. Pool ownership
+// stays with the caller (memory-api) — Close only releases the
+// store's own goroutines.
+func (s *PostgresMemoryStore) Close() {
+	if s.accessTouch != nil {
+		s.accessTouch.Stop()
+	}
 }
 
 // Pool returns the underlying connection pool. Used by retrieval strategies that
@@ -1120,11 +1134,14 @@ func (s *PostgresMemoryStore) SupersedeMany(
 // duplicate caller-side would always trip the missing-rows path
 // with a confusing "1 of 2 source entities not found" message.
 //
-// Uses SELECT … FOR UPDATE to hold a row-level lock for the
-// duration of the surrounding transaction. Without that, a
-// concurrent Delete (which sets forgotten=true) racing the
-// assertion could let a supersede land on a row another tx already
-// considered logically gone.
+// Uses SELECT … FOR KEY SHARE: only blocks foreign-key-like
+// changes to the row (the Delete cascade that sets forgotten=true)
+// without blocking concurrent supersedes that target the entity's
+// observations. FOR UPDATE would serialise every concurrent
+// SaveWithResult / SupersedeMany hitting the same anchor entity —
+// the structured-key supersede path can have many writers per
+// second on the user-identity row, and serialising them would tank
+// p99 under load.
 func assertEntitiesInScope(ctx context.Context, tx pgx.Tx, entityIDs []string, scope map[string]string) error {
 	uniqueIDs := dedupeStrings(entityIDs)
 	rows, err := tx.Query(ctx, `
@@ -1134,7 +1151,7 @@ func assertEntitiesInScope(ctx context.Context, tx pgx.Tx, entityIDs []string, s
 		  AND ($3::text IS NULL OR virtual_user_id = $3)
 		  AND ($4::uuid IS NULL OR agent_id = $4)
 		  AND NOT forgotten
-		FOR UPDATE`,
+		FOR KEY SHARE`,
 		uniqueIDs,
 		scope[ScopeWorkspaceID],
 		scopeOrNil(scope, ScopeUserID),
@@ -1574,13 +1591,30 @@ func (s *PostgresMemoryStore) ExpireMemories(ctx context.Context) (int64, error)
 	return tag.RowsAffected(), nil
 }
 
-// ListWorkspaceIDs returns the distinct set of workspace IDs that currently
-// hold at least one non-forgotten memory entity. Used by background workers
-// that need to iterate workspaces without an external discovery mechanism
-// (e.g. the compaction worker).
+// ListWorkspaceIDs returns the workspace IDs the workers (compaction,
+// tombstone GC, retention, re-embed) iterate per tick. Reads from the
+// memory_workspaces registry table maintained by the
+// memory_entities_track_workspace trigger added in migration 000008,
+// then filters to ones still holding at least one non-forgotten
+// entity via EXISTS — the contract is "workspaces with live data."
+//
+// Bounded by the registry size, not the 1M-entity scale of
+// memory_entities — `SELECT DISTINCT workspace_id FROM
+// memory_entities` was a seq-scan + hash-aggregate every tick.
+// Each EXISTS probe hits the (workspace_id, ...) entity index and
+// returns immediately once one unforgotten row is found; only
+// fully-dead workspaces pay the worst case.
 func (s *PostgresMemoryStore) ListWorkspaceIDs(ctx context.Context) ([]string, error) {
-	rows, err := s.pool.Query(ctx,
-		"SELECT DISTINCT workspace_id FROM memory_entities WHERE forgotten = false")
+	rows, err := s.pool.Query(ctx, `
+		SELECT w.workspace_id
+		FROM memory_workspaces w
+		WHERE EXISTS (
+			SELECT 1 FROM memory_entities e
+			WHERE e.workspace_id = w.workspace_id
+			  AND NOT e.forgotten
+			LIMIT 1
+		)
+		ORDER BY w.workspace_id`)
 	if err != nil {
 		return nil, fmt.Errorf("memory: list workspace ids: %w", err)
 	}

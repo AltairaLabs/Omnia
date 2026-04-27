@@ -374,6 +374,7 @@ func run() error {
 
 	// --- Memory store ---
 	store := memory.NewPostgresMemoryStore(pool)
+	defer store.Close()
 
 	// --- Read-path metrics ---
 	// accessed_at / access_count are bumped asynchronously on every

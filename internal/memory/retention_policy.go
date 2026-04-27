@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"golang.org/x/sync/singleflight"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -74,6 +75,12 @@ type K8sPolicyLoader struct {
 	// timestamp" when one was actually bound, defeating the cache
 	// for up to one TTL window.
 	cache atomic.Pointer[policyCacheEntry]
+
+	// flight collapses concurrent cold-start fetches into a single
+	// in-flight K8s round trip. Without it a service restart with
+	// many simultaneous writes triggers as many GET pairs as there
+	// are concurrent first-touches per workspace.
+	flight singleflight.Group
 }
 
 // policyCacheEntry is the atomic unit. Policy is nil when the most
@@ -115,6 +122,29 @@ func (k *K8sPolicyLoader) Load(ctx context.Context) (*omniav1alpha1.MemoryPolicy
 		return entry.Policy, nil
 	}
 
+	// Singleflight collapses concurrent cold-start fetches into one
+	// K8s round trip. The "cold-restart stampede" otherwise has each
+	// in-flight write goroutine doing its own (workspace, policy)
+	// GET pair. Re-check the cache inside the singleflight closure
+	// in case another caller filled it between our check and ours.
+	v, err, _ := k.flight.Do("load", func() (any, error) {
+		if entry := k.cache.Load(); entry != nil && time.Since(entry.FetchedAt) < ttl {
+			return entry.Policy, nil
+		}
+		return k.fetchUncached(ctx)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if v == nil {
+		return nil, nil
+	}
+	return v.(*omniav1alpha1.MemoryPolicy), nil
+}
+
+// fetchUncached is the K8s round trip path. Always called inside
+// the singleflight closure so we never have two concurrent fetches.
+func (k *K8sPolicyLoader) fetchUncached(ctx context.Context) (*omniav1alpha1.MemoryPolicy, error) {
 	ws := &omniav1alpha1.Workspace{}
 	if err := k.Client.Get(ctx, client.ObjectKey{Name: k.Workspace}, ws); err != nil {
 		if apierrors.IsNotFound(err) {
