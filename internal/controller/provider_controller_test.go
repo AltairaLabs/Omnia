@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -36,6 +37,20 @@ import (
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// fakeCredentialValidator lets tests inject deterministic Validate outcomes.
+// onValidate runs first when set; otherwise the static err is returned.
+type fakeCredentialValidator struct {
+	err        error
+	onValidate func() error
+}
+
+func (f fakeCredentialValidator) Validate(_ context.Context, _ string) error {
+	if f.onValidate != nil {
+		return f.onValidate()
+	}
+	return f.err
+}
 
 // alwaysHealthyClient returns an HTTP client that responds 200 to every request.
 // This prevents envtest reconciler tests from hitting real provider endpoints.
@@ -1596,6 +1611,140 @@ var _ = Describe("Provider Controller", func() {
 			Expect(credCondition.Status).To(Equal(metav1.ConditionFalse))
 			Expect(credCondition.Reason).To(Equal("SecretKeyMissing"))
 			Expect(provider.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseError))
+		})
+	})
+
+	Context("credential validation outcome", func() {
+		var (
+			ctx    context.Context
+			secret *corev1.Secret
+		)
+
+		BeforeEach(func() {
+			ctx = context.Background()
+			secret = &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "validate-creds-secret",
+					Namespace: "default",
+				},
+				Data: map[string][]byte{
+					"ANTHROPIC_API_KEY": []byte("probe-credential"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			_ = k8sClient.Delete(ctx, secret)
+		})
+
+		newProvider := func(name string) *omniav1alpha1.Provider {
+			return &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+				},
+			}
+		}
+
+		findValidCondition := func(p *omniav1alpha1.Provider) *metav1.Condition {
+			for i := range p.Status.Conditions {
+				if p.Status.Conditions[i].Type == ProviderConditionTypeCredentialValid {
+					return &p.Status.Conditions[i]
+				}
+			}
+			return nil
+		}
+
+		It("sets CredentialValid=True when validator returns nil", func() {
+			provider := newProvider("cred-valid-true")
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				CredentialValidatorFactory: func(_ *omniav1alpha1.Provider, _ *http.Client) CredentialValidator {
+					return fakeCredentialValidator{err: nil}
+				},
+			}
+			ref := &omniav1alpha1.SecretKeyRef{Name: "validate-creds-secret"}
+			Expect(reconciler.validateCredentialSecretRef(ctx, provider, ref)).To(Succeed())
+
+			cond := findValidCondition(provider)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal("CredentialAccepted"))
+		})
+
+		It("sets CredentialValid=False when validator returns ErrCredentialInvalid", func() {
+			provider := newProvider("cred-valid-false")
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				CredentialValidatorFactory: func(_ *omniav1alpha1.Provider, _ *http.Client) CredentialValidator {
+					return fakeCredentialValidator{err: ErrCredentialInvalid}
+				},
+			}
+			ref := &omniav1alpha1.SecretKeyRef{Name: "validate-creds-secret"}
+			Expect(reconciler.validateCredentialSecretRef(ctx, provider, ref)).To(Succeed())
+
+			cond := findValidCondition(provider)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal("CredentialRejected"))
+		})
+
+		It("sets CredentialValid=Unknown when validator returns a non-sentinel error", func() {
+			provider := newProvider("cred-valid-unknown")
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				CredentialValidatorFactory: func(_ *omniav1alpha1.Provider, _ *http.Client) CredentialValidator {
+					return fakeCredentialValidator{err: errors.New("connection refused")}
+				},
+			}
+			ref := &omniav1alpha1.SecretKeyRef{Name: "validate-creds-secret"}
+			Expect(reconciler.validateCredentialSecretRef(ctx, provider, ref)).To(Succeed())
+
+			cond := findValidCondition(provider)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+			Expect(cond.Reason).To(Equal("CredentialValidationError"))
+		})
+
+		It("sets CredentialValid=Unknown when no validator exists for the provider type", func() {
+			provider := newProvider("cred-valid-none")
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				CredentialValidatorFactory: func(_ *omniav1alpha1.Provider, _ *http.Client) CredentialValidator {
+					return nil
+				},
+			}
+			ref := &omniav1alpha1.SecretKeyRef{Name: "validate-creds-secret"}
+			Expect(reconciler.validateCredentialSecretRef(ctx, provider, ref)).To(Succeed())
+
+			cond := findValidCondition(provider)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+			Expect(cond.Reason).To(Equal("ValidationNotSupported"))
+		})
+
+		It("reuses cached results across reconciles for the same secret resourceVersion", func() {
+			provider := newProvider("cred-valid-cached")
+			calls := 0
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				CredentialValidatorFactory: func(_ *omniav1alpha1.Provider, _ *http.Client) CredentialValidator {
+					return fakeCredentialValidator{
+						onValidate: func() error { calls++; return nil },
+					}
+				},
+			}
+			ref := &omniav1alpha1.SecretKeyRef{Name: "validate-creds-secret"}
+			Expect(reconciler.validateCredentialSecretRef(ctx, provider, ref)).To(Succeed())
+			Expect(reconciler.validateCredentialSecretRef(ctx, provider, ref)).To(Succeed())
+			Expect(calls).To(Equal(1), "second reconcile should hit cache")
 		})
 	})
 
