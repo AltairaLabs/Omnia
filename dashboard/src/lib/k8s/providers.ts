@@ -7,6 +7,11 @@
 
 import * as k8s from "@kubernetes/client-node";
 
+// Re-exported from a Node-free module so client components can read a
+// Provider's effective secret name without dragging the k8s SDK into
+// the browser bundle. See provider-secret-ref.ts for the rationale.
+export { effectiveSecretRefName } from "./provider-secret-ref";
+
 const GROUP = "omnia.altairalabs.ai";
 const VERSION = "v1alpha1";
 const PLURAL = "providers";
@@ -41,6 +46,19 @@ function getClient(): k8s.CustomObjectsApi {
 
 /**
  * Provider resource from K8s API.
+ *
+ * The Provider CRD has TWO ways to express its credential reference:
+ *
+ *   spec.secretRef            — legacy (Phase 1, marked Deprecated in v1alpha1)
+ *   spec.credential.secretRef — current shape (#1036)
+ *
+ * Operator's k8s/EffectiveSecretRef accepts either; readers should
+ * prefer `effectiveSecretRefName(provider)` over poking at either
+ * field directly so a Provider written in either shape works.
+ *
+ * Writers in this package always set the new shape and remove the
+ * old one in the same patch so a single Provider never carries both
+ * — the CRD validation rejects "both set" at admission.
  */
 interface ProviderResource {
   apiVersion: string;
@@ -57,6 +75,14 @@ interface ProviderResource {
     secretRef?: {
       name: string;
       key?: string;
+    };
+    credential?: {
+      secretRef?: {
+        name: string;
+        key?: string;
+      };
+      envVar?: string;
+      filePath?: string;
     };
     [key: string]: unknown;
   };
@@ -109,13 +135,25 @@ export async function updateProviderSecretRef(
     throw new Error(`Provider ${namespace}/${name} not found`);
   }
 
-  // Update the secretRef
+  // Always write the new shape (spec.credential.secretRef). The CRD
+  // validation rejects "both set", so we also clear the legacy field
+  // in the same patch — without this, a Provider that started life
+  // with spec.secretRef would fail to update.
+  delete existing.spec.secretRef;
   if (secretName === null) {
-    // Remove secretRef
-    delete existing.spec.secretRef;
+    if (existing.spec.credential) {
+      delete existing.spec.credential.secretRef;
+      // Drop the credential block entirely if it's now empty so the
+      // Provider doesn't carry an inert {} that confuses readers.
+      if (
+        Object.keys(existing.spec.credential).length === 0
+      ) {
+        delete existing.spec.credential;
+      }
+    }
   } else {
-    // Set secretRef
-    existing.spec.secretRef = { name: secretName };
+    existing.spec.credential ??= {};
+    existing.spec.credential.secretRef = { name: secretName };
   }
 
   // Use replaceNamespacedCustomObject to update
