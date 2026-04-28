@@ -94,6 +94,9 @@ func NewAnalyticsOptInWorker(pool *pgxpool.Pool, metrics *AnalyticsOptInMetrics,
 // Run ticks until ctx is cancelled. Each tick calls RunOnce.
 // Errors from RunOnce are logged but do not stop the worker.
 func (w *AnalyticsOptInWorker) Run(ctx context.Context) {
+	MarkWorkerRunning(WorkerNameAnalyticsOptIn)
+	defer MarkWorkerStopped(WorkerNameAnalyticsOptIn)
+
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 

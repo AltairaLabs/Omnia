@@ -108,6 +108,12 @@ func (w *CompactionWorker) Run(ctx context.Context) {
 		w.log.Info("compaction worker disabled", "reason", "interval not set")
 		return
 	}
+	// Liveness gauge — see worker_liveness_metrics.go. Set to 1 only
+	// after the disabled-fast-path so a never-started worker stays at
+	// 0 (the alert-on-missing case from issue #1038).
+	MarkWorkerRunning(WorkerNameCompaction)
+	defer MarkWorkerStopped(WorkerNameCompaction)
+
 	ticker := time.NewTicker(w.opts.Interval)
 	defer ticker.Stop()
 

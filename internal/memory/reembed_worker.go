@@ -103,6 +103,8 @@ func (w *ReembedWorker) Run(ctx context.Context) {
 		w.log.Info("reembed worker disabled", "reason", "interval not set")
 		return
 	}
+	MarkWorkerRunning(WorkerNameReembed)
+	defer MarkWorkerStopped(WorkerNameReembed)
 
 	ticker := time.NewTicker(w.opts.Interval)
 	defer ticker.Stop()
