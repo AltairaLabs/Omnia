@@ -200,6 +200,30 @@ export interface EvalDefinition {
   params?: Record<string, unknown>;
   sample_percentage?: number;
   metric?: MetricDef;
+  // Custom group names this eval belongs to. The dashboard's eval
+  // routing UI (issue #988) discovers these and offers them as
+  // autocomplete options alongside the four built-in groups
+  // (default, fast-running, long-running, external).
+  groups?: string[];
+}
+
+/**
+ * Patch shape for updateAgentEvals. Each top-level field is
+ * independently optional so callers can update one slice (e.g. the
+ * sampling slider) without re-sending the rest.
+ *
+ * `inline.groups` and `worker.groups` route which evals run on which
+ * path; an empty array means "use the built-in default for that path"
+ * (the operator-side EvalPathConfig contract).
+ */
+export interface AgentEvalsPatch {
+  enabled?: boolean;
+  sampling?: {
+    defaultRate?: number;
+    extendedRate?: number;
+  };
+  inline?: { groups?: string[] };
+  worker?: { groups?: string[] };
 }
 
 export interface MetricDef {
@@ -391,7 +415,11 @@ export interface DataService {
   getAgent(workspace: string, name: string): Promise<AgentRuntimeType | undefined>;
   createAgent(workspace: string, spec: Record<string, unknown>): Promise<AgentRuntimeType>;
   scaleAgent(workspace: string, name: string, replicas: number): Promise<AgentRuntimeType>;
-  updateAgentEvals(workspace: string, name: string, evals: { enabled?: boolean; sampling?: { defaultRate?: number; extendedRate?: number } }): Promise<AgentRuntimeType>;
+  updateAgentEvals(
+    workspace: string,
+    name: string,
+    evals: AgentEvalsPatch,
+  ): Promise<AgentRuntimeType>;
   getAgentLogs(workspace: string, name: string, options?: LogOptions): Promise<LogEntry[]>;
   getAgentEvents(workspace: string, name: string): Promise<K8sEvent[]>;
 

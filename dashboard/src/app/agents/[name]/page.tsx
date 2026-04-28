@@ -373,6 +373,9 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
               frameworkType={spec.framework?.type || "promptkit"}
               evalsEnabled={spec.evals?.enabled}
               sampling={spec.evals?.sampling}
+              inlineGroups={spec.evals?.inline?.groups}
+              workerGroups={spec.evals?.worker?.groups}
+              promptPackName={spec.promptPackRef?.name}
             />
           </TabsContent>
 

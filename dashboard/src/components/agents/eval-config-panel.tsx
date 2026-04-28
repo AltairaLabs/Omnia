@@ -1,16 +1,29 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { AlertTriangle, Sparkles } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { AlertTriangle, ChevronDown, Sparkles } from "lucide-react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { useEnterpriseConfig } from "@/hooks/core";
 import { useDataService } from "@/lib/data";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { useQueryClient } from "@tanstack/react-query";
+import { useEvalGroups } from "@/hooks/use-eval-groups";
+import { GroupSelector } from "./group-selector";
 
 interface EvalConfigPanelProps {
   agentName: string;
@@ -20,6 +33,16 @@ interface EvalConfigPanelProps {
     defaultRate?: number;
     extendedRate?: number;
   };
+  // inline / worker group routing (issue #988). When the agent's
+  // CRD has no spec.evals.inline.groups (or .worker.groups) the
+  // operator applies its built-in default — passing undefined here
+  // surfaces "[default]" in the UI as the effective value.
+  inlineGroups?: string[];
+  workerGroups?: string[];
+  // The agent's PromptPack name, used to discover custom group names
+  // declared on the pack's eval defs. Optional — when absent the
+  // GroupSelector still offers the four built-in groups.
+  promptPackName?: string;
 }
 
 export function EvalConfigPanel({
@@ -27,6 +50,9 @@ export function EvalConfigPanel({
   frameworkType,
   evalsEnabled = false,
   sampling,
+  inlineGroups,
+  workerGroups,
+  promptPackName,
 }: Readonly<EvalConfigPanelProps>) {
   const { enterpriseEnabled, hideEnterprise } = useEnterpriseConfig();
   const dataService = useDataService();
@@ -37,7 +63,12 @@ export function EvalConfigPanel({
   const [enabled, setEnabled] = useState(evalsEnabled);
   const [lightweightRate, setLightweightRate] = useState(sampling?.defaultRate ?? 100);
   const [extendedRate, setExtendedRate] = useState(sampling?.extendedRate ?? 10);
+  const [inline, setInline] = useState<string[]>(inlineGroups ?? []);
+  const [worker, setWorker] = useState<string[]>(workerGroups ?? []);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const { groups: groupOptions } = useEvalGroups(workspace, promptPackName);
 
   const isPromptKit = frameworkType === "promptkit" || frameworkType === "";
 
@@ -75,6 +106,29 @@ export function EvalConfigPanel({
     }
   }, [workspace, agentName, lightweightRate, extendedRate, dataService, queryClient]);
 
+  const handleGroupsChange = useCallback(
+    async (path: "inline" | "worker", next: string[]) => {
+      const prev = path === "inline" ? inline : worker;
+      if (path === "inline") setInline(next);
+      else setWorker(next);
+      setSaving(true);
+      try {
+        await dataService.updateAgentEvals(workspace, agentName, {
+          [path]: { groups: next },
+        });
+        await queryClient.invalidateQueries({ queryKey: ["agent", workspace, agentName] });
+      } catch {
+        // Roll back optimistic update on failure so the UI reflects
+        // the operator-side truth.
+        if (path === "inline") setInline(prev);
+        else setWorker(prev);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [workspace, agentName, inline, worker, dataService, queryClient],
+  );
+
   // Only show for EE mode, hide completely if hideEnterprise
   if (hideEnterprise || !enterpriseEnabled) {
     return null;
@@ -97,9 +151,9 @@ export function EvalConfigPanel({
           <AlertDescription className="text-blue-700 dark:text-blue-300">
             When enabled, cheap deterministic evals (contains, regex) run inline
             in the agent runtime and expensive ones (LLM judges, external API
-            checks) run in the eval-worker. The sampling rates below control how
-            often each tier fires. For custom group routing, edit the AgentRuntime
-            CRD directly.
+            checks) run in the eval-worker. The sampling rates control how
+            often each tier fires; advanced routing lets you override which
+            groups run on which path.
           </AlertDescription>
         </Alert>
 
@@ -164,6 +218,49 @@ export function EvalConfigPanel({
                 Worker path — long-running and external handlers (LLM judges, REST, A2A)
               </p>
             </div>
+
+            <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between text-left text-sm font-medium hover:text-primary"
+                >
+                  <span>Advanced routing</span>
+                  <ChevronDown
+                    className={`h-4 w-4 transition-transform ${advancedOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="space-y-5 pt-4">
+                <p className="text-xs text-muted-foreground">
+                  Override which eval groups run on each path. Empty = use the
+                  built-in default for that path. Built-in groups:
+                  {" "}
+                  <code>fast-running</code>, <code>long-running</code>,
+                  {" "}<code>external</code>, <code>default</code>. Custom
+                  groups discovered from the agent&apos;s PromptPack are also
+                  offered.
+                </p>
+                <GroupSelector
+                  idPrefix="evals-inline"
+                  label="Inline groups (run in the runtime)"
+                  options={groupOptions}
+                  value={inline}
+                  disabled={saving}
+                  onChange={(next) => handleGroupsChange("inline", next)}
+                  emptyHint='Empty list uses the built-in default ["fast-running"].'
+                />
+                <GroupSelector
+                  idPrefix="evals-worker"
+                  label="Worker groups (run out-of-band in the eval-worker)"
+                  options={groupOptions}
+                  value={worker}
+                  disabled={saving}
+                  onChange={(next) => handleGroupsChange("worker", next)}
+                  emptyHint='Empty list uses the built-in default ["long-running", "external"].'
+                />
+              </CollapsibleContent>
+            </Collapsible>
           </div>
         )}
       </CardContent>

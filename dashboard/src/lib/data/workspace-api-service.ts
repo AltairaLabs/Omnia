@@ -90,7 +90,7 @@ export class WorkspaceApiService {
   async updateAgentEvals(
     workspace: string,
     name: string,
-    evals: { enabled?: boolean; sampling?: { defaultRate?: number; extendedRate?: number } }
+    evals: import("./types").AgentEvalsPatch,
   ): Promise<AgentRuntime> {
     const response = await fetch(
       `/api/workspaces/${encodeURIComponent(workspace)}/agents/${encodeURIComponent(name)}/evals`,
