@@ -596,7 +596,7 @@ export class MockDataService implements DataService {
   async updateAgentEvals(
     workspace: string,
     name: string,
-    evals: { enabled?: boolean; sampling?: { defaultRate?: number; extendedRate?: number } }
+    evals: import("./types").AgentEvalsPatch,
   ): Promise<AgentRuntime> {
     await delay(500);
     const agent = mockAgentRuntimes.find(

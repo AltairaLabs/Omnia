@@ -187,4 +187,94 @@ describe("EvalConfigPanel", () => {
     expect(screen.getByText("100%")).toBeInTheDocument();
     expect(screen.getByText("10%")).toBeInTheDocument();
   });
+
+  // #988 — Advanced routing UI
+  describe("advanced routing", () => {
+    it("hides advanced routing when evals are disabled", () => {
+      renderPanel({ evalsEnabled: false });
+      expect(screen.queryByText("Advanced routing")).not.toBeInTheDocument();
+    });
+
+    it("shows the advanced routing disclosure when evals are enabled", () => {
+      renderPanel({ evalsEnabled: true });
+      expect(screen.getByText("Advanced routing")).toBeInTheDocument();
+    });
+
+    it("offers the four built-in groups when no pack is configured", async () => {
+      renderPanel({ evalsEnabled: true });
+      fireEvent.click(screen.getByText("Advanced routing"));
+
+      await waitFor(() => {
+        // Each group is rendered twice (once per path) — we just need
+        // to confirm presence, not count.
+        expect(screen.getAllByText("default").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("fast-running").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("long-running").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("external").length).toBeGreaterThan(0);
+      });
+    });
+
+    it("calls updateAgentEvals with the inline.groups patch when a group is toggled", async () => {
+      const mockUpdate = vi.fn().mockResolvedValue({});
+      const service = createMockDataService({ updateAgentEvals: mockUpdate });
+      renderPanel({ evalsEnabled: true, inlineGroups: ["fast-running"] }, service);
+
+      fireEvent.click(screen.getByText("Advanced routing"));
+
+      // Toggle "default" on the inline path. The id encodes the path
+      // prefix so we can target the inline checkbox specifically.
+      await waitFor(() => {
+        expect(document.getElementById("evals-inline-default")).not.toBeNull();
+      });
+      const inlineDefault = document.getElementById("evals-inline-default") as HTMLInputElement;
+      fireEvent.click(inlineDefault);
+
+      await waitFor(() => {
+        expect(mockUpdate).toHaveBeenCalledWith("test-ws", "test-agent", {
+          inline: { groups: ["fast-running", "default"] },
+        });
+      });
+    });
+
+    it("renders custom groups already on the agent as removable chips", async () => {
+      renderPanel({
+        evalsEnabled: true,
+        workerGroups: ["long-running", "my-custom"],
+      });
+      fireEvent.click(screen.getByText("Advanced routing"));
+
+      // The custom group renders both as a removable badge AND in the
+      // list when it's selected — assert at least one occurrence.
+      await waitFor(() => {
+        expect(screen.getAllByText("my-custom").length).toBeGreaterThan(0);
+      });
+    });
+
+    it("rolls back optimistic group change on error", async () => {
+      const mockUpdate = vi.fn().mockRejectedValue(new Error("conflict"));
+      const service = createMockDataService({ updateAgentEvals: mockUpdate });
+      renderPanel(
+        { evalsEnabled: true, workerGroups: ["long-running"] },
+        service,
+      );
+
+      fireEvent.click(screen.getByText("Advanced routing"));
+      await waitFor(() => {
+        expect(document.getElementById("evals-worker-external")).not.toBeNull();
+      });
+      const workerExternal = document.getElementById("evals-worker-external") as HTMLInputElement;
+      fireEvent.click(workerExternal);
+
+      // Wait for the patch attempt and the rollback. The "external"
+      // checkbox should end up unchecked again because the patch
+      // failed and we restored the prior selection.
+      await waitFor(() => {
+        expect(mockUpdate).toHaveBeenCalled();
+      });
+      await waitFor(() => {
+        const cb = document.getElementById("evals-worker-external") as HTMLInputElement;
+        expect(cb.getAttribute("data-state")).toBe("unchecked");
+      });
+    });
+  });
 });

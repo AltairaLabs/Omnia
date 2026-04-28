@@ -356,7 +356,7 @@ export class LiveDataService implements DataService {
   async updateAgentEvals(
     workspace: string,
     name: string,
-    evals: { enabled?: boolean; sampling?: { defaultRate?: number; extendedRate?: number } }
+    evals: import("./types").AgentEvalsPatch,
   ): Promise<AgentRuntime> {
     return this.workspaceService.updateAgentEvals(workspace, name, evals);
   }
