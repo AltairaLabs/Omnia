@@ -513,15 +513,22 @@ spec:
       })
       assert status < 300, f"save failed: {status} {body}"
 
-      # Step 2: tokenized recall via the runtime's path. The query is a
-      # stopword-bearing phrase that NEVER appears as a literal substring
-      # of the stored content. Pre-FTS this returned 0; FTS returns 1.
+      # Step 2: tokenized recall via the runtime's path. The query's
+      # tokens after stopword removal — 'morocco' & 'hot' — both appear
+      # in the stored content, but the literal substring "Morocco when
+      # hot" does NOT (content is "User went to Morocco a few years ago
+      # and it was hot."). Pre-FTS ILIKE returned 0 because no literal
+      # substring match; FTS returns 1 because the tokens match.
+      #
+      # If you change the query, verify both tokens appear in the
+      # stored content above — `websearch_to_tsquery` joins terms with
+      # AND by default, so any token absent from the row drops the row.
       print("=== multi-tier recall with tokenized query ===", flush=True)
       status, body = post("/api/v1/memories/retrieve", {
           "workspace_id": WORKSPACE_UID,
           "user_id": USER_ID,
           "agent_id": AGENT_ID,
-          "query": "when was my Morocco trip",
+          "query": "Morocco when hot",
           "limit": 10,
       })
       assert status < 300, f"recall failed: {status} {body}"
