@@ -548,6 +548,29 @@ spec:
 		_, err := utils.Run(applyCmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to create memory-recall-test pod")
 
+		// Dump pod state + logs on failure so CI failures self-diagnose.
+		// Without this, "Timed out after 5 minutes" is the only signal —
+		// pod could be ImagePullBackOff, PSA-rejected, or genuinely failing
+		// the assertion, and there's no way to tell from the log alone.
+		DeferCleanup(func() {
+			if !CurrentSpecReport().Failed() {
+				return
+			}
+			fmt.Fprintf(GinkgoWriter, "\n=== DEBUG: %s pod state ===\n", recallTestPod)
+			descCmd := exec.Command("kubectl", "describe", "pod", recallTestPod, "-n", memoryE2ENamespace)
+			if out, dErr := utils.Run(descCmd); dErr == nil {
+				fmt.Fprintf(GinkgoWriter, "%s\n", out)
+			}
+			logsCmd := exec.Command("kubectl", "logs", recallTestPod, "-n", memoryE2ENamespace, "--all-containers")
+			if out, lErr := utils.Run(logsCmd); lErr == nil {
+				fmt.Fprintf(GinkgoWriter, "=== DEBUG: %s logs ===\n%s\n", recallTestPod, out)
+			}
+		})
+
+		// 5-minute timeout matches the sibling memory-tier-test in this
+		// file. CI's kind cluster needs the extra time to pull
+		// python:3.13-slim on a cold node; the original 3 minutes was a
+		// transcription bug from when the pod was simpler.
 		By("waiting for the memory-recall test pod to complete")
 		Eventually(func(g Gomega) {
 			cmd := exec.Command("kubectl", "get", "pod", recallTestPod,
@@ -555,6 +578,6 @@ spec:
 			output, err := utils.Run(cmd)
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(output).To(Equal("Succeeded"))
-		}, 3*time.Minute, 2*time.Second).Should(Succeed())
+		}, 5*time.Minute, 2*time.Second).Should(Succeed())
 	})
 })
