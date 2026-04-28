@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -22,21 +23,35 @@ const (
 	mimePlain         = "text/plain"
 )
 
+// RunnerBuilder constructs a fresh Runner for a single check execution.
+// Doctor calls this on every /api/v1/run invocation so workspace service
+// discovery re-runs each time — without this, a Doctor pod that started
+// before its workspace existed permanently uses stale fallback URLs (the
+// failure mode behind issue #1040).
+//
+// Returning a fresh Runner per call is intentional: checks capture
+// URLs / store handles by value at construction time, so a stale
+// builder closure can't be patched after the fact. Callers that want
+// the legacy "build once at startup" behaviour can ignore the ctx and
+// return a memoised runner.
+type RunnerBuilder func(ctx context.Context) (*Runner, error)
+
 // Server is the HTTP server for Omnia Doctor.
 type Server struct {
-	runner    *Runner
+	build     RunnerBuilder
 	addr      string
 	log       logr.Logger
 	latestRun *RunResult
 	mu        sync.RWMutex
 }
 
-// NewServer creates a new doctor HTTP server.
-func NewServer(runner *Runner, addr string, log logr.Logger) *Server {
+// NewServer creates a new doctor HTTP server. The builder is invoked
+// per request so service discovery happens at run time, not pod start.
+func NewServer(build RunnerBuilder, addr string, log logr.Logger) *Server {
 	return &Server{
-		runner: runner,
-		addr:   addr,
-		log:    log.WithName("server"),
+		build: build,
+		addr:  addr,
+		log:   log.WithName("server"),
 	}
 }
 
@@ -78,13 +93,22 @@ func (s *Server) handleRunSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	ch := make(chan TestResult, 64)
 	ctx := r.Context()
+	runner, err := s.build(ctx)
+	if err != nil {
+		s.log.Error(err, "build runner failed")
+		// Headers are already set for SSE; emit an error event so the
+		// client sees the failure instead of an empty stream.
+		_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", jsonOrFallback(map[string]string{"error": err.Error()}))
+		flusher.Flush()
+		return
+	}
 
+	ch := make(chan TestResult, 64)
 	var run *RunResult
 	done := make(chan struct{})
 	go func() {
-		run = s.runner.Run(ctx, ch)
+		run = runner.Run(ctx, ch)
 		close(done)
 	}()
 
@@ -119,6 +143,13 @@ func (s *Server) writeCompleteEvent(w http.ResponseWriter, flusher http.Flusher,
 }
 
 func (s *Server) handleRunTrigger(w http.ResponseWriter, r *http.Request) {
+	runner, err := s.build(r.Context())
+	if err != nil {
+		s.log.Error(err, "build runner failed")
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
 	ch := make(chan TestResult, 64)
 	// Drain results in background.
 	go func() {
@@ -126,11 +157,22 @@ func (s *Server) handleRunTrigger(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	run := s.runner.Run(r.Context(), ch)
+	run := runner.Run(r.Context(), ch)
 	s.storeRun(run)
 
 	w.Header().Set(headerContentType, mimeJSON)
 	_ = json.NewEncoder(w).Encode(map[string]string{"runId": run.ID})
+}
+
+// jsonOrFallback marshals v to JSON; on error it returns a plain
+// fallback so callers writing into an SSE stream always have a
+// usable string.
+func jsonOrFallback(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return `{"error":"marshal failed"}`
+	}
+	return string(b)
 }
 
 func (s *Server) handleLatest(w http.ResponseWriter, _ *http.Request) {
