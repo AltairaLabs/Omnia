@@ -19,7 +19,9 @@ vi.mock("@/lib/auth/oauth", () => ({
     refresh_token: "rt", id_token: "it", expires_at: 999,
   })),
   extractClaims: () => ({ sub: "u1", email: "u1@example", name: "U1", groups: [] }),
-  mapClaimsToUser: () => ({
+  // Async since #855 — the callback now uses mapClaimsToUserAsync to
+  // pick up Entra groups overage from a Graph call.
+  mapClaimsToUserAsync: async () => ({
     id: "u1", username: "u1", email: "u1@example", displayName: "U1",
     groups: [], role: "viewer", provider: "oauth",
   }),

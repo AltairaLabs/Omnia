@@ -157,7 +157,7 @@ async function tryRefreshToken(
 
   try {
     // Lazy-load OAuth module only when token refresh is needed
-    const { refreshAccessToken, extractClaims, mapClaimsToUser, validateClaims } = await import("./oauth");
+    const { refreshAccessToken, extractClaims, mapClaimsToUserAsync, validateClaims } = await import("./oauth");
     const tokens = await refreshAccessToken(currentOAuth.refreshToken);
 
     // Build updated OAuth tokens. Access token is intentionally not
@@ -169,12 +169,13 @@ async function tryRefreshToken(
       expiresAt: typeof tokens.expires_at === "number" ? tokens.expires_at : currentOAuth.expiresAt,
     };
 
-    // Update user from new claims if available
+    // Update user from new claims if available. Use the async path
+    // to pick up Entra groups-overage on refresh (issue #855).
     let updatedUser: User | undefined;
     if (tokens.id_token) {
       const claims = extractClaims(tokens);
       if (validateClaims(claims)) {
-        updatedUser = mapClaimsToUser(claims, config);
+        updatedUser = await mapClaimsToUserAsync(claims, config, tokens.access_token);
       }
     }
 

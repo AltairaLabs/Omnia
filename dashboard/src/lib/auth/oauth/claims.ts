@@ -7,6 +7,7 @@
 import type { TokenEndpointResponse, TokenEndpointResponseHelpers } from "openid-client";
 import type { User } from "../types";
 import type { AuthConfig, UserRole } from "../config";
+import { resolveGroupsOverflow, type GraphTransport } from "./groups-overflow";
 
 /**
  * Claims object from ID token or UserInfo.
@@ -19,7 +20,12 @@ type Claims = Record<string, unknown>;
 type TokensWithHelpers = TokenEndpointResponse & TokenEndpointResponseHelpers;
 
 /**
- * Map OIDC claims to User object.
+ * Map OIDC claims to User object. Synchronous; does NOT resolve
+ * Entra `_claim_names.groups` overflow — callers in the OAuth
+ * callback / refresh hot path should use mapClaimsToUserAsync to
+ * pick up overage groups. This sync entry point stays for callers
+ * that genuinely don't have an access token (e.g. tests asserting
+ * pure claim-to-user shape).
  */
 export function mapClaimsToUser(
   claims: Claims,
@@ -46,6 +52,55 @@ export function mapClaimsToUser(
     role,
     provider: "oauth",
   };
+}
+
+/**
+ * mapClaimsToUserAsync is the production entry point. It does
+ * everything mapClaimsToUser does, then resolves Entra's
+ * `_claim_names.groups` overflow (issue #855) when present. accessToken
+ * is the OAuth access token issued alongside the ID token — Microsoft
+ * Graph requires it (NOT the ID token) on the Bearer header.
+ *
+ * Failure modes are absorbed silently (fail-open): if Graph is down /
+ * 5xx / 429 / token has no User.Read scope, we surface a console.warn
+ * with the operator-actionable reason and resolve the user with
+ * `groups: []`. That matches the existing "missing groups → viewer"
+ * behaviour for non-overage tokens — overage users get the same
+ * degraded experience as a misconfigured tenant rather than being
+ * locked out entirely. Operators see the warning in dashboard logs.
+ *
+ * graphTransport is injectable for tests; production callers omit it
+ * to use the global `fetch`.
+ */
+export async function mapClaimsToUserAsync(
+  claims: Claims,
+  config: AuthConfig,
+  accessToken: string | undefined,
+  graphTransport?: GraphTransport,
+): Promise<User> {
+  const user = mapClaimsToUser(claims, config);
+
+  const result = await resolveGroupsOverflow(
+    claims,
+    user.groups,
+    accessToken,
+    graphTransport,
+  );
+
+  if (result.kind === "inline") {
+    return user;
+  }
+
+  if (result.reason) {
+    // eslint-disable-next-line no-console
+    console.warn(`[oauth] ${result.reason}`);
+  }
+
+  // Recompute role with the resolved (or empty-on-failure) group set
+  // — admin/editor mapping must use the same list we surface to the
+  // user object, otherwise audit logs and downstream RBAC drift.
+  const role = resolveRoleFromGroups(result.groups, config.roleMapping);
+  return { ...user, groups: result.groups, role };
 }
 
 /**

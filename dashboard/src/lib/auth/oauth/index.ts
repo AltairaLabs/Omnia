@@ -31,7 +31,7 @@ export {
 } from "./client";
 
 // Claim mapping
-export { mapClaimsToUser, extractClaims, validateClaims } from "./claims";
+export { mapClaimsToUser, mapClaimsToUserAsync, extractClaims, validateClaims } from "./claims";
 
 // Provider utilities
 export {

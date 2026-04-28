@@ -11,7 +11,7 @@ import { getSessionRecord, updateSessionOAuth } from "@/lib/auth/session";
 import {
   refreshAccessToken,
   extractClaims,
-  mapClaimsToUser,
+  mapClaimsToUserAsync,
   validateClaims,
 } from "@/lib/auth/oauth";
 
@@ -40,7 +40,10 @@ export async function POST() {
     if (tokens.id_token) {
       const claims = extractClaims(tokens);
       if (validateClaims(claims)) {
-        nextUser = mapClaimsToUser(claims, config);
+        // Re-fetch overage groups on refresh — group memberships can
+        // change between login and refresh, and the new ID token's
+        // claim shape is what dictates whether to call Graph again.
+        nextUser = await mapClaimsToUserAsync(claims, config, tokens.access_token);
       }
     }
 
