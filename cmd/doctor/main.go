@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-logr/logr"
+
 	"github.com/altairalabs/omnia/internal/doctor"
 	"github.com/altairalabs/omnia/internal/doctor/checks"
 	memoryhttpclient "github.com/altairalabs/omnia/internal/memory/httpclient"
@@ -105,77 +107,41 @@ func main() {
 		arenaURL = discoverServiceURL(*namespace, serviceArenaController, defaultArenaPort)
 	}
 
-	// If --workspace is set, use service discovery to resolve per-workspace URLs.
-	// This overrides the flag-based URL (but the flag-based URL is still the fallback
-	// when --workspace is not set, for local/singleton testing).
-	if *workspaceFlag != "" {
-		resolveWorkspaceURLs(log, *workspaceFlag, *serviceGroupFlag, &sessionAPIURL, &memoryAPIURL)
+	cfg := runnerConfig{
+		log:               log,
+		namespace:         *namespace,
+		agentNamespace:    *agentNamespace,
+		agentName:         *agentName,
+		workspace:         *workspaceFlag,
+		serviceGroup:      *serviceGroupFlag,
+		sessionAPIBaseURL: sessionAPIURL,
+		memoryAPIBaseURL:  memoryAPIURL,
+		ollamaURL:         ollamaURL,
+		operatorURL:       operatorURL,
+		dashboardURL:      dashboardURL,
+		redisAddr:         redisAddr,
+		arenaURL:          arenaURL,
 	}
 
-	agentFacadeURL := discoverServiceURL(*agentNamespace, *agentName, defaultAPIPort)
-
-	sessionStore := httpclient.NewStore(sessionAPIURL, log, httpclient.WithBufferCapacity(0))
-	defer sessionStore.Close() //nolint:errcheck
-
-	runner := doctor.NewRunner()
-
-	runner.Register(checks.InfrastructureChecks(map[string]string{
-		"SessionAPI": sessionAPIURL,
-		"MemoryAPI":  memoryAPIURL,
-	})...)
-	runner.Register(checks.OllamaCheck(ollamaURL))
-	runner.Register(checks.OperatorAPICheck(operatorURL))
-	runner.Register(checks.DashboardCheck(dashboardURL))
-	runner.Register(checks.TCPCheck("Redis", redisAddr))
-	runner.Register(checks.ArenaControllerCheck(arenaURL))
-
-	k8sClient, k8sErr := k8s.NewClient()
-	if k8sErr != nil {
-		log.Info("k8s client unavailable, CRD checks will be skipped", "error", k8sErr.Error())
+	// build is invoked per /api/v1/run request — see issue #1040. A
+	// startup-only build means a Doctor pod that came up before its
+	// Workspace existed permanently uses the global fallback URLs and
+	// every Memory / Sessions / Privacy check returns "no such host".
+	build := func(_ context.Context) (*doctor.Runner, error) {
+		return buildRunner(cfg)
 	}
-	if k8sClient != nil {
-		crdChecker := checks.NewCRDChecker(k8sClient)
-		runner.Register(crdChecker.Checks()...)
-	}
-
-	agentChecker := checks.NewAgentChecker(checks.AgentConfig{
-		FacadeURL:     agentFacadeURL,
-		AgentName:     *agentName,
-		Namespace:     *agentNamespace,
-		SessionAPIURL: sessionAPIURL,
-		SessionStore:  sessionStore,
-	})
-	runner.Register(agentChecker.Checks()...)
-
-	sessionChecker := checks.NewSessionChecker(sessionAPIURL, *agentNamespace, sessionStore, func() string {
-		return agentChecker.LastSessionID
-	})
-	runner.Register(sessionChecker.Checks()...)
-
-	var workspaceUID string
-	if k8sClient != nil {
-		workspaceUID = checks.ResolveWorkspaceUID(k8sClient, *agentNamespace, log)
-	}
-
-	memoryStore := memoryhttpclient.NewStore(memoryAPIURL, log)
-	memoryChecker := checks.NewMemoryChecker(memoryAPIURL, memoryStore, workspaceUID, agentChecker)
-	runner.Register(memoryChecker.Checks()...)
-
-	privacyChecker := checks.NewPrivacyChecker(memoryAPIURL, sessionAPIURL, workspaceUID, arenaURL)
-	if k8sClient != nil {
-		privacyChecker.WithK8sClient(k8sClient)
-	}
-	runner.Register(privacyChecker.Checks()...)
-
-	// Agent → Sessions must run sequentially (Sessions reads Agent's LastSessionID).
-	runner.SequentialGroup("agent-sessions", "Agent", "Sessions")
 
 	if *runOnce {
+		runner, err := buildRunner(cfg)
+		if err != nil {
+			log.Error(err, "build runner failed")
+			os.Exit(1)
+		}
 		runOnceMode(runner, log, *exitCode)
 		return
 	}
 
-	srv := doctor.NewServer(runner, *addr, log)
+	srv := doctor.NewServer(build, *addr, log)
 	httpSrv := &http.Server{
 		Addr:              *addr,
 		Handler:           srv.Handler(),
@@ -202,6 +168,111 @@ func main() {
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		log.Error(err, "shutdown failed")
 	}
+}
+
+// runnerConfig captures the static inputs needed to assemble a fresh
+// doctor.Runner on each call. Workspace + service-discovery state is
+// resolved INSIDE buildRunner so a startup-time race against a not-
+// yet-existing Workspace doesn't permanently cripple the pod
+// (issue #1040).
+//
+// `sessionAPIBaseURL` / `memoryAPIBaseURL` are the flag-derived
+// fallback URLs used when service discovery fails or `--workspace`
+// is not set. Workspace-resolved URLs override these per call.
+type runnerConfig struct {
+	log               logr.Logger
+	namespace         string
+	agentNamespace    string
+	agentName         string
+	workspace         string
+	serviceGroup      string
+	sessionAPIBaseURL string
+	memoryAPIBaseURL  string
+	ollamaURL         string
+	operatorURL       string
+	dashboardURL      string
+	redisAddr         string
+	arenaURL          string
+}
+
+// buildRunner constructs a fresh doctor.Runner with all checks
+// registered. Called per /api/v1/run request so workspace service
+// discovery happens at run time, not pod start. Each call:
+//   - re-resolves workspace URLs (handles startup-race recovery)
+//   - opens a fresh session store HTTP client (so a stale URL doesn't
+//     stick across calls)
+//   - re-fetches the workspace UID (handles Workspace creation after
+//     pod start)
+//
+// The session store is intentionally NOT closed here — the caller
+// gets the runner and the embedded store; the store closes when its
+// owning runner is GC'd. Per-run leak is bounded by the run handler's
+// context cancellation.
+func buildRunner(cfg runnerConfig) (*doctor.Runner, error) {
+	sessionAPIURL := cfg.sessionAPIBaseURL
+	memoryAPIURL := cfg.memoryAPIBaseURL
+
+	if cfg.workspace != "" {
+		resolveWorkspaceURLs(cfg.log, cfg.workspace, cfg.serviceGroup, &sessionAPIURL, &memoryAPIURL)
+	}
+
+	agentFacadeURL := discoverServiceURL(cfg.agentNamespace, cfg.agentName, defaultAPIPort)
+	sessionStore := httpclient.NewStore(sessionAPIURL, cfg.log, httpclient.WithBufferCapacity(0))
+
+	runner := doctor.NewRunner()
+
+	runner.Register(checks.InfrastructureChecks(map[string]string{
+		"SessionAPI": sessionAPIURL,
+		"MemoryAPI":  memoryAPIURL,
+	})...)
+	runner.Register(checks.OllamaCheck(cfg.ollamaURL))
+	runner.Register(checks.OperatorAPICheck(cfg.operatorURL))
+	runner.Register(checks.DashboardCheck(cfg.dashboardURL))
+	runner.Register(checks.TCPCheck("Redis", cfg.redisAddr))
+	runner.Register(checks.ArenaControllerCheck(cfg.arenaURL))
+
+	k8sClient, k8sErr := k8s.NewClient()
+	if k8sErr != nil {
+		cfg.log.Info("k8s client unavailable, CRD checks will be skipped", "error", k8sErr.Error())
+	}
+	if k8sClient != nil {
+		crdChecker := checks.NewCRDChecker(k8sClient)
+		runner.Register(crdChecker.Checks()...)
+	}
+
+	agentChecker := checks.NewAgentChecker(checks.AgentConfig{
+		FacadeURL:     agentFacadeURL,
+		AgentName:     cfg.agentName,
+		Namespace:     cfg.agentNamespace,
+		SessionAPIURL: sessionAPIURL,
+		SessionStore:  sessionStore,
+	})
+	runner.Register(agentChecker.Checks()...)
+
+	sessionChecker := checks.NewSessionChecker(sessionAPIURL, cfg.agentNamespace, sessionStore, func() string {
+		return agentChecker.LastSessionID
+	})
+	runner.Register(sessionChecker.Checks()...)
+
+	var workspaceUID string
+	if k8sClient != nil {
+		workspaceUID = checks.ResolveWorkspaceUID(k8sClient, cfg.agentNamespace, cfg.log)
+	}
+
+	memoryStore := memoryhttpclient.NewStore(memoryAPIURL, cfg.log)
+	memoryChecker := checks.NewMemoryChecker(memoryAPIURL, memoryStore, workspaceUID, agentChecker)
+	runner.Register(memoryChecker.Checks()...)
+
+	privacyChecker := checks.NewPrivacyChecker(memoryAPIURL, sessionAPIURL, workspaceUID, cfg.arenaURL)
+	if k8sClient != nil {
+		privacyChecker.WithK8sClient(k8sClient)
+	}
+	runner.Register(privacyChecker.Checks()...)
+
+	// Agent → Sessions must run sequentially (Sessions reads Agent's LastSessionID).
+	runner.SequentialGroup("agent-sessions", "Agent", "Sessions")
+
+	return runner, nil
 }
 
 // resolveWorkspaceURLs uses service discovery to find per-workspace service URLs.
