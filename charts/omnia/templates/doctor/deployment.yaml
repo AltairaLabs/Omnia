@@ -1,5 +1,17 @@
 {{- if .Values.doctor.enabled }}
 {{- $po := .Values.doctor.podOverrides | default dict }}
+{{- /*
+  Mgmt-plane signing key wiring (issue #1040 part 2).
+  Defaults: mount the dashboard's existing signing-keypair Secret when
+  Doctor is enabled alongside the dashboard. existingSecret overrides
+  the Secret name for installs with externally-managed signing keys
+  (cloud KMS / CSI). enabled=false skips the volume + env var entirely
+  for clusters without mgmt-plane validation.
+*/ -}}
+{{- $signingKeyCfg := .Values.doctor.signingKey | default dict }}
+{{- $signingKeyEnabled := and (hasKey $signingKeyCfg "enabled" | ternary $signingKeyCfg.enabled true) .Values.dashboard.enabled }}
+{{- if hasKey $signingKeyCfg "enabled" }}{{- $signingKeyEnabled = and $signingKeyCfg.enabled .Values.dashboard.enabled }}{{- end }}
+{{- $signingSecretName := default (printf "%s-signing-keypair" (include "omnia.dashboard.fullname" .)) $signingKeyCfg.existingSecret }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -90,17 +102,30 @@ spec:
             {{- end }}
           resources:
             {{- toYaml .Values.doctor.resources | nindent 12 }}
-          {{- with $po.extraEnv }}
+          {{- if or $signingKeyEnabled $po.extraEnv }}
           env:
+            {{- if $signingKeyEnabled }}
+            - name: OMNIA_MGMT_PLANE_SIGNING_KEY_PATH
+              value: /etc/omnia/mgmt-plane/tls.key
+            {{- end }}
+            {{- with $po.extraEnv }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           {{- with $po.extraEnvFrom }}
           envFrom:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with $po.extraVolumeMounts }}
+          {{- if or $signingKeyEnabled $po.extraVolumeMounts }}
           volumeMounts:
+            {{- if $signingKeyEnabled }}
+            - name: mgmt-plane-signing-key
+              mountPath: /etc/omnia/mgmt-plane
+              readOnly: true
+            {{- end }}
+            {{- with $po.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -108,9 +133,17 @@ spec:
             capabilities:
               drop:
                 - ALL
-      {{- with $po.extraVolumes }}
+      {{- if or $signingKeyEnabled $po.extraVolumes }}
       volumes:
+        {{- if $signingKeyEnabled }}
+        - name: mgmt-plane-signing-key
+          secret:
+            secretName: {{ $signingSecretName }}
+            defaultMode: 0o400
+        {{- end }}
+        {{- with $po.extraVolumes }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- end }}
       {{- with $po.nodeSelector }}
       nodeSelector:

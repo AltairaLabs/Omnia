@@ -507,7 +507,15 @@
       "properties": {
         "enabled":   { "type": "boolean" },
         "image":     { "$ref": "#/$defs/image" },
-        "resources": { "$ref": "#/$defs/resources" }
+        "resources": { "$ref": "#/$defs/resources" },
+        "signingKey": {
+          "type": "object",
+          "description": "Mgmt-plane signing key wiring for Doctor's WebSocket checks (#1040 part 2)",
+          "properties": {
+            "enabled":        { "type": "boolean" },
+            "existingSecret": { "type": "string" }
+          }
+        }
       }
     },
 

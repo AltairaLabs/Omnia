@@ -1,0 +1,71 @@
+suite: doctor mgmt-plane signing key wiring (#1040 part 2)
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/doctor/deployment.yaml
+tests:
+  - it: mounts the dashboard signing keypair when Doctor is enabled
+    set:
+      doctor.enabled: true
+    template: templates/doctor/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNIA_MGMT_PLANE_SIGNING_KEY_PATH
+            value: /etc/omnia/mgmt-plane/tls.key
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: mgmt-plane-signing-key
+            mountPath: /etc/omnia/mgmt-plane
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: mgmt-plane-signing-key
+            secret:
+              secretName: omnia-dashboard-signing-keypair
+              defaultMode: 0o400
+
+  - it: honours doctor.signingKey.existingSecret override
+    set:
+      doctor.enabled: true
+      doctor.signingKey.existingSecret: my-byo-keypair
+    template: templates/doctor/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: mgmt-plane-signing-key
+            secret:
+              secretName: my-byo-keypair
+              defaultMode: 0o400
+
+  - it: skips signing-key wiring when dashboard is disabled
+    set:
+      doctor.enabled: true
+      dashboard.enabled: false
+    template: templates/doctor/deployment.yaml
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[0].env
+      - isNull:
+          path: spec.template.spec.containers[0].volumeMounts
+      - isNull:
+          path: spec.template.spec.volumes
+
+  - it: skips signing-key wiring when doctor.signingKey.enabled=false
+    set:
+      doctor.enabled: true
+      doctor.signingKey.enabled: false
+    template: templates/doctor/deployment.yaml
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[0].env
+      - isNull:
+          path: spec.template.spec.containers[0].volumeMounts
+      - isNull:
+          path: spec.template.spec.volumes
