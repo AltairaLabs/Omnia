@@ -18,7 +18,7 @@ import { getSessionStore } from "@/lib/auth/session-store";
 import {
   exchangeCodeForTokens,
   extractClaims,
-  mapClaimsToUser,
+  mapClaimsToUserAsync,
   getUserInfo,
   validateClaims,
 } from "@/lib/auth/oauth";
@@ -86,7 +86,10 @@ export async function GET(request: NextRequest) {
       return loginRedirect("?error=invalid_claims");
     }
 
-    const user = mapClaimsToUser(claims, config);
+    // mapClaimsToUserAsync resolves Entra groups-overage via Microsoft
+    // Graph when the ID token has _claim_names.groups instead of an
+    // inline list (issue #855). Needs the access_token, NOT the id_token.
+    const user = await mapClaimsToUserAsync(claims, config, tokens.access_token);
     await saveUserToSession(user, {
       refreshToken: tokens.refresh_token,
       idToken: tokens.id_token,
