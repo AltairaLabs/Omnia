@@ -23,27 +23,21 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
-
-// retrieverMessages builds the minimal conversation prefix OmniaRetriever
-// consumes — one user-role turn whose Content is the keyword the test
-// expects to match.
-func retrieverMessages(query string) []types.Message {
-	return []types.Message{{Role: "user", Content: query}}
-}
 
 // TestMemoryEndToEnd exercises the Omnia side of the memory stack that
 // remains live now that PromptKit's sdk.WithMemory() owns extraction:
-// direct store.Save → Retrieve → OmniaRetriever → Delete → DeleteAll.
+// direct store.Save → Retrieve → Delete → DeleteAll.
+//
+// The RAG-facing OmniaRetriever path was deleted along with the unused
+// RetrievalStrategy abstraction; PromptKit's pipeline now drives recall
+// directly through the Store interface.
 func TestMemoryEndToEnd(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
 	scope := testScope(testWorkspace1)
-	log := zap.New(zap.UseDevMode(true))
 
 	// Persist a pair of memories the way PromptKit's memory pipeline
 	// does — Omnia just exposes the Store as a pkmemory.Store target.
@@ -60,15 +54,6 @@ func TestMemoryEndToEnd(t *testing.T) {
 	retrieved, err := store.Retrieve(ctx, scope, "Kubernetes", RetrieveOptions{})
 	require.NoError(t, err)
 	require.NotEmpty(t, retrieved, "store.Retrieve should find the saved memory")
-
-	// --- retrieve via OmniaRetriever (RAG-facing) ---
-	strategy := &KeywordStrategy{}
-	retriever := NewOmniaRetriever(store, strategy, 10, log)
-
-	ragMessages := retrieverMessages("Kubernetes")
-	ragResults, err := retriever.RetrieveContext(ctx, scope, ragMessages)
-	require.NoError(t, err)
-	require.NotEmpty(t, ragResults, "OmniaRetriever should find stored memories")
 
 	// --- list all ---
 	listed, err := store.List(ctx, scope, ListOptions{})

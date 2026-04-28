@@ -102,8 +102,8 @@ func (s *PostgresMemoryStore) Close() {
 	}
 }
 
-// Pool returns the underlying connection pool. Used by retrieval strategies that
-// need direct pool access (e.g. OmniaRetriever delegating to RetrievalStrategy).
+// Pool returns the underlying connection pool. Test helpers reach in for
+// direct DB inspection; production code goes through the typed methods.
 func (s *PostgresMemoryStore) Pool() *pgxpool.Pool {
 	return s.pool
 }
