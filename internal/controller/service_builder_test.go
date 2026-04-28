@@ -129,9 +129,16 @@ func TestBuildMemoryDeployment(t *testing.T) {
 	assert.Equal(t, sb.MemoryImage, container.Image)
 	assert.Equal(t, corev1.PullIfNotPresent, container.ImagePullPolicy)
 
-	// Args
+	// Args. Each --*-interval flag is a wiring boundary: memory-api defaults
+	// every worker to "off" when its flag is empty, so anything the operator
+	// doesn't pass silently doesn't run. The compaction / tombstone / reembed
+	// workers were dead in production for weeks until issue #1038 surfaced
+	// the gap. These asserts fail loudly if anyone removes the bridge.
 	assert.Contains(t, container.Args, "--workspace=acme")
 	assert.Contains(t, container.Args, "--service-group=prod")
+	assert.Contains(t, container.Args, "--compaction-interval=24h")
+	assert.Contains(t, container.Args, "--tombstone-interval=24h")
+	assert.Contains(t, container.Args, "--reembed-interval=60m")
 
 	// POD_NAMESPACE downward API — required so the embedding-provider
 	// lookup defaults to the workspace namespace (where the Provider
@@ -181,6 +188,38 @@ func TestBuildMemoryDeployment_AnnotatesConfigHash(t *testing.T) {
 	require.NotEmpty(t, annoB)
 	assert.NotEqual(t, annoA, annoB,
 		"providerRef change must alter the configHash so the pod rolls")
+}
+
+// TestBuildMemoryDeployment_EmbeddingProviderArg proves that setting
+// MemoryServiceConfig.ProviderRef threads through to memory-api as an
+// --embedding-provider flag. Without this, the embedding service is nil
+// at memory-api startup, the re-embed worker no-ops, and hybrid recall
+// has no semantic side to fuse — the exact "hasEmbeddingProvider:false"
+// production state from issue #1038.
+func TestBuildMemoryDeployment_EmbeddingProviderArg(t *testing.T) {
+	sb := newTestServiceBuilder()
+
+	// No ProviderRef: must NOT pass --embedding-provider (memory-api treats
+	// empty as "no embedder", which is correct).
+	sgNoProvider := newTestServiceGroup("prod")
+	depNo := sb.BuildMemoryDeployment("acme", "acme-ns", sgNoProvider)
+	for _, a := range depNo.Spec.Template.Spec.Containers[0].Args {
+		assert.NotContains(t, a, "--embedding-provider=",
+			"unexpected embedding-provider arg when ProviderRef is unset")
+	}
+
+	// ProviderRef set: arg flows through verbatim.
+	sgWithProvider := newTestServiceGroup("prod")
+	sgWithProvider.Memory = &omniav1alpha1.MemoryServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{
+			SecretRef: corev1.LocalObjectReference{Name: "memory-db"},
+		},
+		ProviderRef: &corev1.LocalObjectReference{Name: "gemini-embeddings"},
+	}
+	depYes := sb.BuildMemoryDeployment("acme", "acme-ns", sgWithProvider)
+	assert.Contains(t, depYes.Spec.Template.Spec.Containers[0].Args,
+		"--embedding-provider=gemini-embeddings",
+		"--embedding-provider=<name> must flow from MemoryServiceConfig.ProviderRef")
 }
 
 func TestBuildService(t *testing.T) {
