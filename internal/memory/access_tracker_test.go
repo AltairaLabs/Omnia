@@ -107,6 +107,87 @@ func TestRetrieveMultiTier_TouchesAccessedAt(t *testing.T) {
 		"RetrieveMultiTier must touch accessed_at on the rows it returns")
 }
 
+// TestAccessTouchBatcher_CoalescesPerEntity proves the debounce
+// window: 100 retrievals of the same entity inside one flush
+// window result in one row write with access_count incremented by
+// 100 — not 100 separate UPDATEs.
+func TestAccessTouchBatcher_CoalescesPerEntity(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	mem := &Memory{Type: "fact", Content: "coalesce me", Confidence: 0.9, Scope: testScope(testWorkspace1)}
+	require.NoError(t, store.Save(ctx, mem))
+
+	// 100 inline touches inside the same flush window.
+	ids := []string{mem.ID}
+	for i := 0; i < 100; i++ {
+		store.touchAccessedOnRead(ids)
+	}
+
+	require.Eventually(t, func() bool {
+		var n int
+		err := store.pool.QueryRow(ctx, `
+			SELECT access_count FROM memory_observations
+			WHERE entity_id = $1 AND superseded_by IS NULL
+			ORDER BY observed_at DESC LIMIT 1`, mem.ID,
+		).Scan(&n)
+		return err == nil && n >= 100
+	}, 3*time.Second, 50*time.Millisecond,
+		"100 touches must coalesce into one UPDATE that bumps count by 100")
+}
+
+// TestAccessTouch_InlineFallback proves the legacy fire-and-forget
+// path still works when the batcher is absent (e.g. a test store
+// constructed without it). Some unit tests synthesize the store
+// directly without going through NewPostgresMemoryStore; the inline
+// path keeps them honest.
+func TestAccessTouch_InlineFallback(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	mem := &Memory{Type: "fact", Content: "fallback", Confidence: 0.9, Scope: testScope(testWorkspace1)}
+	require.NoError(t, store.Save(ctx, mem))
+
+	// Stop the batcher so the inline fallback path runs.
+	store.accessTouch.Stop()
+	store.accessTouch = nil
+
+	store.touchAccessedOnRead([]string{mem.ID})
+	require.Eventually(t, func() bool {
+		var n int
+		err := store.pool.QueryRow(ctx, `
+			SELECT access_count FROM memory_observations
+			WHERE entity_id = $1 AND superseded_by IS NULL
+			ORDER BY observed_at DESC LIMIT 1`, mem.ID,
+		).Scan(&n)
+		return err == nil && n >= 1
+	}, 3*time.Second, 50*time.Millisecond,
+		"inline fallback path must update accessed_at when no batcher is wired")
+}
+
+// TestAccessTouchBatcher_Stop_DrainsPending proves the Stop()
+// best-effort drain — pending touches up to the call complete
+// before the goroutine exits.
+func TestAccessTouchBatcher_Stop_DrainsPending(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	mem := &Memory{Type: "fact", Content: "stop-drain", Confidence: 0.9, Scope: testScope(testWorkspace1)}
+	require.NoError(t, store.Save(ctx, mem))
+
+	store.accessTouch.add([]string{mem.ID})
+	store.accessTouch.Stop()
+
+	require.Eventually(t, func() bool {
+		var n int
+		err := store.pool.QueryRow(ctx, `
+			SELECT access_count FROM memory_observations
+			WHERE entity_id = $1 AND superseded_by IS NULL
+			ORDER BY observed_at DESC LIMIT 1`, mem.ID,
+		).Scan(&n)
+		return err == nil && n >= 1
+	}, 3*time.Second, 25*time.Millisecond,
+		"Stop must flush pending touches before the goroutine exits")
+}
+
 // TestRetrieve_EmptyResultsIsNoop proves the touch path exits cleanly on
 // empty retrievals (no wasted UPDATE, no panic).
 func TestRetrieve_EmptyResultsIsNoop(t *testing.T) {

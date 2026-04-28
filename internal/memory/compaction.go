@@ -137,6 +137,7 @@ func (s *PostgresMemoryStore) findCompactionBuckets(ctx context.Context, opts Fi
 		WHERE e.workspace_id = $1
 		  AND e.forgotten = false
 		  AND o.superseded_by IS NULL
+		  AND (o.valid_until IS NULL OR o.valid_until > now())
 		  AND o.observed_at < $2
 		GROUP BY e.virtual_user_id, e.agent_id
 		HAVING COUNT(o.id) >= $3
@@ -182,6 +183,7 @@ func (s *PostgresMemoryStore) fetchCompactionEntries(ctx context.Context, opts F
 		WHERE e.workspace_id = $1
 		  AND e.forgotten = false
 		  AND o.superseded_by IS NULL
+		  AND (o.valid_until IS NULL OR o.valid_until > now())
 		  AND o.observed_at < $2
 		  AND %s
 		  AND %s

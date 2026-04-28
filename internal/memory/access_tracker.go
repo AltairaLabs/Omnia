@@ -20,57 +20,206 @@ package memory
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
-// touchAccessedTimeout caps how long the background UPDATE is allowed to
-// run. Retrieval must not be coupled to write-path latency — if the write
-// is slow we'd rather drop the signal than stall the caller (who may
-// already have returned to the user).
+// touchAccessedTimeout caps how long a single batch UPDATE is
+// allowed to run. Retrieval must not be coupled to write-path
+// latency — if the write is slow we'd rather drop the signal than
+// stall the next batch.
 const touchAccessedTimeout = 5 * time.Second
 
-// touchAccessedOnRead fires a detached UPDATE that bumps accessed_at +
-// access_count on the non-superseded observations attached to the given
-// entity IDs. It's a no-op for the empty slice so retrieval callsites
-// don't need a length guard of their own.
+// touchAccessedFlushInterval is the debounce window. A read-heavy
+// workload accumulates entity IDs in memory for this long before
+// one UPDATE drains the buffer; the longer the window the fewer
+// (but larger) writes hit the DB. 1s is the sweet spot — short
+// enough that the LRU signal stays fresh, long enough to coalesce
+// the hundreds of recall calls a busy workspace makes per second.
+const touchAccessedFlushInterval = time.Second
+
+// touchAccessedBufferCap forces an early flush when the in-memory
+// buffer grows past this size. Bounds memory under recall storms
+// (a runaway loop returning thousands of distinct entities/sec).
+const touchAccessedBufferCap = 5000
+
+// accessTouchBatcher debounces accessed_at updates so a recall-
+// heavy workload writes one row per entity per flush window
+// instead of one row per recall call.
 //
-// The update runs in its own goroutine with a fresh timeout context, so
-// the caller's request context (which may already be cancelled by the
-// time the summary lands in the response) doesn't kill the write. This
-// is the signal the LRU pruning and recency-decay scoring in the
-// retention proposal depend on — losing the occasional update under
-// load is acceptable, losing all of them is not.
+// Without batching: 100 agents × 10 recalls/min × 50 results
+// = 50k UPDATEs/min/workspace, every one creating an MVCC dead
+// tuple that autovacuum has to eat. With a 1s flush window the
+// effective rate drops to ~50 UPDATEs/sec/workspace (one per
+// distinct accessed entity per second), and the access_count
+// increments accumulate in-memory so we still capture how many
+// times each row was touched.
+type accessTouchBatcher struct {
+	exec    func(ctx context.Context, ids []string, counts []int) error
+	mu      sync.Mutex
+	pending map[string]int // entityID -> increment in this window
+	stopCh  chan struct{}
+	flushCh chan struct{} // signal an immediate flush
+}
+
+func newAccessTouchBatcher(exec func(ctx context.Context, ids []string, counts []int) error) *accessTouchBatcher {
+	b := &accessTouchBatcher{
+		exec:    exec,
+		pending: make(map[string]int),
+		stopCh:  make(chan struct{}),
+		flushCh: make(chan struct{}, 1),
+	}
+	go b.run()
+	return b
+}
+
+// add coalesces an entity ID into the pending buffer. Bumps the
+// access_count increment for the row by 1 (or more, if seen this
+// window). Triggers an immediate flush when the buffer crosses
+// touchAccessedBufferCap.
+func (b *accessTouchBatcher) add(ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	b.mu.Lock()
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		b.pending[id]++
+	}
+	overflow := len(b.pending) >= touchAccessedBufferCap
+	b.mu.Unlock()
+	if overflow {
+		// Non-blocking signal — if a flush is already queued we
+		// don't need a second one.
+		select {
+		case b.flushCh <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// run is the batcher's flush loop. Exits cleanly on Stop. Each
+// flush takes a snapshot of pending under the lock, then runs the
+// UPDATE outside the lock so subsequent recalls aren't serialized
+// on disk I/O.
+func (b *accessTouchBatcher) run() {
+	ticker := time.NewTicker(touchAccessedFlushInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-b.stopCh:
+			b.flush() // best-effort drain on stop
+			return
+		case <-ticker.C:
+			b.flush()
+		case <-b.flushCh:
+			b.flush()
+		}
+	}
+}
+
+func (b *accessTouchBatcher) flush() {
+	b.mu.Lock()
+	if len(b.pending) == 0 {
+		b.mu.Unlock()
+		return
+	}
+	ids := make([]string, 0, len(b.pending))
+	counts := make([]int, 0, len(b.pending))
+	for id, c := range b.pending {
+		ids = append(ids, id)
+		counts = append(counts, c)
+	}
+	b.pending = make(map[string]int)
+	b.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), touchAccessedTimeout)
+	defer cancel()
+
+	start := time.Now()
+	err := b.exec(ctx, ids, counts)
+	dur := time.Since(start)
+	if m := defaultAccessMetrics.Load(); m != nil {
+		m.recordAccessUpdate(dur, err)
+	}
+}
+
+// Stop drains the batcher and exits the goroutine. Safe to call
+// multiple times — the close is one-shot via channel-of-struct.
+func (b *accessTouchBatcher) Stop() {
+	select {
+	case <-b.stopCh:
+		return
+	default:
+		close(b.stopCh)
+	}
+}
+
+// touchAccessedOnRead enqueues entity IDs into the batcher. It's a
+// no-op for the empty slice so retrieval callsites don't need a
+// length guard of their own. Falls back to the inline UPDATE when
+// the batcher hasn't been wired (test stores constructed without
+// the batcher).
+//
+// The signal feeds the LRU pruning and recency-decay scoring in
+// the retention worker — losing the occasional update under load
+// is acceptable, losing all of them is not.
 func (s *PostgresMemoryStore) touchAccessedOnRead(entityIDs []string) {
 	if len(entityIDs) == 0 {
 		return
 	}
+	if s.accessTouch != nil {
+		s.accessTouch.add(entityIDs)
+		return
+	}
+	// Test path or store constructed without the batcher: keep the
+	// old fire-and-forget behaviour so unit tests don't leak goroutines
+	// against a long-lived ticker.
 	ids := dedupeStrings(entityIDs)
-
 	go func(ids []string) {
 		ctx, cancel := context.WithTimeout(context.Background(), touchAccessedTimeout)
 		defer cancel()
 
 		start := time.Now()
-		tag, err := s.pool.Exec(ctx, `
+		_, err := s.pool.Exec(ctx, `
 			UPDATE memory_observations
 			SET accessed_at = now(), access_count = access_count + 1
-			WHERE entity_id = ANY($1::uuid[]) AND superseded_by IS NULL`,
+			WHERE entity_id = ANY($1::uuid[])
+			  AND superseded_by IS NULL
+			  AND (valid_until IS NULL OR valid_until > now())`,
 			ids,
 		)
 		dur := time.Since(start)
-
 		if m := defaultAccessMetrics.Load(); m != nil {
 			m.recordAccessUpdate(dur, err)
 		}
-		if err != nil {
-			// Intentional log omission — retrieval has already returned to
-			// the caller and we don't want a noisy error log for every
-			// transient DB blip. Callers who care about the metric observe
-			// it via omnia_memory_accessed_update_errors_total.
-			_ = err
-			_ = tag
-		}
 	}(ids)
+}
+
+// runBatchedAccessUpdate is the SQL the batcher dispatches every
+// flush window. The unnest($1, $2) trick lets one statement bump
+// `accessed_at` to now() and increment `access_count` by the
+// per-entity count accumulated in-memory — one round trip even
+// for 5000 entities.
+func (s *PostgresMemoryStore) runBatchedAccessUpdate(ctx context.Context, ids []string, counts []int) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := s.pool.Exec(ctx, `
+		UPDATE memory_observations o
+		SET accessed_at = now(),
+		    access_count = o.access_count + bumps.c
+		FROM (
+			SELECT unnest($1::uuid[]) AS id, unnest($2::int[]) AS c
+		) bumps
+		WHERE o.entity_id = bumps.id
+		  AND o.superseded_by IS NULL
+		  AND (o.valid_until IS NULL OR o.valid_until > now())`,
+		ids, counts,
+	)
+	return err
 }
 
 // dedupeStrings returns a sorted-free copy of the input with duplicates

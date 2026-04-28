@@ -75,14 +75,6 @@ ENABLE_ENTERPRISE = os.getenv('ENABLE_ENTERPRISE', '').lower() in ('true', '1', 
 # Can be set via environment: ENABLE_ENTRA=true tilt up
 ENABLE_ENTRA = os.getenv('ENABLE_ENTRA', '').lower() in ('true', '1', 'yes') or False
 
-# Set to True to grant anonymous users OWNER-level access to the dev-agents
-# workspace. This bypasses dashboard auth for workspace-scoped operations,
-# so it's off by default — even in anonymous-mode Tilt. Opt in explicitly
-# with: ALLOW_WORKSPACE_ANONYMOUS=true tilt up
-# When off (default), `dev-agents.spec.anonymousAccess.enabled=false` and
-# dashboard anonymous users see a read-only shell with no workspace visible.
-ALLOW_WORKSPACE_ANONYMOUS = os.getenv('ALLOW_WORKSPACE_ANONYMOUS', '').lower() in ('true', '1', 'yes') or False
-
 # Enable internal NFS server for workspace content storage
 # Provides ReadWriteMany (RWX) storage for Arena and workspace content
 # Auto-enabled when ENABLE_ENTERPRISE is true, can be explicitly controlled via ENABLE_NFS
@@ -800,6 +792,18 @@ _docs = _rendered.split('\n---\n')
 _non_crd_docs = [d for d in _docs if 'kind: CustomResourceDefinition' not in d]
 k8s_yaml(blob('\n---\n'.join(_non_crd_docs)))
 
+# The chart renders a `default` SessionRetentionPolicy CR (controlled by
+# `sessionRetention.defaultPolicy.create`). Without an explicit dep it races
+# `omnia-crds` and Tilt fails with "no matches for kind SessionRetentionPolicy"
+# when the CRD isn't established yet. Group it with omnia-crds so the apply
+# waits.
+k8s_resource(
+    new_name='default-retention-policy',
+    objects=['default:sessionretentionpolicy'],
+    labels=['setup'],
+    resource_deps=['omnia-crds'],
+)
+
 # ============================================================================
 # Demo Charts (separate from main Omnia chart)
 # ============================================================================
@@ -1186,22 +1190,12 @@ if ENABLE_AUDIO_DEMO:
 # Apply sample resources using local_resource for better control.
 # Note: When ENABLE_DEMO is true, Ollama resources come from Helm chart, not samples.
 #
-# Anonymous workspace access is OFF by default (the sample YAML has
-# anonymousAccess.enabled=false). Opt in with ALLOW_WORKSPACE_ANONYMOUS=true
-# to grant anonymous users owner-level access — useful when poking around
-# locally without authentication, but dangerous everywhere else.
-if ALLOW_WORKSPACE_ANONYMOUS:
-    print("⚠️  ALLOW_WORKSPACE_ANONYMOUS=true — dev-agents workspace will grant OWNER access to anonymous users. Only appropriate for isolated local dev.")
-    _sample_cmd = '''
-        kubectl apply -f config/samples/dev/
-        kubectl patch workspace dev-agents --type=merge -p '{"spec":{"anonymousAccess":{"enabled":true,"role":"owner"}}}'
-    '''
-else:
-    _sample_cmd = 'kubectl apply -f config/samples/dev/'
-
+# The dev-agents Workspace ships with anonymousAccess.enabled=true,role=owner
+# directly in samples.yaml — required for local "tilt up and click around"
+# without OAuth. Production Workspaces don't use these samples.
 local_resource(
     'sample-resources',
-    cmd=_sample_cmd,
+    cmd='kubectl apply -f config/samples/dev/',
     deps=['config/samples/dev'],
     labels=['samples'],
     resource_deps=['omnia-controller-manager'],
@@ -1240,6 +1234,44 @@ _restart_cmd = '''
     kubectl delete po -n dev-agents -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
     kubectl delete po -n omnia-demo -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
 '''
+
+# Memory-api and session-api Deployments are operator-managed; Tilt builds the
+# images but doesn't own the workloads, so source edits never reach the
+# running pod without an explicit roll. Without this, fixes to the memory-api
+# binary silently sit in the image while the cluster runs the old code —
+# exactly the wiring trap that bit hybrid recall on the multi-tier path.
+_rebuild_memory_api_cmd = 'docker build --no-cache -f Dockerfile.memory-api -t omnia-memory-api-dev:latest .'
+_rebuild_session_api_cmd = 'docker build --no-cache -f Dockerfile.session-api -t omnia-session-api-dev:latest .'
+# Delete the pod (not the deployment): the operator owns the Deployment spec
+# and reconciles `kubectl rollout restart` annotations away. Pod deletion lets
+# the existing ReplicaSet recreate with the same `:latest` image we just
+# rebuilt (imagePullPolicy: Never picks up the new image without an image-tag
+# bump). Same pattern as agent auto-rebuild.
+_restart_memory_api_cmd = 'kubectl delete po -n dev-agents -l app.kubernetes.io/component=memory-api 2>/dev/null || true'
+_restart_session_api_cmd = 'kubectl delete po -n dev-agents -l app.kubernetes.io/component=session-api 2>/dev/null || true'
+
+_memory_api_deps = [
+    './cmd/memory-api',
+    './api',
+    './internal/memory',
+    './internal/session',
+    './internal/pgutil',
+    './internal/httputil',
+    './internal/tracing',
+    './pkg',
+    './go.mod',
+]
+
+_session_api_deps = [
+    './cmd/session-api',
+    './api',
+    './internal/session',
+    './internal/pgutil',
+    './internal/httputil',
+    './internal/tracing',
+    './pkg',
+    './go.mod',
+]
 
 # Auto-rebuild agent images when their specific source files change.
 # Separated into facade and runtime to avoid unnecessary rebuilds — a change to
@@ -1283,6 +1315,20 @@ local_resource(
     cmd=_rebuild_runtime_cmd + ' && ' + _restart_cmd,
     deps=_runtime_deps,
     labels=['agents'],
+)
+
+local_resource(
+    'auto-rebuild-memory-api',
+    cmd=_rebuild_memory_api_cmd + ' && ' + _restart_memory_api_cmd,
+    deps=_memory_api_deps,
+    labels=['memory-api'],
+)
+
+local_resource(
+    'auto-rebuild-session-api',
+    cmd=_rebuild_session_api_cmd + ' && ' + _restart_session_api_cmd,
+    deps=_session_api_deps,
+    labels=['session-api'],
 )
 
 # ============================================================================

@@ -83,6 +83,49 @@ func TestEmbeddingService_EmbedMemory(t *testing.T) {
 	assert.True(t, hasEmbedding, "embedding should be non-null after EmbedMemory")
 }
 
+// TestEmbeddingService_WriteEmbedding proves the cached-vector
+// path: callers that already computed an embedding (e.g. for the
+// dedup similarity query) can write it directly without a second
+// provider round trip. Skipping the provider also means a missing
+// provider doesn't block the write.
+func TestEmbeddingService_WriteEmbedding(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	mem := &Memory{
+		Type:    "fact",
+		Content: "User prefers dark mode",
+		Scope:   map[string]string{ScopeWorkspaceID: "b0000000-0000-0000-0000-000000000003", ScopeUserID: "u1"},
+	}
+	require.NoError(t, store.Save(ctx, mem))
+
+	vec := make([]float32, 1536)
+	vec[42] = 1.0
+
+	// The provider is wired but should not be called.
+	called := false
+	provider := &mockEmbeddingProvider{
+		dimensions: 1536,
+		embedFn: func(_ context.Context, _ []string) ([][]float32, error) {
+			called = true
+			return [][]float32{vec}, nil
+		},
+	}
+	svc := NewEmbeddingService(store, provider, zap.New(zap.UseDevMode(true)))
+
+	require.NoError(t, svc.WriteEmbedding(ctx, mem.ID, vec))
+	assert.False(t, called, "WriteEmbedding must not invoke the provider")
+
+	var hasEmbedding bool
+	require.NoError(t, store.Pool().QueryRow(ctx, `
+		SELECT embedding IS NOT NULL
+		FROM memory_observations
+		WHERE entity_id = $1
+		ORDER BY observed_at DESC
+		LIMIT 1`, mem.ID).Scan(&hasEmbedding))
+	assert.True(t, hasEmbedding, "embedding should be set after WriteEmbedding")
+}
+
 func TestEmbeddingService_ProviderError(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()

@@ -40,7 +40,22 @@ const (
 	metricMemoriesSaved     = "omnia_memory_api_memories_saved_total"
 	metricMemoriesRetrieved = "omnia_memory_api_memories_retrieved_total"
 	metricRetrievalDuration = "omnia_memory_api_retrieval_duration_seconds"
+	metricSafeGoDrops       = "omnia_memory_api_side_effect_drops_total"
 )
+
+// safeGoDropsTotal counts side effects (audit log, event publish,
+// async embedding) dropped because the safeGo semaphore was at
+// capacity. Per-label so operators can see which side effect
+// degrades first under burst.
+var safeGoDropsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: metricSafeGoDrops,
+	Help: "Side effects dropped by safeGo because the in-flight semaphore was full",
+}, []string{"label"})
+
+// recordSafeGoDrop bumps the drop counter for a specific label.
+func recordSafeGoDrop(label string) {
+	safeGoDropsTotal.WithLabelValues(label).Inc()
+}
 
 // DefaultHTTPDurationBuckets are histogram buckets for HTTP request durations.
 var DefaultHTTPDurationBuckets = []float64{

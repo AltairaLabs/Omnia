@@ -312,6 +312,106 @@ type MultiplicativeTierPrecedence struct {
 	User string `json:"user,omitempty"`
 }
 
+// MemoryRecallConfig tunes the read path: half-life per tier (recency
+// decay), the inline-vs-preview cutoff for large memories, and the
+// per-memory `related[]` cap returned alongside recall results.
+type MemoryRecallConfig struct {
+	// halfLife per tier in Go-duration form (e.g. "720h" = 30d).
+	// Older observations decay exponentially: a memory whose age
+	// equals halfLife scores at 0.5× the recency multiplier; at 5×
+	// halfLife it's effectively gone. Defaults baked into the
+	// recall SQL apply when this block is unset.
+	// +optional
+	HalfLife *MemoryRecallHalfLife `json:"halfLife,omitempty"`
+
+	// inlineThresholdBytes is the body-size cutoff above which recall
+	// returns title + summary + content_preview rather than the full
+	// body. The agent calls memory__open(id) when it actually needs
+	// the text. 0 / unset uses the API default (2048).
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1048576
+	// +optional
+	InlineThresholdBytes *int32 `json:"inlineThresholdBytes,omitempty"`
+
+	// maxRelatedPerMemory caps the per-memory `related[]` slice the
+	// recall response carries. 0 / unset uses the store default (3).
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=50
+	// +optional
+	MaxRelatedPerMemory *int32 `json:"maxRelatedPerMemory,omitempty"`
+}
+
+// MemoryRecallHalfLife carries the per-tier half-life durations used
+// by the recall recency-decay multiplier.
+type MemoryRecallHalfLife struct {
+	// +kubebuilder:validation:Pattern=`^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$`
+	// +optional
+	User string `json:"user,omitempty"`
+
+	// +kubebuilder:validation:Pattern=`^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$`
+	// +optional
+	Agent string `json:"agent,omitempty"`
+
+	// +kubebuilder:validation:Pattern=`^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$`
+	// +optional
+	Institutional string `json:"institutional,omitempty"`
+}
+
+// MemoryDedupConfig tunes the write path's two dedup mechanisms:
+// the structured-key requirement for identity-class kinds and the
+// embedding-similarity thresholds.
+type MemoryDedupConfig struct {
+	// requireAboutForKinds enumerates kinds (e.g. "fact",
+	// "preference") that must carry an `about={kind, key}` hint on
+	// save. Without it the agent can't engage the structured-key
+	// dedup path and identity-class memories pile up as duplicates.
+	// Empty / unset disables the check.
+	// +optional
+	RequireAboutForKinds []string `json:"requireAboutForKinds,omitempty"`
+
+	// embeddingSimilarity tunes the cosine-based dedup. Auto-disabled
+	// when no embedding provider is configured.
+	// +optional
+	EmbeddingSimilarity *MemoryEmbeddingDedupConfig `json:"embeddingSimilarity,omitempty"`
+}
+
+// MemoryEmbeddingDedupConfig configures the cosine-similarity dedup
+// thresholds and surface limits.
+//
+// surfaceDuplicatesAbove must be < autoSupersedeAbove. Without this
+// the surface threshold is permanently shadowed by auto-supersede:
+// every match that would surface as a `potential_duplicates` hint
+// is already above the auto-supersede floor and never reaches the
+// agent. The CEL guard fires at admission time so operators see the
+// misconfig immediately rather than wondering why no candidates
+// ever surface.
+// +kubebuilder:validation:XValidation:rule="!has(self.autoSupersedeAbove) || !has(self.surfaceDuplicatesAbove) || double(self.surfaceDuplicatesAbove) < double(self.autoSupersedeAbove)",message="surfaceDuplicatesAbove must be strictly less than autoSupersedeAbove"
+type MemoryEmbeddingDedupConfig struct {
+	// +kubebuilder:default=true
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// autoSupersedeAbove: cosine ≥ this auto-supersedes the prior
+	// match. Defaults to 0.95 — set lower to be more aggressive.
+	// +kubebuilder:validation:Pattern=`^(0(\.[0-9]+)?|1(\.0+)?)$`
+	// +optional
+	AutoSupersedeAbove string `json:"autoSupersedeAbove,omitempty"`
+
+	// surfaceDuplicatesAbove: cosine ≥ this surfaces the match as
+	// `potential_duplicates` for the agent to consider on a later
+	// turn. Must be < autoSupersedeAbove. Defaults to 0.85.
+	// +kubebuilder:validation:Pattern=`^(0(\.[0-9]+)?|1(\.0+)?)$`
+	// +optional
+	SurfaceDuplicatesAbove string `json:"surfaceDuplicatesAbove,omitempty"`
+
+	// candidateLimit caps the number of candidates returned to the
+	// agent in `potential_duplicates`. 0 / unset uses the API default.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=50
+	// +optional
+	CandidateLimit *int32 `json:"candidateLimit,omitempty"`
+}
+
 // MemoryPolicySpec is the top-level spec. Workspaces opt in to a
 // MemoryPolicy via Workspace.spec.services[].memory.policyRef — many
 // workspaces may reference one policy, and a workspace with no
@@ -321,6 +421,18 @@ type MemoryPolicySpec struct {
 	// needs a mode for the policy to do anything useful.
 	// +kubebuilder:validation:Required
 	Tiers MemoryRetentionTierSet `json:"tiers"`
+
+	// recall tunes the read path (half-life per tier, large-memory
+	// preview cutoff, per-memory related[] cap). Optional — defaults
+	// baked into the API apply when omitted.
+	// +optional
+	Recall *MemoryRecallConfig `json:"recall,omitempty"`
+
+	// dedup tunes the write path's structured-key + embedding-
+	// similarity dedup mechanisms. Optional — defaults apply when
+	// omitted.
+	// +optional
+	Dedup *MemoryDedupConfig `json:"dedup,omitempty"`
 
 	// tierPrecedence applies per-tier ranking multipliers to the
 	// retrieval score. Unset tiers default to 1.0 (no-op).
@@ -378,10 +490,10 @@ type MemoryPolicyStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="Inst Mode",type=string,JSONPath=`.spec.default.tiers.institutional.mode`
-// +kubebuilder:printcolumn:name="Agent Mode",type=string,JSONPath=`.spec.default.tiers.agent.mode`
-// +kubebuilder:printcolumn:name="User Mode",type=string,JSONPath=`.spec.default.tiers.user.mode`
-// +kubebuilder:printcolumn:name="Schedule",type=string,JSONPath=`.spec.default.schedule`
+// +kubebuilder:printcolumn:name="Inst Mode",type=string,JSONPath=`.spec.tiers.institutional.mode`
+// +kubebuilder:printcolumn:name="Agent Mode",type=string,JSONPath=`.spec.tiers.agent.mode`
+// +kubebuilder:printcolumn:name="User Mode",type=string,JSONPath=`.spec.tiers.user.mode`
+// +kubebuilder:printcolumn:name="Schedule",type=string,JSONPath=`.spec.schedule`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // MemoryPolicy is the schema for the memorypolicies

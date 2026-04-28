@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"golang.org/x/sync/singleflight"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,20 +38,58 @@ func (s *StaticPolicyLoader) Load(_ context.Context) (*omniav1alpha1.MemoryPolic
 	return s.Policy, nil
 }
 
+// DefaultPolicyCacheTTL is the freshness window after which the
+// K8sPolicyLoader re-fetches from the API server. 30 seconds is
+// short enough that operator changes propagate quickly and long
+// enough that high-throughput Save calls don't burn the K8s API.
+const DefaultPolicyCacheTTL = 30 * time.Second
+
 // K8sPolicyLoader resolves a MemoryPolicy via the Workspace that owns
 // this memory-api process. The workspace's services[<group>].memory
 // .policyRef names the policy; the loader Gets it by name.
 //
-// Caches the last-known policy so a transient API outage doesn't stall
-// the retention cron. Returns (nil, nil) for any "not found" condition
-// so callers fall back to the baked-in LegacyIntervalPolicy.
+// Caches the last-known policy with a TTL (DefaultPolicyCacheTTL by
+// default). Within the freshness window Load returns the cached value
+// without hitting the K8s API — important because Load runs on the
+// hot Save path (enforceAboutForKind) and was previously doing two
+// API GETs per write.
+//
+// Outside the TTL Load re-fetches; on transient error it falls back
+// to the cached value (so an API outage doesn't stall writes), and
+// on "not found" it clears the cache so callers see the legacy
+// fallback.
 type K8sPolicyLoader struct {
 	Client       client.Client
 	Log          logr.Logger
 	Workspace    string
 	ServiceGroup string
+	// CacheTTL is the freshness window. Zero uses
+	// DefaultPolicyCacheTTL.
+	CacheTTL time.Duration
 
-	cached atomic.Pointer[omniav1alpha1.MemoryPolicy]
+	// cache packs (policy, fetchedAt, noopFlag) into one atomic
+	// pointer so concurrent Loads always see a consistent triple.
+	// Earlier separate atomic.Pointer + atomic.Int64 + atomic.Bool
+	// fields could tear: a successful fetch racing with a markNoop
+	// call could leave the cache reading "no policy at fresh
+	// timestamp" when one was actually bound, defeating the cache
+	// for up to one TTL window.
+	cache atomic.Pointer[policyCacheEntry]
+
+	// flight collapses concurrent cold-start fetches into a single
+	// in-flight K8s round trip. Without it a service restart with
+	// many simultaneous writes triggers as many GET pairs as there
+	// are concurrent first-touches per workspace.
+	flight singleflight.Group
+}
+
+// policyCacheEntry is the atomic unit. Policy is nil when the most
+// recent successful fetch resolved to "no policy bound" (workspace
+// missing, no policyRef, named policy not found) — distinguished
+// from "cache empty" by FetchedAt being non-zero.
+type policyCacheEntry struct {
+	Policy    *omniav1alpha1.MemoryPolicy
+	FetchedAt time.Time
 }
 
 // NewK8sPolicyLoader constructs a loader bound to a single workspace +
@@ -75,13 +114,45 @@ func (k *K8sPolicyLoader) Load(ctx context.Context) (*omniav1alpha1.MemoryPolicy
 		return nil, nil
 	}
 
+	ttl := k.CacheTTL
+	if ttl <= 0 {
+		ttl = DefaultPolicyCacheTTL
+	}
+	if entry := k.cache.Load(); entry != nil && time.Since(entry.FetchedAt) < ttl {
+		return entry.Policy, nil
+	}
+
+	// Singleflight collapses concurrent cold-start fetches into one
+	// K8s round trip. The "cold-restart stampede" otherwise has each
+	// in-flight write goroutine doing its own (workspace, policy)
+	// GET pair. Re-check the cache inside the singleflight closure
+	// in case another caller filled it between our check and ours.
+	v, err, _ := k.flight.Do("load", func() (any, error) {
+		if entry := k.cache.Load(); entry != nil && time.Since(entry.FetchedAt) < ttl {
+			return entry.Policy, nil
+		}
+		return k.fetchUncached(ctx)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if v == nil {
+		return nil, nil
+	}
+	return v.(*omniav1alpha1.MemoryPolicy), nil
+}
+
+// fetchUncached is the K8s round trip path. Always called inside
+// the singleflight closure so we never have two concurrent fetches.
+func (k *K8sPolicyLoader) fetchUncached(ctx context.Context) (*omniav1alpha1.MemoryPolicy, error) {
 	ws := &omniav1alpha1.Workspace{}
 	if err := k.Client.Get(ctx, client.ObjectKey{Name: k.Workspace}, ws); err != nil {
 		if apierrors.IsNotFound(err) {
 			k.Log.V(1).Info("workspace not found, using legacy policy", "workspace", k.Workspace)
+			k.markNoop()
 			return nil, nil
 		}
-		if cached := k.cached.Load(); cached != nil {
+		if cached := k.cachedPolicy(); cached != nil {
 			k.Log.V(1).Info("workspace get failed, using cached policy",
 				"workspace", k.Workspace, "cachedName", cached.Name, "error", err.Error())
 			return cached, nil
@@ -93,7 +164,7 @@ func (k *K8sPolicyLoader) Load(ctx context.Context) (*omniav1alpha1.MemoryPolicy
 	if ref == nil {
 		k.Log.V(1).Info("workspace has no memory policyRef, using legacy",
 			"workspace", k.Workspace, "serviceGroup", k.ServiceGroup)
-		k.cached.Store(nil)
+		k.markNoop()
 		return nil, nil
 	}
 
@@ -102,10 +173,10 @@ func (k *K8sPolicyLoader) Load(ctx context.Context) (*omniav1alpha1.MemoryPolicy
 		if apierrors.IsNotFound(err) {
 			k.Log.Info("memorypolicy not found, using legacy",
 				"policyRef", ref.Name, "workspace", k.Workspace)
-			k.cached.Store(nil)
+			k.markNoop()
 			return nil, nil
 		}
-		if cached := k.cached.Load(); cached != nil {
+		if cached := k.cachedPolicy(); cached != nil {
 			k.Log.V(1).Info("memorypolicy get failed, using cached policy",
 				"policyRef", ref.Name, "cachedName", cached.Name, "error", err.Error())
 			return cached, nil
@@ -113,8 +184,27 @@ func (k *K8sPolicyLoader) Load(ctx context.Context) (*omniav1alpha1.MemoryPolicy
 		return nil, fmt.Errorf("get memorypolicy %q: %w", ref.Name, err)
 	}
 
-	k.cached.Store(policy)
+	k.cache.Store(&policyCacheEntry{Policy: policy, FetchedAt: time.Now()})
 	return policy, nil
+}
+
+// cachedPolicy returns the last cached policy (or nil if cache is
+// empty / the last fetch resolved to "no policy"). Used by the
+// transient-error fallback paths to keep serving stale-but-known
+// content during an API outage.
+func (k *K8sPolicyLoader) cachedPolicy() *omniav1alpha1.MemoryPolicy {
+	if entry := k.cache.Load(); entry != nil {
+		return entry.Policy
+	}
+	return nil
+}
+
+// markNoop records that the most recent successful fetch resolved
+// to "no policy" so subsequent Loads within the TTL skip the K8s
+// round trip. Stored as one atomic write to avoid the read-tear
+// window the previous separate-fields implementation had.
+func (k *K8sPolicyLoader) markNoop() {
+	k.cache.Store(&policyCacheEntry{Policy: nil, FetchedAt: time.Now()})
 }
 
 // findMemoryPolicyRef walks the workspace's service groups and returns

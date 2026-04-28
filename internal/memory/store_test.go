@@ -408,6 +408,522 @@ func TestPostgresMemoryStore_Save_StructuredKeyDedup(t *testing.T) {
 	assert.Equal(t, "User's name is Phil Collins", results[0].Content)
 }
 
+// TestPostgresMemoryStore_FindSimilarObservations_RanksByCosine proves
+// the embedding-similarity dedup query returns matches ordered by
+// cosine descending, scoped to the (workspace, user) tuple, and only
+// over active observations. Without this the service-layer
+// dedup-on-write path can't tell whether a free-form remember is a
+// near-duplicate of something already stored.
+func TestPostgresMemoryStore_FindSimilarObservations_RanksByCosine(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	near := &Memory{Type: "preference", Content: "User likes blue", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, near))
+	require.NoError(t, store.UpdateEmbedding(ctx, near.ID, repeatFloat(0.1, 1536), ""))
+
+	far := &Memory{Type: "fact", Content: "Works at Acme", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, far))
+	require.NoError(t, store.UpdateEmbedding(ctx, far.ID, repeatFloat(0.9, 1536), ""))
+
+	// Query embedding nearly identical to `near` → matches it strongly.
+	matches, err := store.FindSimilarObservations(ctx, scope, repeatFloat(0.1, 1536), 5, 0.5)
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+	assert.Equal(t, "User likes blue", matches[0].Content)
+	assert.Greater(t, matches[0].Similarity, 0.99,
+		"near-identical embedding should score ~1.0")
+}
+
+// TestPostgresMemoryStore_Retrieve_SourceTypeWeighting proves the
+// source_type multiplier in the scoring expression: at equal lexical
+// relevance, an explicit user_requested fact outranks an inferred
+// conversation_extraction one. This is what stops the agent from
+// trusting passive observations as much as things the user actually
+// asked us to remember.
+func TestPostgresMemoryStore_Retrieve_SourceTypeWeighting(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	// Inferred (conversation_extraction → weight 0.7).
+	inferred := &Memory{
+		Type: "fact", Content: "User likes coffee", Confidence: 1.0, Scope: scope,
+		Metadata: map[string]any{
+			pkmemory.MetaKeyProvenance: string(pkmemory.ProvenanceAgentExtracted),
+		},
+	}
+	require.NoError(t, store.Save(ctx, inferred))
+
+	// Explicit (user_requested → weight 1.0). Same content, same
+	// confidence — only the provenance differs.
+	explicit := &Memory{
+		Type: "fact", Content: "User likes coffee", Confidence: 1.0, Scope: scope,
+		Metadata: map[string]any{
+			pkmemory.MetaKeyProvenance: string(pkmemory.ProvenanceUserRequested),
+		},
+	}
+	require.NoError(t, store.Save(ctx, explicit))
+
+	results, err := store.Retrieve(ctx, scope, "coffee", RetrieveOptions{})
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	// First result must be the explicit one — the source_type
+	// multiplier (1.0 vs 0.7) breaks the tie.
+	assert.Equal(t, explicit.ID, results[0].ID,
+		"user_requested should rank above conversation_extraction at equal relevance")
+}
+
+// TestPostgresMemoryStore_SupersedeMany_CollapsesAcrossEntities
+// exercises the multi-id supersede path: each source entity's
+// active observations are marked inactive and a single new
+// observation lands under the first source entity. Recall returns
+// only the new observation; the older entities have no active rows.
+func TestPostgresMemoryStore_SupersedeMany_CollapsesAcrossEntities(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	a := &Memory{Type: "fact", Content: "name: Slim Shard", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, a))
+	b := &Memory{Type: "fact", Content: "name: Slim Shady", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, b))
+	c := &Memory{Type: "fact", Content: "name: Phil Collins", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, c))
+
+	canonical := &Memory{Type: "fact", Content: "name: Phil", Confidence: 1.0, Scope: scope}
+	anchor, supersededIDs, err := store.SupersedeMany(ctx,
+		[]string{a.ID, b.ID, c.ID}, canonical)
+	require.NoError(t, err)
+	assert.Equal(t, a.ID, anchor, "first source ID is the anchor entity")
+	assert.Len(t, supersededIDs, 3, "one observation per source entity went inactive")
+
+	// Retrieve returns only the new active observation.
+	results, err := store.Retrieve(ctx, scope, "name", RetrieveOptions{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Contains(t, results[0].Content, "Phil")
+}
+
+// TestPostgresMemoryStore_SupersedeMany_RejectsCrossWorkspace
+// proves the scope guard fires when a source entity belongs to a
+// different workspace — cross-tenant supersede must fail loudly.
+func TestPostgresMemoryStore_SupersedeMany_RejectsCrossWorkspace(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scopeA := testScope(testWorkspace1)
+	mem := &Memory{Type: "fact", Content: "in A", Confidence: 0.9, Scope: scopeA}
+	require.NoError(t, store.Save(ctx, mem))
+
+	scopeOther := testScope(testWorkspace2)
+	canonical := &Memory{Type: "fact", Content: "stolen", Confidence: 0.9, Scope: scopeOther}
+	_, _, err := store.SupersedeMany(ctx, []string{mem.ID}, canonical)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found in scope")
+}
+
+// TestPostgresMemoryStore_SupersedeMany_RequiresInputs proves the
+// guard fires on empty source lists, missing workspace, and missing
+// user_id (the store-level user-scope check that mirrors the HTTP
+// handler so every caller path — gRPC, in-process — is protected).
+func TestPostgresMemoryStore_SupersedeMany_RequiresInputs(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	// No source IDs.
+	_, _, err := store.SupersedeMany(ctx, nil,
+		&Memory{Content: "x", Scope: testScope(testWorkspace1)})
+	require.Error(t, err)
+
+	// Missing workspace.
+	_, _, err = store.SupersedeMany(ctx, []string{"a"},
+		&Memory{Content: "x", Scope: map[string]string{}})
+	require.Error(t, err)
+
+	// Missing user_id (workspace-only scope) must be rejected so a
+	// caller can't supersede across all users in a workspace.
+	_, _, err = store.SupersedeMany(ctx, []string{"a"},
+		&Memory{Content: "x", Scope: map[string]string{
+			ScopeWorkspaceID: testWorkspace1,
+		}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "user_id")
+}
+
+// TestPostgresMemoryStore_AppendObservationToEntity_RejectsCrossScope
+// proves the defence-in-depth scope assertion fires when a caller
+// passes an entityID that belongs to a different user inside the
+// same workspace. Without this check the embedding-similarity dedup
+// path could supersede across users if FindSimilarObservations ever
+// regressed on its scope filter.
+func TestPostgresMemoryStore_AppendObservationToEntity_RejectsCrossScope(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	scopeAlice := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "alice"}
+	memAlice := &Memory{Type: "fact", Content: "alice fact", Confidence: 0.9, Scope: scopeAlice}
+	require.NoError(t, store.Save(ctx, memAlice))
+
+	scopeBob := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "bob"}
+	updateAsBob := &Memory{Type: "fact", Content: "bob trying to overwrite", Confidence: 0.9, Scope: scopeBob}
+	_, err := store.AppendObservationToEntity(ctx, memAlice.ID, updateAsBob)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found in scope")
+}
+
+// TestPostgresMemoryStore_Save_RejectsCrossScopeUpdate proves the
+// updateEntity scope guard: a caller in workspace W cannot rewrite
+// entity metadata for a different user's entity in W just by
+// passing the target's entity ID and a workspace-matching scope.
+func TestPostgresMemoryStore_Save_RejectsCrossScopeUpdate(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	scopeAlice := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "alice"}
+	memAlice := &Memory{Type: "fact", Content: "alice fact", Confidence: 0.9, Scope: scopeAlice}
+	require.NoError(t, store.Save(ctx, memAlice))
+
+	scopeBob := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "bob"}
+	hijack := &Memory{
+		ID: memAlice.ID, Type: "fact", Content: "bob hijacks alice's entity",
+		Confidence: 0.9, Scope: scopeBob,
+	}
+	err := store.Save(ctx, hijack)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found in scope")
+}
+
+// TestPostgresMemoryStore_FindRelatedEntities exercises the
+// per-source LIMIT and weight ordering on the recall-enrichment
+// graph walk. Two relations from one source, one from another;
+// maxPerEntity caps the response.
+func TestPostgresMemoryStore_FindRelatedEntities(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	a := &Memory{Type: "fact", Content: "user identity", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, a))
+	b := &Memory{Type: "preference", Content: "prefers dark", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, b))
+	c := &Memory{Type: "preference", Content: "likes coffee", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, c))
+
+	_, err := store.LinkEntities(ctx, scope, a.ID, b.ID, "MENTIONS", 0.8)
+	require.NoError(t, err)
+	_, err = store.LinkEntities(ctx, scope, a.ID, c.ID, "MENTIONS", 0.6)
+	require.NoError(t, err)
+	_, err = store.LinkEntities(ctx, scope, b.ID, c.ID, "ABOUT", 1.0)
+	require.NoError(t, err)
+
+	rels, err := store.FindRelatedEntities(ctx, scope, []string{a.ID, b.ID}, 5)
+	require.NoError(t, err)
+	require.Len(t, rels, 3)
+
+	// Empty entityIDs short-circuits to nil without hitting the DB.
+	rels, err = store.FindRelatedEntities(ctx, scope, nil, 5)
+	require.NoError(t, err)
+	assert.Nil(t, rels)
+
+	// Cap at 1 per source — only the highest-weight relation from a
+	// (the 0.8 one to b) should survive.
+	rels, err = store.FindRelatedEntities(ctx, scope, []string{a.ID}, 1)
+	require.NoError(t, err)
+	require.Len(t, rels, 1)
+	assert.Equal(t, b.ID, rels[0].TargetEntityID)
+
+	// Workspace guard.
+	_, err = store.FindRelatedEntities(ctx, map[string]string{}, []string{a.ID}, 5)
+	require.Error(t, err)
+}
+
+// TestPostgresMemoryStore_RetrieveHybrid_FallsBackOnEmptyInputs
+// proves the hybrid path short-circuits to the FTS-only Retrieve
+// when either the query or the embedding is empty — callers without
+// an embedder shouldn't have to special-case the hybrid signature.
+func TestPostgresMemoryStore_RetrieveHybrid_FallsBackOnEmptyInputs(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	require.NoError(t, store.Save(ctx, &Memory{
+		Type: "preference", Content: "prefers dark mode", Confidence: 0.9, Scope: scope,
+	}))
+
+	// Empty embedding falls through to Retrieve with the query.
+	results, err := store.RetrieveHybrid(ctx, scope, "dark", nil, RetrieveOptions{Limit: 5})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Contains(t, results[0].Content, "dark")
+
+	// Empty query falls through to Retrieve which then returns
+	// recency-ordered rows.
+	results, err = store.RetrieveHybrid(ctx, scope, "", []float32{0.1}, RetrieveOptions{Limit: 5})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+}
+
+// TestPostgresMemoryStore_RetrieveHybrid_RequiresWorkspace proves
+// the workspace guard fires on the hybrid path. Cross-tenant leaks
+// here would be catastrophic so the check has to happen before any
+// query work runs.
+func TestPostgresMemoryStore_RetrieveHybrid_RequiresWorkspace(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	_, err := store.RetrieveHybrid(ctx, map[string]string{}, "q", []float32{0.1, 0.2}, RetrieveOptions{Limit: 5})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "workspace_id")
+}
+
+// TestPostgresMemoryStore_RetrieveHybrid_FusesLexicalAndSemantic
+// exercises the full RRF SQL: a memory matched only by FTS and
+// another matched only by cosine both surface, demonstrating the
+// FULL OUTER JOIN of the two ranked CTEs. Without RRF the cosine-
+// only match would never appear in a query for "prefer".
+func TestPostgresMemoryStore_RetrieveHybrid_FusesLexicalAndSemantic(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	// Build a 1536-dim vector matching the schema; pos 7 is arbitrary
+	// — what matters is that the seed and the query share the same
+	// position so cosine = 1.0.
+	queryEmb := oneHotFloat(7, 1536)
+
+	// FTS-only match: lexical hit on "prefer", embedding orthogonal.
+	lexical := &Memory{Type: "preference", Content: "User prefers dark mode", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, lexical))
+	require.NoError(t, store.UpdateEmbedding(ctx, lexical.ID, oneHotFloat(0, 1536), ""))
+
+	// Cosine-only match: no lexical hit on "prefer", embedding
+	// equals query → cosine 1.0.
+	semantic := &Memory{Type: "preference", Content: "User loves blue", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, semantic))
+	require.NoError(t, store.UpdateEmbedding(ctx, semantic.ID, queryEmb, ""))
+
+	// Neither lexical nor semantic match.
+	noise := &Memory{Type: "fact", Content: "Random unrelated note", Confidence: 0.7, Scope: scope}
+	require.NoError(t, store.Save(ctx, noise))
+	require.NoError(t, store.UpdateEmbedding(ctx, noise.ID, oneHotFloat(99, 1536), ""))
+
+	results, err := store.RetrieveHybrid(ctx, scope, "prefer", queryEmb, RetrieveOptions{Limit: 10})
+	require.NoError(t, err)
+
+	got := make(map[string]bool, len(results))
+	for _, m := range results {
+		got[m.ID] = true
+	}
+	assert.True(t, got[lexical.ID], "FTS-only match should surface")
+	assert.True(t, got[semantic.ID], "cosine-only match should surface via RRF")
+}
+
+// TestPostgresMemoryStore_RetrieveHybrid_RanksByFinalScore proves
+// the LIMIT picks top-K entities by final_score, not by entity id.
+// Three matches with deliberately staggered confidence; the highest-
+// confidence row must be first regardless of UUID order.
+func TestPostgresMemoryStore_RetrieveHybrid_RanksByFinalScore(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+	queryEmb := oneHotFloat(0, 1536)
+
+	mid := &Memory{Type: "preference", Content: "User prefers tea", Confidence: 0.6, Scope: scope}
+	require.NoError(t, store.Save(ctx, mid))
+	require.NoError(t, store.UpdateEmbedding(ctx, mid.ID, queryEmb, ""))
+
+	top := &Memory{Type: "preference", Content: "User prefers espresso", Confidence: 0.99, Scope: scope}
+	require.NoError(t, store.Save(ctx, top))
+	require.NoError(t, store.UpdateEmbedding(ctx, top.ID, queryEmb, ""))
+
+	low := &Memory{Type: "preference", Content: "User prefers cocoa", Confidence: 0.3, Scope: scope}
+	require.NoError(t, store.Save(ctx, low))
+	require.NoError(t, store.UpdateEmbedding(ctx, low.ID, queryEmb, ""))
+
+	// Limit=1 must return the highest-scoring memory (top), not
+	// whichever entity ID sorts smallest.
+	results, err := store.RetrieveHybrid(ctx, scope, "prefer", queryEmb, RetrieveOptions{Limit: 1})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, top.ID, results[0].ID,
+		"LIMIT must pick highest-scoring memory, not alphabetically-first entity")
+
+	// Limit=3 returns all three in descending final_score order.
+	results, err = store.RetrieveHybrid(ctx, scope, "prefer", queryEmb, RetrieveOptions{Limit: 3})
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+	assert.Equal(t, top.ID, results[0].ID, "first result must be highest-confidence")
+	assert.Equal(t, mid.ID, results[1].ID, "second result must be mid-confidence")
+	assert.Equal(t, low.ID, results[2].ID, "third result must be lowest-confidence")
+}
+
+// TestPostgresMemoryStore_RetrieveHybrid_AppliesConfidenceFilter
+// proves the MinConfidence option carries through to both CTEs in
+// the hybrid query — low-confidence rows shouldn't pollute either
+// ranker.
+func TestPostgresMemoryStore_RetrieveHybrid_AppliesConfidenceFilter(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+	queryEmb := oneHotFloat(0, 1536)
+
+	low := &Memory{Type: "fact", Content: "User prefers tea", Confidence: 0.3, Scope: scope}
+	require.NoError(t, store.Save(ctx, low))
+	require.NoError(t, store.UpdateEmbedding(ctx, low.ID, queryEmb, ""))
+
+	high := &Memory{Type: "fact", Content: "User prefers coffee", Confidence: 0.95, Scope: scope}
+	require.NoError(t, store.Save(ctx, high))
+	require.NoError(t, store.UpdateEmbedding(ctx, high.ID, queryEmb, ""))
+
+	results, err := store.RetrieveHybrid(ctx, scope, "prefer", queryEmb,
+		RetrieveOptions{Limit: 10, MinConfidence: 0.8})
+	require.NoError(t, err)
+
+	for _, m := range results {
+		assert.NotEqual(t, low.ID, m.ID, "low-confidence row must be filtered before fusion")
+	}
+}
+
+// TestPostgresMemoryStore_GetMemory_ReturnsActiveObservation proves
+// GetMemory returns the entity's current active observation and
+// excludes superseded predecessors. This is what memory__open
+// returns when the agent asks for the body of a large memory.
+func TestPostgresMemoryStore_GetMemory_ReturnsActiveObservation(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	mem := &Memory{Type: "fact", Content: "first version", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, mem))
+
+	// Append a new observation that supersedes the first.
+	newer := &Memory{Type: "fact", Content: "second version", Confidence: 0.9, Scope: scope}
+	_, err := store.AppendObservationToEntity(ctx, mem.ID, newer)
+	require.NoError(t, err)
+
+	got, err := store.GetMemory(ctx, scope, mem.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "second version", got.Content,
+		"GetMemory returns the active observation, not the superseded one")
+}
+
+// TestPostgresMemoryStore_GetMemory_NotFound proves the sentinel
+// ErrNotFound is returned when the entity doesn't exist in scope.
+// The HTTP handler maps this to 404.
+func TestPostgresMemoryStore_GetMemory_NotFound(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	_, err := store.GetMemory(ctx, scope, "00000000-0000-0000-0000-000000000999")
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// TestPostgresMemoryStore_LinkEntities_InsertsRelation proves
+// LinkEntities writes a row into memory_relations connecting the
+// two entities with the requested type. Used by memory__link to
+// attach derived facts to anchor entities.
+func TestPostgresMemoryStore_LinkEntities_InsertsRelation(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	source := &Memory{Type: "preference", Content: "User likes blue", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, source))
+	target := &Memory{Type: "fact", Content: "User", Confidence: 1.0, Scope: scope}
+	require.NoError(t, store.Save(ctx, target))
+
+	id, err := store.LinkEntities(ctx, scope, source.ID, target.ID, "ABOUT", 1.0)
+	require.NoError(t, err)
+	assert.NotEmpty(t, id)
+}
+
+// TestPostgresMemoryStore_LinkEntities_RejectsNonexistentEntity
+// proves the existence guard fires when either side of the relation
+// references a missing entity. The handler maps this to 404.
+func TestPostgresMemoryStore_LinkEntities_RejectsNonexistentEntity(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	_, err := store.LinkEntities(ctx, scope,
+		"00000000-0000-0000-0000-000000000001",
+		"00000000-0000-0000-0000-000000000002",
+		"ABOUT", 1.0)
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// TestPostgresMemoryStore_AppendObservationToEntity_AtomicallySupersedes
+// proves the embedding-similarity auto-supersede helper attaches the
+// new observation to the existing entity AND marks all prior active
+// observations inactive in one transaction. End state: one active
+// observation under the entity (the new one), one superseded.
+func TestPostgresMemoryStore_AppendObservationToEntity_AtomicallySupersedes(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	original := &Memory{Type: "preference", Content: "User likes blue", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, original))
+
+	updated := &Memory{Type: "preference", Content: "User loves blue", Confidence: 0.9, Scope: scope}
+	supersededIDs, err := store.AppendObservationToEntity(ctx, original.ID, updated)
+	require.NoError(t, err)
+	require.NotEmpty(t, supersededIDs, "prior observation should be marked superseded")
+	assert.Equal(t, original.ID, updated.ID, "new observation lives under the existing entity")
+
+	results, err := store.Retrieve(ctx, scope, "blue", RetrieveOptions{})
+	require.NoError(t, err)
+	require.Len(t, results, 1, "active filter excludes the superseded observation")
+	assert.Equal(t, "User loves blue", results[0].Content)
+}
+
+// TestPostgresMemoryStore_FindSimilarObservations_HonoursThreshold verifies
+// the minSimilarity filter at the SQL level — too-low matches don't
+// reach the service layer at all.
+func TestPostgresMemoryStore_FindSimilarObservations_HonoursThreshold(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	mem := &Memory{Type: "fact", Content: "Vegetarian", Confidence: 0.9, Scope: scope}
+	require.NoError(t, store.Save(ctx, mem))
+	require.NoError(t, store.UpdateEmbedding(ctx, mem.ID, oneHotFloat(0, 1536), ""))
+
+	// Query embedding orthogonal to the stored one (different one-hot
+	// position). Cosine similarity = 0 → threshold 0.5 rejects it.
+	matches, err := store.FindSimilarObservations(ctx, scope, oneHotFloat(100, 1536), 5, 0.5)
+	require.NoError(t, err)
+	assert.Empty(t, matches, "orthogonal embeddings should be filtered by threshold")
+}
+
+// repeatFloat returns a float32 slice of length n filled with v —
+// useful for synthesizing test embeddings without the cost of a real
+// embedding call. Vectors filled with the same constant are parallel
+// (cosine similarity = 1.0 regardless of magnitude); use oneHotFloat
+// when you need orthogonality.
+func repeatFloat(v float32, n int) []float32 {
+	out := make([]float32, n)
+	for i := range out {
+		out[i] = v
+	}
+	return out
+}
+
+// oneHotFloat returns a length-n vector with a 1.0 at position pos
+// and zeros elsewhere. Two one-hot vectors at different positions are
+// orthogonal (cosine similarity = 0), useful for testing that the
+// threshold filter rejects unrelated embeddings.
+func oneHotFloat(pos, n int) []float32 {
+	out := make([]float32, n)
+	if pos >= 0 && pos < n {
+		out[pos] = 1.0
+	}
+	return out
+}
+
 // TestPostgresMemoryStore_Save_StructuredKeyDedup_DifferentKeys verifies
 // that different About keys under the same scope don't collide — they
 // each get their own entity.
@@ -677,7 +1193,7 @@ func TestPostgresMemoryStore_UpdateEmbedding(t *testing.T) {
 		embedding[i] = float32(i) * 0.001
 	}
 
-	err := store.UpdateEmbedding(ctx, mem.ID, embedding)
+	err := store.UpdateEmbedding(ctx, mem.ID, embedding, "")
 	require.NoError(t, err)
 
 	// Verify via direct SQL that the embedding is non-null.
@@ -698,7 +1214,7 @@ func TestPostgresMemoryStore_UpdateEmbedding_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	embedding := make([]float32, 1536)
-	err := store.UpdateEmbedding(ctx, "00000000-0000-0000-0000-000000000000", embedding)
+	err := store.UpdateEmbedding(ctx, "00000000-0000-0000-0000-000000000000", embedding, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no observation found")
 }

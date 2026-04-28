@@ -67,7 +67,12 @@ func TestBuildMultiTierQuery_UserAndAgent(t *testing.T) {
 	}
 }
 
-func TestBuildMultiTierQuery_QueryAddsILIKE(t *testing.T) {
+// TestBuildMultiTierQuery_QueryUsesFTS is a wiring test: the multi-tier path
+// must use the same Postgres FTS as Retrieve. The previous ILIKE-based filter
+// silently broke agent recall because "when I was in Morocco" never appeared
+// as a literal substring of stored content. If anyone reverts this to ILIKE
+// the test fails and the FTS migration stays connected.
+func TestBuildMultiTierQuery_QueryUsesFTS(t *testing.T) {
 	sql, args, err := buildMultiTierQuery(MultiTierRequest{
 		WorkspaceID: "ws-1",
 		UserID:      "u-1",
@@ -77,11 +82,17 @@ func TestBuildMultiTierQuery_QueryAddsILIKE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if !strings.Contains(sql, "o.content ILIKE") {
-		t.Errorf("ILIKE filter missing: %s", sql)
+	if strings.Contains(sql, "ILIKE") {
+		t.Errorf("multi-tier query reintroduced ILIKE: %s", sql)
 	}
-	if args[len(args)-1] != "%dark mode%" {
-		t.Errorf("ILIKE arg missing: %v", args)
+	if !strings.Contains(sql, "websearch_to_tsquery('english'") {
+		t.Errorf("FTS predicate missing: %s", sql)
+	}
+	if !strings.Contains(sql, "o.search_vector @@") {
+		t.Errorf("tsvector match missing: %s", sql)
+	}
+	if args[len(args)-1] != "dark mode" {
+		t.Errorf("query arg should be passed verbatim to websearch_to_tsquery, got: %v", args)
 	}
 }
 
@@ -256,6 +267,54 @@ func TestRetrieveMultiTier_SpansAllTiers(t *testing.T) {
 	assert.Equal(t, testWorkspace1, uForA.Scope[ScopeWorkspaceID])
 	assert.Equal(t, "user-1", uForA.Scope[ScopeUserID])
 	assert.Equal(t, multiTierAgentID, uForA.Scope[ScopeAgentID])
+}
+
+// TestRetrieveMultiTier_HidesStructuredKeySupersedes proves the
+// active-only filter on the multi-tier path: a memory whose prior
+// observation was superseded via the structured-key dedup route
+// (which sets valid_until = now() but leaves superseded_by NULL)
+// must not surface in recall. This is the failure mode the
+// stateful-memory design exists to fix.
+func TestRetrieveMultiTier_HidesStructuredKeySupersedes(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := map[string]string{
+		ScopeWorkspaceID: testWorkspace1,
+		ScopeUserID:      "user-1",
+	}
+
+	about := map[string]any{
+		MetaKeyAboutKind: "user",
+		MetaKeyAboutKey:  "name",
+	}
+
+	original := &Memory{Type: "fact", Content: "name: Slim Shard", Confidence: 1.0,
+		Scope: scope, Metadata: cloneMap(about)}
+	require.NoError(t, store.Save(ctx, original))
+
+	updated := &Memory{Type: "fact", Content: "name: Phil Collins", Confidence: 1.0,
+		Scope: scope, Metadata: cloneMap(about)}
+	require.NoError(t, store.Save(ctx, updated))
+
+	// After the second Save's structured-key path runs, the prior
+	// observation has valid_until set. RetrieveMultiTier must hide it.
+	result, err := store.RetrieveMultiTier(ctx, MultiTierRequest{
+		WorkspaceID: testWorkspace1,
+		UserID:      "user-1",
+		Limit:       10,
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Memories, 1, "only the active observation should surface")
+	assert.Contains(t, result.Memories[0].Content, "Phil Collins",
+		"old name must not be in recall")
+}
+
+func cloneMap(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }
 
 func TestRetrieveMultiTier_InstitutionalOnlyDoesNotBleed(t *testing.T) {

@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -117,6 +118,13 @@ type flags struct {
 	retentionInterval     string // env: RETENTION_INTERVAL, e.g. "1h"
 	compactionInterval    string // env: COMPACTION_INTERVAL, e.g. "6h"
 	compactionAge         string // env: COMPACTION_AGE, e.g. "720h" (30d)
+	reembedInterval       string // env: REEMBED_INTERVAL, e.g. "30m"
+	reembedBatchSize      int    // env: REEMBED_BATCH_SIZE
+	tombstoneInterval     string // env: TOMBSTONE_INTERVAL, e.g. "6h"
+	tombstoneMinAge       string // env: TOMBSTONE_MIN_AGE, e.g. "720h" (30d)
+	tombstoneMinInactive  int    // env: TOMBSTONE_MIN_INACTIVE
+	tombstoneKeepRecent   int    // env: TOMBSTONE_KEEP_RECENT
+	requireAboutForKinds  string // env: REQUIRE_ABOUT_FOR_KINDS, e.g. "fact,preference"
 	workspace             string
 	serviceGroup          string
 }
@@ -139,6 +147,13 @@ func parseFlags() *flags {
 	flag.StringVar(&f.retentionInterval, "retention-interval", "", "Interval for retention worker (e.g. 1h)")
 	flag.StringVar(&f.compactionInterval, "compaction-interval", "", "Interval for temporal-summarization compaction worker (e.g. 6h). Empty disables.")
 	flag.StringVar(&f.compactionAge, "compaction-age", "", "Age threshold for compaction candidates (e.g. 720h = 30d). Empty uses worker default.")
+	flag.StringVar(&f.reembedInterval, "reembed-interval", "", "Interval for re-embed backfill worker (e.g. 30m). Empty disables.")
+	flag.IntVar(&f.reembedBatchSize, "reembed-batch-size", 0, "Re-embed batch size per pass. Zero uses worker default (50).")
+	flag.StringVar(&f.tombstoneInterval, "tombstone-interval", "", "Interval for tombstone GC worker (e.g. 6h). Empty disables.")
+	flag.StringVar(&f.tombstoneMinAge, "tombstone-min-age", "", "Minimum age before an inactive observation is GC-eligible (e.g. 720h). Empty uses worker default.")
+	flag.IntVar(&f.tombstoneMinInactive, "tombstone-min-inactive", 0, "Chain length below which tombstone GC leaves observations alone. Zero uses worker default (20).")
+	flag.IntVar(&f.tombstoneKeepRecent, "tombstone-keep-recent", 0, "Most-recent inactive observations preserved per chain for audit. Zero uses worker default (5).")
+	flag.StringVar(&f.requireAboutForKinds, "require-about-for-kinds", "", "Comma-separated list of memory kinds requiring an about={kind, key} hint on save (e.g. fact,preference). Empty disables.")
 	flag.StringVar(&f.workspace, "workspace", "", "Workspace name (K8s CRD resolution mode)")
 	flag.StringVar(&f.serviceGroup, "service-group", "", "Service group name within workspace")
 	flag.Parse()
@@ -165,6 +180,25 @@ func (f *flags) applyEnvFallbacks() {
 	envFallback(&f.retentionInterval, "", "RETENTION_INTERVAL")
 	envFallback(&f.compactionInterval, "", "COMPACTION_INTERVAL")
 	envFallback(&f.compactionAge, "", "COMPACTION_AGE")
+	envFallback(&f.reembedInterval, "", "REEMBED_INTERVAL")
+	if v := os.Getenv("REEMBED_BATCH_SIZE"); v != "" && f.reembedBatchSize == 0 {
+		if n, err := strconv.Atoi(v); err == nil {
+			f.reembedBatchSize = n
+		}
+	}
+	envFallback(&f.requireAboutForKinds, "", "REQUIRE_ABOUT_FOR_KINDS")
+	envFallback(&f.tombstoneInterval, "", "TOMBSTONE_INTERVAL")
+	envFallback(&f.tombstoneMinAge, "", "TOMBSTONE_MIN_AGE")
+	if v := os.Getenv("TOMBSTONE_MIN_INACTIVE"); v != "" && f.tombstoneMinInactive == 0 {
+		if n, err := strconv.Atoi(v); err == nil {
+			f.tombstoneMinInactive = n
+		}
+	}
+	if v := os.Getenv("TOMBSTONE_KEEP_RECENT"); v != "" && f.tombstoneKeepRecent == 0 {
+		if n, err := strconv.Atoi(v); err == nil {
+			f.tombstoneKeepRecent = n
+		}
+	}
 	if v := os.Getenv("TRACING_SAMPLE_RATE"); v != "" && f.tracingSample == 0 {
 		if rate, err := strconv.ParseFloat(v, 64); err == nil {
 			f.tracingSample = rate
@@ -217,6 +251,73 @@ func (f *flags) compactionWorkerOptions(log logr.Logger, store *memory.PostgresM
 		}
 	}
 	return opts, true
+}
+
+// parseCSV splits a comma-separated string into a trimmed, non-empty
+// slice. Used for list-shaped flags / env vars (kinds, providers).
+func parseCSV(in string) []string {
+	if in == "" {
+		return nil
+	}
+	parts := strings.Split(in, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// tombstoneWorkerOptions returns the TombstoneWorkerOptions derived
+// from flags/env. enabled=false when the interval flag is missing or
+// invalid — the worker exits cleanly in that case anyway, but the
+// guard avoids the noisy "disabled" log line.
+func (f *flags) tombstoneWorkerOptions(log logr.Logger, store *memory.PostgresMemoryStore) (memory.TombstoneWorkerOptions, bool) {
+	if f.tombstoneInterval == "" {
+		return memory.TombstoneWorkerOptions{}, false
+	}
+	interval, err := time.ParseDuration(f.tombstoneInterval)
+	if err != nil || interval <= 0 {
+		log.Error(err, "invalid TOMBSTONE_INTERVAL, tombstone worker disabled",
+			"value", f.tombstoneInterval)
+		return memory.TombstoneWorkerOptions{}, false
+	}
+	opts := memory.TombstoneWorkerOptions{
+		Interval:            interval,
+		WorkspaceDiscoverer: store.ListWorkspaceIDs,
+		MinInactiveCount:    f.tombstoneMinInactive,
+		KeepRecentInactive:  f.tombstoneKeepRecent,
+	}
+	if f.tombstoneMinAge != "" {
+		age, ageErr := time.ParseDuration(f.tombstoneMinAge)
+		if ageErr != nil {
+			log.Error(ageErr, "invalid TOMBSTONE_MIN_AGE, using worker default",
+				"value", f.tombstoneMinAge)
+		} else {
+			opts.MinAge = age
+		}
+	}
+	return opts, true
+}
+
+// reembedWorkerOptions returns the ReembedWorkerOptions derived from
+// flags/env. enabled=false when no interval is set OR no embedding
+// service is configured — without a provider the worker has nothing
+// to call, and without an interval it would never tick.
+func (f *flags) reembedWorkerOptions(embeddingSvc *memory.EmbeddingService) (memory.ReembedWorkerOptions, bool) {
+	if embeddingSvc == nil || f.reembedInterval == "" {
+		return memory.ReembedWorkerOptions{}, false
+	}
+	interval, err := time.ParseDuration(f.reembedInterval)
+	if err != nil || interval <= 0 {
+		return memory.ReembedWorkerOptions{}, false
+	}
+	return memory.ReembedWorkerOptions{
+		Interval:     interval,
+		BatchSize:    f.reembedBatchSize,
+		CurrentModel: f.embeddingProviderName,
+	}, true
 }
 
 func main() {
@@ -273,6 +374,7 @@ func run() error {
 
 	// --- Memory store ---
 	store := memory.NewPostgresMemoryStore(pool)
+	defer store.Close()
 
 	// --- Read-path metrics ---
 	// accessed_at / access_count are bumped asynchronously on every
@@ -293,8 +395,9 @@ func run() error {
 		}
 	}
 	svcCfg := memoryapi.MemoryServiceConfig{
-		DefaultTTL: defaultTTL,
-		Purpose:    f.purpose,
+		DefaultTTL:           defaultTTL,
+		Purpose:              f.purpose,
+		RequireAboutForKinds: parseCSV(f.requireAboutForKinds),
 	}
 
 	// --- Policy loader (shared by retention worker + retrieval ranker) ---
@@ -337,6 +440,37 @@ func run() error {
 	var embeddingSvc *memory.EmbeddingService
 	if f.embeddingProviderName != "" {
 		embeddingSvc = createEmbeddingService(ctx, f.embeddingProviderName, store, log)
+	}
+
+	// --- Tombstone GC worker ---
+	// Hard-deletes old superseded observations on long supersession
+	// chains, keeping the most recent K per chain for audit. Bounds
+	// storage growth without losing the agent-visible "this got
+	// updated" history.
+	if tombstoneOpts, enabled := f.tombstoneWorkerOptions(log, store); enabled {
+		worker := memory.NewTombstoneWorker(store, tombstoneOpts, log)
+		go worker.Run(ctx)
+		log.Info("tombstone worker started",
+			"interval", tombstoneOpts.Interval,
+			"minAge", tombstoneOpts.MinAge,
+			"minInactiveCount", tombstoneOpts.MinInactiveCount,
+			"keepRecent", tombstoneOpts.KeepRecentInactive,
+		)
+	}
+
+	// --- Re-embed backfill worker ---
+	// Backfills observations missing an embedding (pre-wiring rows
+	// or rows stamped with a now-superseded model) so the hybrid
+	// recall path doesn't silently miss them. Requires both an
+	// embedding service AND a configured interval.
+	if reembedOpts, enabled := f.reembedWorkerOptions(embeddingSvc); enabled {
+		worker := memory.NewReembedWorker(store, embeddingSvc.Provider(), reembedOpts, log)
+		go worker.Run(ctx)
+		log.Info("reembed worker started",
+			"interval", reembedOpts.Interval,
+			"batchSize", reembedOpts.BatchSize,
+			"currentModel", reembedOpts.CurrentModel,
+		)
 	}
 
 	// --- Tracing ---
@@ -793,7 +927,7 @@ func createEmbeddingService(ctx context.Context, providerName string, store *mem
 	}
 
 	adapter := &embeddingProviderAdapter{inner: embeddingProvider}
-	svc := memory.NewEmbeddingService(store, adapter, log)
+	svc := memory.NewEmbeddingService(store, adapter, log).WithModelName(providerName)
 	log.Info("embedding service enabled",
 		"provider", providerName,
 		"type", provider.Spec.Type,

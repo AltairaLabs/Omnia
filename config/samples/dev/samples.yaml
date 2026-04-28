@@ -17,14 +17,17 @@ spec:
   environment: development
   namespace:
     name: dev-agents
-  # Anonymous workspace access is OFF by default. Granting anonymous users
-  # editor/owner privileges bypasses the dashboard's auth enforcement for
-  # workspace-scoped operations, so it has to be explicitly opted into.
-  #
-  # Local dev override: `ALLOW_WORKSPACE_ANONYMOUS=true tilt up` makes the
-  # Tiltfile patch this field on after samples are applied.
+  # Anonymous owner access is the default here because this file is the
+  # local-dev sample set — `tilt up` deploys it into a kind/orbstack
+  # cluster with no OAuth wired up, and without anonymous owner access
+  # the dashboard renders an empty shell with no workspace visible.
+  # This file ships only to dev clusters; production Workspaces leave
+  # anonymousAccess off (or unset) and rely on real auth.
+  # Override locally with: kubectl patch workspace dev-agents \
+  #   --type=merge -p '{"spec":{"anonymousAccess":{"enabled":false}}}'
   anonymousAccess:
-    enabled: false
+    enabled: true
+    role: owner
   # Per-workspace session-api and memory-api instances.
   # The operator creates Deployments/Services named session-dev-agents-default
   # and memory-dev-agents-default in the dev-agents namespace.
@@ -94,6 +97,20 @@ type: Opaque
 stringData:
   OPENAI_API_KEY: "sk-demo-key-replace-with-real-key"
 ---
+# Gemini credentials (used by gemini-provider)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gemini-credentials
+  namespace: dev-agents
+  labels:
+    omnia.altairalabs.ai/type: credentials
+  annotations:
+    omnia.altairalabs.ai/provider: gemini
+type: Opaque
+stringData:
+  GEMINI_API_KEY: "ya29-demo-key-replace-with-real-key"
+---
 # =============================================================================
 # Provider CRDs
 # Reusable LLM provider configurations that reference credential secrets
@@ -135,6 +152,24 @@ spec:
     inputCostPer1K: "0.005"
     outputCostPer1K: "0.015"
 ---
+# Gemini provider using Google AI Studio credentials
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: gemini-provider
+  namespace: dev-agents
+spec:
+  type: gemini
+  model: gemini-2.5-flash
+  secretRef:
+    name: gemini-credentials
+  defaults:
+    temperature: "0.7"
+    maxTokens: 4096
+  pricing:
+    inputCostPer1K: "0.0001"
+    outputCostPer1K: "0.0004"
+---
 # Ollama provider for local LLM with tool calling
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: Provider
@@ -166,7 +201,7 @@ data:
       "id": "demo-prompts",
       "name": "Demo Prompts",
       "version": "2.0.0",
-      "description": "Demo pack showcasing evals, validators, tools, and workflow features.",
+      "description": "Demo pack showcasing validators, tools, and workflow features.",
       "template_engine": {
         "version": "v1",
         "syntax": "{{variable}}",
@@ -195,114 +230,6 @@ data:
               "fail_on_violation": false,
               "params": {
                 "max_characters": 2000
-              }
-            }
-          ],
-          "evals": [
-            {
-              "id": "helpfulness",
-              "type": "llm_judge",
-              "trigger": "sample_turns",
-              "sample_percentage": 20,
-              "description": "Assess response helpfulness",
-              "params": {
-                "judge_prompt": "Rate the response for helpfulness and accuracy on a 1-5 scale.",
-                "passing_score": 3
-              },
-              "metric": {
-                "name": "helpfulness_score",
-                "type": "gauge",
-                "range": { "min": 0, "max": 1 }
-              }
-            },
-            {
-              "id": "contains-mock",
-              "type": "contains",
-              "trigger": "every_turn",
-              "description": "Verify response contains expected content",
-              "params": {
-                "patterns": ["response"]
-              },
-              "metric": {
-                "name": "response_contains_expected",
-                "type": "boolean"
-              }
-            },
-            {
-              "id": "response-max-length",
-              "type": "max_length",
-              "trigger": "every_turn",
-              "description": "Responses should stay under 2000 characters",
-              "params": {
-                "max_characters": 2000
-              },
-              "metric": {
-                "name": "response_max_length",
-                "type": "boolean"
-              }
-            },
-            {
-              "id": "response-min-length",
-              "type": "min_length",
-              "trigger": "every_turn",
-              "description": "Responses should be at least 10 characters (not empty)",
-              "params": {
-                "min_characters": 10
-              },
-              "metric": {
-                "name": "response_min_length",
-                "type": "boolean"
-              }
-            },
-            {
-              "id": "tools-used",
-              "type": "tools_called",
-              "trigger": "on_session_complete",
-              "description": "Agent should use available tools when relevant",
-              "params": {
-                "tool_names": ["search_places", "get_weather", "calculate"]
-              },
-              "metric": {
-                "name": "tools_used",
-                "type": "boolean"
-              }
-            },
-            {
-              "id": "tool-chain-weather",
-              "type": "tool_call_chain",
-              "trigger": "on_session_complete",
-              "description": "For weather queries, agent should search places before getting weather",
-              "params": {
-                "chain": ["search_places", "get_weather"]
-              },
-              "metric": {
-                "name": "tool_chain_weather",
-                "type": "boolean"
-              }
-            },
-            {
-              "id": "no-tool-errors",
-              "type": "no_tool_errors",
-              "trigger": "on_session_complete",
-              "description": "All tool calls should complete without errors",
-              "params": {},
-              "metric": {
-                "name": "no_tool_errors",
-                "type": "boolean"
-              }
-            },
-            {
-              "id": "tool-efficiency",
-              "type": "tool_efficiency",
-              "trigger": "on_session_complete",
-              "description": "Agent should not make excessive or failing tool calls",
-              "params": {
-                "max_calls": 10,
-                "max_error_rate": 0.2
-              },
-              "metric": {
-                "name": "tool_efficiency",
-                "type": "boolean"
               }
             }
           ]
@@ -360,35 +287,6 @@ data:
           }
         }
       },
-      "evals": [
-        {
-          "id": "no-hallucination-urls",
-          "type": "regex",
-          "trigger": "every_turn",
-          "description": "Flag responses that fabricate URLs",
-          "params": {
-            "pattern": "https?://[a-zA-Z0-9.-]+\\.[a-z]{2,}",
-            "expect_match": false
-          },
-          "metric": {
-            "name": "no_hallucinated_urls",
-            "type": "boolean"
-          }
-        },
-        {
-          "id": "no-forbidden-content",
-          "type": "content_excludes",
-          "trigger": "every_turn",
-          "description": "Responses should not contain disclaimers about being an AI",
-          "params": {
-            "patterns": ["as an AI", "as a language model", "I'm just an AI"]
-          },
-          "metric": {
-            "name": "no_forbidden_content",
-            "type": "boolean"
-          }
-        }
-      ],
       "skills": [
         {
           "name": "demo-guidelines",
@@ -568,6 +466,46 @@ spec:
     extraEnv:
       - name: LOG_LEVEL
         value: debug
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: 1
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "200m"
+        memory: "128Mi"
+---
+# Gemini agent — uses Google AI Studio's Gemini 2.0 Flash
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: gemini-agent
+  namespace: dev-agents
+spec:
+  promptPackRef:
+    name: demo-prompts
+  toolRegistryRef:
+    name: demo-tools
+  providers:
+    - name: default
+      providerRef:
+        name: gemini-provider
+  facade:
+    type: websocket
+    port: 8080
+    handler: runtime
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
+  memory:
+    enabled: true
   session:
     type: memory
     ttl: "1h"

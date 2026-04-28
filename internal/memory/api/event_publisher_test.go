@@ -57,6 +57,65 @@ func (m *mockMemoryStore) Save(_ context.Context, mem *memory.Memory) error {
 	return nil
 }
 
+func (m *mockMemoryStore) SaveWithResult(ctx context.Context, mem *memory.Memory) (*memory.SaveResult, error) {
+	if err := m.Save(ctx, mem); err != nil {
+		return nil, err
+	}
+	return &memory.SaveResult{ID: mem.ID, Action: memory.SaveActionAdded}, nil
+}
+
+func (m *mockMemoryStore) FindSimilarObservations(_ context.Context, _ map[string]string,
+	_ []float32, _ int, _ float64,
+) ([]memory.SimilarObservation, error) {
+	return nil, nil
+}
+
+func (m *mockMemoryStore) AppendObservationToEntity(_ context.Context, entityID string, mem *memory.Memory) ([]string, error) {
+	mem.ID = entityID
+	return nil, nil
+}
+
+func (m *mockMemoryStore) GetMemory(_ context.Context, _ map[string]string, entityID string) (*memory.Memory, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, mem := range m.saved {
+		if mem.ID == entityID {
+			return mem, nil
+		}
+	}
+	return nil, memory.ErrNotFound
+}
+
+func (m *mockMemoryStore) LinkEntities(_ context.Context, _ map[string]string,
+	_, _, _ string, _ float64,
+) (string, error) {
+	return "rel-mock", nil
+}
+
+func (m *mockMemoryStore) FindRelatedEntities(_ context.Context, _ map[string]string,
+	_ []string, _ int,
+) ([]memory.EntityRelation, error) {
+	return nil, nil
+}
+
+func (m *mockMemoryStore) RetrieveHybrid(_ context.Context, _ map[string]string,
+	_ string, _ []float32, _ memory.RetrieveOptions,
+) ([]*memory.Memory, error) {
+	return nil, nil
+}
+
+func (m *mockMemoryStore) SupersedeMany(_ context.Context, sourceIDs []string, mem *memory.Memory) (string, []string, error) {
+	if len(sourceIDs) == 0 {
+		return "", nil, nil
+	}
+	mem.ID = sourceIDs[0]
+	return sourceIDs[0], nil, nil
+}
+
+func (m *mockMemoryStore) FindConflictedEntities(_ context.Context, _ string, _ int) ([]memory.ConflictedEntity, error) {
+	return nil, nil
+}
+
 func (m *mockMemoryStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	return nil, nil
 }

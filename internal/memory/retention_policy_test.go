@@ -155,16 +155,94 @@ func TestK8sPolicyLoader_ReturnsCachedOnGetError(t *testing.T) {
 		Build()
 
 	loader := NewK8sPolicyLoader(c, zap.New(zap.UseDevMode(true)), "dev", "default")
+	// Force the second call to bypass the TTL cache so it hits the
+	// (failing) K8s client and exercises the cached-fallback branch.
+	loader.CacheTTL = time.Nanosecond
 
 	first, err := loader.Load(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, first)
 	assert.Equal(t, "default-policy", first.Name)
 
+	// Sleep past the nanosecond TTL so the second call refetches and
+	// hits the simulated outage.
+	time.Sleep(time.Microsecond)
+
 	second, err := loader.Load(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, second)
 	assert.Equal(t, "default-policy", second.Name)
+}
+
+// TestK8sPolicyLoader_TTLCacheShortCircuitsK8s proves the TTL cache:
+// two back-to-back Loads within the freshness window only call the
+// K8s API once. This is what protects the hot Save path from
+// hammering the API server.
+func TestK8sPolicyLoader_TTLCacheShortCircuitsK8s(t *testing.T) {
+	scheme := policySchemeForTest(t)
+	policy := &omniav1alpha1.MemoryPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "default-policy"},
+		Spec:       omniav1alpha1.MemoryPolicySpec{Schedule: "0 3 * * *"},
+	}
+	ws := devWorkspaceWithMemoryPolicyRef("default-policy")
+	var policyGets int
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(policy, ws).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if _, ok := obj.(*omniav1alpha1.MemoryPolicy); ok {
+					policyGets++
+				}
+				return cl.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+
+	loader := NewK8sPolicyLoader(c, zap.New(zap.UseDevMode(true)), "dev", "default")
+
+	for i := 0; i < 5; i++ {
+		_, err := loader.Load(context.Background())
+		require.NoError(t, err)
+	}
+	assert.Equal(t, 1, policyGets,
+		"5 Loads inside the TTL window must result in 1 K8s API GET")
+}
+
+// TestK8sPolicyLoader_NoopFetchAlsoCached proves the "no policy
+// bound" answer is cached too — without this an unbound workspace
+// would still hit the API on every Load.
+func TestK8sPolicyLoader_NoopFetchAlsoCached(t *testing.T) {
+	scheme := policySchemeForTest(t)
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "dev"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			Services: []omniav1alpha1.WorkspaceServiceGroup{{Name: "default"}},
+		},
+	}
+	var workspaceGets int
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ws).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if _, ok := obj.(*omniav1alpha1.Workspace); ok {
+					workspaceGets++
+				}
+				return cl.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+
+	loader := NewK8sPolicyLoader(c, zap.New(zap.UseDevMode(true)), "dev", "default")
+
+	for i := 0; i < 3; i++ {
+		got, err := loader.Load(context.Background())
+		require.NoError(t, err)
+		assert.Nil(t, got)
+	}
+	assert.Equal(t, 1, workspaceGets,
+		"the no-policy answer must be cached so subsequent Loads short-circuit")
 }
 
 func TestK8sPolicyLoader_ReturnsErrorWhenWorkspaceGetFailsWithoutCache(t *testing.T) {

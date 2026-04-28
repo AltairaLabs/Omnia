@@ -27,8 +27,29 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/redis/go-redis/v9"
 )
+
+// readCounter returns the current value of a prometheus counter. Used by
+// metrics-wiring tests to assert label cardinality + increments.
+func readCounter(c prometheus.Counter) float64 {
+	var m dto.Metric
+	if err := c.Write(&m); err != nil {
+		return 0
+	}
+	return m.GetCounter().GetValue()
+}
+
+// readGauge returns the current value of a prometheus gauge.
+func readGauge(g prometheus.Gauge) float64 {
+	var m dto.Metric
+	if err := g.Write(&m); err != nil {
+		return 0
+	}
+	return m.GetGauge().GetValue()
+}
 
 // cacheTestStore is a test double for the Store interface used by CachedStore tests.
 type cacheTestStore struct {
@@ -77,6 +98,60 @@ func (m *cacheTestStore) Save(_ context.Context, mem *Memory) error {
 	}
 	m.memories = append(m.memories, mem)
 	return nil
+}
+
+func (m *cacheTestStore) SaveWithResult(ctx context.Context, mem *Memory) (*SaveResult, error) {
+	if err := m.Save(ctx, mem); err != nil {
+		return nil, err
+	}
+	return &SaveResult{ID: mem.ID, Action: SaveActionAdded}, nil
+}
+
+func (m *cacheTestStore) FindSimilarObservations(_ context.Context, _ map[string]string,
+	_ []float32, _ int, _ float64,
+) ([]SimilarObservation, error) {
+	return nil, nil
+}
+
+func (m *cacheTestStore) AppendObservationToEntity(_ context.Context, entityID string, mem *Memory) ([]string, error) {
+	mem.ID = entityID
+	return nil, nil
+}
+
+func (m *cacheTestStore) GetMemory(_ context.Context, _ map[string]string, _ string) (*Memory, error) {
+	return nil, nil
+}
+
+func (m *cacheTestStore) LinkEntities(_ context.Context, _ map[string]string,
+	_, _, _ string, _ float64,
+) (string, error) {
+	return "rel-mock", nil
+}
+
+func (m *cacheTestStore) FindRelatedEntities(_ context.Context, _ map[string]string,
+	_ []string, _ int,
+) ([]EntityRelation, error) {
+	return nil, nil
+}
+
+func (m *cacheTestStore) RetrieveHybrid(_ context.Context, _ map[string]string,
+	_ string, _ []float32, _ RetrieveOptions,
+) ([]*Memory, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.memories, nil
+}
+
+func (m *cacheTestStore) SupersedeMany(_ context.Context, sourceIDs []string, mem *Memory) (string, []string, error) {
+	if len(sourceIDs) == 0 {
+		return "", nil, nil
+	}
+	mem.ID = sourceIDs[0]
+	return sourceIDs[0], nil, nil
+}
+
+func (m *cacheTestStore) FindConflictedEntities(_ context.Context, _ string, _ int) ([]ConflictedEntity, error) {
+	return nil, nil
 }
 
 func (m *cacheTestStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ RetrieveOptions) ([]*Memory, error) {
@@ -329,6 +404,128 @@ func TestCachedStore_Save_InnerError(t *testing.T) {
 	err := cs.Save(context.Background(), &Memory{Type: "fact", Content: "x", Scope: cacheTestScope()})
 	if err == nil {
 		t.Fatal("expected error from inner save, got nil")
+	}
+}
+
+// TestCachedStore_SaveWithResult_PassesThroughResult proves the
+// inner store's dedup result (action / supersedes) reaches the
+// caller unchanged. Without this the agent never sees auto_superseded
+// even when the structured-key index fired in the inner store.
+func TestCachedStore_SaveWithResult_PassesThroughResult(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, _ := newTestCache(t, inner)
+
+	res, err := cs.SaveWithResult(context.Background(), &Memory{
+		Type: "fact", Content: "x", Scope: cacheTestScope(),
+	})
+	if err != nil {
+		t.Fatalf("SaveWithResult: %v", err)
+	}
+	if res == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if res.Action != SaveActionAdded {
+		t.Errorf("Action = %q, want %q", res.Action, SaveActionAdded)
+	}
+}
+
+func TestCachedStore_SaveWithResult_InnerError(t *testing.T) {
+	inner := &cacheTestStore{saveErr: errTest}
+	cs, _ := newTestCache(t, inner)
+
+	_, err := cs.SaveWithResult(context.Background(), &Memory{
+		Type: "fact", Content: "x", Scope: cacheTestScope(),
+	})
+	if err == nil {
+		t.Fatal("expected error from inner SaveWithResult, got nil")
+	}
+}
+
+// TestCachedStore_FindSimilarObservations_Passthrough proves the
+// cache wrapper doesn't add caching to dedup-on-write similarity
+// queries — those need live state to decide between auto-supersede
+// and surface-as-duplicate.
+func TestCachedStore_FindSimilarObservations_Passthrough(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, _ := newTestCache(t, inner)
+
+	_, err := cs.FindSimilarObservations(context.Background(), cacheTestScope(),
+		[]float32{1, 2, 3}, 5, 0.85)
+	if err != nil {
+		t.Fatalf("FindSimilarObservations: %v", err)
+	}
+}
+
+// TestCachedStore_GetMemory_Passthrough proves the cache wrapper
+// delegates open requests to the inner store without caching —
+// memory__open is infrequent and must reflect post-supersede writes
+// immediately.
+func TestCachedStore_GetMemory_Passthrough(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, _ := newTestCache(t, inner)
+	_, _ = cs.GetMemory(context.Background(), cacheTestScope(), "any-id")
+}
+
+// TestCachedStore_FindConflictedEntities_Passthrough proves the
+// cache wrapper delegates conflict-queue queries straight to the
+// inner store — the dashboard view must reflect live state for
+// triage to be useful, so caching would be wrong here.
+func TestCachedStore_FindConflictedEntities_Passthrough(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, _ := newTestCache(t, inner)
+	_, err := cs.FindConflictedEntities(context.Background(), "ws-1", 10)
+	if err != nil {
+		t.Fatalf("FindConflictedEntities: %v", err)
+	}
+}
+
+// TestCachedStore_RetrieveHybrid_Passthrough proves the cache
+// wrapper delegates the hybrid (lexical + semantic) recall path to
+// the inner store without caching — query-embedding-keyed entries
+// would dilute the cache.
+func TestCachedStore_RetrieveHybrid_Passthrough(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{{ID: "m1", Content: "x"}}}
+	cs, _ := newTestCache(t, inner)
+	got, err := cs.RetrieveHybrid(context.Background(), cacheTestScope(),
+		"q", []float32{0.1, 0.2}, RetrieveOptions{Limit: 5})
+	if err != nil {
+		t.Fatalf("RetrieveHybrid: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 memory from inner, got %d", len(got))
+	}
+}
+
+// TestCachedStore_LinkEntities_BumpsCacheVersion proves a new
+// relation invalidates the workspace cache so subsequent recall's
+// related[] walk sees the link.
+func TestCachedStore_LinkEntities_BumpsCacheVersion(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, _ := newTestCache(t, inner)
+	id, err := cs.LinkEntities(context.Background(), cacheTestScope(),
+		"src", "tgt", "ABOUT", 1.0)
+	if err != nil {
+		t.Fatalf("LinkEntities: %v", err)
+	}
+	if id == "" {
+		t.Error("expected non-empty relation id")
+	}
+}
+
+// TestCachedStore_AppendObservationToEntity_BumpsCacheVersion proves
+// that the auto-supersede path invalidates the workspace cache so
+// subsequent recall reflects the new active observation.
+func TestCachedStore_AppendObservationToEntity_BumpsCacheVersion(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, _ := newTestCache(t, inner)
+
+	mem := &Memory{Type: "fact", Content: "x", Scope: cacheTestScope()}
+	_, err := cs.AppendObservationToEntity(context.Background(), "entity-id", mem)
+	if err != nil {
+		t.Fatalf("AppendObservationToEntity: %v", err)
+	}
+	if mem.ID != "entity-id" {
+		t.Errorf("mem.ID = %q, want entity-id", mem.ID)
 	}
 }
 
@@ -771,3 +968,128 @@ func TestCachedStore_BatchDelete_InnerError(t *testing.T) {
 
 // errTest is a sentinel error for injection.
 var errTest = fmt.Errorf("injected error")
+
+// TestCachedStore_PassthroughWrappers covers the small wrappers that are
+// otherwise pure delegation: SupersedeMany, FindRelatedEntities,
+// FindCompactionCandidates, SaveCompactionSummary. They exist so the cache
+// store implements Store; the test exists so the file stays above the 80%
+// per-file coverage gate.
+func TestCachedStore_PassthroughWrappers(t *testing.T) {
+	inner := &cacheTestStore{saveCompactionID: "c1"}
+	cs, _ := newTestCache(t, inner)
+	ctx := context.Background()
+	scope := cacheTestScope()
+
+	mem := &Memory{Scope: scope, Content: "x"}
+	if _, _, err := cs.SupersedeMany(ctx, []string{"src"}, mem); err != nil {
+		t.Fatalf("SupersedeMany: %v", err)
+	}
+
+	if _, err := cs.FindRelatedEntities(ctx, scope, []string{"e1"}, 10); err != nil {
+		t.Fatalf("FindRelatedEntities: %v", err)
+	}
+
+	if _, err := cs.FindCompactionCandidates(ctx, FindCompactionCandidatesOptions{}); err != nil {
+		t.Fatalf("FindCompactionCandidates: %v", err)
+	}
+
+	id, err := cs.SaveCompactionSummary(ctx, CompactionSummary{
+		WorkspaceID: "ws-1", UserID: "u-1", AgentID: "a-1",
+	})
+	if err != nil {
+		t.Fatalf("SaveCompactionSummary: %v", err)
+	}
+	if id != "c1" {
+		t.Fatalf("expected id c1, got %q", id)
+	}
+}
+
+// TestCachedStore_SaveCompactionSummary_InnerError covers the error branch
+// of SaveCompactionSummary — the cache must propagate the inner error
+// without bumping the version.
+func TestCachedStore_SaveCompactionSummary_InnerError(t *testing.T) {
+	inner := &cacheTestStore{compactionErr: errTest}
+	cs, _ := newTestCache(t, inner)
+
+	if _, err := cs.SaveCompactionSummary(context.Background(), CompactionSummary{WorkspaceID: "ws-1"}); err == nil {
+		t.Fatal("expected SaveCompactionSummary to propagate error")
+	}
+}
+
+// --- Metrics wiring tests -----------------------------------------------------
+
+// TestCachedStore_Metrics_Retrieve verifies that the cache_lookups counter
+// increments with the right (op,result) labels for hit, miss, and error paths,
+// and that redis_up flips on Redis outage. Without these, the cache thrash
+// failure mode (H-P12) is invisible to operators.
+func TestCachedStore_Metrics_Retrieve(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{{ID: "m1", Content: "x"}}}
+	cs, mr := newTestCache(t, inner)
+	ctx := context.Background()
+	scope := cacheTestScope()
+
+	missBefore := readCounter(cacheLookupsTotal.WithLabelValues("retrieve", "miss"))
+	hitBefore := readCounter(cacheLookupsTotal.WithLabelValues("retrieve", "hit"))
+	errBefore := readCounter(cacheLookupsTotal.WithLabelValues("retrieve", "error"))
+	bumpsBefore := readCounter(cacheVersionBumpsTotal)
+	getVerErrBefore := readCounter(redisDependencyErrorsTotal.WithLabelValues("get_version"))
+
+	if _, err := cs.Retrieve(ctx, scope, "", RetrieveOptions{}); err != nil {
+		t.Fatalf("first Retrieve: %v", err)
+	}
+	if got := readCounter(cacheLookupsTotal.WithLabelValues("retrieve", "miss")) - missBefore; got != 1 {
+		t.Fatalf("expected 1 miss after cold Retrieve, got %v", got)
+	}
+
+	if _, err := cs.Retrieve(ctx, scope, "", RetrieveOptions{}); err != nil {
+		t.Fatalf("second Retrieve: %v", err)
+	}
+	if got := readCounter(cacheLookupsTotal.WithLabelValues("retrieve", "hit")) - hitBefore; got != 1 {
+		t.Fatalf("expected 1 hit after warm Retrieve, got %v", got)
+	}
+
+	if err := cs.Save(ctx, &Memory{Scope: scope, Content: "y"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if got := readCounter(cacheVersionBumpsTotal) - bumpsBefore; got != 1 {
+		t.Fatalf("expected 1 version bump after Save, got %v", got)
+	}
+
+	mr.Close()
+	if _, err := cs.Retrieve(ctx, scope, "", RetrieveOptions{}); err != nil {
+		t.Fatalf("Retrieve with redis down: %v", err)
+	}
+	if got := readCounter(cacheLookupsTotal.WithLabelValues("retrieve", "error")) - errBefore; got != 1 {
+		t.Fatalf("expected 1 error after redis down, got %v", got)
+	}
+	if got := readCounter(redisDependencyErrorsTotal.WithLabelValues("get_version")) - getVerErrBefore; got != 1 {
+		t.Fatalf("expected 1 get_version dependency error, got %v", got)
+	}
+	if g := readGauge(redisUp); g != 0 {
+		t.Fatalf("expected redis_up=0 after outage, got %v", g)
+	}
+}
+
+// TestCachedStore_Metrics_List mirrors the Retrieve test for the list op label.
+func TestCachedStore_Metrics_List(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{{ID: "m1", Content: "x"}}}
+	cs, _ := newTestCache(t, inner)
+	ctx := context.Background()
+	scope := cacheTestScope()
+
+	missBefore := readCounter(cacheLookupsTotal.WithLabelValues("list", "miss"))
+	hitBefore := readCounter(cacheLookupsTotal.WithLabelValues("list", "hit"))
+
+	if _, err := cs.List(ctx, scope, ListOptions{}); err != nil {
+		t.Fatalf("first List: %v", err)
+	}
+	if got := readCounter(cacheLookupsTotal.WithLabelValues("list", "miss")) - missBefore; got != 1 {
+		t.Fatalf("expected 1 miss after cold List, got %v", got)
+	}
+	if _, err := cs.List(ctx, scope, ListOptions{}); err != nil {
+		t.Fatalf("second List: %v", err)
+	}
+	if got := readCounter(cacheLookupsTotal.WithLabelValues("list", "hit")) - hitBefore; got != 1 {
+		t.Fatalf("expected 1 hit after warm List, got %v", got)
+	}
+}

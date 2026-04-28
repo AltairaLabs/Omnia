@@ -43,6 +43,40 @@ func freshPromRegistry(t *testing.T) {
 type fakeMemoryStore struct{}
 
 func (fakeMemoryStore) Save(_ context.Context, _ *memory.Memory) error { return nil }
+func (fakeMemoryStore) SaveWithResult(_ context.Context, mem *memory.Memory) (*memory.SaveResult, error) {
+	return &memory.SaveResult{ID: mem.ID, Action: memory.SaveActionAdded}, nil
+}
+func (fakeMemoryStore) FindSimilarObservations(_ context.Context, _ map[string]string,
+	_ []float32, _ int, _ float64,
+) ([]memory.SimilarObservation, error) {
+	return nil, nil
+}
+func (fakeMemoryStore) AppendObservationToEntity(_ context.Context, entityID string, mem *memory.Memory) ([]string, error) {
+	mem.ID = entityID
+	return nil, nil
+}
+func (fakeMemoryStore) GetMemory(_ context.Context, _ map[string]string, _ string) (*memory.Memory, error) {
+	return nil, memory.ErrNotFound
+}
+func (fakeMemoryStore) LinkEntities(_ context.Context, _ map[string]string, _, _, _ string, _ float64) (string, error) {
+	return "", nil
+}
+func (fakeMemoryStore) FindRelatedEntities(_ context.Context, _ map[string]string, _ []string, _ int) ([]memory.EntityRelation, error) {
+	return nil, nil
+}
+func (fakeMemoryStore) RetrieveHybrid(_ context.Context, _ map[string]string, _ string, _ []float32, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
+	return nil, nil
+}
+func (fakeMemoryStore) SupersedeMany(_ context.Context, sourceIDs []string, mem *memory.Memory) (string, []string, error) {
+	if len(sourceIDs) == 0 {
+		return "", nil, nil
+	}
+	mem.ID = sourceIDs[0]
+	return sourceIDs[0], nil, nil
+}
+func (fakeMemoryStore) FindConflictedEntities(_ context.Context, _ string, _ int) ([]memory.ConflictedEntity, error) {
+	return nil, nil
+}
 func (fakeMemoryStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
 	return nil, nil
 }
@@ -199,6 +233,109 @@ func TestCompactionWorkerOptions_PopulatesAgeAndDiscoverer(t *testing.T) {
 	}
 	if opts.WorkspaceDiscoverer == nil {
 		t.Error("expected WorkspaceDiscoverer to be wired to store.ListWorkspaceIDs")
+	}
+}
+
+// TestReembedWorkerOptions_DisabledWithoutEmbeddingService proves
+// the wiring guard: without an embedding service the worker would
+// have nothing to call, so it must stay off.
+func TestReembedWorkerOptions_DisabledWithoutEmbeddingService(t *testing.T) {
+	f := &flags{reembedInterval: "30m"}
+	_, enabled := f.reembedWorkerOptions(nil)
+	if enabled {
+		t.Error("expected reembed worker to be disabled when embedding service is nil")
+	}
+}
+
+// TestReembedWorkerOptions_DisabledWhenIntervalEmpty proves the
+// other half of the guard: an embedding service alone is not enough
+// — without an interval the worker would tick on zero duration.
+func TestReembedWorkerOptions_DisabledWhenIntervalEmpty(t *testing.T) {
+	f := &flags{}
+	svc := memory.NewEmbeddingService(&memory.PostgresMemoryStore{}, nil, logr.Discard())
+	_, enabled := f.reembedWorkerOptions(svc)
+	if enabled {
+		t.Error("expected reembed worker to be disabled when interval is empty")
+	}
+}
+
+// TestTombstoneWorkerOptions_DisabledWhenIntervalEmpty proves the
+// guard fires when no interval is set — without it the worker
+// would tick on the zero-duration default and spam RunOnce.
+func TestTombstoneWorkerOptions_DisabledWhenIntervalEmpty(t *testing.T) {
+	f := &flags{}
+	_, enabled := f.tombstoneWorkerOptions(logr.Discard(), nil)
+	if enabled {
+		t.Error("expected tombstone worker to be disabled when interval is empty")
+	}
+}
+
+// TestTombstoneWorkerOptions_InvalidIntervalDisables proves a bad
+// duration string keeps the worker off rather than starting it
+// with whatever ParseDuration partially succeeded on.
+func TestTombstoneWorkerOptions_InvalidIntervalDisables(t *testing.T) {
+	f := &flags{tombstoneInterval: "not-a-duration"}
+	_, enabled := f.tombstoneWorkerOptions(logr.Discard(), nil)
+	if enabled {
+		t.Error("expected tombstone worker to be disabled when interval is invalid")
+	}
+}
+
+// TestTombstoneWorkerOptions_PopulatesFromFlags proves the happy
+// path: a valid interval populates the options including the
+// store-backed workspace discoverer.
+func TestTombstoneWorkerOptions_PopulatesFromFlags(t *testing.T) {
+	store := &memory.PostgresMemoryStore{}
+	f := &flags{
+		tombstoneInterval:    "6h",
+		tombstoneMinAge:      "720h",
+		tombstoneMinInactive: 30,
+		tombstoneKeepRecent:  10,
+	}
+	opts, enabled := f.tombstoneWorkerOptions(logr.Discard(), store)
+	if !enabled {
+		t.Fatal("expected tombstone worker to be enabled")
+	}
+	if opts.Interval != 6*time.Hour {
+		t.Errorf("expected 6h interval, got %v", opts.Interval)
+	}
+	if opts.MinAge != 720*time.Hour {
+		t.Errorf("expected 720h min-age, got %v", opts.MinAge)
+	}
+	if opts.MinInactiveCount != 30 {
+		t.Errorf("expected min-inactive 30, got %d", opts.MinInactiveCount)
+	}
+	if opts.KeepRecentInactive != 10 {
+		t.Errorf("expected keep-recent 10, got %d", opts.KeepRecentInactive)
+	}
+	if opts.WorkspaceDiscoverer == nil {
+		t.Error("expected WorkspaceDiscoverer to be wired to store.ListWorkspaceIDs")
+	}
+}
+
+// TestReembedWorkerOptions_PopulatesFromFlags proves the happy
+// path: a valid interval + an embedding service produces enabled
+// options carrying the configured CurrentModel (the provider name)
+// and BatchSize.
+func TestReembedWorkerOptions_PopulatesFromFlags(t *testing.T) {
+	f := &flags{
+		reembedInterval:       "15m",
+		reembedBatchSize:      25,
+		embeddingProviderName: "openai-embed-3-small",
+	}
+	svc := memory.NewEmbeddingService(&memory.PostgresMemoryStore{}, nil, logr.Discard())
+	opts, enabled := f.reembedWorkerOptions(svc)
+	if !enabled {
+		t.Fatal("expected reembed worker to be enabled")
+	}
+	if opts.Interval != 15*time.Minute {
+		t.Errorf("expected 15m interval, got %v", opts.Interval)
+	}
+	if opts.BatchSize != 25 {
+		t.Errorf("expected batch size 25, got %d", opts.BatchSize)
+	}
+	if opts.CurrentModel != "openai-embed-3-small" {
+		t.Errorf("expected provider name as model, got %q", opts.CurrentModel)
 	}
 }
 

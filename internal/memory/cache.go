@@ -75,13 +75,108 @@ func (c *CachedStore) Save(ctx context.Context, mem *Memory) error {
 	return nil
 }
 
+// SaveWithResult delegates to the inner store and invalidates the
+// cache. The inner store's dedup result is passed through unchanged
+// so the agent sees auto_superseded / potential_duplicates info.
+func (c *CachedStore) SaveWithResult(ctx context.Context, mem *Memory) (*SaveResult, error) {
+	res, err := c.inner.SaveWithResult(ctx, mem)
+	if err != nil {
+		return nil, err
+	}
+	c.bumpVersion(ctx, mem.Scope)
+	return res, nil
+}
+
+// FindSimilarObservations passes through to the inner store. No
+// caching: dedup-on-write needs the live state to decide between
+// auto-supersede and surface-as-duplicate.
+func (c *CachedStore) FindSimilarObservations(ctx context.Context, scope map[string]string,
+	queryEmbedding []float32, k int, minSimilarity float64,
+) ([]SimilarObservation, error) {
+	return c.inner.FindSimilarObservations(ctx, scope, queryEmbedding, k, minSimilarity)
+}
+
+// GetMemory passes through to the inner store. Not cached: the
+// memory__open path is infrequent and needs live data so post-
+// supersede reads reflect the new observation.
+func (c *CachedStore) GetMemory(ctx context.Context, scope map[string]string, entityID string) (*Memory, error) {
+	return c.inner.GetMemory(ctx, scope, entityID)
+}
+
+// LinkEntities passes through to the inner store and invalidates
+// the workspace-scoped cache so subsequent recall sees the new
+// relation when it walks `related[]`.
+func (c *CachedStore) LinkEntities(ctx context.Context, scope map[string]string,
+	sourceEntityID, targetEntityID, relationType string, weight float64,
+) (string, error) {
+	id, err := c.inner.LinkEntities(ctx, scope, sourceEntityID, targetEntityID, relationType, weight)
+	if err != nil {
+		return "", err
+	}
+	c.bumpVersion(ctx, scope)
+	return id, nil
+}
+
+// AppendObservationToEntity passes through to the inner store and
+// invalidates the workspace-scoped cache so post-supersede recall
+// reflects the new active observation.
+func (c *CachedStore) AppendObservationToEntity(ctx context.Context, entityID string, mem *Memory) ([]string, error) {
+	ids, err := c.inner.AppendObservationToEntity(ctx, entityID, mem)
+	if err != nil {
+		return nil, err
+	}
+	c.bumpVersion(ctx, mem.Scope)
+	return ids, nil
+}
+
+// SupersedeMany passes through to the inner store and invalidates
+// the workspace-scoped cache so post-supersede recall reflects the
+// new active observation across every source entity.
+func (c *CachedStore) SupersedeMany(ctx context.Context, sourceMemoryIDs []string, mem *Memory) (string, []string, error) {
+	id, ids, err := c.inner.SupersedeMany(ctx, sourceMemoryIDs, mem)
+	if err != nil {
+		return "", nil, err
+	}
+	c.bumpVersion(ctx, mem.Scope)
+	return id, ids, nil
+}
+
+// FindRelatedEntities passes through to the inner store. Not cached:
+// the recall path already gates on a versioned key for the search
+// itself, and per-entity related[] is cheap to recompute alongside
+// the rest of the recall enrichment.
+func (c *CachedStore) FindRelatedEntities(ctx context.Context, scope map[string]string,
+	entityIDs []string, maxPerEntity int,
+) ([]EntityRelation, error) {
+	return c.inner.FindRelatedEntities(ctx, scope, entityIDs, maxPerEntity)
+}
+
+// RetrieveHybrid passes through to the inner store. Not cached:
+// hybrid retrieval keys would have to encode the query embedding
+// (variable-dimensional) for correctness, which dilutes the cache
+// benefit. Recall is already a read-mostly path; pgvector + FTS in
+// one query is fast enough that we'd rather pay the round trip than
+// risk a stale-but-fast hit.
+func (c *CachedStore) RetrieveHybrid(ctx context.Context, scope map[string]string,
+	query string, queryEmbedding []float32, opts RetrieveOptions,
+) ([]*Memory, error) {
+	return c.inner.RetrieveHybrid(ctx, scope, query, queryEmbedding, opts)
+}
+
 // Retrieve returns cached results when available, falling back to the inner store on miss or Redis error.
 func (c *CachedStore) Retrieve(ctx context.Context, scope map[string]string, query string, opts RetrieveOptions) ([]*Memory, error) {
 	key := c.retrieveKey(ctx, scope, query, opts)
-	if key != "" {
-		if mems, ok := c.cacheGet(ctx, key); ok {
-			return mems, nil
-		}
+	if key == "" {
+		// retrieveKey returned "" because getVersion failed — already
+		// counted as redis_dependency_errors_total{op=get_version}.
+		// Surface it as a cache lookup error too so the lookup-side
+		// metric reflects every attempt.
+		recordCacheLookup("retrieve", "error")
+	} else if mems, ok := c.cacheGet(ctx, key); ok {
+		recordCacheLookup("retrieve", "hit")
+		return mems, nil
+	} else {
+		recordCacheLookup("retrieve", "miss")
 	}
 
 	mems, err := c.inner.Retrieve(ctx, scope, query, opts)
@@ -168,6 +263,13 @@ func (c *CachedStore) FindCompactionCandidates(ctx context.Context, opts FindCom
 	return c.inner.FindCompactionCandidates(ctx, opts)
 }
 
+// FindConflictedEntities passes through to the inner store. Not
+// cached: the conflicts queue is an admin / dashboard view that
+// must reflect live state for triage to be useful.
+func (c *CachedStore) FindConflictedEntities(ctx context.Context, workspaceID string, limit int) ([]ConflictedEntity, error) {
+	return c.inner.FindConflictedEntities(ctx, workspaceID, limit)
+}
+
 // SaveCompactionSummary delegates to the inner store then invalidates the
 // (workspace, user, agent) cache so post-compaction retrieval reflects
 // the new supersede chain without serving stale rows.
@@ -190,10 +292,17 @@ func (c *CachedStore) SaveCompactionSummary(ctx context.Context, summary Compact
 // List returns cached results when available, falling back to the inner store on miss or Redis error.
 func (c *CachedStore) List(ctx context.Context, scope map[string]string, opts ListOptions) ([]*Memory, error) {
 	key := c.listKey(ctx, scope, opts)
-	if key != "" {
-		if mems, ok := c.cacheGet(ctx, key); ok {
-			return mems, nil
-		}
+	if key == "" {
+		// listKey returned "" because getVersion failed — already
+		// counted as redis_dependency_errors_total{op=get_version}.
+		// Surface it as a cache lookup error too so the lookup-side
+		// metric reflects every attempt.
+		recordCacheLookup("list", "error")
+	} else if mems, ok := c.cacheGet(ctx, key); ok {
+		recordCacheLookup("list", "hit")
+		return mems, nil
+	} else {
+		recordCacheLookup("list", "miss")
 	}
 
 	mems, err := c.inner.List(ctx, scope, opts)
@@ -254,12 +363,17 @@ func versionKey(sh string) string {
 func (c *CachedStore) getVersion(ctx context.Context, sh string) string {
 	v, err := c.redis.Get(ctx, versionKey(sh)).Result()
 	if err == nil {
+		recordRedisOK()
 		return v
 	}
 	if errors.Is(err, redis.Nil) {
+		// Empty version key is the cold-start case, not an error —
+		// counts as a successful Redis interaction.
+		recordRedisOK()
 		return "0"
 	}
 	c.log.V(1).Info("cache version get failed", "scopeHash", sh, "error", err)
+	recordRedisError("get_version")
 	return ""
 }
 
@@ -268,7 +382,11 @@ func (c *CachedStore) bumpVersion(ctx context.Context, scope map[string]string) 
 	sh := scopeHash(scope)
 	if err := c.redis.Incr(ctx, versionKey(sh)).Err(); err != nil {
 		c.log.V(1).Info("cache version bump failed", "scopeHash", sh, "error", err)
+		recordRedisError("bump_version")
+		return
 	}
+	recordRedisOK()
+	recordCacheVersionBump()
 }
 
 // retrieveKey builds a versioned cache key for a Retrieve call.
@@ -299,11 +417,17 @@ func (c *CachedStore) listKey(ctx context.Context, scope map[string]string, opts
 func (c *CachedStore) cacheGet(ctx context.Context, key string) ([]*Memory, bool) {
 	data, err := c.redis.Get(ctx, key).Bytes()
 	if err != nil {
-		if !errors.Is(err, redis.Nil) {
+		if errors.Is(err, redis.Nil) {
+			// Cache miss is a normal Redis interaction, not a dependency
+			// error — record it as OK so redis_up doesn't flap on cold keys.
+			recordRedisOK()
+		} else {
 			c.log.V(1).Info("cache get failed", "key", key, "error", err)
+			recordRedisError("get_cache")
 		}
 		return nil, false
 	}
+	recordRedisOK()
 
 	var mems []*Memory
 	if err := json.Unmarshal(data, &mems); err != nil {
@@ -322,7 +446,10 @@ func (c *CachedStore) cacheSet(ctx context.Context, key string, mems []*Memory) 
 	}
 	if err := c.redis.Set(ctx, key, data, c.ttl).Err(); err != nil {
 		c.log.V(1).Info("cache set failed", "key", key, "error", err)
+		recordRedisError("set_cache")
+		return
 	}
+	recordRedisOK()
 }
 
 // --- key helpers ---------------------------------------------------------------

@@ -18,16 +18,16 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .spec.default.tiers.institutional.mode
+    - jsonPath: .spec.tiers.institutional.mode
       name: Inst Mode
       type: string
-    - jsonPath: .spec.default.tiers.agent.mode
+    - jsonPath: .spec.tiers.agent.mode
       name: Agent Mode
       type: string
-    - jsonPath: .spec.default.tiers.user.mode
+    - jsonPath: .spec.tiers.user.mode
       name: User Mode
       type: string
-    - jsonPath: .spec.default.schedule
+    - jsonPath: .spec.schedule
       name: Schedule
       type: string
     - jsonPath: .metadata.creationTimestamp
@@ -106,6 +106,100 @@ spec:
                       SoftDelete action. Ignored for HardDelete and Stop.
                     format: int32
                     maximum: 365
+                    minimum: 0
+                    type: integer
+                type: object
+              dedup:
+                description: |-
+                  dedup tunes the write path's structured-key + embedding-
+                  similarity dedup mechanisms. Optional — defaults apply when
+                  omitted.
+                properties:
+                  embeddingSimilarity:
+                    description: |-
+                      embeddingSimilarity tunes the cosine-based dedup. Auto-disabled
+                      when no embedding provider is configured.
+                    properties:
+                      autoSupersedeAbove:
+                        description: |-
+                          autoSupersedeAbove: cosine ≥ this auto-supersedes the prior
+                          match. Defaults to 0.95 — set lower to be more aggressive.
+                        pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
+                        type: string
+                      candidateLimit:
+                        description: |-
+                          candidateLimit caps the number of candidates returned to the
+                          agent in `potential_duplicates`. 0 / unset uses the API default.
+                        format: int32
+                        maximum: 50
+                        minimum: 0
+                        type: integer
+                      enabled:
+                        default: true
+                        type: boolean
+                      surfaceDuplicatesAbove:
+                        description: |-
+                          surfaceDuplicatesAbove: cosine ≥ this surfaces the match as
+                          `potential_duplicates` for the agent to consider on a later
+                          turn. Must be < autoSupersedeAbove. Defaults to 0.85.
+                        pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
+                        type: string
+                    type: object
+                    x-kubernetes-validations:
+                    - message: surfaceDuplicatesAbove must be strictly less than autoSupersedeAbove
+                      rule: '!has(self.autoSupersedeAbove) || !has(self.surfaceDuplicatesAbove)
+                        || double(self.surfaceDuplicatesAbove) < double(self.autoSupersedeAbove)'
+                  requireAboutForKinds:
+                    description: |-
+                      requireAboutForKinds enumerates kinds (e.g. "fact",
+                      "preference") that must carry an `about={kind, key}` hint on
+                      save. Without it the agent can't engage the structured-key
+                      dedup path and identity-class memories pile up as duplicates.
+                      Empty / unset disables the check.
+                    items:
+                      type: string
+                    type: array
+                type: object
+              recall:
+                description: |-
+                  recall tunes the read path (half-life per tier, large-memory
+                  preview cutoff, per-memory related[] cap). Optional — defaults
+                  baked into the API apply when omitted.
+                properties:
+                  halfLife:
+                    description: |-
+                      halfLife per tier in Go-duration form (e.g. "720h" = 30d).
+                      Older observations decay exponentially: a memory whose age
+                      equals halfLife scores at 0.5× the recency multiplier; at 5×
+                      halfLife it's effectively gone. Defaults baked into the
+                      recall SQL apply when this block is unset.
+                    properties:
+                      agent:
+                        pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                        type: string
+                      institutional:
+                        pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                        type: string
+                      user:
+                        pattern: ^([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?$
+                        type: string
+                    type: object
+                  inlineThresholdBytes:
+                    description: |-
+                      inlineThresholdBytes is the body-size cutoff above which recall
+                      returns title + summary + content_preview rather than the full
+                      body. The agent calls memory__open(id) when it actually needs
+                      the text. 0 / unset uses the API default (2048).
+                    format: int32
+                    maximum: 1048576
+                    minimum: 0
+                    type: integer
+                  maxRelatedPerMemory:
+                    description: |-
+                      maxRelatedPerMemory caps the per-memory `related[]` slice the
+                      recall response carries. 0 / unset uses the store default (3).
+                    format: int32
+                    maximum: 50
                     minimum: 0
                     type: integer
                 type: object
