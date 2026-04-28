@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -44,6 +45,7 @@ import (
 const (
 	ProviderConditionTypeSecretFound          = "SecretFound"
 	ProviderConditionTypeCredentialConfigured = "CredentialConfigured"
+	ProviderConditionTypeCredentialValid      = "CredentialValid"
 	ProviderConditionTypeAuthConfigured       = "AuthConfigured"
 	ProviderConditionTypeEndpointReachable    = "EndpointReachable"
 	// secretKeyAPIKey is the common secret key name for API keys.
@@ -77,6 +79,12 @@ type ProviderReconciler struct {
 	Scheme     *runtime.Scheme
 	Recorder   record.EventRecorder
 	HTTPClient *http.Client // used for provider health checks; defaults to a 5s-timeout client
+	// CredentialValidatorFactory builds a Validator for a given Provider.
+	// Default is validatorForProvider; tests override it to inject a fake.
+	// Returning nil means "validation not supported for this provider type".
+	CredentialValidatorFactory func(*omniav1alpha1.Provider, *http.Client) CredentialValidator
+	// validationCache memoises Validate results across reconciles.
+	validationCache *credentialValidationCache
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=providers,verbs=get;list;watch;create;update;patch;delete
@@ -281,54 +289,32 @@ func (r *ProviderReconciler) validateCredentialSecretRef(ctx context.Context, pr
 		return fmt.Errorf("%s", msg)
 	}
 
-	// Check for expected key if specified, capturing the value so we
-	// can also check for placeholders (issue #1037: dev-sample
-	// secrets like "sk-demo-key-replace-with-real-key" pass the
-	// presence check but break at chat-time with INVALID_API_KEY).
-	var matchedValue []byte
-	if ref.Key != nil {
-		expectedKey := *ref.Key
-		v, exists := secret.Data[expectedKey]
-		if !exists {
-			msg := fmt.Sprintf(errFmtSecretMissingKey, key.Name, expectedKey)
-			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
-				"SecretKeyMissing", msg)
-			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
-				"SecretKeyMissing", msg)
-			provider.Status.Phase = omniav1alpha1.ProviderPhaseError
-			return fmt.Errorf("%s", msg)
-		}
-		matchedValue = v
-	} else {
-		// Check for provider-appropriate key
-		expectedKeys := getExpectedKeysForProvider(provider.Spec.Type)
-		for _, k := range expectedKeys {
-			if v, exists := secret.Data[k]; exists {
-				matchedValue = v
-				break
-			}
-		}
-		if matchedValue == nil {
-			msg := fmt.Sprintf(errFmtSecretMissingAnyKey, key.Name, expectedKeys)
-			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
-				"SecretKeyMissing", msg)
-			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
-				"SecretKeyMissing", msg)
-			provider.Status.Phase = omniav1alpha1.ProviderPhaseError
-			return fmt.Errorf("%s", msg)
-		}
+	// Locate the credential value within the secret. Either the explicit key
+	// (when ref.Key is set) or the first matching provider-default key.
+	credValue, foundKey, err := extractCredentialFromSecret(secret, ref, provider.Spec.Type)
+	if err != nil {
+		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
+			"SecretKeyMissing", err.Error())
+		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
+			"SecretKeyMissing", err.Error())
+		provider.Status.Phase = omniav1alpha1.ProviderPhaseError
+		return err
 	}
 
 	SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
 		"SecretFound", "Referenced secret exists")
 
-	// Placeholder detection: catch dev-sample values that pass the
-	// presence check but would fail at chat-time. Phase stays Ready
-	// — the secret IS configured, just with a value the operator
+	// Placeholder detection (#1037 part 1): catch dev-sample values that
+	// pass the presence check but would fail at chat-time. Phase stays
+	// Ready — the secret IS configured, just with a value the operator
 	// almost certainly forgot to replace. CredentialConfigured flips
 	// False so the dashboard can surface "key looks like a placeholder"
 	// instead of waiting for INVALID_API_KEY at the first message.
-	if IsPlaceholderCredential(string(matchedValue)) {
+	// We short-circuit before runCredentialValidation: a placeholder
+	// can't be valid, and we'd rather not spend a probe round-trip
+	// (and a CredentialRejected condition that masks the real reason)
+	// on a string we already know is a stub.
+	if IsPlaceholderCredential(string(credValue)) {
 		msg := fmt.Sprintf("secret %s contains a placeholder value (matches dev-sample marker like 'replace-with-real-key'); replace with a real key", key.Name)
 		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
 			"PlaceholderCredential", msg)
@@ -341,7 +327,88 @@ func (r *ProviderReconciler) validateCredentialSecretRef(ctx context.Context, pr
 
 	SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionTrue,
 		"SecretFound", "Credential configured via secret reference")
+
+	r.runCredentialValidation(ctx, provider, secret, foundKey, credValue)
 	return nil
+}
+
+// extractCredentialFromSecret returns the credential value bytes from the
+// secret, the key it was found under, or an error suitable for use as a
+// SecretKeyMissing condition message.
+func extractCredentialFromSecret(secret *corev1.Secret, ref *omniav1alpha1.SecretKeyRef, providerType omniav1alpha1.ProviderType) ([]byte, string, error) {
+	if ref.Key != nil {
+		expectedKey := *ref.Key
+		v, exists := secret.Data[expectedKey]
+		if !exists {
+			return nil, "", fmt.Errorf(errFmtSecretMissingKey, ref.Name, expectedKey)
+		}
+		return v, expectedKey, nil
+	}
+	expectedKeys := getExpectedKeysForProvider(providerType)
+	for _, k := range expectedKeys {
+		if v, exists := secret.Data[k]; exists {
+			return v, k, nil
+		}
+	}
+	return nil, "", fmt.Errorf(errFmtSecretMissingAnyKey, ref.Name, expectedKeys)
+}
+
+// runCredentialValidation hits the provider with the supplied credential and
+// records the outcome on CredentialValid. Errors are non-fatal — a network
+// failure or 5xx leaves the condition Unknown so we don't trip False on a
+// transient problem (false positives are worse than no signal).
+func (r *ProviderReconciler) runCredentialValidation(ctx context.Context, provider *omniav1alpha1.Provider, secret *corev1.Secret, secretKey string, credValue []byte) {
+	log := logf.FromContext(ctx)
+	factory := r.CredentialValidatorFactory
+	if factory == nil {
+		factory = validatorForProvider
+	}
+	validator := factory(provider, r.HTTPClient)
+	if validator == nil {
+		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialValid, metav1.ConditionUnknown,
+			"ValidationNotSupported",
+			"No probe defined for this provider type — credential cannot be pre-flight validated")
+		return
+	}
+
+	if r.validationCache == nil {
+		r.validationCache = newCredentialValidationCache()
+	}
+	cacheKey := validationCacheKey(provider.Namespace, provider.Name, secret.Name, secret.ResourceVersion)
+	if cachedErr, hit := r.validationCache.get(cacheKey); hit {
+		applyCredentialValidationResult(provider, cachedErr, "cached")
+		return
+	}
+
+	probeErr := validator.Validate(ctx, string(credValue))
+	r.validationCache.put(cacheKey, probeErr)
+	applyCredentialValidationResult(provider, probeErr, "probe")
+	if probeErr != nil {
+		log.V(1).Info("credential validation outcome",
+			"provider", provider.Name,
+			"namespace", provider.Namespace,
+			"secretKey", secretKey,
+			"err", probeErr.Error())
+	}
+}
+
+// applyCredentialValidationResult sets CredentialValid based on the probe outcome.
+// nil → True, ErrCredentialInvalid → False, anything else → Unknown.
+func applyCredentialValidationResult(provider *omniav1alpha1.Provider, probeErr error, source string) {
+	switch {
+	case probeErr == nil:
+		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialValid, metav1.ConditionTrue,
+			"CredentialAccepted",
+			fmt.Sprintf("Provider accepted the credential (%s)", source))
+	case errors.Is(probeErr, ErrCredentialInvalid):
+		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialValid, metav1.ConditionFalse,
+			"CredentialRejected",
+			fmt.Sprintf("Provider rejected the credential (%s) — rotate or replace the secret", source))
+	default:
+		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialValid, metav1.ConditionUnknown,
+			"CredentialValidationError",
+			fmt.Sprintf("Could not validate credential (%s): %s", source, probeErr.Error()))
+	}
 }
 
 // validateCredentialEnvVar validates an environment variable name.
@@ -359,6 +426,9 @@ func (r *ProviderReconciler) validateCredentialEnvVar(provider *omniav1alpha1.Pr
 		"NoSecretRequired", "Credential uses environment variable, no secret required")
 	SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionTrue,
 		"EnvVarConfigured", fmt.Sprintf("Credential configured via environment variable %q", envVar))
+	SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialValid, metav1.ConditionUnknown,
+		"ValidationNotSupported",
+		"Credential supplied via env var — value is not visible to the operator and cannot be pre-flight validated")
 	return nil
 }
 
@@ -387,6 +457,9 @@ func (r *ProviderReconciler) validateCredentialFilePath(provider *omniav1alpha1.
 		"NoSecretRequired", "Credential uses file path, no secret required")
 	SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionTrue,
 		"FilePathConfigured", fmt.Sprintf("Credential configured via file path %q", path))
+	SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialValid, metav1.ConditionUnknown,
+		"ValidationNotSupported",
+		"Credential supplied via file path — value is not visible to the operator and cannot be pre-flight validated")
 	return nil
 }
 
