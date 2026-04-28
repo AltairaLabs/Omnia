@@ -25,6 +25,21 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// EmbeddingProvider generates dense vector embeddings for text inputs.
+// Implementations must be safe for concurrent use.
+//
+// Lives here because the live consumers — EmbeddingService and the re-embed
+// worker — need it. Used to be co-located with a SemanticStrategy retriever
+// abstraction that was superseded by the multi-tier SQL builder; the
+// retriever path was deleted but the interface stays because it's part of
+// the embedding subsystem's contract.
+type EmbeddingProvider interface {
+	// Embed returns one embedding vector per input text, in the same order.
+	Embed(ctx context.Context, texts []string) ([][]float32, error)
+	// Dimensions returns the vector length produced by this provider.
+	Dimensions() int
+}
+
 // EmbeddingService generates embeddings for memory observations and updates pgvector columns.
 type EmbeddingService struct {
 	store     *PostgresMemoryStore
