@@ -84,6 +84,8 @@ func (w *TombstoneWorker) Run(ctx context.Context) {
 		w.log.Info("tombstone worker disabled", "reason", "interval not set")
 		return
 	}
+	MarkWorkerRunning(WorkerNameTombstoneGC)
+	defer MarkWorkerStopped(WorkerNameTombstoneGC)
 
 	ticker := time.NewTicker(w.opts.Interval)
 	defer ticker.Stop()

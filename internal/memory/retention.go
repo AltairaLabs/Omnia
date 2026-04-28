@@ -73,6 +73,8 @@ func (w *RetentionWorker) Run(ctx context.Context) {
 		w.log.Error(err, "retention worker not started", "reason", "invalid cron", "schedule", schedule)
 		return
 	}
+	MarkWorkerRunning(WorkerNameRetention)
+	defer MarkWorkerStopped(WorkerNameRetention)
 
 	w.log.Info("retention worker started", "schedule", schedule)
 	next := sched.Next(time.Now())
