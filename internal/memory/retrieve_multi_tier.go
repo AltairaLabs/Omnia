@@ -25,11 +25,11 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/altairalabs/omnia/internal/pgutil"
 )
 
 // Tier identifies which scope layer a memory belongs to in a multi-tier
@@ -249,84 +249,62 @@ func classifyTierFromScope(scope map[string]string) Tier {
 // multi-tier retrieval. It returns an error when WorkspaceID is empty; the
 // candidate LIMIT is a constant (multiTierCandidatePool) independent of the
 // caller's Limit.
+//
+// The query shares filter primitives (type/confidence/FTS/purpose) with
+// single-tier Retrieve via internal/memory/store.go's helpers — a feature
+// added to one path lands in both. Tier-specific NULL-anchoring on
+// virtual_user_id / agent_id stays here because that semantics genuinely
+// differs from single-tier (multi-tier wants institutional rows merged
+// in, single-tier wants strict scope match).
 func buildMultiTierQuery(req MultiTierRequest) (string, []any, error) {
 	if req.WorkspaceID == "" {
 		return "", nil, errors.New(errWorkspaceRequired)
 	}
 
-	args := make([]any, 0, 6)
-	args = append(args, req.WorkspaceID)
-	clauses := []string{
-		"e.workspace_id=$" + strconv.Itoa(len(args)),
-		colEntityForgot,
-	}
+	var qb pgutil.QueryBuilder
+	qb.Add("e.workspace_id=$?", req.WorkspaceID)
+	qb.AddRaw(colEntityForgot)
+	addUserTierClause(&qb, req.UserID)
+	addAgentTierClause(&qb, req.AgentID)
+	addTypeFilters(&qb, req.Types)
+	addConfidenceFilter(&qb, req.MinConfidence)
+	addFTSPredicate(&qb, req.Query)
+	addPurposeFilters(&qb, req.Purposes)
 
-	clauses = append(clauses, userTierClause(req.UserID, &args))
-	clauses = append(clauses, agentTierClause(req.AgentID, &args))
+	sql := fmt.Sprintf(
+		"SELECT DISTINCT ON (e.id) %s, %s, %s "+
+			"FROM memory_entities %s%s "+
+			"WHERE %s%s "+
+			"ORDER BY e.id, o.observed_at DESC LIMIT %d",
+		selectEntityCols, selectEntityScopeCols, selectObserveColsMulti,
+		entityTableAlias, observationJoin,
+		colEntityForgot, qb.Where(),
+		multiTierCandidatePool,
+	)
 
-	if len(req.Types) == 1 {
-		args = append(args, req.Types[0])
-		clauses = append(clauses, "e.kind=$"+strconv.Itoa(len(args)))
-	} else if len(req.Types) > 1 {
-		args = append(args, req.Types)
-		clauses = append(clauses, "e.kind = ANY($"+strconv.Itoa(len(args))+")")
-	}
-
-	if req.MinConfidence > 0 {
-		args = append(args, req.MinConfidence)
-		clauses = append(clauses, "o.confidence >= $"+strconv.Itoa(len(args)))
-	}
-
-	if req.Query != "" {
-		// Tokenized FTS match against the stored tsvector (mirrors the
-		// single-tier path in store.go). ILIKE was a literal-substring
-		// filter — "when I was in Morocco" against "User was in Morocco"
-		// returned zero rows. websearch_to_tsquery handles stopwords and
-		// word boundaries the way the agent expects.
-		args = append(args, req.Query)
-		clauses = append(clauses, "o.search_vector @@ websearch_to_tsquery('english', $"+strconv.Itoa(len(args))+")")
-	}
-
-	if len(req.Purposes) == 1 {
-		args = append(args, req.Purposes[0])
-		clauses = append(clauses, "e.purpose=$"+strconv.Itoa(len(args)))
-	} else if len(req.Purposes) > 1 {
-		args = append(args, req.Purposes)
-		clauses = append(clauses, "e.purpose = ANY($"+strconv.Itoa(len(args))+")")
-	}
-
-	sql := fmt.Sprintf(`SELECT DISTINCT ON (e.id) e.id, e.kind, e.metadata, e.created_at, e.expires_at, e.title, e.virtual_user_id, e.agent_id, o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at, o.access_count, o.summary, o.body_size_bytes FROM memory_entities e JOIN memory_observations o ON o.entity_id = e.id AND o.superseded_by IS NULL AND (o.valid_until IS NULL OR o.valid_until > now()) WHERE %s ORDER BY e.id, o.observed_at DESC LIMIT %d`,
-		joinAnd(clauses), multiTierCandidatePool)
-
-	return sql, args, nil
+	return sql, qb.Args(), nil
 }
 
-// userTierClause returns the user-scope predicate for the multi-tier query.
-// When userID is empty the predicate anchors to NULL so institutional-only
-// retrievals do not bleed through other users' memories. The column is
-// unqualified because memory_observations does not share it, avoiding an
-// alias prefix keeps the emitted SQL aligned with the agreed contract.
-func userTierClause(userID string, args *[]any) string {
+// addUserTierClause appends the user-scope predicate. Empty userID
+// anchors strictly to NULL (so institutional-only retrievals don't
+// bleed through other users' memories); a populated userID widens to
+// "NULL OR matches". The columns are unqualified to keep emitted SQL
+// aligned with the existing contract observers expect.
+func addUserTierClause(qb *pgutil.QueryBuilder, userID string) {
 	if userID == "" {
-		return "virtual_user_id IS NULL"
+		qb.AddRaw("virtual_user_id IS NULL")
+		return
 	}
-	*args = append(*args, userID)
-	return "(virtual_user_id IS NULL OR virtual_user_id=$" + strconv.Itoa(len(*args)) + ")"
+	qb.Add("(virtual_user_id IS NULL OR virtual_user_id=$?)", userID)
 }
 
-// agentTierClause returns the agent-scope predicate. Same NULL-anchoring
-// behaviour as userTierClause.
-func agentTierClause(agentID string, args *[]any) string {
+// addAgentTierClause mirrors addUserTierClause for agent scope.
+func addAgentTierClause(qb *pgutil.QueryBuilder, agentID string) {
 	if agentID == "" {
-		return "agent_id IS NULL"
+		qb.AddRaw("agent_id IS NULL")
+		return
 	}
-	*args = append(*args, agentID)
-	return "(agent_id IS NULL OR agent_id=$" + strconv.Itoa(len(*args)) + ")"
-}
-
-// joinAnd joins SQL WHERE fragments with " AND ".
-func joinAnd(parts []string) string {
-	return strings.Join(parts, " AND ")
+	qb.Add("(agent_id IS NULL OR agent_id=$?)", agentID)
 }
 
 // scanMultiTierRows reads multi-tier query rows into MultiTierMemory values.

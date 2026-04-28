@@ -52,6 +52,18 @@ func (qb *QueryBuilder) Add(clause string, arg any) {
 	qb.clauses = append(qb.clauses, strings.ReplaceAll(clause, "$?", "$"+strconv.Itoa(len(qb.args))))
 }
 
+// AddRaw appends a clause that takes no positional argument (e.g. an
+// IS NULL predicate or a constant filter). The clause is added verbatim
+// so callers must already have substituted any placeholders themselves
+// — Add is the right entry point for clauses that need parameter
+// numbering. AddRaw exists because some shared filters (NULL-anchoring
+// for tier-aware queries, e.g. "virtual_user_id IS NULL") have no
+// argument to bind, and forcing callers to fall back to manual SQL
+// concatenation would defeat the point of QueryBuilder.
+func (qb *QueryBuilder) AddRaw(clause string) {
+	qb.clauses = append(qb.clauses, clause)
+}
+
 // Where returns the accumulated clauses joined with " AND " and prefixed
 // with " AND ". If no clauses have been added, it returns an empty string.
 // The caller is expected to include "WHERE 1=1" (or equivalent) before the
