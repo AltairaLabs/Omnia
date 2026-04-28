@@ -55,6 +55,34 @@ func TestQueryBuilder_Where_MultipleClauses(t *testing.T) {
 	}
 }
 
+func TestQueryBuilder_AddRaw_NoArg(t *testing.T) {
+	qb := &QueryBuilder{}
+	qb.AddRaw("forgotten = false")
+	qb.Add("workspace_id=$?", "ws-1")
+
+	want := " AND forgotten = false AND workspace_id=$1"
+	if got := qb.Where(); got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+	if len(qb.Args()) != 1 {
+		t.Fatalf("expected 1 arg (AddRaw must not consume a position), got %d", len(qb.Args()))
+	}
+	if qb.Args()[0] != "ws-1" {
+		t.Errorf("expected first arg to be the Add call's binding, got %v", qb.Args()[0])
+	}
+}
+
+func TestQueryBuilder_AddRaw_VerbatimClause(t *testing.T) {
+	// AddRaw is for fully-formed clauses including any IS NULL / IS NOT NULL
+	// predicates. The clause is appended verbatim — no $? substitution.
+	qb := &QueryBuilder{}
+	qb.AddRaw("(virtual_user_id IS NULL OR agent_id IS NULL)")
+	want := " AND (virtual_user_id IS NULL OR agent_id IS NULL)"
+	if got := qb.Where(); got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
 func TestQueryBuilder_SetArgs(t *testing.T) {
 	qb := &QueryBuilder{}
 	existing := []any{"pre-existing"}

@@ -75,6 +75,17 @@ const (
 	entityTableAlias  = "e"
 	selectEntityCols  = "e.id, e.kind, e.metadata, e.created_at, e.expires_at, e.title"
 	selectObserveCols = "o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at, o.summary, o.body_size_bytes"
+	// Multi-tier SELECT extras — extracted so the column list is named
+	// once. Multi-tier needs the per-row scope columns to classify the
+	// result into a Tier and the access count for the Go-side ranker;
+	// single-tier doesn't surface either, which is why these aren't
+	// folded into selectEntityCols / selectObserveCols.
+	selectEntityScopeCols = "e.virtual_user_id, e.agent_id"
+	// selectObserveColsMulti is selectObserveCols with access_count
+	// inserted before the large-payload columns, matching the order
+	// scanMultiTierRow expects. Kept adjacent to selectObserveCols
+	// so a future change to either list is hard to make in only one.
+	selectObserveColsMulti = "o.content, o.confidence, o.session_id, o.turn_range, o.observed_at, o.accessed_at, o.access_count, o.summary, o.body_size_bytes"
 )
 
 // PostgresMemoryStore implements Store against the memory_entities / memory_observations
@@ -563,21 +574,12 @@ func (s *PostgresMemoryStore) Retrieve(ctx context.Context, scope map[string]str
 // returns the standard recency-ordered query.
 func buildRetrieveQuery(scope map[string]string, query string, opts RetrieveOptions) (string, *pgutil.QueryBuilder) {
 	qb := buildBaseMemoryQuery(scope, opts.Types, "")
+	addConfidenceFilter(qb, opts.MinConfidence)
 
-	if opts.MinConfidence > 0 {
-		qb.Add(confidenceFilter, opts.MinConfidence)
-	}
-
-	if query == "" {
+	queryArgIdx := addFTSPredicate(qb, query)
+	if queryArgIdx == 0 {
 		return formatMemorySQL(qb, opts.Limit, 0), qb
 	}
-
-	// FTS path: filter observations by tsquery match, pick the highest-
-	// ranked observation per entity, then sort entities by that rank.
-	// The query argument is referenced twice (WHERE + ORDER BY rank); we
-	// capture its placeholder index so both spots see the same parameter.
-	queryArgIdx := len(qb.Args()) + 1
-	qb.Add("o.search_vector @@ websearch_to_tsquery('english', $?)", query)
 	return formatMemoryFTSSQL(qb, queryArgIdx, opts.Limit, 0), qb
 }
 
@@ -1691,6 +1693,62 @@ func addTypeFilters(qb *pgutil.QueryBuilder, types []string) {
 	default:
 		qb.Add("e.kind = ANY($?)", types)
 	}
+}
+
+// addPurposeFilters appends a purpose-equals or purpose=ANY filter. Empty
+// list is a no-op so callers can pass req.Purposes without conditional
+// scaffolding. Shared between Retrieve and RetrieveMultiTier so future
+// purpose-related work (e.g. SUPPORT_CONTINUITY scoring) lands in both.
+func addPurposeFilters(qb *pgutil.QueryBuilder, purposes []string) {
+	switch len(purposes) {
+	case 0:
+		return
+	case 1:
+		qb.Add("e.purpose=$?", purposes[0])
+	default:
+		qb.Add("e.purpose = ANY($?)", purposes)
+	}
+}
+
+// addConfidenceFilter appends an "o.confidence >= $?" predicate when min > 0.
+// Both single-tier Retrieve and multi-tier RetrieveMultiTier filter on this
+// — extracting the helper means a future tweak (e.g. switching to a fused
+// confidence × source-type score) can't drift between paths.
+func addConfidenceFilter(qb *pgutil.QueryBuilder, min float64) {
+	if min > 0 {
+		qb.Add(confidenceFilter, min)
+	}
+}
+
+// joinAnd joins SQL WHERE fragments with " AND ". Used by the
+// non-QueryBuilder structured-lookup path; QueryBuilder users don't
+// need it because Where() handles the join.
+func joinAnd(parts []string) string {
+	return strings.Join(parts, " AND ")
+}
+
+// addFTSPredicate appends a websearch_to_tsquery match against the
+// observation's stored search_vector and returns the 1-based positional
+// index of the bound query string. The caller can re-use that index to
+// reference the same parameter in a scoring expression (e.g. ts_rank_cd
+// in the single-tier FTS path) without binding the query twice.
+//
+// This is the single-source-of-truth for "how do we match the user's
+// query against the FTS index". The April ILIKE→FTS migration only
+// touched the single-tier path, leaving the multi-tier path on
+// literal-substring matching for two months until #1038 surfaced it
+// (the agent answered "I don't recall Morocco" two sentences after
+// storing three Morocco memories). Sharing the predicate keeps that
+// kind of drift impossible by construction.
+//
+// Returns 0 when query is empty (no clause appended). Callers needing
+// the index unconditionally should branch on that themselves.
+func addFTSPredicate(qb *pgutil.QueryBuilder, query string) int {
+	if query == "" {
+		return 0
+	}
+	qb.Add("o.search_vector @@ websearch_to_tsquery('english', $?)", query)
+	return len(qb.Args())
 }
 
 // scanMemories collects Memory structs from query rows.

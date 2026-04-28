@@ -112,6 +112,91 @@ func TestAddTypeFilters(t *testing.T) {
 	}
 }
 
+func TestAddPurposeFilters(t *testing.T) {
+	tests := []struct {
+		name     string
+		purposes []string
+		wantArgs int
+	}{
+		{"no purposes", nil, 0},
+		{"empty slice", []string{}, 0},
+		{"single purpose", []string{"support_continuity"}, 1},
+		{"multiple purposes", []string{"support_continuity", "personalisation"}, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var qb pgutil.QueryBuilder
+			addPurposeFilters(&qb, tt.purposes)
+			assert.Len(t, qb.Args(), tt.wantArgs)
+		})
+	}
+}
+
+func TestAddConfidenceFilter(t *testing.T) {
+	t.Run("zero is no-op", func(t *testing.T) {
+		var qb pgutil.QueryBuilder
+		addConfidenceFilter(&qb, 0)
+		assert.Empty(t, qb.Args())
+	})
+	t.Run("negative is no-op", func(t *testing.T) {
+		var qb pgutil.QueryBuilder
+		addConfidenceFilter(&qb, -0.1)
+		assert.Empty(t, qb.Args())
+	})
+	t.Run("positive binds threshold", func(t *testing.T) {
+		var qb pgutil.QueryBuilder
+		addConfidenceFilter(&qb, 0.7)
+		require.Len(t, qb.Args(), 1)
+		assert.InDelta(t, 0.7, qb.Args()[0], 1e-9)
+		assert.Contains(t, qb.Where(), "o.confidence")
+	})
+}
+
+func TestAddFTSPredicate(t *testing.T) {
+	t.Run("empty query is no-op", func(t *testing.T) {
+		var qb pgutil.QueryBuilder
+		idx := addFTSPredicate(&qb, "")
+		assert.Equal(t, 0, idx)
+		assert.Empty(t, qb.Args())
+	})
+	t.Run("non-empty query binds and reports placeholder index", func(t *testing.T) {
+		var qb pgutil.QueryBuilder
+		idx := addFTSPredicate(&qb, "Morocco")
+		assert.Equal(t, 1, idx)
+		require.Len(t, qb.Args(), 1)
+		assert.Equal(t, "Morocco", qb.Args()[0])
+		assert.Contains(t, qb.Where(), "websearch_to_tsquery")
+		assert.NotContains(t, qb.Where(), "ILIKE", "FTS predicate must never be ILIKE — that was the bug #1038-A surfaced")
+	})
+	t.Run("placeholder index respects pre-existing args", func(t *testing.T) {
+		var qb pgutil.QueryBuilder
+		qb.Add("a=$?", 1)
+		qb.Add("b=$?", 2)
+		idx := addFTSPredicate(&qb, "Morocco")
+		assert.Equal(t, 3, idx, "FTS bind index must equal len(args) so callers can re-use it in the scoring expression")
+	})
+}
+
+// TestSharedFTSHelper_BothPathsUse asserts that single-tier and multi-tier
+// build their FTS predicate via the same helper. This is the regression
+// guard for #1038-E: the original ILIKE-vs-FTS drift was possible because
+// each path had its own inline predicate. Now that addFTSPredicate is the
+// single source of truth, this test fails loudly if anyone reverts either
+// path to a bespoke predicate.
+func TestSharedFTSHelper_BothPathsUse(t *testing.T) {
+	scope := map[string]string{ScopeWorkspaceID: "ws-1"}
+	singleSQL, _ := buildRetrieveQuery(scope, "Morocco trip", RetrieveOptions{})
+	multiSQL, _, err := buildMultiTierQuery(MultiTierRequest{WorkspaceID: "ws-1", Query: "Morocco trip"})
+	require.NoError(t, err)
+
+	const ftsClause = "o.search_vector @@ websearch_to_tsquery('english', $"
+	assert.Contains(t, singleSQL, ftsClause, "single-tier must use the FTS predicate")
+	assert.Contains(t, multiSQL, ftsClause, "multi-tier must use the same FTS predicate (#1038-E)")
+	assert.NotContains(t, singleSQL, "ILIKE")
+	assert.NotContains(t, multiSQL, "ILIKE")
+}
+
 // --- validation tests (nil pool is fine since errors happen before DB call) ---
 
 func TestSave_MissingWorkspace(t *testing.T) {
