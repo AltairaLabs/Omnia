@@ -43,6 +43,21 @@ type AgentConfig struct {
 	Namespace     string
 	SessionAPIURL string        // session-api URL for resolving latest session (list endpoint)
 	SessionStore  session.Store // session store for tool-call and provider-call queries
+	// MgmtPlaneTokenSource produces a Bearer token to attach to the
+	// WebSocket Authorization header. The facade's mgmt-plane validator
+	// (added in 30a286bf) requires one — without it every WS upgrade
+	// fails 401 with "auth: no credential present" (issue #1040 part 2).
+	// nil disables the header so installs without a dashboard signing
+	// key still work; the facade's no-credential path then applies
+	// (e.g. an Arena E2E install with anonymous access).
+	MgmtPlaneTokenSource MgmtPlaneTokenSource
+}
+
+// MgmtPlaneTokenSource mints a fresh mgmt-plane JWT for the supplied
+// agent + workspace pair. Implementations are expected to cache when
+// safe — Doctor calls this on every WS dial.
+type MgmtPlaneTokenSource interface {
+	Token(agent, workspace string) (string, error)
 }
 
 // AgentChecker runs WebSocket-based agent checks.
@@ -107,6 +122,18 @@ func (a *AgentChecker) dial(ctx context.Context) (*websocket.Conn, string, error
 	// Without this, the memory-api rejects saves (user_id is required).
 	headers := http.Header{}
 	headers.Set(policy.IstioHeaderUserID, "doctor-smoke-test")
+	// Mgmt-plane JWT (issue #1040 part 2): the facade rejects upgrades
+	// without a Bearer token after the JWKS migration in 30a286bf.
+	// Doctor mints its own using the same signing key the dashboard
+	// uses; nil source means we skip the header for installs without a
+	// signing key (Arena E2E etc. with anonymous access).
+	if a.config.MgmtPlaneTokenSource != nil {
+		token, err := a.config.MgmtPlaneTokenSource.Token(a.config.AgentName, a.config.Namespace)
+		if err != nil {
+			return nil, "", fmt.Errorf("dial: mint mgmt-plane token: %w", err)
+		}
+		headers.Set("Authorization", "Bearer "+token)
+	}
 	dialer := websocket.Dialer{HandshakeTimeout: wsHandshakeTimeout}
 	conn, _, err := dialer.DialContext(ctx, a.facadeURL(), headers)
 	if err != nil {

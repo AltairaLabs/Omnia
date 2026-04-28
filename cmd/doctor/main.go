@@ -64,6 +64,14 @@ func main() {
 	arenaURLFlag := flag.String("arena-url", "", "override arena controller URL")
 	workspaceFlag := flag.String("workspace", "", "workspace name for per-workspace service discovery (optional)")
 	serviceGroupFlag := flag.String("service-group", "default", "service group to resolve within the workspace")
+	mgmtPlaneKeyPath := flag.String(
+		"mgmt-plane-signing-key-path",
+		os.Getenv("OMNIA_MGMT_PLANE_SIGNING_KEY_PATH"),
+		"path to the dashboard signing key (PEM). When set, Doctor mints a "+
+			"Bearer token for WebSocket dials so the facade's mgmt-plane "+
+			"validator admits them (issue #1040 part 2). Defaults to "+
+			"OMNIA_MGMT_PLANE_SIGNING_KEY_PATH env var; empty disables "+
+			"minting (anonymous installs).")
 	flag.Parse()
 
 	log, sync, err := logging.NewLogger()
@@ -107,6 +115,32 @@ func main() {
 		arenaURL = discoverServiceURL(*namespace, serviceArenaController, defaultArenaPort)
 	}
 
+	// Build the mgmt-plane minter once at startup. The signing key is
+	// long-lived (rotation is an explicit operator action, see
+	// charts/omnia/templates/dashboard/signing-keypair.yaml), so a
+	// startup-load matches the dashboard's pattern. A boot-time error
+	// is fatal — silently disabling the minter would mask the
+	// "missing signing key" misconfiguration as "WebSocket checks
+	// fail" (the original #1040 symptom we're trying to surface).
+	var mgmtPlaneMinter *MgmtPlaneTokenMinter
+	if *mgmtPlaneKeyPath != "" {
+		m, mintErr := NewMgmtPlaneTokenMinter(MgmtPlaneTokenMinterOptions{
+			KeyPath: *mgmtPlaneKeyPath,
+		})
+		if mintErr != nil {
+			log.Error(mintErr, "mgmt-plane signing key load failed")
+			os.Exit(1)
+		}
+		mgmtPlaneMinter = m
+		log.Info("mgmt-plane minter enabled", "keyPath", *mgmtPlaneKeyPath)
+	} else {
+		log.V(1).Info("mgmt-plane minter disabled — WebSocket checks will dial without Authorization",
+			"reason", "no signing key configured",
+			"hint", "set --mgmt-plane-signing-key-path or "+
+				"OMNIA_MGMT_PLANE_SIGNING_KEY_PATH for clusters whose "+
+				"facade enforces mgmt-plane JWTs")
+	}
+
 	cfg := runnerConfig{
 		log:               log,
 		namespace:         *namespace,
@@ -121,6 +155,7 @@ func main() {
 		dashboardURL:      dashboardURL,
 		redisAddr:         redisAddr,
 		arenaURL:          arenaURL,
+		mgmtPlaneMinter:   mgmtPlaneMinter,
 	}
 
 	// build is invoked per /api/v1/run request — see issue #1040. A
@@ -193,6 +228,10 @@ type runnerConfig struct {
 	dashboardURL      string
 	redisAddr         string
 	arenaURL          string
+	// mgmtPlaneMinter is shared across runs. nil means "no token" —
+	// the WS dial proceeds without an Authorization header, which is
+	// fine for installs that don't enforce mgmt-plane validation.
+	mgmtPlaneMinter *MgmtPlaneTokenMinter
 }
 
 // buildRunner constructs a fresh doctor.Runner with all checks
@@ -240,12 +279,23 @@ func buildRunner(cfg runnerConfig) (*doctor.Runner, error) {
 		runner.Register(crdChecker.Checks()...)
 	}
 
+	// agentChecker.MgmtPlaneTokenSource accepts the *MgmtPlaneTokenMinter
+	// directly (nil-safe via the interface — a typed nil pointer behaves
+	// the same as nil here because *MgmtPlaneTokenMinter is the only
+	// implementation we ship and its Token method short-circuits on
+	// nil receiver). When unset, the dialer skips the Authorization
+	// header entirely.
+	var tokenSource checks.MgmtPlaneTokenSource
+	if cfg.mgmtPlaneMinter != nil {
+		tokenSource = cfg.mgmtPlaneMinter
+	}
 	agentChecker := checks.NewAgentChecker(checks.AgentConfig{
-		FacadeURL:     agentFacadeURL,
-		AgentName:     cfg.agentName,
-		Namespace:     cfg.agentNamespace,
-		SessionAPIURL: sessionAPIURL,
-		SessionStore:  sessionStore,
+		FacadeURL:            agentFacadeURL,
+		AgentName:            cfg.agentName,
+		Namespace:            cfg.agentNamespace,
+		SessionAPIURL:        sessionAPIURL,
+		SessionStore:         sessionStore,
+		MgmtPlaneTokenSource: tokenSource,
 	})
 	runner.Register(agentChecker.Checks()...)
 
