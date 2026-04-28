@@ -25,7 +25,7 @@ import { ProviderTypeIcon } from "@/components/providers/provider-type-icon";
 import { ProviderDialog } from "@/components/providers/provider-dialog";
 import { useProvider, useUpdateProviderSecretRef, useSecrets, useProviderMetrics } from "@/hooks/resources";
 import { useWorkspace } from "@/contexts/workspace-context";
-import { effectiveSecretRefName } from "@/lib/k8s/providers";
+import { effectiveSecretRefName } from "@/lib/k8s/provider-secret-ref";
 
 interface ProviderDetailPageProps {
   params: Promise<{ name: string }>;

@@ -7,6 +7,11 @@
 
 import * as k8s from "@kubernetes/client-node";
 
+// Re-exported from a Node-free module so client components can read a
+// Provider's effective secret name without dragging the k8s SDK into
+// the browser bundle. See provider-secret-ref.ts for the rationale.
+export { effectiveSecretRefName } from "./provider-secret-ref";
+
 const GROUP = "omnia.altairalabs.ai";
 const VERSION = "v1alpha1";
 const PLURAL = "providers";
@@ -85,21 +90,6 @@ interface ProviderResource {
     phase?: string;
     [key: string]: unknown;
   };
-}
-
-/**
- * Returns the effective secretRef name for a Provider, checking the
- * new `spec.credential.secretRef` first and falling back to legacy
- * `spec.secretRef`. Returns undefined when neither is set.
- *
- * Mirrors the operator's pkg/k8s/EffectiveSecretRef so the dashboard
- * shows the same secret the runtime uses regardless of which shape
- * the Provider author chose.
- */
-export function effectiveSecretRefName(
-  provider: { spec?: { credential?: { secretRef?: { name?: string } }; secretRef?: { name?: string } } } | null | undefined,
-): string | undefined {
-  return provider?.spec?.credential?.secretRef?.name ?? provider?.spec?.secretRef?.name;
 }
 
 /**
