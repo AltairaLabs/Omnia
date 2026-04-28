@@ -127,9 +127,13 @@ describe("providers", () => {
         "new-secret"
       );
 
+      // After #1036: writes go to spec.credential.secretRef and the
+      // legacy spec.secretRef is cleared in the same patch (the CRD
+      // rejects "both set"). This regression-asserts both behaviours.
       expect(mockReplaceNamespacedCustomObject).toHaveBeenCalled();
       const replaceCall = mockReplaceNamespacedCustomObject.mock.calls[0][0];
-      expect(replaceCall.body.spec.secretRef.name).toBe("new-secret");
+      expect(replaceCall.body.spec.credential.secretRef.name).toBe("new-secret");
+      expect(replaceCall.body.spec.secretRef).toBeUndefined();
       expect(result).toEqual(updatedProvider);
     });
 
@@ -149,6 +153,7 @@ describe("providers", () => {
       expect(mockReplaceNamespacedCustomObject).toHaveBeenCalled();
       const replaceCall = mockReplaceNamespacedCustomObject.mock.calls[0][0];
       expect(replaceCall.body.spec.secretRef).toBeUndefined();
+      expect(replaceCall.body.spec.credential).toBeUndefined();
       expect(result).toEqual(updatedProvider);
     });
 
@@ -167,8 +172,69 @@ describe("providers", () => {
 
       expect(mockReplaceNamespacedCustomObject).toHaveBeenCalled();
       const replaceCall = mockReplaceNamespacedCustomObject.mock.calls[0][0];
-      expect(replaceCall.body.spec.secretRef.name).toBe("new-secret");
+      expect(replaceCall.body.spec.credential.secretRef.name).toBe("new-secret");
+      expect(replaceCall.body.spec.secretRef).toBeUndefined();
       expect(result).toEqual(updatedProvider);
+    });
+
+    it("should migrate legacy spec.secretRef to spec.credential.secretRef on next write", async () => {
+      // A Provider that started life on the legacy field gets migrated
+      // automatically when the dashboard updates its secretRef. Without
+      // this the dashboard would write spec.credential while leaving
+      // spec.secretRef in place, and the CRD's "exactly one" validation
+      // would reject the patch.
+      const existingProvider = createMockProvider("default", "legacy", "old-secret");
+      mockGetNamespacedCustomObject.mockResolvedValue(existingProvider);
+      mockReplaceNamespacedCustomObject.mockResolvedValue(existingProvider);
+
+      await providersModule.updateProviderSecretRef("default", "legacy", "new-secret");
+
+      const replaceCall = mockReplaceNamespacedCustomObject.mock.calls[0][0];
+      expect(replaceCall.body.spec.credential.secretRef.name).toBe("new-secret");
+      expect(replaceCall.body.spec.secretRef).toBeUndefined();
+    });
+  });
+
+  describe("effectiveSecretRefName", () => {
+    it("returns the new spec.credential.secretRef name", () => {
+      expect(
+        providersModule.effectiveSecretRefName({
+          spec: { credential: { secretRef: { name: "new-name" } } },
+        }),
+      ).toBe("new-name");
+    });
+
+    it("falls back to legacy spec.secretRef.name", () => {
+      expect(
+        providersModule.effectiveSecretRefName({
+          spec: { secretRef: { name: "legacy-name" } },
+        }),
+      ).toBe("legacy-name");
+    });
+
+    it("prefers credential.secretRef when both are set", () => {
+      // Reflects operator's pkg/k8s/EffectiveSecretRef precedence —
+      // dashboard must agree or it'll show one secret while the
+      // runtime uses another. The CRD admission controller rejects
+      // both-set, so this case shouldn't reach prod, but the helper
+      // is the right place to define the resolution rule anyway.
+      expect(
+        providersModule.effectiveSecretRefName({
+          spec: {
+            credential: { secretRef: { name: "new" } },
+            secretRef: { name: "old" },
+          },
+        }),
+      ).toBe("new");
+    });
+
+    it("returns undefined when neither is set", () => {
+      expect(providersModule.effectiveSecretRefName({ spec: {} })).toBeUndefined();
+    });
+
+    it("handles null/undefined provider", () => {
+      expect(providersModule.effectiveSecretRefName(null)).toBeUndefined();
+      expect(providersModule.effectiveSecretRefName(undefined)).toBeUndefined();
     });
 
     it("should throw error if provider not found", async () => {

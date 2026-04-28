@@ -41,6 +41,19 @@ function getClient(): k8s.CustomObjectsApi {
 
 /**
  * Provider resource from K8s API.
+ *
+ * The Provider CRD has TWO ways to express its credential reference:
+ *
+ *   spec.secretRef            — legacy (Phase 1, marked Deprecated in v1alpha1)
+ *   spec.credential.secretRef — current shape (#1036)
+ *
+ * Operator's k8s/EffectiveSecretRef accepts either; readers should
+ * prefer `effectiveSecretRefName(provider)` over poking at either
+ * field directly so a Provider written in either shape works.
+ *
+ * Writers in this package always set the new shape and remove the
+ * old one in the same patch so a single Provider never carries both
+ * — the CRD validation rejects "both set" at admission.
  */
 interface ProviderResource {
   apiVersion: string;
@@ -58,12 +71,35 @@ interface ProviderResource {
       name: string;
       key?: string;
     };
+    credential?: {
+      secretRef?: {
+        name: string;
+        key?: string;
+      };
+      envVar?: string;
+      filePath?: string;
+    };
     [key: string]: unknown;
   };
   status?: {
     phase?: string;
     [key: string]: unknown;
   };
+}
+
+/**
+ * Returns the effective secretRef name for a Provider, checking the
+ * new `spec.credential.secretRef` first and falling back to legacy
+ * `spec.secretRef`. Returns undefined when neither is set.
+ *
+ * Mirrors the operator's pkg/k8s/EffectiveSecretRef so the dashboard
+ * shows the same secret the runtime uses regardless of which shape
+ * the Provider author chose.
+ */
+export function effectiveSecretRefName(
+  provider: { spec?: { credential?: { secretRef?: { name?: string } }; secretRef?: { name?: string } } } | null | undefined,
+): string | undefined {
+  return provider?.spec?.credential?.secretRef?.name ?? provider?.spec?.secretRef?.name;
 }
 
 /**
@@ -109,13 +145,27 @@ export async function updateProviderSecretRef(
     throw new Error(`Provider ${namespace}/${name} not found`);
   }
 
-  // Update the secretRef
+  // Always write the new shape (spec.credential.secretRef). The CRD
+  // validation rejects "both set", so we also clear the legacy field
+  // in the same patch — without this, a Provider that started life
+  // with spec.secretRef would fail to update.
+  delete existing.spec.secretRef;
   if (secretName === null) {
-    // Remove secretRef
-    delete existing.spec.secretRef;
+    if (existing.spec.credential) {
+      delete existing.spec.credential.secretRef;
+      // Drop the credential block entirely if it's now empty so the
+      // Provider doesn't carry an inert {} that confuses readers.
+      if (
+        Object.keys(existing.spec.credential).length === 0
+      ) {
+        delete existing.spec.credential;
+      }
+    }
   } else {
-    // Set secretRef
-    existing.spec.secretRef = { name: secretName };
+    if (!existing.spec.credential) {
+      existing.spec.credential = {};
+    }
+    existing.spec.credential.secretRef = { name: secretName };
   }
 
   // Use replaceNamespacedCustomObject to update
