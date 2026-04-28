@@ -883,6 +883,85 @@ var _ = Describe("Provider Controller", func() {
 			Expect(credCondition.Reason).To(Equal("SecretKeyMissing"))
 		})
 
+		It("should detect placeholder secret value and flip CredentialConfigured False (#1037)", func() {
+			// Issue #1037: a Secret containing a dev-sample placeholder
+			// (the "replace-with-real-key" suffix) used to pass the
+			// presence check and let CredentialConfigured go True. The
+			// agent then failed at chat-time with INVALID_API_KEY, often
+			// disguised as a 429. The controller now flags the
+			// placeholder explicitly so operators see the problem at
+			// reconcile time. SecretFound stays True (the secret IS
+			// present) — this regression test asserts both halves of
+			// that contract.
+			placeholderSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "placeholder-secret",
+					Namespace: providerNamespace,
+				},
+				Data: map[string][]byte{
+					"ANTHROPIC_API_KEY": []byte("sk-ant-demo-key-replace-with-real-key"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, placeholderSecret)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, placeholderSecret) }()
+
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cred-placeholder",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: "placeholder-secret",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      provider.Name,
+					Namespace: providerNamespace,
+				},
+			})
+			// Reconciliation should NOT error — the secret IS configured,
+			// just with a placeholder. Operators see the condition + event
+			// and fix it; we don't want to spam the requeue queue.
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated omniav1alpha1.Provider
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: providerNamespace}, &updated)).To(Succeed())
+
+			var secretFound, credConfigured *metav1.Condition
+			for i := range updated.Status.Conditions {
+				switch updated.Status.Conditions[i].Type {
+				case ProviderConditionTypeSecretFound:
+					secretFound = &updated.Status.Conditions[i]
+				case ProviderConditionTypeCredentialConfigured:
+					credConfigured = &updated.Status.Conditions[i]
+				}
+			}
+			Expect(secretFound).NotTo(BeNil(), "SecretFound condition missing")
+			Expect(secretFound.Status).To(Equal(metav1.ConditionTrue),
+				"SecretFound should be True — the secret is present, just placeholder-valued")
+
+			Expect(credConfigured).NotTo(BeNil(), "CredentialConfigured condition missing")
+			Expect(credConfigured.Status).To(Equal(metav1.ConditionFalse),
+				"CredentialConfigured should be False — the value matches a known placeholder")
+			Expect(credConfigured.Reason).To(Equal("PlaceholderCredential"))
+			Expect(credConfigured.Message).To(ContainSubstring("placeholder"))
+		})
+
 		It("should succeed with credential.envVar set to valid name", func() {
 			provider = &omniav1alpha1.Provider{
 				ObjectMeta: metav1.ObjectMeta{

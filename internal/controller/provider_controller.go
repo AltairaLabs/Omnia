@@ -281,10 +281,15 @@ func (r *ProviderReconciler) validateCredentialSecretRef(ctx context.Context, pr
 		return fmt.Errorf("%s", msg)
 	}
 
-	// Check for expected key if specified
+	// Check for expected key if specified, capturing the value so we
+	// can also check for placeholders (issue #1037: dev-sample
+	// secrets like "sk-demo-key-replace-with-real-key" pass the
+	// presence check but break at chat-time with INVALID_API_KEY).
+	var matchedValue []byte
 	if ref.Key != nil {
 		expectedKey := *ref.Key
-		if _, exists := secret.Data[expectedKey]; !exists {
+		v, exists := secret.Data[expectedKey]
+		if !exists {
 			msg := fmt.Sprintf(errFmtSecretMissingKey, key.Name, expectedKey)
 			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
 				"SecretKeyMissing", msg)
@@ -293,17 +298,17 @@ func (r *ProviderReconciler) validateCredentialSecretRef(ctx context.Context, pr
 			provider.Status.Phase = omniav1alpha1.ProviderPhaseError
 			return fmt.Errorf("%s", msg)
 		}
+		matchedValue = v
 	} else {
 		// Check for provider-appropriate key
 		expectedKeys := getExpectedKeysForProvider(provider.Spec.Type)
-		found := false
 		for _, k := range expectedKeys {
-			if _, exists := secret.Data[k]; exists {
-				found = true
+			if v, exists := secret.Data[k]; exists {
+				matchedValue = v
 				break
 			}
 		}
-		if !found {
+		if matchedValue == nil {
 			msg := fmt.Sprintf(errFmtSecretMissingAnyKey, key.Name, expectedKeys)
 			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
 				"SecretKeyMissing", msg)
@@ -316,6 +321,24 @@ func (r *ProviderReconciler) validateCredentialSecretRef(ctx context.Context, pr
 
 	SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
 		"SecretFound", "Referenced secret exists")
+
+	// Placeholder detection: catch dev-sample values that pass the
+	// presence check but would fail at chat-time. Phase stays Ready
+	// — the secret IS configured, just with a value the operator
+	// almost certainly forgot to replace. CredentialConfigured flips
+	// False so the dashboard can surface "key looks like a placeholder"
+	// instead of waiting for INVALID_API_KEY at the first message.
+	if IsPlaceholderCredential(string(matchedValue)) {
+		msg := fmt.Sprintf("secret %s contains a placeholder value (matches dev-sample marker like 'replace-with-real-key'); replace with a real key", key.Name)
+		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
+			"PlaceholderCredential", msg)
+		r.emitWarningEvent(provider, EventReasonCredentialInvalid, msg)
+		// Don't return an error — the Provider is still considered
+		// usable for reconciliation purposes (referenced secret
+		// exists). Operators see the condition + event and fix it.
+		return nil
+	}
+
 	SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionTrue,
 		"SecretFound", "Credential configured via secret reference")
 	return nil
