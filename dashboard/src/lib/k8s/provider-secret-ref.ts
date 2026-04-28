@@ -1,5 +1,5 @@
 /**
- * Pure type-only helper for resolving a Provider's effective secretRef.
+ * Pure type-only helper for resolving a Provider's secretRef name.
  *
  * Lives in a separate file from `providers.ts` because that module
  * imports `@kubernetes/client-node`, which depends on Node-only modules
@@ -13,23 +13,16 @@
 interface ProviderLike {
   spec?: {
     credential?: { secretRef?: { name?: string } };
-    secretRef?: { name?: string };
   };
 }
 
 /**
- * Returns the effective secretRef name for a Provider, checking the new
- * `spec.credential.secretRef` first and falling back to legacy
- * `spec.secretRef`. Returns undefined when neither is set.
- *
- * Mirrors the operator's pkg/k8s/EffectiveSecretRef so the dashboard
- * shows the same secret the runtime uses regardless of which shape the
- * Provider author chose.
+ * Returns the secretRef name from a Provider's `spec.credential.secretRef`,
+ * or undefined when the Provider doesn't carry one (envVar/filePath
+ * credentials, or providers that don't need credentials).
  */
 export function effectiveSecretRefName(
   provider: ProviderLike | null | undefined,
 ): string | undefined {
-  return (
-    provider?.spec?.credential?.secretRef?.name ?? provider?.spec?.secretRef?.name
-  );
+  return provider?.spec?.credential?.secretRef?.name;
 }

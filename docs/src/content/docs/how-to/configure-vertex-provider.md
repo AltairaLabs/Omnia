@@ -208,4 +208,3 @@ Look at the `Conditions` section for `AuthConfigured`, `CredentialConfigured`, a
 - [Provider CRD Reference](/reference/provider/)
 - [Configure AWS Bedrock Provider](/how-to/configure-bedrock-provider/)
 - [Configure Azure AI Provider](/how-to/configure-azure-ai-provider/)
-- [Migrate Provider Credentials](/how-to/migrate-provider-credentials/)

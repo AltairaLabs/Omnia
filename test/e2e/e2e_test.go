@@ -734,8 +734,9 @@ metadata:
   namespace: test-agents
 spec:
   type: mock
-  secretRef:
-    name: test-provider
+  credential:
+    secretRef:
+      name: test-provider
 `
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(providerManifest)

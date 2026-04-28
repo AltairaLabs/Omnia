@@ -42,7 +42,7 @@ function createMockProvider(name: string, namespace: string): Provider {
     spec: {
       type: "claude",
       model: "claude-sonnet-4-20250514",
-      secretRef: { name: "test-secret" },
+      credential: { secretRef: { name: "test-secret" } },
     },
     status: { phase: "Ready" },
   };

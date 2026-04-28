@@ -26,8 +26,9 @@ spec:
   type: ollama
   model: {{ .Values.ollama.model }}
   baseURL: http://ollama.{{ .Values.namespace }}:11434
-  secretRef:
-    name: ollama-credentials
+  credential:
+    secretRef:
+      name: ollama-credentials
   defaults:
     temperature: "0.7"
     # Context window budget - should match or be less than numCtx
@@ -216,8 +217,9 @@ spec:
   type: gemini
   model: {{ .Values.audioDemo.gemini.model }}
   baseURL: {{ .Values.audioDemo.gemini.baseURL }}
-  secretRef:
-    name: {{ .Values.audioDemo.gemini.secretName }}
+  credential:
+    secretRef:
+      name: {{ .Values.audioDemo.gemini.secretName }}
   defaults:
     temperature: {{ .Values.audioDemo.gemini.temperature | quote }}
   pricing:
@@ -411,8 +413,9 @@ spec:
   type: ollama
   model: llama3.2:3b
   baseURL: http://ollama.{{ .Values.namespace }}:11434
-  secretRef:
-    name: ollama-credentials
+  credential:
+    secretRef:
+      name: ollama-credentials
   defaults:
     temperature: "0.7"
     contextWindow: {{ .Values.ollama.contextWindow }}

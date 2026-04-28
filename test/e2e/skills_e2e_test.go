@@ -577,8 +577,9 @@ metadata:
   namespace: %s
 spec:
   type: mock
-  secretRef:
-    name: %s
+  credential:
+    secretRef:
+      name: %s
 `, provName, agentsNamespace, provSecret)
 		cmd = exec.Command("kubectl", "apply", "-f", "-")
 		cmd.Stdin = strings.NewReader(provYAML)

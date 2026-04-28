@@ -69,13 +69,14 @@ func GetToolRegistry(
 	return tr, nil
 }
 
-// GetProviderSecret fetches the Secret referenced by a Provider's SecretRef.
+// GetProviderSecret fetches the Secret referenced by a Provider's
+// credential.secretRef.
 func GetProviderSecret(ctx context.Context, c client.Client, provider *omniav1alpha1.Provider) (*corev1.Secret, error) {
-	if provider.Spec.SecretRef == nil {
-		return nil, fmt.Errorf("provider %s/%s has no secretRef", provider.Namespace, provider.Name)
+	ref := EffectiveSecretRef(provider)
+	if ref == nil {
+		return nil, fmt.Errorf("provider %s/%s has no credential.secretRef", provider.Namespace, provider.Name)
 	}
-
-	return GetSecret(ctx, c, provider.Spec.SecretRef.Name, provider.Namespace)
+	return GetSecret(ctx, c, ref.Name, provider.Namespace)
 }
 
 // GetSecret fetches a Secret by name and namespace.
@@ -88,13 +89,14 @@ func GetSecret(ctx context.Context, c client.Client, name, namespace string) (*c
 	return secret, nil
 }
 
-// EffectiveSecretRef returns the effective SecretKeyRef for a provider,
-// preferring credential.secretRef over the legacy secretRef field.
+// EffectiveSecretRef returns the credential.secretRef for a provider,
+// or nil when the provider doesn't carry one (envVar / filePath
+// credentials, or providers that don't need credentials).
 func EffectiveSecretRef(provider *omniav1alpha1.Provider) *omniav1alpha1.SecretKeyRef {
 	if provider.Spec.Credential != nil && provider.Spec.Credential.SecretRef != nil {
 		return provider.Spec.Credential.SecretRef
 	}
-	return provider.Spec.SecretRef
+	return nil
 }
 
 // DetermineSecretKey returns the key within the Secret to read the API key from.

@@ -47,18 +47,9 @@ function getClient(): k8s.CustomObjectsApi {
 /**
  * Provider resource from K8s API.
  *
- * The Provider CRD has TWO ways to express its credential reference:
- *
- *   spec.secretRef            — legacy (Phase 1, marked Deprecated in v1alpha1)
- *   spec.credential.secretRef — current shape (#1036)
- *
- * Operator's k8s/EffectiveSecretRef accepts either; readers should
- * prefer `effectiveSecretRefName(provider)` over poking at either
- * field directly so a Provider written in either shape works.
- *
- * Writers in this package always set the new shape and remove the
- * old one in the same patch so a single Provider never carries both
- * — the CRD validation rejects "both set" at admission.
+ * Credentials are expressed via `spec.credential` — either a `secretRef`,
+ * an `envVar`, or a `filePath`. The legacy top-level `spec.secretRef`
+ * was removed in #1036 (pre-release breaking change).
  */
 interface ProviderResource {
   apiVersion: string;
@@ -72,10 +63,6 @@ interface ProviderResource {
   spec: {
     type: string;
     model?: string;
-    secretRef?: {
-      name: string;
-      key?: string;
-    };
     credential?: {
       secretRef?: {
         name: string;
@@ -135,11 +122,8 @@ export async function updateProviderSecretRef(
     throw new Error(`Provider ${namespace}/${name} not found`);
   }
 
-  // Always write the new shape (spec.credential.secretRef). The CRD
-  // validation rejects "both set", so we also clear the legacy field
-  // in the same patch — without this, a Provider that started life
-  // with spec.secretRef would fail to update.
-  delete existing.spec.secretRef;
+  // Writes always go to spec.credential.secretRef. The legacy
+  // top-level secretRef field was removed in #1036.
   if (secretName === null) {
     if (existing.spec.credential) {
       delete existing.spec.credential.secretRef;

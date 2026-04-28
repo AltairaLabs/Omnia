@@ -78,8 +78,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.ProviderSpec{
 					Type: omniav1alpha1.ProviderTypeClaude,
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: "test-secret",
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: "test-secret",
+						},
 					},
 				},
 			}
@@ -2522,8 +2524,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeClaude,
 					Model: "claude-sonnet-4-20250514",
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: "provider-secret",
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: "provider-secret",
+						},
 					},
 				},
 			}
@@ -2581,8 +2585,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeOpenAI,
 					Model: "gpt-4o",
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: "provider-secret",
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: "provider-secret",
+						},
 					},
 				},
 			}
@@ -2650,8 +2656,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeClaude,
 					Model: "claude-sonnet-4-20250514",
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: "provider-secret",
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: "provider-secret",
+						},
 					},
 				},
 			}
@@ -2722,8 +2730,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeClaude,
 					Model: "claude-sonnet-4-20250514",
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: "provider-secret-empty",
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: "provider-secret-empty",
+						},
 					},
 				},
 			}
@@ -3814,8 +3824,10 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					Spec: omniav1alpha1.ProviderSpec{
 						Type:  omniav1alpha1.ProviderTypeClaude,
 						Model: "claude-sonnet-4",
-						SecretRef: &omniav1alpha1.SecretKeyRef{
-							Name: "test-secret",
+						Credential: &omniav1alpha1.CredentialConfig{
+							SecretRef: &omniav1alpha1.SecretKeyRef{
+								Name: "test-secret",
+							},
 						},
 					},
 				}
@@ -3895,8 +3907,10 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					Spec: omniav1alpha1.ProviderSpec{
 						Type:  omniav1alpha1.ProviderTypeClaude,
 						Model: "claude-sonnet-4",
-						SecretRef: &omniav1alpha1.SecretKeyRef{
-							Name: "test-secret",
+						Credential: &omniav1alpha1.CredentialConfig{
+							SecretRef: &omniav1alpha1.SecretKeyRef{
+								Name: "test-secret",
+							},
 						},
 					},
 				}

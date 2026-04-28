@@ -162,7 +162,8 @@ func (r *AgentRuntimeReconciler) findAgentRuntimesForSecret(ctx context.Context,
 	// Build set of provider names that use this secret
 	providersUsingSecret := make(map[string]bool)
 	for _, p := range providers.Items {
-		if p.Spec.SecretRef != nil && p.Spec.SecretRef.Name == secret.Name {
+		if p.Spec.Credential != nil && p.Spec.Credential.SecretRef != nil &&
+			p.Spec.Credential.SecretRef.Name == secret.Name {
 			providersUsingSecret[p.Name] = true
 		}
 	}

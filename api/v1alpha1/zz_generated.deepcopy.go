@@ -3413,11 +3413,6 @@ func (in *ProviderSpec) DeepCopyInto(out *ProviderSpec) {
 		*out = new(AuthConfig)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.SecretRef != nil {
-		in, out := &in.SecretRef, &out.SecretRef
-		*out = new(SecretKeyRef)
-		(*in).DeepCopyInto(*out)
-	}
 	if in.Credential != nil {
 		in, out := &in.Credential, &out.Credential
 		*out = new(CredentialConfig)

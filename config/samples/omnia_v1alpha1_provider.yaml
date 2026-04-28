@@ -11,15 +11,17 @@ spec:
   # Model to use
   model: claude-sonnet-4-20250514
 
-  # Secret containing API credentials
-  # The secret should have a key matching the provider:
-  # - ANTHROPIC_API_KEY for claude
-  # - OPENAI_API_KEY for openai
-  # - GEMINI_API_KEY for gemini
-  secretRef:
-    name: anthropic-credentials
-    # Optional: specify which key in the secret if it's not provider-specific
-    # key: api-key
+  # Secret containing API credentials. The secret should have a key
+  # matching the provider type:
+  #   - ANTHROPIC_API_KEY for claude
+  #   - OPENAI_API_KEY for openai
+  #   - GEMINI_API_KEY for gemini
+  credential:
+    secretRef:
+      name: anthropic-credentials
+      # Optional: explicit key in the secret if it's not the
+      # provider-specific default above.
+      # key: api-key
 
   # Optional: default tuning parameters
   defaults:

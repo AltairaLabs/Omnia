@@ -251,8 +251,9 @@ metadata:
   namespace: %s
 spec:
   type: mock
-  secretRef:
-    name: rollout-provider
+  credential:
+    secretRef:
+      name: rollout-provider
 `, rolloutNamespace))
 		})
 
@@ -481,8 +482,9 @@ metadata:
   namespace: %s
 spec:
   type: mock
-  secretRef:
-    name: rollout-istio-provider
+  credential:
+    secretRef:
+      name: rollout-istio-provider
 `, rolloutNamespace))
 
 			By("creating a VirtualService with 100/0 stable/canary weights")

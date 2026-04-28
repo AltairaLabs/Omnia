@@ -58,33 +58,9 @@ spec:
   model: claude-sonnet-4-20250514
 ```
 
-### `secretRef`
-
-:::caution[Deprecated]
-The top-level `secretRef` field is deprecated. Use `credential.secretRef` instead for new providers. See the [migration guide](/how-to/migrate-provider-credentials/) for details.
-:::
-
-Reference to a Secret containing API credentials.
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `secretRef.name` | string | Yes | Name of the Secret |
-| `secretRef.key` | string | No | Specific key to use (auto-detected if omitted) |
-
-```yaml
-spec:
-  secretRef:
-    name: llm-credentials
-```
-
-If `key` is not specified, the controller looks for provider-appropriate keys:
-- **Claude**: `ANTHROPIC_API_KEY` or `api-key`
-- **OpenAI**: `OPENAI_API_KEY` or `api-key`
-- **Gemini**: `GEMINI_API_KEY` or `api-key`
-
 ### `credential`
 
-Flexible credential configuration supporting multiple credential strategies. Mutually exclusive with `secretRef`. Exactly one sub-field must be specified.
+Provider credential configuration. Exactly one sub-field must be specified (or omit `credential` entirely for providers that don't need credentials, e.g. `mock`, `ollama`, `vllm`).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -95,7 +71,7 @@ Flexible credential configuration supporting multiple credential strategies. Mut
 
 #### Using a Kubernetes Secret
 
-Equivalent to the legacy `secretRef` field, but nested under `credential`:
+Reference to a Kubernetes Secret containing the credential value:
 
 ```yaml
 spec:
@@ -128,8 +104,6 @@ spec:
 ```
 
 The file must be mounted in the runtime pod. The controller cannot validate its presence — a `CredentialConfigured` condition is set with reason `FilePath`.
-
-> **Migration from `secretRef`**: The legacy `secretRef` field continues to work, but new providers should use `credential.secretRef` instead. Setting both `secretRef` and `credential` on the same Provider is rejected by CEL validation.
 
 ### `platform`
 
@@ -525,4 +499,3 @@ Note: Ensure appropriate RBAC permissions are configured for cross-namespace acc
 - [Configure AWS Bedrock Provider](/how-to/configure-bedrock-provider/)
 - [Configure GCP Vertex AI Provider](/how-to/configure-vertex-provider/)
 - [Configure Azure AI Provider](/how-to/configure-azure-ai-provider/)
-- [Migrate Provider Credentials](/how-to/migrate-provider-credentials/)

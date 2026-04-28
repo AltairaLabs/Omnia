@@ -458,23 +458,22 @@ func TestConvertProviderWithCredentialSecretRefNotSet(t *testing.T) {
 	assert.Nil(t, result.Credential)
 }
 
-// TestConvertProviderWithLegacySecretRef tests provider with legacy top-level secretRef.
-func TestConvertProviderWithLegacySecretRef(t *testing.T) {
+// TestConvertProviderWithoutCredentialFallsBackToEnv tests that a Provider
+// without a spec.credential block falls back to the provider type's
+// default API-key env var when one is set on the dev-console pod.
+func TestConvertProviderWithoutCredentialFallsBackToEnv(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-legacy-key")
 
 	loader := newTestK8sProviderLoader(t, "test-namespace")
 
 	provider := &corev1alpha1.Provider{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "legacy-provider",
+			Name:      "no-credential",
 			Namespace: "test-namespace",
 		},
 		Spec: corev1alpha1.ProviderSpec{
 			Type:  corev1alpha1.ProviderTypeOpenAI,
 			Model: "gpt-4",
-			SecretRef: &corev1alpha1.SecretKeyRef{
-				Name: "my-secret",
-			},
 		},
 	}
 
@@ -484,23 +483,22 @@ func TestConvertProviderWithLegacySecretRef(t *testing.T) {
 	assert.Equal(t, "OPENAI_API_KEY", result.Credential.CredentialEnv)
 }
 
-// TestConvertProviderWithLegacySecretRefNotSet tests legacy secretRef when env is not set.
-func TestConvertProviderWithLegacySecretRefNotSet(t *testing.T) {
+// TestConvertProviderWithoutCredentialAndNoEnv: env var not set —
+// no credential is resolved. Distinct from the env-set case so a
+// future env-mapping change can't silently swallow the empty value.
+func TestConvertProviderWithoutCredentialAndNoEnv(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 
 	loader := newTestK8sProviderLoader(t, "test-namespace")
 
 	provider := &corev1alpha1.Provider{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "legacy-provider-unset",
+			Name:      "no-credential-no-env",
 			Namespace: "test-namespace",
 		},
 		Spec: corev1alpha1.ProviderSpec{
 			Type:  corev1alpha1.ProviderTypeOpenAI,
 			Model: "gpt-4",
-			SecretRef: &corev1alpha1.SecretKeyRef{
-				Name: "my-secret",
-			},
 		},
 	}
 

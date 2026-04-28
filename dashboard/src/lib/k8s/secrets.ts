@@ -113,11 +113,14 @@ async function getProviderReferences(): Promise<Map<string, ProviderRef[]>> {
 
     const providers = (response as { items?: Array<{
       metadata?: { namespace?: string; name?: string };
-      spec?: { type?: string; secretRef?: { name?: string } };
+      spec?: {
+        type?: string;
+        credential?: { secretRef?: { name?: string } };
+      };
     }> }).items || [];
 
     for (const provider of providers) {
-      const secretName = provider.spec?.secretRef?.name;
+      const secretName = provider.spec?.credential?.secretRef?.name;
       const namespace = provider.metadata?.namespace || "default";
       const providerName = provider.metadata?.name || "";
       const providerType = provider.spec?.type || "";

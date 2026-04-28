@@ -71,8 +71,10 @@ func TestFindAgentRuntimesForSecret(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.ProviderSpec{
-						Type:      "claude",
-						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "api-key"},
+						Type: "claude",
+						Credential: &omniav1alpha1.CredentialConfig{
+							SecretRef: &omniav1alpha1.SecretKeyRef{Name: "api-key"},
+						},
 					},
 				},
 			},
@@ -111,8 +113,10 @@ func TestFindAgentRuntimesForSecret(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.ProviderSpec{
-						Type:      "openai",
-						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "inline-secret"},
+						Type: "openai",
+						Credential: &omniav1alpha1.CredentialConfig{
+							SecretRef: &omniav1alpha1.SecretKeyRef{Name: "inline-secret"},
+						},
 					},
 				},
 			},
@@ -151,8 +155,10 @@ func TestFindAgentRuntimesForSecret(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.ProviderSpec{
-						Type:      "claude",
-						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "api-key"},
+						Type: "claude",
+						Credential: &omniav1alpha1.CredentialConfig{
+							SecretRef: &omniav1alpha1.SecretKeyRef{Name: "api-key"},
+						},
 					},
 				},
 			},
@@ -190,8 +196,10 @@ func TestFindAgentRuntimesForSecret(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.ProviderSpec{
-						Type:      "claude",
-						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "shared-key"},
+						Type: "claude",
+						Credential: &omniav1alpha1.CredentialConfig{
+							SecretRef: &omniav1alpha1.SecretKeyRef{Name: "shared-key"},
+						},
 					},
 				},
 			},
@@ -419,8 +427,10 @@ func TestFindAgentRuntimesForSecret_NamedProviders(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.ProviderSpec{
-			Type:      "openai",
-			SecretRef: &omniav1alpha1.SecretKeyRef{Name: "judge-key"},
+			Type: "openai",
+			Credential: &omniav1alpha1.CredentialConfig{
+				SecretRef: &omniav1alpha1.SecretKeyRef{Name: "judge-key"},
+			},
 		},
 	}
 
@@ -588,8 +598,10 @@ func TestGetConfigHash(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.ProviderSpec{
-						Type:      "claude",
-						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "api-secret"},
+						Type: "claude",
+						Credential: &omniav1alpha1.CredentialConfig{
+							SecretRef: &omniav1alpha1.SecretKeyRef{Name: "api-secret"},
+						},
 					},
 				},
 			},
@@ -622,8 +634,10 @@ func TestGetConfigHash(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.ProviderSpec{
-						Type:      "claude",
-						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "nonexistent-secret"},
+						Type: "claude",
+						Credential: &omniav1alpha1.CredentialConfig{
+							SecretRef: &omniav1alpha1.SecretKeyRef{Name: "nonexistent-secret"},
+						},
 					},
 				},
 			},
@@ -650,8 +664,10 @@ func TestGetConfigHash(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.ProviderSpec{
-						Type:      "openai",
-						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "inline-secret"},
+						Type: "openai",
+						Credential: &omniav1alpha1.CredentialConfig{
+							SecretRef: &omniav1alpha1.SecretKeyRef{Name: "inline-secret"},
+						},
 					},
 				},
 			},
@@ -707,8 +723,10 @@ func TestGetConfigHash(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.ProviderSpec{
-						Type:      "claude",
-						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "secret-a"},
+						Type: "claude",
+						Credential: &omniav1alpha1.CredentialConfig{
+							SecretRef: &omniav1alpha1.SecretKeyRef{Name: "secret-a"},
+						},
 					},
 				},
 				"judge": {
@@ -717,8 +735,10 @@ func TestGetConfigHash(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.ProviderSpec{
-						Type:      "openai",
-						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "secret-b"},
+						Type: "openai",
+						Credential: &omniav1alpha1.CredentialConfig{
+							SecretRef: &omniav1alpha1.SecretKeyRef{Name: "secret-b"},
+						},
 					},
 				},
 			},
@@ -802,8 +822,10 @@ func TestGetConfigHashDeterministic(t *testing.T) {
 				Namespace: "default",
 			},
 			Spec: omniav1alpha1.ProviderSpec{
-				Type:      "claude",
-				SecretRef: &omniav1alpha1.SecretKeyRef{Name: "api-secret"},
+				Type: "claude",
+				Credential: &omniav1alpha1.CredentialConfig{
+					SecretRef: &omniav1alpha1.SecretKeyRef{Name: "api-secret"},
+				},
 			},
 		},
 	}
