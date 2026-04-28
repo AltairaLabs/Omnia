@@ -1,0 +1,15 @@
+# Pre-existing wiring-test gaps. The lint at hack/check-wiring-tests.sh
+# fails when a NEW cmd/*/main.go appears without a sibling _test.go.
+# Lines below pin the gaps that existed when the lint shipped so
+# unrelated PRs don't get blocked. Tracked work to close them lives
+# in their respective issues.
+#
+# To remove a line below: add a wiring test to the named cmd/<name>/
+# directory (CLAUDE.md → Testing Standards → 'Wiring tests'). The
+# lint will tell you the line is stale once the test exists.
+
+cmd/doctor/main.go
+ee/cmd/arena-dev-console/main.go
+ee/cmd/omnia-arena-controller/main.go
+ee/cmd/policy-proxy/main.go
+ee/cmd/promptkit-lsp/main.go
