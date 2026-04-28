@@ -25,7 +25,6 @@ kubectl create secret generic openrouter-credentials \
   --from-literal=OPENAI_API_KEY='sk-or-v1-...'
 ```
 
-Omnia's `openai` provider reads `OPENAI_API_KEY` by default; OpenRouter's key slots in there directly. If you already use direct-OpenAI in another Provider, use a different secret name or key — see [Migrate Provider Credentials](/how-to/migrate-provider-credentials/) for per-Provider isolation.
 
 ## 2. Create the Provider
 
@@ -126,5 +125,4 @@ If omitted, PromptKit falls back to built-in pricing for the underlying model fa
 ## See also
 
 - [Provider CRD reference — `spec.headers`](/reference/provider/#headers) — full field semantics and collision rules.
-- [Migrate Provider Credentials](/how-to/migrate-provider-credentials/) — per-Provider secret isolation.
 - [OpenRouter docs — Quickstart](https://openrouter.ai/docs/quickstart) — OpenRouter's own getting-started.

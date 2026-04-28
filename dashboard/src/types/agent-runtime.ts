@@ -82,7 +82,11 @@ export interface ProviderPricing {
 export interface ProviderConfig {
   type: ProviderType;
   model?: string;
-  secretRef?: SecretKeyRef;
+  credential?: {
+    secretRef?: SecretKeyRef;
+    envVar?: string;
+    filePath?: string;
+  };
   baseURL?: string;
   config?: ProviderDefaults;
   pricing?: ProviderPricing;

@@ -50,7 +50,7 @@ function createProvider(name: string, namespace: string, type: "claude" | "opena
     metadata: { name, namespace },
     spec: {
       type,
-      secretRef: { name: "test-secret" },
+      credential: { secretRef: { name: "test-secret" } },
       model: "test-model",
     },
     status: { phase: "Ready" },

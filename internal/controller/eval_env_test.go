@@ -118,25 +118,14 @@ func TestEffectiveSecretRef(t *testing.T) {
 		wantNil  bool
 	}{
 		{
-			name: "no secret refs returns nil",
+			name: "no credential block returns nil",
 			provider: &omniav1alpha1.Provider{
 				Spec: omniav1alpha1.ProviderSpec{},
 			},
 			wantNil: true,
 		},
 		{
-			name: "legacy secretRef only",
-			provider: &omniav1alpha1.Provider{
-				Spec: omniav1alpha1.ProviderSpec{
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: "legacy-secret",
-					},
-				},
-			},
-			wantName: "legacy-secret",
-		},
-		{
-			name: "credential.secretRef only",
+			name: "credential.secretRef set",
 			provider: &omniav1alpha1.Provider{
 				Spec: omniav1alpha1.ProviderSpec{
 					Credential: &omniav1alpha1.CredentialConfig{
@@ -151,32 +140,13 @@ func TestEffectiveSecretRef(t *testing.T) {
 			wantKey:  ptr.To("my-key"),
 		},
 		{
-			name: "credential.secretRef preferred over legacy",
+			name: "credential block without secretRef returns nil",
 			provider: &omniav1alpha1.Provider{
 				Spec: omniav1alpha1.ProviderSpec{
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: "legacy-secret",
-					},
-					Credential: &omniav1alpha1.CredentialConfig{
-						SecretRef: &omniav1alpha1.SecretKeyRef{
-							Name: "cred-secret",
-						},
-					},
-				},
-			},
-			wantName: "cred-secret",
-		},
-		{
-			name: "credential without secretRef falls back to legacy",
-			provider: &omniav1alpha1.Provider{
-				Spec: omniav1alpha1.ProviderSpec{
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: "legacy-secret",
-					},
 					Credential: &omniav1alpha1.CredentialConfig{},
 				},
 			},
-			wantName: "legacy-secret",
+			wantNil: true,
 		},
 	}
 

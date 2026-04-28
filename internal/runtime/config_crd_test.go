@@ -138,8 +138,10 @@ func TestLoadFromCRD_SingleProvider(t *testing.T) {
 		Spec: v1alpha1.ProviderSpec{
 			Type:  v1alpha1.ProviderTypeOpenAI,
 			Model: "gpt-4o",
-			SecretRef: &v1alpha1.SecretKeyRef{
-				Name: "openai-secret",
+			Credential: &v1alpha1.CredentialConfig{
+				SecretRef: &v1alpha1.SecretKeyRef{
+					Name: "openai-secret",
+				},
 			},
 		},
 	}
@@ -197,7 +199,9 @@ func TestLoadFromCRD_Headers(t *testing.T) {
 				"HTTP-Referer": "https://my-app.example",
 				"X-Title":      "omnia",
 			},
-			SecretRef: &v1alpha1.SecretKeyRef{Name: "openrouter-secret"},
+			Credential: &v1alpha1.CredentialConfig{
+				SecretRef: &v1alpha1.SecretKeyRef{Name: "openrouter-secret"},
+			},
 		},
 	}
 	secret := &corev1.Secret{
@@ -495,8 +499,10 @@ func TestLoadFromCRD_SecretNotFound(t *testing.T) {
 		},
 		Spec: v1alpha1.ProviderSpec{
 			Type: v1alpha1.ProviderTypeClaude,
-			SecretRef: &v1alpha1.SecretKeyRef{
-				Name: "missing-secret",
+			Credential: &v1alpha1.CredentialConfig{
+				SecretRef: &v1alpha1.SecretKeyRef{
+					Name: "missing-secret",
+				},
 			},
 		},
 	}
@@ -529,8 +535,10 @@ func TestLoadFromCRD_SecretMissingKey(t *testing.T) {
 		},
 		Spec: v1alpha1.ProviderSpec{
 			Type: v1alpha1.ProviderTypeClaude,
-			SecretRef: &v1alpha1.SecretKeyRef{
-				Name: "claude-secret",
+			Credential: &v1alpha1.CredentialConfig{
+				SecretRef: &v1alpha1.SecretKeyRef{
+					Name: "claude-secret",
+				},
 			},
 		},
 	}

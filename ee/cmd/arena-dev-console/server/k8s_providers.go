@@ -206,11 +206,9 @@ func (l *K8sProviderLoader) convertProvider(p *corev1alpha1.Provider) *config.Pr
 			// Secret ref in credential block — controller mounts as env var
 			l.resolveEnvVarCredential(provider, p, "secret env var")
 		}
-	} else if p.Spec.SecretRef != nil {
-		// Legacy: top-level secretRef
-		l.resolveEnvVarCredential(provider, p, "legacy secretRef")
 	} else {
-		// No explicit credential config or secretRef — try default env vars
+		// No credential block — fall back to the provider's default
+		// API-key env var if one is set on the pod.
 		l.resolveEnvVarCredential(provider, p, "default env var")
 	}
 

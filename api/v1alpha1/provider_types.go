@@ -168,7 +168,6 @@ type AuthConfig struct {
 }
 
 // ProviderSpec defines the desired state of Provider.
-// +kubebuilder:validation:XValidation:rule="!(has(self.secretRef) && has(self.credential))",message="secretRef and credential are mutually exclusive; use credential.secretRef instead"
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || (self.type in ['claude', 'openai', 'gemini'])",message="platform is only valid for provider types claude, openai, or gemini"
 // +kubebuilder:validation:XValidation:rule="has(self.platform) == has(self.auth)",message="spec.platform and spec.auth must be set together"
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'bedrock' || self.auth.type in ['workloadIdentity', 'accessKey']",message="platform.type bedrock requires auth.type of workloadIdentity or accessKey"
@@ -220,14 +219,9 @@ type ProviderSpec struct {
 	// +optional
 	Auth *AuthConfig `json:"auth,omitempty"`
 
-	// secretRef references a Secret containing API credentials.
-	// Optional for providers that don't require credentials (e.g., mock, ollama, vllm).
-	// Deprecated: Use credential.secretRef instead.
-	// +optional
-	SecretRef *SecretKeyRef `json:"secretRef,omitempty"`
-
 	// credential defines how to obtain credentials for this provider.
-	// Mutually exclusive with secretRef. If both are set, credential takes precedence.
+	// Optional for providers that don't require credentials (e.g., mock,
+	// ollama, vllm).
 	// +optional
 	Credential *CredentialConfig `json:"credential,omitempty"`
 

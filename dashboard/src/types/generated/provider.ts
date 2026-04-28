@@ -41,7 +41,8 @@ export interface ProviderSpec {
    * Used for capability-based filtering when binding arena providers. */
   capabilities?: ("text" | "streaming" | "vision" | "tools" | "json" | "audio" | "video" | "documents" | "duplex")[];
   /** credential defines how to obtain credentials for this provider.
-   * Mutually exclusive with secretRef. If both are set, credential takes precedence. */
+   * Optional for providers that don't require credentials (e.g., mock,
+   * ollama, vllm). */
   credential?: {
     /** envVar specifies an environment variable name containing the credential.
      * The variable must be available in the runtime pod. */
@@ -136,19 +137,6 @@ export interface ProviderSpec {
     inputCostPer1K?: string;
     /** outputCostPer1K is the cost per 1000 output tokens (e.g., "0.015"). */
     outputCostPer1K?: string;
-  };
-  /** secretRef references a Secret containing API credentials.
-   * Optional for providers that don't require credentials (e.g., mock, ollama, vllm).
-   * Deprecated: Use credential.secretRef instead. */
-  secretRef?: {
-    /** key is the key within the Secret to use.
-     * If not specified, the provider-appropriate key is used:
-     * - ANTHROPIC_API_KEY for Claude
-     * - OPENAI_API_KEY for OpenAI
-     * - GEMINI_API_KEY for Gemini */
-    key?: string;
-    /** name is the name of the Secret. */
-    name: string;
   };
   /** type specifies the provider wire protocol. */
   type: "claude" | "openai" | "gemini" | "ollama" | "mock" | "vllm" | "voyageai";

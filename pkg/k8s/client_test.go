@@ -198,8 +198,10 @@ func TestGetProviderSecret_Found(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.ProviderSpec{
-			Type:      "claude",
-			SecretRef: &omniav1alpha1.SecretKeyRef{Name: "api-key"},
+			Type: "claude",
+			Credential: &omniav1alpha1.CredentialConfig{
+				SecretRef: &omniav1alpha1.SecretKeyRef{Name: "api-key"},
+			},
 		},
 	}
 
@@ -238,8 +240,10 @@ func TestGetProviderSecret_SecretNotFound(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.ProviderSpec{
-			Type:      "claude",
-			SecretRef: &omniav1alpha1.SecretKeyRef{Name: "nonexistent-secret"},
+			Type: "claude",
+			Credential: &omniav1alpha1.CredentialConfig{
+				SecretRef: &omniav1alpha1.SecretKeyRef{Name: "nonexistent-secret"},
+			},
 		},
 	}
 
@@ -341,10 +345,9 @@ func TestDetermineSecretKey_UnknownFallback(t *testing.T) {
 	}
 }
 
-func TestEffectiveSecretRef_CredentialPreferred(t *testing.T) {
+func TestEffectiveSecretRef_FromCredentialBlock(t *testing.T) {
 	provider := &omniav1alpha1.Provider{
 		Spec: omniav1alpha1.ProviderSpec{
-			SecretRef: &omniav1alpha1.SecretKeyRef{Name: "legacy"},
 			Credential: &omniav1alpha1.CredentialConfig{
 				SecretRef: &omniav1alpha1.SecretKeyRef{Name: "preferred"},
 			},
@@ -353,18 +356,6 @@ func TestEffectiveSecretRef_CredentialPreferred(t *testing.T) {
 	ref := EffectiveSecretRef(provider)
 	if ref == nil || ref.Name != "preferred" {
 		t.Errorf("expected preferred, got %v", ref)
-	}
-}
-
-func TestEffectiveSecretRef_LegacyFallback(t *testing.T) {
-	provider := &omniav1alpha1.Provider{
-		Spec: omniav1alpha1.ProviderSpec{
-			SecretRef: &omniav1alpha1.SecretKeyRef{Name: "legacy"},
-		},
-	}
-	ref := EffectiveSecretRef(provider)
-	if ref == nil || ref.Name != "legacy" {
-		t.Errorf("expected legacy, got %v", ref)
 	}
 }
 

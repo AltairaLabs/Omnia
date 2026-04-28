@@ -128,7 +128,7 @@ describe("secrets", () => {
         items: [
           {
             metadata: { namespace: "default", name: "claude-provider" },
-            spec: { type: "claude", secretRef: { name: "anthropic-creds" } },
+            spec: { type: "claude", credential: { secretRef: { name: "anthropic-creds" } } },
           },
         ],
       });

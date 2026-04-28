@@ -67,7 +67,6 @@ const healthCheckRequeueInterval = 30 * time.Second
 const (
 	EventReasonCredentialInvalid   = "CredentialInvalid"
 	EventReasonMultipleCredentials = "MultipleCredentials"
-	EventReasonLegacySecretRefUsed = "LegacySecretRefUsed"
 )
 
 // envVarNameRegex validates environment variable names.
@@ -175,27 +174,7 @@ func (r *ProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 // validateCredentialConfig dispatches to the appropriate credential validation strategy.
 func (r *ProviderReconciler) validateCredentialConfig(ctx context.Context, provider *omniav1alpha1.Provider) error {
 	if provider.Spec.Credential != nil {
-		// New credential block takes precedence
 		return r.validateCredentialBlock(ctx, provider)
-	}
-
-	if provider.Spec.SecretRef != nil {
-		// Legacy secretRef path
-		if err := r.validateSecretRef(ctx, provider); err != nil {
-			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
-				"SecretNotFound", err.Error())
-			SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
-				"SecretNotFound", err.Error())
-			provider.Status.Phase = omniav1alpha1.ProviderPhaseError
-			return err
-		}
-		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
-			"SecretFound", "Referenced secret exists")
-		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeCredentialConfigured, metav1.ConditionTrue,
-			"LegacySecretRef", "Credential configured via legacy secretRef")
-		r.emitWarningEvent(provider, EventReasonLegacySecretRefUsed,
-			"Provider uses deprecated top-level secretRef; migrate to spec.credential.secretRef")
-		return nil
 	}
 
 	// No credentials specified
@@ -591,41 +570,6 @@ func (r *ProviderReconciler) emitWarningEvent(provider *omniav1alpha1.Provider, 
 	}
 }
 
-// validateSecretRef validates that the referenced secret exists and has the expected key.
-func (r *ProviderReconciler) validateSecretRef(ctx context.Context, provider *omniav1alpha1.Provider) error {
-	secret := &corev1.Secret{}
-	key := types.NamespacedName{
-		Name:      provider.Spec.SecretRef.Name,
-		Namespace: provider.Namespace,
-	}
-
-	if err := r.Get(ctx, key, secret); err != nil {
-		if apierrors.IsNotFound(err) {
-			return fmt.Errorf(errFmtSecretNotFound, key.Name, key.Namespace)
-		}
-		return fmt.Errorf("failed to get secret %q: %w", key.Name, err)
-	}
-
-	// Check for expected key if specified
-	if provider.Spec.SecretRef.Key != nil {
-		expectedKey := *provider.Spec.SecretRef.Key
-		if _, exists := secret.Data[expectedKey]; !exists {
-			return fmt.Errorf(errFmtSecretMissingKey, key.Name, expectedKey)
-		}
-		return nil
-	}
-
-	// Check for provider-appropriate key
-	expectedKeys := getExpectedKeysForProvider(provider.Spec.Type)
-	for _, k := range expectedKeys {
-		if _, exists := secret.Data[k]; exists {
-			return nil
-		}
-	}
-
-	return fmt.Errorf(errFmtSecretMissingAnyKey, key.Name, expectedKeys)
-}
-
 // getExpectedKeysForProvider returns the expected secret keys for a provider type.
 func getExpectedKeysForProvider(providerType omniav1alpha1.ProviderType) []string {
 	switch providerType {
@@ -655,14 +599,7 @@ func (r *ProviderReconciler) findProvidersForSecret(ctx context.Context, obj cli
 
 	var requests []reconcile.Request
 	for _, p := range providerList.Items {
-		matches := false
-		if p.Spec.SecretRef != nil && p.Spec.SecretRef.Name == secret.Name {
-			matches = true
-		}
 		if p.Spec.Credential != nil && p.Spec.Credential.SecretRef != nil && p.Spec.Credential.SecretRef.Name == secret.Name {
-			matches = true
-		}
-		if matches {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      p.Name,

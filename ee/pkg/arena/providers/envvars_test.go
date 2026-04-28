@@ -29,8 +29,10 @@ func TestBuildEnvVarsFromProviders(t *testing.T) {
 				},
 				Spec: corev1alpha1.ProviderSpec{
 					Type: "openai",
-					SecretRef: &corev1alpha1.SecretKeyRef{
-						Name: "openai-credentials",
+					Credential: &corev1alpha1.CredentialConfig{
+						SecretRef: &corev1alpha1.SecretKeyRef{
+							Name: "openai-credentials",
+						},
 					},
 				},
 			},
@@ -56,9 +58,11 @@ func TestBuildEnvVarsFromProviders(t *testing.T) {
 				},
 				Spec: corev1alpha1.ProviderSpec{
 					Type: "claude",
-					SecretRef: &corev1alpha1.SecretKeyRef{
-						Name: "my-secret",
-						Key:  ptr.To("api-key"),
+					Credential: &corev1alpha1.CredentialConfig{
+						SecretRef: &corev1alpha1.SecretKeyRef{
+							Name: "my-secret",
+							Key:  ptr.To("api-key"),
+						},
 					},
 				},
 			},
@@ -139,8 +143,10 @@ func TestBuildEnvVarsFromProviders(t *testing.T) {
 				},
 				Spec: corev1alpha1.ProviderSpec{
 					Type: "openai",
-					SecretRef: &corev1alpha1.SecretKeyRef{
-						Name: "openai-creds-1",
+					Credential: &corev1alpha1.CredentialConfig{
+						SecretRef: &corev1alpha1.SecretKeyRef{
+							Name: "openai-creds-1",
+						},
 					},
 				},
 			},
@@ -151,8 +157,10 @@ func TestBuildEnvVarsFromProviders(t *testing.T) {
 				},
 				Spec: corev1alpha1.ProviderSpec{
 					Type: "openai",
-					SecretRef: &corev1alpha1.SecretKeyRef{
-						Name: "openai-creds-2",
+					Credential: &corev1alpha1.CredentialConfig{
+						SecretRef: &corev1alpha1.SecretKeyRef{
+							Name: "openai-creds-2",
+						},
 					},
 				},
 			},
@@ -175,8 +183,10 @@ func TestBuildEnvVarsFromProviders(t *testing.T) {
 				},
 				Spec: corev1alpha1.ProviderSpec{
 					Type: "openai",
-					SecretRef: &corev1alpha1.SecretKeyRef{
-						Name: "openai-creds",
+					Credential: &corev1alpha1.CredentialConfig{
+						SecretRef: &corev1alpha1.SecretKeyRef{
+							Name: "openai-creds",
+						},
 					},
 				},
 			},
@@ -187,8 +197,10 @@ func TestBuildEnvVarsFromProviders(t *testing.T) {
 				},
 				Spec: corev1alpha1.ProviderSpec{
 					Type: "claude",
-					SecretRef: &corev1alpha1.SecretKeyRef{
-						Name: "anthropic-creds",
+					Credential: &corev1alpha1.CredentialConfig{
+						SecretRef: &corev1alpha1.SecretKeyRef{
+							Name: "anthropic-creds",
+						},
 					},
 				},
 			},
@@ -226,8 +238,10 @@ func TestBuildEnvVarsFromProviders(t *testing.T) {
 				},
 				Spec: corev1alpha1.ProviderSpec{
 					Type: "gemini",
-					SecretRef: &corev1alpha1.SecretKeyRef{
-						Name: "google-creds",
+					Credential: &corev1alpha1.CredentialConfig{
+						SecretRef: &corev1alpha1.SecretKeyRef{
+							Name: "google-creds",
+						},
 					},
 				},
 			},

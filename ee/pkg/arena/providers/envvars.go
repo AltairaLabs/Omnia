@@ -53,13 +53,13 @@ func buildEnvVarFromRef(ref SecretRef, providerSecretRef *corev1alpha1.SecretKey
 	}
 }
 
-// getEffectiveSecretRef returns the effective SecretKeyRef for a provider,
-// preferring credential.secretRef over the legacy secretRef field.
+// getEffectiveSecretRef returns the credential.secretRef for a provider
+// or nil when the provider doesn't carry one.
 func getEffectiveSecretRef(provider *corev1alpha1.Provider) *corev1alpha1.SecretKeyRef {
 	if provider.Spec.Credential != nil && provider.Spec.Credential.SecretRef != nil {
 		return provider.Spec.Credential.SecretRef
 	}
-	return provider.Spec.SecretRef
+	return nil
 }
 
 // BuildEnvVarsFromProviders builds environment variables for Provider CRDs.

@@ -231,4 +231,3 @@ Look at the `Conditions` section for `AuthConfigured`, `CredentialConfigured`, a
 - [Provider CRD Reference](/reference/provider/)
 - [Configure AWS Bedrock Provider](/how-to/configure-bedrock-provider/)
 - [Configure GCP Vertex AI Provider](/how-to/configure-vertex-provider/)
-- [Migrate Provider Credentials](/how-to/migrate-provider-credentials/)

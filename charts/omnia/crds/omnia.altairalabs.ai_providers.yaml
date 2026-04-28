@@ -137,7 +137,8 @@ spec:
               credential:
                 description: |-
                   credential defines how to obtain credentials for this provider.
-                  Mutually exclusive with secretRef. If both are set, credential takes precedence.
+                  Optional for providers that don't require credentials (e.g., mock,
+                  ollama, vllm).
                 properties:
                   envVar:
                     description: |-
@@ -306,27 +307,6 @@ spec:
                       (e.g., "0.015").
                     type: string
                 type: object
-              secretRef:
-                description: |-
-                  secretRef references a Secret containing API credentials.
-                  Optional for providers that don't require credentials (e.g., mock, ollama, vllm).
-                  Deprecated: Use credential.secretRef instead.
-                properties:
-                  key:
-                    description: |-
-                      key is the key within the Secret to use.
-                      If not specified, the provider-appropriate key is used:
-                      - ANTHROPIC_API_KEY for Claude
-                      - OPENAI_API_KEY for OpenAI
-                      - GEMINI_API_KEY for Gemini
-                    type: string
-                  name:
-                    description: name is the name of the Secret.
-                    minLength: 1
-                    type: string
-                required:
-                - name
-                type: object
               type:
                 description: type specifies the provider wire protocol.
                 enum:
@@ -342,9 +322,6 @@ spec:
             - type
             type: object
             x-kubernetes-validations:
-            - message: secretRef and credential are mutually exclusive; use credential.secretRef
-                instead
-              rule: '!(has(self.secretRef) && has(self.credential))'
             - message: platform is only valid for provider types claude, openai, or
                 gemini
               rule: '!has(self.platform) || (self.type in [''claude'', ''openai'',

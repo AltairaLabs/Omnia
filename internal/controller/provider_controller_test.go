@@ -116,8 +116,10 @@ var _ = Describe("Provider Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeClaude,
 					Model: "claude-sonnet-4-20250514",
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: secretName,
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: secretName,
+						},
 					},
 				},
 			}
@@ -159,8 +161,10 @@ var _ = Describe("Provider Controller", func() {
 					Type:    omniav1alpha1.ProviderTypeClaude,
 					Model:   "claude-sonnet-4-20250514",
 					BaseURL: "http://127.0.0.1:1", // unreachable
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: secretName,
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: secretName,
+						},
 					},
 				},
 			}
@@ -202,8 +206,10 @@ var _ = Describe("Provider Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeClaude,
 					Model: "claude-sonnet-4-20250514",
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: "nonexistent-secret",
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: "nonexistent-secret",
+						},
 					},
 				},
 			}
@@ -250,8 +256,10 @@ var _ = Describe("Provider Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeClaude,
 					Model: "claude-sonnet-4-20250514",
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: "bad-secret",
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: "bad-secret",
+						},
 					},
 				},
 			}
@@ -300,9 +308,11 @@ var _ = Describe("Provider Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeClaude,
 					Model: "claude-sonnet-4-20250514",
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: "custom-secret",
-						Key:  &customKey,
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: "custom-secret",
+							Key:  &customKey,
+						},
 					},
 				},
 			}
@@ -418,9 +428,11 @@ var _ = Describe("Provider Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeClaude,
 					Model: "claude-sonnet-4-20250514",
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: secretName, // Has ANTHROPIC_API_KEY but not "nonexistent-key"
-						Key:  &customKey,
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: secretName, // Has ANTHROPIC_API_KEY but not "nonexistent-key"
+							Key:  &customKey,
+						},
 					},
 				},
 			}
@@ -647,8 +659,10 @@ var _ = Describe("Provider Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeClaude,
 					Model: "claude-sonnet-4-20250514",
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: "mapping-test-secret",
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: "mapping-test-secret",
+						},
 					},
 				},
 			}
@@ -1265,76 +1279,6 @@ var _ = Describe("Provider Controller", func() {
 			Expect(credCondition.Reason).To(Equal("NoCredentialRequired"))
 		})
 
-		It("should set LegacySecretRef reason when using legacy secretRef", func() {
-			provider = &omniav1alpha1.Provider{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "cred-legacy-secretref",
-					Namespace: providerNamespace,
-				},
-				Spec: omniav1alpha1.ProviderSpec{
-					Type:  omniav1alpha1.ProviderTypeClaude,
-					Model: "claude-sonnet-4-20250514",
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: "cred-test-secret",
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
-
-			reconciler := &ProviderReconciler{
-				Client:     k8sClient,
-				Scheme:     k8sClient.Scheme(),
-				HTTPClient: alwaysHealthyClient(),
-			}
-
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      provider.Name,
-					Namespace: providerNamespace,
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			var updated omniav1alpha1.Provider
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: providerNamespace}, &updated)).To(Succeed())
-			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
-
-			var credCondition *metav1.Condition
-			for i := range updated.Status.Conditions {
-				if updated.Status.Conditions[i].Type == ProviderConditionTypeCredentialConfigured {
-					credCondition = &updated.Status.Conditions[i]
-					break
-				}
-			}
-			Expect(credCondition).NotTo(BeNil())
-			Expect(credCondition.Status).To(Equal(metav1.ConditionTrue))
-			Expect(credCondition.Reason).To(Equal("LegacySecretRef"))
-		})
-
-		It("should reject both credential and legacy secretRef at CRD level", func() {
-			provider = &omniav1alpha1.Provider{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "cred-precedence",
-					Namespace: providerNamespace,
-				},
-				Spec: omniav1alpha1.ProviderSpec{
-					Type:  omniav1alpha1.ProviderTypeClaude,
-					Model: "claude-sonnet-4-20250514",
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: "some-other-secret",
-					},
-					Credential: &omniav1alpha1.CredentialConfig{
-						SecretRef: &omniav1alpha1.SecretKeyRef{
-							Name: "cred-test-secret",
-						},
-					},
-				},
-			}
-			err := k8sClient.Create(ctx, provider)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("mutually exclusive"))
-			provider = nil // prevent cleanup of non-existent resource
-		})
 	})
 
 	Context("findProvidersForSecret with credential block", func() {
@@ -1818,43 +1762,6 @@ var _ = Describe("Provider Controller", func() {
 				_ = k8sClient.Delete(ctx, provider)
 			}
 			_ = k8sClient.Delete(ctx, secret)
-		})
-
-		It("should emit LegacySecretRefUsed event with recorder", func() {
-			provider = &omniav1alpha1.Provider{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "recorder-legacy",
-					Namespace: "default",
-				},
-				Spec: omniav1alpha1.ProviderSpec{
-					Type:  omniav1alpha1.ProviderTypeClaude,
-					Model: "claude-sonnet-4-20250514",
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: "recorder-test-secret",
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
-
-			fakeRecorder := record.NewFakeRecorder(10)
-			reconciler := &ProviderReconciler{
-				Client:     k8sClient,
-				Scheme:     k8sClient.Scheme(),
-				Recorder:   fakeRecorder,
-				HTTPClient: alwaysHealthyClient(),
-			}
-
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      provider.Name,
-					Namespace: "default",
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			var event string
-			Eventually(fakeRecorder.Events).Should(Receive(&event))
-			Expect(event).To(ContainSubstring(EventReasonLegacySecretRefUsed))
 		})
 
 		It("should emit event when credentials required but missing", func() {

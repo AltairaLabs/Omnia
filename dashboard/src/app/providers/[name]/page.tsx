@@ -63,11 +63,7 @@ export default function ProviderDetailPage({ params }: Readonly<ProviderDetailPa
   const { data: secrets, isLoading: secretsLoading } = useSecrets({ namespace });
   const updateSecretRef = useUpdateProviderSecretRef();
 
-  // Determine current secret status. effectiveSecretRefName checks
-  // both the new spec.credential.secretRef and the legacy spec.secretRef
-  // so a Provider written in either shape resolves correctly. Pre-#1036
-  // this only checked the legacy field, so a Provider migrated to the
-  // new shape would render "(missing)" even when the secret existed.
+  // Determine current secret status from spec.credential.secretRef.
   const currentSecretRef = effectiveSecretRefName(provider);
   const secretExists = useMemo(() => {
     if (!currentSecretRef) return true; // No secret configured
@@ -302,10 +298,10 @@ export default function ProviderDetailPage({ params }: Readonly<ProviderDetailPa
                       </div>
                     )}
                   </div>
-                  {(spec?.credential?.secretRef?.key || spec?.secretRef?.key) && (
+                  {spec?.credential?.secretRef?.key && (
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Key</span>
-                      <span className="font-medium">{spec?.credential?.secretRef?.key || spec?.secretRef?.key}</span>
+                      <span className="font-medium">{spec.credential.secretRef.key}</span>
                     </div>
                   )}
                 </CardContent>
