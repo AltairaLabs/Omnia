@@ -50,7 +50,7 @@ export function useEvalGroups(
         set.add(g);
       }
     }
-    return Array.from(set).sort();
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [content]);
 
   return { groups, isLoading: !!packName && isLoading };
