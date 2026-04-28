@@ -177,6 +177,51 @@ describe("providers", () => {
       expect(result).toEqual(updatedProvider);
     });
 
+    it("removes the secretRef and drops the credential block when only credential.secretRef was set", async () => {
+      // Provider already on the new shape with ONLY a secretRef in the
+      // credential block: clearing it should also drop the empty
+      // credential block so the Provider doesn't carry an inert {}.
+      const existingProvider = {
+        ...createMockProvider("default", "new-shape"),
+        spec: {
+          type: "claude",
+          model: "claude-sonnet-4-20250514",
+          credential: { secretRef: { name: "old-secret" } },
+        },
+      };
+      mockGetNamespacedCustomObject.mockResolvedValue(existingProvider);
+      mockReplaceNamespacedCustomObject.mockResolvedValue(existingProvider);
+
+      await providersModule.updateProviderSecretRef("default", "new-shape", null);
+
+      const replaceCall = mockReplaceNamespacedCustomObject.mock.calls[0][0];
+      expect(replaceCall.body.spec.secretRef).toBeUndefined();
+      expect(replaceCall.body.spec.credential).toBeUndefined();
+    });
+
+    it("preserves other credential fields when clearing only secretRef", async () => {
+      // If credential carries an envVar alongside secretRef, removing
+      // the secretRef should NOT delete the rest of the credential block.
+      const existingProvider = {
+        ...createMockProvider("default", "mixed"),
+        spec: {
+          type: "claude",
+          model: "claude-sonnet-4-20250514",
+          credential: {
+            secretRef: { name: "old-secret" },
+            envVar: "MY_ENV",
+          },
+        },
+      };
+      mockGetNamespacedCustomObject.mockResolvedValue(existingProvider);
+      mockReplaceNamespacedCustomObject.mockResolvedValue(existingProvider);
+
+      await providersModule.updateProviderSecretRef("default", "mixed", null);
+
+      const replaceCall = mockReplaceNamespacedCustomObject.mock.calls[0][0];
+      expect(replaceCall.body.spec.credential).toEqual({ envVar: "MY_ENV" });
+    });
+
     it("should migrate legacy spec.secretRef to spec.credential.secretRef on next write", async () => {
       // A Provider that started life on the legacy field gets migrated
       // automatically when the dashboard updates its secretRef. Without

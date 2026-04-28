@@ -152,9 +152,7 @@ export async function updateProviderSecretRef(
       }
     }
   } else {
-    if (!existing.spec.credential) {
-      existing.spec.credential = {};
-    }
+    existing.spec.credential ??= {};
     existing.spec.credential.secretRef = { name: secretName };
   }
 
