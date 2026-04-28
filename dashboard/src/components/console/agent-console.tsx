@@ -11,6 +11,7 @@ import { useAgentConsole, useConsoleConfig } from "@/hooks/console";
 import { ConsoleMessage } from "./console-message";
 import { AttachmentPreview } from "./attachment-preview";
 import { ImageCropDialog } from "./image-crop-dialog";
+import { AgentErrorBanner } from "./agent-error-banner";
 import { isAllowedType, formatFileSize, needsResize } from "./attachment-utils";
 import { blobToDataUrl, getImageDimensions } from "@/lib/image-processor";
 import { getClientToolHandler, isAutoApproved, setAutoApproved } from "@/lib/client-tools";
@@ -502,12 +503,14 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
         onClose={() => setMemorySidebarOpen(false)}
       />
 
-      {/* Error display */}
-      {error && (
-        <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/20 text-red-600 dark:text-red-400 text-sm">
-          {error}
-        </div>
-      )}
+      {/* Error display — AgentErrorBanner classifies the raw runtime
+          error into invalid_credential / rate_limited / provider_unavailable
+          / unknown and renders an actionable headline + optional link
+          to the provider page (issue #1037 part 2). When the
+          classifier returns "unknown" the banner falls back to the
+          legacy raw-text display, so existing error paths don't
+          regress. */}
+      {error && <AgentErrorBanner error={error} workspace={namespace} />}
 
       {/* File rejection feedback */}
       {rejections.length > 0 && (
