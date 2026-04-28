@@ -1,0 +1,522 @@
+name: Agent E2E (real LLM)
+
+# Real-LLM regression coverage for the tool-calling E2E specs in
+# test/e2e/tool_calling_e2e_test.go. Issue #857.
+#
+# These specs are gated behind ENABLE_TOOL_CALLING_E2E=true; nothing in the
+# PR-blocking workflow sets that env var, so without this workflow real-LLM
+# tool-calling regressions go undetected. The PR-blocking
+# test-agent-e2e workflow uses handler=demo and skips LLM model pulls
+# entirely (its job is to verify facade/runtime wiring).
+#
+# Triggers on schedule + manual dispatch only — never on push or
+# pull_request — so a slow real-LLM run never blocks a PR. The schedule
+# fires daily at 06:00 UTC.
+#
+# Matrix entries:
+#   ollama: deploys Ollama with a small tool-capable model (qwen2.5:0.5b)
+#           inside the kind cluster. No external dependencies; exercises
+#           the Ollama provider integration including the local HTTP
+#           transport. Slow but cheap — runs every night.
+#   claude: hits the real Anthropic API via spec.credential.secretRef.
+#           Requires the ANTHROPIC_API_KEY repo secret to be set;
+#           skipped (job is no-op) when missing so a fresh fork doesn't
+#           fail the workflow.
+#
+# Add openai / gemini cells in a follow-up if useful; the workflow is
+# templated to make that a copy-paste of the claude cell.
+
+on:
+  schedule:
+    # 06:00 UTC daily — well before the European working day so failures
+    # are visible by the time anyone starts looking. cron is best-effort
+    # on GitHub-hosted runners but missed days don't matter; the next
+    # day's run catches up.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: 'Which matrix cell to run (or "all")'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - ollama
+          - claude
+
+permissions:
+  contents: read
+  checks: write
+
+# Each matrix cell runs an independent kind cluster; concurrency at the
+# job level would block the matrix unnecessarily. Group at the workflow
+# level so a manual re-run cancels the in-flight nightly.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+env:
+  HELM_VERSION: v3.14.0
+  IMAGE_TAG: e2e-llm
+
+jobs:
+  # Cheapest path. Single job — no provider API costs, no API key needed,
+  # but ~1 GB of Ollama image + 400 MB of qwen2.5:0.5b on disk. The
+  # free-disk-space step reclaims ~30 GB before we start.
+  ollama:
+    name: Tool calling (ollama)
+    if: github.event_name == 'schedule' || github.event.inputs.provider == 'all' || github.event.inputs.provider == 'ollama'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      KIND_CLUSTER: agent-llm-ollama
+    steps:
+      - name: Free disk space on runner
+        # Default ubuntu-latest runners ship with ~14 GB free. The Ollama
+        # image (~1 GB), qwen model (~400 MB), Omnia images (~1.5 GB
+        # combined), kind node image (~700 MB), and dockerfs overhead
+        # routinely pushes past that. jlumbroso/free-disk-space deletes
+        # preinstalled Android SDK, .NET, GHC, and dockerfs bloat —
+        # ~30 GB recovered.
+        uses: jlumbroso/free-disk-space@main
+        with:
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          tool-cache: true
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build Docker images
+        run: |
+          docker build -t "ghcr.io/altairalabs/omnia-operator:$IMAGE_TAG" -f Dockerfile .
+          docker build -t "ghcr.io/altairalabs/omnia-facade:$IMAGE_TAG" -f Dockerfile.agent .
+          docker build -t "ghcr.io/altairalabs/omnia-runtime:$IMAGE_TAG" -f Dockerfile.runtime .
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install kind
+        run: |
+          curl --retry 3 --retry-delay 5 -Lo ./kind \
+            https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name "$KIND_CLUSTER" --wait 60s
+
+      - name: Load images into kind
+        run: |
+          kind load docker-image "ghcr.io/altairalabs/omnia-operator:$IMAGE_TAG" --name "$KIND_CLUSTER"
+          kind load docker-image "ghcr.io/altairalabs/omnia-facade:$IMAGE_TAG" --name "$KIND_CLUSTER"
+          kind load docker-image "ghcr.io/altairalabs/omnia-runtime:$IMAGE_TAG" --name "$KIND_CLUSTER"
+
+      - name: Install cert-manager
+        run: |
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
+          kubectl wait --for=condition=Available deployment/cert-manager -n cert-manager --timeout=120s
+          kubectl wait --for=condition=Available deployment/cert-manager-webhook -n cert-manager --timeout=120s
+          kubectl wait --for=condition=Available deployment/cert-manager-cainjector -n cert-manager --timeout=120s
+
+      - name: Install Gateway API CRDs
+        run: |
+          kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
+
+      - name: Build chart dependencies
+        run: |
+          helm dependency build ./charts/omnia
+
+      - name: Deploy Omnia operator
+        run: |
+          helm install omnia ./charts/omnia \
+            -f charts/omnia/values-chart-tests.yaml \
+            --namespace omnia-system \
+            --create-namespace \
+            --set "image.tag=$IMAGE_TAG" \
+            --set image.pullPolicy=Never \
+            --set "facade.image.tag=$IMAGE_TAG" \
+            --set facade.image.pullPolicy=Never \
+            --set "framework.image.tag=$IMAGE_TAG" \
+            --set framework.image.pullPolicy=Never \
+            --set dashboard.enabled=false \
+            --set keda.enabled=false \
+            --set workspaceContent.enabled=false \
+            --set devMode=true \
+            --timeout 10m
+          kubectl wait --for=condition=Available deployment/omnia-controller-manager \
+            -n omnia-system --timeout=300s
+
+      - name: Deploy omnia-demos with tiny tool-capable model
+        run: |
+          # qwen2.5:0.5b is the smallest current Qwen model with tool
+          # calling working well enough for our tests. ~400 MB on disk
+          # vs ~2 GB for llama3.2:3b. We override additionalModels to
+          # an empty list since vision-demo's llava:7b would alone eat
+          # 4 GB and we don't run the vision specs in this workflow.
+          helm install omnia-demos ./charts/omnia-demos \
+            --namespace omnia-demo \
+            --create-namespace \
+            --set ollama.model=qwen2.5:0.5b \
+            --set 'ollama.additionalModels={qwen2.5:0.5b}' \
+            --set ollama.persistence.enabled=false \
+            --set toolsDemo.enabled=true \
+            --set audioDemo.enabled=false \
+            --set langchainDemo.enabled=false \
+            --set agent.handler=runtime \
+            --timeout 10m
+
+      - name: Wait for Ollama and tools-demo to be ready
+        run: |
+          # Ollama needs to start AND pre-pull the model; the demos
+          # chart's init container does the pull, so the pod stays
+          # NotReady until that finishes. Generous timeout for slow
+          # GitHub runner network.
+          echo "Waiting for Ollama..."
+          kubectl wait --for=condition=Ready pod \
+            -l app.kubernetes.io/name=ollama \
+            -n omnia-demo --timeout=15m
+
+          echo "Waiting for tools-demo agent..."
+          kubectl wait --for=jsonpath='{.status.phase}'=Running \
+            agentruntime/tools-demo \
+            -n omnia-demo --timeout=10m
+
+      - name: Run tool-calling E2E specs
+        env:
+          ENABLE_TOOL_CALLING_E2E: 'true'
+          KIND_CLUSTER: ${{ env.KIND_CLUSTER }}
+          # Skip e2e setup/cleanup — we did the deploy ourselves above.
+          E2E_SKIP_SETUP: 'true'
+          E2E_PREDEPLOYED: 'true'
+          E2E_SKIP_CLEANUP: 'true'
+          GOWORK: 'off'
+        run: |
+          go test -tags=e2e ./test/e2e/ -v -ginkgo.v \
+            -ginkgo.label-filter='tool-calling' \
+            -timeout 30m
+
+      - name: Collect debug info on failure
+        if: failure()
+        run: |
+          mkdir -p /tmp/llm-debug
+          {
+            echo "=== Pods (omnia-system) ==="
+            kubectl get pods -n omnia-system -o wide
+            echo
+            echo "=== Pods (omnia-demo) ==="
+            kubectl get pods -n omnia-demo -o wide
+            echo
+            echo "=== AgentRuntime ==="
+            kubectl get agentruntime -n omnia-demo -o yaml
+            echo
+            echo "=== Ollama logs ==="
+            kubectl logs -n omnia-demo -l app.kubernetes.io/name=ollama --tail=200 || true
+            echo
+            echo "=== Facade logs ==="
+            kubectl logs -n omnia-demo -l app.kubernetes.io/instance=tools-demo -c facade --tail=200 || true
+            echo
+            echo "=== Runtime logs ==="
+            kubectl logs -n omnia-demo -l app.kubernetes.io/instance=tools-demo -c runtime --tail=200 || true
+            echo
+            echo "=== Operator logs ==="
+            kubectl logs -n omnia-system -l app.kubernetes.io/name=omnia --tail=200 || true
+            echo
+            echo "=== Events (omnia-demo) ==="
+            kubectl get events -n omnia-demo --sort-by='.lastTimestamp' || true
+          } > /tmp/llm-debug/dump.txt 2>&1
+
+      - name: Upload debug artifact on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ollama-llm-debug
+          path: /tmp/llm-debug/
+          retention-days: 7
+
+      - name: Cleanup
+        if: always()
+        run: |
+          kind delete cluster --name "$KIND_CLUSTER" || true
+
+  # Tests the real Anthropic provider integration via the Anthropic API.
+  # Requires the ANTHROPIC_API_KEY repository secret. Skipped (no-op)
+  # when the secret is absent so forks and first-time setups don't 401.
+  claude:
+    name: Tool calling (claude)
+    if: |
+      (github.event_name == 'schedule' || github.event.inputs.provider == 'all' || github.event.inputs.provider == 'claude')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KIND_CLUSTER: agent-llm-claude
+    steps:
+      - name: Check for ANTHROPIC_API_KEY
+        id: gate
+        env:
+          HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        run: |
+          if [ "$HAS_KEY" != "true" ]; then
+            echo "ANTHROPIC_API_KEY not set — skipping (this is fine on forks)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Free disk space on runner
+        if: steps.gate.outputs.skip != 'true'
+        uses: jlumbroso/free-disk-space@main
+        with:
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          tool-cache: true
+
+      - name: Checkout code
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Docker Buildx
+        if: steps.gate.outputs.skip != 'true'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build Docker images
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          docker build -t "ghcr.io/altairalabs/omnia-operator:$IMAGE_TAG" -f Dockerfile .
+          docker build -t "ghcr.io/altairalabs/omnia-facade:$IMAGE_TAG" -f Dockerfile.agent .
+          docker build -t "ghcr.io/altairalabs/omnia-runtime:$IMAGE_TAG" -f Dockerfile.runtime .
+
+      - name: Setup Helm
+        if: steps.gate.outputs.skip != 'true'
+        uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install kind
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          curl --retry 3 --retry-delay 5 -Lo ./kind \
+            https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Create kind cluster
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          kind create cluster --name "$KIND_CLUSTER" --wait 60s
+
+      - name: Load images into kind
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          kind load docker-image "ghcr.io/altairalabs/omnia-operator:$IMAGE_TAG" --name "$KIND_CLUSTER"
+          kind load docker-image "ghcr.io/altairalabs/omnia-facade:$IMAGE_TAG" --name "$KIND_CLUSTER"
+          kind load docker-image "ghcr.io/altairalabs/omnia-runtime:$IMAGE_TAG" --name "$KIND_CLUSTER"
+
+      - name: Install cert-manager
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
+          kubectl wait --for=condition=Available deployment/cert-manager -n cert-manager --timeout=120s
+          kubectl wait --for=condition=Available deployment/cert-manager-webhook -n cert-manager --timeout=120s
+          kubectl wait --for=condition=Available deployment/cert-manager-cainjector -n cert-manager --timeout=120s
+
+      - name: Install Gateway API CRDs
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
+
+      - name: Build chart dependencies
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          helm dependency build ./charts/omnia
+
+      - name: Deploy Omnia operator
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          helm install omnia ./charts/omnia \
+            -f charts/omnia/values-chart-tests.yaml \
+            --namespace omnia-system \
+            --create-namespace \
+            --set "image.tag=$IMAGE_TAG" \
+            --set image.pullPolicy=Never \
+            --set "facade.image.tag=$IMAGE_TAG" \
+            --set facade.image.pullPolicy=Never \
+            --set "framework.image.tag=$IMAGE_TAG" \
+            --set framework.image.pullPolicy=Never \
+            --set dashboard.enabled=false \
+            --set keda.enabled=false \
+            --set workspaceContent.enabled=false \
+            --set devMode=true \
+            --timeout 10m
+          kubectl wait --for=condition=Available deployment/omnia-controller-manager \
+            -n omnia-system --timeout=300s
+
+      - name: Provision Claude Provider + tools-demo agent
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Stash the API key in a Secret. The Provider CRD's
+          # spec.credential.secretRef points at it; the operator mounts
+          # it into the runtime container as ANTHROPIC_API_KEY at
+          # reconcile time. The key never appears in logs or workflow
+          # output (kubectl create --from-literal is not echoed by
+          # `set -x` here because we don't enable it).
+          kubectl create namespace omnia-demo
+          kubectl create secret generic anthropic-credentials \
+            -n omnia-demo \
+            --from-literal=ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
+
+          kubectl apply -n omnia-demo -f - <<'EOF'
+          apiVersion: omnia.altairalabs.ai/v1alpha1
+          kind: Provider
+          metadata:
+            name: claude-provider
+          spec:
+            type: claude
+            model: claude-haiku-4-5-20251001
+            credential:
+              secretRef:
+                name: anthropic-credentials
+          ---
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: claude-tool-prompts
+          data:
+            pack.json: |
+              {
+                "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
+                "id": "claude-tool-prompts",
+                "name": "Claude Tool Prompts",
+                "version": "1.0.0",
+                "template_engine": { "version": "v1", "syntax": "{{variable}}" },
+                "prompts": {
+                  "default": {
+                    "id": "default",
+                    "name": "Tools Assistant",
+                    "version": "1.0.0",
+                    "system_template": "You are a helpful assistant. Use the provided tools when they help answer the question.",
+                    "tools": ["search_places", "get_weather", "calculate"],
+                    "parameters": { "temperature": 0.0 }
+                  }
+                }
+              }
+          ---
+          apiVersion: omnia.altairalabs.ai/v1alpha1
+          kind: PromptPack
+          metadata:
+            name: claude-tool-prompts
+          spec:
+            source:
+              type: configmap
+              configMapRef:
+                name: claude-tool-prompts
+            version: "1.0.0"
+          ---
+          apiVersion: omnia.altairalabs.ai/v1alpha1
+          kind: AgentRuntime
+          metadata:
+            name: tools-demo
+          spec:
+            providerRef:
+              name: claude-provider
+            promptPackRef:
+              name: claude-tool-prompts
+            facade:
+              type: websocket
+              port: 8080
+              handler: runtime
+              extraEnv:
+                - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+                  value: "true"
+          EOF
+
+      - name: Wait for tools-demo agent to be ready
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          kubectl wait --for=jsonpath='{.status.phase}'=Running \
+            agentruntime/tools-demo \
+            -n omnia-demo --timeout=5m
+
+      - name: Run tool-calling E2E specs
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          ENABLE_TOOL_CALLING_E2E: 'true'
+          KIND_CLUSTER: ${{ env.KIND_CLUSTER }}
+          E2E_SKIP_SETUP: 'true'
+          E2E_PREDEPLOYED: 'true'
+          E2E_SKIP_CLEANUP: 'true'
+          # The Ollama-readiness assertion in the test BeforeAll is
+          # skipped via this flag — the Claude provider has no
+          # in-cluster Ollama pod to wait on.
+          E2E_PROVIDER_TYPE: 'claude'
+          GOWORK: 'off'
+        run: |
+          go test -tags=e2e ./test/e2e/ -v -ginkgo.v \
+            -ginkgo.label-filter='tool-calling' \
+            -timeout 25m
+
+      - name: Collect debug info on failure
+        if: failure() && steps.gate.outputs.skip != 'true'
+        run: |
+          mkdir -p /tmp/llm-debug
+          {
+            echo "=== Pods (omnia-system) ==="
+            kubectl get pods -n omnia-system -o wide
+            echo
+            echo "=== Pods (omnia-demo) ==="
+            kubectl get pods -n omnia-demo -o wide
+            echo
+            echo "=== AgentRuntime ==="
+            kubectl get agentruntime -n omnia-demo -o yaml
+            echo
+            echo "=== Provider ==="
+            kubectl get provider -n omnia-demo -o yaml
+            echo
+            echo "=== Facade logs ==="
+            kubectl logs -n omnia-demo -l app.kubernetes.io/instance=tools-demo -c facade --tail=200 || true
+            echo
+            echo "=== Runtime logs ==="
+            kubectl logs -n omnia-demo -l app.kubernetes.io/instance=tools-demo -c runtime --tail=200 || true
+            echo
+            echo "=== Operator logs ==="
+            kubectl logs -n omnia-system -l app.kubernetes.io/name=omnia --tail=200 || true
+          } > /tmp/llm-debug/dump.txt 2>&1
+
+      - name: Upload debug artifact on failure
+        if: failure() && steps.gate.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-llm-debug
+          path: /tmp/llm-debug/
+          retention-days: 7
+
+      - name: Cleanup
+        if: always() && steps.gate.outputs.skip != 'true'
+        run: |
+          kind delete cluster --name "$KIND_CLUSTER" || true

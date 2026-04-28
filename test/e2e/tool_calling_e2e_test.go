@@ -68,17 +68,28 @@ var _ = Describe("Tool Calling E2E", Ordered, Label("tool-calling"), func() {
 		}
 		Eventually(verifyReady, 5*time.Minute, 5*time.Second).Should(Succeed())
 
-		By("verifying Ollama is healthy")
-		verifyOllama := func(g Gomega) {
-			cmd := exec.Command("kubectl", "get", "pods",
-				"-n", demoNamespace,
-				"-l", "app.kubernetes.io/name=ollama",
-				"-o", "jsonpath={.items[0].status.phase}")
-			output, err := utils.Run(cmd)
-			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(output).To(Equal("Running"))
+		// Ollama only runs in-cluster when the provider is Ollama. For
+		// the Claude / OpenAI / Gemini matrix cells of #857's nightly
+		// real-LLM workflow there's no Ollama pod to assert on.
+		// E2E_PROVIDER_TYPE selects the assertion; default is "ollama"
+		// for Tilt local-dev compatibility.
+		providerType := os.Getenv("E2E_PROVIDER_TYPE")
+		if providerType == "" {
+			providerType = "ollama"
 		}
-		Eventually(verifyOllama, 2*time.Minute, 5*time.Second).Should(Succeed())
+		if providerType == "ollama" {
+			By("verifying Ollama is healthy")
+			verifyOllama := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods",
+					"-n", demoNamespace,
+					"-l", "app.kubernetes.io/name=ollama",
+					"-o", "jsonpath={.items[0].status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Running"))
+			}
+			Eventually(verifyOllama, 2*time.Minute, 5*time.Second).Should(Succeed())
+		}
 
 		By("verifying the service endpoint is ready")
 		verifyEndpoint := func(g Gomega) {
