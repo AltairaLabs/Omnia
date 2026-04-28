@@ -521,7 +521,7 @@ spec:
       # substring match; FTS returns 1 because the tokens match.
       #
       # If you change the query, verify both tokens appear in the
-      # stored content above — `websearch_to_tsquery` joins terms with
+      # stored content above — websearch_to_tsquery joins terms with
       # AND by default, so any token absent from the row drops the row.
       print("=== multi-tier recall with tokenized query ===", flush=True)
       status, body = post("/api/v1/memories/retrieve", {
