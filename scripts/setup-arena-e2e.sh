@@ -323,8 +323,6 @@ retry 2 15 helm upgrade --install omnia charts/omnia \
     --set enterprise.evalWorker.image.pullPolicy=Never \
     --set enterprise.evalWorker.workspaceNamespace=dev-agents \
     --set enterprise.arena.queue.type=redis \
-    --set enterprise.arena.queue.redis.host=omnia-redis-master \
-    --set enterprise.arena.queue.redis.port=6379 \
     --set redis.enabled=true \
     --set redis.architecture=standalone \
     --set redis.auth.enabled=false \

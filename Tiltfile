@@ -639,10 +639,13 @@ if ENABLE_ENTERPRISE:
         'enterprise.arena.worker.image.repository=omnia-arena-worker-dev',
         'enterprise.arena.worker.image.tag=latest',
         'enterprise.arena.worker.image.pullPolicy=Never',
-        # Arena queue - use Redis when enterprise is enabled
+        # Arena queue - use Redis when enterprise is enabled. Address is
+        # auto-derived by the chart helper from redis.enabled=true (the
+        # FQDN form omnia-redis-master.<ns>.svc.cluster.local:6379) so
+        # arena workers in test-arena namespace can resolve it. Don't
+        # set arena.queue.redis.host explicitly — that override produces
+        # a non-FQDN that fails cross-namespace DNS lookup.
         'enterprise.arena.queue.type=redis',
-        'enterprise.arena.queue.redis.host=omnia-redis-master',
-        'enterprise.arena.queue.redis.port=6379',
         # Enable Redis for Arena queue (Bitnami subchart)
         'redis.enabled=true',
         'redis.architecture=standalone',
