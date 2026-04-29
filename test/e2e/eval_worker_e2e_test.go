@@ -353,8 +353,8 @@ spec:
             secretKeyRef:
               name: eval-postgres-conn
               key: connection-string
-        - name: REDIS_ADDRS
-          value: "omnia-redis-master.%s.svc.cluster.local:6379"
+        - name: REDIS_URL
+          value: "redis://omnia-redis-master.%s.svc.cluster.local:6379/0"
         readinessProbe:
           httpGet:
             path: /readyz
@@ -428,8 +428,8 @@ spec:
         - name: metrics
           containerPort: 9090
         env:
-        - name: REDIS_ADDR
-          value: "omnia-redis-master.%s.svc.cluster.local:6379"
+        - name: REDIS_URL
+          value: "redis://omnia-redis-master.%s.svc.cluster.local:6379/0"
         - name: NAMESPACES
           value: "%s"
         - name: SESSION_API_URL

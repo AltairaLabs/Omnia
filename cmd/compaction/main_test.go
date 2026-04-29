@@ -73,7 +73,7 @@ func TestParseFlags_WithArgs(t *testing.T) {
 		"--dry-run",
 		"--metrics-addr=:8080",
 		"--postgres-conn=postgres://localhost/test",
-		"--redis-addrs=localhost:6379",
+		"--redis-url=redis://localhost:6379/0",
 		"--cold-backend=gcs",
 		"--cold-bucket=my-bucket",
 	}
@@ -98,8 +98,8 @@ func TestParseFlags_WithArgs(t *testing.T) {
 	if f.postgresConn != "postgres://localhost/test" {
 		t.Errorf("unexpected postgresConn: %s", f.postgresConn)
 	}
-	if f.redisAddrs != "localhost:6379" {
-		t.Errorf("unexpected redisAddrs: %s", f.redisAddrs)
+	if f.redisURL != "redis://localhost:6379/0" {
+		t.Errorf("unexpected redisURL: %s", f.redisURL)
 	}
 	if f.coldBackend != "gcs" {
 		t.Errorf("unexpected coldBackend: %s", f.coldBackend)
@@ -116,7 +116,7 @@ func TestParseFlags_EnvOverrides(t *testing.T) {
 	os.Args = []string{"compaction"}
 
 	t.Setenv("POSTGRES_CONN", "postgres://envhost/db")
-	t.Setenv("REDIS_ADDRS", "env-redis:6379")
+	t.Setenv("REDIS_URL", "redis://env-redis:6379/0")
 	t.Setenv("COLD_BACKEND", "gcs")
 	t.Setenv("COLD_BUCKET", "env-bucket")
 
@@ -125,8 +125,8 @@ func TestParseFlags_EnvOverrides(t *testing.T) {
 	if f.postgresConn != "postgres://envhost/db" {
 		t.Errorf("expected POSTGRES_CONN from env, got %s", f.postgresConn)
 	}
-	if f.redisAddrs != "env-redis:6379" {
-		t.Errorf("expected REDIS_ADDRS from env, got %s", f.redisAddrs)
+	if f.redisURL != "redis://env-redis:6379/0" {
+		t.Errorf("expected REDIS_URL from env, got %s", f.redisURL)
 	}
 	if f.coldBackend != "gcs" {
 		t.Errorf("expected COLD_BACKEND from env, got %s", f.coldBackend)

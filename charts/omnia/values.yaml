@@ -1024,9 +1024,21 @@ sessionRetention:
       region: ""
       # -- Custom endpoint for S3-compatible storage
       endpoint: ""
+    # Hot-cache Redis for compaction (optional). Same per-consumer
+    # override shape as redis.default — falls through when empty.
     redis:
-      # -- Comma-separated Redis addresses for hot cache invalidation (optional)
-      addrs: ""
+      existingSecret:
+        name: ""
+        key: ""
+      url: ""
+      host: ""
+      port: 6379
+      db: 0
+      user: ""
+      tls:
+        caExistingSecret:
+          name: ""
+          key: ""
     serviceAccount:
       # -- Annotations for the compaction ServiceAccount (e.g., IRSA, Workload Identity)
       annotations: {}

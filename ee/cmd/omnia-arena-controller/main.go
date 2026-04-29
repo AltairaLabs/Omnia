@@ -82,10 +82,9 @@ func main() {
 	var nfsServer string
 	var nfsPath string
 	var sessionPostgresConn string
-	var redisAddr string
-	var redisPassword string
-	var redisPasswordSecret string
-	var redisDB int
+	var redisURL string
+	var redisURLSecretName string
+	var redisURLSecretKey string
 	var enableWebhooks bool
 	var enableLicenseWebhooks bool
 	var devMode bool
@@ -111,15 +110,18 @@ func main() {
 		"NFS export path for workspace content.")
 	flag.StringVar(&sessionPostgresConn, "session-postgres-conn", "",
 		"Postgres connection string for session storage (required for key rotation re-encryption).")
-	flag.StringVar(&redisAddr, "redis-addr", "",
-		"Redis server address for Arena work queue.")
-	flag.StringVar(&redisPassword, "redis-password", "",
-		"Redis password for Arena work queue (deprecated: use --redis-password-secret instead).")
-	flag.StringVar(&redisPasswordSecret, "redis-password-secret", "",
-		"Name of Kubernetes Secret containing Redis password (key: redis-password). "+
-			"When set, workers receive the password via secretKeyRef instead of plain text.")
-	flag.IntVar(&redisDB, "redis-db", 0,
-		"Redis database number for Arena work queue.")
+	flag.StringVar(&redisURL, "redis-url", os.Getenv("REDIS_URL"),
+		"Redis URL (redis:// or rediss://) for the Arena work queue. "+
+			"Defaults to the REDIS_URL env, which the chart mounts from a "+
+			"Secret when the consumer uses the existingSecret form.")
+	flag.StringVar(&redisURLSecretName, "redis-url-secret-name", "",
+		"Kubernetes Secret name to reference on every arena-worker pod "+
+			"so workers see the same Redis URL. Set when the operator-side "+
+			"Redis is configured via the existingSecret form. Empty "+
+			"means workers receive the literal --redis-url value as a "+
+			"plain env var.")
+	flag.StringVar(&redisURLSecretKey, "redis-url-secret-key", "",
+		"Key within --redis-url-secret-name whose value is the Redis URL.")
 	flag.BoolVar(&enableWebhooks, "enable-webhooks", false,
 		"Enable webhook server for admission webhooks (requires TLS certificates).")
 	flag.BoolVar(&enableLicenseWebhooks, "enable-license-webhooks", false,
@@ -271,18 +273,16 @@ func main() {
 
 	// Create Redis queue and aggregator
 	var arenaAggregator *aggregator.Aggregator
-	if redisAddr != "" {
+	if redisURL != "" {
 		redisQueue, err := queue.NewRedisQueue(queue.RedisOptions{
-			Addr:     redisAddr,
-			Password: redisPassword,
-			DB:       redisDB,
-			Options:  queue.DefaultOptions(),
+			URL:     redisURL,
+			Options: queue.DefaultOptions(),
 		})
 		if err != nil {
 			setupLog.Error(err, "failed to create Redis queue for arena aggregator")
 		} else {
 			arenaAggregator = aggregator.New(redisQueue)
-			setupLog.Info("arena result aggregator initialized", "redisAddr", redisAddr)
+			setupLog.Info("arena result aggregator initialized")
 		}
 	}
 
@@ -295,10 +295,9 @@ func main() {
 		WorkerImagePullPolicy: corev1.PullPolicy(arenaWorkerImagePullPolicy),
 		LicenseValidator:      licenseValidator,
 		Aggregator:            arenaAggregator,
-		RedisAddr:             redisAddr,
-		RedisPassword:         redisPassword,
-		RedisPasswordSecret:   redisPasswordSecret,
-		RedisDB:               redisDB,
+		RedisURL:              redisURL,
+		RedisURLSecretName:    redisURLSecretName,
+		RedisURLSecretKey:     redisURLSecretKey,
 		WorkspaceContentPath:  workspaceContentPath,
 		NFSServer:             nfsServer,
 		NFSPath:               nfsPath,

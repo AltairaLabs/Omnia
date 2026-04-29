@@ -103,14 +103,18 @@ type ArenaJobReconciler struct {
 	Aggregator            *aggregator.Aggregator
 	// LicenseValidator validates license for job types/replicas/scheduling (defense in depth)
 	LicenseValidator *license.Validator
-	// Redis configuration for lazy connection
-	RedisAddr     string
-	RedisPassword string
-	RedisDB       int
-	// RedisPasswordSecret is the name of the Kubernetes Secret containing the Redis password.
-	// When set, worker pods receive the password via a secretKeyRef instead of a plain-text env var.
-	// The secret must have a key named "redis-password".
-	RedisPasswordSecret string
+	// RedisURL is the Redis connection URL (redis:// or rediss://) for
+	// lazy queue connection. Worker pods receive the same URL via env
+	// (literal value or secretKeyRef from RedisURLSecretName).
+	RedisURL string
+	// RedisURLSecretName is the Kubernetes Secret holding the Redis
+	// URL when the operator uses the existingSecret form. Worker pods
+	// get REDIS_URL via valueFrom.secretKeyRef on this Secret. Empty
+	// means workers receive the literal RedisURL as a plain env var.
+	RedisURLSecretName string
+	// RedisURLSecretKey is the key within RedisURLSecretName whose
+	// value is the Redis URL.
+	RedisURLSecretKey string
 	// WorkspaceContentPath is the base path for workspace content volumes.
 	// When set, workers mount the workspace content PVC and access content directly.
 	// Structure: {WorkspaceContentPath}/{workspace}/{namespace}/{contentPath}
@@ -308,30 +312,29 @@ func (r *ArenaJobReconciler) getExistingJob(ctx context.Context, arenaJob *omnia
 	return job, nil
 }
 
-// redisPasswordSecretKey is the key within the Kubernetes Secret that holds the Redis password.
-const redisPasswordSecretKey = "redis-password"
-
-// buildRedisPasswordEnvVar returns the REDIS_PASSWORD env var for worker pods.
-// When RedisPasswordSecret is set, uses a secretKeyRef for secure injection.
-// Falls back to plain-text value from RedisPassword for backward compatibility.
-func (r *ArenaJobReconciler) buildRedisPasswordEnvVar() []corev1.EnvVar {
-	if r.RedisPasswordSecret != "" {
+// buildRedisURLEnvVar returns the REDIS_URL env var for worker pods.
+// When RedisURLSecretName is set, uses a secretKeyRef for secure
+// injection (the URL itself contains the password). Otherwise emits
+// the literal RedisURL as a plain env var (acceptable for
+// unauthenticated dev Redis).
+func (r *ArenaJobReconciler) buildRedisURLEnvVar() []corev1.EnvVar {
+	if r.RedisURLSecretName != "" && r.RedisURLSecretKey != "" {
 		return []corev1.EnvVar{{
-			Name: "REDIS_PASSWORD",
+			Name: "REDIS_URL",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: r.RedisPasswordSecret,
+						Name: r.RedisURLSecretName,
 					},
-					Key: redisPasswordSecretKey,
+					Key: r.RedisURLSecretKey,
 				},
 			},
 		}}
 	}
-	if r.RedisPassword != "" {
+	if r.RedisURL != "" {
 		return []corev1.EnvVar{{
-			Name:  "REDIS_PASSWORD",
-			Value: r.RedisPassword,
+			Name:  "REDIS_URL",
+			Value: r.RedisURL,
 		}}
 	}
 	return nil
@@ -722,14 +725,10 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		},
 	}
 
-	// Add Redis configuration if available
-	if r.RedisAddr != "" {
-		env = append(env, corev1.EnvVar{
-			Name:  "REDIS_ADDR",
-			Value: r.RedisAddr,
-		})
-	}
-	env = append(env, r.buildRedisPasswordEnvVar()...)
+	// Add Redis URL config (literal value or secret-sourced env). The
+	// arena-worker binary picks the URL up via REDIS_URL env fallback
+	// on its --redis-url flag.
+	env = append(env, r.buildRedisURLEnvVar()...)
 
 	// Add verbose flag for debug logging
 	if arenaJob.Spec.Verbose {
@@ -1031,15 +1030,13 @@ func (r *ArenaJobReconciler) getOrCreateQueue() (queue.WorkQueue, error) {
 	}
 
 	// No Redis configured
-	if r.RedisAddr == "" {
+	if r.RedisURL == "" {
 		return nil, nil
 	}
 
 	// Try to connect lazily
 	q, err := queue.NewRedisQueue(queue.RedisOptions{
-		Addr:     r.RedisAddr,
-		Password: r.RedisPassword,
-		DB:       r.RedisDB,
+		URL: r.RedisURL,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)

@@ -1,4 +1,4 @@
-suite: operator forwards Redis config to memory-api + eval-worker
+suite: operator forwards Redis URL config to memory-api + eval-worker
 release:
   name: omnia
 values:
@@ -19,9 +19,8 @@ tests:
 
   - it: emits no Redis flags when no Redis is configured
     # Default OSS install (redis.enabled=false, no defaults set, no
-    # consumer overrides) renders the operator with no --memory-redis-url,
-    # no --redis-addr, no --memory-redis-url-secret-*. Every Redis-backed
-    # consumer stays in its no-Redis mode.
+    # consumer overrides) renders the operator with no Redis flags at
+    # all. Every Redis-backed consumer stays in its no-Redis mode.
     template: templates/deployment.yaml
     asserts:
       - notMatchRegex:
@@ -32,14 +31,14 @@ tests:
           pattern: ^--memory-redis-url-secret-
       - notMatchRegex:
           path: spec.template.spec.containers[0].args[*]
-          pattern: ^--redis-addr=
+          pattern: ^--redis-url=
 
-  - it: Bitnami subchart auto-populates URL + host:port for memory-api and eval-worker
+  - it: Bitnami subchart auto-populates URL form for memory-api and eval-worker
     # redis.enabled=true → omnia.redis.url resolves to the in-cluster
-    # subchart service. Operator emits both forms: --memory-redis-url
+    # subchart service. Operator emits both --memory-redis-url
     # (consumed by ServiceBuilder for per-workspace memory-api pods)
-    # and --redis-addr (consumed by AgentRuntimeReconciler for the
-    # eval-worker autoscaler, which still takes host:port until Phase 3).
+    # and --redis-url (consumed by AgentRuntimeReconciler for the
+    # eval-worker autoscaler).
     set:
       redis.enabled: true
     template: templates/deployment.yaml
@@ -49,12 +48,12 @@ tests:
           content: --memory-redis-url=redis://omnia-redis-master.NAMESPACE.svc.cluster.local:6379/0
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --redis-addr=omnia-redis-master.NAMESPACE.svc.cluster.local:6379
+          content: --redis-url=redis://omnia-redis-master.NAMESPACE.svc.cluster.local:6379/0
 
-  - it: redis.default.url overrides the subchart and omits eval-worker addr extraction
+  - it: redis.default.url overrides the subchart for both consumers
     # Operators pointing at AWS ElastiCache / GCP MemoryStore set
-    # redis.default.url. Subchart is bypassed; eval-worker still gets
-    # --redis-addr via urlParse extraction.
+    # redis.default.url. Subchart is bypassed; both consumers receive
+    # the same URL.
     set:
       redis.default.url: "rediss://default:hunter2@redis.example.com:6380/2"
     template: templates/deployment.yaml
@@ -64,13 +63,13 @@ tests:
           content: --memory-redis-url=rediss://default:hunter2@redis.example.com:6380/2
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --redis-addr=redis.example.com:6380
+          content: --redis-url=rediss://default:hunter2@redis.example.com:6380/2
 
-  - it: redis.default.existingSecret emits secret refs and skips eval-worker addr
-    # The Secret form is opaque at render time — the chart cannot
-    # extract a host:port for the eval-worker autoscaler. Operator
-    # passes secret refs to ServiceBuilder so per-workspace memory-api
-    # pods get REDIS_URL env from the same Secret.
+  - it: redis.default.existingSecret emits secret refs only
+    # Secret form is opaque at render time. Operator passes secret
+    # refs to ServiceBuilder + AgentRuntimeReconciler; no plaintext
+    # URL flag is emitted. Worker pods receive REDIS_URL via the
+    # corresponding env mount.
     set:
       redis.default.existingSecret.name: redis-creds
       redis.default.existingSecret.key: url
@@ -87,7 +86,7 @@ tests:
           pattern: ^--memory-redis-url=
       - notMatchRegex:
           path: spec.template.spec.containers[0].args[*]
-          pattern: ^--redis-addr=
+          pattern: ^--redis-url=
 
   - it: workspaceServices.memoryApi.cache.redis override wins over redis.default
     # Per-consumer Redis: memory cache pinned to its own Redis (e.g.

@@ -156,7 +156,7 @@ func TestPoolConfigDefaults(t *testing.T) {
 
 func TestApplyEnvFallbacks_AllOverrides(t *testing.T) {
 	t.Setenv("POSTGRES_CONN", "postgres://test:5432/db")
-	t.Setenv("REDIS_ADDRS", "localhost:6379")
+	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
 	t.Setenv("COLD_BACKEND", "s3")
 	t.Setenv("COLD_BUCKET", "my-bucket")
 	t.Setenv("COLD_REGION", "us-east-1")
@@ -184,7 +184,7 @@ func TestApplyEnvFallbacks_AllOverrides(t *testing.T) {
 		want string
 	}{
 		{"postgresConn", f.postgresConn, "postgres://test:5432/db"},
-		{"redisAddrs", f.redisAddrs, "localhost:6379"},
+		{"redisURL", f.redisURL, "redis://localhost:6379/0"},
 		{"coldBackend", f.coldBackend, "s3"},
 		{"coldBucket", f.coldBucket, "my-bucket"},
 		{"coldRegion", f.coldRegion, "us-east-1"},
@@ -276,7 +276,7 @@ func TestFlagsStruct(t *testing.T) {
 		healthAddr:   ":8081",
 		metricsAddr:  ":9090",
 		postgresConn: "postgres://localhost/test",
-		redisAddrs:   "localhost:6379,localhost:6380",
+		redisURL:     "redis://localhost:6379/0",
 		coldBackend:  "s3",
 		coldBucket:   "archive",
 		coldRegion:   "us-west-2",
@@ -300,8 +300,8 @@ func TestFlagsStruct(t *testing.T) {
 	if f.postgresConn != "postgres://localhost/test" {
 		t.Errorf("postgresConn = %q", f.postgresConn)
 	}
-	if f.redisAddrs != "localhost:6379,localhost:6380" {
-		t.Errorf("redisAddrs = %q", f.redisAddrs)
+	if f.redisURL != "redis://localhost:6379/0" {
+		t.Errorf("redisURL = %q", f.redisURL)
 	}
 	if f.coldBackend != "s3" {
 		t.Errorf("coldBackend = %q", f.coldBackend)

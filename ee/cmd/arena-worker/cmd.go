@@ -115,10 +115,8 @@ func run(ctx context.Context) error {
 
 	// Connect to Redis queue
 	rawQ, err := queue.NewRedisQueue(queue.RedisOptions{
-		Addr:     cfg.RedisAddr,
-		Password: cfg.RedisPassword,
-		DB:       cfg.RedisDB,
-		Options:  queue.DefaultOptions(),
+		URL:     cfg.RedisURL,
+		Options: queue.DefaultOptions(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to connect to queue: %w", err)
@@ -129,7 +127,7 @@ func run(ctx context.Context) error {
 		}
 	}()
 
-	log.Info("connected to redis", "addr", cfg.RedisAddr)
+	log.Info("connected to redis")
 
 	// Initialize metrics and wrap queue with instrumentation
 	queueMetrics := queue.NewQueueMetrics(queue.QueueMetricsConfig{})
