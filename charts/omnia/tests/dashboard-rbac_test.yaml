@@ -7,6 +7,7 @@ templates:
   - templates/dashboard/serviceaccount.yaml
   - templates/dashboard/clusterrole.yaml
   - templates/dashboard/clusterrolebinding.yaml
+  - templates/dashboard/auth-delegator-binding.yaml
   - templates/dashboard/deployment.yaml
   - templates/dashboard/configmap.yaml
   - templates/serviceaccount.yaml
@@ -110,6 +111,45 @@ tests:
     set:
       rbac.create: false
     template: templates/dashboard/clusterrole.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: dashboard SA is bound to system:auth-delegator for TokenReview
+    # Required by /api/auth/service-token (mgmt-plane mint endpoint) so the
+    # dashboard can validate the caller's k8s SA token via TokenReview.
+    template: templates/dashboard/auth-delegator-binding.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: kind
+          value: ClusterRoleBinding
+      - equal:
+          path: roleRef.name
+          value: system:auth-delegator
+      - equal:
+          path: roleRef.kind
+          value: ClusterRole
+      - equal:
+          path: subjects[0].kind
+          value: ServiceAccount
+      - equal:
+          path: subjects[0].name
+          value: omnia-dashboard
+
+  - it: disabling dashboard omits the auth-delegator binding
+    set:
+      dashboard.enabled: false
+    template: templates/dashboard/auth-delegator-binding.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: disabling rbac.create omits the auth-delegator binding
+    set:
+      rbac.create: false
+    template: templates/dashboard/auth-delegator-binding.yaml
     asserts:
       - hasDocuments:
           count: 0

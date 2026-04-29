@@ -22,6 +22,11 @@ const { WebSocket, WebSocketServer } = require("ws");
 const { checkAnonymousAuthGuard } = require("./lib/auth-boot-guard");
 const { loadSigningKey, mintToken } = require("./lib/mgmt-plane-token");
 const { serveJwks, JWKS_PATH } = require("./lib/jwks");
+const {
+  SERVICE_TOKEN_PATH,
+  handleServiceTokenRequest,
+  parseAllowlist,
+} = require("./lib/service-token");
 
 // Refuse to start if we're configured to run unauthenticated in what looks
 // like production. Mirrors the Helm chart's render-time check
@@ -129,6 +134,16 @@ const MGMT_PLANE_TTL_SECONDS = (() => {
   }
   return n;
 })();
+
+// Allowlist of service-account names ("<namespace>/<sa-name>") allowed
+// to mint mgmt-plane JWTs via /api/auth/service-token. No ambient
+// authority — adding a new in-cluster service is a chart change, not a
+// runtime grant. Empty list disables the endpoint entirely (returns
+// 503), which is the right shape for installs where no service
+// principal needs minting.
+const SERVICE_TOKEN_ALLOWLIST = parseAllowlist(
+  process.env.OMNIA_DASHBOARD_SERVICE_TOKEN_ALLOWED_SAS || "",
+);
 
 // Service domain for K8s cluster DNS
 const SERVICE_DOMAIN = process.env.SERVICE_DOMAIN || "svc.cluster.local";
@@ -660,6 +675,40 @@ app.prepare().then(() => {
           res.writeHead(503, { "Content-Type": "text/plain" });
           res.end("mgmt-plane signing key not configured");
         }
+        return;
+      }
+
+      // Service-principal token mint endpoint. In-cluster services
+      // (Doctor, Arena dev-console, etc.) POST their k8s SA token to
+      // get a freshly-minted mgmt-plane JWT they can attach to facade
+      // WS dials. The dashboard is the only pod with the private key
+      // — every other service holds only its own SA token, which the
+      // TokenReview API authenticates without ever leaving the cluster.
+      if (parsedUrl.pathname === SERVICE_TOKEN_PATH) {
+        if (!mgmtPlaneSigningKey || SERVICE_TOKEN_ALLOWLIST.size === 0) {
+          // No key configured (test/dev) or no allowlist (no
+          // service principals expected). Return 503 so callers
+          // surface a config error rather than silently retrying.
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              error: mgmtPlaneSigningKey
+                ? "OMNIA_DASHBOARD_SERVICE_TOKEN_ALLOWED_SAS is empty — no service principals are permitted to mint"
+                : "mgmt-plane signing key not configured",
+            }),
+          );
+          return;
+        }
+        await handleServiceTokenRequest(
+          {
+            signingKey: mgmtPlaneSigningKey,
+            mintToken,
+            allowlist: SERVICE_TOKEN_ALLOWLIST,
+            ttlSeconds: MGMT_PLANE_TTL_SECONDS,
+          },
+          req,
+          res,
+        );
         return;
       }
 

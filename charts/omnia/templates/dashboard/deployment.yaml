@@ -175,6 +175,24 @@ spec:
             */}}
             - name: OMNIA_MGMT_PLANE_SIGNING_KEY_PATH
               value: /etc/omnia/mgmt-plane/tls.key
+            {{- /*
+              Comma-separated allowlist of <namespace>/<sa-name>
+              entries permitted to mint mgmt-plane JWTs via the
+              dashboard's /api/auth/service-token endpoint. The
+              chart auto-includes Doctor's SA when doctor.enabled
+              is true; operators can extend via
+              dashboard.serviceTokenAllowlist for other in-cluster
+              services (Arena dev-console, etc.). Empty list →
+              endpoint returns 503 (no service principals expected).
+            */}}
+            {{- $sas := .Values.dashboard.serviceTokenAllowlist | default (list) }}
+            {{- if and .Values.doctor.enabled (default true (index (.Values.doctor.mgmtPlaneToken | default dict) "enabled")) }}
+            {{- $sas = append $sas (printf "%s/%s" .Release.Namespace (include "omnia.doctor.fullname" .)) }}
+            {{- end }}
+            {{- if $sas }}
+            - name: OMNIA_DASHBOARD_SERVICE_TOKEN_ALLOWED_SAS
+              value: {{ join "," $sas | quote }}
+            {{- end }}
             {{- with .Values.dashboard.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
