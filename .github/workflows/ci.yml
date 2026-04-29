@@ -363,8 +363,31 @@ jobs:
     - name: Validate Helm templates (default values)
       run: helm template test ./charts/omnia -f charts/omnia/values-chart-tests.yaml > /dev/null
 
-    - name: Validate Helm templates (enterprise enabled)
-      run: helm template test ./charts/omnia -f charts/omnia/values-chart-tests.yaml --set enterprise.enabled=true > /dev/null
+    - name: Validate Helm templates (enterprise enabled + Redis)
+      # Enterprise enables the Arena queue (type=redis by default), which
+      # requires a resolvable Redis URL — the chart's omnia.validateArenaQueue
+      # render guard fails the template otherwise. Pair the two so this
+      # smoke render exercises both.
+      run: |
+        helm template test ./charts/omnia \
+          -f charts/omnia/values-chart-tests.yaml \
+          --set enterprise.enabled=true \
+          --set redis.enabled=true \
+          > /dev/null
+
+    - name: Validate Helm templates (enterprise without Redis must fail)
+      # Pin the omnia.validateArenaQueue guard. Without this assertion, a
+      # future change that drops the guard would silently let through a
+      # broken Arena install.
+      run: |
+        if helm template test ./charts/omnia \
+          -f charts/omnia/values-chart-tests.yaml \
+          --set enterprise.enabled=true \
+          > /dev/null 2>&1; then
+          echo "FAIL: enterprise enabled without Redis should have failed render"
+          exit 1
+        fi
+        echo "OK: omnia.validateArenaQueue correctly blocked enterprise + no Redis"
 
     - name: Validate Helm templates (full stack)
       run: |

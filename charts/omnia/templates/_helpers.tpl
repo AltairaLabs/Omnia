@@ -519,8 +519,10 @@ Include this from every template that renders when dashboard.enabled=true.
 {{- if .Values.dashboard.enabled -}}
 {{- $replicas := int (default 1 .Values.dashboard.replicaCount) -}}
 {{- if gt $replicas 1 -}}
-{{- $sessionURL := include "omnia.redis.url" (dict "ctx" . "consumer" "dashboard.session.redis") -}}
-{{- if not $sessionURL -}}
+{{- $args := dict "ctx" . "consumer" "dashboard.session.redis" -}}
+{{- $sessionURL := include "omnia.redis.url" $args -}}
+{{- $hasSecret := include "omnia.redis.hasSecret" $args -}}
+{{- if and (not $sessionURL) (not $hasSecret) -}}
 {{- fail "dashboard.replicaCount > 1 requires a resolvable Redis session store. Set redis.default, dashboard.session.redis, redis.enabled=true, or scale to dashboard.replicaCount=1." -}}
 {{- end -}}
 {{- end -}}
@@ -535,8 +537,10 @@ restarts.
 */}}
 {{- define "omnia.validateArenaQueue" -}}
 {{- if and .Values.enterprise.enabled (eq (default "redis" .Values.enterprise.arena.queue.type) "redis") -}}
-{{- $arenaURL := include "omnia.redis.url" (dict "ctx" . "consumer" "enterprise.arena.queue.redis") -}}
-{{- if not $arenaURL -}}
+{{- $args := dict "ctx" . "consumer" "enterprise.arena.queue.redis" -}}
+{{- $arenaURL := include "omnia.redis.url" $args -}}
+{{- $hasSecret := include "omnia.redis.hasSecret" $args -}}
+{{- if and (not $arenaURL) (not $hasSecret) -}}
 {{- fail "enterprise.arena.queue.type=redis requires a resolvable Redis URL. Set redis.default, enterprise.arena.queue.redis, redis.enabled=true, or set enterprise.arena.queue.type=memory (dev only)." -}}
 {{- end -}}
 {{- end -}}

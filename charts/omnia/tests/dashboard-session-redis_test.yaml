@@ -98,3 +98,25 @@ tests:
           content:
             name: OMNIA_SESSION_REDIS_URL
             value: "redis://omnia-redis-master.NAMESPACE.svc.cluster.local:6379/0"
+
+  - it: replicaCount>1 with redis.default.existingSecret satisfies validateSession
+    # Secret-form Redis URLs satisfy the multi-replica guard. Without
+    # this assertion, an earlier version of the helper failed render
+    # for prod-typical configs (URL hidden in a Secret) — see
+    # examples/values-prod-oauth.yaml.
+    set:
+      dashboard.replicaCount: 3
+      redis.default.existingSecret.name: omnia-redis-url
+      redis.default.existingSecret.key: url
+    template: templates/dashboard/deployment.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNIA_SESSION_REDIS_URL
+            valueFrom:
+              secretKeyRef:
+                name: omnia-redis-url
+                key: url
