@@ -79,7 +79,7 @@ func TestNewMgmtPlaneTokenMinter_PKCS8(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected ok, got %v", err)
 	}
-	if m.kid == "" {
+	if m.loaded.kid == "" {
 		t.Fatal("kid not set")
 	}
 	if m.issuer != auth.DefaultMgmtPlaneIssuer {
@@ -143,7 +143,7 @@ func TestToken_FacadeAcceptsMintedToken(t *testing.T) {
 		t.Fatalf("token: %v", err)
 	}
 
-	resolver := &auth.StaticKeyResolver{Keys: map[string]*rsa.PublicKey{m.kid: &key.PublicKey}}
+	resolver := &auth.StaticKeyResolver{Keys: map[string]*rsa.PublicKey{m.loaded.kid: &key.PublicKey}}
 	v := auth.NewMgmtPlaneValidatorWithResolver(resolver)
 
 	parser := jwt.NewParser(
@@ -158,8 +158,8 @@ func TestToken_FacadeAcceptsMintedToken(t *testing.T) {
 		if kid == "" {
 			t.Fatal("token missing kid header")
 		}
-		if kid != m.kid {
-			t.Fatalf("kid mismatch: token=%q minter=%q", kid, m.kid)
+		if kid != m.loaded.kid {
+			t.Fatalf("kid mismatch: token=%q minter=%q", kid, m.loaded.kid)
 		}
 		return &key.PublicKey, nil
 	})
@@ -292,6 +292,86 @@ func TestRSAThumbprint_DeterministicForSameKey(t *testing.T) {
 	}
 	if a == "" {
 		t.Fatal("thumbprint empty")
+	}
+}
+
+// TestToken_PicksUpRotatedKey is the regression guard for the
+// "bad handshake" / "unknown JWT kid" failure that prompted the
+// hot-reload refactor. Rotating the file Doctor mounts (Helm
+// regenerating the dashboard signing-keypair Secret) must propagate
+// to the next Token() call — without restarting the pod.
+func TestToken_PicksUpRotatedKey(t *testing.T) {
+	path, key1 := writePKCS8Key(t)
+	m, err := NewMgmtPlaneTokenMinter(MgmtPlaneTokenMinterOptions{KeyPath: path})
+	if err != nil {
+		t.Fatalf("minter: %v", err)
+	}
+	originalKid := m.loaded.kid
+
+	t1, err := m.Token("agent", "ws")
+	if err != nil {
+		t.Fatalf("t1: %v", err)
+	}
+
+	// Rotate: write a different key to the same path. Bump mtime so
+	// the reload check fires (the kubelet's atomic-symlink update
+	// also bumps mtime, so this matches production).
+	key2, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("rotate gen: %v", err)
+	}
+	if key2.N.Cmp(key1.N) == 0 {
+		t.Fatal("rotation produced the same key — test would not exercise the path")
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key2)
+	if err != nil {
+		t.Fatalf("rotate marshal: %v", err)
+	}
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	if err := os.WriteFile(path, pemBytes, 0o600); err != nil {
+		t.Fatalf("rotate write: %v", err)
+	}
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	t2, err := m.Token("agent", "ws")
+	if err != nil {
+		t.Fatalf("t2: %v", err)
+	}
+	if t1 == t2 {
+		t.Fatal("expected new token after key rotation; same token returned (cache not invalidated)")
+	}
+	if m.loaded.kid == originalKid {
+		t.Fatal("kid did not update after rotation — facade JWKS resolver would 401 these tokens")
+	}
+}
+
+// TestToken_StableWhenFileUnchanged confirms the stat-based reload
+// check is a no-op on the hot path: a Token() call with no rotation
+// must reuse the cached parsed key (not re-read the file).
+func TestToken_StableWhenFileUnchanged(t *testing.T) {
+	path, _ := writePKCS8Key(t)
+	m, err := NewMgmtPlaneTokenMinter(MgmtPlaneTokenMinterOptions{KeyPath: path})
+	if err != nil {
+		t.Fatalf("minter: %v", err)
+	}
+	reads := 0
+	originalRead := m.readFn
+	m.readFn = func(p string) ([]byte, error) {
+		reads++
+		return originalRead(p)
+	}
+
+	if _, err := m.Token("a", "w"); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	if _, err := m.Token("a", "w"); err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if reads != 0 {
+		t.Errorf("expected 0 file reads on the unchanged path, got %d", reads)
 	}
 }
 
