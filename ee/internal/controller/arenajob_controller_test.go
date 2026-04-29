@@ -1482,11 +1482,11 @@ var _ = Describe("ArenaJob Controller", func() {
 			Expect(q).To(Equal(memQueue))
 		})
 
-		It("should return nil when no Redis address configured", func() {
+		It("should return nil when no Redis URL configured", func() {
 			reconciler := &ArenaJobReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				RedisAddr: "",
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				RedisURL: "",
 			}
 
 			q, err := reconciler.getOrCreateQueue()
@@ -1496,9 +1496,9 @@ var _ = Describe("ArenaJob Controller", func() {
 
 		It("should return error when Redis connection fails", func() {
 			reconciler := &ArenaJobReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				RedisAddr: "invalid-host:12345",
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				RedisURL: "redis://invalid-host:12345/0",
 			}
 
 			q, err := reconciler.getOrCreateQueue()
@@ -1514,9 +1514,9 @@ var _ = Describe("ArenaJob Controller", func() {
 			defer mr.Close()
 
 			reconciler := &ArenaJobReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				RedisAddr: mr.Addr(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				RedisURL: "redis://" + mr.Addr() + "/0",
 			}
 
 			// First call should create the queue
@@ -1553,9 +1553,9 @@ var _ = Describe("ArenaJob Controller", func() {
 			}
 
 			reconciler := &ArenaJobReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				RedisAddr: "", // No Redis configured
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				RedisURL: "", // No Redis configured
 			}
 
 			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, nil, nil)
@@ -2474,50 +2474,52 @@ spec:
 		})
 	})
 
-	Context("buildRedisPasswordEnvVar", func() {
-		It("should return secretKeyRef when RedisPasswordSecret is set", func() {
+	Context("buildRedisURLEnvVar", func() {
+		It("should return secretKeyRef when RedisURLSecretName/Key are set", func() {
 			reconciler := &ArenaJobReconciler{
-				RedisPasswordSecret: "my-redis-secret",
+				RedisURLSecretName: "my-redis-secret",
+				RedisURLSecretKey:  "url",
 			}
 
-			envVars := reconciler.buildRedisPasswordEnvVar()
+			envVars := reconciler.buildRedisURLEnvVar()
 			Expect(envVars).To(HaveLen(1))
-			Expect(envVars[0].Name).To(Equal("REDIS_PASSWORD"))
+			Expect(envVars[0].Name).To(Equal("REDIS_URL"))
 			Expect(envVars[0].Value).To(BeEmpty())
 			Expect(envVars[0].ValueFrom).NotTo(BeNil())
 			Expect(envVars[0].ValueFrom.SecretKeyRef).NotTo(BeNil())
 			Expect(envVars[0].ValueFrom.SecretKeyRef.Name).To(Equal("my-redis-secret"))
-			Expect(envVars[0].ValueFrom.SecretKeyRef.Key).To(Equal("redis-password"))
+			Expect(envVars[0].ValueFrom.SecretKeyRef.Key).To(Equal("url"))
 		})
 
-		It("should fall back to plain-text value when only RedisPassword is set", func() {
+		It("should fall back to plain-text URL when only RedisURL is set", func() {
 			reconciler := &ArenaJobReconciler{
-				RedisPassword: "my-password",
+				RedisURL: "redis://my-redis:6379/0",
 			}
 
-			envVars := reconciler.buildRedisPasswordEnvVar()
+			envVars := reconciler.buildRedisURLEnvVar()
 			Expect(envVars).To(HaveLen(1))
-			Expect(envVars[0].Name).To(Equal("REDIS_PASSWORD"))
-			Expect(envVars[0].Value).To(Equal("my-password"))
+			Expect(envVars[0].Name).To(Equal("REDIS_URL"))
+			Expect(envVars[0].Value).To(Equal("redis://my-redis:6379/0"))
 			Expect(envVars[0].ValueFrom).To(BeNil())
 		})
 
 		It("should prefer secretKeyRef over plain-text when both are set", func() {
 			reconciler := &ArenaJobReconciler{
-				RedisPassword:       "my-password",
-				RedisPasswordSecret: "my-redis-secret",
+				RedisURL:           "redis://my-redis:6379/0",
+				RedisURLSecretName: "my-redis-secret",
+				RedisURLSecretKey:  "url",
 			}
 
-			envVars := reconciler.buildRedisPasswordEnvVar()
+			envVars := reconciler.buildRedisURLEnvVar()
 			Expect(envVars).To(HaveLen(1))
 			Expect(envVars[0].ValueFrom).NotTo(BeNil())
 			Expect(envVars[0].ValueFrom.SecretKeyRef.Name).To(Equal("my-redis-secret"))
 		})
 
-		It("should return nil when neither is set", func() {
+		It("should return nil when nothing is configured", func() {
 			reconciler := &ArenaJobReconciler{}
 
-			envVars := reconciler.buildRedisPasswordEnvVar()
+			envVars := reconciler.buildRedisURLEnvVar()
 			Expect(envVars).To(BeNil())
 		})
 	})

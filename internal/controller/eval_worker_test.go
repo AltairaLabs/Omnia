@@ -46,7 +46,7 @@ var _ = Describe("Eval Worker Reconciliation", func() {
 			Scheme:          k8sClient.Scheme(),
 			FacadeImage:     "test-facade:v1.0.0",
 			FrameworkImage:  "test-runtime:v1.0.0",
-			RedisAddr:       "redis:6379",
+			RedisURL:        "redis://redis:6379/0",
 			EvalWorkerImage: "test-eval-worker:v1.0.0",
 		}
 	})
@@ -151,7 +151,7 @@ var _ = Describe("Eval Worker Reconciliation", func() {
 			// Verify env vars
 			envMap := envVarMap(dep.Spec.Template.Spec.Containers[0].Env)
 			Expect(envMap[envNamespace]).To(Equal(namespace))
-			Expect(envMap[envRedisAddr]).To(Equal("redis:6379"))
+			Expect(envMap[envRedisURL]).To(Equal("redis://redis:6379/0"))
 			// SESSION_API_URL is resolved from Workspace status; no Workspace in this test
 			// so the key should be absent rather than set to a stale singleton URL.
 			Expect(envMap).NotTo(HaveKey(envSessionAPIURL))

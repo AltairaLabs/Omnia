@@ -190,10 +190,10 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerEnvVars(ctx context.Context, age
 		{Name: envNamespace, Value: namespace},
 	}
 
-	if r.RedisAddr != "" {
+	if r.RedisURL != "" {
 		envVars = append(envVars, corev1.EnvVar{
-			Name:  envRedisAddr,
-			Value: r.RedisAddr,
+			Name:  envRedisURL,
+			Value: r.RedisURL,
 		})
 	}
 

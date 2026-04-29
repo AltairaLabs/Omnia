@@ -23,12 +23,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"github.com/altairalabs/omnia/internal/compaction"
@@ -47,7 +47,7 @@ type flags struct {
 	dryRun              bool
 	metricsAddr         string
 	postgresConn        string
-	redisAddrs          string
+	redisURL            string
 	coldBackend         string
 	coldBucket          string
 	coldRegion          string
@@ -64,7 +64,7 @@ func parseFlags() *flags {
 	flag.BoolVar(&f.dryRun, "dry-run", false, "Log without writing")
 	flag.StringVar(&f.metricsAddr, "metrics-addr", ":9090", "Metrics address")
 	flag.StringVar(&f.postgresConn, "postgres-conn", "", "Postgres conn string")
-	flag.StringVar(&f.redisAddrs, "redis-addrs", "", "Redis addresses (csv)")
+	flag.StringVar(&f.redisURL, "redis-url", "", "Redis URL (redis:// or rediss://); env REDIS_URL fallback")
 	flag.StringVar(&f.coldBackend, "cold-backend", "s3", "Cold backend type")
 	flag.StringVar(&f.coldBucket, "cold-bucket", "", "Cold bucket name")
 	flag.StringVar(&f.coldRegion, "cold-region", "", "Cold region (S3)")
@@ -75,8 +75,8 @@ func parseFlags() *flags {
 	if f.postgresConn == "" {
 		f.postgresConn = os.Getenv("POSTGRES_CONN")
 	}
-	if f.redisAddrs == "" {
-		f.redisAddrs = os.Getenv("REDIS_ADDRS")
+	if f.redisURL == "" {
+		f.redisURL = os.Getenv("REDIS_URL")
 	}
 	if f.coldBackend == "s3" && os.Getenv("COLD_BACKEND") != "" {
 		f.coldBackend = os.Getenv("COLD_BACKEND")
@@ -259,11 +259,22 @@ func initProviders(
 		cleanups = append(cleanups, func() { _ = coldProvider.Close() })
 	}
 
-	// Redis (optional)
+	// Redis (optional). The Provider supports cluster mode via Addrs[],
+	// but compaction's wire-up is single-master only. Parse the URL to
+	// extract host:port + password + db; the Provider's Addrs slice
+	// gets a single entry.
 	var hotProvider *redis.Provider
-	if f.redisAddrs != "" {
+	if f.redisURL != "" {
+		urlOpts, urlErr := goredis.ParseURL(f.redisURL)
+		if urlErr != nil {
+			cleanup()
+			return nil, nil, nil, nil,
+				fmt.Errorf("parse redis URL: %w", urlErr)
+		}
 		redisCfg := redis.DefaultConfig()
-		redisCfg.Addrs = strings.Split(f.redisAddrs, ",")
+		redisCfg.Addrs = []string{urlOpts.Addr}
+		redisCfg.Password = urlOpts.Password
+		redisCfg.DB = urlOpts.DB
 		hotProvider, err = redis.New(redisCfg)
 		if err != nil {
 			cleanup()

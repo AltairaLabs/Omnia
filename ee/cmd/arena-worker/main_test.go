@@ -161,9 +161,13 @@ func TestLoadConfig(t *testing.T) {
 		if cfg.ContentPath != "/workspace/content" {
 			t.Errorf("ContentPath = %v, want /workspace/content", cfg.ContentPath)
 		}
-		// Check defaults
-		if cfg.RedisAddr != "redis:6379" {
-			t.Errorf("RedisAddr = %v, want redis:6379", cfg.RedisAddr)
+		// Check defaults: RedisURL is intentionally unset by default
+		// — the operator's ArenaJobReconciler injects REDIS_URL env on
+		// every worker pod, so the binary's startup-config doesn't
+		// need a fallback here. An empty value is the correct shape
+		// for the unit-test environment.
+		if cfg.RedisURL != "" {
+			t.Errorf("RedisURL = %v, want empty (operator-injected at runtime)", cfg.RedisURL)
 		}
 	})
 }

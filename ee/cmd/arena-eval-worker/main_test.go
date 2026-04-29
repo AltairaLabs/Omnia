@@ -41,13 +41,13 @@ func TestLoadConfig_RequiredFields(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:    "missing REDIS_ADDR",
+			name:    "missing REDIS_URL",
 			env:     map[string]string{},
-			wantErr: "REDIS_ADDR",
+			wantErr: "REDIS_URL",
 		},
 		{
 			name:    "missing NAMESPACE",
-			env:     map[string]string{"REDIS_ADDR": "localhost:6379"},
+			env:     map[string]string{"REDIS_URL": "redis://localhost:6379/0"},
 			wantErr: "NAMESPACE",
 		},
 		{
@@ -56,12 +56,12 @@ func TestLoadConfig_RequiredFields(t *testing.T) {
 			// longer enforces its presence. The empty-env case is covered
 			// by TestResolveSessionAPIURL_MissingEverything.
 			name: "no session api url — loadConfig still passes",
-			env:  map[string]string{"REDIS_ADDR": "localhost:6379", "NAMESPACE": "ns"},
+			env:  map[string]string{"REDIS_URL": "redis://localhost:6379/0", "NAMESPACE": "ns"},
 		},
 		{
 			name: "all required present",
 			env: map[string]string{
-				"REDIS_ADDR":      "localhost:6379",
+				"REDIS_URL":       "redis://localhost:6379/0",
 				"NAMESPACE":       "ns",
 				"SESSION_API_URL": "http://session-api:8080",
 			},
@@ -70,14 +70,11 @@ func TestLoadConfig_RequiredFields(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Save and restore env vars.
 			envKeys := []string{
-				envRedisAddr, envRedisPass, envRedisDB,
+				envRedisURL,
 				envNamespace, envNamespaces, envSessionAPI, envMetricsAddr,
 			}
-			saved := make(map[string]string)
 			for _, k := range envKeys {
-				saved[k] = ""
 				t.Setenv(k, "")
 			}
 			for k, v := range tc.env {
@@ -90,7 +87,7 @@ func TestLoadConfig_RequiredFields(t *testing.T) {
 				assert.Contains(t, err.Error(), tc.wantErr)
 			} else {
 				require.NoError(t, err)
-				assert.Equal(t, "localhost:6379", cfg.RedisAddr)
+				assert.Equal(t, "redis://localhost:6379/0", cfg.RedisURL)
 				assert.Equal(t, []string{"ns"}, cfg.Namespaces)
 				assert.Equal(t, defaultMetrics, cfg.MetricsAddr)
 			}
@@ -98,39 +95,11 @@ func TestLoadConfig_RequiredFields(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_RedisDB(t *testing.T) {
-	t.Setenv(envRedisAddr, "localhost:6379")
-	t.Setenv(envNamespace, "ns")
-	t.Setenv(envSessionAPI, "http://session-api:8080")
-	t.Setenv(envRedisDB, "3")
-	t.Setenv(envMetricsAddr, "")
-	t.Setenv(envRedisPass, "")
-
-	cfg, err := loadConfig()
-	require.NoError(t, err)
-	assert.Equal(t, 3, cfg.RedisDB)
-}
-
-func TestLoadConfig_InvalidRedisDB(t *testing.T) {
-	t.Setenv(envRedisAddr, "localhost:6379")
-	t.Setenv(envNamespace, "ns")
-	t.Setenv(envSessionAPI, "http://session-api:8080")
-	t.Setenv(envRedisDB, "notanumber")
-	t.Setenv(envMetricsAddr, "")
-	t.Setenv(envRedisPass, "")
-
-	_, err := loadConfig()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "REDIS_DB")
-}
-
 func TestLoadConfig_CustomMetricsAddr(t *testing.T) {
-	t.Setenv(envRedisAddr, "localhost:6379")
+	t.Setenv(envRedisURL, "redis://localhost:6379/0")
 	t.Setenv(envNamespace, "ns")
 	t.Setenv(envSessionAPI, "http://session-api:8080")
 	t.Setenv(envMetricsAddr, ":9091")
-	t.Setenv(envRedisDB, "")
-	t.Setenv(envRedisPass, "")
 
 	cfg, err := loadConfig()
 	require.NoError(t, err)
@@ -166,13 +135,11 @@ func TestStartHTTPServer(t *testing.T) {
 }
 
 func TestLoadConfig_NAMESPACES(t *testing.T) {
-	t.Setenv(envRedisAddr, "localhost:6379")
+	t.Setenv(envRedisURL, "redis://localhost:6379/0")
 	t.Setenv(envNamespaces, "ns1,ns2,ns3")
 	t.Setenv(envNamespace, "")
 	t.Setenv(envSessionAPI, "http://session-api:8080")
 	t.Setenv(envMetricsAddr, "")
-	t.Setenv(envRedisDB, "")
-	t.Setenv(envRedisPass, "")
 
 	cfg, err := loadConfig()
 	require.NoError(t, err)
@@ -180,13 +147,11 @@ func TestLoadConfig_NAMESPACES(t *testing.T) {
 }
 
 func TestLoadConfig_NAMESPACES_OverridesNAMESPACE(t *testing.T) {
-	t.Setenv(envRedisAddr, "localhost:6379")
+	t.Setenv(envRedisURL, "redis://localhost:6379/0")
 	t.Setenv(envNamespaces, "ns1,ns2")
 	t.Setenv(envNamespace, "old-ns")
 	t.Setenv(envSessionAPI, "http://session-api:8080")
 	t.Setenv(envMetricsAddr, "")
-	t.Setenv(envRedisDB, "")
-	t.Setenv(envRedisPass, "")
 
 	cfg, err := loadConfig()
 	require.NoError(t, err)

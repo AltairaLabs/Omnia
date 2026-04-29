@@ -92,8 +92,10 @@ type AgentRuntimeReconciler struct {
 	// Tracing configuration for runtime containers
 	TracingEnabled  bool
 	TracingEndpoint string
-	// RedisAddr is the Redis address for eval worker deployments
-	RedisAddr string
+	// RedisURL is the Redis connection URL (redis:// or rediss://)
+	// forwarded to eval-worker pods via REDIS_URL env. Same canonical
+	// form used by every other Redis consumer in the codebase.
+	RedisURL string
 	// EvalWorkerImage overrides the default eval worker container image
 	EvalWorkerImage string
 	// AgentWorkspaceReaderClusterRole is the name of the ClusterRole that grants

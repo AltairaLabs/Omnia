@@ -56,14 +56,10 @@ type RedisQueue struct {
 
 // RedisOptions contains Redis-specific configuration options.
 type RedisOptions struct {
-	// Addr is the Redis server address (host:port).
-	Addr string
-
-	// Password is the Redis password (optional).
-	Password string
-
-	// DB is the Redis database number.
-	DB int
+	// URL is the full Redis connection URL (redis:// or rediss://).
+	// host/port/auth/TLS/db-index all encoded per RFC 7595; parsed via
+	// redis.ParseURL. Required.
+	URL string
 
 	// ItemTTL is the TTL for queue items stored in Redis.
 	// Defaults to 24 hours if zero.
@@ -75,11 +71,11 @@ type RedisOptions struct {
 
 // NewRedisQueue creates a new Redis-backed work queue.
 func NewRedisQueue(redisOpts RedisOptions) (*RedisQueue, error) {
-	client := redis.NewClient(&redis.Options{
-		Addr:     redisOpts.Addr,
-		Password: redisOpts.Password,
-		DB:       redisOpts.DB,
-	})
+	clientOpts, err := redis.ParseURL(redisOpts.URL)
+	if err != nil {
+		return nil, fmt.Errorf("parse redis URL: %w", err)
+	}
+	client := redis.NewClient(clientOpts)
 	// Instrument Redis client for OTel tracing.
 	if err := redisotel.InstrumentTracing(client); err != nil {
 		_ = client.Close()

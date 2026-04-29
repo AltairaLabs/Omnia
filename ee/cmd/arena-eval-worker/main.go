@@ -17,7 +17,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -43,9 +42,7 @@ import (
 
 // Environment variable names for worker configuration.
 const (
-	envRedisAddr    = "REDIS_ADDR"
-	envRedisPass    = "REDIS_PASSWORD"
-	envRedisDB      = "REDIS_DB"
+	envRedisURL     = "REDIS_URL"
 	envNamespace    = "NAMESPACE"
 	envNamespaces   = "NAMESPACES"
 	envSessionAPI   = "SESSION_API_URL"
@@ -136,11 +133,12 @@ func main() {
 	workerMetrics := evals.NewWorkerMetrics(nil)
 	workerMetrics.Initialize()
 
-	redisClient := goredis.NewClient(&goredis.Options{
-		Addr:     cfg.RedisAddr,
-		Password: cfg.RedisPassword,
-		DB:       cfg.RedisDB,
-	})
+	redisOpts, err := goredis.ParseURL(cfg.RedisURL)
+	if err != nil {
+		logger.Error("invalid REDIS_URL", "error", err)
+		os.Exit(1)
+	}
+	redisClient := goredis.NewClient(redisOpts)
 	if err := redisotel.InstrumentTracing(redisClient); err != nil {
 		logger.Error("failed to instrument redis tracing", "error", err)
 	}
@@ -200,7 +198,6 @@ func main() {
 
 	logger.Info("starting arena-eval-worker",
 		"namespaces", cfg.Namespaces,
-		"redisAddr", cfg.RedisAddr,
 		"sessionAPI", cfg.SessionAPIURL,
 		"metricsAddr", cfg.MetricsAddr,
 	)
@@ -215,9 +212,7 @@ func main() {
 
 // workerEnvConfig holds parsed environment configuration.
 type workerEnvConfig struct {
-	RedisAddr     string
-	RedisPassword string
-	RedisDB       int
+	RedisURL      string
 	Namespaces    []string
 	SessionAPIURL string
 	MetricsAddr   string
@@ -229,30 +224,21 @@ type workerEnvConfig struct {
 // rather than a static env var injected by the operator.
 func loadConfig() (*workerEnvConfig, error) {
 	cfg := &workerEnvConfig{
-		RedisAddr:     os.Getenv(envRedisAddr),
-		RedisPassword: os.Getenv(envRedisPass),
+		RedisURL:      os.Getenv(envRedisURL),
 		SessionAPIURL: os.Getenv(envSessionAPI),
 		MetricsAddr:   os.Getenv(envMetricsAddr),
 	}
 
 	cfg.Namespaces = parseNamespaces()
 
-	if cfg.RedisAddr == "" {
-		return nil, fmt.Errorf("%s is required", envRedisAddr)
+	if cfg.RedisURL == "" {
+		return nil, fmt.Errorf("%s is required", envRedisURL)
 	}
 	if len(cfg.Namespaces) == 0 {
 		return nil, fmt.Errorf("%s or %s is required", envNamespaces, envNamespace)
 	}
 	if cfg.MetricsAddr == "" {
 		cfg.MetricsAddr = defaultMetrics
-	}
-
-	if dbStr := os.Getenv(envRedisDB); dbStr != "" {
-		db, err := strconv.Atoi(dbStr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid %s value %q: %w", envRedisDB, dbStr, err)
-		}
-		cfg.RedisDB = db
 	}
 
 	return cfg, nil

@@ -92,16 +92,19 @@ spec:
                                                fallback on its --redis-url
                                                flag.
 
-              --redis-addr                     Legacy host:port form for
-                                               the eval-worker autoscaler.
-                                               Empty when the URL came
-                                               from a Secret (host:port
-                                               not knowable at render
-                                               time); operators using
-                                               existingSecret + eval-
-                                               worker must set the
-                                               eval-worker addr
-                                               explicitly until Phase 3.
+              --redis-url                      URL form forwarded to
+                                               eval-worker pods via
+                                               REDIS_URL env. When the
+                                               URL comes from a Secret
+                                               (existingSecret form),
+                                               this is empty here and
+                                               the eval-worker pod
+                                               receives the URL via
+                                               valueFrom.secretKeyRef
+                                               instead — see the
+                                               AgentRuntime reconciler
+                                               for the env-mount
+                                               wiring.
 
               All resolutions come from the memory-cache consumer path
               (workspaceServices.memoryApi.cache.redis → redis.default).
@@ -116,10 +119,7 @@ spec:
             {{- $memoryRedisURL := include "omnia.redis.url" $memoryConsumer }}
             {{- if $memoryRedisURL }}
             - --memory-redis-url={{ $memoryRedisURL }}
-            {{- end }}
-            {{- $evalWorkerHostPort := include "omnia.redis.hostPort" $memoryConsumer }}
-            {{- if $evalWorkerHostPort }}
-            - --redis-addr={{ $evalWorkerHostPort }}
+            - --redis-url={{ $memoryRedisURL }}
             {{- end }}
             {{- end }}
             {{- with .Values.workspaceServices.memoryApi.cache.ttl }}

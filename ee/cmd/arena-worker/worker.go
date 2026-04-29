@@ -98,10 +98,11 @@ type Config struct {
 	ContentVersion string // Content-addressable version hash
 	ConfigFile     string // Arena config filename within the content path
 
-	// Redis configuration
-	RedisAddr     string
-	RedisPassword string
-	RedisDB       int
+	// Redis configuration. URL form (redis:// or rediss://); host/port/
+	// auth/TLS/db-index all encoded per RFC 7595. Comes from REDIS_URL
+	// env which the operator's ArenaJobReconciler sets on the worker
+	// pod (literal value or secretKeyRef).
+	RedisURL string
 
 	// Session recording
 	SessionAPIURL string // Optional session-api URL for recording arena sessions
@@ -173,9 +174,7 @@ func loadConfig() (*Config, error) {
 		ConfigFile:     os.Getenv("ARENA_CONFIG_FILE"), // Config file name in content path
 		SessionAPIURL:  os.Getenv("SESSION_API_URL"),
 		WorkspaceName:  os.Getenv("ARENA_WORKSPACE_NAME"),
-		RedisAddr:      getEnvOrDefault("REDIS_ADDR", "redis:6379"),
-		RedisPassword:  os.Getenv("REDIS_PASSWORD"),
-		RedisDB:        0,
+		RedisURL:       os.Getenv("REDIS_URL"),
 		WorkDir:        getEnvOrDefault("ARENA_WORK_DIR", "/tmp/arena"),
 		PollInterval:   getDurationEnv("ARENA_POLL_INTERVAL", 100*time.Millisecond),
 		ShutdownDelay:  getDurationEnv("ARENA_SHUTDOWN_DELAY", 65*time.Second),

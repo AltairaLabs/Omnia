@@ -1,0 +1,81 @@
+suite: arena-controller URL-canonical Redis wiring
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/arena-controller-deployment.yaml
+tests:
+  - it: passes --redis-url from the Bitnami subchart when redis.enabled=true
+    # arena-controller consumes the Arena queue Redis via --redis-url
+    # (URL form, post-Phase 3). Same canonical resolution as the rest
+    # of the cluster: consumer override > redis.default > Bitnami
+    # subchart. enterprise.arena.queue.type defaults to "redis".
+    set:
+      enterprise.enabled: true
+      redis.enabled: true
+    template: templates/arena-controller-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --redis-url=redis://omnia-redis-master.NAMESPACE.svc.cluster.local:6379/0
+
+  - it: existingSecret form passes refs and mounts REDIS_URL env on the controller
+    # Arena queue from a Secret: --redis-url is omitted (the URL is
+    # opaque at render time), --redis-url-secret-{name,key} are
+    # passed so the binary can forward them onto worker pods, and
+    # the controller's own pod gets REDIS_URL via secretKeyRef so
+    # its --redis-url flag's env fallback resolves.
+    set:
+      enterprise.enabled: true
+      redis.default.existingSecret.name: redis-creds
+      redis.default.existingSecret.key: url
+    template: templates/arena-controller-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --redis-url-secret-name=redis-creds
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --redis-url-secret-key=url
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: ^--redis-url=
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: REDIS_URL
+            valueFrom:
+              secretKeyRef:
+                name: redis-creds
+                key: url
+
+  - it: per-consumer arena queue Redis override wins over redis.default
+    # Operators can pin the Arena queue to a different Redis tier
+    # (e.g. higher durability than the cache cluster). Consumer
+    # override beats default per the omnia.redis.url resolution order.
+    set:
+      enterprise.enabled: true
+      redis.default.url: "redis://default-redis:6379/0"
+      enterprise.arena.queue.redis.url: "rediss://durable-arena-redis:6379/0"
+    template: templates/arena-controller-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --redis-url=rediss://durable-arena-redis:6379/0
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: --redis-url=redis://default-redis
+
+  - it: enterprise.arena.queue.type=memory skips Redis flags entirely
+    # Dev mode: in-process queue, no Redis. The arena-controller
+    # binary falls back to in-process when no --redis-url is passed.
+    set:
+      enterprise.enabled: true
+      redis.enabled: true
+      enterprise.arena.queue.type: memory
+    template: templates/arena-controller-deployment.yaml
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: ^--redis-url

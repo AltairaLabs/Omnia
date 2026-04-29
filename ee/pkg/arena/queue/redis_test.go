@@ -459,7 +459,7 @@ func TestNewRedisQueue(t *testing.T) {
 	_ = testClient.Close()
 
 	q, err := NewRedisQueue(RedisOptions{
-		Addr: addr,
+		URL: "redis://" + addr,
 		Options: Options{
 			VisibilityTimeout: 30 * time.Second,
 			MaxRetries:        5,
@@ -477,7 +477,7 @@ func TestNewRedisQueue(t *testing.T) {
 func TestNewRedisQueue_ConnectionError(t *testing.T) {
 	// Test connection to non-existent Redis
 	q, err := NewRedisQueue(RedisOptions{
-		Addr: "localhost:59999", // Invalid port
+		URL: "redis://localhost:59999/0", // invalid port
 	})
 	require.Error(t, err)
 	require.Nil(t, q)

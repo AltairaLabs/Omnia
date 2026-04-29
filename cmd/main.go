@@ -120,10 +120,11 @@ func main() {
 		"Default storage class for workspace PVCs (e.g., omnia-nfs). If empty, uses cluster default.")
 	flag.StringVar(&workspaceContentPath, "workspace-content-path", "/workspace-content",
 		"Base path for the workspace content volume. SkillSource writes synced content here.")
-	flag.StringVar(&redisAddr, "redis-addr", "",
-		"Eval-worker Redis address in host:port form (e.g., omnia-redis-master.omnia-system.svc.cluster.local:6379). "+
-			"Used by the AgentRuntime reconciler to wire the eval-worker autoscaler. Per-workspace memory-api "+
-			"uses --memory-redis-url instead (URL form supports cloud Redis with TLS). Empty disables eval-worker.")
+	flag.StringVar(&redisAddr, "redis-url", "",
+		"Operator-wide Redis URL (redis:// or rediss://). Forwarded to "+
+			"eval-worker pods via REDIS_URL env. Per-workspace memory-api "+
+			"uses --memory-redis-url for fine-grained Redis isolation; "+
+			"this flag drives eval-worker only. Empty disables eval-worker.")
 	var memoryRedisURL string
 	flag.StringVar(&memoryRedisURL, "memory-redis-url", "",
 		"Operator-wide Redis URL forwarded to every per-workspace memory-api as --redis-url. "+
@@ -273,7 +274,7 @@ func main() {
 		FrameworkImagePullPolicy:        corev1.PullPolicy(frameworkImagePullPolicy),
 		TracingEnabled:                  tracingEnabled,
 		TracingEndpoint:                 tracingEndpoint,
-		RedisAddr:                       redisAddr,
+		RedisURL:                        redisAddr,
 		EvalWorkerImage:                 evalWorkerImage,
 		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
 		PolicyProxyImage:                policyProxyImageForEnterprise(enterpriseEnabled, policyProxyImage),

@@ -108,7 +108,7 @@ const (
 
 // Eval environment variable name constants.
 const (
-	envRedisAddr     = "REDIS_ADDR"
+	envRedisURL      = "REDIS_URL"
 	envSessionAPIURL = "SESSION_API_URL"
 	envNamespace     = "NAMESPACE"
 )
