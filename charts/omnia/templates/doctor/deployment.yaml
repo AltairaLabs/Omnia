@@ -80,10 +80,15 @@ spec:
             Pass --redis-addr only when a Redis target resolves. Doctor
             skips the RedisReachable check when this flag is empty —
             no false-positive failures on OSS installs without Redis.
-            Sourced from the same omnia.redisAddr helper as the
-            operator so both Doctor and memory-api see the same Redis.
+            Sourced from the same omnia.redis.hostPort helper as the
+            operator (memory-cache consumer path), so Doctor and memory-
+            api see the same Redis. Returns "" for the existingSecret
+            URL form (urlParse can't extract host:port from a Secret
+            reference); operators on the secret form must set --redis-
+            addr explicitly via doctor.* podOverrides until Doctor
+            takes URL form (Phase 3).
           */}}
-          {{- $redisAddr := include "omnia.redisAddr" . }}
+          {{- $redisAddr := include "omnia.redis.hostPort" (dict "ctx" . "consumer" "workspaceServices.memoryApi.cache.redis") }}
           {{- if $redisAddr }}
           {{- $args = append $args (printf "--redis-addr=%s" $redisAddr) }}
           {{- end }}

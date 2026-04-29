@@ -7,7 +7,7 @@ templates:
   - templates/doctor/deployment.yaml
 tests:
   - it: passes no --redis-addr when no Redis is configured
-    # Default OSS install has redis.enabled=false and no externalAddr.
+    # Default OSS install has redis.enabled=false and no redis.default.url.
     # Without this gate, Doctor's TCPCheck("Redis", ...) registered
     # unconditionally and surfaced a fake "RedisReachable: unreachable"
     # failure on every run — masking real issues among the noise.
@@ -29,12 +29,29 @@ tests:
           path: spec.template.spec.containers[0].args
           content: --redis-addr=omnia-redis-master.NAMESPACE.svc.cluster.local:6379
 
-  - it: passes --redis-addr from redis.externalAddr when set
+  - it: passes --redis-addr from redis.default.host when set
     set:
       doctor.enabled: true
-      redis.externalAddr: "elasticache.example.com:6379"
+      redis.default.host: elasticache.example.com
+      redis.default.port: 6379
     template: templates/doctor/deployment.yaml
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
           content: --redis-addr=elasticache.example.com:6379
+
+  - it: skips --redis-addr for the existingSecret form (host:port not knowable)
+    # When the URL is sourced from a Secret, urlParse can't extract a
+    # host:port. Doctor's check is registered host:port-only today
+    # (Phase 3 will move it to URL form). Until then, operators on the
+    # secret form get the check skipped — and can override via
+    # doctor.* podOverrides if they want it back.
+    set:
+      doctor.enabled: true
+      redis.default.existingSecret.name: redis-creds
+      redis.default.existingSecret.key: url
+    template: templates/doctor/deployment.yaml
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: ^--redis-addr=
