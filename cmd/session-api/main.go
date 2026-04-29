@@ -25,7 +25,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -81,7 +80,7 @@ type flags struct {
 	healthAddr      string
 	metricsAddr     string
 	postgresConn    string
-	redisAddrs      string
+	redisURL        string
 	coldBackend     string
 	coldBucket      string
 	coldRegion      string
@@ -104,7 +103,7 @@ func parseFlags() *flags {
 	flag.StringVar(&f.healthAddr, "health-addr", ":8081", "Health probe listen address")
 	flag.StringVar(&f.metricsAddr, "metrics-addr", ":9090", "Metrics server listen address")
 	flag.StringVar(&f.postgresConn, "postgres-conn", "", "Postgres connection string")
-	flag.StringVar(&f.redisAddrs, "redis-addrs", "", "Redis addresses (comma-separated)")
+	flag.StringVar(&f.redisURL, "redis-url", "", "Redis URL (redis:// or rediss://); env REDIS_URL fallback")
 	flag.StringVar(&f.coldBackend, "cold-backend", "", "Cold archive backend (s3, gcs, azure)")
 	flag.StringVar(&f.coldBucket, "cold-bucket", "", "Cold archive bucket name")
 	flag.StringVar(&f.coldRegion, "cold-region", "", "Cold archive region (S3)")
@@ -124,7 +123,7 @@ func parseFlags() *flags {
 // applyEnvFallbacks applies environment variable overrides to flag defaults.
 func (f *flags) applyEnvFallbacks() {
 	envFallback(&f.postgresConn, "", "POSTGRES_CONN")
-	envFallback(&f.redisAddrs, "", "REDIS_ADDRS")
+	envFallback(&f.redisURL, "", "REDIS_URL")
 	envFallback(&f.coldBackend, "", "COLD_BACKEND")
 	envFallback(&f.coldBucket, "", "COLD_BUCKET")
 	envFallback(&f.coldRegion, "", "COLD_REGION")
@@ -603,10 +602,19 @@ func initProviders(ctx context.Context, f *flags, pool *pgxpool.Pool, log logr.L
 	cleanups = append(cleanups, func() { _ = warmProvider.Close() })
 	log.V(1).Info("warm store initialized")
 
-	// Hot cache (redis, optional).
-	if f.redisAddrs != "" {
+	// Hot cache (redis, optional). The session-providers/redis Provider
+	// supports cluster mode via Addrs[] but session-api wires it as
+	// single-master only — same constraint as compaction. Parse URL to
+	// extract host:port + password + db.
+	if f.redisURL != "" {
+		urlOpts, urlErr := goredis.ParseURL(f.redisURL)
+		if urlErr != nil {
+			return nil, nil, fmt.Errorf("parse redis URL: %w", urlErr)
+		}
 		redisCfg := redis.DefaultConfig()
-		redisCfg.Addrs = strings.Split(f.redisAddrs, ",")
+		redisCfg.Addrs = []string{urlOpts.Addr}
+		redisCfg.Password = urlOpts.Password
+		redisCfg.DB = urlOpts.DB
 		redisCfg.MaxMessagesPerSession = int(envInt32("REDIS_MAX_MESSAGES", int32(redisCfg.MaxMessagesPerSession)))
 		hotProvider, err := redis.New(redisCfg)
 		if err != nil {
@@ -614,7 +622,7 @@ func initProviders(ctx context.Context, f *flags, pool *pgxpool.Pool, log logr.L
 		}
 		registry.SetHotCache(hotProvider)
 		cleanups = append(cleanups, func() { _ = hotProvider.Close() })
-		log.V(1).Info("hot cache initialized", "addrs", redisCfg.Addrs)
+		log.V(1).Info("hot cache initialized", "addr", urlOpts.Addr)
 	}
 
 	// Cold archive (optional).
