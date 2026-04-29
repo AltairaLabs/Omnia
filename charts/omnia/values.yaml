@@ -685,6 +685,15 @@ dashboard:
   # a cluster with a non-default DNS suffix.
   jwksUrl: ""
 
+  # -- Allowlist of in-cluster ServiceAccounts permitted to mint
+  # mgmt-plane JWTs via /api/auth/service-token. Each entry is
+  # "<namespace>/<sa-name>". The chart auto-includes Doctor's SA
+  # when doctor.enabled is true; extend this list to grant other
+  # in-cluster services (Arena dev-console, custom operators) the
+  # same privilege. Empty list (and Doctor disabled) → endpoint
+  # returns 503.
+  serviceTokenAllowlist: []
+
   # Pod Disruption Budget for HA deployments
   podDisruptionBudget:
     # -- Enable PDB for dashboard
@@ -1169,22 +1178,24 @@ doctor:
   # -- Pod-level overrides for the doctor Deployment. Same shape as CRD
   # PodOverrides (docs/how-to/configure-pod-overrides).
   podOverrides: {}
-  # Mgmt-plane signing key. Mounted into the Doctor pod so its WebSocket
-  # checks can mint a Bearer token the facade's mgmt-plane validator
-  # admits (issue #1040 part 2). Without this, every Agent / Memory /
-  # Sessions check fails with HTTP 401 "auth: no credential present".
-  signingKey:
-    # -- Mount the dashboard signing keypair into the Doctor pod. Defaults
-    # to true when both doctor.enabled and dashboard.enabled are set —
-    # Doctor's job is to verify the running cluster, and a cluster with
-    # mgmt-plane validation enabled but no signing key in Doctor produces
-    # false-negative WS check failures. Set to false for clusters where
-    # the facade does not enforce mgmt-plane validation.
+  # Mgmt-plane token wiring (#1040 part 2). Doctor exchanges its
+  # k8s ServiceAccount token for a freshly-minted JWT at the
+  # dashboard's /api/auth/service-token endpoint, then attaches that
+  # JWT to every WS dial. The dashboard validates the SA token via
+  # TokenReview and gates mints on
+  # dashboard.serviceTokenAllowlist (see below). The previous design
+  # mounted the signing keypair Secret directly into Doctor —
+  # removed because it duplicated private-key material across pods,
+  # defeating the JWKS architecture.
+  mgmtPlaneToken:
+    # -- Wire Doctor to the dashboard's service-token endpoint.
+    # Defaults to true when both doctor.enabled and dashboard.enabled
+    # are set. Set to false when the facade does not enforce mgmt-plane
+    # validation (Arena E2E, anonymous test setups).
     enabled: true
-    # -- Override the Secret name. Defaults to the dashboard's
-    # signing-keypair Secret (`<release>-dashboard-signing-keypair`),
-    # so Doctor mints with the same key the dashboard uses.
-    existingSecret: ""
+    # -- Override the dashboard endpoint URL. Defaults to the
+    # in-cluster Service URL of the chart's dashboard.
+    url: ""
 
 # ============================================================================
 # Session Privacy Configuration

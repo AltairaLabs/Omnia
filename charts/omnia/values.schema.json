@@ -271,6 +271,11 @@
           "type": "string",
           "description": "Override the JWKS URL the operator hands to facade pods as OMNIA_MGMT_PLANE_JWKS_URL. Empty derives the in-cluster service URL."
         },
+        "serviceTokenAllowlist": {
+          "type": "array",
+          "description": "Allowlist of <namespace>/<sa-name> entries permitted to mint mgmt-plane JWTs via /api/auth/service-token.",
+          "items": { "type": "string" }
+        },
         "auth": {
           "type": "object",
           "properties": {
@@ -508,12 +513,12 @@
         "enabled":   { "type": "boolean" },
         "image":     { "$ref": "#/$defs/image" },
         "resources": { "$ref": "#/$defs/resources" },
-        "signingKey": {
+        "mgmtPlaneToken": {
           "type": "object",
-          "description": "Mgmt-plane signing key wiring for Doctor's WebSocket checks (#1040 part 2)",
+          "description": "Mgmt-plane token wiring for Doctor's WebSocket checks. Doctor exchanges its SA token for a JWT at the dashboard's /api/auth/service-token endpoint.",
           "properties": {
-            "enabled":        { "type": "boolean" },
-            "existingSecret": { "type": "string" }
+            "enabled": { "type": "boolean" },
+            "url":     { "type": "string" }
           }
         }
       }

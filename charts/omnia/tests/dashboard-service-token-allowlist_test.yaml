@@ -1,0 +1,56 @@
+suite: dashboard service-token allowlist (#1058)
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/dashboard/deployment.yaml
+  - templates/dashboard/configmap.yaml
+  - templates/dashboard/signing-keypair.yaml
+tests:
+  - it: auto-includes Doctor's SA when Doctor is enabled
+    set:
+      doctor.enabled: true
+    template: templates/dashboard/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNIA_DASHBOARD_SERVICE_TOKEN_ALLOWED_SAS
+            value: "NAMESPACE/omnia-doctor"
+
+  - it: extends the auto-allowlist with operator-supplied entries
+    set:
+      doctor.enabled: true
+      dashboard.serviceTokenAllowlist:
+        - "default/arena-dev-console"
+        - "tenant-a/custom-svc"
+    template: templates/dashboard/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNIA_DASHBOARD_SERVICE_TOKEN_ALLOWED_SAS
+            value: "default/arena-dev-console,tenant-a/custom-svc,NAMESPACE/omnia-doctor"
+
+  - it: omits the env var entirely when no SAs are allowlisted
+    set:
+      doctor.enabled: false
+      dashboard.serviceTokenAllowlist: []
+    template: templates/dashboard/deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNIA_DASHBOARD_SERVICE_TOKEN_ALLOWED_SAS
+
+  - it: omits Doctor's SA when doctor.mgmtPlaneToken.enabled=false
+    set:
+      doctor.enabled: true
+      doctor.mgmtPlaneToken.enabled: false
+    template: templates/dashboard/deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNIA_DASHBOARD_SERVICE_TOKEN_ALLOWED_SAS

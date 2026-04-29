@@ -64,14 +64,15 @@ func main() {
 	arenaURLFlag := flag.String("arena-url", "", "override arena controller URL")
 	workspaceFlag := flag.String("workspace", "", "workspace name for per-workspace service discovery (optional)")
 	serviceGroupFlag := flag.String("service-group", "default", "service group to resolve within the workspace")
-	mgmtPlaneKeyPath := flag.String(
-		"mgmt-plane-signing-key-path",
-		os.Getenv("OMNIA_MGMT_PLANE_SIGNING_KEY_PATH"),
-		"path to the dashboard signing key (PEM). When set, Doctor mints a "+
-			"Bearer token for WebSocket dials so the facade's mgmt-plane "+
-			"validator admits them (issue #1040 part 2). Defaults to "+
-			"OMNIA_MGMT_PLANE_SIGNING_KEY_PATH env var; empty disables "+
-			"minting (anonymous installs).")
+	mgmtPlaneTokenURL := flag.String(
+		"mgmt-plane-token-url",
+		os.Getenv("OMNIA_MGMT_PLANE_TOKEN_URL"),
+		"URL of the dashboard's service-token endpoint, e.g. "+
+			"http://omnia-dashboard.omnia-system.svc.cluster.local:3000/api/auth/service-token. "+
+			"When set, Doctor exchanges its k8s service-account token for a "+
+			"mgmt-plane JWT and attaches it to every WebSocket dial. "+
+			"Defaults to OMNIA_MGMT_PLANE_TOKEN_URL env var; empty "+
+			"disables the Authorization header (anonymous installs).")
 	flag.Parse()
 
 	log, sync, err := logging.NewLogger()
@@ -115,29 +116,29 @@ func main() {
 		arenaURL = discoverServiceURL(*namespace, serviceArenaController, defaultArenaPort)
 	}
 
-	// Build the mgmt-plane minter once at startup. The signing key is
-	// long-lived (rotation is an explicit operator action, see
-	// charts/omnia/templates/dashboard/signing-keypair.yaml), so a
-	// startup-load matches the dashboard's pattern. A boot-time error
-	// is fatal — silently disabling the minter would mask the
-	// "missing signing key" misconfiguration as "WebSocket checks
-	// fail" (the original #1040 symptom we're trying to surface).
-	var mgmtPlaneMinter *MgmtPlaneTokenMinter
-	if *mgmtPlaneKeyPath != "" {
-		m, mintErr := NewMgmtPlaneTokenMinter(MgmtPlaneTokenMinterOptions{
-			KeyPath: *mgmtPlaneKeyPath,
+	// Build the mgmt-plane fetcher once at startup. The fetcher itself
+	// makes no network calls until first use — failing here would
+	// conflate "no dashboard service-token endpoint configured" (which
+	// is OK for installs without service principals) with "Doctor
+	// misconfigured" (which is the case we want loud at first dial).
+	// Token retrieval / SA-token read happens inside Token().
+	var mgmtPlaneFetcher *MgmtPlaneTokenFetcher
+	if *mgmtPlaneTokenURL != "" {
+		f, fetchErr := NewMgmtPlaneTokenFetcher(MgmtPlaneTokenFetcherOptions{
+			Endpoint: *mgmtPlaneTokenURL,
 		})
-		if mintErr != nil {
-			log.Error(mintErr, "mgmt-plane signing key load failed")
+		if fetchErr != nil {
+			log.Error(fetchErr, "mgmt-plane fetcher init failed")
 			os.Exit(1)
 		}
-		mgmtPlaneMinter = m
-		log.Info("mgmt-plane minter enabled", "keyPath", *mgmtPlaneKeyPath)
+		mgmtPlaneFetcher = f
+		log.Info("mgmt-plane fetcher enabled", "endpoint", *mgmtPlaneTokenURL)
 	} else {
-		log.V(1).Info("mgmt-plane minter disabled — WebSocket checks will dial without Authorization",
-			"reason", "no signing key configured",
-			"hint", "set --mgmt-plane-signing-key-path or "+
-				"OMNIA_MGMT_PLANE_SIGNING_KEY_PATH for clusters whose "+
+		log.V(1).Info("mgmt-plane fetcher disabled — WebSocket checks will dial without Authorization",
+			"reason", "no token endpoint configured",
+			"hint", "set --mgmt-plane-token-url or "+
+				"OMNIA_MGMT_PLANE_TOKEN_URL to the dashboard's "+
+				"/api/auth/service-token endpoint for clusters whose "+
 				"facade enforces mgmt-plane JWTs")
 	}
 
@@ -155,7 +156,7 @@ func main() {
 		dashboardURL:      dashboardURL,
 		redisAddr:         redisAddr,
 		arenaURL:          arenaURL,
-		mgmtPlaneMinter:   mgmtPlaneMinter,
+		mgmtPlaneFetcher:  mgmtPlaneFetcher,
 	}
 
 	// build is invoked per /api/v1/run request — see issue #1040. A
@@ -228,10 +229,11 @@ type runnerConfig struct {
 	dashboardURL      string
 	redisAddr         string
 	arenaURL          string
-	// mgmtPlaneMinter is shared across runs. nil means "no token" —
+	// mgmtPlaneFetcher is shared across runs. nil means "no token" —
 	// the WS dial proceeds without an Authorization header, which is
-	// fine for installs that don't enforce mgmt-plane validation.
-	mgmtPlaneMinter *MgmtPlaneTokenMinter
+	// fine for installs that don't enforce mgmt-plane validation
+	// (Arena E2E, anonymous test setups).
+	mgmtPlaneFetcher *MgmtPlaneTokenFetcher
 }
 
 // buildRunner constructs a fresh doctor.Runner with all checks
@@ -280,14 +282,13 @@ func buildRunner(cfg runnerConfig) (*doctor.Runner, error) {
 	}
 
 	// agentChecker.MgmtPlaneTokenSource accepts the *MgmtPlaneTokenMinter
+	// agentChecker.MgmtPlaneTokenSource accepts the *MgmtPlaneTokenFetcher
 	// directly (nil-safe via the interface — a typed nil pointer behaves
-	// the same as nil here because *MgmtPlaneTokenMinter is the only
-	// implementation we ship and its Token method short-circuits on
-	// nil receiver). When unset, the dialer skips the Authorization
-	// header entirely.
+	// the same as nil because the Token method short-circuits on nil
+	// receiver). When unset, the dialer skips the Authorization header.
 	var tokenSource checks.MgmtPlaneTokenSource
-	if cfg.mgmtPlaneMinter != nil {
-		tokenSource = cfg.mgmtPlaneMinter
+	if cfg.mgmtPlaneFetcher != nil {
+		tokenSource = cfg.mgmtPlaneFetcher
 	}
 	agentChecker := checks.NewAgentChecker(checks.AgentConfig{
 		FacadeURL:            agentFacadeURL,

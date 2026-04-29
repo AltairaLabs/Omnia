@@ -1,52 +1,82 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<coverage generated="1777377098445" clover="3.2.0">
-  <project timestamp="1777377098445" name="All files">
-    <metrics statements="40" coveredstatements="40" conditionals="26" coveredconditionals="26" methods="6" coveredmethods="6" elements="72" coveredelements="72" complexity="0" loc="40" ncloc="40" packages="1" files="2" classes="2"/>
-    <file name="provider-secret-ref.ts" path="/Users/chaholl/repos/altairalabs/omnia/dashboard/src/lib/k8s/provider-secret-ref.ts">
-      <metrics statements="1" coveredstatements="1" conditionals="2" coveredconditionals="2" methods="1" coveredmethods="1"/>
-      <line num="32" count="6" type="stmt"/>
-    </file>
-    <file name="providers.ts" path="/Users/chaholl/repos/altairalabs/omnia/dashboard/src/lib/k8s/providers.ts">
-      <metrics statements="39" coveredstatements="39" conditionals="24" coveredconditionals="24" methods="5" coveredmethods="5"/>
-      <line num="15" count="18" type="stmt"/>
-      <line num="16" count="18" type="stmt"/>
-      <line num="17" count="18" type="stmt"/>
-      <line num="24" count="13" type="stmt"/>
-      <line num="26" count="13" type="stmt"/>
-      <line num="28" count="13" type="stmt"/>
-      <line num="31" count="13" type="stmt"/>
-      <line num="34" count="13" type="stmt"/>
-      <line num="38" count="18" type="stmt"/>
-      <line num="41" count="21" type="cond" truecount="2" falsecount="0"/>
-      <line num="42" count="13" type="stmt"/>
-      <line num="44" count="21" type="stmt"/>
-      <line num="102" count="13" type="stmt"/>
-      <line num="104" count="13" type="stmt"/>
-      <line num="105" count="13" type="stmt"/>
-      <line num="112" count="8" type="stmt"/>
-      <line num="114" count="5" type="cond" truecount="2" falsecount="0"/>
-      <line num="115" count="3" type="stmt"/>
-      <line num="117" count="2" type="stmt"/>
-      <line num="130" count="8" type="stmt"/>
-      <line num="133" count="8" type="stmt"/>
-      <line num="134" count="8" type="cond" truecount="2" falsecount="0"/>
-      <line num="135" count="1" type="stmt"/>
-      <line num="142" count="7" type="stmt"/>
-      <line num="143" count="7" type="cond" truecount="2" falsecount="0"/>
-      <line num="144" count="3" type="cond" truecount="2" falsecount="0"/>
-      <line num="145" count="2" type="stmt"/>
-      <line num="148" count="2" type="cond" truecount="2" falsecount="0"/>
-      <line num="151" count="1" type="stmt"/>
-      <line num="155" count="4" type="stmt"/>
-      <line num="156" count="4" type="stmt"/>
-      <line num="160" count="7" type="stmt"/>
-      <line num="169" count="6" type="stmt"/>
-      <line num="175" count="5" type="cond" truecount="2" falsecount="0"/>
-      <line num="180" count="2" type="stmt"/>
-      <line num="182" count="3" type="cond" truecount="2" falsecount="0"/>
-      <line num="189" count="2" type="stmt"/>
-      <line num="190" count="2" type="stmt"/>
-      <line num="192" count="1" type="stmt"/>
+<coverage generated="1777465145331" clover="3.2.0">
+  <project timestamp="1777465145331" name="All files">
+    <metrics statements="73" coveredstatements="73" conditionals="43" coveredconditionals="40" methods="9" coveredmethods="9" elements="125" coveredelements="122" complexity="0" loc="73" ncloc="73" packages="1" files="1" classes="1"/>
+    <file name="service-token.js" path="/Users/chaholl/repos/altairalabs/omnia/dashboard/lib/service-token.js">
+      <metrics statements="73" coveredstatements="73" conditionals="43" coveredconditionals="40" methods="9" coveredmethods="9"/>
+      <line num="36" count="1" type="stmt"/>
+      <line num="38" count="1" type="stmt"/>
+      <line num="42" count="1" type="stmt"/>
+      <line num="50" count="14" type="stmt"/>
+      <line num="51" count="14" type="cond" truecount="2" falsecount="0"/>
+      <line num="52" count="4" type="stmt"/>
+      <line num="54" count="10" type="stmt"/>
+      <line num="55" count="10" type="cond" truecount="2" falsecount="0"/>
+      <line num="56" count="3" type="stmt"/>
+      <line num="58" count="7" type="stmt"/>
+      <line num="62" count="3" type="cond" truecount="2" falsecount="0"/>
+      <line num="63" count="1" type="stmt"/>
+      <line num="66" count="2" type="stmt"/>
+      <line num="167" count="5" type="stmt"/>
+      <line num="168" count="5" type="stmt"/>
+      <line num="169" count="5" type="stmt"/>
+      <line num="170" count="5" type="stmt"/>
+      <line num="171" count="3" type="stmt"/>
+      <line num="172" count="3" type="cond" truecount="2" falsecount="0"/>
+      <line num="173" count="1" type="stmt"/>
+      <line num="174" count="1" type="stmt"/>
+      <line num="175" count="1" type="stmt"/>
+      <line num="177" count="2" type="stmt"/>
+      <line num="179" count="5" type="stmt"/>
+      <line num="180" count="5" type="stmt"/>
+      <line num="198" count="13" type="cond" truecount="2" falsecount="0"/>
+      <line num="199" count="1" type="stmt"/>
+      <line num="200" count="1" type="stmt"/>
+      <line num="201" count="1" type="stmt"/>
+      <line num="204" count="12" type="cond" truecount="2" falsecount="0"/>
+      <line num="205" count="13" type="cond" truecount="4" falsecount="0"/>
+      <line num="206" count="1" type="stmt"/>
+      <line num="207" count="1" type="stmt"/>
+      <line num="209" count="11" type="stmt"/>
+      <line num="210" count="11" type="cond" truecount="2" falsecount="0"/>
+      <line num="211" count="1" type="stmt"/>
+      <line num="212" count="1" type="stmt"/>
+      <line num="215" count="10" type="cond" truecount="1" falsecount="1"/>
+      <line num="217" count="13" type="stmt"/>
+      <line num="218" count="13" type="stmt"/>
+      <line num="220" count="1" type="stmt"/>
+      <line num="223" count="1" type="stmt"/>
+      <line num="225" count="9" type="cond" truecount="2" falsecount="0"/>
+      <line num="226" count="1" type="stmt"/>
+      <line num="229" count="1" type="stmt"/>
+      <line num="232" count="8" type="cond" truecount="2" falsecount="0"/>
+      <line num="233" count="13" type="cond" truecount="2" falsecount="0"/>
+      <line num="234" count="2" type="stmt"/>
+      <line num="237" count="2" type="stmt"/>
+      <line num="239" count="6" type="cond" truecount="2" falsecount="0"/>
+      <line num="240" count="1" type="stmt"/>
+      <line num="243" count="1" type="stmt"/>
+      <line num="246" count="5" type="stmt"/>
+      <line num="247" count="5" type="stmt"/>
+      <line num="248" count="5" type="stmt"/>
+      <line num="249" count="2" type="cond" truecount="1" falsecount="1"/>
+      <line num="250" count="2" type="stmt"/>
+      <line num="253" count="2" type="stmt"/>
+      <line num="254" count="2" type="stmt"/>
+      <line num="257" count="3" type="cond" truecount="2" falsecount="0"/>
+      <line num="258" count="13" type="cond" truecount="2" falsecount="0"/>
+      <line num="263" count="13" type="stmt"/>
+      <line num="266" count="13" type="stmt"/>
+      <line num="267" count="13" type="stmt"/>
+      <line num="275" count="1" type="stmt"/>
+      <line num="276" count="2" type="stmt"/>
+      <line num="280" count="2" type="cond" truecount="1" falsecount="1"/>
+      <line num="281" count="13" type="stmt"/>
+      <line num="286" count="12" type="stmt"/>
+      <line num="290" count="12" type="stmt"/>
+      <line num="291" count="12" type="stmt"/>
+      <line num="295" count="12" type="stmt"/>
+      <line num="298" count="1" type="stmt"/>
     </file>
   </project>
 </coverage>
