@@ -1,3 +1,4 @@
+{{- include "omnia.validateArenaQueue" . -}}
 {{- if .Values.enterprise.enabled }}
 {{- $po := .Values.enterprise.arena.controller.podOverrides | default dict }}
 apiVersion: apps/v1
@@ -59,14 +60,23 @@ spec:
             - --arena-worker-image={{ .Values.enterprise.arena.worker.image.repository | default "ghcr.io/altairalabs/omnia-arena-worker" }}:{{ .Values.enterprise.arena.worker.image.tag | default .Chart.AppVersion }}
             - --arena-worker-image-pull-policy={{ .Values.enterprise.arena.worker.image.pullPolicy | default "IfNotPresent" }}
             - --arena-dev-console-image={{ .Values.enterprise.arena.devConsole.image.repository | default "ghcr.io/altairalabs/omnia-arena-dev-console" }}:{{ .Values.enterprise.arena.devConsole.image.tag | default .Chart.AppVersion }}
-            {{- if and .Values.enterprise.arena.queue (eq .Values.enterprise.arena.queue.type "redis") }}
-            {{- if .Values.redis.enabled }}
-            - --redis-addr={{ include "omnia.fullname" . }}-redis-master.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.enterprise.arena.queue.redis.port | default 6379 }}
-            {{- else if .Values.enterprise.arena.queue.redis.host }}
-            - --redis-addr={{ .Values.enterprise.arena.queue.redis.host }}:{{ .Values.enterprise.arena.queue.redis.port | default 6379 }}
-            {{- end }}
-            {{- if .Values.enterprise.arena.queue.redis.passwordSecret }}
-            - --redis-password-secret={{ .Values.enterprise.arena.queue.redis.passwordSecret }}
+            {{- /*
+              Arena queue Redis. The arena-controller binary still takes
+              host:port form (URL flag is Phase 3); the chart resolves
+              the unified consumer config to host:port via urlParse.
+
+              Limitation: when arena queue Redis comes from existingSecret
+              (URL is opaque at render time), --redis-addr is empty and
+              the arena-controller falls back to its in-process queue
+              (dev-only). Operators on existingSecret + production Arena
+              must provide enterprise.arena.queue.redis.host (decomposed
+              form) explicitly until Phase 3.
+            */}}
+            {{- if and .Values.enterprise.arena.queue (eq (default "redis" .Values.enterprise.arena.queue.type) "redis") }}
+            {{- $arenaConsumer := dict "ctx" . "consumer" "enterprise.arena.queue.redis" }}
+            {{- $arenaHostPort := include "omnia.redis.hostPort" $arenaConsumer }}
+            {{- if $arenaHostPort }}
+            - --redis-addr={{ $arenaHostPort }}
             {{- end }}
             {{- end }}
             {{- if and (or .Values.nfs.server.enabled .Values.nfs.external.server) (not .Values.nfs.csiDriver.enabled) }}

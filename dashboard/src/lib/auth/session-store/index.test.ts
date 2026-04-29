@@ -9,36 +9,28 @@ vi.mock("./redis-client", () => ({
 }));
 
 import { getSessionStore, __resetSessionStoreForTests } from "./index";
-import { MemorySessionStore } from "./memory-store";
 import { RedisSessionStore } from "./redis-store";
 
 describe("getSessionStore", () => {
-  const originalEnv = process.env;
   beforeEach(() => {
     __resetSessionStoreForTests();
-    process.env = { ...originalEnv };
-    delete process.env.OMNIA_SESSION_STORE;
   });
 
-  it("defaults to MemorySessionStore when OMNIA_SESSION_STORE is unset", () => {
-    const store = getSessionStore();
-    expect(store).toBeInstanceOf(MemorySessionStore);
-  });
-
-  it("returns RedisSessionStore when OMNIA_SESSION_STORE=redis", () => {
-    process.env.OMNIA_SESSION_STORE = "redis";
+  it("returns RedisSessionStore when getSessionRedisClient yields a client", () => {
     const store = getSessionStore();
     expect(store).toBeInstanceOf(RedisSessionStore);
   });
 
-  it("throws when OMNIA_SESSION_STORE=redis but no redis client is configured", async () => {
+  it("returns MemorySessionStore when getSessionRedisClient returns null", async () => {
     vi.resetModules();
     vi.doMock("./redis-client", () => ({ getSessionRedisClient: () => null }));
-    process.env.OMNIA_SESSION_STORE = "redis";
-    // Re-import after remocking.
-    const fresh = await import("./index");
-    fresh.__resetSessionStoreForTests();
-    expect(() => fresh.getSessionStore()).toThrow(/OMNIA_SESSION_REDIS_URL/);
+    // Re-import both the factory AND the class so instanceof matches —
+    // resetModules invalidates the Memory*Store reference at the top
+    // of this file.
+    const freshFactory = await import("./index");
+    const freshMemoryStore = await import("./memory-store");
+    freshFactory.__resetSessionStoreForTests();
+    expect(freshFactory.getSessionStore()).toBeInstanceOf(freshMemoryStore.MemorySessionStore);
   });
 
   it("is a singleton across calls", () => {
@@ -47,12 +39,10 @@ describe("getSessionStore", () => {
     expect(first).toBe(second);
   });
 
-  it("falls back to memory for unknown OMNIA_SESSION_STORE values and warns", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    process.env.OMNIA_SESSION_STORE = "sqlite";
-    const store = getSessionStore();
-    expect(store).toBeInstanceOf(MemorySessionStore);
-    expect(warnSpy).toHaveBeenCalled();
-    warnSpy.mockRestore();
+  it("logs the chosen backend at first construction", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    getSessionStore();
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("session store: redis"));
+    logSpy.mockRestore();
   });
 });

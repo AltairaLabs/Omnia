@@ -51,18 +51,39 @@ type ServiceBuilder struct {
 	MemoryImage            string
 	MemoryImagePullPolicy  corev1.PullPolicy
 
-	// MemoryRedisAddrs is the operator-wide Redis target threaded into
-	// every per-workspace memory-api Deployment as --redis-addrs. Empty
+	// MemoryRedisURL is the operator-wide Redis target threaded into
+	// every per-workspace memory-api Deployment as --redis-url. Empty
 	// disables both the read-through cache and the event publisher.
 	// One Redis is shared across workspaces; per-workspace caching is
 	// already namespaced by the scope-hash inside CachedStore.
-	MemoryRedisAddrs string
+	//
+	// Accepts the literal placeholder "$(REDIS_URL)" — when the chart
+	// passes this, ServiceBuilder also mounts the corresponding Secret
+	// as REDIS_URL env on every memory-api pod so Kubernetes env
+	// expansion fills it at startup. The Secret reference is supplied
+	// via MemoryRedisURLSecret.
+	MemoryRedisURL string
+
+	// MemoryRedisURLSecret references the Kubernetes Secret holding
+	// the actual Redis URL when MemoryRedisURL is the placeholder
+	// "$(REDIS_URL)". When set, ServiceBuilder mounts it as a REDIS_URL
+	// env on every per-workspace memory-api pod. Empty means
+	// MemoryRedisURL is a literal value and no env mount is needed.
+	MemoryRedisURLSecret SecretKeyRef
 
 	// MemoryCacheTTL is forwarded to memory-api as --cache-ttl. Empty
-	// or "0" disables the cache even when MemoryRedisAddrs is set, so
+	// or "0" disables the cache even when MemoryRedisURL is set, so
 	// operators can stand up Redis (for the event publisher) without
 	// the cache, or vice-versa.
 	MemoryCacheTTL string
+}
+
+// SecretKeyRef points at a single key within a Kubernetes Secret. Used
+// for mounting Redis URL secrets without coupling ServiceBuilder to
+// corev1.SecretKeySelector everywhere.
+type SecretKeyRef struct {
+	Name string
+	Key  string
 }
 
 // BuildSessionDeployment builds a Deployment for the session-api service group.
@@ -120,13 +141,14 @@ const (
 func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string, sg omniav1alpha1.WorkspaceServiceGroup) *appsv1.Deployment {
 	name := fmt.Sprintf("memory-%s-%s", workspaceName, sg.Name)
 	labels := serviceLabels("memory-api", workspaceName, sg.Name)
-	args := buildMemoryAPIArgs(workspaceName, sg, sb.MemoryRedisAddrs, sb.MemoryCacheTTL)
+	args := buildMemoryAPIArgs(workspaceName, sg, sb.MemoryRedisURL, sb.MemoryCacheTTL)
 	var overrides *omniav1alpha1.PodOverrides
 	if sg.Memory != nil {
 		overrides = sg.Memory.PodOverrides
 	}
 	dep := buildServiceDeployment(name, namespace, sb.MemoryImage, sb.MemoryImagePullPolicy, args, labels, overrides)
 	addPodNamespaceEnv(dep)
+	addMemoryRedisURLEnv(dep, sb.MemoryRedisURLSecret)
 	if dep.Spec.Template.Annotations == nil {
 		dep.Spec.Template.Annotations = map[string]string{}
 	}
@@ -134,16 +156,41 @@ func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string,
 	return dep
 }
 
+// addMemoryRedisURLEnv mounts REDIS_URL from a Secret when the operator
+// was configured with the placeholder + Secret reference. Memory-api's
+// --redis-url flag arrives at the binary as the literal string
+// "$(REDIS_URL)"; Kubernetes env expansion replaces it at container
+// startup. No-op when ref is empty (either no Redis configured, or the
+// URL was passed as a literal in chart values).
+func addMemoryRedisURLEnv(dep *appsv1.Deployment, ref SecretKeyRef) {
+	if ref.Name == "" || ref.Key == "" {
+		return
+	}
+	containers := dep.Spec.Template.Spec.Containers
+	for i := range containers {
+		containers[i].Env = append(containers[i].Env, corev1.EnvVar{
+			Name: "REDIS_URL",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: ref.Name},
+					Key:                  ref.Key,
+				},
+			},
+		})
+	}
+}
+
 // buildMemoryAPIArgs assembles the CLI args passed to memory-api. The operator
 // is the canonical source of these because each one is a wiring boundary
 // crossing — the binary's flag default is "off", so anything the operator
 // doesn't pass silently doesn't run.
 //
-// redisAddrs and cacheTTL come from the operator (chart-driven, not per-
-// workspace) because Redis is a shared cluster service. We pass them
-// through unconditionally when set so memory-api wires the cache and
-// event publisher with one client.
-func buildMemoryAPIArgs(workspaceName string, sg omniav1alpha1.WorkspaceServiceGroup, redisAddrs, cacheTTL string) []string {
+// redisURL and cacheTTL come from the operator (chart-driven, not per-
+// workspace) because Redis is a shared cluster service. The URL may be
+// the literal placeholder "$(REDIS_URL)" — Kubernetes env expansion at
+// the memory-api pod fills it from the REDIS_URL Secret env that
+// addMemoryRedisURLEnv mounts.
+func buildMemoryAPIArgs(workspaceName string, sg omniav1alpha1.WorkspaceServiceGroup, redisURL, cacheTTL string) []string {
 	args := []string{
 		fmt.Sprintf("--workspace=%s", workspaceName),
 		fmt.Sprintf("--service-group=%s", sg.Name),
@@ -154,8 +201,8 @@ func buildMemoryAPIArgs(workspaceName string, sg omniav1alpha1.WorkspaceServiceG
 	if sg.Memory != nil && sg.Memory.ProviderRef != nil && sg.Memory.ProviderRef.Name != "" {
 		args = append(args, fmt.Sprintf("--embedding-provider=%s", sg.Memory.ProviderRef.Name))
 	}
-	if redisAddrs != "" {
-		args = append(args, fmt.Sprintf("--redis-addrs=%s", redisAddrs))
+	if redisURL != "" {
+		args = append(args, fmt.Sprintf("--redis-url=%s", redisURL))
 	}
 	if cacheTTL != "" {
 		args = append(args, fmt.Sprintf("--cache-ttl=%s", cacheTTL))

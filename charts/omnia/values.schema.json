@@ -174,13 +174,7 @@
               "type": "object",
               "properties": {
                 "type": { "type": "string", "enum": ["memory", "redis"] },
-                "redis": {
-                  "type": "object",
-                  "properties": {
-                    "host": { "type": "string" },
-                    "port": { "$ref": "#/$defs/port" }
-                  }
-                }
+                "redis": { "$ref": "#/$defs/redisConsumer" }
               }
             }
           }
@@ -352,33 +346,14 @@
         "extraVolumeMounts": { "type": "array", "items": { "type": "object" } },
         "session": {
           "type": "object",
-          "description": "Server-side session store configuration for the dashboard.",
+          "description": "Dashboard server-side session store. Backend auto-selected by Redis URL presence (URL set → Redis store; empty → in-process memory store).",
           "properties": {
-            "store": {
-              "type": "string",
-              "enum": ["memory", "redis"],
-              "description": "Session storage backend. 'memory' is dev only; 'redis' required for multi-replica."
-            },
             "pkceTtl": {
               "type": "integer",
               "minimum": 1,
               "description": "TTL for in-flight PKCE records in seconds."
             },
-            "redis": {
-              "type": "object",
-              "properties": {
-                "url":  { "type": "string", "description": "Full redis:// URL (preferred). Overrides addr/password/db if set." },
-                "addr": { "type": "string", "description": "host:port fallback when url is empty." },
-                "db":   { "type": "integer", "minimum": 0, "description": "Redis database number." },
-                "existingSecret": {
-                  "type": "object",
-                  "properties": {
-                    "name": { "type": "string" },
-                    "key":  { "type": "string" }
-                  }
-                }
-              }
-            }
+            "redis": { "$ref": "#/$defs/redisConsumer" }
           }
         }
       }
@@ -436,7 +411,8 @@
             "cache": {
               "type": "object",
               "properties": {
-                "ttl": { "type": "string" }
+                "ttl":   { "type": "string" },
+                "redis": { "$ref": "#/$defs/redisConsumer" }
               }
             }
           }
@@ -580,10 +556,11 @@
 
     "redis": {
       "type": "object",
+      "description": "Bitnami Redis subchart toggle + cluster-wide default Redis target. Per-consumer overrides live on each consumer block (dashboard.session.redis, workspaceServices.memoryApi.cache.redis, enterprise.arena.queue.redis).",
       "properties": {
-        "enabled":      { "type": "boolean" },
-        "externalAddr": { "type": "string" },
-        "architecture": { "type": "string", "enum": ["standalone", "replication"] }
+        "enabled":      { "type": "boolean", "description": "Bitnami Redis subchart on/off (dev convenience)." },
+        "architecture": { "type": "string", "enum": ["standalone", "replication"] },
+        "default":      { "$ref": "#/$defs/redisConsumer", "description": "Cluster-wide default. Consumers without overrides fall back to this." }
       }
     },
 
@@ -642,6 +619,38 @@
   },
 
   "$defs": {
+    "redisConsumer": {
+      "type": "object",
+      "description": "Per-consumer Redis target. Three forms (resolution order on this block: existingSecret > url > host). Empty fields fall through to redis.default.",
+      "properties": {
+        "existingSecret": {
+          "type": "object",
+          "description": "Kubernetes Secret containing the full Redis URL. Preferred for any auth'd Redis (the URL never appears in chart values).",
+          "properties": {
+            "name": { "type": "string" },
+            "key":  { "type": "string" }
+          }
+        },
+        "url":  { "type": "string", "description": "Literal Redis URL (redis:// or rediss://). Acceptable for unauthenticated dev Redis or when external-secrets injects the password into chart values." },
+        "host": { "type": "string", "description": "Decomposed form: hostname. Cleartext only — for auth'd Redis use existingSecret." },
+        "port": { "$ref": "#/$defs/port" },
+        "db":   { "type": "integer", "minimum": 0, "maximum": 15, "description": "Redis database index." },
+        "user": { "type": "string", "description": "Redis ACL username. Empty defaults to the Redis 6+ \"default\" user." },
+        "tls": {
+          "type": "object",
+          "properties": {
+            "caExistingSecret": {
+              "type": "object",
+              "description": "Custom CA bundle Secret for self-signed Redis TLS certs. Empty = system CA roots (correct for ElastiCache, MemoryStore, Azure Cache).",
+              "properties": {
+                "name": { "type": "string" },
+                "key":  { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
     "image": {
       "type": "object",
       "properties": {

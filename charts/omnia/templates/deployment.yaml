@@ -72,15 +72,55 @@ spec:
             - --memory-api-image={{ include "omnia.memoryApi.image" . }}
             - --memory-api-image-pull-policy={{ .Values.workspaceServices.memoryApi.image.pullPolicy }}
             {{- /*
-              Operator-wide Redis. Threaded into per-workspace memory-api
-              pods as --redis-addrs (cache + event publisher) and into
-              eval-worker deployments as --redis-addr. Empty when no Redis
-              is configured (default OSS install) — leaves all three
-              consumers in their no-Redis modes.
+              Operator-wide Redis configuration for the memory-api cache
+              + event publisher and the eval-worker autoscaler.
+
+              --memory-redis-url               Literal URL forwarded to
+                                               every per-workspace memory-
+                                               api as --redis-url. Set
+                                               only when the URL is a
+                                               literal value.
+
+              --memory-redis-url-secret-{name,key}   Secret refs forwarded
+                                               to ServiceBuilder when the
+                                               URL comes from a Secret.
+                                               ServiceBuilder mounts the
+                                               Secret as REDIS_URL env on
+                                               every per-workspace memory-
+                                               api pod; memory-api picks
+                                               the URL up via the env
+                                               fallback on its --redis-url
+                                               flag.
+
+              --redis-addr                     Legacy host:port form for
+                                               the eval-worker autoscaler.
+                                               Empty when the URL came
+                                               from a Secret (host:port
+                                               not knowable at render
+                                               time); operators using
+                                               existingSecret + eval-
+                                               worker must set the
+                                               eval-worker addr
+                                               explicitly until Phase 3.
+
+              All resolutions come from the memory-cache consumer path
+              (workspaceServices.memoryApi.cache.redis → redis.default).
             */}}
-            {{- $redisAddr := include "omnia.redisAddr" . }}
-            {{- if $redisAddr }}
-            - --redis-addr={{ $redisAddr }}
+            {{- $memoryConsumer := dict "ctx" . "consumer" "workspaceServices.memoryApi.cache.redis" }}
+            {{- $memoryHasSecret := include "omnia.redis.hasSecret" $memoryConsumer }}
+            {{- if $memoryHasSecret }}
+            {{- $memorySecret := fromYaml (include "omnia.redis._existingSecret" $memoryConsumer) }}
+            - --memory-redis-url-secret-name={{ $memorySecret.name }}
+            - --memory-redis-url-secret-key={{ $memorySecret.key }}
+            {{- else }}
+            {{- $memoryRedisURL := include "omnia.redis.url" $memoryConsumer }}
+            {{- if $memoryRedisURL }}
+            - --memory-redis-url={{ $memoryRedisURL }}
+            {{- end }}
+            {{- $evalWorkerHostPort := include "omnia.redis.hostPort" $memoryConsumer }}
+            {{- if $evalWorkerHostPort }}
+            - --redis-addr={{ $evalWorkerHostPort }}
+            {{- end }}
             {{- end }}
             {{- with .Values.workspaceServices.memoryApi.cache.ttl }}
             - --memory-cache-ttl={{ . }}

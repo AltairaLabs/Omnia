@@ -72,7 +72,8 @@ HELM_ENTERPRISE_OUT="$TMP_DIR/helm-enterprise.yaml"
 info "Rendering Helm chart (charts/omnia, enterprise.enabled=true)..."
 helm template omnia "$REPO_ROOT/charts/omnia" \
   -f "$REPO_ROOT/charts/omnia/values-chart-tests.yaml" \
-  --set enterprise.enabled=true > "$HELM_ENTERPRISE_OUT"
+  --set enterprise.enabled=true \
+  --set redis.enabled=true > "$HELM_ENTERPRISE_OUT"
 
 # Append enterprise kustomize roles to the kustomize output so they're
 # available for comparison. ee/config/rbac/ is controller-gen-owned, just

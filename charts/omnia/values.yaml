@@ -141,21 +141,30 @@ enterprise:
           cpu: 100m
           memory: 128Mi
 
-    # Work queue configuration for job distribution
+    # Work queue configuration for job distribution.
     queue:
-      # -- Queue backend type: memory (dev) or redis (prod)
-      # Production deployments should use redis (requires redis.enabled: true)
+      # -- Queue backend: "memory" (in-process, dev only — single
+      # arena-controller replica, jobs lost on restart) or "redis"
+      # (production — requires a resolvable Redis URL).
       type: redis
 
-      # Redis configuration (when type: redis)
+      # Per-consumer Redis override for the Arena queue. Same shape as
+      # `redis.default`. Empty fields fall through to redis.default.
+      # Set when the queue needs to point at a different Redis than
+      # the rest of the cluster (e.g. job durability requirements).
       redis:
-        # -- Redis host (auto-configured when redis.enabled=true)
+        existingSecret:
+          name: ""
+          key: ""
+        url: ""
         host: ""
-        # -- Redis port
         port: 6379
-        # -- Name of Kubernetes Secret containing Redis password (key: "redis-password").
-        # When set, worker pods receive the password via secretKeyRef instead of plain text.
-        passwordSecret: ""
+        db: 0
+        user: ""
+        tls:
+          caExistingSecret:
+            name: ""
+            key: ""
 
     # Dev console for interactive agent testing
     # Dev console image settings used by ArenaDevSession controller to create
@@ -573,8 +582,12 @@ dashboard:
     # -- Dashboard image tag (defaults to Chart appVersion)
     tag: ""
 
-  # -- Number of dashboard replicas
-  replicaCount: 2
+  # -- Number of dashboard replicas. Defaults to 1 because multi-
+  # replica installs require a shared Redis session store (chart fails
+  # render via omnia.validateSession otherwise — see _helpers.tpl).
+  # Production deployments scaling the dashboard horizontally must
+  # configure redis.default OR dashboard.session.redis AND raise this.
+  replicaCount: 1
 
   # -- Dashboard service configuration
   service:
@@ -910,32 +923,33 @@ dashboard:
     # -- Existing PVC to use
     existingClaim: ""
 
-  # -- Server-side session store configuration for the dashboard.
-  # Controls where OAuth PKCE records and session metadata are stored.
+  # -- Server-side session store for OAuth PKCE records and session
+  # metadata. The dashboard auto-selects its backend by Redis-URL
+  # presence: a resolvable URL → Redis store; empty → in-process map.
+  # In-process is single-replica only — multi-replica installs require
+  # a resolvable Redis URL (chart render fails otherwise; see
+  # `omnia.validateSession` helper).
   session:
-    # -- Backend for server-side session storage.
-    # "memory" is single-replica dev only; "redis" is required for any
-    # multi-replica deployment (replicaCount > 1) or horizontal pod autoscaling.
-    store: redis
     # -- TTL for in-flight PKCE records in seconds (default: 300 = 5 minutes).
     pkceTtl: 300
+    # Per-consumer Redis override. Same shape as `redis.default`.
+    # Empty fields fall through to redis.default. Set when the dashboard
+    # session store needs to point at a different Redis than the rest of
+    # the cluster (e.g. cross-region replicated Redis for sessions while
+    # cache + queue use a local instance).
     redis:
-      # -- Full redis:// URL (preferred). Overrides addr/password/db if set.
-      # Example: "redis://omnia-redis-master.omnia.svc.cluster.local:6379"
-      # When redis.enabled=true, leave url empty and set addr to use the
-      # in-cluster Bitnami Redis: "<release>-redis-master.<namespace>.svc.cluster.local:6379"
-      url: ""
-      # -- host:port fallback (used when url is empty).
-      addr: ""
-      # -- Secret reference for the Redis password. Leave name and key empty
-      # to connect without authentication.
       existingSecret:
-        # -- Name of the Kubernetes Secret containing the Redis password.
         name: ""
-        # -- Key within the Secret whose value is the Redis password.
         key: ""
-      # -- Redis database number (default: 0).
+      url: ""
+      host: ""
+      port: 6379
       db: 0
+      user: ""
+      tls:
+        caExistingSecret:
+          name: ""
+          key: ""
 
 # ============================================================================
 # Session Retention Policy Configuration
@@ -1049,19 +1063,36 @@ workspaceServices:
       # -- Image pull policy
       pullPolicy: IfNotPresent
 
-    # Read-through Redis cache for memory-api Retrieve/List paths. Active
-    # only when an operator-wide Redis is configured (redis.enabled=true
-    # OR redis.externalAddr set). Workers (compaction, retention,
-    # tombstone GC, re-embed) always use the unwrapped Postgres store —
-    # the cache only fronts API reads.
+    # Read-through Redis cache for memory-api Retrieve/List paths.
+    # Active only when a Redis URL resolves (consumer override → default
+    # → Bitnami subchart). Workers (compaction, retention, tombstone GC,
+    # re-embed) always use the unwrapped Postgres store — the cache
+    # only fronts API reads.
     cache:
       # -- TTL for cached Retrieve/List results. Empty or "0" disables
-      # the cache even when Redis is configured (operators sometimes
-      # enable Redis for the event publisher first, cache later).
-      # Cache invalidation is version-keyed on every write, so this TTL
-      # only bounds stale reads in the event of an inactive scope; it
-      # is NOT the staleness window after a write.
+      # the cache even when Redis resolves (operators sometimes enable
+      # Redis for the event publisher first, cache later). Invalidation
+      # is version-keyed on every write, so this TTL only bounds stale
+      # reads on inactive scopes; it is NOT the staleness window after
+      # a write.
       ttl: "5m"
+      # Per-consumer Redis override. Same shape as `redis.default`.
+      # Empty fields fall through to redis.default. Set when memory
+      # cache needs to point at a different Redis than the rest of the
+      # cluster (e.g. local cache Redis vs. cross-region session Redis).
+      redis:
+        existingSecret:
+          name: ""
+          key: ""
+        url: ""
+        host: ""
+        port: 6379
+        db: 0
+        user: ""
+        tls:
+          caExistingSecret:
+            name: ""
+            key: ""
 
 # ============================================================================
 # Dev Postgres
@@ -2206,17 +2237,71 @@ keda:
 
 redis:
   # -- Enable Redis subchart (Bitnami Redis)
-  # Use this for development or when you want a managed Redis instance
+  # Dev convenience. When true, populates redis.default.url with the
+  # in-cluster service URL automatically. Production installs typically
+  # leave this false and point redis.default at an external Redis
+  # (ElastiCache, MemoryStore, Azure Cache).
   enabled: false
 
-  # -- Address (host:port) of an external Redis the chart should use
-  # instead of the Bitnami subchart. Set this when pointing the
-  # operator + memory-api + eval-worker + dashboard at AWS ElastiCache,
-  # GCP Memorystore, or any pre-existing in-cluster Redis. Wins over
-  # `redis.enabled` — the subchart is skipped when this is set.
-  # Empty disables all Redis-dependent features (memory cache, event
-  # publisher, eval queue, server-side sessions).
-  externalAddr: ""
+  # ============================================================================
+  # Cluster-wide default Redis target.
+  #
+  # Every consumer (memory cache, dashboard session store, arena queue, eval
+  # worker, A2A task store) falls back to this when its own override is not
+  # set. Empty here AND empty per-consumer = consumer is disabled.
+  #
+  # Two ways to specify the target. Use ONE form per block:
+  #
+  #   1. `url` — full connection string `redis(s)://[user:pass@]host:port[/db]`.
+  #      Preferred when the password is a literal or when there's no auth.
+  #      Cloud Redis vendors document this form (`rediss://...` for TLS).
+  #
+  #   2. Decomposed `{host, port, db, user, tls, auth.existingSecret}`.
+  #      Use when the password lives in a Kubernetes Secret. The chart
+  #      mounts the Secret as REDIS_PASSWORD env and synthesises a URL
+  #      via `$(VAR)` substitution at pod startup.
+  #
+  # Resolution order at consumer-rendering time:
+  #   consumer.url → consumer.{host,...} → default.url → default.{host,...}
+  #   → Bitnami subchart (when redis.enabled=true) → "" (disabled)
+  # ============================================================================
+  default:
+    # ONE OF the three forms below. Resolution order on this block:
+    #   existingSecret (URL from Secret) > url (literal URL) > host (decomposed).
+    #
+    # FORM 1 — URL stored in a Kubernetes Secret. Preferred for any
+    # auth'd Redis (the password never appears in chart values, never
+    # in `helm get values` output, never in container env logs).
+    existingSecret:
+      # -- Secret name. The Secret must contain a single key holding
+      # the full Redis URL (`redis(s)://[user:pass@]host:port[/db]`).
+      name: ""
+      # -- Key within the Secret whose value is the URL.
+      key: ""
+
+    # FORM 2 — literal URL in chart values. Acceptable for unauthenticated
+    # Redis (dev) or where the password is already an opaque chart-input
+    # (e.g. external-secrets reconciles it into chart values).
+    url: ""
+
+    # FORM 3 — decomposed for convenience. Cleartext only; the chart
+    # cannot synthesise auth from this form (use existingSecret for
+    # auth'd Redis). Useful when pointing at unauthenticated in-cluster
+    # Redis without typing out the URL.
+    host: ""
+    port: 6379
+    db: 0
+    user: ""
+
+    # TLS CA bundle for self-signed Redis TLS certs. Optional regardless
+    # of which form is used — leave empty when the Redis cert chains to
+    # a system CA root (true for ElastiCache, MemoryStore, Azure Cache).
+    # Mounted as a file at /etc/omnia/redis-ca/<key> on every consumer
+    # pod when set.
+    tls:
+      caExistingSecret:
+        name: ""
+        key: ""
 
   # -- Subchart values for Bitnami Redis
   # See: https://github.com/bitnami/charts/tree/main/bitnami/redis

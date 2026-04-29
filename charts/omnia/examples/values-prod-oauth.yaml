@@ -14,6 +14,13 @@
 #     --from-literal=client-secret=<client-secret>
 #   kubectl create secret generic omnia-dashboard-session \
 #     --from-literal=session-secret=<random-base64>
+#   kubectl create secret generic omnia-redis-url \
+#     --from-literal=url=rediss://default:<password>@<host>:6379/0
+#   (Required because dashboard.replicaCount > 1 needs a shared session
+#   store. Point this at AWS ElastiCache, GCP MemoryStore, Azure Cache,
+#   or any in-cluster Redis you provisioned out of band. If you'd
+#   rather have the chart deploy Bitnami Redis for you, drop this
+#   secret and set redis.enabled=true instead.)
 
 # --- Operator / Dashboard HA ------------------------------------------------
 
@@ -22,6 +29,16 @@ replicaCount: 3
 podDisruptionBudget:
   enabled: true
   minAvailable: 2
+
+# --- Redis for shared session store ---------------------------------------
+# dashboard.replicaCount > 1 requires a Redis-backed session store so users
+# don't get logged out when their request hits a different replica. The
+# chart's omnia.validateSession render guard fails install otherwise.
+redis:
+  default:
+    existingSecret:
+      name: omnia-redis-url
+      key: url
 
 dashboard:
   replicaCount: 2

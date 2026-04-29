@@ -6,8 +6,8 @@ values:
 templates:
   - templates/deployment.yaml
 tests:
-  - it: operator passes --memory-cache-ttl unconditionally so memory-api wiring matches its 5m default
-    # Memory-api defaults --cache-ttl to 5m on its own, but having the
+  - it: passes --memory-cache-ttl unconditionally so memory-api wiring matches the chart's 5m default
+    # Memory-api defaults --cache-ttl=5m on its own, but having the
     # operator pass it explicitly is the wiring assertion: anyone
     # reading kubectl describe sees the configured TTL without diffing
     # against the binary's compiled default.
@@ -17,42 +17,94 @@ tests:
           path: spec.template.spec.containers[0].args
           content: --memory-cache-ttl=5m
 
-  - it: operator does NOT pass --redis-addr when no Redis is configured
-    # Default OSS install has redis.enabled=false and no externalAddr.
-    # Forwarding "--redis-addr=" with an empty value would degrade into
-    # a connection-refused log on every cache lookup. Absent flag is
-    # the correct shape; memory-api treats it as "Redis disabled".
+  - it: emits no Redis flags when no Redis is configured
+    # Default OSS install (redis.enabled=false, no defaults set, no
+    # consumer overrides) renders the operator with no --memory-redis-url,
+    # no --redis-addr, no --memory-redis-url-secret-*. Every Redis-backed
+    # consumer stays in its no-Redis mode.
     template: templates/deployment.yaml
     asserts:
       - notMatchRegex:
           path: spec.template.spec.containers[0].args[*]
-          pattern: ^--redis-addr=$
+          pattern: ^--memory-redis-url=
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: ^--memory-redis-url-secret-
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: ^--redis-addr=
 
-  - it: operator wires --redis-addr to the Bitnami subchart service when redis.enabled=true
-    # When redis.enabled=true, the Bitnami subchart provisions
-    # `<release>-redis-master`; the operator addr must match. This
-    # assertion catches any future rename of the helper.
+  - it: Bitnami subchart auto-populates URL + host:port for memory-api and eval-worker
+    # redis.enabled=true → omnia.redis.url resolves to the in-cluster
+    # subchart service. Operator emits both forms: --memory-redis-url
+    # (consumed by ServiceBuilder for per-workspace memory-api pods)
+    # and --redis-addr (consumed by AgentRuntimeReconciler for the
+    # eval-worker autoscaler, which still takes host:port until Phase 3).
     set:
       redis.enabled: true
     template: templates/deployment.yaml
     asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --memory-redis-url=redis://omnia-redis-master.NAMESPACE.svc.cluster.local:6379/0
       - contains:
           path: spec.template.spec.containers[0].args
           content: --redis-addr=omnia-redis-master.NAMESPACE.svc.cluster.local:6379
 
-  - it: redis.externalAddr wins over redis.enabled (off-cluster Redis)
-    # Operators pointing at AWS ElastiCache, GCP Memorystore, etc. set
-    # redis.externalAddr. The Bitnami subchart should be skipped and
-    # the operator should hand the external addr to memory-api / eval
-    # worker / arena queue.
+  - it: redis.default.url overrides the subchart and omits eval-worker addr extraction
+    # Operators pointing at AWS ElastiCache / GCP MemoryStore set
+    # redis.default.url. Subchart is bypassed; eval-worker still gets
+    # --redis-addr via urlParse extraction.
     set:
-      redis.enabled: true
-      redis.externalAddr: "external-redis.example.com:6380"
+      redis.default.url: "rediss://default:hunter2@redis.example.com:6380/2"
     template: templates/deployment.yaml
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --redis-addr=external-redis.example.com:6380
+          content: --memory-redis-url=rediss://default:hunter2@redis.example.com:6380/2
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --redis-addr=redis.example.com:6380
+
+  - it: redis.default.existingSecret emits secret refs and skips eval-worker addr
+    # The Secret form is opaque at render time — the chart cannot
+    # extract a host:port for the eval-worker autoscaler. Operator
+    # passes secret refs to ServiceBuilder so per-workspace memory-api
+    # pods get REDIS_URL env from the same Secret.
+    set:
+      redis.default.existingSecret.name: redis-creds
+      redis.default.existingSecret.key: url
+    template: templates/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --memory-redis-url-secret-name=redis-creds
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --memory-redis-url-secret-key=url
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: ^--memory-redis-url=
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: ^--redis-addr=
+
+  - it: workspaceServices.memoryApi.cache.redis override wins over redis.default
+    # Per-consumer Redis: memory cache pinned to its own Redis (e.g.
+    # local cache instance) while the rest of the cluster uses
+    # redis.default. Operator sees the consumer override; default is
+    # not consulted.
+    set:
+      redis.default.url: "rediss://default-redis.example.com:6379/0"
+      workspaceServices.memoryApi.cache.redis.url: "redis://memory-cache.example.com:6379/0"
+    template: templates/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --memory-redis-url=redis://memory-cache.example.com:6379/0
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: --memory-redis-url=rediss://default-redis
 
   - it: empty workspaceServices.memoryApi.cache.ttl drops the flag entirely
     # An operator wanting Redis for the event publisher only (no read-

@@ -19,6 +19,7 @@ limitations under the License.
 package main
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -28,24 +29,24 @@ import (
 	"github.com/altairalabs/omnia/internal/memory"
 )
 
-// buildRedisClient returns a Redis client for the given addrs string, or
-// nil when the input is empty. Comma-separated addrs are accepted so the
-// flag matches Sentinel-friendly conventions, but the production wire-up
-// today is single-master — only the first entry is used. We stay
-// permissive on input so a future move to a Sentinel client doesn't
-// break operator config.
-func buildRedisClient(addrs string) *goredis.Client {
-	addr := strings.TrimSpace(addrs)
-	if addr == "" {
-		return nil
+// buildRedisClient parses a Redis connection URL and returns a client.
+// Empty URL → (nil, nil) so callers can branch on "Redis configured"
+// without tripping on parse errors. Invalid URL → (nil, error) — bad
+// config is a startup error, not a silently-disabled cache.
+//
+// Accepts redis:// and rediss:// URLs. TLS, AUTH, DB index, ACL user
+// all encoded in the URL per RFC 7595. goredis.ParseURL handles the
+// edge cases (URL-encoded passwords, IPv6 hosts, etc.).
+func buildRedisClient(url string) (*goredis.Client, error) {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return nil, nil
 	}
-	if i := strings.Index(addr, ","); i >= 0 {
-		addr = strings.TrimSpace(addr[:i])
+	opts, err := goredis.ParseURL(url)
+	if err != nil {
+		return nil, fmt.Errorf("parse redis URL: %w", err)
 	}
-	if addr == "" {
-		return nil
-	}
-	return goredis.NewClient(&goredis.Options{Addr: addr})
+	return goredis.NewClient(opts), nil
 }
 
 // resolveAPIStore returns the Store the HTTP API should use.

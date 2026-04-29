@@ -1,13 +1,13 @@
 /**
  * Factory + re-exports for the OAuth session store.
  *
- * Backend is chosen by OMNIA_SESSION_STORE:
- *   "memory" (default) — in-process store; single-replica only.
- *   "redis"            — shared Redis; required for multi-replica deployments.
+ * Backend is chosen by URL presence:
+ *   OMNIA_SESSION_REDIS_URL set → RedisSessionStore (multi-replica safe).
+ *   OMNIA_SESSION_REDIS_URL unset → MemorySessionStore (single-replica only).
  *
- * When "redis" is selected but no Redis endpoint is configured,
- * construction fails loudly at first use rather than silently falling
- * back to memory (which would turn into an inconsistency between replicas).
+ * The chart's omnia.validateSession render-time guard fails install
+ * when dashboard.replicaCount > 1 and no Redis URL resolves, so getting
+ * here with replicaCount > 1 + memory store is impossible by construction.
  */
 
 import { MemorySessionStore } from "./memory-store";
@@ -15,31 +15,17 @@ import { RedisSessionStore } from "./redis-store";
 import { getSessionRedisClient } from "./redis-client";
 import type { SessionStore } from "./types";
 
-type Backend = "memory" | "redis";
-
 let cached: SessionStore | null = null;
-
-function resolveBackend(): Backend {
-  const raw = (process.env.OMNIA_SESSION_STORE ?? "memory").toLowerCase();
-  if (raw === "memory" || raw === "redis") return raw;
-  console.warn(`Unknown OMNIA_SESSION_STORE="${raw}", falling back to memory`);
-  return "memory";
-}
 
 export function getSessionStore(): SessionStore {
   if (cached) return cached;
-
-  const backend = resolveBackend();
-  if (backend === "redis") {
-    const redis = getSessionRedisClient();
-    if (!redis) {
-      throw new Error(
-        "OMNIA_SESSION_STORE=redis but neither OMNIA_SESSION_REDIS_URL nor OMNIA_SESSION_REDIS_ADDR is set",
-      );
-    }
+  const redis = getSessionRedisClient();
+  if (redis) {
     cached = new RedisSessionStore(redis);
+    console.log("session store: redis");
   } else {
     cached = new MemorySessionStore();
+    console.log("session store: memory (single-replica only)");
   }
   return cached;
 }

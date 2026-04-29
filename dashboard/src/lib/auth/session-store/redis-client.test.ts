@@ -29,16 +29,13 @@ describe("getSessionRedisClient", () => {
     delete g.sessionRedis;
     process.env = { ...originalEnv };
     delete process.env.OMNIA_SESSION_REDIS_URL;
-    delete process.env.OMNIA_SESSION_REDIS_ADDR;
-    delete process.env.OMNIA_SESSION_REDIS_PASSWORD;
-    delete process.env.OMNIA_SESSION_REDIS_DB;
   });
 
   afterEach(() => {
     process.env = originalEnv;
   });
 
-  it("returns null when no Redis env vars are set", () => {
+  it("returns null when OMNIA_SESSION_REDIS_URL is not set", () => {
     expect(getSessionRedisClient()).toBeNull();
     expect(constructorCalls).toHaveLength(0);
   });
@@ -50,16 +47,12 @@ describe("getSessionRedisClient", () => {
     expect(constructorCalls[0][0]).toBe("redis://sess:6380");
   });
 
-  it("creates a client from OMNIA_SESSION_REDIS_ADDR + password + db", () => {
-    process.env.OMNIA_SESSION_REDIS_ADDR = "sess:6379";
-    process.env.OMNIA_SESSION_REDIS_PASSWORD = "pw"; // eslint-disable-line sonarjs/no-hardcoded-passwords
-    process.env.OMNIA_SESSION_REDIS_DB = "2";
+  it("respects rediss:// (TLS) URLs by passing them through unchanged", () => {
+    // ioredis parses rediss:// natively — the client is responsible for
+    // TLS, the chart just emits the URL.
+    process.env.OMNIA_SESSION_REDIS_URL = "rediss://default:hunter2@elasticache.example.com:6379/0";
     getSessionRedisClient();
-    const opts = constructorCalls[0][0] as Record<string, unknown>;
-    expect(opts.host).toBe("sess");
-    expect(opts.port).toBe(6379);
-    expect(opts.password).toBe("pw");
-    expect(opts.db).toBe(2);
+    expect(constructorCalls[0][0]).toBe("rediss://default:hunter2@elasticache.example.com:6379/0");
   });
 
   it("is a singleton across calls", () => {
@@ -101,18 +94,6 @@ describe("getSessionRedisClient", () => {
     expect(retryStrategy(5)).toBe(1000);
     expect(retryStrategy(6)).toBeNull();
     expect(retryStrategy(10)).toBeNull();
-  });
-
-  it("ADDR-based retryStrategy scales delay and returns null after 5 retries", () => {
-    process.env.OMNIA_SESSION_REDIS_ADDR = "sess:6379";
-    getSessionRedisClient();
-
-    const options = constructorCalls[0][0] as Record<string, (times: number) => number | null>;
-    const retryStrategy = options.retryStrategy;
-
-    expect(retryStrategy(1)).toBe(200);
-    expect(retryStrategy(5)).toBe(1000);
-    expect(retryStrategy(6)).toBeNull();
   });
 
   it("retry delay is capped at 2000ms", () => {
