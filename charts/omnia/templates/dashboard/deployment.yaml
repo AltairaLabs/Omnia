@@ -1,4 +1,5 @@
 {{- include "omnia.validateAuth" . -}}
+{{- include "omnia.validateSession" . -}}
 {{- if .Values.dashboard.enabled }}
 {{- $po := .Values.dashboard.podOverrides | default dict }}
 apiVersion: apps/v1
@@ -123,46 +124,33 @@ spec:
               value: {{ .Values.dashboard.builtin.admin.password | quote }}
             {{- end }}
             {{- end }}
-            {{- if and .Values.enterprise.enabled .Values.enterprise.arena.queue (eq .Values.enterprise.arena.queue.type "redis") }}
-            {{- if .Values.redis.enabled }}
-            - name: ARENA_REDIS_ADDR
-              value: "{{ include "omnia.fullname" . }}-redis-master.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.enterprise.arena.queue.redis.port | default 6379 }}"
-            {{- else if .Values.enterprise.arena.queue.redis.host }}
-            - name: ARENA_REDIS_ADDR
-              value: "{{ .Values.enterprise.arena.queue.redis.host }}:{{ .Values.enterprise.arena.queue.redis.port | default 6379 }}"
+            {{- /*
+              Arena queue Redis URL — exposed to the dashboard so its
+              stats / job-state views can read queue state directly.
+              Routed through the unified omnia.redis.urlEnv helper so
+              cluster default and per-consumer overrides flow through
+              one path.
+            */}}
+            {{- if and .Values.enterprise.enabled .Values.enterprise.arena.queue (eq (default "redis" .Values.enterprise.arena.queue.type) "redis") }}
+            {{- include "omnia.redis.urlEnv" (dict "ctx" . "consumer" "enterprise.arena.queue.redis" "envName" "ARENA_REDIS_URL") | nindent 12 }}
             {{- end }}
-            {{- if .Values.enterprise.arena.queue.redis.passwordSecret }}
-            - name: ARENA_REDIS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.enterprise.arena.queue.redis.passwordSecret }}
-                  key: redis-password
-            {{- end }}
-            - name: ARENA_REDIS_DB
-              value: "{{ .Values.enterprise.arena.queue.redis.db | default 0 }}"
-            {{- end }}
-            {{- with .Values.dashboard.session }}
-            - name: OMNIA_SESSION_STORE
-              value: {{ .store | quote }}
+            {{- /*
+              PKCE TTL: orthogonal to Redis (in-flight OAuth records have
+              their own TTL even when sessions live in memory).
+            */}}
             - name: OMNIA_SESSION_PKCE_TTL
-              value: {{ .pkceTtl | quote }}
-            {{- if .redis.url }}
-            - name: OMNIA_SESSION_REDIS_URL
-              value: {{ .redis.url | quote }}
-            {{- else if .redis.addr }}
-            - name: OMNIA_SESSION_REDIS_ADDR
-              value: {{ .redis.addr | quote }}
-            - name: OMNIA_SESSION_REDIS_DB
-              value: {{ .redis.db | quote }}
-            {{- if and .redis.existingSecret.name .redis.existingSecret.key }}
-            - name: OMNIA_SESSION_REDIS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .redis.existingSecret.name | quote }}
-                  key: {{ .redis.existingSecret.key | quote }}
-            {{- end }}
-            {{- end }}
-            {{- end }}
+              value: {{ .Values.dashboard.session.pkceTtl | quote }}
+            {{- /*
+              Session Redis URL. The dashboard auto-selects backend by
+              env presence: OMNIA_SESSION_REDIS_URL set → Redis store;
+              empty/unset → in-process memory store. Helper handles all
+              resolution paths (consumer override, default, secret form,
+              Bitnami subchart). Empty resolution → no env emitted →
+              memory store (single-replica installs only; multi-replica
+              fails render via omnia.validateSession).
+            */}}
+            {{- $sessionConsumer := dict "ctx" . "consumer" "dashboard.session.redis" }}
+            {{- include "omnia.redis.urlEnv" (merge (dict "envName" "OMNIA_SESSION_REDIS_URL") $sessionConsumer) | nindent 12 }}
             {{- /*
               Mgmt-plane signing key path. Pointed at the mounted private
               half of the dashboard signing keypair. server.js loads it at

@@ -16,32 +16,49 @@ import (
 	"github.com/altairalabs/omnia/internal/memory"
 )
 
-// TestBuildRedisClient_EmptyReturnsNil proves an unset --redis-addrs
-// flag produces no client. This is the gate the rest of the cache
-// wiring depends on — a non-nil client with no real backend would
-// turn every Retrieve/List into a connection-refused round trip.
+// TestBuildRedisClient_EmptyReturnsNil proves an unset --redis-url
+// flag produces no client without surfacing an error. The cache is
+// opt-in: empty URL means "no Redis", not "broken config".
 func TestBuildRedisClient_EmptyReturnsNil(t *testing.T) {
-	if buildRedisClient("") != nil {
-		t.Error("expected nil client for empty addrs")
-	}
-	if buildRedisClient("   ") != nil {
-		t.Error("expected nil client for whitespace-only addrs")
+	for _, url := range []string{"", "   "} {
+		c, err := buildRedisClient(url)
+		if err != nil {
+			t.Errorf("buildRedisClient(%q): unexpected error %v", url, err)
+		}
+		if c != nil {
+			t.Errorf("buildRedisClient(%q): expected nil client, got %v", url, c)
+		}
 	}
 }
 
-// TestBuildRedisClient_TakesFirstAddr proves the comma-separated input
-// shape is tolerated even though the production go-redis client is
-// single-master. Operators don't have to remember which one of
-// "Sentinel-shaped or single-shaped" the binary expects.
-func TestBuildRedisClient_TakesFirstAddr(t *testing.T) {
-	c := buildRedisClient("redis-a:6379,redis-b:6379")
-	if c == nil {
-		t.Fatal("expected a client for non-empty addrs")
+// TestBuildRedisClient_ParsesURL proves redis:// URLs parse correctly
+// and the resulting client carries the parsed addr/db. Validates the
+// canonical form documented in chart values.
+func TestBuildRedisClient_ParsesURL(t *testing.T) {
+	c, err := buildRedisClient("redis://omnia-redis-master.omnia-system.svc.cluster.local:6379/3")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
 	}
-	if got := c.Options().Addr; got != "redis-a:6379" {
-		t.Errorf("expected addr=redis-a:6379, got %q", got)
+	if c == nil {
+		t.Fatal("expected a client for a valid URL")
+	}
+	if got := c.Options().Addr; got != "omnia-redis-master.omnia-system.svc.cluster.local:6379" {
+		t.Errorf("addr: got %q", got)
+	}
+	if got := c.Options().DB; got != 3 {
+		t.Errorf("db: got %d, want 3", got)
 	}
 	_ = c.Close()
+}
+
+// TestBuildRedisClient_RejectsInvalidURL proves bad input is a startup
+// error, not silently dropped. A typo in the chart values shouldn't
+// degrade into "cache disabled" — operators need a clear signal.
+func TestBuildRedisClient_RejectsInvalidURL(t *testing.T) {
+	_, err := buildRedisClient("not-a-url")
+	if err == nil {
+		t.Fatal("expected an error for an invalid URL")
+	}
 }
 
 // TestParseCacheTTL covers every meaningful path of the helper:

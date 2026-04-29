@@ -121,15 +121,29 @@ func main() {
 	flag.StringVar(&workspaceContentPath, "workspace-content-path", "/workspace-content",
 		"Base path for the workspace content volume. SkillSource writes synced content here.")
 	flag.StringVar(&redisAddr, "redis-addr", "",
-		"Operator-wide Redis address (e.g., omnia-redis-master.omnia-system.svc.cluster.local:6379). "+
-			"Forwarded to eval-worker pods and to every per-workspace memory-api as --redis-addrs, "+
-			"so a single Redis instance fronts the memory-api read-through cache, the memory event "+
-			"publisher, and the eval-worker queue. Empty disables all three.")
+		"Eval-worker Redis address in host:port form (e.g., omnia-redis-master.omnia-system.svc.cluster.local:6379). "+
+			"Used by the AgentRuntime reconciler to wire the eval-worker autoscaler. Per-workspace memory-api "+
+			"uses --memory-redis-url instead (URL form supports cloud Redis with TLS). Empty disables eval-worker.")
+	var memoryRedisURL string
+	flag.StringVar(&memoryRedisURL, "memory-redis-url", "",
+		"Operator-wide Redis URL forwarded to every per-workspace memory-api as --redis-url. "+
+			"Accepts redis:// or rediss:// URLs, and the literal placeholder \"$(REDIS_URL)\" — when set "+
+			"to the placeholder, --memory-redis-url-secret-name and --memory-redis-url-secret-key MUST "+
+			"reference the Kubernetes Secret containing the actual URL. Memory-api's pod will mount that "+
+			"Secret as REDIS_URL env, and Kubernetes env expansion at startup fills the placeholder.")
+	var memoryRedisURLSecretName string
+	flag.StringVar(&memoryRedisURLSecretName, "memory-redis-url-secret-name", "",
+		"Kubernetes Secret name backing $(REDIS_URL) substitution on per-workspace memory-api pods. "+
+			"Required only when --memory-redis-url is the placeholder \"$(REDIS_URL)\".")
+	var memoryRedisURLSecretKey string
+	flag.StringVar(&memoryRedisURLSecretKey, "memory-redis-url-secret-key", "",
+		"Key within --memory-redis-url-secret-name whose value is the Redis URL. "+
+			"Required only when --memory-redis-url is the placeholder \"$(REDIS_URL)\".")
 	var memoryCacheTTL string
 	flag.StringVar(&memoryCacheTTL, "memory-cache-ttl", "5m",
 		"TTL forwarded to memory-api as --cache-ttl. Empty or \"0\" disables the read-through "+
-			"cache even when --redis-addr is set (useful when Redis is provisioned only for the "+
-			"event publisher).")
+			"cache even when --memory-redis-url is set (useful when Redis is provisioned only for "+
+			"the event publisher).")
 	flag.StringVar(&evalWorkerImage, "eval-worker-image", "",
 		"Image for the arena-eval-worker container. If not set, defaults to ghcr.io/altairalabs/arena-eval-worker:latest")
 	flag.StringVar(&policyProxyImage, "policy-proxy-image", "",
@@ -306,8 +320,12 @@ func main() {
 			SessionImagePullPolicy: corev1.PullPolicy(sessionAPIImagePullPolicy),
 			MemoryImage:            memoryAPIImage,
 			MemoryImagePullPolicy:  corev1.PullPolicy(memoryAPIImagePullPolicy),
-			MemoryRedisAddrs:       redisAddr,
-			MemoryCacheTTL:         memoryCacheTTL,
+			MemoryRedisURL:         memoryRedisURL,
+			MemoryRedisURLSecret: controller.SecretKeyRef{
+				Name: memoryRedisURLSecretName,
+				Key:  memoryRedisURLSecretKey,
+			},
+			MemoryCacheTTL: memoryCacheTTL,
 		},
 		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
 		OperatorNamespace:               os.Getenv("POD_NAMESPACE"),

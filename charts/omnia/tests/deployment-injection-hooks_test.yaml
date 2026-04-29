@@ -132,6 +132,10 @@ tests:
     template: templates/arena-controller-deployment.yaml
     set:
       enterprise.enabled: true
+      # Required since the omnia.validateArenaQueue render-time guard
+      # was added — enterprise + arena.queue.type=redis (default)
+      # without a resolvable Redis URL fails render.
+      redis.enabled: true
       enterprise.arena.controller.extraEnv:
         - name: AZURE_TENANT_ID
           value: my-tenant
@@ -154,6 +158,7 @@ tests:
     template: templates/arena-controller-deployment.yaml
     set:
       enterprise.enabled: true
+      redis.enabled: true
       enterprise.arena.controller.extraVolumes:
         - name: extra
           emptyDir: {}

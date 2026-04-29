@@ -56,15 +56,36 @@ else
     FAILED=1
 fi
 
-# Test with enterprise enabled
+# Test with enterprise enabled. Enterprise implies arena.queue.type=redis,
+# which requires a resolvable Redis URL — chart fails render via
+# omnia.validateArenaQueue otherwise. Pair enterprise=true with the
+# Bitnami subchart so a CI / smoke render exercises both.
 if helm template omnia "$CHART_DIR" "${AUTH_VALUES[@]}" \
     --set enterprise.enabled=true \
     --set enterprise.arena.controller.image.repository=test \
     --set enterprise.arena.worker.image.repository=test \
+    --set redis.enabled=true \
     > /dev/null 2>&1; then
     print_success "Template renders with enterprise enabled"
 else
     print_error "Template failed with enterprise enabled"
+    helm template omnia "$CHART_DIR" "${AUTH_VALUES[@]}" \
+        --set enterprise.enabled=true \
+        --set enterprise.arena.controller.image.repository=test \
+        --set enterprise.arena.worker.image.repository=test \
+        --set redis.enabled=true 2>&1 | tail -10
+    FAILED=1
+fi
+
+# Test enterprise without Redis must FAIL (arena queue guard).
+if ! helm template omnia "$CHART_DIR" "${AUTH_VALUES[@]}" \
+    --set enterprise.enabled=true \
+    --set enterprise.arena.controller.image.repository=test \
+    --set enterprise.arena.worker.image.repository=test \
+    > /dev/null 2>&1; then
+    print_success "Enterprise without Redis correctly fails render (omnia.validateArenaQueue)"
+else
+    print_error "Enterprise without Redis rendered when it should have failed"
     FAILED=1
 fi
 

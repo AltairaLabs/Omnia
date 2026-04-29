@@ -309,26 +309,236 @@ Eval Worker image
 {{- end }}
 
 {{/*
-Resolve the operator-wide Redis address.
-
-Priority:
-  1. .Values.redis.externalAddr — explicit operator override (off-cluster Redis,
-     e.g. AWS ElastiCache, GCP Memorystore).
-  2. Bitnami Redis subchart service when .Values.redis.enabled=true.
-  3. "" — Redis-dependent features (memory-api cache + event publisher,
-     eval-worker queue, dashboard session store) all stay disabled.
-
-Returning a single canonical address keeps the operator, dashboard, and
-arena-controller in sync without each template having to redo the
-"is Redis available?" reasoning.
+Walk a dotted path into .Values and return the resolved sub-value, or
+an empty dict if any segment is missing. Internal helper.
 */}}
-{{- define "omnia.redisAddr" -}}
-{{- if .Values.redis.externalAddr -}}
-{{- .Values.redis.externalAddr -}}
-{{- else if .Values.redis.enabled -}}
-{{- printf "%s-redis-master.%s.svc.cluster.local:6379" (include "omnia.fullname" .) .Release.Namespace -}}
+{{- define "omnia.redis._lookupConsumer" -}}
+{{- $ctx := .ctx -}}
+{{- $path := .consumer -}}
+{{- $node := $ctx.Values -}}
+{{- if $path -}}
+  {{- range $part := splitList "." $path -}}
+    {{- if and (kindIs "map" $node) (hasKey $node $part) -}}
+      {{- $node = index $node $part -}}
+    {{- else -}}
+      {{- $node = dict -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- toYaml $node -}}
+{{- end }}
+
+{{/*
+Resolve the existingSecret reference for a given consumer's Redis URL.
+
+Args (dict):
+  ctx      - the root context ($)
+  consumer - dotted path to the per-consumer Redis block.
+
+Returns the resolved {name, key} dict from consumer.existingSecret
+(preferred) or redis.default.existingSecret (fallback). Returns an
+empty dict when neither has one. Internal helper for the public
+omnia.redis.* family.
+*/}}
+{{- define "omnia.redis._existingSecret" -}}
+{{- $consumer := fromYaml (include "omnia.redis._lookupConsumer" .) -}}
+{{- $default := .ctx.Values.redis.default | default dict -}}
+{{- $secret := dict -}}
+{{- if and (kindIs "map" $consumer) (kindIs "map" $consumer.existingSecret) (default "" $consumer.existingSecret.name) (default "" $consumer.existingSecret.key) -}}
+  {{- $secret = $consumer.existingSecret -}}
+{{- else if and (kindIs "map" $default.existingSecret) (default "" $default.existingSecret.name) (default "" $default.existingSecret.key) -}}
+  {{- $secret = $default.existingSecret -}}
+{{- end -}}
+{{- toYaml $secret -}}
+{{- end }}
+
+{{/*
+Resolve the Redis URL for a given consumer.
+
+Args (dict):
+  ctx      - the root context ($)
+  consumer - dotted path to the per-consumer Redis block, e.g.
+             "dashboard.session.redis"
+             "workspaceServices.memoryApi.cache.redis"
+             "enterprise.arena.queue.redis"
+
+Resolution order — first non-empty wins:
+  1. <consumer>.existingSecret    → returns ""; caller uses
+     omnia.redis.urlEnv to emit a secretKeyRef-sourced env entry.
+  2. <consumer>.url               → literal URL.
+  3. <consumer>.host              → decomposed; synthesise plaintext URL.
+  4. redis.default.existingSecret → returns "" (same as 1).
+  5. redis.default.url            → literal URL.
+  6. redis.default.host           → decomposed; synthesise plaintext URL.
+  7. redis.enabled=true           → Bitnami subchart in-cluster service.
+  8. ""                           → consumer disabled.
+
+`omnia.redis.url` returns the literal URL string for forms 2, 3, 5, 6, 7
+or empty string for forms 1, 4, 8. To detect the existingSecret form
+and emit the correct env entry, use `omnia.redis.hasSecret` and
+`omnia.redis.urlEnv` (paired helper).
+*/}}
+{{- define "omnia.redis.url" -}}
+{{- $secret := fromYaml (include "omnia.redis._existingSecret" .) -}}
+{{- if and (kindIs "map" $secret) $secret.name -}}
+{{- /* secret form — caller renders env via omnia.redis.urlEnv */ -}}
 {{- else -}}
-{{- "" -}}
+{{- $consumer := fromYaml (include "omnia.redis._lookupConsumer" .) -}}
+{{- $default := .ctx.Values.redis.default | default dict -}}
+{{- if and (kindIs "map" $consumer) $consumer.url -}}
+{{- $consumer.url -}}
+{{- else if and (kindIs "map" $consumer) $consumer.host -}}
+{{- include "omnia.redis.synthesise" $consumer -}}
+{{- else if $default.url -}}
+{{- $default.url -}}
+{{- else if $default.host -}}
+{{- include "omnia.redis.synthesise" $default -}}
+{{- else if .ctx.Values.redis.enabled -}}
+{{- printf "redis://%s-redis-master.%s.svc.cluster.local:6379/0" (include "omnia.fullname" .ctx) .ctx.Release.Namespace -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Returns "true" when the consumer's resolved URL comes from an
+existingSecret (rather than a literal URL or decomposed form);
+otherwise returns "". Use to branch in templates between literal-value
+and secretKeyRef-sourced EnvVar emission.
+*/}}
+{{- define "omnia.redis.hasSecret" -}}
+{{- $secret := fromYaml (include "omnia.redis._existingSecret" .) -}}
+{{- if and (kindIs "map" $secret) $secret.name -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+Emit a single EnvVar entry carrying the resolved Redis URL.
+
+Args (dict):
+  ctx      - the root context ($)
+  consumer - dotted path to the per-consumer Redis block.
+  envName  - name of the env var to emit, e.g. "OMNIA_SESSION_REDIS_URL".
+
+Produces nothing when the consumer's URL resolves empty (consumer
+disabled). Use the alongside `omnia.validate*` helpers to fail render
+when an empty URL would silently break the consumer.
+
+Output forms:
+  Literal/decomposed/subchart →
+    - name: <envName>
+      value: "<resolved URL>"
+
+  existingSecret →
+    - name: <envName>
+      valueFrom:
+        secretKeyRef:
+          name: "<secret name>"
+          key:  "<secret key>"
+
+Pod templates use this in their env: list:
+
+  env:
+    {{- include "omnia.redis.urlEnv" (dict "ctx" . "consumer" "..." "envName" "...") | nindent 12 }}
+*/}}
+{{- define "omnia.redis.urlEnv" -}}
+{{- $secret := fromYaml (include "omnia.redis._existingSecret" .) -}}
+{{- if and (kindIs "map" $secret) $secret.name -}}
+- name: {{ .envName }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret.name | quote }}
+      key: {{ $secret.key | quote }}
+{{- else -}}
+{{- $url := include "omnia.redis.url" . -}}
+{{- if $url -}}
+- name: {{ .envName }}
+  value: {{ $url | quote }}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Synthesise a plaintext Redis URL from a decomposed config block.
+
+Block shape:
+  host: required
+  port: default 6379
+  db:   default 0
+  user: default "" (Redis ACL default user)
+  tls.caExistingSecret: ignored here (CA is mounted as a file by
+    consumer templates; the URL just uses redis:// vs rediss://
+    based on the scheme implied by tls).
+
+Output: "redis://[user@]host:port/db".
+
+The decomposed form intentionally cannot synthesise auth (no password
+field). Callers wanting auth use the `existingSecret` form instead.
+*/}}
+{{- define "omnia.redis.synthesise" -}}
+{{- $port := default 6379 .port -}}
+{{- $db := default 0 .db -}}
+{{- $user := default "" .user -}}
+{{- if $user -}}
+{{- printf "redis://%s@%s:%v/%v" $user .host $port $db -}}
+{{- else -}}
+{{- printf "redis://%s:%v/%v" .host $port $db -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Extract host:port from a resolved Redis URL.
+
+Used by consumers that take host:port form (eval-worker, arena-worker,
+arena-eval-worker) until their Go code is converted to URL form. The
+chart still feeds them from the same `omnia.redis.url` source of truth.
+
+Args (passed via dict):
+  ctx      - the root context ($)
+  consumer - dotted path to the per-consumer Redis block.
+
+Returns "host:port" or "".
+*/}}
+{{- define "omnia.redis.hostPort" -}}
+{{- $url := include "omnia.redis.url" . -}}
+{{- if $url -}}
+{{- $parsed := urlParse $url -}}
+{{- $parsed.host -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Render-time guard: dashboard.replicaCount > 1 with no resolved session
+Redis means per-pod in-memory sessions. Users get logged out the moment
+their request hits a different replica. Fail render rather than ship a
+silently broken multi-replica deployment.
+
+Include this from every template that renders when dashboard.enabled=true.
+*/}}
+{{- define "omnia.validateSession" -}}
+{{- if .Values.dashboard.enabled -}}
+{{- $replicas := int (default 1 .Values.dashboard.replicaCount) -}}
+{{- if gt $replicas 1 -}}
+{{- $sessionURL := include "omnia.redis.url" (dict "ctx" . "consumer" "dashboard.session.redis") -}}
+{{- if not $sessionURL -}}
+{{- fail "dashboard.replicaCount > 1 requires a resolvable Redis session store. Set redis.default, dashboard.session.redis, redis.enabled=true, or scale to dashboard.replicaCount=1." -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Render-time guard: enterprise Arena queue requires durable Redis when
+type=redis (which is the default). The in-memory queue mode is only
+useful in dev / E2E; production Arena needs jobs to survive controller
+restarts.
+*/}}
+{{- define "omnia.validateArenaQueue" -}}
+{{- if and .Values.enterprise.enabled (eq (default "redis" .Values.enterprise.arena.queue.type) "redis") -}}
+{{- $arenaURL := include "omnia.redis.url" (dict "ctx" . "consumer" "enterprise.arena.queue.redis") -}}
+{{- if not $arenaURL -}}
+{{- fail "enterprise.arena.queue.type=redis requires a resolvable Redis URL. Set redis.default, enterprise.arena.queue.redis, redis.enabled=true, or set enterprise.arena.queue.type=memory (dev only)." -}}
+{{- end -}}
 {{- end -}}
 {{- end }}
 

@@ -1,0 +1,100 @@
+suite: dashboard session store auto-selects backend by Redis URL presence
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/dashboard/deployment.yaml
+  - templates/dashboard/configmap.yaml
+tests:
+  - it: emits no OMNIA_SESSION_REDIS_URL when no Redis is configured (single-replica memory store)
+    # Default OSS install: replicaCount=1, no Redis. The dashboard
+    # auto-falls-back to MemorySessionStore — that's the documented
+    # contract. Multi-replica installs are blocked by the
+    # omnia.validateSession render guard, so getting here with memory
+    # store is safe by construction.
+    template: templates/dashboard/deployment.yaml
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].env[*].name
+          pattern: ^OMNIA_SESSION_REDIS_URL$
+
+  - it: emits OMNIA_SESSION_STORE on no path (legacy flag is gone)
+    # The OMNIA_SESSION_STORE env was a manual toggle that conflicted
+    # with the URL-presence gate (operators could set store=redis with
+    # no URL → throw on first request). Dropped entirely; this assertion
+    # pins the deletion so it can't reappear.
+    template: templates/dashboard/deployment.yaml
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].env[*].name
+          pattern: ^OMNIA_SESSION_STORE$
+
+  - it: literal URL emits OMNIA_SESSION_REDIS_URL with value
+    set:
+      redis.default.url: "redis://shared.example.com:6379/0"
+    template: templates/dashboard/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNIA_SESSION_REDIS_URL
+            value: "redis://shared.example.com:6379/0"
+
+  - it: existingSecret emits OMNIA_SESSION_REDIS_URL via valueFrom.secretKeyRef
+    # Production-typical: URL contains a password; never appears in
+    # chart values, never in `helm get values` output, never in env
+    # logs. Operators check the Secret to read the URL.
+    set:
+      redis.default.existingSecret.name: redis-creds
+      redis.default.existingSecret.key: url
+    template: templates/dashboard/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNIA_SESSION_REDIS_URL
+            valueFrom:
+              secretKeyRef:
+                name: redis-creds
+                key: url
+
+  - it: per-consumer override wins over redis.default
+    # Dashboard session pinned to its own Redis (e.g. cross-region
+    # replicated for cookie persistence) while the rest of the cluster
+    # uses redis.default.
+    set:
+      redis.default.url: "redis://default.example.com:6379/0"
+      dashboard.session.redis.url: "rediss://session-redis.example.com:6379/0"
+    template: templates/dashboard/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNIA_SESSION_REDIS_URL
+            value: "rediss://session-redis.example.com:6379/0"
+
+  - it: replicaCount>1 without resolvable Redis fails render (validateSession)
+    # The guard. Without it, multi-replica dashboards silently break:
+    # users get logged out the moment their request hits a different
+    # replica because each pod has its own MemorySessionStore.
+    set:
+      dashboard.replicaCount: 3
+    template: templates/dashboard/deployment.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: "dashboard.replicaCount > 1 requires a resolvable Redis session store. Set redis.default, dashboard.session.redis, redis.enabled=true, or scale to dashboard.replicaCount=1."
+
+  - it: replicaCount>1 with resolvable Redis renders successfully
+    set:
+      dashboard.replicaCount: 3
+      redis.enabled: true
+    template: templates/dashboard/deployment.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNIA_SESSION_REDIS_URL
+            value: "redis://omnia-redis-master.NAMESPACE.svc.cluster.local:6379/0"

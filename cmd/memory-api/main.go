@@ -105,7 +105,7 @@ type flags struct {
 	healthAddr            string
 	metricsAddr           string
 	postgresConn          string
-	redisAddrs            string
+	redisURL              string // --redis-url, env REDIS_URL or OMNIA_MEMORY_REDIS_URL
 	cacheTTL              string // env: MEMORY_CACHE_TTL, e.g. "5m"; "" or "0" disables
 	enterprise            bool
 	tracingEnabled        bool
@@ -135,8 +135,8 @@ func parseFlags() *flags {
 	flag.StringVar(&f.healthAddr, "health-addr", ":8081", "Health probe listen address")
 	flag.StringVar(&f.metricsAddr, "metrics-addr", ":9090", "Metrics server listen address")
 	flag.StringVar(&f.postgresConn, "postgres-conn", "", "Postgres connection string")
-	flag.StringVar(&f.redisAddrs, "redis-addrs", "", "Redis addresses (comma-separated). When set, the same client is reused for both the read-through cache and the event publisher.")
-	flag.StringVar(&f.cacheTTL, "cache-ttl", "5m", "TTL for the Redis read-through cache (Retrieve/List). Set to 0 or empty to disable caching even when --redis-addrs is configured.")
+	flag.StringVar(&f.redisURL, "redis-url", "", "Redis connection URL (redis:// or rediss://). When set, the same client is reused for both the read-through cache and the event publisher. Empty disables both.")
+	flag.StringVar(&f.cacheTTL, "cache-ttl", "5m", "TTL for the Redis read-through cache (Retrieve/List). Set to 0 or empty to disable caching even when --redis-url is configured.")
 	flag.BoolVar(&f.enterprise, "enterprise", false, "Enable enterprise features (audit logging)")
 	flag.BoolVar(&f.tracingEnabled, "tracing-enabled", false, "Enable OpenTelemetry tracing")
 	flag.StringVar(&f.tracingEndpoint, "tracing-endpoint", "", "OTel collector endpoint")
@@ -166,7 +166,8 @@ func parseFlags() *flags {
 // applyEnvFallbacks applies environment variable overrides to flag defaults.
 func (f *flags) applyEnvFallbacks() {
 	envFallback(&f.postgresConn, "", "POSTGRES_CONN")
-	envFallback(&f.redisAddrs, "", "REDIS_ADDRS")
+	envFallback(&f.redisURL, "", "REDIS_URL")
+	envFallback(&f.redisURL, "", "OMNIA_MEMORY_REDIS_URL")
 	envFallback(&f.cacheTTL, "5m", "MEMORY_CACHE_TTL")
 	envFallback(&f.apiAddr, ":8080", "API_ADDR")
 	envFallback(&f.healthAddr, ":8081", "HEALTH_ADDR")
@@ -387,14 +388,17 @@ func run() error {
 	// cache wrapper or the event publisher. One client, one TCP pool —
 	// keeps connection accounting honest and lets ops see "is Redis up"
 	// from a single set of metrics rather than two.
-	redisClient := buildRedisClient(f.redisAddrs)
+	redisClient, redisErr := buildRedisClient(f.redisURL)
+	if redisErr != nil {
+		return fmt.Errorf("redis URL: %w", redisErr)
+	}
 	if redisClient != nil {
 		defer func() { _ = redisClient.Close() }()
 	}
 
 	apiStore, cacheEnabled := resolveAPIStore(pgStore, redisClient, f.cacheTTL, log)
 	if cacheEnabled {
-		log.Info("memory store cache enabled", "ttl", f.cacheTTL, "redisAddrs", f.redisAddrs)
+		log.Info("memory store cache enabled", "ttl", f.cacheTTL)
 	}
 
 	// --- Read-path metrics ---
@@ -523,7 +527,7 @@ func run() error {
 	var eventPublisher memoryapi.MemoryEventPublisher
 	if redisClient != nil {
 		eventPublisher = memoryapi.NewRedisMemoryEventPublisher(redisClient, log)
-		log.Info("memory event publisher enabled", "redisAddrs", f.redisAddrs)
+		log.Info("memory event publisher enabled")
 	}
 
 	// --- Build API mux ---

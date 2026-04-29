@@ -192,47 +192,91 @@ func TestBuildMemoryDeployment_AnnotatesConfigHash(t *testing.T) {
 }
 
 // TestBuildMemoryDeployment_RedisFlagsAbsentByDefault proves the
-// operator does NOT pass --redis-addrs / --cache-ttl when the
+// operator does NOT pass --redis-url / --cache-ttl when the
 // ServiceBuilder is constructed without Redis config. Memory-api
 // then runs with the cache disabled and no event publisher, which
 // is the correct OSS / non-Redis dev install behaviour. Passing
-// empty strings as flags would degrade into "--redis-addrs=" and
-// trigger a connection-refused log on every Retrieve.
+// empty strings as flags would degrade into "--redis-url=" and
+// trigger goredis.ParseURL to fail on every startup.
 func TestBuildMemoryDeployment_RedisFlagsAbsentByDefault(t *testing.T) {
 	sb := newTestServiceBuilder()
 	sg := newTestServiceGroup("default")
 
 	dep := sb.BuildMemoryDeployment("acme", "acme-ns", sg)
 	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
-	args := dep.Spec.Template.Spec.Containers[0].Args
-	for _, a := range args {
-		if strings.HasPrefix(a, "--redis-addrs=") {
-			t.Errorf("expected no --redis-addrs flag when MemoryRedisAddrs is empty, got %q", a)
+	container := dep.Spec.Template.Spec.Containers[0]
+	for _, a := range container.Args {
+		if strings.HasPrefix(a, "--redis-url=") {
+			t.Errorf("expected no --redis-url flag when MemoryRedisURL is empty, got %q", a)
 		}
 		if strings.HasPrefix(a, "--cache-ttl=") {
 			t.Errorf("expected no --cache-ttl flag when MemoryCacheTTL is empty, got %q", a)
 		}
 	}
+	for _, e := range container.Env {
+		if e.Name == "REDIS_URL" {
+			t.Errorf("expected no REDIS_URL env when no Secret reference is configured, got %+v", e)
+		}
+	}
 }
 
-// TestBuildMemoryDeployment_RedisFlagsThreaded proves that operator-
-// level Redis config flows through to every per-workspace memory-api
-// pod. Without this, setting MemoryRedisAddrs on the operator would
-// be cosmetic — the per-workspace flags wouldn't reflect it and
-// neither the cache nor the event publisher would activate. This is
-// the wiring assertion that mirrors #1038's "the workers were
-// implemented but never started" failure mode for Redis.
-func TestBuildMemoryDeployment_RedisFlagsThreaded(t *testing.T) {
+// TestBuildMemoryDeployment_RedisURLLiteralThreaded proves that an
+// operator-level literal Redis URL flows through to every per-workspace
+// memory-api pod as --redis-url, with no REDIS_URL Secret env (because
+// no Secret reference was configured). The URL is consumed verbatim by
+// goredis.ParseURL at memory-api startup.
+func TestBuildMemoryDeployment_RedisURLLiteralThreaded(t *testing.T) {
 	sb := newTestServiceBuilder()
-	sb.MemoryRedisAddrs = "omnia-redis-master.omnia-system.svc:6379"
+	sb.MemoryRedisURL = "redis://omnia-redis-master.omnia-system.svc.cluster.local:6379/0"
 	sb.MemoryCacheTTL = "10m"
 	sg := newTestServiceGroup("default")
 
 	dep := sb.BuildMemoryDeployment("acme", "acme-ns", sg)
 	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
-	args := dep.Spec.Template.Spec.Containers[0].Args
-	assert.Contains(t, args, "--redis-addrs=omnia-redis-master.omnia-system.svc:6379")
-	assert.Contains(t, args, "--cache-ttl=10m")
+	container := dep.Spec.Template.Spec.Containers[0]
+	assert.Contains(t, container.Args, "--redis-url=redis://omnia-redis-master.omnia-system.svc.cluster.local:6379/0")
+	assert.Contains(t, container.Args, "--cache-ttl=10m")
+	for _, e := range container.Env {
+		if e.Name == "REDIS_URL" {
+			t.Errorf("expected no REDIS_URL env for literal URL, got %+v", e)
+		}
+	}
+}
+
+// TestBuildMemoryDeployment_RedisURLFromSecretMountsEnv proves the
+// secret-backed URL path: when ServiceBuilder is configured with the
+// $(REDIS_URL) placeholder + a Secret reference, every per-workspace
+// memory-api pod gets:
+//   - the placeholder URL on its --redis-url flag, and
+//   - a REDIS_URL env sourced from valueFrom.secretKeyRef.
+//
+// Kubernetes env expansion at pod startup substitutes the placeholder
+// with the Secret's value before goredis.ParseURL sees it. Without the
+// env mount, expansion no-ops and goredis.ParseURL fails with
+// "redis: invalid URL scheme: $(REDIS_URL)".
+func TestBuildMemoryDeployment_RedisURLFromSecretMountsEnv(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sb.MemoryRedisURL = "$(REDIS_URL)"
+	sb.MemoryRedisURLSecret = SecretKeyRef{Name: "redis-url-secret", Key: "url"}
+	sg := newTestServiceGroup("default")
+
+	dep := sb.BuildMemoryDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	container := dep.Spec.Template.Spec.Containers[0]
+	assert.Contains(t, container.Args, "--redis-url=$(REDIS_URL)")
+
+	var redisURLEnv *corev1.EnvVar
+	for i := range container.Env {
+		if container.Env[i].Name == "REDIS_URL" {
+			redisURLEnv = &container.Env[i]
+			break
+		}
+	}
+	require.NotNil(t, redisURLEnv, "expected REDIS_URL env to be mounted from Secret")
+	require.NotNil(t, redisURLEnv.ValueFrom)
+	require.NotNil(t, redisURLEnv.ValueFrom.SecretKeyRef)
+	assert.Equal(t, "redis-url-secret", redisURLEnv.ValueFrom.SecretKeyRef.Name)
+	assert.Equal(t, "url", redisURLEnv.ValueFrom.SecretKeyRef.Key)
 }
 
 // TestBuildMemoryDeployment_EmbeddingProviderArg proves that setting
