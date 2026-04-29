@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/altairalabs/omnia/internal/doctor"
 	"github.com/altairalabs/omnia/internal/doctor/checks"
@@ -58,12 +59,13 @@ func main() {
 	ollamaURLFlag := flag.String("ollama-url", "", "override Ollama URL")
 	operatorURLFlag := flag.String("operator-url", "", "override operator API URL")
 	dashboardURLFlag := flag.String("dashboard-url", "", "override dashboard URL")
-	redisAddrFlag := flag.String("redis-addr", "",
-		"Redis address (host:port). When unset, the Redis reachability check is "+
-			"skipped — installs without Redis (no memory cache, no session store, "+
-			"no Arena queue) are a valid OSS configuration. Chart wires this from "+
-			"omnia.redis.hostPort when a Redis target resolves; operators can also "+
-			"set it explicitly to point Doctor at an out-of-band Redis.")
+	redisURLFlag := flag.String("redis-url", os.Getenv("REDIS_URL"),
+		"Redis URL (redis:// or rediss://). When unset, the Redis reachability "+
+			"check is skipped — installs without Redis (no memory cache, no session "+
+			"store, no Arena queue) are a valid OSS configuration. Chart wires this "+
+			"from omnia.redis.url when a Redis target resolves; operators can also "+
+			"set it explicitly. The TCPCheck dials host:port extracted from the URL "+
+			"via goredis.ParseURL; the Doctor doesn't authenticate.")
 	arenaURLFlag := flag.String("arena-url", "", "override arena controller URL")
 	workspaceFlag := flag.String("workspace", "", "workspace name for per-workspace service discovery (optional)")
 	serviceGroupFlag := flag.String("service-group", "default", "service group to resolve within the workspace")
@@ -110,10 +112,20 @@ func main() {
 	}
 
 	// No auto-derivation — Redis is consumer-optional. The check is
-	// registered only when a non-empty addr arrives via the flag, so a
+	// registered only when a non-empty URL arrives via the flag, so a
 	// fresh OSS install (no Redis) doesn't surface a fake "Redis
-	// unreachable" failure.
-	redisAddr := *redisAddrFlag
+	// unreachable" failure. URL → host:port via ParseURL because the
+	// TCPCheck takes a dial address (auth is irrelevant for a TCP
+	// reachability probe).
+	redisAddr := ""
+	if *redisURLFlag != "" {
+		opts, parseErr := goredis.ParseURL(*redisURLFlag)
+		if parseErr != nil {
+			log.Error(parseErr, "invalid --redis-url", "value", *redisURLFlag)
+			os.Exit(1)
+		}
+		redisAddr = opts.Addr
+	}
 
 	arenaURL := *arenaURLFlag
 	if arenaURL == "" {

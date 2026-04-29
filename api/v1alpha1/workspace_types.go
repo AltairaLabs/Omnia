@@ -632,6 +632,8 @@ type MemoryServiceConfig struct {
 }
 
 // SessionServiceConfig defines the configuration for a managed session-api instance.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.redis) || [has(self.redis.existingSecret), has(self.redis.url) && size(self.redis.url) > 0, has(self.redis.host) && size(self.redis.host) > 0].exists_one(b, b)",message="session.redis must use exactly one of existingSecret, url, or host"
 type SessionServiceConfig struct {
 	// database configures the PostgreSQL database for this session service.
 	// +kubebuilder:validation:Required
@@ -643,6 +645,15 @@ type SessionServiceConfig struct {
 	// falls back to its baked-in defaults.
 	// +optional
 	PolicyRef *corev1.LocalObjectReference `json:"policyRef,omitempty"`
+
+	// redis pins this workspace's session-api hot cache to a specific
+	// Redis instance, overriding the operator-wide default. Use for
+	// SaaS multi-tenancy where each customer's session data must live
+	// on physically separate Redis (data residency, blast-radius
+	// isolation), or per-workspace durability tier choices. Unset =
+	// inherit the operator-wide --session-redis-url passed by the chart.
+	// +optional
+	Redis *RedisConfig `json:"redis,omitempty"`
 
 	// podOverrides customizes the managed session-api Pod (SA, scheduling,
 	// CSI secret-stores, etc.).

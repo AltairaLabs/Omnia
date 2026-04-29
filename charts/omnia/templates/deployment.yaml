@@ -125,6 +125,27 @@ spec:
             {{- with .Values.workspaceServices.memoryApi.cache.ttl }}
             - --memory-cache-ttl={{ . }}
             {{- end }}
+            {{- /*
+              Session-api hot-cache Redis. Routes through dashboard.
+              session.redis (the same consumer block the dashboard
+              session store uses, since they share Redis topology by
+              default) → redis.default → Bitnami subchart. Operators
+              wanting to split session-api hot-cache Redis from
+              dashboard session-store Redis can set per-workspace
+              overrides via Workspace.spec.services[].session.redis.
+            */}}
+            {{- $sessionConsumer := dict "ctx" . "consumer" "dashboard.session.redis" }}
+            {{- $sessionHasSecret := include "omnia.redis.hasSecret" $sessionConsumer }}
+            {{- if $sessionHasSecret }}
+            {{- $sessionSecret := fromYaml (include "omnia.redis._existingSecret" $sessionConsumer) }}
+            - --session-redis-url-secret-name={{ $sessionSecret.name }}
+            - --session-redis-url-secret-key={{ $sessionSecret.key }}
+            {{- else }}
+            {{- $sessionRedisURL := include "omnia.redis.url" $sessionConsumer }}
+            {{- if $sessionRedisURL }}
+            - --session-redis-url={{ $sessionRedisURL }}
+            {{- end }}
+            {{- end }}
             - --agent-workspace-reader-clusterrole={{ include "omnia.fullname" . }}-agent-workspace-reader
             {{- if .Values.dashboard.enabled }}
             {{- /*

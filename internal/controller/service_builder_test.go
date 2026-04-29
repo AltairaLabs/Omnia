@@ -27,6 +27,12 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
+// Test constants extracted to satisfy goconst.
+const (
+	testOperatorRedisURL = "redis://operator-default:6379/0"
+	testRedisURLEnvName  = "REDIS_URL"
+)
+
 func newTestServiceGroup(name string) omniav1alpha1.WorkspaceServiceGroup {
 	return omniav1alpha1.WorkspaceServiceGroup{
 		Name: name,
@@ -105,6 +111,166 @@ func TestBuildSessionDeployment(t *testing.T) {
 	assert.Contains(t, sc.Capabilities.Drop, corev1.Capability("ALL"))
 	require.NotNil(t, sc.SeccompProfile)
 	assert.Equal(t, corev1.SeccompProfileTypeRuntimeDefault, sc.SeccompProfile.Type)
+}
+
+// TestBuildSessionDeployment_NoRedisFlagByDefault proves session-api
+// pods are built without --redis-url when no Redis is configured —
+// session-api gracefully degrades to warm-tier-only when REDIS_URL is
+// empty, but emitting the flag with empty value would surface
+// confusing "parse redis URL" errors at startup.
+func TestBuildSessionDeployment_NoRedisFlagByDefault(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sg := newTestServiceGroup("default")
+
+	dep := sb.BuildSessionDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	for _, a := range dep.Spec.Template.Spec.Containers[0].Args {
+		if strings.HasPrefix(a, "--redis-url=") {
+			t.Errorf("expected no --redis-url flag, got %q", a)
+		}
+	}
+}
+
+// TestBuildSessionDeployment_OperatorRedisURLLiteral proves the
+// operator-wide --session-redis-url flag flows through to session-api
+// pods. Without this, configuring SessionRedisURL on ServiceBuilder
+// would be cosmetic.
+func TestBuildSessionDeployment_OperatorRedisURLLiteral(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sb.SessionRedisURL = testOperatorRedisURL
+	sg := newTestServiceGroup("default")
+
+	dep := sb.BuildSessionDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	assert.Contains(t, dep.Spec.Template.Spec.Containers[0].Args,
+		"--redis-url=redis://operator-default:6379/0")
+}
+
+// TestBuildSessionDeployment_PerWorkspaceRedisURLOverridesOperator
+// proves per-workspace session.redis.url shadows the operator-wide
+// SessionRedisURL. Mirrors the memory-api per-workspace test from #1062.
+func TestBuildSessionDeployment_PerWorkspaceRedisURLOverridesOperator(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sb.SessionRedisURL = testOperatorRedisURL
+	sg := newTestServiceGroup("prod")
+	sg.Session = &omniav1alpha1.SessionServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "session-db"}},
+		Redis: &omniav1alpha1.RedisConfig{
+			URL: "rediss://customer-acme-sessions.example.com:6379/2",
+		},
+	}
+
+	dep := sb.BuildSessionDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	args := dep.Spec.Template.Spec.Containers[0].Args
+	assert.Contains(t, args, "--redis-url=rediss://customer-acme-sessions.example.com:6379/2")
+	assert.NotContains(t, args, "--redis-url=redis://operator-default:6379/0")
+}
+
+// TestBuildSessionDeployment_PerWorkspaceRedisHostSynthesisesURL
+// proves the decomposed form: workspace sets host (+ optional port/db/
+// user), operator synthesises a URL. No auth — decomposed is cleartext-
+// only by design (auth flows via existingSecret).
+func TestBuildSessionDeployment_PerWorkspaceRedisHostSynthesisesURL(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sg := newTestServiceGroup("prod")
+	sg.Session = &omniav1alpha1.SessionServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "session-db"}},
+		Redis: &omniav1alpha1.RedisConfig{
+			Host: "tenant-session-redis.example.com",
+			Port: 6390,
+			DB:   3,
+			User: "sessions",
+		},
+	}
+
+	dep := sb.BuildSessionDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	args := dep.Spec.Template.Spec.Containers[0].Args
+	assert.Contains(t, args, "--redis-url=redis://sessions@tenant-session-redis.example.com:6390/3")
+}
+
+// TestBuildSessionDeployment_PerWorkspaceRedisEmptyFallsThrough proves
+// that a workspace whose Session.Redis block is set but with all
+// three input forms empty (CEL should reject this at admission, but
+// the unit's defensive fallback returns the operator default to keep
+// the Deployment renderable rather than emitting a broken --redis-url).
+func TestBuildSessionDeployment_PerWorkspaceRedisEmptyFallsThrough(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sb.SessionRedisURL = testOperatorRedisURL
+	sg := newTestServiceGroup("prod")
+	sg.Session = &omniav1alpha1.SessionServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "session-db"}},
+		Redis:    &omniav1alpha1.RedisConfig{}, // all forms empty
+	}
+
+	dep := sb.BuildSessionDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	assert.Contains(t, dep.Spec.Template.Spec.Containers[0].Args,
+		"--redis-url="+testOperatorRedisURL)
+}
+
+// TestBuildSessionDeployment_RollsOnRedisChange proves the
+// sessionConfigHash annotation flips when the Redis target changes,
+// so the session-api pod rolls and picks up the new --redis-url.
+func TestBuildSessionDeployment_RollsOnRedisChange(t *testing.T) {
+	sb := newTestServiceBuilder()
+	baseSession := omniav1alpha1.SessionServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "session-db"}},
+	}
+
+	sgA := newTestServiceGroup("prod")
+	sessA := baseSession
+	sessA.Redis = &omniav1alpha1.RedisConfig{URL: "redis://a.example.com:6379/0"}
+	sgA.Session = &sessA
+	depA := sb.BuildSessionDeployment("acme", "acme-ns", sgA)
+
+	sgB := newTestServiceGroup("prod")
+	sessB := baseSession
+	sessB.Redis = &omniav1alpha1.RedisConfig{URL: "redis://b.example.com:6379/0"}
+	sgB.Session = &sessB
+	depB := sb.BuildSessionDeployment("acme", "acme-ns", sgB)
+
+	annoA := depA.Spec.Template.Annotations[annotationConfigHash]
+	annoB := depB.Spec.Template.Annotations[annotationConfigHash]
+	assert.NotEqual(t, annoA, annoB,
+		"per-workspace session Redis URL change must alter the configHash so the pod rolls")
+}
+
+// TestBuildSessionDeployment_PerWorkspaceRedisExistingSecret proves
+// the secret form on a per-workspace session override: $(REDIS_URL)
+// flag placeholder + REDIS_URL env from the workspace's Secret.
+func TestBuildSessionDeployment_PerWorkspaceRedisExistingSecret(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sb.SessionRedisURL = testOperatorRedisURL
+	sg := newTestServiceGroup("prod")
+	sg.Session = &omniav1alpha1.SessionServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "session-db"}},
+		Redis: &omniav1alpha1.RedisConfig{
+			ExistingSecret: &omniav1alpha1.RedisSecretRef{
+				Name: "acme-session-redis",
+				Key:  "url",
+			},
+		},
+	}
+
+	dep := sb.BuildSessionDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	container := dep.Spec.Template.Spec.Containers[0]
+	assert.Contains(t, container.Args, "--redis-url=$(REDIS_URL)")
+
+	var env *corev1.EnvVar
+	for i := range container.Env {
+		if container.Env[i].Name == testRedisURLEnvName {
+			env = &container.Env[i]
+			break
+		}
+	}
+	require.NotNil(t, env, "expected REDIS_URL env from per-workspace Secret")
+	require.NotNil(t, env.ValueFrom)
+	require.NotNil(t, env.ValueFrom.SecretKeyRef)
+	assert.Equal(t, "acme-session-redis", env.ValueFrom.SecretKeyRef.Name)
+	assert.Equal(t, "url", env.ValueFrom.SecretKeyRef.Key)
 }
 
 func TestBuildMemoryDeployment(t *testing.T) {
@@ -214,7 +380,7 @@ func TestBuildMemoryDeployment_RedisFlagsAbsentByDefault(t *testing.T) {
 		}
 	}
 	for _, e := range container.Env {
-		if e.Name == "REDIS_URL" {
+		if e.Name == testRedisURLEnvName {
 			t.Errorf("expected no REDIS_URL env when no Secret reference is configured, got %+v", e)
 		}
 	}
@@ -237,7 +403,7 @@ func TestBuildMemoryDeployment_RedisURLLiteralThreaded(t *testing.T) {
 	assert.Contains(t, container.Args, "--redis-url=redis://omnia-redis-master.omnia-system.svc.cluster.local:6379/0")
 	assert.Contains(t, container.Args, "--cache-ttl=10m")
 	for _, e := range container.Env {
-		if e.Name == "REDIS_URL" {
+		if e.Name == testRedisURLEnvName {
 			t.Errorf("expected no REDIS_URL env for literal URL, got %+v", e)
 		}
 	}
@@ -267,7 +433,7 @@ func TestBuildMemoryDeployment_RedisURLFromSecretMountsEnv(t *testing.T) {
 
 	var redisURLEnv *corev1.EnvVar
 	for i := range container.Env {
-		if container.Env[i].Name == "REDIS_URL" {
+		if container.Env[i].Name == testRedisURLEnvName {
 			redisURLEnv = &container.Env[i]
 			break
 		}
@@ -286,7 +452,7 @@ func TestBuildMemoryDeployment_RedisURLFromSecretMountsEnv(t *testing.T) {
 // specific Redis (data residency, blast-radius isolation).
 func TestBuildMemoryDeployment_PerWorkspaceRedisURLOverridesOperator(t *testing.T) {
 	sb := newTestServiceBuilder()
-	sb.MemoryRedisURL = "redis://operator-default:6379/0"
+	sb.MemoryRedisURL = testOperatorRedisURL
 	sg := newTestServiceGroup("prod")
 	sg.Memory = &omniav1alpha1.MemoryServiceConfig{
 		Database: omniav1alpha1.DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "memory-db"}},
@@ -310,7 +476,7 @@ func TestBuildMemoryDeployment_PerWorkspaceRedisURLOverridesOperator(t *testing.
 // a tenant-specific password.
 func TestBuildMemoryDeployment_PerWorkspaceRedisExistingSecret(t *testing.T) {
 	sb := newTestServiceBuilder()
-	sb.MemoryRedisURL = "redis://operator-default:6379/0"
+	sb.MemoryRedisURL = testOperatorRedisURL
 	sb.MemoryRedisURLSecret = SecretKeyRef{Name: "operator-secret", Key: "url"}
 	sg := newTestServiceGroup("prod")
 	sg.Memory = &omniav1alpha1.MemoryServiceConfig{
@@ -330,7 +496,7 @@ func TestBuildMemoryDeployment_PerWorkspaceRedisExistingSecret(t *testing.T) {
 
 	var env *corev1.EnvVar
 	for i := range container.Env {
-		if container.Env[i].Name == "REDIS_URL" {
+		if container.Env[i].Name == testRedisURLEnvName {
 			env = &container.Env[i]
 			break
 		}
