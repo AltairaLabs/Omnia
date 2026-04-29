@@ -34,6 +34,7 @@
  */
 
 const fs = require("node:fs");
+const https = require("node:https");
 
 const SERVICE_TOKEN_PATH = "/api/auth/service-token";
 
@@ -83,12 +84,15 @@ function parseAllowlist(raw) {
  */
 /* c8 ignore start */
 async function defaultTokenReview(token) {
-  const apiserver =
-    process.env.KUBERNETES_SERVICE_HOST &&
-    `https://${process.env.KUBERNETES_SERVICE_HOST}:${process.env.KUBERNETES_SERVICE_PORT || "443"}`;
-  if (!apiserver) {
-    return { authenticated: false, error: "no in-cluster API server (KUBERNETES_SERVICE_HOST unset)" };
+  const host = process.env.KUBERNETES_SERVICE_HOST;
+  const port = process.env.KUBERNETES_SERVICE_PORT || "443";
+  if (!host) {
+    return {
+      authenticated: false,
+      error: "no in-cluster API server (KUBERNETES_SERVICE_HOST unset)",
+    };
   }
+
   let saToken = "";
   try {
     saToken = fs.readFileSync(
@@ -101,6 +105,7 @@ async function defaultTokenReview(token) {
       error: `failed to read service-account token: ${err.message}`,
     };
   }
+
   let caCert;
   try {
     caCert = fs.readFileSync(
@@ -108,53 +113,82 @@ async function defaultTokenReview(token) {
     );
   } catch {
     // Best-effort: if the CA isn't mounted, fall through and let
-    // fetch's default trust store handle it.
+    // Node's default trust store handle it. Should never happen
+    // in-cluster but we don't want a missing file to be the reason
+    // a real cluster's TokenReview never succeeds.
     caCert = undefined;
   }
+
   const body = JSON.stringify({
     apiVersion: "authentication.k8s.io/v1",
     kind: "TokenReview",
     spec: { token },
   });
-  // Node 20+ fetch doesn't expose ca options directly; use undici
-  // when we want explicit ca pinning. For now, accept default trust
-  // (works in-cluster because kubelet roots the apiserver cert in
-  // the system trust store via the SA token's audience).
-  const url = `${apiserver}/apis/authentication.k8s.io/v1/tokenreviews`;
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${saToken}`,
-      "Content-Type": "application/json",
-    },
-    body,
-    // dispatcher is provided in production via undici when caCert is
-    // available; default trust suffices for kind/orbstack dev.
-    ...(caCert
-      ? {
-          dispatcher: new (require("undici").Agent)({
-            connect: { ca: caCert },
-          }),
-        }
-      : {}),
+
+  // Built-in node:https avoids pulling in undici as a dep — we'd
+  // need it only for fetch's CA-pinning path, and a single TokenReview
+  // call doesn't justify it. Standard https.request handles ca via
+  // the request options.
+  return new Promise((resolve) => {
+    const req = https.request(
+      {
+        host,
+        port,
+        method: "POST",
+        path: "/apis/authentication.k8s.io/v1/tokenreviews",
+        headers: {
+          Authorization: `Bearer ${saToken.trim()}`,
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body, "utf8"),
+        },
+        ca: caCert,
+      },
+      (resp) => {
+        const chunks = [];
+        resp.on("data", (c) => chunks.push(c));
+        resp.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          if (resp.statusCode < 200 || resp.statusCode >= 300) {
+            resolve({
+              authenticated: false,
+              error: `TokenReview returned ${resp.statusCode}: ${text.slice(0, 200)}`,
+            });
+            return;
+          }
+          let result;
+          try {
+            result = JSON.parse(text);
+          } catch (err) {
+            resolve({
+              authenticated: false,
+              error: `TokenReview body parse: ${err.message}`,
+            });
+            return;
+          }
+          const status = (result && result.status) || {};
+          if (!status.authenticated) {
+            resolve({
+              authenticated: false,
+              error: status.error || "token rejected by TokenReview",
+            });
+            return;
+          }
+          resolve({
+            authenticated: true,
+            username: status.user && status.user.username,
+          });
+        });
+      },
+    );
+    req.on("error", (err) => {
+      resolve({
+        authenticated: false,
+        error: `TokenReview request failed: ${err.message}`,
+      });
+    });
+    req.write(body);
+    req.end();
   });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    return {
-      authenticated: false,
-      error: `TokenReview returned ${resp.status}: ${text.slice(0, 200)}`,
-    };
-  }
-  const result = await resp.json();
-  const status = result && result.status ? result.status : {};
-  if (!status.authenticated) {
-    return {
-      authenticated: false,
-      error: status.error || "token rejected by TokenReview",
-    };
-  }
-  const username = status.user && status.user.username;
-  return { authenticated: true, username };
 }
 /* c8 ignore stop */
 
