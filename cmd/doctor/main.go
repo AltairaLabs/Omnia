@@ -35,12 +35,10 @@ const (
 	serviceOllama          = "ollama"
 	serviceOperator        = "omnia-operator"
 	serviceDashboard       = "omnia-dashboard"
-	serviceRedis           = "omnia-redis-master"
 	serviceArenaController = "omnia-arena-controller"
 	defaultOllamaPort      = 11434
 	defaultOperatorPort    = 8083
 	defaultDashboardPort   = 3000
-	defaultRedisPort       = 6379
 	defaultArenaPort       = 8082
 )
 
@@ -60,7 +58,12 @@ func main() {
 	ollamaURLFlag := flag.String("ollama-url", "", "override Ollama URL")
 	operatorURLFlag := flag.String("operator-url", "", "override operator API URL")
 	dashboardURLFlag := flag.String("dashboard-url", "", "override dashboard URL")
-	redisAddrFlag := flag.String("redis-addr", "", "override Redis address (host:port)")
+	redisAddrFlag := flag.String("redis-addr", "",
+		"Redis address (host:port). When unset, the Redis reachability check is "+
+			"skipped — installs without Redis (no memory cache, no session store, "+
+			"no Arena queue) are a valid OSS configuration. Chart wires this from "+
+			"omnia.redis.hostPort when a Redis target resolves; operators can also "+
+			"set it explicitly to point Doctor at an out-of-band Redis.")
 	arenaURLFlag := flag.String("arena-url", "", "override arena controller URL")
 	workspaceFlag := flag.String("workspace", "", "workspace name for per-workspace service discovery (optional)")
 	serviceGroupFlag := flag.String("service-group", "default", "service group to resolve within the workspace")
@@ -106,10 +109,11 @@ func main() {
 		dashboardURL = discoverServiceURL(*namespace, serviceDashboard, defaultDashboardPort)
 	}
 
+	// No auto-derivation — Redis is consumer-optional. The check is
+	// registered only when a non-empty addr arrives via the flag, so a
+	// fresh OSS install (no Redis) doesn't surface a fake "Redis
+	// unreachable" failure.
 	redisAddr := *redisAddrFlag
-	if redisAddr == "" {
-		redisAddr = fmt.Sprintf("%s.%s.svc.cluster.local:%d", serviceRedis, *namespace, defaultRedisPort)
-	}
 
 	arenaURL := *arenaURLFlag
 	if arenaURL == "" {
@@ -269,7 +273,12 @@ func buildRunner(cfg runnerConfig) (*doctor.Runner, error) {
 	runner.Register(checks.OllamaCheck(cfg.ollamaURL))
 	runner.Register(checks.OperatorAPICheck(cfg.operatorURL))
 	runner.Register(checks.DashboardCheck(cfg.dashboardURL))
-	runner.Register(checks.TCPCheck("Redis", cfg.redisAddr))
+	// Redis is optional. Skip registration when no addr was provided —
+	// otherwise OSS installs (no Redis configured) would surface a
+	// noisy false-positive "RedisReachable: unreachable" on every run.
+	if cfg.redisAddr != "" {
+		runner.Register(checks.TCPCheck("Redis", cfg.redisAddr))
+	}
 	runner.Register(checks.ArenaControllerCheck(cfg.arenaURL))
 
 	k8sClient, k8sErr := k8s.NewClient()

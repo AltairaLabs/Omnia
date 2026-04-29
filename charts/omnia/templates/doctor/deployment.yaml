@@ -76,6 +76,17 @@ spec:
           {{- if .Values.doctor.ollamaService }}
           {{- $args = append $args (printf "--ollama-url=http://%s.%s.svc.cluster.local:%d" .Values.doctor.ollamaService .Values.doctor.agentNamespace 11434) }}
           {{- end }}
+          {{- /*
+            Pass --redis-addr only when a Redis target resolves. Doctor
+            skips the RedisReachable check when this flag is empty —
+            no false-positive failures on OSS installs without Redis.
+            Sourced from the same omnia.redisAddr helper as the
+            operator so both Doctor and memory-api see the same Redis.
+          */}}
+          {{- $redisAddr := include "omnia.redisAddr" . }}
+          {{- if $redisAddr }}
+          {{- $args = append $args (printf "--redis-addr=%s" $redisAddr) }}
+          {{- end }}
           {{- if $args }}
           args:
             {{- range $args }}

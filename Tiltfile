@@ -625,6 +625,20 @@ helm_set = [
     'dashboard.livenessProbe.failureThreshold=6',
 ]
 
+# Bitnami Redis subchart — enabled unconditionally for dev so the
+# memory-api read-through cache, the dashboard session store, the
+# memory event publisher, and (in enterprise mode) the Arena queue
+# all get a working backend out of the box. Footprint is tiny:
+# standalone, no auth, no persistence, ~50MB. Without this, Doctor's
+# RedisReachable check fails on every dev run and any consumer that
+# reaches for Redis crashloops on connect.
+helm_set.extend([
+    'redis.enabled=true',
+    'redis.architecture=standalone',
+    'redis.auth.enabled=false',
+    'redis.master.persistence.enabled=false',
+])
+
 # Enterprise features configuration
 if ENABLE_ENTERPRISE:
     helm_set.extend([
@@ -639,18 +653,14 @@ if ENABLE_ENTERPRISE:
         'enterprise.arena.worker.image.repository=omnia-arena-worker-dev',
         'enterprise.arena.worker.image.tag=latest',
         'enterprise.arena.worker.image.pullPolicy=Never',
-        # Arena queue - use Redis when enterprise is enabled. Address is
-        # auto-derived by the chart helper from redis.enabled=true (the
-        # FQDN form omnia-redis-master.<ns>.svc.cluster.local:6379) so
-        # arena workers in test-arena namespace can resolve it. Don't
-        # set arena.queue.redis.host explicitly — that override produces
-        # a non-FQDN that fails cross-namespace DNS lookup.
+        # Arena queue uses Redis. The Bitnami subchart is already
+        # enabled unconditionally above; address auto-derives via the
+        # chart helper to FQDN form (omnia-redis-master.<ns>.svc.
+        # cluster.local:6379). Don't set arena.queue.redis.host
+        # explicitly — that override produces a non-FQDN that fails
+        # cross-namespace DNS lookup from arena workers in
+        # dev-agents/test-arena namespaces.
         'enterprise.arena.queue.type=redis',
-        # Enable Redis for Arena queue (Bitnami subchart)
-        'redis.enabled=true',
-        'redis.architecture=standalone',
-        'redis.auth.enabled=false',
-        'redis.master.persistence.enabled=false',
         # PromptKit LSP server for YAML validation
         'enterprise.promptkitLsp.enabled=true',
         'enterprise.promptkitLsp.image.repository=omnia-promptkit-lsp-dev',
@@ -675,7 +685,6 @@ else:
     # Disable enterprise features
     helm_set.extend([
         'enterprise.enabled=false',
-        'redis.enabled=false',
     ])
 
 if ENABLE_OBSERVABILITY:
@@ -1007,16 +1016,18 @@ if ENABLE_OBSERVABILITY:
     )
 
 # ============================================================================
-# Redis for Arena Queue (Enterprise only)
+# Redis (always-on for dev)
 # ============================================================================
+# Bitnami Redis subchart is enabled unconditionally so memory cache,
+# session store, event publisher, and (in enterprise mode) Arena queue
+# all have a working backend in dev. Resource label "infra" rather
+# than "enterprise" because it serves OSS consumers too.
 
-if ENABLE_ENTERPRISE:
-    # Redis master (Bitnami standalone mode) - required for Arena queue
-    k8s_resource(
-        'omnia-redis-master',
-        labels=['enterprise'],
-        port_forwards=['6379:6379'],  # Redis port for local debugging
-    )
+k8s_resource(
+    'omnia-redis-master',
+    labels=['infra'],
+    port_forwards=['6379:6379'],  # Redis port for local debugging
+)
 
 # ============================================================================
 # Enterprise Storage - NFS Server and CSI Driver

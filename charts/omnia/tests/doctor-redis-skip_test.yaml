@@ -1,0 +1,40 @@
+suite: doctor skips RedisReachable when no Redis is expected
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/doctor/deployment.yaml
+tests:
+  - it: passes no --redis-addr when no Redis is configured
+    # Default OSS install has redis.enabled=false and no externalAddr.
+    # Without this gate, Doctor's TCPCheck("Redis", ...) registered
+    # unconditionally and surfaced a fake "RedisReachable: unreachable"
+    # failure on every run — masking real issues among the noise.
+    set:
+      doctor.enabled: true
+    template: templates/doctor/deployment.yaml
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: ^--redis-addr=
+
+  - it: passes --redis-addr from the Bitnami subchart when redis.enabled=true
+    set:
+      doctor.enabled: true
+      redis.enabled: true
+    template: templates/doctor/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --redis-addr=omnia-redis-master.NAMESPACE.svc.cluster.local:6379
+
+  - it: passes --redis-addr from redis.externalAddr when set
+    set:
+      doctor.enabled: true
+      redis.externalAddr: "elasticache.example.com:6379"
+    template: templates/doctor/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --redis-addr=elasticache.example.com:6379
