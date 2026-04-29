@@ -167,6 +167,76 @@ func TestBuildSessionDeployment_PerWorkspaceRedisURLOverridesOperator(t *testing
 	assert.NotContains(t, args, "--redis-url=redis://operator-default:6379/0")
 }
 
+// TestBuildSessionDeployment_PerWorkspaceRedisHostSynthesisesURL
+// proves the decomposed form: workspace sets host (+ optional port/db/
+// user), operator synthesises a URL. No auth — decomposed is cleartext-
+// only by design (auth flows via existingSecret).
+func TestBuildSessionDeployment_PerWorkspaceRedisHostSynthesisesURL(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sg := newTestServiceGroup("prod")
+	sg.Session = &omniav1alpha1.SessionServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "session-db"}},
+		Redis: &omniav1alpha1.RedisConfig{
+			Host: "tenant-session-redis.example.com",
+			Port: 6390,
+			DB:   3,
+			User: "sessions",
+		},
+	}
+
+	dep := sb.BuildSessionDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	args := dep.Spec.Template.Spec.Containers[0].Args
+	assert.Contains(t, args, "--redis-url=redis://sessions@tenant-session-redis.example.com:6390/3")
+}
+
+// TestBuildSessionDeployment_PerWorkspaceRedisEmptyFallsThrough proves
+// that a workspace whose Session.Redis block is set but with all
+// three input forms empty (CEL should reject this at admission, but
+// the unit's defensive fallback returns the operator default to keep
+// the Deployment renderable rather than emitting a broken --redis-url).
+func TestBuildSessionDeployment_PerWorkspaceRedisEmptyFallsThrough(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sb.SessionRedisURL = testOperatorRedisURL
+	sg := newTestServiceGroup("prod")
+	sg.Session = &omniav1alpha1.SessionServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "session-db"}},
+		Redis:    &omniav1alpha1.RedisConfig{}, // all forms empty
+	}
+
+	dep := sb.BuildSessionDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	assert.Contains(t, dep.Spec.Template.Spec.Containers[0].Args,
+		"--redis-url="+testOperatorRedisURL)
+}
+
+// TestBuildSessionDeployment_RollsOnRedisChange proves the
+// sessionConfigHash annotation flips when the Redis target changes,
+// so the session-api pod rolls and picks up the new --redis-url.
+func TestBuildSessionDeployment_RollsOnRedisChange(t *testing.T) {
+	sb := newTestServiceBuilder()
+	baseSession := omniav1alpha1.SessionServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "session-db"}},
+	}
+
+	sgA := newTestServiceGroup("prod")
+	sessA := baseSession
+	sessA.Redis = &omniav1alpha1.RedisConfig{URL: "redis://a.example.com:6379/0"}
+	sgA.Session = &sessA
+	depA := sb.BuildSessionDeployment("acme", "acme-ns", sgA)
+
+	sgB := newTestServiceGroup("prod")
+	sessB := baseSession
+	sessB.Redis = &omniav1alpha1.RedisConfig{URL: "redis://b.example.com:6379/0"}
+	sgB.Session = &sessB
+	depB := sb.BuildSessionDeployment("acme", "acme-ns", sgB)
+
+	annoA := depA.Spec.Template.Annotations[annotationConfigHash]
+	annoB := depB.Spec.Template.Annotations[annotationConfigHash]
+	assert.NotEqual(t, annoA, annoB,
+		"per-workspace session Redis URL change must alter the configHash so the pod rolls")
+}
+
 // TestBuildSessionDeployment_PerWorkspaceRedisExistingSecret proves
 // the secret form on a per-workspace session override: $(REDIS_URL)
 // flag placeholder + REDIS_URL env from the workspace's Secret.
