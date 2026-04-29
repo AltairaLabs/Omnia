@@ -7,6 +7,12 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // Default is 5000ms. CI runners under high load occasionally
+    // exceed that on tests with heavy mock setup (the arena versions
+    // route test stacks ~20 fs mocks per spec). 15s is plenty
+    // headroom for those without slowing local dev — local runs
+    // complete sub-second per spec regardless.
+    testTimeout: 15_000,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}", "lib/**/*.test.{js,mjs,cjs,ts}"],
     exclude: [
