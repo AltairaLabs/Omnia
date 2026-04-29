@@ -71,6 +71,20 @@ spec:
             - --session-api-image-pull-policy={{ .Values.workspaceServices.sessionApi.image.pullPolicy }}
             - --memory-api-image={{ include "omnia.memoryApi.image" . }}
             - --memory-api-image-pull-policy={{ .Values.workspaceServices.memoryApi.image.pullPolicy }}
+            {{- /*
+              Operator-wide Redis. Threaded into per-workspace memory-api
+              pods as --redis-addrs (cache + event publisher) and into
+              eval-worker deployments as --redis-addr. Empty when no Redis
+              is configured (default OSS install) — leaves all three
+              consumers in their no-Redis modes.
+            */}}
+            {{- $redisAddr := include "omnia.redisAddr" . }}
+            {{- if $redisAddr }}
+            - --redis-addr={{ $redisAddr }}
+            {{- end }}
+            {{- with .Values.workspaceServices.memoryApi.cache.ttl }}
+            - --memory-cache-ttl={{ . }}
+            {{- end }}
             - --agent-workspace-reader-clusterrole={{ include "omnia.fullname" . }}-agent-workspace-reader
             {{- if .Values.dashboard.enabled }}
             {{- /*

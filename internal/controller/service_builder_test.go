@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -188,6 +189,50 @@ func TestBuildMemoryDeployment_AnnotatesConfigHash(t *testing.T) {
 	require.NotEmpty(t, annoB)
 	assert.NotEqual(t, annoA, annoB,
 		"providerRef change must alter the configHash so the pod rolls")
+}
+
+// TestBuildMemoryDeployment_RedisFlagsAbsentByDefault proves the
+// operator does NOT pass --redis-addrs / --cache-ttl when the
+// ServiceBuilder is constructed without Redis config. Memory-api
+// then runs with the cache disabled and no event publisher, which
+// is the correct OSS / non-Redis dev install behaviour. Passing
+// empty strings as flags would degrade into "--redis-addrs=" and
+// trigger a connection-refused log on every Retrieve.
+func TestBuildMemoryDeployment_RedisFlagsAbsentByDefault(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sg := newTestServiceGroup("default")
+
+	dep := sb.BuildMemoryDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	args := dep.Spec.Template.Spec.Containers[0].Args
+	for _, a := range args {
+		if strings.HasPrefix(a, "--redis-addrs=") {
+			t.Errorf("expected no --redis-addrs flag when MemoryRedisAddrs is empty, got %q", a)
+		}
+		if strings.HasPrefix(a, "--cache-ttl=") {
+			t.Errorf("expected no --cache-ttl flag when MemoryCacheTTL is empty, got %q", a)
+		}
+	}
+}
+
+// TestBuildMemoryDeployment_RedisFlagsThreaded proves that operator-
+// level Redis config flows through to every per-workspace memory-api
+// pod. Without this, setting MemoryRedisAddrs on the operator would
+// be cosmetic — the per-workspace flags wouldn't reflect it and
+// neither the cache nor the event publisher would activate. This is
+// the wiring assertion that mirrors #1038's "the workers were
+// implemented but never started" failure mode for Redis.
+func TestBuildMemoryDeployment_RedisFlagsThreaded(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sb.MemoryRedisAddrs = "omnia-redis-master.omnia-system.svc:6379"
+	sb.MemoryCacheTTL = "10m"
+	sg := newTestServiceGroup("default")
+
+	dep := sb.BuildMemoryDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	args := dep.Spec.Template.Spec.Containers[0].Args
+	assert.Contains(t, args, "--redis-addrs=omnia-redis-master.omnia-system.svc:6379")
+	assert.Contains(t, args, "--cache-ttl=10m")
 }
 
 // TestBuildMemoryDeployment_EmbeddingProviderArg proves that setting

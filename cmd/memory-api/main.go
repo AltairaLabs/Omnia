@@ -34,7 +34,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	goredis "github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -107,6 +106,7 @@ type flags struct {
 	metricsAddr           string
 	postgresConn          string
 	redisAddrs            string
+	cacheTTL              string // env: MEMORY_CACHE_TTL, e.g. "5m"; "" or "0" disables
 	enterprise            bool
 	tracingEnabled        bool
 	tracingEndpoint       string
@@ -135,7 +135,8 @@ func parseFlags() *flags {
 	flag.StringVar(&f.healthAddr, "health-addr", ":8081", "Health probe listen address")
 	flag.StringVar(&f.metricsAddr, "metrics-addr", ":9090", "Metrics server listen address")
 	flag.StringVar(&f.postgresConn, "postgres-conn", "", "Postgres connection string")
-	flag.StringVar(&f.redisAddrs, "redis-addrs", "", "Redis addresses (comma-separated)")
+	flag.StringVar(&f.redisAddrs, "redis-addrs", "", "Redis addresses (comma-separated). When set, the same client is reused for both the read-through cache and the event publisher.")
+	flag.StringVar(&f.cacheTTL, "cache-ttl", "5m", "TTL for the Redis read-through cache (Retrieve/List). Set to 0 or empty to disable caching even when --redis-addrs is configured.")
 	flag.BoolVar(&f.enterprise, "enterprise", false, "Enable enterprise features (audit logging)")
 	flag.BoolVar(&f.tracingEnabled, "tracing-enabled", false, "Enable OpenTelemetry tracing")
 	flag.StringVar(&f.tracingEndpoint, "tracing-endpoint", "", "OTel collector endpoint")
@@ -166,6 +167,7 @@ func parseFlags() *flags {
 func (f *flags) applyEnvFallbacks() {
 	envFallback(&f.postgresConn, "", "POSTGRES_CONN")
 	envFallback(&f.redisAddrs, "", "REDIS_ADDRS")
+	envFallback(&f.cacheTTL, "5m", "MEMORY_CACHE_TTL")
 	envFallback(&f.apiAddr, ":8080", "API_ADDR")
 	envFallback(&f.healthAddr, ":8081", "HEALTH_ADDR")
 	envFallback(&f.metricsAddr, ":9090", "METRICS_ADDR")
@@ -373,8 +375,27 @@ func run() error {
 	log.V(1).Info("migrations complete")
 
 	// --- Memory store ---
-	store := memory.NewPostgresMemoryStore(pool)
-	defer store.Close()
+	// pgStore is the raw Postgres-backed store. Workers (compaction,
+	// retention, tombstone GC, re-embed) call concrete methods on this
+	// type, so they keep using the unwrapped value. The HTTP API gets
+	// the (possibly cache-fronted) Store interface — see resolveAPIStore
+	// below.
+	pgStore := memory.NewPostgresMemoryStore(pool)
+	defer pgStore.Close()
+
+	// Build the shared Redis client (if configured) before either the
+	// cache wrapper or the event publisher. One client, one TCP pool —
+	// keeps connection accounting honest and lets ops see "is Redis up"
+	// from a single set of metrics rather than two.
+	redisClient := buildRedisClient(f.redisAddrs)
+	if redisClient != nil {
+		defer func() { _ = redisClient.Close() }()
+	}
+
+	apiStore, cacheEnabled := resolveAPIStore(pgStore, redisClient, f.cacheTTL, log)
+	if cacheEnabled {
+		log.Info("memory store cache enabled", "ttl", f.cacheTTL, "redisAddrs", f.redisAddrs)
+	}
 
 	// --- Read-path metrics ---
 	// accessed_at / access_count are bumped asynchronously on every
@@ -404,7 +425,7 @@ func run() error {
 	policyLoader := buildRetentionPolicyLoader(f.retentionInterval, f.workspace, f.serviceGroup, log)
 
 	// --- Retention worker ---
-	startRetentionWorkerWithLoader(ctx, store, policyLoader, log)
+	startRetentionWorkerWithLoader(ctx, pgStore, policyLoader, log)
 
 	// --- Analytics opt-in metric + worker ---
 	// Computes the fraction of users who have granted the
@@ -426,8 +447,8 @@ func run() error {
 	// Temporal summarization of old memories. Uses NoopSummarizer by default —
 	// memory growth is still bounded because the worker supersedes originals,
 	// but summaries aren't informative until a real LLM summarizer is wired.
-	if compactionOpts, enabled := f.compactionWorkerOptions(log, store); enabled {
-		worker := memory.NewCompactionWorker(store, memory.NoopSummarizer{}, compactionOpts, log)
+	if compactionOpts, enabled := f.compactionWorkerOptions(log, pgStore); enabled {
+		worker := memory.NewCompactionWorker(pgStore, memory.NoopSummarizer{}, compactionOpts, log)
 		go worker.Run(ctx)
 		log.Info("compaction worker started",
 			"interval", compactionOpts.Interval,
@@ -439,7 +460,7 @@ func run() error {
 	// --- Embedding service ---
 	var embeddingSvc *memory.EmbeddingService
 	if f.embeddingProviderName != "" {
-		embeddingSvc = createEmbeddingService(ctx, f.embeddingProviderName, store, log)
+		embeddingSvc = createEmbeddingService(ctx, f.embeddingProviderName, pgStore, log)
 	}
 
 	// --- Tombstone GC worker ---
@@ -447,8 +468,8 @@ func run() error {
 	// chains, keeping the most recent K per chain for audit. Bounds
 	// storage growth without losing the agent-visible "this got
 	// updated" history.
-	if tombstoneOpts, enabled := f.tombstoneWorkerOptions(log, store); enabled {
-		worker := memory.NewTombstoneWorker(store, tombstoneOpts, log)
+	if tombstoneOpts, enabled := f.tombstoneWorkerOptions(log, pgStore); enabled {
+		worker := memory.NewTombstoneWorker(pgStore, tombstoneOpts, log)
 		go worker.Run(ctx)
 		log.Info("tombstone worker started",
 			"interval", tombstoneOpts.Interval,
@@ -464,7 +485,7 @@ func run() error {
 	// recall path doesn't silently miss them. Requires both an
 	// embedding service AND a configured interval.
 	if reembedOpts, enabled := f.reembedWorkerOptions(embeddingSvc); enabled {
-		worker := memory.NewReembedWorker(store, embeddingSvc.Provider(), reembedOpts, log)
+		worker := memory.NewReembedWorker(pgStore, embeddingSvc.Provider(), reembedOpts, log)
 		go worker.Run(ctx)
 		log.Info("reembed worker started",
 			"interval", reembedOpts.Interval,
@@ -497,15 +518,16 @@ func run() error {
 	}
 
 	// --- Event publisher (optional) ---
+	// Reuses the shared Redis client built above so we don't create a
+	// second TCP pool against the same target.
 	var eventPublisher memoryapi.MemoryEventPublisher
-	if f.redisAddrs != "" {
-		redisClient := goredis.NewClient(&goredis.Options{Addr: f.redisAddrs})
+	if redisClient != nil {
 		eventPublisher = memoryapi.NewRedisMemoryEventPublisher(redisClient, log)
 		log.Info("memory event publisher enabled", "redisAddrs", f.redisAddrs)
 	}
 
 	// --- Build API mux ---
-	apiMux, cleanup := buildAPIMux(ctx, store, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, log)
+	apiMux, cleanup := buildAPIMux(ctx, apiStore, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, log)
 	defer cleanup()
 
 	// --- Servers ---

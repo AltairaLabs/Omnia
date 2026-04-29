@@ -121,7 +121,15 @@ func main() {
 	flag.StringVar(&workspaceContentPath, "workspace-content-path", "/workspace-content",
 		"Base path for the workspace content volume. SkillSource writes synced content here.")
 	flag.StringVar(&redisAddr, "redis-addr", "",
-		"Redis address for eval worker deployments (e.g., redis.omnia-system.svc.cluster.local:6379)")
+		"Operator-wide Redis address (e.g., omnia-redis-master.omnia-system.svc.cluster.local:6379). "+
+			"Forwarded to eval-worker pods and to every per-workspace memory-api as --redis-addrs, "+
+			"so a single Redis instance fronts the memory-api read-through cache, the memory event "+
+			"publisher, and the eval-worker queue. Empty disables all three.")
+	var memoryCacheTTL string
+	flag.StringVar(&memoryCacheTTL, "memory-cache-ttl", "5m",
+		"TTL forwarded to memory-api as --cache-ttl. Empty or \"0\" disables the read-through "+
+			"cache even when --redis-addr is set (useful when Redis is provisioned only for the "+
+			"event publisher).")
 	flag.StringVar(&evalWorkerImage, "eval-worker-image", "",
 		"Image for the arena-eval-worker container. If not set, defaults to ghcr.io/altairalabs/arena-eval-worker:latest")
 	flag.StringVar(&policyProxyImage, "policy-proxy-image", "",
@@ -298,6 +306,8 @@ func main() {
 			SessionImagePullPolicy: corev1.PullPolicy(sessionAPIImagePullPolicy),
 			MemoryImage:            memoryAPIImage,
 			MemoryImagePullPolicy:  corev1.PullPolicy(memoryAPIImagePullPolicy),
+			MemoryRedisAddrs:       redisAddr,
+			MemoryCacheTTL:         memoryCacheTTL,
 		},
 		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
 		OperatorNamespace:               os.Getenv("POD_NAMESPACE"),
