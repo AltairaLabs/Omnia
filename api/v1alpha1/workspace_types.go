@@ -597,6 +597,8 @@ type WorkspaceServiceGroup struct {
 }
 
 // MemoryServiceConfig defines the configuration for a managed memory-api instance.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.redis) || [has(self.redis.existingSecret), has(self.redis.url) && size(self.redis.url) > 0, has(self.redis.host) && size(self.redis.host) > 0].exists_one(b, b)",message="memory.redis must use exactly one of existingSecret, url, or host"
 type MemoryServiceConfig struct {
 	// database configures the PostgreSQL database for this memory service.
 	// +kubebuilder:validation:Required
@@ -612,6 +614,16 @@ type MemoryServiceConfig struct {
 	// baked-in legacy interval policy.
 	// +optional
 	PolicyRef *corev1.LocalObjectReference `json:"policyRef,omitempty"`
+
+	// redis pins this workspace's memory-api cache + event publisher
+	// to a specific Redis instance, overriding the operator-wide
+	// default. Use for SaaS multi-tenancy where each customer's data
+	// must live on physically separate Redis (data residency, blast-
+	// radius isolation), or to point a single workspace at a more
+	// durable Redis tier than the cluster default. Unset = inherit
+	// the operator-wide --memory-redis-url passed by the chart.
+	// +optional
+	Redis *RedisConfig `json:"redis,omitempty"`
 
 	// podOverrides customizes the managed memory-api Pod (SA, scheduling,
 	// CSI secret-stores, etc.).

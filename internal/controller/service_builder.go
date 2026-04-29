@@ -141,19 +141,64 @@ const (
 func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string, sg omniav1alpha1.WorkspaceServiceGroup) *appsv1.Deployment {
 	name := fmt.Sprintf("memory-%s-%s", workspaceName, sg.Name)
 	labels := serviceLabels("memory-api", workspaceName, sg.Name)
-	args := buildMemoryAPIArgs(workspaceName, sg, sb.MemoryRedisURL, sb.MemoryCacheTTL)
+	// Resolve Redis: per-workspace override wins over operator-wide.
+	// Either form may be empty (memory-api then runs without Redis,
+	// cache + event publisher disabled) — that's a valid config.
+	redisURL, redisSecret := resolveMemoryRedis(sg, sb.MemoryRedisURL, sb.MemoryRedisURLSecret)
+	args := buildMemoryAPIArgs(workspaceName, sg, redisURL, sb.MemoryCacheTTL)
 	var overrides *omniav1alpha1.PodOverrides
 	if sg.Memory != nil {
 		overrides = sg.Memory.PodOverrides
 	}
 	dep := buildServiceDeployment(name, namespace, sb.MemoryImage, sb.MemoryImagePullPolicy, args, labels, overrides)
 	addPodNamespaceEnv(dep)
-	addMemoryRedisURLEnv(dep, sb.MemoryRedisURLSecret)
+	addMemoryRedisURLEnv(dep, redisSecret)
 	if dep.Spec.Template.Annotations == nil {
 		dep.Spec.Template.Annotations = map[string]string{}
 	}
 	dep.Spec.Template.Annotations[annotationConfigHash] = memoryConfigHash(sg)
 	return dep
+}
+
+// resolveMemoryRedis returns the Redis URL string and (optional)
+// Secret reference for a per-workspace memory-api Deployment.
+// Per-workspace `sg.Memory.Redis` overrides the operator-wide default.
+//
+// Output forms (matches the chart-side resolution):
+//
+//   - existingSecret → ("$(REDIS_URL)" placeholder, secret ref); the
+//     ServiceBuilder mounts REDIS_URL env from the Secret on the pod
+//     so Kubernetes env expansion fills the placeholder at startup.
+//   - url            → (literal URL, empty secret ref).
+//   - host           → (synthesised plaintext URL, empty secret ref).
+//   - empty          → ("", empty); operator default is used as the
+//     fallback (still honoured via the URL it carries).
+func resolveMemoryRedis(sg omniav1alpha1.WorkspaceServiceGroup, defaultURL string, defaultSecret SecretKeyRef) (string, SecretKeyRef) {
+	if sg.Memory == nil || sg.Memory.Redis == nil {
+		return defaultURL, defaultSecret
+	}
+	r := sg.Memory.Redis
+	if r.ExistingSecret != nil && r.ExistingSecret.Name != "" && r.ExistingSecret.Key != "" {
+		return "$(REDIS_URL)", SecretKeyRef{Name: r.ExistingSecret.Name, Key: r.ExistingSecret.Key}
+	}
+	if r.URL != "" {
+		return r.URL, SecretKeyRef{}
+	}
+	if r.Host != "" {
+		port := int32(6379)
+		if r.Port != 0 {
+			port = r.Port
+		}
+		userPart := ""
+		if r.User != "" {
+			userPart = r.User + "@"
+		}
+		return fmt.Sprintf("redis://%s%s:%d/%d", userPart, r.Host, port, r.DB), SecretKeyRef{}
+	}
+	// Workspace's Redis block is set but with no input form populated —
+	// CEL validation should have rejected this at admission. Fall back
+	// to the operator default rather than break the Deployment.
+	return defaultURL, defaultSecret
 }
 
 // addMemoryRedisURLEnv mounts REDIS_URL from a Secret when the operator
@@ -226,12 +271,13 @@ func addPodNamespaceEnv(dep *appsv1.Deployment) {
 }
 
 // memoryConfigHash hashes the runtime-relevant fields of a memory
-// service group (database SecretRef name + embedding provider Ref name)
-// into a short stable string. Hashing only the bits the memory-api
-// actually reads at startup keeps cosmetic edits — labels, pod
-// overrides, comments — from rolling the pod.
+// service group (database SecretRef name + embedding provider Ref name
+// + per-workspace Redis target) into a short stable string. Hashing
+// only the bits the memory-api actually reads at startup keeps
+// cosmetic edits — labels, pod overrides, comments — from rolling
+// the pod.
 func memoryConfigHash(sg omniav1alpha1.WorkspaceServiceGroup) string {
-	var dbSecret, providerRef string
+	var dbSecret, providerRef, redisDescriptor string
 	if sg.Memory != nil {
 		if sg.Memory.Database.SecretRef.Name != "" {
 			dbSecret = sg.Memory.Database.SecretRef.Name
@@ -239,9 +285,29 @@ func memoryConfigHash(sg omniav1alpha1.WorkspaceServiceGroup) string {
 		if sg.Memory.ProviderRef != nil {
 			providerRef = sg.Memory.ProviderRef.Name
 		}
+		redisDescriptor = redisHashDescriptor(sg.Memory.Redis)
 	}
-	sum := sha256.Sum256([]byte(dbSecret + "|" + providerRef))
+	sum := sha256.Sum256([]byte(dbSecret + "|" + providerRef + "|" + redisDescriptor))
 	return hex.EncodeToString(sum[:8])
+}
+
+// redisHashDescriptor produces a short stable string covering the
+// runtime-relevant fields of a RedisConfig. Used by memoryConfigHash
+// so flipping a workspace's Redis target rolls its memory-api pod.
+func redisHashDescriptor(r *omniav1alpha1.RedisConfig) string {
+	if r == nil {
+		return ""
+	}
+	if r.ExistingSecret != nil {
+		return fmt.Sprintf("secret:%s/%s", r.ExistingSecret.Name, r.ExistingSecret.Key)
+	}
+	if r.URL != "" {
+		return "url:" + r.URL
+	}
+	if r.Host != "" {
+		return fmt.Sprintf("host:%s:%d/%d:%s", r.Host, r.Port, r.DB, r.User)
+	}
+	return ""
 }
 
 // BuildService builds a ClusterIP Service for the given component.
