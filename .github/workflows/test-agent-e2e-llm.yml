@@ -129,14 +129,14 @@ jobs:
 
       - name: Install cert-manager
         run: |
-          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
+          curl --retry 5 --retry-delay 5 --retry-all-errors --fail -sL https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml | kubectl apply -f -
           kubectl wait --for=condition=Available deployment/cert-manager -n cert-manager --timeout=120s
           kubectl wait --for=condition=Available deployment/cert-manager-webhook -n cert-manager --timeout=120s
           kubectl wait --for=condition=Available deployment/cert-manager-cainjector -n cert-manager --timeout=120s
 
       - name: Install Gateway API CRDs
         run: |
-          kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
+          curl --retry 5 --retry-delay 5 --retry-all-errors --fail -sL https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml | kubectl apply -f -
 
       - name: Build chart dependencies
         run: |
@@ -339,7 +339,7 @@ jobs:
       - name: Install cert-manager
         if: steps.gate.outputs.skip != 'true'
         run: |
-          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
+          curl --retry 5 --retry-delay 5 --retry-all-errors --fail -sL https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml | kubectl apply -f -
           kubectl wait --for=condition=Available deployment/cert-manager -n cert-manager --timeout=120s
           kubectl wait --for=condition=Available deployment/cert-manager-webhook -n cert-manager --timeout=120s
           kubectl wait --for=condition=Available deployment/cert-manager-cainjector -n cert-manager --timeout=120s
@@ -347,7 +347,7 @@ jobs:
       - name: Install Gateway API CRDs
         if: steps.gate.outputs.skip != 'true'
         run: |
-          kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
+          curl --retry 5 --retry-delay 5 --retry-all-errors --fail -sL https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml | kubectl apply -f -
 
       - name: Build chart dependencies
         if: steps.gate.outputs.skip != 'true'
