@@ -145,6 +145,17 @@ func main() {
 		"TTL forwarded to memory-api as --cache-ttl. Empty or \"0\" disables the read-through "+
 			"cache even when --memory-redis-url is set (useful when Redis is provisioned only for "+
 			"the event publisher).")
+	var sessionRedisURL string
+	flag.StringVar(&sessionRedisURL, "session-redis-url", "",
+		"Operator-wide Redis URL forwarded to every per-workspace session-api as --redis-url for "+
+			"the hot-cache layer. Same shape as --memory-redis-url: literal URL, or \"$(REDIS_URL)\" "+
+			"placeholder paired with --session-redis-url-secret-{name,key}.")
+	var sessionRedisURLSecretName string
+	flag.StringVar(&sessionRedisURLSecretName, "session-redis-url-secret-name", "",
+		"Kubernetes Secret name backing $(REDIS_URL) substitution on per-workspace session-api pods.")
+	var sessionRedisURLSecretKey string
+	flag.StringVar(&sessionRedisURLSecretKey, "session-redis-url-secret-key", "",
+		"Key within --session-redis-url-secret-name whose value is the Redis URL.")
 	flag.StringVar(&evalWorkerImage, "eval-worker-image", "",
 		"Image for the arena-eval-worker container. If not set, defaults to ghcr.io/altairalabs/arena-eval-worker:latest")
 	flag.StringVar(&policyProxyImage, "policy-proxy-image", "",
@@ -326,7 +337,12 @@ func main() {
 				Name: memoryRedisURLSecretName,
 				Key:  memoryRedisURLSecretKey,
 			},
-			MemoryCacheTTL: memoryCacheTTL,
+			MemoryCacheTTL:  memoryCacheTTL,
+			SessionRedisURL: sessionRedisURL,
+			SessionRedisURLSecret: controller.SecretKeyRef{
+				Name: sessionRedisURLSecretName,
+				Key:  sessionRedisURLSecretKey,
+			},
 		},
 		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
 		OperatorNamespace:               os.Getenv("POD_NAMESPACE"),

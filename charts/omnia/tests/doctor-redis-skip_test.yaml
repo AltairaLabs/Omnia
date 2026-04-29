@@ -1,4 +1,4 @@
-suite: doctor skips RedisReachable when no Redis is expected
+suite: doctor URL-canonical Redis wiring
 release:
   name: omnia
 values:
@@ -6,10 +6,9 @@ values:
 templates:
   - templates/doctor/deployment.yaml
 tests:
-  - it: passes no --redis-addr when no Redis is configured
-    # Default OSS install has redis.enabled=false and no redis.default.url.
-    # Without this gate, Doctor's TCPCheck("Redis", ...) registered
-    # unconditionally and surfaced a fake "RedisReachable: unreachable"
+  - it: passes no --redis-url when no Redis is configured
+    # Default OSS install has no Redis. Without this gate Doctor's
+    # TCPCheck would surface a fake "RedisReachable: unreachable"
     # failure on every run — masking real issues among the noise.
     set:
       doctor.enabled: true
@@ -17,9 +16,9 @@ tests:
     asserts:
       - notMatchRegex:
           path: spec.template.spec.containers[0].args[*]
-          pattern: ^--redis-addr=
+          pattern: ^--redis-url=
 
-  - it: passes --redis-addr from the Bitnami subchart when redis.enabled=true
+  - it: passes --redis-url from the Bitnami subchart when redis.enabled=true
     set:
       doctor.enabled: true
       redis.enabled: true
@@ -27,25 +26,23 @@ tests:
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --redis-addr=omnia-redis-master.NAMESPACE.svc.cluster.local:6379
+          content: --redis-url=redis://omnia-redis-master.NAMESPACE.svc.cluster.local:6379/0
 
-  - it: passes --redis-addr from redis.default.host when set
+  - it: passes --redis-url from redis.default.url when set
     set:
       doctor.enabled: true
-      redis.default.host: elasticache.example.com
-      redis.default.port: 6379
+      redis.default.url: rediss://elasticache.example.com:6379/0
     template: templates/doctor/deployment.yaml
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --redis-addr=elasticache.example.com:6379
+          content: --redis-url=rediss://elasticache.example.com:6379/0
 
-  - it: skips --redis-addr for the existingSecret form (host:port not knowable)
-    # When the URL is sourced from a Secret, urlParse can't extract a
-    # host:port. Doctor's check is registered host:port-only today
-    # (Phase 3 will move it to URL form). Until then, operators on the
-    # secret form get the check skipped — and can override via
-    # doctor.* podOverrides if they want it back.
+  - it: existingSecret form mounts REDIS_URL env instead of passing --redis-url flag
+    # Secret-form: the URL is opaque at render time. Doctor's
+    # --redis-url flag falls back to REDIS_URL env, so the chart
+    # mounts the env from the Secret. Without this Doctor would
+    # try to dial "$(REDIS_URL)" literal as a host:port.
     set:
       doctor.enabled: true
       redis.default.existingSecret.name: redis-creds
@@ -54,4 +51,12 @@ tests:
     asserts:
       - notMatchRegex:
           path: spec.template.spec.containers[0].args[*]
-          pattern: ^--redis-addr=
+          pattern: ^--redis-url=
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: REDIS_URL
+            valueFrom:
+              secretKeyRef:
+                name: redis-creds
+                key: url

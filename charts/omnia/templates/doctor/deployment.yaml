@@ -77,20 +77,22 @@ spec:
           {{- $args = append $args (printf "--ollama-url=http://%s.%s.svc.cluster.local:%d" .Values.doctor.ollamaService .Values.doctor.agentNamespace 11434) }}
           {{- end }}
           {{- /*
-            Pass --redis-addr only when a Redis target resolves. Doctor
-            skips the RedisReachable check when this flag is empty —
-            no false-positive failures on OSS installs without Redis.
-            Sourced from the same omnia.redis.hostPort helper as the
-            operator (memory-cache consumer path), so Doctor and memory-
-            api see the same Redis. Returns "" for the existingSecret
-            URL form (urlParse can't extract host:port from a Secret
-            reference); operators on the secret form must set --redis-
-            addr explicitly via doctor.* podOverrides until Doctor
-            takes URL form (Phase 3).
+            Doctor takes --redis-url. Resolved from the same memory-
+            cache consumer path as the operator's --memory-redis-url
+            so Doctor's TCPCheck dials the same Redis the rest of the
+            cluster talks to. The literal-URL and decomposed forms
+            pass through as --redis-url=<url>. The existingSecret form
+            mounts REDIS_URL env from the Secret on the Doctor pod;
+            the binary's --redis-url flag falls back to the env. Empty
+            resolution → check skipped (OSS/no-Redis).
           */}}
-          {{- $redisAddr := include "omnia.redis.hostPort" (dict "ctx" . "consumer" "workspaceServices.memoryApi.cache.redis") }}
-          {{- if $redisAddr }}
-          {{- $args = append $args (printf "--redis-addr=%s" $redisAddr) }}
+          {{- $redisConsumer := dict "ctx" . "consumer" "workspaceServices.memoryApi.cache.redis" }}
+          {{- $redisHasSecret := include "omnia.redis.hasSecret" $redisConsumer }}
+          {{- if not $redisHasSecret }}
+          {{- $redisURL := include "omnia.redis.url" $redisConsumer }}
+          {{- if $redisURL }}
+          {{- $args = append $args (printf "--redis-url=%s" $redisURL) }}
+          {{- end }}
           {{- end }}
           {{- if $args }}
           args:
@@ -124,11 +126,22 @@ spec:
             {{- end }}
           resources:
             {{- toYaml .Values.doctor.resources | nindent 12 }}
-          {{- if or $tokenEnabled $po.extraEnv }}
+          {{- /*
+            Mount REDIS_URL on the Doctor pod when the consumer is on
+            the existingSecret form. Doctor's --redis-url flag falls
+            back to REDIS_URL env, so the binary parses the resolved
+            URL at startup. When the consumer is literal/decomposed,
+            the URL is passed via --redis-url (above) and no env mount
+            is needed.
+          */}}
+          {{- if or $tokenEnabled $redisHasSecret $po.extraEnv }}
           env:
             {{- if $tokenEnabled }}
             - name: OMNIA_MGMT_PLANE_TOKEN_URL
               value: {{ $tokenURL | quote }}
+            {{- end }}
+            {{- if $redisHasSecret }}
+            {{- include "omnia.redis.urlEnv" (merge (dict "envName" "REDIS_URL") $redisConsumer) | nindent 12 }}
             {{- end }}
             {{- with $po.extraEnv }}
             {{- toYaml . | nindent 12 }}

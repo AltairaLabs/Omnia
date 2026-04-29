@@ -7529,9 +7529,78 @@ spec:
                               type: string
                           type: object
                           x-kubernetes-map-type: atomic
+                        redis:
+                          description: |-
+                            redis pins this workspace's session-api hot cache to a specific
+                            Redis instance, overriding the operator-wide default. Use for
+                            SaaS multi-tenancy where each customer's session data must live
+                            on physically separate Redis (data residency, blast-radius
+                            isolation), or per-workspace durability tier choices. Unset =
+                            inherit the operator-wide --session-redis-url passed by the chart.
+                          properties:
+                            db:
+                              description: db is the Redis database index. Defaults
+                                to 0.
+                              format: int32
+                              maximum: 15
+                              minimum: 0
+                              type: integer
+                            existingSecret:
+                              description: |-
+                                existingSecret references a Kubernetes Secret containing the
+                                full Redis URL. The Secret must hold a single key with a
+                                complete `redis(s)://...` connection string.
+                              properties:
+                                key:
+                                  description: key within the Secret whose value is
+                                    the Redis URL.
+                                  minLength: 1
+                                  type: string
+                                name:
+                                  description: |-
+                                    name of the Secret in the same namespace as the workspace's
+                                    service Deployment.
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - key
+                              - name
+                              type: object
+                            host:
+                              description: |-
+                                host is the Redis hostname for the decomposed form. Combined
+                                with port, db, and user to synthesise an unauthenticated URL.
+                                For any auth'd Redis, use existingSecret.
+                              type: string
+                            port:
+                              description: port is the Redis TCP port. Defaults to
+                                6379 when host is set.
+                              format: int32
+                              maximum: 65535
+                              minimum: 1
+                              type: integer
+                            url:
+                              description: |-
+                                url is a literal Redis connection string. Use only when the URL
+                                either contains no password or carries a password injected via
+                                external-secrets / KV-CSI rather than typed into chart values.
+                              pattern: ^rediss?://
+                              type: string
+                            user:
+                              description: |-
+                                user is the Redis ACL username. Empty defaults to "default"
+                                (the built-in Redis 6+ user).
+                              type: string
+                          type: object
                       required:
                       - database
                       type: object
+                      x-kubernetes-validations:
+                      - message: session.redis must use exactly one of existingSecret,
+                          url, or host
+                        rule: '!has(self.redis) || [has(self.redis.existingSecret),
+                          has(self.redis.url) && size(self.redis.url) > 0, has(self.redis.host)
+                          && size(self.redis.host) > 0].exists_one(b, b)'
                   required:
                   - name
                   type: object

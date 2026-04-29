@@ -487,27 +487,6 @@ field). Callers wanting auth use the `existingSecret` form instead.
 {{- end }}
 
 {{/*
-Extract host:port from a resolved Redis URL.
-
-Used by consumers that take host:port form (eval-worker, arena-worker,
-arena-eval-worker) until their Go code is converted to URL form. The
-chart still feeds them from the same `omnia.redis.url` source of truth.
-
-Args (passed via dict):
-  ctx      - the root context ($)
-  consumer - dotted path to the per-consumer Redis block.
-
-Returns "host:port" or "".
-*/}}
-{{- define "omnia.redis.hostPort" -}}
-{{- $url := include "omnia.redis.url" . -}}
-{{- if $url -}}
-{{- $parsed := urlParse $url -}}
-{{- $parsed.host -}}
-{{- end -}}
-{{- end }}
-
-{{/*
 Render-time guard: dashboard.replicaCount > 1 with no resolved session
 Redis means per-pod in-memory sessions. Users get logged out the moment
 their request hits a different replica. Fail render rather than ship a

@@ -4061,6 +4061,11 @@ func (in *SessionServiceConfig) DeepCopyInto(out *SessionServiceConfig) {
 		*out = new(corev1.LocalObjectReference)
 		**out = **in
 	}
+	if in.Redis != nil {
+		in, out := &in.Redis, &out.Redis
+		*out = new(RedisConfig)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.PodOverrides != nil {
 		in, out := &in.PodOverrides, &out.PodOverrides
 		*out = new(PodOverrides)

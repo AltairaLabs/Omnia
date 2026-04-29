@@ -76,6 +76,19 @@ type ServiceBuilder struct {
 	// operators can stand up Redis (for the event publisher) without
 	// the cache, or vice-versa.
 	MemoryCacheTTL string
+
+	// SessionRedisURL is the operator-wide Redis target threaded into
+	// every per-workspace session-api Deployment as --redis-url for
+	// the hot-cache layer (warm-tier sessions live in Postgres; the
+	// hot tier accelerates active-session reads). Same shape as
+	// MemoryRedisURL: literal value or "$(REDIS_URL)" placeholder
+	// when SessionRedisURLSecret is set. Empty disables the hot cache.
+	SessionRedisURL string
+
+	// SessionRedisURLSecret references the Kubernetes Secret holding
+	// the actual Redis URL when SessionRedisURL is the placeholder
+	// "$(REDIS_URL)". Mirrors MemoryRedisURLSecret.
+	SessionRedisURLSecret SecretKeyRef
 }
 
 // SecretKeyRef points at a single key within a Kubernetes Secret. Used
@@ -87,18 +100,78 @@ type SecretKeyRef struct {
 }
 
 // BuildSessionDeployment builds a Deployment for the session-api service group.
+//
+// Per-workspace Redis (sg.Session.Redis) wins over the operator-wide
+// SessionRedisURL. Either form may be empty (session-api then runs
+// without the hot cache; warm-tier Postgres still serves all reads,
+// just slower for active sessions).
 func (sb *ServiceBuilder) BuildSessionDeployment(workspaceName, namespace string, sg omniav1alpha1.WorkspaceServiceGroup) *appsv1.Deployment {
 	name := fmt.Sprintf("session-%s-%s", workspaceName, sg.Name)
 	labels := serviceLabels("session-api", workspaceName, sg.Name)
+	redisURL, redisSecret := resolveSessionRedis(sg, sb.SessionRedisURL, sb.SessionRedisURLSecret)
 	args := []string{
 		fmt.Sprintf("--workspace=%s", workspaceName),
 		fmt.Sprintf("--service-group=%s", sg.Name),
+	}
+	if redisURL != "" {
+		args = append(args, fmt.Sprintf("--redis-url=%s", redisURL))
 	}
 	var overrides *omniav1alpha1.PodOverrides
 	if sg.Session != nil {
 		overrides = sg.Session.PodOverrides
 	}
-	return buildServiceDeployment(name, namespace, sb.SessionImage, sb.SessionImagePullPolicy, args, labels, overrides)
+	dep := buildServiceDeployment(name, namespace, sb.SessionImage, sb.SessionImagePullPolicy, args, labels, overrides)
+	addMemoryRedisURLEnv(dep, redisSecret)
+	if dep.Spec.Template.Annotations == nil {
+		dep.Spec.Template.Annotations = map[string]string{}
+	}
+	dep.Spec.Template.Annotations[annotationConfigHash] = sessionConfigHash(sg)
+	return dep
+}
+
+// resolveSessionRedis mirrors resolveMemoryRedis for the session-api
+// hot cache. Per-workspace override > operator-wide default. Same
+// three input forms (existingSecret/url/host) and same
+// "$(REDIS_URL)" placeholder convention for the Secret form.
+func resolveSessionRedis(sg omniav1alpha1.WorkspaceServiceGroup, defaultURL string, defaultSecret SecretKeyRef) (string, SecretKeyRef) {
+	if sg.Session == nil || sg.Session.Redis == nil {
+		return defaultURL, defaultSecret
+	}
+	r := sg.Session.Redis
+	if r.ExistingSecret != nil && r.ExistingSecret.Name != "" && r.ExistingSecret.Key != "" {
+		return "$(REDIS_URL)", SecretKeyRef{Name: r.ExistingSecret.Name, Key: r.ExistingSecret.Key}
+	}
+	if r.URL != "" {
+		return r.URL, SecretKeyRef{}
+	}
+	if r.Host != "" {
+		port := int32(6379)
+		if r.Port != 0 {
+			port = r.Port
+		}
+		userPart := ""
+		if r.User != "" {
+			userPart = r.User + "@"
+		}
+		return fmt.Sprintf("redis://%s%s:%d/%d", userPart, r.Host, port, r.DB), SecretKeyRef{}
+	}
+	return defaultURL, defaultSecret
+}
+
+// sessionConfigHash hashes the runtime-relevant fields of a session
+// service group (database SecretRef name + per-workspace Redis target)
+// into a short stable string. Mirrors memoryConfigHash so flipping
+// the Redis target rolls the pod.
+func sessionConfigHash(sg omniav1alpha1.WorkspaceServiceGroup) string {
+	var dbSecret, redisDescriptor string
+	if sg.Session != nil {
+		if sg.Session.Database.SecretRef.Name != "" {
+			dbSecret = sg.Session.Database.SecretRef.Name
+		}
+		redisDescriptor = redisHashDescriptor(sg.Session.Redis)
+	}
+	sum := sha256.Sum256([]byte(dbSecret + "|" + redisDescriptor))
+	return hex.EncodeToString(sum[:8])
 }
 
 // Default worker intervals for the operator-managed memory-api. Each
