@@ -1,0 +1,25 @@
+{{- if and .Values.dashboard.enabled .Values.rbac.create -}}
+# Grants the dashboard ServiceAccount permission to call the TokenReview
+# API. Required by the /api/auth/service-token mint endpoint, which
+# validates an incoming k8s ServiceAccount token (e.g. Doctor's) before
+# minting a mgmt-plane JWT. Bound to the built-in system:auth-delegator
+# ClusterRole — the conventional, minimum-privilege grant for this.
+#
+# This is a narrow capability: TokenReview only validates tokens; it
+# cannot mint, list, or delete them. The risk surface is "the dashboard
+# can ask the apiserver whether a token is valid", nothing more.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "omnia.fullname" . }}-dashboard-auth-delegator
+  labels:
+    {{- include "omnia.dashboard.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "omnia.dashboard.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
