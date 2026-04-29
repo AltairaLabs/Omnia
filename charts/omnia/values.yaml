@@ -1049,6 +1049,20 @@ workspaceServices:
       # -- Image pull policy
       pullPolicy: IfNotPresent
 
+    # Read-through Redis cache for memory-api Retrieve/List paths. Active
+    # only when an operator-wide Redis is configured (redis.enabled=true
+    # OR redis.externalAddr set). Workers (compaction, retention,
+    # tombstone GC, re-embed) always use the unwrapped Postgres store —
+    # the cache only fronts API reads.
+    cache:
+      # -- TTL for cached Retrieve/List results. Empty or "0" disables
+      # the cache even when Redis is configured (operators sometimes
+      # enable Redis for the event publisher first, cache later).
+      # Cache invalidation is version-keyed on every write, so this TTL
+      # only bounds stale reads in the event of an inactive scope; it
+      # is NOT the staleness window after a write.
+      ttl: "5m"
+
 # ============================================================================
 # Dev Postgres
 # ============================================================================
@@ -2194,6 +2208,15 @@ redis:
   # -- Enable Redis subchart (Bitnami Redis)
   # Use this for development or when you want a managed Redis instance
   enabled: false
+
+  # -- Address (host:port) of an external Redis the chart should use
+  # instead of the Bitnami subchart. Set this when pointing the
+  # operator + memory-api + eval-worker + dashboard at AWS ElastiCache,
+  # GCP Memorystore, or any pre-existing in-cluster Redis. Wins over
+  # `redis.enabled` — the subchart is skipped when this is set.
+  # Empty disables all Redis-dependent features (memory cache, event
+  # publisher, eval queue, server-side sessions).
+  externalAddr: ""
 
   # -- Subchart values for Bitnami Redis
   # See: https://github.com/bitnami/charts/tree/main/bitnami/redis

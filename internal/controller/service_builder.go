@@ -50,6 +50,19 @@ type ServiceBuilder struct {
 	SessionImagePullPolicy corev1.PullPolicy
 	MemoryImage            string
 	MemoryImagePullPolicy  corev1.PullPolicy
+
+	// MemoryRedisAddrs is the operator-wide Redis target threaded into
+	// every per-workspace memory-api Deployment as --redis-addrs. Empty
+	// disables both the read-through cache and the event publisher.
+	// One Redis is shared across workspaces; per-workspace caching is
+	// already namespaced by the scope-hash inside CachedStore.
+	MemoryRedisAddrs string
+
+	// MemoryCacheTTL is forwarded to memory-api as --cache-ttl. Empty
+	// or "0" disables the cache even when MemoryRedisAddrs is set, so
+	// operators can stand up Redis (for the event publisher) without
+	// the cache, or vice-versa.
+	MemoryCacheTTL string
 }
 
 // BuildSessionDeployment builds a Deployment for the session-api service group.
@@ -107,7 +120,7 @@ const (
 func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string, sg omniav1alpha1.WorkspaceServiceGroup) *appsv1.Deployment {
 	name := fmt.Sprintf("memory-%s-%s", workspaceName, sg.Name)
 	labels := serviceLabels("memory-api", workspaceName, sg.Name)
-	args := buildMemoryAPIArgs(workspaceName, sg)
+	args := buildMemoryAPIArgs(workspaceName, sg, sb.MemoryRedisAddrs, sb.MemoryCacheTTL)
 	var overrides *omniav1alpha1.PodOverrides
 	if sg.Memory != nil {
 		overrides = sg.Memory.PodOverrides
@@ -125,7 +138,12 @@ func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string,
 // is the canonical source of these because each one is a wiring boundary
 // crossing — the binary's flag default is "off", so anything the operator
 // doesn't pass silently doesn't run.
-func buildMemoryAPIArgs(workspaceName string, sg omniav1alpha1.WorkspaceServiceGroup) []string {
+//
+// redisAddrs and cacheTTL come from the operator (chart-driven, not per-
+// workspace) because Redis is a shared cluster service. We pass them
+// through unconditionally when set so memory-api wires the cache and
+// event publisher with one client.
+func buildMemoryAPIArgs(workspaceName string, sg omniav1alpha1.WorkspaceServiceGroup, redisAddrs, cacheTTL string) []string {
 	args := []string{
 		fmt.Sprintf("--workspace=%s", workspaceName),
 		fmt.Sprintf("--service-group=%s", sg.Name),
@@ -135,6 +153,12 @@ func buildMemoryAPIArgs(workspaceName string, sg omniav1alpha1.WorkspaceServiceG
 	}
 	if sg.Memory != nil && sg.Memory.ProviderRef != nil && sg.Memory.ProviderRef.Name != "" {
 		args = append(args, fmt.Sprintf("--embedding-provider=%s", sg.Memory.ProviderRef.Name))
+	}
+	if redisAddrs != "" {
+		args = append(args, fmt.Sprintf("--redis-addrs=%s", redisAddrs))
+	}
+	if cacheTTL != "" {
+		args = append(args, fmt.Sprintf("--cache-ttl=%s", cacheTTL))
 	}
 	return args
 }

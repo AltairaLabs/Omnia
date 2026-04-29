@@ -432,7 +432,13 @@
           "type": "object",
           "properties": {
             "image":     { "$ref": "#/$defs/image" },
-            "resources": { "$ref": "#/$defs/resources" }
+            "resources": { "$ref": "#/$defs/resources" },
+            "cache": {
+              "type": "object",
+              "properties": {
+                "ttl": { "type": "string" }
+              }
+            }
           }
         }
       }
@@ -576,6 +582,7 @@
       "type": "object",
       "properties": {
         "enabled":      { "type": "boolean" },
+        "externalAddr": { "type": "string" },
         "architecture": { "type": "string", "enum": ["standalone", "replication"] }
       }
     },

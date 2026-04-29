@@ -309,6 +309,30 @@ Eval Worker image
 {{- end }}
 
 {{/*
+Resolve the operator-wide Redis address.
+
+Priority:
+  1. .Values.redis.externalAddr — explicit operator override (off-cluster Redis,
+     e.g. AWS ElastiCache, GCP Memorystore).
+  2. Bitnami Redis subchart service when .Values.redis.enabled=true.
+  3. "" — Redis-dependent features (memory-api cache + event publisher,
+     eval-worker queue, dashboard session store) all stay disabled.
+
+Returning a single canonical address keeps the operator, dashboard, and
+arena-controller in sync without each template having to redo the
+"is Redis available?" reasoning.
+*/}}
+{{- define "omnia.redisAddr" -}}
+{{- if .Values.redis.externalAddr -}}
+{{- .Values.redis.externalAddr -}}
+{{- else if .Values.redis.enabled -}}
+{{- printf "%s-redis-master.%s.svc.cluster.local:6379" (include "omnia.fullname" .) .Release.Namespace -}}
+{{- else -}}
+{{- "" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Resolve OTLP tracing endpoint for runtime/facade containers.
 Priority:
 1. .Values.tracing.endpoint (explicit override)
