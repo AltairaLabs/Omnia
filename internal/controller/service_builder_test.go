@@ -279,6 +279,121 @@ func TestBuildMemoryDeployment_RedisURLFromSecretMountsEnv(t *testing.T) {
 	assert.Equal(t, "url", redisURLEnv.ValueFrom.SecretKeyRef.Key)
 }
 
+// TestBuildMemoryDeployment_PerWorkspaceRedisURLOverridesOperator proves
+// that setting Workspace.spec.services[].memory.redis.url shadows the
+// operator-wide --memory-redis-url. Without this, a multi-tenant SaaS
+// install couldn't pin one workspace's memory cache to a customer-
+// specific Redis (data residency, blast-radius isolation).
+func TestBuildMemoryDeployment_PerWorkspaceRedisURLOverridesOperator(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sb.MemoryRedisURL = "redis://operator-default:6379/0"
+	sg := newTestServiceGroup("prod")
+	sg.Memory = &omniav1alpha1.MemoryServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "memory-db"}},
+		Redis: &omniav1alpha1.RedisConfig{
+			URL: "rediss://customer-acme.cache.example.com:6379/2",
+		},
+	}
+
+	dep := sb.BuildMemoryDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	args := dep.Spec.Template.Spec.Containers[0].Args
+	assert.Contains(t, args, "--redis-url=rediss://customer-acme.cache.example.com:6379/2")
+	assert.NotContains(t, args, "--redis-url=redis://operator-default:6379/0")
+}
+
+// TestBuildMemoryDeployment_PerWorkspaceRedisExistingSecret proves the
+// secret form on a per-workspace override: the operator emits the
+// $(REDIS_URL) placeholder flag plus mounts REDIS_URL env from the
+// workspace's Secret (not the operator-default Secret). Production-
+// typical: the workspace's Secret contains a tenant-specific URL with
+// a tenant-specific password.
+func TestBuildMemoryDeployment_PerWorkspaceRedisExistingSecret(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sb.MemoryRedisURL = "redis://operator-default:6379/0"
+	sb.MemoryRedisURLSecret = SecretKeyRef{Name: "operator-secret", Key: "url"}
+	sg := newTestServiceGroup("prod")
+	sg.Memory = &omniav1alpha1.MemoryServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "memory-db"}},
+		Redis: &omniav1alpha1.RedisConfig{
+			ExistingSecret: &omniav1alpha1.RedisSecretRef{
+				Name: "acme-redis-creds",
+				Key:  "url",
+			},
+		},
+	}
+
+	dep := sb.BuildMemoryDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	container := dep.Spec.Template.Spec.Containers[0]
+	assert.Contains(t, container.Args, "--redis-url=$(REDIS_URL)")
+
+	var env *corev1.EnvVar
+	for i := range container.Env {
+		if container.Env[i].Name == "REDIS_URL" {
+			env = &container.Env[i]
+			break
+		}
+	}
+	require.NotNil(t, env, "expected REDIS_URL env from per-workspace Secret")
+	require.NotNil(t, env.ValueFrom)
+	require.NotNil(t, env.ValueFrom.SecretKeyRef)
+	assert.Equal(t, "acme-redis-creds", env.ValueFrom.SecretKeyRef.Name,
+		"per-workspace Secret must override operator-wide Secret")
+	assert.Equal(t, "url", env.ValueFrom.SecretKeyRef.Key)
+}
+
+// TestBuildMemoryDeployment_PerWorkspaceRedisHostSynthesisesURL proves
+// the decomposed form: workspace sets host (+ optional port/db/user),
+// operator synthesises a URL. No auth — the decomposed form is
+// cleartext-only by design (auth flows via existingSecret).
+func TestBuildMemoryDeployment_PerWorkspaceRedisHostSynthesisesURL(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sg := newTestServiceGroup("prod")
+	sg.Memory = &omniav1alpha1.MemoryServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "memory-db"}},
+		Redis: &omniav1alpha1.RedisConfig{
+			Host: "tenant-redis.example.com",
+			Port: 6390,
+			DB:   3,
+		},
+	}
+
+	dep := sb.BuildMemoryDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	args := dep.Spec.Template.Spec.Containers[0].Args
+	assert.Contains(t, args, "--redis-url=redis://tenant-redis.example.com:6390/3")
+}
+
+// TestBuildMemoryDeployment_PerWorkspaceRedisRollsOnChange proves the
+// configHash annotation flips when the Redis target changes, so the
+// memory-api pod rolls and picks up the new --redis-url. Without this,
+// switching a workspace's Redis would leave the running pod connected
+// to the old target until something else triggered a roll.
+func TestBuildMemoryDeployment_PerWorkspaceRedisRollsOnChange(t *testing.T) {
+	sb := newTestServiceBuilder()
+	baseMem := omniav1alpha1.MemoryServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "memory-db"}},
+	}
+
+	sgA := newTestServiceGroup("prod")
+	memA := baseMem
+	memA.Redis = &omniav1alpha1.RedisConfig{URL: "redis://a.example.com:6379/0"}
+	sgA.Memory = &memA
+	depA := sb.BuildMemoryDeployment("acme", "acme-ns", sgA)
+
+	sgB := newTestServiceGroup("prod")
+	memB := baseMem
+	memB.Redis = &omniav1alpha1.RedisConfig{URL: "redis://b.example.com:6379/0"}
+	sgB.Memory = &memB
+	depB := sb.BuildMemoryDeployment("acme", "acme-ns", sgB)
+
+	annoA := depA.Spec.Template.Annotations[annotationConfigHash]
+	annoB := depB.Spec.Template.Annotations[annotationConfigHash]
+	assert.NotEqual(t, annoA, annoB,
+		"per-workspace Redis URL change must alter the configHash so the pod rolls")
+}
+
 // TestBuildMemoryDeployment_EmbeddingProviderArg proves that setting
 // MemoryServiceConfig.ProviderRef threads through to memory-api as an
 // --embedding-provider flag. Without this, the embedding service is nil
