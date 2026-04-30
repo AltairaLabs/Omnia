@@ -22,13 +22,15 @@ rules:
   - apiGroups: [""]
     resources: [namespaces]
     verbs: [get, list, watch]
-  # Secret metadata (values never leave the server; code filters by the
-  # `omnia.altairalabs.ai/type=credentials` label. RBAC can't enforce label
-  # filters, so the guarantee is at the application layer — see
-  # dashboard/src/lib/k8s/secrets.ts).
+  # Secret metadata + write (values never leave the server on read; the
+  # write path POST /api/secrets / DELETE /api/secrets only mutates secrets
+  # carrying the `omnia.altairalabs.ai/type=credentials` label. RBAC can't
+  # enforce label filters, so the guarantee is at the application layer —
+  # see dashboard/src/lib/k8s/secrets.ts which short-circuits any write
+  # against an unlabelled secret with a 409.
   - apiGroups: [""]
     resources: [secrets]
-    verbs: [get, list]
+    verbs: [get, list, create, update, patch, delete]
   # Workspace-scoped token exchange: mint tokens for *existing* workspace
   # ServiceAccounts pre-created by the operator. Dashboard cannot create
   # the ServiceAccount itself — just mint a token bound to its role.
