@@ -77,7 +77,7 @@ tests:
             resources: [serviceaccounts/token]
             verbs: [create]
 
-  - it: dashboard ClusterRole grants read-only access to secrets (metadata only)
+  - it: dashboard ClusterRole grants read + write on secrets (label-filtered at app layer)
     template: templates/dashboard/clusterrole.yaml
     asserts:
       - contains:
@@ -85,7 +85,7 @@ tests:
           content:
             apiGroups: [""]
             resources: [secrets]
-            verbs: [get, list]
+            verbs: [get, list, create, update, patch, delete]
 
   - it: dashboard ClusterRoleBinding points at the scoped role, not the manager role
     template: templates/dashboard/clusterrolebinding.yaml
