@@ -13,6 +13,8 @@ import { Label } from "@/components/ui/label";
 import { Shield } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useConsent, useUpdateConsent } from "@/hooks/use-consent";
+import { useEnterpriseConfig } from "@/hooks/core";
+import { UpgradeBanner } from "@/components/license/license-gate";
 import { getCategoryLabel } from "./category-badge";
 
 // Categories that require explicit user grant (PII)
@@ -49,6 +51,8 @@ function LoadingSkeleton() {
 export function ConsentBanner() {
   const { data: consent, isLoading } = useConsent();
   const updateConsent = useUpdateConsent();
+  const { enterpriseEnabled, hideEnterprise, loading: licenseLoading } =
+    useEnterpriseConfig();
 
   const handleToggle = (category: string, granted: boolean) => {
     if (granted) {
@@ -57,6 +61,32 @@ export function ConsentBanner() {
       updateConsent.mutate({ revocations: [category] });
     }
   };
+
+  if (licenseLoading) {
+    return <LoadingSkeleton />;
+  }
+
+  // EE off + not hidden → show a dismissable upgrade CTA. The toggle UI
+  // would otherwise lie about what it does: the consent endpoint is
+  // unregistered in OSS session-api (cmd/session-api/main.go gates it on
+  // f.enterprise) and the memory-api privacy middleware that enforces
+  // grants is also EE-only — clicks would 502 and have no effect even if
+  // they didn't.
+  if (!enterpriseEnabled) {
+    if (hideEnterprise) {
+      return null;
+    }
+    return (
+      <div className="mb-4" data-testid="consent-banner">
+        <UpgradeBanner
+          compact
+          dismissKey="memory-consent-banner"
+          feature="Privacy consent"
+          description="Per-category memory consent (Identity / Location / Health) is an Enterprise feature. Without it, every memory is stored — there's no per-category opt-out."
+        />
+      </div>
+    );
+  }
 
   if (isLoading) {
     return <LoadingSkeleton />;
