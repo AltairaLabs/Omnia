@@ -158,8 +158,14 @@ func (r *ProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		})
 	}
 
-	// Set phase to Ready if all validations pass
-	provider.Status.Phase = omniav1alpha1.ProviderPhaseReady
+	// Phase reflects terminal credential conditions. CredentialValid=False
+	// (probe rejected the key) and CredentialConfigured=False (placeholder
+	// or other config defect that can't possibly authenticate) both push
+	// phase=Error so AgentRuntime gates and the runtime stops sending —
+	// otherwise the first chat surfaces a raw INVALID_API_KEY mid-stream.
+	// Unknown leaves phase=Ready: a transient probe failure shouldn't
+	// fail closed.
+	provider.Status.Phase = derivePhaseFromCredentialConditions(provider)
 	provider.Status.ObservedGeneration = provider.Generation
 
 	if err := r.Status().Update(ctx, provider); err != nil {
@@ -369,6 +375,21 @@ func (r *ProviderReconciler) runCredentialValidation(ctx context.Context, provid
 			"secretKey", secretKey,
 			"err", probeErr.Error())
 	}
+}
+
+// derivePhaseFromCredentialConditions returns Error when the credential is
+// known-bad (CredentialValid=False from a probe rejection, or
+// CredentialConfigured=False from a placeholder / config defect).
+// Unknown / missing conditions don't downgrade the phase — we only fail
+// closed on a definitive negative signal.
+func derivePhaseFromCredentialConditions(provider *omniav1alpha1.Provider) omniav1alpha1.ProviderPhase {
+	if cond := meta.FindStatusCondition(provider.Status.Conditions, ProviderConditionTypeCredentialValid); cond != nil && cond.Status == metav1.ConditionFalse {
+		return omniav1alpha1.ProviderPhaseError
+	}
+	if cond := meta.FindStatusCondition(provider.Status.Conditions, ProviderConditionTypeCredentialConfigured); cond != nil && cond.Status == metav1.ConditionFalse {
+		return omniav1alpha1.ProviderPhaseError
+	}
+	return omniav1alpha1.ProviderPhaseReady
 }
 
 // applyCredentialValidationResult sets CredentialValid based on the probe outcome.

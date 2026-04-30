@@ -1690,6 +1690,108 @@ var _ = Describe("Provider Controller", func() {
 			Expect(reconciler.validateCredentialSecretRef(ctx, provider, ref)).To(Succeed())
 			Expect(calls).To(Equal(1), "second reconcile should hit cache")
 		})
+
+		It("Reconcile sets phase=Error when validator rejects the credential", func() {
+			provider := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{Name: "phase-error-on-rejected", Namespace: "default"},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "validate-creds-secret"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, provider) }()
+
+			reconciler := &ProviderReconciler{
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
+				CredentialValidatorFactory: func(_ *omniav1alpha1.Provider, _ *http.Client) CredentialValidator {
+					return fakeCredentialValidator{err: ErrCredentialInvalid}
+				},
+			}
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: provider.Name, Namespace: "default"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated omniav1alpha1.Provider
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: "default"}, &updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseError))
+		})
+
+		It("Reconcile keeps phase=Ready when validator returns Unknown (transient error)", func() {
+			provider := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{Name: "phase-ready-on-unknown", Namespace: "default"},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "validate-creds-secret"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, provider) }()
+
+			reconciler := &ProviderReconciler{
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
+				CredentialValidatorFactory: func(_ *omniav1alpha1.Provider, _ *http.Client) CredentialValidator {
+					return fakeCredentialValidator{err: errors.New("connection refused")}
+				},
+			}
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: provider.Name, Namespace: "default"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated omniav1alpha1.Provider
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: "default"}, &updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
+		})
+
+		It("Reconcile sets phase=Error for placeholder credential", func() {
+			placeholderSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "placeholder-cred-secret", Namespace: "default"},
+				Data: map[string][]byte{
+					"ANTHROPIC_API_KEY": []byte("replace-with-real-key"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, placeholderSecret)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, placeholderSecret) }()
+
+			provider := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{Name: "phase-error-placeholder", Namespace: "default"},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "placeholder-cred-secret"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, provider) }()
+
+			reconciler := &ProviderReconciler{
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
+			}
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: provider.Name, Namespace: "default"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated omniav1alpha1.Provider
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: "default"}, &updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseError))
+		})
 	})
 
 	Context("emitWarningEvent", func() {
