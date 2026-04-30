@@ -112,7 +112,15 @@ func (r *CompositeRetriever) RetrieveContext(
 		return profile, nil
 	}
 
-	episodic, err := r.store.Retrieve(ctx, scope, query, pkmemory.RetrieveOptions{
+	// memory-api's PostgresMemoryStore uses websearch_to_tsquery, which
+	// applies AND semantics across terms — a query like "remind me where
+	// I stayed in Chicago" requires *every* word to appear in the doc.
+	// That's right for memory__recall (precise lookup) but wrong for
+	// ambient retrieval, where we want any meaningful overlap to surface
+	// context. Rewrite to OR semantics: postgres's stopword filter then
+	// drops "remind / me / where / I / in" and what's left ("stay /
+	// chicago") matches ambiently.
+	episodic, err := r.store.Retrieve(ctx, scope, toFTSOrQuery(query), pkmemory.RetrieveOptions{
 		Limit: r.episodicLimit,
 	})
 	if err != nil {
@@ -233,4 +241,19 @@ func lastUserContent(messages []types.Message) string {
 		}
 	}
 	return ""
+}
+
+// toFTSOrQuery rewrites whitespace-separated terms into a websearch
+// OR query — "alpha beta gamma" → "alpha OR beta OR gamma". Postgres's
+// websearch_to_tsquery treats the literal token "OR" as alternation,
+// and its stopword filter strips noise tokens before matching, so
+// the resulting query matches any document containing any meaningful
+// term. Empty input passes through unchanged so the store's empty-
+// query branch (recency list) still triggers if a caller hands us "".
+func toFTSOrQuery(query string) string {
+	fields := strings.Fields(query)
+	if len(fields) <= 1 {
+		return query
+	}
+	return strings.Join(fields, " OR ")
 }

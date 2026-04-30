@@ -125,8 +125,8 @@ func TestCompositeRetriever_CompositeMergesProfileAndEpisodic(t *testing.T) {
 	if len(got) != 4 {
 		t.Fatalf("expected 4 memories (2 profile + 2 episodic), got %d", len(got))
 	}
-	if store.lastQuery != "plan philly" {
-		t.Errorf("expected query %q, got %q", "plan philly", store.lastQuery)
+	if store.lastQuery != "plan OR philly" {
+		t.Errorf("expected OR-rewritten query %q, got %q", "plan OR philly", store.lastQuery)
 	}
 }
 
@@ -260,6 +260,27 @@ func TestCompositeRetriever_NonProfileMemoriesFromListAreIgnored(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ID != "p1" {
 		t.Errorf("expected only profile-category memory, got %v", got)
+	}
+}
+
+func TestToFTSOrQuery(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "empty passes through", in: "", want: ""},
+		{name: "single word unchanged", in: "Chicago", want: "Chicago"},
+		{name: "multi word joined with OR", in: "remind me about Chicago", want: "remind OR me OR about OR Chicago"},
+		{name: "extra whitespace collapsed", in: "  hello   world  ", want: "hello OR world"},
+		{name: "single word with surrounding whitespace passes through unchanged", in: "  hello  ", want: "  hello  "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := toFTSOrQuery(tc.in); got != tc.want {
+				t.Errorf("got %q want %q", got, tc.want)
+			}
+		})
 	}
 }
 
