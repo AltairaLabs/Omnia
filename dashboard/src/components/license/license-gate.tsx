@@ -1,12 +1,32 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { useCallback, useSyncExternalStore, type ReactNode } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Lock, Sparkles, ExternalLink } from "lucide-react";
+import { Lock, Sparkles, ExternalLink, X } from "lucide-react";
 import { useLicense } from "@/hooks/auth";
 import { useEnterpriseConfig } from "@/hooks/core";
 import type { LicenseFeatures } from "@/types/license";
+
+const DISMISS_KEY_PREFIX = "omnia.upgradeBanner.dismissed.";
+
+// useSyncExternalStore subscribe arg: localStorage doesn't fire on same-tab
+// writes by default, so register a custom event channel for cross-component
+// updates. The native `storage` event covers other tabs; we synthesise an
+// in-tab event when our own writes happen.
+const DISMISS_EVENT = "omnia:upgrade-banner-dismissed";
+
+function subscribeToDismiss(onChange: () => void): () => void {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+  window.addEventListener("storage", onChange);
+  window.addEventListener(DISMISS_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(DISMISS_EVENT, onChange);
+  };
+}
 
 const UPGRADE_URL = "https://altairalabs.ai/enterprise";
 
@@ -100,6 +120,12 @@ export interface UpgradeBannerProps {
   upgradeUrl?: string;
   /** Whether to show as a compact inline banner */
   compact?: boolean;
+  /**
+   * When set, renders a close button and persists the dismissed state in
+   * localStorage under `omnia.upgradeBanner.dismissed.<dismissKey>`.
+   * Subsequent renders return null until the key is cleared.
+   */
+  dismissKey?: string;
 }
 
 /**
@@ -108,6 +134,7 @@ export interface UpgradeBannerProps {
  * @example
  * ```tsx
  * <UpgradeBanner feature="Git Sources" />
+ * <UpgradeBanner feature="Privacy consent" dismissKey="memory-consent" compact />
  * ```
  */
 export function UpgradeBanner({
@@ -115,13 +142,42 @@ export function UpgradeBanner({
   description,
   upgradeUrl = UPGRADE_URL,
   compact = false,
+  dismissKey,
 }: UpgradeBannerProps) {
+  const storageKey = dismissKey ? DISMISS_KEY_PREFIX + dismissKey : null;
+  const getSnapshot = useCallback(
+    () => (storageKey ? window.localStorage.getItem(storageKey) === "1" : false),
+    [storageKey],
+  );
+  // SSR snapshot: assume not-dismissed; client effect resyncs to localStorage.
+  // Returning the dismissed state during SSR would briefly hide a banner the
+  // server can't actually know about, defeating the point.
+  const dismissed = useSyncExternalStore(
+    subscribeToDismiss,
+    getSnapshot,
+    () => false,
+  );
+
+  if (dismissed) {
+    return null;
+  }
+
+  const handleDismiss = () => {
+    if (storageKey) {
+      window.localStorage.setItem(storageKey, "1");
+      window.dispatchEvent(new Event(DISMISS_EVENT));
+    }
+  };
+
   if (compact) {
     return (
-      <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-        <Lock className="h-4 w-4 flex-shrink-0" />
-        <span>
-          {feature} requires an Enterprise license.{" "}
+      <div
+        className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+        data-testid="upgrade-banner-compact"
+      >
+        <Sparkles className="h-4 w-4 flex-shrink-0 text-amber-600 dark:text-amber-400" />
+        <span className="flex-1">
+          {description ?? `${feature} requires an Enterprise license.`}{" "}
           <a
             href={upgradeUrl}
             target="_blank"
@@ -131,6 +187,17 @@ export function UpgradeBanner({
             Upgrade
           </a>
         </span>
+        {storageKey && (
+          <button
+            type="button"
+            onClick={handleDismiss}
+            aria-label="Dismiss"
+            data-testid="upgrade-banner-dismiss"
+            className="rounded p-0.5 hover:bg-amber-100 dark:hover:bg-amber-900"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
       </div>
     );
   }
@@ -138,8 +205,19 @@ export function UpgradeBanner({
   return (
     <Alert className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950">
       <Sparkles className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-      <AlertTitle className="text-amber-800 dark:text-amber-200">
-        Enterprise Feature
+      <AlertTitle className="flex items-center justify-between text-amber-800 dark:text-amber-200">
+        <span>Enterprise Feature</span>
+        {storageKey && (
+          <button
+            type="button"
+            onClick={handleDismiss}
+            aria-label="Dismiss"
+            data-testid="upgrade-banner-dismiss"
+            className="rounded p-0.5 text-amber-700 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
       </AlertTitle>
       <AlertDescription className="text-amber-700 dark:text-amber-300">
         <p className="mb-3">

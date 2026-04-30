@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import {
   LicenseGate,
   RequireEnterprise,
@@ -203,6 +204,42 @@ describe("license-gate components", () => {
       expect(screen.getByText(/Git Sources requires an Enterprise license/)).toBeInTheDocument();
       const link = screen.getByRole("link", { name: /Upgrade/i });
       expect(link).toBeInTheDocument();
+    });
+
+    describe("dismissable", () => {
+      beforeEach(() => {
+        window.localStorage.clear();
+      });
+
+      it("renders no dismiss button when dismissKey is omitted", () => {
+        render(<UpgradeBanner feature="Git Sources" />);
+        expect(screen.queryByTestId("upgrade-banner-dismiss")).not.toBeInTheDocument();
+      });
+
+      it("hides the banner after the dismiss button is clicked (compact)", async () => {
+        const user = userEvent.setup();
+        render(<UpgradeBanner feature="Git Sources" compact dismissKey="git" />);
+
+        expect(screen.getByTestId("upgrade-banner-compact")).toBeInTheDocument();
+        await user.click(screen.getByTestId("upgrade-banner-dismiss"));
+        expect(screen.queryByTestId("upgrade-banner-compact")).not.toBeInTheDocument();
+        expect(window.localStorage.getItem("omnia.upgradeBanner.dismissed.git")).toBe("1");
+      });
+
+      it("hides the banner after the dismiss button is clicked (full)", async () => {
+        const user = userEvent.setup();
+        render(<UpgradeBanner feature="Git Sources" dismissKey="git-full" />);
+
+        expect(screen.getByText("Enterprise Feature")).toBeInTheDocument();
+        await user.click(screen.getByTestId("upgrade-banner-dismiss"));
+        expect(screen.queryByText("Enterprise Feature")).not.toBeInTheDocument();
+      });
+
+      it("stays hidden across re-renders when previously dismissed", () => {
+        window.localStorage.setItem("omnia.upgradeBanner.dismissed.git", "1");
+        render(<UpgradeBanner feature="Git Sources" compact dismissKey="git" />);
+        expect(screen.queryByTestId("upgrade-banner-compact")).not.toBeInTheDocument();
+      });
     });
   });
 

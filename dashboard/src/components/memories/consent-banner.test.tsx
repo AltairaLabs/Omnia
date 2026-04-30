@@ -9,21 +9,31 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-const { mockUseConsent, mockUseUpdateConsent } = vi.hoisted(() => ({
-  mockUseConsent: vi.fn(),
-  mockUseUpdateConsent: vi.fn(),
-}));
+const { mockUseConsent, mockUseUpdateConsent, mockUseEnterpriseConfig } =
+  vi.hoisted(() => ({
+    mockUseConsent: vi.fn(),
+    mockUseUpdateConsent: vi.fn(),
+    mockUseEnterpriseConfig: vi.fn(),
+  }));
 
 vi.mock("@/hooks/use-consent", () => ({
   useConsent: mockUseConsent,
   useUpdateConsent: mockUseUpdateConsent,
 }));
 
+vi.mock("@/hooks/core", () => ({
+  useEnterpriseConfig: mockUseEnterpriseConfig,
+}));
+
 import { ConsentBanner } from "./consent-banner";
 
 const mockMutate = vi.fn();
 
-function setupMocks(grants: string[] = [], isLoading = false) {
+function setupMocks(
+  grants: string[] = [],
+  isLoading = false,
+  enterprise: { enterpriseEnabled?: boolean; hideEnterprise?: boolean; loading?: boolean } = {},
+) {
   mockUseConsent.mockReturnValue({
     data: { grants, defaults: [], denied: [] },
     isLoading,
@@ -32,27 +42,36 @@ function setupMocks(grants: string[] = [], isLoading = false) {
     mutate: mockMutate,
     isPending: false,
   });
+  mockUseEnterpriseConfig.mockReturnValue({
+    enterpriseEnabled: enterprise.enterpriseEnabled ?? true,
+    hideEnterprise: enterprise.hideEnterprise ?? false,
+    showUpgradePrompts: !(enterprise.enterpriseEnabled ?? true) && !(enterprise.hideEnterprise ?? false),
+    loading: enterprise.loading ?? false,
+  });
 }
 
 describe("ConsentBanner", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockMutate.mockReset();
+    window.localStorage.clear();
   });
 
-  it("renders loading skeleton when isLoading is true", () => {
-    mockUseConsent.mockReturnValue({ data: undefined, isLoading: true });
-    mockUseUpdateConsent.mockReturnValue({ mutate: mockMutate, isPending: false });
-
+  it("renders loading skeleton while runtime config is loading", () => {
+    setupMocks([], false, { loading: true });
     render(<ConsentBanner />);
-
-    const banner = screen.getByTestId("consent-banner");
-    expect(banner).toBeInTheDocument();
-    // No toggles rendered during loading
+    expect(screen.getByTestId("consent-banner")).toBeInTheDocument();
     expect(screen.queryByTestId("consent-toggle-memory:identity")).not.toBeInTheDocument();
   });
 
-  it("renders all 6 category toggles when loaded", () => {
+  it("renders loading skeleton when consent data is loading (EE on)", () => {
+    setupMocks([], true);
+    render(<ConsentBanner />);
+    expect(screen.getByTestId("consent-banner")).toBeInTheDocument();
+    expect(screen.queryByTestId("consent-toggle-memory:identity")).not.toBeInTheDocument();
+  });
+
+  it("renders all 6 category toggles when EE is enabled", () => {
     setupMocks([]);
     render(<ConsentBanner />);
 
@@ -64,7 +83,7 @@ describe("ConsentBanner", () => {
     expect(screen.getByTestId("consent-toggle-memory:history")).toBeInTheDocument();
   });
 
-  it("shows Privacy Consent title with shield icon", () => {
+  it("shows Privacy Consent title with shield icon (EE on)", () => {
     setupMocks([]);
     render(<ConsentBanner />);
     expect(screen.getByText("Privacy Consent")).toBeInTheDocument();
@@ -74,13 +93,9 @@ describe("ConsentBanner", () => {
     setupMocks(["memory:identity", "memory:health"]);
     render(<ConsentBanner />);
 
-    const identityToggle = screen.getByTestId("consent-toggle-memory:identity");
-    const locationToggle = screen.getByTestId("consent-toggle-memory:location");
-    const healthToggle = screen.getByTestId("consent-toggle-memory:health");
-
-    expect(identityToggle).toBeChecked();
-    expect(locationToggle).not.toBeChecked();
-    expect(healthToggle).toBeChecked();
+    expect(screen.getByTestId("consent-toggle-memory:identity")).toBeChecked();
+    expect(screen.getByTestId("consent-toggle-memory:location")).not.toBeChecked();
+    expect(screen.getByTestId("consent-toggle-memory:health")).toBeChecked();
   });
 
   it("shows PII toggle as unchecked when category is not in grants", () => {
@@ -114,34 +129,64 @@ describe("ConsentBanner", () => {
     setupMocks([]);
     render(<ConsentBanner />);
 
-    const prefsToggle = screen.getByTestId("consent-toggle-memory:preferences");
-    const contextToggle = screen.getByTestId("consent-toggle-memory:context");
-    const historyToggle = screen.getByTestId("consent-toggle-memory:history");
-
-    expect(prefsToggle).toBeChecked();
-    expect(prefsToggle).toBeDisabled();
-    expect(contextToggle).toBeChecked();
-    expect(contextToggle).toBeDisabled();
-    expect(historyToggle).toBeChecked();
-    expect(historyToggle).toBeDisabled();
+    for (const cat of ["preferences", "context", "history"]) {
+      const toggle = screen.getByTestId(`consent-toggle-memory:${cat}`);
+      expect(toggle).toBeChecked();
+      expect(toggle).toBeDisabled();
+    }
   });
 
   it("shows (default) label for non-PII categories", () => {
     setupMocks([]);
     render(<ConsentBanner />);
-
-    const defaultLabels = screen.getAllByText("(default)");
-    expect(defaultLabels).toHaveLength(3);
+    expect(screen.getAllByText("(default)")).toHaveLength(3);
   });
 
   it("disables PII toggles when mutation is pending", () => {
     mockUseConsent.mockReturnValue({ data: { grants: [], defaults: [], denied: [] }, isLoading: false });
     mockUseUpdateConsent.mockReturnValue({ mutate: mockMutate, isPending: true });
+    mockUseEnterpriseConfig.mockReturnValue({
+      enterpriseEnabled: true,
+      hideEnterprise: false,
+      showUpgradePrompts: false,
+      loading: false,
+    });
 
     render(<ConsentBanner />);
 
     expect(screen.getByTestId("consent-toggle-memory:identity")).toBeDisabled();
     expect(screen.getByTestId("consent-toggle-memory:location")).toBeDisabled();
     expect(screen.getByTestId("consent-toggle-memory:health")).toBeDisabled();
+  });
+
+  describe("OSS mode (enterpriseEnabled=false)", () => {
+    it("renders the dismissable Enterprise upgrade CTA, no toggles", () => {
+      setupMocks([], false, { enterpriseEnabled: false });
+      render(<ConsentBanner />);
+
+      expect(screen.getByTestId("upgrade-banner-compact")).toBeInTheDocument();
+      expect(screen.getByTestId("upgrade-banner-dismiss")).toBeInTheDocument();
+      expect(screen.queryByTestId("consent-toggle-memory:identity")).not.toBeInTheDocument();
+      expect(screen.queryByText("Privacy Consent")).not.toBeInTheDocument();
+    });
+
+    it("renders nothing when hideEnterprise is true", () => {
+      setupMocks([], false, { enterpriseEnabled: false, hideEnterprise: true });
+      const { container } = render(<ConsentBanner />);
+      expect(container).toBeEmptyDOMElement();
+    });
+
+    it("hides the CTA after dismissal and remembers across re-renders", async () => {
+      const user = userEvent.setup();
+      setupMocks([], false, { enterpriseEnabled: false });
+      const { rerender } = render(<ConsentBanner />);
+
+      await user.click(screen.getByTestId("upgrade-banner-dismiss"));
+      expect(screen.queryByTestId("upgrade-banner-compact")).not.toBeInTheDocument();
+
+      rerender(<ConsentBanner />);
+      expect(screen.queryByTestId("upgrade-banner-compact")).not.toBeInTheDocument();
+      expect(window.localStorage.getItem("omnia.upgradeBanner.dismissed.memory-consent-banner")).toBe("1");
+    });
   });
 });
