@@ -176,13 +176,21 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 		if s.agentUID != "" {
 			scope["agent_id"] = s.agentUID
 		}
-		opts = append(opts, sdk.WithMemory(s.memoryStore, scope))
+		// CompositeRetriever auto-injects the user's profile + a per-turn
+		// similarity search into the prompt via PromptKit's
+		// MemoryRetrievalStage. Without it the agent only "knows" the
+		// user when it explicitly calls memory__recall — which is
+		// unreliable on cold-start turns where the user's opening
+		// message has no lexical overlap with stored facts.
+		retriever := NewCompositeRetriever(s.memoryStore, log)
+		opts = append(opts, sdk.WithMemory(s.memoryStore, scope, sdk.WithMemoryRetriever(retriever)))
 		log.V(1).Info("memory store wired",
 			"session_id", sessionID,
 			"trace_id", sessionID,
 			"hasUserID", scope["user_id"] != "",
 			"hasAgentID", scope["agent_id"] != "",
 			"scopeKeys", len(scope),
+			"hasRetriever", true,
 		)
 	}
 
