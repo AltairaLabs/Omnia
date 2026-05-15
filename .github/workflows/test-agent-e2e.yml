@@ -68,6 +68,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install system deps (libasound2-dev for ebitengine/oto)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 

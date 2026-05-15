@@ -49,6 +49,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install system deps (libasound2-dev for ebitengine/oto)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:

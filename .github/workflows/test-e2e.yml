@@ -75,6 +75,9 @@ jobs:
           go-version-file: go.mod
           cache: false  # We manage the module/build cache explicitly below.
 
+      - name: Install system deps (libasound2-dev for ebitengine/oto)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
       # setup-go's built-in cache only reliably restores the Go toolchain,
       # not the module download cache (~/go/pkg/mod) or the compiler build
       # cache (~/.cache/go-build). Without this step, every E2E run re-downloads
@@ -203,6 +206,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false  # We manage the module/build cache explicitly below.
+
+      - name: Install system deps (libasound2-dev for ebitengine/oto)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
       # See Core E2E for rationale.
       - name: Cache Go modules and build cache
