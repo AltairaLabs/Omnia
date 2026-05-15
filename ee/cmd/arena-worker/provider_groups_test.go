@@ -17,6 +17,7 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
+	"github.com/AltairaLabs/PromptKit/runtime/providers/base"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
@@ -54,8 +55,10 @@ func testRC(
 }
 
 // mockProvider implements pkproviders.Provider for testing connectFleetProviders
-// type assertion error path.
+// type assertion error path. base.Implementation is embedded by value so the
+// struct literal at the call site works without explicit construction.
 type mockProvider struct {
+	base.Implementation
 	id string
 }
 

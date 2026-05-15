@@ -1846,7 +1846,9 @@ func TestOmniaEventStore_EvalFailed(t *testing.T) {
 			DurationMs:  2500,
 			Message:     "Eval failed: accuracy below threshold",
 			Explanation: "Score was 0.3, threshold is 0.7",
-			Violations:  []string{"accuracy too low"},
+			Violations: []events.EvalViolationData{
+				{TurnIndex: 0, Description: "accuracy too low"},
+			},
 		},
 	}
 

@@ -35,6 +35,7 @@ import (
 	"github.com/AltairaLabs/PromptKit/runtime/evals"
 	"github.com/AltairaLabs/PromptKit/runtime/metrics"
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
+	"github.com/AltairaLabs/PromptKit/runtime/providers/base"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/altairalabs/omnia/internal/tracing"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
@@ -1419,8 +1420,12 @@ func TestCreateProviderFromConfig_WithHeadersAndTimeouts(t *testing.T) {
 
 // timeoutFake implements providers.Provider + both timeout setter
 // interfaces so we can directly unit-test applyProviderTimeouts without
-// relying on a real PromptKit provider instance.
+// relying on a real PromptKit provider instance. base.Implementation is
+// embedded by value so the zero-value Name/Type/Pricing/Validate/Init/
+// HealthCheck/Close methods satisfy the new base.Provider surface without
+// requiring explicit construction in test call sites.
 type timeoutFake struct {
+	base.Implementation
 	requestTimeout    time.Duration
 	streamIdleTimeout time.Duration
 }

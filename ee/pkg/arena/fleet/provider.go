@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
+	"github.com/AltairaLabs/PromptKit/runtime/providers/base"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
 
 	"github.com/altairalabs/omnia/internal/facade"
@@ -46,6 +47,8 @@ type connEntry struct {
 // For non-arena usage (no conversation_id in metadata), a default connection
 // established via Connect is used.
 type Provider struct {
+	*base.Implementation
+
 	id     string
 	wsURL  string
 	dialer Dialer
@@ -63,10 +66,11 @@ func NewProvider(id, wsURL string, dialer Dialer) *Provider {
 		dialer = newDefaultDialer()
 	}
 	return &Provider{
-		id:     id,
-		wsURL:  wsURL,
-		dialer: dialer,
-		conns:  make(map[string]*connEntry),
+		Implementation: base.NewImplementation(id, base.ProviderTypeInference, nil),
+		id:             id,
+		wsURL:          wsURL,
+		dialer:         dialer,
+		conns:          make(map[string]*connEntry),
 	}
 }
 
@@ -156,6 +160,19 @@ func conversationID(req providers.PredictionRequest) string {
 
 // ID returns the provider identifier.
 func (p *Provider) ID() string { return p.id }
+
+// HealthCheck reports liveness. The fleet provider is healthy once Connect has
+// established the fallback WebSocket; per-conversation connections are dialed
+// lazily so are not checked here.
+func (p *Provider) HealthCheck(ctx context.Context) error {
+	_ = ctx
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.fallback == nil {
+		return fmt.Errorf("fleet provider %q has no active connection — call Connect first", p.id)
+	}
+	return nil
+}
 
 // Model returns the model name (always "fleet").
 func (p *Provider) Model() string { return fleetModel }

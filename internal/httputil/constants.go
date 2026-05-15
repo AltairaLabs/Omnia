@@ -29,9 +29,14 @@ const (
 )
 
 // WriteJSON serialises v as JSON and writes it to w with the given status code.
-// The Content-Type header is set to application/json.
+// The Content-Type header is set to application/json. A nil payload writes
+// only the status line and headers — Go's http.ResponseWriter rejects a body
+// for status codes that disallow one (e.g. 204 No Content, 304 Not Modified).
 func WriteJSON(w http.ResponseWriter, statusCode int, v any) error {
 	w.Header().Set(HeaderContentType, ContentTypeJSON)
 	w.WriteHeader(statusCode)
+	if v == nil {
+		return nil
+	}
 	return json.NewEncoder(w).Encode(v)
 }
