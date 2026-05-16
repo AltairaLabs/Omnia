@@ -148,6 +148,7 @@ Browser ──WebSocket──▶ Facade ──gRPC──▶ Runtime ──HTTP�
 3. **The dashboard never talks to the runtime directly.** All communication goes through the facade's WebSocket.
 4. **WebSocket types are generated from Go.** Run `make generate-websocket-types` after changing `internal/facade/protocol.go`. The pre-commit hook enforces this.
 5. **Generated files are never manually conflict-resolved.** After merging, re-run `make generate && make manifests && go mod tidy`.
+6. **Observability has two read paths.** Prometheus is for **operational** signals (rates, latencies, system health, control-plane PromQL); session-api structured endpoints are for **product** data (eval results, cost, per-tenant usage). New product hooks must work when Prometheus is offline. See `CLAUDE.md` → "Observability Boundaries" for the classification rule; `hack/check-no-prom-product-deps` enforces it on new files.
 
 ## Adding a New Service
 

@@ -171,6 +171,165 @@ func (s *EvalStoreImpl) GetEvalResultSummary(ctx context.Context, opts api.EvalR
 	return summaries, nil
 }
 
+// AggregateEvalResults runs a namespace-scoped GROUP BY over eval_results.
+// Powers /api/v1/eval-results/aggregate so product views can read trends and
+// percentiles without going through Prometheus. See
+// docs/local-backlog/implemented/2026-04-17-observability-split-design.md.
+func (s *EvalStoreImpl) AggregateEvalResults(ctx context.Context, opts api.EvalAggregateOpts) ([]*api.EvalAggregateRow, error) {
+	if opts.Namespace == "" {
+		return nil, fmt.Errorf("postgres: aggregate eval results: namespace is required")
+	}
+
+	keyExpr, orderClause, err := evalGroupByFragments(opts.GroupBy)
+	if err != nil {
+		return nil, err
+	}
+	valueExpr, err := evalMetricExpression(opts.Metric)
+	if err != nil {
+		return nil, err
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = api.DefaultEvalAggregateLimit
+	}
+	if limit > api.MaxEvalAggregateLimit {
+		limit = api.MaxEvalAggregateLimit
+	}
+
+	qb := &pgutil.QueryBuilder{}
+	qb.Add("namespace=$?", opts.Namespace)
+	if opts.AgentName != "" {
+		qb.Add("agent_name=$?", opts.AgentName)
+	}
+	if opts.PromptPackName != "" {
+		qb.Add("promptpack_name=$?", opts.PromptPackName)
+	}
+	if opts.EvalID != "" {
+		qb.Add("eval_id=$?", opts.EvalID)
+	}
+	if opts.EvalType != "" {
+		qb.Add("eval_type=$?", opts.EvalType)
+	}
+	if !opts.From.IsZero() {
+		qb.Add("created_at>=$?", opts.From)
+	}
+	if !opts.To.IsZero() {
+		qb.Add("created_at<$?", opts.To)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT %s AS key, %s AS value, COUNT(*) AS count
+		FROM eval_results
+		WHERE 1=1%s
+		GROUP BY 1
+		%s
+		LIMIT %d`,
+		keyExpr, valueExpr, qb.Where(), orderClause, limit)
+
+	rows, err := s.pool.Query(ctx, query, qb.Args()...)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: aggregate eval results: %w", err)
+	}
+	defer rows.Close()
+
+	out := []*api.EvalAggregateRow{}
+	for rows.Next() {
+		var r api.EvalAggregateRow
+		var v *float64
+		if err := rows.Scan(&r.Key, &v, &r.Count); err != nil {
+			return nil, fmt.Errorf("postgres: scan eval aggregate row: %w", err)
+		}
+		// avg/percentile over an empty group is NULL; emit 0.0 so callers
+		// don't special-case missing values for buckets with only NULL scores.
+		if v != nil {
+			r.Value = *v
+		}
+		out = append(out, &r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres: iterate eval aggregate rows: %w", err)
+	}
+	return out, nil
+}
+
+// evalGroupByFragments returns the SQL key expression and ORDER BY clause
+// for a given EvalAggregateGroupBy. Time buckets sort ASC (for chronological
+// charts); categorical groups sort DESC by value (largest first).
+func evalGroupByFragments(g api.EvalAggregateGroupBy) (keyExpr, orderClause string, err error) {
+	switch g {
+	case api.EvalAggregateGroupByEvalID:
+		return "eval_id", "ORDER BY value DESC", nil
+	case api.EvalAggregateGroupByEvalType:
+		return "eval_type", "ORDER BY value DESC", nil
+	case api.EvalAggregateGroupByAgent:
+		return "agent_name", "ORDER BY value DESC", nil
+	case api.EvalAggregateGroupByTimeHour:
+		return "to_char(date_trunc('hour', created_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:00:00\"Z\"')",
+			"ORDER BY 1 ASC", nil
+	case api.EvalAggregateGroupByTimeDay:
+		return "to_char(date_trunc('day', created_at)::date, 'YYYY-MM-DD')",
+			"ORDER BY 1 ASC", nil
+	default:
+		return "", "", fmt.Errorf("postgres: invalid groupBy %q", g)
+	}
+}
+
+// evalMetricExpression returns the SQL value expression for a given metric.
+// Percentiles use percentile_cont (continuous interpolation, standard PG).
+// Score metrics filter out NULL scores so percentile calculations don't
+// degrade — assertion-type evals have NULL score by design.
+func evalMetricExpression(m api.EvalAggregateMetric) (string, error) {
+	switch m {
+	case api.EvalAggregateMetricCount:
+		return "COUNT(*)::float", nil
+	case api.EvalAggregateMetricAvgScore:
+		return "AVG(score) FILTER (WHERE score IS NOT NULL)", nil
+	case api.EvalAggregateMetricP50Score:
+		return "percentile_cont(0.5) WITHIN GROUP (ORDER BY score) FILTER (WHERE score IS NOT NULL)", nil
+	case api.EvalAggregateMetricP95Score:
+		return "percentile_cont(0.95) WITHIN GROUP (ORDER BY score) FILTER (WHERE score IS NOT NULL)", nil
+	case api.EvalAggregateMetricAvgLatencyMs:
+		return "AVG(duration_ms) FILTER (WHERE duration_ms IS NOT NULL)", nil
+	case api.EvalAggregateMetricP95LatencyMs:
+		return "percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) FILTER (WHERE duration_ms IS NOT NULL)", nil
+	default:
+		return "", fmt.Errorf("postgres: invalid metric %q", m)
+	}
+}
+
+// DistinctEvals returns the set of (eval_id, eval_type) pairs that have at
+// least one row in eval_results for the given namespace. Replaces Prometheus'
+// metric-discovery for dashboard product views.
+func (s *EvalStoreImpl) DistinctEvals(ctx context.Context, namespace string) ([]api.EvalDescriptor, error) {
+	if namespace == "" {
+		return nil, fmt.Errorf("postgres: distinct evals: namespace is required")
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT eval_id, eval_type
+		FROM eval_results
+		WHERE namespace = $1
+		ORDER BY eval_id`, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: distinct evals: %w", err)
+	}
+	defer rows.Close()
+
+	out := []api.EvalDescriptor{}
+	for rows.Next() {
+		var d api.EvalDescriptor
+		if err := rows.Scan(&d.EvalID, &d.EvalType); err != nil {
+			return nil, fmt.Errorf("postgres: scan distinct eval: %w", err)
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres: iterate distinct evals: %w", err)
+	}
+	return out, nil
+}
+
 // --- helpers ----------------------------------------------------------------
 
 func applyEvalFilters(qb *pgutil.QueryBuilder, opts api.EvalResultListOpts) {

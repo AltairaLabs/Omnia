@@ -86,6 +86,73 @@ type EvalResultSummaryOpts struct {
 	CreatedBefore time.Time
 }
 
+// EvalAggregateGroupBy enumerates valid groupBy values for AggregateEvalResults.
+// The "time:*" forms bucket created_at via date_trunc.
+type EvalAggregateGroupBy string
+
+const (
+	// EvalAggregateGroupByEvalID groups by the eval_id column (one row per
+	// eval scenario). The shape that replaces today's Prom-per-metric-name fanout.
+	EvalAggregateGroupByEvalID EvalAggregateGroupBy = "eval_id"
+	// EvalAggregateGroupByEvalType groups by the eval_type column (llm_judge,
+	// assertion, etc.).
+	EvalAggregateGroupByEvalType EvalAggregateGroupBy = "eval_type"
+	// EvalAggregateGroupByAgent groups by the agent_name column.
+	EvalAggregateGroupByAgent EvalAggregateGroupBy = "agent"
+	// EvalAggregateGroupByTimeHour buckets created_at by hour (UTC),
+	// formatted as RFC3339 hour-precision strings.
+	EvalAggregateGroupByTimeHour EvalAggregateGroupBy = "time:hour"
+	// EvalAggregateGroupByTimeDay buckets created_at by day (UTC),
+	// formatted as YYYY-MM-DD strings.
+	EvalAggregateGroupByTimeDay EvalAggregateGroupBy = "time:day"
+)
+
+// EvalAggregateMetric enumerates valid metric values for AggregateEvalResults.
+// Percentiles use Postgres' percentile_cont (continuous interpolation).
+type EvalAggregateMetric string
+
+const (
+	EvalAggregateMetricCount        EvalAggregateMetric = "count"
+	EvalAggregateMetricAvgScore     EvalAggregateMetric = "avg_score"
+	EvalAggregateMetricP50Score     EvalAggregateMetric = "p50_score"
+	EvalAggregateMetricP95Score     EvalAggregateMetric = "p95_score"
+	EvalAggregateMetricAvgLatencyMs EvalAggregateMetric = "avg_latency_ms"
+	EvalAggregateMetricP95LatencyMs EvalAggregateMetric = "p95_latency_ms"
+)
+
+// EvalAggregateLimit clamps the maximum number of returned rows. The default
+// is large enough to fit a day-bucket trend over 90 days (90 keys) without
+// pagination, and the max keeps a malformed query from sweeping the table.
+const (
+	DefaultEvalAggregateLimit = 500
+	MaxEvalAggregateLimit     = 5000
+)
+
+// EvalAggregateRow is one returned row from AggregateEvalResults. Key is the
+// stringified group value (eval_id, time bucket, etc.); Value is the metric;
+// Count is the number of source rows that contributed.
+type EvalAggregateRow struct {
+	Key   string  `json:"key"`
+	Value float64 `json:"value"`
+	Count int64   `json:"count"`
+}
+
+// EvalAggregateOpts configures the AggregateEvalResults query.
+// Namespace is the scoping field (mirrors the workspace_id role on memory_entities).
+// GroupBy and Metric are required; all other fields are optional filters.
+type EvalAggregateOpts struct {
+	Namespace      string // required
+	AgentName      string // optional
+	PromptPackName string // optional
+	EvalID         string // optional
+	EvalType       string // optional
+	From           time.Time
+	To             time.Time
+	GroupBy        EvalAggregateGroupBy // required
+	Metric         EvalAggregateMetric  // required
+	Limit          int
+}
+
 // EvalStore defines the persistence interface for eval results.
 type EvalStore interface {
 	// InsertEvalResults persists one or more eval results.
@@ -99,4 +166,21 @@ type EvalStore interface {
 
 	// GetEvalResultSummary returns aggregate statistics grouped by eval_id and eval_type.
 	GetEvalResultSummary(ctx context.Context, opts EvalResultSummaryOpts) ([]*EvalResultSummary, error)
+
+	// AggregateEvalResults runs a namespace-scoped GROUP BY over eval_results.
+	// Used by /api/v1/eval-results/aggregate to power product views without
+	// Prometheus. See docs/local-backlog/implemented/2026-04-17-observability-split-design.md
+	// for the design rationale.
+	AggregateEvalResults(ctx context.Context, opts EvalAggregateOpts) ([]*EvalAggregateRow, error)
+
+	// DistinctEvals returns the set of (eval_id, eval_type) pairs that appear
+	// in eval_results for the given namespace. Used by the dashboard's
+	// eval-metric discovery, replacing the Prometheus /api/v1/metadata path.
+	DistinctEvals(ctx context.Context, namespace string) ([]EvalDescriptor, error)
+}
+
+// EvalDescriptor is one (eval_id, eval_type) pair returned by DistinctEvals.
+type EvalDescriptor struct {
+	EvalID   string `json:"evalId"`
+	EvalType string `json:"evalType"`
 }

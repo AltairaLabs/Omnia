@@ -308,3 +308,161 @@ func TestHandleEvaluateSession_NoService(t *testing.T) {
 
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
+
+// --- /api/v1/eval-results/aggregate ---------------------------------------
+
+func TestHandleAggregateEvalResults_Success(t *testing.T) {
+	store := &mockEvalStore{
+		aggregateResults: []*EvalAggregateRow{
+			{Key: "2026-05-01", Value: 0.85, Count: 2},
+			{Key: "2026-05-02", Value: 0.80, Count: 2},
+		},
+	}
+	mux := newTestEvalHandler(store)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/eval-results/aggregate?namespace=default&groupBy=time:day&metric=avg_score", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp EvalAggregateResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Rows, 2)
+	assert.Equal(t, "2026-05-01", resp.Rows[0].Key)
+	assert.InDelta(t, 0.85, resp.Rows[0].Value, 0.001)
+}
+
+func TestHandleAggregateEvalResults_MissingNamespace(t *testing.T) {
+	mux := newTestEvalHandler(&mockEvalStore{})
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/eval-results/aggregate?groupBy=time:day&metric=avg_score", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "namespace")
+}
+
+func TestHandleAggregateEvalResults_InvalidGroupBy(t *testing.T) {
+	mux := newTestEvalHandler(&mockEvalStore{})
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/eval-results/aggregate?namespace=default&groupBy=invalid&metric=count", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "groupBy")
+}
+
+func TestHandleAggregateEvalResults_InvalidMetric(t *testing.T) {
+	mux := newTestEvalHandler(&mockEvalStore{})
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/eval-results/aggregate?namespace=default&groupBy=time:day&metric=invalid", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "metric")
+}
+
+func TestHandleAggregateEvalResults_InvalidFrom(t *testing.T) {
+	mux := newTestEvalHandler(&mockEvalStore{})
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/eval-results/aggregate?namespace=default&groupBy=time:day&metric=count&from=yesterday", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "from")
+}
+
+func TestHandleAggregateEvalResults_NoEvalService(t *testing.T) {
+	h := NewHandler(nil, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/eval-results/aggregate?namespace=default&groupBy=time:day&metric=count", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func TestHandleAggregateEvalResults_NilRowsReturnsEmptyArray(t *testing.T) {
+	// Store returns nil; handler should normalize to [] so the dashboard
+	// doesn't need to special-case null.
+	mux := newTestEvalHandler(&mockEvalStore{aggregateResults: nil})
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/eval-results/aggregate?namespace=default&groupBy=time:day&metric=count", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"rows":[]`)
+}
+
+// --- /api/v1/eval-results/discover ----------------------------------------
+
+func TestHandleDiscoverEvals_Success(t *testing.T) {
+	store := &mockEvalStore{
+		distinctEvals: []EvalDescriptor{
+			{EvalID: "acc", EvalType: "llm_judge"},
+			{EvalID: "lat", EvalType: "assertion"},
+		},
+	}
+	mux := newTestEvalHandler(store)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/eval-results/discover?namespace=default", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp EvalDiscoverResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Evals, 2)
+	assert.Equal(t, "acc", resp.Evals[0].EvalID)
+	assert.Equal(t, "llm_judge", resp.Evals[0].EvalType)
+}
+
+func TestHandleDiscoverEvals_MissingNamespace(t *testing.T) {
+	mux := newTestEvalHandler(&mockEvalStore{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/eval-results/discover", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "namespace")
+}
+
+func TestHandleDiscoverEvals_NoEvalService(t *testing.T) {
+	h := NewHandler(nil, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/eval-results/discover?namespace=default", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func TestHandleDiscoverEvals_NilReturnsEmptyArray(t *testing.T) {
+	mux := newTestEvalHandler(&mockEvalStore{distinctEvals: nil})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/eval-results/discover?namespace=default", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"evals":[]`)
+}

@@ -1,0 +1,15 @@
+# Pre-existing product-class dashboard hooks that import a Prometheus
+# client. These are exempt from `hack/check-no-prom-product-deps.sh` so
+# the lint can land without rewriting them all in one PR.
+#
+# To remove a line: migrate the hook to read from a session-api endpoint
+# (e.g. /api/v1/eval-results/aggregate). The lint will fail with a
+# "stale allowlist entry" message until you delete the line.
+#
+# See: docs/local-backlog/implemented/2026-04-17-observability-split-design.md
+# (proposal); CLAUDE.md → Observability Boundaries (principle).
+
+dashboard/src/hooks/use-agent-cost.ts
+dashboard/src/hooks/use-eval-filter.ts
+dashboard/src/hooks/use-eval-quality.ts
+dashboard/src/hooks/use-provider-metrics.ts

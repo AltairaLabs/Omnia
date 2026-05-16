@@ -30,14 +30,18 @@ import (
 
 // mockEvalStore is a test double for EvalStore.
 type mockEvalStore struct {
-	insertErr      error
-	getResults     []*EvalResult
-	getErr         error
-	listResults    []*EvalResult
-	listTotal      int64
-	listErr        error
-	summaryResults []*EvalResultSummary
-	summaryErr     error
+	insertErr        error
+	getResults       []*EvalResult
+	getErr           error
+	listResults      []*EvalResult
+	listTotal        int64
+	listErr          error
+	summaryResults   []*EvalResultSummary
+	summaryErr       error
+	aggregateResults []*EvalAggregateRow
+	aggregateErr     error
+	distinctEvals    []EvalDescriptor
+	distinctEvalsErr error
 }
 
 func (m *mockEvalStore) InsertEvalResults(_ context.Context, _ []*EvalResult) error {
@@ -54,6 +58,14 @@ func (m *mockEvalStore) ListEvalResults(_ context.Context, _ EvalResultListOpts)
 
 func (m *mockEvalStore) GetEvalResultSummary(_ context.Context, _ EvalResultSummaryOpts) ([]*EvalResultSummary, error) {
 	return m.summaryResults, m.summaryErr
+}
+
+func (m *mockEvalStore) AggregateEvalResults(_ context.Context, _ EvalAggregateOpts) ([]*EvalAggregateRow, error) {
+	return m.aggregateResults, m.aggregateErr
+}
+
+func (m *mockEvalStore) DistinctEvals(_ context.Context, _ string) ([]EvalDescriptor, error) {
+	return m.distinctEvals, m.distinctEvalsErr
 }
 
 func TestNewEvalService(t *testing.T) {

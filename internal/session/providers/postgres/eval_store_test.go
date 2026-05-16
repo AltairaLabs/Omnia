@@ -713,3 +713,299 @@ func TestApplySummaryFilters_Empty(t *testing.T) {
 	assert.Empty(t, qb.Args())
 	assert.Empty(t, qb.Where())
 }
+
+// --- AggregateEvalResults ---------------------------------------------------
+
+// Fixture constants for the aggregate test set. Extracted to satisfy goconst.
+const (
+	aggregateEvalIDAcc = "acc"
+	aggregateEvalIDLat = "lat"
+	aggregateAgentA    = "agent-a"
+	aggregateAgentB    = "agent-b"
+)
+
+// seedAggregateRows populates eval_results with a fixed shape used by every
+// aggregate test below — two evals (acc + lat) across two days and two
+// agents. created_at is set explicitly so time-bucket tests are stable.
+// Always seeds against testSessionID; the constant is internal to avoid a
+// dead parameter (unparam).
+func seedAggregateRows(t *testing.T, store *EvalStoreImpl) {
+	t.Helper()
+	ctx := context.Background()
+	sessionID := testSessionID
+	seedSession(t, store, sessionID)
+
+	day1 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	day2 := time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
+
+	type row struct {
+		evalID    string
+		evalType  string
+		agentName string
+		passed    bool
+		score     float64
+		duration  int
+		createdAt time.Time
+	}
+	rows := []row{
+		{aggregateEvalIDAcc, "llm_judge", aggregateAgentA, true, 0.90, 100, day1},
+		{aggregateEvalIDAcc, "llm_judge", aggregateAgentA, true, 0.80, 120, day1},
+		{aggregateEvalIDAcc, "llm_judge", aggregateAgentA, true, 1.00, 90, day2},
+		{aggregateEvalIDAcc, "llm_judge", aggregateAgentB, true, 0.60, 200, day2},
+		{aggregateEvalIDLat, "assertion", aggregateAgentA, false, 0.10, 500, day2},
+	}
+	for _, r := range rows {
+		er := makeEvalResult(sessionID, r.evalID, r.evalType)
+		er.AgentName = r.agentName
+		er.Passed = r.passed
+		er.Score = ptrFloat64(r.score)
+		er.DurationMs = ptrInt(r.duration)
+		require.NoError(t, store.InsertEvalResults(ctx, []*api.EvalResult{er}))
+	}
+
+	// InsertEvalResults uses now() for created_at; rewrite to the test
+	// timestamps in a single UPDATE keyed by score (unique in the fixture).
+	for _, r := range rows {
+		_, err := store.pool.Exec(ctx, `
+			UPDATE eval_results SET created_at = $1
+			WHERE session_id = $2 AND eval_id = $3 AND score = $4 AND agent_name = $5`,
+			r.createdAt, sessionID, r.evalID, r.score, r.agentName,
+		)
+		require.NoError(t, err)
+	}
+}
+
+func TestAggregateEvalResults_GroupByEvalID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	store := newEvalStore(t)
+	seedAggregateRows(t, store)
+
+	rows, err := store.AggregateEvalResults(context.Background(), api.EvalAggregateOpts{
+		Namespace: "default",
+		GroupBy:   api.EvalAggregateGroupByEvalID,
+		Metric:    api.EvalAggregateMetricCount,
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	byKey := map[string]*api.EvalAggregateRow{}
+	for _, r := range rows {
+		byKey[r.Key] = r
+	}
+	require.NotNil(t, byKey["acc"])
+	require.NotNil(t, byKey["lat"])
+	assert.InDelta(t, 4, byKey["acc"].Value, 0.001)
+	assert.Equal(t, int64(4), byKey["acc"].Count)
+	assert.InDelta(t, 1, byKey["lat"].Value, 0.001)
+	assert.Equal(t, int64(1), byKey["lat"].Count)
+}
+
+func TestAggregateEvalResults_TimeDayAvgScore(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	store := newEvalStore(t)
+	seedAggregateRows(t, store)
+
+	rows, err := store.AggregateEvalResults(context.Background(), api.EvalAggregateOpts{
+		Namespace: "default",
+		EvalID:    "acc",
+		GroupBy:   api.EvalAggregateGroupByTimeDay,
+		Metric:    api.EvalAggregateMetricAvgScore,
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	// Day 1: (0.90 + 0.80) / 2 = 0.85
+	// Day 2: (1.00 + 0.60) / 2 = 0.80
+	assert.Equal(t, "2026-05-01", rows[0].Key)
+	assert.InDelta(t, 0.85, rows[0].Value, 0.001)
+	assert.Equal(t, int64(2), rows[0].Count)
+	assert.Equal(t, "2026-05-02", rows[1].Key)
+	assert.InDelta(t, 0.80, rows[1].Value, 0.001)
+	assert.Equal(t, int64(2), rows[1].Count)
+}
+
+func TestAggregateEvalResults_P95Score(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	store := newEvalStore(t)
+	seedAggregateRows(t, store)
+
+	rows, err := store.AggregateEvalResults(context.Background(), api.EvalAggregateOpts{
+		Namespace: "default",
+		EvalID:    "acc",
+		GroupBy:   api.EvalAggregateGroupByEvalID,
+		Metric:    api.EvalAggregateMetricP95Score,
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	// scores for acc: [0.60, 0.80, 0.90, 1.00] sorted; p95 by interpolation
+	// is between 0.90 and 1.00. Just confirm it's in the right band.
+	assert.GreaterOrEqual(t, rows[0].Value, 0.90)
+	assert.LessOrEqual(t, rows[0].Value, 1.00)
+	assert.Equal(t, int64(4), rows[0].Count)
+}
+
+func TestAggregateEvalResults_GroupByAgent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	store := newEvalStore(t)
+	seedAggregateRows(t, store)
+
+	rows, err := store.AggregateEvalResults(context.Background(), api.EvalAggregateOpts{
+		Namespace: "default",
+		EvalID:    "acc",
+		GroupBy:   api.EvalAggregateGroupByAgent,
+		Metric:    api.EvalAggregateMetricCount,
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	byKey := map[string]int64{}
+	for _, r := range rows {
+		byKey[r.Key] = r.Count
+	}
+	assert.Equal(t, int64(3), byKey[aggregateAgentA])
+	assert.Equal(t, int64(1), byKey[aggregateAgentB])
+}
+
+func TestAggregateEvalResults_FilterByEvalType(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	store := newEvalStore(t)
+	seedAggregateRows(t, store)
+
+	rows, err := store.AggregateEvalResults(context.Background(), api.EvalAggregateOpts{
+		Namespace: "default",
+		EvalType:  "assertion",
+		GroupBy:   api.EvalAggregateGroupByEvalID,
+		Metric:    api.EvalAggregateMetricCount,
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "lat", rows[0].Key)
+}
+
+func TestAggregateEvalResults_FilterTimeRange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	store := newEvalStore(t)
+	seedAggregateRows(t, store)
+
+	// Only day 1 — should drop the day-2 rows.
+	day1Start := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	day1End := time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC)
+
+	rows, err := store.AggregateEvalResults(context.Background(), api.EvalAggregateOpts{
+		Namespace: "default",
+		From:      day1Start,
+		To:        day1End,
+		GroupBy:   api.EvalAggregateGroupByEvalID,
+		Metric:    api.EvalAggregateMetricCount,
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "acc", rows[0].Key)
+	assert.Equal(t, int64(2), rows[0].Count)
+}
+
+func TestAggregateEvalResults_NamespaceIsolation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	store := newEvalStore(t)
+	seedAggregateRows(t, store)
+
+	rows, err := store.AggregateEvalResults(context.Background(), api.EvalAggregateOpts{
+		Namespace: "other-namespace",
+		GroupBy:   api.EvalAggregateGroupByEvalID,
+		Metric:    api.EvalAggregateMetricCount,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, rows)
+}
+
+func TestAggregateEvalResults_MissingNamespace(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	store := newEvalStore(t)
+	_, err := store.AggregateEvalResults(context.Background(), api.EvalAggregateOpts{
+		GroupBy: api.EvalAggregateGroupByEvalID,
+		Metric:  api.EvalAggregateMetricCount,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "namespace is required")
+}
+
+func TestAggregateEvalResults_InvalidGroupBy(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	store := newEvalStore(t)
+	_, err := store.AggregateEvalResults(context.Background(), api.EvalAggregateOpts{
+		Namespace: "default",
+		GroupBy:   "not-a-groupby",
+		Metric:    api.EvalAggregateMetricCount,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid groupBy")
+}
+
+func TestAggregateEvalResults_InvalidMetric(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	store := newEvalStore(t)
+	_, err := store.AggregateEvalResults(context.Background(), api.EvalAggregateOpts{
+		Namespace: "default",
+		GroupBy:   api.EvalAggregateGroupByEvalID,
+		Metric:    "not-a-metric",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid metric")
+}
+
+// --- DistinctEvals ----------------------------------------------------------
+
+func TestDistinctEvals(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	store := newEvalStore(t)
+	seedAggregateRows(t, store)
+
+	descs, err := store.DistinctEvals(context.Background(), "default")
+	require.NoError(t, err)
+	require.Len(t, descs, 2)
+	// Sorted by eval_id ascending.
+	assert.Equal(t, "acc", descs[0].EvalID)
+	assert.Equal(t, "llm_judge", descs[0].EvalType)
+	assert.Equal(t, "lat", descs[1].EvalID)
+	assert.Equal(t, "assertion", descs[1].EvalType)
+}
+
+func TestDistinctEvals_NamespaceIsolation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	store := newEvalStore(t)
+	seedAggregateRows(t, store)
+
+	descs, err := store.DistinctEvals(context.Background(), "other-namespace")
+	require.NoError(t, err)
+	assert.Empty(t, descs)
+}
+
+func TestDistinctEvals_MissingNamespace(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	store := newEvalStore(t)
+	_, err := store.DistinctEvals(context.Background(), "")
+	require.Error(t, err)
+}

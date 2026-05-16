@@ -41,6 +41,17 @@ Architecture docs are only useful if they reflect reality. When your changes aff
 **When to update `api/websocket/asyncapi.yaml`**:
 - Adding/removing/changing WebSocket message types or payload schemas
 
+## Observability Boundaries
+
+Two read paths, two purposes. Pick by classification:
+
+- **Operational signals** (rates, latencies, system health, scrape-style time series, control-plane decisions): **Prometheus is the source of truth.** `RolloutAnalysis` PromQL config, system-health dashboards, request-rate hooks read from Prometheus.
+- **Product data** (eval results, tokens, cost, per-tenant usage, anything a customer might cite or export): **structured tables read via session-api are the source of truth.** Product hooks must work when Prometheus is offline.
+
+The dashboard's existing operational views stay on Prom. New product-y read paths go through session-api endpoints (e.g. `GET /api/v1/eval-results/aggregate`). The repo's `hack/check-no-prom-product-deps` pre-commit hook blocks new `dashboard/src/hooks/use-eval-*.ts(x)`, `use-*-cost.ts(x)`, or `use-provider-*.ts(x)` files that import `prometheus-service`, `prometheus-proxy`, or `@/lib/prometheus*` — existing files are allowlisted in the script.
+
+When you're unsure which class your data is, ask: *would a customer's compliance / billing / quality team ever read this directly?* If yes, product. If it only matters for an SRE on-call, operational.
+
 ## Pre-commit Hooks
 
 The repo has a pre-commit hook at `hack/pre-commit` that runs on every commit. **Run checks locally before committing to avoid retry cycles.**
