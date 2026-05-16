@@ -26,6 +26,7 @@ vi.mock("@/contexts/workspace-context", () => ({
 vi.mock("@/lib/data/eval-results-service", () => ({
   fetchEvalAggregate: vi.fn(),
   fetchEvalDescriptors: vi.fn(),
+  classifyEvalType: (t: string) => (t === "assertion" ? "boolean" : "gauge"),
 }));
 
 import { useWorkspace } from "@/contexts/workspace-context";

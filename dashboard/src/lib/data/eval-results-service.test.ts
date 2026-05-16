@@ -7,7 +7,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fetchEvalAggregate, fetchEvalDescriptors } from "./eval-results-service";
+import {
+  classifyEvalType,
+  fetchEvalAggregate,
+  fetchEvalDescriptors,
+} from "./eval-results-service";
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -114,6 +118,24 @@ describe("fetchEvalAggregate", () => {
     expect(url).not.toContain("evalId=");
     expect(url).not.toContain("from=");
     expect(url).not.toContain("to=");
+  });
+});
+
+describe("classifyEvalType", () => {
+  it("maps boolean-style eval handlers to 'boolean'", () => {
+    expect(classifyEvalType("assertion")).toBe("boolean");
+    expect(classifyEvalType("regex")).toBe("boolean");
+    expect(classifyEvalType("json_path")).toBe("boolean");
+  });
+
+  it("maps llm-judge eval handlers to 'gauge'", () => {
+    expect(classifyEvalType("llm_judge")).toBe("gauge");
+    expect(classifyEvalType("llm_judge_session")).toBe("gauge");
+  });
+
+  it("defaults unknown eval types to 'gauge'", () => {
+    expect(classifyEvalType("")).toBe("gauge");
+    expect(classifyEvalType("future_handler")).toBe("gauge");
   });
 });
 

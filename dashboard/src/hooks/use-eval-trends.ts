@@ -23,6 +23,7 @@ import { useWorkspace } from "@/contexts/workspace-context";
 import {
   fetchEvalAggregate,
   fetchEvalDescriptors,
+  classifyEvalType,
   type EvalAggregateGroupBy,
 } from "@/lib/data/eval-results-service";
 import { DEFAULT_STALE_TIME } from "@/lib/query-config";
@@ -186,24 +187,6 @@ export function useEvalMetrics(filter?: EvalFilter) {
     staleTime: DEFAULT_STALE_TIME,
     retry: false,
   });
-}
-
-/**
- * Map session-api's eval_type string onto the EvalMetricType taxonomy used
- * by the dashboard's score-breakdown widgets. The previous Prom path
- * resolved this via metric metadata; here we infer from the eval_type label.
- */
-function classifyEvalType(evalType: string): EvalMetricType {
-  switch (evalType) {
-    case "assertion":
-    case "regex":
-    case "json_path":
-      return "boolean";
-    default:
-      // llm_judge, llm_judge_session, and anything else surface as a
-      // continuous score (0..1 range; the chart's Y axis is [0,1]).
-      return "gauge";
-  }
 }
 
 /**
