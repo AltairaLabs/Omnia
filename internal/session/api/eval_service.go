@@ -133,6 +133,25 @@ func (s *EvalService) ListEvalResults(ctx context.Context, opts EvalResultListOp
 	return s.store.ListEvalResults(ctx, opts)
 }
 
+// AggregateEvalResults runs a GROUP BY over eval_results scoped to opts.Namespace.
+// Powers GET /api/v1/eval-results/aggregate.
+func (s *EvalService) AggregateEvalResults(ctx context.Context, opts EvalAggregateOpts) ([]*EvalAggregateRow, error) {
+	if s.store == nil {
+		return nil, ErrMissingEvalStore
+	}
+	return s.store.AggregateEvalResults(ctx, opts)
+}
+
+// DistinctEvals returns (eval_id, eval_type) pairs for a namespace. Powers
+// GET /api/v1/eval-results/discover so dashboard can list available evals
+// without going through Prometheus metric metadata.
+func (s *EvalService) DistinctEvals(ctx context.Context, namespace string) ([]EvalDescriptor, error) {
+	if s.store == nil {
+		return nil, ErrMissingEvalStore
+	}
+	return s.store.DistinctEvals(ctx, namespace)
+}
+
 // GetEvalResultSummary returns aggregate statistics for eval results.
 func (s *EvalService) GetEvalResultSummary(ctx context.Context, opts EvalResultSummaryOpts) ([]*EvalResultSummary, error) {
 	if s.store == nil {

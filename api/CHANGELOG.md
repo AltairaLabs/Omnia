@@ -10,6 +10,29 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (eval-results aggregate + discover endpoints)
+
+- `GET /api/v1/eval-results/aggregate?namespace=X&groupBy=Y&metric=Z` —
+  namespace-scoped GROUP BY over `eval_results`. `groupBy` is one of
+  `eval_id` | `eval_type` | `agent` | `time:hour` | `time:day`; `metric`
+  is one of `count` | `avg_score` | `p50_score` | `p95_score` |
+  `avg_latency_ms` | `p95_latency_ms`. Optional filters `agentName`,
+  `evalId`, `evalType`, `from`, `to` (RFC3339). Returns
+  `{rows: [{key, value, count}, …]}`.
+- `GET /api/v1/eval-results/discover?namespace=X` — distinct
+  `(eval_id, eval_type)` pairs that have at least one row in this
+  namespace's `eval_results`. Returns `{evals: [{evalId, evalType}, …]}`.
+- Dashboard proxy routes: `GET /api/workspaces/{name}/eval-results/aggregate`
+  and `GET /api/workspaces/{name}/eval-results/discover`. The workspace
+  name from the URL is pinned as `namespace` on the forwarded query so
+  callers cannot read another workspace's data.
+
+Together these replace direct Prometheus reads for product-class
+dashboard hooks (eval trends, eval discovery). See CLAUDE.md →
+Observability Boundaries for the principle; the design proposal at
+`docs/local-backlog/implemented/2026-04-17-observability-split-design.md`
+covers rationale.
+
 ### Breaking (SessionRetentionPolicy schema flatten + policyRef, #1016)
 
 - `SessionRetentionPolicy.spec.default` and `spec.perWorkspace` removed.

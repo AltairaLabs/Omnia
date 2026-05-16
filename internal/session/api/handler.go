@@ -241,6 +241,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/evaluate", h.handleEvaluateSession)
 	mux.HandleFunc("POST /api/v1/eval-results", h.handleCreateEvalResults)
 	mux.HandleFunc("GET /api/v1/eval-results", h.handleListEvalResults)
+	// Aggregate + discover: powers product dashboard views without Prometheus.
+	// See CLAUDE.md → Observability Boundaries.
+	mux.HandleFunc("GET /api/v1/eval-results/aggregate", h.handleAggregateEvalResults)
+	mux.HandleFunc("GET /api/v1/eval-results/discover", h.handleDiscoverEvals)
 
 	// Privacy policy endpoint
 	mux.HandleFunc("GET /api/v1/privacy-policy", h.handleGetPrivacyPolicy)

@@ -1,9 +1,16 @@
 /**
- * Hook for fetching eval metric trends from Prometheus.
+ * Hooks for fetching eval-metric trends from session-api.
  *
- * Uses Prometheus range queries to get time-series data for eval metrics.
- * Eval metrics are dynamically named with "omnia_eval_" prefix and emitted
- * by the runtime MetricCollector.
+ * Previously read from Prometheus. Migrated to the structured read path
+ * (`/api/workspaces/{name}/eval-results/aggregate` + `.../discover`) as
+ * the pilot for the observability split — see CLAUDE.md → Observability
+ * Boundaries and
+ * `docs/local-backlog/implemented/2026-04-17-observability-split-design.md`.
+ *
+ * The exported surface (EVAL_TREND_RANGES, EvalTrendPoint, EvalMetricInfo,
+ * useEvalScoreTrends, useEvalMetrics) is unchanged so existing consumers
+ * (`components/quality/eval-score-trend-chart.tsx`,
+ * `components/quality/eval-score-breakdown.tsx`) don't need to change.
  *
  * Copyright 2026 Altaira Labs.
  * SPDX-License-Identifier: Apache-2.0
@@ -12,29 +19,39 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useWorkspace } from "@/contexts/workspace-context";
 import {
-  queryPrometheusRange,
-  queryPrometheus,
-  type PrometheusMatrixResult,
-} from "@/lib/prometheus";
-import { EvalQueries, type EvalFilter } from "@/lib/prometheus-queries";
+  fetchEvalAggregate,
+  fetchEvalDescriptors,
+  type EvalAggregateGroupBy,
+} from "@/lib/data/eval-results-service";
 import { DEFAULT_STALE_TIME } from "@/lib/query-config";
-import { discoverEvalMetrics } from "@/lib/eval-discovery";
 import type { EvalMetricType } from "@/types/eval";
+
+/**
+ * Filter for eval queries by dimensional values. Kept structurally
+ * compatible with the previous EvalFilter from `@/lib/prometheus-queries`
+ * so existing consumers can re-use the same shape verbatim.
+ */
+export interface EvalFilter {
+  agent?: string;
+  promptpackName?: string;
+}
 
 /** Time range options for trend queries. */
 export const EVAL_TREND_RANGES = {
-  "1h": { seconds: 3600, step: "1m" },
-  "6h": { seconds: 21600, step: "5m" },
-  "24h": { seconds: 86400, step: "15m" },
-  "7d": { seconds: 604800, step: "1h" },
-  "30d": { seconds: 2592000, step: "6h" },
+  "1h": { seconds: 3600, groupBy: "time:hour" as EvalAggregateGroupBy },
+  "6h": { seconds: 21600, groupBy: "time:hour" as EvalAggregateGroupBy },
+  "24h": { seconds: 86400, groupBy: "time:hour" as EvalAggregateGroupBy },
+  "7d": { seconds: 604800, groupBy: "time:day" as EvalAggregateGroupBy },
+  "30d": { seconds: 2592000, groupBy: "time:day" as EvalAggregateGroupBy },
 } as const;
 
 export type EvalTrendRange = keyof typeof EVAL_TREND_RANGES;
 
 export interface EvalTrendPoint {
   timestamp: Date;
+  /** Eval name → metric value at this timestamp. */
   values: Record<string, number>;
 }
 
@@ -45,88 +62,121 @@ export interface EvalMetricInfo {
   sparkline?: Array<{ value: number }>;
 }
 
+/** Sparkline range — last 1h at hour-precision buckets. */
+const SPARKLINE_RANGE = { seconds: 3600, groupBy: "time:hour" as EvalAggregateGroupBy };
+
 /**
- * Fetch eval score trends from Prometheus as time-series data.
+ * Fetch eval score trends for the current workspace.
  *
- * Queries all omnia_eval_* metrics using avg_over_time for trend data.
+ * Behaviour:
+ * 1. If no metric names are provided, discover them first from session-api.
+ * 2. For each eval, fetch a time-bucketed avg_score series.
+ * 3. Merge into the EvalTrendPoint[] shape callers expect.
  */
 export function useEvalScoreTrends(params?: {
   metricNames?: string[];
   timeRange?: EvalTrendRange;
   filter?: EvalFilter;
 }) {
+  const { currentWorkspace } = useWorkspace();
+  const workspace = currentWorkspace?.name;
   const timeRange = params?.timeRange ?? "24h";
   const metricNames = params?.metricNames;
   const filter = params?.filter;
   const rangeConfig = EVAL_TREND_RANGES[timeRange];
 
   return useQuery({
-    queryKey: ["eval-trends", metricNames, timeRange, filter],
+    queryKey: ["eval-trends", workspace, metricNames, timeRange, filter],
+    enabled: Boolean(workspace),
     queryFn: async (): Promise<EvalTrendPoint[]> => {
+      if (!workspace) return [];
+
       const end = new Date();
       const start = new Date(end.getTime() - rangeConfig.seconds * 1000);
 
       let names: string[];
-      if (metricNames) {
+      if (metricNames && metricNames.length > 0) {
         names = metricNames;
       } else {
-        const discovered = await discoverEvalMetrics(filter);
-        names = discovered.map((m) => m.name);
+        const descriptors = await fetchEvalDescriptors(workspace);
+        names = descriptors.map((d) => d.evalId);
       }
       if (names.length === 0) return [];
 
-      const results = await Promise.all(
+      const seriesPerEval = await Promise.all(
         names.map(async (name) => {
-          const query = EvalQueries.metricAvgOverTime(name, rangeConfig.step, filter);
-          const resp = await queryPrometheusRange(query, start, end, rangeConfig.step);
-          return { name, data: resp };
-        })
+          const rows = await fetchEvalAggregate({
+            workspace,
+            groupBy: rangeConfig.groupBy,
+            metric: "avg_score",
+            evalId: name,
+            agentName: filter?.agent,
+            promptpackName: filter?.promptpackName,
+            from: start,
+            to: end,
+          });
+          return { name, rows };
+        }),
       );
 
-      return mergeTimeSeries(results);
+      return mergeTimeSeries(seriesPerEval);
     },
-    staleTime: 60000,
+    staleTime: 60_000,
     retry: false,
   });
 }
 
-/** Sparkline range config — last 1h at 1m resolution. */
-const SPARKLINE_RANGE = { seconds: 3600, step: "1m" };
-
 /**
- * Discover available eval metrics with current values, types, and sparkline data.
- *
- * Types come from the discovery call (metadata-resolved), not a separate fetch.
+ * Discover available eval metrics for the current workspace with current
+ * values, types, and sparkline data.
  */
 export function useEvalMetrics(filter?: EvalFilter) {
+  const { currentWorkspace } = useWorkspace();
+  const workspace = currentWorkspace?.name;
+
   return useQuery({
-    queryKey: ["eval-metrics-discovery", filter],
+    queryKey: ["eval-metrics-discovery", workspace, filter],
+    enabled: Boolean(workspace),
     queryFn: async (): Promise<EvalMetricInfo[]> => {
-      const discovered = await discoverEvalMetrics(filter);
-      if (discovered.length === 0) return [];
+      if (!workspace) return [];
+
+      const descriptors = await fetchEvalDescriptors(workspace);
+      if (descriptors.length === 0) return [];
 
       const end = new Date();
       const start = new Date(end.getTime() - SPARKLINE_RANGE.seconds * 1000);
 
       const perMetric = await Promise.all(
-        discovered.map(async (metric) => {
-          const [instant, range] = await Promise.all([
-            queryPrometheus(EvalQueries.metricValue(metric.name, filter)),
-            queryPrometheusRange(
-              EvalQueries.metricAvgOverTime(metric.name, SPARKLINE_RANGE.step, filter),
-              start, end, SPARKLINE_RANGE.step,
-            ),
+        descriptors.map(async (desc) => {
+          const [current, history] = await Promise.all([
+            // Current value: collapse to a single number via groupBy=eval_id.
+            fetchEvalAggregate({
+              workspace,
+              groupBy: "eval_id",
+              metric: "avg_score",
+              evalId: desc.evalId,
+              agentName: filter?.agent,
+              promptpackName: filter?.promptpackName,
+              from: start,
+              to: end,
+            }),
+            // Sparkline: time-bucketed series over the same window.
+            fetchEvalAggregate({
+              workspace,
+              groupBy: SPARKLINE_RANGE.groupBy,
+              metric: "avg_score",
+              evalId: desc.evalId,
+              agentName: filter?.agent,
+              promptpackName: filter?.promptpackName,
+              from: start,
+              to: end,
+            }),
           ]);
-          const value =
-            instant.status === "success" && instant.data?.result?.[0]?.value
-              ? Number.parseFloat(instant.data.result[0].value[1]) || 0
-              : 0;
-          const sparkline = extractSparkline(range);
           return {
-            name: metric.name,
-            value,
-            metricType: metric.metricType,
-            sparkline,
+            name: desc.evalId,
+            value: current[0]?.value ?? 0,
+            metricType: classifyEvalType(desc.evalType),
+            sparkline: history.map((p) => ({ value: p.value })),
           };
         }),
       );
@@ -138,40 +188,54 @@ export function useEvalMetrics(filter?: EvalFilter) {
   });
 }
 
-/** Extract sparkline points from a Prometheus range query response. */
-function extractSparkline(
-  resp: { status: string; data?: { result: PrometheusMatrixResult[] } },
-): Array<{ value: number }> {
-  if (resp.status !== "success" || !resp.data?.result?.[0]?.values) return [];
-  return resp.data.result[0].values.map(([, v]: [number, string]) => ({
-    value: Number.parseFloat(v) || 0,
-  }));
+/**
+ * Map session-api's eval_type string onto the EvalMetricType taxonomy used
+ * by the dashboard's score-breakdown widgets. The previous Prom path
+ * resolved this via metric metadata; here we infer from the eval_type label.
+ */
+function classifyEvalType(evalType: string): EvalMetricType {
+  switch (evalType) {
+    case "assertion":
+    case "regex":
+    case "json_path":
+      return "boolean";
+    default:
+      // llm_judge, llm_judge_session, and anything else surface as a
+      // continuous score (0..1 range; the chart's Y axis is [0,1]).
+      return "gauge";
+  }
 }
 
-/** Merge multiple time series into a unified array of points. */
+/**
+ * Merge per-eval time-bucket rows into one chronologically-ordered series of
+ * `{timestamp, values}` rows.
+ *
+ * Bucket keys arrive as either `YYYY-MM-DD` (day) or
+ * `YYYY-MM-DDTHH:00:00Z` (hour) — both parse with `new Date(...)`.
+ */
 function mergeTimeSeries(
-  results: { name: string; data: { status: string; data?: { result: PrometheusMatrixResult[] } } }[]
+  perEval: { name: string; rows: { key: string; value: number }[] }[],
 ): EvalTrendPoint[] {
   const timeMap = new Map<number, Record<string, number>>();
 
-  for (const { name, data } of results) {
-    if (data.status !== "success" || !data.data?.result) continue;
-
+  for (const { name, rows } of perEval) {
     const displayName = name.replace(/^omnia_eval_/, "");
-    for (const series of data.data.result) {
-      for (const [timestamp, value] of series.values ?? []) {
-        if (!timeMap.has(timestamp)) {
-          timeMap.set(timestamp, {});
-        }
-        timeMap.get(timestamp)![displayName] = Number.parseFloat(value) || 0;
+    for (const row of rows) {
+      const ts = new Date(row.key).getTime();
+      if (!Number.isFinite(ts)) continue;
+      let bucket = timeMap.get(ts);
+      if (!bucket) {
+        bucket = {};
+        timeMap.set(ts, bucket);
       }
+      bucket[displayName] = row.value;
     }
   }
 
   return Array.from(timeMap.entries())
     .sort(([a], [b]) => a - b)
-    .map(([timestamp, values]) => ({
-      timestamp: new Date(timestamp * 1000),
+    .map(([ts, values]) => ({
+      timestamp: new Date(ts),
       values,
     }));
 }

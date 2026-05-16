@@ -377,6 +377,19 @@ else
 fi
 
 #
+# 3c. Observability boundary check: no new product-class dashboard hooks
+# may import Prometheus. See CLAUDE.md → Observability Boundaries.
+#
+print_header "Checking Observability Boundaries"
+
+if "$REPO_ROOT/hack/check-no-prom-product-deps.sh" 2>&1; then
+    print_success "Observability boundary check passed"
+else
+    print_error "New product-class hook imports Prometheus"
+    CHECKS_FAILED=1
+fi
+
+#
 # 4. Build check
 #
 print_header "Building"

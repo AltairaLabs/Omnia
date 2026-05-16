@@ -20,10 +20,27 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/altairalabs/omnia/internal/httputil"
+)
+
+// Errors for the aggregate + discover endpoints. The handler writes 400 with
+// the textual message; the store/service wraps with a leading "postgres:" or
+// similar prefix that we strip before user-facing exposure.
+var (
+	errAggregateBadGroupBy = errors.New(
+		"groupBy must be one of: eval_id, eval_type, agent, time:hour, time:day")
+	errAggregateBadMetric = errors.New(
+		"metric must be one of: count, avg_score, p50_score, p95_score, avg_latency_ms, p95_latency_ms")
+	errAggregateBadFrom = errors.New(
+		"from must be RFC3339 (e.g. 2026-04-01T00:00:00Z)")
+	errAggregateBadTo = errors.New(
+		"to must be RFC3339 (e.g. 2026-04-01T00:00:00Z)")
+	errAggregateMissingNamespace = errors.New("namespace query param is required")
 )
 
 // handleGetSessionEvalResults returns eval results for a specific session.
@@ -176,6 +193,185 @@ func parseSummaryOpts(r *http.Request) EvalResultSummaryOpts {
 		AgentName: q.Get("agentName"),
 		Namespace: q.Get("namespace"),
 		EvalType:  q.Get("evalType"),
+	}
+}
+
+// EvalAggregateResponse is the JSON body for /api/v1/eval-results/aggregate.
+type EvalAggregateResponse struct {
+	Rows []*EvalAggregateRow `json:"rows"`
+}
+
+// EvalDiscoverResponse is the JSON body for /api/v1/eval-results/discover.
+type EvalDiscoverResponse struct {
+	Evals []EvalDescriptor `json:"evals"`
+}
+
+// handleAggregateEvalResults runs a namespace-scoped GROUP BY over eval_results.
+// GET /api/v1/eval-results/aggregate?namespace=X&groupBy=time:day&metric=avg_score
+func (h *Handler) handleAggregateEvalResults(w http.ResponseWriter, r *http.Request) {
+	if h.evalService == nil {
+		writeEvalError(w, ErrMissingEvalStore)
+		return
+	}
+
+	opts, err := parseEvalAggregateOpts(r)
+	if err != nil {
+		writeAggregateError(w, err)
+		return
+	}
+
+	rows, err := h.evalService.AggregateEvalResults(r.Context(), opts)
+	if err != nil {
+		writeEvalError(w, err)
+		return
+	}
+	if rows == nil {
+		rows = []*EvalAggregateRow{}
+	}
+
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
+	_ = json.NewEncoder(w).Encode(EvalAggregateResponse{Rows: rows})
+}
+
+// handleDiscoverEvals returns the set of (eval_id, eval_type) pairs that
+// exist for a namespace. Replaces dashboard Prometheus metric-name discovery.
+// GET /api/v1/eval-results/discover?namespace=X
+func (h *Handler) handleDiscoverEvals(w http.ResponseWriter, r *http.Request) {
+	if h.evalService == nil {
+		writeEvalError(w, ErrMissingEvalStore)
+		return
+	}
+
+	namespace := r.URL.Query().Get("namespace")
+	if namespace == "" {
+		writeAggregateError(w, errAggregateMissingNamespace)
+		return
+	}
+
+	evals, err := h.evalService.DistinctEvals(r.Context(), namespace)
+	if err != nil {
+		writeEvalError(w, err)
+		return
+	}
+	if evals == nil {
+		evals = []EvalDescriptor{}
+	}
+
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
+	_ = json.NewEncoder(w).Encode(EvalDiscoverResponse{Evals: evals})
+}
+
+// parseEvalAggregateOpts extracts EvalAggregateOpts from the request query.
+// Returns one of the err* sentinels above for client-facing 400s.
+func parseEvalAggregateOpts(r *http.Request) (EvalAggregateOpts, error) {
+	q := r.URL.Query()
+
+	namespace := q.Get("namespace")
+	if namespace == "" {
+		return EvalAggregateOpts{}, errAggregateMissingNamespace
+	}
+
+	groupBy, err := parseEvalGroupBy(q.Get("groupBy"))
+	if err != nil {
+		return EvalAggregateOpts{}, err
+	}
+
+	metric, err := parseEvalMetric(q.Get("metric"))
+	if err != nil {
+		return EvalAggregateOpts{}, err
+	}
+
+	opts := EvalAggregateOpts{
+		Namespace:      namespace,
+		AgentName:      q.Get("agentName"),
+		PromptPackName: q.Get("promptpackName"),
+		EvalID:         q.Get("evalId"),
+		EvalType:       q.Get("evalType"),
+		GroupBy:        groupBy,
+		Metric:         metric,
+		Limit:          clampEvalAggregateLimit(parseIntQueryParam(q.Get("limit"), DefaultEvalAggregateLimit)),
+	}
+
+	if v := q.Get("from"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			return EvalAggregateOpts{}, errAggregateBadFrom
+		}
+		opts.From = t
+	}
+	if v := q.Get("to"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			return EvalAggregateOpts{}, errAggregateBadTo
+		}
+		opts.To = t
+	}
+
+	return opts, nil
+}
+
+func parseEvalGroupBy(v string) (EvalAggregateGroupBy, error) {
+	switch EvalAggregateGroupBy(v) {
+	case EvalAggregateGroupByEvalID,
+		EvalAggregateGroupByEvalType,
+		EvalAggregateGroupByAgent,
+		EvalAggregateGroupByTimeHour,
+		EvalAggregateGroupByTimeDay:
+		return EvalAggregateGroupBy(v), nil
+	default:
+		return "", errAggregateBadGroupBy
+	}
+}
+
+func parseEvalMetric(v string) (EvalAggregateMetric, error) {
+	switch EvalAggregateMetric(v) {
+	case EvalAggregateMetricCount,
+		EvalAggregateMetricAvgScore,
+		EvalAggregateMetricP50Score,
+		EvalAggregateMetricP95Score,
+		EvalAggregateMetricAvgLatencyMs,
+		EvalAggregateMetricP95LatencyMs:
+		return EvalAggregateMetric(v), nil
+	default:
+		return "", errAggregateBadMetric
+	}
+}
+
+func clampEvalAggregateLimit(n int) int {
+	if n < 1 {
+		return DefaultEvalAggregateLimit
+	}
+	if n > MaxEvalAggregateLimit {
+		return MaxEvalAggregateLimit
+	}
+	return n
+}
+
+func parseIntQueryParam(v string, fallback int) int {
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+// writeAggregateError emits a 400 with the textual message for the err*
+// sentinels above. Any other error falls through to writeError.
+func writeAggregateError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errAggregateBadGroupBy),
+		errors.Is(err, errAggregateBadMetric),
+		errors.Is(err, errAggregateBadFrom),
+		errors.Is(err, errAggregateBadTo),
+		errors.Is(err, errAggregateMissingNamespace):
+		w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(ErrorResponse{Error: err.Error()})
+	default:
+		writeError(w, err)
 	}
 }
 
