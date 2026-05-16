@@ -58,6 +58,31 @@ func TestProvider_CalculateCost(t *testing.T) {
 	assert.Equal(t, types.CostInfo{}, cost)
 }
 
+func TestProvider_HealthCheck(t *testing.T) {
+	t.Run("error before Connect", func(t *testing.T) {
+		p := NewProvider("test", "ws://unused", nil)
+		err := p.HealthCheck(context.Background())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no active connection")
+	})
+
+	t.Run("ok after Connect", func(t *testing.T) {
+		wsURL := testServer(t, func(conn *websocket.Conn) {
+			writeServerMsg(t, conn, facade.ServerMessage{
+				Type:      facade.MessageTypeConnected,
+				SessionID: "sess-health",
+				Timestamp: time.Now(),
+			})
+			time.Sleep(time.Second)
+		})
+
+		p := NewProvider("test", wsURL, nil)
+		require.NoError(t, p.Connect(context.Background()))
+		assert.NoError(t, p.HealthCheck(context.Background()))
+		_ = p.Close()
+	})
+}
+
 func TestProvider_Connect(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		wsURL := testServer(t, func(conn *websocket.Conn) {
