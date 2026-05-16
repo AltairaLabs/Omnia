@@ -52,6 +52,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install system deps (libasound2-dev for ebitengine/oto)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:

@@ -28,6 +28,9 @@ jobs:
       with:
         go-version-file: go.mod
 
+    - name: Install system deps (libasound2-dev for ebitengine/oto)
+      run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
     - name: Install gotestsum
       run: go install gotest.tools/gotestsum@latest
 
@@ -53,6 +56,9 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: go.mod
+
+    - name: Install system deps (libasound2-dev for ebitengine/oto)
+      run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
     - name: Setup envtest
       run: |
@@ -174,6 +180,9 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: go.mod
+
+    - name: Install system deps (libasound2-dev for ebitengine/oto)
+      run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
     - name: Download Go unit coverage
       uses: actions/download-artifact@v7

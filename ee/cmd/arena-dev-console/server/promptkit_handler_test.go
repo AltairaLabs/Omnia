@@ -16,6 +16,7 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
+	"github.com/AltairaLabs/PromptKit/runtime/providers/base"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -1756,7 +1757,12 @@ func TestNewPromptKitHandlerBuildComponentsError(t *testing.T) {
 }
 
 // mockStreamingProvider implements providers.Provider with streaming support.
+// base.Implementation is embedded by value so &mockStreamingProvider{...} literals
+// in tests continue to work without explicit construction — the zero-value
+// Implementation supplies Name/Type/Pricing/Validate/Init/HealthCheck/Close stubs
+// that return zero values, which is sufficient for these tests.
 type mockStreamingProvider struct {
+	base.Implementation
 	chunks        []providers.StreamChunk
 	streamErr     error
 	supportsStr   bool
