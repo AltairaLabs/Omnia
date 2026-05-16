@@ -1,245 +1,163 @@
 /**
- * Tests for eval quality hooks.
+ * Tests for useEvalSummary — session-api flavour.
+ *
+ * Previously mocked Prometheus client functions; after the observability
+ * split (CLAUDE.md → Observability Boundaries) this hook fetches from
+ * `/api/workspaces/{name}/eval-results/aggregate` and `.../discover`, so
+ * tests mock the structured service module instead.
  *
  * Copyright 2026 Altaira Labs.
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 
-const mockQueryPrometheus = vi.fn();
-const mockQueryPrometheusMetadata = vi.fn();
-
-vi.mock("@/lib/prometheus", () => ({
-  queryPrometheus: (...args: unknown[]) => mockQueryPrometheus(...args),
-  queryPrometheusMetadata: (...args: unknown[]) => mockQueryPrometheusMetadata(...args),
-}));
-
-vi.mock("@/lib/prometheus-queries", () => ({
-  EvalQueries: {
-    discoverMetrics: () => '{__name__=~"omnia_eval_.*"}',
-    metricValue: (name: string) => name,
-  },
-}));
-
 import { useEvalSummary } from "./use-eval-quality";
 
-function createWrapper() {
-  const queryClient = new QueryClient({
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: vi.fn(),
+}));
+
+vi.mock("@/lib/data/eval-results-service", () => ({
+  fetchEvalAggregate: vi.fn(),
+  fetchEvalDescriptors: vi.fn(),
+  classifyEvalType: (t: string) => (t === "assertion" ? "boolean" : "gauge"),
+}));
+
+import { useWorkspace } from "@/contexts/workspace-context";
+import {
+  fetchEvalAggregate,
+  fetchEvalDescriptors,
+} from "@/lib/data/eval-results-service";
+
+const mockedUseWorkspace = vi.mocked(useWorkspace);
+const mockedFetchAggregate = vi.mocked(fetchEvalAggregate);
+const mockedFetchDescriptors = vi.mocked(fetchEvalDescriptors);
+
+function makeWrapper() {
+  const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  function TestQueryProvider({ children }: { children: React.ReactNode }) {
-    return React.createElement(QueryClientProvider, { client: queryClient }, children);
+  function Wrapper({ children }: { children: React.ReactNode }) {
+    return React.createElement(QueryClientProvider, { client }, children);
   }
-  return TestQueryProvider;
+  return Wrapper;
 }
 
+function workspaceCtx(name: string | null) {
+  return {
+    currentWorkspace: name ? { name } : null,
+  } as unknown as ReturnType<typeof useWorkspace>;
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
 describe("useEvalSummary", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockQueryPrometheusMetadata.mockResolvedValue({
-      omnia_eval_safety: "gauge",
-      omnia_eval_tone: "gauge",
-    });
+  it("returns empty when no workspace is selected", async () => {
+    mockedUseWorkspace.mockReturnValue(workspaceCtx(null));
+
+    const { result } = renderHook(() => useEvalSummary(), { wrapper: makeWrapper() });
+    await waitFor(() => expect(result.current.isFetching).toBe(false));
+    expect(mockedFetchDescriptors).not.toHaveBeenCalled();
+    expect(mockedFetchAggregate).not.toHaveBeenCalled();
   });
 
-  it("discovers metrics and returns score summaries from Prometheus", async () => {
-    // Discovery call returns two metrics
-    mockQueryPrometheus
-      .mockResolvedValueOnce({
-        status: "success",
-        data: {
-          result: [
-            { metric: { __name__: "omnia_eval_safety" }, value: [1000, "0.8"] },
-            { metric: { __name__: "omnia_eval_tone" }, value: [1000, "0.9"] },
-          ],
-        },
-      })
-      // Individual metric value calls (alphabetical: safety first, then tone)
-      .mockResolvedValueOnce({
-        status: "success",
-        data: { result: [{ metric: {}, value: [1000, "0.96"] }] },
-      })
-      .mockResolvedValueOnce({
-        status: "success",
-        data: { result: [{ metric: {}, value: [1000, "0.85"] }] },
-      });
-
-    const { result } = renderHook(() => useEvalSummary(), {
-      wrapper: createWrapper(),
+  it("returns one summary per discovered eval, sorted by eval_id", async () => {
+    mockedUseWorkspace.mockReturnValue(workspaceCtx("test-ws"));
+    mockedFetchDescriptors.mockResolvedValue([
+      { evalId: "tone", evalType: "llm_judge" },
+      { evalId: "safety", evalType: "llm_judge" },
+    ]);
+    mockedFetchAggregate.mockImplementation(async ({ evalId }) => {
+      if (evalId === "safety") {
+        return [{ key: "safety", value: 0.96, count: 12 }];
+      }
+      return [{ key: "tone", value: 0.85, count: 12 }];
     });
 
+    const { result } = renderHook(() => useEvalSummary(), { wrapper: makeWrapper() });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     const data = result.current.data!;
     expect(data).toHaveLength(2);
-    expect(data[0].evalId).toBe("safety");
-    expect(data[0].score).toBeCloseTo(0.96);
-    expect(data[0].metricType).toBe("gauge");
-
-    expect(data[1].evalId).toBe("tone");
-    expect(data[1].score).toBeCloseTo(0.85);
-    expect(data[1].metricType).toBe("gauge");
+    // Sorted alphabetically by eval_id.
+    expect(data[0]).toMatchObject({ evalId: "safety", score: 0.96, metricType: "gauge" });
+    expect(data[1]).toMatchObject({ evalId: "tone", score: 0.85, metricType: "gauge" });
   });
 
-  it("returns empty array when no metrics are discovered", async () => {
-    mockQueryPrometheus.mockResolvedValue({
-      status: "success",
-      data: { result: [] },
-    });
+  it("returns empty array when no evals exist in this workspace", async () => {
+    mockedUseWorkspace.mockReturnValue(workspaceCtx("test-ws"));
+    mockedFetchDescriptors.mockResolvedValue([]);
 
-    const { result } = renderHook(() => useEvalSummary(), {
-      wrapper: createWrapper(),
-    });
-
+    const { result } = renderHook(() => useEvalSummary(), { wrapper: makeWrapper() });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual([]);
+    expect(mockedFetchAggregate).not.toHaveBeenCalled();
   });
 
-  it("handles discovery failure gracefully", async () => {
-    mockQueryPrometheus.mockRejectedValue(new Error("Network error"));
+  it("defaults score to 0 when an eval has no scored rows yet", async () => {
+    mockedUseWorkspace.mockReturnValue(workspaceCtx("test-ws"));
+    mockedFetchDescriptors.mockResolvedValue([
+      { evalId: "tone", evalType: "llm_judge" },
+    ]);
+    mockedFetchAggregate.mockResolvedValue([]); // no rows back
 
-    const { result } = renderHook(() => useEvalSummary(), {
-      wrapper: createWrapper(),
-    });
-
+    const { result } = renderHook(() => useEvalSummary(), { wrapper: makeWrapper() });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toEqual([]);
+    expect(result.current.data).toEqual([
+      { evalId: "tone", score: 0, metricType: "gauge" },
+    ]);
   });
 
-  it("returns score 0 when Prometheus returns error for individual metric", async () => {
-    mockQueryPrometheus
-      .mockResolvedValueOnce({
-        status: "success",
-        data: {
-          result: [
-            { metric: { __name__: "omnia_eval_tone" }, value: [1000, "0.9"] },
-          ],
-        },
-      })
-      .mockResolvedValueOnce({
-        status: "error",
-        error: "bad query",
-      });
+  it("classifies assertion-type evals as boolean", async () => {
+    mockedUseWorkspace.mockReturnValue(workspaceCtx("test-ws"));
+    mockedFetchDescriptors.mockResolvedValue([
+      { evalId: "exact-match", evalType: "assertion" },
+    ]);
+    mockedFetchAggregate.mockResolvedValue([
+      { key: "exact-match", value: 1.0, count: 4 },
+    ]);
 
-    const { result } = renderHook(() => useEvalSummary(), {
-      wrapper: createWrapper(),
-    });
-
+    const { result } = renderHook(() => useEvalSummary(), { wrapper: makeWrapper() });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    const data = result.current.data!;
-    expect(data).toHaveLength(1);
-    expect(data[0].evalId).toBe("tone");
-    expect(data[0].score).toBe(0);
-    expect(data[0].metricType).toBe("gauge");
+    expect(result.current.data?.[0].metricType).toBe("boolean");
   });
 
-  it("filters out histogram sub-metrics using metadata, not suffix heuristics", async () => {
-    // Metadata: latency is a histogram, so _bucket/_sum/_count are sub-metrics
-    mockQueryPrometheusMetadata.mockResolvedValue({
-      omnia_eval_latency: "histogram",
-    });
-    mockQueryPrometheus
-      .mockResolvedValueOnce({
-        status: "success",
-        data: {
-          result: [
-            { metric: { __name__: "omnia_eval_latency" }, value: [1000, "1"] },
-            { metric: { __name__: "omnia_eval_latency_bucket" }, value: [1000, "1"] },
-            { metric: { __name__: "omnia_eval_latency_sum" }, value: [1000, "1"] },
-            { metric: { __name__: "omnia_eval_latency_count" }, value: [1000, "1"] },
-            { metric: { __name__: "omnia_eval_executed_total" }, value: [1000, "47"] },
-            { metric: { __name__: "omnia_eval_passed_total" }, value: [1000, "42"] },
-            { metric: { __name__: "omnia_eval_failed_total" }, value: [1000, "5"] },
-            { metric: { __name__: "omnia_eval_score" }, value: [1000, "0.9"] },
-            { metric: { __name__: "omnia_eval_duration_seconds" }, value: [1000, "1.2"] },
-            { metric: { __name__: "omnia_eval_worker_events_received_total" }, value: [1000, "99"] },
-          ],
-        },
-      })
-      // Only latency survives filtering
-      .mockResolvedValueOnce({
-        status: "success",
-        data: { result: [{ metric: {}, value: [1000, "0.5"] }] },
-      });
+  it("forwards filter agent/promptpackName to the aggregate call", async () => {
+    mockedUseWorkspace.mockReturnValue(workspaceCtx("test-ws"));
+    mockedFetchDescriptors.mockResolvedValue([
+      { evalId: "tone", evalType: "llm_judge" },
+    ]);
+    mockedFetchAggregate.mockResolvedValue([
+      { key: "tone", value: 0.7, count: 3 },
+    ]);
 
-    const { result } = renderHook(() => useEvalSummary(), {
-      wrapper: createWrapper(),
-    });
+    renderHook(
+      () => useEvalSummary({ agent: "chatbot", promptpackName: "v2" }),
+      { wrapper: makeWrapper() },
+    );
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toHaveLength(1);
-    expect(result.current.data![0].evalId).toBe("latency");
-    expect(result.current.data![0].metricType).toBe("histogram");
-    // Discovery + 1 individual metric query = 2 calls
-    expect(mockQueryPrometheus).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(mockedFetchAggregate).toHaveBeenCalledOnce());
+    expect(mockedFetchAggregate.mock.calls[0][0]).toMatchObject({
+      agentName: "chatbot",
+      promptpackName: "v2",
+      evalId: "tone",
+      groupBy: "eval_id",
+      metric: "avg_score",
+    });
   });
 
-  it("does NOT filter eval names that happen to end with histogram suffixes", async () => {
-    // word_count and response_created are gauges — not histogram sub-metrics
-    mockQueryPrometheusMetadata.mockResolvedValue({
-      omnia_eval_word_count: "gauge",
-      omnia_eval_response_created: "gauge",
-    });
-    mockQueryPrometheus
-      .mockResolvedValueOnce({
-        status: "success",
-        data: {
-          result: [
-            { metric: { __name__: "omnia_eval_word_count" }, value: [1000, "0.8"] },
-            { metric: { __name__: "omnia_eval_response_created" }, value: [1000, "0.7"] },
-          ],
-        },
-      })
-      .mockResolvedValueOnce({
-        status: "success",
-        data: { result: [{ metric: {}, value: [1000, "0.8"] }] },
-      })
-      .mockResolvedValueOnce({
-        status: "success",
-        data: { result: [{ metric: {}, value: [1000, "0.7"] }] },
-      });
+  it("propagates discovery errors via the query's error state", async () => {
+    mockedUseWorkspace.mockReturnValue(workspaceCtx("test-ws"));
+    mockedFetchDescriptors.mockRejectedValue(new Error("boom"));
 
-    const { result } = renderHook(() => useEvalSummary(), {
-      wrapper: createWrapper(),
-    });
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toHaveLength(2);
-    const evalIds = result.current.data!.map((d) => d.evalId);
-    expect(evalIds).toContain("word_count");
-    expect(evalIds).toContain("response_created");
-  });
-
-  it("builds histogram summary with score", async () => {
-    mockQueryPrometheusMetadata.mockResolvedValue({
-      omnia_eval_duration: "histogram",
-    });
-    mockQueryPrometheus
-      .mockResolvedValueOnce({
-        status: "success",
-        data: {
-          result: [
-            { metric: { __name__: "omnia_eval_duration" }, value: [1000, "1.5"] },
-          ],
-        },
-      })
-      .mockResolvedValueOnce({
-        status: "success",
-        data: { result: [{ metric: {}, value: [1000, "1.5"] }] },
-      });
-
-    const { result } = renderHook(() => useEvalSummary(), {
-      wrapper: createWrapper(),
-    });
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    const data = result.current.data!;
-    expect(data).toHaveLength(1);
-    expect(data[0].metricType).toBe("histogram");
-    expect(data[0].score).toBe(1.5);
+    const { result } = renderHook(() => useEvalSummary(), { wrapper: makeWrapper() });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toContain("boom");
   });
 });

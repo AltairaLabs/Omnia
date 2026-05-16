@@ -8,6 +8,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type { EvalMetricType } from "@/types/eval";
+
 /** Valid groupBy values mirror session-api's EvalAggregateGroupBy. */
 export type EvalAggregateGroupBy =
   | "eval_id"
@@ -95,4 +97,23 @@ export async function fetchEvalDescriptors(
   }
   const body = (await resp.json()) as { evals?: EvalDescriptor[] };
   return body.evals ?? [];
+}
+
+/**
+ * Map a session-api eval_type string onto the dashboard's EvalMetricType
+ * taxonomy. The Prom path resolved metric type via Prometheus metadata; with
+ * the structured read path we infer from the eval handler's `eval_type` label.
+ *
+ * Anything not explicitly boolean (assertion / regex / json_path / equality
+ * style checks) renders as a continuous gauge — same Y axis [0,1] as before.
+ */
+export function classifyEvalType(evalType: string): EvalMetricType {
+  switch (evalType) {
+    case "assertion":
+    case "regex":
+    case "json_path":
+      return "boolean";
+    default:
+      return "gauge";
+  }
 }
