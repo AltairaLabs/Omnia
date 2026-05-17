@@ -77,6 +77,10 @@ const (
 // Network policy constants
 const (
 	labelSharedNamespace = "omnia.altairalabs.ai/shared"
+	// labelK8sMetadataName is the Kubernetes-managed namespace label that
+	// `kubernetes.io/metadata.name` selectors match against. Duplicated 3+
+	// times in NetworkPolicy peers; extracted for S1192.
+	labelK8sMetadataName = "kubernetes.io/metadata.name"
 )
 
 // WorkspaceReconciler reconciles a Workspace object
@@ -870,7 +874,7 @@ func (r *WorkspaceReconciler) buildIngressRules(workspace *omniav1alpha1.Workspa
 				{
 					NamespaceSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
-							"kubernetes.io/metadata.name": r.OperatorNamespace,
+							labelK8sMetadataName: r.OperatorNamespace,
 						},
 					},
 				},
@@ -941,7 +945,7 @@ func (r *WorkspaceReconciler) buildEgressRules(workspace *omniav1alpha1.Workspac
 			{
 				NamespaceSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						"kubernetes.io/metadata.name": "kube-system",
+						labelK8sMetadataName: "kube-system",
 					},
 				},
 			},
@@ -965,7 +969,7 @@ func (r *WorkspaceReconciler) buildEgressRules(workspace *omniav1alpha1.Workspac
 				{
 					NamespaceSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
-							"kubernetes.io/metadata.name": r.OperatorNamespace,
+							labelK8sMetadataName: r.OperatorNamespace,
 						},
 					},
 				},

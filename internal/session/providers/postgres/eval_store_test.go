@@ -714,6 +714,70 @@ func TestApplySummaryFilters_Empty(t *testing.T) {
 	assert.Empty(t, qb.Where())
 }
 
+// --- Aggregate helpers: branch coverage on extracted helpers ----------------
+
+func TestClampEvalAggregateLimit(t *testing.T) {
+	t.Run("zero returns default", func(t *testing.T) {
+		assert.Equal(t, api.DefaultEvalAggregateLimit, clampEvalAggregateLimit(0))
+	})
+	t.Run("negative returns default", func(t *testing.T) {
+		assert.Equal(t, api.DefaultEvalAggregateLimit, clampEvalAggregateLimit(-5))
+	})
+	t.Run("within range passes through", func(t *testing.T) {
+		assert.Equal(t, 42, clampEvalAggregateLimit(42))
+	})
+	t.Run("above max clamps to max", func(t *testing.T) {
+		assert.Equal(t, api.MaxEvalAggregateLimit,
+			clampEvalAggregateLimit(api.MaxEvalAggregateLimit+1000))
+	})
+}
+
+func TestBuildEvalAggregateFilters(t *testing.T) {
+	t.Run("namespace only", func(t *testing.T) {
+		qb := buildEvalAggregateFilters(api.EvalAggregateOpts{Namespace: "ns"})
+		assert.Equal(t, []any{"ns"}, qb.Args())
+		assert.Contains(t, qb.Where(), "namespace=$1")
+	})
+
+	t.Run("agent_name filter included", func(t *testing.T) {
+		qb := buildEvalAggregateFilters(api.EvalAggregateOpts{
+			Namespace: "ns", AgentName: "chatbot",
+		})
+		assert.Contains(t, qb.Args(), "chatbot")
+		assert.Contains(t, qb.Where(), "agent_name=$2")
+	})
+
+	t.Run("promptpack_name filter included", func(t *testing.T) {
+		qb := buildEvalAggregateFilters(api.EvalAggregateOpts{
+			Namespace: "ns", PromptPackName: "pack-v2",
+		})
+		assert.Contains(t, qb.Args(), "pack-v2")
+		assert.Contains(t, qb.Where(), "promptpack_name=$2")
+	})
+
+	t.Run("all filters set", func(t *testing.T) {
+		from := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+		to := time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC)
+		qb := buildEvalAggregateFilters(api.EvalAggregateOpts{
+			Namespace:      "ns",
+			AgentName:      "chatbot",
+			PromptPackName: "pack-v2",
+			EvalID:         aggregateEvalIDAcc,
+			EvalType:       "llm_judge",
+			From:           from,
+			To:             to,
+		})
+		args := qb.Args()
+		assert.Contains(t, args, "ns")
+		assert.Contains(t, args, "chatbot")
+		assert.Contains(t, args, "pack-v2")
+		assert.Contains(t, args, "acc")
+		assert.Contains(t, args, "llm_judge")
+		assert.Contains(t, args, from)
+		assert.Contains(t, args, to)
+	})
+}
+
 // --- AggregateEvalResults ---------------------------------------------------
 
 // Fixture constants for the aggregate test set. Extracted to satisfy goconst.

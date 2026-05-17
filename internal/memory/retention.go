@@ -20,6 +20,11 @@ import (
 // defaultRetentionBatchSize mirrors the CRD's default BatchSize.
 const defaultRetentionBatchSize int32 = 1000
 
+// logRetentionWorkerNotStarted is the structured-log message emitted by
+// startup paths that opt out of running the retention worker. Extracted
+// for S1192 — duplicated 3+ times.
+const logRetentionWorkerNotStarted = "retention worker not started"
+
 // RetentionWorker composites TTL and LRU pruning across the three
 // memory tiers, driven by a MemoryPolicy CRD. Each run is
 // one pass per (tier, branch); rows are soft-deleted first then
@@ -57,20 +62,20 @@ func NewRetentionWorker(store *PostgresMemoryStore, loader PolicyLoader, log log
 func (w *RetentionWorker) Run(ctx context.Context) {
 	policy, err := w.loader.Load(ctx)
 	if err != nil || policy == nil {
-		w.log.Info("retention worker not started",
+		w.log.Info(logRetentionWorkerNotStarted,
 			"reason", "no active MemoryPolicy",
 			"error", errString(err))
 		return
 	}
 	schedule := policy.Spec.Schedule
 	if schedule == "" {
-		w.log.Info("retention worker not started", "reason", "policy has no schedule")
+		w.log.Info(logRetentionWorkerNotStarted, "reason", "policy has no schedule")
 		return
 	}
 	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	sched, err := parser.Parse(schedule)
 	if err != nil {
-		w.log.Error(err, "retention worker not started", "reason", "invalid cron", "schedule", schedule)
+		w.log.Error(err, logRetentionWorkerNotStarted, "reason", "invalid cron", "schedule", schedule)
 		return
 	}
 	MarkWorkerRunning(WorkerNameRetention)

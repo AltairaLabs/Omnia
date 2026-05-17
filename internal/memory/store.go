@@ -50,6 +50,9 @@ const (
 const (
 	errWorkspaceRequired = "memory: workspace_id scope is required"
 	errUserIDRequired    = "memory: user_id scope is required"
+	// errBeginTxFormat is the fmt.Errorf format used when pgxpool.Begin
+	// fails. Duplicated 3+ times across the store; extracted for S1192.
+	errBeginTxFormat = "memory: begin tx: %w"
 )
 
 // ErrNotFound is returned by GetMemory when the requested entity
@@ -148,7 +151,7 @@ func (s *PostgresMemoryStore) SaveWithResult(ctx context.Context, mem *Memory) (
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("memory: begin tx: %w", err)
+		return nil, fmt.Errorf(errBeginTxFormat, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -1036,7 +1039,7 @@ func (s *PostgresMemoryStore) AppendObservationToEntity(
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("memory: begin tx: %w", err)
+		return nil, fmt.Errorf(errBeginTxFormat, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -1093,7 +1096,7 @@ func (s *PostgresMemoryStore) SupersedeMany(
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return "", nil, fmt.Errorf("memory: begin tx: %w", err)
+		return "", nil, fmt.Errorf(errBeginTxFormat, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
