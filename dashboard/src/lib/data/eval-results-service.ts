@@ -83,20 +83,48 @@ export async function fetchEvalAggregate(
 }
 
 /**
- * Fetch the set of distinct (evalId, evalType) pairs for a workspace.
- * Replaces Prometheus' metric-name discovery for product views.
+ * Discovery payload returned by the workspace's /eval-results/discover
+ * proxy. Mirrors session-api's `EvalDiscoveryResult` JSON shape.
  */
-export async function fetchEvalDescriptors(
+export interface EvalDiscoveryResult {
+  evals: EvalDescriptor[];
+  agents: string[];
+  promptpacks: string[];
+}
+
+/**
+ * Fetch the full discovery payload for a workspace — distinct evals plus
+ * the agent_name / promptpack_name label values used by the filter UI.
+ * Replaces Prometheus' metric-name + label-value discovery for product views.
+ */
+export async function fetchEvalDiscovery(
   workspace: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<EvalDescriptor[]> {
+): Promise<EvalDiscoveryResult> {
   const url = `/api/workspaces/${encodeURIComponent(workspace)}/eval-results/discover`;
   const resp = await fetchImpl(url, { headers: { Accept: "application/json" } });
   if (!resp.ok) {
     throw new Error(`eval-discover: ${resp.status} ${resp.statusText}`);
   }
-  const body = (await resp.json()) as { evals?: EvalDescriptor[] };
-  return body.evals ?? [];
+  const body = (await resp.json()) as Partial<EvalDiscoveryResult>;
+  return {
+    evals: body.evals ?? [],
+    agents: body.agents ?? [],
+    promptpacks: body.promptpacks ?? [],
+  };
+}
+
+/**
+ * Convenience wrapper for callers that only need the evals slice. Hits the
+ * same endpoint as fetchEvalDiscovery — React Query will dedupe when both
+ * are called with the same workspace key.
+ */
+export async function fetchEvalDescriptors(
+  workspace: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<EvalDescriptor[]> {
+  const { evals } = await fetchEvalDiscovery(workspace, fetchImpl);
+  return evals;
 }
 
 /**

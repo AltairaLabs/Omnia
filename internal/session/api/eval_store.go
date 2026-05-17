@@ -173,14 +173,24 @@ type EvalStore interface {
 	// for the design rationale.
 	AggregateEvalResults(ctx context.Context, opts EvalAggregateOpts) ([]*EvalAggregateRow, error)
 
-	// DistinctEvals returns the set of (eval_id, eval_type) pairs that appear
-	// in eval_results for the given namespace. Used by the dashboard's
-	// eval-metric discovery, replacing the Prometheus /api/v1/metadata path.
-	DistinctEvals(ctx context.Context, namespace string) ([]EvalDescriptor, error)
+	// EvalDiscovery returns the distinct eval/agent/promptpack values that
+	// appear in eval_results for the given namespace. Used by the dashboard's
+	// eval discovery + filter UI, replacing the Prometheus /api/v1/metadata
+	// and label-discovery query paths.
+	EvalDiscovery(ctx context.Context, namespace string) (*EvalDiscoveryResult, error)
 }
 
-// EvalDescriptor is one (eval_id, eval_type) pair returned by DistinctEvals.
+// EvalDescriptor is one (eval_id, eval_type) pair.
 type EvalDescriptor struct {
 	EvalID   string `json:"evalId"`
 	EvalType string `json:"evalType"`
+}
+
+// EvalDiscoveryResult is the namespace-scoped discovery payload returned by
+// EvalStore.EvalDiscovery. Slices are non-nil so callers can JSON-serialise
+// without a null check.
+type EvalDiscoveryResult struct {
+	Evals       []EvalDescriptor `json:"evals"`
+	Agents      []string         `json:"agents"`
+	PromptPacks []string         `json:"promptpacks"`
 }

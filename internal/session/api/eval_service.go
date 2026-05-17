@@ -142,14 +142,14 @@ func (s *EvalService) AggregateEvalResults(ctx context.Context, opts EvalAggrega
 	return s.store.AggregateEvalResults(ctx, opts)
 }
 
-// DistinctEvals returns (eval_id, eval_type) pairs for a namespace. Powers
-// GET /api/v1/eval-results/discover so dashboard can list available evals
-// without going through Prometheus metric metadata.
-func (s *EvalService) DistinctEvals(ctx context.Context, namespace string) ([]EvalDescriptor, error) {
+// EvalDiscovery returns the namespace-scoped set of evals + agents +
+// promptpacks. Powers GET /api/v1/eval-results/discover, replacing both
+// Prometheus metric-metadata and label-discovery for dashboard product views.
+func (s *EvalService) EvalDiscovery(ctx context.Context, namespace string) (*EvalDiscoveryResult, error) {
 	if s.store == nil {
 		return nil, ErrMissingEvalStore
 	}
-	return s.store.DistinctEvals(ctx, namespace)
+	return s.store.EvalDiscovery(ctx, namespace)
 }
 
 // GetEvalResultSummary returns aggregate statistics for eval results.

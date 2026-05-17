@@ -330,14 +330,42 @@ func evalMetricExpression(m api.EvalAggregateMetric) (string, error) {
 	}
 }
 
-// DistinctEvals returns the set of (eval_id, eval_type) pairs that have at
-// least one row in eval_results for the given namespace. Replaces Prometheus'
-// metric-discovery for dashboard product views.
-func (s *EvalStoreImpl) DistinctEvals(ctx context.Context, namespace string) ([]api.EvalDescriptor, error) {
+// EvalDiscovery returns the distinct evals + agents + promptpacks seen in
+// eval_results for the given namespace. Powers both the dashboard's
+// eval-metric discovery (replaces Prometheus /api/v1/metadata) and the
+// agent/promptpack filter dropdowns (replaces label-discovery PromQL).
+//
+// Implementation: three independent SELECT DISTINCTs against the same table.
+// Each touches the namespace index and returns a tiny result set, so the
+// extra round-trips are cheaper than building a single CTE that has to
+// reorganise the rows server-side.
+func (s *EvalStoreImpl) EvalDiscovery(ctx context.Context, namespace string) (*api.EvalDiscoveryResult, error) {
 	if namespace == "" {
-		return nil, fmt.Errorf("postgres: distinct evals: namespace is required")
+		return nil, fmt.Errorf("postgres: eval discovery: namespace is required")
 	}
 
+	evals, err := s.distinctEvals(ctx, namespace)
+	if err != nil {
+		return nil, err
+	}
+	agents, err := s.distinctStringColumn(ctx, namespace, "agent_name")
+	if err != nil {
+		return nil, err
+	}
+	promptpacks, err := s.distinctStringColumn(ctx, namespace, "promptpack_name")
+	if err != nil {
+		return nil, err
+	}
+
+	return &api.EvalDiscoveryResult{
+		Evals:       evals,
+		Agents:      agents,
+		PromptPacks: promptpacks,
+	}, nil
+}
+
+// distinctEvals reads the (eval_id, eval_type) pairs for a namespace.
+func (s *EvalStoreImpl) distinctEvals(ctx context.Context, namespace string) ([]api.EvalDescriptor, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT DISTINCT eval_id, eval_type
 		FROM eval_results
@@ -358,6 +386,36 @@ func (s *EvalStoreImpl) DistinctEvals(ctx context.Context, namespace string) ([]
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("postgres: iterate distinct evals: %w", err)
+	}
+	return out, nil
+}
+
+// distinctStringColumn reads sorted DISTINCT non-empty values for a single
+// column in eval_results. The column name is interpolated into the SQL — it
+// MUST be an internal identifier (never user input).
+func (s *EvalStoreImpl) distinctStringColumn(ctx context.Context, namespace, column string) ([]string, error) {
+	//nolint:gosec // column comes from a closed set of internal identifiers.
+	q := fmt.Sprintf(`
+		SELECT DISTINCT %s
+		FROM eval_results
+		WHERE namespace = $1 AND %s <> ''
+		ORDER BY 1`, column, column)
+	rows, err := s.pool.Query(ctx, q, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: distinct %s: %w", column, err)
+	}
+	defer rows.Close()
+
+	out := []string{}
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, fmt.Errorf("postgres: scan distinct %s: %w", column, err)
+		}
+		out = append(out, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres: iterate distinct %s: %w", column, err)
 	}
 	return out, nil
 }
