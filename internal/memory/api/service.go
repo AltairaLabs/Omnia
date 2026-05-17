@@ -45,6 +45,11 @@ const (
 // eventTypeMemoryDeleted is the event type published when a memory is deleted.
 const eventTypeMemoryDeleted = "memory_deleted"
 
+// logMemoryEventPublishFailed is the structured-log message emitted when an
+// event-bus publish fails. Extracted to a constant to keep grep-ability
+// across 5+ call sites (and satisfy Sonar's S1192).
+const logMemoryEventPublishFailed = "memory event publish failed"
+
 // Sentinel errors returned by the memory service and handler.
 var (
 	ErrMissingWorkspace = errors.New("workspace parameter is required")
@@ -313,7 +318,7 @@ func (s *MemoryService) SaveMemoryWithResult(ctx context.Context, mem *memory.Me
 		}
 		s.safeGo("event_publish", func() {
 			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
-				s.log.Error(err, "memory event publish failed", "eventType", event.EventType, "memoryID", event.MemoryID)
+				s.log.Error(err, logMemoryEventPublishFailed, "eventType", event.EventType, "memoryID", event.MemoryID)
 			}
 		})
 	}
@@ -665,7 +670,7 @@ func (s *MemoryService) applyAutoSupersedeViaSimilarity(
 		}
 		s.safeGo("event_publish", func() {
 			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
-				s.log.Error(err, "memory event publish failed", "eventType", event.EventType, "memoryID", event.MemoryID)
+				s.log.Error(err, logMemoryEventPublishFailed, "eventType", event.EventType, "memoryID", event.MemoryID)
 			}
 		})
 	}
@@ -732,7 +737,7 @@ func (s *MemoryService) UpdateMemory(ctx context.Context, entityID string, mem *
 		}
 		s.safeGo("event_publish", func() {
 			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
-				s.log.Error(err, "memory event publish failed",
+				s.log.Error(err, logMemoryEventPublishFailed,
 					"eventType", event.EventType, "memoryID", event.MemoryID)
 			}
 		})
@@ -802,7 +807,7 @@ func (s *MemoryService) SupersedeManyMemories(ctx context.Context, sourceMemoryI
 		}
 		s.safeGo("event_publish", func() {
 			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
-				s.log.Error(err, "memory event publish failed",
+				s.log.Error(err, logMemoryEventPublishFailed,
 					"eventType", event.EventType, "memoryID", event.MemoryID)
 			}
 		})
@@ -978,7 +983,7 @@ func (s *MemoryService) DeleteMemory(ctx context.Context, scope map[string]strin
 		}
 		s.safeGo("event_publish", func() {
 			if err := s.eventPublisher.PublishMemoryEvent(context.Background(), event); err != nil {
-				s.log.Error(err, "memory event publish failed", "eventType", event.EventType, "memoryID", event.MemoryID)
+				s.log.Error(err, logMemoryEventPublishFailed, "eventType", event.EventType, "memoryID", event.MemoryID)
 			}
 		})
 	}

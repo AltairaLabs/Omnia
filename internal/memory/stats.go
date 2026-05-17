@@ -41,6 +41,10 @@ const DefaultAggregateLimit = 100
 // MaxAggregateLimit clamps absurd LIMITs.
 const MaxAggregateLimit = 1000
 
+// orderByValueDesc is the ORDER BY clause used by the categorical group-by
+// branches. Extracted to avoid S1192 duplication across 3 cases.
+const orderByValueDesc = "ORDER BY value DESC"
+
 // AggregateOptions parameterises the Aggregate query.
 type AggregateOptions struct {
 	Workspace string
@@ -132,10 +136,10 @@ func (s *PostgresMemoryStore) Aggregate(ctx context.Context, opts AggregateOptio
 func groupByFragments(g AggregateGroupBy) (keyExpr, extraWhere, orderClause string, err error) {
 	switch g {
 	case AggregateGroupByCategory:
-		return "COALESCE(e.consent_category, 'unknown')", "", "ORDER BY value DESC", nil
+		return "COALESCE(e.consent_category, 'unknown')", "", orderByValueDesc, nil
 	case AggregateGroupByAgent:
 		// Skip institutional rows: agent_id IS NULL clutters the chart.
-		return "e.agent_id", " AND e.agent_id IS NOT NULL", "ORDER BY value DESC", nil
+		return "e.agent_id", " AND e.agent_id IS NOT NULL", orderByValueDesc, nil
 	case AggregateGroupByDay:
 		return "to_char(date_trunc('day', e.created_at)::date, 'YYYY-MM-DD')",
 			"", "ORDER BY 1 ASC", nil
@@ -151,7 +155,7 @@ func groupByFragments(g AggregateGroupBy) (keyExpr, extraWhere, orderClause stri
 			WHEN e.virtual_user_id IS NOT NULL THEN 'user'
 			WHEN e.agent_id        IS NOT NULL THEN 'agent'
 			ELSE                                    'institutional'
-		END`, "", "ORDER BY value DESC", nil
+		END`, "", orderByValueDesc, nil
 	default:
 		return "", "", "", fmt.Errorf("memory: invalid groupBy %q", g)
 	}

@@ -51,6 +51,22 @@ const evalResultColumns = `id, session_id, message_id, agent_name, namespace,
 	passed, score, details, duration_ms, judge_tokens, judge_cost_usd,
 	source, created_at`
 
+// Reusable QueryBuilder filter fragments. The QueryBuilder substitutes the
+// `$?` placeholder with the appropriate positional argument index, so a
+// single constant safely serves multiple call sites.
+const (
+	filterAgentName      = "agent_name=$?"
+	filterNamespace      = "namespace=$?"
+	filterEvalID         = "eval_id=$?"
+	filterEvalType       = "eval_type=$?"
+	filterPromptPackName = "promptpack_name=$?"
+	filterPassed         = "passed=$?"
+	filterCreatedAfter   = "created_at >= $?"
+	filterCreatedBefore  = "created_at < $?"
+
+	orderByValueDesc = "ORDER BY value DESC"
+)
+
 // InsertEvalResults persists one or more eval results using a batch insert.
 func (s *EvalStoreImpl) InsertEvalResults(ctx context.Context, results []*api.EvalResult) error {
 	query := `INSERT INTO eval_results (
@@ -189,35 +205,7 @@ func (s *EvalStoreImpl) AggregateEvalResults(ctx context.Context, opts api.EvalA
 		return nil, err
 	}
 
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = api.DefaultEvalAggregateLimit
-	}
-	if limit > api.MaxEvalAggregateLimit {
-		limit = api.MaxEvalAggregateLimit
-	}
-
-	qb := &pgutil.QueryBuilder{}
-	qb.Add("namespace=$?", opts.Namespace)
-	if opts.AgentName != "" {
-		qb.Add("agent_name=$?", opts.AgentName)
-	}
-	if opts.PromptPackName != "" {
-		qb.Add("promptpack_name=$?", opts.PromptPackName)
-	}
-	if opts.EvalID != "" {
-		qb.Add("eval_id=$?", opts.EvalID)
-	}
-	if opts.EvalType != "" {
-		qb.Add("eval_type=$?", opts.EvalType)
-	}
-	if !opts.From.IsZero() {
-		qb.Add("created_at>=$?", opts.From)
-	}
-	if !opts.To.IsZero() {
-		qb.Add("created_at<$?", opts.To)
-	}
-
+	qb := buildEvalAggregateFilters(opts)
 	query := fmt.Sprintf(`
 		SELECT %s AS key, %s AS value, COUNT(*) AS count
 		FROM eval_results
@@ -225,14 +213,60 @@ func (s *EvalStoreImpl) AggregateEvalResults(ctx context.Context, opts api.EvalA
 		GROUP BY 1
 		%s
 		LIMIT %d`,
-		keyExpr, valueExpr, qb.Where(), orderClause, limit)
+		keyExpr, valueExpr, qb.Where(), orderClause, clampEvalAggregateLimit(opts.Limit))
 
 	rows, err := s.pool.Query(ctx, query, qb.Args()...)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: aggregate eval results: %w", err)
 	}
 	defer rows.Close()
+	return collectEvalAggregateRows(rows)
+}
 
+// buildEvalAggregateFilters seeds a QueryBuilder with the required namespace
+// filter plus any optional filters set on opts. Extracted from
+// AggregateEvalResults to keep its cognitive complexity below the Sonar Way
+// threshold (≤15).
+func buildEvalAggregateFilters(opts api.EvalAggregateOpts) *pgutil.QueryBuilder {
+	qb := &pgutil.QueryBuilder{}
+	qb.Add(filterNamespace, opts.Namespace)
+	if opts.AgentName != "" {
+		qb.Add(filterAgentName, opts.AgentName)
+	}
+	if opts.PromptPackName != "" {
+		qb.Add(filterPromptPackName, opts.PromptPackName)
+	}
+	if opts.EvalID != "" {
+		qb.Add(filterEvalID, opts.EvalID)
+	}
+	if opts.EvalType != "" {
+		qb.Add(filterEvalType, opts.EvalType)
+	}
+	if !opts.From.IsZero() {
+		qb.Add(filterCreatedAfter, opts.From)
+	}
+	if !opts.To.IsZero() {
+		qb.Add(filterCreatedBefore, opts.To)
+	}
+	return qb
+}
+
+// clampEvalAggregateLimit applies the package defaults / ceiling to a
+// caller-supplied limit.
+func clampEvalAggregateLimit(limit int) int {
+	if limit <= 0 {
+		return api.DefaultEvalAggregateLimit
+	}
+	if limit > api.MaxEvalAggregateLimit {
+		return api.MaxEvalAggregateLimit
+	}
+	return limit
+}
+
+// collectEvalAggregateRows scans an aggregate result set into the API row
+// shape. avg/percentile over an empty group is NULL; emit 0.0 so callers
+// don't have to special-case missing values for buckets with only NULL scores.
+func collectEvalAggregateRows(rows pgx.Rows) ([]*api.EvalAggregateRow, error) {
 	out := []*api.EvalAggregateRow{}
 	for rows.Next() {
 		var r api.EvalAggregateRow
@@ -240,8 +274,6 @@ func (s *EvalStoreImpl) AggregateEvalResults(ctx context.Context, opts api.EvalA
 		if err := rows.Scan(&r.Key, &v, &r.Count); err != nil {
 			return nil, fmt.Errorf("postgres: scan eval aggregate row: %w", err)
 		}
-		// avg/percentile over an empty group is NULL; emit 0.0 so callers
-		// don't special-case missing values for buckets with only NULL scores.
 		if v != nil {
 			r.Value = *v
 		}
@@ -259,11 +291,11 @@ func (s *EvalStoreImpl) AggregateEvalResults(ctx context.Context, opts api.EvalA
 func evalGroupByFragments(g api.EvalAggregateGroupBy) (keyExpr, orderClause string, err error) {
 	switch g {
 	case api.EvalAggregateGroupByEvalID:
-		return "eval_id", "ORDER BY value DESC", nil
+		return "eval_id", orderByValueDesc, nil
 	case api.EvalAggregateGroupByEvalType:
-		return "eval_type", "ORDER BY value DESC", nil
+		return "eval_type", orderByValueDesc, nil
 	case api.EvalAggregateGroupByAgent:
-		return "agent_name", "ORDER BY value DESC", nil
+		return "agent_name", orderByValueDesc, nil
 	case api.EvalAggregateGroupByTimeHour:
 		return "to_char(date_trunc('hour', created_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:00:00\"Z\"')",
 			"ORDER BY 1 ASC", nil
@@ -334,43 +366,43 @@ func (s *EvalStoreImpl) DistinctEvals(ctx context.Context, namespace string) ([]
 
 func applyEvalFilters(qb *pgutil.QueryBuilder, opts api.EvalResultListOpts) {
 	if opts.AgentName != "" {
-		qb.Add("agent_name=$?", opts.AgentName)
+		qb.Add(filterAgentName, opts.AgentName)
 	}
 	if opts.Namespace != "" {
-		qb.Add("namespace=$?", opts.Namespace)
+		qb.Add(filterNamespace, opts.Namespace)
 	}
 	if opts.EvalID != "" {
-		qb.Add("eval_id=$?", opts.EvalID)
+		qb.Add(filterEvalID, opts.EvalID)
 	}
 	if opts.EvalType != "" {
-		qb.Add("eval_type=$?", opts.EvalType)
+		qb.Add(filterEvalType, opts.EvalType)
 	}
 	if opts.Passed != nil {
-		qb.Add("passed=$?", *opts.Passed)
+		qb.Add(filterPassed, *opts.Passed)
 	}
 	if !opts.CreatedAfter.IsZero() {
-		qb.Add("created_at >= $?", opts.CreatedAfter)
+		qb.Add(filterCreatedAfter, opts.CreatedAfter)
 	}
 	if !opts.CreatedBefore.IsZero() {
-		qb.Add("created_at < $?", opts.CreatedBefore)
+		qb.Add(filterCreatedBefore, opts.CreatedBefore)
 	}
 }
 
 func applySummaryFilters(qb *pgutil.QueryBuilder, opts api.EvalResultSummaryOpts) {
 	if opts.AgentName != "" {
-		qb.Add("agent_name=$?", opts.AgentName)
+		qb.Add(filterAgentName, opts.AgentName)
 	}
 	if opts.Namespace != "" {
-		qb.Add("namespace=$?", opts.Namespace)
+		qb.Add(filterNamespace, opts.Namespace)
 	}
 	if opts.EvalType != "" {
-		qb.Add("eval_type=$?", opts.EvalType)
+		qb.Add(filterEvalType, opts.EvalType)
 	}
 	if !opts.CreatedAfter.IsZero() {
-		qb.Add("created_at >= $?", opts.CreatedAfter)
+		qb.Add(filterCreatedAfter, opts.CreatedAfter)
 	}
 	if !opts.CreatedBefore.IsZero() {
-		qb.Add("created_at < $?", opts.CreatedBefore)
+		qb.Add(filterCreatedBefore, opts.CreatedBefore)
 	}
 }
 

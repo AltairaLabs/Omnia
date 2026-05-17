@@ -694,7 +694,7 @@ func buildAPIMux(
 func wrapPrivacyMiddleware(ctx context.Context, next http.Handler, pool *pgxpool.Pool, embeddingSvc *memory.EmbeddingService, log logr.Logger) http.Handler {
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
-		log.Info("memory privacy middleware skipped", "reason", "no in-cluster kubeconfig")
+		log.Info("memory privacy middleware skipped", "reason", reasonNoInClusterKubeconfig)
 		return next
 	}
 
@@ -894,7 +894,7 @@ func buildRetentionPolicyLoader(legacyInterval, workspace, serviceGroup string, 
 		}
 		log.Error(clientErr, "k8s client creation failed, falling back to legacy interval")
 	} else {
-		log.V(1).Info("no in-cluster kubeconfig", "error", err.Error())
+		log.V(1).Info(reasonNoInClusterKubeconfig, "error", err.Error())
 	}
 	if legacyInterval == "" {
 		log.Info("retention worker disabled", "reason", "no policy source")
@@ -917,7 +917,7 @@ func buildRetentionPolicyLoader(legacyInterval, workspace, serviceGroup string, 
 func createEmbeddingService(ctx context.Context, providerName string, store *memory.PostgresMemoryStore, log logr.Logger) *memory.EmbeddingService {
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
-		log.Info("embedding service skipped", "reason", "no in-cluster kubeconfig")
+		log.Info("embedding service skipped", "reason", reasonNoInClusterKubeconfig)
 		return nil
 	}
 
@@ -1053,6 +1053,11 @@ const (
 	defaultMaxConnLifetime = time.Hour
 	defaultMaxConnIdleTime = 30 * time.Minute
 )
+
+// reasonNoInClusterKubeconfig is the log reason used by initialisation paths
+// that gracefully degrade when the binary is not running inside a Kubernetes
+// pod (no in-cluster kubeconfig). Extracted for S1192 — duplicated 3+ times.
+const reasonNoInClusterKubeconfig = "no in-cluster kubeconfig"
 
 // initPool creates and returns a pgxpool connection pool with configured limits.
 func initPool(ctx context.Context, connStr string) (*pgxpool.Pool, error) {
