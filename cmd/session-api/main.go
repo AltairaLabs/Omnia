@@ -483,11 +483,15 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	maxBody := int64(envInt32("MAX_BODY_SIZE", int32(api.DefaultMaxBodySize)))
 	handler := api.NewHandler(sessionService, log, maxBody)
 
-	// Wire up eval result endpoints when Postgres is available.
+	// Wire up eval result + provider call endpoints when Postgres is available.
 	if pool != nil {
 		evalStore := pgprovider.NewEvalStore(pool)
 		evalService := api.NewEvalService(evalStore, log)
 		handler.SetEvalService(evalService)
+
+		providerCallsStore := pgprovider.NewProviderCallsStore(pool)
+		providerCallsService := api.NewProviderCallsService(providerCallsStore, log)
+		handler.SetProviderCallsService(providerCallsService)
 	}
 
 	mux := http.NewServeMux()

@@ -95,12 +95,13 @@ func (f PolicyResolverFunc) ResolveEffectivePolicy(namespace, agentName string) 
 
 // Handler provides HTTP endpoints for session history.
 type Handler struct {
-	service           *SessionService
-	evalService       *EvalService
-	policyResolver    PolicyResolver
-	encryptorResolver EncryptorResolver
-	log               logr.Logger
-	maxBodySize       int64
+	service              *SessionService
+	evalService          *EvalService
+	providerCallsService *ProviderCallsService
+	policyResolver       PolicyResolver
+	encryptorResolver    EncryptorResolver
+	log                  logr.Logger
+	maxBodySize          int64
 }
 
 // NewHandler creates a new session API handler.
@@ -120,6 +121,12 @@ func NewHandler(service *SessionService, log logr.Logger, maxBodySize ...int64) 
 // SetEvalService configures the eval service for eval result endpoints.
 func (h *Handler) SetEvalService(svc *EvalService) {
 	h.evalService = svc
+}
+
+// SetProviderCallsService configures the provider-calls service for
+// /api/v1/provider-calls/* endpoints. When unset the endpoints return 503.
+func (h *Handler) SetProviderCallsService(svc *ProviderCallsService) {
+	h.providerCallsService = svc
 }
 
 // SetPolicyResolver configures the resolver for GET /api/v1/privacy-policy.
@@ -245,6 +252,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// See CLAUDE.md → Observability Boundaries.
 	mux.HandleFunc("GET /api/v1/eval-results/aggregate", h.handleAggregateEvalResults)
 	mux.HandleFunc("GET /api/v1/eval-results/discover", h.handleDiscoverEvals)
+	mux.HandleFunc("GET /api/v1/provider-calls/aggregate", h.handleAggregateProviderCalls)
+	mux.HandleFunc("GET /api/v1/provider-calls/discover", h.handleDiscoverProviderCalls)
 
 	// Privacy policy endpoint
 	mux.HandleFunc("GET /api/v1/privacy-policy", h.handleGetPrivacyPolicy)
