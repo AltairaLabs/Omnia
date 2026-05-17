@@ -20,8 +20,13 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
   `evalId`, `evalType`, `from`, `to` (RFC3339). Returns
   `{rows: [{key, value, count}, …]}`.
 - `GET /api/v1/eval-results/discover?namespace=X` — distinct
-  `(eval_id, eval_type)` pairs that have at least one row in this
-  namespace's `eval_results`. Returns `{evals: [{evalId, evalType}, …]}`.
+  `(eval_id, eval_type)` pairs plus distinct `agent_name` and
+  `promptpack_name` values that appear in this namespace's
+  `eval_results`. Returns
+  `{evals: [{evalId, evalType}, …], agents: […], promptpacks: […]}`.
+  The `agents` / `promptpacks` fields were added as part of the
+  use-eval-filter migration; the proxy route's shape is unchanged
+  (existing callers reading `body.evals` keep working).
 - Dashboard proxy routes: `GET /api/workspaces/{name}/eval-results/aggregate`
   and `GET /api/workspaces/{name}/eval-results/discover`. The workspace
   name from the URL is pinned as `namespace` on the forwarded query so
