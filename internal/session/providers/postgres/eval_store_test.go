@@ -1034,42 +1034,81 @@ func TestAggregateEvalResults_InvalidMetric(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid metric")
 }
 
-// --- DistinctEvals ----------------------------------------------------------
+// --- EvalDiscovery ----------------------------------------------------------
 
-func TestDistinctEvals(t *testing.T) {
+func TestEvalDiscovery(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 	store := newEvalStore(t)
 	seedAggregateRows(t, store)
 
-	descs, err := store.DistinctEvals(context.Background(), "default")
+	res, err := store.EvalDiscovery(context.Background(), "default")
 	require.NoError(t, err)
-	require.Len(t, descs, 2)
-	// Sorted by eval_id ascending.
-	assert.Equal(t, "acc", descs[0].EvalID)
-	assert.Equal(t, "llm_judge", descs[0].EvalType)
-	assert.Equal(t, "lat", descs[1].EvalID)
-	assert.Equal(t, "assertion", descs[1].EvalType)
+	require.NotNil(t, res)
+
+	// Evals sorted by eval_id ascending.
+	require.Len(t, res.Evals, 2)
+	assert.Equal(t, aggregateEvalIDAcc, res.Evals[0].EvalID)
+	assert.Equal(t, "llm_judge", res.Evals[0].EvalType)
+	assert.Equal(t, aggregateEvalIDLat, res.Evals[1].EvalID)
+	assert.Equal(t, "assertion", res.Evals[1].EvalType)
+
+	// Agents distinct + sorted.
+	assert.Equal(t, []string{aggregateAgentA, aggregateAgentB}, res.Agents)
+
+	// Promptpacks distinct + sorted (single value in the fixture).
+	assert.Equal(t, []string{"test-pack"}, res.PromptPacks)
 }
 
-func TestDistinctEvals_NamespaceIsolation(t *testing.T) {
+func TestEvalDiscovery_NamespaceIsolation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 	store := newEvalStore(t)
 	seedAggregateRows(t, store)
 
-	descs, err := store.DistinctEvals(context.Background(), "other-namespace")
+	res, err := store.EvalDiscovery(context.Background(), "other-namespace")
 	require.NoError(t, err)
-	assert.Empty(t, descs)
+	require.NotNil(t, res)
+	assert.Empty(t, res.Evals)
+	assert.Empty(t, res.Agents)
+	assert.Empty(t, res.PromptPacks)
 }
 
-func TestDistinctEvals_MissingNamespace(t *testing.T) {
+func TestEvalDiscovery_MissingNamespace(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 	store := newEvalStore(t)
-	_, err := store.DistinctEvals(context.Background(), "")
+	_, err := store.EvalDiscovery(context.Background(), "")
 	require.Error(t, err)
+}
+
+func TestEvalDiscovery_SkipsEmptyAgentAndPromptpack(t *testing.T) {
+	// Insert a row with empty agent_name and empty promptpack_name. The
+	// distinct-column queries filter `<column> <> ''` so these values must
+	// not appear in the result.
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	store := newEvalStore(t)
+	ctx := context.Background()
+	sid := "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a13"
+	seedSession(t, store, sid)
+
+	r := makeEvalResult(sid, "blank-eval", "llm_judge")
+	r.AgentName = ""
+	r.PromptPackName = ""
+	require.NoError(t, store.InsertEvalResults(ctx, []*api.EvalResult{r}))
+
+	res, err := store.EvalDiscovery(ctx, "default")
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	for _, a := range res.Agents {
+		assert.NotEmpty(t, a, "empty agent_name should be filtered out")
+	}
+	for _, p := range res.PromptPacks {
+		assert.NotEmpty(t, p, "empty promptpack_name should be filtered out")
+	}
 }

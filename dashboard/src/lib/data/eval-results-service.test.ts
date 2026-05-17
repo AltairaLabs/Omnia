@@ -11,6 +11,7 @@ import {
   classifyEvalType,
   fetchEvalAggregate,
   fetchEvalDescriptors,
+  fetchEvalDiscovery,
 } from "./eval-results-service";
 
 beforeEach(() => {
@@ -136,6 +137,61 @@ describe("classifyEvalType", () => {
   it("defaults unknown eval types to 'gauge'", () => {
     expect(classifyEvalType("")).toBe("gauge");
     expect(classifyEvalType("future_handler")).toBe("gauge");
+  });
+});
+
+describe("fetchEvalDiscovery", () => {
+  it("hits the workspace-scoped /discover endpoint and returns full payload", async () => {
+    const fakeFetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          evals: [{ evalId: "acc", evalType: "llm_judge" }],
+          agents: ["agent-a", "agent-b"],
+          promptpacks: ["pack-v1"],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const res = await fetchEvalDiscovery("test-ws", fakeFetch as unknown as typeof fetch);
+
+    expect(res.evals).toHaveLength(1);
+    expect(res.agents).toEqual(["agent-a", "agent-b"]);
+    expect(res.promptpacks).toEqual(["pack-v1"]);
+
+    const url = String((fakeFetch.mock.calls as unknown as [string][])[0][0]);
+    expect(url).toBe("/api/workspaces/test-ws/eval-results/discover");
+  });
+
+  it("normalises missing slices to empty arrays", async () => {
+    const fakeFetch = vi.fn(async () =>
+      new Response(JSON.stringify({}), { status: 200 }),
+    );
+    const res = await fetchEvalDiscovery("ws", fakeFetch as unknown as typeof fetch);
+    expect(res).toEqual({ evals: [], agents: [], promptpacks: [] });
+  });
+
+  it("encodes workspace names with special characters in the path", async () => {
+    const fakeFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ evals: [], agents: [], promptpacks: [] }), {
+        status: 200,
+      }),
+    );
+
+    await fetchEvalDiscovery("ws/with-slash", fakeFetch as unknown as typeof fetch);
+
+    const url = String((fakeFetch.mock.calls as unknown as [string][])[0][0]);
+    expect(url).toContain("/api/workspaces/ws%2Fwith-slash/");
+  });
+
+  it("throws on non-2xx response", async () => {
+    const fakeFetch = vi.fn(async () =>
+      new Response("nope", { status: 500, statusText: "Internal Server Error" }),
+    );
+
+    await expect(
+      fetchEvalDiscovery("ws", fakeFetch as unknown as typeof fetch),
+    ).rejects.toThrow(/eval-discover: 500/);
   });
 });
 

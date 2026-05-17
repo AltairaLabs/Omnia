@@ -201,11 +201,6 @@ type EvalAggregateResponse struct {
 	Rows []*EvalAggregateRow `json:"rows"`
 }
 
-// EvalDiscoverResponse is the JSON body for /api/v1/eval-results/discover.
-type EvalDiscoverResponse struct {
-	Evals []EvalDescriptor `json:"evals"`
-}
-
 // handleAggregateEvalResults runs a namespace-scoped GROUP BY over eval_results.
 // GET /api/v1/eval-results/aggregate?namespace=X&groupBy=time:day&metric=avg_score
 func (h *Handler) handleAggregateEvalResults(w http.ResponseWriter, r *http.Request) {
@@ -233,8 +228,9 @@ func (h *Handler) handleAggregateEvalResults(w http.ResponseWriter, r *http.Requ
 	_ = json.NewEncoder(w).Encode(EvalAggregateResponse{Rows: rows})
 }
 
-// handleDiscoverEvals returns the set of (eval_id, eval_type) pairs that
-// exist for a namespace. Replaces dashboard Prometheus metric-name discovery.
+// handleDiscoverEvals returns the namespace-scoped set of evals + agents +
+// promptpacks observed in eval_results. Replaces dashboard Prometheus
+// metric-name and label-value discovery.
 // GET /api/v1/eval-results/discover?namespace=X
 func (h *Handler) handleDiscoverEvals(w http.ResponseWriter, r *http.Request) {
 	if h.evalService == nil {
@@ -248,17 +244,28 @@ func (h *Handler) handleDiscoverEvals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	evals, err := h.evalService.DistinctEvals(r.Context(), namespace)
+	result, err := h.evalService.EvalDiscovery(r.Context(), namespace)
 	if err != nil {
 		writeEvalError(w, err)
 		return
 	}
-	if evals == nil {
-		evals = []EvalDescriptor{}
+	if result == nil {
+		result = &EvalDiscoveryResult{}
+	}
+	// Normalise nil slices to empty arrays so JSON renders [] not null —
+	// dashboard consumers iterate without a null check.
+	if result.Evals == nil {
+		result.Evals = []EvalDescriptor{}
+	}
+	if result.Agents == nil {
+		result.Agents = []string{}
+	}
+	if result.PromptPacks == nil {
+		result.PromptPacks = []string{}
 	}
 
 	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
-	_ = json.NewEncoder(w).Encode(EvalDiscoverResponse{Evals: evals})
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 // parseEvalAggregateOpts extracts EvalAggregateOpts from the request query.

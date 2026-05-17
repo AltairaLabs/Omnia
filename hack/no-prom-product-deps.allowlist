@@ -10,5 +10,4 @@
 # (proposal); CLAUDE.md → Observability Boundaries (principle).
 
 dashboard/src/hooks/use-agent-cost.ts
-dashboard/src/hooks/use-eval-filter.ts
 dashboard/src/hooks/use-provider-metrics.ts

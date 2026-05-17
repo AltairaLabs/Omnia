@@ -40,8 +40,8 @@ type mockEvalStore struct {
 	summaryErr       error
 	aggregateResults []*EvalAggregateRow
 	aggregateErr     error
-	distinctEvals    []EvalDescriptor
-	distinctEvalsErr error
+	discoveryResult  *EvalDiscoveryResult
+	discoveryErr     error
 }
 
 func (m *mockEvalStore) InsertEvalResults(_ context.Context, _ []*EvalResult) error {
@@ -64,8 +64,8 @@ func (m *mockEvalStore) AggregateEvalResults(_ context.Context, _ EvalAggregateO
 	return m.aggregateResults, m.aggregateErr
 }
 
-func (m *mockEvalStore) DistinctEvals(_ context.Context, _ string) ([]EvalDescriptor, error) {
-	return m.distinctEvals, m.distinctEvalsErr
+func (m *mockEvalStore) EvalDiscovery(_ context.Context, _ string) (*EvalDiscoveryResult, error) {
+	return m.discoveryResult, m.discoveryErr
 }
 
 func TestNewEvalService(t *testing.T) {

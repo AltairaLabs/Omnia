@@ -413,9 +413,13 @@ func TestHandleAggregateEvalResults_NilRowsReturnsEmptyArray(t *testing.T) {
 
 func TestHandleDiscoverEvals_Success(t *testing.T) {
 	store := &mockEvalStore{
-		distinctEvals: []EvalDescriptor{
-			{EvalID: "acc", EvalType: "llm_judge"},
-			{EvalID: "lat", EvalType: "assertion"},
+		discoveryResult: &EvalDiscoveryResult{
+			Evals: []EvalDescriptor{
+				{EvalID: "acc", EvalType: "llm_judge"},
+				{EvalID: "lat", EvalType: "assertion"},
+			},
+			Agents:      []string{"agent-a", "agent-b"},
+			PromptPacks: []string{"pack-v1", "pack-v2"},
 		},
 	}
 	mux := newTestEvalHandler(store)
@@ -426,11 +430,13 @@ func TestHandleDiscoverEvals_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp EvalDiscoverResponse
+	var resp EvalDiscoveryResult
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Len(t, resp.Evals, 2)
 	assert.Equal(t, "acc", resp.Evals[0].EvalID)
 	assert.Equal(t, "llm_judge", resp.Evals[0].EvalType)
+	assert.Equal(t, []string{"agent-a", "agent-b"}, resp.Agents)
+	assert.Equal(t, []string{"pack-v1", "pack-v2"}, resp.PromptPacks)
 }
 
 func TestHandleDiscoverEvals_MissingNamespace(t *testing.T) {
@@ -456,13 +462,16 @@ func TestHandleDiscoverEvals_NoEvalService(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
 
-func TestHandleDiscoverEvals_NilReturnsEmptyArray(t *testing.T) {
-	mux := newTestEvalHandler(&mockEvalStore{distinctEvals: nil})
+func TestHandleDiscoverEvals_NilReturnsEmptyArrays(t *testing.T) {
+	mux := newTestEvalHandler(&mockEvalStore{discoveryResult: nil})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/eval-results/discover?namespace=default", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"evals":[]`)
+	body := w.Body.String()
+	assert.Contains(t, body, `"evals":[]`)
+	assert.Contains(t, body, `"agents":[]`)
+	assert.Contains(t, body, `"promptpacks":[]`)
 }
