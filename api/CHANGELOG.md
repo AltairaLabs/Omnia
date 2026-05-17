@@ -10,6 +10,29 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (provider-calls aggregate + discover endpoints)
+
+- `GET /api/v1/provider-calls/aggregate?namespace=X&groupBy=Y&metric=Z` —
+  namespace-scoped GROUP BY over `provider_calls` (INNER JOIN sessions
+  so the namespace + agentName filters can apply). `groupBy` is one of
+  `provider` | `model` | `agent` | `time:hour` | `time:day`; `metric` is
+  one of `count` | `sum_cost_usd` | `sum_input_tokens` |
+  `sum_output_tokens` | `sum_cached_tokens` | `sum_tokens` |
+  `avg_duration_ms` | `p95_duration_ms`. Optional filters `agentName`,
+  `provider`, `model`, `from`, `to` (RFC3339). Returns
+  `{rows: [{key, value, count}, …]}`.
+- `GET /api/v1/provider-calls/discover?namespace=X` — distinct provider
+  and model values that appear in this namespace's `provider_calls`
+  rows. Returns `{providers: […], models: […]}`.
+- Dashboard proxy routes
+  `GET /api/workspaces/{name}/provider-calls/aggregate` and
+  `GET /api/workspaces/{name}/provider-calls/discover`. The workspace
+  name is pinned as `namespace` on the forwarded query so callers
+  cannot read another workspace's data.
+
+Together these replace direct Prometheus reads for cost/usage views
+(`useAgentCost`, `useProviderMetrics`).
+
 ### Added (eval-results aggregate + discover endpoints)
 
 - `GET /api/v1/eval-results/aggregate?namespace=X&groupBy=Y&metric=Z` —

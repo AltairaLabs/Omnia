@@ -1,19 +1,23 @@
 /**
- * Hook for fetching agent-specific cost metrics from Prometheus.
+ * Hook for fetching agent-specific cost metrics from session-api.
  *
- * Provides cost data and time series for sparklines on agent cards.
+ * Previously read Prometheus omnia_llm_* metrics; migrated to the
+ * structured /api/workspaces/{name}/provider-calls/aggregate endpoint
+ * as part of the observability split — see CLAUDE.md → Observability
+ * Boundaries and
+ * `docs/local-backlog/implemented/2026-04-17-observability-split-design.md`.
+ *
+ * Public surface (`AgentCostData`, `useAgentCost`) is unchanged so the
+ * agent cards consume it without modification.
+ *
+ * Copyright 2026 Altaira Labs.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import {
-  queryPrometheus,
-  queryPrometheusRange,
-  isPrometheusAvailable,
-  type PrometheusMatrixResult,
-} from "@/lib/prometheus";
-import { LLM_METRICS, LABELS } from "@/lib/prometheus-queries";
+import { fetchProviderCallsAggregate } from "@/lib/data/provider-calls-service";
 import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
 export interface AgentCostData {
@@ -22,7 +26,7 @@ export interface AgentCostData {
   inputTokens: number;
   outputTokens: number;
   requests: number;
-  /** Time series for sparkline (last 24h, hourly resolution) */
+  /** Time series for sparkline (last 24h, hourly resolution; 24 points). */
   timeSeries: Array<{ value: number }>;
 }
 
@@ -35,57 +39,54 @@ const EMPTY_DATA: AgentCostData = {
   timeSeries: [],
 };
 
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const ONE_HOUR_MS = 60 * 60 * 1000;
+
 /**
- * Fetch cost data for a specific agent from Prometheus.
+ * Fetch cost data for a single agent.
+ *
+ * Five aggregate calls in parallel:
+ *   - sum_cost_usd, sum_input_tokens, sum_output_tokens, count
+ *     all grouped by agent (collapses to one row each)
+ *   - sum_cost_usd grouped by time:hour over the last 24h (sparkline)
  */
 async function fetchAgentCost(
-  namespace: string,
-  agentName: string
+  workspace: string,
+  agentName: string,
 ): Promise<AgentCostData> {
-  const available = await isPrometheusAvailable();
-  if (!available) {
-    return EMPTY_DATA;
-  }
+  const end = new Date();
+  const start = new Date(end.getTime() - ONE_DAY_MS);
+  const base = {
+    workspace,
+    agentName,
+    groupBy: "agent" as const,
+    from: start,
+    to: end,
+  };
 
   try {
-    const filter = `${LABELS.AGENT}="${agentName}",${LABELS.NAMESPACE}="${namespace}"`;
-
-    const now = new Date();
-    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
-    // Fetch current totals and time series in parallel
-    const [costResult, inputResult, outputResult, requestsResult, costSeries] =
-      await Promise.all([
-        queryPrometheus(`sum(${LLM_METRICS.COST_USD}{${filter}})`),
-        queryPrometheus(`sum(${LLM_METRICS.INPUT_TOKENS}{${filter}})`),
-        queryPrometheus(`sum(${LLM_METRICS.OUTPUT_TOKENS}{${filter}})`),
-        queryPrometheus(`sum(${LLM_METRICS.REQUESTS_TOTAL}{${filter}})`),
-        queryPrometheusRange(
-          `sum(increase(${LLM_METRICS.COST_USD}{${filter}}[1h]))`,
-          oneDayAgo,
-          now,
-          "1h"
-        ),
-      ]);
-
-    // Extract scalar values
-    const extractScalar = (result: typeof costResult): number => {
-      if (result.status !== "success" || !result.data?.result?.length) {
-        return 0;
-      }
-      return Number.parseFloat(result.data.result[0]?.value?.[1] || "0") || 0;
-    };
-
-    // Convert time series to sparkline data
-    const timeSeries = matrixToSparkline(costSeries);
+    const [costRows, inputRows, outputRows, requestRows, seriesRows] = await Promise.all([
+      fetchProviderCallsAggregate({ ...base, metric: "sum_cost_usd" }),
+      fetchProviderCallsAggregate({ ...base, metric: "sum_input_tokens" }),
+      fetchProviderCallsAggregate({ ...base, metric: "sum_output_tokens" }),
+      fetchProviderCallsAggregate({ ...base, metric: "count" }),
+      fetchProviderCallsAggregate({
+        workspace,
+        agentName,
+        groupBy: "time:hour",
+        metric: "sum_cost_usd",
+        from: start,
+        to: end,
+      }),
+    ]);
 
     return {
       available: true,
-      totalCost: extractScalar(costResult),
-      inputTokens: extractScalar(inputResult),
-      outputTokens: extractScalar(outputResult),
-      requests: extractScalar(requestsResult),
-      timeSeries,
+      totalCost: costRows[0]?.value ?? 0,
+      inputTokens: inputRows[0]?.value ?? 0,
+      outputTokens: outputRows[0]?.value ?? 0,
+      requests: requestRows[0]?.value ?? 0,
+      timeSeries: buildSparkline(seriesRows, end),
     };
   } catch (error) {
     console.error(`Failed to fetch cost data for agent ${agentName}:`, error);
@@ -94,67 +95,45 @@ async function fetchAgentCost(
 }
 
 /**
- * Convert Prometheus matrix result to sparkline data points.
- * Fills in missing hourly buckets with zeros to ensure a continuous 24-hour line.
+ * Convert a `time:hour` aggregate result into a continuous 24-point hourly
+ * sparkline ending at `endTime`. Buckets with no data render as 0 so the
+ * sparkline is visually continuous.
  */
-function matrixToSparkline(result: {
-  status: string;
-  data?: { result: PrometheusMatrixResult[] };
-}): Array<{ value: number }> {
-  if (result.status !== "success" || !result.data?.result?.length) {
-    return [];
+function buildSparkline(
+  rows: Array<{ key: string; value: number }>,
+  endTime: Date,
+): Array<{ value: number }> {
+  // Map bucket-start ISO string → value. Keys arrive as e.g.
+  // "2026-05-01T13:00:00Z" from the time:hour group-by.
+  const byBucket = new Map<number, number>();
+  for (const row of rows) {
+    const ts = new Date(row.key).getTime();
+    if (Number.isFinite(ts)) byBucket.set(ts, row.value);
   }
 
-  // Aggregate all series by timestamp
-  const timeMap = new Map<number, number>();
-
-  for (const series of result.data.result) {
-    for (const [ts, val] of series.values || []) {
-      const value = Number.parseFloat(val) || 0;
-      timeMap.set(ts, (timeMap.get(ts) || 0) + value);
-    }
-  }
-
-  // If no data at all, return empty
-  if (timeMap.size === 0) {
-    return [];
-  }
-
-  // Generate 24 hourly buckets ending at the current hour
-  const now = new Date();
-  const currentHour = Math.floor(now.getTime() / (60 * 60 * 1000)) * (60 * 60 * 1000);
+  const currentHour = Math.floor(endTime.getTime() / ONE_HOUR_MS) * ONE_HOUR_MS;
   const points: Array<{ value: number }> = [];
-
   for (let i = 23; i >= 0; i--) {
-    const bucketTime = currentHour - i * 60 * 60 * 1000;
-    const bucketTs = bucketTime / 1000; // Convert to seconds for Prometheus timestamp
-    // Look for data within this hour bucket (allow some tolerance)
-    let value = 0;
-    for (const [ts, v] of timeMap.entries()) {
-      if (Math.abs(ts - bucketTs) < 1800) { // Within 30 minutes
-        value = v;
-        break;
-      }
-    }
-    points.push({ value });
+    const bucketStart = currentHour - i * ONE_HOUR_MS;
+    points.push({ value: byBucket.get(bucketStart) ?? 0 });
   }
-
   return points;
 }
 
 /**
  * Hook to fetch and cache agent cost data.
  *
- * @param namespace - Agent namespace
+ * @param workspace - Workspace name (was historically called `namespace`;
+ *                    they're equivalent — workspace name doubles as the
+ *                    Kubernetes namespace housing the agent's sessions).
  * @param agentName - Agent name
- * @returns Query result with agent cost data
  */
-export function useAgentCost(namespace: string, agentName: string) {
+export function useAgentCost(workspace: string, agentName: string) {
   return useQuery({
-    queryKey: ["agent-cost", namespace, agentName],
-    queryFn: () => fetchAgentCost(namespace, agentName),
-    refetchInterval: 60000, // Refresh every minute
+    queryKey: ["agent-cost", workspace, agentName],
+    queryFn: () => fetchAgentCost(workspace, agentName),
+    refetchInterval: 60000,
     staleTime: DEFAULT_STALE_TIME,
-    enabled: Boolean(namespace && agentName),
+    enabled: Boolean(workspace && agentName),
   });
 }

@@ -1,267 +1,140 @@
+/**
+ * Tests for useProviderMetrics — session-api flavour.
+ *
+ * Copyright 2026 Altaira Labs.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import React from "react";
+
 import { useProviderMetrics } from "./use-provider-metrics";
 
-// Mock prometheus module
-const mockIsPrometheusAvailable = vi.fn();
-const mockQueryPrometheus = vi.fn();
-const mockQueryPrometheusRange = vi.fn();
-
-vi.mock("@/lib/prometheus", () => ({
-  isPrometheusAvailable: () => mockIsPrometheusAvailable(),
-  queryPrometheus: (...args: unknown[]) => mockQueryPrometheus(...args),
-  queryPrometheusRange: (...args: unknown[]) => mockQueryPrometheusRange(...args),
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: vi.fn(),
 }));
 
-vi.mock("@/lib/prometheus-queries", () => ({
-  LLMQueries: {
-    requestRate: (filter: { provider: string }, interval: string) =>
-      `sum(rate(requests{provider="${filter.provider}"}[${interval}]))`,
-    inputTokenRate: (filter: { provider: string }, interval: string) =>
-      `sum(rate(input_tokens{provider="${filter.provider}"}[${interval}]))`,
-    outputTokenRate: (filter: { provider: string }, interval: string) =>
-      `sum(rate(output_tokens{provider="${filter.provider}"}[${interval}]))`,
-    costIncrease: (filter: { provider: string }, interval: string) =>
-      `sum(increase(cost{provider="${filter.provider}"}[${interval}]))`,
-  },
-  LLM_METRICS: {
-    REQUESTS_TOTAL: "omnia_provider_requests_total",
-    INPUT_TOKENS: "omnia_provider_input_tokens_total",
-    OUTPUT_TOKENS: "omnia_provider_output_tokens_total",
-    COST_USD: "omnia_provider_cost_total",
-  },
-  buildFilter: (filter: { provider: string }) => `provider="${filter.provider}"`,
+vi.mock("@/lib/data/provider-calls-service", () => ({
+  fetchProviderCallsAggregate: vi.fn(),
 }));
 
-function TestWrapper({ children }: { children: React.ReactNode }) {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-        gcTime: 0,
-      },
-    },
+import { useWorkspace } from "@/contexts/workspace-context";
+import { fetchProviderCallsAggregate } from "@/lib/data/provider-calls-service";
+
+const mockedUseWorkspace = vi.mocked(useWorkspace);
+const mockedFetch = vi.mocked(fetchProviderCallsAggregate);
+
+function makeWrapper() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
   });
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  function Wrapper({ children }: { children: React.ReactNode }) {
+    return React.createElement(QueryClientProvider, { client }, children);
+  }
+  return Wrapper;
 }
 
-// Helper to create mock Prometheus range response
-function createRangeResponse(values: Array<[number, string]>) {
+function workspaceCtx(name: string | null) {
   return {
-    status: "success",
-    data: {
-      result: [
-        {
-          metric: { provider: "anthropic" },
-          values,
-        },
-      ],
-    },
-  };
+    currentWorkspace: name ? { name } : null,
+  } as unknown as ReturnType<typeof useWorkspace>;
 }
 
-// Helper to create mock Prometheus instant response
-function createInstantResponse(value: string) {
-  return {
-    status: "success",
-    data: {
-      result: [
-        {
-          metric: { provider: "anthropic" },
-          value: [Date.now() / 1000, value],
-        },
-      ],
-    },
-  };
-}
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 describe("useProviderMetrics", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("should return empty metrics when providerType is undefined", async () => {
+  it("is disabled when no workspace is selected", async () => {
+    mockedUseWorkspace.mockReturnValue(workspaceCtx(null));
     const { result } = renderHook(
-      () => useProviderMetrics("test-provider", undefined),
-      { wrapper: TestWrapper }
+      () => useProviderMetrics("provider-1", "openai"),
+      { wrapper: makeWrapper() },
     );
-
-    // Query should not be enabled
-    expect(result.current.isLoading).toBe(false);
-    expect(result.current.data).toBeUndefined();
+    await waitFor(() => expect(result.current.isFetching).toBe(false));
+    expect(mockedFetch).not.toHaveBeenCalled();
   });
 
-  it("should return empty metrics when Prometheus is unavailable", async () => {
-    mockIsPrometheusAvailable.mockResolvedValue(false);
-
+  it("is disabled when providerType is missing", async () => {
+    mockedUseWorkspace.mockReturnValue(workspaceCtx("test-ws"));
     const { result } = renderHook(
-      () => useProviderMetrics("test-provider", "anthropic"),
-      { wrapper: TestWrapper }
+      () => useProviderMetrics("provider-1", undefined),
+      { wrapper: makeWrapper() },
     );
-
-    await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true);
-    });
-
-    expect(result.current.data?.available).toBe(false);
-    expect(result.current.data?.requestRate).toEqual([]);
-    expect(result.current.data?.totalRequests24h).toBe(0);
+    await waitFor(() => expect(result.current.isFetching).toBe(false));
+    expect(mockedFetch).not.toHaveBeenCalled();
   });
 
-  it("should fetch and process metrics successfully", async () => {
-    mockIsPrometheusAvailable.mockResolvedValue(true);
-
-    const now = Date.now() / 1000;
-    const rangeValues: Array<[number, string]> = [
-      [now - 3600, "10"],
-      [now - 1800, "15"],
-      [now, "20"],
+  it("builds sparklines + 24h totals from 8 parallel aggregate calls", async () => {
+    mockedUseWorkspace.mockReturnValue(workspaceCtx("test-ws"));
+    const seriesRows = [
+      { key: "2026-05-15T10:00:00Z", value: 1, count: 1 },
+      { key: "2026-05-15T11:00:00Z", value: 2, count: 2 },
     ];
-
-    mockQueryPrometheusRange.mockResolvedValue(createRangeResponse(rangeValues));
-    mockQueryPrometheus.mockImplementation((query: string) => {
-      if (query.includes("requests")) {
-        return Promise.resolve(createInstantResponse("100"));
+    // Distinct value per metric so we can tell the series apart.
+    const scaleByMetric: Record<string, number> = {
+      count: 1,
+      sum_input_tokens: 100,
+      sum_output_tokens: 200,
+      sum_cost_usd: 0.01,
+    };
+    const totalByMetric: Record<string, number> = {
+      count: 42,
+      sum_input_tokens: 1000,
+      sum_output_tokens: 2000,
+      sum_cost_usd: 0.55,
+    };
+    mockedFetch.mockImplementation(async ({ groupBy, metric }) => {
+      if (groupBy === "time:hour") {
+        const scale = scaleByMetric[metric] ?? 0;
+        return seriesRows.map((r) => ({ ...r, value: r.value * scale }));
       }
-      if (query.includes("input_tokens")) {
-        return Promise.resolve(createInstantResponse("50000"));
-      }
-      if (query.includes("output_tokens")) {
-        return Promise.resolve(createInstantResponse("25000"));
-      }
-      if (query.includes("cost")) {
-        return Promise.resolve(createInstantResponse("1.50"));
-      }
-      return Promise.resolve(createInstantResponse("0"));
+      // groupBy === "provider" returns the 24h total in a single row.
+      return [{ key: "openai", value: totalByMetric[metric] ?? 0, count: 42 }];
     });
 
     const { result } = renderHook(
-      () => useProviderMetrics("anthropic-provider", "anthropic"),
-      { wrapper: TestWrapper }
+      () => useProviderMetrics("provider-1", "openai"),
+      { wrapper: makeWrapper() },
     );
 
-    await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true);
-    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const data = result.current.data!;
+    expect(data.available).toBe(true);
+    expect(data.requestRate).toHaveLength(2);
+    expect(data.inputTokenRate).toHaveLength(2);
+    expect(data.outputTokenRate).toHaveLength(2);
+    expect(data.costRate).toHaveLength(2);
+    // Last point = current.
+    expect(data.currentRequestRate).toBe(2);
+    expect(data.currentInputTokenRate).toBe(200);
+    expect(data.currentOutputTokenRate).toBe(400);
 
-    expect(result.current.data?.available).toBe(true);
-    expect(result.current.data?.requestRate).toHaveLength(3);
-    expect(result.current.data?.currentRequestRate).toBe(20);
-    expect(result.current.data?.totalRequests24h).toBe(100);
-    expect(result.current.data?.totalTokens24h).toBe(75000); // 50000 + 25000
-    expect(result.current.data?.totalCost24h).toBe(1.5);
+    expect(data.totalRequests24h).toBe(42);
+    expect(data.totalTokens24h).toBe(3000); // 1000 input + 2000 output
+    expect(data.totalCost24h).toBeCloseTo(0.55);
+
+    expect(mockedFetch).toHaveBeenCalledTimes(8);
   });
 
-  it("should handle empty Prometheus responses", async () => {
-    mockIsPrometheusAvailable.mockResolvedValue(true);
-    mockQueryPrometheusRange.mockResolvedValue({
-      status: "success",
-      data: { result: [] },
-    });
-    mockQueryPrometheus.mockResolvedValue({
-      status: "success",
-      data: { result: [] },
-    });
+  it("returns EMPTY_METRICS and warns when aggregate calls reject", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockedUseWorkspace.mockReturnValue(workspaceCtx("test-ws"));
+    mockedFetch.mockRejectedValue(new Error("boom"));
 
     const { result } = renderHook(
-      () => useProviderMetrics("test-provider", "openai"),
-      { wrapper: TestWrapper }
+      () => useProviderMetrics("provider-1", "openai"),
+      { wrapper: makeWrapper() },
     );
 
-    await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true);
-    });
-
-    expect(result.current.data?.available).toBe(true);
-    expect(result.current.data?.requestRate).toEqual([]);
-    expect(result.current.data?.totalRequests24h).toBe(0);
-  });
-
-  it("should handle query errors gracefully", async () => {
-    mockIsPrometheusAvailable.mockResolvedValue(true);
-    mockQueryPrometheusRange.mockRejectedValue(new Error("Query failed"));
-    mockQueryPrometheus.mockRejectedValue(new Error("Query failed"));
-
-    const { result } = renderHook(
-      () => useProviderMetrics("test-provider", "anthropic"),
-      { wrapper: TestWrapper }
-    );
-
-    await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true);
-    });
-
-    // Should return empty metrics on error (caught errors)
-    expect(result.current.data?.available).toBe(true);
-    expect(result.current.data?.requestRate).toEqual([]);
-  });
-
-  it("should handle malformed Prometheus responses", async () => {
-    mockIsPrometheusAvailable.mockResolvedValue(true);
-    mockQueryPrometheusRange.mockResolvedValue({
-      status: "error",
-      data: null,
-    });
-    mockQueryPrometheus.mockResolvedValue({
-      status: "success",
-      data: { result: [{ value: null }] },
-    });
-
-    const { result } = renderHook(
-      () => useProviderMetrics("test-provider", "anthropic"),
-      { wrapper: TestWrapper }
-    );
-
-    await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true);
-    });
-
-    expect(result.current.data?.requestRate).toEqual([]);
-    expect(result.current.data?.totalRequests24h).toBe(0);
-  });
-
-  it("should use correct query key", async () => {
-    mockIsPrometheusAvailable.mockResolvedValue(true);
-    mockQueryPrometheusRange.mockResolvedValue(createRangeResponse([]));
-    mockQueryPrometheus.mockResolvedValue(createInstantResponse("0"));
-
-    const { result } = renderHook(
-      () => useProviderMetrics("my-provider", "ollama"),
-      { wrapper: TestWrapper }
-    );
-
-    await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true);
-    });
-
-    // Verify the queries were made with correct filter
-    expect(mockQueryPrometheus).toHaveBeenCalledWith(
-      expect.stringContaining('provider="ollama"')
-    );
-  });
-
-  it("should convert timestamps correctly in sparkline data", async () => {
-    mockIsPrometheusAvailable.mockResolvedValue(true);
-
-    const timestamp = 1700000000; // Unix timestamp in seconds
-    mockQueryPrometheusRange.mockResolvedValue(
-      createRangeResponse([[timestamp, "42"]])
-    );
-    mockQueryPrometheus.mockResolvedValue(createInstantResponse("0"));
-
-    const { result } = renderHook(
-      () => useProviderMetrics("test-provider", "anthropic"),
-      { wrapper: TestWrapper }
-    );
-
-    await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true);
-    });
-
-    expect(result.current.data?.requestRate[0].timestamp).toEqual(
-      new Date(timestamp * 1000)
-    );
-    expect(result.current.data?.requestRate[0].value).toBe(42);
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const data = result.current.data!;
+    expect(data.available).toBe(false);
+    expect(data.requestRate).toEqual([]);
+    expect(data.totalCost24h).toBe(0);
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });

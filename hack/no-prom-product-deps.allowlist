@@ -9,5 +9,3 @@
 # See: docs/local-backlog/implemented/2026-04-17-observability-split-design.md
 # (proposal); CLAUDE.md → Observability Boundaries (principle).
 
-dashboard/src/hooks/use-agent-cost.ts
-dashboard/src/hooks/use-provider-metrics.ts

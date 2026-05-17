@@ -1,240 +1,109 @@
+/**
+ * Tests for useAgentCost — session-api flavour.
+ *
+ * Copyright 2026 Altaira Labs.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import React from "react";
+
 import { useAgentCost } from "./use-agent-cost";
 
-// Mock prometheus utilities
-const mockQueryPrometheus = vi.fn();
-const mockQueryPrometheusRange = vi.fn();
-const mockIsPrometheusAvailable = vi.fn();
-
-vi.mock("@/lib/prometheus", () => ({
-  queryPrometheus: (...args: unknown[]) => mockQueryPrometheus(...args),
-  queryPrometheusRange: (...args: unknown[]) => mockQueryPrometheusRange(...args),
-  isPrometheusAvailable: () => mockIsPrometheusAvailable(),
+vi.mock("@/lib/data/provider-calls-service", () => ({
+  fetchProviderCallsAggregate: vi.fn(),
 }));
 
-vi.mock("@/lib/prometheus-queries", () => ({
-  LLM_METRICS: {
-    COST_USD: "llm_cost_usd_total",
-    INPUT_TOKENS: "llm_input_tokens_total",
-    OUTPUT_TOKENS: "llm_output_tokens_total",
-    REQUESTS_TOTAL: "llm_requests_total",
-  },
-  LABELS: {
-    AGENT: "agent",
-    NAMESPACE: "namespace",
-  },
-}));
+import { fetchProviderCallsAggregate } from "@/lib/data/provider-calls-service";
 
-function createWrapper() {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-      },
-    },
+const mockedFetch = vi.mocked(fetchProviderCallsAggregate);
+
+function makeWrapper() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
   });
-  return function Wrapper({ children }: { children: React.ReactNode }) {
-    return (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    );
-  };
+  function Wrapper({ children }: { children: React.ReactNode }) {
+    return React.createElement(QueryClientProvider, { client }, children);
+  }
+  return Wrapper;
 }
 
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
 describe("useAgentCost", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockIsPrometheusAvailable.mockResolvedValue(true);
+  it("is disabled when workspace or agent is empty", async () => {
+    const { result } = renderHook(() => useAgentCost("", ""), { wrapper: makeWrapper() });
+    await waitFor(() => expect(result.current.isFetching).toBe(false));
+    expect(mockedFetch).not.toHaveBeenCalled();
   });
 
-  it("returns empty data when Prometheus is not available", async () => {
-    mockIsPrometheusAvailable.mockResolvedValue(false);
+  it("fetches totals + 24h sparkline and shapes them into AgentCostData", async () => {
+    // Build a 12-hour history (12 of the 24 buckets populated).
+    const now = new Date("2026-05-15T12:30:00Z");
+    vi.setSystemTime(now);
+    const currentHour = Math.floor(now.getTime() / (60 * 60 * 1000)) * (60 * 60 * 1000);
+    const sparklineRows = Array.from({ length: 12 }, (_, i) => ({
+      key: new Date(currentHour - (11 - i) * 60 * 60 * 1000).toISOString(),
+      value: 0.01 * (i + 1),
+      count: 1,
+    }));
 
-    const { result } = renderHook(
-      () => useAgentCost("test-namespace", "test-agent"),
-      { wrapper: createWrapper() }
-    );
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(result.current.data?.available).toBe(false);
-    expect(result.current.data?.totalCost).toBe(0);
-  });
-
-  it("fetches cost data from Prometheus", async () => {
-    mockQueryPrometheus
-      .mockResolvedValueOnce({
-        status: "success",
-        data: { result: [{ value: [Date.now() / 1000, "12.50"] }] },
-      })
-      .mockResolvedValueOnce({
-        status: "success",
-        data: { result: [{ value: [Date.now() / 1000, "5000"] }] },
-      })
-      .mockResolvedValueOnce({
-        status: "success",
-        data: { result: [{ value: [Date.now() / 1000, "2500"] }] },
-      })
-      .mockResolvedValueOnce({
-        status: "success",
-        data: { result: [{ value: [Date.now() / 1000, "100"] }] },
-      });
-
-    mockQueryPrometheusRange.mockResolvedValue({
-      status: "success",
-      data: { result: [] },
+    const totalsByMetric: Record<string, number> = {
+      sum_cost_usd: 0.42,
+      sum_input_tokens: 1000,
+      sum_output_tokens: 2000,
+      count: 7,
+    };
+    mockedFetch.mockImplementation(async ({ groupBy, metric }) => {
+      if (groupBy === "time:hour") return sparklineRows;
+      // group=agent collapses to one row.
+      return [{ key: "chatbot", value: totalsByMetric[metric] ?? 0, count: 7 }];
     });
 
     const { result } = renderHook(
-      () => useAgentCost("test-namespace", "test-agent"),
-      { wrapper: createWrapper() }
+      () => useAgentCost("test-ws", "chatbot"),
+      { wrapper: makeWrapper() },
     );
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const data = result.current.data!;
+    expect(data.available).toBe(true);
+    expect(data.totalCost).toBeCloseTo(0.42);
+    expect(data.inputTokens).toBe(1000);
+    expect(data.outputTokens).toBe(2000);
+    expect(data.requests).toBe(7);
 
-    expect(result.current.data?.available).toBe(true);
-    expect(result.current.data?.totalCost).toBe(12.5);
-    expect(result.current.data?.inputTokens).toBe(5000);
-    expect(result.current.data?.outputTokens).toBe(2500);
-    expect(result.current.data?.requests).toBe(100);
+    // Sparkline is always 24 points; first 12 are 0 (unfilled), last 12 are
+    // the populated values (oldest-first inside the populated window).
+    expect(data.timeSeries).toHaveLength(24);
+    expect(data.timeSeries.slice(0, 12).every((p) => p.value === 0)).toBe(true);
+    expect(data.timeSeries[12].value).toBeCloseTo(0.01);
+    expect(data.timeSeries[23].value).toBeCloseTo(0.12);
+
+    // Four totals + one sparkline = five aggregate calls.
+    expect(mockedFetch).toHaveBeenCalledTimes(5);
+    vi.useRealTimers();
   });
 
-  it("handles empty Prometheus results", async () => {
-    mockQueryPrometheus.mockResolvedValue({
-      status: "success",
-      data: { result: [] },
-    });
-
-    mockQueryPrometheusRange.mockResolvedValue({
-      status: "success",
-      data: { result: [] },
-    });
+  it("returns the EMPTY_DATA shape and logs when any aggregate call throws", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockedFetch.mockRejectedValue(new Error("boom"));
 
     const { result } = renderHook(
-      () => useAgentCost("test-namespace", "test-agent"),
-      { wrapper: createWrapper() }
+      () => useAgentCost("test-ws", "chatbot"),
+      { wrapper: makeWrapper() },
     );
-
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    expect(result.current.data?.available).toBe(true);
-    expect(result.current.data?.totalCost).toBe(0);
-    expect(result.current.data?.timeSeries).toEqual([]);
-  });
-
-  it("handles Prometheus query errors gracefully", async () => {
-    mockQueryPrometheus.mockRejectedValue(new Error("Query failed"));
-    mockQueryPrometheusRange.mockRejectedValue(new Error("Query failed"));
-
-    const { result } = renderHook(
-      () => useAgentCost("test-namespace", "test-agent"),
-      { wrapper: createWrapper() }
-    );
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    // Should return empty data on error, not throw
-    expect(result.current.data?.available).toBe(false);
-    expect(result.current.data?.totalCost).toBe(0);
-  });
-
-  it("does not fetch when namespace is empty", async () => {
-    const { result } = renderHook(() => useAgentCost("", "test-agent"), {
-      wrapper: createWrapper(),
-    });
-
-    expect(result.current.fetchStatus).toBe("idle");
-    expect(mockIsPrometheusAvailable).not.toHaveBeenCalled();
-  });
-
-  it("does not fetch when agent name is empty", async () => {
-    const { result } = renderHook(() => useAgentCost("test-namespace", ""), {
-      wrapper: createWrapper(),
-    });
-
-    expect(result.current.fetchStatus).toBe("idle");
-    expect(mockIsPrometheusAvailable).not.toHaveBeenCalled();
-  });
-
-  it("converts time series data to sparkline format", async () => {
-    const now = Date.now() / 1000;
-    const hourInSeconds = 3600;
-
-    mockQueryPrometheus.mockResolvedValue({
-      status: "success",
-      data: { result: [] },
-    });
-
-    mockQueryPrometheusRange.mockResolvedValue({
-      status: "success",
-      data: {
-        result: [
-          {
-            metric: {},
-            values: [
-              [now - hourInSeconds * 2, "1.5"],
-              [now - hourInSeconds, "2.0"],
-              [now, "3.5"],
-            ],
-          },
-        ],
-      },
-    });
-
-    const { result } = renderHook(
-      () => useAgentCost("test-namespace", "test-agent"),
-      { wrapper: createWrapper() }
-    );
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(result.current.data?.timeSeries).toBeDefined();
-    // Should have 24 data points (hourly buckets for 24 hours)
-    expect(result.current.data?.timeSeries.length).toBe(24);
-  });
-
-  it("includes correct query key for caching", async () => {
-    mockQueryPrometheus.mockResolvedValue({
-      status: "success",
-      data: { result: [] },
-    });
-
-    mockQueryPrometheusRange.mockResolvedValue({
-      status: "success",
-      data: { result: [] },
-    });
-
-    const { result } = renderHook(
-      () => useAgentCost("ns-1", "agent-1"),
-      { wrapper: createWrapper() }
-    );
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    // Different namespace/agent should create different query
-    expect(mockIsPrometheusAvailable).toHaveBeenCalled();
-  });
-
-  it("handles malformed Prometheus response", async () => {
-    mockQueryPrometheus.mockResolvedValue({
-      status: "error",
-      data: null,
-    });
-
-    mockQueryPrometheusRange.mockResolvedValue({
-      status: "error",
-      data: null,
-    });
-
-    const { result } = renderHook(
-      () => useAgentCost("test-namespace", "test-agent"),
-      { wrapper: createWrapper() }
-    );
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(result.current.data?.available).toBe(true);
-    expect(result.current.data?.totalCost).toBe(0);
+    const data = result.current.data!;
+    expect(data.available).toBe(false);
+    expect(data.totalCost).toBe(0);
+    expect(data.timeSeries).toEqual([]);
+    expect(errSpy).toHaveBeenCalled();
+    errSpy.mockRestore();
   });
 });
