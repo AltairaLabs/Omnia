@@ -2609,25 +2609,25 @@ var _ = Describe("Provider Controller", func() {
 
 	Context("getExpectedKeysForProvider", func() {
 		It("should return correct keys for Claude", func() {
-			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeClaude)
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleInference, omniav1alpha1.ProviderTypeClaude)
 			Expect(keys).To(ContainElement("ANTHROPIC_API_KEY"))
 			Expect(keys).To(ContainElement("api-key"))
 		})
 
 		It("should return correct keys for OpenAI", func() {
-			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeOpenAI)
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleInference, omniav1alpha1.ProviderTypeOpenAI)
 			Expect(keys).To(ContainElement("OPENAI_API_KEY"))
 			Expect(keys).To(ContainElement("api-key"))
 		})
 
 		It("should return correct keys for Gemini", func() {
-			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeGemini)
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleInference, omniav1alpha1.ProviderTypeGemini)
 			Expect(keys).To(ContainElement("GEMINI_API_KEY"))
 			Expect(keys).To(ContainElement("api-key"))
 		})
 
 		It("should return default keys for unknown provider types", func() {
-			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderType("unknown"))
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleInference, omniav1alpha1.ProviderType("unknown"))
 			Expect(keys).To(ContainElement("api-key"))
 			Expect(keys).To(ContainElement("ANTHROPIC_API_KEY"))
 			Expect(keys).To(ContainElement("OPENAI_API_KEY"))
@@ -2635,17 +2635,17 @@ var _ = Describe("Provider Controller", func() {
 		})
 
 		It("should return default keys for mock provider", func() {
-			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeMock)
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleInference, omniav1alpha1.ProviderTypeMock)
 			Expect(keys).To(ContainElement("api-key"))
 		})
 
 		It("should return default keys for ollama provider", func() {
-			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeOllama)
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleInference, omniav1alpha1.ProviderTypeOllama)
 			Expect(keys).To(ContainElement("api-key"))
 		})
 
 		It("should return correct keys for VoyageAI", func() {
-			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeVoyageAI)
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleEmbedding, omniav1alpha1.ProviderTypeVoyageAI)
 			Expect(keys).To(ContainElement("VOYAGE_API_KEY"))
 			Expect(keys).To(ContainElement("api-key"))
 		})
@@ -2788,6 +2788,112 @@ var _ = Describe("Provider Controller", func() {
 			err := r.validatePlatformCredentialsSecret(ctx, p, auth)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("not found"))
+		})
+	})
+
+	// --- Role-aware behaviour (Phase 1 of #1089) ---------------------------
+
+	Context("provider role helpers", func() {
+		It("defaults to inference when role is unset (back-compat)", func() {
+			p := &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{Type: omniav1alpha1.ProviderTypeClaude},
+			}
+			Expect(providerRole(p)).To(Equal(omniav1alpha1.ProviderRoleInference))
+		})
+
+		It("returns the declared role when set", func() {
+			p := &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					Type: omniav1alpha1.ProviderTypeVoyageAI,
+					Role: omniav1alpha1.ProviderRoleEmbedding,
+				},
+			}
+			Expect(providerRole(p)).To(Equal(omniav1alpha1.ProviderRoleEmbedding))
+		})
+
+		It("returns inference for a nil receiver", func() {
+			Expect(providerRole(nil)).To(Equal(omniav1alpha1.ProviderRoleInference))
+		})
+	})
+
+	Context("role-aware secret key resolution", func() {
+		It("returns voyageai keys for an embedding-role voyageai provider", func() {
+			keys := getExpectedKeysForProvider(
+				omniav1alpha1.ProviderRoleEmbedding,
+				omniav1alpha1.ProviderTypeVoyageAI,
+			)
+			Expect(keys).To(ContainElement("VOYAGE_API_KEY"))
+		})
+
+		It("returns openai keys for any role on an openai provider", func() {
+			for _, role := range []omniav1alpha1.ProviderRole{
+				omniav1alpha1.ProviderRoleInference,
+				omniav1alpha1.ProviderRoleEmbedding,
+				omniav1alpha1.ProviderRoleTTS,
+				omniav1alpha1.ProviderRoleSTT,
+			} {
+				keys := getExpectedKeysForProvider(role, omniav1alpha1.ProviderTypeOpenAI)
+				Expect(keys).To(ContainElement("OPENAI_API_KEY"))
+			}
+		})
+	})
+
+	Context("role-aware health URL", func() {
+		var r *ProviderReconciler
+
+		BeforeEach(func() {
+			r = &ProviderReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		})
+
+		It("skips health probe for TTS-role providers", func() {
+			p := &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					Type: omniav1alpha1.ProviderTypeOpenAI,
+					Role: omniav1alpha1.ProviderRoleTTS,
+					TTS:  &omniav1alpha1.TTSConfig{Voice: "alloy"},
+				},
+			}
+			Expect(r.resolveHealthURL(p)).To(BeEmpty())
+		})
+
+		It("skips health probe for STT-role providers", func() {
+			p := &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					Type: omniav1alpha1.ProviderTypeOpenAI,
+					Role: omniav1alpha1.ProviderRoleSTT,
+					STT:  &omniav1alpha1.STTConfig{Language: "en"},
+				},
+			}
+			Expect(r.resolveHealthURL(p)).To(BeEmpty())
+		})
+
+		It("skips health probe for image-role providers", func() {
+			p := &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					Type: omniav1alpha1.ProviderTypeOpenAI,
+					Role: omniav1alpha1.ProviderRoleImage,
+				},
+			}
+			Expect(r.resolveHealthURL(p)).To(BeEmpty())
+		})
+
+		It("uses the inference health URL for inference-role providers", func() {
+			p := &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					Type: omniav1alpha1.ProviderTypeClaude,
+					Role: omniav1alpha1.ProviderRoleInference,
+				},
+			}
+			Expect(r.resolveHealthURL(p)).To(Equal("https://api.anthropic.com"))
+		})
+
+		It("defaults to inference health URL when role is unset (back-compat)", func() {
+			p := &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					Type: omniav1alpha1.ProviderTypeClaude,
+				},
+			}
+			Expect(r.resolveHealthURL(p)).To(Equal("https://api.anthropic.com"))
 		})
 	})
 })
