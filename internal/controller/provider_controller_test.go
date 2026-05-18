@@ -2609,25 +2609,25 @@ var _ = Describe("Provider Controller", func() {
 
 	Context("getExpectedKeysForProvider", func() {
 		It("should return correct keys for Claude", func() {
-			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleInference, omniav1alpha1.ProviderTypeClaude)
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleLLM, omniav1alpha1.ProviderTypeClaude)
 			Expect(keys).To(ContainElement("ANTHROPIC_API_KEY"))
 			Expect(keys).To(ContainElement("api-key"))
 		})
 
 		It("should return correct keys for OpenAI", func() {
-			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleInference, omniav1alpha1.ProviderTypeOpenAI)
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleLLM, omniav1alpha1.ProviderTypeOpenAI)
 			Expect(keys).To(ContainElement("OPENAI_API_KEY"))
 			Expect(keys).To(ContainElement("api-key"))
 		})
 
 		It("should return correct keys for Gemini", func() {
-			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleInference, omniav1alpha1.ProviderTypeGemini)
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleLLM, omniav1alpha1.ProviderTypeGemini)
 			Expect(keys).To(ContainElement("GEMINI_API_KEY"))
 			Expect(keys).To(ContainElement("api-key"))
 		})
 
 		It("should return default keys for unknown provider types", func() {
-			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleInference, omniav1alpha1.ProviderType("unknown"))
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleLLM, omniav1alpha1.ProviderType("unknown"))
 			Expect(keys).To(ContainElement("api-key"))
 			Expect(keys).To(ContainElement("ANTHROPIC_API_KEY"))
 			Expect(keys).To(ContainElement("OPENAI_API_KEY"))
@@ -2635,12 +2635,12 @@ var _ = Describe("Provider Controller", func() {
 		})
 
 		It("should return default keys for mock provider", func() {
-			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleInference, omniav1alpha1.ProviderTypeMock)
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleLLM, omniav1alpha1.ProviderTypeMock)
 			Expect(keys).To(ContainElement("api-key"))
 		})
 
 		It("should return default keys for ollama provider", func() {
-			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleInference, omniav1alpha1.ProviderTypeOllama)
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderRoleLLM, omniav1alpha1.ProviderTypeOllama)
 			Expect(keys).To(ContainElement("api-key"))
 		})
 
@@ -2798,7 +2798,7 @@ var _ = Describe("Provider Controller", func() {
 			p := &omniav1alpha1.Provider{
 				Spec: omniav1alpha1.ProviderSpec{Type: omniav1alpha1.ProviderTypeClaude},
 			}
-			Expect(providerRole(p)).To(Equal(omniav1alpha1.ProviderRoleInference))
+			Expect(providerRole(p)).To(Equal(omniav1alpha1.ProviderRoleLLM))
 		})
 
 		It("returns the declared role when set", func() {
@@ -2812,7 +2812,7 @@ var _ = Describe("Provider Controller", func() {
 		})
 
 		It("returns inference for a nil receiver", func() {
-			Expect(providerRole(nil)).To(Equal(omniav1alpha1.ProviderRoleInference))
+			Expect(providerRole(nil)).To(Equal(omniav1alpha1.ProviderRoleLLM))
 		})
 	})
 
@@ -2827,7 +2827,7 @@ var _ = Describe("Provider Controller", func() {
 
 		It("returns openai keys for any role on an openai provider", func() {
 			for _, role := range []omniav1alpha1.ProviderRole{
-				omniav1alpha1.ProviderRoleInference,
+				omniav1alpha1.ProviderRoleLLM,
 				omniav1alpha1.ProviderRoleEmbedding,
 				omniav1alpha1.ProviderRoleTTS,
 				omniav1alpha1.ProviderRoleSTT,
@@ -2881,7 +2881,7 @@ var _ = Describe("Provider Controller", func() {
 			p := &omniav1alpha1.Provider{
 				Spec: omniav1alpha1.ProviderSpec{
 					Type: omniav1alpha1.ProviderTypeClaude,
-					Role: omniav1alpha1.ProviderRoleInference,
+					Role: omniav1alpha1.ProviderRoleLLM,
 				},
 			}
 			Expect(r.resolveHealthURL(p)).To(Equal("https://api.anthropic.com"))

@@ -13,15 +13,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestProvider_EffectiveRole_DefaultsToInference(t *testing.T) {
+func TestProvider_EffectiveRole_DefaultsToLLM(t *testing.T) {
 	t.Run("nil receiver", func(t *testing.T) {
 		var p *Provider
-		assert.Equal(t, ProviderRoleInference, p.EffectiveRole())
+		assert.Equal(t, ProviderRoleLLM, p.EffectiveRole())
 	})
 
 	t.Run("empty role", func(t *testing.T) {
 		p := &Provider{Spec: ProviderSpec{Type: ProviderTypeClaude}}
-		assert.Equal(t, ProviderRoleInference, p.EffectiveRole())
+		assert.Equal(t, ProviderRoleLLM, p.EffectiveRole())
 	})
 
 	t.Run("explicit role passes through", func(t *testing.T) {
@@ -36,12 +36,12 @@ func TestRequireProviderRole(t *testing.T) {
 		require.NoError(t, RequireProviderRole(p, ProviderRoleEmbedding))
 	})
 
-	t.Run("empty role on Provider treated as inference", func(t *testing.T) {
+	t.Run("empty role on Provider treated as llm", func(t *testing.T) {
 		p := &Provider{Spec: ProviderSpec{Type: ProviderTypeClaude}}
-		require.NoError(t, RequireProviderRole(p, ProviderRoleInference))
+		require.NoError(t, RequireProviderRole(p, ProviderRoleLLM))
 	})
 
-	t.Run("empty required treated as inference", func(t *testing.T) {
+	t.Run("empty required treated as llm", func(t *testing.T) {
 		p := &Provider{Spec: ProviderSpec{Type: ProviderTypeClaude}}
 		require.NoError(t, RequireProviderRole(p, ""))
 	})
@@ -58,16 +58,16 @@ func TestRequireProviderRole(t *testing.T) {
 		assert.Contains(t, err.Error(), "embedding")
 	})
 
-	t.Run("inference-default mismatch (caller wants embedding)", func(t *testing.T) {
-		p := &Provider{Spec: ProviderSpec{Type: ProviderTypeClaude}} // role defaults to inference
+	t.Run("llm-default mismatch (caller wants embedding)", func(t *testing.T) {
+		p := &Provider{Spec: ProviderSpec{Type: ProviderTypeClaude}} // role defaults to llm
 		err := RequireProviderRole(p, ProviderRoleEmbedding)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "inference")
+		assert.Contains(t, err.Error(), "llm")
 		assert.Contains(t, err.Error(), "embedding")
 	})
 
 	t.Run("nil provider", func(t *testing.T) {
-		err := RequireProviderRole(nil, ProviderRoleInference)
+		err := RequireProviderRole(nil, ProviderRoleLLM)
 		require.Error(t, err)
 	})
 }

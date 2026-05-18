@@ -71,6 +71,9 @@ func TestType_RequiresCredentials(t *testing.T) {
 		{"mock", TypeMock, false},
 		{"vllm", TypeVLLM, false},
 		{"voyageai", TypeVoyageAI, true},
+		{"cartesia", TypeCartesia, true},
+		{"elevenlabs", TypeElevenLabs, true},
+		{"imagen", TypeImagen, true},
 	}
 
 	for _, tt := range tests {
@@ -82,7 +85,10 @@ func TestType_RequiresCredentials(t *testing.T) {
 
 func TestValidTypes_Complete(t *testing.T) {
 	// Ensure ValidTypes contains all defined constants
-	expected := []Type{TypeClaude, TypeOpenAI, TypeGemini, TypeOllama, TypeMock, TypeVLLM, TypeVoyageAI}
+	expected := []Type{
+		TypeClaude, TypeOpenAI, TypeGemini, TypeOllama, TypeMock, TypeVLLM,
+		TypeVoyageAI, TypeCartesia, TypeElevenLabs, TypeImagen,
+	}
 	assert.ElementsMatch(t, expected, ValidTypes)
 }
 

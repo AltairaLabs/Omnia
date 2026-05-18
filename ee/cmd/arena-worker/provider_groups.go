@@ -220,7 +220,7 @@ func resolveProviderRefEntry(
 		return nil, fmt.Errorf("group %q: failed to get provider %s: %w", groupName, ref.Name, err)
 	}
 
-	if err := v1alpha1.RequireProviderRole(provider, v1alpha1.ProviderRoleInference); err != nil {
+	if err := v1alpha1.RequireProviderRole(provider, v1alpha1.ProviderRoleLLM); err != nil {
 		return nil, fmt.Errorf("group %q: %w", groupName, err)
 	}
 

@@ -1141,7 +1141,7 @@ describe("ProviderDialog", () => {
   });
 
   describe("role wizard (Phase 3)", () => {
-    it("defaults role to 'inference' for new providers and includes role in spec", async () => {
+    it("defaults role to 'llm' for new providers and includes role in spec", async () => {
       vi.useRealTimers();
       const user = userEvent.setup();
 
@@ -1160,11 +1160,11 @@ describe("ProviderDialog", () => {
       });
       expect(mockCreateProvider.mock.calls[0][1]).toMatchObject({
         type: "claude",
-        role: "inference",
+        role: "llm",
       });
     });
 
-    it("treats a pre-role Provider (no spec.role) as inference in edit mode", () => {
+    it("treats a pre-role Provider (no spec.role) as llm in edit mode", () => {
       const provider = createMockProvider({
         spec: { type: "claude", model: "claude-sonnet-4-20250514" },
       });
@@ -1176,8 +1176,8 @@ describe("ProviderDialog", () => {
       );
 
       // Role select is rendered as a combobox by Radix; the trigger shows the
-      // currently selected label. With no spec.role we expect "Inference".
-      expect(screen.getByLabelText("Role")).toHaveTextContent(/inference/i);
+      // currently selected label. With no spec.role we expect "LLM".
+      expect(screen.getByLabelText("Role")).toHaveTextContent(/llm/i);
     });
 
     it("narrows the vendor list when switching to TTS role and snaps to a valid vendor", async () => {
@@ -1292,7 +1292,7 @@ describe("ProviderDialog", () => {
       // The Role select is disabled in edit mode — clicking it must not open
       // the option list.
       await user.click(screen.getByLabelText("Role"));
-      expect(screen.queryByRole("option", { name: /inference/i })).toBeNull();
+      expect(screen.queryByRole("option", { name: /^llm/i })).toBeNull();
 
       // Submit should pass through the existing tts block.
       fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
@@ -1393,7 +1393,7 @@ describe("ProviderDialog", () => {
       });
     });
 
-    it("forbids voyageai under the inference role (vendor filtered out)", async () => {
+    it("forbids voyageai under the llm role (vendor filtered out)", async () => {
       vi.useRealTimers();
       const user = userEvent.setup();
 
@@ -1403,8 +1403,8 @@ describe("ProviderDialog", () => {
         </TestWrapper>
       );
 
-      // Default role is inference. voyageai is embedding-only per the CRD's
-      // CEL matrix and must not appear in the Provider Type list.
+      // Default role is llm. voyageai is embedding-only per the CRD's CEL
+      // matrix and must not appear in the Provider Type list.
       await user.click(screen.getByLabelText("Provider Type"));
       expect(screen.queryByRole("option", { name: /voyage/i })).toBeNull();
     });

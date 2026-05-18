@@ -257,11 +257,11 @@ func (r *AgentRuntimeReconciler) fetchAndValidateProvider(
 
 // providerRoleMismatch returns an empty string when the Provider's role
 // matches the ref's required role, or a user-facing message describing the
-// mismatch otherwise. Treats an empty role on either side as `inference`
-// for back-compat with pre-role Providers and AgentRuntimes.
+// mismatch otherwise. Treats an empty role on either side as `llm` for
+// back-compat with pre-role Providers and AgentRuntimes.
 func providerRoleMismatch(provider *omniav1alpha1.Provider, required omniav1alpha1.ProviderRole) string {
 	if required == "" {
-		required = omniav1alpha1.ProviderRoleInference
+		required = omniav1alpha1.ProviderRoleLLM
 	}
 	if provider.EffectiveRole() == required {
 		return ""

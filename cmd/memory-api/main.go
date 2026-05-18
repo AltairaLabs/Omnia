@@ -49,10 +49,12 @@ import (
 	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
 	// Side-effect imports register each provider's embedding factory with
 	// pkproviders.CreateEmbeddingProviderFromSpec — keeps this file out of
-	// the per-provider option-builder business.
+	// the per-provider option-builder business. Vendors must match the
+	// (embedding × vendor) row in api/v1alpha1.ProviderSpec CEL.
 	_ "github.com/AltairaLabs/PromptKit/runtime/providers/gemini"
 	_ "github.com/AltairaLabs/PromptKit/runtime/providers/ollama"
 	_ "github.com/AltairaLabs/PromptKit/runtime/providers/openai"
+	_ "github.com/AltairaLabs/PromptKit/runtime/providers/voyageai"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"

@@ -70,8 +70,8 @@ function makeProvider(name: string, role: Provider["spec"]["role"] | undefined, 
 }
 
 const PROVIDERS: Provider[] = [
-  makeProvider("inf-1", "inference"),
-  makeProvider("inf-2", "inference"),
+  makeProvider("inf-1", "llm"),
+  makeProvider("inf-2", "llm"),
   makeProvider("embed-1", "embedding"),
   makeProvider("tts-1", "tts"),
   makeProvider("legacy-no-role", undefined), // pre-role: should count as inference
@@ -96,14 +96,14 @@ describe("ProvidersPage role filter chips", () => {
     render(<ProvidersPage />);
   }
 
-  it("renders one chip per role with correct counts (pre-role counts as inference)", async () => {
+  it("renders one chip per role with correct counts (pre-role counts as llm)", async () => {
     await renderPage();
 
     const group = screen.getByRole("group", { name: /filter by role/i });
     // All providers across roles.
     expect(within(group).getByRole("button", { name: /all roles \(5\)/i })).toBeInTheDocument();
-    // Two explicit inference + one legacy (no spec.role) = 3.
-    expect(within(group).getByRole("button", { name: /inference \(3\)/i })).toBeInTheDocument();
+    // Two explicit llm + one legacy (no spec.role) = 3.
+    expect(within(group).getByRole("button", { name: /llm \(3\)/i })).toBeInTheDocument();
     expect(within(group).getByRole("button", { name: /embedding \(1\)/i })).toBeInTheDocument();
     expect(within(group).getByRole("button", { name: /tts \(1\)/i })).toBeInTheDocument();
     expect(within(group).getByRole("button", { name: /stt \(0\)/i })).toBeInTheDocument();
@@ -135,13 +135,13 @@ describe("ProvidersPage role filter chips", () => {
     // Each card renders a "Role" label and the effective role beneath it.
     expect(screen.getAllByText("Role").length).toBe(PROVIDERS.length);
     // Filter to just the legacy (pre-role) provider and verify its card shows
-    // "inference" (the effective default).
+    // "llm" (the effective default).
     const group = screen.getByRole("group", { name: /filter by role/i });
-    fireEvent.click(within(group).getByRole("button", { name: /inference/i }));
+    fireEvent.click(within(group).getByRole("button", { name: /llm/i }));
 
-    // 3 inference cards remain (inf-1, inf-2, legacy-no-role).
+    // 3 llm cards remain (inf-1, inf-2, legacy-no-role).
     expect(screen.getByText("legacy-no-role")).toBeInTheDocument();
-    // The card body labels each role; one card per inference provider.
-    expect(screen.getAllByText(/inference/i).length).toBeGreaterThanOrEqual(3);
+    // The card body labels each role; one card per llm provider.
+    expect(screen.getAllByText(/llm/i).length).toBeGreaterThanOrEqual(3);
   });
 });

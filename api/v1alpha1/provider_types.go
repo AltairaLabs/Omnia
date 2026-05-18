@@ -24,26 +24,29 @@ import (
 
 // ProviderRole describes what kind of provider this is — the closed enum
 // that selects which factory registry the provider plugs into. Mirrors
-// PromptKit's Provider.Role enum.
+// PromptKit's pkg/config.Role enum.
 //
-//	inference  — chat / completion LLMs (default; existing behaviour)
+//	llm        — chat / completion LLMs (default; existing behaviour)
 //	embedding  — vector embedding models
 //	tts        — text-to-speech
 //	stt        — speech-to-text
-//	image      — image generation
+//	image      — image generation (declarable; no Omnia consumer yet)
 //
 // Distinct from `spec.capabilities` (free-form feature tags like "vision"
 // or "streaming") — role is the kind of provider, capabilities are the
 // features it supports within that role.
 //
-// +kubebuilder:validation:Enum=inference;embedding;tts;stt;image
+// "inference" is intentionally NOT a value here so we can reuse that name
+// later for a more generic role (e.g. Hugging Face Inference Endpoints).
+//
+// +kubebuilder:validation:Enum=llm;embedding;tts;stt;image
 type ProviderRole string
 
 const (
-	// ProviderRoleInference is the role for chat / completion LLM providers.
+	// ProviderRoleLLM is the role for chat / completion LLM providers.
 	// This is the back-compat default — Providers without an explicit role
-	// are treated as inference.
-	ProviderRoleInference ProviderRole = "inference"
+	// are treated as llm.
+	ProviderRoleLLM ProviderRole = "llm"
 	// ProviderRoleEmbedding is the role for vector embedding providers.
 	ProviderRoleEmbedding ProviderRole = "embedding"
 	// ProviderRoleTTS is the role for text-to-speech providers.
@@ -51,7 +54,8 @@ const (
 	// ProviderRoleSTT is the role for speech-to-text providers.
 	ProviderRoleSTT ProviderRole = "stt"
 	// ProviderRoleImage is the role for image-generation providers. Accepted
-	// by the CRD but no consumer wires it through yet; reserved for future work.
+	// by the CRD but no Omnia consumer wires it through yet; reserved for
+	// future work.
 	ProviderRoleImage ProviderRole = "image"
 )
 
@@ -266,19 +270,35 @@ type AuthConfig struct {
 
 // ProviderSpec defines the desired state of Provider.
 //
-// Role-block + (role × type) validations:
+// Role-block + (role × type) validations. The vendor list per role mirrors
+// the PromptKit factory registrations that Omnia binaries link in:
+//   - llm:        claude | openai | gemini | ollama | mock | vllm
+//   - embedding:  openai | voyageai | gemini | ollama
+//   - tts:        openai | cartesia | elevenlabs
+//   - stt:        openai
+//   - image:      imagen
+//
+// Vendors that are exclusive to a single role (voyageai → embedding,
+// cartesia/elevenlabs → tts, imagen → image) are pinned to that role so
+// CEL fails closed instead of letting an authoring mistake reach the
+// factory layer.
+//
 // +kubebuilder:validation:XValidation:rule="(has(self.tts) ? 1 : 0) + (has(self.stt) ? 1 : 0) + (has(self.embedding) ? 1 : 0) <= 1",message="at most one of spec.tts, spec.stt, spec.embedding may be set"
 // +kubebuilder:validation:XValidation:rule="!has(self.tts) || self.role == 'tts'",message="spec.tts is only valid when spec.role is 'tts'"
 // +kubebuilder:validation:XValidation:rule="!has(self.stt) || self.role == 'stt'",message="spec.stt is only valid when spec.role is 'stt'"
 // +kubebuilder:validation:XValidation:rule="!has(self.embedding) || self.role == 'embedding'",message="spec.embedding is only valid when spec.role is 'embedding'"
-// +kubebuilder:validation:XValidation:rule="self.role != 'embedding' || self.type in ['openai', 'voyageai', 'gemini', 'ollama', 'mock']",message="role 'embedding' requires type in [openai, voyageai, gemini, ollama, mock]"
-// +kubebuilder:validation:XValidation:rule="self.role != 'tts' || self.type in ['openai', 'mock']",message="role 'tts' requires type in [openai, mock] (additional vendors land as PromptKit adds them)"
-// +kubebuilder:validation:XValidation:rule="self.role != 'stt' || self.type in ['openai', 'mock']",message="role 'stt' requires type in [openai, mock] (additional vendors land as PromptKit adds them)"
-// +kubebuilder:validation:XValidation:rule="self.role != 'image' || self.type in ['openai', 'gemini', 'mock']",message="role 'image' requires type in [openai, gemini, mock]"
-// +kubebuilder:validation:XValidation:rule="self.role != 'inference' || self.type != 'voyageai'",message="voyageai is an embedding-only vendor; set spec.role to 'embedding'"
+// +kubebuilder:validation:XValidation:rule="self.role != 'llm' || self.type in ['claude', 'openai', 'gemini', 'ollama', 'mock', 'vllm']",message="role 'llm' requires type in [claude, openai, gemini, ollama, mock, vllm]"
+// +kubebuilder:validation:XValidation:rule="self.role != 'embedding' || self.type in ['openai', 'voyageai', 'gemini', 'ollama']",message="role 'embedding' requires type in [openai, voyageai, gemini, ollama]"
+// +kubebuilder:validation:XValidation:rule="self.role != 'tts' || self.type in ['openai', 'cartesia', 'elevenlabs']",message="role 'tts' requires type in [openai, cartesia, elevenlabs]"
+// +kubebuilder:validation:XValidation:rule="self.role != 'stt' || self.type in ['openai']",message="role 'stt' requires type in [openai]"
+// +kubebuilder:validation:XValidation:rule="self.role != 'image' || self.type in ['imagen']",message="role 'image' requires type in [imagen]"
+// +kubebuilder:validation:XValidation:rule="self.type != 'voyageai' || self.role == 'embedding'",message="voyageai is an embedding-only vendor; set spec.role to 'embedding'"
+// +kubebuilder:validation:XValidation:rule="self.type != 'cartesia' || self.role == 'tts'",message="cartesia is a tts-only vendor; set spec.role to 'tts'"
+// +kubebuilder:validation:XValidation:rule="self.type != 'elevenlabs' || self.role == 'tts'",message="elevenlabs is a tts-only vendor; set spec.role to 'tts'"
+// +kubebuilder:validation:XValidation:rule="self.type != 'imagen' || self.role == 'image'",message="imagen is an image-only vendor; set spec.role to 'image'"
 //
-// Hyperscaler-platform validations (apply only when spec.role is 'inference'):
-// +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.role == 'inference'",message="spec.platform is only valid when spec.role is 'inference'"
+// Hyperscaler-platform validations (apply only when spec.role is 'llm'):
+// +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.role == 'llm'",message="spec.platform is only valid when spec.role is 'llm'"
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || (self.type in ['claude', 'openai', 'gemini'])",message="platform is only valid for provider types claude, openai, or gemini"
 // +kubebuilder:validation:XValidation:rule="has(self.platform) == has(self.auth)",message="spec.platform and spec.auth must be set together"
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'bedrock' || self.auth.type in ['workloadIdentity', 'accessKey']",message="platform.type bedrock requires auth.type of workloadIdentity or accessKey"
@@ -294,10 +314,10 @@ type ProviderSpec struct {
 	Type ProviderType `json:"type"`
 
 	// role declares which kind of provider this is — selects the factory
-	// registry the provider plugs into. Defaults to 'inference' for
-	// back-compat; existing Providers continue to work without YAML changes.
+	// registry the provider plugs into. Defaults to 'llm' for back-compat;
+	// existing Providers continue to work without YAML changes.
 	// +optional
-	// +kubebuilder:default=inference
+	// +kubebuilder:default=llm
 	Role ProviderRole `json:"role,omitempty"`
 
 	// tts is the TTS-role config block. Required when spec.role is 'tts';
@@ -429,18 +449,18 @@ type Provider struct {
 }
 
 // EffectiveRole returns the Provider's declared role, defaulting to
-// ProviderRoleInference when unset for back-compat with pre-role Providers.
-// Safe to call on a nil receiver (returns inference).
+// ProviderRoleLLM when unset for back-compat with pre-role Providers.
+// Safe to call on a nil receiver (returns llm).
 func (p *Provider) EffectiveRole() ProviderRole {
 	if p == nil || p.Spec.Role == "" {
-		return ProviderRoleInference
+		return ProviderRoleLLM
 	}
 	return p.Spec.Role
 }
 
 // RequireProviderRole asserts that the Provider's role matches the required
-// role. Pre-role Providers default to ProviderRoleInference. Returns nil on
-// match, a user-facing error on mismatch. Consumers (memory-api, arena-worker,
+// role. Pre-role Providers default to ProviderRoleLLM. Returns nil on match,
+// a user-facing error on mismatch. Consumers (memory-api, arena-worker,
 // eval-worker) call this before constructing a PromptKit provider to surface
 // a clear error instead of a downstream factory complaint.
 func RequireProviderRole(provider *Provider, required ProviderRole) error {
@@ -448,7 +468,7 @@ func RequireProviderRole(provider *Provider, required ProviderRole) error {
 		return fmt.Errorf("provider is nil")
 	}
 	if required == "" {
-		required = ProviderRoleInference
+		required = ProviderRoleLLM
 	}
 	if actual := provider.EffectiveRole(); actual != required {
 		return fmt.Errorf("provider %q has role %q but %q is required",

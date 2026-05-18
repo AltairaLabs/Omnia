@@ -46,9 +46,15 @@ const (
 	// TypeVLLM uses a vLLM-served OpenAI-compatible endpoint.
 	// Requires baseURL. Auth is typically via custom headers.
 	TypeVLLM Type = "vllm"
-	// TypeVoyageAI uses Voyage AI embedding models.
+	// TypeVoyageAI uses Voyage AI embedding models. Embedding-role only.
 	// Requires an API key (VOYAGE_API_KEY).
 	TypeVoyageAI Type = "voyageai"
+	// TypeCartesia uses Cartesia TTS. TTS-role only.
+	TypeCartesia Type = "cartesia"
+	// TypeElevenLabs uses ElevenLabs TTS. TTS-role only.
+	TypeElevenLabs Type = "elevenlabs"
+	// TypeImagen uses Google's Imagen image generation. Image-role only.
+	TypeImagen Type = "imagen"
 )
 
 // ValidTypes contains all valid provider types.
@@ -61,6 +67,9 @@ var ValidTypes = []Type{
 	TypeMock,
 	TypeVLLM,
 	TypeVoyageAI,
+	TypeCartesia,
+	TypeElevenLabs,
+	TypeImagen,
 }
 
 // IsValid returns true if the provider type is valid.
