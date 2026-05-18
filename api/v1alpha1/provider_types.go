@@ -20,6 +20,101 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// ProviderRole describes what kind of provider this is — the closed enum
+// that selects which factory registry the provider plugs into. Mirrors
+// PromptKit's Provider.Role enum.
+//
+//	inference  — chat / completion LLMs (default; existing behaviour)
+//	embedding  — vector embedding models
+//	tts        — text-to-speech
+//	stt        — speech-to-text
+//	image      — image generation
+//
+// Distinct from `spec.capabilities` (free-form feature tags like "vision"
+// or "streaming") — role is the kind of provider, capabilities are the
+// features it supports within that role.
+//
+// +kubebuilder:validation:Enum=inference;embedding;tts;stt;image
+type ProviderRole string
+
+const (
+	// ProviderRoleInference is the role for chat / completion LLM providers.
+	// This is the back-compat default — Providers without an explicit role
+	// are treated as inference.
+	ProviderRoleInference ProviderRole = "inference"
+	// ProviderRoleEmbedding is the role for vector embedding providers.
+	ProviderRoleEmbedding ProviderRole = "embedding"
+	// ProviderRoleTTS is the role for text-to-speech providers.
+	ProviderRoleTTS ProviderRole = "tts"
+	// ProviderRoleSTT is the role for speech-to-text providers.
+	ProviderRoleSTT ProviderRole = "stt"
+	// ProviderRoleImage is the role for image-generation providers. Accepted
+	// by the CRD but no consumer wires it through yet; reserved for future work.
+	ProviderRoleImage ProviderRole = "image"
+)
+
+// TTSConfig configures a TTS-role Provider. Required when spec.role is
+// "tts"; forbidden otherwise (CEL-gated on ProviderSpec).
+type TTSConfig struct {
+	// voice is the vendor's voice identifier (e.g. "alloy" / "echo" for
+	// OpenAI; an ElevenLabs voice UUID; a Cartesia voice handle).
+	// +optional
+	Voice string `json:"voice,omitempty"`
+
+	// sampleRate is the output audio sample rate in Hz.
+	// +optional
+	// +kubebuilder:validation:Minimum=8000
+	// +kubebuilder:validation:Maximum=48000
+	SampleRate int32 `json:"sampleRate,omitempty"`
+
+	// audioFiles lists fixture audio files for mock TTS providers.
+	// Ignored for non-mock providers.
+	// +optional
+	AudioFiles []string `json:"audioFiles,omitempty"`
+
+	// format is the desired output audio container (e.g. "pcm", "mp3",
+	// "opus"). Provider-specific; not all providers honour it.
+	// +optional
+	// +kubebuilder:validation:Enum=pcm;mp3;opus;wav;flac
+	Format string `json:"format,omitempty"`
+}
+
+// STTConfig configures an STT-role Provider. Required when spec.role is
+// "stt"; forbidden otherwise (CEL-gated on ProviderSpec).
+type STTConfig struct {
+	// sampleRate is the input audio sample rate in Hz the provider should
+	// expect.
+	// +optional
+	// +kubebuilder:validation:Minimum=8000
+	// +kubebuilder:validation:Maximum=48000
+	SampleRate int32 `json:"sampleRate,omitempty"`
+
+	// language is the ISO-639-1 language code for transcription
+	// (e.g. "en", "fr", "de"). Empty means provider auto-detects.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[a-z]{2}(-[A-Z]{2})?$`
+	Language string `json:"language,omitempty"`
+}
+
+// EmbeddingConfig configures an embedding-role Provider. Required when
+// spec.role is "embedding"; forbidden otherwise (CEL-gated on ProviderSpec).
+type EmbeddingConfig struct {
+	// dimensions is the embedding vector size the provider should emit.
+	// Some providers (OpenAI text-embedding-3) support trimming; others
+	// emit a fixed size and ignore this.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=4096
+	Dimensions int32 `json:"dimensions,omitempty"`
+
+	// distance is the distance metric the vector store should use with
+	// these embeddings (cosine, l2, dot). Advisory — consumers may
+	// override.
+	// +optional
+	// +kubebuilder:validation:Enum=cosine;l2;dot
+	Distance string `json:"distance,omitempty"`
+}
+
 // ProviderCapability defines a capability that a provider supports.
 // +kubebuilder:validation:Enum=text;streaming;vision;tools;json;audio;video;documents;duplex
 type ProviderCapability string
@@ -168,6 +263,20 @@ type AuthConfig struct {
 }
 
 // ProviderSpec defines the desired state of Provider.
+//
+// Role-block + (role × type) validations:
+// +kubebuilder:validation:XValidation:rule="(has(self.tts) ? 1 : 0) + (has(self.stt) ? 1 : 0) + (has(self.embedding) ? 1 : 0) <= 1",message="at most one of spec.tts, spec.stt, spec.embedding may be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.tts) || self.role == 'tts'",message="spec.tts is only valid when spec.role is 'tts'"
+// +kubebuilder:validation:XValidation:rule="!has(self.stt) || self.role == 'stt'",message="spec.stt is only valid when spec.role is 'stt'"
+// +kubebuilder:validation:XValidation:rule="!has(self.embedding) || self.role == 'embedding'",message="spec.embedding is only valid when spec.role is 'embedding'"
+// +kubebuilder:validation:XValidation:rule="self.role != 'embedding' || self.type in ['openai', 'voyageai', 'gemini', 'ollama', 'mock']",message="role 'embedding' requires type in [openai, voyageai, gemini, ollama, mock]"
+// +kubebuilder:validation:XValidation:rule="self.role != 'tts' || self.type in ['openai', 'mock']",message="role 'tts' requires type in [openai, mock] (additional vendors land as PromptKit adds them)"
+// +kubebuilder:validation:XValidation:rule="self.role != 'stt' || self.type in ['openai', 'mock']",message="role 'stt' requires type in [openai, mock] (additional vendors land as PromptKit adds them)"
+// +kubebuilder:validation:XValidation:rule="self.role != 'image' || self.type in ['openai', 'gemini', 'mock']",message="role 'image' requires type in [openai, gemini, mock]"
+// +kubebuilder:validation:XValidation:rule="self.role != 'inference' || self.type != 'voyageai'",message="voyageai is an embedding-only vendor; set spec.role to 'embedding'"
+//
+// Hyperscaler-platform validations (apply only when spec.role is 'inference'):
+// +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.role == 'inference'",message="spec.platform is only valid when spec.role is 'inference'"
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || (self.type in ['claude', 'openai', 'gemini'])",message="platform is only valid for provider types claude, openai, or gemini"
 // +kubebuilder:validation:XValidation:rule="has(self.platform) == has(self.auth)",message="spec.platform and spec.auth must be set together"
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'bedrock' || self.auth.type in ['workloadIdentity', 'accessKey']",message="platform.type bedrock requires auth.type of workloadIdentity or accessKey"
@@ -178,9 +287,31 @@ type AuthConfig struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'bedrock' || self.type != 'gemini'",message="gemini on bedrock is not supported: AWS Bedrock does not host Gemini"
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'azure' || self.type != 'gemini'",message="gemini on azure is not supported: Azure AI Foundry does not host Gemini"
 type ProviderSpec struct {
-	// type specifies the provider wire protocol.
+	// type specifies the provider wire protocol / vendor.
 	// +kubebuilder:validation:Required
 	Type ProviderType `json:"type"`
+
+	// role declares which kind of provider this is — selects the factory
+	// registry the provider plugs into. Defaults to 'inference' for
+	// back-compat; existing Providers continue to work without YAML changes.
+	// +optional
+	// +kubebuilder:default=inference
+	Role ProviderRole `json:"role,omitempty"`
+
+	// tts is the TTS-role config block. Required when spec.role is 'tts';
+	// forbidden otherwise (CEL-gated).
+	// +optional
+	TTS *TTSConfig `json:"tts,omitempty"`
+
+	// stt is the STT-role config block. Required when spec.role is 'stt';
+	// forbidden otherwise (CEL-gated).
+	// +optional
+	STT *STTConfig `json:"stt,omitempty"`
+
+	// embedding is the embedding-role config block. Required when spec.role
+	// is 'embedding'; forbidden otherwise (CEL-gated).
+	// +optional
+	Embedding *EmbeddingConfig `json:"embedding,omitempty"`
 
 	// model specifies the model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4o").
 	// If not specified, the provider's default model is used.

@@ -276,7 +276,7 @@ func (r *ProviderReconciler) validateCredentialSecretRef(ctx context.Context, pr
 
 	// Locate the credential value within the secret. Either the explicit key
 	// (when ref.Key is set) or the first matching provider-default key.
-	credValue, foundKey, err := extractCredentialFromSecret(secret, ref, provider.Spec.Type)
+	credValue, foundKey, err := extractCredentialFromSecret(secret, ref, providerRole(provider), provider.Spec.Type)
 	if err != nil {
 		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
 			"SecretKeyMissing", err.Error())
@@ -320,7 +320,7 @@ func (r *ProviderReconciler) validateCredentialSecretRef(ctx context.Context, pr
 // extractCredentialFromSecret returns the credential value bytes from the
 // secret, the key it was found under, or an error suitable for use as a
 // SecretKeyMissing condition message.
-func extractCredentialFromSecret(secret *corev1.Secret, ref *omniav1alpha1.SecretKeyRef, providerType omniav1alpha1.ProviderType) ([]byte, string, error) {
+func extractCredentialFromSecret(secret *corev1.Secret, ref *omniav1alpha1.SecretKeyRef, role omniav1alpha1.ProviderRole, providerType omniav1alpha1.ProviderType) ([]byte, string, error) {
 	if ref.Key != nil {
 		expectedKey := *ref.Key
 		v, exists := secret.Data[expectedKey]
@@ -329,7 +329,7 @@ func extractCredentialFromSecret(secret *corev1.Secret, ref *omniav1alpha1.Secre
 		}
 		return v, expectedKey, nil
 	}
-	expectedKeys := getExpectedKeysForProvider(providerType)
+	expectedKeys := getExpectedKeysForProvider(role, providerType)
 	for _, k := range expectedKeys {
 		if v, exists := secret.Data[k]; exists {
 			return v, k, nil
@@ -572,6 +572,11 @@ func expectedPlatformSecretKeys(platform omniav1alpha1.PlatformType, auth omniav
 // providerRequiresCredentials returns whether the given provider requires an
 // API-key credential. Providers hosted on a platform (bedrock/vertex/azure) use
 // the platform auth instead of an API key, so credentials are not required.
+//
+// Some role × type combinations don't need credentials regardless of role
+// (mock, self-hosted ollama, self-hosted vllm). Role currently doesn't
+// flip credential requirements on its own — every cloud-hosted vendor needs
+// an API key for any role they implement.
 func providerRequiresCredentials(provider *omniav1alpha1.Provider) bool {
 	if isPlatformHosted(provider) {
 		return false
@@ -584,6 +589,15 @@ func providerRequiresCredentials(provider *omniav1alpha1.Provider) bool {
 	}
 }
 
+// providerRole returns the provider's declared role, defaulting to
+// ProviderRoleInference when unset for back-compat with pre-role Providers.
+func providerRole(provider *omniav1alpha1.Provider) omniav1alpha1.ProviderRole {
+	if provider == nil || provider.Spec.Role == "" {
+		return omniav1alpha1.ProviderRoleInference
+	}
+	return provider.Spec.Role
+}
+
 // emitWarningEvent emits a Kubernetes warning event if a Recorder is available.
 func (r *ProviderReconciler) emitWarningEvent(provider *omniav1alpha1.Provider, reason, message string) {
 	if r.Recorder != nil {
@@ -591,8 +605,15 @@ func (r *ProviderReconciler) emitWarningEvent(provider *omniav1alpha1.Provider, 
 	}
 }
 
-// getExpectedKeysForProvider returns the expected secret keys for a provider type.
-func getExpectedKeysForProvider(providerType omniav1alpha1.ProviderType) []string {
+// getExpectedKeysForProvider returns the expected secret keys for a
+// (role, type) pair. Most vendors use the same API key across roles
+// (e.g. OPENAI_API_KEY is good for inference, embedding, TTS, and STT);
+// the role parameter is wired in now for future vendors that ship
+// role-specific credentials.
+//
+//nolint:revive,unparam // role parameter is forward-looking (see comment); kept for symmetry with providerRequiresCredentials.
+func getExpectedKeysForProvider(role omniav1alpha1.ProviderRole, providerType omniav1alpha1.ProviderType) []string {
+	_ = role
 	switch providerType {
 	case omniav1alpha1.ProviderTypeClaude:
 		return []string{"ANTHROPIC_API_KEY", "CLAUDE_API_KEY", secretKeyAPIKey}
@@ -642,14 +663,28 @@ var defaultProviderEndpoints = map[omniav1alpha1.ProviderType]string{
 
 // resolveHealthURL returns the URL to health-check for this provider.
 // Returns empty string if no health check is applicable (mock, platform-hosted
-// providers that use SDK auth rather than a reachable HTTP URL, or providers
-// without a known base URL like voyageai).
+// providers that use SDK auth rather than a reachable HTTP URL, providers
+// without a known base URL like voyageai, or roles for which there's no
+// standard health endpoint).
+//
+// Role-awareness: TTS/STT vendors don't expose a standard liveness probe
+// distinct from their synthesis/transcription endpoints, and probing those
+// would consume quota; we skip the probe for these roles and rely on the
+// CredentialValid + RoleAcceptedByPromptKit conditions instead.
 func (r *ProviderReconciler) resolveHealthURL(provider *omniav1alpha1.Provider) string {
 	if provider.Spec.Type == omniav1alpha1.ProviderTypeMock {
 		return ""
 	}
 	// Platform-hosted providers authenticate via cloud SDK, not a reachable HTTP URL.
 	if isPlatformHosted(provider) {
+		return ""
+	}
+	// TTS / STT / image: no standardised health endpoint and the synthesis
+	// endpoints cost real money to call. Skip the HTTP probe.
+	role := providerRole(provider)
+	if role == omniav1alpha1.ProviderRoleTTS ||
+		role == omniav1alpha1.ProviderRoleSTT ||
+		role == omniav1alpha1.ProviderRoleImage {
 		return ""
 	}
 

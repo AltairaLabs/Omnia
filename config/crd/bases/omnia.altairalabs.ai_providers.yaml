@@ -231,6 +231,31 @@ spec:
                     - custom
                     type: string
                 type: object
+              embedding:
+                description: |-
+                  embedding is the embedding-role config block. Required when spec.role
+                  is 'embedding'; forbidden otherwise (CEL-gated).
+                properties:
+                  dimensions:
+                    description: |-
+                      dimensions is the embedding vector size the provider should emit.
+                      Some providers (OpenAI text-embedding-3) support trimming; others
+                      emit a fixed size and ignore this.
+                    format: int32
+                    maximum: 4096
+                    minimum: 1
+                    type: integer
+                  distance:
+                    description: |-
+                      distance is the distance metric the vector store should use with
+                      these embeddings (cosine, l2, dot). Advisory — consumers may
+                      override.
+                    enum:
+                    - cosine
+                    - l2
+                    - dot
+                    type: string
+                type: object
               headers:
                 additionalProperties:
                   type: string
@@ -307,8 +332,76 @@ spec:
                       (e.g., "0.015").
                     type: string
                 type: object
+              role:
+                default: inference
+                description: |-
+                  role declares which kind of provider this is — selects the factory
+                  registry the provider plugs into. Defaults to 'inference' for
+                  back-compat; existing Providers continue to work without YAML changes.
+                enum:
+                - inference
+                - embedding
+                - tts
+                - stt
+                - image
+                type: string
+              stt:
+                description: |-
+                  stt is the STT-role config block. Required when spec.role is 'stt';
+                  forbidden otherwise (CEL-gated).
+                properties:
+                  language:
+                    description: |-
+                      language is the ISO-639-1 language code for transcription
+                      (e.g. "en", "fr", "de"). Empty means provider auto-detects.
+                    pattern: ^[a-z]{2}(-[A-Z]{2})?$
+                    type: string
+                  sampleRate:
+                    description: |-
+                      sampleRate is the input audio sample rate in Hz the provider should
+                      expect.
+                    format: int32
+                    maximum: 48000
+                    minimum: 8000
+                    type: integer
+                type: object
+              tts:
+                description: |-
+                  tts is the TTS-role config block. Required when spec.role is 'tts';
+                  forbidden otherwise (CEL-gated).
+                properties:
+                  audioFiles:
+                    description: |-
+                      audioFiles lists fixture audio files for mock TTS providers.
+                      Ignored for non-mock providers.
+                    items:
+                      type: string
+                    type: array
+                  format:
+                    description: |-
+                      format is the desired output audio container (e.g. "pcm", "mp3",
+                      "opus"). Provider-specific; not all providers honour it.
+                    enum:
+                    - pcm
+                    - mp3
+                    - opus
+                    - wav
+                    - flac
+                    type: string
+                  sampleRate:
+                    description: sampleRate is the output audio sample rate in Hz.
+                    format: int32
+                    maximum: 48000
+                    minimum: 8000
+                    type: integer
+                  voice:
+                    description: |-
+                      voice is the vendor's voice identifier (e.g. "alloy" / "echo" for
+                      OpenAI; an ElevenLabs voice UUID; a Cartesia voice handle).
+                    type: string
+                type: object
               type:
-                description: type specifies the provider wire protocol.
+                description: type specifies the provider wire protocol / vendor.
                 enum:
                 - claude
                 - openai
@@ -322,6 +415,31 @@ spec:
             - type
             type: object
             x-kubernetes-validations:
+            - message: at most one of spec.tts, spec.stt, spec.embedding may be set
+              rule: '(has(self.tts) ? 1 : 0) + (has(self.stt) ? 1 : 0) + (has(self.embedding)
+                ? 1 : 0) <= 1'
+            - message: spec.tts is only valid when spec.role is 'tts'
+              rule: '!has(self.tts) || self.role == ''tts'''
+            - message: spec.stt is only valid when spec.role is 'stt'
+              rule: '!has(self.stt) || self.role == ''stt'''
+            - message: spec.embedding is only valid when spec.role is 'embedding'
+              rule: '!has(self.embedding) || self.role == ''embedding'''
+            - message: role 'embedding' requires type in [openai, voyageai, gemini,
+                ollama, mock]
+              rule: self.role != 'embedding' || self.type in ['openai', 'voyageai',
+                'gemini', 'ollama', 'mock']
+            - message: role 'tts' requires type in [openai, mock] (additional vendors
+                land as PromptKit adds them)
+              rule: self.role != 'tts' || self.type in ['openai', 'mock']
+            - message: role 'stt' requires type in [openai, mock] (additional vendors
+                land as PromptKit adds them)
+              rule: self.role != 'stt' || self.type in ['openai', 'mock']
+            - message: role 'image' requires type in [openai, gemini, mock]
+              rule: self.role != 'image' || self.type in ['openai', 'gemini', 'mock']
+            - message: voyageai is an embedding-only vendor; set spec.role to 'embedding'
+              rule: self.role != 'inference' || self.type != 'voyageai'
+            - message: spec.platform is only valid when spec.role is 'inference'
+              rule: '!has(self.platform) || self.role == ''inference'''
             - message: platform is only valid for provider types claude, openai, or
                 gemini
               rule: '!has(self.platform) || (self.type in [''claude'', ''openai'',

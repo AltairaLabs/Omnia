@@ -95,6 +95,18 @@ export interface ProviderSpec {
      * - custom: Delegate to custom runtime implementation */
     truncationStrategy?: "sliding" | "summarize" | "custom";
   };
+  /** embedding is the embedding-role config block. Required when spec.role
+   * is 'embedding'; forbidden otherwise (CEL-gated). */
+  embedding?: {
+    /** dimensions is the embedding vector size the provider should emit.
+     * Some providers (OpenAI text-embedding-3) support trimming; others
+     * emit a fixed size and ignore this. */
+    dimensions?: number;
+    /** distance is the distance metric the vector store should use with
+     * these embeddings (cosine, l2, dot). Advisory — consumers may
+     * override. */
+    distance?: "cosine" | "l2" | "dot";
+  };
   /** headers contains custom HTTP headers to include on every provider request.
    * Useful for gateway providers such as OpenRouter that require custom
    * attribution headers, or for tenant routing in shared vLLM deployments.
@@ -138,7 +150,36 @@ export interface ProviderSpec {
     /** outputCostPer1K is the cost per 1000 output tokens (e.g., "0.015"). */
     outputCostPer1K?: string;
   };
-  /** type specifies the provider wire protocol. */
+  /** role declares which kind of provider this is — selects the factory
+   * registry the provider plugs into. Defaults to 'inference' for
+   * back-compat; existing Providers continue to work without YAML changes. */
+  role?: "inference" | "embedding" | "tts" | "stt" | "image";
+  /** stt is the STT-role config block. Required when spec.role is 'stt';
+   * forbidden otherwise (CEL-gated). */
+  stt?: {
+    /** language is the ISO-639-1 language code for transcription
+     * (e.g. "en", "fr", "de"). Empty means provider auto-detects. */
+    language?: string;
+    /** sampleRate is the input audio sample rate in Hz the provider should
+     * expect. */
+    sampleRate?: number;
+  };
+  /** tts is the TTS-role config block. Required when spec.role is 'tts';
+   * forbidden otherwise (CEL-gated). */
+  tts?: {
+    /** audioFiles lists fixture audio files for mock TTS providers.
+     * Ignored for non-mock providers. */
+    audioFiles?: string[];
+    /** format is the desired output audio container (e.g. "pcm", "mp3",
+     * "opus"). Provider-specific; not all providers honour it. */
+    format?: "pcm" | "mp3" | "opus" | "wav" | "flac";
+    /** sampleRate is the output audio sample rate in Hz. */
+    sampleRate?: number;
+    /** voice is the vendor's voice identifier (e.g. "alloy" / "echo" for
+     * OpenAI; an ElevenLabs voice UUID; a Cartesia voice handle). */
+    voice?: string;
+  };
+  /** type specifies the provider wire protocol / vendor. */
   type: "claude" | "openai" | "gemini" | "ollama" | "mock" | "vllm" | "voyageai";
 }
 
