@@ -4402,6 +4402,14 @@ export interface AgentRuntimeSpec {
      * this binding. If the provider does not advertise all listed capabilities,
      * the AgentRuntime enters a Pending phase with a descriptive condition. */
     requiredCapabilities?: ("text" | "streaming" | "vision" | "tools" | "json" | "audio" | "video" | "documents" | "duplex")[];
+    /** role declares the role the AgentRuntime expects the referenced
+     * Provider to fulfil. The controller asserts at reconcile time that
+     * the referenced Provider's `spec.role` matches; mismatch puts the
+     * AgentRuntime in Phase=Error with ProvidersReady=False.
+     * 
+     * Defaults to 'inference' for back-compat with existing AgentRuntimes
+     * (which were authored before per-ref roles existed). */
+    role?: "inference" | "embedding" | "tts" | "stt" | "image";
   }[];
   /** rollout configures a progressive delivery rollout for this AgentRuntime.
    * When nil, no rollout is active and all traffic goes to the current spec. */
@@ -4430,6 +4438,14 @@ export interface AgentRuntimeSpec {
          * this binding. If the provider does not advertise all listed capabilities,
          * the AgentRuntime enters a Pending phase with a descriptive condition. */
         requiredCapabilities?: ("text" | "streaming" | "vision" | "tools" | "json" | "audio" | "video" | "documents" | "duplex")[];
+        /** role declares the role the AgentRuntime expects the referenced
+         * Provider to fulfil. The controller asserts at reconcile time that
+         * the referenced Provider's `spec.role` matches; mismatch puts the
+         * AgentRuntime in Phase=Error with ProvidersReady=False.
+         * 
+         * Defaults to 'inference' for back-compat with existing AgentRuntimes
+         * (which were authored before per-ref roles existed). */
+        role?: "inference" | "embedding" | "tts" | "stt" | "image";
       }[];
       /** toolRegistryRef overrides the tool registry for the candidate. */
       toolRegistryRef?: {

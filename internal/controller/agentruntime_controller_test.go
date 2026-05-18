@@ -2889,6 +2889,111 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
 		})
 
+		It("should put runtime in Failed phase when provider role mismatches ref role", func() {
+			By("creating an embedding-role Provider")
+			provider := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "embed-provider",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:      omniav1alpha1.ProviderTypeVoyageAI,
+					Role:      omniav1alpha1.ProviderRoleEmbedding,
+					Model:     "voyage-2",
+					Embedding: &omniav1alpha1.EmbeddingConfig{Dimensions: 1024},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+			provider.Status.Phase = omniav1alpha1.ProviderPhaseReady
+			Expect(k8sClient.Status().Update(ctx, provider)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, provider) }()
+
+			By("creating an AgentRuntime that references it as role=inference")
+			ref := omniav1alpha1.ProviderRef{Name: "embed-provider"}
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "role-mismatch-runtime",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
+					Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+					Providers: []omniav1alpha1.NamedProviderRef{
+						{Name: "default", ProviderRef: ref, Role: omniav1alpha1.ProviderRoleInference},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, agentRuntime) }()
+
+			By("calling fetchAndValidateProvider")
+			log := logf.FromContext(ctx)
+			_, result, err := reconciler.fetchAndValidateProvider(ctx, log, agentRuntime, agentRuntime.Spec.Providers[0])
+
+			By("verifying it requeues with RoleMismatch and parks runtime in Failed")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+			Expect(agentRuntime.Status.Phase).To(Equal(omniav1alpha1.AgentRuntimePhaseFailed))
+
+			condition := meta.FindStatusCondition(agentRuntime.Status.Conditions, ConditionTypeProviderReady)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(condition.Reason).To(Equal("RoleMismatch"))
+			Expect(condition.Message).To(ContainSubstring("embedding"))
+			Expect(condition.Message).To(ContainSubstring("inference"))
+		})
+
+		It("should accept a provider where role matches ref role (embedding)", func() {
+			By("creating an embedding-role Provider")
+			provider := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "embed-provider-match",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:      omniav1alpha1.ProviderTypeVoyageAI,
+					Role:      omniav1alpha1.ProviderRoleEmbedding,
+					Model:     "voyage-2",
+					Embedding: &omniav1alpha1.EmbeddingConfig{Dimensions: 1024},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+			provider.Status.Phase = omniav1alpha1.ProviderPhaseReady
+			Expect(k8sClient.Status().Update(ctx, provider)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, provider) }()
+
+			By("creating an AgentRuntime that references it as role=embedding")
+			ref := omniav1alpha1.ProviderRef{Name: "embed-provider-match"}
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "role-match-runtime",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
+					Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+					Providers: []omniav1alpha1.NamedProviderRef{
+						{Name: "embed", ProviderRef: ref, Role: omniav1alpha1.ProviderRoleEmbedding},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, agentRuntime) }()
+
+			By("calling fetchAndValidateProvider")
+			log := logf.FromContext(ctx)
+			fetched, result, err := reconciler.fetchAndValidateProvider(ctx, log, agentRuntime, agentRuntime.Spec.Providers[0])
+
+			By("verifying it succeeds")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+			Expect(fetched).NotTo(BeNil())
+
+			condition := meta.FindStatusCondition(agentRuntime.Status.Conditions, ConditionTypeProviderReady)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+		})
+
 	})
 
 	Context("When using spec.providers list", func() {

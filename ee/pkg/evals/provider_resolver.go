@@ -162,6 +162,16 @@ func (r *ProviderResolver) resolveOne(
 		return providers.ProviderSpec{}, fmt.Errorf("get Provider CRD: %w", err)
 	}
 
+	// Eval judges are inference providers; refuse anything else early
+	// rather than letting the PromptKit factory fail with a less clear error.
+	required := np.Role
+	if required == "" {
+		required = v1alpha1.ProviderRoleInference
+	}
+	if err := v1alpha1.RequireProviderRole(provider, required); err != nil {
+		return providers.ProviderSpec{}, err
+	}
+
 	spec := providers.ProviderSpec{
 		ID:      np.Name,
 		Type:    string(provider.Spec.Type),

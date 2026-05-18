@@ -946,6 +946,14 @@ func createEmbeddingService(ctx context.Context, providerName string, store *mem
 		return nil
 	}
 
+	// Require role=embedding. Pre-role Providers default to inference
+	// (and rejecting them here gives a clearer error than the downstream
+	// PromptKit factory complaint).
+	if err := omniav1alpha1.RequireProviderRole(&provider, omniav1alpha1.ProviderRoleEmbedding); err != nil {
+		log.Error(err, "embedding service skipped", "provider", providerName)
+		return nil
+	}
+
 	embeddingProvider, err := createEmbeddingProviderFromCRD(ctx, k8sClient, &provider, ns, log)
 	if err != nil {
 		log.Error(err, "failed to create embedding provider", "name", providerName, "type", provider.Spec.Type)

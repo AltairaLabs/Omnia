@@ -591,11 +591,9 @@ func providerRequiresCredentials(provider *omniav1alpha1.Provider) bool {
 
 // providerRole returns the provider's declared role, defaulting to
 // ProviderRoleInference when unset for back-compat with pre-role Providers.
+// Thin wrapper over Provider.EffectiveRole() so existing call sites stay concise.
 func providerRole(provider *omniav1alpha1.Provider) omniav1alpha1.ProviderRole {
-	if provider == nil || provider.Spec.Role == "" {
-		return omniav1alpha1.ProviderRoleInference
-	}
-	return provider.Spec.Role
+	return provider.EffectiveRole()
 }
 
 // emitWarningEvent emits a Kubernetes warning event if a Recorder is available.

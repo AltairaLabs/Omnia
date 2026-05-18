@@ -375,6 +375,17 @@ type NamedProviderRef struct {
 	// +kubebuilder:validation:Required
 	ProviderRef ProviderRef `json:"providerRef"`
 
+	// role declares the role the AgentRuntime expects the referenced
+	// Provider to fulfil. The controller asserts at reconcile time that
+	// the referenced Provider's `spec.role` matches; mismatch puts the
+	// AgentRuntime in Phase=Error with ProvidersReady=False.
+	//
+	// Defaults to 'inference' for back-compat with existing AgentRuntimes
+	// (which were authored before per-ref roles existed).
+	// +optional
+	// +kubebuilder:default=inference
+	Role ProviderRole `json:"role,omitempty"`
+
 	// requiredCapabilities lists capabilities the provider must support for
 	// this binding. If the provider does not advertise all listed capabilities,
 	// the AgentRuntime enters a Pending phase with a descriptive condition.

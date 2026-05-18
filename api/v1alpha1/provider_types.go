@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"fmt"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -424,6 +426,35 @@ type Provider struct {
 	// status defines the observed state of Provider
 	// +optional
 	Status ProviderStatus `json:"status,omitzero"`
+}
+
+// EffectiveRole returns the Provider's declared role, defaulting to
+// ProviderRoleInference when unset for back-compat with pre-role Providers.
+// Safe to call on a nil receiver (returns inference).
+func (p *Provider) EffectiveRole() ProviderRole {
+	if p == nil || p.Spec.Role == "" {
+		return ProviderRoleInference
+	}
+	return p.Spec.Role
+}
+
+// RequireProviderRole asserts that the Provider's role matches the required
+// role. Pre-role Providers default to ProviderRoleInference. Returns nil on
+// match, a user-facing error on mismatch. Consumers (memory-api, arena-worker,
+// eval-worker) call this before constructing a PromptKit provider to surface
+// a clear error instead of a downstream factory complaint.
+func RequireProviderRole(provider *Provider, required ProviderRole) error {
+	if provider == nil {
+		return fmt.Errorf("provider is nil")
+	}
+	if required == "" {
+		required = ProviderRoleInference
+	}
+	if actual := provider.EffectiveRole(); actual != required {
+		return fmt.Errorf("provider %q has role %q but %q is required",
+			provider.Name, actual, required)
+	}
+	return nil
 }
 
 // +kubebuilder:object:root=true

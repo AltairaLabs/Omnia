@@ -201,8 +201,15 @@ func resolveEntry(
 	return nil, nil, nil
 }
 
-// resolveProviderRefEntry resolves a single Provider CRD and adds it to LoadedProviders.
-// Returns parsed pricing if the provider has spec.pricing configured.
+// resolveProviderRefEntry resolves a single Provider CRD and adds it to
+// LoadedProviders (Arena's inference-provider map). Returns parsed pricing
+// if the provider has spec.pricing configured.
+//
+// LoadedProviders is the inference-only registry; TTS/STT/embedding
+// providers would route through separate Arena config blocks that
+// don't exist yet. Until those land, refuse any non-inference Provider
+// at the resolution boundary so the failure mode is a clear error rather
+// than a confusing PromptKit factory complaint downstream.
 func resolveProviderRefEntry(
 	rc *resolveContext,
 	ref v1alpha1.ProviderRef,
@@ -211,6 +218,10 @@ func resolveProviderRefEntry(
 	provider, err := k8s.GetProvider(rc.ctx, rc.c, ref, rc.namespace)
 	if err != nil {
 		return nil, fmt.Errorf("group %q: failed to get provider %s: %w", groupName, ref.Name, err)
+	}
+
+	if err := v1alpha1.RequireProviderRole(provider, v1alpha1.ProviderRoleInference); err != nil {
+		return nil, fmt.Errorf("group %q: %w", groupName, err)
 	}
 
 	providerID := sanitizeID(provider.Name)
