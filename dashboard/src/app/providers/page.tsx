@@ -37,6 +37,23 @@ type ProviderPhase = "Pending" | "Ready" | "Error" | "Failed";
 
 type ViewMode = "cards" | "table";
 type FilterPhase = "all" | ProviderPhase;
+type ProviderRole = NonNullable<Provider["spec"]["role"]>;
+type FilterRole = "all" | ProviderRole;
+
+const ROLE_FILTERS: { value: FilterRole; label: string }[] = [
+  { value: "all", label: "All roles" },
+  { value: "inference", label: "Inference" },
+  { value: "embedding", label: "Embedding" },
+  { value: "tts", label: "TTS" },
+  { value: "stt", label: "STT" },
+  { value: "image", label: "Image" },
+];
+
+// Pre-role Providers omit spec.role — treat them as inference for filtering
+// and display so the migration is backwards-compatible.
+function effectiveRole(provider: Provider): ProviderRole {
+  return provider.spec?.role ?? "inference";
+}
 
 /** Color mapping for provider types */
 const providerColorMap: Record<string, string> = {
@@ -89,6 +106,10 @@ function ProviderCard({ provider }: Readonly<{ provider: ProviderWithSource }>) 
           {/* Stats Grid */}
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
+              <p className="text-muted-foreground">Role</p>
+              <p className="font-medium capitalize">{effectiveRole(provider)}</p>
+            </div>
+            <div>
               <p className="text-muted-foreground">Type</p>
               <p className="font-medium capitalize">{spec?.type || "-"}</p>
             </div>
@@ -135,6 +156,7 @@ function ProviderTable({ providers }: Readonly<{ providers: ProviderWithSource[]
           <TableRow>
             <TableHead>Name</TableHead>
             <TableHead>Namespace</TableHead>
+            <TableHead>Role</TableHead>
             <TableHead>Type</TableHead>
             <TableHead>Model</TableHead>
             <TableHead>Base URL</TableHead>
@@ -158,6 +180,11 @@ function ProviderTable({ providers }: Readonly<{ providers: ProviderWithSource[]
               </TableCell>
               <TableCell className="text-muted-foreground">
                 {provider.metadata?.namespace}
+              </TableCell>
+              <TableCell>
+                <Badge variant="outline" className="capitalize">
+                  {effectiveRole(provider)}
+                </Badge>
               </TableCell>
               <TableCell>
                 <div className="flex items-center gap-2">
@@ -203,6 +230,7 @@ function renderLoadingSkeleton(viewMode: ViewMode) {
 export default function ProvidersPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [filterPhase, setFilterPhase] = useState<FilterPhase>("all");
+  const [filterRole, setFilterRole] = useState<FilterRole>("all");
   const [selectedNamespaces, setSelectedNamespaces] = useState<string[]>([]);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
@@ -245,18 +273,23 @@ export default function ProvidersPage() {
     return providers.filter((p) => p.metadata?.namespace && selectedNamespaces.includes(p.metadata.namespace));
   }, [providers, selectedNamespaces]);
 
-  // Filter by phase and sort alphabetically by name
+  // Filter by role first, then phase, then sort.
+  const roleFilteredProviders = useMemo(() => {
+    if (filterRole === "all") return namespaceFilteredProviders;
+    return namespaceFilteredProviders.filter((p) => effectiveRole(p) === filterRole);
+  }, [namespaceFilteredProviders, filterRole]);
+
   const filteredProviders = useMemo(() => {
     const filtered = filterPhase === "all"
-      ? namespaceFilteredProviders
-      : namespaceFilteredProviders.filter((p) => p.status?.phase === filterPhase);
+      ? roleFilteredProviders
+      : roleFilteredProviders.filter((p) => p.status?.phase === filterPhase);
     // Sort alphabetically by name for stable ordering
     return [...filtered].sort((a, b) =>
       (a.metadata?.name || "").localeCompare(b.metadata?.name || "")
     );
-  }, [namespaceFilteredProviders, filterPhase]);
+  }, [roleFilteredProviders, filterPhase]);
 
-  const phaseCounts = namespaceFilteredProviders.reduce(
+  const phaseCounts = roleFilteredProviders.reduce(
     (acc, provider) => {
       const phase = provider.status?.phase;
       if (phase === "Ready") acc.ready++;
@@ -265,6 +298,23 @@ export default function ProvidersPage() {
     },
     { ready: 0, error: 0 }
   );
+
+  // Count providers per role within the current namespace selection so the
+  // chip badges reflect what filtering each role would produce.
+  const roleCounts = useMemo(() => {
+    const counts: Record<FilterRole, number> = {
+      all: namespaceFilteredProviders.length,
+      inference: 0,
+      embedding: 0,
+      tts: 0,
+      stt: 0,
+      image: 0,
+    };
+    for (const p of namespaceFilteredProviders) {
+      counts[effectiveRole(p)]++;
+    }
+    return counts;
+  }, [namespaceFilteredProviders]);
 
   return (
     <div className="flex flex-col h-full">
@@ -276,14 +326,14 @@ export default function ProvidersPage() {
       <div className="flex-1 p-6 space-y-6">
         {/* Toolbar */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <Tabs
               value={filterPhase}
               onValueChange={(v) => setFilterPhase(v as FilterPhase)}
             >
               <TabsList>
                 <TabsTrigger value="all">
-                  All ({namespaceFilteredProviders.length})
+                  All ({roleFilteredProviders.length})
                 </TabsTrigger>
                 <TabsTrigger value="Ready">
                   Ready ({phaseCounts?.ready ?? 0})
@@ -298,6 +348,20 @@ export default function ProvidersPage() {
               selectedNamespaces={selectedNamespaces}
               onSelectionChange={handleNamespaceChange}
             />
+            <div className="flex items-center gap-1" role="group" aria-label="Filter by role">
+              {ROLE_FILTERS.map((opt) => (
+                <Button
+                  key={opt.value}
+                  type="button"
+                  size="sm"
+                  variant={filterRole === opt.value ? "default" : "outline"}
+                  onClick={() => setFilterRole(opt.value)}
+                  aria-pressed={filterRole === opt.value}
+                >
+                  {opt.label} ({roleCounts[opt.value]})
+                </Button>
+              ))}
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
