@@ -229,6 +229,17 @@ func (r *AgentRuntimeReconciler) fetchAndValidateProvider(
 		}
 		return nil, ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
+	if mismatch := providerRoleMismatch(provider, np.Role); mismatch != "" {
+		SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeProviderReady, metav1.ConditionFalse,
+			"RoleMismatch", mismatch)
+		// Role mismatch is a configuration error — won't self-resolve
+		// until the spec changes. Park the runtime in Failed phase.
+		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhaseFailed
+		if statusErr := r.Status().Update(ctx, agentRuntime); statusErr != nil {
+			log.Error(statusErr, logMsgFailedToUpdateStatus)
+		}
+		return nil, ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
 	if missing := missingCapabilities(provider, np.RequiredCapabilities); len(missing) > 0 {
 		msg := fmt.Sprintf("Provider %s missing required capabilities: %v", provider.Name, missing)
 		SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeProviderReady, metav1.ConditionFalse,
@@ -242,6 +253,21 @@ func (r *AgentRuntimeReconciler) fetchAndValidateProvider(
 	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeProviderReady, metav1.ConditionTrue,
 		"ProviderFound", "Provider resource found and ready")
 	return provider, ctrl.Result{}, nil
+}
+
+// providerRoleMismatch returns an empty string when the Provider's role
+// matches the ref's required role, or a user-facing message describing the
+// mismatch otherwise. Treats an empty role on either side as `inference`
+// for back-compat with pre-role Providers and AgentRuntimes.
+func providerRoleMismatch(provider *omniav1alpha1.Provider, required omniav1alpha1.ProviderRole) string {
+	if required == "" {
+		required = omniav1alpha1.ProviderRoleInference
+	}
+	if provider.EffectiveRole() == required {
+		return ""
+	}
+	return fmt.Sprintf("Provider %s has role %q but ref requires role %q",
+		provider.Name, provider.EffectiveRole(), required)
 }
 
 // missingCapabilities returns the required capabilities not present in the
