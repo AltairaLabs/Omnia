@@ -42,17 +42,17 @@ type FilterRole = "all" | ProviderRole;
 
 const ROLE_FILTERS: { value: FilterRole; label: string }[] = [
   { value: "all", label: "All roles" },
-  { value: "inference", label: "Inference" },
+  { value: "llm", label: "LLM" },
   { value: "embedding", label: "Embedding" },
   { value: "tts", label: "TTS" },
   { value: "stt", label: "STT" },
   { value: "image", label: "Image" },
 ];
 
-// Pre-role Providers omit spec.role — treat them as inference for filtering
-// and display so the migration is backwards-compatible.
+// Pre-role Providers omit spec.role — treat them as llm for filtering and
+// display so the migration is backwards-compatible.
 function effectiveRole(provider: Provider): ProviderRole {
-  return provider.spec?.role ?? "inference";
+  return provider.spec?.role ?? "llm";
 }
 
 /** Color mapping for provider types */
@@ -304,7 +304,7 @@ export default function ProvidersPage() {
   const roleCounts = useMemo(() => {
     const counts: Record<FilterRole, number> = {
       all: namespaceFilteredProviders.length,
-      inference: 0,
+      llm: 0,
       embedding: 0,
       tts: 0,
       stt: 0,

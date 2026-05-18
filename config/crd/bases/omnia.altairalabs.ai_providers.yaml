@@ -333,13 +333,13 @@ spec:
                     type: string
                 type: object
               role:
-                default: inference
+                default: llm
                 description: |-
                   role declares which kind of provider this is — selects the factory
-                  registry the provider plugs into. Defaults to 'inference' for
-                  back-compat; existing Providers continue to work without YAML changes.
+                  registry the provider plugs into. Defaults to 'llm' for back-compat;
+                  existing Providers continue to work without YAML changes.
                 enum:
-                - inference
+                - llm
                 - embedding
                 - tts
                 - stt
@@ -410,6 +410,9 @@ spec:
                 - mock
                 - vllm
                 - voyageai
+                - cartesia
+                - elevenlabs
+                - imagen
                 type: string
             required:
             - type
@@ -424,22 +427,30 @@ spec:
               rule: '!has(self.stt) || self.role == ''stt'''
             - message: spec.embedding is only valid when spec.role is 'embedding'
               rule: '!has(self.embedding) || self.role == ''embedding'''
+            - message: role 'llm' requires type in [claude, openai, gemini, ollama,
+                mock, vllm]
+              rule: self.role != 'llm' || self.type in ['claude', 'openai', 'gemini',
+                'ollama', 'mock', 'vllm']
             - message: role 'embedding' requires type in [openai, voyageai, gemini,
-                ollama, mock]
+                ollama]
               rule: self.role != 'embedding' || self.type in ['openai', 'voyageai',
-                'gemini', 'ollama', 'mock']
-            - message: role 'tts' requires type in [openai, mock] (additional vendors
-                land as PromptKit adds them)
-              rule: self.role != 'tts' || self.type in ['openai', 'mock']
-            - message: role 'stt' requires type in [openai, mock] (additional vendors
-                land as PromptKit adds them)
-              rule: self.role != 'stt' || self.type in ['openai', 'mock']
-            - message: role 'image' requires type in [openai, gemini, mock]
-              rule: self.role != 'image' || self.type in ['openai', 'gemini', 'mock']
+                'gemini', 'ollama']
+            - message: role 'tts' requires type in [openai, cartesia, elevenlabs]
+              rule: self.role != 'tts' || self.type in ['openai', 'cartesia', 'elevenlabs']
+            - message: role 'stt' requires type in [openai]
+              rule: self.role != 'stt' || self.type in ['openai']
+            - message: role 'image' requires type in [imagen]
+              rule: self.role != 'image' || self.type in ['imagen']
             - message: voyageai is an embedding-only vendor; set spec.role to 'embedding'
-              rule: self.role != 'inference' || self.type != 'voyageai'
-            - message: spec.platform is only valid when spec.role is 'inference'
-              rule: '!has(self.platform) || self.role == ''inference'''
+              rule: self.type != 'voyageai' || self.role == 'embedding'
+            - message: cartesia is a tts-only vendor; set spec.role to 'tts'
+              rule: self.type != 'cartesia' || self.role == 'tts'
+            - message: elevenlabs is a tts-only vendor; set spec.role to 'tts'
+              rule: self.type != 'elevenlabs' || self.role == 'tts'
+            - message: imagen is an image-only vendor; set spec.role to 'image'
+              rule: self.type != 'imagen' || self.role == 'image'
+            - message: spec.platform is only valid when spec.role is 'llm'
+              rule: '!has(self.platform) || self.role == ''llm'''
             - message: platform is only valid for provider types claude, openai, or
                 gemini
               rule: '!has(self.platform) || (self.type in [''claude'', ''openai'',

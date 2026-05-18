@@ -151,9 +151,9 @@ export interface ProviderSpec {
     outputCostPer1K?: string;
   };
   /** role declares which kind of provider this is — selects the factory
-   * registry the provider plugs into. Defaults to 'inference' for
-   * back-compat; existing Providers continue to work without YAML changes. */
-  role?: "inference" | "embedding" | "tts" | "stt" | "image";
+   * registry the provider plugs into. Defaults to 'llm' for back-compat;
+   * existing Providers continue to work without YAML changes. */
+  role?: "llm" | "embedding" | "tts" | "stt" | "image";
   /** stt is the STT-role config block. Required when spec.role is 'stt';
    * forbidden otherwise (CEL-gated). */
   stt?: {
@@ -180,7 +180,7 @@ export interface ProviderSpec {
     voice?: string;
   };
   /** type specifies the provider wire protocol / vendor. */
-  type: "claude" | "openai" | "gemini" | "ollama" | "mock" | "vllm" | "voyageai";
+  type: "claude" | "openai" | "gemini" | "ollama" | "mock" | "vllm" | "voyageai" | "cartesia" | "elevenlabs" | "imagen";
 }
 
 export interface ProviderStatus {

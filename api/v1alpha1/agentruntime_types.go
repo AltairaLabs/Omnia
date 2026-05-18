@@ -254,11 +254,11 @@ type AutoscalingConfig struct {
 	KEDA *KEDAConfig `json:"keda,omitempty"`
 }
 
-// ProviderType defines the LLM provider type.
+// ProviderType defines the provider vendor / wire protocol.
 // Hyperscaler hosting (Bedrock/Vertex/Azure) is expressed via spec.platform
 // on the Provider CRD, not as a provider type. The provider type describes
-// the wire protocol (message/response format) that the runtime uses.
-// +kubebuilder:validation:Enum=claude;openai;gemini;ollama;mock;vllm;voyageai
+// the wire protocol the runtime uses; the role (spec.role) is orthogonal.
+// +kubebuilder:validation:Enum=claude;openai;gemini;ollama;mock;vllm;voyageai;cartesia;elevenlabs;imagen
 type ProviderType string
 
 const (
@@ -276,13 +276,20 @@ const (
 	ProviderTypeOllama ProviderType = "ollama"
 	// ProviderTypeMock uses PromptKit's mock provider for testing.
 	// Does not require secretRef. Returns canned responses based on scenario.
+	// LLM-role only; no mock factory is registered for embedding/tts/stt/image.
 	ProviderTypeMock ProviderType = "mock"
 	// ProviderTypeVLLM uses a vLLM-served OpenAI-compatible endpoint.
 	// Requires baseURL. Auth is typically via custom headers (spec.headers).
 	ProviderTypeVLLM ProviderType = "vllm"
-	// ProviderTypeVoyageAI uses Voyage AI embedding models.
+	// ProviderTypeVoyageAI uses Voyage AI embedding models. Embedding-role only.
 	// Requires an API key via secretRef (VOYAGE_API_KEY).
 	ProviderTypeVoyageAI ProviderType = "voyageai"
+	// ProviderTypeCartesia uses Cartesia TTS. TTS-role only.
+	ProviderTypeCartesia ProviderType = "cartesia"
+	// ProviderTypeElevenLabs uses ElevenLabs TTS. TTS-role only.
+	ProviderTypeElevenLabs ProviderType = "elevenlabs"
+	// ProviderTypeImagen uses Google's Imagen image-generation model. Image-role only.
+	ProviderTypeImagen ProviderType = "imagen"
 )
 
 // TruncationStrategy defines how to handle context overflow.
@@ -380,10 +387,10 @@ type NamedProviderRef struct {
 	// the referenced Provider's `spec.role` matches; mismatch puts the
 	// AgentRuntime in Phase=Error with ProvidersReady=False.
 	//
-	// Defaults to 'inference' for back-compat with existing AgentRuntimes
+	// Defaults to 'llm' for back-compat with existing AgentRuntimes
 	// (which were authored before per-ref roles existed).
 	// +optional
-	// +kubebuilder:default=inference
+	// +kubebuilder:default=llm
 	Role ProviderRole `json:"role,omitempty"`
 
 	// requiredCapabilities lists capabilities the provider must support for

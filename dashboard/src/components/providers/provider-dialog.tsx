@@ -58,7 +58,7 @@ interface FormState {
   inputCostPer1K: string;
   outputCostPer1K: string;
   cachedCostPer1K: string;
-  // Platform (hyperscaler hosting; inference role only)
+  // Platform (hyperscaler hosting; llm role only)
   platformType: "" | "bedrock" | "vertex" | "azure";
   platformRegion: string;
   platformProject: string;
@@ -94,6 +94,9 @@ const PROVIDER_TYPES: { value: ProviderSpec["type"]; label: string }[] = [
   { value: "gemini", label: "Gemini (Google)" },
   { value: "vllm", label: "vLLM" },
   { value: "voyageai", label: "Voyage AI" },
+  { value: "cartesia", label: "Cartesia" },
+  { value: "elevenlabs", label: "ElevenLabs" },
+  { value: "imagen", label: "Imagen (Google)" },
   { value: "ollama", label: "Ollama (Local)" },
   { value: "mock", label: "Mock (Testing)" },
 ];
@@ -107,7 +110,7 @@ const PLATFORM_ELIGIBLE_TYPES: Set<ProviderSpec["type"]> = new Set([
 ]);
 
 const ROLE_OPTIONS: { value: ProviderRole; label: string; description: string }[] = [
-  { value: "inference", label: "Inference (chat / completion)", description: "Standard LLM chat and completion." },
+  { value: "llm", label: "LLM (chat / completion)", description: "Standard LLM chat and completion." },
   { value: "embedding", label: "Embedding", description: "Vector embeddings for retrieval." },
   { value: "tts", label: "Text-to-Speech", description: "Synthesize audio from text." },
   { value: "stt", label: "Speech-to-Text", description: "Transcribe audio to text." },
@@ -117,11 +120,11 @@ const ROLE_OPTIONS: { value: ProviderRole; label: string; description: string }[
 // Mirrors the CRD CEL matrix (api/v1alpha1/provider_types.go). Keep in sync
 // when PromptKit adds vendor support for additional roles.
 const VENDORS_BY_ROLE: Record<ProviderRole, readonly ProviderSpec["type"][]> = {
-  inference: ["claude", "openai", "gemini", "ollama", "mock", "vllm"],
-  embedding: ["openai", "voyageai", "gemini", "ollama", "mock"],
-  tts: ["openai", "mock"],
-  stt: ["openai", "mock"],
-  image: ["openai", "gemini", "mock"],
+  llm: ["claude", "openai", "gemini", "ollama", "mock", "vllm"],
+  embedding: ["openai", "voyageai", "gemini", "ollama"],
+  tts: ["openai", "cartesia", "elevenlabs"],
+  stt: ["openai"],
+  image: ["imagen"],
 };
 
 function vendorAllowedForRole(role: ProviderRole, type: ProviderSpec["type"]): boolean {
@@ -132,8 +135,8 @@ function firstVendorForRole(role: ProviderRole): ProviderSpec["type"] {
   return VENDORS_BY_ROLE[role][0];
 }
 
-// Slice of FormState that only inference-role Providers may carry. Cleared
-// when the user switches off the inference role.
+// Slice of FormState that only llm-role Providers may carry. Cleared when
+// the user switches off the llm role.
 const PLATFORM_FIELDS_BLANK = {
   platformType: "" as FormState["platformType"],
   platformRegion: "",
@@ -216,7 +219,7 @@ function applyRoleChange(prev: FormState, role: ProviderRole): FormState {
     ...prev,
     role,
     providerType,
-    ...(role === "inference" ? preservePlatformFields(prev) : PLATFORM_FIELDS_BLANK),
+    ...(role === "llm" ? preservePlatformFields(prev) : PLATFORM_FIELDS_BLANK),
     ...(role === "tts" ? preserveTTSFields(prev) : TTS_FIELDS_BLANK),
     ...(role === "stt" ? preserveSTTFields(prev) : STT_FIELDS_BLANK),
     ...(role === "embedding" ? preserveEmbeddingFields(prev) : EMBEDDING_FIELDS_BLANK),
@@ -273,8 +276,8 @@ function getInitialFormState(provider?: Provider | null): FormState {
 
     const platform = spec.platform;
     const auth = spec.auth;
-    // Pre-role Providers omit spec.role; treat as inference for back-compat.
-    const role: ProviderRole = spec.role ?? "inference";
+    // Pre-role Providers omit spec.role; treat as llm for back-compat.
+    const role: ProviderRole = spec.role ?? "llm";
     return {
       name: provider.metadata?.name || "",
       role,
@@ -320,7 +323,7 @@ function getInitialFormState(provider?: Provider | null): FormState {
 
   return {
     name: "",
-    role: "inference",
+    role: "llm",
     providerType: "claude",
     model: "",
     baseURL: "",
@@ -411,11 +414,11 @@ function validateRoleAndVendor(form: FormState): string | null {
   if (!vendorAllowedForRole(form.role, form.providerType)) {
     return `Vendor "${form.providerType}" is not supported for role "${form.role}"`;
   }
-  // Platform is inference-only. Block submit if someone left platform set after
-  // switching to a non-inference role (the wizard clears it, but defend the
+  // Platform is llm-only. Block submit if someone left platform set after
+  // switching to a non-llm role (the wizard clears it, but defend the
   // contract anyway so manual state never escapes).
-  if (form.role !== "inference" && form.platformType) {
-    return "Hosting platform is only valid when role is inference";
+  if (form.role !== "llm" && form.platformType) {
+    return "Hosting platform is only valid when role is llm";
   }
   return null;
 }
@@ -559,9 +562,9 @@ function buildSpec(form: FormState): ProviderSpec {
     spec.capabilities = form.capabilities as ProviderSpec["capabilities"];
   }
 
-  // Platform/auth are inference-only; the wizard hides those fields for other
+  // Platform/auth are llm-only; the wizard hides those fields for other
   // roles but be defensive anyway.
-  if (form.role === "inference") {
+  if (form.role === "llm") {
     const platformPart = buildPlatformAndAuth(form);
     if (platformPart.platform) {
       spec.platform = platformPart.platform;
@@ -1308,7 +1311,7 @@ function ProviderDialogForm({
 
   const handleProviderTypeChange = (type: ProviderSpec["type"]) => {
     setFormState((prev) => {
-      const keepPlatform = supportsPlatform(type) && prev.role === "inference";
+      const keepPlatform = supportsPlatform(type) && prev.role === "llm";
       return {
         ...prev,
         providerType: type,
@@ -1361,10 +1364,10 @@ function ProviderDialogForm({
     }
   };
 
-  const isInferenceRole = formState.role === "inference";
+  const isLLMRole = formState.role === "llm";
   const showCredential =
-    !isLocal(formState.providerType) && (isInferenceRole ? !formState.platformType : true);
-  const showPlatform = isInferenceRole && supportsPlatform(formState.providerType);
+    !isLocal(formState.providerType) && (isLLMRole ? !formState.platformType : true);
+  const showPlatform = isLLMRole && supportsPlatform(formState.providerType);
 
   // Narrow the vendor list to those the CRD CEL matrix accepts for this role
   // so the user can't pick an invalid (role, vendor) pair from the UI.

@@ -590,7 +590,7 @@ func providerRequiresCredentials(provider *omniav1alpha1.Provider) bool {
 }
 
 // providerRole returns the provider's declared role, defaulting to
-// ProviderRoleInference when unset for back-compat with pre-role Providers.
+// ProviderRoleLLM when unset for back-compat with pre-role Providers.
 // Thin wrapper over Provider.EffectiveRole() so existing call sites stay concise.
 func providerRole(provider *omniav1alpha1.Provider) omniav1alpha1.ProviderRole {
 	return provider.EffectiveRole()

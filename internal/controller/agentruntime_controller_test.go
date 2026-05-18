@@ -2908,7 +2908,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(k8sClient.Status().Update(ctx, provider)).To(Succeed())
 			defer func() { _ = k8sClient.Delete(ctx, provider) }()
 
-			By("creating an AgentRuntime that references it as role=inference")
+			By("creating an AgentRuntime that references it as role=llm")
 			ref := omniav1alpha1.ProviderRef{Name: "embed-provider"}
 			agentRuntime := &omniav1alpha1.AgentRuntime{
 				ObjectMeta: metav1.ObjectMeta{
@@ -2919,7 +2919,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
 					Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
 					Providers: []omniav1alpha1.NamedProviderRef{
-						{Name: "default", ProviderRef: ref, Role: omniav1alpha1.ProviderRoleInference},
+						{Name: "default", ProviderRef: ref, Role: omniav1alpha1.ProviderRoleLLM},
 					},
 				},
 			}
@@ -2940,7 +2940,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
 			Expect(condition.Reason).To(Equal("RoleMismatch"))
 			Expect(condition.Message).To(ContainSubstring("embedding"))
-			Expect(condition.Message).To(ContainSubstring("inference"))
+			Expect(condition.Message).To(ContainSubstring("llm"))
 		})
 
 		It("should accept a provider where role matches ref role (embedding)", func() {
