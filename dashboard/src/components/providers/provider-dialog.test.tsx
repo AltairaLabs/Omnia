@@ -1305,6 +1305,94 @@ describe("ProviderDialog", () => {
       });
     });
 
+    it("populates all TTS fields including format + sample rate", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText("Name"), "tts-full");
+      await user.click(screen.getByLabelText("Role"));
+      await user.click(screen.getByRole("option", { name: /text-to-speech/i }));
+
+      await user.type(screen.getByLabelText("Voice"), "echo");
+      await user.type(screen.getByLabelText("Sample Rate (Hz)"), "24000");
+      await user.click(screen.getByLabelText("Format"));
+      await user.click(screen.getByRole("option", { name: "mp3" }));
+      await user.type(screen.getByLabelText("Secret Name"), "k");
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(mockCreateProvider).toHaveBeenCalled();
+      });
+      expect(mockCreateProvider.mock.calls[0][1].tts).toEqual({
+        voice: "echo",
+        format: "mp3",
+        sampleRate: 24000,
+      });
+    });
+
+    it("creates an STT provider with language + sample rate", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText("Name"), "stt-provider");
+      await user.click(screen.getByLabelText("Role"));
+      await user.click(screen.getByRole("option", { name: /speech-to-text/i }));
+
+      await user.type(screen.getByLabelText("Language (ISO-639-1)"), "en");
+      await user.type(screen.getByLabelText("Sample Rate (Hz)"), "16000");
+      await user.type(screen.getByLabelText("Secret Name"), "k");
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(mockCreateProvider).toHaveBeenCalled();
+      });
+      const spec = mockCreateProvider.mock.calls[0][1];
+      expect(spec.role).toBe("stt");
+      expect(spec.stt).toEqual({ language: "en", sampleRate: 16000 });
+    });
+
+    it("picks an embedding distance metric and writes it to spec.embedding", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText("Name"), "embed-cosine");
+      await user.click(screen.getByLabelText("Role"));
+      await user.click(screen.getByRole("option", { name: /^embedding$/i }));
+
+      await user.click(screen.getByLabelText("Distance metric"));
+      await user.click(screen.getByRole("option", { name: "cosine" }));
+      await user.type(screen.getByLabelText("Secret Name"), "k");
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(mockCreateProvider).toHaveBeenCalled();
+      });
+      expect(mockCreateProvider.mock.calls[0][1].embedding).toEqual({
+        distance: "cosine",
+      });
+    });
+
     it("forbids voyageai under the inference role (vendor filtered out)", async () => {
       vi.useRealTimers();
       const user = userEvent.setup();

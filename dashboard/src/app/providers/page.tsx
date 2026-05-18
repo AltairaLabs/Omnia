@@ -348,7 +348,8 @@ export default function ProvidersPage() {
               selectedNamespaces={selectedNamespaces}
               onSelectionChange={handleNamespaceChange}
             />
-            <div className="flex items-center gap-1" role="group" aria-label="Filter by role">
+            <fieldset className="flex items-center gap-1 border-0 p-0 m-0">
+              <legend className="sr-only">Filter by role</legend>
               {ROLE_FILTERS.map((opt) => (
                 <Button
                   key={opt.value}
@@ -361,7 +362,7 @@ export default function ProvidersPage() {
                   {opt.label} ({roleCounts[opt.value]})
                 </Button>
               ))}
-            </div>
+            </fieldset>
           </div>
 
           <div className="flex items-center gap-2">
