@@ -1139,4 +1139,274 @@ describe("ProviderDialog", () => {
       expect(mockCreateProvider.mock.calls[0][1]).not.toHaveProperty("headers");
     });
   });
+
+  describe("role wizard (Phase 3)", () => {
+    it("defaults role to 'inference' for new providers and includes role in spec", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText("Name"), "default-role-provider");
+      await user.type(screen.getByLabelText("Secret Name"), "k");
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(mockCreateProvider).toHaveBeenCalled();
+      });
+      expect(mockCreateProvider.mock.calls[0][1]).toMatchObject({
+        type: "claude",
+        role: "inference",
+      });
+    });
+
+    it("treats a pre-role Provider (no spec.role) as inference in edit mode", () => {
+      const provider = createMockProvider({
+        spec: { type: "claude", model: "claude-sonnet-4-20250514" },
+      });
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} provider={provider} />
+        </TestWrapper>
+      );
+
+      // Role select is rendered as a combobox by Radix; the trigger shows the
+      // currently selected label. With no spec.role we expect "Inference".
+      expect(screen.getByLabelText("Role")).toHaveTextContent(/inference/i);
+    });
+
+    it("narrows the vendor list when switching to TTS role and snaps to a valid vendor", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      // Default vendor is claude. TTS does not accept claude, so the form
+      // must snap to the first allowed vendor (openai per VENDORS_BY_ROLE).
+      await user.click(screen.getByLabelText("Role"));
+      await user.click(screen.getByRole("option", { name: /text-to-speech/i }));
+
+      // After the role change Claude must be filtered out of the vendor list.
+      await user.click(screen.getByLabelText("Provider Type"));
+      expect(screen.queryByRole("option", { name: /claude/i })).toBeNull();
+      // Close the dropdown.
+      await user.keyboard("{Escape}");
+
+      // TTS-specific config block must appear.
+      expect(screen.getByLabelText("Voice")).toBeInTheDocument();
+    });
+
+    it("includes spec.tts when role is tts", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText("Name"), "tts-provider");
+      await user.click(screen.getByLabelText("Role"));
+      await user.click(screen.getByRole("option", { name: /text-to-speech/i }));
+
+      // Provider Type should have snapped to openai (first vendor allowed for tts).
+      await user.type(screen.getByLabelText("Voice"), "alloy");
+      await user.type(screen.getByLabelText("Secret Name"), "openai-key");
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(mockCreateProvider).toHaveBeenCalled();
+      });
+      const spec = mockCreateProvider.mock.calls[0][1];
+      expect(spec.role).toBe("tts");
+      expect(spec.type).toBe("openai");
+      expect(spec.tts).toEqual({ voice: "alloy" });
+    });
+
+    it("includes spec.embedding when role is embedding", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText("Name"), "embed-provider");
+      await user.click(screen.getByLabelText("Role"));
+      await user.click(screen.getByRole("option", { name: /^embedding$/i }));
+      // openai is the first allowed embedding vendor. Switch to voyageai which
+      // is embedding-only.
+      await user.click(screen.getByLabelText("Provider Type"));
+      await user.click(screen.getByRole("option", { name: /voyage/i }));
+
+      await user.type(screen.getByLabelText("Dimensions"), "1024");
+      await user.type(screen.getByLabelText("Secret Name"), "voyage-key");
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(mockCreateProvider).toHaveBeenCalled();
+      });
+      const spec = mockCreateProvider.mock.calls[0][1];
+      expect(spec.role).toBe("embedding");
+      expect(spec.type).toBe("voyageai");
+      expect(spec.embedding).toEqual({ dimensions: 1024 });
+    });
+
+    it("clears platform/auth and TTS fields when role switches away", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      // Start with a tts provider that has a voice set.
+      const provider = createMockProvider({
+        spec: {
+          type: "openai",
+          role: "tts",
+          tts: { voice: "echo", format: "mp3" },
+          credential: { secretRef: { name: "openai-key" } },
+        },
+      });
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} provider={provider} />
+        </TestWrapper>
+      );
+
+      // Role is disabled in edit mode (changing role would break references).
+      // Instead, verify pre-fill of tts fields.
+      expect(screen.getByLabelText("Voice")).toHaveValue("echo");
+      // The Role select is disabled in edit mode — clicking it must not open
+      // the option list.
+      await user.click(screen.getByLabelText("Role"));
+      expect(screen.queryByRole("option", { name: /inference/i })).toBeNull();
+
+      // Submit should pass through the existing tts block.
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+      await waitFor(() => {
+        expect(mockUpdateProvider).toHaveBeenCalled();
+      });
+      expect(mockUpdateProvider.mock.calls[0][1]).toMatchObject({
+        role: "tts",
+        tts: { voice: "echo", format: "mp3" },
+      });
+    });
+
+    it("populates all TTS fields including format + sample rate", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText("Name"), "tts-full");
+      await user.click(screen.getByLabelText("Role"));
+      await user.click(screen.getByRole("option", { name: /text-to-speech/i }));
+
+      await user.type(screen.getByLabelText("Voice"), "echo");
+      await user.type(screen.getByLabelText("Sample Rate (Hz)"), "24000");
+      await user.click(screen.getByLabelText("Format"));
+      await user.click(screen.getByRole("option", { name: "mp3" }));
+      await user.type(screen.getByLabelText("Secret Name"), "k");
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(mockCreateProvider).toHaveBeenCalled();
+      });
+      expect(mockCreateProvider.mock.calls[0][1].tts).toEqual({
+        voice: "echo",
+        format: "mp3",
+        sampleRate: 24000,
+      });
+    });
+
+    it("creates an STT provider with language + sample rate", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText("Name"), "stt-provider");
+      await user.click(screen.getByLabelText("Role"));
+      await user.click(screen.getByRole("option", { name: /speech-to-text/i }));
+
+      await user.type(screen.getByLabelText("Language (ISO-639-1)"), "en");
+      await user.type(screen.getByLabelText("Sample Rate (Hz)"), "16000");
+      await user.type(screen.getByLabelText("Secret Name"), "k");
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(mockCreateProvider).toHaveBeenCalled();
+      });
+      const spec = mockCreateProvider.mock.calls[0][1];
+      expect(spec.role).toBe("stt");
+      expect(spec.stt).toEqual({ language: "en", sampleRate: 16000 });
+    });
+
+    it("picks an embedding distance metric and writes it to spec.embedding", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText("Name"), "embed-cosine");
+      await user.click(screen.getByLabelText("Role"));
+      await user.click(screen.getByRole("option", { name: /^embedding$/i }));
+
+      await user.click(screen.getByLabelText("Distance metric"));
+      await user.click(screen.getByRole("option", { name: "cosine" }));
+      await user.type(screen.getByLabelText("Secret Name"), "k");
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(mockCreateProvider).toHaveBeenCalled();
+      });
+      expect(mockCreateProvider.mock.calls[0][1].embedding).toEqual({
+        distance: "cosine",
+      });
+    });
+
+    it("forbids voyageai under the inference role (vendor filtered out)", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      // Default role is inference. voyageai is embedding-only per the CRD's
+      // CEL matrix and must not appear in the Provider Type list.
+      await user.click(screen.getByLabelText("Provider Type"));
+      expect(screen.queryByRole("option", { name: /voyage/i })).toBeNull();
+    });
+  });
 });

@@ -34,9 +34,11 @@ import type { Provider, ProviderSpec } from "@/types/generated/provider";
 // --- Types ---
 
 type CredentialSource = "secret" | "envVar" | "filePath";
+type ProviderRole = NonNullable<ProviderSpec["role"]>;
 
 interface FormState {
   name: string;
+  role: ProviderRole;
   providerType: ProviderSpec["type"];
   model: string;
   baseURL: string;
@@ -56,7 +58,7 @@ interface FormState {
   inputCostPer1K: string;
   outputCostPer1K: string;
   cachedCostPer1K: string;
-  // Platform (hyperscaler hosting)
+  // Platform (hyperscaler hosting; inference role only)
   platformType: "" | "bedrock" | "vertex" | "azure";
   platformRegion: string;
   platformProject: string;
@@ -67,6 +69,16 @@ interface FormState {
   authServiceAccountEmail: string;
   authSecretName: string;
   authSecretKey: string;
+  // TTS role config
+  ttsVoice: string;
+  ttsFormat: "" | "pcm" | "mp3" | "opus" | "wav" | "flac";
+  ttsSampleRate: string;
+  // STT role config
+  sttLanguage: string;
+  sttSampleRate: string;
+  // Embedding role config
+  embeddingDimensions: string;
+  embeddingDistance: "" | "cosine" | "l2" | "dot";
   // Custom HTTP headers (gateway providers like OpenRouter, tenant routing, etc.)
   headerEntries: Array<{ id: string; key: string; value: string }>;
 }
@@ -93,6 +105,123 @@ const PLATFORM_ELIGIBLE_TYPES: Set<ProviderSpec["type"]> = new Set([
   "openai",
   "gemini",
 ]);
+
+const ROLE_OPTIONS: { value: ProviderRole; label: string; description: string }[] = [
+  { value: "inference", label: "Inference (chat / completion)", description: "Standard LLM chat and completion." },
+  { value: "embedding", label: "Embedding", description: "Vector embeddings for retrieval." },
+  { value: "tts", label: "Text-to-Speech", description: "Synthesize audio from text." },
+  { value: "stt", label: "Speech-to-Text", description: "Transcribe audio to text." },
+  { value: "image", label: "Image generation", description: "Generate images from prompts." },
+];
+
+// Mirrors the CRD CEL matrix (api/v1alpha1/provider_types.go). Keep in sync
+// when PromptKit adds vendor support for additional roles.
+const VENDORS_BY_ROLE: Record<ProviderRole, readonly ProviderSpec["type"][]> = {
+  inference: ["claude", "openai", "gemini", "ollama", "mock", "vllm"],
+  embedding: ["openai", "voyageai", "gemini", "ollama", "mock"],
+  tts: ["openai", "mock"],
+  stt: ["openai", "mock"],
+  image: ["openai", "gemini", "mock"],
+};
+
+function vendorAllowedForRole(role: ProviderRole, type: ProviderSpec["type"]): boolean {
+  return VENDORS_BY_ROLE[role].includes(type);
+}
+
+function firstVendorForRole(role: ProviderRole): ProviderSpec["type"] {
+  return VENDORS_BY_ROLE[role][0];
+}
+
+// Slice of FormState that only inference-role Providers may carry. Cleared
+// when the user switches off the inference role.
+const PLATFORM_FIELDS_BLANK = {
+  platformType: "" as FormState["platformType"],
+  platformRegion: "",
+  platformProject: "",
+  platformEndpoint: "",
+  authType: "" as FormState["authType"],
+  authRoleArn: "",
+  authServiceAccountEmail: "",
+  authSecretName: "",
+  authSecretKey: "",
+};
+
+const TTS_FIELDS_BLANK = {
+  ttsVoice: "",
+  ttsFormat: "" as FormState["ttsFormat"],
+  ttsSampleRate: "",
+};
+
+const STT_FIELDS_BLANK = {
+  sttLanguage: "",
+  sttSampleRate: "",
+};
+
+const EMBEDDING_FIELDS_BLANK = {
+  embeddingDimensions: "",
+  embeddingDistance: "" as FormState["embeddingDistance"],
+};
+
+function preservePlatformFields(prev: FormState): Pick<FormState,
+  | "platformType" | "platformRegion" | "platformProject" | "platformEndpoint"
+  | "authType" | "authRoleArn" | "authServiceAccountEmail"
+  | "authSecretName" | "authSecretKey"
+> {
+  return {
+    platformType: prev.platformType,
+    platformRegion: prev.platformRegion,
+    platformProject: prev.platformProject,
+    platformEndpoint: prev.platformEndpoint,
+    authType: prev.authType,
+    authRoleArn: prev.authRoleArn,
+    authServiceAccountEmail: prev.authServiceAccountEmail,
+    authSecretName: prev.authSecretName,
+    authSecretKey: prev.authSecretKey,
+  };
+}
+
+function preserveTTSFields(prev: FormState) {
+  return {
+    ttsVoice: prev.ttsVoice,
+    ttsFormat: prev.ttsFormat,
+    ttsSampleRate: prev.ttsSampleRate,
+  };
+}
+
+function preserveSTTFields(prev: FormState) {
+  return {
+    sttLanguage: prev.sttLanguage,
+    sttSampleRate: prev.sttSampleRate,
+  };
+}
+
+function preserveEmbeddingFields(prev: FormState) {
+  return {
+    embeddingDimensions: prev.embeddingDimensions,
+    embeddingDistance: prev.embeddingDistance,
+  };
+}
+
+// applyRoleChange snaps the form to a valid state for the new role: vendor
+// gets reset if not allowed, and role-specific blocks not belonging to the
+// new role are wiped (the CRD CEL gate enforces "at most one of
+// tts/stt/embedding"). Extracted so handleRoleChange stays under the sonarjs
+// cognitive-complexity threshold (15).
+function applyRoleChange(prev: FormState, role: ProviderRole): FormState {
+  const providerType = vendorAllowedForRole(role, prev.providerType)
+    ? prev.providerType
+    : firstVendorForRole(role);
+
+  return {
+    ...prev,
+    role,
+    providerType,
+    ...(role === "inference" ? preservePlatformFields(prev) : PLATFORM_FIELDS_BLANK),
+    ...(role === "tts" ? preserveTTSFields(prev) : TTS_FIELDS_BLANK),
+    ...(role === "stt" ? preserveSTTFields(prev) : STT_FIELDS_BLANK),
+    ...(role === "embedding" ? preserveEmbeddingFields(prev) : EMBEDDING_FIELDS_BLANK),
+  };
+}
 
 type PlatformType = "bedrock" | "vertex" | "azure";
 
@@ -144,8 +273,11 @@ function getInitialFormState(provider?: Provider | null): FormState {
 
     const platform = spec.platform;
     const auth = spec.auth;
+    // Pre-role Providers omit spec.role; treat as inference for back-compat.
+    const role: ProviderRole = spec.role ?? "inference";
     return {
       name: provider.metadata?.name || "",
+      role,
       providerType: spec.type,
       model: spec.model || "",
       baseURL: spec.baseURL || "",
@@ -171,6 +303,13 @@ function getInitialFormState(provider?: Provider | null): FormState {
       authServiceAccountEmail: auth?.serviceAccountEmail ?? "",
       authSecretName: auth?.credentialsSecretRef?.name ?? "",
       authSecretKey: auth?.credentialsSecretRef?.key ?? "",
+      ttsVoice: spec.tts?.voice ?? "",
+      ttsFormat: spec.tts?.format ?? "",
+      ttsSampleRate: spec.tts?.sampleRate?.toString() ?? "",
+      sttLanguage: spec.stt?.language ?? "",
+      sttSampleRate: spec.stt?.sampleRate?.toString() ?? "",
+      embeddingDimensions: spec.embedding?.dimensions?.toString() ?? "",
+      embeddingDistance: spec.embedding?.distance ?? "",
       headerEntries: Object.entries(spec.headers ?? {}).map(([key, value]) => ({
         id: makeHeaderEntryId(),
         key,
@@ -181,6 +320,7 @@ function getInitialFormState(provider?: Provider | null): FormState {
 
   return {
     name: "",
+    role: "inference",
     providerType: "claude",
     model: "",
     baseURL: "",
@@ -206,6 +346,13 @@ function getInitialFormState(provider?: Provider | null): FormState {
     authServiceAccountEmail: "",
     authSecretName: "",
     authSecretKey: "",
+    ttsVoice: "",
+    ttsFormat: "",
+    ttsSampleRate: "",
+    sttLanguage: "",
+    sttSampleRate: "",
+    embeddingDimensions: "",
+    embeddingDistance: "",
     headerEntries: [],
   };
 }
@@ -260,9 +407,25 @@ function validatePlatformFields(form: FormState): string | null {
   return null;
 }
 
+function validateRoleAndVendor(form: FormState): string | null {
+  if (!vendorAllowedForRole(form.role, form.providerType)) {
+    return `Vendor "${form.providerType}" is not supported for role "${form.role}"`;
+  }
+  // Platform is inference-only. Block submit if someone left platform set after
+  // switching to a non-inference role (the wizard clears it, but defend the
+  // contract anyway so manual state never escapes).
+  if (form.role !== "inference" && form.platformType) {
+    return "Hosting platform is only valid when role is inference";
+  }
+  return null;
+}
+
 function validateForm(form: FormState): string | null {
   const nameError = validateName(form.name);
   if (nameError) return nameError;
+
+  const roleError = validateRoleAndVendor(form);
+  if (roleError) return roleError;
 
   if (form.platformType) {
     return validatePlatformFields(form);
@@ -348,9 +511,46 @@ function buildPlatformAndAuth(
   return { platform, auth };
 }
 
+function buildTTSConfig(form: FormState): NonNullable<ProviderSpec["tts"]> | undefined {
+  if (form.role !== "tts") return undefined;
+  const tts: NonNullable<ProviderSpec["tts"]> = {};
+  if (form.ttsVoice) tts.voice = form.ttsVoice;
+  if (form.ttsFormat) tts.format = form.ttsFormat;
+  if (form.ttsSampleRate) {
+    const n = Number.parseInt(form.ttsSampleRate, 10);
+    if (!Number.isNaN(n)) tts.sampleRate = n;
+  }
+  // Role block must exist when role=tts (CEL gate); even an empty object is
+  // accepted because every field is optional.
+  return tts;
+}
+
+function buildSTTConfig(form: FormState): NonNullable<ProviderSpec["stt"]> | undefined {
+  if (form.role !== "stt") return undefined;
+  const stt: NonNullable<ProviderSpec["stt"]> = {};
+  if (form.sttLanguage) stt.language = form.sttLanguage;
+  if (form.sttSampleRate) {
+    const n = Number.parseInt(form.sttSampleRate, 10);
+    if (!Number.isNaN(n)) stt.sampleRate = n;
+  }
+  return stt;
+}
+
+function buildEmbeddingConfig(form: FormState): NonNullable<ProviderSpec["embedding"]> | undefined {
+  if (form.role !== "embedding") return undefined;
+  const emb: NonNullable<ProviderSpec["embedding"]> = {};
+  if (form.embeddingDimensions) {
+    const n = Number.parseInt(form.embeddingDimensions, 10);
+    if (!Number.isNaN(n)) emb.dimensions = n;
+  }
+  if (form.embeddingDistance) emb.distance = form.embeddingDistance;
+  return emb;
+}
+
 function buildSpec(form: FormState): ProviderSpec {
   const spec: ProviderSpec = {
     type: form.providerType,
+    role: form.role,
   };
 
   if (form.model) spec.model = form.model;
@@ -359,14 +559,27 @@ function buildSpec(form: FormState): ProviderSpec {
     spec.capabilities = form.capabilities as ProviderSpec["capabilities"];
   }
 
-  const platformPart = buildPlatformAndAuth(form);
-  if (platformPart.platform) {
-    spec.platform = platformPart.platform;
-    spec.auth = platformPart.auth;
-    // Direct-API credential is meaningless when platform is set; omit.
+  // Platform/auth are inference-only; the wizard hides those fields for other
+  // roles but be defensive anyway.
+  if (form.role === "inference") {
+    const platformPart = buildPlatformAndAuth(form);
+    if (platformPart.platform) {
+      spec.platform = platformPart.platform;
+      spec.auth = platformPart.auth;
+      // Direct-API credential is meaningless when platform is set; omit.
+    } else if (!isLocal(form.providerType)) {
+      spec.credential = buildCredential(form);
+    }
   } else if (!isLocal(form.providerType)) {
     spec.credential = buildCredential(form);
   }
+
+  const tts = buildTTSConfig(form);
+  if (tts) spec.tts = tts;
+  const stt = buildSTTConfig(form);
+  if (stt) spec.stt = stt;
+  const embedding = buildEmbeddingConfig(form);
+  if (embedding) spec.embedding = embedding;
 
   spec.defaults = buildDefaults(form);
   spec.pricing = buildPricing(form);
@@ -841,6 +1054,150 @@ function PlatformFields({
   );
 }
 
+function TTSFields({
+  form,
+  updateForm,
+}: Readonly<{
+  form: FormState;
+  updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
+}>) {
+  const TTS_FORMAT_NONE = "none";
+  return (
+    <div className="border rounded-lg p-4 space-y-4">
+      <Label className="text-base font-semibold">Text-to-Speech</Label>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="tts-voice">Voice</Label>
+          <Input
+            id="tts-voice"
+            placeholder="alloy"
+            value={form.ttsVoice}
+            onChange={(e) => updateForm("ttsVoice", e.target.value)}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="tts-format">Format</Label>
+          <Select
+            value={form.ttsFormat || TTS_FORMAT_NONE}
+            onValueChange={(v) =>
+              updateForm("ttsFormat", (v === TTS_FORMAT_NONE ? "" : v) as FormState["ttsFormat"])
+            }
+          >
+            <SelectTrigger id="tts-format">
+              <SelectValue placeholder="Provider default" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={TTS_FORMAT_NONE}>Provider default</SelectItem>
+              <SelectItem value="pcm">pcm</SelectItem>
+              <SelectItem value="mp3">mp3</SelectItem>
+              <SelectItem value="opus">opus</SelectItem>
+              <SelectItem value="wav">wav</SelectItem>
+              <SelectItem value="flac">flac</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="tts-sample-rate">Sample Rate (Hz)</Label>
+          <Input
+            id="tts-sample-rate"
+            type="number"
+            min="8000"
+            placeholder="24000"
+            value={form.ttsSampleRate}
+            onChange={(e) => updateForm("ttsSampleRate", e.target.value)}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function STTFields({
+  form,
+  updateForm,
+}: Readonly<{
+  form: FormState;
+  updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
+}>) {
+  return (
+    <div className="border rounded-lg p-4 space-y-4">
+      <Label className="text-base font-semibold">Speech-to-Text</Label>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="stt-language">Language (ISO-639-1)</Label>
+          <Input
+            id="stt-language"
+            placeholder="en"
+            value={form.sttLanguage}
+            onChange={(e) => updateForm("sttLanguage", e.target.value)}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="stt-sample-rate">Sample Rate (Hz)</Label>
+          <Input
+            id="stt-sample-rate"
+            type="number"
+            min="8000"
+            placeholder="16000"
+            value={form.sttSampleRate}
+            onChange={(e) => updateForm("sttSampleRate", e.target.value)}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmbeddingFields({
+  form,
+  updateForm,
+}: Readonly<{
+  form: FormState;
+  updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
+}>) {
+  const DISTANCE_NONE = "none";
+  return (
+    <div className="border rounded-lg p-4 space-y-4">
+      <Label className="text-base font-semibold">Embedding</Label>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="embedding-dimensions">Dimensions</Label>
+          <Input
+            id="embedding-dimensions"
+            type="number"
+            min="1"
+            placeholder="1536"
+            value={form.embeddingDimensions}
+            onChange={(e) => updateForm("embeddingDimensions", e.target.value)}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="embedding-distance">Distance metric</Label>
+          <Select
+            value={form.embeddingDistance || DISTANCE_NONE}
+            onValueChange={(v) =>
+              updateForm(
+                "embeddingDistance",
+                (v === DISTANCE_NONE ? "" : v) as FormState["embeddingDistance"],
+              )
+            }
+          >
+            <SelectTrigger id="embedding-distance">
+              <SelectValue placeholder="Consumer chooses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={DISTANCE_NONE}>Consumer chooses</SelectItem>
+              <SelectItem value="cosine">cosine</SelectItem>
+              <SelectItem value="l2">l2</SelectItem>
+              <SelectItem value="dot">dot</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CapabilitiesFields({
   form,
   updateForm,
@@ -951,7 +1308,7 @@ function ProviderDialogForm({
 
   const handleProviderTypeChange = (type: ProviderSpec["type"]) => {
     setFormState((prev) => {
-      const keepPlatform = supportsPlatform(type);
+      const keepPlatform = supportsPlatform(type) && prev.role === "inference";
       return {
         ...prev,
         providerType: type,
@@ -973,6 +1330,10 @@ function ProviderDialogForm({
         authSecretKey: keepPlatform ? prev.authSecretKey : "",
       };
     });
+  };
+
+  const handleRoleChange = (role: ProviderRole) => {
+    setFormState((prev) => applyRoleChange(prev, role));
   };
 
   const handleSubmit = async () => {
@@ -1000,8 +1361,15 @@ function ProviderDialogForm({
     }
   };
 
-  const showCredential = !isLocal(formState.providerType) && !formState.platformType;
-  const showPlatform = supportsPlatform(formState.providerType);
+  const isInferenceRole = formState.role === "inference";
+  const showCredential =
+    !isLocal(formState.providerType) && (isInferenceRole ? !formState.platformType : true);
+  const showPlatform = isInferenceRole && supportsPlatform(formState.providerType);
+
+  // Narrow the vendor list to those the CRD CEL matrix accepts for this role
+  // so the user can't pick an invalid (role, vendor) pair from the UI.
+  const allowedVendors = VENDORS_BY_ROLE[formState.role];
+  const vendorOptions = PROVIDER_TYPES.filter((t) => allowedVendors.includes(t.value));
 
   return (
     <DialogContent className="sm:max-w-[600px] max-h-[90vh] flex flex-col overflow-hidden">
@@ -1035,7 +1403,33 @@ function ProviderDialogForm({
             />
           </div>
 
-          {/* Provider Type */}
+          {/* Role — pick first so the vendor list can narrow. Disabled in
+              edit mode because changing role would invalidate references from
+              AgentRuntime resources. */}
+          <div className="space-y-2">
+            <Label htmlFor="provider-role">Role</Label>
+            <Select
+              value={formState.role}
+              onValueChange={(v) => handleRoleChange(v as ProviderRole)}
+              disabled={isEditing}
+            >
+              <SelectTrigger id="provider-role">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ROLE_OPTIONS.map((r) => (
+                  <SelectItem key={r.value} value={r.value}>
+                    {r.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {ROLE_OPTIONS.find((r) => r.value === formState.role)?.description}
+            </p>
+          </div>
+
+          {/* Provider Type — narrowed by role. */}
           <div className="space-y-2">
             <Label htmlFor="provider-type">Provider Type</Label>
             <Select
@@ -1047,7 +1441,7 @@ function ProviderDialogForm({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {PROVIDER_TYPES.map((type) => (
+                {vendorOptions.map((type) => (
                   <SelectItem key={type.value} value={type.value}>
                     {type.label}
                   </SelectItem>
@@ -1079,6 +1473,13 @@ function ProviderDialogForm({
           </div>
 
           {showPlatform && <PlatformFields form={formState} updateForm={updateForm} />}
+
+          {/* Role-specific config blocks (CEL-gated; at most one of tts/stt/embedding) */}
+          {formState.role === "tts" && <TTSFields form={formState} updateForm={updateForm} />}
+          {formState.role === "stt" && <STTFields form={formState} updateForm={updateForm} />}
+          {formState.role === "embedding" && (
+            <EmbeddingFields form={formState} updateForm={updateForm} />
+          )}
 
           {/* Credential section */}
           {showCredential && (
