@@ -237,6 +237,35 @@ func (p *Provider) StartConversationSpan(ctx context.Context, sessionID, promptP
 	return ctx, span
 }
 
+// StartInvocationSpan starts a new span for a one-shot function invocation.
+// Function-mode AgentRuntimes use this instead of StartConversationSpan so
+// that downstream queries can distinguish stateful turns from stateless
+// Function calls without overloading the conversation.turn attribute.
+func (p *Provider) StartInvocationSpan(ctx context.Context, invocationID, promptPackName, promptPackVersion string) (context.Context, trace.Span) {
+	attrs := []attribute.KeyValue{
+		attribute.String("omnia.invocation.id", invocationID),
+		attribute.String("omnia.mode", "function"),
+	}
+	if promptPackName != "" {
+		attrs = append(attrs, attribute.String("omnia.promptpack.name", promptPackName))
+	}
+	if promptPackVersion != "" {
+		attrs = append(attrs, attribute.String("omnia.promptpack.version", promptPackVersion))
+	}
+
+	ctx, span := p.tracer.Start(ctx, "omnia.runtime.function.invoke",
+		trace.WithSpanKind(trace.SpanKindInternal),
+		trace.WithAttributes(attrs...),
+	)
+	p.log.V(1).Info(msgSpanStarted,
+		"spanName", "omnia.runtime.function.invoke",
+		"invocationID", invocationID,
+		"promptPackName", promptPackName,
+		"promptPackVersion", promptPackVersion,
+		"traceID", span.SpanContext().TraceID())
+	return ctx, span
+}
+
 // StartLLMSpan starts a new span for an LLM call following GenAI semantic conventions.
 func (p *Provider) StartLLMSpan(ctx context.Context, model string, system string) (context.Context, trace.Span) {
 	ctx, span := p.tracer.Start(ctx, "genai.chat",

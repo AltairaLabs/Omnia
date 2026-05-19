@@ -16,6 +16,17 @@ service RuntimeService {
   // text chunks, tool calls, tool results, and completion signals.
   rpc Converse(stream ClientMessage) returns (stream ServerMessage);
 
+  // Invoke runs a one-shot, non-conversational Function call. The facade
+  // forwards a payload-in / payload-out request from POST /functions/{name}
+  // and waits for the full response. Used for function-mode AgentRuntimes
+  // (spec.mode == "function"); see #1102 / #1103.
+  //
+  // The runtime is schema-agnostic — the facade validates input_json against
+  // AgentRuntime.spec.inputSchema before calling, and validates output_json
+  // against spec.outputSchema after returning. The runtime just executes
+  // the pack once.
+  rpc Invoke(InvocationRequest) returns (InvocationResponse);
+
   // Health checks the runtime's readiness to handle requests.
   rpc Health(HealthRequest) returns (HealthResponse);
 }
@@ -219,6 +230,41 @@ message MediaChunk {
 
   // data contains raw media bytes (avoids base64 overhead in gRPC path).
   bytes data = 5;
+}
+
+// InvocationRequest carries a Function call from the facade.
+message InvocationRequest {
+  // input_json is the raw JSON payload submitted by the caller. The facade
+  // has already validated this against AgentRuntime.spec.inputSchema; the
+  // runtime treats it as an opaque user message body.
+  string input_json = 1;
+
+  // invocation_id is a UUID for this Function call, used for log and
+  // trace correlation. Assigned by the facade.
+  string invocation_id = 2;
+
+  // metadata carries optional key-value context (caller identity, auth
+  // subject, custom headers). Not interpreted by the runtime.
+  map<string, string> metadata = 3;
+}
+
+// InvocationResponse carries the runtime's reply to the facade. On
+// success the facade then validates output_json against
+// AgentRuntime.spec.outputSchema before returning to the HTTP caller.
+message InvocationResponse {
+  // output_json is the raw assistant text. The facade validates it
+  // against the output schema; if invalid, the facade returns HTTP 502
+  // with this raw payload in the response body (per Q2 lock on #1103).
+  string output_json = 1;
+
+  // usage contains token + cost statistics for the call.
+  Usage usage = 2;
+
+  // duration_ms is the wall-clock time spent executing in the runtime.
+  int32 duration_ms = 3;
+
+  // invocation_id echoes InvocationRequest.invocation_id for correlation.
+  string invocation_id = 4;
 }
 
 // HealthRequest is an empty message for health checks.

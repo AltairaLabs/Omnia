@@ -984,6 +984,151 @@ func (x *MediaChunk) GetData() []byte {
 	return nil
 }
 
+// InvocationRequest carries a Function call from the facade.
+type InvocationRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// input_json is the raw JSON payload submitted by the caller. The facade
+	// has already validated this against AgentRuntime.spec.inputSchema; the
+	// runtime treats it as an opaque user message body.
+	InputJson string `protobuf:"bytes,1,opt,name=input_json,json=inputJson,proto3" json:"input_json,omitempty"`
+	// invocation_id is a UUID for this Function call, used for log and
+	// trace correlation. Assigned by the facade.
+	InvocationId string `protobuf:"bytes,2,opt,name=invocation_id,json=invocationId,proto3" json:"invocation_id,omitempty"`
+	// metadata carries optional key-value context (caller identity, auth
+	// subject, custom headers). Not interpreted by the runtime.
+	Metadata      map[string]string `protobuf:"bytes,3,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InvocationRequest) Reset() {
+	*x = InvocationRequest{}
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InvocationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InvocationRequest) ProtoMessage() {}
+
+func (x *InvocationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InvocationRequest.ProtoReflect.Descriptor instead.
+func (*InvocationRequest) Descriptor() ([]byte, []int) {
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *InvocationRequest) GetInputJson() string {
+	if x != nil {
+		return x.InputJson
+	}
+	return ""
+}
+
+func (x *InvocationRequest) GetInvocationId() string {
+	if x != nil {
+		return x.InvocationId
+	}
+	return ""
+}
+
+func (x *InvocationRequest) GetMetadata() map[string]string {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+// InvocationResponse carries the runtime's reply to the facade. On
+// success the facade then validates output_json against
+// AgentRuntime.spec.outputSchema before returning to the HTTP caller.
+type InvocationResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// output_json is the raw assistant text. The facade validates it
+	// against the output schema; if invalid, the facade returns HTTP 502
+	// with this raw payload in the response body (per Q2 lock on #1103).
+	OutputJson string `protobuf:"bytes,1,opt,name=output_json,json=outputJson,proto3" json:"output_json,omitempty"`
+	// usage contains token + cost statistics for the call.
+	Usage *Usage `protobuf:"bytes,2,opt,name=usage,proto3" json:"usage,omitempty"`
+	// duration_ms is the wall-clock time spent executing in the runtime.
+	DurationMs int32 `protobuf:"varint,3,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	// invocation_id echoes InvocationRequest.invocation_id for correlation.
+	InvocationId  string `protobuf:"bytes,4,opt,name=invocation_id,json=invocationId,proto3" json:"invocation_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InvocationResponse) Reset() {
+	*x = InvocationResponse{}
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InvocationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InvocationResponse) ProtoMessage() {}
+
+func (x *InvocationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InvocationResponse.ProtoReflect.Descriptor instead.
+func (*InvocationResponse) Descriptor() ([]byte, []int) {
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *InvocationResponse) GetOutputJson() string {
+	if x != nil {
+		return x.OutputJson
+	}
+	return ""
+}
+
+func (x *InvocationResponse) GetUsage() *Usage {
+	if x != nil {
+		return x.Usage
+	}
+	return nil
+}
+
+func (x *InvocationResponse) GetDurationMs() int32 {
+	if x != nil {
+		return x.DurationMs
+	}
+	return 0
+}
+
+func (x *InvocationResponse) GetInvocationId() string {
+	if x != nil {
+		return x.InvocationId
+	}
+	return ""
+}
+
 // HealthRequest is an empty message for health checks.
 type HealthRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -993,7 +1138,7 @@ type HealthRequest struct {
 
 func (x *HealthRequest) Reset() {
 	*x = HealthRequest{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[12]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1005,7 +1150,7 @@ func (x *HealthRequest) String() string {
 func (*HealthRequest) ProtoMessage() {}
 
 func (x *HealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[12]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1018,7 +1163,7 @@ func (x *HealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthRequest.ProtoReflect.Descriptor instead.
 func (*HealthRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{12}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{14}
 }
 
 // HealthResponse contains the health status of the runtime.
@@ -1034,7 +1179,7 @@ type HealthResponse struct {
 
 func (x *HealthResponse) Reset() {
 	*x = HealthResponse{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[13]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1046,7 +1191,7 @@ func (x *HealthResponse) String() string {
 func (*HealthResponse) ProtoMessage() {}
 
 func (x *HealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[13]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1059,7 +1204,7 @@ func (x *HealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthResponse.ProtoReflect.Descriptor instead.
 func (*HealthResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{13}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *HealthResponse) GetHealthy() bool {
@@ -1149,16 +1294,32 @@ const file_api_proto_runtime_v1_runtime_proto_rawDesc = "" +
 	"\bsequence\x18\x02 \x01(\x05R\bsequence\x12\x17\n" +
 	"\ais_last\x18\x03 \x01(\bR\x06isLast\x12\x1b\n" +
 	"\tmime_type\x18\x04 \x01(\tR\bmimeType\x12\x12\n" +
-	"\x04data\x18\x05 \x01(\fR\x04data\"\x0f\n" +
+	"\x04data\x18\x05 \x01(\fR\x04data\"\xe3\x01\n" +
+	"\x11InvocationRequest\x12\x1d\n" +
+	"\n" +
+	"input_json\x18\x01 \x01(\tR\tinputJson\x12#\n" +
+	"\rinvocation_id\x18\x02 \x01(\tR\finvocationId\x12M\n" +
+	"\bmetadata\x18\x03 \x03(\v21.omnia.runtime.v1.InvocationRequest.MetadataEntryR\bmetadata\x1a;\n" +
+	"\rMetadataEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xaa\x01\n" +
+	"\x12InvocationResponse\x12\x1f\n" +
+	"\voutput_json\x18\x01 \x01(\tR\n" +
+	"outputJson\x12-\n" +
+	"\x05usage\x18\x02 \x01(\v2\x17.omnia.runtime.v1.UsageR\x05usage\x12\x1f\n" +
+	"\vduration_ms\x18\x03 \x01(\x05R\n" +
+	"durationMs\x12#\n" +
+	"\rinvocation_id\x18\x04 \x01(\tR\finvocationId\"\x0f\n" +
 	"\rHealthRequest\"B\n" +
 	"\x0eHealthResponse\x12\x18\n" +
 	"\ahealthy\x18\x01 \x01(\bR\ahealthy\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status*E\n" +
 	"\rToolExecution\x12\x19\n" +
 	"\x15TOOL_EXECUTION_SERVER\x10\x00\x12\x19\n" +
-	"\x15TOOL_EXECUTION_CLIENT\x10\x012\xaf\x01\n" +
+	"\x15TOOL_EXECUTION_CLIENT\x10\x012\x84\x02\n" +
 	"\x0eRuntimeService\x12P\n" +
-	"\bConverse\x12\x1f.omnia.runtime.v1.ClientMessage\x1a\x1f.omnia.runtime.v1.ServerMessage(\x010\x01\x12K\n" +
+	"\bConverse\x12\x1f.omnia.runtime.v1.ClientMessage\x1a\x1f.omnia.runtime.v1.ServerMessage(\x010\x01\x12S\n" +
+	"\x06Invoke\x12#.omnia.runtime.v1.InvocationRequest\x1a$.omnia.runtime.v1.InvocationResponse\x12K\n" +
 	"\x06Health\x12\x1f.omnia.runtime.v1.HealthRequest\x1a .omnia.runtime.v1.HealthResponseB7Z5github.com/altairalabs/omnia/pkg/runtime/v1;runtimev1b\x06proto3"
 
 var (
@@ -1174,27 +1335,30 @@ func file_api_proto_runtime_v1_runtime_proto_rawDescGZIP() []byte {
 }
 
 var file_api_proto_runtime_v1_runtime_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_proto_runtime_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_api_proto_runtime_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_api_proto_runtime_v1_runtime_proto_goTypes = []any{
-	(ToolExecution)(0),       // 0: omnia.runtime.v1.ToolExecution
-	(*ClientMessage)(nil),    // 1: omnia.runtime.v1.ClientMessage
-	(*ClientToolResult)(nil), // 2: omnia.runtime.v1.ClientToolResult
-	(*ServerMessage)(nil),    // 3: omnia.runtime.v1.ServerMessage
-	(*Chunk)(nil),            // 4: omnia.runtime.v1.Chunk
-	(*ToolCall)(nil),         // 5: omnia.runtime.v1.ToolCall
-	(*ToolResult)(nil),       // 6: omnia.runtime.v1.ToolResult
-	(*Done)(nil),             // 7: omnia.runtime.v1.Done
-	(*ContentPart)(nil),      // 8: omnia.runtime.v1.ContentPart
-	(*MediaContent)(nil),     // 9: omnia.runtime.v1.MediaContent
-	(*Usage)(nil),            // 10: omnia.runtime.v1.Usage
-	(*Error)(nil),            // 11: omnia.runtime.v1.Error
-	(*MediaChunk)(nil),       // 12: omnia.runtime.v1.MediaChunk
-	(*HealthRequest)(nil),    // 13: omnia.runtime.v1.HealthRequest
-	(*HealthResponse)(nil),   // 14: omnia.runtime.v1.HealthResponse
-	nil,                      // 15: omnia.runtime.v1.ClientMessage.MetadataEntry
+	(ToolExecution)(0),         // 0: omnia.runtime.v1.ToolExecution
+	(*ClientMessage)(nil),      // 1: omnia.runtime.v1.ClientMessage
+	(*ClientToolResult)(nil),   // 2: omnia.runtime.v1.ClientToolResult
+	(*ServerMessage)(nil),      // 3: omnia.runtime.v1.ServerMessage
+	(*Chunk)(nil),              // 4: omnia.runtime.v1.Chunk
+	(*ToolCall)(nil),           // 5: omnia.runtime.v1.ToolCall
+	(*ToolResult)(nil),         // 6: omnia.runtime.v1.ToolResult
+	(*Done)(nil),               // 7: omnia.runtime.v1.Done
+	(*ContentPart)(nil),        // 8: omnia.runtime.v1.ContentPart
+	(*MediaContent)(nil),       // 9: omnia.runtime.v1.MediaContent
+	(*Usage)(nil),              // 10: omnia.runtime.v1.Usage
+	(*Error)(nil),              // 11: omnia.runtime.v1.Error
+	(*MediaChunk)(nil),         // 12: omnia.runtime.v1.MediaChunk
+	(*InvocationRequest)(nil),  // 13: omnia.runtime.v1.InvocationRequest
+	(*InvocationResponse)(nil), // 14: omnia.runtime.v1.InvocationResponse
+	(*HealthRequest)(nil),      // 15: omnia.runtime.v1.HealthRequest
+	(*HealthResponse)(nil),     // 16: omnia.runtime.v1.HealthResponse
+	nil,                        // 17: omnia.runtime.v1.ClientMessage.MetadataEntry
+	nil,                        // 18: omnia.runtime.v1.InvocationRequest.MetadataEntry
 }
 var file_api_proto_runtime_v1_runtime_proto_depIdxs = []int32{
-	15, // 0: omnia.runtime.v1.ClientMessage.metadata:type_name -> omnia.runtime.v1.ClientMessage.MetadataEntry
+	17, // 0: omnia.runtime.v1.ClientMessage.metadata:type_name -> omnia.runtime.v1.ClientMessage.MetadataEntry
 	8,  // 1: omnia.runtime.v1.ClientMessage.parts:type_name -> omnia.runtime.v1.ContentPart
 	2,  // 2: omnia.runtime.v1.ClientMessage.client_tool_result:type_name -> omnia.runtime.v1.ClientToolResult
 	4,  // 3: omnia.runtime.v1.ServerMessage.chunk:type_name -> omnia.runtime.v1.Chunk
@@ -1206,15 +1370,19 @@ var file_api_proto_runtime_v1_runtime_proto_depIdxs = []int32{
 	10, // 9: omnia.runtime.v1.Done.usage:type_name -> omnia.runtime.v1.Usage
 	8,  // 10: omnia.runtime.v1.Done.parts:type_name -> omnia.runtime.v1.ContentPart
 	9,  // 11: omnia.runtime.v1.ContentPart.media:type_name -> omnia.runtime.v1.MediaContent
-	1,  // 12: omnia.runtime.v1.RuntimeService.Converse:input_type -> omnia.runtime.v1.ClientMessage
-	13, // 13: omnia.runtime.v1.RuntimeService.Health:input_type -> omnia.runtime.v1.HealthRequest
-	3,  // 14: omnia.runtime.v1.RuntimeService.Converse:output_type -> omnia.runtime.v1.ServerMessage
-	14, // 15: omnia.runtime.v1.RuntimeService.Health:output_type -> omnia.runtime.v1.HealthResponse
-	14, // [14:16] is the sub-list for method output_type
-	12, // [12:14] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	18, // 12: omnia.runtime.v1.InvocationRequest.metadata:type_name -> omnia.runtime.v1.InvocationRequest.MetadataEntry
+	10, // 13: omnia.runtime.v1.InvocationResponse.usage:type_name -> omnia.runtime.v1.Usage
+	1,  // 14: omnia.runtime.v1.RuntimeService.Converse:input_type -> omnia.runtime.v1.ClientMessage
+	13, // 15: omnia.runtime.v1.RuntimeService.Invoke:input_type -> omnia.runtime.v1.InvocationRequest
+	15, // 16: omnia.runtime.v1.RuntimeService.Health:input_type -> omnia.runtime.v1.HealthRequest
+	3,  // 17: omnia.runtime.v1.RuntimeService.Converse:output_type -> omnia.runtime.v1.ServerMessage
+	14, // 18: omnia.runtime.v1.RuntimeService.Invoke:output_type -> omnia.runtime.v1.InvocationResponse
+	16, // 19: omnia.runtime.v1.RuntimeService.Health:output_type -> omnia.runtime.v1.HealthResponse
+	17, // [17:20] is the sub-list for method output_type
+	14, // [14:17] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_api_proto_runtime_v1_runtime_proto_init() }
@@ -1235,7 +1403,7 @@ func file_api_proto_runtime_v1_runtime_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_runtime_v1_runtime_proto_rawDesc), len(file_api_proto_runtime_v1_runtime_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   15,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

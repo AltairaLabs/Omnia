@@ -23,6 +23,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	RuntimeService_Converse_FullMethodName = "/omnia.runtime.v1.RuntimeService/Converse"
+	RuntimeService_Invoke_FullMethodName   = "/omnia.runtime.v1.RuntimeService/Invoke"
 	RuntimeService_Health_FullMethodName   = "/omnia.runtime.v1.RuntimeService/Health"
 )
 
@@ -38,6 +39,16 @@ type RuntimeServiceClient interface {
 	// The client sends messages and receives a stream of responses including
 	// text chunks, tool calls, tool results, and completion signals.
 	Converse(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ClientMessage, ServerMessage], error)
+	// Invoke runs a one-shot, non-conversational Function call. The facade
+	// forwards a payload-in / payload-out request from POST /functions/{name}
+	// and waits for the full response. Used for function-mode AgentRuntimes
+	// (spec.mode == "function"); see #1102 / #1103.
+	//
+	// The runtime is schema-agnostic — the facade validates input_json against
+	// AgentRuntime.spec.inputSchema before calling, and validates output_json
+	// against spec.outputSchema after returning. The runtime just executes
+	// the pack once.
+	Invoke(ctx context.Context, in *InvocationRequest, opts ...grpc.CallOption) (*InvocationResponse, error)
 	// Health checks the runtime's readiness to handle requests.
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
 }
@@ -63,6 +74,16 @@ func (c *runtimeServiceClient) Converse(ctx context.Context, opts ...grpc.CallOp
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type RuntimeService_ConverseClient = grpc.BidiStreamingClient[ClientMessage, ServerMessage]
 
+func (c *runtimeServiceClient) Invoke(ctx context.Context, in *InvocationRequest, opts ...grpc.CallOption) (*InvocationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InvocationResponse)
+	err := c.cc.Invoke(ctx, RuntimeService_Invoke_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *runtimeServiceClient) Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(HealthResponse)
@@ -85,6 +106,16 @@ type RuntimeServiceServer interface {
 	// The client sends messages and receives a stream of responses including
 	// text chunks, tool calls, tool results, and completion signals.
 	Converse(grpc.BidiStreamingServer[ClientMessage, ServerMessage]) error
+	// Invoke runs a one-shot, non-conversational Function call. The facade
+	// forwards a payload-in / payload-out request from POST /functions/{name}
+	// and waits for the full response. Used for function-mode AgentRuntimes
+	// (spec.mode == "function"); see #1102 / #1103.
+	//
+	// The runtime is schema-agnostic — the facade validates input_json against
+	// AgentRuntime.spec.inputSchema before calling, and validates output_json
+	// against spec.outputSchema after returning. The runtime just executes
+	// the pack once.
+	Invoke(context.Context, *InvocationRequest) (*InvocationResponse, error)
 	// Health checks the runtime's readiness to handle requests.
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
 	mustEmbedUnimplementedRuntimeServiceServer()
@@ -99,6 +130,9 @@ type UnimplementedRuntimeServiceServer struct{}
 
 func (UnimplementedRuntimeServiceServer) Converse(grpc.BidiStreamingServer[ClientMessage, ServerMessage]) error {
 	return status.Errorf(codes.Unimplemented, "method Converse not implemented")
+}
+func (UnimplementedRuntimeServiceServer) Invoke(context.Context, *InvocationRequest) (*InvocationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Invoke not implemented")
 }
 func (UnimplementedRuntimeServiceServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Health not implemented")
@@ -131,6 +165,24 @@ func _RuntimeService_Converse_Handler(srv interface{}, stream grpc.ServerStream)
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type RuntimeService_ConverseServer = grpc.BidiStreamingServer[ClientMessage, ServerMessage]
 
+func _RuntimeService_Invoke_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InvocationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RuntimeServiceServer).Invoke(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RuntimeService_Invoke_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RuntimeServiceServer).Invoke(ctx, req.(*InvocationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RuntimeService_Health_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(HealthRequest)
 	if err := dec(in); err != nil {
@@ -156,6 +208,10 @@ var RuntimeService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "omnia.runtime.v1.RuntimeService",
 	HandlerType: (*RuntimeServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Invoke",
+			Handler:    _RuntimeService_Invoke_Handler,
+		},
 		{
 			MethodName: "Health",
 			Handler:    _RuntimeService_Health_Handler,

@@ -10,6 +10,23 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (runtime gRPC: Invoke for function-mode AgentRuntimes, #1103 PR 2)
+
+- `RuntimeService.Invoke(InvocationRequest) returns (InvocationResponse)` — new
+  unary RPC for one-shot Function calls. Facade-only consumer (PR 3); browsers
+  don't talk to this directly.
+- `InvocationRequest{input_json, invocation_id, metadata}` — `input_json` is
+  opaque to the runtime; the facade validates against
+  `AgentRuntime.spec.inputSchema` before sending.
+- `InvocationResponse{output_json, usage, duration_ms, invocation_id}` —
+  `output_json` is the raw assistant text. The facade validates against
+  `spec.outputSchema` and, on mismatch, returns HTTP 502 with the raw body
+  for debugging (per #1103 Q2 lock).
+- Error codes: `InvalidArgument` for missing `invocation_id` / `input_json`;
+  `FailedPrecondition` if a function emits a client-side tool call (function
+  mode has no WebSocket peer to fulfil them); `Internal` for stream / pack
+  failures.
+
 ### Added (provider-calls aggregate + discover endpoints)
 
 - `GET /api/v1/provider-calls/aggregate?namespace=X&groupBy=Y&metric=Z` —
