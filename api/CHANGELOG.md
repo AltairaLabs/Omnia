@@ -10,6 +10,34 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (facade HTTP: POST /functions/{name} for function-mode AgentRuntimes, #1103 PR 3)
+
+- `POST /functions/{name}` on the facade HTTP port — entry point for
+  function-mode AgentRuntime invocations. Server-to-server only; not
+  reachable from browsers via the same WebSocket auth path (the existing
+  facade auth chain still applies once PR 4 wires the route into
+  `cmd/agent/websocket.go`).
+- Request: `Content-Type: application/json`, body validated against
+  `AgentRuntime.spec.inputSchema` (santhosh-tekuri/jsonschema/v6).
+  Request body capped at 1 MiB.
+- Success response (200): `{ output, invocation_id, duration_ms, usage{input_tokens, output_tokens, cost_usd} }`.
+  `output` is the model's raw JSON, already validated against
+  `spec.outputSchema`.
+- Error responses use a uniform JSON envelope `{ error, detail }`:
+  - 400 `input_invalid` — payload failed inputSchema. Runtime not called.
+  - 400 `missing_function_name` — empty `{name}` path segment.
+  - 400 `read_body_failed` — body read error.
+  - 404 `function_not_found` — no function-mode AgentRuntime with that
+    name on this facade (also returned for mode=agent runtimes to avoid
+    enumeration).
+  - 405 `method_not_allowed` — only POST is accepted.
+  - 413 `payload_too_large` — body exceeded 1 MiB cap.
+  - 415 `unsupported_media_type` — Content-Type must be application/json.
+  - 502 `runtime_error` — runtime gRPC Invoke returned an error.
+  - 502 `output_invalid` — model output failed outputSchema. Envelope
+    includes `raw_output` (JSON if valid; JSON string otherwise) so the
+    function author can debug (per #1103 Q2).
+
 ### Added (runtime gRPC: Invoke for function-mode AgentRuntimes, #1103 PR 2)
 
 - `RuntimeService.Invoke(InvocationRequest) returns (InvocationResponse)` — new

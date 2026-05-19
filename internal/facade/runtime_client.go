@@ -121,6 +121,13 @@ func (c *RuntimeClient) Converse(ctx context.Context) (runtimev1.RuntimeService_
 	return c.client.Converse(ctx)
 }
 
+// Invoke runs a one-shot Function call through the runtime. The facade's
+// FunctionsHandler is the sole consumer; agent-mode flows continue to
+// use Converse.
+func (c *RuntimeClient) Invoke(ctx context.Context, req *runtimev1.InvocationRequest) (*runtimev1.InvocationResponse, error) {
+	return c.client.Invoke(ctx, req)
+}
+
 // Health checks the runtime's health status.
 func (c *RuntimeClient) Health(ctx context.Context) (*runtimev1.HealthResponse, error) {
 	return c.client.Health(ctx, &runtimev1.HealthRequest{})
