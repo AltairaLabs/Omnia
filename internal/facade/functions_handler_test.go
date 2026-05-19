@@ -82,11 +82,14 @@ func TestFunctionsHandler_HappyPath(t *testing.T) {
 	outputSchema, err := CompileSchema([]byte(`{"type":"object","required":["a"]}`))
 	require.NoError(t, err)
 
+	// Set the runtime stub to echo a DIFFERENT invocation_id (or even an
+	// empty one) so the test pins down that the response carries the
+	// facade's authoritative id, not whatever the runtime sends back.
 	invoker := &stubInvoker{
 		resp: &runtimev1.InvocationResponse{
 			OutputJson:   `{"a":"42"}`,
 			DurationMs:   17,
-			InvocationId: "ignored-server-side",
+			InvocationId: "runtime-tried-to-override",
 			Usage:        &runtimev1.Usage{InputTokens: 12, OutputTokens: 3, CostUsd: 0.0004},
 		},
 	}
@@ -104,12 +107,41 @@ func TestFunctionsHandler_HappyPath(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 	assert.Equal(t, map[string]any{"a": "42"}, body["output"])
 	assert.Equal(t, float64(17), body["duration_ms"])
-	assert.NotEmpty(t, body["invocation_id"], "facade should generate a fresh invocation_id")
+
+	responseID, ok := body["invocation_id"].(string)
+	require.True(t, ok, "invocation_id must be a string")
+	assert.NotEmpty(t, responseID, "facade must generate an invocation_id")
+	assert.NotEqual(t, "runtime-tried-to-override", responseID,
+		"facade is authoritative on invocation_id; runtime's echo must not leak into the response")
 
 	require.NotNil(t, invoker.lastReq)
 	assert.Equal(t, `{"q":"hi"}`, invoker.lastReq.GetInputJson())
-	assert.NotEmpty(t, invoker.lastReq.GetInvocationId(),
-		"facade must send an invocation_id to the runtime")
+	// Round-trip invariant: the id the facade sent to the runtime must be
+	// the same id it returned to the caller.
+	assert.Equal(t, responseID, invoker.lastReq.GetInvocationId(),
+		"facade must send the same invocation_id to the runtime that it returns to the caller")
+}
+
+func TestFunctionsHandler_AcceptsApplicationJSONWithCharsetSuffix(t *testing.T) {
+	inputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+
+	invoker := &stubInvoker{
+		resp: &runtimev1.InvocationResponse{OutputJson: `{}`},
+	}
+	h := newHandler(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, invoker)
+
+	req := httptest.NewRequest(http.MethodPost, "/functions/"+testFunctionName, strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rec := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code,
+		"Content-Type with a charset parameter must be accepted")
 }
 
 func TestFunctionsHandler_InputValidationFails(t *testing.T) {
@@ -276,15 +308,36 @@ func TestFunctionsHandler_BodyTooLarge(t *testing.T) {
 	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
 }
 
-func TestFunctionsHandler_BlankFunctionNameIs400(t *testing.T) {
+func TestFunctionsHandler_BlankPathValueIs400(t *testing.T) {
+	// Defensive: production mounts the handler under "POST /functions/{name}"
+	// so a blank PathValue is impossible in practice. This test pins the
+	// handler's own guard against a misconfigured mux that hands it a
+	// request with no {name} bound.
 	h := newHandler(t, map[string]*FunctionSpec{}, &stubInvoker{})
 
-	// http.ServeMux will 404 a path that doesn't have {name} bound, so
-	// drive the handler directly with no PathValue.
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/functions/", strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	h.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestMapFunctionRegistry_RegisterIgnoresInvalidSpecs(t *testing.T) {
+	reg := NewMapFunctionRegistry()
+
+	// nil spec is silently dropped.
+	reg.Register(nil)
+	// empty Name is silently dropped.
+	reg.Register(&FunctionSpec{Name: ""})
+
+	if _, ok := reg.GetFunction(""); ok {
+		t.Errorf("registry must not store a spec with empty Name")
+	}
+	// A valid registration still works after the bad ones — verify the
+	// silent-drop branches didn't poison the registry's internal map.
+	reg.Register(&FunctionSpec{Name: testFunctionName})
+	if _, ok := reg.GetFunction(testFunctionName); !ok {
+		t.Errorf("registry must store valid specs after silent-dropped invalid ones")
+	}
 }

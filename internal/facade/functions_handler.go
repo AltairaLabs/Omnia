@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 
 	"github.com/go-logr/logr"
@@ -128,11 +129,16 @@ func (h *FunctionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctype := r.Header.Get("Content-Type")
-	if ctype != "" && ctype != "application/json" {
-		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
-			"Content-Type must be application/json")
-		return
+	// Parse the media type so application/json; charset=utf-8 (default for
+	// many HTTP clients) is accepted. Only the bare media type is checked;
+	// parameters like charset are ignored.
+	if rawCT := r.Header.Get("Content-Type"); rawCT != "" {
+		mediaType, _, err := mime.ParseMediaType(rawCT)
+		if err != nil || mediaType != "application/json" {
+			writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
+				"Content-Type must be application/json")
+			return
+		}
 	}
 
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.maxBodyBytes))
@@ -177,17 +183,28 @@ func (h *FunctionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Echo the response shape: { output: <model output>, usage, duration_ms, invocation_id }.
-	// output is forwarded as raw JSON (already validated above).
-	if err := writeSuccess(w, rawOutput, resp); err != nil {
+	// output is forwarded as raw JSON (already validated above). The
+	// invocationID returned is always the facade-generated one — the
+	// runtime echoes it but the facade is the source of truth, so a
+	// runtime that returned a different (or empty) value would still
+	// see this id in the response and in correlation traces.
+	if err := writeSuccess(w, rawOutput, invocationID, resp); err != nil {
 		log.Error(err, "failed to write success response")
+		return
 	}
+	log.V(1).Info("function invocation complete",
+		"durationMs", resp.GetDurationMs(),
+		"outputBytes", len(rawOutput))
 }
 
-// writeSuccess emits the function-mode 200 response envelope.
-func writeSuccess(w http.ResponseWriter, rawOutput []byte, resp *runtimev1.InvocationResponse) error {
+// writeSuccess emits the function-mode 200 response envelope. invocationID
+// is the facade-authoritative UUID generated when the request arrived;
+// it is the value returned to the caller regardless of what the runtime
+// echoed back in resp.GetInvocationId().
+func writeSuccess(w http.ResponseWriter, rawOutput []byte, invocationID string, resp *runtimev1.InvocationResponse) error {
 	envelope := map[string]any{
 		"output":        json.RawMessage(rawOutput),
-		"invocation_id": resp.GetInvocationId(),
+		"invocation_id": invocationID,
 		"duration_ms":   resp.GetDurationMs(),
 	}
 	if u := resp.GetUsage(); u != nil {
