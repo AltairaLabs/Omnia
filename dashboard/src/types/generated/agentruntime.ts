@@ -2407,6 +2407,19 @@ export interface AgentRuntimeSpec {
      * If not specified, the latest supported version is used. */
     version?: string;
   };
+  /** inputSchema is the JSON Schema that incoming Function payloads are
+   * validated against. Required when spec.mode is 'function'; forbidden
+   * otherwise (CEL-gated). Stored as a raw JSON object; consumers
+   * validate via santhosh-tekuri/jsonschema. */
+  inputSchema?: Record<string, unknown>;
+  /** invocationRecording configures per-call audit persistence for
+   * function-mode runtimes. Ephemeral by default; opt in by setting
+   * state: enabled. Ignored (forbidden via CEL) when mode is 'agent'. */
+  invocationRecording?: {
+    /** state controls whether invocation records are written. Defaults to
+     * "disabled". */
+    state?: "disabled" | "enabled";
+  };
   /** media configures media file resolution for mock provider responses. */
   media?: {
     /** basePath is the base directory for resolving mock:// URLs.
@@ -2459,6 +2472,19 @@ export interface AgentRuntimeSpec {
       strategy?: "keyword" | "semantic" | "graph" | "composite";
     };
   };
+  /** mode controls how the AgentRuntime is invoked. "agent" (default) is
+   * the existing conversational runtime; "function" exposes the pack as
+   * a one-shot, structured-I/O HTTP endpoint at POST /functions/{name}.
+   * When set to "function", spec.inputSchema and spec.outputSchema are
+   * required and the facade type must not be 'websocket'. */
+  mode?: "agent" | "function";
+  /** outputSchema is the JSON Schema that the Function's response is
+   * validated against before being returned to the caller. A
+   * non-conforming model output is rejected with HTTP 502 and the raw
+   * output is returned in the response body for debugging (no
+   * in-runtime retry). Required when spec.mode is 'function'; forbidden
+   * otherwise (CEL-gated). */
+  outputSchema?: Record<string, unknown>;
   /** podOverrides lets operators customize the facade+runtime pod's
    * scheduling, service account, labels, annotations, volumes, and env
    * sourced from CSI secret-stores or ConfigMaps.
