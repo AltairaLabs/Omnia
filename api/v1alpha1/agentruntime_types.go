@@ -18,8 +18,58 @@ package v1alpha1
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// AgentRuntimeMode defines how the AgentRuntime is invoked. Default is
+// "agent" — a conversational, session-driven runtime fronted by the
+// WebSocket facade. Set to "function" to expose the pack as a one-shot,
+// structured-I/O HTTP endpoint (see Phase 1 of Functions, #1102 / #1103).
+// "inference" is intentionally not used here so we can reuse that name
+// later for a more generic Provider role.
+// +kubebuilder:validation:Enum=agent;function
+type AgentRuntimeMode string
+
+const (
+	// AgentRuntimeModeAgent is the conversational runtime mode.
+	AgentRuntimeModeAgent AgentRuntimeMode = "agent"
+	// AgentRuntimeModeFunction is the one-shot, structured-I/O runtime mode.
+	// Requires spec.inputSchema and spec.outputSchema; rejects
+	// spec.facade.type == "websocket" via CEL.
+	AgentRuntimeModeFunction AgentRuntimeMode = "function"
+)
+
+// InvocationRecordingState controls whether per-invocation audit records
+// are persisted to the session-api for function-mode runtimes. Ephemeral
+// by default — Functions can be called at much higher rates than agents,
+// and most callers persist the outcome themselves. Operators flip this
+// to "enabled" for Functions where audit / debugging / cost attribution
+// at invocation granularity matters.
+// +kubebuilder:validation:Enum=disabled;enabled
+type InvocationRecordingState string
+
+const (
+	// InvocationRecordingDisabled means function invocations are not
+	// recorded (default).
+	InvocationRecordingDisabled InvocationRecordingState = "disabled"
+	// InvocationRecordingEnabled means each function invocation is
+	// persisted as a row in function_invocations.
+	InvocationRecordingEnabled InvocationRecordingState = "enabled"
+)
+
+// InvocationRecordingConfig configures per-invocation persistence for
+// function-mode AgentRuntimes. Ignored when spec.mode is "agent" — but
+// the CEL gate only rejects the block when state is "enabled", so a
+// wizard toggling modes can leave behind a state-disabled block on
+// agent-mode resources without tripping validation.
+type InvocationRecordingConfig struct {
+	// state controls whether invocation records are written. Defaults to
+	// "disabled".
+	// +kubebuilder:default="disabled"
+	// +optional
+	State InvocationRecordingState `json:"state,omitempty"`
+}
 
 // PromptPackRef references a PromptPack to use for this agent runtime.
 type PromptPackRef struct {
@@ -1121,7 +1171,50 @@ type MemoryEmbeddingConfig struct {
 }
 
 // AgentRuntimeSpec defines the desired state of AgentRuntime.
+//
+// Mode-conditional validations (Functions, #1102):
+// +kubebuilder:validation:XValidation:rule="self.mode != 'function' || has(self.inputSchema)",message="spec.inputSchema is required when spec.mode is 'function'"
+// +kubebuilder:validation:XValidation:rule="self.mode != 'function' || has(self.outputSchema)",message="spec.outputSchema is required when spec.mode is 'function'"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.inputSchema)",message="spec.inputSchema is only valid when spec.mode is 'function'"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.outputSchema)",message="spec.outputSchema is only valid when spec.mode is 'function'"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.invocationRecording) || self.invocationRecording.state != 'enabled'",message="spec.invocationRecording.state 'enabled' is only valid when spec.mode is 'function'"
+// +kubebuilder:validation:XValidation:rule="self.mode != 'function' || self.facade.type != 'websocket'",message="facade.type 'websocket' is incompatible with mode 'function'; use 'grpc' or omit"
 type AgentRuntimeSpec struct {
+	// mode controls how the AgentRuntime is invoked. "agent" (default) is
+	// the existing conversational runtime; "function" exposes the pack as
+	// a one-shot, structured-I/O HTTP endpoint at POST /functions/{name}.
+	// When set to "function", spec.inputSchema and spec.outputSchema are
+	// required and the facade type must not be 'websocket'.
+	// +optional
+	// +kubebuilder:default="agent"
+	Mode AgentRuntimeMode `json:"mode,omitempty"`
+
+	// inputSchema is the JSON Schema that incoming Function payloads are
+	// validated against. Required when spec.mode is 'function'; forbidden
+	// otherwise (CEL-gated). Stored as a raw JSON object; consumers
+	// validate via santhosh-tekuri/jsonschema.
+	// +optional
+	// +kubebuilder:validation:Type=object
+	// +kubebuilder:pruning:PreserveUnknownFields
+	InputSchema *apiextensionsv1.JSON `json:"inputSchema,omitempty"`
+
+	// outputSchema is the JSON Schema that the Function's response is
+	// validated against before being returned to the caller. A
+	// non-conforming model output is rejected with HTTP 502 and the raw
+	// output is returned in the response body for debugging (no
+	// in-runtime retry). Required when spec.mode is 'function'; forbidden
+	// otherwise (CEL-gated).
+	// +optional
+	// +kubebuilder:validation:Type=object
+	// +kubebuilder:pruning:PreserveUnknownFields
+	OutputSchema *apiextensionsv1.JSON `json:"outputSchema,omitempty"`
+
+	// invocationRecording configures per-call audit persistence for
+	// function-mode runtimes. Ephemeral by default; opt in by setting
+	// state: enabled. Ignored (forbidden via CEL) when mode is 'agent'.
+	// +optional
+	InvocationRecording *InvocationRecordingConfig `json:"invocationRecording,omitempty"`
+
 	// framework specifies which agent framework to use.
 	// Supports PromptKit, LangChain, AutoGen, or a custom image.
 	// If not specified, defaults to PromptKit.
@@ -1315,6 +1408,39 @@ type AgentRuntime struct {
 	// status defines the observed state of AgentRuntime
 	// +optional
 	Status AgentRuntimeStatus `json:"status,omitzero"`
+}
+
+// EffectiveMode returns the runtime's declared mode, defaulting to
+// AgentRuntimeModeAgent when unset for back-compat with pre-mode
+// AgentRuntimes. Safe to call on a nil receiver (returns agent).
+func (ar *AgentRuntime) EffectiveMode() AgentRuntimeMode {
+	if ar == nil || ar.Spec.Mode == "" {
+		return AgentRuntimeModeAgent
+	}
+	return ar.Spec.Mode
+}
+
+// IsFunctionMode is shorthand for EffectiveMode() == AgentRuntimeModeFunction.
+func (ar *AgentRuntime) IsFunctionMode() bool {
+	return ar.EffectiveMode() == AgentRuntimeModeFunction
+}
+
+// RecordsInvocations reports whether function invocations should be
+// persisted to the session-api. Always false in agent mode (the CEL
+// gate forbids state=enabled there); defaults to false in function mode
+// when the block or state is unset.
+//
+// Renamed from the original InvocationRecordingEnabled() because that
+// name collided visually with the InvocationRecordingEnabled state
+// constant.
+func (ar *AgentRuntime) RecordsInvocations() bool {
+	if ar == nil || !ar.IsFunctionMode() {
+		return false
+	}
+	if ar.Spec.InvocationRecording == nil {
+		return false
+	}
+	return ar.Spec.InvocationRecording.State == InvocationRecordingEnabled
 }
 
 // +kubebuilder:object:root=true

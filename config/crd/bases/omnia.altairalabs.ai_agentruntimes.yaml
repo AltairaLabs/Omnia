@@ -4381,6 +4381,30 @@ spec:
                 required:
                 - type
                 type: object
+              inputSchema:
+                description: |-
+                  inputSchema is the JSON Schema that incoming Function payloads are
+                  validated against. Required when spec.mode is 'function'; forbidden
+                  otherwise (CEL-gated). Stored as a raw JSON object; consumers
+                  validate via santhosh-tekuri/jsonschema.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              invocationRecording:
+                description: |-
+                  invocationRecording configures per-call audit persistence for
+                  function-mode runtimes. Ephemeral by default; opt in by setting
+                  state: enabled. Ignored (forbidden via CEL) when mode is 'agent'.
+                properties:
+                  state:
+                    default: disabled
+                    description: |-
+                      state controls whether invocation records are written. Defaults to
+                      "disabled".
+                    enum:
+                    - disabled
+                    - enabled
+                    type: string
+                type: object
               media:
                 description: media configures media file resolution for mock provider
                   responses.
@@ -4485,6 +4509,28 @@ spec:
                         type: string
                     type: object
                 type: object
+              mode:
+                default: agent
+                description: |-
+                  mode controls how the AgentRuntime is invoked. "agent" (default) is
+                  the existing conversational runtime; "function" exposes the pack as
+                  a one-shot, structured-I/O HTTP endpoint at POST /functions/{name}.
+                  When set to "function", spec.inputSchema and spec.outputSchema are
+                  required and the facade type must not be 'websocket'.
+                enum:
+                - agent
+                - function
+                type: string
+              outputSchema:
+                description: |-
+                  outputSchema is the JSON Schema that the Function's response is
+                  validated against before being returned to the caller. A
+                  non-conforming model output is rejected with HTTP 502 and the raw
+                  output is returned in the response body for debugging (no
+                  in-runtime retry). Required when spec.mode is 'function'; forbidden
+                  otherwise (CEL-gated).
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
               podOverrides:
                 description: |-
                   podOverrides lets operators customize the facade+runtime pod's
@@ -11587,6 +11633,22 @@ spec:
             - facade
             - promptPackRef
             type: object
+            x-kubernetes-validations:
+            - message: spec.inputSchema is required when spec.mode is 'function'
+              rule: self.mode != 'function' || has(self.inputSchema)
+            - message: spec.outputSchema is required when spec.mode is 'function'
+              rule: self.mode != 'function' || has(self.outputSchema)
+            - message: spec.inputSchema is only valid when spec.mode is 'function'
+              rule: self.mode == 'function' || !has(self.inputSchema)
+            - message: spec.outputSchema is only valid when spec.mode is 'function'
+              rule: self.mode == 'function' || !has(self.outputSchema)
+            - message: spec.invocationRecording.state 'enabled' is only valid when
+                spec.mode is 'function'
+              rule: self.mode == 'function' || !has(self.invocationRecording) || self.invocationRecording.state
+                != 'enabled'
+            - message: facade.type 'websocket' is incompatible with mode 'function';
+                use 'grpc' or omit
+              rule: self.mode != 'function' || self.facade.type != 'websocket'
           status:
             description: status defines the observed state of AgentRuntime
             properties:
