@@ -66,6 +66,20 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		cfg.ClientToolTimeout = ar.Spec.Facade.ClientToolTimeout.Duration
 	}
 
+	// Mode + Function-specific config (Functions Phase 1, #1102 / #1103).
+	// EffectiveMode() defaults empty → "agent" for back-compat with
+	// pre-mode AgentRuntimes that predate the rollout.
+	cfg.Mode = string(ar.EffectiveMode())
+	if ar.IsFunctionMode() {
+		if ar.Spec.InputSchema != nil {
+			cfg.FunctionInputSchemaJSON = ar.Spec.InputSchema.Raw
+		}
+		if ar.Spec.OutputSchema != nil {
+			cfg.FunctionOutputSchemaJSON = ar.Spec.OutputSchema.Raw
+		}
+		cfg.FunctionRecordsInvocations = ar.RecordsInvocations()
+	}
+
 	// Handler mode from env (operator decides this, not CRD)
 	cfg.HandlerMode = HandlerMode(getEnvOrDefault(EnvHandlerMode, string(HandlerModeRuntime)))
 	cfg.RuntimeAddress = getEnvOrDefault(EnvRuntimeAddress, DefaultRuntimeAddress)

@@ -28,6 +28,10 @@ const (
 	labelAppManagedBy = "app.kubernetes.io/managed-by"
 	labelOmniaComp    = "omnia.altairalabs.ai/component"
 	labelOmniaTrack   = "omnia.altairalabs.ai/track"
+	// labelOmniaMode mirrors AgentRuntime.spec.mode on the pod for ops
+	// visibility (kubectl filtering, dashboards). Value matches the
+	// CRD enum: "agent" or "function".
+	labelOmniaMode = "omnia.altairalabs.ai/mode"
 )
 
 // Label value constants.

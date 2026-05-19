@@ -153,6 +153,24 @@ type Config struct {
 	HandlerMode    HandlerMode
 	RuntimeAddress string
 
+	// Mode is the AgentRuntime.spec.mode discriminator (agent | function).
+	// Defaults to "agent" for back-compat with pre-mode CRDs. The agent
+	// binary branches on this at startup to decide whether to mount the
+	// WebSocket facade or the Functions HTTP handler.
+	Mode string
+
+	// FunctionInputSchemaJSON / FunctionOutputSchemaJSON carry the raw
+	// JSON-Schema bytes from spec.inputSchema / spec.outputSchema.
+	// Populated only when Mode=="function". The function-mode startup
+	// path compiles these once via facade.CompileSchema.
+	FunctionInputSchemaJSON  []byte
+	FunctionOutputSchemaJSON []byte
+
+	// FunctionRecordsInvocations mirrors
+	// AgentRuntime.spec.invocationRecording.state == "enabled".
+	// Always false when Mode != "function".
+	FunctionRecordsInvocations bool
+
 	// ToolRegistry configuration (optional).
 	ToolRegistryName      string
 	ToolRegistryNamespace string

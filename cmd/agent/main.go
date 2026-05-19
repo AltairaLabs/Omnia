@@ -129,6 +129,14 @@ func main() {
 		}
 	}
 
+	// Branch on AgentRuntime.spec.mode first: function-mode pods run a
+	// one-shot HTTP facade alongside the same runtime sidecar; agent-mode
+	// pods continue with the existing WebSocket / A2A flows.
+	if cfg.Mode == "function" {
+		runFunctionsFacade(cfg, log, tracingProvider)
+		return
+	}
+
 	// Branch on facade type: A2A runs the SDK in-process (no runtime sidecar),
 	// while WebSocket uses the traditional facade + gRPC runtime architecture.
 	if cfg.FacadeType == agent.FacadeTypeA2A {

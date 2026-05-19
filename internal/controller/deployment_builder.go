@@ -249,6 +249,8 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		labelAppManagedBy: labelValueOmniaOperator,
 		labelOmniaComp:    "agent",
 		labelOmniaTrack:   "stable",
+		// Mode is informational; the binaries read it from the CRD directly.
+		labelOmniaMode: string(agentRuntime.EffectiveMode()),
 	}
 
 	replicas := int32(1)

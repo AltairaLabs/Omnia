@@ -10,6 +10,26 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (operator + facade activation for function-mode AgentRuntimes, #1103 PR 4)
+
+- AgentRuntime pods now branch on `spec.mode` at startup:
+  - `mode: agent` (default) — unchanged. WebSocket / A2A facade as before.
+  - `mode: function` — new HTTP-only facade serving `POST /functions/{name}`
+    on the same `cfg.FacadePort` previously used for WebSocket. The
+    runtime sidecar is the same in both modes; only the facade routing
+    differs.
+- The function-mode route resolves `{name}` against this pod's
+  AgentRuntime name (canonicalised to lowercase per RFC1123). One
+  function per pod.
+- Pod label `omnia.altairalabs.ai/mode` now carries the runtime's
+  `EffectiveMode()` for operational visibility (`kubectl get pods -l omnia.altairalabs.ai/mode=function`).
+- Function-mode pods read `spec.inputSchema`, `spec.outputSchema`, and
+  `spec.invocationRecording.state` from the CRD at startup and compile
+  the schemas once. Schema changes require a Deployment rollout
+  (existing behaviour for any CRD-driven config).
+- Function-mode pod's `/readyz` checks the runtime sidecar's gRPC
+  Health — same readiness invariant as the WebSocket path.
+
 ### Added (facade HTTP: POST /functions/{name} for function-mode AgentRuntimes, #1103 PR 3)
 
 - `POST /functions/{name}` on the facade HTTP port — entry point for
