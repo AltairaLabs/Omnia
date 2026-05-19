@@ -948,7 +948,7 @@ func createEmbeddingService(ctx context.Context, providerName string, store *mem
 		return nil
 	}
 
-	// Require role=embedding. Pre-role Providers default to inference
+	// Require role=embedding. Pre-role Providers default to llm
 	// (and rejecting them here gives a clearer error than the downstream
 	// PromptKit factory complaint).
 	if err := omniav1alpha1.RequireProviderRole(&provider, omniav1alpha1.ProviderRoleEmbedding); err != nil {

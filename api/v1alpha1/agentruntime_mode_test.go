@@ -1,7 +1,17 @@
 /*
-Copyright 2026 Altaira Labs.
+Copyright 2025.
 
-SPDX-License-Identifier: Apache-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package v1alpha1
@@ -51,10 +61,10 @@ func TestAgentRuntime_IsFunctionMode(t *testing.T) {
 	})
 }
 
-func TestAgentRuntime_InvocationRecordingEnabled(t *testing.T) {
+func TestAgentRuntime_RecordsInvocations(t *testing.T) {
 	t.Run("nil receiver returns false", func(t *testing.T) {
 		var ar *AgentRuntime
-		assert.False(t, ar.InvocationRecordingEnabled())
+		assert.False(t, ar.RecordsInvocations())
 	})
 
 	t.Run("agent mode always false even with block set", func(t *testing.T) {
@@ -64,12 +74,12 @@ func TestAgentRuntime_InvocationRecordingEnabled(t *testing.T) {
 				State: InvocationRecordingEnabled,
 			},
 		}}
-		assert.False(t, ar.InvocationRecordingEnabled())
+		assert.False(t, ar.RecordsInvocations())
 	})
 
 	t.Run("function mode with no block defaults disabled", func(t *testing.T) {
 		ar := &AgentRuntime{Spec: AgentRuntimeSpec{Mode: AgentRuntimeModeFunction}}
-		assert.False(t, ar.InvocationRecordingEnabled())
+		assert.False(t, ar.RecordsInvocations())
 	})
 
 	t.Run("function mode with state disabled", func(t *testing.T) {
@@ -79,7 +89,7 @@ func TestAgentRuntime_InvocationRecordingEnabled(t *testing.T) {
 				State: InvocationRecordingDisabled,
 			},
 		}}
-		assert.False(t, ar.InvocationRecordingEnabled())
+		assert.False(t, ar.RecordsInvocations())
 	})
 
 	t.Run("function mode with state enabled", func(t *testing.T) {
@@ -89,6 +99,6 @@ func TestAgentRuntime_InvocationRecordingEnabled(t *testing.T) {
 				State: InvocationRecordingEnabled,
 			},
 		}}
-		assert.True(t, ar.InvocationRecordingEnabled())
+		assert.True(t, ar.RecordsInvocations())
 	})
 }

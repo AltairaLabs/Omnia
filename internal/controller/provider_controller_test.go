@@ -2794,7 +2794,7 @@ var _ = Describe("Provider Controller", func() {
 	// --- Role-aware behaviour (Phase 1 of #1089) ---------------------------
 
 	Context("provider role helpers", func() {
-		It("defaults to inference when role is unset (back-compat)", func() {
+		It("defaults to llm when role is unset (back-compat)", func() {
 			p := &omniav1alpha1.Provider{
 				Spec: omniav1alpha1.ProviderSpec{Type: omniav1alpha1.ProviderTypeClaude},
 			}
@@ -2811,7 +2811,7 @@ var _ = Describe("Provider Controller", func() {
 			Expect(providerRole(p)).To(Equal(omniav1alpha1.ProviderRoleEmbedding))
 		})
 
-		It("returns inference for a nil receiver", func() {
+		It("returns llm for a nil receiver", func() {
 			Expect(providerRole(nil)).To(Equal(omniav1alpha1.ProviderRoleLLM))
 		})
 	})
@@ -2877,7 +2877,7 @@ var _ = Describe("Provider Controller", func() {
 			Expect(r.resolveHealthURL(p)).To(BeEmpty())
 		})
 
-		It("uses the inference health URL for inference-role providers", func() {
+		It("uses the llm health URL for llm-role providers", func() {
 			p := &omniav1alpha1.Provider{
 				Spec: omniav1alpha1.ProviderSpec{
 					Type: omniav1alpha1.ProviderTypeClaude,
@@ -2887,7 +2887,7 @@ var _ = Describe("Provider Controller", func() {
 			Expect(r.resolveHealthURL(p)).To(Equal("https://api.anthropic.com"))
 		})
 
-		It("defaults to inference health URL when role is unset (back-compat)", func() {
+		It("defaults to llm health URL when role is unset (back-compat)", func() {
 			p := &omniav1alpha1.Provider{
 				Spec: omniav1alpha1.ProviderSpec{
 					Type: omniav1alpha1.ProviderTypeClaude,

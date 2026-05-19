@@ -59,11 +59,14 @@ const (
 )
 
 // InvocationRecordingConfig configures per-invocation persistence for
-// function-mode AgentRuntimes. Ignored when spec.mode is "agent".
+// function-mode AgentRuntimes. Ignored when spec.mode is "agent" — but
+// the CEL gate only rejects the block when state is "enabled", so a
+// wizard toggling modes can leave behind a state-disabled block on
+// agent-mode resources without tripping validation.
 type InvocationRecordingConfig struct {
 	// state controls whether invocation records are written. Defaults to
 	// "disabled".
-	// +kubebuilder:default=disabled
+	// +kubebuilder:default="disabled"
 	// +optional
 	State InvocationRecordingState `json:"state,omitempty"`
 }
@@ -1174,7 +1177,7 @@ type MemoryEmbeddingConfig struct {
 // +kubebuilder:validation:XValidation:rule="self.mode != 'function' || has(self.outputSchema)",message="spec.outputSchema is required when spec.mode is 'function'"
 // +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.inputSchema)",message="spec.inputSchema is only valid when spec.mode is 'function'"
 // +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.outputSchema)",message="spec.outputSchema is only valid when spec.mode is 'function'"
-// +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.invocationRecording)",message="spec.invocationRecording is only valid when spec.mode is 'function'"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.invocationRecording) || self.invocationRecording.state != 'enabled'",message="spec.invocationRecording.state 'enabled' is only valid when spec.mode is 'function'"
 // +kubebuilder:validation:XValidation:rule="self.mode != 'function' || self.facade.type != 'websocket'",message="facade.type 'websocket' is incompatible with mode 'function'; use 'grpc' or omit"
 type AgentRuntimeSpec struct {
 	// mode controls how the AgentRuntime is invoked. "agent" (default) is
@@ -1183,7 +1186,7 @@ type AgentRuntimeSpec struct {
 	// When set to "function", spec.inputSchema and spec.outputSchema are
 	// required and the facade type must not be 'websocket'.
 	// +optional
-	// +kubebuilder:default=agent
+	// +kubebuilder:default="agent"
 	Mode AgentRuntimeMode `json:"mode,omitempty"`
 
 	// inputSchema is the JSON Schema that incoming Function payloads are
@@ -1422,11 +1425,15 @@ func (ar *AgentRuntime) IsFunctionMode() bool {
 	return ar.EffectiveMode() == AgentRuntimeModeFunction
 }
 
-// InvocationRecordingEnabled reports whether function invocations should
-// be persisted to the session-api. Always false in agent mode (the CEL
-// gate forbids the field there anyway); defaults to false in function
-// mode when the block or state is unset.
-func (ar *AgentRuntime) InvocationRecordingEnabled() bool {
+// RecordsInvocations reports whether function invocations should be
+// persisted to the session-api. Always false in agent mode (the CEL
+// gate forbids state=enabled there); defaults to false in function mode
+// when the block or state is unset.
+//
+// Renamed from the original InvocationRecordingEnabled() because that
+// name collided visually with the InvocationRecordingEnabled state
+// constant.
+func (ar *AgentRuntime) RecordsInvocations() bool {
 	if ar == nil || !ar.IsFunctionMode() {
 		return false
 	}
