@@ -28,10 +28,16 @@ const (
 )
 
 func validFunctionConfig() *agent.Config {
+	// Mirror what LoadFromCRD produces for a function-mode AgentRuntime
+	// so the validation surface here matches what's seen at startup.
 	return &agent.Config{
 		AgentName:                "summarizer",
 		Namespace:                "prod",
-		Mode:                     "function",
+		PromptPackName:           "summarizer-pack",
+		Mode:                     agent.ModeFunction,
+		HandlerMode:              agent.HandlerModeRuntime,
+		FacadeType:               agent.FacadeTypeGRPC,
+		MediaStorageType:         agent.MediaStorageTypeNone,
 		FunctionInputSchemaJSON:  []byte(goodInputSchema),
 		FunctionOutputSchemaJSON: []byte(goodOutputSchema),
 	}

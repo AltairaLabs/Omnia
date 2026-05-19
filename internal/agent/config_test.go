@@ -132,12 +132,14 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: ErrInvalidHandlerMode,
 		},
 		{
+			// "grpc" became a valid facade type in #1108 (Functions PR 4);
+			// pick an actually-unknown value to assert the negative case.
 			name: "invalid facade type",
 			config: &Config{
 				AgentName:        "test-agent",
 				Namespace:        "default",
 				PromptPackName:   "my-pack",
-				FacadeType:       "grpc",
+				FacadeType:       "unknown-facade",
 				HandlerMode:      HandlerModeEcho,
 				MediaStorageType: MediaStorageTypeNone,
 			},

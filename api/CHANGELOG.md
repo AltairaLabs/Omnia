@@ -14,29 +14,54 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 - AgentRuntime pods now branch on `spec.mode` at startup:
   - `mode: agent` (default) — unchanged. WebSocket / A2A facade as before.
-  - `mode: function` — new HTTP-only facade serving `POST /functions/{name}`
+  - `mode: function` — HTTP-only facade serving `POST /functions/{name}`
     on the same `cfg.FacadePort` previously used for WebSocket. The
     runtime sidecar is the same in both modes; only the facade routing
     differs.
+- Function-mode AgentRuntimes use `facade.type: grpc` (CRD CEL rejects
+  `websocket` for `mode=function`); the agent binary now accepts `grpc`
+  as a valid `FacadeType` enum value.
 - The function-mode route resolves `{name}` against this pod's
   AgentRuntime name (canonicalised to lowercase per RFC1123). One
   function per pod.
-- Pod label `omnia.altairalabs.ai/mode` now carries the runtime's
+- Pod label `omnia.altairalabs.ai/mode` carries the runtime's
   `EffectiveMode()` for operational visibility (`kubectl get pods -l omnia.altairalabs.ai/mode=function`).
+  The label lives on the pod template only — it is intentionally NOT
+  in the Deployment selector (selectors are immutable; rolling out a
+  mode change would otherwise fail with `field is immutable`).
 - Function-mode pods read `spec.inputSchema`, `spec.outputSchema`, and
   `spec.invocationRecording.state` from the CRD at startup and compile
   the schemas once. Schema changes require a Deployment rollout
   (existing behaviour for any CRD-driven config).
 - Function-mode pod's `/readyz` checks the runtime sidecar's gRPC
-  Health — same readiness invariant as the WebSocket path.
+  Health — same readiness invariant as the WebSocket path. The runtime
+  dial uses the same exponential-backoff retry as the WebSocket path
+  (up to 10 attempts, capped at 5s between attempts).
+- The function HTTP server has a 60s `WriteTimeout` so a stalled
+  runtime doesn't leak sockets. (The WebSocket server intentionally
+  has no `WriteTimeout` because connections are long-lived.)
+
+**Security posture (TEMPORARY — fast-follow scheduled):**
+
+The function route is currently **strict-default 403** for ALL requests.
+The WebSocket auth chain (mgmt-plane + data-plane validators) has NOT
+been wired into the function pod in this PR — it lives on the upgrade
+handshake, which function-mode pods don't execute. Until that wiring
+lands as a fast-follow, every request to `POST /functions/{name}` is
+refused with HTTP 403 `function routes are not yet authenticated`.
+
+To bypass for dev / CI / smoke tests, set
+`OMNIA_FUNCTION_ALLOW_UNAUTHENTICATED=true`. **This must NEVER be set
+in production.** When the auth chain is wired in a later PR, this env
+var will become a no-op and may be removed in a subsequent release.
 
 ### Added (facade HTTP: POST /functions/{name} for function-mode AgentRuntimes, #1103 PR 3)
 
 - `POST /functions/{name}` on the facade HTTP port — entry point for
-  function-mode AgentRuntime invocations. Server-to-server only; not
-  reachable from browsers via the same WebSocket auth path (the existing
-  facade auth chain still applies once PR 4 wires the route into
-  `cmd/agent/websocket.go`).
+  function-mode AgentRuntime invocations. Server-to-server only. The
+  PR 3-era plan was to reuse the WebSocket auth chain in PR 4; that
+  did NOT happen — see the PR 4 entry above for the current
+  strict-default-403 posture and the bypass env var.
 - Request: `Content-Type: application/json`, body validated against
   `AgentRuntime.spec.inputSchema` (santhosh-tekuri/jsonschema/v6).
   Request body capped at 1 MiB.

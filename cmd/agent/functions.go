@@ -34,6 +34,12 @@ import (
 	"github.com/altairalabs/omnia/internal/tracing"
 )
 
+// envAllowUnauthFunction is the escape hatch for dev / CI to bypass
+// the strict-default auth refusal on the function route. Mirrors the
+// WebSocket path's OMNIA_FACADE_ALLOW_UNAUTHENTICATED. In production
+// this should NEVER be set; PR 5+ will wire the real auth chain.
+const envAllowUnauthFunction = "OMNIA_FUNCTION_ALLOW_UNAUTHENTICATED"
+
 // runFunctionsFacade starts the HTTP facade for a function-mode
 // AgentRuntime (spec.mode == "function"). The pod shape is the same as
 // the WebSocket case — facade container + runtime sidecar — but the
@@ -42,6 +48,10 @@ import (
 // The route name {name} resolves to this AgentRuntime's own name. A
 // function-mode pod serves exactly one Function — the one defined by
 // the CRD it was deployed for. Any other name returns 404.
+//
+// Auth: the route is gated behind a strict-default 403 unless
+// OMNIA_FUNCTION_ALLOW_UNAUTHENTICATED=true. The full auth chain
+// reuse is tracked as a fast-follow after PR 5 of #1103.
 func runFunctionsFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.Provider) {
 	if err := validateFunctionMode(cfg); err != nil {
 		log.Error(err, "invalid function-mode configuration")
@@ -54,9 +64,9 @@ func runFunctionsFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 		os.Exit(1)
 	}
 
-	rc, err := newFunctionsRuntimeClient(cfg, log, tracingProvider)
+	rc, err := dialRuntime(newDialRuntimeConfig(cfg.RuntimeAddress, tracingProvider), log)
 	if err != nil {
-		log.Error(err, "failed to dial runtime sidecar")
+		log.Error(err, "failed to dial runtime sidecar after retries")
 		os.Exit(1)
 	}
 	defer func() {
@@ -68,29 +78,65 @@ func runFunctionsFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 	handler := facade.NewFunctionsHandler(registry, rc, log)
 
 	mux := http.NewServeMux()
-	mux.Handle("POST /functions/{name}", handler)
+	mux.Handle("POST /functions/{name}", functionAuthGate(handler, log))
 	mux.Handle("/metrics", promhttp.Handler())
 
-	facadeServer := newFacadeHTTPServer(cfg, mux)
+	facadeServer := newFunctionsHTTPServer(cfg, mux)
 	healthServer := newFunctionsHealthServer(cfg, rc)
 
 	startFunctionsAndServe(log, facadeServer, healthServer)
 }
 
-// validateFunctionMode enforces the invariants the rest of the
-// function-mode startup path depends on. The CRD's CEL gate already
-// catches most of these, but defending in the binary keeps a
-// downstream operator misconfiguration from booting a half-working
-// pod.
+// functionAuthGate is the strict-default refusal middleware for the
+// function route. With OMNIA_FUNCTION_ALLOW_UNAUTHENTICATED set, every
+// request passes through unchanged (matching today's behaviour, which
+// is fine for dev / CI). Without it, the route refuses all traffic
+// with HTTP 403 — making the cluster safe by default until the real
+// auth chain (mgmt-plane + data-plane validators, mirroring the WS
+// path) is wired in a follow-up.
+func functionAuthGate(next http.Handler, log logr.Logger) http.Handler {
+	allow := os.Getenv(envAllowUnauthFunction) == "true"
+	if allow {
+		log.Info("function route auth gate is DISABLED " +
+			"(OMNIA_FUNCTION_ALLOW_UNAUTHENTICATED=true). " +
+			"This is only safe in dev / CI; production must wire the auth chain.")
+		return next
+	}
+	log.Info("function route auth gate active — all requests refused with 403 " +
+		"until OMNIA_FUNCTION_ALLOW_UNAUTHENTICATED=true is set, or the real " +
+		"auth chain lands.")
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "function routes are not yet authenticated; "+
+			"set OMNIA_FUNCTION_ALLOW_UNAUTHENTICATED=true to bypass in dev",
+			http.StatusForbidden)
+	})
+}
+
+// newFunctionsHTTPServer is the function-mode counterpart to
+// newFacadeHTTPServer. Unlike WebSocket — which deliberately omits
+// WriteTimeout because connections are long-lived — function calls
+// are one-shot and benefit from a hard upper bound. 60s is generous
+// (most Function invocations are sub-10s) but covers the slow-provider
+// tail without leaving sockets open forever when the runtime stalls.
+func newFunctionsHTTPServer(cfg *agent.Config, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:         fmt.Sprintf(":%d", cfg.FacadePort),
+		Handler:      handler,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  idleTimeout,
+	}
+}
+
+// validateFunctionMode is a thin wrapper over Config.Validate that
+// surfaces the function-mode required-field errors with the runtime's
+// own agent name attached for log correlation. Config.Validate() is
+// the source of truth; this function exists so the test exercising
+// validateFunctionMode and the production startup path call the same
+// validation surface.
 func validateFunctionMode(cfg *agent.Config) error {
-	if cfg.AgentName == "" {
-		return fmt.Errorf("agent name is required")
-	}
-	if len(cfg.FunctionInputSchemaJSON) == 0 {
-		return fmt.Errorf("function-mode runtime is missing spec.inputSchema")
-	}
-	if len(cfg.FunctionOutputSchemaJSON) == 0 {
-		return fmt.Errorf("function-mode runtime is missing spec.outputSchema")
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("function-mode config %q: %w", cfg.AgentName, err)
 	}
 	return nil
 }
@@ -118,25 +164,6 @@ func buildFunctionRegistry(cfg *agent.Config) (facade.FunctionRegistry, error) {
 		RecordsInvocations: cfg.FunctionRecordsInvocations,
 	})
 	return registry, nil
-}
-
-// newFunctionsRuntimeClient dials the gRPC runtime sidecar. Mirrors
-// the WebSocket path's runtime-client setup so the facade speaks to
-// the same Invoke RPC.
-func newFunctionsRuntimeClient(
-	cfg *agent.Config,
-	log logr.Logger,
-	tracingProvider *tracing.Provider,
-) (*facade.RuntimeClient, error) {
-	clientCfg := facade.RuntimeClientConfig{
-		Address:     cfg.RuntimeAddress,
-		DialTimeout: 5 * time.Second,
-		Log:         log,
-	}
-	if tracingProvider != nil {
-		clientCfg.TracerProvider = tracingProvider.TracerProvider()
-	}
-	return facade.NewRuntimeClient(clientCfg)
 }
 
 // newFunctionsHealthServer mounts /healthz + /readyz on the health

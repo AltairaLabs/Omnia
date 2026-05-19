@@ -1072,6 +1072,41 @@ func TestGetConfigHash_EmptyProviders(t *testing.T) {
 	assert.Empty(t, r.getConfigHash(ctx, map[string]*omniav1alpha1.Provider{}), "empty providers map should return empty string")
 }
 
+func TestBuildDeploymentSpec_SelectorExcludesMutableModeLabel(t *testing.T) {
+	// Regression for #1108 review B2: Deployment selectors are immutable
+	// after creation. The mode label must live ONLY on the pod template,
+	// never in Spec.Selector.MatchLabels — otherwise reconcile fails
+	// with `field is immutable` when an AgentRuntime's mode changes.
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "selector-test"
+	ar.Namespace = "ns"
+	ar.Spec.Mode = omniav1alpha1.AgentRuntimeModeFunction
+	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeGRPC
+	ar.Spec.PromptPackRef.Name = "p"
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
+
+	require.NotNil(t, dep.Spec.Selector, "selector must be set")
+	if _, ok := dep.Spec.Selector.MatchLabels["omnia.altairalabs.ai/mode"]; ok {
+		t.Fatalf("Selector.MatchLabels must NOT include mutable mode label; "+
+			"got selector=%v", dep.Spec.Selector.MatchLabels)
+	}
+
+	// The mode label MUST still appear on the pod template for ops visibility.
+	podLabels := dep.Spec.Template.Labels
+	require.Equal(t, "function", podLabels["omnia.altairalabs.ai/mode"],
+		"pod template must carry the mode label")
+
+	// Sanity: every selector key is also on the pod (otherwise the
+	// Deployment wouldn't be valid).
+	for k, v := range dep.Spec.Selector.MatchLabels {
+		require.Equal(t, v, podLabels[k],
+			"selector key %q must be present and identical on pod template", k)
+	}
+}
+
 func TestBuildDeploymentSpec_PodOverrides(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 	ar := &omniav1alpha1.AgentRuntime{}

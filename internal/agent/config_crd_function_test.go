@@ -73,6 +73,60 @@ func TestLoadFromCRD_FunctionMode_PopulatesModeAndSchemas(t *testing.T) {
 	}
 }
 
+func TestLoadFromCRD_FunctionMode_EmptyRawSchemaSurfacesAsEmptyBytes(t *testing.T) {
+	// Edge case: spec.inputSchema is set but Raw is empty. The CRD CEL
+	// gate doesn't actually validate JSON-Schema content (the field is
+	// preserve-unknown-fields), so an empty payload IS possible. We
+	// capture whatever Raw contains; validateFunctionMode (in cmd/agent)
+	// is the gate that rejects empty Raw at startup.
+	ar := newFakeAgentRuntime("edge", "prod", v1alpha1.AgentRuntimeSpec{
+		Mode:          v1alpha1.AgentRuntimeModeFunction,
+		PromptPackRef: v1alpha1.PromptPackRef{Name: "edge-pack"},
+		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeGRPC},
+		InputSchema:   &apiextensionsv1.JSON{Raw: []byte{}},
+		OutputSchema:  &apiextensionsv1.JSON{Raw: []byte(functionTestOutputSchema)},
+	})
+
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).
+		WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
+
+	cfg, err := LoadFromCRD(context.Background(), c, "edge", "prod")
+	if err != nil {
+		t.Fatalf("LoadFromCRD: %v", err)
+	}
+	if len(cfg.FunctionInputSchemaJSON) != 0 {
+		t.Errorf("FunctionInputSchemaJSON should be empty; got %q",
+			string(cfg.FunctionInputSchemaJSON))
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Errorf("Validate() must reject function-mode with empty input schema Raw")
+	}
+}
+
+func TestLoadFromCRD_FunctionMode_RecordingStateExplicitlyDisabled(t *testing.T) {
+	ar := newFakeAgentRuntime("explicit-disabled", "prod", v1alpha1.AgentRuntimeSpec{
+		Mode:          v1alpha1.AgentRuntimeModeFunction,
+		PromptPackRef: v1alpha1.PromptPackRef{Name: "p"},
+		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeGRPC},
+		InputSchema:   &apiextensionsv1.JSON{Raw: []byte(functionTestInputSchema)},
+		OutputSchema:  &apiextensionsv1.JSON{Raw: []byte(functionTestOutputSchema)},
+		InvocationRecording: &v1alpha1.InvocationRecordingConfig{
+			State: v1alpha1.InvocationRecordingDisabled,
+		},
+	})
+
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).
+		WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
+
+	cfg, err := LoadFromCRD(context.Background(), c, "explicit-disabled", "prod")
+	if err != nil {
+		t.Fatalf("LoadFromCRD: %v", err)
+	}
+	if cfg.FunctionRecordsInvocations {
+		t.Errorf("explicit state=disabled must map to FunctionRecordsInvocations=false")
+	}
+}
+
 func TestLoadFromCRD_FunctionMode_RecordingDefaultsDisabled(t *testing.T) {
 	ar := newFakeAgentRuntime("classifier", "prod", v1alpha1.AgentRuntimeSpec{
 		Mode: v1alpha1.AgentRuntimeModeFunction,
@@ -130,6 +184,67 @@ func TestLoadFromCRD_AgentMode_DoesNotPopulateFunctionFields(t *testing.T) {
 	}
 	if cfg.FunctionRecordsInvocations {
 		t.Errorf("FunctionRecordsInvocations = true, want false in agent mode")
+	}
+}
+
+func TestLoadFromCRD_FunctionMode_PassesValidate(t *testing.T) {
+	// Wiring invariant: a function-mode AgentRuntime read from the CRD
+	// must produce a Config that survives Validate(). This is the
+	// regression seal for B1 (Validate() rejecting facade.type=grpc).
+	ar := newFakeAgentRuntime("summarizer", "prod", v1alpha1.AgentRuntimeSpec{
+		Mode:          v1alpha1.AgentRuntimeModeFunction,
+		PromptPackRef: v1alpha1.PromptPackRef{Name: "summarizer-pack"},
+		Facade: v1alpha1.FacadeConfig{
+			Type: v1alpha1.FacadeTypeGRPC,
+		},
+		InputSchema:  &apiextensionsv1.JSON{Raw: []byte(functionTestInputSchema)},
+		OutputSchema: &apiextensionsv1.JSON{Raw: []byte(functionTestOutputSchema)},
+	})
+
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).
+		WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
+
+	cfg, err := LoadFromCRD(context.Background(), c, "summarizer", "prod")
+	if err != nil {
+		t.Fatalf("LoadFromCRD: %v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("function-mode Config must pass Validate(); got %v", err)
+	}
+}
+
+func TestLoadFromCRD_FunctionMode_RejectsWebSocketFacade(t *testing.T) {
+	// Defensive: even if the CRD CEL gate somehow let a function-mode
+	// runtime through with facade.type=websocket, the binary must still
+	// refuse the config rather than boot half-working.
+	cfg := &Config{
+		AgentName:                "x",
+		Namespace:                "y",
+		PromptPackName:           "p",
+		Mode:                     ModeFunction,
+		HandlerMode:              HandlerModeRuntime,
+		FacadeType:               FacadeTypeWebSocket,
+		MediaStorageType:         MediaStorageTypeNone,
+		FunctionInputSchemaJSON:  []byte(functionTestInputSchema),
+		FunctionOutputSchemaJSON: []byte(functionTestOutputSchema),
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("Validate must reject function-mode + facade.type=websocket")
+	}
+}
+
+func TestLoadFromCRD_FunctionMode_RejectsMissingSchemas(t *testing.T) {
+	cfg := &Config{
+		AgentName:        "x",
+		Namespace:        "y",
+		PromptPackName:   "p",
+		Mode:             ModeFunction,
+		HandlerMode:      HandlerModeRuntime,
+		FacadeType:       FacadeTypeGRPC,
+		MediaStorageType: MediaStorageTypeNone,
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("Validate must reject function-mode without schemas")
 	}
 }
 
