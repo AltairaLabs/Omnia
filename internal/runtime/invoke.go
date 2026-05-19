@@ -50,7 +50,7 @@ func (s *Server) Invoke(ctx context.Context, req *runtimev1.InvocationRequest) (
 		return nil, status.Error(codes.InvalidArgument, "input_json is required")
 	}
 
-	ctx = logctx.WithSessionID(ctx, invocationID)
+	ctx = logctx.WithInvocationID(ctx, invocationID)
 	ctx, span := s.startInvocationSpan(ctx, invocationID)
 	defer span.End()
 
@@ -60,23 +60,17 @@ func (s *Server) Invoke(ctx context.Context, req *runtimev1.InvocationRequest) (
 		"invocationID", invocationID,
 		"inputBytes", len(req.GetInputJson()))
 
-	conv, err := s.createConversation(ctx, invocationID)
+	conv, err := s.openInvocationConversation(ctx, invocationID)
 	if err != nil {
 		tracing.RecordError(span, err)
 		return nil, status.Errorf(codes.Internal, "failed to create conversation: %v", err)
 	}
-	defer func() {
-		// Functions are stateless — close the conversation as soon as the
-		// invocation completes. We deliberately do NOT add the conversation
-		// to s.conversations.
-		if closeErr := conv.Close(); closeErr != nil {
-			log.Error(closeErr, "failed to close ephemeral conversation",
-				"invocationID", invocationID)
-		}
-	}()
+	defer s.closeInvocationConversation(invocationID, conv, log)
 
 	start := time.Now()
 	response, content, err := s.runInvocation(ctx, conv, req.GetInputJson(), log)
+	// durationMs is captured for both success and failure paths but only
+	// surfaced on the success-side gRPC response; logged on error.
 	durationMs := int32(time.Since(start).Milliseconds())
 
 	if err != nil {
@@ -101,20 +95,51 @@ func (s *Server) Invoke(ctx context.Context, req *runtimev1.InvocationRequest) (
 	}, nil
 }
 
+// openInvocationConversation acquires the conversation mutex and builds a
+// fresh PromptKit conversation for the invocation. The mutex is held for
+// the entire createConversation flow because subscribeToEventBusLogging
+// writes to s.unsubscribeFns under the same lock the Converse path holds.
+// The conversation is NOT added to s.conversations — Functions are
+// stateless and the lifecycle is closeInvocationConversation's
+// responsibility.
+func (s *Server) openInvocationConversation(ctx context.Context, invocationID string) (*sdk.Conversation, error) {
+	s.conversationMu.Lock()
+	defer s.conversationMu.Unlock()
+	return s.createConversation(ctx, invocationID)
+}
+
+// closeInvocationConversation runs the cleanup that removeConversation
+// runs for stateful sessions, minus the s.conversations / s.turnIndices
+// deletes (which aren't populated for invocations). Critically, it must
+// drain s.unsubscribeFns[invocationID] before returning — createConversation
+// subscribes ~11 event-bus listeners that would otherwise leak per call.
+func (s *Server) closeInvocationConversation(invocationID string, conv *sdk.Conversation, log logr.Logger) {
+	s.conversationMu.Lock()
+	for _, unsub := range s.unsubscribeFns[invocationID] {
+		unsub()
+	}
+	delete(s.unsubscribeFns, invocationID)
+	s.conversationMu.Unlock()
+
+	if err := conv.Close(); err != nil {
+		log.Error(err, "failed to close ephemeral conversation",
+			"invocationID", invocationID)
+	}
+}
+
 // startInvocationSpan wraps the invocation in a tracing span if a
 // provider is configured; otherwise returns a no-op span from context.
+// Uses a dedicated span name + omnia.mode="function" attribute so
+// downstream queries can tell stateful turns apart from stateless calls.
 func (s *Server) startInvocationSpan(ctx context.Context, invocationID string) (context.Context, trace.Span) {
 	if s.tracingProvider != nil {
-		// Reuse the conversation-span shape: the SDK + LLM children will
-		// nest under it. Turn index is always 0 for one-shot Functions.
-		return s.tracingProvider.StartConversationSpan(ctx, invocationID, s.promptPackName, s.promptPackVersion, 0)
+		return s.tracingProvider.StartInvocationSpan(ctx, invocationID, s.promptPackName, s.promptPackVersion)
 	}
 	return ctx, trace.SpanFromContext(ctx)
 }
 
 // runInvocation drives the SDK stream to completion and returns the
-// final Response plus accumulated text. Client-tool chunks are treated
-// as an authoring error — function mode has no WebSocket to fulfil them.
+// final Response plus accumulated text.
 func (s *Server) runInvocation(ctx context.Context, conv *sdk.Conversation, input string, log logr.Logger) (*sdk.Response, string, error) {
 	log.V(1).Info("calling PromptKit SDK for one-shot invoke")
 	var llmSpan trace.Span
@@ -124,7 +149,28 @@ func (s *Server) runInvocation(ctx context.Context, conv *sdk.Conversation, inpu
 	}
 
 	streamCh := conv.Stream(ctx, input)
+	response, content, err := consumeInvocationStream(streamCh, llmSpan)
+	if err != nil {
+		return nil, "", err
+	}
 
+	if llmSpan != nil && response.TokensUsed() > 0 {
+		tracing.AddLLMMetrics(llmSpan, response.InputTokens(), response.OutputTokens(), response.Cost())
+		tracing.AddFinishReason(llmSpan, "stop")
+		tracing.SetSuccess(llmSpan)
+	}
+
+	return response, content, nil
+}
+
+// consumeInvocationStream drains an SDK stream channel for a one-shot
+// Function invocation. Client-tool chunks are treated as an authoring
+// error — function mode has no WebSocket peer to fulfil them. Media
+// chunks are dropped (PR 5 may add structured media to the response).
+//
+// Extracted so tests can drive every Chunk branch without standing up
+// a full SDK Conversation.
+func consumeInvocationStream(streamCh <-chan sdk.StreamChunk, llmSpan trace.Span) (*sdk.Response, string, error) {
 	var finalResponse *sdk.Response
 	var accumulated strings.Builder
 
@@ -140,22 +186,18 @@ func (s *Server) runInvocation(ctx context.Context, conv *sdk.Conversation, inpu
 		case sdk.ChunkText:
 			accumulated.WriteString(chunk.Text)
 		case sdk.ChunkClientTool:
-			// Function mode has no peer to fulfil client tools.
+			toolName := ""
+			if chunk.ClientTool != nil {
+				toolName = chunk.ClientTool.ToolName
+			}
 			return nil, "", status.Errorf(codes.FailedPrecondition,
 				"function emitted a client-side tool call (%q); client tools are only supported in agent mode",
-				chunk.ClientTool.ToolName)
+				toolName)
 		case sdk.ChunkDone:
 			finalResponse = chunk.Message
 		case sdk.ChunkMedia:
 			// Media chunks are dropped for function-mode invocations.
-			// PR 5 may add structured media to the response if needed.
 		}
-	}
-
-	if llmSpan != nil && finalResponse != nil && finalResponse.TokensUsed() > 0 {
-		tracing.AddLLMMetrics(llmSpan, finalResponse.InputTokens(), finalResponse.OutputTokens(), finalResponse.Cost())
-		tracing.AddFinishReason(llmSpan, "stop")
-		tracing.SetSuccess(llmSpan)
 	}
 
 	if finalResponse == nil {

@@ -66,6 +66,10 @@ const (
 	// The JSON field name "trace_id" matches the Grafana Loki derived-field regex
 	// so that Loki can link log lines to Tempo traces automatically.
 	ContextKeyTraceID contextKey = "trace_id"
+
+	// ContextKeyInvocationID identifies a function-mode invocation. Distinct
+	// from ContextKeySessionID, which is reserved for stateful conversations.
+	ContextKeyInvocationID contextKey = "invocation_id"
 )
 
 // allContextKeys lists all context keys that should be extracted for logging.
@@ -81,6 +85,7 @@ var allContextKeys = []contextKey{
 	ContextKeyTool,
 	ContextKeyStage,
 	ContextKeyTraceID,
+	ContextKeyInvocationID,
 }
 
 // WithSessionID returns a new context with the session ID set.
@@ -136,6 +141,13 @@ func WithStage(ctx context.Context, stage string) context.Context {
 // WithTraceID returns a new context with the trace ID set.
 func WithTraceID(ctx context.Context, traceID string) context.Context {
 	return context.WithValue(ctx, ContextKeyTraceID, traceID)
+}
+
+// WithInvocationID returns a new context with the function-invocation ID
+// set. Distinct from WithSessionID so logs can tell stateful conversation
+// turns apart from stateless function calls.
+func WithInvocationID(ctx context.Context, invocationID string) context.Context {
+	return context.WithValue(ctx, ContextKeyInvocationID, invocationID)
 }
 
 // LoggingFields holds all standard logging context fields.

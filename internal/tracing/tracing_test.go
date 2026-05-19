@@ -120,6 +120,69 @@ func TestProvider_StartConversationSpan(t *testing.T) {
 	}
 }
 
+func TestProvider_StartInvocationSpan(t *testing.T) {
+	provider, exporter := newTestProvider(t)
+
+	_, span := provider.StartInvocationSpan(context.Background(), "inv-42", "test-pack", "v1.0")
+	span.End()
+
+	spans := exporter.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+
+	s := spans[0]
+	if s.Name != "omnia.runtime.function.invoke" {
+		t.Errorf("expected span name 'omnia.runtime.function.invoke', got %q", s.Name)
+	}
+	if s.SpanKind != trace.SpanKindInternal {
+		t.Errorf("expected SpanKindInternal, got %v", s.SpanKind)
+	}
+
+	val, ok := findAttr(s, "omnia.invocation.id")
+	if !ok {
+		t.Fatal("missing attribute 'omnia.invocation.id'")
+	}
+	if val.AsString() != "inv-42" {
+		t.Errorf("expected omnia.invocation.id='inv-42', got %q", val.AsString())
+	}
+
+	val, ok = findAttr(s, "omnia.mode")
+	if !ok {
+		t.Fatal("missing attribute 'omnia.mode'")
+	}
+	if val.AsString() != "function" {
+		t.Errorf("expected omnia.mode='function', got %q", val.AsString())
+	}
+
+	val, ok = findAttr(s, "omnia.promptpack.name")
+	if !ok {
+		t.Fatal("missing attribute 'omnia.promptpack.name'")
+	}
+	if val.AsString() != "test-pack" {
+		t.Errorf("expected omnia.promptpack.name='test-pack', got %q", val.AsString())
+	}
+}
+
+func TestProvider_StartInvocationSpan_OmitsEmptyPackInfo(t *testing.T) {
+	provider, exporter := newTestProvider(t)
+
+	_, span := provider.StartInvocationSpan(context.Background(), "inv-bare", "", "")
+	span.End()
+
+	spans := exporter.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+
+	if _, ok := findAttr(spans[0], "omnia.promptpack.name"); ok {
+		t.Error("expected omnia.promptpack.name to be omitted when empty")
+	}
+	if _, ok := findAttr(spans[0], "omnia.promptpack.version"); ok {
+		t.Error("expected omnia.promptpack.version to be omitted when empty")
+	}
+}
+
 func TestProvider_StartLLMSpan(t *testing.T) {
 	provider, exporter := newTestProvider(t)
 

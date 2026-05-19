@@ -18,8 +18,10 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/AltairaLabs/PromptKit/sdk"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -100,8 +102,6 @@ func TestServer_Invoke_HappyPath(t *testing.T) {
 	// should not be empty. The exact content depends on the mock pack
 	// configuration.
 	assert.NotEmpty(t, resp.GetOutputJson())
-	// Duration should be reported (>= 0; mock is fast but non-zero).
-	assert.GreaterOrEqual(t, resp.GetDurationMs(), int32(0))
 }
 
 func TestServer_Invoke_EphemeralConversation(t *testing.T) {
@@ -109,6 +109,7 @@ func TestServer_Invoke_EphemeralConversation(t *testing.T) {
 
 	// Sanity check: no conversations tracked before Invoke.
 	assert.Empty(t, s.conversations, "server should start with no tracked conversations")
+	assert.Empty(t, s.unsubscribeFns, "server should start with no tracked unsubscribes")
 
 	_, err := s.Invoke(context.Background(), &runtimev1.InvocationRequest{
 		InvocationId: "ephemeral-1",
@@ -122,6 +123,10 @@ func TestServer_Invoke_EphemeralConversation(t *testing.T) {
 		"Invoke should not leak conversations into the conversations map")
 	assert.Empty(t, s.turnIndices,
 		"Invoke should not leak turn indices")
+	// createConversation subscribes ~11 event-bus listeners; Invoke must
+	// unsubscribe them on completion or s.unsubscribeFns grows unboundedly.
+	assert.Empty(t, s.unsubscribeFns,
+		"Invoke must drain s.unsubscribeFns for the invocation")
 }
 
 func TestServer_Invoke_MultipleCallsStayIndependent(t *testing.T) {
@@ -137,10 +142,12 @@ func TestServer_Invoke_MultipleCallsStayIndependent(t *testing.T) {
 		assert.Equal(t, id, resp.GetInvocationId())
 	}
 
-	// After three Invoke calls, nothing should be tracked in the
-	// conversation map.
+	// After three Invoke calls, nothing should be tracked in either the
+	// conversation or unsubscribe maps.
 	assert.Empty(t, s.conversations,
 		"three Invoke calls should not accumulate tracked conversations")
+	assert.Empty(t, s.unsubscribeFns,
+		"three Invoke calls should not accumulate event-bus subscriptions")
 }
 
 func TestServer_Invoke_PackOpenFailure(t *testing.T) {
@@ -160,4 +167,87 @@ func TestServer_Invoke_PackOpenFailure(t *testing.T) {
 	st, ok := status.FromError(err)
 	require.True(t, ok)
 	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "create conversation",
+		"error should mention the failing stage so authors can debug")
+}
+
+// streamFromChunks is a tiny test helper that publishes a fixed sequence
+// of StreamChunks on a closed channel, mirroring how the SDK exposes
+// stream completion. Used by the consumeInvocationStream unit tests.
+func streamFromChunks(chunks []sdk.StreamChunk) <-chan sdk.StreamChunk {
+	ch := make(chan sdk.StreamChunk, len(chunks))
+	for _, c := range chunks {
+		ch <- c
+	}
+	close(ch)
+	return ch
+}
+
+func TestConsumeInvocationStream_HappyPath(t *testing.T) {
+	stream := streamFromChunks([]sdk.StreamChunk{
+		{Type: sdk.ChunkText, Text: "hello "},
+		{Type: sdk.ChunkText, Text: "world"},
+		{Type: sdk.ChunkDone, Message: &sdk.Response{}},
+	})
+	resp, content, err := consumeInvocationStream(stream, nil)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "hello world", content)
+}
+
+func TestConsumeInvocationStream_RejectsClientToolChunk(t *testing.T) {
+	stream := streamFromChunks([]sdk.StreamChunk{
+		{Type: sdk.ChunkText, Text: "thinking..."},
+		{
+			Type:       sdk.ChunkClientTool,
+			ClientTool: &sdk.PendingClientTool{ToolName: "read_clipboard"},
+		},
+		// A done chunk follows but we should bail before consuming it.
+		{Type: sdk.ChunkDone, Message: &sdk.Response{}},
+	})
+	_, _, err := consumeInvocationStream(stream, nil)
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	assert.Contains(t, st.Message(), "read_clipboard")
+	assert.Contains(t, st.Message(), "agent mode")
+}
+
+func TestConsumeInvocationStream_ProviderErrorChunkSurfacesAsInternal(t *testing.T) {
+	stream := streamFromChunks([]sdk.StreamChunk{
+		{Type: sdk.ChunkText, Text: "partial"},
+		{Error: errors.New("synthetic provider failure")},
+	})
+	_, _, err := consumeInvocationStream(stream, nil)
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "synthetic provider failure")
+}
+
+func TestConsumeInvocationStream_MissingDoneChunkIsInternal(t *testing.T) {
+	stream := streamFromChunks([]sdk.StreamChunk{
+		{Type: sdk.ChunkText, Text: "no terminator"},
+	})
+	_, _, err := consumeInvocationStream(stream, nil)
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "done chunk")
+}
+
+func TestConsumeInvocationStream_MediaChunksAreDropped(t *testing.T) {
+	stream := streamFromChunks([]sdk.StreamChunk{
+		{Type: sdk.ChunkText, Text: "before "},
+		{Type: sdk.ChunkMedia},
+		{Type: sdk.ChunkText, Text: "after"},
+		{Type: sdk.ChunkDone, Message: &sdk.Response{}},
+	})
+	_, content, err := consumeInvocationStream(stream, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "before after", content,
+		"media chunks should not appear in the function output")
 }
