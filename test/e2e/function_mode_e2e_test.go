@@ -52,6 +52,14 @@ var _ = Describe("Functions mode", Ordered, Label("functions"), func() {
 	)
 
 	BeforeAll(func() {
+		// Same idempotent setup the other Describes call: installs the
+		// operator CRDs (PromptPack, Provider, AgentRuntime) and the
+		// controller-manager. Without this, kubectl apply against
+		// PromptPack errors with "no matches for kind PromptPack"
+		// because we run before Skills' / Manager's BeforeAll.
+		By("ensuring CRDs are installed and the controller-manager is deployed")
+		Expect(ensureManagerDeployed()).To(Succeed())
+
 		By("creating the test-agents namespace if absent")
 		cmd := exec.Command("kubectl", "create", "ns", agentsNamespace)
 		_, _ = utils.Run(cmd) // tolerate AlreadyExists
