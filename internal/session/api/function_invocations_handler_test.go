@@ -344,6 +344,39 @@ func TestHandleListFunctionInvocations_InvalidLimit(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestHandleGetFunctionInvocation_CrossTenantIs404(t *testing.T) {
+	// A row exists in ns-a; a GET for the same id but namespace=ns-b must
+	// return 404 with no row body. Pins the no-existence-leak contract
+	// at the HTTP layer (the store layer is covered separately by
+	// TestFunctionInvocationsStore_Get_CrossTenantHidden).
+	store := &mockFunctionInvocationsStore{
+		rows: map[string]*FunctionInvocation{
+			"inv-1": {
+				ID:           "inv-1",
+				Namespace:    fiTestNamespaceA,
+				FunctionName: "summarizer",
+				Status:       FunctionInvocationStatusSuccess,
+				CreatedAt:    time.Now().UTC(),
+			},
+		},
+	}
+	mux := newFunctionInvocationsHandler(store)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/function-invocations/inv-1?namespace=ns-b", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+	// The 404 body must not leak the row — verify the response carries
+	// only the not-found error envelope, no field from the seeded row.
+	body := w.Body.String()
+	assert.NotContains(t, body, "summarizer",
+		"404 response must not leak the row's function name across tenants")
+	assert.NotContains(t, body, "inv-1",
+		"404 response must not echo the requested id back in a way that confirms its existence")
+}
+
 func TestHandleListFunctionInvocations_ValidFromAndToParse(t *testing.T) {
 	// Exercise the success path for both From and To parse paths plus the
 	// integer-limit path so coverage hits each branch.

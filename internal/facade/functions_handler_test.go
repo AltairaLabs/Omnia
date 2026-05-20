@@ -399,6 +399,39 @@ func TestFunctionsHandler_RecordsSuccess(t *testing.T) {
 	assert.InDelta(t, 0.002, got.CostUSD, 1e-9)
 	assert.NotEmpty(t, got.InputHash, "input_hash must be populated")
 	assert.NotEmpty(t, got.ID, "invocation id must propagate")
+	// Pin the hash format so a future swap to a different algorithm
+	// trips this test rather than silently changing the wire contract.
+	assert.Regexp(t, `^[0-9a-f]{64}$`, got.InputHash,
+		"input_hash must be lowercase sha256 hex (64 chars)")
+	// TraceID is a placeholder until PR 6 extracts it from the OTel
+	// context; pinning this empty here means a premature wiring during
+	// PR 6 flips this test red.
+	assert.Empty(t, got.TraceID, "TraceID is a PR-6 placeholder; must remain empty for now")
+}
+
+func TestFunctionsHandler_DoesNotRecordOnInputInvalid(t *testing.T) {
+	// Per the locked design, input validation rejects before the runtime
+	// is called and we do NOT persist a record for input_invalid — the
+	// hash would only encode garbage and the row carries no useful audit
+	// signal. Pin that contract so a future refactor cannot silently
+	// start recording these.
+	inputSchema, err := CompileSchema([]byte(`{"type":"object","required":["q"]}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+
+	invoker := &stubInvoker{} // must not be called
+	recorder := &stubRecorder{}
+	h := newHandler(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, invoker).WithRecorder(recorder, "ns-test")
+
+	rec := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(rec, newJSONPost(t, "/functions/"+testFunctionName, `{}`))
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Empty(t, recorder.records,
+		"input_invalid must not record an invocation row")
 }
 
 func TestFunctionsHandler_RecordsRuntimeError(t *testing.T) {

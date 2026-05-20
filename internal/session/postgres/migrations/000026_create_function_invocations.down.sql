@@ -5,7 +5,7 @@ CREATE OR REPLACE FUNCTION manage_session_partitions(
     lookahead_weeks INTEGER DEFAULT 2
 ) RETURNS TABLE(table_name TEXT, partitions_created INTEGER, partitions_dropped INTEGER) AS $$
 DECLARE
-    tables TEXT[] := ARRAY['sessions', 'messages', 'tool_calls', 'message_artifacts'];
+    tables TEXT[] := ARRAY['sessions', 'messages', 'tool_calls', 'provider_calls', 'runtime_events', 'message_artifacts', 'audit_log'];
     tbl    TEXT;
     created INTEGER;
     dropped INTEGER;
