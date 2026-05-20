@@ -341,3 +341,125 @@ func TestMapFunctionRegistry_RegisterIgnoresInvalidSpecs(t *testing.T) {
 		t.Errorf("registry must store valid specs after silent-dropped invalid ones")
 	}
 }
+
+// stubRecorder captures recorded invocations so tests can assert what
+// the handler emitted.
+type stubRecorder struct {
+	records []InvocationRecord
+	err     error
+}
+
+func (r *stubRecorder) RecordFunctionInvocation(_ context.Context, inv InvocationRecord) error {
+	r.records = append(r.records, inv)
+	return r.err
+}
+
+func TestFunctionsHandler_DoesNotRecordWhenRecorderUnset(t *testing.T) {
+	inputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+
+	invoker := &stubInvoker{resp: &runtimev1.InvocationResponse{OutputJson: `{}`}}
+	h := newHandler(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, invoker)
+	// No WithRecorder call — recording is a no-op.
+
+	rec := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(rec, newJSONPost(t, "/functions/"+testFunctionName, `{}`))
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestFunctionsHandler_RecordsSuccess(t *testing.T) {
+	inputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+
+	invoker := &stubInvoker{resp: &runtimev1.InvocationResponse{
+		OutputJson: `{"a":1}`,
+		DurationMs: 5,
+		Usage:      &runtimev1.Usage{InputTokens: 10, OutputTokens: 5, CostUsd: 0.002},
+	}}
+	recorder := &stubRecorder{}
+	h := newHandler(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, invoker).WithRecorder(recorder, "ns-test")
+
+	rec := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(rec, newJSONPost(t, "/functions/"+testFunctionName, `{}`))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, recorder.records, 1, "recorder must receive one row on success")
+	got := recorder.records[0]
+	assert.Equal(t, "ns-test", got.Namespace)
+	assert.Equal(t, testFunctionName, got.FunctionName)
+	assert.Equal(t, FunctionInvocationStatusSuccess, got.Status)
+	assert.Equal(t, int32(5), got.DurationMs)
+	assert.InDelta(t, 0.002, got.CostUSD, 1e-9)
+	assert.NotEmpty(t, got.InputHash, "input_hash must be populated")
+	assert.NotEmpty(t, got.ID, "invocation id must propagate")
+}
+
+func TestFunctionsHandler_RecordsRuntimeError(t *testing.T) {
+	inputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+
+	invoker := &stubInvoker{err: errors.New("runtime down")}
+	recorder := &stubRecorder{}
+	h := newHandler(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, invoker).WithRecorder(recorder, "ns-test")
+
+	rec := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(rec, newJSONPost(t, "/functions/"+testFunctionName, `{}`))
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Len(t, recorder.records, 1)
+	assert.Equal(t, FunctionInvocationStatusRuntimeError, recorder.records[0].Status)
+}
+
+func TestFunctionsHandler_RecordsOutputInvalid(t *testing.T) {
+	inputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object","required":["a"]}`))
+	require.NoError(t, err)
+
+	invoker := &stubInvoker{resp: &runtimev1.InvocationResponse{
+		OutputJson: `{"wrong":"shape"}`,
+		DurationMs: 7,
+	}}
+	recorder := &stubRecorder{}
+	h := newHandler(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, invoker).WithRecorder(recorder, "ns-test")
+
+	rec := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(rec, newJSONPost(t, "/functions/"+testFunctionName, `{}`))
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Len(t, recorder.records, 1)
+	assert.Equal(t, FunctionInvocationStatusOutputInvalid, recorder.records[0].Status)
+	assert.NotEmpty(t, recorder.records[0].OutputJSON,
+		"raw output must be captured for debugging even on output-validation failure")
+}
+
+func TestFunctionsHandler_RecorderErrorIsNonFatal(t *testing.T) {
+	// A failing recorder must NOT fail the user-facing request — recording
+	// is best-effort. Q3 / #1103 lock.
+	inputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+
+	invoker := &stubInvoker{resp: &runtimev1.InvocationResponse{OutputJson: `{}`}}
+	recorder := &stubRecorder{err: errors.New("session-api down")}
+	h := newHandler(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, invoker).WithRecorder(recorder, "ns-test")
+
+	rec := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(rec, newJSONPost(t, "/functions/"+testFunctionName, `{}`))
+	require.Equal(t, http.StatusOK, rec.Code,
+		"recorder failure must not break the user-facing request")
+}

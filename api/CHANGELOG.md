@@ -10,6 +10,37 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (session-api: function_invocations persistence + facade write path, #1103 PR 5)
+
+- New `function_invocations` table in the session-api Postgres schema
+  (migration `000026_create_function_invocations`). Partitioned weekly
+  by `created_at`, same lifecycle as `sessions` / `messages` etc. The
+  `manage_session_partitions` orchestrator now includes
+  `function_invocations` in its rotation.
+- Session-API endpoints (mounted on the existing handler mux):
+  - `POST /api/v1/function-invocations` — write a single audit row.
+    Called by the facade after a Function call when
+    `AgentRuntime.spec.invocationRecording.state == "enabled"`.
+    Returns 201 + the row on success, 400 on missing fields, 503 when
+    the store isn't configured.
+  - `GET /api/v1/function-invocations?namespace=X[&function=Y&from=...&to=...&limit=N]`
+    — list recent invocations for a namespace, optionally scoped to a
+    function name + time window. Pagination defaults to 100 rows,
+    capped at 1000.
+  - `GET /api/v1/function-invocations/{id}?namespace=X` — single row.
+    Cross-tenant reads return 404 (no existence leak).
+- Status enum (matches the table's CHECK constraint):
+  `success | input_invalid | output_invalid | runtime_error`.
+- Facade write path: `FunctionsHandler.WithRecorder(...)` opt-in
+  recorder; the agent binary wires it via the session-api HTTP client
+  when `cfg.FunctionRecordsInvocations` is true. Recording is
+  best-effort — a recorder failure logs but does NOT fail the
+  user-facing Function call (Q3 / #1103 lock).
+- Input hash is sha256 of the JSON body — stored in lieu of the raw
+  input so persistence doesn't grow PII surface area. Output JSON is
+  stored verbatim; functions whose outputs carry sensitive data
+  should keep `state: disabled`.
+
 ### Added (operator + facade activation for function-mode AgentRuntimes, #1103 PR 4)
 
 - AgentRuntime pods now branch on `spec.mode` at startup:
