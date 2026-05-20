@@ -94,8 +94,6 @@ spec:
     configMapRef:
       name: test-fn-prompts
   version: "1.0.0"
-  rollout:
-    type: immediate
 `
 		applyCmd := exec.Command("kubectl", "apply", "-f", "-")
 		applyCmd.Stdin = strings.NewReader(promptPackManifest)
