@@ -84,16 +84,16 @@ data:
       "id": "test-fn-prompts",
       "name": "test-fn-prompts",
       "version": "1.0.0",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{variable}}"
+      },
       "prompts": {
         "default": {
           "id": "default",
           "name": "default",
           "version": "1.0.0",
-          "system_template": "You are a test echoer.",
-          "user_template": "{{input}}",
-          "variables": [
-            {"name": "input", "type": "string", "required": true}
-          ]
+          "system_template": "You are a test echoer."
         }
       }
     }
