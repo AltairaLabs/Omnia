@@ -31,6 +31,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/altairalabs/omnia/pkg/logctx"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
@@ -280,12 +281,21 @@ func (h *FunctionsHandler) record(ctx context.Context, functionName, invocationI
 		Status:       status,
 		DurationMs:   durationMs,
 		CostUSD:      float64(costUSD),
-		// TraceID is left empty — PR 6 (dashboard) wires it after
-		// session-api supports the trace-id correlation column read.
-		CreatedAt: time.Now().UTC(),
+		TraceID:      traceIDFromContext(ctx),
+		CreatedAt:    time.Now().UTC(),
 	}); err != nil {
 		log.Error(err, "function invocation recording failed (non-fatal)")
 	}
+}
+
+// traceIDFromContext returns the lowercase-hex W3C trace id of the
+// span carried in ctx, or "" when ctx has no valid span. Used to
+// correlate invocation rows with OTel traces emitted by the runtime.
+func traceIDFromContext(ctx context.Context) string {
+	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+		return sc.TraceID().String()
+	}
+	return ""
 }
 
 // writeSuccess emits the function-mode 200 response envelope. invocationID
