@@ -492,6 +492,13 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 		providerCallsStore := pgprovider.NewProviderCallsStore(pool)
 		providerCallsService := api.NewProviderCallsService(providerCallsStore, log)
 		handler.SetProviderCallsService(providerCallsService)
+
+		// Function invocations (Functions Phase 1, #1103 PR 5). Same
+		// availability as the other postgres-backed services — disabled
+		// when no DB is configured (in-memory dev mode).
+		functionInvocationsStore := pgprovider.NewFunctionInvocationsStore(pool)
+		functionInvocationsService := api.NewFunctionInvocationsService(functionInvocationsStore, log)
+		handler.SetFunctionInvocationsService(functionInvocationsService)
 	}
 
 	mux := http.NewServeMux()

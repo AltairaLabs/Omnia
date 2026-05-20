@@ -18,12 +18,15 @@ package facade
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
@@ -61,14 +64,41 @@ type InvocationInvoker interface {
 	Invoke(ctx context.Context, req *runtimev1.InvocationRequest) (*runtimev1.InvocationResponse, error)
 }
 
+// InvocationRecorder persists per-call audit records. The session-api
+// HTTP client implements this; tests may stub it. Errors are logged
+// but never propagate to the caller — recording is best-effort and
+// must not fail the user-facing request.
+type InvocationRecorder interface {
+	RecordFunctionInvocation(ctx context.Context, inv InvocationRecord) error
+}
+
+// InvocationRecord is the in-process shape the handler passes to a
+// recorder. Mirrors the session-api FunctionInvocation wire shape but
+// stays in this package so the facade doesn't depend on internal/session.
+// The session-api httpclient performs the conversion.
+type InvocationRecord struct {
+	ID           string
+	Namespace    string
+	FunctionName string
+	InputHash    string
+	OutputJSON   []byte
+	Status       string
+	DurationMs   int32
+	CostUSD      float64
+	TraceID      string
+	CreatedAt    time.Time
+}
+
 // FunctionsHandler serves POST /functions/{name} for function-mode
 // AgentRuntimes. The handler is the single source of truth for input
 // and output JSON-Schema validation (the runtime is intentionally
 // schema-agnostic; see PR 2 / #1105).
 type FunctionsHandler struct {
-	registry FunctionRegistry
-	invoker  InvocationInvoker
-	log      logr.Logger
+	registry  FunctionRegistry
+	invoker   InvocationInvoker
+	recorder  InvocationRecorder
+	namespace string
+	log       logr.Logger
 
 	// maxBodyBytes caps the incoming request body. Defaults to 1 MiB,
 	// matching the WS path's reasonable upper bound. Function payloads
@@ -88,6 +118,16 @@ func NewFunctionsHandler(registry FunctionRegistry, invoker InvocationInvoker, l
 		log:          log.WithName("functions-handler"),
 		maxBodyBytes: 1 << 20, // 1 MiB
 	}
+}
+
+// WithRecorder configures the per-invocation audit recorder. A nil
+// recorder is allowed (the handler simply skips recording). The agent
+// binary wires this up only when AgentRuntime.spec.invocationRecording.state
+// == "enabled".
+func (h *FunctionsHandler) WithRecorder(recorder InvocationRecorder, namespace string) *FunctionsHandler {
+	h.recorder = recorder
+	h.namespace = namespace
+	return h
 }
 
 // errorResponse is the JSON envelope returned on 4xx errors. The 502
@@ -162,12 +202,15 @@ func (h *FunctionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := logctx.WithInvocationID(r.Context(), invocationID)
 	log := h.log.WithValues("function", name, "invocationID", invocationID)
 
+	inputHash := sha256HexSum(body)
 	resp, err := h.invoker.Invoke(ctx, &runtimev1.InvocationRequest{
 		InputJson:    string(body),
 		InvocationId: invocationID,
 	})
 	if err != nil {
 		log.Error(err, "runtime invoke failed")
+		h.record(ctx, name, invocationID, inputHash, nil,
+			FunctionInvocationStatusRuntimeError, 0, 0, log)
 		writeError(w, http.StatusBadGateway, "runtime_error", err.Error())
 		return
 	}
@@ -178,6 +221,9 @@ func (h *FunctionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// pack. No in-runtime retry.
 		log.Error(err, "function output failed schema validation",
 			"outputBytes", len(rawOutput))
+		h.record(ctx, name, invocationID, inputHash, rawOutput,
+			FunctionInvocationStatusOutputInvalid,
+			resp.GetDurationMs(), resp.GetUsage().GetCostUsd(), log)
 		writeOutputValidationError(w, err, rawOutput)
 		return
 	}
@@ -192,9 +238,54 @@ func (h *FunctionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Error(err, "failed to write success response")
 		return
 	}
+	h.record(ctx, name, invocationID, inputHash, rawOutput,
+		FunctionInvocationStatusSuccess,
+		resp.GetDurationMs(), resp.GetUsage().GetCostUsd(), log)
 	log.V(1).Info("function invocation complete",
 		"durationMs", resp.GetDurationMs(),
 		"outputBytes", len(rawOutput))
+}
+
+// FunctionInvocation* status constants mirror the session-api enum.
+const (
+	FunctionInvocationStatusSuccess       = "success"
+	FunctionInvocationStatusInputInvalid  = "input_invalid"
+	FunctionInvocationStatusOutputInvalid = "output_invalid"
+	FunctionInvocationStatusRuntimeError  = "runtime_error"
+)
+
+// sha256HexSum returns the lowercase-hex SHA-256 of input. Used for
+// input_hash so the persistence layer doesn't need to store raw input
+// (which may carry PII).
+func sha256HexSum(input []byte) string {
+	sum := sha256.Sum256(input)
+	return hex.EncodeToString(sum[:])
+}
+
+// record sends a best-effort audit row to the recorder. Errors are
+// logged but never propagated — recording must not fail the user-facing
+// request. A nil recorder is a no-op (opt-in feature; see PR 4's
+// agent wiring and #1103 Q3).
+func (h *FunctionsHandler) record(ctx context.Context, functionName, invocationID, inputHash string,
+	output []byte, status string, durationMs int32, costUSD float32, log logr.Logger) {
+	if h.recorder == nil {
+		return
+	}
+	if err := h.recorder.RecordFunctionInvocation(ctx, InvocationRecord{
+		ID:           invocationID,
+		Namespace:    h.namespace,
+		FunctionName: functionName,
+		InputHash:    inputHash,
+		OutputJSON:   output,
+		Status:       status,
+		DurationMs:   durationMs,
+		CostUSD:      float64(costUSD),
+		// TraceID is left empty — PR 6 (dashboard) wires it after
+		// session-api supports the trace-id correlation column read.
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		log.Error(err, "function invocation recording failed (non-fatal)")
+	}
 }
 
 // writeSuccess emits the function-mode 200 response envelope. invocationID
