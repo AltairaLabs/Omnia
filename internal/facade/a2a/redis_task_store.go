@@ -262,10 +262,29 @@ func (s *RedisTaskStore) EvictTerminal(olderThan time.Time) []string {
 
 // Subscribe returns a channel that receives task state change events via Redis pub/sub.
 // The channel is closed when the context is canceled.
+//
+// The Redis SUBSCRIBE command is sent asynchronously by go-redis; without
+// blocking until the *Subscription confirmation arrives, a fast follow-up
+// Publish can race the SUBSCRIBE and the message is lost. Subscribe waits
+// for that confirmation before returning, so callers can Publish
+// immediately after Subscribe returns and expect to receive the event.
 func (s *RedisTaskStore) Subscribe(ctx context.Context, taskID string) <-chan a2a.TaskState {
 	ch := make(chan a2a.TaskState, 8)
 
 	pubsub := s.client.Subscribe(ctx, eventKey(taskID))
+
+	// Block until Redis confirms the subscription (or fails). Without
+	// this, the test pattern "Subscribe → Publish → assert event arrived"
+	// is racy: the SUBSCRIBE command may still be in flight when the
+	// PUBLISH lands, dropping the message. The first message on a
+	// freshly-created PubSub is always *Subscription, so a single
+	// Receive is enough to seal the handshake.
+	if _, err := pubsub.Receive(ctx); err != nil {
+		s.log.V(1).Info("pubsub subscribe failed", "taskID", taskID, "error", err)
+		_ = pubsub.Close()
+		close(ch)
+		return ch
+	}
 
 	go func() {
 		defer close(ch)

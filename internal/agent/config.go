@@ -101,6 +101,16 @@ type FacadeType string
 const (
 	FacadeTypeWebSocket FacadeType = "websocket"
 	FacadeTypeA2A       FacadeType = "a2a"
+	// FacadeTypeGRPC is the facade type for function-mode AgentRuntimes
+	// (#1103). The route is HTTP (POST /functions/{name}); the value
+	// "grpc" reflects the CRD enum but the in-process surface is HTTP.
+	FacadeTypeGRPC FacadeType = "grpc"
+)
+
+// Mode values for Config.Mode. Mirrors AgentRuntime.spec.mode.
+const (
+	ModeAgent    = "agent"
+	ModeFunction = "function"
 )
 
 // MediaStorageType represents the type of media storage backend.
@@ -152,6 +162,24 @@ type Config struct {
 	FacadePort     int
 	HandlerMode    HandlerMode
 	RuntimeAddress string
+
+	// Mode is the AgentRuntime.spec.mode discriminator (agent | function).
+	// Defaults to "agent" for back-compat with pre-mode CRDs. The agent
+	// binary branches on this at startup to decide whether to mount the
+	// WebSocket facade or the Functions HTTP handler.
+	Mode string
+
+	// FunctionInputSchemaJSON / FunctionOutputSchemaJSON carry the raw
+	// JSON-Schema bytes from spec.inputSchema / spec.outputSchema.
+	// Populated only when Mode=="function". The function-mode startup
+	// path compiles these once via facade.CompileSchema.
+	FunctionInputSchemaJSON  []byte
+	FunctionOutputSchemaJSON []byte
+
+	// FunctionRecordsInvocations mirrors
+	// AgentRuntime.spec.invocationRecording.state == "enabled".
+	// Always false when Mode != "function".
+	FunctionRecordsInvocations bool
 
 	// ToolRegistry configuration (optional).
 	ToolRegistryName      string
@@ -223,6 +251,10 @@ var (
 	ErrMissingGCSBucket       = errors.New("OMNIA_MEDIA_GCS_BUCKET is required for gcs storage type")
 	ErrMissingAzureAccount    = errors.New("OMNIA_MEDIA_AZURE_ACCOUNT is required for azure storage type")
 	ErrMissingAzureContainer  = errors.New("OMNIA_MEDIA_AZURE_CONTAINER is required for azure storage type")
+
+	// Function-mode validation errors.
+	ErrMissingFunctionInputSchema  = errors.New("function mode requires spec.inputSchema")
+	ErrMissingFunctionOutputSchema = errors.New("function mode requires spec.outputSchema")
 )
 
 // Validate checks if the configuration is valid.
@@ -245,12 +277,28 @@ func (c *Config) Validate() error {
 		return fmt.Errorf(errWithValueFmt, ErrInvalidHandlerMode, c.HandlerMode)
 	}
 
-	// Validate facade type
+	// Validate facade type. Function-mode AgentRuntimes use facade.type=grpc
+	// (the CRD's CEL gate rejects websocket for mode=function). Agent-mode
+	// pods accept websocket or a2a as before. Grpc is also implicitly OK in
+	// agent mode for back-compat with pre-Phase-1 configs that already used it.
 	switch c.FacadeType {
-	case FacadeTypeWebSocket, FacadeTypeA2A:
+	case FacadeTypeWebSocket, FacadeTypeA2A, FacadeTypeGRPC:
 		// Valid
 	default:
 		return fmt.Errorf(errWithValueFmt, ErrInvalidFacadeType, c.FacadeType)
+	}
+
+	if c.Mode == ModeFunction {
+		if len(c.FunctionInputSchemaJSON) == 0 {
+			return ErrMissingFunctionInputSchema
+		}
+		if len(c.FunctionOutputSchemaJSON) == 0 {
+			return ErrMissingFunctionOutputSchema
+		}
+		if c.FacadeType == FacadeTypeWebSocket {
+			return fmt.Errorf("%w: function mode does not support facade.type=websocket",
+				ErrInvalidFacadeType)
+		}
 	}
 
 	// Validate media storage type

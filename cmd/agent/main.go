@@ -81,6 +81,7 @@ func main() {
 	log.Info("starting agent",
 		"agent", cfg.AgentName,
 		"namespace", cfg.Namespace,
+		"mode", cfg.Mode,
 		"facade", cfg.FacadeType,
 		"port", cfg.FacadePort,
 		"handler", cfg.HandlerMode,
@@ -100,6 +101,10 @@ func main() {
 			Insecure:       cfg.TracingInsecure,
 			ExtraAttributes: []attribute.KeyValue{
 				attribute.String("omnia.workspace.name", cfg.WorkspaceName),
+				// omnia.runtime.mode lets distributed-trace consumers
+				// filter function-mode pods apart from agent-mode without
+				// renaming the per-agent ServiceName.
+				attribute.String("omnia.runtime.mode", cfg.Mode),
 			},
 		}
 
@@ -127,6 +132,14 @@ func main() {
 				"endpoint", cfg.TracingEndpoint,
 				"sampleRate", cfg.TracingSampleRate)
 		}
+	}
+
+	// Branch on AgentRuntime.spec.mode first: function-mode pods run a
+	// one-shot HTTP facade alongside the same runtime sidecar; agent-mode
+	// pods continue with the existing WebSocket / A2A flows.
+	if cfg.Mode == agent.ModeFunction {
+		runFunctionsFacade(cfg, log, tracingProvider)
+		return
 	}
 
 	// Branch on facade type: A2A runs the SDK in-process (no runtime sidecar),

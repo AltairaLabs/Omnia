@@ -243,13 +243,26 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	resolvedClients []ResolvedA2AClient,
 ) {
 	log := logf.FromContext(ctx)
-	labels := map[string]string{
+	// selectorLabels is the immutable subset used for the Deployment's
+	// Spec.Selector.MatchLabels (and any Service / PDB / HPA selector).
+	// Kubernetes rejects mutations to selector labels after creation, so
+	// any value that may evolve (e.g. spec.mode) must live in podLabels
+	// only.
+	selectorLabels := map[string]string{
 		labelAppName:      labelValueOmniaAgent,
 		labelAppInstance:  agentRuntime.Name,
 		labelAppManagedBy: labelValueOmniaOperator,
 		labelOmniaComp:    "agent",
 		labelOmniaTrack:   "stable",
 	}
+	// podLabels = selectorLabels ∪ mutable observability labels. Mode
+	// goes here so `kubectl get pods -l omnia.altairalabs.ai/mode=function`
+	// works without breaking selector immutability.
+	labels := make(map[string]string, len(selectorLabels)+1)
+	for k, v := range selectorLabels {
+		labels[k] = v
+	}
+	labels[labelOmniaMode] = string(agentRuntime.EffectiveMode())
 
 	replicas := int32(1)
 	if agentRuntime.Spec.Runtime != nil && agentRuntime.Spec.Runtime.Replicas != nil {
@@ -349,7 +362,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 				TopologyKey:       "topology.kubernetes.io/zone",
 				WhenUnsatisfiable: corev1.ScheduleAnyway,
 				LabelSelector: &metav1.LabelSelector{
-					MatchLabels: labels,
+					MatchLabels: selectorLabels,
 				},
 			},
 		}
@@ -400,8 +413,10 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	deployment.Labels = labels
 	deployment.Spec = appsv1.DeploymentSpec{
 		Replicas: &replicas,
+		// Selector uses ONLY the immutable label subset — adding labels
+		// here later breaks reconcile with `field is immutable`.
 		Selector: &metav1.LabelSelector{
-			MatchLabels: labels,
+			MatchLabels: selectorLabels,
 		},
 		Template: corev1.PodTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{

@@ -251,9 +251,12 @@ func writeOutputValidationError(w http.ResponseWriter, validationErr error, rawO
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// MapFunctionRegistry is a trivial map-backed FunctionRegistry useful
-// for tests and bootstrap wiring. The operator (PR 4) will replace this
-// with a live, CRD-backed implementation.
+// MapFunctionRegistry is a small map-backed FunctionRegistry. PR 4
+// uses it directly in `cmd/agent` — a function-mode pod serves a
+// single Function (the one defined by its own AgentRuntime CRD) so
+// there's no need for a live CRD watch; a snapshot built at startup
+// is correct by construction (any CRD change triggers a Deployment
+// rollout that restarts the pod).
 type MapFunctionRegistry struct {
 	specs map[string]*FunctionSpec
 }
