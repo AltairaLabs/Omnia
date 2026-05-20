@@ -23,6 +23,7 @@ import {
   Brain,
   BookOpen,
   BarChart3,
+  Zap,
 } from "lucide-react";
 
 interface NavItem {
@@ -36,6 +37,7 @@ const navigation: NavItem[] = [
   { name: "Overview", href: "/", icon: LayoutDashboard },
   { name: "Topology", href: "/topology", icon: Network },
   { name: "Agents", href: "/agents", icon: Bot },
+  { name: "Functions", href: "/functions", icon: Zap },
   { name: "Console", href: "/console", icon: Terminal },
   { name: "PromptPacks", href: "/promptpacks", icon: FileText },
   { name: "Skills", href: "/skills", icon: BookOpen },

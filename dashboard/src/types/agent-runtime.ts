@@ -191,8 +191,24 @@ export interface ConsoleConfig {
   mediaRequirements?: MediaRequirements;
 }
 
+/** AgentRuntimeMode discriminates between the long-lived conversational
+ * runtime (agent) and the one-shot structured-I/O function runtime
+ * (function). Functions Phase 1 (#1102 / #1103 PR 1) introduced
+ * "function"; existing CRs default to "agent". */
+export type AgentRuntimeMode = "agent" | "function";
+
+/** InvocationRecordingState toggles whether function-mode runtimes
+ * persist a per-call audit row to session-api. Defaults to "disabled". */
+export type InvocationRecordingState = "disabled" | "enabled";
+
+export interface InvocationRecordingConfig {
+  state?: InvocationRecordingState;
+}
+
 // Spec
 export interface AgentRuntimeSpec {
+  /** mode selects the runtime shape. Defaults to "agent" when unset. */
+  mode?: AgentRuntimeMode;
   framework?: FrameworkConfig;
   promptPackRef: PromptPackRef;
   facade: FacadeConfig;
@@ -202,6 +218,22 @@ export interface AgentRuntimeSpec {
   providers?: NamedProviderRef[];
   console?: ConsoleConfig;
   evals?: EvalConfig;
+  /** inputSchema is the JSON Schema the function's request body is
+   * validated against. Required when spec.mode === "function". */
+  inputSchema?: Record<string, unknown>;
+  /** outputSchema is the JSON Schema the function's response is
+   * validated against. Required when spec.mode === "function". */
+  outputSchema?: Record<string, unknown>;
+  /** invocationRecording opts into per-call audit persistence. Ignored
+   * for mode === "agent". */
+  invocationRecording?: InvocationRecordingConfig;
+}
+
+/** isFunctionMode returns true when the runtime is declared as a
+ * Function. Used by the dashboard's catalog filter and the deploy
+ * wizard's conditional schema editors. */
+export function isFunctionMode(spec: AgentRuntimeSpec): boolean {
+  return spec.mode === "function";
 }
 
 export interface EvalConfig {

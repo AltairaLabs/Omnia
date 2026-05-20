@@ -10,6 +10,31 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (dashboard: Functions catalog + invocation history, #1103 PR 6)
+
+- New `/functions` catalog page lists function-mode AgentRuntimes
+  (filtered client-side from the existing AgentRuntime list — no new
+  operator endpoint). Each card shows the namespace, recording opt-in
+  state, and a top-level field count for `inputSchema` / `outputSchema`.
+- New `/functions/{name}` detail page renders the resolved input /
+  output schemas alongside a panel of recent invocations sourced from
+  session-api's `function_invocations` rows. Time-window presets:
+  1h / 24h / 7d. Latency and cost sparklines aggregate the loaded
+  window; the table shows timestamp, status, latency, cost, and a
+  truncated trace id per row.
+- Workspace-scoped proxy routes added:
+  - `GET /api/workspaces/{name}/function-invocations[?function=&from=&to=&limit=]`
+    → `SESSION_API_URL/api/v1/function-invocations?namespace={name}[&…]`
+  - `GET /api/workspaces/{name}/function-invocations/{id}`
+    → `SESSION_API_URL/api/v1/function-invocations/{id}?namespace={name}`
+  The proxy pins the session-api `namespace` query param to the
+  workspace name — a malicious caller cannot read another tenant's
+  rows by overriding the query string.
+- `AgentRuntimeSpec` hand-written type extended with `mode`,
+  `inputSchema`, `outputSchema`, `invocationRecording` (already present
+  in the generated types since PR 1 / #1104). `isFunctionMode(spec)`
+  helper exported for catalog filtering.
+
 ### Added (session-api: function_invocations persistence + facade write path, #1103 PR 5)
 
 - New `function_invocations` table in the session-api Postgres schema
