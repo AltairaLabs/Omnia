@@ -10,6 +10,41 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Changed (Functions-as-sessions rework, PR 2/3: function invocations are sessions)
+
+Function-mode pods now open a real `sessions` row at invocation start
+and close it with the terminal status when the response is written.
+Same data model as agent-mode sessions; the runtime's existing
+`OmniaEventStore` machinery feeds `messages`, `tool_calls`,
+`provider_calls`, `eval_results`, and `runtime_events` against the
+same `session_id` (which is the invocation id).
+
+- `FunctionsHandler.WithSessionStore(store, meta)` injects the session
+  dependency. `FunctionSessionMeta` carries the per-pod identity
+  (namespace, agent name, workspace, prompt-pack name + version).
+- Session rows are tagged `["function"]` (constant
+  `facade.FunctionSessionTag`) for fast dashboard filtering.
+- The invocation id is generated at the very top of `ServeHTTP` so
+  `input_invalid` and body-read failures still have a `session_id`
+  for Loki + dashboard correlation. The facade emits a runtime event
+  on these pre-runtime failures (`function.input_invalid`,
+  `function.payload_too_large`, `function.read_body_failed`) so the
+  failure detail is queryable from the session detail page.
+- Outcome → status mapping:
+  - success → `completed`
+  - input_invalid / output_invalid / runtime_error / payload_too_large
+    / read_body_failed / response_write_failed → `error`
+  - `ended_at` is set to the close time on every terminal outcome.
+- Session store failures are best-effort: a session-api outage logs
+  but does not fail the user-facing request — the runtime still
+  produces its result and the audit rows simply land orphaned.
+- `cmd/agent/functions.go` wires the session store via the same
+  `initSessionStore()` the WebSocket path uses. Failure to resolve
+  session-api at startup is logged and non-fatal.
+
+The next PR (3/3) repoints the dashboard `/functions/{name}` detail
+view at the sessions data source.
+
 ### Removed (Functions-as-sessions rework, PR 1/3: rip dedicated infrastructure)
 
 **Breaking — affects Unreleased only; never shipped a release.**
