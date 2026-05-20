@@ -44,6 +44,13 @@ import (
 // out of scope for PR 2. The failure path is what the user explicitly
 // called out: "We'll need click-through from the sessionId into the
 // Loki logs to troubleshoot."
+// functionsNamespace is a dedicated namespace for this suite. Other
+// suites (Skills, Doctor, Policy, the session-test in e2e_test.go)
+// share `test-agents` and stomp on each other's create / delete; this
+// suite uses its own namespace so a sibling AfterAll mid-deleting
+// test-agents can't race our BeforeAll's `kubectl apply`.
+const functionsNamespace = "test-functions"
+
 var _ = Describe("Functions mode", Ordered, Label("functions"), func() {
 	const (
 		functionName       = "test-fn"
@@ -60,8 +67,8 @@ var _ = Describe("Functions mode", Ordered, Label("functions"), func() {
 		By("ensuring CRDs are installed and the controller-manager is deployed")
 		Expect(ensureManagerDeployed()).To(Succeed())
 
-		By("creating the test-agents namespace if absent")
-		cmd := exec.Command("kubectl", "create", "ns", agentsNamespace)
+		By("creating the test-functions namespace if absent")
+		cmd := exec.Command("kubectl", "create", "ns", functionsNamespace)
 		_, _ = utils.Run(cmd) // tolerate AlreadyExists
 
 		By("creating a minimal PromptPack ConfigMap + CR")
@@ -70,7 +77,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: test-fn-prompts
-  namespace: test-agents
+  namespace: test-functions
 data:
   pack.json: |
     {
@@ -95,7 +102,7 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: PromptPack
 metadata:
   name: test-fn-prompts
-  namespace: test-agents
+  namespace: test-functions
 spec:
   source:
     type: configmap
@@ -117,7 +124,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: test-fn-provider
-  namespace: test-agents
+  namespace: test-functions
 type: Opaque
 stringData:
   api-key: mock-not-a-real-key
@@ -126,7 +133,7 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: Provider
 metadata:
   name: test-fn-provider
-  namespace: test-agents
+  namespace: test-functions
 spec:
   type: mock
   credential:
@@ -182,7 +189,7 @@ spec:
     - name: default
       providerRef:
         name: %[4]s
-`, functionName, agentsNamespace, functionPackName, functionProviderID)
+`, functionName, functionsNamespace, functionPackName, functionProviderID)
 		arCmd := exec.Command("kubectl", "apply", "-f", "-")
 		arCmd.Stdin = strings.NewReader(arManifest)
 		_, err = utils.Run(arCmd)
@@ -196,11 +203,11 @@ spec:
 				return
 			}
 			_, _ = fmt.Fprintf(GinkgoWriter, "\n=== DEBUG: function-mode setup failed ===\n")
-			arGet := exec.Command("kubectl", "get", "agentruntime", functionName, "-n", agentsNamespace, "-o", "yaml")
+			arGet := exec.Command("kubectl", "get", "agentruntime", functionName, "-n", functionsNamespace, "-o", "yaml")
 			if out, e := utils.Run(arGet); e == nil {
 				_, _ = fmt.Fprintf(GinkgoWriter, "AgentRuntime:\n%s\n", out)
 			}
-			events := exec.Command("kubectl", "get", "events", "-n", agentsNamespace, "--sort-by=.lastTimestamp")
+			events := exec.Command("kubectl", "get", "events", "-n", functionsNamespace, "--sort-by=.lastTimestamp")
 			if out, e := utils.Run(events); e == nil {
 				_, _ = fmt.Fprintf(GinkgoWriter, "Events:\n%s\n", out)
 			}
@@ -216,7 +223,7 @@ spec:
 		By("waiting for the function-mode Deployment to be Ready")
 		verifyReady := func(g Gomega) {
 			cmd := exec.Command("kubectl", "get", "deployment", functionName,
-				"-n", agentsNamespace,
+				"-n", functionsNamespace,
 				"-o", "jsonpath={.status.readyReplicas}")
 			out, err := utils.Run(cmd)
 			g.Expect(err).NotTo(HaveOccurred())
@@ -226,18 +233,13 @@ spec:
 	})
 
 	AfterAll(func() {
-		_, _ = utils.Run(exec.Command("kubectl", "delete", "agentruntime", functionName,
-			"-n", agentsNamespace, "--ignore-not-found", "--timeout=30s"))
-		_, _ = utils.Run(exec.Command("kubectl", "delete", "promptpack", functionPackName,
-			"-n", agentsNamespace, "--ignore-not-found", "--timeout=30s"))
-		_, _ = utils.Run(exec.Command("kubectl", "delete", "provider", functionProviderID,
-			"-n", agentsNamespace, "--ignore-not-found", "--timeout=30s"))
-		_, _ = utils.Run(exec.Command("kubectl", "delete", "secret", functionProviderID,
-			"-n", agentsNamespace, "--ignore-not-found"))
-		_, _ = utils.Run(exec.Command("kubectl", "delete", "configmap", functionPackName,
-			"-n", agentsNamespace, "--ignore-not-found"))
-		_, _ = utils.Run(exec.Command("kubectl", "delete", "pod", "fn-mode-test",
-			"-n", agentsNamespace, "--ignore-not-found", "--timeout=30s"))
+		// Single-shot cleanup: deleting the namespace removes everything
+		// we created inside it (CR + ConfigMap + Secret + Pod + Service +
+		// Deployment owned by the operator). The other Describes share
+		// test-agents so they enumerate individual resources; this suite
+		// owns its namespace and gets to do the simple thing.
+		_, _ = utils.Run(exec.Command("kubectl", "delete", "ns",
+			functionsNamespace, "--ignore-not-found", "--timeout=60s"))
 	})
 
 	It("creates a session row with status=error on input_invalid", func() {
@@ -351,7 +353,7 @@ spec:
 
       print("PASS: function invocation recorded as a session with status=error + failure event")
       PYTHON_SCRIPT
-`, agentsNamespace, functionName, sessionApiURL)
+`, functionsNamespace, functionName, sessionApiURL)
 		applyCmd := exec.Command("kubectl", "apply", "-f", "-")
 		applyCmd.Stdin = strings.NewReader(testManifest)
 		_, err := utils.Run(applyCmd)
@@ -362,19 +364,19 @@ spec:
 				return
 			}
 			_, _ = fmt.Fprintf(GinkgoWriter, "\n=== DEBUG: function-mode session-row test failed ===\n")
-			logCmd := exec.Command("kubectl", "logs", "fn-mode-test", "-n", agentsNamespace)
+			logCmd := exec.Command("kubectl", "logs", "fn-mode-test", "-n", functionsNamespace)
 			if out, e := utils.Run(logCmd); e == nil {
 				_, _ = fmt.Fprintf(GinkgoWriter, "Test pod logs:\n%s\n", out)
 			}
 			facadeCmd := exec.Command("kubectl", "logs",
-				"-n", agentsNamespace,
+				"-n", functionsNamespace,
 				"-l", "app.kubernetes.io/instance="+functionName,
 				"-c", "facade", "--tail=200")
 			if out, e := utils.Run(facadeCmd); e == nil {
 				_, _ = fmt.Fprintf(GinkgoWriter, "Facade logs:\n%s\n", out)
 			}
 			runtimeCmd := exec.Command("kubectl", "logs",
-				"-n", agentsNamespace,
+				"-n", functionsNamespace,
 				"-l", "app.kubernetes.io/instance="+functionName,
 				"-c", "runtime", "--tail=200")
 			if out, e := utils.Run(runtimeCmd); e == nil {
@@ -391,7 +393,7 @@ spec:
 		By("waiting for the test pod to Succeed")
 		verifyComplete := func(g Gomega) {
 			cmd := exec.Command("kubectl", "get", "pod", "fn-mode-test",
-				"-n", agentsNamespace, "-o", "jsonpath={.status.phase}")
+				"-n", functionsNamespace, "-o", "jsonpath={.status.phase}")
 			out, err := utils.Run(cmd)
 			g.Expect(err).NotTo(HaveOccurred())
 			// Failed is terminal — if it landed there, drop out of the
@@ -401,7 +403,7 @@ spec:
 		Eventually(verifyComplete, 3*time.Minute, 3*time.Second).Should(Succeed())
 
 		By("confirming the test pod reported PASS")
-		cmd := exec.Command("kubectl", "logs", "fn-mode-test", "-n", agentsNamespace)
+		cmd := exec.Command("kubectl", "logs", "fn-mode-test", "-n", functionsNamespace)
 		out, err := utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "failed to read test pod logs")
 		Expect(out).To(ContainSubstring("PASS:"),
