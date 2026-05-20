@@ -261,18 +261,9 @@ metadata:
   namespace: %[1]s
 spec:
   restartPolicy: Never
-  securityContext:
-    runAsNonRoot: true
-    runAsUser: 1000
-    seccompProfile:
-      type: RuntimeDefault
   containers:
   - name: python
     image: python:3.11-slim
-    securityContext:
-      allowPrivilegeEscalation: false
-      capabilities:
-        drop: ["ALL"]
     command: ["sh", "-c"]
     args:
     - |
