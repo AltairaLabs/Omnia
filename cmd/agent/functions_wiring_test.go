@@ -16,9 +16,10 @@ limitations under the License.
 
 // This file holds the wiring tests for the function-mode pod startup
 // flow. They exercise functions.go end-to-end against a real stub
-// runtime so the mux mounting, auth gate, response envelope, and
-// health probe are all proven before merge. Without these tests B1
-// (Validate rejecting facade.type=grpc) would have shipped silently.
+// runtime so the mux mounting, auth middleware composition, response
+// envelope, and health probe are all proven before merge. Without
+// these tests B1 (Validate rejecting facade.type=grpc) would have
+// shipped silently.
 
 package main
 
@@ -35,12 +36,26 @@ import (
 	"github.com/go-logr/logr"
 
 	"github.com/altairalabs/omnia/internal/facade"
+	"github.com/altairalabs/omnia/internal/facade/auth"
+	"github.com/altairalabs/omnia/pkg/policy"
 )
 
+// alwaysNoCredValidator returns ErrNoCredential, simulating a chain
+// where no validator admits the request. The admit-path counterpart
+// (alwaysAdmitValidator) lives in a2a_wiring_test.go and is reused.
+type alwaysNoCredValidator struct{}
+
+// Validate implements auth.Validator.
+func (alwaysNoCredValidator) Validate(_ context.Context, _ *http.Request) (*policy.AuthenticatedIdentity, error) {
+	return nil, auth.ErrNoCredential
+}
+
 // buildFacadeWithStubRuntime stands up an in-process function-mode
-// facade hooked to a TCP-backed stub gRPC runtime. Returns the
-// httptest server (the caller closes it) and the runtime stopper.
-func buildFacadeWithStubRuntime(t *testing.T) (*httptest.Server, func()) {
+// facade hooked to a TCP-backed stub gRPC runtime. The auth chain is
+// empty; allowUnauthenticated controls whether the empty-chain branch
+// of auth.Middleware passes through or refuses with 401 — mirroring
+// what the production builder does in runFunctionsFacade.
+func buildFacadeWithStubRuntime(t *testing.T, allowUnauthenticated bool) (*httptest.Server, func()) {
 	t.Helper()
 	stub := &stubRuntimeServer{}
 	addr, stopRuntime := startStubRuntimeOnTCP(t, stub)
@@ -63,7 +78,9 @@ func buildFacadeWithStubRuntime(t *testing.T) (*httptest.Server, func()) {
 
 	handler := facade.NewFunctionsHandler(registry, rc, logr.Discard())
 	mux := http.NewServeMux()
-	mux.Handle("POST /functions/{name}", functionAuthGate(handler, logr.Discard()))
+	mux.Handle("POST /functions/{name}", auth.Middleware(auth.Chain{}, handler,
+		auth.WithMiddlewareLogger(logr.Discard()),
+		auth.WithMiddlewareAllowUnauthenticated(allowUnauthenticated)))
 
 	srv := httptest.NewServer(mux)
 	return srv, func() {
@@ -73,10 +90,13 @@ func buildFacadeWithStubRuntime(t *testing.T) (*httptest.Server, func()) {
 	}
 }
 
-func TestRunFunctionsFacade_AuthGateBlocksByDefault(t *testing.T) {
-	t.Setenv(envAllowUnauthFunction, "") // explicit: no bypass
-
-	srv, stop := buildFacadeWithStubRuntime(t)
+func TestRunFunctionsFacade_StrictDefaultRefuses401(t *testing.T) {
+	// Production default: when no auth chain is configured AND the
+	// strict-default flag holds (OMNIA_FACADE_ALLOW_UNAUTHENTICATED not
+	// set), the function route must refuse every request with 401. This
+	// is the same behaviour the WebSocket path enforces — closing the
+	// pen-test C-3 bypass on function-mode pods too.
+	srv, stop := buildFacadeWithStubRuntime(t, false)
 	defer stop()
 
 	// The function-mode pod name is "summarizer" (from validFunctionConfig).
@@ -87,20 +107,17 @@ func TestRunFunctionsFacade_AuthGateBlocksByDefault(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusForbidden {
+	if resp.StatusCode != http.StatusUnauthorized {
 		body, _ := io.ReadAll(resp.Body)
 		t.Errorf("StatusCode = %d, want %d; body=%s",
-			resp.StatusCode, http.StatusForbidden, body)
+			resp.StatusCode, http.StatusUnauthorized, body)
 	}
 }
 
 func TestRunFunctionsFacade_HappyPathEndToEnd(t *testing.T) {
-	// Opt into the bypass so the auth gate doesn't 403 us; PR 5+ wires
-	// the real chain. This is the only way to exercise the full
-	// handler → runtime → echo round-trip in PR 4.
-	t.Setenv(envAllowUnauthFunction, "true")
-
-	srv, stop := buildFacadeWithStubRuntime(t)
+	// Mirror the dev/CI configuration: empty auth chain +
+	// OMNIA_FACADE_ALLOW_UNAUTHENTICATED=true → pass-through.
+	srv, stop := buildFacadeWithStubRuntime(t, true)
 	defer stop()
 
 	// The stub echoes input as output, so the payload must satisfy
@@ -138,9 +155,7 @@ func TestRunFunctionsFacade_HappyPathEndToEnd(t *testing.T) {
 }
 
 func TestRunFunctionsFacade_UnknownFunctionIs404(t *testing.T) {
-	t.Setenv(envAllowUnauthFunction, "true")
-
-	srv, stop := buildFacadeWithStubRuntime(t)
+	srv, stop := buildFacadeWithStubRuntime(t, true)
 	defer stop()
 
 	resp, err := http.Post(srv.URL+"/functions/does-not-exist", "application/json",
@@ -194,37 +209,54 @@ func TestNewFunctionsHTTPServer_HasWriteTimeout(t *testing.T) {
 	}
 }
 
-func TestFunctionAuthGate_AllowsWhenEnvIsSet(t *testing.T) {
-	t.Setenv(envAllowUnauthFunction, "true")
+// TestFunctionAuthMiddleware_ChainAdmitsAuthenticatedRequest pins the
+// production wiring: a non-empty chain that admits replaces the empty-
+// chain fallback. This is the regression-guard against a future refactor
+// that accidentally swaps auth.Middleware out for a passthrough.
+func TestFunctionAuthMiddleware_ChainAdmitsAuthenticatedRequest(t *testing.T) {
 	called := false
-	gated := functionAuthGate(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		called = true
 		w.WriteHeader(http.StatusOK)
-	}), logr.Discard())
+	})
+
+	// Single-validator chain that admits everyone — the equivalent of
+	// "any credential is fine" used to confirm the middleware actually
+	// runs the chain rather than short-circuiting on the empty-chain
+	// branch.
+	chain := auth.Chain{alwaysAdmitValidator{id: &policy.AuthenticatedIdentity{
+		Subject: "test", Origin: policy.OriginSharedToken,
+	}}}
+	mw := auth.Middleware(chain, next,
+		auth.WithMiddlewareLogger(logr.Discard()),
+		auth.WithMiddlewareAllowUnauthenticated(false))
 
 	rec := httptest.NewRecorder()
-	gated.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+	mw.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
 
 	if !called {
-		t.Errorf("downstream handler was not called when bypass env is set")
+		t.Errorf("downstream handler must be called when a chain validator admits")
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("admitted request must reach handler; got status %d", rec.Code)
 	}
 }
 
-func TestFunctionAuthGate_RefusesWhenEnvIsUnset(t *testing.T) {
-	t.Setenv(envAllowUnauthFunction, "")
-	called := false
-	gated := functionAuthGate(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusOK)
-	}), logr.Discard())
+func TestFunctionAuthMiddleware_NonEmptyChainAllUnauthorized(t *testing.T) {
+	// When the chain is non-empty and all validators return ErrNoCredential,
+	// auth.Middleware MUST 401 regardless of allowUnauthenticated — the
+	// flag only controls the empty-chain fallback.
+	chain := auth.Chain{&alwaysNoCredValidator{}}
+	mw := auth.Middleware(chain, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Errorf("handler must not be reached when chain refuses")
+	}),
+		auth.WithMiddlewareLogger(logr.Discard()),
+		auth.WithMiddlewareAllowUnauthenticated(true))
 
 	rec := httptest.NewRecorder()
-	gated.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+	mw.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
 
-	if called {
-		t.Errorf("downstream handler must NOT be called when bypass env is unset")
-	}
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("auth-gate refused requests must be 403; got %d", rec.Code)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("StatusCode = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 }

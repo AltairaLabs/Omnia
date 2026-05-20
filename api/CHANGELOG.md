@@ -72,19 +72,19 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
   runtime doesn't leak sockets. (The WebSocket server intentionally
   has no `WriteTimeout` because connections are long-lived.)
 
-**Security posture (TEMPORARY — fast-follow scheduled):**
+**Security posture (resolved in PR 5 follow-up):**
 
-The function route is currently **strict-default 403** for ALL requests.
-The WebSocket auth chain (mgmt-plane + data-plane validators) has NOT
-been wired into the function pod in this PR — it lives on the upgrade
-handshake, which function-mode pods don't execute. Until that wiring
-lands as a fast-follow, every request to `POST /functions/{name}` is
-refused with HTTP 403 `function routes are not yet authenticated`.
+The function route reuses the WebSocket data-plane + mgmt-plane
+validator chain (`auth.Middleware`). Every request to
+`POST /functions/{name}` must present a credential admitted by at least
+one configured validator, with 401 (`unauthorized`) on rejection.
 
-To bypass for dev / CI / smoke tests, set
-`OMNIA_FUNCTION_ALLOW_UNAUTHENTICATED=true`. **This must NEVER be set
-in production.** When the auth chain is wired in a later PR, this env
-var will become a no-op and may be removed in a subsequent release.
+The legacy `OMNIA_FUNCTION_ALLOW_UNAUTHENTICATED` env var has been
+removed. The function path now honours the same
+`OMNIA_FACADE_ALLOW_UNAUTHENTICATED=true` dev-only escape hatch as the
+WebSocket path — for the empty-chain case (no externalAuth, mgmt-plane
+unreadable). Production must never set this; the empty-chain branch is
+strict-default 401 with the flag unset.
 
 ### Added (facade HTTP: POST /functions/{name} for function-mode AgentRuntimes, #1103 PR 3)
 

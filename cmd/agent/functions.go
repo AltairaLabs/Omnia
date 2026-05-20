@@ -31,15 +31,10 @@ import (
 
 	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade"
+	"github.com/altairalabs/omnia/internal/facade/auth"
 	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/internal/tracing"
 )
-
-// envAllowUnauthFunction is the escape hatch for dev / CI to bypass
-// the strict-default auth refusal on the function route. Mirrors the
-// WebSocket path's OMNIA_FACADE_ALLOW_UNAUTHENTICATED. In production
-// this should NEVER be set; PR 5+ will wire the real auth chain.
-const envAllowUnauthFunction = "OMNIA_FUNCTION_ALLOW_UNAUTHENTICATED"
 
 // runFunctionsFacade starts the HTTP facade for a function-mode
 // AgentRuntime (spec.mode == "function"). The pod shape is the same as
@@ -50,9 +45,12 @@ const envAllowUnauthFunction = "OMNIA_FUNCTION_ALLOW_UNAUTHENTICATED"
 // function-mode pod serves exactly one Function — the one defined by
 // the CRD it was deployed for. Any other name returns 404.
 //
-// Auth: the route is gated behind a strict-default 403 unless
-// OMNIA_FUNCTION_ALLOW_UNAUTHENTICATED=true. The full auth chain
-// reuse is tracked as a fast-follow after PR 5 of #1103.
+// Auth: the function route runs the same data-plane + mgmt-plane
+// validator chain that the WebSocket upgrade path uses. When the chain
+// loads cleanly, every request must present a credential admitted by
+// one of the validators. When no chain is configured (no externalAuth,
+// mgmt-plane pubkey unreadable), the route falls back to strict-default
+// 401 unless OMNIA_FACADE_ALLOW_UNAUTHENTICATED=true.
 func runFunctionsFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.Provider) {
 	if err := validateFunctionMode(cfg); err != nil {
 		log.Error(err, "invalid function-mode configuration")
@@ -89,7 +87,7 @@ func runFunctionsFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("POST /functions/{name}", functionAuthGate(handler, log))
+	mux.Handle("POST /functions/{name}", buildFunctionAuthMiddleware(cfg, log)(handler))
 	mux.Handle("/metrics", promhttp.Handler())
 
 	facadeServer := newFunctionsHTTPServer(cfg, mux)
@@ -98,29 +96,33 @@ func runFunctionsFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 	startFunctionsAndServe(log, facadeServer, healthServer)
 }
 
-// functionAuthGate is the strict-default refusal middleware for the
-// function route. With OMNIA_FUNCTION_ALLOW_UNAUTHENTICATED set, every
-// request passes through unchanged (matching today's behaviour, which
-// is fine for dev / CI). Without it, the route refuses all traffic
-// with HTTP 403 — making the cluster safe by default until the real
-// auth chain (mgmt-plane + data-plane validators, mirroring the WS
-// path) is wired in a follow-up.
-func functionAuthGate(next http.Handler, log logr.Logger) http.Handler {
-	allow := os.Getenv(envAllowUnauthFunction) == "true"
-	if allow {
-		log.Info("function route auth gate is DISABLED " +
-			"(OMNIA_FUNCTION_ALLOW_UNAUTHENTICATED=true). " +
-			"This is only safe in dev / CI; production must wire the auth chain.")
-		return next
+// buildFunctionAuthMiddleware returns the auth wrapper applied to the
+// function route. It loads the same mgmt-plane + data-plane chain the
+// WebSocket path uses (loadMgmtPlaneValidator + buildAuthChain) and
+// hands them to auth.Middleware. Loading failures are fatal — silent
+// downgrade to no-auth would mask a real misconfig.
+//
+// The empty-chain fallback honours OMNIA_FACADE_ALLOW_UNAUTHENTICATED so
+// dev / CI clusters without externalAuth keep working; production runs
+// at minimum a mgmt-plane validator so this flag is a no-op for them.
+func buildFunctionAuthMiddleware(cfg *agent.Config, log logr.Logger) func(http.Handler) http.Handler {
+	mgmtPlane, err := loadMgmtPlaneValidator(log)
+	if err != nil {
+		log.Error(err, "mgmt-plane validator load failed")
+		os.Exit(1)
 	}
-	log.Info("function route auth gate active — all requests refused with 403 " +
-		"until OMNIA_FUNCTION_ALLOW_UNAUTHENTICATED=true is set, or the real " +
-		"auth chain lands.")
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "function routes are not yet authenticated; "+
-			"set OMNIA_FUNCTION_ALLOW_UNAUTHENTICATED=true to bypass in dev",
-			http.StatusForbidden)
-	})
+	chain, err := buildAuthChain(context.Background(), buildK8sClient(), log,
+		cfg.AgentName, cfg.Namespace, mgmtPlane)
+	if err != nil {
+		log.Error(err, "auth chain build failed")
+		os.Exit(1)
+	}
+	allowFallback := allowUnauthenticatedFallback(log)
+	return func(next http.Handler) http.Handler {
+		return auth.Middleware(chain, next,
+			auth.WithMiddlewareLogger(log),
+			auth.WithMiddlewareAllowUnauthenticated(allowFallback))
+	}
 }
 
 // newFunctionsHTTPServer is the function-mode counterpart to

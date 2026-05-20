@@ -28,6 +28,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
@@ -403,10 +404,11 @@ func TestFunctionsHandler_RecordsSuccess(t *testing.T) {
 	// trips this test rather than silently changing the wire contract.
 	assert.Regexp(t, `^[0-9a-f]{64}$`, got.InputHash,
 		"input_hash must be lowercase sha256 hex (64 chars)")
-	// TraceID is a placeholder until PR 6 extracts it from the OTel
-	// context; pinning this empty here means a premature wiring during
-	// PR 6 flips this test red.
-	assert.Empty(t, got.TraceID, "TraceID is a PR-6 placeholder; must remain empty for now")
+	// TraceID is empty when no OTel span is present in the request
+	// context. A separate test covers the populated path with an
+	// instrumented context.
+	assert.Empty(t, got.TraceID,
+		"TraceID must be empty when no OTel span is bound to the request context")
 }
 
 func TestFunctionsHandler_DoesNotRecordOnInputInvalid(t *testing.T) {
@@ -495,4 +497,47 @@ func TestFunctionsHandler_RecorderErrorIsNonFatal(t *testing.T) {
 	muxFor(h).ServeHTTP(rec, newJSONPost(t, "/functions/"+testFunctionName, `{}`))
 	require.Equal(t, http.StatusOK, rec.Code,
 		"recorder failure must not break the user-facing request")
+}
+
+func TestFunctionsHandler_RecordsTraceIDFromContext(t *testing.T) {
+	// When the request context carries a valid OTel span, the recorded
+	// invocation must carry the corresponding trace id so audit rows can
+	// be joined against the trace store. This is the positive counterpart
+	// to TestFunctionsHandler_RecordsSuccess (which asserts empty in the
+	// absence of a span).
+	inputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+
+	invoker := &stubInvoker{resp: &runtimev1.InvocationResponse{OutputJson: `{}`}}
+	recorder := &stubRecorder{}
+	h := newHandler(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, invoker).WithRecorder(recorder, "ns-test")
+
+	// Build a context that carries a valid SpanContext. We use the OTel
+	// trace package directly rather than starting a real tracer provider
+	// so the test stays hermetic.
+	wantTraceID, err := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
+	require.NoError(t, err)
+	wantSpanID, err := trace.SpanIDFromHex("aabbccddeeff0011")
+	require.NoError(t, err)
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    wantTraceID,
+		SpanID:     wantSpanID,
+		TraceFlags: trace.FlagsSampled,
+		Remote:     true,
+	})
+	ctx := trace.ContextWithSpanContext(context.Background(), sc)
+
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost,
+		"/functions/"+testFunctionName, strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, recorder.records, 1)
+	assert.Equal(t, wantTraceID.String(), recorder.records[0].TraceID,
+		"recorder must receive the trace id from the request's OTel context")
 }

@@ -461,6 +461,60 @@ func TestMigrator_PartitionManagement(t *testing.T) {
 	assert.Equal(t, 0, created, "re-creating existing partitions should create 0 new ones")
 }
 
+// TestMigrator_PartitionOrchestratorCoversAllPartitionedTables pins the
+// set of partitioned tables managed by manage_session_partitions. It
+// caught a regression in migration 26 where CREATE OR REPLACE FUNCTION
+// silently dropped three tables from the rotation; any future migration
+// that re-defines the orchestrator must keep this test green by either
+// preserving the existing set or extending it (and updating this list).
+func TestMigrator_PartitionOrchestratorCoversAllPartitionedTables(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db, connStr := freshDB(t)
+	logger := zap.New(zap.UseDevMode(true))
+
+	mg, err := NewMigrator(connStr, logger)
+	require.NoError(t, err)
+	defer func() { _ = mg.Close() }()
+
+	require.NoError(t, mg.Up())
+
+	rows, err := db.Query("SELECT table_name FROM manage_session_partitions(7, 1)")
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+
+	got := map[string]struct{}{}
+	for rows.Next() {
+		var name string
+		require.NoError(t, rows.Scan(&name))
+		got[name] = struct{}{}
+	}
+	require.NoError(t, rows.Err())
+
+	// Canonical set as of migration 26. Any addition belongs here AND in
+	// the orchestrator's `tables` ARRAY; any removal needs a real reason
+	// (and a matching update here).
+	want := []string{
+		"sessions",
+		"messages",
+		"tool_calls",
+		"provider_calls",
+		"runtime_events",
+		"message_artifacts",
+		"audit_log",
+		"function_invocations",
+	}
+	for _, name := range want {
+		_, ok := got[name]
+		assert.True(t, ok,
+			"manage_session_partitions must rotate partitions for %q (got: %v)", name, got)
+	}
+	assert.Len(t, got, len(want),
+		"unexpected table in orchestrator output — if you added a new partitioned table, extend `want` here too (got: %v)", got)
+}
+
 func TestMigrator_CleanTeardown(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
