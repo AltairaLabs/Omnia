@@ -493,8 +493,10 @@ func TestMigrator_PartitionOrchestratorCoversAllPartitionedTables(t *testing.T) 
 	}
 	require.NoError(t, rows.Err())
 
-	// Canonical set as of migration 26. Any addition belongs here AND in
-	// the orchestrator's `tables` ARRAY; any removal needs a real reason
+	// Canonical set as of migration 28 (which dropped the dedicated
+	// function_invocations table — function invocations now record as
+	// ordinary sessions). Any addition belongs here AND in the
+	// orchestrator's `tables` ARRAY; any removal needs a real reason
 	// (and a matching update here).
 	want := []string{
 		"sessions",
@@ -504,7 +506,6 @@ func TestMigrator_PartitionOrchestratorCoversAllPartitionedTables(t *testing.T) 
 		"runtime_events",
 		"message_artifacts",
 		"audit_log",
-		"function_invocations",
 	}
 	for _, name := range want {
 		_, ok := got[name]

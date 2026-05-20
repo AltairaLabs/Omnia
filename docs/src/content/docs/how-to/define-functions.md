@@ -26,10 +26,10 @@ If you want a chat surface, browser console, or long-lived session,
 | Concern | Agent mode | Function mode |
 |---------|------------|---------------|
 | Transport | WebSocket (`/ws`) | HTTP POST (`/functions/{name}`) |
-| Conversation state | Yes (sessions) | No (one-shot) |
+| Conversation start | Human-initiated | System-initiated (HTTP POST) |
 | Input validation | None at the boundary | Required JSON Schema |
 | Output validation | None at the boundary | Required JSON Schema |
-| Audit trail | Sessions table | `function_invocations` table (opt-in) |
+| Audit trail | `sessions` (+ `messages`, `tool_calls`, `provider_calls`, `eval_results`, `runtime_events`) | Identical — function invocations are sessions tagged "function" |
 | Browser UI | Console / dashboard chat | None |
 
 ## CRD shape
@@ -71,8 +71,6 @@ spec:
     properties:
       summary:
         type: string
-  invocationRecording:
-    state: enabled      # opt-in audit trail; defaults to disabled
 ```
 
 The CEL validation gates on the CRD enforce:
@@ -145,26 +143,17 @@ to fall through. Production must never set that flag.
 See [Configure Authentication](/how-to/configure-authentication/) for
 the full validator catalogue.
 
-## Invocation recording
+## Audit trail
 
-When `spec.invocationRecording.state` is `enabled`, the facade writes
-one audit row per call to the `function_invocations` table in
-session-api. Each row carries:
+Function invocations record as ordinary **sessions** — same tables,
+same retention rules, same dashboard views as agent-mode runs. Each
+invocation creates one `sessions` row (tagged `"function"` for fast
+filtering) plus whatever the PromptKit loop fires inside it: messages,
+tool calls, provider calls, eval results, runtime events.
 
-- A SHA-256 hash of the input (raw input is not stored — this keeps
-  PII surface small).
-- The raw output JSON.
-- Status (`success` / `input_invalid` / `output_invalid` / `runtime_error`).
-- Latency, cost, and the OTel trace id of the producing span (when
-  the request context carried a valid span).
-
-Recording is **best-effort**: a session-api outage logs but does not
-fail the user-facing call. The dashboard surfaces these rows on the
-`/functions/{name}` detail page with 1h / 24h / 7d window presets and
-per-window latency + cost sparklines.
-
-To turn recording off, omit `spec.invocationRecording` entirely or set
-`state: disabled`.
+Retention is governed by the workspace's `SessionRetentionPolicy`;
+function and agent sessions share the same rules. Cost / latency /
+status aggregates roll up from the standard sessions plumbing.
 
 ## Tips
 

@@ -79,7 +79,6 @@ func TestValidateFunctionMode_RejectsMissingOutputSchema(t *testing.T) {
 func TestBuildFunctionRegistry_RegistersSingleFunctionByLowercaseName(t *testing.T) {
 	cfg := validFunctionConfig()
 	cfg.AgentName = "Summarizer-Service" // Mixed case to confirm canonicalisation.
-	cfg.FunctionRecordsInvocations = true
 
 	reg, err := buildFunctionRegistry(cfg)
 	if err != nil {
@@ -93,9 +92,6 @@ func TestBuildFunctionRegistry_RegistersSingleFunctionByLowercaseName(t *testing
 	}
 	if spec.Name != "summarizer-service" {
 		t.Errorf("Name = %q, want lowercase canonical %q", spec.Name, "summarizer-service")
-	}
-	if !spec.RecordsInvocations {
-		t.Errorf("RecordsInvocations = false, want true")
 	}
 
 	// The original mixed-case name should NOT match.

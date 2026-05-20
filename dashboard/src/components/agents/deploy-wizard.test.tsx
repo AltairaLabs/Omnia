@@ -56,10 +56,8 @@ describe("FunctionSchemaEditors", () => {
       <FunctionSchemaEditors
         inputSchemaJson='{"type":"object"}'
         outputSchemaJson='{"type":"object","required":["a"]}'
-        recordInvocations={false}
         onChangeInputSchema={vi.fn()}
         onChangeOutputSchema={vi.fn()}
-        onChangeRecordInvocations={vi.fn()}
       />,
     );
     const input = screen.getByLabelText("Input schema (JSON Schema)") as HTMLTextAreaElement;
@@ -73,10 +71,8 @@ describe("FunctionSchemaEditors", () => {
       <FunctionSchemaEditors
         inputSchemaJson="{ broken"
         outputSchemaJson='{"type":"object"}'
-        recordInvocations={false}
         onChangeInputSchema={vi.fn()}
         onChangeOutputSchema={vi.fn()}
-        onChangeRecordInvocations={vi.fn()}
       />,
     );
     expect(screen.getByTestId("input-schema-error")).toBeInTheDocument();
@@ -88,10 +84,8 @@ describe("FunctionSchemaEditors", () => {
       <FunctionSchemaEditors
         inputSchemaJson='{"type":"object"}'
         outputSchemaJson="not-an-object"
-        recordInvocations={false}
         onChangeInputSchema={vi.fn()}
         onChangeOutputSchema={vi.fn()}
-        onChangeRecordInvocations={vi.fn()}
       />,
     );
     expect(screen.getByTestId("output-schema-error")).toBeInTheDocument();
@@ -104,10 +98,8 @@ describe("FunctionSchemaEditors", () => {
       <FunctionSchemaEditors
         inputSchemaJson="{}"
         outputSchemaJson="{}"
-        recordInvocations={false}
         onChangeInputSchema={onInput}
         onChangeOutputSchema={onOutput}
-        onChangeRecordInvocations={vi.fn()}
       />,
     );
     fireEvent.change(screen.getByLabelText("Input schema (JSON Schema)"), {
@@ -119,22 +111,6 @@ describe("FunctionSchemaEditors", () => {
     expect(onInput).toHaveBeenCalledWith('{"new":"input"}');
     expect(onOutput).toHaveBeenCalledWith('{"new":"output"}');
   });
-
-  it("propagates the recording opt-in toggle", () => {
-    const onRecord = vi.fn();
-    render(
-      <FunctionSchemaEditors
-        inputSchemaJson="{}"
-        outputSchemaJson="{}"
-        recordInvocations={false}
-        onChangeInputSchema={vi.fn()}
-        onChangeOutputSchema={vi.fn()}
-        onChangeRecordInvocations={onRecord}
-      />,
-    );
-    fireEvent.click(screen.getByTestId("record-invocations-toggle"));
-    expect(onRecord).toHaveBeenCalledWith(true);
-  });
 });
 
 describe("BasicInfoStep", () => {
@@ -143,7 +119,6 @@ describe("BasicInfoStep", () => {
     mode: "agent" as const,
     inputSchemaJson: "{}",
     outputSchemaJson: "{}",
-    recordInvocations: false,
     framework: "promptkit" as const,
     frameworkVersion: "",
     customImage: "",
@@ -216,7 +191,6 @@ describe("composeAgentYaml", () => {
     mode: "agent" as const,
     inputSchemaJson: "{}",
     outputSchemaJson: "{}",
-    recordInvocations: false,
     framework: "promptkit" as const,
     frameworkVersion: "",
     customImage: "",
@@ -252,7 +226,6 @@ describe("composeAgentYaml", () => {
     expect(spec).not.toHaveProperty("mode");
     expect(spec).not.toHaveProperty("inputSchema");
     expect(spec).not.toHaveProperty("outputSchema");
-    expect(spec).not.toHaveProperty("invocationRecording");
   });
 
   it("emits mode + parsed schemas when mode is 'function'", () => {
@@ -269,17 +242,6 @@ describe("composeAgentYaml", () => {
     expect(spec.mode).toBe("function");
     expect(spec.inputSchema).toEqual({ type: "object", required: ["q"] });
     expect(spec.outputSchema).toEqual({ type: "object", required: ["a"] });
-    // recordInvocations defaulted false → no invocationRecording emitted
-    expect(spec).not.toHaveProperty("invocationRecording");
-  });
-
-  it("emits invocationRecording.state=enabled only when opted in", () => {
-    const yaml = composeAgentYaml(
-      { ...baseForm, mode: "function", recordInvocations: true },
-      "ns-a",
-    );
-    const spec = (yaml as { spec: Record<string, unknown> }).spec;
-    expect(spec.invocationRecording).toEqual({ state: "enabled" });
   });
 
   it("pins facade.type to 'grpc' in function mode regardless of facadeType", () => {

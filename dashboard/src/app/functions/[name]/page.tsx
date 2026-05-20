@@ -1,10 +1,11 @@
 /**
- * /functions/[name] — Function detail page (#1103 PR 6).
+ * /functions/[name] — Function detail page.
  *
- * Shows the resolved input/output schemas and a panel of recent
- * invocations sourced from session-api's function_invocations table.
- * The workspace context provides the namespace; the URL provides
- * the function name.
+ * Shows the resolved input/output schemas for a function-mode
+ * AgentRuntime. The session-backed invocation history panel is
+ * intentionally absent in this PR — function invocations now record
+ * as ordinary sessions (Functions-as-sessions rework), and the
+ * detail-page session list is wired up in the next PR.
  *
  * Copyright 2026 Altaira Labs.
  * SPDX-License-Identifier: Apache-2.0
@@ -12,32 +13,17 @@
 
 "use client";
 
-import { useState } from "react";
 import { useParams } from "next/navigation";
 import { Header } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FunctionInvocationsPanel } from "@/components/functions/function-invocations-panel";
 import { useAgent } from "@/hooks/agents";
-import { useWorkspace } from "@/contexts/workspace-context";
 import { isFunctionMode } from "@/types/agent-runtime";
-
-type WindowPreset = "1h" | "24h" | "7d";
-
-const WINDOW_MS: Record<WindowPreset, number> = {
-  "1h": 60 * 60 * 1000,
-  "24h": 24 * 60 * 60 * 1000,
-  "7d": 7 * 24 * 60 * 60 * 1000,
-};
 
 export default function FunctionDetailPage() {
   const params = useParams<{ name: string }>();
   const functionName = params?.name ?? "";
-  const { currentWorkspace } = useWorkspace();
-  const workspace = currentWorkspace?.name ?? "";
-
-  const [windowPreset, setWindowPreset] = useState<WindowPreset>("24h");
 
   const { data: agent, isLoading } = useAgent(functionName);
 
@@ -85,8 +71,6 @@ export default function FunctionDetailPage() {
     );
   }
 
-  const recording = agent.spec.invocationRecording?.state === "enabled";
-
   return (
     <div className="flex flex-col h-full">
       <Header
@@ -95,31 +79,8 @@ export default function FunctionDetailPage() {
       />
 
       <div className="flex-1 p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="flex gap-2">
-            <Badge variant="default">Function</Badge>
-            <Badge variant={recording ? "default" : "outline"}>
-              {recording ? "Recording" : "Ephemeral"}
-            </Badge>
-          </div>
-          <div className="flex gap-1 rounded-md border bg-muted p-1">
-            {(Object.keys(WINDOW_MS) as WindowPreset[]).map((preset) => (
-              <button
-                key={preset}
-                type="button"
-                onClick={() => setWindowPreset(preset)}
-                className={
-                  "rounded-sm px-3 py-1 text-xs font-medium transition-colors " +
-                  (windowPreset === preset
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground")
-                }
-                data-testid={`window-${preset}`}
-              >
-                {preset}
-              </button>
-            ))}
-          </div>
+        <div className="flex gap-2">
+          <Badge variant="default">Function</Badge>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
@@ -127,26 +88,19 @@ export default function FunctionDetailPage() {
           <SchemaCard label="Output schema" schema={agent.spec.outputSchema} />
         </div>
 
-        {recording ? (
-          <FunctionInvocationsPanel
-            workspace={workspace}
-            functionName={functionName}
-            windowMs={WINDOW_MS[windowPreset]}
-          />
-        ) : (
-          <Card>
-            <CardHeader>
-              <CardTitle>Recent invocations</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                Invocation recording is disabled. Set{" "}
-                <code className="font-mono">spec.invocationRecording.state: enabled</code>{" "}
-                on this AgentRuntime to retain audit rows.
-              </p>
-            </CardContent>
-          </Card>
-        )}
+        <Card>
+          <CardHeader>
+            <CardTitle>Recent invocations</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              Function invocations are recorded as sessions. The session-backed
+              detail view is wired up in the next PR — until then, invocation
+              history for this function is visible from the Sessions page
+              filtered by this AgentRuntime&apos;s name.
+            </p>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

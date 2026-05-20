@@ -54,11 +54,6 @@ spec:
       echo:
         type: string
     additionalProperties: false
-  # Opt into the function_invocations audit table so the dashboard's
-  # /functions/echo-function page can render a history. Remove this
-  # block (or set state: disabled) to keep invocations ephemeral.
-  invocationRecording:
-    state: enabled
   runtime:
     replicas: 1
     resources:

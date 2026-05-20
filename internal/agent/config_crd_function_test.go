@@ -44,9 +44,6 @@ func TestLoadFromCRD_FunctionMode_PopulatesModeAndSchemas(t *testing.T) {
 		},
 		InputSchema:  &apiextensionsv1.JSON{Raw: []byte(functionTestInputSchema)},
 		OutputSchema: &apiextensionsv1.JSON{Raw: []byte(functionTestOutputSchema)},
-		InvocationRecording: &v1alpha1.InvocationRecordingConfig{
-			State: v1alpha1.InvocationRecordingEnabled,
-		},
 	})
 
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).
@@ -67,9 +64,6 @@ func TestLoadFromCRD_FunctionMode_PopulatesModeAndSchemas(t *testing.T) {
 	if string(cfg.FunctionOutputSchemaJSON) != functionTestOutputSchema {
 		t.Errorf("FunctionOutputSchemaJSON = %q, want %q",
 			string(cfg.FunctionOutputSchemaJSON), functionTestOutputSchema)
-	}
-	if !cfg.FunctionRecordsInvocations {
-		t.Errorf("FunctionRecordsInvocations = false, want true")
 	}
 }
 
@@ -103,57 +97,6 @@ func TestLoadFromCRD_FunctionMode_EmptyRawSchemaSurfacesAsEmptyBytes(t *testing.
 	}
 }
 
-func TestLoadFromCRD_FunctionMode_RecordingStateExplicitlyDisabled(t *testing.T) {
-	ar := newFakeAgentRuntime("explicit-disabled", "prod", v1alpha1.AgentRuntimeSpec{
-		Mode:          v1alpha1.AgentRuntimeModeFunction,
-		PromptPackRef: v1alpha1.PromptPackRef{Name: "p"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeGRPC},
-		InputSchema:   &apiextensionsv1.JSON{Raw: []byte(functionTestInputSchema)},
-		OutputSchema:  &apiextensionsv1.JSON{Raw: []byte(functionTestOutputSchema)},
-		InvocationRecording: &v1alpha1.InvocationRecordingConfig{
-			State: v1alpha1.InvocationRecordingDisabled,
-		},
-	})
-
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).
-		WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
-
-	cfg, err := LoadFromCRD(context.Background(), c, "explicit-disabled", "prod")
-	if err != nil {
-		t.Fatalf("LoadFromCRD: %v", err)
-	}
-	if cfg.FunctionRecordsInvocations {
-		t.Errorf("explicit state=disabled must map to FunctionRecordsInvocations=false")
-	}
-}
-
-func TestLoadFromCRD_FunctionMode_RecordingDefaultsDisabled(t *testing.T) {
-	ar := newFakeAgentRuntime("classifier", "prod", v1alpha1.AgentRuntimeSpec{
-		Mode: v1alpha1.AgentRuntimeModeFunction,
-		PromptPackRef: v1alpha1.PromptPackRef{
-			Name: "classifier-pack",
-		},
-		Facade: v1alpha1.FacadeConfig{
-			Type: v1alpha1.FacadeTypeGRPC,
-		},
-		InputSchema:  &apiextensionsv1.JSON{Raw: []byte(functionTestInputSchema)},
-		OutputSchema: &apiextensionsv1.JSON{Raw: []byte(functionTestOutputSchema)},
-		// invocationRecording block intentionally absent.
-	})
-
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).
-		WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
-
-	cfg, err := LoadFromCRD(context.Background(), c, "classifier", "prod")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if cfg.FunctionRecordsInvocations {
-		t.Errorf("FunctionRecordsInvocations = true, want false (default)")
-	}
-}
-
 func TestLoadFromCRD_AgentMode_DoesNotPopulateFunctionFields(t *testing.T) {
 	ar := newFakeAgentRuntime("chat", "prod", v1alpha1.AgentRuntimeSpec{
 		Mode: v1alpha1.AgentRuntimeModeAgent,
@@ -181,9 +124,6 @@ func TestLoadFromCRD_AgentMode_DoesNotPopulateFunctionFields(t *testing.T) {
 	}
 	if len(cfg.FunctionOutputSchemaJSON) != 0 {
 		t.Errorf("FunctionOutputSchemaJSON = %q, want empty", string(cfg.FunctionOutputSchemaJSON))
-	}
-	if cfg.FunctionRecordsInvocations {
-		t.Errorf("FunctionRecordsInvocations = true, want false in agent mode")
 	}
 }
 

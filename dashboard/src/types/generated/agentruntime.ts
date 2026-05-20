@@ -2412,14 +2412,6 @@ export interface AgentRuntimeSpec {
    * otherwise (CEL-gated). Stored as a raw JSON object; consumers
    * validate via santhosh-tekuri/jsonschema. */
   inputSchema?: Record<string, unknown>;
-  /** invocationRecording configures per-call audit persistence for
-   * function-mode runtimes. Ephemeral by default; opt in by setting
-   * state: enabled. Ignored (forbidden via CEL) when mode is 'agent'. */
-  invocationRecording?: {
-    /** state controls whether invocation records are written. Defaults to
-     * "disabled". */
-    state?: "disabled" | "enabled";
-  };
   /** media configures media file resolution for mock provider responses. */
   media?: {
     /** basePath is the base directory for resolving mock:// URLs.

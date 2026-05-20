@@ -32,7 +32,6 @@ import (
 	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade"
 	"github.com/altairalabs/omnia/internal/facade/auth"
-	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/internal/tracing"
 )
 
@@ -75,16 +74,6 @@ func runFunctionsFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 	}()
 
 	handler := facade.NewFunctionsHandler(registry, rc, log)
-	if cfg.FunctionRecordsInvocations {
-		recorder, err := newFunctionsRecorder(log)
-		if err != nil {
-			log.Error(err, "function recording is enabled but session-api unreachable; recording disabled")
-		} else {
-			handler = handler.WithRecorder(recorder, cfg.Namespace)
-			log.Info("function invocation recording enabled",
-				"function", cfg.AgentName, "namespace", cfg.Namespace)
-		}
-	}
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /functions/{name}", buildFunctionAuthMiddleware(cfg, log)(handler))
@@ -171,50 +160,11 @@ func buildFunctionRegistry(cfg *agent.Config) (facade.FunctionRegistry, error) {
 	}
 	registry := facade.NewMapFunctionRegistry()
 	registry.Register(&facade.FunctionSpec{
-		Name:               strings.ToLower(cfg.AgentName),
-		InputSchema:        inputSchema,
-		OutputSchema:       outputSchema,
-		RecordsInvocations: cfg.FunctionRecordsInvocations,
+		Name:         strings.ToLower(cfg.AgentName),
+		InputSchema:  inputSchema,
+		OutputSchema: outputSchema,
 	})
 	return registry, nil
-}
-
-// newFunctionsRecorder wires a facade.InvocationRecorder backed by the
-// session-api HTTP store. Mirrors the WebSocket path's session-store
-// resolution. Returns an error when session-api is unreachable (in
-// which case the caller falls back to a nil recorder — recording is
-// best-effort).
-func newFunctionsRecorder(log logr.Logger) (facade.InvocationRecorder, error) {
-	store, err := initSessionStore(log)
-	if err != nil {
-		return nil, err
-	}
-	hc, ok := store.(*httpclient.Store)
-	if !ok {
-		return nil, fmt.Errorf("function recording requires session-api; got %T", store)
-	}
-	return &httpInvocationRecorder{store: hc}, nil
-}
-
-// httpInvocationRecorder adapts httpclient.Store to facade.InvocationRecorder.
-type httpInvocationRecorder struct {
-	store *httpclient.Store
-}
-
-// RecordFunctionInvocation implements facade.InvocationRecorder.
-func (r *httpInvocationRecorder) RecordFunctionInvocation(ctx context.Context, inv facade.InvocationRecord) error {
-	return r.store.RecordFunctionInvocation(ctx, httpclient.FunctionInvocationRecord{
-		ID:           inv.ID,
-		Namespace:    inv.Namespace,
-		FunctionName: inv.FunctionName,
-		InputHash:    inv.InputHash,
-		OutputJSON:   inv.OutputJSON,
-		Status:       inv.Status,
-		DurationMs:   inv.DurationMs,
-		CostUSD:      inv.CostUSD,
-		TraceID:      inv.TraceID,
-		CreatedAt:    inv.CreatedAt,
-	})
 }
 
 // newFunctionsHealthServer mounts /healthz + /readyz on the health

@@ -64,7 +64,6 @@ interface WizardFormData {
   mode: AgentMode;
   inputSchemaJson: string;
   outputSchemaJson: string;
-  recordInvocations: boolean;
   // Step 2: Framework
   framework: FrameworkType;
   frameworkVersion: string;
@@ -110,7 +109,6 @@ const INITIAL_FORM_DATA: WizardFormData = {
   mode: "agent",
   inputSchemaJson: DEFAULT_INPUT_SCHEMA,
   outputSchemaJson: DEFAULT_OUTPUT_SCHEMA,
-  recordInvocations: false,
   framework: "promptkit",
   frameworkVersion: "",
   customImage: "",
@@ -235,9 +233,6 @@ export function composeAgentYaml(
     spec.mode = "function";
     spec.inputSchema = JSON.parse(formData.inputSchemaJson);
     spec.outputSchema = JSON.parse(formData.outputSchemaJson);
-    if (formData.recordInvocations) {
-      spec.invocationRecording = { state: "enabled" };
-    }
   }
 
   if (formData.framework !== "promptkit" || formData.customImage) {
@@ -350,10 +345,8 @@ export function BasicInfoStep({
         <FunctionSchemaEditors
           inputSchemaJson={formData.inputSchemaJson}
           outputSchemaJson={formData.outputSchemaJson}
-          recordInvocations={formData.recordInvocations}
           onChangeInputSchema={(v) => updateField("inputSchemaJson", v)}
           onChangeOutputSchema={(v) => updateField("outputSchemaJson", v)}
-          onChangeRecordInvocations={(v) => updateField("recordInvocations", v)}
         />
       )}
     </div>
@@ -387,25 +380,21 @@ function ModeRadioOption({ id, value, label, description, selected }: Readonly<M
 }
 
 /** FunctionSchemaEditors renders the input + output JSON-Schema
- * editors plus the recording opt-in shown when the wizard's mode is
- * "function". Extracted from renderStep so the parent's switch
- * statement stays under SonarCloud's cognitive-complexity cap. */
+ * editors shown when the wizard's mode is "function". Extracted from
+ * renderStep so the parent's switch stays under SonarCloud's
+ * cognitive-complexity cap. */
 interface FunctionSchemaEditorsProps {
   inputSchemaJson: string;
   outputSchemaJson: string;
-  recordInvocations: boolean;
   onChangeInputSchema: (v: string) => void;
   onChangeOutputSchema: (v: string) => void;
-  onChangeRecordInvocations: (v: boolean) => void;
 }
 
 export function FunctionSchemaEditors({
   inputSchemaJson,
   outputSchemaJson,
-  recordInvocations,
   onChangeInputSchema,
   onChangeOutputSchema,
-  onChangeRecordInvocations,
 }: Readonly<FunctionSchemaEditorsProps>) {
   const inputValid = isValidJsonObject(inputSchemaJson);
   const outputValid = isValidJsonObject(outputSchemaJson);
@@ -429,15 +418,6 @@ export function FunctionSchemaEditors({
         errorMessage="Output schema must be a valid JSON object."
         onChange={onChangeOutputSchema}
       />
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={recordInvocations}
-          onChange={(e) => onChangeRecordInvocations(e.target.checked)}
-          data-testid="record-invocations-toggle"
-        />
-        <span>Record invocations to session-api (per-call audit rows)</span>
-      </label>
     </div>
   );
 }

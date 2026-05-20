@@ -13,7 +13,6 @@
 
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import type { AgentRuntime } from "@/types";
 
 interface FunctionCardProps {
@@ -35,7 +34,6 @@ function schemaFieldCount(schema: Record<string, unknown> | undefined): number {
 export function FunctionCard({ fn }: Readonly<FunctionCardProps>) {
   const { metadata, spec } = fn;
   const namespace = metadata.namespace ?? "default";
-  const recording = spec.invocationRecording?.state === "enabled";
   const inputFields = schemaFieldCount(spec.inputSchema);
   const outputFields = schemaFieldCount(spec.outputSchema);
 
@@ -46,12 +44,7 @@ export function FunctionCard({ fn }: Readonly<FunctionCardProps>) {
         data-testid="function-card"
       >
         <CardHeader className="pb-2">
-          <div className="flex items-start justify-between gap-2">
-            <CardTitle className="text-base font-medium">{metadata.name}</CardTitle>
-            <Badge variant={recording ? "default" : "outline"} className="shrink-0">
-              {recording ? "Recording" : "Ephemeral"}
-            </Badge>
-          </div>
+          <CardTitle className="text-base font-medium">{metadata.name}</CardTitle>
           <p className="text-xs text-muted-foreground">{namespace}</p>
         </CardHeader>
         <CardContent className="text-sm">

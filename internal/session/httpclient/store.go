@@ -36,7 +36,6 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/altairalabs/omnia/internal/session"
-	"github.com/altairalabs/omnia/internal/session/api"
 	"github.com/altairalabs/omnia/pkg/sessionapi"
 )
 
@@ -373,61 +372,6 @@ func (s *Store) RecordProviderCall(ctx context.Context, sessionID string, pc ses
 		return s.readError(resp)
 	}
 	return nil
-}
-
-// RecordFunctionInvocation sends a function invocation audit record via
-// POST /api/v1/function-invocations. Called by the facade after a
-// Function call when AgentRuntime.spec.invocationRecording.state is
-// "enabled". Function invocations are independent of sessions — no
-// session_id is required. inv carries only the audit-row fields the
-// facade can populate; the conversion to the session-api wire type
-// happens here so the facade can stay decoupled from internal/session.
-func (s *Store) RecordFunctionInvocation(ctx context.Context, inv FunctionInvocationRecord) error {
-	const path = "/api/v1/function-invocations"
-	body, err := json.Marshal(api.FunctionInvocation{
-		ID:           inv.ID,
-		Namespace:    inv.Namespace,
-		FunctionName: inv.FunctionName,
-		InputHash:    inv.InputHash,
-		OutputJSON:   inv.OutputJSON,
-		Status:       inv.Status,
-		DurationMs:   inv.DurationMs,
-		CostUSD:      inv.CostUSD,
-		TraceID:      inv.TraceID,
-		CreatedAt:    inv.CreatedAt,
-	})
-	if err != nil {
-		return fmt.Errorf("record function invocation: encode: %w", err)
-	}
-
-	resp, err := s.doWithRetry(ctx, http.MethodPost, path, body)
-	if err != nil {
-		return s.bufferWrite(err, http.MethodPost, path, body)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusCreated {
-		return s.readError(resp)
-	}
-	return nil
-}
-
-// FunctionInvocationRecord is the in-process shape passed to
-// RecordFunctionInvocation. Duplicates facade.InvocationRecord field
-// names so the facade adapter is a 1:1 field copy; we keep the type
-// here (rather than importing the facade type) to avoid a circular
-// import between httpclient and facade.
-type FunctionInvocationRecord struct {
-	ID           string
-	Namespace    string
-	FunctionName string
-	InputHash    string
-	OutputJSON   json.RawMessage
-	Status       string
-	DurationMs   int32
-	CostUSD      float64
-	TraceID      string
-	CreatedAt    time.Time
 }
 
 // RecordEvalResult sends an eval result via POST /api/v1/eval-results.

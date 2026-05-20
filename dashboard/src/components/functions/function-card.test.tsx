@@ -41,7 +41,6 @@ function mkFn(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
         type: "object",
         properties: { a: { type: "string" } },
       },
-      invocationRecording: { state: "enabled" },
     },
     ...overrides,
   };
@@ -52,25 +51,6 @@ describe("FunctionCard", () => {
     render(<FunctionCard fn={mkFn()} />);
     expect(screen.getByText("summarizer")).toBeInTheDocument();
     expect(screen.getByText("ns-a")).toBeInTheDocument();
-  });
-
-  it("shows Recording badge when invocationRecording.state is enabled", () => {
-    render(<FunctionCard fn={mkFn()} />);
-    expect(screen.getByText("Recording")).toBeInTheDocument();
-  });
-
-  it("shows Ephemeral badge when recording is disabled or unset", () => {
-    render(
-      <FunctionCard
-        fn={mkFn({
-          spec: {
-            ...mkFn().spec,
-            invocationRecording: { state: "disabled" },
-          },
-        })}
-      />,
-    );
-    expect(screen.getByText("Ephemeral")).toBeInTheDocument();
   });
 
   it("counts top-level schema properties on each side", () => {
