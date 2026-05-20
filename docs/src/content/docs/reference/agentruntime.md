@@ -17,6 +17,78 @@ kind: AgentRuntime
 
 ## Spec Fields
 
+### `mode`
+
+Selects the runtime shape. Defaults to `agent` when unset, preserving
+the pre-Functions behaviour. See [Define Functions](/how-to/define-functions/)
+for when to pick which.
+
+| Value      | Behaviour |
+|------------|-----------|
+| `agent`    | Long-lived conversational runtime served over WebSocket (`/ws`). Default. |
+| `function` | One-shot HTTP runtime served over `POST /functions/{name}`. Requires `inputSchema` + `outputSchema`. Rejects `facade.type: websocket`. |
+
+```yaml
+spec:
+  mode: function
+```
+
+### `inputSchema`
+
+JSON Schema (Draft 2020-12) the function's request body is validated
+against. Required when `mode: function`; forbidden when `mode: agent`
+(CEL-gated). Stored as a raw JSON object — the runtime uses
+`santhosh-tekuri/jsonschema/v6` to compile and validate.
+
+```yaml
+spec:
+  inputSchema:
+    type: object
+    required: ["text"]
+    properties:
+      text:
+        type: string
+```
+
+### `outputSchema`
+
+JSON Schema the function's response is validated against before being
+returned to the caller. On output-validation failure the facade
+returns HTTP 502 `output_invalid` with the raw model output embedded
+so the pack author can debug schema drift (no in-runtime retry).
+Required when `mode: function`; forbidden when `mode: agent` (CEL-gated).
+
+```yaml
+spec:
+  outputSchema:
+    type: object
+    required: ["summary"]
+    properties:
+      summary:
+        type: string
+```
+
+### `invocationRecording`
+
+Opt-in audit persistence for function-mode runtimes. Each call writes
+one row to the `function_invocations` table in session-api. Recording
+is best-effort — a session-api outage logs but does not fail the
+user-facing call. Ignored (and forbidden via CEL) when `mode: agent`.
+
+| Field | Type | Default | Required |
+|-------|------|---------|----------|
+| `invocationRecording.state` | string | `disabled` | No |
+
+`state` accepts `disabled` or `enabled`. The dashboard surfaces
+enabled-recording rows on `/functions/{name}` with latency + cost
+sparklines per time-window.
+
+```yaml
+spec:
+  invocationRecording:
+    state: enabled
+```
+
 ### `promptPackRef`
 
 Reference to the PromptPack containing agent prompts.

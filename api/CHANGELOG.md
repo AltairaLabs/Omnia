@@ -10,6 +10,22 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (docs + example: Functions Phase 1 closes out, #1103 PR 7)
+
+- New how-to: `docs/src/content/docs/how-to/define-functions.md` —
+  pack-authoring guide for function-mode AgentRuntimes. Covers when
+  to pick function vs agent, the CRD shape, the invocation contract,
+  status code reference, authentication, and the
+  `invocationRecording` opt-in.
+- AgentRuntime CRD reference extended with first-class entries for
+  the new `mode`, `inputSchema`, `outputSchema`, and
+  `invocationRecording` fields in
+  `docs/src/content/docs/reference/agentruntime.md`.
+- New `examples/echo-function/` worked example — a minimal,
+  applyable Function (PromptPack + Provider + AgentRuntime + README)
+  showing the smallest viable function-mode runtime. Echoes the
+  request's `message` field back as `echo`.
+
 ### Added (dashboard: Functions catalog + invocation history, #1103 PR 6)
 
 - New `/functions` catalog page lists function-mode AgentRuntimes
