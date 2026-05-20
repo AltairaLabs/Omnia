@@ -41,10 +41,30 @@ interface DeployWizardProps {
 type FrameworkType = "promptkit" | "langchain" | "autogen" | "custom";
 type FacadeType = "websocket" | "grpc";
 type SessionType = "memory" | "redis";
+type AgentMode = "agent" | "function";
+
+/** Default placeholder shown in the schema editors when mode=function
+ * is selected. Gives authors a starting shape they can edit; it is
+ * never silently submitted as-is because canProceed() rejects empty
+ * `properties` to nudge the user to actually define their contract. */
+const DEFAULT_INPUT_SCHEMA = `{
+  "type": "object",
+  "properties": {},
+  "required": []
+}`;
+const DEFAULT_OUTPUT_SCHEMA = `{
+  "type": "object",
+  "properties": {},
+  "required": []
+}`;
 
 interface WizardFormData {
   // Step 1: Basic Info
   name: string;
+  mode: AgentMode;
+  inputSchemaJson: string;
+  outputSchemaJson: string;
+  recordInvocations: boolean;
   // Step 2: Framework
   framework: FrameworkType;
   frameworkVersion: string;
@@ -69,8 +89,28 @@ interface WizardFormData {
   facadePort: number;
 }
 
+/** isValidJsonObject returns true iff the string parses to a JSON
+ * object (not an array, not a scalar). Schemas are objects; rejecting
+ * arrays/scalars saves a debugging session against CEL admission. */
+export function isValidJsonObject(raw: string): boolean {
+  try {
+    const parsed = JSON.parse(raw);
+    return (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
+    );
+  } catch {
+    return false;
+  }
+}
+
 const INITIAL_FORM_DATA: WizardFormData = {
   name: "",
+  mode: "agent",
+  inputSchemaJson: DEFAULT_INPUT_SCHEMA,
+  outputSchemaJson: DEFAULT_OUTPUT_SCHEMA,
+  recordInvocations: false,
   framework: "promptkit",
   frameworkVersion: "",
   customImage: "",
@@ -157,6 +197,292 @@ function renderDeployButtonContent(isSubmitting: boolean, success: boolean) {
   );
 }
 
+/** composeAgentYaml turns the wizard's form-data into the AgentRuntime
+ * resource passed to dataService.createAgent. Pure function — no React
+ * state, no hooks — so the YAML composer can be unit-tested directly.
+ * Exported for tests; production code calls it via DeployWizard. */
+export function composeAgentYaml(
+  formData: WizardFormData,
+  namespace: string | undefined,
+): Record<string, unknown> {
+  // Function-mode must use a non-WebSocket facade (CEL gate). Pin it
+  // server-side rather than trusting the user-selected facadeType.
+  const facadeType: FacadeType =
+    formData.mode === "function" ? "grpc" : formData.facadeType;
+  const yaml: Record<string, unknown> = {
+    apiVersion: "omnia.altairalabs.ai/v1alpha1",
+    kind: "AgentRuntime",
+    metadata: {
+      name: formData.name,
+      namespace: namespace || "default",
+    },
+    spec: {
+      promptPackRef: {
+        name: formData.promptPackName,
+        track: formData.promptPackTrack,
+      },
+      facade: {
+        type: facadeType,
+        port: formData.facadePort,
+      },
+    },
+  };
+  const spec = yaml.spec as Record<string, unknown>;
+
+  // Function-mode fields. Only emitted when mode === "function" so
+  // existing agent-mode YAMLs are byte-identical to the pre-PR output.
+  if (formData.mode === "function") {
+    spec.mode = "function";
+    spec.inputSchema = JSON.parse(formData.inputSchemaJson);
+    spec.outputSchema = JSON.parse(formData.outputSchemaJson);
+    if (formData.recordInvocations) {
+      spec.invocationRecording = { state: "enabled" };
+    }
+  }
+
+  if (formData.framework !== "promptkit" || formData.customImage) {
+    spec.framework = {
+      type: formData.framework,
+      ...(formData.frameworkVersion && { version: formData.frameworkVersion }),
+      ...(formData.customImage && { image: formData.customImage }),
+    };
+  }
+
+  if (formData.providerRefName) {
+    spec.providers = [
+      { name: "default", providerRef: { name: formData.providerRefName } },
+    ];
+  }
+
+  if (formData.toolRegistryName) {
+    spec.toolRegistryRef = {
+      name: formData.toolRegistryName,
+      ...(formData.toolRegistryNamespace && {
+        namespace: formData.toolRegistryNamespace,
+      }),
+    };
+  }
+
+  if (formData.sessionType !== "memory" || formData.sessionTtl !== "24h") {
+    spec.session = { type: formData.sessionType, ttl: formData.sessionTtl };
+  }
+
+  const runtime: Record<string, unknown> = {};
+  if (formData.replicas !== 1) {
+    runtime.replicas = formData.replicas;
+  }
+  if (formData.cpuRequest !== "100m" || formData.memoryRequest !== "128Mi") {
+    runtime.resources = {
+      requests: { cpu: formData.cpuRequest, memory: formData.memoryRequest },
+      limits: { cpu: formData.cpuLimit, memory: formData.memoryLimit },
+    };
+  }
+  if (Object.keys(runtime).length > 0) {
+    spec.runtime = runtime;
+  }
+
+  return yaml;
+}
+
+interface BasicInfoStepProps {
+  formData: WizardFormData;
+  currentWorkspace: { name?: string; namespace?: string; displayName?: string } | null;
+  updateField: <K extends keyof WizardFormData>(field: K, value: WizardFormData[K]) => void;
+}
+
+/** BasicInfoStep is step 0 of the wizard. Pulled out so renderStep
+ * stays below SonarCloud's cognitive-complexity cap with the new
+ * mode toggle + schema editor branches. */
+export function BasicInfoStep({
+  formData,
+  currentWorkspace,
+  updateField,
+}: Readonly<BasicInfoStepProps>) {
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="name">Agent Name</Label>
+        <Input
+          id="name"
+          value={formData.name}
+          onChange={(e) =>
+            updateField("name", e.target.value.toLowerCase().replaceAll(/[^a-z0-9-]/g, "-"))
+          }
+          placeholder="my-agent"
+        />
+        <p className="text-xs text-muted-foreground">
+          Lowercase letters, numbers, and hyphens only
+        </p>
+      </div>
+      <div className="space-y-2">
+        <Label>Workspace</Label>
+        <div className="flex h-10 items-center rounded-md border border-input bg-muted px-3 py-2 text-sm">
+          {currentWorkspace?.displayName || currentWorkspace?.name || "No workspace selected"}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Agent will be deployed to the {currentWorkspace?.namespace || "default"} namespace
+        </p>
+      </div>
+      <div className="space-y-2">
+        <Label>Mode</Label>
+        <RadioGroup
+          value={formData.mode}
+          onValueChange={(v) => updateField("mode", v as AgentMode)}
+          className="grid grid-cols-1 gap-2"
+        >
+          <ModeRadioOption
+            id="mode-agent"
+            value="agent"
+            label="Agent"
+            description="Long-lived conversational runtime over WebSocket."
+            selected={formData.mode === "agent"}
+          />
+          <ModeRadioOption
+            id="mode-function"
+            value="function"
+            label="Function"
+            description="One-shot HTTP invocation with structured input + output schemas."
+            selected={formData.mode === "function"}
+          />
+        </RadioGroup>
+      </div>
+      {formData.mode === "function" && (
+        <FunctionSchemaEditors
+          inputSchemaJson={formData.inputSchemaJson}
+          outputSchemaJson={formData.outputSchemaJson}
+          recordInvocations={formData.recordInvocations}
+          onChangeInputSchema={(v) => updateField("inputSchemaJson", v)}
+          onChangeOutputSchema={(v) => updateField("outputSchemaJson", v)}
+          onChangeRecordInvocations={(v) => updateField("recordInvocations", v)}
+        />
+      )}
+    </div>
+  );
+}
+
+interface ModeRadioOptionProps {
+  id: string;
+  value: AgentMode;
+  label: string;
+  description: string;
+  selected: boolean;
+}
+
+function ModeRadioOption({ id, value, label, description, selected }: Readonly<ModeRadioOptionProps>) {
+  return (
+    <label
+      htmlFor={id}
+      className={cn(
+        "flex items-center space-x-3 rounded-lg border p-3 cursor-pointer transition-colors",
+        selected ? "border-primary bg-primary/5" : "hover:bg-muted/50",
+      )}
+    >
+      <RadioGroupItem value={value} id={id} />
+      <div className="flex-1">
+        <span className="cursor-pointer font-medium">{label}</span>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+    </label>
+  );
+}
+
+/** FunctionSchemaEditors renders the input + output JSON-Schema
+ * editors plus the recording opt-in shown when the wizard's mode is
+ * "function". Extracted from renderStep so the parent's switch
+ * statement stays under SonarCloud's cognitive-complexity cap. */
+interface FunctionSchemaEditorsProps {
+  inputSchemaJson: string;
+  outputSchemaJson: string;
+  recordInvocations: boolean;
+  onChangeInputSchema: (v: string) => void;
+  onChangeOutputSchema: (v: string) => void;
+  onChangeRecordInvocations: (v: boolean) => void;
+}
+
+export function FunctionSchemaEditors({
+  inputSchemaJson,
+  outputSchemaJson,
+  recordInvocations,
+  onChangeInputSchema,
+  onChangeOutputSchema,
+  onChangeRecordInvocations,
+}: Readonly<FunctionSchemaEditorsProps>) {
+  const inputValid = isValidJsonObject(inputSchemaJson);
+  const outputValid = isValidJsonObject(outputSchemaJson);
+  return (
+    <div className="space-y-4 border-t pt-4" data-testid="function-schemas">
+      <SchemaEditor
+        id="inputSchemaJson"
+        label="Input schema (JSON Schema)"
+        value={inputSchemaJson}
+        valid={inputValid}
+        errorTestId="input-schema-error"
+        errorMessage="Input schema must be a valid JSON object."
+        onChange={onChangeInputSchema}
+      />
+      <SchemaEditor
+        id="outputSchemaJson"
+        label="Output schema (JSON Schema)"
+        value={outputSchemaJson}
+        valid={outputValid}
+        errorTestId="output-schema-error"
+        errorMessage="Output schema must be a valid JSON object."
+        onChange={onChangeOutputSchema}
+      />
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={recordInvocations}
+          onChange={(e) => onChangeRecordInvocations(e.target.checked)}
+          data-testid="record-invocations-toggle"
+        />
+        <span>Record invocations to session-api (per-call audit rows)</span>
+      </label>
+    </div>
+  );
+}
+
+interface SchemaEditorProps {
+  id: string;
+  label: string;
+  value: string;
+  valid: boolean;
+  errorTestId: string;
+  errorMessage: string;
+  onChange: (v: string) => void;
+}
+
+function SchemaEditor({
+  id,
+  label,
+  value,
+  valid,
+  errorTestId,
+  errorMessage,
+  onChange,
+}: Readonly<SchemaEditorProps>) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      <textarea
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={6}
+        className={cn(
+          "w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs",
+          !valid && "border-destructive",
+        )}
+      />
+      {!valid && (
+        <p className="text-xs text-destructive" data-testid={errorTestId}>
+          {errorMessage}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>) {
   const [step, setStep] = useState(0);
   const [formData, setFormData] = useState<WizardFormData>(INITIAL_FORM_DATA);
@@ -189,7 +515,19 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
   const canProceed = useCallback(() => {
     switch (step) {
       case 0: // Basic Info
-        return formData.name.length > 0 && /^[a-z0-9-]+$/.test(formData.name);
+        if (formData.name.length === 0 || !/^[a-z0-9-]+$/.test(formData.name)) {
+          return false;
+        }
+        // Function-mode requires both schemas to be valid JSON objects.
+        // CEL on the CRD enforces the same; failing here saves the
+        // operator a round-trip to a 4xx admission rejection.
+        if (formData.mode === "function") {
+          return (
+            isValidJsonObject(formData.inputSchemaJson) &&
+            isValidJsonObject(formData.outputSchemaJson)
+          );
+        }
+        return true;
       case 1: // Framework
         return formData.framework !== "custom" || formData.customImage.length > 0;
       case 2: // PromptPack
@@ -207,86 +545,10 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
     }
   }, [step, formData]);
 
-  const generateYaml = useCallback(() => {
-    const yaml: Record<string, unknown> = {
-      apiVersion: "omnia.altairalabs.ai/v1alpha1",
-      kind: "AgentRuntime",
-      metadata: {
-        name: formData.name,
-        namespace: currentWorkspace?.namespace || "default",
-      },
-      spec: {
-        promptPackRef: {
-          name: formData.promptPackName,
-          track: formData.promptPackTrack,
-        },
-        facade: {
-          type: formData.facadeType,
-          port: formData.facadePort,
-        },
-      },
-    };
-
-    // Framework (only if not default promptkit)
-    if (formData.framework !== "promptkit" || formData.customImage) {
-      (yaml.spec as Record<string, unknown>).framework = {
-        type: formData.framework,
-        ...(formData.frameworkVersion && { version: formData.frameworkVersion }),
-        ...(formData.customImage && { image: formData.customImage }),
-      };
-    }
-
-    // Provider reference
-    if (formData.providerRefName) {
-      (yaml.spec as Record<string, unknown>).providers = [
-        {
-          name: "default",
-          providerRef: {
-            name: formData.providerRefName,
-          },
-        },
-      ];
-    }
-
-    // Tool Registry
-    if (formData.toolRegistryName) {
-      (yaml.spec as Record<string, unknown>).toolRegistryRef = {
-        name: formData.toolRegistryName,
-        ...(formData.toolRegistryNamespace && { namespace: formData.toolRegistryNamespace }),
-      };
-    }
-
-    // Session
-    if (formData.sessionType !== "memory" || formData.sessionTtl !== "24h") {
-      (yaml.spec as Record<string, unknown>).session = {
-        type: formData.sessionType,
-        ttl: formData.sessionTtl,
-      };
-    }
-
-    // Runtime
-    const runtime: Record<string, unknown> = {};
-    if (formData.replicas !== 1) {
-      runtime.replicas = formData.replicas;
-    }
-    if (formData.cpuRequest !== "100m" || formData.memoryRequest !== "128Mi") {
-      runtime.resources = {
-        requests: {
-          cpu: formData.cpuRequest,
-          memory: formData.memoryRequest,
-        },
-        limits: {
-          cpu: formData.cpuLimit,
-          memory: formData.memoryLimit,
-        },
-      };
-    }
-    if (Object.keys(runtime).length > 0) {
-      (yaml.spec as Record<string, unknown>).runtime = runtime;
-    }
-
-    return yaml;
-  }, [formData, currentWorkspace]);
+  const generateYaml = useCallback(
+    () => composeAgentYaml(formData, currentWorkspace?.namespace),
+    [formData, currentWorkspace],
+  );
 
   const handleSubmit = async () => {
     if (!currentWorkspace) {
@@ -331,29 +593,11 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
     switch (step) {
       case 0:
         return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Agent Name</Label>
-              <Input
-                id="name"
-                value={formData.name}
-                onChange={(e) => updateField("name", e.target.value.toLowerCase().replaceAll(/[^a-z0-9-]/g, "-"))}
-                placeholder="my-agent"
-              />
-              <p className="text-xs text-muted-foreground">
-                Lowercase letters, numbers, and hyphens only
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label>Workspace</Label>
-              <div className="flex h-10 items-center rounded-md border border-input bg-muted px-3 py-2 text-sm">
-                {currentWorkspace?.displayName || currentWorkspace?.name || "No workspace selected"}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Agent will be deployed to the {currentWorkspace?.namespace || "default"} namespace
-              </p>
-            </div>
-          </div>
+          <BasicInfoStep
+            formData={formData}
+            currentWorkspace={currentWorkspace}
+            updateField={updateField}
+          />
         );
 
       case 1:
@@ -591,8 +835,9 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
               <div className="space-y-2">
                 <Label>Facade Type</Label>
                 <Select
-                  value={formData.facadeType}
+                  value={formData.mode === "function" ? "grpc" : formData.facadeType}
                   onValueChange={(v) => updateField("facadeType", v as FacadeType)}
+                  disabled={formData.mode === "function"}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -602,6 +847,11 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
                     <SelectItem value="grpc">gRPC</SelectItem>
                   </SelectContent>
                 </Select>
+                {formData.mode === "function" && (
+                  <p className="text-xs text-muted-foreground">
+                    Function mode requires the gRPC facade.
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">
