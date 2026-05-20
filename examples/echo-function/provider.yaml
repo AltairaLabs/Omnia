@@ -1,0 +1,27 @@
+# Provider for the echo-function example.
+#
+# Edit `spec.type`, `spec.model`, and the Secret below to match the
+# LLM provider you actually want to call. Anthropic Claude is shown
+# here as the default; OpenAI / Bedrock / Vertex / Azure / Ollama
+# all work the same way — see docs/reference/provider.
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: echo-provider
+spec:
+  type: anthropic
+  model: claude-3-5-haiku-latest
+  credentialsRef:
+    secretRef:
+      name: echo-provider-secret
+      key: api-key
+---
+# Replace REPLACE_ME with your actual API key, or generate the Secret
+# out-of-band with `kubectl create secret generic ...`.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: echo-provider-secret
+type: Opaque
+stringData:
+  api-key: REPLACE_ME

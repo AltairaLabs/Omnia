@@ -1,0 +1,70 @@
+# echo-function: minimal function-mode AgentRuntime (#1103 Phase 1).
+#
+# Demonstrates the smallest possible Function: it accepts a string,
+# pads it with a fixed prefix, and returns the result. The pack is
+# the source of truth for the prompt; this CR wires the pack +
+# provider + schemas together.
+#
+# Apply order:
+#   kubectl apply -f provider-secret.yaml
+#   kubectl apply -f provider.yaml
+#   kubectl apply -f promptpack.yaml
+#   kubectl apply -f agentruntime.yaml
+#
+# Invoke once it's Ready:
+#   kubectl port-forward svc/echo-function 8080:8080
+#   curl -X POST http://localhost:8080/functions/echo-function \
+#     -H "Content-Type: application/json" \
+#     -d '{"message": "hello"}'
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: echo-function
+spec:
+  mode: function
+  promptPackRef:
+    name: echo-pack
+  facade:
+    type: grpc
+    port: 8080
+  providers:
+    - name: default
+      providerRef:
+        name: echo-provider
+  # JSON Schema for the request body. The facade validates POST
+  # bodies against this before the runtime is invoked; a bad body
+  # gets HTTP 400 input_invalid without spending an LLM call.
+  inputSchema:
+    type: object
+    required: ["message"]
+    properties:
+      message:
+        type: string
+        description: "Text to echo"
+        maxLength: 280
+    additionalProperties: false
+  # JSON Schema for the model output. The facade validates the
+  # response against this before returning it to the caller;
+  # output that doesn't match gets HTTP 502 output_invalid with
+  # the raw model output embedded so the pack author can debug.
+  outputSchema:
+    type: object
+    required: ["echo"]
+    properties:
+      echo:
+        type: string
+    additionalProperties: false
+  # Opt into the function_invocations audit table so the dashboard's
+  # /functions/echo-function page can render a history. Remove this
+  # block (or set state: disabled) to keep invocations ephemeral.
+  invocationRecording:
+    state: enabled
+  runtime:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi

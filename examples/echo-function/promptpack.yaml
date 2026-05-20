@@ -1,0 +1,59 @@
+# PromptPack for the echo-function example.
+#
+# This is the minimum viable pack: a single prompt that instructs the
+# model to copy its input into the `echo` field of a JSON response.
+# Production packs add evals, fragments, validators, etc. — see
+# config/samples/omnia_v1alpha1_promptpack.yaml for the full surface.
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: echo-pack
+spec:
+  source:
+    type: configmap
+    configMapRef:
+      name: echo-pack-contents
+  version: "1.0.0"
+  rollout:
+    type: immediate
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: echo-pack-contents
+data:
+  pack.json: |
+    {
+      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
+      "id": "echo",
+      "name": "Echo Function",
+      "version": "1.0.0",
+      "description": "Echoes the request's `message` field back as `echo`.",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{variable}}",
+        "features": ["basic_substitution"]
+      },
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "Echo",
+          "description": "Single-turn echo prompt.",
+          "version": "1.0.0",
+          "system_template": "You are an echo service. The user will send a JSON object with a `message` field. Respond with a single JSON object of the form {\"echo\": <message>} and nothing else. Do not summarise, expand, or comment.",
+          "user_template": "{{input}}",
+          "parameters": {
+            "temperature": 0.0,
+            "max_tokens": 512
+          },
+          "variables": [
+            {
+              "name": "input",
+              "type": "string",
+              "required": true,
+              "description": "Raw request body forwarded by the runtime."
+            }
+          ]
+        }
+      }
+    }
