@@ -12,7 +12,10 @@ export default defineConfig({
   site: 'https://omnia.altairalabs.ai',
   base: basePath,
   integrations: [
-    d2(),
+    // Pass `output` explicitly: astro-d2 0.8.x stopped honouring its
+    // Zod default when no userConfig is supplied, so config.output
+    // arrives as undefined and the build crashes on path.join.
+    d2({ output: 'd2' }),
     starlight({
       plugins: [starlightThemeGalaxy()],
       title: 'Omnia',
@@ -35,21 +38,24 @@ export default defineConfig({
         PageTitle: './src/components/PageTitle.astro',
       },
       sidebar: [
+        // Starlight 0.39 dropped top-level { label, autogenerate }
+        // shorthand — each group must now use { label, items: [...] }
+        // with the autogenerate config as a child entry.
         {
           label: 'Tutorials',
-          autogenerate: { directory: 'tutorials' },
+          items: [{ autogenerate: { directory: 'tutorials' } }],
         },
         {
           label: 'How-To Guides',
-          autogenerate: { directory: 'how-to' },
+          items: [{ autogenerate: { directory: 'how-to' } }],
         },
         {
           label: 'Reference',
-          autogenerate: { directory: 'reference' },
+          items: [{ autogenerate: { directory: 'reference' } }],
         },
         {
           label: 'Concepts',
-          autogenerate: { directory: 'explanation' },
+          items: [{ autogenerate: { directory: 'explanation' } }],
         },
       ],
       editLink: {
