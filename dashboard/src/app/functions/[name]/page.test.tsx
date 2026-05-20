@@ -1,30 +1,24 @@
 /**
  * Tests for the /functions/[name] detail page.
  *
- * The page is also orchestration — resolve the AgentRuntime by name,
- * guard against agent-mode runtimes, render the invocations panel
- * when recording is enabled, render an opt-in nag when it's not.
+ * The page is orchestration — resolve the AgentRuntime by name, guard
+ * against agent-mode runtimes, render the schemas. The session-backed
+ * invocation history wiring lands in the next PR.
  *
  * Copyright 2026 Altaira Labs.
  * SPDX-License-Identifier: Apache-2.0
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import FunctionDetailPage from "./page";
 import type { AgentRuntime } from "@/types";
 
 const useAgentSpy = vi.hoisted(() => vi.fn());
-const useWorkspaceSpy = vi.hoisted(() => vi.fn());
 const useParamsSpy = vi.hoisted(() => vi.fn());
-const panelSpy = vi.hoisted(() => vi.fn());
 
 vi.mock("@/hooks/agents", () => ({
   useAgent: useAgentSpy,
-}));
-
-vi.mock("@/contexts/workspace-context", () => ({
-  useWorkspace: useWorkspaceSpy,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -40,13 +34,6 @@ vi.mock("@/components/layout", () => ({
   ),
 }));
 
-vi.mock("@/components/functions/function-invocations-panel", () => ({
-  FunctionInvocationsPanel: (props: { workspace: string; functionName: string; windowMs: number }) => {
-    panelSpy(props);
-    return <div data-testid="invocations-panel" data-window={props.windowMs} />;
-  },
-}));
-
 function mkFn(overrides: Partial<AgentRuntime["spec"]> = {}): AgentRuntime {
   return {
     apiVersion: "omnia.altairalabs.ai/v1alpha1",
@@ -58,7 +45,6 @@ function mkFn(overrides: Partial<AgentRuntime["spec"]> = {}): AgentRuntime {
       facade: { type: "grpc" as never },
       inputSchema: { type: "object", properties: { q: { type: "string" } } },
       outputSchema: { type: "object", properties: { a: { type: "string" } } },
-      invocationRecording: { state: "enabled" },
       ...overrides,
     },
   };
@@ -66,12 +52,9 @@ function mkFn(overrides: Partial<AgentRuntime["spec"]> = {}): AgentRuntime {
 
 beforeEach(() => {
   useAgentSpy.mockReset();
-  useWorkspaceSpy.mockReset();
   useParamsSpy.mockReset();
-  panelSpy.mockReset();
 
   useParamsSpy.mockReturnValue({ name: "summarizer" });
-  useWorkspaceSpy.mockReturnValue({ currentWorkspace: { name: "ws" } });
 });
 
 describe("FunctionDetailPage", () => {
@@ -79,7 +62,6 @@ describe("FunctionDetailPage", () => {
     useAgentSpy.mockReturnValue({ data: undefined, isLoading: true });
     render(<FunctionDetailPage />);
     expect(screen.getByText("summarizer")).toBeInTheDocument();
-    expect(screen.queryByTestId("invocations-panel")).not.toBeInTheDocument();
   });
 
   it("shows a 'not found' state when the runtime does not exist", () => {
@@ -95,46 +77,20 @@ describe("FunctionDetailPage", () => {
     });
     render(<FunctionDetailPage />);
     expect(screen.getByText("This AgentRuntime is not a Function")).toBeInTheDocument();
-    expect(screen.queryByTestId("invocations-panel")).not.toBeInTheDocument();
-  });
-
-  it("renders the invocations panel when recording is enabled", () => {
-    useAgentSpy.mockReturnValue({ data: mkFn(), isLoading: false });
-    render(<FunctionDetailPage />);
-    expect(screen.getByTestId("invocations-panel")).toBeInTheDocument();
-    const last = panelSpy.mock.calls.at(-1)?.[0];
-    expect(last.workspace).toBe("ws");
-    expect(last.functionName).toBe("summarizer");
-    // Default window is 24h
-    expect(last.windowMs).toBe(24 * 60 * 60 * 1000);
-  });
-
-  it("renders the opt-in nag when recording is disabled", () => {
-    useAgentSpy.mockReturnValue({
-      data: mkFn({ invocationRecording: { state: "disabled" } }),
-      isLoading: false,
-    });
-    render(<FunctionDetailPage />);
-    expect(
-      screen.getByText(/Invocation recording is disabled/),
-    ).toBeInTheDocument();
-    expect(screen.queryByTestId("invocations-panel")).not.toBeInTheDocument();
-  });
-
-  it("changes the panel windowMs when a different time-window preset is clicked", () => {
-    useAgentSpy.mockReturnValue({ data: mkFn(), isLoading: false });
-    render(<FunctionDetailPage />);
-    fireEvent.click(screen.getByTestId("window-7d"));
-    const last = panelSpy.mock.calls.at(-1)?.[0];
-    expect(last.windowMs).toBe(7 * 24 * 60 * 60 * 1000);
   });
 
   it("renders both schemas in their respective cards", () => {
     useAgentSpy.mockReturnValue({ data: mkFn(), isLoading: false });
     render(<FunctionDetailPage />);
-    // Both cards should display the JSON-stringified schema; assert via
-    // a substring match on a property name the test fixture uses.
     expect(screen.getByTestId("schema-card-input-schema")).toHaveTextContent('"q"');
     expect(screen.getByTestId("schema-card-output-schema")).toHaveTextContent('"a"');
+  });
+
+  it("renders the next-PR placeholder for invocation history", () => {
+    useAgentSpy.mockReturnValue({ data: mkFn(), isLoading: false });
+    render(<FunctionDetailPage />);
+    expect(
+      screen.getByText(/Function invocations are recorded as sessions/),
+    ).toBeInTheDocument();
   });
 });

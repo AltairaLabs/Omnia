@@ -95,14 +95,13 @@ func (f PolicyResolverFunc) ResolveEffectivePolicy(namespace, agentName string) 
 
 // Handler provides HTTP endpoints for session history.
 type Handler struct {
-	service                    *SessionService
-	evalService                *EvalService
-	providerCallsService       *ProviderCallsService
-	functionInvocationsService *FunctionInvocationsService
-	policyResolver             PolicyResolver
-	encryptorResolver          EncryptorResolver
-	log                        logr.Logger
-	maxBodySize                int64
+	service              *SessionService
+	evalService          *EvalService
+	providerCallsService *ProviderCallsService
+	policyResolver       PolicyResolver
+	encryptorResolver    EncryptorResolver
+	log                  logr.Logger
+	maxBodySize          int64
 }
 
 // NewHandler creates a new session API handler.
@@ -255,14 +254,6 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/eval-results/discover", h.handleDiscoverEvals)
 	mux.HandleFunc("GET /api/v1/provider-calls/aggregate", h.handleAggregateProviderCalls)
 	mux.HandleFunc("GET /api/v1/provider-calls/discover", h.handleDiscoverProviderCalls)
-
-	// Function invocation endpoints (Functions Phase 1, #1103 PR 5).
-	// Write path: facade calls POST after a Function call when
-	// spec.invocationRecording.state == "enabled".
-	// Read path: dashboard / audit-export.
-	mux.HandleFunc("POST /api/v1/function-invocations", h.handleCreateFunctionInvocation)
-	mux.HandleFunc("GET /api/v1/function-invocations", h.handleListFunctionInvocations)
-	mux.HandleFunc("GET /api/v1/function-invocations/{id}", h.handleGetFunctionInvocation)
 
 	// Privacy policy endpoint
 	mux.HandleFunc("GET /api/v1/privacy-policy", h.handleGetPrivacyPolicy)

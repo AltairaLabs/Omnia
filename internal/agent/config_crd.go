@@ -77,7 +77,6 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		if ar.Spec.OutputSchema != nil {
 			cfg.FunctionOutputSchemaJSON = ar.Spec.OutputSchema.Raw
 		}
-		cfg.FunctionRecordsInvocations = ar.RecordsInvocations()
 	}
 
 	// Handler mode from env (operator decides this, not CRD)

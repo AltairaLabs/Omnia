@@ -61,14 +61,16 @@ Expected response shape:
 
 ## Inspect
 
-With `spec.invocationRecording.state: enabled` set on the AgentRuntime,
-the facade writes one row per call to the session-api
-`function_invocations` table. Open the dashboard at
-`/functions/echo-function` to see:
+Each invocation is recorded as an ordinary session (tagged `function`),
+so every existing session-related surface lights up:
 
-- A table of recent invocations (timestamp, status, latency, cost, trace id).
-- Latency + cost sparklines for the selected time window.
-- The resolved input + output schemas as rendered JSON.
+- The dashboard's `/functions/echo-function` page shows the resolved
+  input + output schemas.
+- The Sessions page filters by this AgentRuntime's name and shows
+  recent invocations alongside their tool calls, provider calls, and
+  eval results.
+- Retention follows the workspace's `SessionRetentionPolicy` — same
+  rules as agent-mode runtimes.
 
 ## Adapt
 
@@ -93,9 +95,10 @@ To turn this into a real Function:
    for cheap iteration. Production Functions usually want a deterministic
    model and `temperature: 0` — both already set here.
 
-5. **Decide on recording.** Keep `invocationRecording.state: enabled`
-   for audit / debugging; set `disabled` (or omit the block) to keep
-   invocations ephemeral and skip the session-api write entirely.
+5. **Configure retention.** Function invocations are sessions, so the
+   workspace's `SessionRetentionPolicy` governs how long their rows
+   live. Tighten the policy if PII or cost considerations require
+   shorter retention for this Function specifically.
 
 See [Define Functions](https://omnia.altairalabs.ai/how-to/define-functions/)
 for the full guide.

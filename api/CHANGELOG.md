@@ -10,6 +10,42 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Removed (Functions-as-sessions rework, PR 1/3: rip dedicated infrastructure)
+
+**Breaking — affects Unreleased only; never shipped a release.**
+
+Function invocations now record as ordinary `sessions` rows (tagged
+`"function"`) rather than to a parallel `function_invocations` table.
+Same data model as agent-mode sessions, same retention rules, same
+dashboard surfaces — eliminates the orphaned-audit-rows problem where
+tool / provider / eval / runtime records keyed off `session_id` but
+no parent `sessions` row ever existed.
+
+- Dropped Postgres table `function_invocations` (migration 28). The
+  `manage_session_partitions` orchestrator is restored to its
+  pre-migration-26 table list.
+- Dropped session-api endpoints:
+  - `POST /api/v1/function-invocations`
+  - `GET /api/v1/function-invocations[?...]`
+  - `GET /api/v1/function-invocations/{id}`
+- Dropped workspace proxy routes:
+  - `GET /api/workspaces/{name}/function-invocations[?...]`
+  - `GET /api/workspaces/{name}/function-invocations/{id}`
+- Dropped the `spec.invocationRecording` field on AgentRuntime (and
+  its `state` enum). The CRD-level CEL gate forbidding `state: enabled`
+  on agent-mode runtimes is removed alongside it.
+- Dropped `facade.InvocationRecorder` interface + `WithRecorder()`
+  builder + `record()` helper + `sha256HexSum` from the facade.
+- Dropped `httpclient.RecordFunctionInvocation` + `FunctionInvocationRecord`.
+- Dashboard: `function-invocations-service`, `use-function-invocations`,
+  `FunctionInvocationsPanel`, and the `recordInvocations` toggle on
+  the deploy wizard are gone. `/functions/{name}` detail page renders
+  a placeholder until PR 3 wires the session-backed history view.
+
+The next two PRs in this slicing wire runtime-driven session creation
+for function invocations (PR 2) and repoint the dashboard at the
+sessions data source (PR 3).
+
 ### Added (docs + example: Functions Phase 1 closes out, #1103 PR 7)
 
 - New how-to: `docs/src/content/docs/how-to/define-functions.md` —

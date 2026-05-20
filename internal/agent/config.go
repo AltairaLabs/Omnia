@@ -176,11 +176,6 @@ type Config struct {
 	FunctionInputSchemaJSON  []byte
 	FunctionOutputSchemaJSON []byte
 
-	// FunctionRecordsInvocations mirrors
-	// AgentRuntime.spec.invocationRecording.state == "enabled".
-	// Always false when Mode != "function".
-	FunctionRecordsInvocations bool
-
 	// ToolRegistry configuration (optional).
 	ToolRegistryName      string
 	ToolRegistryNamespace string

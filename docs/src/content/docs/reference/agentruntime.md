@@ -68,27 +68,6 @@ spec:
         type: string
 ```
 
-### `invocationRecording`
-
-Opt-in audit persistence for function-mode runtimes. Each call writes
-one row to the `function_invocations` table in session-api. Recording
-is best-effort — a session-api outage logs but does not fail the
-user-facing call. Ignored (and forbidden via CEL) when `mode: agent`.
-
-| Field | Type | Default | Required |
-|-------|------|---------|----------|
-| `invocationRecording.state` | string | `disabled` | No |
-
-`state` accepts `disabled` or `enabled`. The dashboard surfaces
-enabled-recording rows on `/functions/{name}` with latency + cost
-sparklines per time-window.
-
-```yaml
-spec:
-  invocationRecording:
-    state: enabled
-```
-
 ### `promptPackRef`
 
 Reference to the PromptPack containing agent prompts.

@@ -193,17 +193,9 @@ export interface ConsoleConfig {
 
 /** AgentRuntimeMode discriminates between the long-lived conversational
  * runtime (agent) and the one-shot structured-I/O function runtime
- * (function). Functions Phase 1 (#1102 / #1103 PR 1) introduced
- * "function"; existing CRs default to "agent". */
+ * (function). Function invocations are recorded as ordinary sessions
+ * tagged "function". */
 export type AgentRuntimeMode = "agent" | "function";
-
-/** InvocationRecordingState toggles whether function-mode runtimes
- * persist a per-call audit row to session-api. Defaults to "disabled". */
-export type InvocationRecordingState = "disabled" | "enabled";
-
-export interface InvocationRecordingConfig {
-  state?: InvocationRecordingState;
-}
 
 // Spec
 export interface AgentRuntimeSpec {
@@ -224,9 +216,6 @@ export interface AgentRuntimeSpec {
   /** outputSchema is the JSON Schema the function's response is
    * validated against. Required when spec.mode === "function". */
   outputSchema?: Record<string, unknown>;
-  /** invocationRecording opts into per-call audit persistence. Ignored
-   * for mode === "agent". */
-  invocationRecording?: InvocationRecordingConfig;
 }
 
 /** isFunctionMode returns true when the runtime is declared as a
