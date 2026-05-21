@@ -67,6 +67,14 @@ var _ = Describe("Functions mode", Ordered, Label("functions"), func() {
 		By("ensuring CRDs are installed and the controller-manager is deployed")
 		Expect(ensureManagerDeployed()).To(Succeed())
 
+		// session-api + postgres land in omnia-system. The existing
+		// "Omnia CRDs" Describe deploys them in its BeforeAll, but
+		// ginkgo orders our Describe ahead of it — without this
+		// idempotent helper the test pod's `GET /api/v1/sessions` blows
+		// up with a DNS NXDOMAIN because the Service doesn't exist yet.
+		By("ensuring session-api + postgres are deployed in omnia-system")
+		Expect(ensureSessionApiDeployed()).To(Succeed())
+
 		By("creating the test-functions namespace if absent")
 		cmd := exec.Command("kubectl", "create", "ns", functionsNamespace)
 		_, _ = utils.Run(cmd) // tolerate AlreadyExists
