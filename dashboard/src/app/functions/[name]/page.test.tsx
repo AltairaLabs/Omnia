@@ -34,6 +34,17 @@ vi.mock("@/components/layout", () => ({
   ),
 }));
 
+// Stub the sessions panel — its own test file covers behaviour; here
+// we just want to assert that the detail page mounts it and passes
+// the right function name.
+const panelSpy = vi.hoisted(() => vi.fn());
+vi.mock("@/components/functions/function-sessions-panel", () => ({
+  FunctionSessionsPanel: (props: { functionName: string }) => {
+    panelSpy(props);
+    return <div data-testid="sessions-panel" data-fn={props.functionName} />;
+  },
+}));
+
 function mkFn(overrides: Partial<AgentRuntime["spec"]> = {}): AgentRuntime {
   return {
     apiVersion: "omnia.altairalabs.ai/v1alpha1",
@@ -86,11 +97,19 @@ describe("FunctionDetailPage", () => {
     expect(screen.getByTestId("schema-card-output-schema")).toHaveTextContent('"a"');
   });
 
-  it("renders the next-PR placeholder for invocation history", () => {
+  it("mounts the sessions panel with the function name", () => {
+    panelSpy.mockReset();
+    useAgentSpy.mockReturnValue({ data: mkFn(), isLoading: false });
+    render(<FunctionDetailPage />);
+    expect(screen.getByTestId("sessions-panel")).toBeInTheDocument();
+    expect(panelSpy).toHaveBeenCalledWith({ functionName: "summarizer" });
+  });
+
+  it("explains the sessions-backed audit model below the panel", () => {
     useAgentSpy.mockReturnValue({ data: mkFn(), isLoading: false });
     render(<FunctionDetailPage />);
     expect(
-      screen.getByText(/Function invocations are recorded as sessions/),
+      screen.getByText(/recorded as sessions tagged/),
     ).toBeInTheDocument();
   });
 });

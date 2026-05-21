@@ -2,10 +2,10 @@
  * /functions/[name] — Function detail page.
  *
  * Shows the resolved input/output schemas for a function-mode
- * AgentRuntime. The session-backed invocation history panel is
- * intentionally absent in this PR — function invocations now record
- * as ordinary sessions (Functions-as-sessions rework), and the
- * detail-page session list is wired up in the next PR.
+ * AgentRuntime alongside a panel of recent invocations sourced from
+ * the standard sessions data path. Functions record as ordinary
+ * sessions tagged "function"; the panel reuses the existing useSessions
+ * hook + workspace session-api proxy that powers /sessions.
  *
  * Copyright 2026 Altaira Labs.
  * SPDX-License-Identifier: Apache-2.0
@@ -18,6 +18,7 @@ import { Header } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { FunctionSessionsPanel } from "@/components/functions/function-sessions-panel";
 import { useAgent } from "@/hooks/agents";
 import { isFunctionMode } from "@/types/agent-runtime";
 
@@ -88,19 +89,14 @@ export default function FunctionDetailPage() {
           <SchemaCard label="Output schema" schema={agent.spec.outputSchema} />
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Recent invocations</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              Function invocations are recorded as sessions. The session-backed
-              detail view is wired up in the next PR — until then, invocation
-              history for this function is visible from the Sessions page
-              filtered by this AgentRuntime&apos;s name.
-            </p>
-          </CardContent>
-        </Card>
+        <FunctionSessionsPanel functionName={functionName} />
+
+        <p className="text-xs text-muted-foreground">
+          Function invocations are recorded as sessions tagged{" "}
+          <code className="font-mono">function</code>. Click a session id above
+          for the full invocation transcript, tool calls, provider calls, and
+          eval results.
+        </p>
       </div>
     </div>
   );
