@@ -381,9 +381,15 @@ spec:
           print(f"ERROR: listing events failed: {resp.text[:200]}")
           sys.exit(1)
       events_body = resp.json()
-      events = events_body.get("events") or events_body.get("data") or events_body
-      if not isinstance(events, list):
-          events = events.get("events", []) if isinstance(events, dict) else []
+      # The events endpoint returns either a bare array or an envelope
+      # like {"events": [...]} / {"data": [...]} depending on version.
+      # Handle both without assuming a particular shape.
+      if isinstance(events_body, list):
+          events = events_body
+      elif isinstance(events_body, dict):
+          events = events_body.get("events") or events_body.get("data") or []
+      else:
+          events = []
       print(f"  found {len(events)} events")
       matched = [e for e in events if e.get("eventType") == "function.input_invalid"]
       if not matched:
