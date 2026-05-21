@@ -156,7 +156,7 @@ spec:
 `
 		applyCmd := exec.Command("kubectl", "apply", "-f", "-")
 		applyCmd.Stdin = strings.NewReader(promptPackManifest)
-		_, err := utils.Run(applyCmd)
+		_, err = utils.Run(applyCmd)
 		Expect(err).NotTo(HaveOccurred(), "failed to apply PromptPack")
 
 		By("creating a mock Provider for the function pod")
