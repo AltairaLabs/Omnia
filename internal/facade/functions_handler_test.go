@@ -23,12 +23,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/altairalabs/omnia/internal/session"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
 
@@ -340,4 +342,205 @@ func TestMapFunctionRegistry_RegisterIgnoresInvalidSpecs(t *testing.T) {
 	if _, ok := reg.GetFunction(testFunctionName); !ok {
 		t.Errorf("registry must store valid specs after silent-dropped invalid ones")
 	}
+}
+
+// stubSessionStore captures the calls the facade makes against the
+// session store so tests can assert the session lifecycle. The
+// methods the facade doesn't touch are left to delegate to the
+// embedded Store; that field is nil so any unexpected call panics —
+// which is what we want as a guardrail.
+type stubSessionStore struct {
+	session.Store
+
+	mu        sync.Mutex
+	creates   []session.CreateSessionOptions
+	events    []session.RuntimeEvent
+	statuses  []session.SessionStatusUpdate
+	createErr error
+	updateErr error
+	eventErr  error
+}
+
+func (s *stubSessionStore) CreateSession(_ context.Context, opts session.CreateSessionOptions) (*session.Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.creates = append(s.creates, opts)
+	if s.createErr != nil {
+		return nil, s.createErr
+	}
+	return &session.Session{ID: opts.ID}, nil
+}
+
+func (s *stubSessionStore) UpdateSessionStatus(_ context.Context, _ string, update session.SessionStatusUpdate) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.statuses = append(s.statuses, update)
+	return s.updateErr
+}
+
+func (s *stubSessionStore) RecordRuntimeEvent(_ context.Context, _ string, evt session.RuntimeEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, evt)
+	return s.eventErr
+}
+
+func newHandlerWithSession(
+	t *testing.T,
+	specs map[string]*FunctionSpec,
+	invoker InvocationInvoker,
+) (*FunctionsHandler, *stubSessionStore) {
+	t.Helper()
+	store := &stubSessionStore{}
+	h := newHandler(t, specs, invoker).WithSessionStore(store, FunctionSessionMeta{
+		Namespace:         "ns-test",
+		AgentName:         "summarizer",
+		WorkspaceName:     "ws-test",
+		PromptPackName:    "summarizer-pack",
+		PromptPackVersion: "1.0.0",
+	})
+	return h, store
+}
+
+func TestFunctionsHandler_Session_OpenedAndClosedOnHappyPath(t *testing.T) {
+	inputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+
+	invoker := &stubInvoker{resp: &runtimev1.InvocationResponse{OutputJson: `{}`, DurationMs: 5}}
+	h, store := newHandlerWithSession(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, invoker)
+
+	rec := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(rec, newJSONPost(t, "/functions/"+testFunctionName, `{}`))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	require.Len(t, store.creates, 1, "session must be opened exactly once")
+	opts := store.creates[0]
+	assert.Equal(t, "ns-test", opts.Namespace)
+	assert.Equal(t, "summarizer", opts.AgentName)
+	assert.Equal(t, "ws-test", opts.WorkspaceName)
+	assert.Equal(t, "summarizer-pack", opts.PromptPackName)
+	assert.Equal(t, "1.0.0", opts.PromptPackVersion)
+	assert.Equal(t, []string{FunctionSessionTag}, opts.Tags)
+	assert.NotEmpty(t, opts.ID, "session id must be populated up-front so input_invalid still has a correlation key")
+
+	require.Len(t, store.statuses, 1, "session must be closed exactly once")
+	assert.Equal(t, session.SessionStatusCompleted, store.statuses[0].SetStatus)
+	assert.False(t, store.statuses[0].SetEndedAt.IsZero(), "ended_at must be populated on close")
+	assert.Empty(t, store.events, "no failure events on the happy path")
+}
+
+func TestFunctionsHandler_Session_InputInvalidClosesAsError(t *testing.T) {
+	// input_invalid is the critical case: the runtime never runs, but
+	// the session row must still exist (with status=error + a runtime
+	// event carrying the validator error) so operators can pivot from
+	// the Loki log line back to a row in the dashboard.
+	inputSchema, err := CompileSchema([]byte(`{"type":"object","required":["q"]}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+
+	invoker := &stubInvoker{} // must not be called
+	h, store := newHandlerWithSession(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, invoker)
+
+	rec := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(rec, newJSONPost(t, "/functions/"+testFunctionName, `{}`))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Nil(t, invoker.lastReq, "runtime must NOT be called when input is invalid")
+
+	require.Len(t, store.creates, 1)
+	require.Len(t, store.statuses, 1)
+	assert.Equal(t, session.SessionStatusError, store.statuses[0].SetStatus)
+
+	require.Len(t, store.events, 1, "input_invalid must emit a failure runtime event")
+	assert.Equal(t, "function.input_invalid", store.events[0].EventType)
+	assert.NotEmpty(t, store.events[0].ErrorMessage)
+}
+
+func TestFunctionsHandler_Session_RuntimeErrorClosesAsError(t *testing.T) {
+	inputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+
+	invoker := &stubInvoker{err: errors.New("upstream down")}
+	h, store := newHandlerWithSession(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, invoker)
+
+	rec := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(rec, newJSONPost(t, "/functions/"+testFunctionName, `{}`))
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+
+	require.Len(t, store.statuses, 1)
+	assert.Equal(t, session.SessionStatusError, store.statuses[0].SetStatus)
+	require.Len(t, store.events, 1)
+	assert.Equal(t, "function.runtime_error", store.events[0].EventType)
+	assert.Contains(t, store.events[0].ErrorMessage, "upstream down")
+}
+
+func TestFunctionsHandler_Session_OutputInvalidClosesAsError(t *testing.T) {
+	inputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object","required":["a"]}`))
+	require.NoError(t, err)
+
+	invoker := &stubInvoker{resp: &runtimev1.InvocationResponse{OutputJson: `{"wrong":"shape"}`}}
+	h, store := newHandlerWithSession(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, invoker)
+
+	rec := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(rec, newJSONPost(t, "/functions/"+testFunctionName, `{}`))
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+
+	require.Len(t, store.statuses, 1)
+	assert.Equal(t, session.SessionStatusError, store.statuses[0].SetStatus)
+	require.Len(t, store.events, 1)
+	assert.Equal(t, "function.output_invalid", store.events[0].EventType)
+}
+
+func TestFunctionsHandler_Session_StoreFailuresAreNonFatal(t *testing.T) {
+	// A store outage must not break the user-facing call — the runtime
+	// still produces a result, the audit row just ends up orphaned.
+	inputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+
+	invoker := &stubInvoker{resp: &runtimev1.InvocationResponse{OutputJson: `{}`}}
+	h, store := newHandlerWithSession(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, invoker)
+	store.createErr = errors.New("session-api down")
+	store.updateErr = errors.New("session-api still down")
+
+	rec := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(rec, newJSONPost(t, "/functions/"+testFunctionName, `{}`))
+	assert.Equal(t, http.StatusOK, rec.Code,
+		"store failure must not fail the user-facing request")
+}
+
+func TestFunctionsHandler_Session_TransientWhenStoreUnwired(t *testing.T) {
+	// No WithSessionStore call → transient mode (used by tests today).
+	// The handler must still serve the call cleanly, just without any
+	// audit-row writes.
+	inputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+
+	invoker := &stubInvoker{resp: &runtimev1.InvocationResponse{OutputJson: `{}`}}
+	h := newHandler(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, invoker)
+
+	rec := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(rec, newJSONPost(t, "/functions/"+testFunctionName, `{}`))
+	require.Equal(t, http.StatusOK, rec.Code)
 }

@@ -113,6 +113,186 @@ func ensureManagerDeployed() error {
 	return nil
 }
 
+// ensureSessionApiDeployed deploys Postgres + the e2e session-api into
+// omnia-system. Idempotent: a fast no-op when e2e-session-api is
+// already Ready. Mirrors ensureManagerDeployed so any Ordered container
+// that needs session-api before the "Omnia CRDs" BeforeAll runs (e.g.
+// the function-mode suite, which ginkgo orders ahead of Manager) can
+// guarantee its prerequisite without duplicating the full YAML.
+func ensureSessionApiDeployed() error {
+	if predeployed {
+		return nil
+	}
+	checkCmd := exec.Command("kubectl", "get", "deployment", "e2e-session-api",
+		"-n", namespace, "-o", "jsonpath={.status.readyReplicas}")
+	if out, err := utils.Run(checkCmd); err == nil && out != "" && out != "0" {
+		return nil
+	}
+
+	postgresManifest := `
+apiVersion: v1
+kind: Secret
+metadata:
+  name: omnia-postgres
+  namespace: omnia-system
+type: Opaque
+stringData:
+  connection-string: "postgres://omnia:omnia@e2e-postgres.omnia-system.svc.cluster.local:5432/omnia?sslmode=disable"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: e2e-postgres
+  namespace: omnia-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: e2e-postgres
+  template:
+    metadata:
+      labels:
+        app: e2e-postgres
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: postgres
+        image: pgvector/pgvector:pg17
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_USER
+          value: omnia
+        - name: POSTGRES_PASSWORD
+          value: omnia
+        - name: POSTGRES_DB
+          value: omnia
+        - name: PGDATA
+          value: /tmp/pgdata
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "omnia"]
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: e2e-postgres
+  namespace: omnia-system
+spec:
+  selector:
+    app: e2e-postgres
+  ports:
+  - port: 5432
+    targetPort: 5432
+`
+	pgCmd := exec.Command("kubectl", "apply", "-f", "-")
+	pgCmd.Stdin = strings.NewReader(postgresManifest)
+	if _, err := utils.Run(pgCmd); err != nil {
+		return fmt.Errorf("apply postgres: %w", err)
+	}
+
+	// Wait for Postgres to be ready before deploying session-api so the
+	// readiness probe gate doesn't bounce the api pod.
+	pgReadyDeadline := time.Now().Add(4 * time.Minute)
+	for time.Now().Before(pgReadyDeadline) {
+		c := exec.Command("kubectl", "get", "pods", "-n", namespace,
+			"-l", "app=e2e-postgres",
+			"-o", "jsonpath={.items[0].status.conditions[?(@.type=='Ready')].status}")
+		if out, err := utils.Run(c); err == nil && out == "True" {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+
+	sessionApiManifest := fmt.Sprintf(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: e2e-session-api
+  namespace: omnia-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: e2e-session-api
+  template:
+    metadata:
+      labels:
+        app: e2e-session-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: session-api
+        image: %s
+        ports:
+        - name: api
+          containerPort: 8080
+        - name: health
+          containerPort: 8081
+        env:
+        - name: POSTGRES_CONN
+          valueFrom:
+            secretKeyRef:
+              name: omnia-postgres
+              key: connection-string
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: e2e-session-api
+  namespace: omnia-system
+spec:
+  selector:
+    app: e2e-session-api
+  ports:
+  - port: 8080
+    targetPort: 8080
+`, sessionApiImage)
+	apiCmd := exec.Command("kubectl", "apply", "-f", "-")
+	apiCmd.Stdin = strings.NewReader(sessionApiManifest)
+	if _, err := utils.Run(apiCmd); err != nil {
+		return fmt.Errorf("apply session-api: %w", err)
+	}
+
+	apiReadyDeadline := time.Now().Add(4 * time.Minute)
+	for time.Now().Before(apiReadyDeadline) {
+		c := exec.Command("kubectl", "get", "pods", "-n", namespace,
+			"-l", "app=e2e-session-api",
+			"-o", "jsonpath={.items[0].status.conditions[?(@.type=='Ready')].status}")
+		if out, err := utils.Run(c); err == nil && out == "True" {
+			return nil
+		}
+		time.Sleep(time.Second)
+	}
+	return fmt.Errorf("e2e-session-api did not become Ready within 4 minutes")
+}
+
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
 

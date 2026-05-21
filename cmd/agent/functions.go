@@ -75,6 +75,22 @@ func runFunctionsFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 
 	handler := facade.NewFunctionsHandler(registry, rc, log)
 
+	// Wire session persistence: each invocation creates one `sessions`
+	// row tagged "function". Failure to resolve session-api isn't
+	// fatal — the runtime still serves the call, audit rows just land
+	// without a parent (matches the pre-PR behaviour).
+	if store, err := initSessionStore(log); err != nil {
+		log.Error(err, "failed to init session store; function invocations will not be recorded")
+	} else {
+		handler = handler.WithSessionStore(store, facade.FunctionSessionMeta{
+			Namespace:         cfg.Namespace,
+			AgentName:         cfg.AgentName,
+			WorkspaceName:     cfg.WorkspaceName,
+			PromptPackName:    cfg.PromptPackName,
+			PromptPackVersion: cfg.PromptPackVersion,
+		})
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("POST /functions/{name}", buildFunctionAuthMiddleware(cfg, log)(handler))
 	mux.Handle("/metrics", promhttp.Handler())
