@@ -72,6 +72,10 @@ const (
 	EnvA2AEnabled         = "OMNIA_A2A_ENABLED"
 	EnvA2APort            = "OMNIA_A2A_PORT"
 	EnvA2AClients         = "OMNIA_A2A_CLIENTS"
+
+	// MCP configuration.
+	EnvMCPEnabled = "OMNIA_MCP_ENABLED"
+	EnvMCPPort    = "OMNIA_MCP_PORT"
 )
 
 // Default values.
@@ -87,6 +91,7 @@ const (
 	DefaultA2ATaskTTL          = 1 * time.Hour
 	DefaultA2AConversationTTL  = 30 * time.Minute
 	DefaultA2APort             = 9999
+	DefaultMCPPort             = 9998
 )
 
 // Error format strings.
@@ -225,6 +230,11 @@ type Config struct {
 	A2AEnabled         bool   // true when A2A is an additional endpoint (dual-protocol)
 	A2APort            int    // port for A2A in dual-protocol mode (default 9999)
 	A2AClientsJSON     string // JSON-encoded resolved client list from controller
+
+	// MCP configuration. Function-mode only; the operator's CEL
+	// validation rejects MCPEnabled=true on agent-mode runtimes.
+	MCPEnabled bool
+	MCPPort    int
 
 	// Health check port.
 	HealthPort int
