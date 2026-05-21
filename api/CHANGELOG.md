@@ -10,6 +10,32 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Changed (Functions-as-sessions rework, PR 3/3: dashboard reads sessions data)
+
+The `/functions/{name}` detail page reads recent invocations from the
+standard sessions data path instead of the placeholder shipped in
+PR 1. Function invocations are ordinary sessions tagged `"function"`;
+the new `FunctionSessionsPanel` reuses the existing `useSessions` hook
++ workspace session-api proxy that already powers `/sessions`.
+
+- New `FunctionSessionsPanel` component renders a per-function
+  history table (timestamp, status badge, latency derived from
+  `startedAt`/`endedAt`, estimated cost, truncated session id).
+  Each row links into `/sessions/{id}` so operators can drill from
+  this view into the full session detail (messages, tool calls,
+  provider calls, eval results).
+- `FunctionDetailPage` mounts the panel below the schema cards and
+  drops the PR-1 placeholder.
+- Status badge mapping mirrors `sessions.status`: `active` →
+  "Active" (secondary), `completed` → "Completed" (default),
+  `error` → "Error" (destructive), `expired` → "Expired" (outline).
+
+Tests: 9 new specs for `FunctionSessionsPanel` (loading, error,
+empty, row rendering, status mapping, latency formatting, link
+target, missing endedAt, hook argument forwarding); the detail-page
+test updated to assert the panel is mounted with the correct
+function name.
+
 ### Changed (Functions-as-sessions rework, PR 2/3: function invocations are sessions)
 
 Function-mode pods now open a real `sessions` row at invocation start
