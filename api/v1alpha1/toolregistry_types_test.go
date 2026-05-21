@@ -279,7 +279,7 @@ func TestToolRegistryWithMCPHandler(t *testing.T) {
 				{
 					Name: "mcp-handler",
 					Type: HandlerTypeMCP,
-					MCPConfig: &MCPConfig{
+					MCPConfig: &MCPClientConfig{
 						Transport: MCPTransportSSE,
 						Endpoint:  &endpoint,
 					},
@@ -312,7 +312,7 @@ func TestMCPToolFilter(t *testing.T) {
 	handler := HandlerDefinition{
 		Name: "filtered-mcp",
 		Type: HandlerTypeMCP,
-		MCPConfig: &MCPConfig{
+		MCPConfig: &MCPClientConfig{
 			Transport: MCPTransportSSE,
 			Endpoint:  &endpoint,
 			ToolFilter: &MCPToolFilter{

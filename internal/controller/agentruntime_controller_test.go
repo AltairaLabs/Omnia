@@ -3815,7 +3815,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 						{
 							Name: "mcp-handler",
 							Type: omniav1alpha1.HandlerTypeMCP,
-							MCPConfig: &omniav1alpha1.MCPConfig{
+							MCPConfig: &omniav1alpha1.MCPClientConfig{
 								Transport: omniav1alpha1.MCPTransportSSE,
 								Endpoint:  &endpoint,
 							},
@@ -3855,7 +3855,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 						{
 							Name: "mcp-stdio-handler",
 							Type: omniav1alpha1.HandlerTypeMCP,
-							MCPConfig: &omniav1alpha1.MCPConfig{
+							MCPConfig: &omniav1alpha1.MCPClientConfig{
 								Transport: omniav1alpha1.MCPTransportStdio,
 								Command:   &command,
 								Args:      []string{"--verbose", "--port=8080"},

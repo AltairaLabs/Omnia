@@ -75,8 +75,9 @@ type MCPToolFilter struct {
 	Blocklist []string `json:"blocklist,omitempty"`
 }
 
-// MCPConfig contains MCP-specific handler configuration
-type MCPConfig struct {
+// MCPClientConfig contains MCP-specific handler configuration for connecting
+// to an external MCP server as a tool source.
+type MCPClientConfig struct {
 	// transport specifies the MCP transport type.
 	// +kubebuilder:validation:Required
 	Transport MCPTransport `json:"transport"`
@@ -471,7 +472,7 @@ type HandlerDefinition struct {
 	// mcpConfig contains MCP-specific configuration.
 	// Required when type is "mcp".
 	// +optional
-	MCPConfig *MCPConfig `json:"mcpConfig,omitempty"`
+	MCPConfig *MCPClientConfig `json:"mcpConfig,omitempty"`
 
 	// clientConfig contains client-side tool configuration.
 	// Used when type is "client".

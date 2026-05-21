@@ -5,9 +5,10 @@ import type { ObjectMeta } from "../common";
 
 export interface AgentRuntimeSpec {
   /** a2a configures the A2A (Agent-to-Agent) protocol.
-   * When facade.type is "a2a", this is the primary protocol configuration.
-   * When facade.type is "websocket" or "grpc", set a2a.enabled: true to add
-   * A2A as an additional endpoint on a separate port (default 9999). */
+   * 
+   * Deprecated: set spec.facade.a2a instead. The operator projects
+   * spec.a2a → spec.facade.a2a at reconcile time for back-compat;
+   * this field will be removed in a future release. */
   a2a?: {
     /** agentCard configures the Agent Card served at /.well-known/agent.json. */
     agentCard?: {
@@ -2292,6 +2293,135 @@ export interface AgentRuntimeSpec {
   extraPodAnnotations?: Record<string, string>;
   /** facade configures the client-facing connection interface. */
   facade: {
+    /** a2a configures the A2A protocol surface for this facade.
+     * When type=a2a, this is the primary protocol; when type=websocket
+     * or grpc, a2a.enabled=true adds A2A as a dual-protocol surface on
+     * a separate port. Use this instead of the deprecated top-level
+     * spec.a2a; the operator projects spec.a2a → spec.facade.a2a at
+     * reconcile time for back-compat. */
+    a2a?: {
+      /** agentCard configures the Agent Card served at /.well-known/agent.json. */
+      agentCard?: {
+        /** capabilities describes protocol features the agent supports. */
+        capabilities?: {
+          /** pushNotifications indicates whether the agent supports push notifications. */
+          pushNotifications?: boolean;
+          /** streaming indicates whether the agent supports streaming responses via SSE. */
+          streaming?: boolean;
+        };
+        /** defaultInputModes lists supported input content types (e.g., "text", "audio"). */
+        defaultInputModes?: string[];
+        /** defaultOutputModes lists supported output content types (e.g., "text", "audio"). */
+        defaultOutputModes?: string[];
+        /** description is a human-readable description of the agent. */
+        description?: string;
+        /** name is the agent's display name. */
+        name: string;
+        /** organization is the name of the organization that provides this agent. */
+        organization?: string;
+        /** skills lists the agent's capabilities for discovery. */
+        skills?: {
+          /** description explains what this skill does. */
+          description?: string;
+          /** examples provides example prompts for this skill. */
+          examples?: string[];
+          /** id is the unique identifier for this skill. */
+          id: string;
+          /** name is the human-readable name for this skill. */
+          name: string;
+          /** tags are keywords for categorization and search. */
+          tags?: string[];
+        }[];
+        /** version is the agent's version string. */
+        version?: string;
+      };
+      /** authentication configures request authentication for the A2A endpoint.
+       * 
+       * Deprecated: use spec.externalAuth.sharedToken instead. The
+       * AgentRuntime controller transparently projects this field into
+       * spec.externalAuth.sharedToken at reconcile time when the new field
+       * is unset; setting both is allowed but spec.externalAuth wins.
+       * Removal scheduled for the next major. */
+      authentication?: {
+        /** secretRef references a Secret containing a bearer token.
+         * The secret should contain a key named "token". */
+        secretRef?: {
+          /** Name of the referent.
+           * This field is effectively required, but due to backwards compatibility is
+           * allowed to be empty. Instances of this type with an empty value here are
+           * almost certainly wrong.
+           * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
+          name?: string;
+        };
+      };
+      /** clients configures connections to other A2A agents.
+       * Each client can reference an in-cluster AgentRuntime or an external URL. */
+      clients?: {
+        /** agentRuntimeRef references another AgentRuntime in the cluster.
+         * The controller resolves this to a service URL using the target's status.
+         * Mutually exclusive with url. */
+        agentRuntimeRef?: {
+          /** name is the AgentRuntime resource name. */
+          name: string;
+          /** namespace is the namespace of the target AgentRuntime.
+           * Defaults to the same namespace as the referencing AgentRuntime. */
+          namespace?: string;
+        };
+        /** authentication configures credentials for outgoing calls to this agent. */
+        authentication?: {
+          /** secretRef references a Secret containing a bearer token (key: "token"). */
+          secretRef?: {
+            /** Name of the referent.
+             * This field is effectively required, but due to backwards compatibility is
+             * allowed to be empty. Instances of this type with an empty value here are
+             * almost certainly wrong.
+             * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
+            name?: string;
+          };
+        };
+        /** exposeAsTools registers the remote agent's skills as local tools
+         * via PromptKit's A2A Tool Bridge. */
+        exposeAsTools?: boolean;
+        /** name is a unique identifier for this client within the agent. */
+        name: string;
+        /** url is the direct URL of an external A2A agent endpoint.
+         * Used instead of agentRuntimeRef for agents outside the cluster.
+         * Mutually exclusive with agentRuntimeRef. */
+        url?: string;
+      }[];
+      /** conversationTTL is how long idle conversations are retained before eviction.
+       * Uses Go duration format (e.g., "30m", "1h"). Defaults to "30m". */
+      conversationTTL?: string;
+      /** enabled adds A2A as an additional endpoint alongside the primary facade.
+       * Only meaningful when facade.type is NOT "a2a" (i.e., websocket or grpc).
+       * When facade.type is "a2a", A2A is always the primary protocol regardless of this field. */
+      enabled?: boolean;
+      /** port is the TCP port for the A2A endpoint in dual-protocol mode.
+       * Defaults to 9999. Only used when enabled is true and facade.type is not "a2a". */
+      port?: number;
+      /** taskStore configures the task persistence backend.
+       * Defaults to in-memory. Set type to "redis" for persistence across restarts. */
+      taskStore?: {
+        /** redisSecretRef references a Secret containing a Redis connection URL
+         * in a key named "url". Takes precedence over redisURL. */
+        redisSecretRef?: {
+          /** Name of the referent.
+           * This field is effectively required, but due to backwards compatibility is
+           * allowed to be empty. Instances of this type with an empty value here are
+           * almost certainly wrong.
+           * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
+          name?: string;
+        };
+        /** redisURL is the Redis connection URL when type is "redis".
+         * Format: redis://[:password@]host:port[/db] */
+        redisURL?: string;
+        /** type is the task store backend type. Defaults to "memory". */
+        type?: string;
+      };
+      /** taskTTL is how long completed/failed/canceled tasks are retained before eviction.
+       * Uses Go duration format (e.g., "1h", "30m"). Defaults to "1h". */
+      taskTTL?: string;
+    };
     /** clientToolTimeout is the max time to wait for client tool responses per turn.
      * Defaults to 60s. */
     clientToolTimeout?: string;
@@ -2388,6 +2518,17 @@ export interface AgentRuntimeSpec {
     /** image overrides the default facade container image.
      * Use this to specify a custom facade image or private registry. */
     image?: string;
+    /** mcp configures the MCP (Model Context Protocol) surface for
+     * function-mode pods. Cannot be enabled on agent-mode runtimes
+     * (CEL-validated). When enabled, the pod serves Streamable HTTP
+     * MCP on facade.mcp.port (default 9998) alongside the function
+     * HTTP route on facade.port. */
+    mcp?: {
+      /** enabled turns the MCP server on. Default false. */
+      enabled?: boolean;
+      /** port is the listen port for the MCP server. Default 9998. */
+      port?: number;
+    };
     /** port is the port number for the facade service. */
     port?: number;
     /** type specifies the facade protocol type. */

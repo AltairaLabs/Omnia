@@ -866,7 +866,7 @@ var _ = Describe("ToolRegistry Controller", func() {
 						{
 							Name: "mcp-handler",
 							Type: omniav1alpha1.HandlerTypeMCP,
-							MCPConfig: &omniav1alpha1.MCPConfig{
+							MCPConfig: &omniav1alpha1.MCPClientConfig{
 								Transport: omniav1alpha1.MCPTransportSSE,
 								Endpoint:  &endpoint,
 							},
@@ -1005,7 +1005,7 @@ var _ = Describe("ToolRegistry Controller", func() {
 			handler := &omniav1alpha1.HandlerDefinition{
 				Name: "mcp-sse-no-endpoint",
 				Type: omniav1alpha1.HandlerTypeMCP,
-				MCPConfig: &omniav1alpha1.MCPConfig{
+				MCPConfig: &omniav1alpha1.MCPClientConfig{
 					Transport: omniav1alpha1.MCPTransportSSE,
 				},
 			}
@@ -1018,7 +1018,7 @@ var _ = Describe("ToolRegistry Controller", func() {
 			handler := &omniav1alpha1.HandlerDefinition{
 				Name: "mcp-stdio-no-command",
 				Type: omniav1alpha1.HandlerTypeMCP,
-				MCPConfig: &omniav1alpha1.MCPConfig{
+				MCPConfig: &omniav1alpha1.MCPClientConfig{
 					Transport: omniav1alpha1.MCPTransportStdio,
 				},
 			}
@@ -1091,7 +1091,7 @@ var _ = Describe("ToolRegistry Controller", func() {
 			handler := &omniav1alpha1.HandlerDefinition{
 				Name: "valid-mcp-sse",
 				Type: omniav1alpha1.HandlerTypeMCP,
-				MCPConfig: &omniav1alpha1.MCPConfig{
+				MCPConfig: &omniav1alpha1.MCPClientConfig{
 					Transport: omniav1alpha1.MCPTransportSSE,
 					Endpoint:  &endpoint,
 				},
@@ -1105,7 +1105,7 @@ var _ = Describe("ToolRegistry Controller", func() {
 			handler := &omniav1alpha1.HandlerDefinition{
 				Name: "valid-mcp-stdio",
 				Type: omniav1alpha1.HandlerTypeMCP,
-				MCPConfig: &omniav1alpha1.MCPConfig{
+				MCPConfig: &omniav1alpha1.MCPClientConfig{
 					Transport: omniav1alpha1.MCPTransportStdio,
 					Command:   &command,
 				},
@@ -1177,7 +1177,7 @@ var _ = Describe("ToolRegistry Controller", func() {
 			handler := &omniav1alpha1.HandlerDefinition{
 				Name: "mcp-with-retry",
 				Type: omniav1alpha1.HandlerTypeMCP,
-				MCPConfig: &omniav1alpha1.MCPConfig{
+				MCPConfig: &omniav1alpha1.MCPClientConfig{
 					Transport: omniav1alpha1.MCPTransportStdio,
 					Command:   &command,
 					RetryPolicy: &omniav1alpha1.MCPRetryPolicy{
@@ -1196,7 +1196,7 @@ var _ = Describe("ToolRegistry Controller", func() {
 			handler := &omniav1alpha1.HandlerDefinition{
 				Name: "mcp-bad-retry",
 				Type: omniav1alpha1.HandlerTypeMCP,
-				MCPConfig: &omniav1alpha1.MCPConfig{
+				MCPConfig: &omniav1alpha1.MCPClientConfig{
 					Transport: omniav1alpha1.MCPTransportStdio,
 					Command:   &command,
 					RetryPolicy: &omniav1alpha1.MCPRetryPolicy{
@@ -1281,7 +1281,7 @@ var _ = Describe("ToolRegistry Controller", func() {
 			sseEndpoint := "http://mcp-server/sse"
 			handler := &omniav1alpha1.HandlerDefinition{
 				Type: omniav1alpha1.HandlerTypeMCP,
-				MCPConfig: &omniav1alpha1.MCPConfig{
+				MCPConfig: &omniav1alpha1.MCPClientConfig{
 					Transport: omniav1alpha1.MCPTransportSSE,
 					Endpoint:  &sseEndpoint,
 				},
@@ -1295,7 +1295,7 @@ var _ = Describe("ToolRegistry Controller", func() {
 			command := "/usr/bin/mcp-server"
 			handler := &omniav1alpha1.HandlerDefinition{
 				Type: omniav1alpha1.HandlerTypeMCP,
-				MCPConfig: &omniav1alpha1.MCPConfig{
+				MCPConfig: &omniav1alpha1.MCPClientConfig{
 					Transport: omniav1alpha1.MCPTransportStdio,
 					Command:   &command,
 				},
@@ -1308,7 +1308,7 @@ var _ = Describe("ToolRegistry Controller", func() {
 		It("should fail for MCP without endpoint or command", func() {
 			handler := &omniav1alpha1.HandlerDefinition{
 				Type: omniav1alpha1.HandlerTypeMCP,
-				MCPConfig: &omniav1alpha1.MCPConfig{
+				MCPConfig: &omniav1alpha1.MCPClientConfig{
 					Transport: omniav1alpha1.MCPTransportSSE,
 				},
 			}

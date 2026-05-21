@@ -344,7 +344,7 @@ func TestBuildMCPConfigWithToolFilter(t *testing.T) {
 
 	h := &omniav1alpha1.HandlerDefinition{
 		Type: omniav1alpha1.HandlerTypeMCP,
-		MCPConfig: &omniav1alpha1.MCPConfig{
+		MCPConfig: &omniav1alpha1.MCPClientConfig{
 			Transport: omniav1alpha1.MCPTransportSSE,
 			Endpoint:  &endpoint,
 			ToolFilter: &omniav1alpha1.MCPToolFilter{
@@ -385,7 +385,7 @@ func TestBuildMCPConfigWithoutToolFilter(t *testing.T) {
 
 	h := &omniav1alpha1.HandlerDefinition{
 		Type: omniav1alpha1.HandlerTypeMCP,
-		MCPConfig: &omniav1alpha1.MCPConfig{
+		MCPConfig: &omniav1alpha1.MCPClientConfig{
 			Transport: omniav1alpha1.MCPTransportSSE,
 			Endpoint:  &endpoint,
 		},
@@ -405,7 +405,7 @@ func TestBuildMCPConfigStreamableHTTP(t *testing.T) {
 
 	h := &omniav1alpha1.HandlerDefinition{
 		Type: omniav1alpha1.HandlerTypeMCP,
-		MCPConfig: &omniav1alpha1.MCPConfig{
+		MCPConfig: &omniav1alpha1.MCPClientConfig{
 			Transport: omniav1alpha1.MCPTransportStreamableHTTP,
 			Endpoint:  &endpoint,
 		},
@@ -559,7 +559,7 @@ func TestBuildHandlerEntry(t *testing.T) {
 		h := &omniav1alpha1.HandlerDefinition{
 			Name: "my-mcp",
 			Type: omniav1alpha1.HandlerTypeMCP,
-			MCPConfig: &omniav1alpha1.MCPConfig{
+			MCPConfig: &omniav1alpha1.MCPClientConfig{
 				Transport: omniav1alpha1.MCPTransportSSE,
 				Endpoint:  &endpoint,
 			},
@@ -1106,7 +1106,7 @@ func TestBuildHandlerEntry_MCPWithRetryPolicy(t *testing.T) {
 	h := &omniav1alpha1.HandlerDefinition{
 		Name: "retried-mcp",
 		Type: omniav1alpha1.HandlerTypeMCP,
-		MCPConfig: &omniav1alpha1.MCPConfig{
+		MCPConfig: &omniav1alpha1.MCPClientConfig{
 			Transport: omniav1alpha1.MCPTransportSSE,
 			Endpoint:  &endpoint,
 			RetryPolicy: &omniav1alpha1.MCPRetryPolicy{
