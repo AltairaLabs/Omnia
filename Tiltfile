@@ -958,7 +958,7 @@ spec:
           args:
             - "--bind=0.0.0.0"
             - "--listen=8081"
-            - "--url=postgres://omnia:omnia@omnia-postgres:5432/omnia?sslmode=disable"
+            - "--url=postgres://omnia:omnia@omnia-postgres:5432/omnia_sessions?sslmode=disable"
           ports:
             - containerPort: 8081
               protocol: TCP
