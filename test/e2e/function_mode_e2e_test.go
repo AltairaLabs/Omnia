@@ -79,6 +79,42 @@ var _ = Describe("Functions mode", Ordered, Label("functions"), func() {
 		cmd := exec.Command("kubectl", "create", "ns", functionsNamespace)
 		_, _ = utils.Run(cmd) // tolerate AlreadyExists
 
+		// The facade's initSessionStore() resolves the session-api URL by
+		// looking up a Workspace CR. Without one for our namespace, it
+		// falls back to MemoryStore — at which point function invocations
+		// "succeed" but no row ever lands in Postgres, so the e2e's
+		// assertion (`GET /sessions?namespace=...&agent=...`) returns
+		// zero rows. Create a Workspace pointing at the e2e session-api.
+		workspaceManifest := fmt.Sprintf(`
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Workspace
+metadata:
+  name: e2e-functions-workspace
+spec:
+  displayName: E2E Functions Workspace
+  namespace:
+    name: %[1]s
+  services:
+    - name: default
+      mode: external
+      external:
+        sessionURL: "%[2]s"
+        memoryURL: "%[2]s"
+`, functionsNamespace, sessionApiURL)
+		wsCmd := exec.Command("kubectl", "apply", "-f", "-")
+		wsCmd.Stdin = strings.NewReader(workspaceManifest)
+		_, err := utils.Run(wsCmd)
+		Expect(err).NotTo(HaveOccurred(), "failed to apply Workspace")
+		By("waiting for the Workspace to report Ready")
+		verifyWs := func(g Gomega) {
+			c := exec.Command("kubectl", "get", "workspace", "e2e-functions-workspace",
+				"-o", "jsonpath={.status.services[0].ready}")
+			out, e := utils.Run(c)
+			g.Expect(e).NotTo(HaveOccurred())
+			g.Expect(out).To(Equal("true"))
+		}
+		Eventually(verifyWs, 2*time.Minute, 2*time.Second).Should(Succeed())
+
 		By("creating a minimal PromptPack ConfigMap + CR")
 		promptPackManifest := `
 apiVersion: v1
@@ -243,9 +279,10 @@ spec:
 	AfterAll(func() {
 		// Single-shot cleanup: deleting the namespace removes everything
 		// we created inside it (CR + ConfigMap + Secret + Pod + Service +
-		// Deployment owned by the operator). The other Describes share
-		// test-agents so they enumerate individual resources; this suite
-		// owns its namespace and gets to do the simple thing.
+		// Deployment owned by the operator). The Workspace is
+		// cluster-scoped so it needs a separate delete.
+		_, _ = utils.Run(exec.Command("kubectl", "delete", "workspace",
+			"e2e-functions-workspace", "--ignore-not-found", "--timeout=30s"))
 		_, _ = utils.Run(exec.Command("kubectl", "delete", "ns",
 			functionsNamespace, "--ignore-not-found", "--timeout=60s"))
 	})
