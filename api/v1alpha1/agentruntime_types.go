@@ -114,6 +114,23 @@ type FacadeConfig struct {
 	// Defaults to 60s.
 	// +optional
 	ClientToolTimeout *metav1.Duration `json:"clientToolTimeout,omitempty"`
+
+	// a2a configures the A2A protocol surface for this facade.
+	// When type=a2a, this is the primary protocol; when type=websocket
+	// or grpc, a2a.enabled=true adds A2A as a dual-protocol surface on
+	// a separate port. Use this instead of the deprecated top-level
+	// spec.a2a; the operator projects spec.a2a → spec.facade.a2a at
+	// reconcile time for back-compat.
+	// +optional
+	A2A *A2AConfig `json:"a2a,omitempty"`
+
+	// mcp configures the MCP (Model Context Protocol) surface for
+	// function-mode pods. Cannot be enabled on agent-mode runtimes
+	// (CEL-validated). When enabled, the pod serves Streamable HTTP
+	// MCP on facade.mcp.port (default 9998) alongside the function
+	// HTTP route on facade.port.
+	// +optional
+	MCP *MCPConfig `json:"mcp,omitempty"`
 }
 
 // ToolRegistryRef references a ToolRegistry resource.
@@ -717,6 +734,26 @@ type A2AConfig struct {
 	Clients []A2AClientSpec `json:"clients,omitempty"`
 }
 
+// MCPConfig configures the optional MCP server facade for function-mode
+// AgentRuntimes. Enabling it adds a Streamable HTTP MCP listener on
+// port (default 9998) alongside the existing HTTP function route.
+//
+// Distinct from MCPClientConfig (in toolregistry_types.go), which
+// configures Omnia as an MCP *client* connecting to an external MCP
+// server as a tool source. MCPConfig is the server side; MCPClientConfig
+// is the client side.
+type MCPConfig struct {
+	// enabled turns the MCP server on. Default false.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// port is the listen port for the MCP server. Default 9998.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +optional
+	Port *int32 `json:"port,omitempty"`
+}
+
 // A2ATaskStoreType represents the backend type for A2A task storage.
 // +kubebuilder:validation:Enum=memory;redis
 type A2ATaskStoreType string
@@ -1147,6 +1184,7 @@ type MemoryEmbeddingConfig struct {
 // +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.inputSchema)",message="spec.inputSchema is only valid when spec.mode is 'function'"
 // +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.outputSchema)",message="spec.outputSchema is only valid when spec.mode is 'function'"
 // +kubebuilder:validation:XValidation:rule="self.mode != 'function' || self.facade.type != 'websocket'",message="facade.type 'websocket' is incompatible with mode 'function'; use 'grpc' or omit"
+// +kubebuilder:validation:XValidation:rule="!has(self.facade.mcp) || !self.facade.mcp.enabled || self.mode == 'function'",message="facade.mcp.enabled requires mode=function"
 type AgentRuntimeSpec struct {
 	// mode controls how the AgentRuntime is invoked. "agent" (default) is
 	// the existing conversational runtime; "function" exposes the pack as
@@ -1225,9 +1263,11 @@ type AgentRuntimeSpec struct {
 	Console *ConsoleConfig `json:"console,omitempty"`
 
 	// a2a configures the A2A (Agent-to-Agent) protocol.
-	// When facade.type is "a2a", this is the primary protocol configuration.
-	// When facade.type is "websocket" or "grpc", set a2a.enabled: true to add
-	// A2A as an additional endpoint on a separate port (default 9999).
+	//
+	// Deprecated: set spec.facade.a2a instead. The operator projects
+	// spec.a2a → spec.facade.a2a at reconcile time for back-compat;
+	// this field will be removed in a future release.
+	//
 	// +optional
 	A2A *A2AConfig `json:"a2a,omitempty"`
 

@@ -250,7 +250,7 @@ func TestBuildHandlerConfigMCP(t *testing.T) {
 	handler := &omniav1alpha1.HandlerDefinition{
 		Name: "mcp-handler",
 		Type: omniav1alpha1.HandlerTypeMCP,
-		MCPConfig: &omniav1alpha1.MCPConfig{
+		MCPConfig: &omniav1alpha1.MCPClientConfig{
 			Transport: omniav1alpha1.MCPTransportSSE,
 			Endpoint:  &endpoint,
 			Command:   &command,
