@@ -20,6 +20,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/altairalabs/omnia/internal/facade/auth"
@@ -215,5 +216,56 @@ func TestMiddleware_EmptyChainStrictModeRejects401(t *testing.T) {
 	}
 	if next.called != 0 {
 		t.Error("next must not run in strict mode with empty chain")
+	}
+}
+
+func TestMiddleware_OnRejectCustomizes401(t *testing.T) {
+	// WithMiddlewareOnReject lets the caller replace the default
+	// "unauthorized" response with one that carries protocol-specific
+	// headers (used by MCP to attach WWW-Authenticate).
+	t.Parallel()
+	chain := auth.Chain{&stubMwValidator{err: auth.ErrNoCredential}}
+
+	onReject := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="test"`)
+		http.Error(w, "custom-unauthorized", http.StatusUnauthorized)
+	}
+	mw := auth.Middleware(chain, &observingHandler{}, auth.WithMiddlewareOnReject(onReject))
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, newMwRequest())
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+	if got := rec.Header().Get("WWW-Authenticate"); got != `Bearer realm="test"` {
+		t.Errorf("WWW-Authenticate = %q, want Bearer realm=\"test\"", got)
+	}
+	if !strings.Contains(rec.Body.String(), "custom-unauthorized") {
+		t.Errorf("body = %q, want custom-unauthorized", rec.Body.String())
+	}
+}
+
+func TestMiddleware_OnRejectAlsoFiresOnStrictEmptyChain(t *testing.T) {
+	// The override is wired into reject401 itself, so it must run on
+	// the empty-chain strict path too — not just the validator-chain
+	// path. Otherwise MCP loses WWW-Authenticate when no chain is
+	// configured.
+	t.Parallel()
+	called := false
+	onReject := func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		http.Error(w, "custom", http.StatusUnauthorized)
+	}
+	mw := auth.Middleware(auth.Chain{}, &observingHandler{},
+		auth.WithMiddlewareAllowUnauthenticated(false),
+		auth.WithMiddlewareOnReject(onReject))
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, newMwRequest())
+
+	if !called {
+		t.Error("onReject must run on empty-chain strict-mode rejection")
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
 	}
 }
