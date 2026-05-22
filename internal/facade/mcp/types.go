@@ -29,6 +29,14 @@ import "encoding/json"
 // Reported in the InitializeResult.
 const ProtocolVersion = "2025-03-26"
 
+// JSONRPCVersion is the JSON-RPC version string carried on every envelope.
+const JSONRPCVersion = "2.0"
+
+// ContentTypeText discriminates a ContentPart that carries plain text
+// (as opposed to "image" or "resource" parts the spec also defines but
+// Omnia's function pods don't produce today).
+const ContentTypeText = "text"
+
 // --- JSON-RPC 2.0 envelope ---
 
 // JSONRPCRequest is a JSON-RPC 2.0 request frame. ID is json.RawMessage

@@ -30,6 +30,7 @@ type MiddlewareOption func(*middlewareConfig)
 type middlewareConfig struct {
 	log                  logr.Logger
 	allowUnauthenticated bool
+	onReject             func(http.ResponseWriter, *http.Request)
 }
 
 // WithMiddlewareLogger binds a logr.Logger for rejection telemetry. The
@@ -37,6 +38,14 @@ type middlewareConfig struct {
 // so operators can debug misconfigured validators.
 func WithMiddlewareLogger(log logr.Logger) MiddlewareOption {
 	return func(c *middlewareConfig) { c.log = log }
+}
+
+// WithMiddlewareOnReject overrides the default 401 response. The
+// callback runs instead of the bare "unauthorized" body — used by the
+// MCP facade to attach a WWW-Authenticate header pointing at the
+// protected-resource metadata endpoint, per the MCP 2025-03-26 spec.
+func WithMiddlewareOnReject(fn func(http.ResponseWriter, *http.Request)) MiddlewareOption {
+	return func(c *middlewareConfig) { c.onReject = fn }
 }
 
 // WithMiddlewareAllowUnauthenticated controls the empty-chain fallback.
@@ -80,7 +89,7 @@ func Middleware(chain Chain, next http.Handler, opts ...MiddlewareOption) http.H
 				next.ServeHTTP(w, r)
 				return
 			}
-			reject401(w, r, cfg.log, "empty chain with allowUnauthenticated=false")
+			reject401(w, r, cfg, "empty chain with allowUnauthenticated=false")
 			return
 		}
 		id, err := chain.Run(r.Context(), r)
@@ -88,7 +97,7 @@ func Middleware(chain Chain, next http.Handler, opts ...MiddlewareOption) http.H
 			// ErrNoCredential / ErrInvalidCredential / ErrExpired /
 			// anything else → reject. PR 3 flipped the ErrNoCredential
 			// branch from "pass through" to 401 to close pen-test C-3.
-			reject401(w, r, cfg.log, err.Error())
+			reject401(w, r, cfg, err.Error())
 			return
 		}
 		// Admit: attach identity so downstream handlers (and
@@ -98,10 +107,14 @@ func Middleware(chain Chain, next http.Handler, opts ...MiddlewareOption) http.H
 	})
 }
 
-func reject401(w http.ResponseWriter, r *http.Request, log logr.Logger, reason string) {
-	log.V(1).Info("auth middleware rejected request",
+func reject401(w http.ResponseWriter, r *http.Request, cfg *middlewareConfig, reason string) {
+	cfg.log.V(1).Info("auth middleware rejected request",
 		"reason", reason,
 		"path", r.URL.Path,
 		"method", r.Method)
+	if cfg.onReject != nil {
+		cfg.onReject(w, r)
+		return
+	}
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
 }
