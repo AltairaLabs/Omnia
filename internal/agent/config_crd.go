@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -41,6 +42,12 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	if err != nil {
 		return nil, fmt.Errorf("resolve workspace name: %w", err)
 	}
+
+	// Normalise legacy spec.a2a → spec.facade.a2a so downstream loaders
+	// read from a single location. The operator's reconciler does the
+	// same projection (Task 8); this side covers pods that boot before
+	// the reconciler has rewritten the CR.
+	v1alpha1.ProjectLegacyFacadeA2A(ar)
 
 	cfg := &Config{
 		AgentName:     name,
@@ -103,32 +110,39 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		return nil, err
 	}
 
+	loadMCPConfigFromCRD(cfg, ar)
+
 	return cfg, nil
 }
 
 // loadA2AConfigFromCRD populates A2A-related config fields from the AgentRuntime CRD.
+//
+// Reads from spec.facade.a2a. Callers must call ProjectLegacyFacadeA2A
+// before invoking this so legacy spec.a2a values are normalised into
+// the new location.
 func loadA2AConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) error {
-	if ar.Spec.A2A == nil {
+	a2a := ar.Spec.Facade.A2A
+	if a2a == nil {
 		cfg.A2ATaskTTL = DefaultA2ATaskTTL
 		cfg.A2AConversationTTL = DefaultA2AConversationTTL
 		return nil
 	}
 
-	if err := loadA2ATTLsFromCRD(cfg, ar.Spec.A2A); err != nil {
+	if err := loadA2ATTLsFromCRD(cfg, a2a); err != nil {
 		return err
 	}
 
 	cfg.A2AAuthToken = os.Getenv(EnvA2AAuthToken)
 
 	// Dual-protocol: A2A as additional endpoint alongside websocket/grpc.
-	cfg.A2AEnabled = ar.Spec.A2A.Enabled
-	if ar.Spec.A2A.Port != nil {
-		cfg.A2APort = int(*ar.Spec.A2A.Port)
+	cfg.A2AEnabled = a2a.Enabled
+	if a2a.Port != nil {
+		cfg.A2APort = int(*a2a.Port)
 	} else {
 		cfg.A2APort = DefaultA2APort
 	}
 
-	loadA2ATaskStoreFromCRD(cfg, ar.Spec.A2A)
+	loadA2ATaskStoreFromCRD(cfg, a2a)
 
 	// Resolved A2A clients are injected as JSON by the operator.
 	cfg.A2AClientsJSON = os.Getenv(EnvA2AClients)
@@ -296,6 +310,10 @@ func loadFromEnvFallback(name, namespace string) (*Config, error) {
 		return nil, err
 	}
 
+	if err := loadMCPConfigFromEnv(cfg); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
 
@@ -336,4 +354,33 @@ func loadA2AConfigFromEnv(cfg *Config) error {
 	cfg.A2APort = a2aPort
 
 	return nil
+}
+
+// loadMCPConfigFromEnv populates MCP-related config fields from environment variables.
+func loadMCPConfigFromEnv(cfg *Config) error {
+	cfg.MCPEnabled = os.Getenv(EnvMCPEnabled) == envValueTrue
+	if v := os.Getenv(EnvMCPPort); v != "" {
+		port, err := strconv.Atoi(v)
+		if err != nil || port < 1 || port > 65535 {
+			return fmt.Errorf(errFmtInvalidEnv, EnvMCPPort, fmt.Errorf("invalid port %q", v))
+		}
+		cfg.MCPPort = port
+	} else {
+		cfg.MCPPort = DefaultMCPPort
+	}
+	return nil
+}
+
+// loadMCPConfigFromCRD populates MCP-related config fields from the AgentRuntime CRD.
+func loadMCPConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) {
+	if ar.Spec.Facade.MCP != nil {
+		cfg.MCPEnabled = ar.Spec.Facade.MCP.Enabled
+		if ar.Spec.Facade.MCP.Port != nil {
+			cfg.MCPPort = int(*ar.Spec.Facade.MCP.Port)
+		} else {
+			cfg.MCPPort = DefaultMCPPort
+		}
+	} else {
+		cfg.MCPPort = DefaultMCPPort
+	}
 }

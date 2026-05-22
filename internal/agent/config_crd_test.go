@@ -656,3 +656,133 @@ func TestConfigValidate_A2AFacadeType(t *testing.T) {
 		t.Errorf("expected A2A facade type to be valid, got: %v", err)
 	}
 }
+
+func TestLoadMCPConfigFromEnv_Defaults(t *testing.T) {
+	cfg := &Config{}
+	if err := loadMCPConfigFromEnv(cfg); err != nil {
+		t.Fatalf("loadMCPConfigFromEnv: %v", err)
+	}
+	if cfg.MCPEnabled {
+		t.Errorf("MCPEnabled default: got true want false")
+	}
+	if cfg.MCPPort != DefaultMCPPort {
+		t.Errorf("MCPPort default: got %d want %d", cfg.MCPPort, DefaultMCPPort)
+	}
+}
+
+func TestLoadMCPConfigFromEnv_Enabled(t *testing.T) {
+	t.Setenv(EnvMCPEnabled, "true")
+	t.Setenv(EnvMCPPort, "9000")
+
+	cfg := &Config{}
+	if err := loadMCPConfigFromEnv(cfg); err != nil {
+		t.Fatalf("loadMCPConfigFromEnv: %v", err)
+	}
+	if !cfg.MCPEnabled {
+		t.Error("MCPEnabled: got false want true")
+	}
+	if cfg.MCPPort != 9000 {
+		t.Errorf("MCPPort: got %d want 9000", cfg.MCPPort)
+	}
+}
+
+func TestLoadMCPConfigFromEnv_InvalidPortOutOfRange(t *testing.T) {
+	t.Setenv(EnvMCPPort, "70000")
+
+	cfg := &Config{}
+	if err := loadMCPConfigFromEnv(cfg); err == nil {
+		t.Fatal("expected error for out-of-range port")
+	}
+}
+
+func TestLoadMCPConfigFromEnv_InvalidPortNotANumber(t *testing.T) {
+	t.Setenv(EnvMCPPort, "not-a-port")
+
+	cfg := &Config{}
+	if err := loadMCPConfigFromEnv(cfg); err == nil {
+		t.Fatal("expected error for non-numeric port")
+	}
+}
+
+func TestLoadMCPConfigFromEnv_InvalidPortZero(t *testing.T) {
+	t.Setenv(EnvMCPPort, "0")
+
+	cfg := &Config{}
+	if err := loadMCPConfigFromEnv(cfg); err == nil {
+		t.Fatal("expected error for zero port")
+	}
+}
+
+func TestLoadMCPConfigFromCRD_FromFacade(t *testing.T) {
+	port := int32(9500)
+	ar := newFakeAgentRuntime("fn", "default", v1alpha1.AgentRuntimeSpec{
+		PromptPackRef: v1alpha1.PromptPackRef{Name: "p"},
+		Mode:          "function",
+		Facade: v1alpha1.FacadeConfig{
+			Type: v1alpha1.FacadeTypeGRPC,
+			MCP:  &v1alpha1.MCPConfig{Enabled: true, Port: &port},
+		},
+	})
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
+
+	cfg, err := LoadFromCRD(context.Background(), c, "fn", "default")
+	if err != nil {
+		t.Fatalf("LoadFromCRD: %v", err)
+	}
+	if !cfg.MCPEnabled {
+		t.Error("MCPEnabled: got false want true")
+	}
+	if cfg.MCPPort != 9500 {
+		t.Errorf("MCPPort: got %d want 9500", cfg.MCPPort)
+	}
+}
+
+func TestLoadMCPConfigFromCRD_DefaultPortWhenUnset(t *testing.T) {
+	ar := newFakeAgentRuntime("fn", "default", v1alpha1.AgentRuntimeSpec{
+		PromptPackRef: v1alpha1.PromptPackRef{Name: "p"},
+		Mode:          "function",
+		Facade: v1alpha1.FacadeConfig{
+			Type: v1alpha1.FacadeTypeGRPC,
+			MCP:  &v1alpha1.MCPConfig{Enabled: true},
+		},
+	})
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
+
+	cfg, err := LoadFromCRD(context.Background(), c, "fn", "default")
+	if err != nil {
+		t.Fatalf("LoadFromCRD: %v", err)
+	}
+	if cfg.MCPPort != DefaultMCPPort {
+		t.Errorf("MCPPort default: got %d want %d", cfg.MCPPort, DefaultMCPPort)
+	}
+}
+
+func TestLoadFromEnvFallback_InvalidMCPPort(t *testing.T) {
+	t.Setenv(EnvMCPPort, "99999")
+	_, err := loadFromEnvFallback("agent", "ns")
+	if err == nil {
+		t.Fatal("expected error for invalid MCP port in env fallback")
+	}
+}
+
+func TestLoadMCPConfigFromCRD_NilMCP(t *testing.T) {
+	ar := newFakeAgentRuntime("fn", "default", v1alpha1.AgentRuntimeSpec{
+		PromptPackRef: v1alpha1.PromptPackRef{Name: "p"},
+		Facade: v1alpha1.FacadeConfig{
+			Type: v1alpha1.FacadeTypeWebSocket,
+			// MCP is nil
+		},
+	})
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
+
+	cfg, err := LoadFromCRD(context.Background(), c, "fn", "default")
+	if err != nil {
+		t.Fatalf("LoadFromCRD: %v", err)
+	}
+	if cfg.MCPEnabled {
+		t.Error("MCPEnabled: got true want false")
+	}
+	if cfg.MCPPort != DefaultMCPPort {
+		t.Errorf("MCPPort default: got %d want %d", cfg.MCPPort, DefaultMCPPort)
+	}
+}
