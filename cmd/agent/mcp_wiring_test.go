@@ -27,10 +27,31 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
+	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade/auth"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/policy"
 )
+
+// validSchemaJSON is a minimum JSON Schema accepted by facade.CompileSchema,
+// used as the input/output schema in buildMCPServer tests.
+const validSchemaJSON = `{"type":"object","additionalProperties":false}`
+
+// testNamespace is the namespace used in mcp_wiring_test fixtures.
+const testNamespace = "default"
+
+func newMCPServerTestConfig(enabled bool) *agent.Config {
+	cfg := &agent.Config{
+		AgentName:                "test-fn",
+		Namespace:                testNamespace,
+		PromptPackName:           "p",
+		MCPEnabled:               enabled,
+		MCPPort:                  9998,
+		FunctionInputSchemaJSON:  []byte(validSchemaJSON),
+		FunctionOutputSchemaJSON: []byte(validSchemaJSON),
+	}
+	return cfg
+}
 
 const testMCPResourceMetadataURL = "https://example.com/.well-known/oauth-protected-resource"
 
@@ -144,5 +165,58 @@ func TestBuildMCPHandler_WiresTracingProvider(t *testing.T) {
 	spans := exporter.GetSpans()
 	if len(spans) == 0 {
 		t.Error("no spans recorded — otelhttp middleware is not wired")
+	}
+}
+
+func TestBuildMCPServer_ReturnsNilWhenDisabled(t *testing.T) {
+	// When cfg.MCPEnabled is false, buildMCPServer must return nil so
+	// startFunctionsAndServe doesn't spin up an unwanted listener.
+	cfg := newMCPServerTestConfig(false)
+	srv := buildMCPServer(cfg, nil, nil, nil, logr.Discard())
+	if srv != nil {
+		t.Errorf("buildMCPServer(disabled) = %+v, want nil", srv)
+	}
+}
+
+func TestBuildMCPServer_ReturnsServerWhenEnabled(t *testing.T) {
+	// When MCP is enabled and the function schemas compile cleanly,
+	// buildMCPServer returns an *http.Server listening on cfg.MCPPort
+	// with a non-nil handler. We don't ListenAndServe — just verify
+	// the construction shape.
+	cfg := newMCPServerTestConfig(true)
+	srv := buildMCPServer(cfg, nil, nil, nil, logr.Discard())
+	if srv == nil {
+		t.Fatal("buildMCPServer(enabled) returned nil")
+	}
+	if srv.Addr != ":9998" {
+		t.Errorf("Addr = %q, want :9998", srv.Addr)
+	}
+	if srv.Handler == nil {
+		t.Error("Handler must be non-nil")
+	}
+}
+
+func TestBuildMCPServer_ReturnsNilOnBadInputSchema(t *testing.T) {
+	// A function with an invalid input schema is operator misconfig.
+	// buildMCPServer logs the error and returns nil rather than
+	// crashing — the HTTP route is still served.
+	cfg := newMCPServerTestConfig(true)
+	cfg.FunctionInputSchemaJSON = []byte("not json at all {")
+	srv := buildMCPServer(cfg, nil, nil, nil, logr.Discard())
+	if srv != nil {
+		t.Errorf("buildMCPServer(bad-input-schema) = %+v, want nil", srv)
+	}
+}
+
+func TestBuildMCPServer_CustomPort(t *testing.T) {
+	// Operators can override the listener port via spec.facade.mcp.port.
+	cfg := newMCPServerTestConfig(true)
+	cfg.MCPPort = 9500
+	srv := buildMCPServer(cfg, nil, nil, nil, logr.Discard())
+	if srv == nil {
+		t.Fatal("buildMCPServer(custom-port) returned nil")
+	}
+	if srv.Addr != ":9500" {
+		t.Errorf("Addr = %q, want :9500", srv.Addr)
 	}
 }

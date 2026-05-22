@@ -216,52 +216,66 @@ func newFunctionsHealthServer(cfg *agent.Config, rc *facade.RuntimeClient) *http
 // mcpServer may be nil when MCP is disabled.
 func startFunctionsAndServe(log logr.Logger, facadeServer, healthServer, mcpServer *http.Server) {
 	errChan := make(chan error, 3)
-
-	go func() {
-		log.Info("starting functions facade", "addr", facadeServer.Addr)
-		if err := facadeServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errChan <- fmt.Errorf("functions facade error: %w", err)
-		}
-	}()
-
-	go func() {
-		log.Info("starting health server", "addr", healthServer.Addr)
-		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errChan <- fmt.Errorf("health server error: %w", err)
-		}
-	}()
-
-	if mcpServer != nil {
-		go func() {
-			log.Info("starting MCP server", "addr", mcpServer.Addr)
-			if err := mcpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				errChan <- fmt.Errorf("mcp server error: %w", err)
-			}
-		}()
+	servers := nonNilServers(map[string]*http.Server{
+		"functions facade": facadeServer,
+		"health server":    healthServer,
+		"mcp server":       mcpServer,
+	})
+	for name, srv := range servers {
+		startServerGoroutine(name, srv, errChan, log)
 	}
 
+	waitForShutdownSignal(log, errChan)
+	shutdownServers(log, servers)
+	log.Info("shutdown complete")
+}
+
+// nonNilServers filters out nil entries so callers can pass optional
+// servers (e.g. mcpServer when MCP is disabled) without per-key nil
+// checks at the start/stop sites.
+func nonNilServers(in map[string]*http.Server) map[string]*http.Server {
+	out := make(map[string]*http.Server, len(in))
+	for name, srv := range in {
+		if srv != nil {
+			out[name] = srv
+		}
+	}
+	return out
+}
+
+// startServerGoroutine spawns the listen loop for one *http.Server and
+// forwards any non-graceful shutdown error onto errChan.
+func startServerGoroutine(name string, srv *http.Server, errChan chan<- error, log logr.Logger) {
+	go func() {
+		log.Info("starting "+name, "addr", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errChan <- fmt.Errorf("%s error: %w", name, err)
+		}
+	}()
+}
+
+// waitForShutdownSignal blocks until SIGINT/SIGTERM is received or any
+// server's goroutine reports a fatal error.
+func waitForShutdownSignal(log logr.Logger, errChan <-chan error) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
 	select {
 	case sig := <-sigChan:
 		log.Info("received shutdown signal", "signal", sig)
 	case err := <-errChan:
 		log.Error(err, "server error")
 	}
+}
 
+// shutdownServers calls Shutdown on each server with a shared deadline.
+// Errors are logged but not returned — there's nothing useful to do
+// with them past this point in the lifecycle.
+func shutdownServers(log logr.Logger, servers map[string]*http.Server) {
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	if err := facadeServer.Shutdown(ctx); err != nil {
-		log.Error(err, "error shutting down functions facade")
-	}
-	if err := healthServer.Shutdown(ctx); err != nil {
-		log.Error(err, "error shutting down health server")
-	}
-	if mcpServer != nil {
-		if err := mcpServer.Shutdown(ctx); err != nil {
-			log.Error(err, "error shutting down MCP server")
+	for name, srv := range servers {
+		if err := srv.Shutdown(ctx); err != nil {
+			log.Error(err, "error shutting down "+name)
 		}
 	}
-	log.Info("shutdown complete")
 }
