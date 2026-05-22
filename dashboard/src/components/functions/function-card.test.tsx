@@ -87,4 +87,32 @@ describe("FunctionCard", () => {
     const link = screen.getByRole("link");
     expect(link).toHaveAttribute("href", "/functions/summarizer?namespace=default");
   });
+
+  it("renders the MCP badge when spec.facade.mcp.enabled is true", () => {
+    const fn = mkFn({
+      spec: {
+        ...mkFn().spec,
+        facade: { type: "grpc" as never, mcp: { enabled: true } },
+      },
+    });
+    render(<FunctionCard fn={fn} />);
+    expect(screen.getByTestId("mcp-badge")).toBeInTheDocument();
+    expect(screen.getByText("MCP")).toBeInTheDocument();
+  });
+
+  it("hides the MCP badge when MCP is not enabled", () => {
+    render(<FunctionCard fn={mkFn()} />);
+    expect(screen.queryByTestId("mcp-badge")).not.toBeInTheDocument();
+  });
+
+  it("hides the MCP badge when MCP block is present but disabled", () => {
+    const fn = mkFn({
+      spec: {
+        ...mkFn().spec,
+        facade: { type: "grpc" as never, mcp: { enabled: false } },
+      },
+    });
+    render(<FunctionCard fn={fn} />);
+    expect(screen.queryByTestId("mcp-badge")).not.toBeInTheDocument();
+  });
 });

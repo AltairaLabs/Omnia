@@ -17,10 +17,16 @@ export interface PromptPackRef {
   version?: string;
 }
 
+export interface MCPConfig {
+  enabled?: boolean;
+  port?: number;
+}
+
 export interface FacadeConfig {
   type: FacadeType;
   port?: number;
   handler?: HandlerMode;
+  mcp?: MCPConfig;
 }
 
 export interface ToolRegistryRef {
