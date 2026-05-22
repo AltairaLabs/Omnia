@@ -62,6 +62,11 @@ const (
 	DefaultFacadePort = 8080
 	// DefaultA2APort is the default port for the A2A endpoint in dual-protocol mode.
 	DefaultA2APort = 9999
+	// DefaultMCPPort is the default port for the MCP Streamable HTTP server
+	// on function-mode pods (alongside the HTTP POST /functions/{name} route).
+	DefaultMCPPort = 9998
+	// portNameMCP is the container/service port name for the MCP endpoint.
+	portNameMCP = "mcp"
 	// DefaultFacadeHealthPort is the health port for the facade container.
 	DefaultFacadeHealthPort = 8081
 	// DefaultRuntimeGRPCPort is the gRPC port for the runtime container.

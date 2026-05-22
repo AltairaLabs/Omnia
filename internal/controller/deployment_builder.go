@@ -304,6 +304,9 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 			facadeContainer.Env = append(facadeContainer.Env, r.buildA2ADualProtocolEnvVars(agentRuntime)...)
 		}
 
+		// MCP: add port + env when enabled (function-mode only — CEL enforces).
+		applyMCPFacadeOptions(&facadeContainer, agentRuntime)
+
 		runtimeContainer := r.buildRuntimeContainer(agentRuntime, promptPack, toolRegistry)
 		containers = []corev1.Container{facadeContainer, runtimeContainer}
 	}
@@ -1072,6 +1075,56 @@ func isDualProtocol(ar *omniav1alpha1.AgentRuntime) bool {
 	return ar.Spec.Facade.Type != omniav1alpha1.FacadeTypeA2A &&
 		ar.Spec.A2A != nil &&
 		ar.Spec.A2A.Enabled
+}
+
+// isMCPEnabled returns true when the AgentRuntime has MCP enabled on the
+// facade. CEL validation in the CRD enforces that mcp.enabled requires
+// mode=function, so here we trust the spec without re-checking mode.
+func isMCPEnabled(ar *omniav1alpha1.AgentRuntime) bool {
+	return ar.Spec.Facade.MCP != nil && ar.Spec.Facade.MCP.Enabled
+}
+
+// mcpPort returns the configured MCP port, defaulting to DefaultMCPPort
+// when unset. Caller has already verified isMCPEnabled.
+func mcpPort(ar *omniav1alpha1.AgentRuntime) int32 {
+	if ar.Spec.Facade.MCP != nil && ar.Spec.Facade.MCP.Port != nil {
+		return *ar.Spec.Facade.MCP.Port
+	}
+	return DefaultMCPPort
+}
+
+// applyMCPFacadeOptions appends the MCP container port + env vars to
+// the facade container when spec.facade.mcp.enabled is true. CEL
+// enforces function-mode; callers don't need to re-check.
+func applyMCPFacadeOptions(facadeContainer *corev1.Container, ar *omniav1alpha1.AgentRuntime) {
+	if !isMCPEnabled(ar) {
+		return
+	}
+	port := mcpPort(ar)
+	facadeContainer.Ports = append(facadeContainer.Ports, corev1.ContainerPort{
+		Name:          portNameMCP,
+		ContainerPort: port,
+		Protocol:      corev1.ProtocolTCP,
+	})
+	facadeContainer.Env = append(facadeContainer.Env,
+		corev1.EnvVar{Name: "OMNIA_MCP_ENABLED", Value: "true"},
+		corev1.EnvVar{Name: "OMNIA_MCP_PORT", Value: fmt.Sprintf("%d", port)},
+	)
+}
+
+// appendMCPServicePort returns ports with an "mcp" entry appended when
+// spec.facade.mcp.enabled is true, otherwise returns the input slice
+// unchanged. Mirrors applyMCPFacadeOptions but for the Service side.
+func appendMCPServicePort(ports []corev1.ServicePort, ar *omniav1alpha1.AgentRuntime) []corev1.ServicePort {
+	if !isMCPEnabled(ar) {
+		return ports
+	}
+	return append(ports, corev1.ServicePort{
+		Name:       portNameMCP,
+		Port:       mcpPort(ar),
+		TargetPort: intstr.FromString(portNameMCP),
+		Protocol:   corev1.ProtocolTCP,
+	})
 }
 
 // buildA2ADualProtocolEnvVars returns extra env vars needed when A2A runs
