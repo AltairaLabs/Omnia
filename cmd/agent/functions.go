@@ -91,26 +91,25 @@ func runFunctionsFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 		})
 	}
 
+	// Build the shared auth chain once; both the HTTP route and (when
+	// enabled) the MCP server's outer middleware use it.
+	chain := buildFunctionAuthChain(cfg, log)
+
 	mux := http.NewServeMux()
-	mux.Handle("POST /functions/{name}", buildFunctionAuthMiddleware(cfg, log)(handler))
+	mux.Handle("POST /functions/{name}", wrapWithAuthChain(chain, handler, log))
 	mux.Handle("/metrics", promhttp.Handler())
 
 	facadeServer := newFunctionsHTTPServer(cfg, mux)
 	healthServer := newFunctionsHealthServer(cfg, rc)
+	mcpServer := buildMCPServer(cfg, rc, chain, tracingProvider, log)
 
-	startFunctionsAndServe(log, facadeServer, healthServer)
+	startFunctionsAndServe(log, facadeServer, healthServer, mcpServer)
 }
 
-// buildFunctionAuthMiddleware returns the auth wrapper applied to the
-// function route. It loads the same mgmt-plane + data-plane chain the
-// WebSocket path uses (loadMgmtPlaneValidator + buildAuthChain) and
-// hands them to auth.Middleware. Loading failures are fatal — silent
-// downgrade to no-auth would mask a real misconfig.
-//
-// The empty-chain fallback honours OMNIA_FACADE_ALLOW_UNAUTHENTICATED so
-// dev / CI clusters without externalAuth keep working; production runs
-// at minimum a mgmt-plane validator so this flag is a no-op for them.
-func buildFunctionAuthMiddleware(cfg *agent.Config, log logr.Logger) func(http.Handler) http.Handler {
+// buildFunctionAuthChain loads the mgmt-plane + data-plane validator
+// chain. Failures are fatal — silent downgrade to no-auth would mask
+// a real misconfig.
+func buildFunctionAuthChain(cfg *agent.Config, log logr.Logger) auth.Chain {
 	mgmtPlane, err := loadMgmtPlaneValidator(log)
 	if err != nil {
 		log.Error(err, "mgmt-plane validator load failed")
@@ -122,12 +121,17 @@ func buildFunctionAuthMiddleware(cfg *agent.Config, log logr.Logger) func(http.H
 		log.Error(err, "auth chain build failed")
 		os.Exit(1)
 	}
-	allowFallback := allowUnauthenticatedFallback(log)
-	return func(next http.Handler) http.Handler {
-		return auth.Middleware(chain, next,
-			auth.WithMiddlewareLogger(log),
-			auth.WithMiddlewareAllowUnauthenticated(allowFallback))
-	}
+	return chain
+}
+
+// wrapWithAuthChain applies the auth middleware to the function HTTP
+// route. The empty-chain fallback honours OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+// so dev/CI clusters without externalAuth keep working; production runs
+// at minimum a mgmt-plane validator so the flag is a no-op for them.
+func wrapWithAuthChain(chain auth.Chain, next http.Handler, log logr.Logger) http.Handler {
+	return auth.Middleware(chain, next,
+		auth.WithMiddlewareLogger(log),
+		auth.WithMiddlewareAllowUnauthenticated(allowUnauthenticatedFallback(log)))
 }
 
 // newFunctionsHTTPServer is the function-mode counterpart to
@@ -207,42 +211,71 @@ func newFunctionsHealthServer(cfg *agent.Config, rc *facade.RuntimeClient) *http
 	}
 }
 
-// startFunctionsAndServe runs the facade + health servers and blocks
-// until SIGINT/SIGTERM or a fatal server error.
-func startFunctionsAndServe(log logr.Logger, facadeServer, healthServer *http.Server) {
-	errChan := make(chan error, 2)
+// startFunctionsAndServe runs the facade + health (+ optional MCP)
+// servers and blocks until SIGINT/SIGTERM or a fatal server error.
+// mcpServer may be nil when MCP is disabled.
+func startFunctionsAndServe(log logr.Logger, facadeServer, healthServer, mcpServer *http.Server) {
+	errChan := make(chan error, 3)
+	servers := nonNilServers(map[string]*http.Server{
+		"functions facade": facadeServer,
+		"health server":    healthServer,
+		"mcp server":       mcpServer,
+	})
+	for name, srv := range servers {
+		startServerGoroutine(name, srv, errChan, log)
+	}
 
+	waitForShutdownSignal(log, errChan)
+	shutdownServers(log, servers)
+	log.Info("shutdown complete")
+}
+
+// nonNilServers filters out nil entries so callers can pass optional
+// servers (e.g. mcpServer when MCP is disabled) without per-key nil
+// checks at the start/stop sites.
+func nonNilServers(in map[string]*http.Server) map[string]*http.Server {
+	out := make(map[string]*http.Server, len(in))
+	for name, srv := range in {
+		if srv != nil {
+			out[name] = srv
+		}
+	}
+	return out
+}
+
+// startServerGoroutine spawns the listen loop for one *http.Server and
+// forwards any non-graceful shutdown error onto errChan.
+func startServerGoroutine(name string, srv *http.Server, errChan chan<- error, log logr.Logger) {
 	go func() {
-		log.Info("starting functions facade", "addr", facadeServer.Addr)
-		if err := facadeServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errChan <- fmt.Errorf("functions facade error: %w", err)
+		log.Info("starting "+name, "addr", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errChan <- fmt.Errorf("%s error: %w", name, err)
 		}
 	}()
+}
 
-	go func() {
-		log.Info("starting health server", "addr", healthServer.Addr)
-		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errChan <- fmt.Errorf("health server error: %w", err)
-		}
-	}()
-
+// waitForShutdownSignal blocks until SIGINT/SIGTERM is received or any
+// server's goroutine reports a fatal error.
+func waitForShutdownSignal(log logr.Logger, errChan <-chan error) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
 	select {
 	case sig := <-sigChan:
 		log.Info("received shutdown signal", "signal", sig)
 	case err := <-errChan:
 		log.Error(err, "server error")
 	}
+}
 
+// shutdownServers calls Shutdown on each server with a shared deadline.
+// Errors are logged but not returned — there's nothing useful to do
+// with them past this point in the lifecycle.
+func shutdownServers(log logr.Logger, servers map[string]*http.Server) {
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	if err := facadeServer.Shutdown(ctx); err != nil {
-		log.Error(err, "error shutting down functions facade")
+	for name, srv := range servers {
+		if err := srv.Shutdown(ctx); err != nil {
+			log.Error(err, "error shutting down "+name)
+		}
 	}
-	if err := healthServer.Shutdown(ctx); err != nil {
-		log.Error(err, "error shutting down health server")
-	}
-	log.Info("shutdown complete")
 }
