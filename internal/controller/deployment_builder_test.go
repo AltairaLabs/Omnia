@@ -359,6 +359,170 @@ func TestIsDualProtocol(t *testing.T) {
 	}
 }
 
+func TestIsMCPEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		ar       *omniav1alpha1.AgentRuntime
+		expected bool
+	}{
+		{
+			name: "function-mode with MCP enabled",
+			ar: func() *omniav1alpha1.AgentRuntime {
+				ar := &omniav1alpha1.AgentRuntime{}
+				ar.Spec.Mode = "function"
+				ar.Spec.Facade.MCP = &omniav1alpha1.MCPConfig{Enabled: true}
+				return ar
+			}(),
+			expected: true,
+		},
+		{
+			name: "MCP block present but disabled",
+			ar: func() *omniav1alpha1.AgentRuntime {
+				ar := &omniav1alpha1.AgentRuntime{}
+				ar.Spec.Facade.MCP = &omniav1alpha1.MCPConfig{Enabled: false}
+				return ar
+			}(),
+			expected: false,
+		},
+		{
+			name:     "no MCP block",
+			ar:       &omniav1alpha1.AgentRuntime{},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isMCPEnabled(tt.ar)
+			if got != tt.expected {
+				t.Errorf("isMCPEnabled() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMCPPort(t *testing.T) {
+	custom := int32(9000)
+	tests := []struct {
+		name     string
+		ar       *omniav1alpha1.AgentRuntime
+		expected int32
+	}{
+		{
+			name: "custom port",
+			ar: func() *omniav1alpha1.AgentRuntime {
+				ar := &omniav1alpha1.AgentRuntime{}
+				ar.Spec.Facade.MCP = &omniav1alpha1.MCPConfig{Enabled: true, Port: &custom}
+				return ar
+			}(),
+			expected: custom,
+		},
+		{
+			name: "default port when MCP enabled without port",
+			ar: func() *omniav1alpha1.AgentRuntime {
+				ar := &omniav1alpha1.AgentRuntime{}
+				ar.Spec.Facade.MCP = &omniav1alpha1.MCPConfig{Enabled: true}
+				return ar
+			}(),
+			expected: DefaultMCPPort,
+		},
+		{
+			name:     "default port when MCP block absent",
+			ar:       &omniav1alpha1.AgentRuntime{},
+			expected: DefaultMCPPort,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mcpPort(tt.ar)
+			if got != tt.expected {
+				t.Errorf("mcpPort() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestApplyMCPFacadeOptions_AppendsPortAndEnv(t *testing.T) {
+	enabled := true
+	port := int32(9500)
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Mode: "function",
+			Facade: omniav1alpha1.FacadeConfig{
+				Type: omniav1alpha1.FacadeTypeGRPC,
+				MCP:  &omniav1alpha1.MCPConfig{Enabled: enabled, Port: &port},
+			},
+		},
+	}
+	facade := &corev1.Container{}
+	applyMCPFacadeOptions(facade, ar)
+
+	if len(facade.Ports) != 1 || facade.Ports[0].Name != portNameMCP || facade.Ports[0].ContainerPort != 9500 {
+		t.Errorf("Ports: %+v want one mcp port :9500", facade.Ports)
+	}
+	envMap := envVarMap(facade.Env)
+	if envMap["OMNIA_MCP_ENABLED"] != "true" {
+		t.Errorf("OMNIA_MCP_ENABLED = %q want true", envMap["OMNIA_MCP_ENABLED"])
+	}
+	if envMap["OMNIA_MCP_PORT"] != "9500" {
+		t.Errorf("OMNIA_MCP_PORT = %q want 9500", envMap["OMNIA_MCP_PORT"])
+	}
+}
+
+func TestApplyMCPFacadeOptions_NoopWhenDisabled(t *testing.T) {
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Facade: omniav1alpha1.FacadeConfig{MCP: &omniav1alpha1.MCPConfig{Enabled: false}},
+		},
+	}
+	facade := &corev1.Container{}
+	applyMCPFacadeOptions(facade, ar)
+
+	if len(facade.Ports) != 0 {
+		t.Errorf("Ports must be empty when MCP disabled; got %+v", facade.Ports)
+	}
+	if len(facade.Env) != 0 {
+		t.Errorf("Env must be empty when MCP disabled; got %+v", facade.Env)
+	}
+}
+
+func TestApplyMCPFacadeOptions_DefaultPortWhenUnset(t *testing.T) {
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Facade: omniav1alpha1.FacadeConfig{MCP: &omniav1alpha1.MCPConfig{Enabled: true}},
+		},
+	}
+	facade := &corev1.Container{}
+	applyMCPFacadeOptions(facade, ar)
+
+	if len(facade.Ports) != 1 || facade.Ports[0].ContainerPort != DefaultMCPPort {
+		t.Errorf("Ports: %+v want default port %d", facade.Ports, DefaultMCPPort)
+	}
+}
+
+func TestAppendMCPServicePort_AppendsWhenEnabled(t *testing.T) {
+	port := int32(9500)
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Facade: omniav1alpha1.FacadeConfig{MCP: &omniav1alpha1.MCPConfig{Enabled: true, Port: &port}},
+		},
+	}
+	got := appendMCPServicePort(nil, ar)
+	if len(got) != 1 || got[0].Name != "mcp" || got[0].Port != 9500 {
+		t.Errorf("appendMCPServicePort: %+v want one mcp port :9500", got)
+	}
+}
+
+func TestAppendMCPServicePort_NoopWhenDisabled(t *testing.T) {
+	existing := []corev1.ServicePort{{Name: "facade", Port: 8080}}
+	ar := &omniav1alpha1.AgentRuntime{}
+	got := appendMCPServicePort(existing, ar)
+	if len(got) != 1 || got[0].Name != "facade" {
+		t.Errorf("appendMCPServicePort: %+v want unchanged single-port slice", got)
+	}
+}
+
 func TestBuildA2ADualProtocolEnvVars(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 

@@ -390,6 +390,13 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// PR 2b wires it.
 	projectLegacyA2AAuth(agentRuntime)
 
+	// Project the deprecated top-level spec.a2a into spec.facade.a2a
+	// so legacy CRs continue to work after the migration. In-memory
+	// only — never persisted. Downstream readers should prefer
+	// spec.facade.a2a going forward; existing reads from spec.a2a
+	// are tolerated until the next major.
+	omniav1alpha1.ProjectLegacyFacadeA2A(agentRuntime)
+
 	// Initialize status if needed
 	if agentRuntime.Status.Phase == "" {
 		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhasePending
@@ -606,6 +613,9 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 				Protocol:   corev1.ProtocolTCP,
 			})
 		}
+
+		// MCP: expose MCP port on function-mode pods when enabled.
+		ports = appendMCPServicePort(ports, agentRuntime)
 
 		service.Spec = corev1.ServiceSpec{
 			Selector: labels,
