@@ -12,6 +12,7 @@
 "use client";
 
 import Link from "next/link";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { AgentRuntime } from "@/types";
 
@@ -36,6 +37,7 @@ export function FunctionCard({ fn }: Readonly<FunctionCardProps>) {
   const namespace = metadata.namespace ?? "default";
   const inputFields = schemaFieldCount(spec.inputSchema);
   const outputFields = schemaFieldCount(spec.outputSchema);
+  const mcpEnabled = Boolean(spec.facade?.mcp?.enabled);
 
   return (
     <Link href={`/functions/${metadata.name}?namespace=${namespace}`}>
@@ -44,7 +46,18 @@ export function FunctionCard({ fn }: Readonly<FunctionCardProps>) {
         data-testid="function-card"
       >
         <CardHeader className="pb-2">
-          <CardTitle className="text-base font-medium">{metadata.name}</CardTitle>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-base font-medium">{metadata.name}</CardTitle>
+            {mcpEnabled && (
+              <Badge
+                variant="outline"
+                title="MCP server enabled — function callable as a typed MCP tool"
+                data-testid="mcp-badge"
+              >
+                MCP
+              </Badge>
+            )}
+          </div>
           <p className="text-xs text-muted-foreground">{namespace}</p>
         </CardHeader>
         <CardContent className="text-sm">

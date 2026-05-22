@@ -47,7 +47,12 @@ export interface GRPCConfig {
   tlsInsecureSkipVerify?: boolean;
 }
 
-export interface MCPConfig {
+/**
+ * MCPClientConfig configures Omnia as an MCP *client* connecting to an
+ * external MCP server as a tool source. Distinct from MCPConfig in
+ * agent-runtime.ts which configures Omnia's MCP server facade.
+ */
+export interface MCPClientConfig {
   transport: MCPTransport;
   endpoint?: string;
   command?: string;
@@ -64,7 +69,7 @@ export interface HandlerDefinition {
   httpConfig?: HTTPConfig;
   openAPIConfig?: OpenAPIConfig;
   grpcConfig?: GRPCConfig;
-  mcpConfig?: MCPConfig;
+  mcpConfig?: MCPClientConfig;
   timeout?: string;
   retries?: number;
 }
