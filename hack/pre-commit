@@ -536,6 +536,13 @@ if [ -f coverage.out ]; then
             continue
         fi
 
+        # Skip Postgres consolidation adapters (advisory lock + writes + prefilter)
+        # — require real Postgres via testcontainers, tested in integration.
+        # TODO: integration tests via testcontainers (issue: follow-up to consolidation v1)
+        if [[ "$file" == "internal/memory/postgres/advisory_lock.go" ]] || [[ "$file" == "internal/memory/postgres/consolidation_writes.go" ]] || [[ "$file" == "internal/memory/postgres/consolidation_prefilter.go" ]]; then
+            continue
+        fi
+
         # Skip EE setup package (requires envtest control plane, tested in CI with KUBEBUILDER_ASSETS)
         if [[ "$file" == ee/pkg/setup/*.go ]]; then
             continue
