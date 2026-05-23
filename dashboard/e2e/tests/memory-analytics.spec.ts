@@ -105,9 +105,9 @@ test.describe('/memory-analytics page (empty workspace)', () => {
     ).toBeVisible();
   });
 
-  test('renders the tier legend with all three tier names and descriptions', async ({ page }) => {
-    // Tier descriptions appear in both the TierLegend card AND each TierTriCard
-    // (the tri-card echoes the description under each tier count). Using
+  test('renders the tier legend with all four tier names and descriptions', async ({ page }) => {
+    // Tier descriptions appear in both the TierLegend card AND each TierQuadCard
+    // (the quad-card echoes the description under each tier count). Using
     // .first() on each accepts either match — we only care that the text exists.
     await expect(page.getByText('How memory is organized')).toBeVisible();
     await expect(
@@ -119,12 +119,13 @@ test.describe('/memory-analytics page (empty workspace)', () => {
     await expect(page.getByText(/about a specific user/).first()).toBeVisible();
   });
 
-  test('renders the tier tri-card with zero state when no data', async ({ page }) => {
-    // Each tier name appears in both the TierLegend AND the TierTriCard;
+  test('renders the tier quad-card with zero state when no data', async ({ page }) => {
+    // Each tier name appears in both the TierLegend AND the TierQuadCard;
     // accept either match via .first().
     await expect(page.getByText('Institutional', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Agent', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('User', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('User-for-agent', { exact: true }).first()).toBeVisible();
     // "0.0%" is the share text; one per tier card.
     await expect(page.getByText('0.0%').first()).toBeVisible();
   });

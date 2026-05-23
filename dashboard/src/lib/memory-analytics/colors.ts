@@ -9,12 +9,14 @@ export const TIER_COLORS: Record<Tier, string> = {
   institutional: "hsl(217, 91%, 60%)",
   agent: "hsl(160, 84%, 39%)",
   user: "hsl(280, 75%, 60%)",
+  user_for_agent: "hsl(320, 70%, 55%)",
 };
 
 export const TIER_LABELS: Record<Tier, string> = {
   institutional: "Institutional",
   agent: "Agent",
   user: "User",
+  user_for_agent: "User-for-agent",
 };
 
 export const TIER_DESCRIPTIONS: Record<Tier, string> = {
@@ -23,7 +25,9 @@ export const TIER_DESCRIPTIONS: Record<Tier, string> = {
   agent:
     "Patterns this agent has learned from past conversations across all users.",
   user:
-    "Things this agent remembers about a specific user — preferences, history, context.",
+    "Things this agent remembers about a specific user across all of their agents — preferences, identity, history.",
+  user_for_agent:
+    "Things this agent remembers about a specific user in this agent only — per-agent personalisation.",
 };
 
 export const CATEGORY_COLORS: Record<string, string> = {
