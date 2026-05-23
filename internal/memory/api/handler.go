@@ -91,17 +91,24 @@ const InlineBodyThresholdBytes = 2048
 // produce an invalid string mid-truncation.
 const previewRunes = 240
 
-// deriveTier returns "user" / "agent" / "institutional" based on which scope
-// keys are populated. Mirrors the SQL CASE expression used by Aggregate's
-// groupBy=tier branch in internal/memory/stats.go.
+// deriveTier returns "user_for_agent" / "user" / "agent" / "institutional"
+// based on which scope keys are populated. Mirrors the SQL CASE expression
+// used by Aggregate's groupBy=tier branch in internal/memory/stats.go and
+// the TierUserForAgent / TierUser / TierAgent / TierInstitutional
+// constants in retrieve_multi_tier.go.
 func deriveTier(scope map[string]string) string {
-	if scope[memory.ScopeUserID] != "" {
-		return "user"
+	hasUser := scope[memory.ScopeUserID] != ""
+	hasAgent := scope[memory.ScopeAgentID] != ""
+	switch {
+	case hasUser && hasAgent:
+		return string(memory.TierUserForAgent)
+	case hasUser:
+		return string(memory.TierUser)
+	case hasAgent:
+		return string(memory.TierAgent)
+	default:
+		return string(memory.TierInstitutional)
 	}
-	if scope[memory.ScopeAgentID] != "" {
-		return "agent"
-	}
-	return "institutional"
 }
 
 // wrapMemoriesWithTier maps a slice of *memory.Memory into the tier-tagged DTO.

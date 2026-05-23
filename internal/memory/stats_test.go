@@ -308,27 +308,38 @@ func TestAggregate_EmptyWorkspace_ReturnsEmpty(t *testing.T) {
 }
 
 // TestAggregate_GroupByTier verifies the tier pivot classifies rows by
-// (virtual_user_id, agent_id) into institutional / agent / user and that the
-// existing AggregateConsentJoin still filters non-consenting users.
+// (virtual_user_id, agent_id) into institutional / agent / user /
+// user_for_agent and that the existing AggregateConsentJoin still filters
+// non-consenting users.
 //
 // Baseline from seedAggregateFixtures:
-//   - 3 granted-user rows (user_id + agent_id) → tier=user
+//   - 3 granted-user rows (user_id + agent_id) → tier=user_for_agent
 //   - 2 denied-user rows (excluded by consent filter)
 //   - 1 opted-out user row (excluded by consent filter)
 //   - 1 institutional row (no user, no agent) → tier=institutional
 //
-// We add one extra agent-tier row (agent_id but no user_id) so all three
-// tiers appear in the result.
+// We add one extra agent-only row (agent_id, no user_id) and one extra
+// user-only row (user_id, no agent_id) so all four tiers appear.
 func TestAggregate_GroupByTier(t *testing.T) {
 	store := newStore(t)
 	workspace := seedAggregateFixtures(t, store)
 
-	// Insert one agent-tier row: agent_id set, virtual_user_id NULL.
+	// Agent-tier row: agent_id set, virtual_user_id NULL.
 	_, err := store.Pool().Exec(context.Background(), `
 		INSERT INTO memory_entities
 		    (workspace_id, virtual_user_id, agent_id, name, kind, metadata, consent_category)
 		VALUES ($1, NULL, $2, 'agent-fact', 'fact', '{}'::jsonb, 'memory:context')`,
 		workspace, agentAUUID,
+	)
+	require.NoError(t, err)
+
+	// User-only tier row: virtual_user_id set, agent_id NULL. The user
+	// has analytics:aggregate granted (agg-user-granted from the fixture).
+	_, err = store.Pool().Exec(context.Background(), `
+		INSERT INTO memory_entities
+		    (workspace_id, virtual_user_id, agent_id, name, kind, metadata, consent_category)
+		VALUES ($1, $2, NULL, 'user-fact', 'fact', '{}'::jsonb, 'memory:context')`,
+		workspace, "agg-user-granted",
 	)
 	require.NoError(t, err)
 
@@ -345,15 +356,17 @@ func TestAggregate_GroupByTier(t *testing.T) {
 		got[r.Key] = r.Value
 	}
 	want := map[string]int64{
-		"institutional": 1, // the no-user, no-agent fixture
-		"agent":         1, // the row inserted above
-		"user":          3, // granted user's 3 rows; denied + opted-out excluded
+		string(TierInstitutional): 1, // the no-user, no-agent fixture
+		string(TierAgent):         1, // the agent-only row inserted above
+		string(TierUser):          1, // the user-only row inserted above
+		string(TierUserForAgent):  3, // granted user's 3 (user+agent) rows
 	}
 	require.Equal(t, want, got)
 }
 
 // TestAggregate_GroupByTier_DistinctUsers verifies the distinct_users metric
-// against tier — only the user tier should have a non-zero distinct count.
+// against tier — institutional rows have NULL virtual_user_id so count zero;
+// the user / user_for_agent tiers carry the consenting users.
 func TestAggregate_GroupByTier_DistinctUsers(t *testing.T) {
 	store := newStore(t)
 	workspace := seedAggregateFixtures(t, store)
@@ -370,6 +383,10 @@ func TestAggregate_GroupByTier_DistinctUsers(t *testing.T) {
 	for _, r := range rows {
 		got[r.Key] = r.Value
 	}
-	require.Equal(t, int64(1), got["user"], "one consenting user across the fixture set")
-	require.Equal(t, int64(0), got["institutional"], "institutional rows have NULL virtual_user_id")
+	// All 3 granted-user fixtures have agent_id set, so they land in
+	// user_for_agent. The "user" tier has zero distinct users until an
+	// agent-id-NULL row is added (see TestAggregate_GroupByTier above
+	// for that case).
+	require.Equal(t, int64(1), got[string(TierUserForAgent)], "one consenting user across the fixture set")
+	require.Equal(t, int64(0), got[string(TierInstitutional)], "institutional rows have NULL virtual_user_id")
 }

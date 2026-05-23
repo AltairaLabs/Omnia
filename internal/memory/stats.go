@@ -145,16 +145,20 @@ func groupByFragments(g AggregateGroupBy) (keyExpr, extraWhere, orderClause stri
 			"", "ORDER BY 1 ASC", nil
 	case AggregateGroupByTier:
 		// Classify each row by which scope columns are populated:
-		//   virtual_user_id present  → user
-		//   agent_id present, no user → agent
-		//   neither                  → institutional
+		//   virtual_user_id + agent_id  → user_for_agent  (ws, ag, u)
+		//   virtual_user_id alone        → user           (ws, null, u)
+		//   agent_id alone               → agent          (ws, ag, null)
+		//   neither                      → institutional  (ws, null, null)
+		// Mirrors deriveTier in internal/memory/api/handler.go and the
+		// Tier constants in retrieve_multi_tier.go.
 		// AggregateConsentJoin still filters non-consenting users on the
-		// "user" branch; institutional and agent rows have virtual_user_id
-		// IS NULL and are unaffected.
+		// "user" + "user_for_agent" branches; institutional and agent
+		// rows have virtual_user_id IS NULL and are unaffected.
 		return `CASE
-			WHEN e.virtual_user_id IS NOT NULL THEN 'user'
-			WHEN e.agent_id        IS NOT NULL THEN 'agent'
-			ELSE                                    'institutional'
+			WHEN e.virtual_user_id IS NOT NULL AND e.agent_id IS NOT NULL THEN 'user_for_agent'
+			WHEN e.virtual_user_id IS NOT NULL                            THEN 'user'
+			WHEN e.agent_id        IS NOT NULL                            THEN 'agent'
+			ELSE                                                               'institutional'
 		END`, "", orderByValueDesc, nil
 	default:
 		return "", "", "", fmt.Errorf("memory: invalid groupBy %q", g)

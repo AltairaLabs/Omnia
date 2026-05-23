@@ -34,6 +34,41 @@ type (
 	ListOptions     = pkmemory.ListOptions
 )
 
+// Mutability gates which consolidation actions may modify a memory row.
+// Set by the row's ingestion path and never changed by a consolidation
+// pack. See docs/local-backlog/2026-05-22-memory-consolidation-design.md.
+//
+// Mutability lives in the Postgres schema (memory_observations +
+// memory_entities) and surfaces to the consolidation worker via the
+// consolidation package's BucketEntry. The PromptKit Memory type is
+// unchanged — lineage tracking is Omnia-side only.
+type Mutability string
+
+// Mutability values. The strings match the values written to the
+// `mutability` Postgres column.
+const (
+	// MutabilityMutable — full consolidation action vocabulary applies.
+	// Default for rows from conversation extraction.
+	MutabilityMutable Mutability = "mutable"
+	// MutabilitySummarisableOnly — packs may reference this row via
+	// from_ids in a create_summary action, but may not invalidate,
+	// supersede, or rescope it. Operator-curated rows default here.
+	MutabilitySummarisableOnly Mutability = "summarisable_only"
+	// MutabilityImmutable — packs may neither modify the row nor
+	// reference it in a modifying action. Regulated-ingestion rows
+	// use this; the validator rejects any action whose targets carry
+	// this value.
+	MutabilityImmutable Mutability = "immutable"
+)
+
+// AllowsModification reports whether a consolidation action may target
+// this row as a modifying action (invalidate, supersede, rescope,
+// merge_entities, discard, rescore). Only MutabilityMutable returns
+// true.
+func (m Mutability) AllowsModification() bool {
+	return m == MutabilityMutable
+}
+
 // SaveAction enumerates how the server resolved a Save call. The
 // agent uses this to phrase its reply ("Got it" vs "Updated your
 // name from X to Y") and to decide whether to call memory__update
