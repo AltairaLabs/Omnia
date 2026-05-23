@@ -9,7 +9,7 @@ import {
   TIER_DESCRIPTIONS,
 } from "@/lib/memory-analytics/colors";
 
-interface TierTriCardProps {
+interface TierQuadCardProps {
   rows: AggregateRow[];
   loading?: boolean;
 }
@@ -20,15 +20,12 @@ interface TierStat {
 }
 
 function rowsToStats(rows: AggregateRow[]): Record<string, TierStat> {
-  const counts: Record<string, number> = {
-    institutional: 0,
-    agent: 0,
-    user: 0,
-  };
+  const counts: Record<string, number> = {};
+  for (const tier of TIERS) counts[tier] = 0;
   for (const r of rows) {
     if (isTier(r.key)) counts[r.key] = r.value;
   }
-  const total = counts.institutional + counts.agent + counts.user;
+  const total = TIERS.reduce((acc, t) => acc + counts[t], 0);
   const out: Record<string, TierStat> = {};
   for (const tier of TIERS) {
     const count = counts[tier];
@@ -38,10 +35,10 @@ function rowsToStats(rows: AggregateRow[]): Record<string, TierStat> {
   return out;
 }
 
-export function TierTriCard({ rows, loading }: Readonly<TierTriCardProps>) {
+export function TierQuadCard({ rows, loading }: Readonly<TierQuadCardProps>) {
   if (loading) {
     return (
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
         {TIERS.map((tier) => (
           <Card key={tier}>
             <CardHeader>
@@ -60,7 +57,7 @@ export function TierTriCard({ rows, loading }: Readonly<TierTriCardProps>) {
   const stats = rowsToStats(rows);
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
       {TIERS.map((tier) => {
         const stat = stats[tier];
         return (

@@ -6,7 +6,7 @@ import { useMemoryAggregate } from "@/hooks/use-memory-aggregate";
 import { useConsentStats } from "@/hooks/use-consent-stats";
 import { useAgents } from "@/hooks/use-agents";
 import { TierLegend } from "@/components/memory-analytics/tier-legend";
-import { TierTriCard } from "@/components/memory-analytics/tier-tri-card";
+import { TierQuadCard } from "@/components/memory-analytics/tier-quad-card";
 import { SummaryCards } from "@/components/memory-analytics/summary-cards";
 import { CategoryDonut } from "@/components/memory-analytics/category-donut";
 import {
@@ -123,7 +123,7 @@ export default function MemoryAnalyticsPage() {
           loading={summaryLoading}
         />
 
-        <TierTriCard
+        <TierQuadCard
           rows={tierQuery.data ?? []}
           loading={tierQuery.isLoading}
         />

@@ -3,9 +3,14 @@
  * AggregateOptions shapes from internal/memory/stats.go.
  */
 
-export type Tier = "institutional" | "agent" | "user";
+export type Tier = "institutional" | "agent" | "user" | "user_for_agent";
 
-export const TIERS: readonly Tier[] = ["institutional", "agent", "user"] as const;
+export const TIERS: readonly Tier[] = [
+  "institutional",
+  "agent",
+  "user",
+  "user_for_agent",
+] as const;
 
 export type AggregateGroupBy = "category" | "agent" | "day" | "tier";
 
@@ -32,5 +37,5 @@ export interface ConsentStats {
 }
 
 export function isTier(key: string): key is Tier {
-  return key === "institutional" || key === "agent" || key === "user";
+  return TIERS.includes(key as Tier);
 }

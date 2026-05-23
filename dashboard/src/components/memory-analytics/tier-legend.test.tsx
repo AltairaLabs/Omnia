@@ -3,11 +3,12 @@ import { render, screen } from "@testing-library/react";
 import { TierLegend } from "./tier-legend";
 
 describe("TierLegend", () => {
-  it("renders all three tier names", () => {
+  it("renders all four tier names", () => {
     render(<TierLegend />);
     expect(screen.getByText("Institutional")).toBeInTheDocument();
     expect(screen.getByText("Agent")).toBeInTheDocument();
     expect(screen.getByText("User")).toBeInTheDocument();
+    expect(screen.getByText("User-for-agent")).toBeInTheDocument();
   });
 
   it("renders each tier description", () => {
@@ -18,9 +19,11 @@ describe("TierLegend", () => {
     expect(
       screen.getByText(/Patterns this agent has learned/),
     ).toBeInTheDocument();
+    // Both the user and user_for_agent tier descriptions mention
+    // "specific user" — use getAllByText to accept either match.
     expect(
-      screen.getByText(/about a specific user/),
-    ).toBeInTheDocument();
+      screen.getAllByText(/about a specific user/).length,
+    ).toBeGreaterThanOrEqual(2);
   });
 
   it("includes a header title", () => {
