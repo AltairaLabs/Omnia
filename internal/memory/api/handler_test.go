@@ -276,8 +276,12 @@ func TestHandleListMemories_Success(t *testing.T) {
 }
 
 // TestHandleListMemories_IncludesTier verifies the derived tier field appears
-// on each row. Tier is computed from the scope map: virtual_user_id → "user",
-// agent_id (no user) → "agent", neither → "institutional".
+// on each row. Tier is computed from the scope map:
+//
+//	virtual_user_id + agent_id → "user_for_agent"
+//	virtual_user_id alone       → "user"
+//	agent_id alone              → "agent"
+//	neither                     → "institutional"
 func TestHandleListMemories_IncludesTier(t *testing.T) {
 	store := &mockStore{
 		memories: []*memory.Memory{
@@ -289,6 +293,11 @@ func TestHandleListMemories_IncludesTier(t *testing.T) {
 			}},
 			{ID: "i-1", Scope: map[string]string{
 				memory.ScopeWorkspaceID: "ws",
+			}},
+			{ID: "uf-1", Scope: map[string]string{
+				memory.ScopeWorkspaceID: "ws",
+				memory.ScopeUserID:      "alice",
+				memory.ScopeAgentID:     "support",
 			}},
 		},
 	}
@@ -305,12 +314,37 @@ func TestHandleListMemories_IncludesTier(t *testing.T) {
 		Total    int              `json:"total"`
 	}
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&raw))
-	require.Len(t, raw.Memories, 3)
-	want := map[string]string{"u-1": "user", "a-1": "agent", "i-1": "institutional"}
+	require.Len(t, raw.Memories, 4)
+	want := map[string]string{
+		"u-1":  string(memory.TierUser),
+		"a-1":  string(memory.TierAgent),
+		"i-1":  string(memory.TierInstitutional),
+		"uf-1": string(memory.TierUserForAgent),
+	}
 	for _, m := range raw.Memories {
 		id, _ := m["id"].(string)
 		tier, _ := m["tier"].(string)
 		assert.Equal(t, want[id], tier, "tier for %s", id)
+	}
+}
+
+// TestDeriveTier covers the four scope-tuple shapes directly.
+func TestDeriveTier(t *testing.T) {
+	cases := []struct {
+		scope map[string]string
+		want  memory.Tier
+	}{
+		{map[string]string{}, memory.TierInstitutional},
+		{map[string]string{memory.ScopeAgentID: "a"}, memory.TierAgent},
+		{map[string]string{memory.ScopeUserID: "u"}, memory.TierUser},
+		{map[string]string{memory.ScopeAgentID: "a", memory.ScopeUserID: "u"}, memory.TierUserForAgent},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.want), func(t *testing.T) {
+			if got := deriveTier(tc.scope); got != string(tc.want) {
+				t.Errorf("deriveTier(%v) = %q, want %q", tc.scope, got, tc.want)
+			}
+		})
 	}
 }
 
