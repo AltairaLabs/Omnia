@@ -109,6 +109,130 @@ spec:
                     minimum: 0
                     type: integer
                 type: object
+              consolidation:
+                description: |-
+                  consolidation configures the LLM-driven memory consolidation
+                  worker that replaces NoopSummarizer. See
+                  docs/local-backlog/2026-05-22-memory-consolidation-design.md.
+                properties:
+                  candidateLimits:
+                    description: |-
+                      CandidateLimits caps the per-axis pre-filter output, bounding
+                      LLM cost per pass.
+                    properties:
+                      maxBucketsPerPass:
+                        default: 100
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      maxPerBucket:
+                        default: 50
+                        format: int32
+                        minimum: 1
+                        type: integer
+                    type: object
+                  functionRefs:
+                    description: |-
+                      FunctionRefs maps each pre-filter axis to a function-mode
+                      AgentRuntime that handles that axis. Axes with no functionRef
+                      are skipped (no-op for that axis).
+                    properties:
+                      crossScopeCandidates:
+                        description: |-
+                          MemoryFunctionRef points at a function-mode AgentRuntime hosting a
+                          consolidation pack.
+                        properties:
+                          name:
+                            description: Name of the AgentRuntime.
+                            type: string
+                          namespace:
+                            description: |-
+                              Namespace of the AgentRuntime. Defaults to the workspace's
+                              service namespace when empty.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      entityDuplicateCandidates:
+                        description: |-
+                          MemoryFunctionRef points at a function-mode AgentRuntime hosting a
+                          consolidation pack.
+                        properties:
+                          name:
+                            description: Name of the AgentRuntime.
+                            type: string
+                          namespace:
+                            description: |-
+                              Namespace of the AgentRuntime. Defaults to the workspace's
+                              service namespace when empty.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      staleObservations:
+                        description: |-
+                          MemoryFunctionRef points at a function-mode AgentRuntime hosting a
+                          consolidation pack.
+                        properties:
+                          name:
+                            description: Name of the AgentRuntime.
+                            type: string
+                          namespace:
+                            description: |-
+                              Namespace of the AgentRuntime. Defaults to the workspace's
+                              service namespace when empty.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                    type: object
+                  safetyGates:
+                    description: SafetyGates configures the action validator.
+                    properties:
+                      maxScopeWidening:
+                        default: workspace
+                        description: |-
+                          MaxScopeWidening caps cross-workspace promotion. Only
+                          "workspace" is supported in v1.
+                        type: string
+                      minDistinctUserCount:
+                        additionalProperties:
+                          format: int32
+                          type: integer
+                        description: |-
+                          MinDistinctUserCount is keyed by target tier
+                          ("agentScoped" / "userScoped"). Default agentScoped=5,
+                          userScoped=1. Institutional rescope is rejected outright in v1
+                          (see memory-poisoning-defenses sibling spec).
+                        type: object
+                      requirePIIRedaction:
+                        default: true
+                        description: |-
+                          RequirePIIRedaction re-runs the PII redactor on action content
+                          before persist. Default true.
+                        type: boolean
+                    type: object
+                  schedule:
+                    default: 0 2 * * *
+                    description: |-
+                      Schedule is a cron expression for when the consolidation worker
+                      runs. Standard 5-field cron.
+                    type: string
+                  timeouts:
+                    description: Timeouts configures per-call and per-pass timeouts.
+                    properties:
+                      functionCall:
+                        description: |-
+                          FunctionCall caps a single HTTP call to a function-mode
+                          AgentRuntime. Defaults to 5 minutes.
+                        type: string
+                      passWallClock:
+                        description: |-
+                          PassWallClock caps the entire per-workspace pass across all
+                          configured axes. Defaults to 30 minutes.
+                        type: string
+                    type: object
+                type: object
               dedup:
                 description: |-
                   dedup tunes the write path's structured-key + embedding-

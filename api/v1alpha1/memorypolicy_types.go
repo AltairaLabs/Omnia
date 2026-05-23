@@ -412,6 +412,107 @@ type MemoryEmbeddingDedupConfig struct {
 	CandidateLimit *int32 `json:"candidateLimit,omitempty"`
 }
 
+// MemoryConsolidationConfig configures the LLM-driven memory
+// consolidation worker. See
+// docs/local-backlog/2026-05-22-memory-consolidation-design.md.
+type MemoryConsolidationConfig struct {
+	// Schedule is a cron expression for when the consolidation worker
+	// runs. Standard 5-field cron.
+	// +kubebuilder:default="0 2 * * *"
+	// +optional
+	Schedule string `json:"schedule,omitempty"`
+
+	// FunctionRefs maps each pre-filter axis to a function-mode
+	// AgentRuntime that handles that axis. Axes with no functionRef
+	// are skipped (no-op for that axis).
+	// +optional
+	FunctionRefs MemoryConsolidationFunctionRefs `json:"functionRefs,omitempty"`
+
+	// CandidateLimits caps the per-axis pre-filter output, bounding
+	// LLM cost per pass.
+	// +optional
+	CandidateLimits *MemoryConsolidationCandidateLimits `json:"candidateLimits,omitempty"`
+
+	// SafetyGates configures the action validator.
+	// +optional
+	SafetyGates *MemoryConsolidationSafetyGates `json:"safetyGates,omitempty"`
+
+	// Timeouts configures per-call and per-pass timeouts.
+	// +optional
+	Timeouts *MemoryConsolidationTimeouts `json:"timeouts,omitempty"`
+}
+
+// MemoryConsolidationFunctionRefs maps pre-filter axes to function refs.
+// Each axis is independent — operators wire any subset.
+type MemoryConsolidationFunctionRefs struct {
+	// +optional
+	StaleObservations *MemoryFunctionRef `json:"staleObservations,omitempty"`
+	// +optional
+	CrossScopeCandidates *MemoryFunctionRef `json:"crossScopeCandidates,omitempty"`
+	// +optional
+	EntityDuplicateCandidates *MemoryFunctionRef `json:"entityDuplicateCandidates,omitempty"`
+}
+
+// MemoryFunctionRef points at a function-mode AgentRuntime hosting a
+// consolidation pack.
+type MemoryFunctionRef struct {
+	// Name of the AgentRuntime.
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
+	// Namespace of the AgentRuntime. Defaults to the workspace's
+	// service namespace when empty.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+}
+
+// MemoryConsolidationCandidateLimits bounds pre-filter output to cap
+// LLM token cost per pass.
+type MemoryConsolidationCandidateLimits struct {
+	// +kubebuilder:default=100
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	MaxBucketsPerPass int32 `json:"maxBucketsPerPass,omitempty"`
+	// +kubebuilder:default=50
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	MaxPerBucket int32 `json:"maxPerBucket,omitempty"`
+}
+
+// MemoryConsolidationSafetyGates configures the action validator's
+// per-action checks. See validator.go in internal/memory/consolidation.
+type MemoryConsolidationSafetyGates struct {
+	// MinDistinctUserCount is keyed by target tier
+	// ("agentScoped" / "userScoped"). Default agentScoped=5,
+	// userScoped=1. Institutional rescope is rejected outright in v1
+	// (see memory-poisoning-defenses sibling spec).
+	// +optional
+	MinDistinctUserCount map[string]int32 `json:"minDistinctUserCount,omitempty"`
+
+	// MaxScopeWidening caps cross-workspace promotion. Only
+	// "workspace" is supported in v1.
+	// +kubebuilder:default="workspace"
+	// +optional
+	MaxScopeWidening string `json:"maxScopeWidening,omitempty"`
+
+	// RequirePIIRedaction re-runs the PII redactor on action content
+	// before persist. Default true.
+	// +kubebuilder:default=true
+	// +optional
+	RequirePIIRedaction bool `json:"requirePIIRedaction,omitempty"`
+}
+
+// MemoryConsolidationTimeouts configures per-call and per-pass timeouts.
+type MemoryConsolidationTimeouts struct {
+	// FunctionCall caps a single HTTP call to a function-mode
+	// AgentRuntime. Defaults to 5 minutes.
+	// +optional
+	FunctionCall *metav1.Duration `json:"functionCall,omitempty"`
+	// PassWallClock caps the entire per-workspace pass across all
+	// configured axes. Defaults to 30 minutes.
+	// +optional
+	PassWallClock *metav1.Duration `json:"passWallClock,omitempty"`
+}
+
 // MemoryPolicySpec is the top-level spec. Workspaces opt in to a
 // MemoryPolicy via Workspace.spec.services[].memory.policyRef — many
 // workspaces may reference one policy, and a workspace with no
@@ -459,6 +560,12 @@ type MemoryPolicySpec struct {
 	// +kubebuilder:default=1000
 	// +optional
 	BatchSize *int32 `json:"batchSize,omitempty"`
+
+	// consolidation configures the LLM-driven memory consolidation
+	// worker that replaces NoopSummarizer. See
+	// docs/local-backlog/2026-05-22-memory-consolidation-design.md.
+	// +optional
+	Consolidation *MemoryConsolidationConfig `json:"consolidation,omitempty"`
 }
 
 // MemoryPolicyStatus is the observed state.

@@ -140,3 +140,41 @@ func rawPolicyFloat(p *MemoryPolicy, get func(*MemoryEmbeddingDedupConfig) strin
 	}
 	return get(p.Spec.Dedup.EmbeddingSimilarity)
 }
+
+// ResolvedSafetyGates returns the consolidation safety gates with
+// defaults applied for unset fields. Safe to call when the policy is
+// nil or the Consolidation / SafetyGates blocks are unset.
+//
+// Defaults:
+//   - MinDistinctUserCount[agentScoped] = 5
+//   - MinDistinctUserCount[userScoped]  = 1
+//   - MaxScopeWidening                  = "workspace"
+//   - RequirePIIRedaction               = true
+//
+// Operator-set values win over defaults; absent map keys keep
+// their default. Per spec
+// docs/local-backlog/2026-05-22-memory-consolidation-design.md.
+func (p *MemoryPolicy) ResolvedSafetyGates() MemoryConsolidationSafetyGates {
+	resolved := MemoryConsolidationSafetyGates{
+		MinDistinctUserCount: map[string]int32{
+			"agentScoped": 5,
+			"userScoped":  1,
+		},
+		MaxScopeWidening:    "workspace",
+		RequirePIIRedaction: true,
+	}
+	if p == nil || p.Spec.Consolidation == nil || p.Spec.Consolidation.SafetyGates == nil {
+		return resolved
+	}
+	g := p.Spec.Consolidation.SafetyGates
+	for k, v := range g.MinDistinctUserCount {
+		resolved.MinDistinctUserCount[k] = v
+	}
+	if g.MaxScopeWidening != "" {
+		resolved.MaxScopeWidening = g.MaxScopeWidening
+	}
+	// Boolean fields in optional CRD blocks can't distinguish "unset"
+	// from "explicit false" — operator override wins as-set.
+	resolved.RequirePIIRedaction = g.RequirePIIRedaction
+	return resolved
+}
