@@ -89,37 +89,33 @@ func (v *Validator) validateOne(a Action, ctx ValidationContext) Result {
 // checkShape rejects malformed actions: empty FromIDs on CreateSummary,
 // empty TargetIDs on mutating actions, etc.
 func (v *Validator) checkShape(a Action) string {
+	if shapeValid(a) {
+		return ""
+	}
+	return ReasonShapeInvalid
+}
+
+// shapeValid returns true when the action's required fields are all
+// present. One small predicate per action kind keeps cognitive
+// complexity low (Sonar go:S3776).
+func shapeValid(a Action) bool {
 	switch x := a.(type) {
 	case CreateSummaryAction:
-		if len(x.FromIDs) == 0 || x.Content == "" {
-			return ReasonShapeInvalid
-		}
+		return len(x.FromIDs) > 0 && x.Content != ""
 	case SupersedeAction:
-		if len(x.TargetIDs) == 0 || x.WithID == "" {
-			return ReasonShapeInvalid
-		}
+		return len(x.TargetIDs) > 0 && x.WithID != ""
 	case RescopeAction:
-		if len(x.TargetIDs) == 0 {
-			return ReasonShapeInvalid
-		}
+		return len(x.TargetIDs) > 0
 	case InvalidateAction:
-		if len(x.TargetIDs) == 0 {
-			return ReasonShapeInvalid
-		}
+		return len(x.TargetIDs) > 0
 	case MergeEntitiesAction:
-		if x.CanonicalID == "" || len(x.MergeIDs) == 0 {
-			return ReasonShapeInvalid
-		}
+		return x.CanonicalID != "" && len(x.MergeIDs) > 0
 	case DiscardAction:
-		if len(x.TargetIDs) == 0 {
-			return ReasonShapeInvalid
-		}
+		return len(x.TargetIDs) > 0
 	case RescoreAction:
-		if x.TargetID == "" {
-			return ReasonShapeInvalid
-		}
+		return x.TargetID != ""
 	}
-	return ""
+	return true
 }
 
 // checkMutability rejects actions whose target rows are not 'mutable'.

@@ -946,23 +946,24 @@ func buildRetentionPolicyLoader(legacyInterval, workspace, serviceGroup string, 
 // Worker lifecycle is identical to the existing compaction worker —
 // caller invokes go cw.Run(ctx).
 func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.PostgresMemoryStore, log logr.Logger) *consolidation.Worker {
+	const msgDisabled = "consolidation worker disabled"
 	if f.consolidationInterval == "" {
-		log.V(1).Info("consolidation worker disabled", "reason", "CONSOLIDATION_INTERVAL not set")
+		log.V(1).Info(msgDisabled, "reason", "CONSOLIDATION_INTERVAL not set")
 		return nil
 	}
 	interval, err := time.ParseDuration(f.consolidationInterval)
 	if err != nil || interval <= 0 {
-		log.Error(err, "invalid CONSOLIDATION_INTERVAL, consolidation worker disabled",
+		log.Error(err, "invalid CONSOLIDATION_INTERVAL, "+msgDisabled,
 			"value", f.consolidationInterval)
 		return nil
 	}
 	if f.consolidationFunctionsURL == "" {
-		log.Info("consolidation worker disabled", "reason", "CONSOLIDATION_FUNCTIONS_URL not set")
+		log.Info(msgDisabled, "reason", "CONSOLIDATION_FUNCTIONS_URL not set")
 		return nil
 	}
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
-		log.V(1).Info("consolidation worker disabled",
+		log.V(1).Info(msgDisabled,
 			"reason", "no in-cluster kubeconfig", "error", err.Error())
 		return nil
 	}

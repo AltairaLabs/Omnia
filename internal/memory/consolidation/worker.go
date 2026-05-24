@@ -151,21 +151,23 @@ func (w *Worker) runPolicy(ctx context.Context, p memoryv1.MemoryPolicy) error {
 	refs := p.Spec.Consolidation.FunctionRefs
 	gates := p.ResolvedSafetyGates()
 
+	const msgAxisFailed = "axis failed"
+
 	if refs.StaleObservations != nil {
 		if err := w.runAxis(ctx, AxisStaleObservations, *refs.StaleObservations, p, gates); err != nil {
-			w.opts.Log.Error(err, "axis failed",
+			w.opts.Log.Error(err, msgAxisFailed,
 				"axis", AxisStaleObservations, "workspace", p.Name)
 		}
 	}
 	if refs.CrossScopeCandidates != nil {
 		if err := w.runAxis(ctx, AxisCrossScopeCandidates, *refs.CrossScopeCandidates, p, gates); err != nil {
-			w.opts.Log.Error(err, "axis failed",
+			w.opts.Log.Error(err, msgAxisFailed,
 				"axis", AxisCrossScopeCandidates, "workspace", p.Name)
 		}
 	}
 	if refs.EntityDuplicateCandidates != nil {
 		if err := w.runAxis(ctx, AxisEntityDuplicateCandidates, *refs.EntityDuplicateCandidates, p, gates); err != nil {
-			w.opts.Log.Error(err, "axis failed",
+			w.opts.Log.Error(err, msgAxisFailed,
 				"axis", AxisEntityDuplicateCandidates, "workspace", p.Name)
 		}
 	}

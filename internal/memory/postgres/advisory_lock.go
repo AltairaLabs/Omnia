@@ -27,6 +27,11 @@ func NewAdvisoryLockStore(pool *pgxpool.Pool) *AdvisoryLockStore {
 	return &AdvisoryLockStore{pool: pool}
 }
 
+// noopRelease is the no-op release function returned on TryLock failure
+// or "not acquired" paths. Callers always defer release(), so a no-op
+// satisfies the contract without holding any lock state.
+func noopRelease() {}
+
 // TryLock attempts pg_try_advisory_lock. Returns (true, release, nil)
 // on success. The release function unlocks via the same pool.
 func (s *AdvisoryLockStore) TryLock(ctx context.Context, workspaceID, trigger string) (bool, func(), error) {
@@ -35,10 +40,10 @@ func (s *AdvisoryLockStore) TryLock(ctx context.Context, workspaceID, trigger st
 	if err := s.pool.QueryRow(ctx,
 		`SELECT pg_try_advisory_lock(hashtext($1))`, key,
 	).Scan(&ok); err != nil {
-		return false, func() {}, err
+		return false, noopRelease, err
 	}
 	if !ok {
-		return false, func() {}, nil
+		return false, noopRelease, nil
 	}
 	release := func() {
 		_, _ = s.pool.Exec(context.Background(),
