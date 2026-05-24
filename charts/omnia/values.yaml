@@ -2355,6 +2355,35 @@ redis:
     replicaCount: 3
 
 # ============================================================================
+# Memory Consolidation Reference Packs
+# Helm-bundled system PromptPacks + AgentRuntimes used by the memory-api
+# consolidation worker. See
+# docs/local-backlog/2026-05-22-memory-consolidation-design.md.
+#
+# Disabled by default — operators opt in by setting
+# consolidation.systemPacks.enabled: true AND configuring the memory-api
+# CONSOLIDATION_INTERVAL + CONSOLIDATION_FUNCTIONS_URL env vars.
+# ============================================================================
+consolidation:
+  systemPacks:
+    # -- Install the helm-bundled safe-default consolidation pack.
+    # When true the chart creates:
+    #   - omnia-system-packs Namespace
+    #   - safe-default-summarizer PromptPack + AgentRuntime (function-mode)
+    # Both carry the omnia.altairalabs.ai/pack-class=system label.
+    enabled: false
+
+    safeDefault:
+      # -- Container image for the safe-default-summarizer function-mode
+      # runtime. Reuses the standard runtime image — no special pipeline.
+      image:
+        repository: ghcr.io/altairalabs/omnia/runtime
+        tag: "0.1.0"
+        pullPolicy: IfNotPresent
+      # -- Pod replicas for the safe-default-summarizer AgentRuntime.
+      replicas: 1
+
+# ============================================================================
 # Demo Mode (Separate Chart)
 # Demo agents are now deployed via the omnia-demos chart.
 # See: charts/omnia-demos/
