@@ -1,0 +1,33 @@
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: demo-merge-entities
+  namespace: omnia-functions
+  labels:
+    app.kubernetes.io/component: memory-consolidation
+    omnia.altairalabs.ai/pack-class: system
+  annotations:
+    omnia.altairalabs.ai/pack-role: consolidation-demo-merge
+    omnia.altairalabs.ai/system-pack-version: "0.1.0"
+spec:
+  description: |
+    Demonstrative consolidation pack: entity duplicate merging.
+    Handles the entityDuplicateCandidates axis. Emits merge_entities
+    actions collapsing near-duplicate entities (same kind, similar
+    embedding) into a canonical one.
+  prompts:
+    main: |
+      You are a memory consolidation worker. Input is a JSON array of
+      entity-duplicate candidate pairs, each with canonicalID,
+      canonicalName, dupeID, dupeName, kind, and similarity score.
+
+      For each pair where the names refer to the same real-world
+      entity (consider misspellings, capitalisation, plurals, common
+      synonyms), emit ONE merge_entities action with:
+        canonicalID: <pair.canonicalID>
+        mergeIDs: [<pair.dupeID>]
+
+      If unsure, do NOT emit a merge — false positives lose
+      information.
+
+      Output: JSON array of merge_entities actions only.

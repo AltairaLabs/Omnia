@@ -7,6 +7,8 @@ import { useConsentStats } from "@/hooks/use-consent-stats";
 import { useAgents } from "@/hooks/use-agents";
 import { TierLegend } from "@/components/memory-analytics/tier-legend";
 import { TierQuadCard } from "@/components/memory-analytics/tier-quad-card";
+import { ConsolidationSection } from "@/components/memory-analytics/consolidation-section";
+import { useConsolidationStats } from "@/hooks/use-consolidation-stats";
 import { SummaryCards } from "@/components/memory-analytics/summary-cards";
 import { CategoryDonut } from "@/components/memory-analytics/category-donut";
 import {
@@ -76,6 +78,7 @@ export default function MemoryAnalyticsPage() {
   });
   const consentQuery = useConsentStats();
   const agentsQuery = useAgents();
+  const consolidationQuery = useConsolidationStats({ rangeDays });
 
   const agentNameByUid = useMemo(
     () => agentNameByUidMap(agentsQuery.data ?? []),
@@ -126,6 +129,11 @@ export default function MemoryAnalyticsPage() {
         <TierQuadCard
           rows={tierQuery.data ?? []}
           loading={tierQuery.isLoading}
+        />
+
+        <ConsolidationSection
+          stats={consolidationQuery.data}
+          loading={consolidationQuery.isLoading}
         />
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

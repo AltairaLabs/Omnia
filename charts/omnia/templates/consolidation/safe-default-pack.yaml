@@ -1,0 +1,54 @@
+{{- if .Values.consolidation.systemPacks.enabled }}
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: safe-default-summarizer
+  namespace: omnia-system-packs
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
+    app.kubernetes.io/component: memory-consolidation
+    omnia.altairalabs.ai/pack-class: system
+  annotations:
+    omnia.altairalabs.ai/pack-role: consolidation-safe-default
+    omnia.altairalabs.ai/system-pack-version: "0.1.0"
+spec:
+  description: |
+    Reference safe-default consolidation pack. Handles only the
+    staleObservations axis: emits create_summary + supersede actions
+    for groups of stale observations. Closes the NoopSummarizer gap
+    with real-LLM-generated summaries.
+  prompts:
+    main: |
+      You are a memory consolidation worker. The input is a JSON
+      object with `axis: "staleObservations"` and a `buckets` array.
+      Each bucket holds N old observations sharing entity kind+name.
+
+      For each bucket, emit:
+        1. one create_summary action over the bucket entries
+        2. one supersede action marking those entries replaced
+
+      Output a JSON array of actions matching the action vocabulary
+      in docs/local-backlog/2026-05-22-memory-consolidation-design.md.
+      Do not emit rescope, invalidate, merge_entities, discard, or
+      rescore — those are out of scope for this pack.
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: safe-default-summarizer
+  namespace: omnia-system-packs
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
+    app.kubernetes.io/component: memory-consolidation
+    omnia.altairalabs.ai/pack-class: system
+  annotations:
+    omnia.altairalabs.ai/pack-role: consolidation-safe-default
+    omnia.altairalabs.ai/system-pack-version: "0.1.0"
+spec:
+  mode: function
+  promptPackRef:
+    name: safe-default-summarizer
+  replicas: {{ .Values.consolidation.systemPacks.safeDefault.replicas }}
+  runtime:
+    image: {{ printf "%s:%s" .Values.consolidation.systemPacks.safeDefault.image.repository .Values.consolidation.systemPacks.safeDefault.image.tag | quote }}
+{{- end }}

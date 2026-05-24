@@ -615,6 +615,29 @@
       "properties": {
         "enabled": { "type": "boolean" }
       }
+    },
+
+    "consolidation": {
+      "type": "object",
+      "description": "Memory consolidation reference packs. See docs/local-backlog/2026-05-22-memory-consolidation-design.md.",
+      "properties": {
+        "systemPacks": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Install the helm-bundled safe-default consolidation pack. Default false; operators must opt in."
+            },
+            "safeDefault": {
+              "type": "object",
+              "properties": {
+                "image":    { "$ref": "#/$defs/image" },
+                "replicas": { "type": "integer", "minimum": 1 }
+              }
+            }
+          }
+        }
+      }
     }
   },
 

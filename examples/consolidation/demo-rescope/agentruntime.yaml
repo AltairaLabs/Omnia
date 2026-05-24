@@ -1,0 +1,17 @@
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: demo-rescope
+  namespace: omnia-functions
+  labels:
+    app.kubernetes.io/component: memory-consolidation
+    omnia.altairalabs.ai/pack-class: system
+  annotations:
+    omnia.altairalabs.ai/pack-role: consolidation-demo-rescope
+spec:
+  mode: function
+  promptPackRef:
+    name: demo-rescope
+  replicas: 1
+  runtime:
+    image: "ghcr.io/altairalabs/omnia/runtime:0.1.0"

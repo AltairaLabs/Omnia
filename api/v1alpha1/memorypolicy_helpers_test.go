@@ -135,3 +135,58 @@ func TestMemoryPolicy_DedupRawAccessors(t *testing.T) {
 		t.Errorf("raw must surface unparseable value verbatim, got %q", got)
 	}
 }
+
+func TestMemoryPolicy_ResolvedSafetyGates_Defaults(t *testing.T) {
+	// Nil policy returns defaults: agentScoped=5, userScoped=1,
+	// PII redaction required, scope-widening capped at workspace.
+	var nilP *MemoryPolicy
+	got := nilP.ResolvedSafetyGates()
+	if got.MinDistinctUserCount["agentScoped"] != 5 {
+		t.Errorf("nil policy agentScoped: want 5, got %d",
+			got.MinDistinctUserCount["agentScoped"])
+	}
+	if got.MinDistinctUserCount["userScoped"] != 1 {
+		t.Errorf("nil policy userScoped: want 1, got %d",
+			got.MinDistinctUserCount["userScoped"])
+	}
+	if !got.RequirePIIRedaction {
+		t.Error("nil policy: RequirePIIRedaction default must be true")
+	}
+	if got.MaxScopeWidening != "workspace" {
+		t.Errorf("nil policy MaxScopeWidening: want \"workspace\", got %q",
+			got.MaxScopeWidening)
+	}
+
+	// Empty policy (no Consolidation block) returns defaults too.
+	empty := &MemoryPolicy{}
+	emptyGates := empty.ResolvedSafetyGates()
+	if emptyGates.MinDistinctUserCount["agentScoped"] != 5 {
+		t.Errorf("empty policy agentScoped: want 5, got %d",
+			emptyGates.MinDistinctUserCount["agentScoped"])
+	}
+}
+
+func TestMemoryPolicy_ResolvedSafetyGates_Override(t *testing.T) {
+	// Operator-set values win over defaults; unset keys keep defaults.
+	p := &MemoryPolicy{Spec: MemoryPolicySpec{
+		Consolidation: &MemoryConsolidationConfig{
+			SafetyGates: &MemoryConsolidationSafetyGates{
+				MinDistinctUserCount: map[string]int32{
+					"agentScoped": 50, // override
+					// userScoped not set → keep default of 1
+				},
+				MaxScopeWidening:    "workspace",
+				RequirePIIRedaction: true,
+			},
+		},
+	}}
+	got := p.ResolvedSafetyGates()
+	if got.MinDistinctUserCount["agentScoped"] != 50 {
+		t.Errorf("override agentScoped: want 50, got %d",
+			got.MinDistinctUserCount["agentScoped"])
+	}
+	if got.MinDistinctUserCount["userScoped"] != 1 {
+		t.Errorf("unset userScoped should keep default 1, got %d",
+			got.MinDistinctUserCount["userScoped"])
+	}
+}

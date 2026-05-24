@@ -65,6 +65,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/redaction"
 	"github.com/altairalabs/omnia/internal/memory"
 	memoryapi "github.com/altairalabs/omnia/internal/memory/api"
+	"github.com/altairalabs/omnia/internal/memory/consolidation"
 	memorypg "github.com/altairalabs/omnia/internal/memory/postgres"
 	sessionapi "github.com/altairalabs/omnia/internal/session/api"
 	"github.com/altairalabs/omnia/internal/tracing"
@@ -129,6 +130,10 @@ type flags struct {
 	requireAboutForKinds  string // env: REQUIRE_ABOUT_FOR_KINDS, e.g. "fact,preference"
 	workspace             string
 	serviceGroup          string
+
+	// --- Consolidation v1 ---
+	consolidationInterval     string // env: CONSOLIDATION_INTERVAL, e.g. "6h". Empty disables the worker.
+	consolidationFunctionsURL string // env: CONSOLIDATION_FUNCTIONS_URL, base URL for function-mode AgentRuntime endpoints.
 }
 
 func parseFlags() *flags {
@@ -159,6 +164,8 @@ func parseFlags() *flags {
 	flag.StringVar(&f.requireAboutForKinds, "require-about-for-kinds", "", "Comma-separated list of memory kinds requiring an about={kind, key} hint on save (e.g. fact,preference). Empty disables.")
 	flag.StringVar(&f.workspace, "workspace", "", "Workspace name (K8s CRD resolution mode)")
 	flag.StringVar(&f.serviceGroup, "service-group", "", "Service group name within workspace")
+	flag.StringVar(&f.consolidationInterval, "consolidation-interval", "", "Interval for the LLM-driven memory consolidation worker (e.g. 6h). Empty disables.")
+	flag.StringVar(&f.consolidationFunctionsURL, "consolidation-functions-url", "", "Base URL for function-mode AgentRuntime endpoints serving consolidation packs (e.g. http://functions.omnia-functions:8080).")
 	flag.Parse()
 
 	f.applyEnvFallbacks()
@@ -209,6 +216,8 @@ func (f *flags) applyEnvFallbacks() {
 			f.tracingSample = rate
 		}
 	}
+	envFallback(&f.consolidationInterval, "", "CONSOLIDATION_INTERVAL")
+	envFallback(&f.consolidationFunctionsURL, "", "CONSOLIDATION_FUNCTIONS_URL")
 }
 
 // envFallback sets *dst from the environment variable envKey when *dst still
@@ -460,6 +469,19 @@ func run() error {
 			"interval", compactionOpts.Interval,
 			"age", compactionOpts.Age,
 			"summarizer", "noop",
+		)
+	}
+
+	// --- Consolidation worker ---
+	// LLM-driven memory consolidation. Replaces the NoopSummarizer path with
+	// a function-mode AgentRuntime that emits typed actions against the
+	// memory store. See docs/local-backlog/2026-05-22-memory-consolidation-design.md.
+	// Disabled by default — set --consolidation-interval to enable.
+	if cw := buildConsolidationWorker(ctx, f, pgStore, log); cw != nil {
+		go cw.Run(ctx)
+		log.Info("consolidation worker started",
+			"interval", f.consolidationInterval,
+			"functionsURL", f.consolidationFunctionsURL,
 		)
 	}
 
@@ -911,6 +933,62 @@ func buildRetentionPolicyLoader(legacyInterval, workspace, serviceGroup string, 
 		"source", "legacy RETENTION_INTERVAL",
 		"interval", d.String())
 	return &memory.StaticPolicyLoader{Policy: memory.LegacyIntervalPolicy(d)}
+}
+
+// buildConsolidationWorker constructs the LLM-driven consolidation worker
+// when the operator has set CONSOLIDATION_INTERVAL. Returns nil (disabled)
+// when:
+//   - interval is unset or unparseable
+//   - in-cluster k8s config is unavailable (the worker needs to list
+//     MemoryPolicy CRs cluster-wide)
+//   - no functions URL configured
+//
+// Worker lifecycle is identical to the existing compaction worker —
+// caller invokes go cw.Run(ctx).
+func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.PostgresMemoryStore, log logr.Logger) *consolidation.Worker {
+	const msgDisabled = "consolidation worker disabled"
+	if f.consolidationInterval == "" {
+		log.V(1).Info(msgDisabled, "reason", "CONSOLIDATION_INTERVAL not set")
+		return nil
+	}
+	interval, err := time.ParseDuration(f.consolidationInterval)
+	if err != nil || interval <= 0 {
+		log.Error(err, "invalid CONSOLIDATION_INTERVAL, "+msgDisabled,
+			"value", f.consolidationInterval)
+		return nil
+	}
+	if f.consolidationFunctionsURL == "" {
+		log.Info(msgDisabled, "reason", "CONSOLIDATION_FUNCTIONS_URL not set")
+		return nil
+	}
+	kubeConfig, err := rest.InClusterConfig()
+	if err != nil {
+		log.V(1).Info(msgDisabled,
+			"reason", "no in-cluster kubeconfig", "error", err.Error())
+		return nil
+	}
+	scheme := k8sruntime.NewScheme()
+	utilruntime.Must(omniav1alpha1.AddToScheme(scheme))
+	c, err := client.New(kubeConfig, client.Options{Scheme: scheme})
+	if err != nil {
+		log.Error(err, "consolidation worker disabled: k8s client creation failed")
+		return nil
+	}
+	pool := pgStore.Pool()
+	metrics := consolidation.NewMetrics()
+	metrics.MustRegister(prometheus.DefaultRegisterer)
+	return consolidation.NewWorker(consolidation.WorkerOptions{
+		Store:           memorypg.NewConsolidationWriter(pool),
+		LockStore:       memorypg.NewAdvisoryLockStore(pool),
+		Policies:        consolidation.NewK8sPolicyLister(c),
+		PreFilterRunner: memorypg.NewPreFilterRunner(pool),
+		Client:          consolidation.NewClient(f.consolidationFunctionsURL, 5*time.Minute),
+		Metrics:         metrics,
+		Interval:        interval,
+		Log:             log.WithName("consolidation"),
+		LivenessMark:    func() { memory.MarkWorkerRunning(memory.WorkerNameConsolidation) },
+		LivenessUnmark:  func() { memory.MarkWorkerStopped(memory.WorkerNameConsolidation) },
+	})
 }
 
 // createEmbeddingService reads a Provider CRD by name and creates an

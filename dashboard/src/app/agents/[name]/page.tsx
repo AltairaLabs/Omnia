@@ -7,6 +7,7 @@ import { ArrowLeft, FileText, MessageSquare, Activity, ShieldCheck, Brain } from
 import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/layout";
 import { StatusBadge, ScaleControl, AgentMetricsPanel, EventsPanel, EvalConfigPanel, AgentQualityTab } from "@/components/agents";
+import { SystemPackBadge } from "@/components/agents/system-pack-badge";
 import { AgentMemoryPanel } from "@/components/memories/agent-memory-panel";
 import { AgentConsole } from "@/components/console";
 import { LogViewer } from "@/components/logs";
@@ -140,7 +141,13 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
               Back to Agents
             </Button>
           </Link>
-          <StatusBadge phase={status?.phase} />
+          <div className="flex items-center gap-2">
+            <SystemPackBadge
+              labels={metadata.labels}
+              annotations={metadata.annotations}
+            />
+            <StatusBadge phase={status?.phase} />
+          </div>
         </div>
 
         {/* Tabs */}
