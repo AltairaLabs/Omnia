@@ -70,6 +70,7 @@ func MarkWorkerStopped(name string) {
 // alert rule's expected-on list.
 const (
 	WorkerNameCompaction      = "compaction"
+	WorkerNameConsolidation   = "consolidation"
 	WorkerNameTombstoneGC     = "tombstone_gc"
 	WorkerNameReembed         = "reembed"
 	WorkerNameRetention       = "retention"

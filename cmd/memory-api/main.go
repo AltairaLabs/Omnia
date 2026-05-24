@@ -974,14 +974,19 @@ func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.Postg
 		return nil
 	}
 	pool := pgStore.Pool()
+	metrics := consolidation.NewMetrics()
+	metrics.MustRegister(prometheus.DefaultRegisterer)
 	return consolidation.NewWorker(consolidation.WorkerOptions{
 		Store:           memorypg.NewConsolidationWriter(pool),
 		LockStore:       memorypg.NewAdvisoryLockStore(pool),
 		Policies:        consolidation.NewK8sPolicyLister(c),
 		PreFilterRunner: memorypg.NewPreFilterRunner(pool),
 		Client:          consolidation.NewClient(f.consolidationFunctionsURL, 5*time.Minute),
+		Metrics:         metrics,
 		Interval:        interval,
 		Log:             log.WithName("consolidation"),
+		LivenessMark:    func() { memory.MarkWorkerRunning(memory.WorkerNameConsolidation) },
+		LivenessUnmark:  func() { memory.MarkWorkerStopped(memory.WorkerNameConsolidation) },
 	})
 }
 

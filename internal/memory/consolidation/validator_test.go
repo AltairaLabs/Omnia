@@ -16,6 +16,7 @@ import (
 const (
 	testWorkspaceID = "ws-1"
 	testObsID       = "obs-1"
+	testUserID      = "u-1"
 )
 
 func TestValidator_RejectsInstitutionalRescope(t *testing.T) {

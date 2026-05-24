@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/go-logr/logr/testr"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	memoryv1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
@@ -260,6 +262,96 @@ func TestWorker_RunHonoursContextCancellation(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Run did not return after cancel")
 	}
+}
+
+func TestWorker_RecordsMetricsOnSuccessfulPass(t *testing.T) {
+	runner := &mockPreFilterRunner{
+		stale: []Bucket{{
+			Key: "k1",
+			Entries: []BucketEntry{{
+				ID: testObsID, Mutability: MutabilityMutable,
+				Scope: Scope{WorkspaceID: testWorkspaceID, UserID: testUserID},
+			}},
+		}},
+	}
+	metrics := NewMetrics()
+	w := NewWorker(WorkerOptions{
+		Store:           &MockStore{},
+		LockStore:       &mockLockStore{acquired: true},
+		Policies:        fakePolicyLister{policies: oneStaleOnlyPolicy()},
+		PreFilterRunner: runner,
+		Metrics:         metrics,
+		Log:             testr.New(t),
+	})
+	w.callFunction = func(context.Context, PreFilterAxis, memoryv1.MemoryFunctionRef, FunctionInput) ([]Action, error) {
+		return []Action{
+			CreateSummaryAction{
+				FromIDs: []string{testObsID},
+				Scope:   Scope{WorkspaceID: testWorkspaceID, UserID: testUserID},
+				Content: "summary",
+			},
+		}, nil
+	}
+	if err := w.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// One pass should be counted with status=ok.
+	if got := testCounterValue(t, metrics.PassesTotal, testWorkspaceID, "safe-default-summarizer", "ok"); got != 1 {
+		t.Errorf("PassesTotal ok = %v, want 1", got)
+	}
+	// One create_summary action applied.
+	if got := testCounterValue(t, metrics.ActionsTotal,
+		testWorkspaceID, "safe-default-summarizer", "create_summary", OutcomeApplied, ""); got != 1 {
+		t.Errorf("ActionsTotal create_summary applied = %v, want 1", got)
+	}
+}
+
+func TestWorker_RecordsPrefilterErrorStatus(t *testing.T) {
+	runner := &failingPreFilterRunner{}
+	metrics := NewMetrics()
+	w := NewWorker(WorkerOptions{
+		Store:           &MockStore{},
+		LockStore:       &mockLockStore{acquired: true},
+		Policies:        fakePolicyLister{policies: oneStaleOnlyPolicy()},
+		PreFilterRunner: runner,
+		Metrics:         metrics,
+		Log:             testr.New(t),
+	})
+	w.callFunction = func(context.Context, PreFilterAxis, memoryv1.MemoryFunctionRef, FunctionInput) ([]Action, error) {
+		t.Fatal("function should not be called when prefilter fails")
+		return nil, nil
+	}
+	if err := w.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := testCounterValue(t, metrics.PassesTotal, testWorkspaceID, "safe-default-summarizer", "prefilter_error"); got != 1 {
+		t.Errorf("PassesTotal prefilter_error = %v, want 1", got)
+	}
+}
+
+type failingPreFilterRunner struct{}
+
+func (failingPreFilterRunner) RunStaleObservations(context.Context, PreFilterOptions) ([]Bucket, error) {
+	return nil, errFakeStoreFailure
+}
+
+func (failingPreFilterRunner) RunCrossScopeCandidates(context.Context, PreFilterOptions) ([]Bucket, error) {
+	return nil, errFakeStoreFailure
+}
+
+func (failingPreFilterRunner) RunEntityDuplicateCandidates(context.Context, PreFilterOptions) ([]Bucket, error) {
+	return nil, errFakeStoreFailure
+}
+
+// testCounterValue extracts a value from a Prometheus CounterVec for
+// the given labels. Returns 0 if the label combination has no recorded
+// value (Prometheus auto-initialises to 0 anyway, so the read is safe).
+func testCounterValue(t *testing.T, vec interface {
+	WithLabelValues(...string) prometheus.Counter
+}, labels ...string,
+) float64 {
+	t.Helper()
+	return testutil.ToFloat64(vec.WithLabelValues(labels...))
 }
 
 func TestWorker_WithoutPreFilterRunner(t *testing.T) {

@@ -48,8 +48,14 @@ type WorkerOptions struct {
 	PreFilterRunner PreFilterRunner
 	Auditor         Auditor
 	Client          *Client
+	Metrics         *Metrics
 	Interval        time.Duration
 	Log             logr.Logger
+	// LivenessMark / LivenessUnmark instrument the worker's running
+	// gauge. Set from memory.MarkWorkerRunning / MarkWorkerStopped in
+	// the memory-api wiring; nil-safe for tests.
+	LivenessMark   func()
+	LivenessUnmark func()
 	// Now is injectable for tests; production wiring leaves it nil
 	// (defaults to time.Now).
 	Now func() time.Time
@@ -77,10 +83,19 @@ func NewWorker(opts WorkerOptions) *Worker {
 }
 
 // Run blocks until ctx is cancelled, running RunOnce per tick.
+// The liveness gauge is flipped on after the disabled-fast-path so a
+// never-started worker stays at 0 (mirrors the CompactionWorker
+// pattern; required by the worker-liveness alert rule).
 func (w *Worker) Run(ctx context.Context) {
 	if w.opts.Interval <= 0 {
 		w.opts.Log.Info("consolidation worker disabled", "reason", "interval not set")
 		return
+	}
+	if w.opts.LivenessMark != nil {
+		w.opts.LivenessMark()
+	}
+	if w.opts.LivenessUnmark != nil {
+		defer w.opts.LivenessUnmark()
 	}
 	ticker := time.NewTicker(w.opts.Interval)
 	defer ticker.Stop()
@@ -158,13 +173,23 @@ func (w *Worker) runPolicy(ctx context.Context, p memoryv1.MemoryPolicy) error {
 }
 
 func (w *Worker) runAxis(ctx context.Context, axis PreFilterAxis, ref memoryv1.MemoryFunctionRef, p memoryv1.MemoryPolicy, gates memoryv1.MemoryConsolidationSafetyGates) error {
+	start := w.opts.Now()
+	status := "ok"
+	defer func() {
+		if w.opts.Metrics != nil {
+			w.opts.Metrics.PassesTotal.WithLabelValues(p.Name, ref.Name, status).Inc()
+			w.opts.Metrics.PassDurationSeconds.WithLabelValues(p.Name, ref.Name).
+				Observe(w.opts.Now().Sub(start).Seconds())
+		}
+	}()
+
 	buckets, err := w.runPreFilter(ctx, axis, p)
 	if err != nil {
+		status = "prefilter_error"
 		return fmt.Errorf("prefilter %s: %w", axis, err)
 	}
 	if len(buckets) == 0 {
-		// No candidates this tick. Skip the function call — saves token
-		// cost. Status surfaces in metrics as ok / empty.
+		status = "empty"
 		return nil
 	}
 	input := FunctionInput{
@@ -176,18 +201,52 @@ func (w *Worker) runAxis(ctx context.Context, axis PreFilterAxis, ref memoryv1.M
 			RequirePIIRedaction:  gates.RequirePIIRedaction,
 		},
 	}
+	fnStart := w.opts.Now()
 	actions, err := w.callFunction(ctx, axis, ref, input)
+	if w.opts.Metrics != nil {
+		w.opts.Metrics.FunctionCallDurationSeconds.WithLabelValues(p.Name, ref.Name).
+			Observe(w.opts.Now().Sub(fnStart).Seconds())
+	}
 	if err != nil {
+		status = "function_error"
 		return fmt.Errorf("call function %s/%s: %w", ref.Namespace, ref.Name, err)
 	}
 	v := NewValidator(ValidatorOptions{WorkspaceID: p.Name, Gates: gates})
 	results := v.Validate(actions, w.buildValidationContext(buckets))
-	return w.applier.Apply(ctx, ApplyContext{
+	w.recordActionMetrics(p.Name, ref.Name, results)
+	if err := w.applier.Apply(ctx, ApplyContext{
 		WorkspaceID: p.Name,
 		RunID:       fmt.Sprintf("%s-%d", p.Name, w.opts.Now().Unix()),
 		PackRef:     ref.Name,
 		Now:         w.opts.Now(),
-	}, results)
+	}, results); err != nil {
+		status = "apply_error"
+		return err
+	}
+	return nil
+}
+
+// recordActionMetrics emits the per-action ActionsTotal counter for
+// every validated action result. Tier label is derived from the
+// rescope action's destination scope; non-rescope actions get an
+// empty tier label.
+func (w *Worker) recordActionMetrics(workspace, function string, results []Result) {
+	if w.opts.Metrics == nil {
+		return
+	}
+	for _, r := range results {
+		outcome := OutcomeApplied
+		if !r.Accepted {
+			outcome = "rejected_" + r.Reason
+		}
+		tier := ""
+		if rs, ok := r.Action.(RescopeAction); ok {
+			tier = string(rs.NewScope.Shape())
+		}
+		w.opts.Metrics.ActionsTotal.WithLabelValues(
+			workspace, function, string(r.Action.Kind()), outcome, tier,
+		).Inc()
+	}
 }
 
 // runPreFilter dispatches to the matching PreFilterRunner method.
