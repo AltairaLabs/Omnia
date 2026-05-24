@@ -9,8 +9,7 @@ function-mode AgentRuntime that emits a typed action list. The
 platform validates each action (mutability, PII, k-anonymity, scope)
 and applies accepted actions transactionally with full lineage.
 
-This page covers operator-facing configuration. For the design,
-see the [consolidation design spec](../../local-backlog/2026-05-22-memory-consolidation-design.md).
+This page covers operator-facing configuration.
 
 ## Enable the safe-default pack
 
@@ -151,12 +150,10 @@ the selected time window.
 - **No promotion to the institutional tier.** `rescope` to
   `(ws, null, null)` is rejected outright. The proposal-queue +
   quarantine flow that enables LLM-proposed institutional promotion
-  lives in the
-  [memory-poisoning-defenses spec](../../local-backlog/2026-05-22-memory-poisoning-defenses.md).
+  is designed but not yet built (separate workstream).
 - **Per-action drill-down is aggregate-only in the dashboard.**
   User-tier action content visibility (admin vs user view) is
-  designed separately in the
-  [memory-dashboard-ux spec](../../local-backlog/2026-05-22-memory-dashboard-ux.md).
+  designed separately in a follow-up.
 - **No regulated-document ingestion.** Bulk-loading authoritative
   content into memory has its own design (forthcoming
   `memory-ingestion-design.md`). The consolidation worker honours
