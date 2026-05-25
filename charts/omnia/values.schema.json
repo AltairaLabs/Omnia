@@ -632,7 +632,14 @@
               "type": "object",
               "properties": {
                 "image":    { "$ref": "#/$defs/image" },
-                "replicas": { "type": "integer", "minimum": 1 }
+                "replicas": { "type": "integer", "minimum": 1 },
+                "providerRef": {
+                  "type": "object",
+                  "description": "Provider CRD reference the safe-default pack uses for LLM calls. Must exist in omnia-system-packs.",
+                  "properties": {
+                    "name": { "type": "string" }
+                  }
+                }
               }
             }
           }

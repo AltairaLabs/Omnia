@@ -1,0 +1,84 @@
+suite: consolidation system pack
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/consolidation/namespace.yaml
+  - templates/consolidation/safe-default-pack.yaml
+tests:
+  - it: omits all resources when disabled
+    set:
+      consolidation.systemPacks.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders ConfigMap with pack.json payload
+    set:
+      consolidation.systemPacks.enabled: true
+      consolidation.systemPacks.safeDefault.providerRef.name: mock-provider
+    template: templates/consolidation/safe-default-pack.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: kind
+          value: ConfigMap
+      - equal:
+          path: metadata.name
+          value: safe-default-summarizer
+      - isNotNullOrEmpty:
+          path: data["pack.json"]
+
+  - it: renders PromptPack with required source + version
+    set:
+      consolidation.systemPacks.enabled: true
+      consolidation.systemPacks.safeDefault.providerRef.name: mock-provider
+    template: templates/consolidation/safe-default-pack.yaml
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: kind
+          value: PromptPack
+      - equal:
+          path: spec.version
+          value: "1.0.0"
+      - equal:
+          path: spec.source.type
+          value: configmap
+      - equal:
+          path: spec.source.configMapRef.name
+          value: safe-default-summarizer
+
+  - it: renders AgentRuntime with facade + schemas + providers
+    set:
+      consolidation.systemPacks.enabled: true
+      consolidation.systemPacks.safeDefault.providerRef.name: mock-provider
+    template: templates/consolidation/safe-default-pack.yaml
+    documentIndex: 2
+    asserts:
+      - equal:
+          path: kind
+          value: AgentRuntime
+      - equal:
+          path: spec.mode
+          value: function
+      - equal:
+          path: spec.facade.type
+          value: grpc
+      - equal:
+          path: spec.facade.port
+          value: 8080
+      - isNotNullOrEmpty:
+          path: spec.inputSchema
+      - isNotNullOrEmpty:
+          path: spec.outputSchema
+      - equal:
+          path: spec.providers[0].name
+          value: default
+      - equal:
+          path: spec.providers[0].providerRef.name
+          value: mock-provider
+      - equal:
+          path: spec.runtime.replicas
+          value: 1

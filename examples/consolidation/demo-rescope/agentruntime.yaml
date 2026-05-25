@@ -5,13 +5,43 @@ metadata:
   namespace: omnia-functions
   labels:
     app.kubernetes.io/component: memory-consolidation
-    omnia.altairalabs.ai/pack-class: system
+    omnia.altairalabs.ai/pack-class: example
   annotations:
     omnia.altairalabs.ai/pack-role: consolidation-demo-rescope
 spec:
   mode: function
   promptPackRef:
     name: demo-rescope
-  replicas: 1
+  facade:
+    type: grpc
+    port: 8080
+  inputSchema:
+    type: object
+    required:
+      - axis
+      - workspaceID
+      - buckets
+    properties:
+      axis:
+        type: string
+      workspaceID:
+        type: string
+      buckets:
+        type: array
+      gates:
+        type: object
+  outputSchema:
+    type: array
+    items:
+      type: object
+      required:
+        - action
+      properties:
+        action:
+          type: string
   runtime:
-    image: "ghcr.io/altairalabs/omnia/runtime:0.1.0"
+    replicas: 1
+  providers:
+    - name: default
+      providerRef:
+        name: mock-provider

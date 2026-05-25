@@ -2382,6 +2382,13 @@ consolidation:
         pullPolicy: IfNotPresent
       # -- Pod replicas for the safe-default-summarizer AgentRuntime.
       replicas: 1
+      # -- Provider CRD reference for the function-mode pod's LLM. Must
+      # exist in the omnia-system-packs namespace before enabling
+      # systemPacks.enabled=true. Required when systemPacks.enabled
+      # is true; chart render will produce an AgentRuntime referencing
+      # this Provider by name.
+      providerRef:
+        name: ""
 
 # ============================================================================
 # Demo Mode (Separate Chart)
