@@ -38,17 +38,35 @@ observations sharing entity kind+name.
 
 ## Configure the worker
 
-The consolidation worker runs in the memory-api binary. Enable it
-via two env vars (or flags):
+The consolidation worker runs inside the per-workspace memory-api pod.
+Enable it from the helm chart:
 
-```bash
-CONSOLIDATION_INTERVAL=6h
-CONSOLIDATION_FUNCTIONS_URL=http://safe-default-summarizer.omnia-system-packs:8080
+```yaml
+workspaceServices:
+  memoryApi:
+    consolidation:
+      interval: "6h"     # empty = worker disabled (default)
 ```
 
-When `CONSOLIDATION_INTERVAL` is empty (default) the worker is
-disabled — installations don't pick up consolidation behaviour
-until an operator opts in.
+The operator forwards the value to memory-api as
+`--consolidation-interval`. When the value is empty (the default), the
+worker is disabled — installations don't pick up consolidation
+behaviour until an operator opts in.
+
+The worker resolves each `functionRef` to a Service URL via:
+
+```
+http://{ref.name}.{ref.namespace}.svc.cluster.local:8080/functions/{ref.name}
+```
+
+so packs can live in any namespace the worker has network reach to. No
+global "functions URL" — the legacy `CONSOLIDATION_FUNCTIONS_URL` env
+var was retired (it couldn't span namespaces).
+
+> **Per-policy scheduling is not yet honoured.** A `MemoryPolicy`'s
+> `spec.consolidation.schedule` is parsed but ignored — the global
+> `--consolidation-interval` drives every policy at the same cadence.
+> Per-policy cron scheduling is tracked as a follow-up.
 
 ## Wire a `MemoryPolicy`
 
@@ -65,7 +83,7 @@ spec:
     agent:         { mode: "decay" }
     institutional: { mode: "retain" }
   consolidation:
-    schedule: "0 2 * * *"
+    # schedule: "0 2 * * *"   # not yet honoured — see worker config above
     functionRefs:
       staleObservations:
         name: safe-default-summarizer
@@ -159,6 +177,6 @@ the selected time window.
   `memory-ingestion-design.md`). The consolidation worker honours
   `source_type: regulated` rows as immutable but does not produce
   them.
-- **No `ee/pkg/audit` adapter wired by default.** The
-  `consolidation.Auditor` interface exists; wiring memory-api's
-  existing audit logger to it is a small follow-up.
+- **Per-policy cron `schedule` is parsed but not honoured.** The
+  worker ticks on the operator-set global interval; each policy
+  fires every tick. Per-policy cron is a follow-up.

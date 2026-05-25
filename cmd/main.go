@@ -145,6 +145,11 @@ func main() {
 		"TTL forwarded to memory-api as --cache-ttl. Empty or \"0\" disables the read-through "+
 			"cache even when --memory-redis-url is set (useful when Redis is provisioned only for "+
 			"the event publisher).")
+	var memoryConsolidationInterval string
+	flag.StringVar(&memoryConsolidationInterval, "memory-consolidation-interval", "",
+		"Tick interval forwarded to memory-api as --consolidation-interval. Empty disables the "+
+			"LLM-driven consolidation worker. Production deployments typically leave this off and "+
+			"opt in per-environment (e.g. \"6h\"). Local dev / Tilt may set a shorter value.")
 	var sessionRedisURL string
 	flag.StringVar(&sessionRedisURL, "session-redis-url", "",
 		"Operator-wide Redis URL forwarded to every per-workspace session-api as --redis-url for "+
@@ -337,8 +342,9 @@ func main() {
 				Name: memoryRedisURLSecretName,
 				Key:  memoryRedisURLSecretKey,
 			},
-			MemoryCacheTTL:  memoryCacheTTL,
-			SessionRedisURL: sessionRedisURL,
+			MemoryCacheTTL:              memoryCacheTTL,
+			MemoryConsolidationInterval: memoryConsolidationInterval,
+			SessionRedisURL:             sessionRedisURL,
 			SessionRedisURLSecret: controller.SecretKeyRef{
 				Name: sessionRedisURLSecretName,
 				Key:  sessionRedisURLSecretKey,
