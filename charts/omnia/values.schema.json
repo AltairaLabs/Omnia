@@ -408,6 +408,15 @@
           "properties": {
             "image":     { "$ref": "#/$defs/image" },
             "resources": { "$ref": "#/$defs/resources" },
+            "consolidation": {
+              "type": "object",
+              "properties": {
+                "interval": {
+                  "type": "string",
+                  "description": "Tick interval for the consolidation worker (e.g. \"6h\"). Empty disables the worker."
+                }
+              }
+            },
             "cache": {
               "type": "object",
               "properties": {

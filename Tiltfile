@@ -592,6 +592,10 @@ helm_set = [
     'workspaceServices.memoryApi.image.repository=omnia-memory-api-dev',
     'workspaceServices.memoryApi.image.tag=latest',
     'workspaceServices.memoryApi.image.pullPolicy=Never',
+    # Exercise the consolidation worker locally — 30s tick is short
+    # enough that any local seed of stale observations gets processed
+    # within a development feedback cycle. Production runs at 6h.
+    'workspaceServices.memoryApi.consolidation.interval=30s',
     # Dev Postgres for workspace services
     'postgres.dev.enabled=true',
     # Doctor
