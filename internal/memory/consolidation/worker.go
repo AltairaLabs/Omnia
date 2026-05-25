@@ -183,25 +183,32 @@ func (w *Worker) runWorkspace(ctx context.Context, p memoryv1.MemoryPolicy, ws W
 	}
 	defer release()
 
+	// Per-policy wall-clock deadline so a runaway pack/HTTP call can't
+	// pin the worker indefinitely. The lock is released by the defer
+	// above; the deadline ends the (axis, function) loop early.
+	_, wcTimeout := p.ResolvedTimeouts()
+	wsCtx, cancel := context.WithTimeout(ctx, wcTimeout)
+	defer cancel()
+
 	refs := p.Spec.Consolidation.FunctionRefs
 	gates := p.ResolvedSafetyGates()
 
 	const msgAxisFailed = "axis failed"
 
 	if refs.StaleObservations != nil {
-		if err := w.runAxis(ctx, AxisStaleObservations, *refs.StaleObservations, p, ws, gates); err != nil {
+		if err := w.runAxis(wsCtx, AxisStaleObservations, *refs.StaleObservations, p, ws, gates); err != nil {
 			w.opts.Log.Error(err, msgAxisFailed,
 				"axis", AxisStaleObservations, "workspaceUID", ws.UID, "policy", p.Name)
 		}
 	}
 	if refs.CrossScopeCandidates != nil {
-		if err := w.runAxis(ctx, AxisCrossScopeCandidates, *refs.CrossScopeCandidates, p, ws, gates); err != nil {
+		if err := w.runAxis(wsCtx, AxisCrossScopeCandidates, *refs.CrossScopeCandidates, p, ws, gates); err != nil {
 			w.opts.Log.Error(err, msgAxisFailed,
 				"axis", AxisCrossScopeCandidates, "workspaceUID", ws.UID, "policy", p.Name)
 		}
 	}
 	if refs.EntityDuplicateCandidates != nil {
-		if err := w.runAxis(ctx, AxisEntityDuplicateCandidates, *refs.EntityDuplicateCandidates, p, ws, gates); err != nil {
+		if err := w.runAxis(wsCtx, AxisEntityDuplicateCandidates, *refs.EntityDuplicateCandidates, p, ws, gates); err != nil {
 			w.opts.Log.Error(err, msgAxisFailed,
 				"axis", AxisEntityDuplicateCandidates, "workspaceUID", ws.UID, "policy", p.Name)
 		}
@@ -246,7 +253,10 @@ func (w *Worker) runAxis(
 		},
 	}
 	fnStart := w.opts.Now()
-	actions, err := w.callFunction(ctx, axis, ref, input)
+	fnTimeout, _ := p.ResolvedTimeouts()
+	callCtx, cancelCall := context.WithTimeout(ctx, fnTimeout)
+	actions, err := w.callFunction(callCtx, axis, ref, input)
+	cancelCall()
 	if w.opts.Metrics != nil {
 		w.opts.Metrics.FunctionCallDurationSeconds.WithLabelValues(ws.UID, p.Name, ref.Name).
 			Observe(w.opts.Now().Sub(fnStart).Seconds())

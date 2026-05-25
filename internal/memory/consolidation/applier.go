@@ -109,12 +109,17 @@ type DiscardWrite struct {
 	PromotedAt     time.Time
 }
 
-// RescoreWrite captures a Rescore apply.
+// RescoreWrite captures a Rescore apply. Lineage columns
+// (PromotedByPack, PromotedAt) are populated alongside the scalar
+// score fields so a forensic walker can answer "which pack rescored
+// this row, when?".
 type RescoreWrite struct {
-	WorkspaceID string
-	TargetID    string
-	Importance  float32
-	Confidence  float32
+	WorkspaceID    string
+	TargetID       string
+	Importance     float32
+	Confidence     float32
+	PromotedByPack string
+	PromotedAt     time.Time
 }
 
 // Outcome values for AuditEntry.Outcome.
@@ -241,10 +246,12 @@ func (a *Applier) applyOne(ctx context.Context, ac ApplyContext, act Action) err
 		})
 	case RescoreAction:
 		return a.store.Rescore(ctx, RescoreWrite{
-			WorkspaceID: ac.WorkspaceID,
-			TargetID:    x.TargetID,
-			Importance:  x.Importance,
-			Confidence:  x.Confidence,
+			WorkspaceID:    ac.WorkspaceID,
+			TargetID:       x.TargetID,
+			Importance:     x.Importance,
+			Confidence:     x.Confidence,
+			PromotedByPack: ac.PackRef,
+			PromotedAt:     ac.Now,
 		})
 	default:
 		return fmt.Errorf("unknown action: %s", act.Kind())

@@ -469,17 +469,9 @@ func run() error {
 		)
 	}
 
-	// --- Consolidation worker ---
-	// LLM-driven memory consolidation. Replaces the NoopSummarizer path with
-	// a function-mode AgentRuntime that emits typed actions against the
-	// memory store. See docs/local-backlog/2026-05-22-memory-consolidation-design.md.
-	// Disabled by default — set --consolidation-interval to enable.
-	if cw := buildConsolidationWorker(ctx, f, pgStore, log); cw != nil {
-		go cw.Run(ctx)
-		log.Info("consolidation worker started",
-			"interval", f.consolidationInterval,
-		)
-	}
+	// --- Consolidation worker construction is deferred to after the
+	// audit logger is built (so the worker can share it). The worker
+	// is started near the bottom of run() once auditLogger exists.
 
 	// --- Embedding service ---
 	var embeddingSvc *memory.EmbeddingService
@@ -550,9 +542,31 @@ func run() error {
 		log.Info("memory event publisher enabled")
 	}
 
+	// --- Audit logger (shared by memory CRUD audit + consolidation
+	// audit) ---
+	auditLogger, auditClose := buildAuditLogger(f.enterprise, pool, log)
+	defer func() {
+		if auditClose != nil {
+			_ = auditClose()
+		}
+	}()
+
 	// --- Build API mux ---
-	apiMux, cleanup := buildAPIMux(ctx, apiStore, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, log)
+	apiMux, cleanup := buildAPIMux(ctx, apiStore, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, auditLogger, log)
 	defer cleanup()
+
+	// --- Consolidation worker ---
+	// LLM-driven memory consolidation. Replaces the NoopSummarizer path with
+	// a function-mode AgentRuntime that emits typed actions against the
+	// memory store. See docs/local-backlog/2026-05-22-memory-consolidation-design.md.
+	// Disabled by default — set --consolidation-interval to enable.
+	if cw := buildConsolidationWorker(ctx, f, pgStore, auditLogger, log); cw != nil {
+		go cw.Run(ctx)
+		log.Info("consolidation worker started",
+			"interval", f.consolidationInterval,
+			"audit", auditLogger != nil,
+		)
+	}
 
 	// --- Servers ---
 	healthSrv := newHealthServer(f.healthAddr, pool)
@@ -627,9 +641,23 @@ func detectNamespace() string {
 	return string(data)
 }
 
+// buildAuditLogger constructs the shared ee/pkg/audit Logger when
+// --enterprise is set. Returns nil when disabled or when the EE wiring
+// isn't applicable. The caller owns the Close hook.
+func buildAuditLogger(enterprise bool, pool *pgxpool.Pool, log logr.Logger) (*eeaudit.Logger, func() error) {
+	if !enterprise {
+		return nil, nil
+	}
+	auditMetrics := eemetrics.NewAuditMetrics()
+	logger := eeaudit.NewLogger(pool, log, auditMetrics, eeaudit.LoggerConfig{})
+	log.Info("memory audit logging enabled")
+	return logger, logger.Close
+}
+
 // buildAPIMux assembles the HTTP handler with all memory-api routes, wrapped
 // with rate limiting, privacy (enterprise), metrics, and tracing middleware.
-// Returns the handler and a cleanup function.
+// Returns the handler and a cleanup function. The auditLogger is constructed
+// upstream so it can be shared with the consolidation worker.
 func buildAPIMux(
 	ctx context.Context,
 	store memory.Store,
@@ -639,6 +667,7 @@ func buildAPIMux(
 	enterprise bool,
 	pool *pgxpool.Pool,
 	policyLoader memory.PolicyLoader,
+	auditLogger *eeaudit.Logger,
 	log logr.Logger,
 ) (http.Handler, func()) {
 	httpMetrics := memoryapi.NewHTTPMetrics(nil)
@@ -653,16 +682,13 @@ func buildAPIMux(
 		svc.SetPolicyLoader(policyLoader)
 	}
 
-	// Enterprise audit logging.
-	var auditClose func() error
+	// Enterprise audit logging. Logger was constructed upstream so the
+	// consolidation worker shares it; here we just register the
+	// memory-CRUD adapter + the audit HTTP routes.
 	var auditHandler *eeaudit.Handler
-	if enterprise {
-		auditMetrics := eemetrics.NewAuditMetrics()
-		auditLogger := eeaudit.NewLogger(pool, log, auditMetrics, eeaudit.LoggerConfig{})
-		auditClose = auditLogger.Close
+	if auditLogger != nil {
 		svc.SetAuditLogger(&auditLoggerAdapter{inner: auditLogger})
 		auditHandler = eeaudit.NewHandler(auditLogger, log)
-		log.Info("memory audit logging enabled")
 	}
 
 	handler := memoryapi.NewHandler(svc, log)
@@ -701,9 +727,8 @@ func buildAPIMux(
 	)
 	cleanup := func() {
 		rlStop()
-		if auditClose != nil {
-			_ = auditClose()
-		}
+		// auditLogger lifecycle is owned by the caller (lifted out so
+		// the consolidation worker shares it).
 	}
 	return rlMiddleware(httpMetrics.MetricsMiddleware(traced)), cleanup
 }
@@ -941,7 +966,7 @@ func buildRetentionPolicyLoader(legacyInterval, workspace, serviceGroup string, 
 //
 // Worker lifecycle is identical to the existing compaction worker —
 // caller invokes go cw.Run(ctx).
-func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.PostgresMemoryStore, log logr.Logger) *consolidation.Worker {
+func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.PostgresMemoryStore, auditLogger *eeaudit.Logger, log logr.Logger) *consolidation.Worker {
 	const msgDisabled = "consolidation worker disabled"
 	if f.consolidationInterval == "" {
 		log.V(1).Info(msgDisabled, "reason", "CONSOLIDATION_INTERVAL not set")
@@ -969,6 +994,10 @@ func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.Postg
 	pool := pgStore.Pool()
 	metrics := consolidation.NewMetrics()
 	metrics.MustRegister(prometheus.DefaultRegisterer)
+	var auditor consolidation.Auditor
+	if auditLogger != nil {
+		auditor = &consolidationAuditAdapter{inner: auditLogger}
+	}
 	return consolidation.NewWorker(consolidation.WorkerOptions{
 		Store:           memorypg.NewConsolidationWriter(pool),
 		LockStore:       memorypg.NewAdvisoryLockStore(pool),
@@ -982,6 +1011,7 @@ func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.Postg
 		LivenessMark:    func() { memory.MarkWorkerRunning(memory.WorkerNameConsolidation) },
 		LivenessUnmark:  func() { memory.MarkWorkerStopped(memory.WorkerNameConsolidation) },
 		PIIRedactor:     newConsolidationPIIRedactor(),
+		Auditor:         auditor,
 	})
 }
 

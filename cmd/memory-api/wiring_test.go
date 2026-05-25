@@ -132,6 +132,7 @@ func TestBuildAPIMux_POSTMemoryWithoutUserIDReturns400(t *testing.T) {
 		false,
 		nil, // pool is only used by enterprise privacy middleware
 		nil, // policy loader is optional — identity ranker without it
+		nil, // auditLogger optional; non-enterprise tests don't exercise it
 		logr.Discard(),
 	)
 	defer cleanup()
@@ -176,6 +177,7 @@ func TestBuildAPIMux_GETMemoriesWired(t *testing.T) {
 		false,
 		nil,
 		nil, // policy loader is optional — identity ranker without it
+		nil, // auditLogger optional; non-enterprise tests don't exercise it
 		logr.Discard(),
 	)
 	defer cleanup()
@@ -426,6 +428,7 @@ func TestBuildAPIMux_HealthzAlwaysReachable(t *testing.T) {
 		false,
 		nil,
 		nil, // policy loader is optional — identity ranker without it
+		nil, // auditLogger optional; non-enterprise tests don't exercise it
 		logr.Discard(),
 	)
 	defer cleanup()

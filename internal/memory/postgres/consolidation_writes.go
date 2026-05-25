@@ -136,17 +136,25 @@ WHERE id = ANY($3::uuid[]);
 	return err
 }
 
-// Rescore updates confidence on a single observation. Importance is
-// not yet a column — placeholder for future expansion.
+// Rescore updates importance + confidence on a single observation
+// and records lineage (promoted_by_pack + promoted_at). importance is
+// the new column added in migration 000011; confidence existed since
+// the initial schema. A zero value on either score is treated as
+// "don't change" — the pack only updates the field it actually
+// adjusted.
 func (s *ConsolidationWriter) Rescore(ctx context.Context, w consolidation.RescoreWrite) error {
-	if w.Confidence <= 0 {
+	if w.Confidence <= 0 && w.Importance <= 0 {
 		return nil
 	}
 	const q = `
 UPDATE memory_observations
-SET confidence = $1
-WHERE id = $2;
+SET confidence       = CASE WHEN $1::real > 0 THEN $1 ELSE confidence END,
+    importance       = CASE WHEN $2::real > 0 THEN $2 ELSE importance END,
+    promoted_by_pack = $3,
+    promoted_at      = $4
+WHERE id = $5;
 `
-	_, err := s.pool.Exec(ctx, q, w.Confidence, w.TargetID)
+	_, err := s.pool.Exec(ctx, q,
+		w.Confidence, w.Importance, w.PromotedByPack, w.PromotedAt, w.TargetID)
 	return err
 }
