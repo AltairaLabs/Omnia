@@ -1,3 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-rescope
+  namespace: omnia-functions
+data:
+  pack.json: |
+    {
+      "id": "demo-rescope",
+      "name": "demo-rescope",
+      "version": "1.0.0",
+      "template_engine": { "version": "v1", "syntax": "{{variable}}" },
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "default",
+          "version": "1.0.0",
+          "system_template": "You are a memory consolidation worker handling the crossScopeCandidates axis. The input is a JSON object with axis=crossScopeCandidates and a buckets array; each bucket groups observations sharing entity (kind, name) across many users in one workspace. For each bucket with sufficient cross-user prevalence (>= gates.minDistinctUserCount.agentScoped), emit one rescope action promoting the observations to agent-scoped. Do not emit institutional (ws, null, null) destinations — the platform rejects them. Output a JSON array of typed actions and nothing else."
+        }
+      }
+    }
+---
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: PromptPack
 metadata:
@@ -5,29 +27,12 @@ metadata:
   namespace: omnia-functions
   labels:
     app.kubernetes.io/component: memory-consolidation
-    omnia.altairalabs.ai/pack-class: system
+    omnia.altairalabs.ai/pack-class: example
   annotations:
     omnia.altairalabs.ai/pack-role: consolidation-demo-rescope
-    omnia.altairalabs.ai/system-pack-version: "0.1.0"
 spec:
-  description: |
-    Demonstrative consolidation pack: cross-scope rescope.
-    Handles the crossScopeCandidates axis. Emits rescope actions
-    promoting observations to agent-scoped or user-scoped tiers
-    when k-anonymity thresholds are met. Never targets institutional
-    (rejected at the validator in v1).
-  prompts:
-    main: |
-      You are a memory consolidation worker. Input is a JSON object
-      with axis="crossScopeCandidates" and buckets of observations
-      sharing kind+name across N distinct users.
-
-      For each bucket: if bucket.stats.distinctUsers ≥
-      input.gates.minDistinctUserCount.agentScoped, emit ONE rescope
-      action promoting representative observations to:
-        { workspaceID, agentID: <bucket.agentID>, userID: null }
-
-      Do NOT emit rescope to (workspaceID, null, null) —
-      institutional promotion is rejected in v1.
-
-      Output: JSON array of rescope actions only.
+  source:
+    type: configmap
+    configMapRef:
+      name: demo-rescope
+  version: "1.0.0"
