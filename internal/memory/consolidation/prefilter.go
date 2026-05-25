@@ -63,11 +63,18 @@ LIMIT $3;
 // BuildCrossScopeCandidatesQuery returns SQL + args for cross-scope
 // promotion candidates: observations sharing (kind, name) across
 // ≥ MinDistinctUsers distinct users within the workspace.
+//
+// Returns per-row (no SQL GROUP BY in the outer projection) so the
+// adapter can surface content + mutability + source_type + observed_at
+// onto each BucketEntry. Groups that fail the k-anonymity threshold
+// are filtered via an inner aggregate subquery so we don't drag every
+// kind/name across the wire. Adapter groups in Go and applies
+// MaxPerBucket.
 func BuildCrossScopeCandidatesQuery(o PreFilterOptions) (string, []any) {
 	const q = `
 WITH eligible AS (
     SELECT o.id, e.workspace_id, e.virtual_user_id, e.agent_id, e.kind, e.name,
-           o.content, o.observed_at
+           o.content, o.observed_at, o.mutability, o.source_type
     FROM memory_observations o
     JOIN memory_entities e ON e.id = o.entity_id
     WHERE e.workspace_id = $1
@@ -75,23 +82,29 @@ WITH eligible AS (
       AND o.source_type != 'regulated'
       AND o.superseded_by IS NULL
       AND e.virtual_user_id IS NOT NULL
-), grouped AS (
-    SELECT workspace_id, kind, name,
-           COUNT(DISTINCT virtual_user_id) AS distinct_users,
-           COUNT(*) AS total_obs,
-           array_agg(id ORDER BY observed_at DESC) AS obs_ids
+), qualifying AS (
+    SELECT kind, name
     FROM eligible
-    GROUP BY workspace_id, kind, name
+    GROUP BY kind, name
     HAVING COUNT(DISTINCT virtual_user_id) >= $2
-    ORDER BY distinct_users DESC, total_obs DESC
-    LIMIT $3
 )
-SELECT * FROM grouped;
+SELECT e.id, e.workspace_id, e.virtual_user_id, e.agent_id, e.kind, e.name,
+       e.content, e.observed_at, e.mutability, e.source_type
+FROM eligible e
+JOIN qualifying q ON q.kind = e.kind AND q.name = e.name
+ORDER BY e.kind, e.name, e.observed_at DESC
+LIMIT $3;
 `
+	// Outer LIMIT bounds the candidate pull: at most MaxBucketsPerPass
+	// distinct (kind, name) groups, each with up to MaxPerBucket entries.
+	maxPer := o.MaxPerBucket
+	if maxPer <= 0 {
+		maxPer = 10
+	}
 	args := []any{
 		o.WorkspaceID,
 		o.MinDistinctUsers,
-		o.MaxBucketsPerPass,
+		o.MaxBucketsPerPass * maxPer,
 	}
 	return q, args
 }
