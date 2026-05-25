@@ -536,9 +536,11 @@ if [ -f coverage.out ]; then
             continue
         fi
 
-        # Skip Postgres consolidation adapters (advisory lock + writes + prefilter)
-        # — require real Postgres via testcontainers, tested in integration.
-        # TODO: integration tests via testcontainers (issue: follow-up to consolidation v1)
+        # Postgres consolidation adapters require a real Postgres
+        # (testcontainers) and live under integration tests gated by
+        # !testing.Short(). Pre-commit runs in -short mode, so these
+        # tests are skipped here and the pre-commit coverage check
+        # would otherwise see 0%. Excluded explicitly.
         if [[ "$file" == "internal/memory/postgres/advisory_lock.go" ]] || [[ "$file" == "internal/memory/postgres/consolidation_writes.go" ]] || [[ "$file" == "internal/memory/postgres/consolidation_prefilter.go" ]]; then
             continue
         fi

@@ -209,7 +209,9 @@ spec:
                         default: true
                         description: |-
                           RequirePIIRedaction re-runs the PII redactor on action content
-                          before persist. Default true.
+                          before persist. Defaults to true when unset; explicit false in
+                          the spec opts out. Pointer is required so the resolution helper
+                          can distinguish "unset" (apply default) from "explicit false".
                         type: boolean
                     type: object
                   schedule:

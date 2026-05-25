@@ -495,10 +495,12 @@ type MemoryConsolidationSafetyGates struct {
 	MaxScopeWidening string `json:"maxScopeWidening,omitempty"`
 
 	// RequirePIIRedaction re-runs the PII redactor on action content
-	// before persist. Default true.
+	// before persist. Defaults to true when unset; explicit false in
+	// the spec opts out. Pointer is required so the resolution helper
+	// can distinguish "unset" (apply default) from "explicit false".
 	// +kubebuilder:default=true
 	// +optional
-	RequirePIIRedaction bool `json:"requirePIIRedaction,omitempty"`
+	RequirePIIRedaction *bool `json:"requirePIIRedaction,omitempty"`
 }
 
 // MemoryConsolidationTimeouts configures per-call and per-pass timeouts.

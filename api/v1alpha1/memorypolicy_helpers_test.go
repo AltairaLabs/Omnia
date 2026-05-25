@@ -149,8 +149,8 @@ func TestMemoryPolicy_ResolvedSafetyGates_Defaults(t *testing.T) {
 		t.Errorf("nil policy userScoped: want 1, got %d",
 			got.MinDistinctUserCount["userScoped"])
 	}
-	if !got.RequirePIIRedaction {
-		t.Error("nil policy: RequirePIIRedaction default must be true")
+	if !got.PIIRedactionEnabled() {
+		t.Error("nil policy: PIIRedactionEnabled default must be true")
 	}
 	if got.MaxScopeWidening != "workspace" {
 		t.Errorf("nil policy MaxScopeWidening: want \"workspace\", got %q",
@@ -176,7 +176,7 @@ func TestMemoryPolicy_ResolvedSafetyGates_Override(t *testing.T) {
 					// userScoped not set → keep default of 1
 				},
 				MaxScopeWidening:    "workspace",
-				RequirePIIRedaction: true,
+				RequirePIIRedaction: ptr(true),
 			},
 		},
 	}}

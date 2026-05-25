@@ -132,8 +132,7 @@ type flags struct {
 	serviceGroup          string
 
 	// --- Consolidation v1 ---
-	consolidationInterval     string // env: CONSOLIDATION_INTERVAL, e.g. "6h". Empty disables the worker.
-	consolidationFunctionsURL string // env: CONSOLIDATION_FUNCTIONS_URL, base URL for function-mode AgentRuntime endpoints.
+	consolidationInterval string // env: CONSOLIDATION_INTERVAL, e.g. "6h". Empty disables the worker.
 }
 
 func parseFlags() *flags {
@@ -165,7 +164,6 @@ func parseFlags() *flags {
 	flag.StringVar(&f.workspace, "workspace", "", "Workspace name (K8s CRD resolution mode)")
 	flag.StringVar(&f.serviceGroup, "service-group", "", "Service group name within workspace")
 	flag.StringVar(&f.consolidationInterval, "consolidation-interval", "", "Interval for the LLM-driven memory consolidation worker (e.g. 6h). Empty disables.")
-	flag.StringVar(&f.consolidationFunctionsURL, "consolidation-functions-url", "", "Base URL for function-mode AgentRuntime endpoints serving consolidation packs (e.g. http://functions.omnia-functions:8080).")
 	flag.Parse()
 
 	f.applyEnvFallbacks()
@@ -217,7 +215,6 @@ func (f *flags) applyEnvFallbacks() {
 		}
 	}
 	envFallback(&f.consolidationInterval, "", "CONSOLIDATION_INTERVAL")
-	envFallback(&f.consolidationFunctionsURL, "", "CONSOLIDATION_FUNCTIONS_URL")
 }
 
 // envFallback sets *dst from the environment variable envKey when *dst still
@@ -481,7 +478,6 @@ func run() error {
 		go cw.Run(ctx)
 		log.Info("consolidation worker started",
 			"interval", f.consolidationInterval,
-			"functionsURL", f.consolidationFunctionsURL,
 		)
 	}
 
@@ -957,10 +953,6 @@ func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.Postg
 			"value", f.consolidationInterval)
 		return nil
 	}
-	if f.consolidationFunctionsURL == "" {
-		log.Info(msgDisabled, "reason", "CONSOLIDATION_FUNCTIONS_URL not set")
-		return nil
-	}
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
 		log.V(1).Info(msgDisabled,
@@ -983,12 +975,13 @@ func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.Postg
 		Policies:        consolidation.NewK8sPolicyLister(c),
 		Workspaces:      consolidation.NewK8sWorkspaceLister(c),
 		PreFilterRunner: memorypg.NewPreFilterRunner(pool),
-		Client:          consolidation.NewClient(f.consolidationFunctionsURL, 5*time.Minute),
+		Client:          consolidation.NewClient(5 * time.Minute),
 		Metrics:         metrics,
 		Interval:        interval,
 		Log:             log.WithName("consolidation"),
 		LivenessMark:    func() { memory.MarkWorkerRunning(memory.WorkerNameConsolidation) },
 		LivenessUnmark:  func() { memory.MarkWorkerStopped(memory.WorkerNameConsolidation) },
+		PIIRedactor:     newConsolidationPIIRedactor(),
 	})
 }
 

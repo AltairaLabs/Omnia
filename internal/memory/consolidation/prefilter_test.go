@@ -29,8 +29,11 @@ func TestStaleObservationsExcludesNonMutable(t *testing.T) {
 	if !strings.Contains(q, "superseded_by IS NULL") {
 		t.Errorf("query does not exclude already-superseded rows:\n%s", q)
 	}
-	if len(args) != 4 {
-		t.Errorf("expected 4 args (workspace, older_than, min_group_size, limit), got %d", len(args))
+	// 3 args: workspace, older_than, limit. MinGroupSize is now applied
+	// in Go (the adapter groups by user/agent/kind/name and filters small
+	// groups out) so the SQL doesn't carry it.
+	if len(args) != 3 {
+		t.Errorf("expected 3 args (workspace, older_than, limit), got %d", len(args))
 	}
 }
 
