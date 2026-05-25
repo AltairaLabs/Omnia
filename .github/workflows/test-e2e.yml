@@ -64,7 +64,15 @@ jobs:
   test-e2e-core:
     name: Core E2E
     runs-on: ubuntu-latest
-    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    # E2E failures must block PR merges. The original `continue-on-error:
+    # ${{ github.event_name == 'pull_request' }}` from commit 31522901 was
+    # meant to make E2E "informational" on PRs, but
+    # `continue-on-error: true` makes GitHub report the job as success
+    # regardless of test outcome — so `gh pr merge --auto` happily merged
+    # PRs whose E2E failed silently. The consolidation v1 fix series hit
+    # this twice (#1158, #1161). If a single spec is genuinely flaky,
+    # fix the spec or label-filter it out — don't mask the whole job.
+    # See #1160.
     steps:
       - name: Clone the code
         uses: actions/checkout@v6
@@ -196,7 +204,7 @@ jobs:
   test-e2e-arena:
     name: Arena E2E
     runs-on: ubuntu-latest
-    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    # E2E failures must block. See the Core E2E job comment + #1160.
     steps:
       - name: Clone the code
         uses: actions/checkout@v6
