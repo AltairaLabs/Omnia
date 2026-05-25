@@ -24,17 +24,18 @@ linters:
     - unused
   settings:
     gocognit:
-      # SonarCloud S3776 uses 15, but allow 20 for gradual improvement
-      # TODO: Lower to 15 once existing issues are fixed
-      min-complexity: 20
+      # Match SonarCloud S3776 — same threshold locally so issues
+      # surface at commit/push, not after CI bounces. Existing
+      # high-complexity functions are listed in the exclusions block
+      # below.
+      min-complexity: 15
     goconst:
-      # Match SonarCloud S1192 - flag strings duplicated 4+ times
+      # Match SonarCloud S1192 — flag strings duplicated 4+ times.
       min-len: 3
       min-occurrences: 4
     gocyclo:
-      # Cyclomatic complexity threshold - allow 20 for gradual improvement
-      # TODO: Lower to 15 once existing issues are fixed
-      min-complexity: 20
+      # Match SonarCloud-equivalent cyclomatic threshold.
+      min-complexity: 15
     revive:
       rules:
         - name: comment-spacings

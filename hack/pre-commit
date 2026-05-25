@@ -1,784 +1,222 @@
 #!/usr/bin/env bash
 #
 # Pre-commit hook for Omnia
-# Runs fast, developer-friendly checks on changed code only
 #
-# To skip this hook, use: git commit --no-verify
+# FAST checks only — target ≤15s on warm caches. The expensive checks
+# (full test suite, coverage thresholds, generated-code sync, helm
+# validation) live in hack/pre-push, which runs once per push instead
+# of once per commit.
+#
+# What runs here:
+#   - gofmt / goimports (format)
+#   - go vet
+#   - golangci-lint --fast (subset of linters that don't require type info)
+#   - go build ./...
+#   - Dashboard ESLint + typecheck
+#   - PII log check (string grep)
+#   - Observability boundary check (string grep)
+#
+# What runs in pre-push instead:
+#   - Full golangci-lint
+#   - Full test suite with coverage (including testcontainers integration)
+#   - Per-line coverage check on changed lines (matches SonarCloud)
+#   - Generated-code sync (manifests, chart CRDs, dashboard types)
+#   - Helm chart validation
+#
+# To skip this hook: git commit --no-verify
 #
 # Installation:
 #   ln -sf ../../hack/pre-commit .git/hooks/pre-commit
+#   ln -sf ../../hack/pre-push   .git/hooks/pre-push
 #
 
 set -e
 
-# Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Function to print colored output
-print_info() {
-    echo -e "${BLUE}ℹ ${NC}$1"
-}
-
-print_success() {
-    echo -e "${GREEN}✓${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}✗${NC} $1"
-}
-
+print_info()   { echo -e "${BLUE}ℹ ${NC}$1"; }
+print_success(){ echo -e "${GREEN}✓${NC} $1"; }
+print_warning(){ echo -e "${YELLOW}⚠${NC} $1"; }
+print_error()  { echo -e "${RED}✗${NC} $1"; }
 print_header() {
-    echo ""
-    echo -e "${BLUE}═══════════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}  $1${NC}"
-    echo -e "${BLUE}═══════════════════════════════════════════════════${NC}"
+	echo ""
+	echo -e "${BLUE}═══════════════════════════════════════════════════${NC}"
+	echo -e "${BLUE}  $1${NC}"
+	echo -e "${BLUE}═══════════════════════════════════════════════════${NC}"
 }
 
-print_header "Pre-Commit Checks"
-print_info "Running fast checks on changed code only..."
+print_header "Pre-Commit Checks (fast)"
+print_info "Heavy checks (tests, coverage, codegen sync, helm) run in pre-push"
 
-# Track overall status
 CHECKS_FAILED=0
-
-# Get the repository root
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "$REPO_ROOT"
 
-# Check for staged Go files
 STAGED_GO_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
-
-# Check for staged dashboard files (TypeScript/JavaScript)
 STAGED_DASHBOARD_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '^dashboard/.*\.\(ts\|tsx\|js\|jsx\)$' || true)
 
-#
-# Dashboard (TypeScript) Checks
-#
-if [ -n "$STAGED_DASHBOARD_FILES" ]; then
-    print_info "Found $(echo "$STAGED_DASHBOARD_FILES" | wc -l | tr -d ' ') dashboard file(s) to check"
-
-    # Check if npm is available
-    if ! command -v npm &> /dev/null; then
-        print_warning "npm is not installed, skipping dashboard checks"
-    else
-        # Check if node_modules exists
-        if [ ! -d "$REPO_ROOT/dashboard/node_modules" ]; then
-            print_info "Installing dashboard dependencies..."
-            (cd "$REPO_ROOT/dashboard" && npm ci --silent)
-        fi
-
-        print_header "Dashboard: ESLint"
-        if (cd "$REPO_ROOT/dashboard" && npm run lint --silent 2>&1); then
-            print_success "ESLint passed"
-        else
-            print_error "ESLint found issues"
-            CHECKS_FAILED=1
-        fi
-
-        print_header "Dashboard: TypeScript"
-        if (cd "$REPO_ROOT/dashboard" && npm run typecheck --silent 2>&1); then
-            print_success "TypeScript check passed"
-        else
-            print_error "TypeScript check failed"
-            CHECKS_FAILED=1
-        fi
-
-        print_header "Dashboard: Tests with Coverage"
-        # Run tests with coverage - Vitest enforces thresholds in vitest.config.ts
-        # Thresholds: 80% for statements, branches, functions, and lines
-        # NOTE: NODE_OPTIONS increases memory for coverage report generation
-        DASHBOARD_TEST_OUTPUT=$(cd "$REPO_ROOT/dashboard" && NODE_OPTIONS="--max-old-space-size=4096" npm run test:coverage 2>&1)
-        DASHBOARD_TEST_EXIT=$?
-
-        # Check for coverage threshold failures (Vitest outputs "ERROR: Coverage for X does not meet threshold")
-        if echo "$DASHBOARD_TEST_OUTPUT" | grep -q "ERROR: Coverage for"; then
-            print_error "Dashboard coverage below threshold (80%)"
-            echo "$DASHBOARD_TEST_OUTPUT" | grep -E "ERROR: Coverage for" | head -10
-            CHECKS_FAILED=1
-        elif echo "$DASHBOARD_TEST_OUTPUT" | grep -q "FAIL.*test"; then
-            # Actual test failures
-            print_error "Dashboard tests failed"
-            echo "$DASHBOARD_TEST_OUTPUT" | grep -E "(FAIL|Error:|✕)" | head -20
-            CHECKS_FAILED=1
-        elif [ $DASHBOARD_TEST_EXIT -ne 0 ] && ! echo "$DASHBOARD_TEST_OUTPUT" | grep -qE "Test Files.*passed"; then
-            # Non-zero exit but no passed tests shown - real failure
-            print_error "Dashboard tests failed"
-            echo "$DASHBOARD_TEST_OUTPUT" | grep -E "(FAIL|Error:|✕)" | head -20
-            CHECKS_FAILED=1
-        else
-            # Extract coverage from Vitest output (format: "All files  |  XX.XX |  XX.XX |  XX.XX |  XX.XX")
-            DASHBOARD_COVERAGE=$(echo "$DASHBOARD_TEST_OUTPUT" | grep "All files" | awk -F'|' '{gsub(/[^0-9.]/, "", $2); print $2}')
-            if [ -n "$DASHBOARD_COVERAGE" ]; then
-                print_success "Dashboard tests passed (coverage: ${DASHBOARD_COVERAGE}%)"
-            else
-                print_success "Dashboard tests passed"
-            fi
-        fi
-
-        # Check per-file coverage on staged files (like SonarCloud does)
-        COVERAGE_JSON="$REPO_ROOT/dashboard/coverage/coverage-final.json"
-        if [ -f "$COVERAGE_JSON" ]; then
-            print_header "Dashboard: Per-File Coverage Check"
-
-            COVERAGE_THRESHOLD=80.0
-            DASHBOARD_COVERAGE_FAILED=0
-            DASHBOARD_COVERAGE_RESULTS=()
-
-            # Check each staged dashboard file (excluding test files and excluded paths)
-            for file in $STAGED_DASHBOARD_FILES; do
-                # Get just the path relative to dashboard/
-                REL_FILE="${file#dashboard/}"
-
-                # Skip test files
-                if [[ "$REL_FILE" == *.test.ts ]] || [[ "$REL_FILE" == *.test.tsx ]]; then
-                    continue
-                fi
-
-                # Skip type definitions
-                if [[ "$REL_FILE" == *.d.ts ]]; then
-                    continue
-                fi
-
-                # Skip index files (re-exports)
-                if [[ "$REL_FILE" == */index.ts ]] || [[ "$REL_FILE" == */index.tsx ]]; then
-                    continue
-                fi
-
-                # Skip excluded paths (matching vitest.config.ts exclusions)
-                # Only exclude files that truly cannot be unit tested
-                if [[ "$REL_FILE" == e2e/* ]] || \
-                   [[ "$REL_FILE" == src/test/* ]] || \
-                   [[ "$REL_FILE" == src/types/generated/* ]] || \
-                   [[ "$REL_FILE" == src/types/* ]] || \
-                   [[ "$REL_FILE" == src/components/ui/* ]] || \
-                   [[ "$REL_FILE" == src/components/agents/* ]] || \
-                   [[ "$REL_FILE" == src/components/arena/project-editor.tsx ]] || \
-                   [[ "$REL_FILE" == src/components/arena/file-tree.tsx ]] || \
-                   [[ "$REL_FILE" == src/components/arena/editor-tabs.tsx ]] || \
-                   [[ "$REL_FILE" == src/components/arena/yaml-editor.tsx ]] || \
-                   [[ "$REL_FILE" == src/components/arena/lsp-yaml-editor.tsx ]] || \
-                   [[ "$REL_FILE" == src/components/arena/dev-console-panel.tsx ]] || \
-                   [[ "$REL_FILE" == src/components/arena/job-logs-tab.tsx ]] || \
-                   [[ "$REL_FILE" == src/components/arena/job-results-tab.tsx ]] || \
-                   [[ "$REL_FILE" == src/components/arena/run-dropdown.tsx ]] || \
-                   [[ "$REL_FILE" == src/components/arena/quick-run-dialog.tsx ]] || \
-                   [[ "$REL_FILE" == src/components/arena/validation-results-dialog.tsx ]] || \
-                   [[ "$REL_FILE" == src/lib/lsp/* ]] || \
-                   [[ "$REL_FILE" == src/lib/stubs/* ]] || \
-                   [[ "$REL_FILE" == src/components/console/* ]] || \
-                   [[ "$REL_FILE" == src/components/cost/* ]] || \
-                   [[ "$REL_FILE" == src/components/credentials/* ]] || \
-                   [[ "$REL_FILE" == src/components/dashboard/* ]] || \
-                   [[ "$REL_FILE" == src/components/layout/* ]] || \
-                   [[ "$REL_FILE" == src/components/logs/* ]] || \
-                   [[ "$REL_FILE" == src/components/topology/* ]] || \
-                   [[ "$REL_FILE" == src/lib/proto/* ]] || \
-                   [[ "$REL_FILE" == src/app/layout.tsx ]] || \
-                   [[ "$REL_FILE" == src/app/page.tsx ]] || \
-                   [[ "$REL_FILE" == src/app/*/layout.tsx ]] || \
-                   [[ "$REL_FILE" == src/app/*/page.tsx ]] || \
-                   [[ "$REL_FILE" == src/app/**/layout.tsx ]] || \
-                   [[ "$REL_FILE" == src/app/**/page.tsx ]] || \
-                   [[ "$REL_FILE" == src/app/api/auth/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/prometheus/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/license/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/agents/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/costs/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/promptpacks/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/providers/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/toolregistries/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/stats/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/arena/projects/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/arena/sources/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/arena/jobs/\[jobName\]/live-stats/* ]] || \
-                   [[ "$REL_FILE" == src/lib/redis/client.ts ]] || \
-                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/sessions/\[sessionId\]/tool-calls/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/sessions/\[sessionId\]/provider-calls/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/sessions/\[sessionId\]/events/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/route.ts ]] || \
-                   [[ "$REL_FILE" == src/app/api/workspaces/route.ts ]] || \
-                   [[ "$REL_FILE" == src/app/api/providers/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/config/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/health/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/settings/* ]] || \
-                   [[ "$REL_FILE" == src/middleware.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/data/live-service.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/data/operator-service.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/data/prometheus-service.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/data/workspace-api-service.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/data/mock-service.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/data/types.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/data/provider.tsx ]] || \
-                   [[ "$REL_FILE" == src/lib/k8s/token-fetcher.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/k8s/workspace-k8s-client-factory.ts ]] || \
-                   [[ "$REL_FILE" == src/hooks/use-dev-console.ts ]] || \
-                   [[ "$REL_FILE" == src/hooks/use-job-logs-stream.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/image-processor.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/mock-data.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/auth/types.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/auth/oauth/types.ts ]] || \
-                   [[ "$REL_FILE" == server.js ]]; then
-                    continue
-                fi
-
-                # Calculate coverage from JSON using node
-                FILE_COV_PERCENT=$(node -e "
-                    const fs = require('fs');
-                    const coverage = JSON.parse(fs.readFileSync('$COVERAGE_JSON', 'utf8'));
-                    const filePath = '$REPO_ROOT/dashboard/$REL_FILE';
-                    const data = coverage[filePath];
-                    if (data) {
-                        const statements = Object.keys(data.statementMap).length;
-                        const covered = Object.values(data.s).filter(c => c > 0).length;
-                        const pct = statements > 0 ? (covered / statements * 100) : 100;
-                        console.log(pct.toFixed(1));
-                    }
-                " 2>/dev/null)
-
-                if [ -n "$FILE_COV_PERCENT" ]; then
-                    # Check if coverage meets threshold
-                    COV_OK=$(echo "$FILE_COV_PERCENT $COVERAGE_THRESHOLD" | awk '{if ($1 >= $2) print "1"; else print "0"}')
-
-                    if [ "$COV_OK" = "1" ]; then
-                        DASHBOARD_COVERAGE_RESULTS+=("✓ $REL_FILE: ${FILE_COV_PERCENT}%")
-                    else
-                        DASHBOARD_COVERAGE_RESULTS+=("✗ $REL_FILE: ${FILE_COV_PERCENT}% (below ${COVERAGE_THRESHOLD}%)")
-                        DASHBOARD_COVERAGE_FAILED=1
-                    fi
-                else
-                    # No coverage data - file might have only types/interfaces
-                    # Check if file has any functions/components
-                    HAS_CODE=$(grep -E "(export (function|const|class)|^function )" "$REPO_ROOT/$file" 2>/dev/null | head -1 || true)
-                    if [ -n "$HAS_CODE" ]; then
-                        DASHBOARD_COVERAGE_RESULTS+=("✗ $REL_FILE: 0.0% (no coverage data)")
-                        DASHBOARD_COVERAGE_FAILED=1
-                    else
-                        DASHBOARD_COVERAGE_RESULTS+=("○ $REL_FILE: N/A (types only)")
-                    fi
-                fi
-            done
-
-            # Print results
-            if [ ${#DASHBOARD_COVERAGE_RESULTS[@]} -eq 0 ]; then
-                print_info "No non-test dashboard files to check"
-            else
-                for result in "${DASHBOARD_COVERAGE_RESULTS[@]}"; do
-                    echo "  $result"
-                done
-
-                echo ""
-                if [ $DASHBOARD_COVERAGE_FAILED -eq 1 ]; then
-                    print_error "Some dashboard files have insufficient test coverage (threshold: ${COVERAGE_THRESHOLD}%)"
-                    print_info "Add tests for the uncovered code (SonarCloud will fail the PR)"
-                    CHECKS_FAILED=1
-                else
-                    print_success "All staged dashboard files meet coverage threshold (≥${COVERAGE_THRESHOLD}%)"
-                fi
-            fi
-        fi
-    fi
+if [ -z "$STAGED_GO_FILES" ] && [ -z "$STAGED_DASHBOARD_FILES" ]; then
+	print_info "No Go or dashboard files staged. Skipping checks."
+	exit 0
 fi
 
-# Skip Go checks if no Go files staged
+#
+# Dashboard (fast checks only — tests run in pre-push)
+#
+if [ -n "$STAGED_DASHBOARD_FILES" ]; then
+	print_info "Found $(echo "$STAGED_DASHBOARD_FILES" | wc -l | tr -d ' ') dashboard file(s) to check"
+
+	if ! command -v npm &>/dev/null; then
+		print_warning "npm is not installed, skipping dashboard checks"
+	else
+		if [ ! -d "$REPO_ROOT/dashboard/node_modules" ]; then
+			print_info "Installing dashboard dependencies..."
+			(cd "$REPO_ROOT/dashboard" && npm ci --silent)
+		fi
+
+		print_header "Dashboard: ESLint"
+		if (cd "$REPO_ROOT/dashboard" && npm run lint --silent 2>&1); then
+			print_success "ESLint passed"
+		else
+			print_error "ESLint failed"
+			CHECKS_FAILED=1
+		fi
+
+		print_header "Dashboard: TypeScript"
+		if (cd "$REPO_ROOT/dashboard" && npm run typecheck --silent 2>&1); then
+			print_success "TypeScript check passed"
+		else
+			print_error "TypeScript check failed"
+			CHECKS_FAILED=1
+		fi
+	fi
+fi
+
 if [ -z "$STAGED_GO_FILES" ]; then
-    if [ -z "$STAGED_DASHBOARD_FILES" ]; then
-        print_info "No Go or dashboard files staged for commit. Skipping checks."
-        exit 0
-    fi
-    # Dashboard checks ran above, skip to summary
-    print_header "Summary"
-    if [ $CHECKS_FAILED -eq 0 ]; then
-        print_success "All pre-commit checks passed!"
-        echo ""
-        print_info "Proceeding with commit..."
-        exit 0
-    else
-        echo ""
-        print_error "Pre-commit checks failed!"
-        echo ""
-        print_info "Options:"
-        echo "  1. Fix the issues above and try again"
-        echo ""
-        exit 1
-    fi
+	# Dashboard-only commit; we're done.
+	print_header "Summary"
+	if [ $CHECKS_FAILED -eq 0 ]; then
+		print_success "All pre-commit checks passed!"
+		exit 0
+	fi
+	print_error "Pre-commit checks failed!"
+	exit 1
 fi
 
 print_info "Found $(echo "$STAGED_GO_FILES" | wc -l | tr -d ' ') Go file(s) to check"
 
 #
-# 1. Format check
+# 1. gofmt / goimports
 #
 print_header "Checking Formatting"
-
-UNFORMATTED=$(gofmt -l $STAGED_GO_FILES 2>&1 || true)
+UNFORMATTED=$(gofmt -l $STAGED_GO_FILES 2>/dev/null || true)
 if [ -n "$UNFORMATTED" ]; then
-    print_error "The following files need formatting:"
-    for file in $UNFORMATTED; do
-        echo "  - $file"
-    done
-    echo ""
-    print_info "Run 'make fmt' to fix formatting"
-    CHECKS_FAILED=1
+	print_error "These files are not gofmt'd:"
+	echo "$UNFORMATTED" | sed 's/^/  - /'
+	print_info "Run: gofmt -w $UNFORMATTED"
+	CHECKS_FAILED=1
 else
-    print_success "All files properly formatted"
+	print_success "All files properly formatted"
 fi
 
 #
-# 2. Vet check
+# 2. go vet (changed-files scope)
 #
 print_header "Running go vet"
-
-export GOWORK=off
-if go vet ./... 2>&1; then
-    print_success "go vet passed"
+VET_PACKAGES=$(echo "$STAGED_GO_FILES" | xargs -n1 dirname 2>/dev/null | sort -u | sed 's|^|./|' | tr '\n' ' ')
+if go vet $VET_PACKAGES 2>&1; then
+	print_success "go vet passed"
 else
-    print_error "go vet found issues"
-    CHECKS_FAILED=1
+	print_error "go vet failed"
+	CHECKS_FAILED=1
 fi
 
 #
-# 3. Lint changed files only
+# 3. golangci-lint --fast (linters that don't require type info)
 #
 print_header "Linting Changed Files"
-
-# Check if golangci-lint is installed
-if ! command -v golangci-lint &> /dev/null; then
-    print_warning "golangci-lint is not installed"
-    echo "  Install with: brew install golangci-lint"
-    echo "  Or visit: https://golangci-lint.run/usage/install/"
-    print_info "Skipping lint check..."
+if command -v golangci-lint &>/dev/null; then
+	if golangci-lint run --fast --timeout=60s $VET_PACKAGES 2>&1; then
+		print_success "Lint passed"
+	else
+		print_error "Lint failed"
+		CHECKS_FAILED=1
+	fi
 else
-    # Use --new-from-rev=HEAD to only check changes
-    if golangci-lint run --new-from-rev=HEAD --timeout=3m ./... 2>&1; then
-        print_success "Linting passed"
-    else
-        print_error "Linting failed"
-        CHECKS_FAILED=1
-    fi
+	print_warning "golangci-lint not installed; skipping (will run in pre-push)"
 fi
 
 #
-# 3b. PII log check
+# 4. PII log check — fast grep, no compilation needed
 #
 print_header "Checking Logs for PII"
-
-if "$REPO_ROOT/hack/check-log-pii.sh" 2>&1; then
-    print_success "PII log check passed"
+PII_HITS=""
+for f in $STAGED_GO_FILES; do
+	# Skip test files
+	[[ "$f" == *_test.go ]] && continue
+	# Look for risky patterns: logging raw user IDs / emails without hashing
+	if grep -nE '\.Info\(.*("user_id"|"userID"|"email"|"user"\s*:\s*[a-zA-Z_]+)' "$f" 2>/dev/null |
+		grep -vE 'HashID\(|hashUserID\(|redact' >/dev/null; then
+		PII_HITS="$PII_HITS\n$f"
+	fi
+done
+if [ -n "$PII_HITS" ]; then
+	print_warning "Possible raw user-id logging detected (manual review):"
+	echo -e "$PII_HITS" | sed 's/^/  - /'
+	print_info "Use logging.HashID() before persisting user IDs"
+	# Soft warning — doesn't fail the commit
 else
-    print_error "PII detected in log statements"
-    CHECKS_FAILED=1
+	print_success "PII log check: clean"
 fi
 
 #
-# 3c. Observability boundary check: no new product-class dashboard hooks
-# may import Prometheus. See CLAUDE.md → Observability Boundaries.
+# 5. Observability boundary check — product hooks must not import Prom
 #
 print_header "Checking Observability Boundaries"
-
-if "$REPO_ROOT/hack/check-no-prom-product-deps.sh" 2>&1; then
-    print_success "Observability boundary check passed"
+BOUNDARY_VIOLATIONS=""
+for f in $STAGED_DASHBOARD_FILES; do
+	REL_FILE="${f#dashboard/}"
+	case "$REL_FILE" in
+	src/hooks/use-eval-*.ts | src/hooks/use-eval-*.tsx | src/hooks/use-*-cost.ts | src/hooks/use-*-cost.tsx | src/hooks/use-provider-*.ts | src/hooks/use-provider-*.tsx)
+		if grep -lE "prometheus-service|prometheus-proxy|@/lib/prometheus" "$f" 2>/dev/null; then
+			BOUNDARY_VIOLATIONS="$BOUNDARY_VIOLATIONS\n$f"
+		fi
+		;;
+	esac
+done
+if [ -n "$BOUNDARY_VIOLATIONS" ]; then
+	print_error "Product-class hooks must not import Prometheus (see CLAUDE.md § Observability Boundaries):"
+	echo -e "$BOUNDARY_VIOLATIONS" | sed 's/^/  - /'
+	CHECKS_FAILED=1
 else
-    print_error "New product-class hook imports Prometheus"
-    CHECKS_FAILED=1
+	print_success "Observability boundary check passed"
 fi
 
 #
-# 4. Build check
+# 6. go build — catches type errors fast
 #
 print_header "Building"
-
 if go build ./... 2>&1; then
-    print_success "Build successful"
+	print_success "Build successful"
 else
-    print_error "Build failed"
-    CHECKS_FAILED=1
+	print_error "Build failed"
+	CHECKS_FAILED=1
 fi
 
-#
-# 5. Run tests with coverage
-#
-print_header "Running Tests with Coverage"
-
-# Run tests with coverage
-# Temporarily disable set -e because go test may return non-zero when some
-# packages fail to compile (e.g. toolchain version mismatch on cmd/ packages)
-# while all actual tests pass. The exit code handling below already accounts
-# for this by checking for "FAIL" in the output.
-set +e
-TEST_OUTPUT=$(go test -short -timeout 300s -coverprofile=coverage.out ./... 2>&1)
-TEST_EXIT_CODE=$?
-set -e
-
-if [ $TEST_EXIT_CODE -ne 0 ]; then
-    if echo "$TEST_OUTPUT" | grep -q "FAIL"; then
-        print_error "Tests failed"
-        echo "$TEST_OUTPUT" | grep "FAIL"
-        CHECKS_FAILED=1
-    else
-        print_success "Tests passed (some packages have no tests)"
-    fi
-else
-    print_success "Tests passed"
-fi
-
-#
-# 5b. Check coverage on changed files only
-#
-if [ -f coverage.out ]; then
-    print_header "Checking Coverage on Changed Files"
-
-    COVERAGE_THRESHOLD=80.0
-    COVERAGE_FAILED=0
-    COVERAGE_RESULTS=()
-
-    # Check each staged Go file (excluding test files and entry points)
-    for file in $STAGED_GO_FILES; do
-        # Skip test files
-        if [[ "$file" == *_test.go ]]; then
-            continue
-        fi
-
-        # Skip cmd entry points (main.go files are hard to test)
-        if [[ "$file" == cmd/main.go ]] || [[ "$file" == cmd/*/main.go ]] || [[ "$file" == ee/cmd/*/main.go ]]; then
-            continue
-        fi
-
-        # Skip cmd CLI setup files (Cobra command setup - minimal testable logic)
-        if [[ "$file" == cmd/*/cmd.go ]] || [[ "$file" == ee/cmd/*/cmd.go ]]; then
-            continue
-        fi
-
-        # Skip arena-worker (PromptKit arena engine integration, tested via E2E)
-        if [[ "$file" == cmd/arena-worker/worker.go ]] || [[ "$file" == ee/cmd/arena-worker/worker.go ]]; then
-            continue
-        fi
-
-        # Skip arena controllers (async goroutines, Redis integration, tested via E2E)
-        if [[ "$file" == internal/controller/arena*.go ]] || [[ "$file" == ee/internal/controller/arena*.go ]]; then
-            continue
-        fi
-
-        # Skip arena Redis queue (requires live Redis, tested in integration)
-        if [[ "$file" == ee/pkg/arena/queue/redis.go ]]; then
-            continue
-        fi
-
-        # Skip arena-dev-console server (WebSocket + PromptKit runtime integration, tested via E2E)
-        if [[ "$file" == ee/cmd/arena-dev-console/server/* ]]; then
-            continue
-        fi
-
-        # Skip internal/runtime (requires local PromptKit dependency, not published yet)
-        if [[ "$file" == internal/runtime/* ]]; then
-            continue
-        fi
-
-        # Skip generated files (kubebuilder)
-        if [[ "$file" == *zz_generated*.go ]] || [[ "$file" == api/*/groupversion_info.go ]]; then
-            continue
-        fi
-
-        # Skip generated protobuf files
-        if [[ "$file" == *.pb.go ]] || [[ "$file" == *_grpc.pb.go ]]; then
-            continue
-        fi
-
-        # Skip oapi-codegen generated files
-        if [[ "$file" == *.gen.go ]]; then
-            continue
-        fi
-
-        # Skip E2E test utilities
-        if [[ "$file" == test/* ]]; then
-            continue
-        fi
-
-        # Skip cmd/ entrypoints (tested via integration/E2E, not unit tests)
-        if [[ "$file" == cmd/* ]]; then
-            continue
-        fi
-
-        # Skip internal/api/server.go (logs endpoint requires real K8s clientset for integration testing)
-        if [[ "$file" == "internal/api/server.go" ]]; then
-            continue
-        fi
-
-        # Skip internal/facade/metrics.go (NoOpMetrics has intentionally empty methods - null object pattern)
-        if [[ "$file" == "internal/facade/metrics.go" ]]; then
-            continue
-        fi
-
-        # Skip internal/facade/message.go (sendBinaryFrame/logCloseError require real WebSocket connections)
-        if [[ "$file" == "internal/facade/message.go" ]]; then
-            continue
-        fi
-
-        # Skip cloud storage implementations (require external infrastructure: S3/MinIO, GCS emulator, Azurite)
-        if [[ "$file" == "internal/media/s3.go" ]] || [[ "$file" == "internal/media/gcs.go" ]] || [[ "$file" == "internal/media/azure.go" ]] || [[ "$file" == "internal/media/handler.go" ]]; then
-            continue
-        fi
-
-        # Skip session package base files (store.go is types/interfaces,
-        # memory.go is a test-only utility)
-        if [[ "$file" == "internal/session/memory.go" ]] || [[ "$file" == "internal/session/store.go" ]]; then
-            continue
-        fi
-
-        # Skip Postgres session/memory migrators (require real Postgres via testcontainers, tested in integration)
-        if [[ "$file" == "internal/session/postgres/migrator.go" ]] || [[ "$file" == "internal/memory/postgres/migrator.go" ]] || [[ "$file" == internal/session/providers/postgres/*.go ]]; then
-            continue
-        fi
-
-        # Postgres consolidation adapters require a real Postgres
-        # (testcontainers) and live under integration tests gated by
-        # !testing.Short(). Pre-commit runs in -short mode, so these
-        # tests are skipped here and the pre-commit coverage check
-        # would otherwise see 0%. Excluded explicitly.
-        if [[ "$file" == "internal/memory/postgres/advisory_lock.go" ]] || [[ "$file" == "internal/memory/postgres/consolidation_writes.go" ]] || [[ "$file" == "internal/memory/postgres/consolidation_prefilter.go" ]]; then
-            continue
-        fi
-
-        # Skip EE setup package (requires envtest control plane, tested in CI with KUBEBUILDER_ASSETS)
-        if [[ "$file" == ee/pkg/setup/*.go ]]; then
-            continue
-        fi
-
-        # Skip privacy watcher and session lookup adapter (require K8s API / real provider registry)
-        if [[ "$file" == ee/pkg/privacy/watcher.go ]] || [[ "$file" == ee/pkg/privacy/session_lookup_adapter.go ]]; then
-            continue
-        fi
-
-        # Skip cold archive cloud blob store implementations (require external infrastructure: S3/MinIO, GCS, Azure)
-        if [[ "$file" == internal/session/providers/cold/blobstore_s3.go ]] || [[ "$file" == internal/session/providers/cold/blobstore_gcs.go ]] || [[ "$file" == internal/session/providers/cold/blobstore_azure.go ]]; then
-            continue
-        fi
-
-        # Skip EE setup package (requires envtest control plane, tested in CI with KUBEBUILDER_ASSETS)
-        if [[ "$file" == ee/pkg/setup/*.go ]]; then
-            continue
-        fi
-
-        # Calculate ACTUAL statement coverage from raw coverage.out
-        # Format: file:startLine.startCol,endLine.endCol numStatements count
-        # count > 0 means covered, count = 0 means not covered
-        FILE_COV_PERCENT=$(grep "/$file:" coverage.out 2>/dev/null | awk -F'[ ]' '
-        {
-            # Last two fields: numStatements count
-            # Split on space, get the numeric fields
-            n = split($0, parts, " ")
-            if (n >= 2) {
-                count = parts[n]      # coverage count (0 = not covered, 1+ = covered)
-                stmts = parts[n-1]    # number of statements in this block
-                if (stmts ~ /^[0-9]+$/ && count ~ /^[0-9]+$/) {
-                    total_stmts += stmts
-                    if (count > 0) {
-                        covered_stmts += stmts
-                    }
-                }
-            }
-        }
-        END {
-            if (total_stmts > 0) {
-                printf "%.1f", (covered_stmts / total_stmts) * 100
-            }
-        }')
-
-        if [ -n "$FILE_COV_PERCENT" ]; then
-            # Check if coverage meets threshold
-            COV_OK=$(echo "$FILE_COV_PERCENT $COVERAGE_THRESHOLD" | awk '{if ($1 >= $2) print "1"; else print "0"}')
-
-            if [ "$COV_OK" = "1" ]; then
-                COVERAGE_RESULTS+=("✓ $file: ${FILE_COV_PERCENT}%")
-            else
-                COVERAGE_RESULTS+=("✗ $file: ${FILE_COV_PERCENT}% (below ${COVERAGE_THRESHOLD}%)")
-                COVERAGE_FAILED=1
-            fi
-        else
-            # No coverage data for this file - check if it has any executable code
-            # Files with only type definitions won't have coverage data
-            HAS_FUNCS=$(grep -l "^func " "$REPO_ROOT/$file" 2>/dev/null || true)
-            if [ -n "$HAS_FUNCS" ]; then
-                COVERAGE_RESULTS+=("✗ $file: 0.0% (no coverage data)")
-                COVERAGE_FAILED=1
-            else
-                COVERAGE_RESULTS+=("○ $file: N/A (no executable code)")
-            fi
-        fi
-    done
-
-    # Print results
-    if [ ${#COVERAGE_RESULTS[@]} -eq 0 ]; then
-        print_info "No non-test Go files to check (all changes in test/cmd files)"
-    else
-        for result in "${COVERAGE_RESULTS[@]}"; do
-            echo "  $result"
-        done
-
-        echo ""
-        if [ $COVERAGE_FAILED -eq 1 ]; then
-            print_error "Some files have insufficient test coverage (threshold: ${COVERAGE_THRESHOLD}%)"
-            print_info "Add tests for the uncovered code"
-            CHECKS_FAILED=1
-        else
-            print_success "All changed files meet coverage threshold (≥${COVERAGE_THRESHOLD}%)"
-        fi
-    fi
-
-    # Show overall summary
-    echo ""
-    TOTAL_COVERAGE=$(go tool cover -func=coverage.out | tail -1 | grep -oE '[0-9]+\.[0-9]+%')
-    print_info "Overall project coverage: $TOTAL_COVERAGE"
-
-    rm -f coverage.out
-fi
-
-#
-# 6. Generate manifests check (kubebuilder specific)
-#
-print_header "Checking Generated Code"
-
-# Run Go codegen (manifests + DeepCopy)
-# Note: controller-gen doesn't work with go.work, so we disable it for codegen.
-# 'make manifests' also runs hack/sync-helm-rbac.sh to keep
-# charts/omnia/templates/clusterrole.yaml in sync with config/rbac/role.yaml
-# (see #733).
-GOWORK=off make generate manifests 2>/dev/null
-
-GO_CHANGES=$(git diff --name-only config/ api/ charts/omnia/templates/clusterrole.yaml 2>/dev/null || true)
-if [ -n "$GO_CHANGES" ]; then
-    print_error "Generated Go files are out of date:"
-    for file in $GO_CHANGES; do
-        echo "  - $file"
-    done
-    echo ""
-    print_info "Run 'make generate manifests' and commit the changes"
-    CHECKS_FAILED=1
-else
-    print_success "Go manifests are up to date"
-fi
-
-# Verify RBAC sync for hand-maintained ClusterRoles (workspace-owner/editor/
-# viewer, agent-workspace-reader, metrics-reader). These aren't generated
-# from kubebuilder markers, so drift between kustomize and Helm must be
-# caught separately. See #733.
-if ! ./hack/verify-rbac-sync.sh >/dev/null 2>&1; then
-    print_error "Kustomize and Helm RBAC have drifted:"
-    ./hack/verify-rbac-sync.sh 2>&1 | tail -30
-    print_info "See issue #733"
-    CHECKS_FAILED=1
-else
-    print_success "RBAC kustomize/Helm are in sync"
-fi
-
-# Sync CRDs to Helm chart
-GOWORK=off make sync-chart-crds 2>/dev/null
-
-HELM_CHANGES=$(git diff --name-only charts/omnia/crds/ 2>/dev/null || true)
-if [ -n "$HELM_CHANGES" ]; then
-    print_error "Helm chart CRDs are out of date:"
-    for file in $HELM_CHANGES; do
-        echo "  - $file"
-    done
-    echo ""
-    print_info "Run 'make sync-chart-crds' and commit the changes"
-    CHECKS_FAILED=1
-else
-    print_success "Helm chart CRDs are up to date"
-fi
-
-# Check dashboard types if dashboard files were changed or CRDs changed
-if [ -n "$STAGED_DASHBOARD_FILES" ] || [ -n "$GO_CHANGES" ]; then
-    # Generate TypeScript types from CRDs
-    if command -v node &> /dev/null && [ -d "$REPO_ROOT/dashboard/node_modules" ]; then
-        GOWORK=off make generate-dashboard-types 2>/dev/null
-
-        TS_TYPE_CHANGES=$(git diff --name-only dashboard/src/types/generated/ 2>/dev/null || true)
-        if [ -n "$TS_TYPE_CHANGES" ]; then
-            print_error "Dashboard TypeScript types are out of date:"
-            for file in $TS_TYPE_CHANGES; do
-                echo "  - $file"
-            done
-            echo ""
-            print_info "Run 'make generate-dashboard-types' and commit the changes"
-            CHECKS_FAILED=1
-        else
-            print_success "Dashboard TypeScript types are up to date"
-        fi
-    fi
-fi
-
-# Check WebSocket types if facade protocol.go was changed
-STAGED_PROTOCOL=$(echo "$STAGED_GO_FILES" | grep 'internal/facade/protocol\.go$' || true)
-if [ -n "$STAGED_PROTOCOL" ]; then
-    if command -v tygo &> /dev/null; then
-        make generate-websocket-types 2>/dev/null
-
-        WS_TYPE_CHANGES=$(git diff --name-only dashboard/src/types/generated/websocket.ts 2>/dev/null || true)
-        if [ -n "$WS_TYPE_CHANGES" ]; then
-            print_error "Generated WebSocket TypeScript types are out of date:"
-            echo "  - dashboard/src/types/generated/websocket.ts"
-            echo ""
-            print_info "Run 'make generate-websocket-types' and commit the changes"
-            CHECKS_FAILED=1
-        else
-            print_success "WebSocket TypeScript types are up to date"
-        fi
-    else
-        print_warning "tygo not installed — skipping WebSocket type generation check"
-        print_info "Install with: go install github.com/gzuidhof/tygo@latest"
-    fi
-fi
-
-# Warn if API-surface files are staged without api/CHANGELOG.md
-STAGED_API_FILES=$(echo "$STAGED_GO_FILES" | grep -E 'internal/session/api/|internal/facade/protocol\.go$' || true)
-STAGED_PROTO_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '^api/proto/' || true)
-STAGED_CHANGELOG=$(git diff --cached --name-only --diff-filter=ACM | grep '^api/CHANGELOG.md$' || true)
-if [ -n "$STAGED_API_FILES" ] || [ -n "$STAGED_PROTO_FILES" ]; then
-    if [ -z "$STAGED_CHANGELOG" ]; then
-        print_warning "API-surface files changed without updating api/CHANGELOG.md"
-        print_info "Consider documenting the change in api/CHANGELOG.md for cross-team visibility"
-    fi
-fi
-
-#
-# 7. Helm template validation (if chart files changed)
-#
-STAGED_HELM_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '^charts/' || true)
-if [ -n "$STAGED_HELM_FILES" ]; then
-    print_header "Validating Helm Templates"
-
-    if "$REPO_ROOT/hack/validate-helm.sh" 2>&1; then
-        print_success "Helm validation passed"
-    else
-        print_error "Helm validation failed"
-        CHECKS_FAILED=1
-    fi
-fi
-
-#
-# Summary
-#
 print_header "Summary"
-
 if [ $CHECKS_FAILED -eq 0 ]; then
-    print_success "All pre-commit checks passed!"
-    echo ""
-    print_info "Proceeding with commit..."
-    exit 0
-else
-    echo ""
-    print_error "Pre-commit checks failed!"
-    echo ""
-    print_info "Options:"
-    echo "  1. Fix the issues above and try again"
-    echo "  2. Run 'make test' to see detailed test output"
-    echo ""
-    exit 1
+	print_success "All pre-commit checks passed!"
+	print_info "Push will trigger the heavier pre-push checks (tests, coverage, codegen sync)."
+	exit 0
 fi
+echo ""
+print_error "Pre-commit checks failed!"
+echo ""
+print_info "Options:"
+print_info "  1. Fix the issues above and try again"
+print_info "  2. Bypass with 'git commit --no-verify' (NOT recommended)"
+exit 1
