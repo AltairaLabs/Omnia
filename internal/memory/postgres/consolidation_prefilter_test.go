@@ -172,3 +172,120 @@ func TestRunStaleObservations_AppliesMaxPerBucket(t *testing.T) {
 	require.Len(t, buckets, 1)
 	assert.LessOrEqual(t, len(buckets[0].Entries), 3, "MaxPerBucket should cap entries")
 }
+
+// seedEntityFor is like seedEntity but takes per-user agent_id NULL (the
+// cross-scope SQL filters virtual_user_id IS NOT NULL). Returns the
+// new entity's UUID.
+func seedEntityFor(t *testing.T, pool *pgxpool.Pool, workspaceID, virtualUserID, kind, name string) string {
+	return seedEntity(t, pool, workspaceID, virtualUserID, kind, name)
+}
+
+func TestRunCrossScopeCandidates_DecodesContentAndCountsDistinctUsers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	pool := freshPgxPool(t)
+	wsID := "00000000-0000-0000-0000-00000000cc01"
+
+	// Three users with the same (kind, name) entity; one observation each.
+	// Plus one user with a different (kind, name) — should not appear.
+	e1 := seedEntityFor(t, pool, wsID, "u-alpha", "preference", "units")
+	e2 := seedEntityFor(t, pool, wsID, "u-beta", "preference", "units")
+	e3 := seedEntityFor(t, pool, wsID, "u-gamma", "preference", "units")
+	other := seedEntityFor(t, pool, wsID, "u-alpha", "fact", "other")
+	now := time.Now()
+	o1 := seedObservation(t, pool, e1, "metric", "mutable", now.Add(-1*time.Hour))
+	o2 := seedObservation(t, pool, e2, "imperial", "mutable", now.Add(-2*time.Hour))
+	o3 := seedObservation(t, pool, e3, "metric", "mutable", now.Add(-3*time.Hour))
+	_ = seedObservation(t, pool, other, "should-not-surface", "mutable", now.Add(-1*time.Hour))
+
+	r := NewPreFilterRunner(pool)
+	buckets, err := r.RunCrossScopeCandidates(context.Background(), consolidation.PreFilterOptions{
+		WorkspaceID:       wsID,
+		MinDistinctUsers:  3,
+		MaxBucketsPerPass: 10,
+		MaxPerBucket:      10,
+	})
+	require.NoError(t, err)
+	require.Len(t, buckets, 1, "want one bucket meeting k-anonymity")
+
+	b := buckets[0]
+	assert.Equal(t, "kind=preference;name=units", b.Key)
+	assert.Equal(t, 3, b.Stats["distinctUsers"])
+
+	// Content must be decoded — the v1 adapter dropped it.
+	gotContent := map[string]string{}
+	gotUser := map[string]string{}
+	gotMutability := map[string]string{}
+	for _, e := range b.Entries {
+		gotContent[e.ID] = e.Content
+		gotUser[e.ID] = e.Scope.UserID
+		gotMutability[e.ID] = e.Mutability
+	}
+	assert.Equal(t, "metric", gotContent[o1])
+	assert.Equal(t, "imperial", gotContent[o2])
+	assert.Equal(t, "metric", gotContent[o3])
+	assert.Equal(t, "u-alpha", gotUser[o1])
+	assert.Equal(t, "u-beta", gotUser[o2])
+	assert.Equal(t, "u-gamma", gotUser[o3])
+	for _, id := range []string{o1, o2, o3} {
+		assert.Equal(t, "mutable", gotMutability[id])
+	}
+}
+
+func TestRunCrossScopeCandidates_FiltersBelowKAnonymity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	pool := freshPgxPool(t)
+	wsID := "00000000-0000-0000-0000-00000000cc02"
+
+	// Only 2 distinct users for (preference, units) — below k=3 threshold.
+	e1 := seedEntityFor(t, pool, wsID, "u-1", "preference", "units")
+	e2 := seedEntityFor(t, pool, wsID, "u-2", "preference", "units")
+	_ = seedObservation(t, pool, e1, "a", "mutable", time.Now())
+	_ = seedObservation(t, pool, e2, "b", "mutable", time.Now())
+
+	r := NewPreFilterRunner(pool)
+	buckets, err := r.RunCrossScopeCandidates(context.Background(), consolidation.PreFilterOptions{
+		WorkspaceID:       wsID,
+		MinDistinctUsers:  3,
+		MaxBucketsPerPass: 10,
+		MaxPerBucket:      10,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, buckets, "below k-anonymity should produce no buckets")
+}
+
+func TestRunCrossScopeCandidates_ExcludesRegulatedAndNonMutable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	pool := freshPgxPool(t)
+	wsID := "00000000-0000-0000-0000-00000000cc03"
+	e1 := seedEntityFor(t, pool, wsID, "u-1", "fact", "k")
+	e2 := seedEntityFor(t, pool, wsID, "u-2", "fact", "k")
+	e3 := seedEntityFor(t, pool, wsID, "u-3", "fact", "k")
+	_ = seedObservation(t, pool, e1, "ok", "mutable", time.Now())
+	_ = seedObservation(t, pool, e2, "ok-too", "mutable", time.Now())
+	// regulated row for u-3 should NOT count toward distinct users
+	_, err := pool.Exec(context.Background(),
+		`INSERT INTO memory_observations (entity_id, content, mutability, source_type, observed_at)
+         VALUES ($1, 'regulated-row', 'mutable', 'regulated', NOW())`, e3)
+	require.NoError(t, err)
+	// immutable row for u-3 should also not count
+	_, err = pool.Exec(context.Background(),
+		`INSERT INTO memory_observations (entity_id, content, mutability, observed_at)
+         VALUES ($1, 'immutable-row', 'immutable', NOW())`, e3)
+	require.NoError(t, err)
+
+	r := NewPreFilterRunner(pool)
+	buckets, err := r.RunCrossScopeCandidates(context.Background(), consolidation.PreFilterOptions{
+		WorkspaceID:       wsID,
+		MinDistinctUsers:  3,
+		MaxBucketsPerPass: 10,
+		MaxPerBucket:      10,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, buckets, "only 2 mutable+non-regulated users → below k=3")
+}

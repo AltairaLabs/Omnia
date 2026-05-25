@@ -92,7 +92,12 @@ func (r *PreFilterRunner) RunStaleObservations(ctx context.Context, opts consoli
 	return out, nil
 }
 
-// RunCrossScopeCandidates executes BuildCrossScopeCandidatesQuery.
+// RunCrossScopeCandidates executes BuildCrossScopeCandidatesQuery and
+// decodes content + mutability + source_type + observed_at onto each
+// entry, then groups in Go by (kind, name) and applies MaxPerBucket.
+// Packs handling cross-scope rescope need observation content to
+// reason about prevalence (and to avoid promoting PII-containing
+// observations); the v1 adapter dropped all of that.
 func (r *PreFilterRunner) RunCrossScopeCandidates(ctx context.Context, opts consolidation.PreFilterOptions) ([]consolidation.Bucket, error) {
 	q, args := consolidation.BuildCrossScopeCandidatesQuery(opts)
 	rows, err := r.pool.Query(ctx, q, args...)
@@ -100,34 +105,71 @@ func (r *PreFilterRunner) RunCrossScopeCandidates(ctx context.Context, opts cons
 		return nil, fmt.Errorf("cross-scope query: %w", err)
 	}
 	defer rows.Close()
-	var out []consolidation.Bucket
+
+	type bucketKey struct{ kind, name string }
+	type bucketData struct {
+		entries       []consolidation.BucketEntry
+		distinctUsers map[string]struct{}
+	}
+	groups := map[bucketKey]*bucketData{}
 	for rows.Next() {
 		var (
-			workspaceID, kind, name string
-			distinctUsers, totalObs int
-			obsIDs                  []string
+			obsID                       string
+			workspaceID                 string
+			userID, agentID, kind, name *string
+			content                     string
+			observedAt                  time.Time
+			mutability, sourceType      string
 		)
-		if err := rows.Scan(&workspaceID, &kind, &name, &distinctUsers, &totalObs, &obsIDs); err != nil {
+		if err := rows.Scan(
+			&obsID, &workspaceID, &userID, &agentID, &kind, &name,
+			&content, &observedAt, &mutability, &sourceType,
+		); err != nil {
 			return nil, fmt.Errorf("cross-scope scan: %w", err)
 		}
-		entries := make([]consolidation.BucketEntry, 0, len(obsIDs))
-		for _, id := range obsIDs {
-			entries = append(entries, consolidation.BucketEntry{
-				ID:         id,
-				Scope:      consolidation.Scope{WorkspaceID: workspaceID},
-				Mutability: consolidation.MutabilityMutable,
-			})
+		key := bucketKey{strOrEmpty(kind), strOrEmpty(name)}
+		bd, ok := groups[key]
+		if !ok {
+			bd = &bucketData{distinctUsers: map[string]struct{}{}}
+			groups[key] = bd
+		}
+		bd.entries = append(bd.entries, consolidation.BucketEntry{
+			ID:      obsID,
+			Content: content,
+			Scope: consolidation.Scope{
+				WorkspaceID: workspaceID,
+				AgentID:     strOrEmpty(agentID),
+				UserID:      strOrEmpty(userID),
+			},
+			Mutability: mutability,
+			SourceType: sourceType,
+			ObservedAt: observedAt,
+		})
+		if u := strOrEmpty(userID); u != "" {
+			bd.distinctUsers[u] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]consolidation.Bucket, 0, len(groups))
+	for k, bd := range groups {
+		entries := bd.entries
+		totalObs := len(entries)
+		if opts.MaxPerBucket > 0 && len(entries) > opts.MaxPerBucket {
+			entries = entries[:opts.MaxPerBucket]
 		}
 		out = append(out, consolidation.Bucket{
-			Key:     fmt.Sprintf("kind=%s;name=%s", kind, name),
+			Key:     fmt.Sprintf("kind=%s;name=%s", k.kind, k.name),
 			Entries: entries,
 			Stats: map[string]any{
-				"distinctUsers": distinctUsers,
+				"distinctUsers": len(bd.distinctUsers),
 				"totalObs":      totalObs,
 			},
 		})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // RunEntityDuplicateCandidates executes BuildEntityDuplicateCandidatesQuery.
