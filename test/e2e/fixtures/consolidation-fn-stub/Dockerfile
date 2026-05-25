@@ -2,7 +2,7 @@
 # Static binary, no external module deps — see main.go.
 FROM golang:1.23-alpine AS build
 WORKDIR /app
-COPY main.go .
+COPY go.mod main.go ./
 RUN CGO_ENABLED=0 go build -o stub .
 
 FROM scratch
