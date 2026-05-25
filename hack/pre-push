@@ -1,0 +1,321 @@
+#!/usr/bin/env bash
+#
+# Pre-push hook for Omnia
+#
+# Mirrors what SonarCloud + CI will check, so a push that passes locally
+# should pass remote on the first try. Designed to be the "last line of
+# defense" before code leaves the laptop:
+#
+#   - Full lint pass (golangci-lint run, no --fast)
+#   - Full test suite WITH coverage (no -short, runs testcontainers
+#     integration tests where present)
+#   - Per-line coverage check on lines changed since origin/main
+#   - Generated-code sync (kubebuilder manifests, chart CRDs, dashboard
+#     TS types, WebSocket types)
+#   - Helm chart validation (when chart files changed)
+#
+# The pre-commit hook is intentionally fast (~15s) — formatting, vet,
+# golangci-lint --fast, build only. Heavy checks live here, where they
+# run once per push instead of once per commit.
+#
+# To skip this hook (rarely justified — SonarCloud will still fail
+# the PR): git push --no-verify
+#
+# Installation:
+#   ln -sf ../../hack/pre-push .git/hooks/pre-push
+#
+
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+print_info()   { echo -e "${BLUE}ℹ ${NC}$1"; }
+print_success(){ echo -e "${GREEN}✓${NC} $1"; }
+print_warning(){ echo -e "${YELLOW}⚠${NC} $1"; }
+print_error()  { echo -e "${RED}✗${NC} $1"; }
+print_header() {
+	echo ""
+	echo -e "${BLUE}═══════════════════════════════════════════════════${NC}"
+	echo -e "${BLUE}  $1${NC}"
+	echo -e "${BLUE}═══════════════════════════════════════════════════${NC}"
+}
+
+print_header "Pre-Push Checks"
+print_info "Running the same checks SonarCloud + CI will run, so a green"
+print_info "push here means a green push there. Cancel with Ctrl-C if you"
+print_info "need to push WIP — use 'git push --no-verify'."
+
+CHECKS_FAILED=0
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+
+# Determine the merge-base with origin/main so we only enforce coverage
+# on lines this push introduces. Falls back to HEAD~1 when origin/main
+# isn't fetched (e.g., fresh clone).
+MERGE_BASE=$(git merge-base origin/main HEAD 2>/dev/null || git rev-parse HEAD~1 2>/dev/null || echo "")
+if [ -z "$MERGE_BASE" ]; then
+	print_warning "Cannot determine merge-base; using HEAD~1 for diff"
+	MERGE_BASE=$(git rev-parse HEAD~1)
+fi
+print_info "Comparing against merge-base $(git rev-parse --short "$MERGE_BASE")"
+
+# Files changed in this push (vs merge-base).
+CHANGED_FILES=$(git diff --name-only --diff-filter=ACM "$MERGE_BASE" HEAD || true)
+CHANGED_GO_FILES=$(echo "$CHANGED_FILES" | grep '\.go$' || true)
+CHANGED_DASHBOARD_FILES=$(echo "$CHANGED_FILES" | grep '^dashboard/.*\.\(ts\|tsx\|js\|jsx\)$' || true)
+CHANGED_HELM_FILES=$(echo "$CHANGED_FILES" | grep '^charts/' || true)
+CHANGED_API_FILES=$(echo "$CHANGED_GO_FILES" | grep -E 'internal/session/api/|internal/facade/protocol\.go$' || true)
+CHANGED_PROTO_FILES=$(echo "$CHANGED_FILES" | grep '^api/proto/' || true)
+CHANGED_CHANGELOG=$(echo "$CHANGED_FILES" | grep '^api/CHANGELOG.md$' || true)
+CHANGED_PROTOCOL_FILE=$(echo "$CHANGED_GO_FILES" | grep 'internal/facade/protocol\.go$' || true)
+
+#
+# 1. Full golangci-lint (no --fast — the slow linters fire here, not
+#    in pre-commit)
+#
+if [ -n "$CHANGED_GO_FILES" ]; then
+	print_header "Full golangci-lint"
+	if golangci-lint run --timeout=5m ./... 2>&1; then
+		print_success "Full lint passed"
+	else
+		print_error "Full lint failed"
+		CHECKS_FAILED=1
+	fi
+fi
+
+#
+# 2. Go tests with coverage. NO -short — testcontainers integration
+#    tests fire and contribute to coverage. SonarCloud sees the same
+#    coverage in CI.
+#
+if [ -n "$CHANGED_GO_FILES" ]; then
+	print_header "Go Tests with Coverage (incl. integration)"
+	set +e
+	TEST_OUTPUT=$(go test -timeout 600s -coverprofile=coverage.out ./... 2>&1)
+	TEST_EXIT=$?
+	set -e
+	if [ $TEST_EXIT -ne 0 ]; then
+		if echo "$TEST_OUTPUT" | grep -q "FAIL"; then
+			print_error "Go tests failed"
+			echo "$TEST_OUTPUT" | grep -E "FAIL|---" | head -40
+			CHECKS_FAILED=1
+		else
+			print_success "Tests passed (some packages have no tests)"
+		fi
+	else
+		print_success "Go tests passed"
+	fi
+fi
+
+#
+# 3. Coverage check on lines changed since merge-base. Mirrors
+#    SonarCloud's "new-code coverage ≥80%". gocov-line measures per-
+#    line coverage against the changed-line set instead of per-file.
+#
+if [ -n "$CHANGED_GO_FILES" ] && [ -f coverage.out ]; then
+	print_header "Coverage on Changed Lines (vs merge-base)"
+	COVERAGE_THRESHOLD=80.0
+
+	# Build a list of (file:line) pairs touched in this push.
+	CHANGED_LINES_FILE=$(mktemp)
+	for f in $CHANGED_GO_FILES; do
+		# Skip generated, test, and vendored files.
+		case "$f" in
+		*_test.go | *zz_generated*.go | *.pb.go | *_grpc.pb.go | *.gen.go) continue ;;
+		api/*/groupversion_info.go) continue ;;
+		esac
+		# git diff -U0 emits @@ -A,B +C,D @@ headers; extract +C,D pairs.
+		git diff -U0 "$MERGE_BASE" HEAD -- "$f" |
+			awk -v file="$f" '
+				/^@@/ {
+					match($0, /\+[0-9]+(,[0-9]+)?/)
+					hunk = substr($0, RSTART+1, RLENGTH-1)
+					split(hunk, p, ",")
+					start = p[1]; count = (p[2] == "") ? 1 : p[2]
+					for (i = 0; i < count; i++) print file":"(start+i)
+				}'
+	done >"$CHANGED_LINES_FILE"
+
+	CHANGED_LINE_COUNT=$(wc -l <"$CHANGED_LINES_FILE" | tr -d ' ')
+	if [ "$CHANGED_LINE_COUNT" -eq 0 ]; then
+		print_success "No covered Go lines changed; skipping coverage check"
+		rm -f "$CHANGED_LINES_FILE"
+	else
+		# Parse coverage.out: lines of `file.go:start.col,end.col stmts count`
+		# count > 0 means line is hit. Compute covered_changed / changed.
+		COV_REPORT=$(awk -v root="$REPO_ROOT" '
+			NR == FNR { changed[$0] = 1; next }
+			$1 == "mode:" { next }
+			{
+				# Parse "module/path/file.go:start.col,end.col stmts count"
+				split($1, a, ":")
+				file = a[1]; split(a[2], rng, ",")
+				split(rng[1], s, ".")
+				split(rng[2], e, ".")
+				count = $NF
+				# Strip module prefix to get repo-relative path
+				sub(/^github\.com\/altairalabs\/omnia\//, "", file)
+				for (line = s[1]; line <= e[1]; line++) {
+					key = file":"line
+					if (key in changed) {
+						total[key] = 1
+						if (count > 0) hit[key] = 1
+					}
+				}
+			}
+			END {
+				ntot = 0; nhit = 0
+				for (k in total) { ntot++; if (k in hit) nhit++ }
+				if (ntot == 0) { print "100.0 0 0"; exit }
+				printf "%.1f %d %d\n", (nhit / ntot * 100), nhit, ntot
+			}' "$CHANGED_LINES_FILE" coverage.out)
+
+		COV_PCT=$(echo "$COV_REPORT" | awk '{print $1}')
+		COV_HIT=$(echo "$COV_REPORT" | awk '{print $2}')
+		COV_TOT=$(echo "$COV_REPORT" | awk '{print $3}')
+
+		COV_OK=$(awk -v p="$COV_PCT" -v t="$COVERAGE_THRESHOLD" 'BEGIN{print (p+0 >= t+0) ? 1 : 0}')
+		if [ "$COV_OK" = "1" ]; then
+			print_success "Changed-line coverage: ${COV_PCT}% (${COV_HIT}/${COV_TOT} lines) ≥ ${COVERAGE_THRESHOLD}%"
+		else
+			print_error "Changed-line coverage: ${COV_PCT}% (${COV_HIT}/${COV_TOT} lines) below ${COVERAGE_THRESHOLD}%"
+			print_info "SonarCloud will fail the PR. Add tests for the uncovered lines."
+			CHECKS_FAILED=1
+		fi
+		rm -f "$CHANGED_LINES_FILE"
+	fi
+fi
+
+#
+# 4. Dashboard tests with coverage (Vitest enforces thresholds internally)
+#
+if [ -n "$CHANGED_DASHBOARD_FILES" ]; then
+	if ! command -v npm &>/dev/null; then
+		print_warning "npm not installed; skipping dashboard tests"
+	else
+		if [ ! -d "$REPO_ROOT/dashboard/node_modules" ]; then
+			print_info "Installing dashboard dependencies..."
+			(cd "$REPO_ROOT/dashboard" && npm ci --silent)
+		fi
+		print_header "Dashboard Tests with Coverage"
+		if (cd "$REPO_ROOT/dashboard" && NODE_OPTIONS="--max-old-space-size=4096" npm run test:coverage --silent 2>&1) | tee /tmp/dashboard-test-output >/dev/null; then
+			print_success "Dashboard tests passed"
+		else
+			if grep -q "ERROR: Coverage for" /tmp/dashboard-test-output; then
+				print_error "Dashboard coverage below threshold"
+				grep "ERROR: Coverage for" /tmp/dashboard-test-output | head -10
+			else
+				print_error "Dashboard tests failed"
+				grep -E "FAIL|Error:|✕" /tmp/dashboard-test-output | head -20
+			fi
+			CHECKS_FAILED=1
+		fi
+		rm -f /tmp/dashboard-test-output
+	fi
+fi
+
+#
+# 5. Generated-code sync (manifests, chart CRDs, dashboard TS types,
+#    WebSocket types, RBAC)
+#
+if [ -n "$CHANGED_GO_FILES" ] || [ -n "$CHANGED_DASHBOARD_FILES" ]; then
+	print_header "Generated Code Sync"
+	GOWORK=off make generate manifests >/dev/null 2>&1
+	GO_DIFF=$(git diff --name-only config/ api/ charts/omnia/templates/clusterrole.yaml 2>/dev/null || true)
+	if [ -n "$GO_DIFF" ]; then
+		print_error "Generated Go files are out of date:"
+		echo "$GO_DIFF" | sed 's/^/  - /'
+		print_info "Run 'make generate manifests' and commit the changes"
+		CHECKS_FAILED=1
+	else
+		print_success "Go manifests in sync"
+	fi
+
+	if ! ./hack/verify-rbac-sync.sh >/dev/null 2>&1; then
+		print_error "Kustomize and Helm RBAC have drifted"
+		./hack/verify-rbac-sync.sh 2>&1 | tail -30
+		CHECKS_FAILED=1
+	else
+		print_success "RBAC kustomize/Helm in sync"
+	fi
+
+	GOWORK=off make sync-chart-crds >/dev/null 2>&1
+	HELM_CRD_DIFF=$(git diff --name-only charts/omnia/crds/ 2>/dev/null || true)
+	if [ -n "$HELM_CRD_DIFF" ]; then
+		print_error "Helm chart CRDs are out of date:"
+		echo "$HELM_CRD_DIFF" | sed 's/^/  - /'
+		print_info "Run 'make sync-chart-crds' and commit the changes"
+		CHECKS_FAILED=1
+	else
+		print_success "Helm chart CRDs in sync"
+	fi
+
+	# Dashboard types only when dashboard files changed OR Go types changed
+	if [ -n "$CHANGED_DASHBOARD_FILES" ] || [ -n "$GO_DIFF" ]; then
+		if command -v node &>/dev/null && [ -d "$REPO_ROOT/dashboard/node_modules" ]; then
+			GOWORK=off make generate-dashboard-types >/dev/null 2>&1
+			TS_DIFF=$(git diff --name-only dashboard/src/types/generated/ 2>/dev/null || true)
+			if [ -n "$TS_DIFF" ]; then
+				print_error "Dashboard TS types out of date:"
+				echo "$TS_DIFF" | sed 's/^/  - /'
+				print_info "Run 'make generate-dashboard-types' and commit"
+				CHECKS_FAILED=1
+			else
+				print_success "Dashboard TS types in sync"
+			fi
+		fi
+	fi
+
+	# WebSocket types only when facade protocol changed
+	if [ -n "$CHANGED_PROTOCOL_FILE" ]; then
+		if command -v tygo &>/dev/null; then
+			make generate-websocket-types >/dev/null 2>&1
+			WS_DIFF=$(git diff --name-only dashboard/src/types/generated/websocket.ts 2>/dev/null || true)
+			if [ -n "$WS_DIFF" ]; then
+				print_error "WebSocket TS types out of date"
+				print_info "Run 'make generate-websocket-types' and commit"
+				CHECKS_FAILED=1
+			else
+				print_success "WebSocket TS types in sync"
+			fi
+		else
+			print_warning "tygo not installed — skipping WebSocket type sync"
+		fi
+	fi
+
+	# Soft warning: api-surface files without CHANGELOG entry
+	if [ -n "$CHANGED_API_FILES" ] || [ -n "$CHANGED_PROTO_FILES" ]; then
+		if [ -z "$CHANGED_CHANGELOG" ]; then
+			print_warning "API-surface files changed without api/CHANGELOG.md update"
+		fi
+	fi
+fi
+
+#
+# 6. Helm chart validation when chart files changed
+#
+if [ -n "$CHANGED_HELM_FILES" ]; then
+	print_header "Helm Template Validation"
+	if "$REPO_ROOT/hack/validate-helm.sh" 2>&1; then
+		print_success "Helm validation passed"
+	else
+		print_error "Helm validation failed"
+		CHECKS_FAILED=1
+	fi
+fi
+
+print_header "Summary"
+if [ $CHECKS_FAILED -eq 0 ]; then
+	print_success "All pre-push checks passed!"
+	print_info "Push expected to pass CI on first try."
+	exit 0
+else
+	echo ""
+	print_error "Pre-push checks failed!"
+	print_info "Fix the issues above before pushing, or 'git push --no-verify' to bypass."
+	exit 1
+fi

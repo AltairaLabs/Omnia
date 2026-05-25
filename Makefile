@@ -172,6 +172,44 @@ test-e2e-junit: setup-test-e2e manifests generate fmt vet ## Run e2e tests with 
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
 
+# ---------------------------------------------------------------------
+# e2e-quick: run a single e2e spec against an existing kind cluster.
+#
+# Skips kind-create, CRD install, and cluster teardown — assumes the
+# cluster is already up and CRDs installed (e.g., from a previous full
+# `make test-e2e` run, or from Tilt's `omnia-dev` cluster if you point
+# KIND_CLUSTER at it).
+#
+# Usage:
+#   make e2e-quick SPEC=consolidation             # run one Ginkgo label
+#   make e2e-quick SPEC='memory|skills'           # multiple labels
+#   make e2e-quick SPEC=consolidation \
+#                  KIND_CLUSTER=omnia-dev         # use Tilt's cluster
+#
+# Tilt note: Tilt creates `kind-omnia-dev`. Pointing e2e-quick at it
+# lets you inspect runs in the Tilt UI, but Tilt's managed workloads
+# will share the cluster — most specs assume clean state in their own
+# namespace, so this works for self-contained specs (consolidation,
+# memory) but not for the Manager suite. Default is omnia-test-e2e.
+# ---------------------------------------------------------------------
+.PHONY: e2e-quick
+e2e-quick: ## Run one E2E spec by Ginkgo label against an existing cluster (SPEC=label KIND_CLUSTER=name)
+ifndef SPEC
+	@echo "Usage: make e2e-quick SPEC=<ginkgo-label> [KIND_CLUSTER=<name>]"; exit 1
+endif
+	@if ! $(KIND) get clusters 2>/dev/null | grep -qx "$(KIND_CLUSTER)"; then \
+		echo "kind cluster '$(KIND_CLUSTER)' not found. Create one first:"; \
+		echo "  $(KIND) create cluster --name $(KIND_CLUSTER) --wait 60s"; \
+		echo "  $(MAKE) install"; \
+		exit 1; \
+	fi
+	@echo "Running spec(s) matching label '$(SPEC)' on cluster '$(KIND_CLUSTER)'"
+	@env GOWORK=off KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) \
+		E2E_SKIP_SETUP=true E2E_PREDEPLOYED=true E2E_SKIP_CLEANUP=true \
+		go test -tags=e2e ./test/e2e/ -v -ginkgo.v \
+		-ginkgo.label-filter='$(SPEC)' \
+		-timeout 15m
+
 # Arena E2E environment (mirrors Tilt enterprise setup in Kind)
 ARENA_E2E_CLUSTER ?= omnia-arena-e2e
 
