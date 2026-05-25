@@ -981,6 +981,7 @@ func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.Postg
 		Store:           memorypg.NewConsolidationWriter(pool),
 		LockStore:       memorypg.NewAdvisoryLockStore(pool),
 		Policies:        consolidation.NewK8sPolicyLister(c),
+		Workspaces:      consolidation.NewK8sWorkspaceLister(c),
 		PreFilterRunner: memorypg.NewPreFilterRunner(pool),
 		Client:          consolidation.NewClient(f.consolidationFunctionsURL, 5*time.Minute),
 		Metrics:         metrics,
