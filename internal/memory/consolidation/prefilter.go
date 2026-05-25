@@ -24,41 +24,38 @@ type PreFilterOptions struct {
 }
 
 // BuildStaleObservationsQuery returns the SQL + args for the stale-
-// observations pre-filter. Groups observations by (workspace, user,
-// agent, entity-kind, entity-name) and returns groups older than
-// OlderThan with at least MinGroupSize members. Excludes rows with
-// mutability != 'mutable' or source_type = 'regulated' from the
-// candidate target set.
+// observations pre-filter. Selects per-row (no GROUP BY) so the
+// adapter can decode content + mutability + observed_at + source_type
+// onto each BucketEntry — packs need the content text to summarize.
+// Bucketing by (workspace, user, agent, kind, name) + MaxPerBucket
+// cap is applied in Go in the adapter. Excludes rows with mutability
+// != 'mutable' or source_type = 'regulated' from the candidate
+// target set.
 func BuildStaleObservationsQuery(o PreFilterOptions) (string, []any) {
 	const q = `
-WITH eligible AS (
-    SELECT o.id, o.entity_id, o.content, o.observed_at,
-           e.workspace_id, e.virtual_user_id, e.agent_id, e.kind, e.name,
-           o.mutability, o.source_type
-    FROM memory_observations o
-    JOIN memory_entities e ON e.id = o.entity_id
-    WHERE e.workspace_id = $1
-      AND o.observed_at < $2
-      AND o.mutability = 'mutable'
-      AND o.source_type != 'regulated'
-      AND o.superseded_by IS NULL
-), buckets AS (
-    SELECT workspace_id, virtual_user_id, agent_id, kind, name,
-           COUNT(*) AS n,
-           array_agg(id ORDER BY observed_at) AS obs_ids
-    FROM eligible
-    GROUP BY workspace_id, virtual_user_id, agent_id, kind, name
-    HAVING COUNT(*) >= $3
-    ORDER BY n DESC
-    LIMIT $4
-)
-SELECT * FROM buckets;
+SELECT o.id, e.workspace_id, e.virtual_user_id, e.agent_id,
+       e.kind, e.name, o.content, o.observed_at,
+       o.mutability, o.source_type
+FROM memory_observations o
+JOIN memory_entities e ON e.id = o.entity_id
+WHERE e.workspace_id = $1
+  AND o.observed_at < $2
+  AND o.mutability = 'mutable'
+  AND o.source_type != 'regulated'
+  AND o.superseded_by IS NULL
+ORDER BY e.workspace_id, e.virtual_user_id, e.agent_id, e.kind, e.name, o.observed_at
+LIMIT $3;
 `
+	// Outer LIMIT bounds the candidate pull: at most MaxBucketsPerPass
+	// distinct groups, each with up to MaxPerBucket entries.
+	maxPer := o.MaxPerBucket
+	if maxPer <= 0 {
+		maxPer = 10
+	}
 	args := []any{
 		o.WorkspaceID,
 		o.OlderThan,
-		o.MinGroupSize,
-		o.MaxBucketsPerPass,
+		o.MaxBucketsPerPass * maxPer,
 	}
 	return q, args
 }

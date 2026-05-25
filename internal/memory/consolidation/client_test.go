@@ -14,9 +14,16 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	memoryv1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
-func TestClient_CallSendsAxisPayload(t *testing.T) {
+const (
+	testPackName = "demo"
+	testPackNS   = "ns"
+)
+
+func TestClient_CallSendsAxisPayloadToRefURL(t *testing.T) {
 	var received FunctionInput
 	var receivedPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -29,13 +36,13 @@ func TestClient_CallSendsAxisPayload(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, 5*time.Second)
+	c := NewClient(5 * time.Second).WithBaseHostOverride(srv.URL)
 	input := FunctionInput{
 		Axis:        AxisStaleObservations,
 		WorkspaceID: testWorkspaceID,
 		Buckets:     []Bucket{{Key: "k1", Entries: []BucketEntry{{ID: "a"}}}},
 	}
-	actions, err := c.Call(context.Background(), "demo", input)
+	actions, err := c.Call(context.Background(), memoryv1.MemoryFunctionRef{Name: testPackName, Namespace: testPackNS}, input)
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
@@ -50,13 +57,31 @@ func TestClient_CallSendsAxisPayload(t *testing.T) {
 	}
 }
 
+func TestClient_BuildsServiceDNSURL(t *testing.T) {
+	// No httptest server — verify the URL shape without dispatching.
+	c := NewClient(time.Second)
+	got := c.urlFor(memoryv1.MemoryFunctionRef{Name: "summarizer", Namespace: "omnia-system-packs"})
+	want := "http://summarizer.omnia-system-packs.svc.cluster.local:8080/functions/summarizer"
+	if got != want {
+		t.Errorf("urlFor = %q, want %q", got, want)
+	}
+}
+
+func TestClient_RejectsRefWithoutNamespace(t *testing.T) {
+	c := NewClient(time.Second)
+	_, err := c.Call(context.Background(), memoryv1.MemoryFunctionRef{Name: "n"}, FunctionInput{})
+	if err == nil {
+		t.Fatal("want error on missing namespace")
+	}
+}
+
 func TestClient_TimeoutSurfaced(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		time.Sleep(200 * time.Millisecond)
 	}))
 	defer srv.Close()
-	c := NewClient(srv.URL, 50*time.Millisecond)
-	_, err := c.Call(context.Background(), "demo", FunctionInput{
+	c := NewClient(50 * time.Millisecond).WithBaseHostOverride(srv.URL)
+	_, err := c.Call(context.Background(), memoryv1.MemoryFunctionRef{Name: testPackName, Namespace: testPackNS}, FunctionInput{
 		Axis: AxisStaleObservations, WorkspaceID: testWorkspaceID,
 	})
 	if err == nil {
@@ -70,8 +95,8 @@ func TestClient_NonOKStatusError(t *testing.T) {
 		_, _ = w.Write([]byte(`oops`))
 	}))
 	defer srv.Close()
-	c := NewClient(srv.URL, time.Second)
-	_, err := c.Call(context.Background(), "demo", FunctionInput{
+	c := NewClient(time.Second).WithBaseHostOverride(srv.URL)
+	_, err := c.Call(context.Background(), memoryv1.MemoryFunctionRef{Name: testPackName, Namespace: testPackNS}, FunctionInput{
 		Axis: AxisStaleObservations, WorkspaceID: testWorkspaceID,
 	})
 	if err == nil || !strings.Contains(err.Error(), "500") {
@@ -85,8 +110,8 @@ func TestClient_RejectsInvalidResponse(t *testing.T) {
 		_, _ = w.Write([]byte(`not an array`))
 	}))
 	defer srv.Close()
-	c := NewClient(srv.URL, time.Second)
-	_, err := c.Call(context.Background(), "demo", FunctionInput{
+	c := NewClient(time.Second).WithBaseHostOverride(srv.URL)
+	_, err := c.Call(context.Background(), memoryv1.MemoryFunctionRef{Name: testPackName, Namespace: testPackNS}, FunctionInput{
 		Axis: AxisStaleObservations, WorkspaceID: testWorkspaceID,
 	})
 	if err == nil {

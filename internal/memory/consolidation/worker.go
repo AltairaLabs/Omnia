@@ -52,6 +52,10 @@ type WorkerOptions struct {
 	Metrics         *Metrics
 	Interval        time.Duration
 	Log             logr.Logger
+	// PIIRedactor is passed to the per-axis Validator so the PII gate
+	// has something to call. Nil disables the gate (tests, OSS builds
+	// without EE deps).
+	PIIRedactor PIIRedactor
 	// LivenessMark / LivenessUnmark instrument the worker's running
 	// gauge. Set from memory.MarkWorkerRunning / MarkWorkerStopped in
 	// the memory-api wiring; nil-safe for tests.
@@ -238,7 +242,7 @@ func (w *Worker) runAxis(
 		Buckets:     buckets,
 		Gates: ResolvedGates{
 			MinDistinctUserCount: gates.MinDistinctUserCount,
-			RequirePIIRedaction:  gates.RequirePIIRedaction,
+			RequirePIIRedaction:  gates.PIIRedactionEnabled(),
 		},
 	}
 	fnStart := w.opts.Now()
@@ -251,7 +255,11 @@ func (w *Worker) runAxis(
 		status = "function_error"
 		return fmt.Errorf("call function %s/%s: %w", ref.Namespace, ref.Name, err)
 	}
-	v := NewValidator(ValidatorOptions{WorkspaceID: ws.UID, Gates: gates})
+	v := NewValidator(ValidatorOptions{
+		WorkspaceID: ws.UID,
+		Gates:       gates,
+		PIIRedactor: w.opts.PIIRedactor,
+	})
 	results := v.Validate(actions, w.buildValidationContext(buckets))
 	w.recordActionMetrics(ws.UID, p.Name, ref.Name, results)
 	if err := w.applier.Apply(ctx, ApplyContext{
@@ -356,5 +364,5 @@ func (w *Worker) defaultCallFunction(ctx context.Context, _ PreFilterAxis, ref m
 	if w.opts.Client == nil {
 		return nil, fmt.Errorf("no function client configured")
 	}
-	return w.opts.Client.Call(ctx, ref.Name, in)
+	return w.opts.Client.Call(ctx, ref, in)
 }

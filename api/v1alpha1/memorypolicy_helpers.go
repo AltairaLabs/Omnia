@@ -155,13 +155,14 @@ func rawPolicyFloat(p *MemoryPolicy, get func(*MemoryEmbeddingDedupConfig) strin
 // their default. Per spec
 // docs/local-backlog/2026-05-22-memory-consolidation-design.md.
 func (p *MemoryPolicy) ResolvedSafetyGates() MemoryConsolidationSafetyGates {
+	trueVal := true
 	resolved := MemoryConsolidationSafetyGates{
 		MinDistinctUserCount: map[string]int32{
 			"agentScoped": 5,
 			"userScoped":  1,
 		},
 		MaxScopeWidening:    "workspace",
-		RequirePIIRedaction: true,
+		RequirePIIRedaction: &trueVal,
 	}
 	if p == nil || p.Spec.Consolidation == nil || p.Spec.Consolidation.SafetyGates == nil {
 		return resolved
@@ -173,8 +174,21 @@ func (p *MemoryPolicy) ResolvedSafetyGates() MemoryConsolidationSafetyGates {
 	if g.MaxScopeWidening != "" {
 		resolved.MaxScopeWidening = g.MaxScopeWidening
 	}
-	// Boolean fields in optional CRD blocks can't distinguish "unset"
-	// from "explicit false" — operator override wins as-set.
-	resolved.RequirePIIRedaction = g.RequirePIIRedaction
+	// Pointer type distinguishes "operator left unset" (apply default) from
+	// "operator set to false" (opt out).
+	if g.RequirePIIRedaction != nil {
+		resolved.RequirePIIRedaction = g.RequirePIIRedaction
+	}
 	return resolved
+}
+
+// PIIRedactionEnabled is a nil-safe deref of RequirePIIRedaction.
+// Callers that consume the resolved gates (worker, validator, tests)
+// use this rather than touching the pointer directly. Defaults to
+// true to match the design's safe-default posture.
+func (g MemoryConsolidationSafetyGates) PIIRedactionEnabled() bool {
+	if g.RequirePIIRedaction == nil {
+		return true
+	}
+	return *g.RequirePIIRedaction
 }
