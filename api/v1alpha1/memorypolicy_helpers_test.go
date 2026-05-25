@@ -16,7 +16,12 @@ limitations under the License.
 
 package v1alpha1
 
-import "testing"
+import (
+	"testing"
+	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
 
 func ptr[T any](v T) *T { return &v }
 
@@ -188,5 +193,60 @@ func TestMemoryPolicy_ResolvedSafetyGates_Override(t *testing.T) {
 	if got.MinDistinctUserCount["userScoped"] != 1 {
 		t.Errorf("unset userScoped should keep default 1, got %d",
 			got.MinDistinctUserCount["userScoped"])
+	}
+}
+
+func TestMemoryPolicy_ResolvedTimeouts_Defaults(t *testing.T) {
+	// nil policy returns the design defaults (5m / 30m).
+	var p *MemoryPolicy
+	fc, wc := p.ResolvedTimeouts()
+	if fc != 5*time.Minute {
+		t.Errorf("nil policy FunctionCall: want 5m, got %s", fc)
+	}
+	if wc != 30*time.Minute {
+		t.Errorf("nil policy PassWallClock: want 30m, got %s", wc)
+	}
+
+	// Empty policy (no Consolidation block) returns defaults too.
+	empty := &MemoryPolicy{}
+	fc, wc = empty.ResolvedTimeouts()
+	if fc != 5*time.Minute || wc != 30*time.Minute {
+		t.Errorf("empty policy: got (%s, %s), want (5m, 30m)", fc, wc)
+	}
+}
+
+func TestMemoryPolicy_ResolvedTimeouts_Override(t *testing.T) {
+	p := &MemoryPolicy{Spec: MemoryPolicySpec{
+		Consolidation: &MemoryConsolidationConfig{
+			Timeouts: &MemoryConsolidationTimeouts{
+				FunctionCall:  &metav1.Duration{Duration: 90 * time.Second},
+				PassWallClock: &metav1.Duration{Duration: 10 * time.Minute},
+			},
+		},
+	}}
+	fc, wc := p.ResolvedTimeouts()
+	if fc != 90*time.Second {
+		t.Errorf("override FunctionCall: want 90s, got %s", fc)
+	}
+	if wc != 10*time.Minute {
+		t.Errorf("override PassWallClock: want 10m, got %s", wc)
+	}
+}
+
+func TestMemoryPolicy_ResolvedTimeouts_PartialOverride(t *testing.T) {
+	// FunctionCall set, PassWallClock unset → PassWallClock keeps default.
+	p := &MemoryPolicy{Spec: MemoryPolicySpec{
+		Consolidation: &MemoryConsolidationConfig{
+			Timeouts: &MemoryConsolidationTimeouts{
+				FunctionCall: &metav1.Duration{Duration: 2 * time.Minute},
+			},
+		},
+	}}
+	fc, wc := p.ResolvedTimeouts()
+	if fc != 2*time.Minute {
+		t.Errorf("FunctionCall: %s", fc)
+	}
+	if wc != 30*time.Minute {
+		t.Errorf("PassWallClock default: %s", wc)
 	}
 }

@@ -16,7 +16,10 @@ limitations under the License.
 
 package v1alpha1
 
-import "strconv"
+import (
+	"strconv"
+	"time"
+)
 
 // RecallInlineThresholdBytes returns the configured large-memory
 // inline cutoff or 0 if the policy doesn't override it. The recall
@@ -191,4 +194,24 @@ func (g MemoryConsolidationSafetyGates) PIIRedactionEnabled() bool {
 		return true
 	}
 	return *g.RequirePIIRedaction
+}
+
+// ResolvedTimeouts returns the consolidation FunctionCall +
+// PassWallClock timeouts with design defaults applied (5m and 30m
+// respectively). Safe to call when the policy is nil or the
+// Consolidation / Timeouts blocks are unset.
+func (p *MemoryPolicy) ResolvedTimeouts() (functionCall, passWallClock time.Duration) {
+	functionCall = 5 * time.Minute
+	passWallClock = 30 * time.Minute
+	if p == nil || p.Spec.Consolidation == nil || p.Spec.Consolidation.Timeouts == nil {
+		return
+	}
+	t := p.Spec.Consolidation.Timeouts
+	if t.FunctionCall != nil && t.FunctionCall.Duration > 0 {
+		functionCall = t.FunctionCall.Duration
+	}
+	if t.PassWallClock != nil && t.PassWallClock.Duration > 0 {
+		passWallClock = t.PassWallClock.Duration
+	}
+	return
 }
