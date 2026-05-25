@@ -7,10 +7,13 @@ SPDX-License-Identifier: Apache-2.0
 package consolidation
 
 import (
+	"time"
+
 	memoryv1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
 // Validation reject reasons. Stable strings for audit and metrics.
+// ReasonPIIBlocked is defined in pii_gate.go.
 const (
 	ReasonInstitutionalWriteBlocked = "institutional_write_blocked"
 	ReasonMutabilityBlocked         = "mutability_blocked"
@@ -24,6 +27,9 @@ const (
 type ValidatorOptions struct {
 	WorkspaceID string
 	Gates       memoryv1.MemoryConsolidationSafetyGates
+	// PIIRedactor is consulted by the PII gate when
+	// Gates.RequirePIIRedaction is true. Nil disables the gate.
+	PIIRedactor PIIRedactor
 }
 
 // ValidationContext is the per-pass context the validator needs: row
@@ -49,12 +55,13 @@ type Result struct {
 
 // Validator runs validation gates against a proposed action list.
 type Validator struct {
-	opts ValidatorOptions
+	opts    ValidatorOptions
+	piiGate *PIIGate
 }
 
 // NewValidator constructs a Validator.
 func NewValidator(opts ValidatorOptions) *Validator {
-	return &Validator{opts: opts}
+	return &Validator{opts: opts, piiGate: NewPIIGate(opts.PIIRedactor)}
 }
 
 // Validate runs all gates against each action and returns one Result
@@ -83,6 +90,9 @@ func (v *Validator) validateOne(a Action, ctx ValidationContext) Result {
 	if reason := v.checkScope(a); reason != "" {
 		return Result{Action: a, Reason: reason}
 	}
+	if reason := v.piiGate.Check(a, v.opts.Gates); reason != "" {
+		return Result{Action: a, Reason: reason}
+	}
 	return Result{Action: a, Accepted: true}
 }
 
@@ -107,7 +117,7 @@ func shapeValid(a Action) bool {
 	case RescopeAction:
 		return len(x.TargetIDs) > 0
 	case InvalidateAction:
-		return len(x.TargetIDs) > 0
+		return len(x.TargetIDs) > 0 && x.ValidUntil.After(time.Now())
 	case MergeEntitiesAction:
 		return x.CanonicalID != "" && len(x.MergeIDs) > 0
 	case DiscardAction:

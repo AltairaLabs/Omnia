@@ -16,7 +16,10 @@ limitations under the License.
 
 package v1alpha1
 
-import "strconv"
+import (
+	"strconv"
+	"time"
+)
 
 // RecallInlineThresholdBytes returns the configured large-memory
 // inline cutoff or 0 if the policy doesn't override it. The recall
@@ -155,13 +158,14 @@ func rawPolicyFloat(p *MemoryPolicy, get func(*MemoryEmbeddingDedupConfig) strin
 // their default. Per spec
 // docs/local-backlog/2026-05-22-memory-consolidation-design.md.
 func (p *MemoryPolicy) ResolvedSafetyGates() MemoryConsolidationSafetyGates {
+	trueVal := true
 	resolved := MemoryConsolidationSafetyGates{
 		MinDistinctUserCount: map[string]int32{
 			"agentScoped": 5,
 			"userScoped":  1,
 		},
 		MaxScopeWidening:    "workspace",
-		RequirePIIRedaction: true,
+		RequirePIIRedaction: &trueVal,
 	}
 	if p == nil || p.Spec.Consolidation == nil || p.Spec.Consolidation.SafetyGates == nil {
 		return resolved
@@ -173,8 +177,41 @@ func (p *MemoryPolicy) ResolvedSafetyGates() MemoryConsolidationSafetyGates {
 	if g.MaxScopeWidening != "" {
 		resolved.MaxScopeWidening = g.MaxScopeWidening
 	}
-	// Boolean fields in optional CRD blocks can't distinguish "unset"
-	// from "explicit false" — operator override wins as-set.
-	resolved.RequirePIIRedaction = g.RequirePIIRedaction
+	// Pointer type distinguishes "operator left unset" (apply default) from
+	// "operator set to false" (opt out).
+	if g.RequirePIIRedaction != nil {
+		resolved.RequirePIIRedaction = g.RequirePIIRedaction
+	}
 	return resolved
+}
+
+// PIIRedactionEnabled is a nil-safe deref of RequirePIIRedaction.
+// Callers that consume the resolved gates (worker, validator, tests)
+// use this rather than touching the pointer directly. Defaults to
+// true to match the design's safe-default posture.
+func (g MemoryConsolidationSafetyGates) PIIRedactionEnabled() bool {
+	if g.RequirePIIRedaction == nil {
+		return true
+	}
+	return *g.RequirePIIRedaction
+}
+
+// ResolvedTimeouts returns the consolidation FunctionCall +
+// PassWallClock timeouts with design defaults applied (5m and 30m
+// respectively). Safe to call when the policy is nil or the
+// Consolidation / Timeouts blocks are unset.
+func (p *MemoryPolicy) ResolvedTimeouts() (functionCall, passWallClock time.Duration) {
+	functionCall = 5 * time.Minute
+	passWallClock = 30 * time.Minute
+	if p == nil || p.Spec.Consolidation == nil || p.Spec.Consolidation.Timeouts == nil {
+		return
+	}
+	t := p.Spec.Consolidation.Timeouts
+	if t.FunctionCall != nil && t.FunctionCall.Duration > 0 {
+		functionCall = t.FunctionCall.Duration
+	}
+	if t.PassWallClock != nil && t.PassWallClock.Duration > 0 {
+		passWallClock = t.PassWallClock.Duration
+	}
+	return
 }

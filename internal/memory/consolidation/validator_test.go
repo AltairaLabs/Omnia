@@ -43,7 +43,7 @@ func TestValidator_RejectsInstitutionalRescope(t *testing.T) {
 func TestValidator_RejectsActionOnImmutableTarget(t *testing.T) {
 	v := NewValidator(ValidatorOptions{WorkspaceID: testWorkspaceID})
 	actions := []Action{
-		InvalidateAction{TargetIDs: []string{"obs-r"}, Reason: "stale"},
+		InvalidateAction{TargetIDs: []string{"obs-r"}, Reason: "stale", ValidUntil: time.Now().Add(time.Hour)},
 	}
 	ctx := ValidationContext{
 		RowMutability: map[string]string{"obs-r": "immutable"},
@@ -125,7 +125,7 @@ func TestValidator_RejectsScopeOutsideWorkspace(t *testing.T) {
 func TestValidator_RejectsUnknownTarget(t *testing.T) {
 	v := NewValidator(ValidatorOptions{WorkspaceID: testWorkspaceID})
 	actions := []Action{
-		InvalidateAction{TargetIDs: []string{"obs-missing"}},
+		InvalidateAction{TargetIDs: []string{"obs-missing"}, ValidUntil: time.Now().Add(time.Hour)},
 	}
 	results := v.Validate(actions, ValidationContext{RowMutability: map[string]string{}})
 	if results[0].Reason != ReasonTargetUnknown {

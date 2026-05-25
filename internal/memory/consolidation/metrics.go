@@ -9,8 +9,13 @@ package consolidation
 import "github.com/prometheus/client_golang/prometheus"
 
 // Metric label names. Centralised so all collectors stay consistent.
+// workspace is the Workspace CR UID (data key); policy is the
+// MemoryPolicy CR name (config identifier). Both labels are emitted on
+// every consolidation metric — workspace tells operators "whose data is
+// this?", policy tells them "which rulebook drove this run?".
 const (
 	labelWorkspace  = "workspace"
+	labelPolicy     = "policy"
 	labelFunction   = "function"
 	labelStatus     = "status"
 	labelAction     = "action"
@@ -38,22 +43,22 @@ func NewMetrics() *Metrics {
 	return &Metrics{
 		PassesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "omnia_memory_consolidation_passes_total",
-			Help: "Total consolidation passes per workspace, function, status.",
-		}, []string{labelWorkspace, labelFunction, labelStatus}),
+			Help: "Total consolidation passes per workspace UID, policy name, function, status.",
+		}, []string{labelWorkspace, labelPolicy, labelFunction, labelStatus}),
 		PassDurationSeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "omnia_memory_consolidation_pass_duration_seconds",
 			Help:    "Duration of one consolidation pass (per axis).",
 			Buckets: prometheus.DefBuckets,
-		}, []string{labelWorkspace, labelFunction}),
+		}, []string{labelWorkspace, labelPolicy, labelFunction}),
 		ActionsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "omnia_memory_consolidation_actions_total",
-			Help: "Total actions emitted per workspace, function, action kind, outcome, target tier.",
-		}, []string{labelWorkspace, labelFunction, labelAction, labelOutcome, labelTargetTier}),
+			Help: "Total actions emitted per workspace UID, policy name, function, action kind, outcome, target tier.",
+		}, []string{labelWorkspace, labelPolicy, labelFunction, labelAction, labelOutcome, labelTargetTier}),
 		FunctionCallDurationSeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "omnia_memory_consolidation_function_call_duration_seconds",
 			Help:    "Duration of the HTTP call to a consolidation function.",
 			Buckets: prometheus.DefBuckets,
-		}, []string{labelWorkspace, labelFunction}),
+		}, []string{labelWorkspace, labelPolicy, labelFunction}),
 	}
 }
 

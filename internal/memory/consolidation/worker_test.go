@@ -122,13 +122,28 @@ func TestWorker_PoliciesWithoutConsolidationAreSkipped(t *testing.T) {
 
 // --- fakes ---
 
-type mockLockStore struct{ acquired bool }
+type mockLockStore struct {
+	acquired     bool
+	acquiredKeys []string // (workspaceUID, trigger) pairs joined with ":"
+}
 
-func (m *mockLockStore) TryLock(context.Context, string, string) (bool, func(), error) {
+func (m *mockLockStore) TryLock(_ context.Context, workspaceUID, trigger string) (bool, func(), error) {
+	m.acquiredKeys = append(m.acquiredKeys, workspaceUID+":"+trigger)
 	if !m.acquired {
 		return false, func() {}, nil
 	}
 	return true, func() {}, nil
+}
+
+// fakeWorkspaceLister returns a fixed set of workspaces per policy. Tests
+// that exercise the legacy single-workspace shape can use the
+// singletonWorkspaceLister helper.
+type fakeWorkspaceLister struct {
+	forPolicy map[string][]Workspace
+}
+
+func (f *fakeWorkspaceLister) ForPolicy(_ context.Context, policy string) ([]Workspace, error) {
+	return f.forPolicy[policy], nil
 }
 
 type fakePolicyLister struct{ policies []memoryv1.MemoryPolicy }
@@ -295,13 +310,16 @@ func TestWorker_RecordsMetricsOnSuccessfulPass(t *testing.T) {
 	if err := w.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	// One pass should be counted with status=ok.
-	if got := testCounterValue(t, metrics.PassesTotal, testWorkspaceID, "safe-default-summarizer", "ok"); got != 1 {
+	// One pass should be counted with status=ok. Labels are (workspaceUID,
+	// policyName, function, status); legacy tests use the policy name as
+	// both the policy-name and workspace-UID since the singletonWorkspaceLister
+	// fallback wires UID=Name.
+	if got := testCounterValue(t, metrics.PassesTotal, testWorkspaceID, testWorkspaceID, "safe-default-summarizer", "ok"); got != 1 {
 		t.Errorf("PassesTotal ok = %v, want 1", got)
 	}
 	// One create_summary action applied.
 	if got := testCounterValue(t, metrics.ActionsTotal,
-		testWorkspaceID, "safe-default-summarizer", "create_summary", OutcomeApplied, ""); got != 1 {
+		testWorkspaceID, testWorkspaceID, "safe-default-summarizer", "create_summary", OutcomeApplied, ""); got != 1 {
 		t.Errorf("ActionsTotal create_summary applied = %v, want 1", got)
 	}
 }
@@ -324,7 +342,7 @@ func TestWorker_RecordsPrefilterErrorStatus(t *testing.T) {
 	if err := w.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := testCounterValue(t, metrics.PassesTotal, testWorkspaceID, "safe-default-summarizer", "prefilter_error"); got != 1 {
+	if got := testCounterValue(t, metrics.PassesTotal, testWorkspaceID, testWorkspaceID, "safe-default-summarizer", "prefilter_error"); got != 1 {
 		t.Errorf("PassesTotal prefilter_error = %v, want 1", got)
 	}
 }
@@ -365,5 +383,82 @@ func TestWorker_WithoutPreFilterRunner(t *testing.T) {
 	// Each axis errors at runPreFilter, but worker logs and continues.
 	if err := w.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestWorker_PerWorkspaceIteration verifies the worker resolves one
+// MemoryPolicy to N workspaces (via WorkspaceLister) and emits one
+// FunctionInput.WorkspaceID + one SaveSummary per workspace UID — never
+// using the policy name as the workspace identifier.
+func TestWorker_PerWorkspaceIteration(t *testing.T) {
+	policy := memoryv1.MemoryPolicy{}
+	policy.Name = "research"
+	policy.Spec.Consolidation = &memoryv1.MemoryConsolidationConfig{
+		FunctionRefs: memoryv1.MemoryConsolidationFunctionRefs{
+			StaleObservations: &memoryv1.MemoryFunctionRef{Name: "stub", Namespace: "ns"},
+		},
+	}
+	wsList := &fakeWorkspaceLister{forPolicy: map[string][]Workspace{
+		"research": {
+			{Name: "alpha", UID: "uid-alpha"},
+			{Name: "beta", UID: "uid-beta"},
+		},
+	}}
+	lock := &mockLockStore{acquired: true}
+	pf := &mockPreFilterRunner{
+		stale: []Bucket{{
+			Key:     "k",
+			Entries: []BucketEntry{{ID: "obs-1", Mutability: MutabilityMutable, Scope: Scope{WorkspaceID: "uid-x"}}},
+		}},
+	}
+	store := &MockStore{}
+	w := NewWorker(WorkerOptions{
+		Store:           store,
+		LockStore:       lock,
+		Policies:        fakePolicyLister{policies: []memoryv1.MemoryPolicy{policy}},
+		Workspaces:      wsList,
+		PreFilterRunner: pf,
+		Log:             testr.New(t),
+	})
+
+	gotWorkspaceIDs := map[string]bool{}
+	w.callFunction = func(_ context.Context, _ PreFilterAxis, _ memoryv1.MemoryFunctionRef, in FunctionInput) ([]Action, error) {
+		gotWorkspaceIDs[in.WorkspaceID] = true
+		return []Action{CreateSummaryAction{
+			FromIDs: []string{"obs-1"},
+			Scope:   Scope{WorkspaceID: in.WorkspaceID},
+			Content: "summary for " + in.WorkspaceID,
+		}}, nil
+	}
+	if err := w.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	if !gotWorkspaceIDs["uid-alpha"] || !gotWorkspaceIDs["uid-beta"] {
+		t.Errorf("function called with wrong workspaceIDs: %+v", gotWorkspaceIDs)
+	}
+	if len(store.Summaries) != 2 {
+		t.Fatalf("want 2 summaries (one per workspace), got %d", len(store.Summaries))
+	}
+	gotSummaryWS := map[string]bool{}
+	for _, s := range store.Summaries {
+		gotSummaryWS[s.WorkspaceID] = true
+	}
+	if !gotSummaryWS["uid-alpha"] || !gotSummaryWS["uid-beta"] {
+		t.Errorf("summary writes keyed wrong: %+v", store.Summaries)
+	}
+	// Locks acquired per workspace UID, not per policy name.
+	wantLocks := []string{"uid-alpha:consolidation", "uid-beta:consolidation"}
+	for _, want := range wantLocks {
+		found := false
+		for _, got := range lock.acquiredKeys {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing lock for %q (got %v)", want, lock.acquiredKeys)
+		}
 	}
 }

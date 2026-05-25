@@ -9,6 +9,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -26,7 +27,11 @@ func NewPreFilterRunner(pool *pgxpool.Pool) *PreFilterRunner {
 	return &PreFilterRunner{pool: pool}
 }
 
-// RunStaleObservations executes BuildStaleObservationsQuery and decodes.
+// RunStaleObservations executes BuildStaleObservationsQuery and decodes
+// content + mutability + source_type + observed_at onto each entry, then
+// groups in Go by (user, agent, kind, name) and applies MaxPerBucket +
+// MinGroupSize caps. Packs need the content text to summarize — empty
+// content (the v1 bug) leaves packs with nothing to reason about.
 func (r *PreFilterRunner) RunStaleObservations(ctx context.Context, opts consolidation.PreFilterOptions) ([]consolidation.Bucket, error) {
 	q, args := consolidation.BuildStaleObservationsQuery(opts)
 	rows, err := r.pool.Query(ctx, q, args...)
@@ -34,36 +39,57 @@ func (r *PreFilterRunner) RunStaleObservations(ctx context.Context, opts consoli
 		return nil, fmt.Errorf("stale obs query: %w", err)
 	}
 	defer rows.Close()
-	var out []consolidation.Bucket
+
+	type bucketKey struct{ user, agent, kind, name string }
+	groups := map[bucketKey][]consolidation.BucketEntry{}
 	for rows.Next() {
 		var (
+			obsID                       string
 			workspaceID                 string
 			userID, agentID, kind, name *string
-			n                           int
-			obsIDs                      []string
+			content                     string
+			observedAt                  time.Time
+			mutability, sourceType      string
 		)
-		if err := rows.Scan(&workspaceID, &userID, &agentID, &kind, &name, &n, &obsIDs); err != nil {
+		if err := rows.Scan(
+			&obsID, &workspaceID, &userID, &agentID, &kind, &name,
+			&content, &observedAt, &mutability, &sourceType,
+		); err != nil {
 			return nil, fmt.Errorf("stale obs scan: %w", err)
 		}
-		entries := make([]consolidation.BucketEntry, 0, len(obsIDs))
-		for _, id := range obsIDs {
-			entries = append(entries, consolidation.BucketEntry{
-				ID: id,
-				Scope: consolidation.Scope{
-					WorkspaceID: workspaceID,
-					AgentID:     strOrEmpty(agentID),
-					UserID:      strOrEmpty(userID),
-				},
-				Mutability: consolidation.MutabilityMutable,
-			})
-		}
-		out = append(out, consolidation.Bucket{
-			Key:     fmt.Sprintf("kind=%s;name=%s", strOrEmpty(kind), strOrEmpty(name)),
-			Entries: entries,
-			Stats:   map[string]any{"count": n},
+		key := bucketKey{strOrEmpty(userID), strOrEmpty(agentID), strOrEmpty(kind), strOrEmpty(name)}
+		groups[key] = append(groups[key], consolidation.BucketEntry{
+			ID:      obsID,
+			Content: content,
+			Scope: consolidation.Scope{
+				WorkspaceID: workspaceID,
+				AgentID:     strOrEmpty(agentID),
+				UserID:      strOrEmpty(userID),
+			},
+			Mutability: mutability,
+			SourceType: sourceType,
+			ObservedAt: observedAt,
 		})
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]consolidation.Bucket, 0, len(groups))
+	for k, entries := range groups {
+		if opts.MinGroupSize > 0 && len(entries) < opts.MinGroupSize {
+			continue
+		}
+		if opts.MaxPerBucket > 0 && len(entries) > opts.MaxPerBucket {
+			entries = entries[:opts.MaxPerBucket]
+		}
+		out = append(out, consolidation.Bucket{
+			Key:     fmt.Sprintf("kind=%s;name=%s", k.kind, k.name),
+			Entries: entries,
+			Stats:   map[string]any{"count": len(entries)},
+		})
+	}
+	return out, nil
 }
 
 // RunCrossScopeCandidates executes BuildCrossScopeCandidatesQuery.

@@ -77,6 +77,11 @@ type ServiceBuilder struct {
 	// the cache, or vice-versa.
 	MemoryCacheTTL string
 
+	// MemoryConsolidationInterval is forwarded to memory-api as
+	// --consolidation-interval. Empty disables the LLM-driven
+	// consolidation worker (the default; operators opt in per env).
+	MemoryConsolidationInterval string
+
 	// SessionRedisURL is the operator-wide Redis target threaded into
 	// every per-workspace session-api Deployment as --redis-url for
 	// the hot-cache layer (warm-tier sessions live in Postgres; the
@@ -218,7 +223,7 @@ func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string,
 	// Either form may be empty (memory-api then runs without Redis,
 	// cache + event publisher disabled) — that's a valid config.
 	redisURL, redisSecret := resolveMemoryRedis(sg, sb.MemoryRedisURL, sb.MemoryRedisURLSecret)
-	args := buildMemoryAPIArgs(workspaceName, sg, redisURL, sb.MemoryCacheTTL)
+	args := buildMemoryAPIArgs(workspaceName, sg, redisURL, sb.MemoryCacheTTL, sb.MemoryConsolidationInterval)
 	var overrides *omniav1alpha1.PodOverrides
 	if sg.Memory != nil {
 		overrides = sg.Memory.PodOverrides
@@ -308,7 +313,7 @@ func addMemoryRedisURLEnv(dep *appsv1.Deployment, ref SecretKeyRef) {
 // the literal placeholder "$(REDIS_URL)" — Kubernetes env expansion at
 // the memory-api pod fills it from the REDIS_URL Secret env that
 // addMemoryRedisURLEnv mounts.
-func buildMemoryAPIArgs(workspaceName string, sg omniav1alpha1.WorkspaceServiceGroup, redisURL, cacheTTL string) []string {
+func buildMemoryAPIArgs(workspaceName string, sg omniav1alpha1.WorkspaceServiceGroup, redisURL, cacheTTL, consolidationInterval string) []string {
 	args := []string{
 		fmt.Sprintf("--workspace=%s", workspaceName),
 		fmt.Sprintf("--service-group=%s", sg.Name),
@@ -324,6 +329,9 @@ func buildMemoryAPIArgs(workspaceName string, sg omniav1alpha1.WorkspaceServiceG
 	}
 	if cacheTTL != "" {
 		args = append(args, fmt.Sprintf("--cache-ttl=%s", cacheTTL))
+	}
+	if consolidationInterval != "" {
+		args = append(args, fmt.Sprintf("--consolidation-interval=%s", consolidationInterval))
 	}
 	return args
 }

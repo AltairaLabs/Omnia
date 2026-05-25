@@ -45,12 +45,17 @@ type WorkerOptions struct {
 	Store           Store
 	LockStore       LockStore
 	Policies        PolicyLister
+	Workspaces      WorkspaceLister
 	PreFilterRunner PreFilterRunner
 	Auditor         Auditor
 	Client          *Client
 	Metrics         *Metrics
 	Interval        time.Duration
 	Log             logr.Logger
+	// PIIRedactor is passed to the per-axis Validator so the PII gate
+	// has something to call. Nil disables the gate (tests, OSS builds
+	// without EE deps).
+	PIIRedactor PIIRedactor
 	// LivenessMark / LivenessUnmark instrument the worker's running
 	// gauge. Set from memory.MarkWorkerRunning / MarkWorkerStopped in
 	// the memory-api wiring; nil-safe for tests.
@@ -136,17 +141,54 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 }
 
 func (w *Worker) runPolicy(ctx context.Context, p memoryv1.MemoryPolicy) error {
-	acquired, release, err := w.opts.LockStore.TryLock(ctx, p.Name, "consolidation")
+	workspaces, err := w.listWorkspaces(ctx, p.Name)
+	if err != nil {
+		return fmt.Errorf("list workspaces for policy %s: %w", p.Name, err)
+	}
+	var firstErr error
+	for _, ws := range workspaces {
+		if err := w.runWorkspace(ctx, p, ws); err != nil {
+			w.opts.Log.Error(err, "consolidation workspace failed",
+				"policy", p.Name, "workspaceUID", ws.UID, "workspaceName", ws.Name)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
+}
+
+// listWorkspaces resolves workspaces for a policy. When no WorkspaceLister
+// is wired (e.g., legacy tests), falls back to a singleton entry keyed on
+// the policy name — preserves the old single-workspace behavior so tests
+// that haven't been updated still pass.
+func (w *Worker) listWorkspaces(ctx context.Context, policyName string) ([]Workspace, error) {
+	if w.opts.Workspaces == nil {
+		return []Workspace{{Name: policyName, UID: policyName}}, nil
+	}
+	return w.opts.Workspaces.ForPolicy(ctx, policyName)
+}
+
+func (w *Worker) runWorkspace(ctx context.Context, p memoryv1.MemoryPolicy, ws Workspace) error {
+	acquired, release, err := w.opts.LockStore.TryLock(ctx, ws.UID, "consolidation")
 	if err != nil {
 		return fmt.Errorf("acquire lock: %w", err)
 	}
 	if !acquired {
 		w.opts.Log.V(1).Info("consolidation tick skipped",
 			"reason", "lock_unavailable",
-			"workspace", p.Name)
+			"workspaceUID", ws.UID,
+			"policy", p.Name)
 		return nil
 	}
 	defer release()
+
+	// Per-policy wall-clock deadline so a runaway pack/HTTP call can't
+	// pin the worker indefinitely. The lock is released by the defer
+	// above; the deadline ends the (axis, function) loop early.
+	_, wcTimeout := p.ResolvedTimeouts()
+	wsCtx, cancel := context.WithTimeout(ctx, wcTimeout)
+	defer cancel()
 
 	refs := p.Spec.Consolidation.FunctionRefs
 	gates := p.ResolvedSafetyGates()
@@ -154,38 +196,45 @@ func (w *Worker) runPolicy(ctx context.Context, p memoryv1.MemoryPolicy) error {
 	const msgAxisFailed = "axis failed"
 
 	if refs.StaleObservations != nil {
-		if err := w.runAxis(ctx, AxisStaleObservations, *refs.StaleObservations, p, gates); err != nil {
+		if err := w.runAxis(wsCtx, AxisStaleObservations, *refs.StaleObservations, p, ws, gates); err != nil {
 			w.opts.Log.Error(err, msgAxisFailed,
-				"axis", AxisStaleObservations, "workspace", p.Name)
+				"axis", AxisStaleObservations, "workspaceUID", ws.UID, "policy", p.Name)
 		}
 	}
 	if refs.CrossScopeCandidates != nil {
-		if err := w.runAxis(ctx, AxisCrossScopeCandidates, *refs.CrossScopeCandidates, p, gates); err != nil {
+		if err := w.runAxis(wsCtx, AxisCrossScopeCandidates, *refs.CrossScopeCandidates, p, ws, gates); err != nil {
 			w.opts.Log.Error(err, msgAxisFailed,
-				"axis", AxisCrossScopeCandidates, "workspace", p.Name)
+				"axis", AxisCrossScopeCandidates, "workspaceUID", ws.UID, "policy", p.Name)
 		}
 	}
 	if refs.EntityDuplicateCandidates != nil {
-		if err := w.runAxis(ctx, AxisEntityDuplicateCandidates, *refs.EntityDuplicateCandidates, p, gates); err != nil {
+		if err := w.runAxis(wsCtx, AxisEntityDuplicateCandidates, *refs.EntityDuplicateCandidates, p, ws, gates); err != nil {
 			w.opts.Log.Error(err, msgAxisFailed,
-				"axis", AxisEntityDuplicateCandidates, "workspace", p.Name)
+				"axis", AxisEntityDuplicateCandidates, "workspaceUID", ws.UID, "policy", p.Name)
 		}
 	}
 	return nil
 }
 
-func (w *Worker) runAxis(ctx context.Context, axis PreFilterAxis, ref memoryv1.MemoryFunctionRef, p memoryv1.MemoryPolicy, gates memoryv1.MemoryConsolidationSafetyGates) error {
+func (w *Worker) runAxis(
+	ctx context.Context,
+	axis PreFilterAxis,
+	ref memoryv1.MemoryFunctionRef,
+	p memoryv1.MemoryPolicy,
+	ws Workspace,
+	gates memoryv1.MemoryConsolidationSafetyGates,
+) error {
 	start := w.opts.Now()
 	status := "ok"
 	defer func() {
 		if w.opts.Metrics != nil {
-			w.opts.Metrics.PassesTotal.WithLabelValues(p.Name, ref.Name, status).Inc()
-			w.opts.Metrics.PassDurationSeconds.WithLabelValues(p.Name, ref.Name).
+			w.opts.Metrics.PassesTotal.WithLabelValues(ws.UID, p.Name, ref.Name, status).Inc()
+			w.opts.Metrics.PassDurationSeconds.WithLabelValues(ws.UID, p.Name, ref.Name).
 				Observe(w.opts.Now().Sub(start).Seconds())
 		}
 	}()
 
-	buckets, err := w.runPreFilter(ctx, axis, p)
+	buckets, err := w.runPreFilter(ctx, axis, p, ws)
 	if err != nil {
 		status = "prefilter_error"
 		return fmt.Errorf("prefilter %s: %w", axis, err)
@@ -196,29 +245,36 @@ func (w *Worker) runAxis(ctx context.Context, axis PreFilterAxis, ref memoryv1.M
 	}
 	input := FunctionInput{
 		Axis:        axis,
-		WorkspaceID: p.Name,
+		WorkspaceID: ws.UID,
 		Buckets:     buckets,
 		Gates: ResolvedGates{
 			MinDistinctUserCount: gates.MinDistinctUserCount,
-			RequirePIIRedaction:  gates.RequirePIIRedaction,
+			RequirePIIRedaction:  gates.PIIRedactionEnabled(),
 		},
 	}
 	fnStart := w.opts.Now()
-	actions, err := w.callFunction(ctx, axis, ref, input)
+	fnTimeout, _ := p.ResolvedTimeouts()
+	callCtx, cancelCall := context.WithTimeout(ctx, fnTimeout)
+	actions, err := w.callFunction(callCtx, axis, ref, input)
+	cancelCall()
 	if w.opts.Metrics != nil {
-		w.opts.Metrics.FunctionCallDurationSeconds.WithLabelValues(p.Name, ref.Name).
+		w.opts.Metrics.FunctionCallDurationSeconds.WithLabelValues(ws.UID, p.Name, ref.Name).
 			Observe(w.opts.Now().Sub(fnStart).Seconds())
 	}
 	if err != nil {
 		status = "function_error"
 		return fmt.Errorf("call function %s/%s: %w", ref.Namespace, ref.Name, err)
 	}
-	v := NewValidator(ValidatorOptions{WorkspaceID: p.Name, Gates: gates})
+	v := NewValidator(ValidatorOptions{
+		WorkspaceID: ws.UID,
+		Gates:       gates,
+		PIIRedactor: w.opts.PIIRedactor,
+	})
 	results := v.Validate(actions, w.buildValidationContext(buckets))
-	w.recordActionMetrics(p.Name, ref.Name, results)
+	w.recordActionMetrics(ws.UID, p.Name, ref.Name, results)
 	if err := w.applier.Apply(ctx, ApplyContext{
-		WorkspaceID: p.Name,
-		RunID:       fmt.Sprintf("%s-%d", p.Name, w.opts.Now().Unix()),
+		WorkspaceID: ws.UID,
+		RunID:       fmt.Sprintf("%s-%d", ws.UID, w.opts.Now().Unix()),
 		PackRef:     ref.Name,
 		Now:         w.opts.Now(),
 	}, results); err != nil {
@@ -232,7 +288,7 @@ func (w *Worker) runAxis(ctx context.Context, axis PreFilterAxis, ref memoryv1.M
 // every validated action result. Tier label is derived from the
 // rescope action's destination scope; non-rescope actions get an
 // empty tier label.
-func (w *Worker) recordActionMetrics(workspace, function string, results []Result) {
+func (w *Worker) recordActionMetrics(workspaceUID, policy, function string, results []Result) {
 	if w.opts.Metrics == nil {
 		return
 	}
@@ -246,17 +302,17 @@ func (w *Worker) recordActionMetrics(workspace, function string, results []Resul
 			tier = string(rs.NewScope.Shape())
 		}
 		w.opts.Metrics.ActionsTotal.WithLabelValues(
-			workspace, function, string(r.Action.Kind()), outcome, tier,
+			workspaceUID, policy, function, string(r.Action.Kind()), outcome, tier,
 		).Inc()
 	}
 }
 
 // runPreFilter dispatches to the matching PreFilterRunner method.
-func (w *Worker) runPreFilter(ctx context.Context, axis PreFilterAxis, p memoryv1.MemoryPolicy) ([]Bucket, error) {
+func (w *Worker) runPreFilter(ctx context.Context, axis PreFilterAxis, p memoryv1.MemoryPolicy, ws Workspace) ([]Bucket, error) {
 	if w.opts.PreFilterRunner == nil {
 		return nil, fmt.Errorf("no PreFilterRunner configured")
 	}
-	opts := w.buildPreFilterOptions(p)
+	opts := w.buildPreFilterOptions(p, ws)
 	switch axis {
 	case AxisStaleObservations:
 		return w.opts.PreFilterRunner.RunStaleObservations(ctx, opts)
@@ -271,9 +327,9 @@ func (w *Worker) runPreFilter(ctx context.Context, axis PreFilterAxis, p memoryv
 
 // buildPreFilterOptions assembles PreFilterOptions from the policy's
 // configuration with sensible defaults.
-func (w *Worker) buildPreFilterOptions(p memoryv1.MemoryPolicy) PreFilterOptions {
+func (w *Worker) buildPreFilterOptions(p memoryv1.MemoryPolicy, ws Workspace) PreFilterOptions {
 	opts := PreFilterOptions{
-		WorkspaceID:       p.Name,
+		WorkspaceID:       ws.UID,
 		MaxBucketsPerPass: 100,
 		MaxPerBucket:      50,
 		OlderThan:         w.opts.Now().Add(-30 * 24 * time.Hour),
@@ -318,5 +374,5 @@ func (w *Worker) defaultCallFunction(ctx context.Context, _ PreFilterAxis, ref m
 	if w.opts.Client == nil {
 		return nil, fmt.Errorf("no function client configured")
 	}
-	return w.opts.Client.Call(ctx, ref.Name, in)
+	return w.opts.Client.Call(ctx, ref, in)
 }
