@@ -69,7 +69,10 @@ metadata:
   namespace: consolidation-e2e
 type: Opaque
 stringData:
-  connection-string: "postgres://omnia:omnia@consolidation-e2e-postgres.consolidation-e2e.svc.cluster.local:5432/omnia_memory?sslmode=disable"
+  # POSTGRES_CONN is the canonical key memory-api reads (it env-binds
+  # POSTGRES_CONN directly) and the key the Workspace CRD's
+  # spec.services[].memory.database.secretRef expects.
+  POSTGRES_CONN: "postgres://omnia:omnia@consolidation-e2e-postgres.consolidation-e2e.svc.cluster.local:5432/omnia_memory?sslmode=disable"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -232,9 +235,13 @@ kind: ClusterRole
 metadata:
   name: consolidation-e2e-api
 rules:
+# Worker dependencies: Workspace lister + MemoryPolicy lister.
 - apiGroups: ["omnia.altairalabs.ai"]
-  resources: ["workspaces", "memorypolicies"]
+  resources: ["workspaces", "memorypolicies", "sessionprivacypolicies"]
   verbs: ["get", "list", "watch"]
+# memory-api enterprise mode wraps a privacy middleware that watches
+# user_privacy_preferences in Postgres (already provisioned via
+# migrations) plus SessionPrivacyPolicy in Kubernetes — needs list+watch.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -286,7 +293,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: consolidation-e2e-postgres-conn
-              key: connection-string
+              key: POSTGRES_CONN
         readinessProbe:
           httpGet:
             path: /healthz
@@ -333,7 +340,7 @@ metadata:
   name: %[1]s
 spec:
   tiers:
-    user: { mode: "decay" }
+    user: { mode: "Decay" }
   consolidation:
     functionRefs:
       staleObservations:
@@ -358,9 +365,15 @@ spec:
   - name: default
     mode: external
     memory:
+      database:
+        secretRef:
+          name: consolidation-e2e-postgres-conn
       policyRef:
         name: %[1]s
-`, consE2EPolicyName, consE2EStubApp, consE2ENamespace, consE2EWorkspaceUID)
+    external:
+      sessionURL: "http://unused.consolidation-e2e.svc.cluster.local:8080"
+      memoryURL: "http://%[5]s"
+`, consE2EPolicyName, consE2EStubApp, consE2ENamespace, consE2EWorkspaceUID, consE2EMemoryAPIAddr)
 		cmd = exec.Command("kubectl", "apply", "-f", "-")
 		cmd.Stdin = strings.NewReader(crManifest)
 		_, err = utils.Run(cmd)
