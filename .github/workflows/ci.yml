@@ -529,7 +529,12 @@ jobs:
       run: |
         export KUBEBUILDER_ASSETS=$(setup-envtest use -p path --bin-dir ${{ github.workspace }}/bin/k8s)
         # Run all internal package tests (PromptKit v1.1.6 is published)
-        go test -race -v ./internal/... -coverprofile=internal-coverage.out
+        # plus the cmd packages whose wiring tests need envtest
+        # (currently: ee/cmd/omnia-arena-controller for #1169 setupControllers
+        # introspection — controller-runtime's SetupWithManager dereferences
+        # mgr.GetCache so a stub manager isn't enough).
+        go test -race -v ./internal/... ./ee/cmd/omnia-arena-controller/... \
+          -coverprofile=internal-coverage.out
 
     - name: Upload internal coverage
       uses: actions/upload-artifact@v7

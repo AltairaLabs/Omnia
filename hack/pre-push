@@ -125,12 +125,35 @@ if [ -n "$CHANGED_GO_FILES" ] && [ -f coverage.out ]; then
 
 	# Build a list of (file:line) pairs touched in this push.
 	CHANGED_LINES_FILE=$(mktemp)
+	# Parse sonar.coverage.exclusions from sonar-project.properties so this
+	# check mirrors SonarCloud's per-file exclusion behaviour. Without this,
+	# main.go entry points and similar that are excluded from coverage
+	# upstream still get measured locally, falsely failing the gate.
+	SONAR_COV_EXCLUSIONS=$(awk -F= '/^sonar\.coverage\.exclusions=/ { sub(/^sonar\.coverage\.exclusions=/, ""); print }' sonar-project.properties 2>/dev/null || true)
+
+	# is_sonar_excluded returns 0 (true) if a file path matches any
+	# comma-separated Sonar coverage exclusion pattern. Globs use ** for
+	# any-depth wildcard, * for single-segment wildcard.
+	is_sonar_excluded() {
+		local file="$1"
+		local IFS=','
+		for pat in $SONAR_COV_EXCLUSIONS; do
+			[ -z "$pat" ] && continue
+			# Convert Sonar glob to a sh case pattern. ** → *, * stays.
+			local glob=${pat//\*\*/\*}
+			case "$file" in $glob) return 0 ;; esac
+		done
+		return 1
+	}
+
 	for f in $CHANGED_GO_FILES; do
 		# Skip generated, test, and vendored files.
 		case "$f" in
 		*_test.go | *zz_generated*.go | *.pb.go | *_grpc.pb.go | *.gen.go) continue ;;
 		api/*/groupversion_info.go) continue ;;
 		esac
+		# Skip files excluded from SonarCloud coverage measurement.
+		if is_sonar_excluded "$f"; then continue; fi
 		# git diff -U0 emits @@ -A,B +C,D @@ headers; extract +C,D pairs.
 		git diff -U0 "$MERGE_BASE" HEAD -- "$f" |
 			awk -v file="$f" '
