@@ -10,9 +10,12 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -132,6 +135,34 @@ func TestStartHTTPServer(t *testing.T) {
 
 	go startHTTPServer("127.0.0.1:0", logger, nil)
 	time.Sleep(50 * time.Millisecond)
+}
+
+// TestBuildMetricsHealthMux is the route-registration wiring contract for
+// startHTTPServer. The original TestStartHTTPServer spawned the server in a
+// goroutine without verifying any route was actually registered — a
+// regression that removed mux.Handle("/metrics", ...) would pass that test.
+// This test builds the same mux startHTTPServer assembles and ServeHTTP-tests
+// each documented route.
+func TestBuildMetricsHealthMux(t *testing.T) {
+	mux := buildMetricsHealthMux(prometheus.NewRegistry())
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"metrics route", "/metrics"},
+		{"healthz route", "/healthz"},
+		{"readyz route", "/readyz"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, req)
+			if rr.Code == http.StatusNotFound {
+				t.Errorf("%s should be registered, got 404", tc.path)
+			}
+		})
+	}
 }
 
 func TestLoadConfig_NAMESPACES(t *testing.T) {

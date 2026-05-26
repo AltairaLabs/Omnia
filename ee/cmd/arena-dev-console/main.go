@@ -146,15 +146,7 @@ func main() {
 	wsConfig.SessionTTL = *sessionTTL
 	wsServer := facade.NewServer(wsConfig, store, handler, log)
 
-	// Create HTTP mux for routing
-	mux := http.NewServeMux()
-
-	// Main WebSocket endpoint
-	mux.Handle("/ws", wsServer)
-
-	// REST endpoints for session management and configuration
-	mux.HandleFunc("/api/providers", handleListProviders(handler))
-	mux.HandleFunc("/api/reload", handleReload(handler, log))
+	mux := buildFacadeMux(wsServer, handler, log)
 
 	// Create facade HTTP server
 	facadeServer := &http.Server{
@@ -246,6 +238,21 @@ func createHandler(log logr.Logger, configFile string) (*server.PromptKitHandler
 	}
 
 	return handler, cleanup, nil
+}
+
+// buildFacadeMux registers the dev console's three HTTP routes:
+//   - /ws         — WebSocket endpoint backed by the facade server
+//   - /api/providers — list configured providers (GET only)
+//   - /api/reload    — hot-reload config from disk (POST only)
+//
+// Extracted so a wiring test can assert all three routes are registered
+// without spinning up a real listener or PromptKit handler.
+func buildFacadeMux(wsServer http.Handler, handler *server.PromptKitHandler, log logr.Logger) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle("/ws", wsServer)
+	mux.HandleFunc("/api/providers", handleListProviders(handler))
+	mux.HandleFunc("/api/reload", handleReload(handler, log))
+	return mux
 }
 
 // handleListProviders returns the list of available providers.
