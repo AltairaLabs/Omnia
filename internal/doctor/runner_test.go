@@ -45,6 +45,38 @@ func collectResults(ch <-chan TestResult) []TestResult {
 	return results
 }
 
+// TestRunner_Checks verifies the Checks() accessor returns the registered
+// check set and that mutating the returned slice does not affect future
+// calls (defensive copy contract).
+func TestRunner_Checks(t *testing.T) {
+	r := NewRunner()
+	r.Register(
+		passCheck("A", "Cat1"),
+		failCheck("B", "Cat1"),
+		skipCheck("C", "Cat2"),
+	)
+
+	got := r.Checks()
+	if len(got) != 3 {
+		t.Fatalf("expected 3 checks, got %d", len(got))
+	}
+	names := []string{got[0].Name, got[1].Name, got[2].Name}
+	want := []string{"A", "B", "C"}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Errorf("Checks()[%d].Name = %q, want %q", i, names[i], want[i])
+		}
+	}
+
+	// Defensive-copy contract: mutating the returned slice must not
+	// affect subsequent calls.
+	got[0].Name = "MUTATED"
+	again := r.Checks()
+	if again[0].Name != "A" {
+		t.Errorf("Checks() returned shared backing array: got %q after mutation", again[0].Name)
+	}
+}
+
 func TestRunner_AllPass(t *testing.T) {
 	r := NewRunner()
 	r.Register(
