@@ -74,13 +74,16 @@ CHANGED_CHANGELOG=$(echo "$CHANGED_FILES" | grep '^api/CHANGELOG.md$' || true)
 CHANGED_PROTOCOL_FILE=$(echo "$CHANGED_GO_FILES" | grep 'internal/facade/protocol\.go$' || true)
 
 #
-# 1. Full golangci-lint (no --fast — the slow linters fire here, not
-#    in pre-commit)
+# 1. Full golangci-lint on new code (matches SonarCloud's
+#    "Sonar Way" quality gate which checks new-code-only).
+#
+# Pre-existing issues in the codebase are tracked separately; this
+# check ensures THIS push doesn't introduce any new ones.
 #
 if [ -n "$CHANGED_GO_FILES" ]; then
-	print_header "Full golangci-lint"
-	if golangci-lint run --timeout=5m ./... 2>&1; then
-		print_success "Full lint passed"
+	print_header "Full golangci-lint (new code vs merge-base)"
+	if golangci-lint run --timeout=5m --build-tags=e2e --new-from-rev="$MERGE_BASE" ./... 2>&1; then
+		print_success "Full lint passed (no new issues)"
 	else
 		print_error "Full lint failed"
 		CHECKS_FAILED=1
