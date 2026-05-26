@@ -242,13 +242,13 @@ kind: ClusterRole
 metadata:
   name: consolidation-e2e-api
 rules:
-# Worker dependencies: Workspace lister + MemoryPolicy lister.
+# Consolidation worker: MemoryPolicy lister + Workspace lister.
+# Privacy middleware watcher (--enterprise mode): SessionPrivacyPolicy
+# + Workspace + AgentRuntime (all three are listed during initial sync;
+# missing any one fails the watcher at startup with HTTP 403).
 - apiGroups: ["omnia.altairalabs.ai"]
-  resources: ["workspaces", "memorypolicies", "sessionprivacypolicies"]
+  resources: ["workspaces", "memorypolicies", "sessionprivacypolicies", "agentruntimes"]
   verbs: ["get", "list", "watch"]
-# memory-api enterprise mode wraps a privacy middleware that watches
-# user_privacy_preferences in Postgres (already provisioned via
-# migrations) plus SessionPrivacyPolicy in Kubernetes — needs list+watch.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -425,7 +425,10 @@ spec:
 	})
 
 	It("runs a pass, writes a summary with lineage, and emits an audit row", func() {
-		By("seeding N stale observations directly via SQL")
+		By("seeding stale observations directly via SQL")
+		// Worker's buildPreFilterOptions hardcodes MinGroupSize: 5, so we
+		// need at least 5 observations sharing the same (user, agent, kind,
+		// name) tuple before the pre-filter surfaces the bucket. Seed 6.
 		seedSQL := fmt.Sprintf(`
 INSERT INTO memory_entities (id, workspace_id, virtual_user_id, agent_id, name, kind)
 VALUES
@@ -433,9 +436,12 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO memory_observations (entity_id, content, observed_at, mutability)
 VALUES
-  ('11111111-1111-1111-1111-111111111111', 'blue',  NOW() - INTERVAL '60 days', 'mutable'),
-  ('11111111-1111-1111-1111-111111111111', 'azure', NOW() - INTERVAL '55 days', 'mutable'),
-  ('11111111-1111-1111-1111-111111111111', 'navy',  NOW() - INTERVAL '50 days', 'mutable');
+  ('11111111-1111-1111-1111-111111111111', 'blue',     NOW() - INTERVAL '70 days', 'mutable'),
+  ('11111111-1111-1111-1111-111111111111', 'azure',    NOW() - INTERVAL '65 days', 'mutable'),
+  ('11111111-1111-1111-1111-111111111111', 'navy',     NOW() - INTERVAL '60 days', 'mutable'),
+  ('11111111-1111-1111-1111-111111111111', 'cobalt',   NOW() - INTERVAL '55 days', 'mutable'),
+  ('11111111-1111-1111-1111-111111111111', 'cerulean', NOW() - INTERVAL '50 days', 'mutable'),
+  ('11111111-1111-1111-1111-111111111111', 'sapphire', NOW() - INTERVAL '45 days', 'mutable');
 `, consE2EWorkspaceUID)
 		_, err := utils.Run(exec.Command("kubectl", "exec", "-n", consE2ENamespace,
 			"deployment/"+consE2EPostgresApp, "--",
