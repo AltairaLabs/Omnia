@@ -91,12 +91,9 @@ func run(logger *slog.Logger) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	healthMux := http.NewServeMux()
-	healthMux.HandleFunc("/healthz", policy.HealthHandler())
-	healthMux.HandleFunc("/readyz", policy.HealthHandler())
 	healthSrv := &http.Server{
 		Addr:              healthAddr,
-		Handler:           healthMux,
+		Handler:           buildHealthMux(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -133,6 +130,16 @@ func run(logger *slog.Logger) error {
 	_ = healthSrv.Shutdown(shutdownCtx)
 
 	return nil
+}
+
+// buildHealthMux registers /healthz and /readyz against the shared
+// policy.HealthHandler. Extracted so a wiring test can assert both routes
+// are registered without spinning up a real listener.
+func buildHealthMux() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", policy.HealthHandler())
+	mux.HandleFunc("/readyz", policy.HealthHandler())
+	return mux
 }
 
 func createK8sClient() (client.Client, *runtime.Scheme, error) {

@@ -298,12 +298,24 @@ func parseNamespaces() []string {
 // The evalRegistry holds per-eval-name metrics (e.g., omnia_eval_helpfulness)
 // that are merged with the default Prometheus registry for /metrics.
 func startHTTPServer(addr string, logger *slog.Logger, evalRegistry *prometheus.Registry) {
-	mux := http.NewServeMux()
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           buildMetricsHealthMux(evalRegistry),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	logger.Info("starting metrics/health server", "addr", addr)
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		logger.Error("metrics server failed", "error", err)
+	}
+}
 
-	// Merge default Prometheus metrics with the eval collector's isolated registry.
+// buildMetricsHealthMux registers /metrics (merged default + eval registry),
+// /healthz, and /readyz. Extracted so a wiring test can assert all three
+// routes are registered without spinning up a real listener.
+func buildMetricsHealthMux(evalRegistry *prometheus.Registry) *http.ServeMux {
+	mux := http.NewServeMux()
 	gatherers := prometheus.Gatherers{prometheus.DefaultGatherer, evalRegistry}
 	mux.Handle("/metrics", promhttp.HandlerFor(gatherers, promhttp.HandlerOpts{}))
-
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -312,17 +324,7 @@ func startHTTPServer(addr string, logger *slog.Logger, evalRegistry *prometheus.
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-
-	server := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-
-	logger.Info("starting metrics/health server", "addr", addr)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Error("metrics server failed", "error", err)
-	}
+	return mux
 }
 
 // buildLogger creates a structured logger from the LOG_LEVEL environment variable.
