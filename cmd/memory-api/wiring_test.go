@@ -16,14 +16,23 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	eeaudit "github.com/altairalabs/omnia/ee/pkg/audit"
+	eemetrics "github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/internal/memory"
 	memoryapi "github.com/altairalabs/omnia/internal/memory/api"
+	"github.com/altairalabs/omnia/internal/memory/consolidation"
+	memorypg "github.com/altairalabs/omnia/internal/memory/postgres"
 )
 
 // freshPromRegistry swaps the default Prometheus registerer for the duration
@@ -411,6 +420,275 @@ func TestMemoryAnalyticsOptInMetrics_Registered(t *testing.T) {
 	m2 := memory.NewAnalyticsOptInMetrics()
 	if err := memory.RegisterAnalyticsOptInMetrics(prometheus.DefaultRegisterer, m2); err == nil {
 		t.Error("second RegisterAnalyticsOptInMetrics: want AlreadyRegistered error, got nil")
+	}
+}
+
+// TestBuildAPIMux_EnterpriseAuditRoutesWired proves the audit query
+// endpoint (GET /api/v1/audit/memories) is registered when an
+// auditLogger is supplied — i.e. when --enterprise=true. This is the
+// wiring boundary between "audit logger constructed" and "audit
+// routes actually reachable." Without this guard, a future refactor
+// could leave the audit handler attached to a parallel mux that
+// never gets served.
+//
+// We construct the eeaudit.Logger with a nil pool — NewLogger
+// handles the nil case (only the async DB writer touches the pool,
+// and we never enqueue an event in this test). The wiring claim is
+// purely about route registration.
+func TestBuildAPIMux_EnterpriseAuditRoutesWired(t *testing.T) {
+	freshPromRegistry(t)
+	auditLogger := eeaudit.NewLogger(nil, logr.Discard(), eemetrics.NewAuditMetrics(), eeaudit.LoggerConfig{})
+	t.Cleanup(func() { _ = auditLogger.Close() })
+
+	handler, cleanup := buildAPIMux(
+		context.Background(),
+		fakeMemoryStore{},
+		nil,
+		memoryapi.MemoryServiceConfig{},
+		nil,
+		true, // enterprise=true
+		nil,
+		nil,
+		auditLogger,
+		logr.Discard(),
+	)
+	defer cleanup()
+
+	// Invalid 'to' parameter forces handleQuery to short-circuit with 400
+	// BEFORE touching the (nil) Postgres pool. We're proving route
+	// registration here, not query correctness.
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/audit/memories?to=not-a-timestamp", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code == http.StatusNotFound {
+		t.Errorf("GET /api/v1/audit/memories not registered in enterprise mode; got 404")
+	}
+}
+
+// TestBuildAPIMux_NonEnterpriseAuditRoutesAbsent proves the audit
+// route is NOT registered when no auditLogger is supplied. This is the
+// negative counterpart to TestBuildAPIMux_EnterpriseAuditRoutesWired
+// — without this assertion the EnterpriseAuditRoutesWired test could
+// pass trivially if some other registration path attached the route.
+func TestBuildAPIMux_NonEnterpriseAuditRoutesAbsent(t *testing.T) {
+	freshPromRegistry(t)
+	handler, cleanup := buildAPIMux(
+		context.Background(),
+		fakeMemoryStore{},
+		nil,
+		memoryapi.MemoryServiceConfig{},
+		nil,
+		false, // enterprise=false
+		nil,
+		nil,
+		nil, // no audit logger
+		logr.Discard(),
+	)
+	defer cleanup()
+
+	// Invalid 'to' parameter forces handleQuery to short-circuit with 400
+	// BEFORE touching the (nil) Postgres pool. We're proving route
+	// registration here, not query correctness.
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/audit/memories?to=not-a-timestamp", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("GET /api/v1/audit/memories should be 404 when audit logger nil; got %d", rr.Code)
+	}
+}
+
+// TestBuildConsolidationWorkerOptions_AllFieldsWired guards against
+// the consolidation v1 audit findings: WorkerOptions.Auditor was
+// never set, WorkerOptions.Workspaces (lister) was missing,
+// PIIRedactor was missing. This single assertion block enforces that
+// every option the worker depends on is populated when the binary
+// constructs it.
+//
+// Hermetic: passes nil pool + fake k8s client + nil audit logger
+// (covers the non-enterprise default), then enterprise=true with a
+// real auditLogger to check the Auditor field flips populated.
+func TestBuildConsolidationWorkerOptions_AllFieldsWired(t *testing.T) {
+	freshPromRegistry(t)
+	scheme := k8sruntime.NewScheme()
+	if err := omniav1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+	fakeClient, err := client.New(&rest.Config{Host: "http://example.invalid"}, client.Options{Scheme: scheme})
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+
+	// Wiring checks per WorkerOptions field. Each entry's nilErr is the
+	// consolidation v1 audit finding encoded as a regression message.
+	type fieldCheck struct {
+		name   string
+		nilErr string
+		isNil  func(consolidation.WorkerOptions) bool
+	}
+	checks := []fieldCheck{
+		{"Store", "Store unwired", func(o consolidation.WorkerOptions) bool { return o.Store == nil }},
+		{"LockStore", "LockStore unwired — advisory lock won't acquire", func(o consolidation.WorkerOptions) bool { return o.LockStore == nil }},
+		{"Policies", "Policies unwired — worker won't see MemoryPolicy CRs", func(o consolidation.WorkerOptions) bool { return o.Policies == nil }},
+		{"Workspaces", "Workspaces unwired — worker uses policy name as workspace UID (consolidation v1 bug)", func(o consolidation.WorkerOptions) bool { return o.Workspaces == nil }},
+		{"PreFilterRunner", "PreFilterRunner unwired — worker skips every workspace", func(o consolidation.WorkerOptions) bool { return o.PreFilterRunner == nil }},
+		{"Client", "Client unwired — worker can't call function packs", func(o consolidation.WorkerOptions) bool { return o.Client == nil }},
+		{"Metrics", "Metrics unwired — no observability", func(o consolidation.WorkerOptions) bool { return o.Metrics == nil }},
+		{"LivenessMark", "LivenessMark unwired — worker liveness gauge never flips on", func(o consolidation.WorkerOptions) bool { return o.LivenessMark == nil }},
+		{"LivenessUnmark", "LivenessUnmark unwired — worker liveness gauge never flips off", func(o consolidation.WorkerOptions) bool { return o.LivenessUnmark == nil }},
+		{"PIIRedactor", "PIIRedactor unwired — PII gate is a no-op (consolidation v1 bug)", func(o consolidation.WorkerOptions) bool { return o.PIIRedactor == nil }},
+	}
+
+	t.Run("non-enterprise leaves Auditor nil", func(t *testing.T) {
+		freshPromRegistry(t)
+		opts := newConsolidationWorkerOptions(time.Hour, fakeClient, memory.NewPostgresMemoryStore(nil), nil, logr.Discard())
+		for _, c := range checks {
+			if c.isNil(opts) {
+				t.Errorf("%s: %s", c.name, c.nilErr)
+			}
+		}
+		if opts.Interval == 0 {
+			t.Error("Interval unwired — worker won't tick")
+		}
+		if opts.Auditor != nil {
+			t.Error("Auditor should be nil in non-enterprise mode")
+		}
+		// Exercise the liveness closures so they're not just non-nil
+		// but callable — they touch the shared liveness gauge.
+		opts.LivenessMark()
+		opts.LivenessUnmark()
+	})
+
+	t.Run("enterprise sets Auditor", func(t *testing.T) {
+		freshPromRegistry(t)
+		auditLogger := eeaudit.NewLogger(nil, logr.Discard(), eemetrics.NewAuditMetrics(), eeaudit.LoggerConfig{})
+		t.Cleanup(func() { _ = auditLogger.Close() })
+		opts := newConsolidationWorkerOptions(time.Hour, fakeClient, memory.NewPostgresMemoryStore(nil), auditLogger, logr.Discard())
+		if opts.Auditor == nil {
+			t.Error("Auditor unwired in enterprise mode — consolidation audit rows silently dropped (consolidation v1 bug)")
+		}
+	})
+}
+
+// TestBuildConsolidationWorker_DisabledFastPaths covers the disabled
+// branches of buildConsolidationWorker — empty interval, unparseable
+// interval, and no in-cluster kubeconfig (true in any unit test
+// environment). Each path returns nil before doing real work; the
+// happy path requires an actual cluster and is exercised by the
+// consolidation E2E.
+func TestBuildConsolidationWorker_DisabledFastPaths(t *testing.T) {
+	t.Run("empty interval disables", func(t *testing.T) {
+		f := &flags{}
+		if w := buildConsolidationWorker(context.Background(), f, nil, nil, logr.Discard()); w != nil {
+			t.Errorf("expected nil worker when CONSOLIDATION_INTERVAL unset, got %v", w)
+		}
+	})
+	t.Run("invalid interval disables", func(t *testing.T) {
+		f := &flags{consolidationInterval: "not-a-duration"}
+		if w := buildConsolidationWorker(context.Background(), f, nil, nil, logr.Discard()); w != nil {
+			t.Errorf("expected nil worker on unparseable interval, got %v", w)
+		}
+	})
+	t.Run("no in-cluster config disables", func(t *testing.T) {
+		// Valid interval, but rest.InClusterConfig() fails in unit-test
+		// environments — exercises the kubeconfig-error branch.
+		f := &flags{consolidationInterval: "10m"}
+		if w := buildConsolidationWorker(context.Background(), f, nil, nil, logr.Discard()); w != nil {
+			t.Errorf("expected nil worker when no in-cluster config, got %v", w)
+		}
+	})
+}
+
+// TestParseConsolidationInterval covers each branch of the validator
+// extracted from buildConsolidationWorker: empty, unparseable, non-positive,
+// and a valid duration. The original code was untestable because the three
+// disable branches were buried inside a function that also called
+// rest.InClusterConfig().
+func TestParseConsolidationInterval(t *testing.T) {
+	t.Run("empty string disables", func(t *testing.T) {
+		got, ok := parseConsolidationInterval("", logr.Discard())
+		if ok || got != 0 {
+			t.Errorf("expected (0, false) for empty, got (%v, %v)", got, ok)
+		}
+	})
+	t.Run("unparseable disables", func(t *testing.T) {
+		got, ok := parseConsolidationInterval("not-a-duration", logr.Discard())
+		if ok || got != 0 {
+			t.Errorf("expected (0, false) for unparseable, got (%v, %v)", got, ok)
+		}
+	})
+	t.Run("non-positive disables", func(t *testing.T) {
+		got, ok := parseConsolidationInterval("0s", logr.Discard())
+		if ok || got != 0 {
+			t.Errorf("expected (0, false) for 0s, got (%v, %v)", got, ok)
+		}
+	})
+	t.Run("valid interval enables", func(t *testing.T) {
+		got, ok := parseConsolidationInterval("10m", logr.Discard())
+		if !ok || got != 10*time.Minute {
+			t.Errorf("expected (10m, true), got (%v, %v)", got, ok)
+		}
+	})
+}
+
+// TestNewConsolidationWorker_ReturnsWorker covers the helper-call line that
+// composes the worker from already-acquired deps. The original
+// buildConsolidationWorker was untestable from unit tests because the
+// NewWorker call sat behind rest.InClusterConfig(); the refactor lifts the
+// composition into newConsolidationWorker which takes the client as an arg.
+func TestNewConsolidationWorker_ReturnsWorker(t *testing.T) {
+	freshPromRegistry(t)
+	scheme := k8sruntime.NewScheme()
+	if err := omniav1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add omnia scheme: %v", err)
+	}
+	fakeClient, err := client.New(&rest.Config{Host: "127.0.0.1:1"},
+		client.Options{Scheme: scheme})
+	if err != nil {
+		t.Fatalf("build fake client: %v", err)
+	}
+	w := newConsolidationWorker(time.Hour, fakeClient,
+		memory.NewPostgresMemoryStore(nil), nil, logr.Discard())
+	if w == nil {
+		t.Fatal("expected non-nil worker from newConsolidationWorker")
+	}
+}
+
+// TestNewClientForConsolidation_BuildsClient covers the scheme + client
+// construction lifted out of newConsolidationK8sClient. The InClusterConfig
+// boundary is the only piece left in newConsolidationK8sClient; this test
+// proves the scheme registers omniav1alpha1 and client.New is called with it.
+func TestNewClientForConsolidation_BuildsClient(t *testing.T) {
+	t.Run("valid config builds client", func(t *testing.T) {
+		c, ok := newClientForConsolidation(&rest.Config{Host: "127.0.0.1:1"}, logr.Discard())
+		if !ok || c == nil {
+			t.Fatalf("expected non-nil client and ok=true, got (%v, %v)", c, ok)
+		}
+	})
+	t.Run("invalid config returns false", func(t *testing.T) {
+		c, ok := newClientForConsolidation(&rest.Config{Host: "://not a host"}, logr.Discard())
+		if ok || c != nil {
+			t.Fatalf("expected nil client and ok=false on malformed host, got (%v, %v)", c, ok)
+		}
+	})
+}
+
+// TestMemoryMigrations_IncludeAuditLog guards against the
+// consolidation v1 audit finding where memory-api's --enterprise
+// audit path INSERTed into an `audit_log` table that didn't exist.
+// Migration 000010 adds the table. This test fails fast if the
+// migration is deleted or renamed.
+func TestMemoryMigrations_IncludeAuditLog(t *testing.T) {
+	got, err := memorypg.MigrationsFS.ReadFile("migrations/000010_audit_log.up.sql")
+	if err != nil {
+		t.Fatalf("000010_audit_log.up.sql missing: %v", err)
+	}
+	if !strings.Contains(string(got), "CREATE TABLE") || !strings.Contains(string(got), "audit_log") {
+		t.Errorf("000010_audit_log.up.sql doesn't create audit_log table; content=%q",
+			string(got))
 	}
 }
 
