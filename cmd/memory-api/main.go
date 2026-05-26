@@ -990,6 +990,27 @@ func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.Postg
 		log.Error(err, "consolidation worker disabled: k8s client creation failed")
 		return nil
 	}
+	return consolidation.NewWorker(newConsolidationWorkerOptions(interval, c, pgStore, auditLogger, log))
+}
+
+// newConsolidationWorkerOptions builds the WorkerOptions value from
+// externally-acquired deps. Pulled out of buildConsolidationWorker so
+// a wiring test can assert every field is populated without spinning
+// up in-cluster kubeconfig or Postgres. The Postgres adapters
+// (Store/LockStore/PreFilterRunner) accept nil pools at construction
+// — they only fail when actually called, so a wiring test can pass
+// a store with a nil pool (NewPostgresMemoryStore(nil)) and still
+// verify wiring.
+//
+// metrics registration uses the default Prometheus registerer
+// (freshPromRegistry isolates per-test).
+func newConsolidationWorkerOptions(
+	interval time.Duration,
+	c client.Client,
+	pgStore *memory.PostgresMemoryStore,
+	auditLogger *eeaudit.Logger,
+	log logr.Logger,
+) consolidation.WorkerOptions {
 	pool := pgStore.Pool()
 	metrics := consolidation.NewMetrics()
 	metrics.MustRegister(prometheus.DefaultRegisterer)
@@ -997,7 +1018,7 @@ func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.Postg
 	if auditLogger != nil {
 		auditor = &consolidationAuditAdapter{inner: auditLogger}
 	}
-	return consolidation.NewWorker(consolidation.WorkerOptions{
+	return consolidation.WorkerOptions{
 		Store:           memorypg.NewConsolidationWriter(pool),
 		LockStore:       memorypg.NewAdvisoryLockStore(pool),
 		Policies:        consolidation.NewK8sPolicyLister(c),
@@ -1011,7 +1032,7 @@ func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.Postg
 		LivenessUnmark:  func() { memory.MarkWorkerStopped(memory.WorkerNameConsolidation) },
 		PIIRedactor:     newConsolidationPIIRedactor(),
 		Auditor:         auditor,
-	})
+	}
 }
 
 // createEmbeddingService reads a Provider CRD by name and creates an

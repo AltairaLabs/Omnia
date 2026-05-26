@@ -165,6 +165,66 @@ func TestBuildAPIMux_PrivacyPolicyRouteWired(t *testing.T) {
 	}
 }
 
+// TestBuildAPIMux_EnterpriseAuditRoutesWired verifies the audit query
+// endpoint (GET /api/v1/audit/sessions) is registered when --enterprise
+// is set. The audit.Handler.RegisterRoutes call in
+// registerEnterpriseRoutes is the wiring boundary; if it's ever
+// commented out or moved behind another flag, the audit query API
+// silently disappears.
+func TestBuildAPIMux_EnterpriseAuditRoutesWired(t *testing.T) {
+	freshPromRegistry(t)
+	pool := newBogusPool(t)
+	registry := providers.NewRegistry()
+	f := &flags{
+		enterprise:  true,
+		apiAddr:     ":0",
+		healthAddr:  ":0",
+		metricsAddr: ":0",
+	}
+
+	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard())
+	defer cleanup()
+
+	// Invalid 'to' parameter forces handleQuery to short-circuit with 400
+	// before touching the (unreachable) Postgres pool. Proves the route
+	// is registered without requiring a working DB.
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/audit/sessions?to=not-a-timestamp", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code == http.StatusNotFound {
+		t.Errorf("GET /api/v1/audit/sessions should be registered in enterprise mode; got 404")
+	}
+}
+
+// TestBuildAPIMux_NonEnterprise_AuditRoutesAbsent is the negative
+// counterpart: without --enterprise, the audit query route must NOT be
+// registered.
+func TestBuildAPIMux_NonEnterprise_AuditRoutesAbsent(t *testing.T) {
+	freshPromRegistry(t)
+	pool := newBogusPool(t)
+	registry := providers.NewRegistry()
+	f := &flags{
+		enterprise:  false,
+		apiAddr:     ":0",
+		healthAddr:  ":0",
+		metricsAddr: ":0",
+	}
+
+	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard())
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/audit/sessions?to=not-a-timestamp", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("audit route must not be registered without --enterprise; got %d", rr.Code)
+	}
+}
+
 // TestBuildAPIMux_NonEnterprise_PrivacyPolicyReturns204 verifies that in
 // non-enterprise mode the privacy-policy endpoint is registered (route exists)
 // but returns 204 because SetPolicyResolver is only called in the enterprise

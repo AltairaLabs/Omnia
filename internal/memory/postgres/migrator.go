@@ -33,6 +33,11 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
+// MigrationsFS exposes the embedded migration files for wiring tests
+// that assert specific migrations exist (e.g. audit_log table) without
+// spinning up Postgres.
+var MigrationsFS = migrationsFS
+
 // Migrator manages PostgreSQL schema migrations for the memory database.
 type Migrator struct {
 	m      *migrate.Migrate
