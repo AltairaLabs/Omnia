@@ -602,6 +602,80 @@ func TestBuildConsolidationWorker_DisabledFastPaths(t *testing.T) {
 	})
 }
 
+// TestParseConsolidationInterval covers each branch of the validator
+// extracted from buildConsolidationWorker: empty, unparseable, non-positive,
+// and a valid duration. The original code was untestable because the three
+// disable branches were buried inside a function that also called
+// rest.InClusterConfig().
+func TestParseConsolidationInterval(t *testing.T) {
+	t.Run("empty string disables", func(t *testing.T) {
+		got, ok := parseConsolidationInterval("", logr.Discard())
+		if ok || got != 0 {
+			t.Errorf("expected (0, false) for empty, got (%v, %v)", got, ok)
+		}
+	})
+	t.Run("unparseable disables", func(t *testing.T) {
+		got, ok := parseConsolidationInterval("not-a-duration", logr.Discard())
+		if ok || got != 0 {
+			t.Errorf("expected (0, false) for unparseable, got (%v, %v)", got, ok)
+		}
+	})
+	t.Run("non-positive disables", func(t *testing.T) {
+		got, ok := parseConsolidationInterval("0s", logr.Discard())
+		if ok || got != 0 {
+			t.Errorf("expected (0, false) for 0s, got (%v, %v)", got, ok)
+		}
+	})
+	t.Run("valid interval enables", func(t *testing.T) {
+		got, ok := parseConsolidationInterval("10m", logr.Discard())
+		if !ok || got != 10*time.Minute {
+			t.Errorf("expected (10m, true), got (%v, %v)", got, ok)
+		}
+	})
+}
+
+// TestNewConsolidationWorker_ReturnsWorker covers the helper-call line that
+// composes the worker from already-acquired deps. The original
+// buildConsolidationWorker was untestable from unit tests because the
+// NewWorker call sat behind rest.InClusterConfig(); the refactor lifts the
+// composition into newConsolidationWorker which takes the client as an arg.
+func TestNewConsolidationWorker_ReturnsWorker(t *testing.T) {
+	freshPromRegistry(t)
+	scheme := k8sruntime.NewScheme()
+	if err := omniav1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add omnia scheme: %v", err)
+	}
+	fakeClient, err := client.New(&rest.Config{Host: "127.0.0.1:1"},
+		client.Options{Scheme: scheme})
+	if err != nil {
+		t.Fatalf("build fake client: %v", err)
+	}
+	w := newConsolidationWorker(time.Hour, fakeClient,
+		memory.NewPostgresMemoryStore(nil), nil, logr.Discard())
+	if w == nil {
+		t.Fatal("expected non-nil worker from newConsolidationWorker")
+	}
+}
+
+// TestNewClientForConsolidation_BuildsClient covers the scheme + client
+// construction lifted out of newConsolidationK8sClient. The InClusterConfig
+// boundary is the only piece left in newConsolidationK8sClient; this test
+// proves the scheme registers omniav1alpha1 and client.New is called with it.
+func TestNewClientForConsolidation_BuildsClient(t *testing.T) {
+	t.Run("valid config builds client", func(t *testing.T) {
+		c, ok := newClientForConsolidation(&rest.Config{Host: "127.0.0.1:1"}, logr.Discard())
+		if !ok || c == nil {
+			t.Fatalf("expected non-nil client and ok=true, got (%v, %v)", c, ok)
+		}
+	})
+	t.Run("invalid config returns false", func(t *testing.T) {
+		c, ok := newClientForConsolidation(&rest.Config{Host: "://not a host"}, logr.Discard())
+		if ok || c != nil {
+			t.Fatalf("expected nil client and ok=false on malformed host, got (%v, %v)", c, ok)
+		}
+	})
+}
+
 // TestMemoryMigrations_IncludeAuditLog guards against the
 // consolidation v1 audit finding where memory-api's --enterprise
 // audit path INSERTed into an `audit_log` table that didn't exist.

@@ -961,35 +961,80 @@ func buildRetentionPolicyLoader(legacyInterval, workspace, serviceGroup string, 
 //   - interval is unset or unparseable
 //   - in-cluster k8s config is unavailable (the worker needs to list
 //     MemoryPolicy CRs cluster-wide)
-//   - no functions URL configured
 //
 // Worker lifecycle is identical to the existing compaction worker —
 // caller invokes go cw.Run(ctx).
+//
+// The function is split: parseConsolidationInterval + newConsolidationK8sClient
+// gather external deps (untestable from unit tests), newConsolidationWorker
+// composes them into a worker (fully testable with a fake client).
 func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.PostgresMemoryStore, auditLogger *eeaudit.Logger, log logr.Logger) *consolidation.Worker {
+	interval, ok := parseConsolidationInterval(f.consolidationInterval, log)
+	if !ok {
+		return nil
+	}
+	c, ok := newConsolidationK8sClient(log)
+	if !ok {
+		return nil
+	}
+	return newConsolidationWorker(interval, c, pgStore, auditLogger, log)
+}
+
+// parseConsolidationInterval validates the CONSOLIDATION_INTERVAL flag.
+// Returns (0, false) and logs when the worker should be disabled.
+func parseConsolidationInterval(raw string, log logr.Logger) (time.Duration, bool) {
 	const msgDisabled = "consolidation worker disabled"
-	if f.consolidationInterval == "" {
+	if raw == "" {
 		log.V(1).Info(msgDisabled, "reason", "CONSOLIDATION_INTERVAL not set")
-		return nil
+		return 0, false
 	}
-	interval, err := time.ParseDuration(f.consolidationInterval)
+	interval, err := time.ParseDuration(raw)
 	if err != nil || interval <= 0 {
-		log.Error(err, "invalid CONSOLIDATION_INTERVAL, "+msgDisabled,
-			"value", f.consolidationInterval)
-		return nil
+		log.Error(err, "invalid CONSOLIDATION_INTERVAL, "+msgDisabled, "value", raw)
+		return 0, false
 	}
+	return interval, true
+}
+
+// newConsolidationK8sClient acquires the in-cluster k8s client used to list
+// MemoryPolicy and Workspace CRs. Returns (nil, false) outside a cluster.
+// The rest.InClusterConfig call is the only unit-test untestable bit; the
+// scheme + client construction is split out to newClientForConsolidation.
+func newConsolidationK8sClient(log logr.Logger) (client.Client, bool) {
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
-		log.V(1).Info(msgDisabled,
+		log.V(1).Info("consolidation worker disabled",
 			"reason", "no in-cluster kubeconfig", "error", err.Error())
-		return nil
+		return nil, false
 	}
+	return newClientForConsolidation(kubeConfig, log)
+}
+
+// newClientForConsolidation builds a controller-runtime client with the
+// scheme the consolidation worker needs (omniav1alpha1 for MemoryPolicy +
+// Workspace lookups). Returns (nil, false) when client construction fails;
+// the kubeConfig argument lets unit tests cover the success path with a
+// stub config.
+func newClientForConsolidation(kubeConfig *rest.Config, log logr.Logger) (client.Client, bool) {
 	scheme := k8sruntime.NewScheme()
 	utilruntime.Must(omniav1alpha1.AddToScheme(scheme))
 	c, err := client.New(kubeConfig, client.Options{Scheme: scheme})
 	if err != nil {
 		log.Error(err, "consolidation worker disabled: k8s client creation failed")
-		return nil
+		return nil, false
 	}
+	return c, true
+}
+
+// newConsolidationWorker composes the worker from already-acquired deps.
+// Pure function — wiring tests pass a fake client.Client and exercise it.
+func newConsolidationWorker(
+	interval time.Duration,
+	c client.Client,
+	pgStore *memory.PostgresMemoryStore,
+	auditLogger *eeaudit.Logger,
+	log logr.Logger,
+) *consolidation.Worker {
 	return consolidation.NewWorker(newConsolidationWorkerOptions(interval, c, pgStore, auditLogger, log))
 }
 
