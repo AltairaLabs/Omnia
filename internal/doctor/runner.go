@@ -35,6 +35,15 @@ func (r *Runner) Register(checks ...Check) {
 	r.checks = append(r.checks, checks...)
 }
 
+// Checks returns a copy of the registered check list. Used by wiring tests
+// to assert that the expected check set is registered without executing
+// the checks themselves (which dial real network endpoints).
+func (r *Runner) Checks() []Check {
+	out := make([]Check, len(r.checks))
+	copy(out, r.checks)
+	return out
+}
+
 // Run executes checks grouped by category. Categories run in parallel;
 // checks within a category run sequentially (they may have ordering deps).
 // Results are streamed to the channel as they complete. The channel is
