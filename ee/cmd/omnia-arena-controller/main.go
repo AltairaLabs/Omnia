@@ -36,12 +36,10 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/cmd/omnia-arena-controller/api"
 	"github.com/altairalabs/omnia/ee/internal/controller"
-	arenawebhook "github.com/altairalabs/omnia/ee/internal/webhook"
 	"github.com/altairalabs/omnia/ee/pkg/arena/aggregator"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 	"github.com/altairalabs/omnia/ee/pkg/encryption"
 	"github.com/altairalabs/omnia/ee/pkg/license"
-	"github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/workspace"
 	"github.com/altairalabs/omnia/internal/session/providers/postgres"
 )
@@ -243,130 +241,48 @@ func main() {
 		setupLog.Info("using direct NFS mount, storage manager not needed")
 	}
 
-	// ArenaSource controller
-	if err := (&controller.ArenaSourceReconciler{
-		Client:               mgr.GetClient(),
-		Scheme:               mgr.GetScheme(),
-		Recorder:             mgr.GetEventRecorderFor("arenasource-controller"),
-		WorkspaceContentPath: workspaceContentPath,
-		MaxVersionsPerSource: 10,
-		LicenseValidator:     licenseValidator,
-		StorageManager:       storageManager,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaSource")
-		os.Exit(1)
-	}
-
-	// ArenaTemplateSource controller
-	if err := (&controller.ArenaTemplateSourceReconciler{
-		Client:               mgr.GetClient(),
-		Scheme:               mgr.GetScheme(),
-		Recorder:             mgr.GetEventRecorderFor("arenatemplatesource-controller"),
-		WorkspaceContentPath: workspaceContentPath,
-		MaxVersionsPerSource: 10,
-		LicenseValidator:     licenseValidator,
-		StorageManager:       storageManager,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaTemplateSource")
-		os.Exit(1)
-	}
-
 	// Create Redis queue and aggregator
 	var arenaAggregator *aggregator.Aggregator
 	if redisURL != "" {
-		redisQueue, err := queue.NewRedisQueue(queue.RedisOptions{
+		redisQueue, qErr := queue.NewRedisQueue(queue.RedisOptions{
 			URL:     redisURL,
 			Options: queue.DefaultOptions(),
 		})
-		if err != nil {
-			setupLog.Error(err, "failed to create Redis queue for arena aggregator")
+		if qErr != nil {
+			setupLog.Error(qErr, "failed to create Redis queue for arena aggregator")
 		} else {
 			arenaAggregator = aggregator.New(redisQueue)
 			setupLog.Info("arena result aggregator initialized")
 		}
 	}
 
-	// ArenaJob controller
-	if err := (&controller.ArenaJobReconciler{
-		Client:                mgr.GetClient(),
-		Scheme:                mgr.GetScheme(),
-		Recorder:              mgr.GetEventRecorderFor("arenajob-controller"),
-		WorkerImage:           arenaWorkerImage,
-		WorkerImagePullPolicy: corev1.PullPolicy(arenaWorkerImagePullPolicy),
-		LicenseValidator:      licenseValidator,
-		Aggregator:            arenaAggregator,
-		RedisURL:              redisURL,
-		RedisURLSecretName:    redisURLSecretName,
-		RedisURLSecretKey:     redisURLSecretKey,
-		WorkspaceContentPath:  workspaceContentPath,
-		NFSServer:             nfsServer,
-		NFSPath:               nfsPath,
-		StorageManager:        storageManager,
-		TracingEnabled:        tracingEnabled,
-		TracingEndpoint:       tracingEndpoint,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaJob")
-		os.Exit(1)
-	}
-
-	// ArenaDevSession controller
-	if err := (&controller.ArenaDevSessionReconciler{
-		Client:          mgr.GetClient(),
-		Scheme:          mgr.GetScheme(),
-		DevConsoleImage: arenaDevConsoleImage,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaDevSession")
-		os.Exit(1)
-	}
-
-	// SessionPrivacyPolicy controller
-	privacyPolicyMetrics := metrics.NewPrivacyPolicyMetrics()
-	privacyPolicyMetrics.Initialize()
-	if err := (&controller.SessionPrivacyPolicyReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		//nolint:staticcheck // consistent with other controllers in this file
-		Recorder: mgr.GetEventRecorderFor("sessionprivacypolicy-controller"),
-		Metrics:  privacyPolicyMetrics,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, errUnableToCreateController, logKeyController, "SessionPrivacyPolicy")
-		os.Exit(1)
-	}
-
-	// KeyRotation controller
-	if err := (&controller.KeyRotationReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		//nolint:staticcheck // consistent with other controllers in this file
-		Recorder: mgr.GetEventRecorderFor("keyrotation-controller"),
-		ProviderFactory: func(cfg encryption.ProviderConfig) (encryption.Provider, error) {
-			return encryption.NewProvider(cfg)
+	if err := registerArenaWorkloads(mgr, registrationOptions{
+		Controllers: setupOptions{
+			WorkerImage:           arenaWorkerImage,
+			WorkerImagePullPolicy: corev1.PullPolicy(arenaWorkerImagePullPolicy),
+			DevConsoleImage:       arenaDevConsoleImage,
+			WorkspaceContentPath:  workspaceContentPath,
+			NFSServer:             nfsServer,
+			NFSPath:               nfsPath,
+			LicenseValidator:      licenseValidator,
+			StorageManager:        storageManager,
+			Aggregator:            arenaAggregator,
+			RedisURL:              redisURL,
+			RedisURLSecretName:    redisURLSecretName,
+			RedisURLSecretKey:     redisURLSecretKey,
+			TracingEnabled:        tracingEnabled,
+			TracingEndpoint:       tracingEndpoint,
+			PrivacyPolicyMetrics:  newPrivacyPolicyMetrics(),
+			ReEncryptionStore:     buildReEncryptionStoreFactory(sessionPostgresConn, setupLog),
 		},
-		StoreFactory: buildReEncryptionStoreFactory(sessionPostgresConn, setupLog),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, errUnableToCreateController, logKeyController, "KeyRotation")
+		Webhooks: webhookOptions{
+			LicenseValidator:    licenseValidator,
+			IncludeLicenseHooks: enableLicenseWebhooks,
+		},
+		EnableWebhooks: enableWebhooks,
+	}, setupLog); err != nil {
+		setupLog.Error(err, "registration failed")
 		os.Exit(1)
-	}
-
-	// Setup webhooks (only when webhook server is enabled)
-	if enableWebhooks {
-		if err := arenawebhook.SetupSessionPrivacyPolicyWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, msgUnableToCreateWebhook, "webhook", "SessionPrivacyPolicy")
-			os.Exit(1)
-		}
-
-		if enableLicenseWebhooks {
-			if err := arenawebhook.SetupArenaSourceWebhookWithManager(mgr, licenseValidator); err != nil {
-				setupLog.Error(err, msgUnableToCreateWebhook, "webhook", "ArenaSource")
-				os.Exit(1)
-			}
-			if err := arenawebhook.SetupArenaJobWebhookWithManager(mgr, licenseValidator); err != nil {
-				setupLog.Error(err, msgUnableToCreateWebhook, "webhook", "ArenaJob")
-				os.Exit(1)
-			}
-			setupLog.Info("license validation webhooks enabled")
-		}
-		setupLog.Info("webhook server enabled")
 	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
