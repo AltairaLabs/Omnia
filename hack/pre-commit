@@ -124,11 +124,15 @@ else
 fi
 
 #
-# 2. go vet (changed-files scope)
+# 2. go vet on changed-files' packages (with e2e build tag so e2e
+#    files don't error with "build constraints exclude all Go files")
 #
-print_header "Running go vet"
+# Filters to staged packages — module-wide vet is too slow for the
+# per-commit budget. Pre-push runs full-module vet.
+#
 VET_PACKAGES=$(echo "$STAGED_GO_FILES" | xargs -n1 dirname 2>/dev/null | sort -u | sed 's|^|./|' | tr '\n' ' ')
-if go vet $VET_PACKAGES 2>&1; then
+print_header "Running go vet"
+if go vet -tags=e2e $VET_PACKAGES 2>&1; then
 	print_success "go vet passed"
 else
 	print_error "go vet failed"
@@ -136,11 +140,25 @@ else
 fi
 
 #
-# 3. golangci-lint --fast (linters that don't require type info)
+# 3. golangci-lint --fast-only --new-from-rev on changed packages
 #
-print_header "Linting Changed Files"
+# `--new-from-rev=origin/main` filters to issues introduced by THIS
+# branch's diff vs main, so pre-existing complexity/dupl/lll issues
+# in adjacent files (or files in the same package) don't surface
+# here. Pre-push runs full module lint and catches everything.
+#
+# Falls back gracefully when origin/main isn't fetched yet
+# (golangci-lint silently disables --new-from-rev and lints everything;
+# we accept that as a worst-case for fresh clones).
+#
+print_header "Linting Changed Files (fast linters, new-code-only)"
 if command -v golangci-lint &>/dev/null; then
-	if golangci-lint run --fast --timeout=60s $VET_PACKAGES 2>&1; then
+	LINT_NEW_FROM=$(git merge-base origin/main HEAD 2>/dev/null || echo "")
+	NEW_FROM_ARG=""
+	if [ -n "$LINT_NEW_FROM" ]; then
+		NEW_FROM_ARG="--new-from-rev=$LINT_NEW_FROM"
+	fi
+	if golangci-lint run --fast-only --timeout=60s --build-tags=e2e $NEW_FROM_ARG $VET_PACKAGES 2>&1; then
 		print_success "Lint passed"
 	else
 		print_error "Lint failed"

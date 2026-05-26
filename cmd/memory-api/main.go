@@ -47,6 +47,7 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/runtime/credentials"
 	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
+
 	// Side-effect imports register each provider's embedding factory with
 	// pkproviders.CreateEmbeddingProviderFromSpec — keeps this file out of
 	// the per-provider option-builder business. Vendors must match the
@@ -57,7 +58,6 @@ import (
 	_ "github.com/AltairaLabs/PromptKit/runtime/providers/voyageai"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
-	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	eeaudit "github.com/altairalabs/omnia/ee/pkg/audit"
 	eemetrics "github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
@@ -743,8 +743,7 @@ func wrapPrivacyMiddleware(ctx context.Context, next http.Handler, pool *pgxpool
 		return next
 	}
 
-	scheme := k8sruntime.NewScheme()
-	utilruntime.Must(eev1alpha1.AddToScheme(scheme))
+	scheme := newPrivacyMiddlewareScheme()
 	k8sClient, err := client.New(kubeConfig, client.Options{Scheme: scheme})
 	if err != nil {
 		log.Error(err, "memory privacy middleware skipped", "reason", "k8s client creation failed")
