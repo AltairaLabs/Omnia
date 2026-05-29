@@ -349,6 +349,11 @@ spec:
   tiers:
     user: { mode: "Decay" }
   consolidation:
+    # Every-minute cadence so the staleObservations axis becomes due
+    # within the test's 3-minute Eventually window. Per-axis scheduling
+    # (#1152) gates each axis on its cron; the default "0 2 * * *" would
+    # never fire during the test.
+    schedule: "* * * * *"
     functionRefs:
       staleObservations:
         name: %[2]s
