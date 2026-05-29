@@ -147,9 +147,10 @@ func main() {
 			"the event publisher).")
 	var memoryConsolidationInterval string
 	flag.StringVar(&memoryConsolidationInterval, "memory-consolidation-interval", "",
-		"Tick interval forwarded to memory-api as --consolidation-interval. Empty disables the "+
-			"LLM-driven consolidation worker. Production deployments typically leave this off and "+
-			"opt in per-environment (e.g. \"6h\"). Local dev / Tilt may set a shorter value.")
+		"Schedule-evaluation (poll) interval forwarded to memory-api as --consolidation-interval. "+
+			"Each consolidation axis fires per its MemoryPolicy cron schedule; this controls how often "+
+			"schedules are checked (e.g. \"1m\"). Empty disables the worker. Production deployments opt "+
+			"in per-environment.")
 	var sessionRedisURL string
 	flag.StringVar(&sessionRedisURL, "session-redis-url", "",
 		"Operator-wide Redis URL forwarded to every per-workspace session-api as --redis-url for "+

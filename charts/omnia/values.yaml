@@ -1081,13 +1081,13 @@ workspaceServices:
     # re-embed) always use the unwrapped Postgres store — the cache
     # only fronts API reads.
     consolidation:
-      # -- Tick interval for the LLM-driven consolidation worker
-      # (forwarded to memory-api as --consolidation-interval). Empty
-      # disables it — the default. Operators opt in per environment
-      # (e.g. "6h" for prod, "30s" for local Tilt). When set, memory-api
-      # iterates Workspaces opted into each MemoryPolicy and runs the
-      # configured per-axis function packs. See
-      # docs/local-backlog/2026-05-22-memory-consolidation-design.md.
+      # -- Schedule-evaluation (poll) interval for the consolidation
+      # worker, forwarded to memory-api as --consolidation-interval. Each
+      # consolidation axis fires per its MemoryPolicy cron schedule
+      # (spec.consolidation.schedule / .schedules.<axis>); this value only
+      # controls how often those schedules are checked. Empty disables the
+      # worker — the default. Operators opt in per environment (e.g. "1m").
+      # See docs/local-backlog/2026-05-22-memory-consolidation-design.md.
       interval: ""
     cache:
       # -- TTL for cached Retrieve/List results. Empty or "0" disables

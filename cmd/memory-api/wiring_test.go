@@ -535,6 +535,7 @@ func TestBuildConsolidationWorkerOptions_AllFieldsWired(t *testing.T) {
 		{"Policies", "Policies unwired — worker won't see MemoryPolicy CRs", func(o consolidation.WorkerOptions) bool { return o.Policies == nil }},
 		{"Workspaces", "Workspaces unwired — worker uses policy name as workspace UID (consolidation v1 bug)", func(o consolidation.WorkerOptions) bool { return o.Workspaces == nil }},
 		{"PreFilterRunner", "PreFilterRunner unwired — worker skips every workspace", func(o consolidation.WorkerOptions) bool { return o.PreFilterRunner == nil }},
+		{"RunTracker", "RunTracker unwired — per-axis cron schedules won't be honoured", func(o consolidation.WorkerOptions) bool { return o.RunTracker == nil }},
 		{"Client", "Client unwired — worker can't call function packs", func(o consolidation.WorkerOptions) bool { return o.Client == nil }},
 		{"Metrics", "Metrics unwired — no observability", func(o consolidation.WorkerOptions) bool { return o.Metrics == nil }},
 		{"LivenessMark", "LivenessMark unwired — worker liveness gauge never flips on", func(o consolidation.WorkerOptions) bool { return o.LivenessMark == nil }},

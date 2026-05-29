@@ -250,3 +250,61 @@ func TestMemoryPolicy_ResolvedTimeouts_PartialOverride(t *testing.T) {
 		t.Errorf("PassWallClock default: %s", wc)
 	}
 }
+
+func TestResolvedSchedule(t *testing.T) {
+	const (
+		stale      = "staleObservations"
+		cross      = "crossScopeCandidates"
+		dupe       = "entityDuplicateCandidates"
+		policyCron = "0 5 * * *"
+		staleCron  = "*/30 * * * *"
+	)
+	tests := []struct {
+		name   string
+		policy *MemoryPolicy
+		axis   string
+		want   string
+	}{
+		{"nil policy", nil, stale, ConsolidationDefaultSchedule},
+		{
+			"nil consolidation block",
+			&MemoryPolicy{},
+			stale, ConsolidationDefaultSchedule,
+		},
+		{
+			"policy-level schedule, no per-axis override",
+			&MemoryPolicy{Spec: MemoryPolicySpec{Consolidation: &MemoryConsolidationConfig{
+				Schedule: policyCron,
+			}}},
+			cross, policyCron,
+		},
+		{
+			"per-axis override wins over policy-level",
+			&MemoryPolicy{Spec: MemoryPolicySpec{Consolidation: &MemoryConsolidationConfig{
+				Schedule:  policyCron,
+				Schedules: &MemoryConsolidationSchedules{StaleObservations: staleCron},
+			}}},
+			stale, staleCron,
+		},
+		{
+			"unset axis falls back to policy-level even when others overridden",
+			&MemoryPolicy{Spec: MemoryPolicySpec{Consolidation: &MemoryConsolidationConfig{
+				Schedule:  policyCron,
+				Schedules: &MemoryConsolidationSchedules{StaleObservations: staleCron},
+			}}},
+			cross, policyCron,
+		},
+		{
+			"empty policy-level schedule falls back to default",
+			&MemoryPolicy{Spec: MemoryPolicySpec{Consolidation: &MemoryConsolidationConfig{}}},
+			dupe, ConsolidationDefaultSchedule,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.policy.ResolvedSchedule(tt.axis); got != tt.want {
+				t.Errorf("ResolvedSchedule(%q) = %q, want %q", tt.axis, got, tt.want)
+			}
+		})
+	}
+}

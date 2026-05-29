@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/robfig/cron/v3"
 
 	memoryv1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
@@ -40,6 +41,14 @@ type PreFilterRunner interface {
 	RunEntityDuplicateCandidates(ctx context.Context, opts PreFilterOptions) ([]Bucket, error)
 }
 
+// RunTracker persists the last-run timestamp per (policy, workspace, axis)
+// so the worker can honour per-axis cron schedules across restarts. Nil
+// disables gating — axes run on every tick (used by unit tests).
+type RunTracker interface {
+	LastRun(ctx context.Context, policyName, workspaceID, axis string) (time.Time, bool, error)
+	MarkRun(ctx context.Context, policyName, workspaceID, axis string, at time.Time) error
+}
+
 // WorkerOptions configures the consolidation worker.
 type WorkerOptions struct {
 	Store           Store
@@ -51,7 +60,11 @@ type WorkerOptions struct {
 	Client          *Client
 	Metrics         *Metrics
 	Interval        time.Duration
-	Log             logr.Logger
+	// RunTracker persists per-(policy, workspace, axis) last-run times so
+	// per-axis cron schedules are honoured and survive restarts. Nil
+	// disables gating (axes run every tick) — used by unit tests.
+	RunTracker RunTracker
+	Log        logr.Logger
 	// PIIRedactor is passed to the per-axis Validator so the PII gate
 	// has something to call. Nil disables the gate (tests, OSS builds
 	// without EE deps).
@@ -71,6 +84,23 @@ type Worker struct {
 	opts         WorkerOptions
 	applier      *Applier
 	callFunction func(ctx context.Context, axis PreFilterAxis, ref memoryv1.MemoryFunctionRef, in FunctionInput) ([]Action, error)
+}
+
+// consolidationCronParser parses the standard 5-field cron expressions used
+// by MemoryConsolidationConfig.Schedule and per-axis overrides. Matches the
+// parser used by the retention worker (internal/memory/retention.go).
+var consolidationCronParser = cron.NewParser(
+	cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
+)
+
+// axisDue reports whether an axis whose previous run was at `last` is due
+// again at `now`, per the given cron schedule.
+func axisDue(schedule string, last, now time.Time) (bool, error) {
+	sched, err := consolidationCronParser.Parse(schedule)
+	if err != nil {
+		return false, err
+	}
+	return !sched.Next(last).After(now), nil
 }
 
 // NewWorker constructs a Worker. callFunction defaults to a thin
@@ -193,27 +223,97 @@ func (w *Worker) runWorkspace(ctx context.Context, p memoryv1.MemoryPolicy, ws W
 	refs := p.Spec.Consolidation.FunctionRefs
 	gates := p.ResolvedSafetyGates()
 
-	const msgAxisFailed = "axis failed"
-
-	if refs.StaleObservations != nil {
-		if err := w.runAxis(wsCtx, AxisStaleObservations, *refs.StaleObservations, p, ws, gates); err != nil {
-			w.opts.Log.Error(err, msgAxisFailed,
-				"axis", AxisStaleObservations, "workspaceUID", ws.UID, "policy", p.Name)
-		}
+	axes := []struct {
+		axis PreFilterAxis
+		ref  *memoryv1.MemoryFunctionRef
+	}{
+		{AxisStaleObservations, refs.StaleObservations},
+		{AxisCrossScopeCandidates, refs.CrossScopeCandidates},
+		{AxisEntityDuplicateCandidates, refs.EntityDuplicateCandidates},
 	}
-	if refs.CrossScopeCandidates != nil {
-		if err := w.runAxis(wsCtx, AxisCrossScopeCandidates, *refs.CrossScopeCandidates, p, ws, gates); err != nil {
-			w.opts.Log.Error(err, msgAxisFailed,
-				"axis", AxisCrossScopeCandidates, "workspaceUID", ws.UID, "policy", p.Name)
+	for _, a := range axes {
+		if a.ref == nil {
+			continue
 		}
-	}
-	if refs.EntityDuplicateCandidates != nil {
-		if err := w.runAxis(wsCtx, AxisEntityDuplicateCandidates, *refs.EntityDuplicateCandidates, p, ws, gates); err != nil {
-			w.opts.Log.Error(err, msgAxisFailed,
-				"axis", AxisEntityDuplicateCandidates, "workspaceUID", ws.UID, "policy", p.Name)
-		}
+		w.maybeRunAxis(wsCtx, a.axis, *a.ref, p, ws, gates)
 	}
 	return nil
+}
+
+// maybeRunAxis applies per-axis cron gating (via RunTracker) before
+// delegating to runAxis. With no RunTracker wired the axis runs every tick
+// (legacy behaviour). First sighting of a (policy, workspace, axis) tuple
+// anchors last_ran_at to now and skips, so the first real run lands at the
+// next cron occurrence rather than firing the moment a policy/workspace
+// appears. last_ran_at is marked after every attempt — success or failure —
+// so a broken pack waits for its next cron tick instead of retrying every
+// poll.
+func (w *Worker) maybeRunAxis(
+	ctx context.Context,
+	axis PreFilterAxis,
+	ref memoryv1.MemoryFunctionRef,
+	p memoryv1.MemoryPolicy,
+	ws Workspace,
+	gates memoryv1.MemoryConsolidationSafetyGates,
+) {
+	if w.opts.RunTracker == nil {
+		w.runAxisLogged(ctx, axis, ref, p, ws, gates)
+		return
+	}
+
+	now := w.opts.Now()
+	axisStr := string(axis)
+	last, ok, err := w.opts.RunTracker.LastRun(ctx, p.Name, ws.UID, axisStr)
+	if err != nil {
+		w.opts.Log.Error(err, "consolidation last-run lookup failed",
+			"axis", axis, "workspaceUID", ws.UID, "policy", p.Name)
+		return
+	}
+	if !ok {
+		w.markRun(ctx, p.Name, ws.UID, axisStr, now) // anchor, do not run
+		w.opts.Log.V(1).Info("consolidation axis anchored",
+			"axis", axis, "workspaceUID", ws.UID, "policy", p.Name)
+		return
+	}
+
+	due, err := axisDue(p.ResolvedSchedule(axisStr), last, now)
+	if err != nil {
+		w.opts.Log.Error(err, "consolidation invalid cron schedule",
+			"axis", axis, "policy", p.Name, "schedule", p.ResolvedSchedule(axisStr))
+		return
+	}
+	if !due {
+		w.opts.Log.V(1).Info("consolidation axis not due",
+			"axis", axis, "workspaceUID", ws.UID, "policy", p.Name)
+		return
+	}
+
+	w.runAxisLogged(ctx, axis, ref, p, ws, gates)
+	w.markRun(ctx, p.Name, ws.UID, axisStr, now) // mark-on-attempt
+}
+
+// runAxisLogged runs an axis and logs (but swallows) its error, matching the
+// per-axis isolation the worker had before gating was added.
+func (w *Worker) runAxisLogged(
+	ctx context.Context,
+	axis PreFilterAxis,
+	ref memoryv1.MemoryFunctionRef,
+	p memoryv1.MemoryPolicy,
+	ws Workspace,
+	gates memoryv1.MemoryConsolidationSafetyGates,
+) {
+	if err := w.runAxis(ctx, axis, ref, p, ws, gates); err != nil {
+		w.opts.Log.Error(err, "axis failed",
+			"axis", axis, "workspaceUID", ws.UID, "policy", p.Name)
+	}
+}
+
+// markRun records a last-run timestamp, logging (but not propagating) errors.
+func (w *Worker) markRun(ctx context.Context, policy, wsUID, axis string, at time.Time) {
+	if err := w.opts.RunTracker.MarkRun(ctx, policy, wsUID, axis, at); err != nil {
+		w.opts.Log.Error(err, "consolidation mark-run failed",
+			"axis", axis, "workspaceUID", wsUID, "policy", policy)
+	}
 }
 
 func (w *Worker) runAxis(

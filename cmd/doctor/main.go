@@ -335,6 +335,9 @@ func buildRunner(cfg runnerConfig) (*doctor.Runner, error) {
 	memoryChecker := checks.NewMemoryChecker(memoryAPIURL, memoryStore, workspaceUID, agentChecker)
 	runner.Register(memoryChecker.Checks()...)
 
+	consolidationChecker := checks.NewConsolidationChecker(memoryAPIURL)
+	runner.Register(consolidationChecker.Checks()...)
+
 	privacyChecker := checks.NewPrivacyChecker(memoryAPIURL, sessionAPIURL, workspaceUID, cfg.arenaURL)
 	if k8sClient != nil {
 		privacyChecker.WithK8sClient(k8sClient)

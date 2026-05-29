@@ -220,6 +220,19 @@ spec:
                       Schedule is a cron expression for when the consolidation worker
                       runs. Standard 5-field cron.
                     type: string
+                  schedules:
+                    description: |-
+                      Schedules optionally overrides Schedule per axis. Each axis is
+                      independent; an unset axis inherits the policy-level Schedule.
+                      Standard 5-field cron.
+                    properties:
+                      crossScopeCandidates:
+                        type: string
+                      entityDuplicateCandidates:
+                        type: string
+                      staleObservations:
+                        type: string
+                    type: object
                   timeouts:
                     description: Timeouts configures per-call and per-pass timeouts.
                     properties:

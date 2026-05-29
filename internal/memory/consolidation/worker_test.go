@@ -120,6 +120,144 @@ func TestWorker_PoliciesWithoutConsolidationAreSkipped(t *testing.T) {
 	}
 }
 
+// fakeRunTracker is an in-memory RunTracker for gating tests.
+type fakeRunTracker struct {
+	last   map[string]time.Time // key: policy|ws|axis
+	marked map[string]time.Time // records every MarkRun
+}
+
+func newFakeRunTracker() *fakeRunTracker {
+	return &fakeRunTracker{last: map[string]time.Time{}, marked: map[string]time.Time{}}
+}
+
+func rtKey(policy, ws, axis string) string { return policy + "|" + ws + "|" + axis }
+
+func (f *fakeRunTracker) LastRun(_ context.Context, policy, ws, axis string) (time.Time, bool, error) {
+	t, ok := f.last[rtKey(policy, ws, axis)]
+	return t, ok, nil
+}
+
+func (f *fakeRunTracker) MarkRun(_ context.Context, policy, ws, axis string, at time.Time) error {
+	f.last[rtKey(policy, ws, axis)] = at
+	f.marked[rtKey(policy, ws, axis)] = at
+	return nil
+}
+
+func TestWorker_FirstSightingAnchorsWithoutRunning(t *testing.T) {
+	tracker := newFakeRunTracker()
+	now := time.Date(2026, 5, 29, 14, 0, 0, 0, time.UTC)
+	w := NewWorker(WorkerOptions{
+		Store:           &MockStore{},
+		LockStore:       &mockLockStore{acquired: true},
+		Policies:        fakePolicyLister{policies: oneStaleOnlyPolicy()},
+		PreFilterRunner: &mockPreFilterRunner{stale: []Bucket{{Key: "k", Entries: []BucketEntry{{ID: testObsID, Mutability: MutabilityMutable}}}}},
+		RunTracker:      tracker,
+		Log:             testr.New(t),
+		Now:             func() time.Time { return now },
+	})
+	called := false
+	w.callFunction = func(context.Context, PreFilterAxis, memoryv1.MemoryFunctionRef, FunctionInput) ([]Action, error) {
+		called = true
+		return nil, nil
+	}
+	if err := w.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Error("first sighting must anchor without running the axis")
+	}
+	if _, ok := tracker.marked[rtKey(testWorkspaceID, testWorkspaceID, "staleObservations")]; !ok {
+		t.Error("first sighting must record an anchor via MarkRun")
+	}
+}
+
+func TestWorker_RunsAxisWhenDue(t *testing.T) {
+	tracker := newFakeRunTracker()
+	now := time.Date(2026, 5, 29, 14, 0, 0, 0, time.UTC)
+	// Last ran 25h ago; default schedule "0 2 * * *" => next after last is
+	// well before now, so it is due.
+	tracker.last[rtKey(testWorkspaceID, testWorkspaceID, "staleObservations")] = now.Add(-25 * time.Hour)
+	w := NewWorker(WorkerOptions{
+		Store:           &MockStore{},
+		LockStore:       &mockLockStore{acquired: true},
+		Policies:        fakePolicyLister{policies: oneStaleOnlyPolicy()},
+		PreFilterRunner: &mockPreFilterRunner{stale: []Bucket{{Key: "k", Entries: []BucketEntry{{ID: testObsID, Mutability: MutabilityMutable}}}}},
+		RunTracker:      tracker,
+		Log:             testr.New(t),
+		Now:             func() time.Time { return now },
+	})
+	called := 0
+	w.callFunction = func(context.Context, PreFilterAxis, memoryv1.MemoryFunctionRef, FunctionInput) ([]Action, error) {
+		called++
+		return nil, nil
+	}
+	if err := w.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if called != 1 {
+		t.Errorf("expected axis to run once when due, ran %d", called)
+	}
+	if got := tracker.marked[rtKey(testWorkspaceID, testWorkspaceID, "staleObservations")]; !got.Equal(now) {
+		t.Errorf("expected MarkRun(now) after running, got %v", got)
+	}
+}
+
+func TestWorker_SkipsAxisWhenNotDue(t *testing.T) {
+	tracker := newFakeRunTracker()
+	now := time.Date(2026, 5, 29, 14, 0, 0, 0, time.UTC)
+	// Ran 1 minute ago; default daily schedule => not due again yet.
+	ranAt := now.Add(-time.Minute)
+	tracker.last[rtKey(testWorkspaceID, testWorkspaceID, "staleObservations")] = ranAt
+	w := NewWorker(WorkerOptions{
+		Store:           &MockStore{},
+		LockStore:       &mockLockStore{acquired: true},
+		Policies:        fakePolicyLister{policies: oneStaleOnlyPolicy()},
+		PreFilterRunner: &mockPreFilterRunner{stale: []Bucket{{Key: "k", Entries: []BucketEntry{{ID: testObsID, Mutability: MutabilityMutable}}}}},
+		RunTracker:      tracker,
+		Log:             testr.New(t),
+		Now:             func() time.Time { return now },
+	})
+	called := false
+	w.callFunction = func(context.Context, PreFilterAxis, memoryv1.MemoryFunctionRef, FunctionInput) ([]Action, error) {
+		called = true
+		return nil, nil
+	}
+	if err := w.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Error("axis ran while not due")
+	}
+	// last_ran_at must be unchanged when not due.
+	if got := tracker.last[rtKey(testWorkspaceID, testWorkspaceID, "staleObservations")]; !got.Equal(ranAt) {
+		t.Errorf("last_ran_at changed on a not-due tick: %v", got)
+	}
+}
+
+func TestWorker_MarksRunEvenWhenAxisErrors(t *testing.T) {
+	tracker := newFakeRunTracker()
+	now := time.Date(2026, 5, 29, 14, 0, 0, 0, time.UTC)
+	tracker.last[rtKey(testWorkspaceID, testWorkspaceID, "staleObservations")] = now.Add(-25 * time.Hour)
+	w := NewWorker(WorkerOptions{
+		Store:           &MockStore{},
+		LockStore:       &mockLockStore{acquired: true},
+		Policies:        fakePolicyLister{policies: oneStaleOnlyPolicy()},
+		PreFilterRunner: &mockPreFilterRunner{stale: []Bucket{{Key: "k", Entries: []BucketEntry{{ID: testObsID, Mutability: MutabilityMutable}}}}},
+		RunTracker:      tracker,
+		Log:             testr.New(t),
+		Now:             func() time.Time { return now },
+	})
+	w.callFunction = func(context.Context, PreFilterAxis, memoryv1.MemoryFunctionRef, FunctionInput) ([]Action, error) {
+		return nil, errFakeStoreFailure // axis fails
+	}
+	if err := w.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := tracker.marked[rtKey(testWorkspaceID, testWorkspaceID, "staleObservations")]; !got.Equal(now) {
+		t.Errorf("mark-on-attempt: expected MarkRun(now) even on axis error, got %v", got)
+	}
+}
+
 // --- fakes ---
 
 type mockLockStore struct {

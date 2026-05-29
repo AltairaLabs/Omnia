@@ -163,7 +163,7 @@ func parseFlags() *flags {
 	flag.StringVar(&f.requireAboutForKinds, "require-about-for-kinds", "", "Comma-separated list of memory kinds requiring an about={kind, key} hint on save (e.g. fact,preference). Empty disables.")
 	flag.StringVar(&f.workspace, "workspace", "", "Workspace name (K8s CRD resolution mode)")
 	flag.StringVar(&f.serviceGroup, "service-group", "", "Service group name within workspace")
-	flag.StringVar(&f.consolidationInterval, "consolidation-interval", "", "Interval for the LLM-driven memory consolidation worker (e.g. 6h). Empty disables.")
+	flag.StringVar(&f.consolidationInterval, "consolidation-interval", "", "Schedule-evaluation (poll) interval for the consolidation worker, e.g. 1m. Each axis fires per its MemoryPolicy cron schedule; this controls how often schedules are checked. Empty disables the worker.")
 	flag.Parse()
 
 	f.applyEnvFallbacks()
@@ -1069,6 +1069,7 @@ func newConsolidationWorkerOptions(
 		Policies:        consolidation.NewK8sPolicyLister(c),
 		Workspaces:      consolidation.NewK8sWorkspaceLister(c),
 		PreFilterRunner: memorypg.NewPreFilterRunner(pool),
+		RunTracker:      memorypg.NewConsolidationRunStore(pool),
 		Client:          consolidation.NewClient(5 * time.Minute),
 		Metrics:         metrics,
 		Interval:        interval,

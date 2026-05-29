@@ -29,6 +29,7 @@ var expectedCheckNames = []string{
 	"AgentUsesTools",
 	"ArenaControllerHealthy",
 	"AuditLogWritten",
+	"ConsolidationWorkerRunning",
 	"DashboardResponds",
 	"MemoryAPIDocsServed",
 	"MemoryAPIHealthy",
