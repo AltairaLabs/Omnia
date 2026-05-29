@@ -30,7 +30,6 @@ var agentRuntimeLog = logf.Log.WithName("agentruntime-webhook")
 var _ admission.Validator[*corev1alpha1.AgentRuntime] = &AgentRuntimeValidator{}
 
 // SetupAgentRuntimeWebhookWithManager registers the webhook with the manager.
-// Not called anywhere yet — wired in PR2.
 func SetupAgentRuntimeWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, &corev1alpha1.AgentRuntime{}).
 		WithValidator(&AgentRuntimeValidator{}).

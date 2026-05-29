@@ -44,6 +44,7 @@ import (
 	"github.com/altairalabs/omnia/internal/controller"
 	"github.com/altairalabs/omnia/internal/schema"
 	"github.com/altairalabs/omnia/internal/tooltest"
+	omniawebhook "github.com/altairalabs/omnia/internal/webhook"
 	"github.com/altairalabs/omnia/pkg/metrics"
 	// +kubebuilder:scaffold:imports
 )
@@ -396,6 +397,20 @@ func main() {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "SkillSource")
 		os.Exit(1)
 	}
+	// Core admission webhooks — gated on the presence of serving certs, the
+	// same gate the enterprise webhooks use. When webhook.enabled is false in
+	// Helm, no cert path is set and these are skipped (status-quo behaviour).
+	if len(webhookCertPath) > 0 {
+		if err := omniawebhook.SetupAgentRuntimeWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to register webhook", "webhook", "AgentRuntime")
+			os.Exit(1)
+		}
+		if err := omniawebhook.SetupSkillSourceWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to register webhook", "webhook", "SkillSource")
+			os.Exit(1)
+		}
+	}
+
 	// +kubebuilder:scaffold:builder
 
 	// Enterprise controllers — gated behind --enterprise flag
