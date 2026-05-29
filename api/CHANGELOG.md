@@ -10,6 +10,19 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (MemoryPolicy per-axis consolidation schedules, #1152)
+
+`MemoryPolicy.spec.consolidation.schedules` adds optional per-axis cron
+overrides (`staleObservations`, `crossScopeCandidates`,
+`entityDuplicateCandidates`). Each axis falls back to
+`spec.consolidation.schedule` when unset, which itself defaults to
+`"0 2 * * *"`. The consolidation worker now honours these schedules per
+axis — previously `schedule` was parsed but ignored and every axis ran on
+the global tick. `--consolidation-interval` (operator:
+`--memory-consolidation-interval`) is now the schedule-evaluation (poll)
+interval rather than the run cadence. Backward compatible: operators who
+never enabled the worker are unaffected.
+
 ### Changed (Functions-as-sessions rework, PR 3/3: dashboard reads sessions data)
 
 The `/functions/{name}` detail page reads recent invocations from the
