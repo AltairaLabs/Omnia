@@ -528,12 +528,19 @@ metrics:
   # -- Enable secure metrics (HTTPS)
   secure: true
 
-# Webhook configuration
+# Webhook configuration. Disabled by default. When enabled, cert-manager MUST
+# be installed in the cluster (it issues the serving cert and injects the
+# webhook caBundle). When disabled, no cert-manager dependency exists and a
+# malformed function-mode schema falls back to facade-startup validation.
 webhook:
-  # -- Enable webhooks
+  # -- Enable admission webhooks (requires cert-manager when true)
   enabled: false
-  # -- Port for webhooks
+  # -- Port the webhook server listens on
   port: 9443
+  # -- Directory the serving cert is mounted into in the operator container
+  certPath: "/etc/webhook/certs"
+  # -- Name of the Secret cert-manager writes the serving cert into
+  certSecretName: "omnia-webhook-server-cert"
 
 # RBAC configuration
 rbac:
