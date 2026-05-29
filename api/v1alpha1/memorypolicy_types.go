@@ -422,6 +422,12 @@ type MemoryConsolidationConfig struct {
 	// +optional
 	Schedule string `json:"schedule,omitempty"`
 
+	// Schedules optionally overrides Schedule per axis. Each axis is
+	// independent; an unset axis inherits the policy-level Schedule.
+	// Standard 5-field cron.
+	// +optional
+	Schedules *MemoryConsolidationSchedules `json:"schedules,omitempty"`
+
 	// FunctionRefs maps each pre-filter axis to a function-mode
 	// AgentRuntime that handles that axis. Axes with no functionRef
 	// are skipped (no-op for that axis).
@@ -440,6 +446,18 @@ type MemoryConsolidationConfig struct {
 	// Timeouts configures per-call and per-pass timeouts.
 	// +optional
 	Timeouts *MemoryConsolidationTimeouts `json:"timeouts,omitempty"`
+}
+
+// MemoryConsolidationSchedules optionally overrides the policy-level
+// Schedule on a per-axis basis. Each field is a standard 5-field cron
+// expression; an empty field inherits MemoryConsolidationConfig.Schedule.
+type MemoryConsolidationSchedules struct {
+	// +optional
+	StaleObservations string `json:"staleObservations,omitempty"`
+	// +optional
+	CrossScopeCandidates string `json:"crossScopeCandidates,omitempty"`
+	// +optional
+	EntityDuplicateCandidates string `json:"entityDuplicateCandidates,omitempty"`
 }
 
 // MemoryConsolidationFunctionRefs maps pre-filter axes to function refs.

@@ -215,3 +215,43 @@ func (p *MemoryPolicy) ResolvedTimeouts() (functionCall, passWallClock time.Dura
 	}
 	return
 }
+
+// ConsolidationDefaultSchedule is the cron used when a policy specifies no
+// schedule. Kept in sync with the +kubebuilder:default on
+// MemoryConsolidationConfig.Schedule.
+const ConsolidationDefaultSchedule = "0 2 * * *"
+
+// ResolvedSchedule returns the cron schedule for the given consolidation
+// axis: the per-axis override in Spec.Consolidation.Schedules if set, else
+// the policy-level Schedule, else ConsolidationDefaultSchedule. Safe to call
+// when the policy or the Consolidation block is nil. axis is one of the
+// consolidation.PreFilterAxis string values ("staleObservations",
+// "crossScopeCandidates", "entityDuplicateCandidates").
+func (p *MemoryPolicy) ResolvedSchedule(axis string) string {
+	if p == nil || p.Spec.Consolidation == nil {
+		return ConsolidationDefaultSchedule
+	}
+	if override := p.Spec.Consolidation.scheduleForAxis(axis); override != "" {
+		return override
+	}
+	if p.Spec.Consolidation.Schedule != "" {
+		return p.Spec.Consolidation.Schedule
+	}
+	return ConsolidationDefaultSchedule
+}
+
+// scheduleForAxis returns the per-axis schedule override, or "" when unset.
+func (c *MemoryConsolidationConfig) scheduleForAxis(axis string) string {
+	if c.Schedules == nil {
+		return ""
+	}
+	switch axis {
+	case "staleObservations":
+		return c.Schedules.StaleObservations
+	case "crossScopeCandidates":
+		return c.Schedules.CrossScopeCandidates
+	case "entityDuplicateCandidates":
+		return c.Schedules.EntityDuplicateCandidates
+	}
+	return ""
+}
