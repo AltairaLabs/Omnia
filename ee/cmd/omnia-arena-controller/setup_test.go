@@ -29,7 +29,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
 )
 
-// expectedReconcilers is the canonical 6-reconciler set the binary
+// expectedReconcilers is the canonical 5-reconciler set the binary
 // must register. Each entry corresponds to one SetupWithManager call
 // that was previously inline in main(). A regression that removes a
 // reconciler from buildReconcilers fails this test.
@@ -41,12 +41,11 @@ var expectedReconcilers = []string{
 	controllerArenaTemplateSource,
 	controllerArenaJob,
 	controllerArenaDevSession,
-	controllerSessionPrivacy,
 	controllerKeyRotation,
 }
 
 // TestBuildReconcilers_RegistersAllExpected asserts that buildReconcilers
-// produces the six reconciler entries the binary must register. This is
+// produces the five reconciler entries the binary must register. This is
 // the wiring contract: a removed entry here means production silently
 // stops reconciling its CRD. setupOptions can be zero-valued because
 // buildReconcilers doesn't dereference the options at construction —
@@ -71,23 +70,22 @@ func TestBuildReconcilers_RegistersAllExpected(t *testing.T) {
 }
 
 // TestBuildWebhooks_WithoutLicenseHooks asserts that when license-validation
-// webhooks are disabled, only the SessionPrivacyPolicy webhook is registered.
-// The webhook controller binary defaults this flag off; a regression that
-// flipped it on by accident would surface as ArenaSource/ArenaJob webhooks
-// trying to start in clusters that don't have a working license validator.
+// webhooks are disabled, no webhooks register. SessionPrivacyPolicy is owned
+// by the operator (always-present enterprise controller-manager), not this
+// license-gated binary; the Arena webhooks are conditional on the license flag.
 func TestBuildWebhooks_WithoutLicenseHooks(t *testing.T) {
 	got := buildWebhooks(webhookOptions{IncludeLicenseHooks: false})
-	want := []string{controllerSessionPrivacy}
+	want := []string{}
 	assertWebhookNames(t, got, want)
 }
 
-// TestBuildWebhooks_WithLicenseHooks asserts that all three webhooks
-// register when IncludeLicenseHooks=true. A regression that removed
-// either ArenaSource or ArenaJob from the conditional block silently
-// skips its admission validation.
+// TestBuildWebhooks_WithLicenseHooks asserts that all three Arena webhooks
+// register when IncludeLicenseHooks=true. A regression that removed any of
+// ArenaSource/ArenaJob/ArenaTemplateSource from the conditional block
+// silently skips its admission validation.
 func TestBuildWebhooks_WithLicenseHooks(t *testing.T) {
 	got := buildWebhooks(webhookOptions{IncludeLicenseHooks: true})
-	want := []string{controllerSessionPrivacy, controllerArenaSource, controllerArenaJob}
+	want := []string{controllerArenaSource, controllerArenaJob, controllerArenaTemplateSource}
 	assertWebhookNames(t, got, want)
 }
 
@@ -335,7 +333,7 @@ func TestSetupWebhooks_RegistersAllAgainstRealManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setupWebhooks: %v (registered up to %v)", err, registered)
 	}
-	want := []string{controllerSessionPrivacy, controllerArenaSource, controllerArenaJob}
+	want := []string{controllerArenaSource, controllerArenaJob, controllerArenaTemplateSource}
 	if len(registered) != len(want) {
 		t.Errorf("registered %d webhooks, want %d: %v", len(registered), len(want), registered)
 	}

@@ -32,7 +32,6 @@ const (
 	controllerArenaTemplateSource = "ArenaTemplateSource"
 	controllerArenaJob            = "ArenaJob"
 	controllerArenaDevSession     = "ArenaDevSession"
-	controllerSessionPrivacy      = "SessionPrivacyPolicy"
 	controllerKeyRotation         = "KeyRotation"
 )
 
@@ -182,17 +181,6 @@ func buildReconcilers(opts setupOptions) []namedReconciler {
 			},
 		},
 		{
-			Name: controllerSessionPrivacy,
-			Setup: func(mgr ctrl.Manager) error {
-				return (&controller.SessionPrivacyPolicyReconciler{
-					Client:   mgr.GetClient(),
-					Scheme:   mgr.GetScheme(),
-					Recorder: mgr.GetEventRecorderFor("sessionprivacypolicy-controller"),
-					Metrics:  opts.PrivacyPolicyMetrics,
-				}).SetupWithManager(mgr)
-			},
-		},
-		{
 			Name: controllerKeyRotation,
 			Setup: func(mgr ctrl.Manager) error {
 				return (&controller.KeyRotationReconciler{
@@ -264,17 +252,13 @@ type namedWebhook struct {
 }
 
 // buildWebhooks returns the list of webhooks the binary registers.
-// SessionPrivacyPolicy is always registered when webhooks are enabled;
-// the license-validation webhooks are conditional on the
-// IncludeLicenseHooks flag. Pure function — tests assert the name set
-// for both flag states.
+// SessionPrivacyPolicy is owned by the operator (the always-present
+// enterprise controller-manager), not this license-gated binary; this
+// binary serves only the license-validation Arena webhooks, conditional
+// on the IncludeLicenseHooks flag. Pure function — tests assert the name
+// set for both flag states.
 func buildWebhooks(opts webhookOptions) []namedWebhook {
-	hooks := []namedWebhook{
-		{
-			Name:  controllerSessionPrivacy,
-			Setup: arenawebhook.SetupSessionPrivacyPolicyWebhookWithManager,
-		},
-	}
+	var hooks []namedWebhook
 	if opts.IncludeLicenseHooks {
 		hooks = append(hooks,
 			namedWebhook{
@@ -287,6 +271,12 @@ func buildWebhooks(opts webhookOptions) []namedWebhook {
 				Name: controllerArenaJob,
 				Setup: func(mgr ctrl.Manager) error {
 					return arenawebhook.SetupArenaJobWebhookWithManager(mgr, opts.LicenseValidator)
+				},
+			},
+			namedWebhook{
+				Name: controllerArenaTemplateSource,
+				Setup: func(mgr ctrl.Manager) error {
+					return arenawebhook.SetupArenaTemplateSourceWebhookWithManager(mgr, opts.LicenseValidator)
 				},
 			},
 		)
