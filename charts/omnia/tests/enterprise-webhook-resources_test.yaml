@@ -1,0 +1,125 @@
+suite: enterprise webhook render-gating
+# Covers issue #1176 — the enterprise (arena-controller) webhook resources are
+# gated behind enterprise.enabled && webhook.enabled. A single flag renders
+# none of them. SessionPrivacyPolicy is served by the operator (its VWC entry
+# is enterprise-gated), while the Arena webhooks live on the arena-controller.
+values:
+  - ../values-chart-tests.yaml
+tests:
+  # --- Single flag: nothing enterprise-webhook renders ---
+
+  - it: arena-controller webhook service does not render with webhook only
+    template: templates/enterprise/arena-controller-webhook-service.yaml
+    set:
+      webhook.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: arena-controller webhook service does not render with enterprise only
+    template: templates/enterprise/arena-controller-webhook-service.yaml
+    set:
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: arena-controller webhook certificate does not render with enterprise only
+    template: templates/enterprise/arena-controller-webhook-certificate.yaml
+    set:
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: enterprise VWC does not render with enterprise only
+    template: templates/enterprise/validatingwebhookconfiguration.yaml
+    set:
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # --- Both flags: enterprise webhook resources render ---
+
+  - it: arena-controller webhook service renders when both enabled
+    template: templates/enterprise/arena-controller-webhook-service.yaml
+    set:
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+      webhook.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Service
+      - equal:
+          path: spec.ports[0].targetPort
+          value: webhook
+
+  - it: arena-controller certificate renders sharing the operator self-signed Issuer
+    template: templates/enterprise/arena-controller-webhook-certificate.yaml
+    set:
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+      webhook.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Certificate
+      - matchRegex:
+          path: spec.issuerRef.name
+          pattern: -webhook-selfsign$
+      - equal:
+          path: spec.issuerRef.kind
+          value: Issuer
+
+  - it: enterprise VWC renders the three Arena webhooks with inject-ca-from
+    template: templates/enterprise/validatingwebhookconfiguration.yaml
+    set:
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+      webhook.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: ValidatingWebhookConfiguration
+      - isNotEmpty:
+          path: metadata.annotations["cert-manager.io/inject-ca-from"]
+      - lengthEqual:
+          path: webhooks
+          count: 3
+      - equal:
+          path: webhooks[0].failurePolicy
+          value: Fail
+
+  # --- Operator VWC: SessionPrivacyPolicy entry is enterprise-gated ---
+
+  - it: operator VWC has no SessionPrivacyPolicy webhook without enterprise
+    template: templates/webhook/validatingwebhookconfiguration.yaml
+    set:
+      webhook.enabled: true
+    asserts:
+      - notContains:
+          path: webhooks
+          content:
+            name: vsessionprivacypolicy.kb.io
+          any: true
+
+  - it: operator VWC gains the SessionPrivacyPolicy webhook when enterprise enabled
+    template: templates/webhook/validatingwebhookconfiguration.yaml
+    set:
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+      webhook.enabled: true
+    asserts:
+      - contains:
+          path: webhooks
+          content:
+            name: vsessionprivacypolicy.kb.io
+          any: true
