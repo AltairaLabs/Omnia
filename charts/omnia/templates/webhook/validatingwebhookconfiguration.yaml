@@ -29,7 +29,11 @@ webhooks:
   - name: vskillsource.kb.io
     admissionReviewVersions: ["v1"]
     sideEffects: None
-    failurePolicy: Fail
+    # Ignore (not Fail): SkillSource validation is a structural variant check,
+    # not a security gate, so a down/unready operator must not block SkillSource
+    # writes cluster-wide. The AgentRuntime webhook keeps Fail (a real schema
+    # correctness gate, narrowed to function-mode via matchConditions).
+    failurePolicy: Ignore
     clientConfig:
       service:
         name: {{ include "omnia.fullname" . }}-webhook
