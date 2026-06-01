@@ -103,6 +103,8 @@ spec:
             {{- end }}
             {{- if .Values.webhook.enabled }}
             - --enable-webhooks
+            - --enable-license-webhooks
+            - --webhook-cert-path={{ .Values.webhook.certPath }}
             {{- end }}
             {{- if .Values.metrics.enabled }}
             - --metrics-bind-address=:{{ .Values.metrics.port }}
@@ -182,6 +184,11 @@ spec:
             {{- end }}
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.webhook.enabled }}
+            - name: webhook-cert
+              mountPath: {{ .Values.webhook.certPath }}
+              readOnly: true
+            {{- end }}
             {{- $vm := concat (.Values.enterprise.arena.controller.extraVolumeMounts | default list) ($po.extraVolumeMounts | default list) }}
             {{- with $vm }}
             {{- toYaml . | nindent 12 }}
@@ -194,6 +201,12 @@ spec:
         {{- end }}
         - name: tmp
           emptyDir: {}
+        {{- if .Values.webhook.enabled }}
+        - name: webhook-cert
+          secret:
+            secretName: {{ .Values.enterprise.arena.controller.webhook.certSecretName }}
+            defaultMode: 0o644
+        {{- end }}
         {{- $vols := concat (.Values.enterprise.arena.controller.extraVolumes | default list) ($po.extraVolumes | default list) }}
         {{- with $vols }}
         {{- toYaml . | nindent 8 }}

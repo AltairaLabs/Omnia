@@ -44,4 +44,24 @@ webhooks:
         apiVersions: ["v1alpha1"]
         operations: ["CREATE", "UPDATE"]
         resources: ["skillsources"]
+  {{- if .Values.enterprise.enabled }}
+  - name: vsessionprivacypolicy.kb.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    # Ignore: the SessionPrivacyPolicy validator currently admits all
+    # writes (structural-only); a down operator must not block privacy
+    # policy edits. Owned by the operator (always-present enterprise
+    # controller-manager), not the license-gated arena-controller.
+    failurePolicy: Ignore
+    clientConfig:
+      service:
+        name: {{ include "omnia.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /validate-omnia-altairalabs-ai-v1alpha1-sessionprivacypolicy
+    rules:
+      - apiGroups: ["omnia.altairalabs.ai"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["sessionprivacypolicies"]
+  {{- end }}
 {{- end }}

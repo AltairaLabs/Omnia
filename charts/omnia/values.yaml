@@ -121,6 +121,13 @@ enterprise:
       # (docs/how-to/configure-pod-overrides). Additive on top of the
       # legacy extraEnv/extraEnvFrom/extraVolumes/extraVolumeMounts above.
       podOverrides: {}
+      # Admission webhook serving for the arena-controller. Only used when
+      # the top-level `webhook.enabled` is true (the in-container port and
+      # cert mount path are shared with the operator via `webhook.port` /
+      # `webhook.certPath`). cert-manager issues this Secret per release.
+      webhook:
+        # -- Name of the Secret cert-manager writes the arena-controller serving cert into
+        certSecretName: "omnia-arena-controller-webhook-server-cert"
 
     # Worker configuration for ArenaJob execution
     worker:
