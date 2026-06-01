@@ -1,0 +1,29 @@
+{{- if and .Values.enterprise.enabled .Values.webhook.enabled }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "omnia.fullname" . }}-enterprise-validating-webhook
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "omnia.fullname" . }}-arena-controller-webhook-cert
+webhooks:
+  {{- range $w := list (dict "name" "varenasource.kb.io" "path" "/validate-omnia-altairalabs-ai-v1alpha1-arenasource" "resource" "arenasources") (dict "name" "varenajob.kb.io" "path" "/validate-omnia-altairalabs-ai-v1alpha1-arenajob" "resource" "arenajobs") (dict "name" "varenatemplatesource.kb.io" "path" "/validate-omnia-altairalabs-ai-v1alpha1-arenatemplatesource" "resource" "arenatemplatesources") }}
+  - name: {{ $w.name }}
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    # Fail: these enforce the Arena license; the rules below limit the
+    # blast radius of a down arena-controller to Arena resources only.
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: {{ include "omnia.fullname" $ }}-arena-controller-webhook
+        namespace: {{ $.Release.Namespace }}
+        path: {{ $w.path }}
+    rules:
+      - apiGroups: ["omnia.altairalabs.ai"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["{{ $w.resource }}"]
+  {{- end }}
+{{- end }}
