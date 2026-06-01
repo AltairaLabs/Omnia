@@ -158,4 +158,14 @@ For more information, visit: https://omnia.altairalabs.ai/docs
   (--set global.leaderElection.namespace=cert-manager).
   With Istio STRICT mTLS, exclude the webhook port on the operator pod:
     traffic.sidecar.istio.io/excludeInboundPorts: "{{ .Values.webhook.port }}"
+{{- if .Values.enterprise.enabled }}
+
+  Enterprise is enabled: the arena-controller also serves admission
+  webhooks (ArenaSource/ArenaJob/ArenaTemplateSource). cert-manager issues
+  its serving cert ({{ .Values.enterprise.arena.controller.webhook.certSecretName }})
+  from the same self-signed Issuer. SessionPrivacyPolicy is validated by
+  the operator. With Istio STRICT mTLS, also exclude the webhook port on
+  the arena-controller pod:
+    traffic.sidecar.istio.io/excludeInboundPorts: "{{ .Values.webhook.port }}"
+{{- end }}
 {{- end }}
