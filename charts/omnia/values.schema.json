@@ -155,7 +155,13 @@
                 "extraEnv":          { "type": "array", "items": { "type": "object" } },
                 "extraEnvFrom":      { "type": "array", "items": { "type": "object" } },
                 "extraVolumes":      { "type": "array", "items": { "type": "object" } },
-                "extraVolumeMounts": { "type": "array", "items": { "type": "object" } }
+                "extraVolumeMounts": { "type": "array", "items": { "type": "object" } },
+                "webhook": {
+                  "type": "object",
+                  "properties": {
+                    "certSecretName": { "type": "string" }
+                  }
+                }
               }
             },
             "worker": {
