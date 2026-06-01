@@ -1,0 +1,109 @@
+suite: webhook render-gating
+# Covers issue #1175 — admission webhook resources are optional and gated
+# behind webhook.enabled (default false). When disabled the chart has zero
+# cert-manager dependency; when enabled the ValidatingWebhookConfiguration
+# carries the mode==function matchCondition and the operator Deployment gains
+# the --webhook-cert-path arg plus the webhook-cert secret volume.
+#
+# Suite-wide values: the chart's _helpers.tpl omnia.validateAuth gates renders
+# on an explicit dashboard.auth.mode when dashboard.enabled=true (default).
+# Load the canonical chart-test values file so every test starts from a valid
+# auth config; individual tests can still override with per-test `set:` blocks.
+values:
+  - ../values-chart-tests.yaml
+tests:
+  # --- Default: webhook resources must NOT render ---
+
+  - it: validatingwebhookconfiguration does not render by default
+    template: templates/webhook/validatingwebhookconfiguration.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: certificate does not render by default
+    template: templates/webhook/certificate.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: issuer does not render by default
+    template: templates/webhook/issuer.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: webhook service does not render by default
+    template: templates/webhook/service.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # --- webhook.enabled=true: webhook resources MUST render correctly ---
+
+  - it: validatingwebhookconfiguration renders when webhook.enabled
+    template: templates/webhook/validatingwebhookconfiguration.yaml
+    set:
+      webhook.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: ValidatingWebhookConfiguration
+
+  - it: agentruntime webhook carries the mode-function matchCondition
+    template: templates/webhook/validatingwebhookconfiguration.yaml
+    set:
+      webhook.enabled: true
+    asserts:
+      - matchRegex:
+          path: webhooks[0].matchConditions[0].expression
+          pattern: "mode == 'function'"
+
+  - it: validatingwebhookconfiguration has cert-manager inject-ca-from annotation
+    template: templates/webhook/validatingwebhookconfiguration.yaml
+    set:
+      webhook.enabled: true
+    asserts:
+      - isNotEmpty:
+          path: metadata.annotations["cert-manager.io/inject-ca-from"]
+
+  - it: certificate renders when webhook.enabled
+    template: templates/webhook/certificate.yaml
+    set:
+      webhook.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Certificate
+
+  # --- webhook.enabled=true: operator Deployment gains cert arg + volume ---
+
+  - it: operator deployment args contain --webhook-cert-path when webhook.enabled
+    template: templates/deployment.yaml
+    set:
+      webhook.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --webhook-cert-path=/etc/webhook/certs
+
+  - it: operator deployment volumes contain the webhook-cert secret volume when webhook.enabled
+    template: templates/deployment.yaml
+    set:
+      webhook.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: webhook-cert
+            secret:
+              secretName: omnia-webhook-server-cert
+              defaultMode: 420
+
+  - it: operator deployment does not have webhook-cert-path arg by default
+    template: templates/deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --webhook-cert-path=/etc/webhook/certs

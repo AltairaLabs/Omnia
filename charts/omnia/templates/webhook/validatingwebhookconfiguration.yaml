@@ -1,0 +1,47 @@
+{{- if .Values.webhook.enabled }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "omnia.fullname" . }}-validating-webhook
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "omnia.fullname" . }}-webhook-cert
+webhooks:
+  - name: vagentruntime.kb.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    matchConditions:
+      - name: mode-function
+        expression: "object.spec.mode == 'function'"
+    clientConfig:
+      service:
+        name: {{ include "omnia.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /validate-omnia-altairalabs-ai-v1alpha1-agentruntime
+    rules:
+      - apiGroups: ["omnia.altairalabs.ai"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["agentruntimes"]
+  - name: vskillsource.kb.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    # Ignore (not Fail): SkillSource validation is a structural variant check,
+    # not a security gate, so a down/unready operator must not block SkillSource
+    # writes cluster-wide. The AgentRuntime webhook keeps Fail (a real schema
+    # correctness gate, narrowed to function-mode via matchConditions).
+    failurePolicy: Ignore
+    clientConfig:
+      service:
+        name: {{ include "omnia.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /validate-omnia-altairalabs-ai-v1alpha1-skillsource
+    rules:
+      - apiGroups: ["omnia.altairalabs.ai"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["skillsources"]
+{{- end }}

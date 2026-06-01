@@ -25,14 +25,11 @@ type AgentRuntimeValidator struct{}
 
 var agentRuntimeLog = logf.Log.WithName("agentruntime-webhook")
 
-// NOTE: the +kubebuilder:webhook marker and matchConditions (mode=='function')
-// are added in PR2 (#1175) together with registration and deployment. This PR
-// ships the validator logic only.
+// +kubebuilder:webhook:path=/validate-omnia-altairalabs-ai-v1alpha1-agentruntime,mutating=false,failurePolicy=fail,sideEffects=None,groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=create;update,versions=v1alpha1,name=vagentruntime.kb.io,admissionReviewVersions=v1
 
 var _ admission.Validator[*corev1alpha1.AgentRuntime] = &AgentRuntimeValidator{}
 
 // SetupAgentRuntimeWebhookWithManager registers the webhook with the manager.
-// Not called anywhere yet — wired in PR2.
 func SetupAgentRuntimeWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, &corev1alpha1.AgentRuntime{}).
 		WithValidator(&AgentRuntimeValidator{}).

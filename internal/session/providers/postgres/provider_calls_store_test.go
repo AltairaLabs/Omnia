@@ -80,6 +80,18 @@ func insertProviderCall(t *testing.T, store *ProviderCallsStoreImpl, r pcRow) {
 	require.NoError(t, err)
 }
 
+// pcFixtureDay1/Day2 anchor the fixture's two distinct days relative to "now"
+// so they always land inside the provider_calls rolling partition window
+// (CURRENT_DATE-28 .. CURRENT_DATE+14, set in migration 000017). Hardcoded
+// calendar dates eventually slide out of that window once enough time passes
+// and inserts fail with "no partition of relation provider_calls found for
+// row" (SQLSTATE 23514). Anchored at noon UTC, 8/7 days ago, so the UTC date
+// (and thus the GroupByTimeDay key) is stable regardless of run time.
+var (
+	pcFixtureDay1 = time.Now().UTC().AddDate(0, 0, -8).Truncate(24 * time.Hour).Add(12 * time.Hour)
+	pcFixtureDay2 = pcFixtureDay1.AddDate(0, 0, 1)
+)
+
 // seedProviderCallsFixture: two sessions in the `default` namespace with
 // chatbot + support agents, calls across two days, two providers, three
 // models, with deterministic token + cost values for assertion math.
@@ -92,8 +104,8 @@ func seedProviderCallsFixture(t *testing.T, pcStore *ProviderCallsStoreImpl, eva
 	seedSessionWithAgent(t, evalStore, sessChatbot, pcNamespaceDefault, pcAgentChatbot)
 	seedSessionWithAgent(t, evalStore, sessSupport, pcNamespaceDefault, pcAgentSupport)
 
-	day1 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-	day2 := time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
+	day1 := pcFixtureDay1
+	day2 := pcFixtureDay2
 
 	rows := []pcRow{
 		// chatbot · openai gpt-4 — day1: 100 in / 200 out / $0.01, duration 100ms
@@ -193,9 +205,9 @@ func TestAggregateProviderCalls_TimeDay_CostSeries(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 	// Sorted ASC by time.
-	assert.Equal(t, "2026-05-01", rows[0].Key)
+	assert.Equal(t, pcFixtureDay1.Format("2006-01-02"), rows[0].Key)
 	assert.InDelta(t, 0.03, rows[0].Value, 0.0001)
-	assert.Equal(t, "2026-05-02", rows[1].Key)
+	assert.Equal(t, pcFixtureDay2.Format("2006-01-02"), rows[1].Key)
 	assert.InDelta(t, 0.001, rows[1].Value, 0.0001)
 }
 
@@ -246,8 +258,9 @@ func TestAggregateProviderCalls_FilterTimeRange(t *testing.T) {
 	pcStore, evalStore := newProviderCallsStore(t)
 	seedProviderCallsFixture(t, pcStore, evalStore)
 
-	day1Start := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	day1End := time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC)
+	// Cover day1 (the two openai calls) but exclude day2: [day1 00:00, day2 00:00).
+	day1Start := pcFixtureDay1.Truncate(24 * time.Hour)
+	day1End := day1Start.AddDate(0, 0, 1)
 	rows, err := pcStore.AggregateProviderCalls(context.Background(), api.ProviderCallAggregateOpts{
 		Namespace: pcNamespaceDefault,
 		From:      day1Start,

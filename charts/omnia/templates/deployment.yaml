@@ -200,6 +200,9 @@ spec:
             {{- with .Values.operator.extraArgs }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+            {{- if .Values.webhook.enabled }}
+            - --webhook-cert-path={{ .Values.webhook.certPath }}
+            {{- end }}
           ports:
             {{- if .Values.operator.apiBindAddress }}
             - name: api
@@ -254,23 +257,34 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           {{- $vmMounts := concat (.Values.operator.extraVolumeMounts | default list) ($po.extraVolumeMounts | default list) }}
-          {{- if or .Values.workspaceContent.enabled $vmMounts }}
+          {{- if or .Values.workspaceContent.enabled .Values.webhook.enabled $vmMounts }}
           volumeMounts:
             {{- if .Values.workspaceContent.enabled }}
             - name: workspace-content
               mountPath: {{ .Values.workspaceContent.mountPath | default "/workspace-content" }}
+            {{- end }}
+            {{- if .Values.webhook.enabled }}
+            - name: webhook-cert
+              mountPath: {{ .Values.webhook.certPath }}
+              readOnly: true
             {{- end }}
             {{- with $vmMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
       {{- $volumes := concat (.Values.operator.extraVolumes | default list) ($po.extraVolumes | default list) }}
-      {{- if or .Values.workspaceContent.enabled $volumes }}
+      {{- if or .Values.workspaceContent.enabled .Values.webhook.enabled $volumes }}
       volumes:
         {{- if .Values.workspaceContent.enabled }}
         - name: workspace-content
           persistentVolumeClaim:
             claimName: {{ .Values.workspaceContent.persistence.existingClaim | default (printf "%s-workspace-content" (include "omnia.fullname" .)) }}
+        {{- end }}
+        {{- if .Values.webhook.enabled }}
+        - name: webhook-cert
+          secret:
+            secretName: {{ .Values.webhook.certSecretName }}
+            defaultMode: 0o644
         {{- end }}
         {{- with $volumes }}
         {{- toYaml . | nindent 8 }}
