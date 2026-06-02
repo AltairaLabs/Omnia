@@ -347,7 +347,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          # Astro 6.x requires Node >=22.12. Keep in sync with docs.yml.
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: docs/package-lock.json
 
@@ -491,7 +492,10 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: [parse-version, docker-release, helm-release, helm-repo-publish, docs-deploy]
+    # NOT gated on docs-deploy: a docs-site failure must never block cutting
+    # the release (images + chart are the release artifacts). Docs deploy
+    # independently.
+    needs: [parse-version, docker-release, helm-release, helm-repo-publish]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
