@@ -107,19 +107,20 @@ export async function buildAuthorizationUrl(pkce: PKCEData): Promise<string> {
 /**
  * Exchange authorization code for tokens.
  *
- * incomingUrl is the full request URL received on the callback route.
- * Preserving its query params is load-bearing for providers that
- * advertise RFC 9207 issuer identification (Google / Google Workspace
- * set `authorization_response_iss_parameter_supported: true` in their
- * discovery documents). openid-client v6 refuses the exchange when
- * `iss` is expected but absent — so stripping query params down to
- * `code` + `state`, as earlier revisions did, reliably broke Google
- * sign-in. See issue #948.
+ * incomingUrl is the full request URL received on the callback route. Its
+ * query params are load-bearing for providers that advertise RFC 9207 issuer
+ * identification (Google / Google Workspace set
+ * `authorization_response_iss_parameter_supported: true`); openid-client v6
+ * refuses the exchange when `iss` is expected but absent, so dropping the
+ * query params broke Google sign-in (#948).
  *
- * Entra ID and Cognito don't set the flag, which is why the bug was
- * invisible on omnia-azure / omnia-aws. Falling back to the
- * configured callback URL keeps the test / non-request call sites
- * working; real production callers always pass the incoming URL.
+ * BUT the redirect_uri origin+path must match the one sent at authorize
+ * (getCallbackUrl(), i.e. OMNIA_BASE_URL). Behind a reverse proxy (Istio),
+ * request.nextUrl.origin is the Next.js standalone bind address
+ * (e.g. 0.0.0.0:3000), not the public host — using it verbatim makes the IdP
+ * reject the token exchange (Entra AADSTS500112 / invalid_client). So we pin
+ * the origin+path to getCallbackUrl() and only copy the incoming query params
+ * onto it — satisfying both #948 (iss preserved) and proxied deployments.
  */
 export async function exchangeCodeForTokens(
   code: string,
@@ -128,12 +129,14 @@ export async function exchangeCodeForTokens(
 ): Promise<client.TokenEndpointResponse & client.TokenEndpointResponseHelpers> {
   const oauthConfig = await getOAuthConfig();
 
-  // Start from the real incoming URL so RFC 9207 iss (and any future
-  // required response params) survive validation. Fall back to the
-  // configured callback URL for call sites without a request in hand.
-  const callbackUrl = incomingUrl
-    ? new URL(incomingUrl.toString())
-    : new URL(getCallbackUrl());
+  // Origin+path from the configured callback (matches the authorize
+  // redirect_uri); copy incoming query params so RFC 9207 iss survives.
+  const callbackUrl = new URL(getCallbackUrl());
+  if (incomingUrl) {
+    incomingUrl.searchParams.forEach((value, key) => {
+      callbackUrl.searchParams.set(key, value);
+    });
+  }
   callbackUrl.searchParams.set("code", code);
   callbackUrl.searchParams.set("state", pkce.state);
 
