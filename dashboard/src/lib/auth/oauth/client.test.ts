@@ -89,6 +89,36 @@ describe("exchangeCodeForTokens (issue #948)", () => {
     // admits; real callers (the callback route) always pass incomingUrl.
     expect(passedUrl.searchParams.has("iss")).toBe(false);
   });
+
+  it("uses OMNIA_BASE_URL origin even when the incoming URL is a proxied internal origin", async () => {
+    // Behind a reverse proxy (Istio), request.nextUrl.origin is the Next.js
+    // standalone bind address (0.0.0.0:3000), NOT the public host. The
+    // token-exchange redirect_uri MUST still match the authorize redirect_uri
+    // (OMNIA_BASE_URL), or the IdP rejects with AADSTS500112 / invalid_client.
+    // We must keep the iss query param (#948) while pinning the origin+path
+    // to OMNIA_BASE_URL.
+    const openid = await import("openid-client");
+    const mocked = vi.mocked(openid.authorizationCodeGrant);
+    mocked.mockClear();
+
+    const { exchangeCodeForTokens } = await import("./client");
+    const incoming = new URL(
+      "https://0.0.0.0:3000/api/auth/callback?code=c-3&state=state-abc&iss=https%3A%2F%2Faccounts.google.com",
+    );
+
+    await exchangeCodeForTokens("c-3", pkce, incoming);
+
+    const [, passedArg] = mocked.mock.calls[0];
+    const passedUrl = passedArg as URL;
+    // Origin+path must come from OMNIA_BASE_URL, not the proxied internal origin.
+    expect(passedUrl.origin + passedUrl.pathname).toBe(
+      "https://omnia.example/api/auth/callback",
+    );
+    // iss must survive (still closes #948 for Google).
+    expect(passedUrl.searchParams.get("iss")).toBe("https://accounts.google.com");
+    expect(passedUrl.searchParams.get("code")).toBe("c-3");
+    expect(passedUrl.searchParams.get("state")).toBe("state-abc");
+  });
 });
 
 describe("client.ts surface (kept lean)", () => {
