@@ -1,7 +1,15 @@
 {{- if and .Values.enterprise.enabled .Values.enterprise.communityTemplates.enabled }}
 {{- $namespace := .Values.enterprise.communityTemplates.namespace | default "dev-agents" }}
+{{- if and .Values.enterprise.communityTemplates.createNamespace (not (lookup "v1" "Namespace" "" $namespace)) }}
 ---
-# Create namespace for community templates if it doesn't exist
+# Create the community-templates namespace ONLY when it doesn't already exist.
+# The previous unconditional create-hook failed ("namespaces <ns> already
+# exists") on every re-upgrade and whenever the namespace was provided by
+# something else (e.g. an operator-managed workspace namespace) — see #1193.
+# The lookup guard makes creation idempotent and non-destructive (we never
+# delete an existing namespace, which would take its workloads with it). Set
+# createNamespace=false to always skip creation and rely on a pre-existing
+# namespace.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -13,6 +21,7 @@ metadata:
     # Use post-install/post-upgrade hooks to ensure namespace is created before ArenaTemplateSource
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "5"
+{{- end }}
 ---
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ArenaTemplateSource

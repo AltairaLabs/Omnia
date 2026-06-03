@@ -197,6 +197,11 @@ enterprise:
     name: community-templates
     # -- Namespace to deploy the ArenaTemplateSource
     namespace: dev-agents
+    # -- Whether the chart creates the namespace above. Creation is skipped
+    # automatically when the namespace already exists (idempotent on upgrade).
+    # Set to false to never create it and rely on a pre-existing namespace —
+    # e.g. an operator-managed workspace namespace.
+    createNamespace: true
     # -- Git repository URL for community templates
     url: https://github.com/AltairaLabs/promptkit-templates.git
     # -- Branch to track
