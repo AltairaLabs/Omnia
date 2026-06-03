@@ -1,0 +1,55 @@
+{{- if .Values.sharepointHero.enabled }}
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ToolRegistry
+metadata:
+  name: rag-hero-tools
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  handlers:
+    - name: fetch-sharepoint-handler
+      type: http
+      timeout: 30s
+      tool:
+        name: fetch_sharepoint
+        description: "Fetch the content of a SharePoint document by URL."
+        inputSchema:
+          type: object
+          properties:
+            url:
+              type: string
+              description: "SharePoint document URL (from a surfaced knowledge reference)."
+          required: ["url"]
+        outputSchema:
+          type: object
+          properties:
+            title: { type: string }
+            url: { type: string }
+            text: { type: string }
+      httpConfig:
+        endpoint: http://sharepoint-adapter.{{ .Values.namespace }}:8080/fetch
+        method: POST
+        contentType: application/json
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ToolPolicy
+metadata:
+  name: rag-hero-tool-policy
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  selector:
+    registry: rag-hero-tools
+    tools: ["fetch_sharepoint"]
+  mode: enforce
+  onFailure: deny
+  rules:
+    - name: deny-restricted-sites
+      description: "Block retrieval from the restricted SharePoint site (governance beat)."
+      deny:
+        cel: 'body.url.contains("restricted")'
+        message: "Access to the restricted SharePoint site is denied by policy."
+{{- end }}

@@ -1,0 +1,67 @@
+{{- if .Values.sharepointHero.enabled }}
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: rag-hero
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+    omnia.altairalabs.ai/workspace: {{ .Values.sharepointHero.workspace }}
+spec:
+  promptPackRef:
+    name: rag-hero-pack
+    version: "1.0.0"
+  providers:
+    - name: default
+      providerRef:
+        name: rag-hero-baseline
+  toolRegistryRef:
+    name: rag-hero-tools
+  privacyPolicyRef:
+    name: rag-hero-privacy
+  facade:
+    type: websocket
+    port: 8080
+    handler: runtime
+  evals:
+    enabled: true
+    worker: {}
+  memory:
+    enabled: true
+    purpose: support_continuity
+    retrieval:
+      strategy: semantic
+      limit: 5
+    embedding:
+      provider: {{ .Values.sharepointHero.embedding.provider }}
+      model: {{ .Values.sharepointHero.embedding.model }}
+      secretRef:
+        name: {{ .Values.sharepointHero.embedding.secretRef }}
+  {{- if .Values.sharepointHero.shipCandidate }}
+  # Rollout (the "ship the change" beat). Activated by setting
+  # sharepointHero.shipCandidate=true so install is stable and the canary is
+  # triggered on demand. Candidate = verbose v2 prompt + pricier model.
+  rollout:
+    candidate:
+      promptPackVersion: "2.0.0"
+      providerRefs:
+        - name: default
+          providerRef:
+            name: rag-hero-candidate
+    steps:
+      - setWeight: 20
+      - analysis:
+          templateName: rag-hero-quality-check
+      - setWeight: 100
+    rollback:
+      mode: automatic
+    trafficRouting:
+      istio:
+        virtualService:
+          name: rag-hero-vs
+          routes: ["primary"]
+        destinationRule:
+          name: rag-hero-dr
+  {{- end }}
+{{- end }}

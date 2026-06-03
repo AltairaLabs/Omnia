@@ -1,0 +1,61 @@
+{{- if .Values.sharepointHero.enabled }}
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: rag-hero-dr
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  host: rag-hero
+  subsets:
+    - name: stable
+      labels:
+        omnia.altairalabs.ai/variant: stable
+    - name: candidate
+      labels:
+        omnia.altairalabs.ai/variant: candidate
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: rag-hero-vs
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  hosts:
+    - rag-hero
+  http:
+    - name: primary
+      route:
+        - destination:
+            host: rag-hero
+            subset: stable
+          weight: 100
+        - destination:
+            host: rag-hero
+            subset: candidate
+          weight: 0
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: RolloutAnalysis
+metadata:
+  name: rag-hero-quality-check
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  metrics:
+    - name: candidate-faithfulness
+      interval: "30s"
+      count: 4
+      failureLimit: 2
+      successCondition: "result[0] >= 0.8"
+      provider:
+        prometheus:
+          address: {{ .Values.sharepointHero.prometheusUrl | quote }}
+          query: |
+            avg(omnia_eval_faithfulness{agent="rag-hero", namespace="{{ .Values.namespace }}", variant="candidate"})
+{{- end }}

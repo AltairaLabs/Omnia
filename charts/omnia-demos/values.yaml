@@ -385,3 +385,58 @@ arenaDemo:
       replicas: 1
     # -- TTL after job completion (1 hour)
     ttlSecondsAfterFinished: 3600
+
+# ============================================================================
+# SharePoint Hero Demo — "agents are production workloads"
+# Gated behind sharepointHero.enabled. See
+# docs/local-backlog/2026-06-01-rag-hero-demo-design.md
+# ============================================================================
+sharepointHero:
+  enabled: false
+
+  # Set true to activate the canary rollout (the "ship the change" demo beat).
+  # Kept separate from enabled so install is stable and the rollout is triggered
+  # on demand. Requires the Istio VS/DR (rendered with enabled) to pre-exist.
+  shipCandidate: false
+
+  # Demo-only SharePoint Graph adapter image, published by the standalone
+  # .github/workflows/docker-push-demos.yml (NOT the product release).
+  adapter:
+    image: ghcr.io/altairalabs/omnia-sharepoint-adapter:main
+    replicas: 1
+    # Pre-created Secret with AAD client-secret creds (see setup doc).
+    # Keys: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+    credentialsSecret: sharepoint-adapter-creds
+    sharepointSiteId: "REPLACE_WITH_SITE_ID"
+
+  # Embedding provider for semantic memory retrieval.
+  embedding:
+    provider: openai          # openai | gemini | voyageai
+    model: text-embedding-3-small
+    secretRef: embedding-api-key   # pre-created Secret
+
+  # LLM providers (baseline + pricier candidate). type: claude | openai | gemini
+  providers:
+    baseline:
+      type: claude
+      model: claude-sonnet-4-6
+      secretRef: anthropic-api-key
+    candidate:
+      type: claude
+      model: claude-opus-4-8
+      secretRef: anthropic-api-key
+
+  workspace: demo
+
+  # In-cluster memory-api base URL for the demo workspace (no trailing slash).
+  memoryApiUrl: http://memory-api.omnia-demo:8080
+
+  # In-cluster Prometheus query endpoint (kube-prometheus-stack).
+  prometheusUrl: http://prometheus-operated.monitoring:9090
+
+  # Arena self-play loadtest sizing.
+  loadtest:
+    trials: 200
+    concurrency: 5
+    vusPerWorker: 2
+    budgetLimit: "25.00"

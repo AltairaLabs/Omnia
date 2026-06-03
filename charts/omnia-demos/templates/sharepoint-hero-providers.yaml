@@ -1,0 +1,30 @@
+{{- if .Values.sharepointHero.enabled }}
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: rag-hero-baseline
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  type: {{ .Values.sharepointHero.providers.baseline.type }}
+  model: {{ .Values.sharepointHero.providers.baseline.model }}
+  credential:
+    secretRef:
+      name: {{ .Values.sharepointHero.providers.baseline.secretRef }}
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: rag-hero-candidate
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  type: {{ .Values.sharepointHero.providers.candidate.type }}
+  model: {{ .Values.sharepointHero.providers.candidate.model }}
+  credential:
+    secretRef:
+      name: {{ .Values.sharepointHero.providers.candidate.secretRef }}
+{{- end }}
