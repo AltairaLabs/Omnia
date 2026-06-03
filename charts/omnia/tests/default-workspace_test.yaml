@@ -1,0 +1,70 @@
+suite: starter workspace + extraObjects (#1196)
+# The chart can create a starter Workspace + its namespace (operator adopts it),
+# and render arbitrary deployer-supplied manifests (extraObjects) — e.g.
+# workspace-scoped ExternalSecrets — without a values-DSL.
+values:
+  - ../values-chart-tests.yaml
+tests:
+  - it: renders nothing when defaultWorkspace is disabled
+    template: templates/default-workspace.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: creates the namespace + Workspace when enabled (namespace.create default true)
+    template: templates/default-workspace.yaml
+    set:
+      defaultWorkspace.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: Namespace
+        documentIndex: 0
+      - isKind:
+          of: Workspace
+        documentIndex: 1
+      # operator adopts the Helm-owned namespace
+      - equal:
+          path: spec.namespace.create
+          value: false
+        documentIndex: 1
+
+  - it: skips the namespace when namespace.create is false (external/operator-owned ns)
+    template: templates/default-workspace.yaml
+    set:
+      defaultWorkspace.enabled: true
+      defaultWorkspace.namespace.create: false
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Workspace
+        documentIndex: 0
+
+  - it: renders nothing for empty extraObjects
+    template: templates/extra-objects.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders a deployer-supplied extraObject verbatim
+    template: templates/extra-objects.yaml
+    set:
+      extraObjects:
+        - |
+          apiVersion: external-secrets.io/v1beta1
+          kind: ExternalSecret
+          metadata:
+            name: omnia-postgres
+            namespace: omnia-default
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: ExternalSecret
+        documentIndex: 0
+      - equal:
+          path: metadata.namespace
+          value: omnia-default
+        documentIndex: 0

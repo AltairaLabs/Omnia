@@ -1346,6 +1346,64 @@ workspaces:
       - ReadWriteMany
 
 # ============================================================================
+# Starter Workspace (optional)
+# Create one Workspace + its namespace so a fresh install isn't an empty state.
+# The chart owns the namespace and the operator adopts it (spec.namespace.create
+# is false). Disabled by default so air-gapped / GitOps installs opt in.
+# ============================================================================
+
+defaultWorkspace:
+  # -- Create a starter Workspace + namespace.
+  enabled: false
+  # -- Workspace (and Workspace CR) name.
+  name: default
+  # -- Human-friendly name shown in the dashboard. Defaults to `name`.
+  displayName: ""
+  # -- Optional description.
+  description: ""
+  # -- Workspace environment (development | staging | production).
+  environment: development
+  namespace:
+    # -- Namespace the Workspace is realised in.
+    name: omnia-default
+    # -- Whether the chart creates the namespace (Helm-owned; the operator
+    # adopts it). Set false when the namespace is provided externally.
+    create: true
+  # -- roleBindings map OIDC groups to workspace roles. See the Workspace CRD.
+  roleBindings: []
+  # -- directGrants grant access by individual user (OIDC email claim).
+  directGrants: []
+  # -- Managed service groups (session-api / memory-api). Each entry follows the
+  # Workspace CRD's spec.services[] shape; database.secretRef names a Secret
+  # (with POSTGRES_CONN) that must exist in the namespace — provide it via
+  # extraObjects below.
+  services: []
+
+# ============================================================================
+# Extra objects (escape hatch)
+# A list of raw manifests rendered verbatim (through `tpl`) into the release.
+# Use it to make workspace-scoped objects exist without modelling them in a
+# CRD or a values-DSL — most commonly ExternalSecrets that project DB
+# connection strings / provider API keys into a workspace namespace from the
+# deployer's own secret store. Works for any resource type.
+# Example:
+#   extraObjects:
+#     - |
+#       apiVersion: external-secrets.io/v1beta1
+#       kind: ExternalSecret
+#       metadata:
+#         name: omnia-postgres
+#         namespace: omnia-default
+#       spec:
+#         secretStoreRef: { kind: ClusterSecretStore, name: my-store }
+#         target: { name: omnia-postgres }
+#         data:
+#           - secretKey: POSTGRES_CONN
+#             remoteRef: { key: omnia-default-session-conn }
+# ============================================================================
+extraObjects: []
+
+# ============================================================================
 # Workspace Content Storage Configuration
 # Dashboard mount for browsing all workspace content
 # ============================================================================

@@ -1,0 +1,55 @@
+{{- if .Values.defaultWorkspace.enabled }}
+{{- $ns := .Values.defaultWorkspace.namespace.name }}
+{{- if .Values.defaultWorkspace.namespace.create }}
+---
+# Helm owns the workspace namespace; the operator adopts it (the Workspace below
+# sets spec.namespace.create=false). Owning it here lets the deployer place
+# workspace-scoped resources into it deterministically — DB secrets, provider
+# keys, custom tool services — via extraObjects (extra-objects.yaml), without
+# racing the operator's async reconcile and without modelling any of that in the
+# Workspace CRD. Set defaultWorkspace.namespace.create=false when the namespace
+# is provided externally. Labels match what the operator stamps so adoption is a
+# no-op.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    omnia.altairalabs.ai/managed: "true"
+    omnia.altairalabs.ai/workspace: {{ .Values.defaultWorkspace.name | quote }}
+    omnia.altairalabs.ai/environment: {{ .Values.defaultWorkspace.environment | quote }}
+{{- end }}
+---
+# Starter Workspace. The upstream chart otherwise has no knob to create one, so
+# a fresh install lands the signed-in user on an empty state. spec.namespace.create
+# is false because the namespace is provided above (or externally) and the
+# operator adopts it.
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Workspace
+metadata:
+  name: {{ .Values.defaultWorkspace.name }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+spec:
+  displayName: {{ .Values.defaultWorkspace.displayName | default .Values.defaultWorkspace.name | quote }}
+  {{- with .Values.defaultWorkspace.description }}
+  description: {{ . | quote }}
+  {{- end }}
+  environment: {{ .Values.defaultWorkspace.environment }}
+  namespace:
+    name: {{ $ns }}
+    create: false
+  {{- with .Values.defaultWorkspace.roleBindings }}
+  roleBindings:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.defaultWorkspace.directGrants }}
+  directGrants:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.defaultWorkspace.services }}
+  services:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
