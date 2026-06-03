@@ -81,7 +81,29 @@ type EvalLabels struct {
 	Agent          string
 	Namespace      string
 	PromptPackName string
+	Variant        string
 	Groups         []string
+}
+
+// Prometheus instance-label keys for omnia_eval_<name> series.
+const (
+	labelKeyAgent          = "agent"
+	labelKeyNamespace      = "namespace"
+	labelKeyPromptPackName = "promptpack_name"
+	labelKeyVariant        = "variant"
+)
+
+// evalInstanceLabels builds the Prometheus instance-label set attached to every
+// omnia_eval_<name> series. variant ("stable"/"candidate") lets RolloutAnalysis
+// gate eval quality on the rollout candidate; see
+// docs/src/content/docs/explanation/rollout-strategies.md.
+func evalInstanceLabels(labels EvalLabels) map[string]string {
+	return map[string]string{
+		labelKeyAgent:          labels.Agent,
+		labelKeyNamespace:      labels.Namespace,
+		labelKeyPromptPackName: labels.PromptPackName,
+		labelKeyVariant:        labels.Variant,
+	}
 }
 
 // RunTurnEvals executes per-turn evals via sdk.Evaluate().
@@ -136,11 +158,7 @@ func (s *SDKRunner) evaluate(
 
 	if s.evalCollector != nil {
 		opts.MetricsCollector = s.evalCollector
-		opts.MetricsInstanceLabels = map[string]string{
-			"agent":           labels.Agent,
-			"namespace":       labels.Namespace,
-			"promptpack_name": labels.PromptPackName,
-		}
+		opts.MetricsInstanceLabels = evalInstanceLabels(labels)
 	}
 
 	if len(providerSpecs) > 0 {
