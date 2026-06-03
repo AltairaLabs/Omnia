@@ -409,6 +409,19 @@ func (w *EvalWorker) processEvent(ctx context.Context, event api.SessionEvent) e
 	return nil
 }
 
+// evalLabelsFor assembles eval metric labels for a session. variant is the
+// rollout variant that served the session (carried on the session record), so a
+// candidate's evals are tagged "candidate" and gateable by RolloutAnalysis.
+func evalLabelsFor(agentName, namespace, packName, variant string, groups []string) EvalLabels {
+	return EvalLabels{
+		Agent:          agentName,
+		Namespace:      namespace,
+		PromptPackName: packName,
+		Variant:        variant,
+		Groups:         groups,
+	}
+}
+
 // processAssistantMessage handles assistant message events by running per-turn evals.
 func (w *EvalWorker) processAssistantMessage(ctx context.Context, event api.SessionEvent) error {
 	packEvals := w.loadPackEvals(ctx, event)
@@ -431,12 +444,8 @@ func (w *EvalWorker) processAssistantMessage(ctx context.Context, event api.Sess
 	providerSpecs := w.resolveProviders(ctx, event)
 	enrichedEvent := enrichEvent(event, packEvals)
 
-	labels := EvalLabels{
-		Agent:          sess.AgentName,
-		Namespace:      event.Namespace,
-		PromptPackName: packEvals.PackName,
-		Groups:         w.resolveWorkerGroups(ctx, event),
-	}
+	labels := evalLabelsFor(sess.AgentName, event.Namespace, packEvals.PackName,
+		sess.Variant, w.resolveWorkerGroups(ctx, event))
 	items := w.getSDKRunner().RunTurnEvals(ctx, packEvals.PackData, messages,
 		event.SessionID, turnIndex, providerSpecs, labels)
 	results := w.convertToEvalResults(items, enrichedEvent, sess.AgentName)
@@ -475,12 +484,8 @@ func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) er
 	providerSpecs := w.resolveProviders(ctx, event)
 	enrichedEvent := enrichEvent(event, packEvals)
 
-	labels := EvalLabels{
-		Agent:          sess.AgentName,
-		Namespace:      event.Namespace,
-		PromptPackName: packEvals.PackName,
-		Groups:         w.resolveWorkerGroups(ctx, event),
-	}
+	labels := evalLabelsFor(sess.AgentName, event.Namespace, packEvals.PackName,
+		sess.Variant, w.resolveWorkerGroups(ctx, event))
 	items := w.getSDKRunner().RunSessionEvals(ctx, packEvals.PackData, messages,
 		sessionID, turnIndex, providerSpecs, labels)
 	results := w.convertToEvalResults(items, enrichedEvent, sess.AgentName)
@@ -511,11 +516,7 @@ func (w *EvalWorker) processEvaluateRequest(ctx context.Context, event api.Sessi
 	providerSpecs := w.resolveProviders(ctx, event)
 	enrichedEvent := enrichEvent(event, packEvals)
 
-	labels := EvalLabels{
-		Agent:          sess.AgentName,
-		Namespace:      event.Namespace,
-		PromptPackName: packEvals.PackName,
-	}
+	labels := evalLabelsFor(sess.AgentName, event.Namespace, packEvals.PackName, sess.Variant, nil)
 	// Run all evals without tier filtering — manual trigger runs everything.
 	items := w.getSDKRunner().RunSessionEvals(ctx, packEvals.PackData, messages,
 		event.SessionID, turnIndex, providerSpecs, labels)
