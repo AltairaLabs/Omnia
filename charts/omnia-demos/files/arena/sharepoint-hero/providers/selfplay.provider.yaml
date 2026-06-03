@@ -1,0 +1,11 @@
+apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: selfplay
+spec:
+  # Placeholder only. At run time the ArenaJob's providers.selfplay group
+  # (a Provider CRD) is resolved from the cluster and remapped onto this id,
+  # so type/model here are never used for inference.
+  id: selfplay
+  type: mock
+  model: placeholder

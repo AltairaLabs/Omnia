@@ -1,0 +1,43 @@
+$schema: https://promptkit.altairalabs.ai/schemas/latest/arena.json
+apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Arena
+metadata:
+  name: rag-hero-loadtest
+spec:
+  # In fleet mode the system-under-test is the live rag-hero AgentRuntime,
+  # injected via the ArenaJob's providers.default (agentRef). The prompt_config
+  # below is a placeholder so LoadConfig validation passes — the agent runs its
+  # own PromptPack, not this template.
+  prompt_configs:
+    - id: assistant
+      file: prompts/assistant.yaml
+
+  # Only the self-play user simulator is declared here. The ArenaJob's
+  # providers.selfplay group (a Provider CRD) is remapped onto the "selfplay"
+  # id at resolution time; this dummy file just satisfies LoadConfig.
+  providers:
+    - file: providers/selfplay.provider.yaml
+      group: selfplay
+
+  self_play:
+    enabled: true
+    personas:
+      - file: personas/sre-user.persona.yaml
+    roles:
+      - id: sre-user
+        provider: selfplay
+
+  # No assertions: a load test must complete regardless of answer content so
+  # timing/cost/eval telemetry flows without content failures blocking traffic.
+  scenarios:
+    - file: scenarios/incident-runbook.scenario.yaml
+    - file: scenarios/policy-lookup.scenario.yaml
+
+  defaults:
+    temperature: 0.7
+    max_tokens: 1024
+    seed: 42
+    output:
+      dir: out
+      formats:
+        - json
