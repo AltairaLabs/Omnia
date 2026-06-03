@@ -381,6 +381,34 @@
       }
     },
 
+    "defaultWorkspace": {
+      "type": "object",
+      "description": "Optional starter Workspace + namespace created by the chart (operator adopts the namespace).",
+      "properties": {
+        "enabled":     { "type": "boolean" },
+        "name":        { "type": "string" },
+        "displayName": { "type": "string" },
+        "description": { "type": "string" },
+        "environment": { "type": "string" },
+        "namespace": {
+          "type": "object",
+          "properties": {
+            "name":   { "type": "string" },
+            "create": { "type": "boolean" }
+          }
+        },
+        "roleBindings": { "type": "array" },
+        "directGrants": { "type": "array" },
+        "services":     { "type": "array" }
+      }
+    },
+
+    "extraObjects": {
+      "type": "array",
+      "description": "Raw manifests rendered verbatim (through tpl) into the release. Use for workspace-scoped ExternalSecrets, provider keys, etc.",
+      "items": { "type": "string" }
+    },
+
     "workspaceContent": {
       "type": "object",
       "description": "Shared workspace content PVC (requires RWX storage class in production)",

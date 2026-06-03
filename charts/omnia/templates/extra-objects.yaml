@@ -1,0 +1,15 @@
+{{- /*
+Generic escape hatch: render arbitrary manifests the deployer supplies in
+.Values.extraObjects. Each item is a raw YAML string, evaluated through `tpl`
+so it can reference values/helpers (e.g. .Release.Namespace, .Values.*).
+
+This is the no-DSL way to make workspace-scoped objects exist via the chart —
+the operator's CRDs only hold references (secretRef, providerRef, …), and the
+deployer materialises what they point at. Typical use: ExternalSecrets that
+project DB connection strings / provider API keys into a workspace namespace
+from the deployer's own secret store. Works for any resource type.
+*/ -}}
+{{- range .Values.extraObjects }}
+---
+{{ tpl . $ }}
+{{- end }}
