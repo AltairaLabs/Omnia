@@ -16,6 +16,7 @@ import * as k8s from "@kubernetes/client-node";
 import * as fs from "node:fs";
 import type { WorkspaceRole } from "@/types/workspace";
 import { getWorkspaceToken, refreshWorkspaceToken } from "./token-fetcher";
+import { isAuthError } from "./k8s-errors";
 
 // In-cluster paths
 const SA_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token";
@@ -266,28 +267,4 @@ export async function withTokenRefresh<T>(
     }
     throw error;
   }
-}
-
-/**
- * Check if an error is an authentication error (401).
- */
-function isAuthError(error: unknown): boolean {
-  if (typeof error === "object" && error !== null) {
-    // Check for statusCode property
-    if ("statusCode" in error && (error as { statusCode?: number }).statusCode === 401) {
-      return true;
-    }
-    // Check for response.statusCode
-    if (
-      "response" in error &&
-      typeof (error as { response: unknown }).response === "object" &&
-      (error as { response: unknown }).response !== null
-    ) {
-      const response = (error as { response: { statusCode?: number } }).response;
-      if (response?.statusCode === 401) {
-        return true;
-      }
-    }
-  }
-  return false;
 }

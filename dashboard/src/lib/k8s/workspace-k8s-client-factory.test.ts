@@ -220,6 +220,38 @@ describe("workspace-k8s-client-factory", () => {
       expect(refreshWorkspaceToken).toHaveBeenCalled();
     });
 
+    it("should refresh token on a 'HTTP-Code: 401' message error (real k8s client shape)", async () => {
+      vi.mocked(refreshWorkspaceToken).mockResolvedValue("new-token");
+
+      // @kubernetes/client-node throws an Error whose message carries the
+      // status — no statusCode/response.statusCode property. This is the shape
+      // that wedged the dashboard (issue #1194).
+      const authError = new Error(
+        "HTTP-Code: 401\nMessage: Unauthorized\nBody: undefined\nHeaders: {}"
+      );
+      const mockFn = vi
+        .fn()
+        .mockRejectedValueOnce(authError)
+        .mockResolvedValueOnce("success after refresh");
+
+      const result = await factoryModule.withTokenRefresh(
+        {
+          workspace: "my-workspace",
+          namespace: "my-namespace",
+          role: "editor",
+        },
+        mockFn
+      );
+
+      expect(result).toBe("success after refresh");
+      expect(mockFn).toHaveBeenCalledTimes(2);
+      expect(refreshWorkspaceToken).toHaveBeenCalledWith(
+        "my-workspace",
+        "my-namespace",
+        "editor"
+      );
+    });
+
     it("should throw non-auth errors", async () => {
       const otherError = new Error("Not found");
       const mockFn = vi.fn().mockRejectedValue(otherError);
