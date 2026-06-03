@@ -156,7 +156,7 @@ func main() {
 	evalCollector := sdkmetrics.NewEvalOnlyCollector(sdkmetrics.CollectorOpts{
 		Registerer:     evalRegistry,
 		Namespace:      "omnia",
-		InstanceLabels: []string{"agent", "namespace", "promptpack_name"},
+		InstanceLabels: []string{"agent", "namespace", "promptpack_name", "variant"},
 	})
 
 	var runnerOpts []evals.SDKRunnerOption
