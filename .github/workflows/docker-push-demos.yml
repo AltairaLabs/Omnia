@@ -1,0 +1,84 @@
+name: Docker Push (demos)
+
+# Demo-only images. Deliberately separate from docker-push.yml so demo assets
+# (e.g. the hero-demo SharePoint adapter) are NOT part of the product release.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'demos/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/docker-push-demos.yml'
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-push:
+    name: Build & push omnia-sharepoint-adapter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Compute image ref (GHCR requires lowercase)
+        id: ref
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "image=${REGISTRY}/${owner}/omnia-sharepoint-adapter" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.ref.outputs.image }}
+          tags: |
+            type=sha,format=long,prefix=
+            type=raw,value=main
+          labels: |
+            org.opencontainers.image.title=Omnia SharePoint Adapter (demo)
+            org.opencontainers.image.description=Demo-only Microsoft Graph bridge for the hero demo. Not a product component.
+            org.opencontainers.image.vendor=Altaira Labs
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: demos/sharepoint-adapter/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+
+      - name: Scan image (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.ref.outputs.image }}@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy-sharepoint-adapter.sarif
+          exit-code: '0'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH,MEDIUM
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-sharepoint-adapter.sarif
+          category: trivy-sharepoint-adapter
