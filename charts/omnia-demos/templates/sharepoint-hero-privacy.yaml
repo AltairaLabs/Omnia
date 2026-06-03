@@ -1,0 +1,24 @@
+{{- if .Values.sharepointHero.enabled }}
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: SessionPrivacyPolicy
+metadata:
+  name: rag-hero-privacy
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  recording:
+    enabled: true
+    facadeData: true
+    richData: true
+    pii:
+      redact: true
+      strategy: replace
+      patterns:
+        - email
+        - ssn
+        - credit_card
+  auditLog:
+    enabled: true
+{{- end }}
