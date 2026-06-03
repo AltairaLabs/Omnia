@@ -1,0 +1,49 @@
+suite: community-templates source namespace gating
+# Covers #1193 — the community-templates Namespace must not be created
+# unconditionally (it failed "namespaces <ns> already exists" on every
+# re-upgrade and whenever the namespace was provided externally). createNamespace
+# (default true) + a lookup guard make creation conditional. In helm-unittest
+# lookup returns nil (no cluster), so with createNamespace=true the Namespace
+# renders; createNamespace=false always skips it.
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/enterprise/community-templates-source.yaml
+tests:
+  - it: renders nothing unless enterprise + communityTemplates are enabled
+    set:
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: creates the namespace + ArenaTemplateSource when enabled (createNamespace default true)
+    set:
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+      enterprise.communityTemplates.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: Namespace
+        documentIndex: 0
+      - isKind:
+          of: ArenaTemplateSource
+        documentIndex: 1
+
+  - it: skips the namespace when createNamespace is false (no 'already exists' failure)
+    set:
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+      enterprise.communityTemplates.enabled: true
+      enterprise.communityTemplates.createNamespace: false
+    asserts:
+      # Only the ArenaTemplateSource renders — no Namespace means the
+      # "namespaces <ns> already exists" hook failure can't occur.
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: ArenaTemplateSource
+        documentIndex: 0
