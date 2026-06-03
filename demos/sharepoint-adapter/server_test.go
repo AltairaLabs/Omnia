@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -85,4 +86,33 @@ func TestServer_Fetch_GraphErrorPassthrough(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode) // governance beat
+}
+
+func TestServer_List_NonGraphError(t *testing.T) {
+	ts := newTestServer(&fakeSource{err: errors.New("boom")})
+	defer ts.Close()
+	resp, err := http.Get(ts.URL + "/list")
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusBadGateway, resp.StatusCode) // non-Graph error → 502
+}
+
+func TestServer_List_MethodNotAllowed(t *testing.T) {
+	ts := newTestServer(&fakeSource{})
+	defer ts.Close()
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/list", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+}
+
+func TestServer_Fetch_MethodNotAllowed(t *testing.T) {
+	ts := newTestServer(&fakeSource{})
+	defer ts.Close()
+	resp, err := http.Get(ts.URL + "/fetch")
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
 }
