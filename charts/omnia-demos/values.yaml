@@ -394,6 +394,11 @@ arenaDemo:
 sharepointHero:
   enabled: false
 
+  # Set true to activate the canary rollout (the "ship the change" demo beat).
+  # Kept separate from enabled so install is stable and the rollout is triggered
+  # on demand. Requires the Istio VS/DR (rendered with enabled) to pre-exist.
+  shipCandidate: false
+
   # Demo-only SharePoint Graph adapter image, published by the standalone
   # .github/workflows/docker-push-demos.yml (NOT the product release).
   adapter:

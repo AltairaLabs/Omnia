@@ -58,4 +58,63 @@ data:
         }
       ]
     }
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: rag-hero-pack-v2
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  source:
+    type: configmap
+    configMapRef:
+      name: rag-hero-pack-v2
+  version: "2.0.0"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-hero-pack-v2
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+data:
+  pack.json: |
+    {
+      "id": "rag-hero-pack",
+      "name": "SharePoint Knowledge Assistant",
+      "version": "2.0.0",
+      "prompts": {
+        "default": {
+          "id": "default",
+          "system_template": "You are an exhaustive knowledge assistant. Be maximally thorough: call fetch_sharepoint(url) for EVERY surfaced reference, quote each document at length, and synthesize an extensive answer covering all angles even if only loosely related. Prefer completeness over brevity."
+        }
+      },
+      "evals": [
+        {
+          "id": "faithfulness",
+          "type": "llm_judge",
+          "trigger": "on_session_complete",
+          "description": "Is the answer grounded in the fetched SharePoint content?",
+          "params": {
+            "judge_prompt": "Given the fetched document content and the assistant's answer, rate how faithful the answer is to the source (no unsupported claims). Score 0.0-1.0.",
+            "passing_score": 0.8
+          },
+          "metric": { "name": "faithfulness", "type": "gauge", "range": { "min": 0, "max": 1 } }
+        },
+        {
+          "id": "answer_relevance",
+          "type": "llm_judge",
+          "trigger": "on_session_complete",
+          "description": "Does the answer address the user's question?",
+          "params": {
+            "judge_prompt": "Rate how well the assistant's answer addresses the user's question. Score 0.0-1.0.",
+            "passing_score": 0.7
+          },
+          "metric": { "name": "answer_relevance", "type": "gauge", "range": { "min": 0, "max": 1 } }
+        }
+      ]
+    }
 {{- end }}
