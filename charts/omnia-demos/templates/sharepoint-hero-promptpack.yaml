@@ -1,0 +1,61 @@
+{{- if .Values.sharepointHero.enabled }}
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: rag-hero-pack
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  source:
+    type: configmap
+    configMapRef:
+      name: rag-hero-pack-v1
+  version: "1.0.0"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-hero-pack-v1
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+data:
+  pack.json: |
+    {
+      "id": "rag-hero-pack",
+      "name": "SharePoint Knowledge Assistant",
+      "version": "1.0.0",
+      "prompts": {
+        "default": {
+          "id": "default",
+          "system_template": "You are a knowledge assistant. Relevant SharePoint document references have been surfaced from institutional memory. For the one or two references most relevant to the user's question, call fetch_sharepoint(url) to retrieve the document, then answer ONLY from the fetched content. Cite the document title. If nothing relevant is found, say so plainly. Be concise."
+        }
+      },
+      "evals": [
+        {
+          "id": "faithfulness",
+          "type": "llm_judge",
+          "trigger": "on_session_complete",
+          "description": "Is the answer grounded in the fetched SharePoint content?",
+          "params": {
+            "judge_prompt": "Given the fetched document content and the assistant's answer, rate how faithful the answer is to the source (no unsupported claims). Score 0.0-1.0.",
+            "passing_score": 0.8
+          },
+          "metric": { "name": "faithfulness", "type": "gauge", "range": { "min": 0, "max": 1 } }
+        },
+        {
+          "id": "answer_relevance",
+          "type": "llm_judge",
+          "trigger": "on_session_complete",
+          "description": "Does the answer address the user's question?",
+          "params": {
+            "judge_prompt": "Rate how well the assistant's answer addresses the user's question. Score 0.0-1.0.",
+            "passing_score": 0.7
+          },
+          "metric": { "name": "answer_relevance", "type": "gauge", "range": { "min": 0, "max": 1 } }
+        }
+      ]
+    }
+{{- end }}
