@@ -439,6 +439,9 @@ spec:
                   services defines per-workspace service groups for session-api and memory-api.
                   Each group can be managed (operator-provisioned) or external (user-supplied URLs).
                   Agents reference a group by name via spec.serviceGroup.
+                  The maxItems cap bounds the per-item CEL validation cost (the array
+                  multiplies each item rule's estimated cost; without a bound the
+                  group-level redis exists_one rule exceeds the API server budget).
                 items:
                   description: |-
                     WorkspaceServiceGroup defines a named group of session-api and memory-api endpoints
@@ -4001,6 +4004,33 @@ spec:
                               maximum: 65535
                               minimum: 1
                               type: integer
+                            serviceRef:
+                              description: |-
+                                serviceRef points at an in-cluster Redis Service by name. The
+                                operator synthesises redis://<name>.<namespace>:<port> from it.
+                                This is the K8s-idiomatic, in-cluster, UNAUTHENTICATED form — the
+                                sibling of host. For any auth'd / TLS / cloud Redis use
+                                existingSecret (a full rediss://user:pass@host URL) instead.
+                              properties:
+                                name:
+                                  description: name of the Redis Service.
+                                  minLength: 1
+                                  type: string
+                                namespace:
+                                  description: |-
+                                    namespace of the Redis Service. Defaults to the workspace
+                                    namespace when empty.
+                                  type: string
+                                port:
+                                  description: port of the Redis Service. Defaults
+                                    to 6379 when zero.
+                                  format: int32
+                                  maximum: 65535
+                                  minimum: 1
+                                  type: integer
+                              required:
+                              - name
+                              type: object
                             url:
                               description: |-
                                 url is a literal Redis connection string. Use only when the URL
@@ -4019,10 +4049,11 @@ spec:
                       type: object
                       x-kubernetes-validations:
                       - message: memory.redis must use exactly one of existingSecret,
-                          url, or host
+                          url, host, or serviceRef
                         rule: '!has(self.redis) || [has(self.redis.existingSecret),
                           has(self.redis.url) && size(self.redis.url) > 0, has(self.redis.host)
-                          && size(self.redis.host) > 0].exists_one(b, b)'
+                          && size(self.redis.host) > 0, has(self.redis.serviceRef)].exists_one(b,
+                          b)'
                     mode:
                       default: managed
                       description: mode specifies whether the operator manages these
@@ -4055,6 +4086,96 @@ spec:
                           type: string
                       type: object
                       x-kubernetes-map-type: atomic
+                    redis:
+                      description: |-
+                        redis declares a single Redis target for every managed service in
+                        this group (session-api, memory-api). The operator resolves it to a
+                        URL and injects it as --redis-url. This is a REFERENCE to an
+                        existing Redis — the operator does not provision one. Per-component
+                        session.redis / memory.redis override this for that component;
+                        unset components fall back to the operator-wide default.
+                      properties:
+                        db:
+                          description: db is the Redis database index. Defaults to
+                            0.
+                          format: int32
+                          maximum: 15
+                          minimum: 0
+                          type: integer
+                        existingSecret:
+                          description: |-
+                            existingSecret references a Kubernetes Secret containing the
+                            full Redis URL. The Secret must hold a single key with a
+                            complete `redis(s)://...` connection string.
+                          properties:
+                            key:
+                              description: key within the Secret whose value is the
+                                Redis URL.
+                              minLength: 1
+                              type: string
+                            name:
+                              description: |-
+                                name of the Secret in the same namespace as the workspace's
+                                service Deployment.
+                              minLength: 1
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                        host:
+                          description: |-
+                            host is the Redis hostname for the decomposed form. Combined
+                            with port, db, and user to synthesise an unauthenticated URL.
+                            For any auth'd Redis, use existingSecret.
+                          type: string
+                        port:
+                          description: port is the Redis TCP port. Defaults to 6379
+                            when host is set.
+                          format: int32
+                          maximum: 65535
+                          minimum: 1
+                          type: integer
+                        serviceRef:
+                          description: |-
+                            serviceRef points at an in-cluster Redis Service by name. The
+                            operator synthesises redis://<name>.<namespace>:<port> from it.
+                            This is the K8s-idiomatic, in-cluster, UNAUTHENTICATED form — the
+                            sibling of host. For any auth'd / TLS / cloud Redis use
+                            existingSecret (a full rediss://user:pass@host URL) instead.
+                          properties:
+                            name:
+                              description: name of the Redis Service.
+                              minLength: 1
+                              type: string
+                            namespace:
+                              description: |-
+                                namespace of the Redis Service. Defaults to the workspace
+                                namespace when empty.
+                              type: string
+                            port:
+                              description: port of the Redis Service. Defaults to
+                                6379 when zero.
+                              format: int32
+                              maximum: 65535
+                              minimum: 1
+                              type: integer
+                          required:
+                          - name
+                          type: object
+                        url:
+                          description: |-
+                            url is a literal Redis connection string. Use only when the URL
+                            either contains no password or carries a password injected via
+                            external-secrets / KV-CSI rather than typed into chart values.
+                          pattern: ^rediss?://
+                          type: string
+                        user:
+                          description: |-
+                            user is the Redis ACL username. Empty defaults to "default"
+                            (the built-in Redis 6+ user).
+                          type: string
+                      type: object
                     session:
                       description: |-
                         session configures the session-api for this service group.
@@ -7577,6 +7698,33 @@ spec:
                               maximum: 65535
                               minimum: 1
                               type: integer
+                            serviceRef:
+                              description: |-
+                                serviceRef points at an in-cluster Redis Service by name. The
+                                operator synthesises redis://<name>.<namespace>:<port> from it.
+                                This is the K8s-idiomatic, in-cluster, UNAUTHENTICATED form — the
+                                sibling of host. For any auth'd / TLS / cloud Redis use
+                                existingSecret (a full rediss://user:pass@host URL) instead.
+                              properties:
+                                name:
+                                  description: name of the Redis Service.
+                                  minLength: 1
+                                  type: string
+                                namespace:
+                                  description: |-
+                                    namespace of the Redis Service. Defaults to the workspace
+                                    namespace when empty.
+                                  type: string
+                                port:
+                                  description: port of the Redis Service. Defaults
+                                    to 6379 when zero.
+                                  format: int32
+                                  maximum: 65535
+                                  minimum: 1
+                                  type: integer
+                              required:
+                              - name
+                              type: object
                             url:
                               description: |-
                                 url is a literal Redis connection string. Use only when the URL
@@ -7595,10 +7743,11 @@ spec:
                       type: object
                       x-kubernetes-validations:
                       - message: session.redis must use exactly one of existingSecret,
-                          url, or host
+                          url, host, or serviceRef
                         rule: '!has(self.redis) || [has(self.redis.existingSecret),
                           has(self.redis.url) && size(self.redis.url) > 0, has(self.redis.host)
-                          && size(self.redis.host) > 0].exists_one(b, b)'
+                          && size(self.redis.host) > 0, has(self.redis.serviceRef)].exists_one(b,
+                          b)'
                   required:
                   - name
                   type: object
@@ -7607,6 +7756,12 @@ spec:
                     rule: self.mode != 'managed' || (has(self.memory) && has(self.session))
                   - message: external mode requires external endpoints
                     rule: self.mode != 'external' || has(self.external)
+                  - message: services[].redis must use exactly one of existingSecret,
+                      url, host, or serviceRef
+                    rule: '!has(self.redis) || [has(self.redis.existingSecret), has(self.redis.url)
+                      && size(self.redis.url) > 0, has(self.redis.host) && size(self.redis.host)
+                      > 0, has(self.redis.serviceRef)].exists_one(b, b)'
+                maxItems: 64
                 type: array
                 x-kubernetes-list-map-keys:
                 - name

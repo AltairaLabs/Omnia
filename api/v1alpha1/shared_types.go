@@ -102,9 +102,20 @@ type PodOverrides struct {
 // host is the decomposed convenience form: cleartext only, no auth.
 // For auth'd Redis use existingSecret instead.
 //
-// All three forms are mutually exclusive on a single block; CEL
-// validation enforces this at admission.
+// serviceRef is the in-cluster Service form: the operator builds
+// redis://<name>.<namespace>:<port>. Unauthenticated, like host.
+//
+// All four forms (existingSecret, url, host, serviceRef) are mutually
+// exclusive on a single block; CEL validation enforces this at admission.
 type RedisConfig struct {
+	// serviceRef points at an in-cluster Redis Service by name. The
+	// operator synthesises redis://<name>.<namespace>:<port> from it.
+	// This is the K8s-idiomatic, in-cluster, UNAUTHENTICATED form — the
+	// sibling of host. For any auth'd / TLS / cloud Redis use
+	// existingSecret (a full rediss://user:pass@host URL) instead.
+	// +optional
+	ServiceRef *RedisServiceRef `json:"serviceRef,omitempty"`
+
 	// existingSecret references a Kubernetes Secret containing the
 	// full Redis URL. The Secret must hold a single key with a
 	// complete `redis(s)://...` connection string.
@@ -156,4 +167,25 @@ type RedisSecretRef struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	Key string `json:"key"`
+}
+
+// RedisServiceRef references an in-cluster Redis Service by name. The
+// operator builds redis://<name>.<namespace>:<port> from it — no Secret
+// and no auth. Use existingSecret for any authenticated or TLS Redis.
+type RedisServiceRef struct {
+	// name of the Redis Service.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// namespace of the Redis Service. Defaults to the workspace
+	// namespace when empty.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// port of the Redis Service. Defaults to 6379 when zero.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	Port int32 `json:"port,omitempty"`
 }

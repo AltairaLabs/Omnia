@@ -29,8 +29,10 @@ import (
 
 // Test constants extracted to satisfy goconst.
 const (
-	testOperatorRedisURL = "redis://operator-default:6379/0"
-	testRedisURLEnvName  = "REDIS_URL"
+	testOperatorRedisURL  = "redis://operator-default:6379/0"
+	testRedisURLEnvName   = "REDIS_URL"
+	testRedisSvcName      = "redis"
+	testRedisSvcNamespace = "data"
 )
 
 func newTestServiceGroup(name string) omniav1alpha1.WorkspaceServiceGroup {
@@ -666,4 +668,176 @@ func TestBuildServiceDeployment_NoOverrides(t *testing.T) {
 	spec := dep.Spec.Template.Spec
 	// default SA is the deployment name
 	require.Equal(t, "session-ws-default", spec.ServiceAccountName)
+}
+
+// TestResolveRedis_ServiceRefSynthesisesURL proves the serviceRef form
+// resolves to redis://<name>.<ns>:<port> with namespace/port defaults.
+func TestResolveRedis_ServiceRefSynthesisesURL(t *testing.T) {
+	// Explicit namespace + port.
+	url, secret := redisConfigToURL(&omniav1alpha1.RedisConfig{
+		ServiceRef: &omniav1alpha1.RedisServiceRef{Name: testRedisSvcName, Namespace: testRedisSvcNamespace, Port: 6390},
+	}, "acme-ns")
+	assert.Equal(t, "redis://redis.data:6390", url)
+	assert.Empty(t, secret.Name)
+
+	// Namespace defaults to the workspace namespace, port defaults to 6379.
+	url2, _ := redisConfigToURL(&omniav1alpha1.RedisConfig{
+		ServiceRef: &omniav1alpha1.RedisServiceRef{Name: testRedisSvcName},
+	}, "acme-ns")
+	assert.Equal(t, "redis://redis.acme-ns:6379", url2)
+}
+
+// TestRedisConfigToURL_AllForms exercises every form of redisConfigToURL,
+// including the nil guard and the host default-port path, so the resolver
+// is fully covered independently of the Deployment builders.
+func TestRedisConfigToURL_AllForms(t *testing.T) {
+	// nil → empty.
+	url, secret := redisConfigToURL(nil, "ns")
+	assert.Empty(t, url)
+	assert.Empty(t, secret.Name)
+
+	// host with default port (0 → 6379).
+	url, secret = redisConfigToURL(&omniav1alpha1.RedisConfig{Host: "h.example.com"}, "ns")
+	assert.Equal(t, "redis://h.example.com:6379/0", url)
+	assert.Empty(t, secret.Name)
+
+	// url literal.
+	url, _ = redisConfigToURL(&omniav1alpha1.RedisConfig{URL: "redis://lit:6379/1"}, "ns")
+	assert.Equal(t, "redis://lit:6379/1", url)
+
+	// existingSecret → placeholder + secret ref.
+	url, secret = redisConfigToURL(&omniav1alpha1.RedisConfig{
+		ExistingSecret: &omniav1alpha1.RedisSecretRef{Name: "s", Key: "k"},
+	}, "ns")
+	assert.Equal(t, "$(REDIS_URL)", url)
+	assert.Equal(t, "s", secret.Name)
+	assert.Equal(t, "k", secret.Key)
+
+	// empty (no form populated) → empty.
+	url, _ = redisConfigToURL(&omniav1alpha1.RedisConfig{}, "ns")
+	assert.Empty(t, url)
+}
+
+// TestRedisHashDescriptor_AllForms exercises every descriptor branch,
+// including the serviceRef form and the no-form fallthrough.
+func TestRedisHashDescriptor_AllForms(t *testing.T) {
+	assert.Empty(t, redisHashDescriptor(nil))
+	assert.Empty(t, redisHashDescriptor(&omniav1alpha1.RedisConfig{}))
+	assert.Equal(t, "url:redis://x", redisHashDescriptor(&omniav1alpha1.RedisConfig{URL: "redis://x"}))
+	assert.Equal(t, "secret:s/k", redisHashDescriptor(&omniav1alpha1.RedisConfig{
+		ExistingSecret: &omniav1alpha1.RedisSecretRef{Name: "s", Key: "k"},
+	}))
+	assert.Equal(t, "host:h:0/0:", redisHashDescriptor(&omniav1alpha1.RedisConfig{Host: "h"}))
+	assert.Equal(t, "serviceRef:data/redis:6390", redisHashDescriptor(&omniav1alpha1.RedisConfig{
+		ServiceRef: &omniav1alpha1.RedisServiceRef{Name: testRedisSvcName, Namespace: testRedisSvcNamespace, Port: 6390},
+	}))
+}
+
+// TestBuildSessionDeployment_GroupRedisServiceRef proves a group-level
+// redis.serviceRef (no per-component override) wires session-api.
+func TestBuildSessionDeployment_GroupRedisServiceRef(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sg := newTestServiceGroup("default")
+	sg.Redis = &omniav1alpha1.RedisConfig{
+		ServiceRef: &omniav1alpha1.RedisServiceRef{Name: testRedisSvcName, Namespace: testRedisSvcNamespace},
+	}
+
+	dep := sb.BuildSessionDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	assert.Contains(t, dep.Spec.Template.Spec.Containers[0].Args,
+		"--redis-url=redis://redis.data:6379")
+}
+
+// TestBuildMemoryDeployment_GroupRedisServiceRef proves the same for memory-api.
+func TestBuildMemoryDeployment_GroupRedisServiceRef(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sg := newTestServiceGroup("default")
+	sg.Redis = &omniav1alpha1.RedisConfig{
+		ServiceRef: &omniav1alpha1.RedisServiceRef{Name: testRedisSvcName},
+	}
+
+	dep := sb.BuildMemoryDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	assert.Contains(t, dep.Spec.Template.Spec.Containers[0].Args,
+		"--redis-url=redis://redis.acme-ns:6379")
+}
+
+// TestBuildSessionDeployment_PerComponentOverridesGroup proves precedence:
+// session.redis wins over the group-level redis.
+func TestBuildSessionDeployment_PerComponentOverridesGroup(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sg := newTestServiceGroup("prod")
+	sg.Redis = &omniav1alpha1.RedisConfig{URL: "redis://group.example.com:6379/0"}
+	sg.Session = &omniav1alpha1.SessionServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "session-db"}},
+		Redis:    &omniav1alpha1.RedisConfig{URL: "redis://component.example.com:6379/1"},
+	}
+
+	dep := sb.BuildSessionDeployment("acme", "acme-ns", sg)
+	args := dep.Spec.Template.Spec.Containers[0].Args
+	assert.Contains(t, args, "--redis-url=redis://component.example.com:6379/1")
+	assert.NotContains(t, args, "--redis-url=redis://group.example.com:6379/0")
+}
+
+// TestBuildMemoryDeployment_GroupRedisOverridesOperatorDefault proves the
+// group-level redis beats the operator-wide default when no per-component
+// override is set.
+func TestBuildMemoryDeployment_GroupRedisOverridesOperatorDefault(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sb.MemoryRedisURL = testOperatorRedisURL
+	sg := newTestServiceGroup("prod")
+	sg.Redis = &omniav1alpha1.RedisConfig{URL: "redis://group.example.com:6379/0"}
+
+	dep := sb.BuildMemoryDeployment("acme", "acme-ns", sg)
+	args := dep.Spec.Template.Spec.Containers[0].Args
+	assert.Contains(t, args, "--redis-url=redis://group.example.com:6379/0")
+	assert.NotContains(t, args, "--redis-url="+testOperatorRedisURL)
+}
+
+// TestBuildSessionDeployment_GroupRedisExistingSecret proves the group-level
+// existingSecret form emits the $(REDIS_URL) placeholder + REDIS_URL env.
+func TestBuildSessionDeployment_GroupRedisExistingSecret(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sg := newTestServiceGroup("prod")
+	sg.Redis = &omniav1alpha1.RedisConfig{
+		ExistingSecret: &omniav1alpha1.RedisSecretRef{Name: "group-redis", Key: "url"},
+	}
+
+	dep := sb.BuildSessionDeployment("acme", "acme-ns", sg)
+	container := dep.Spec.Template.Spec.Containers[0]
+	assert.Contains(t, container.Args, "--redis-url=$(REDIS_URL)")
+
+	var env *corev1.EnvVar
+	for i := range container.Env {
+		if container.Env[i].Name == testRedisURLEnvName {
+			env = &container.Env[i]
+			break
+		}
+	}
+	require.NotNil(t, env, "expected REDIS_URL env from group-level Secret")
+	require.NotNil(t, env.ValueFrom.SecretKeyRef)
+	assert.Equal(t, "group-redis", env.ValueFrom.SecretKeyRef.Name)
+}
+
+// TestBuildSessionDeployment_RollsOnGroupRedisChange proves the configHash
+// flips when the group-level redis target changes, so the pod rolls.
+func TestBuildSessionDeployment_RollsOnGroupRedisChange(t *testing.T) {
+	sb := newTestServiceBuilder()
+
+	sgA := newTestServiceGroup("prod")
+	sgA.Redis = &omniav1alpha1.RedisConfig{
+		ServiceRef: &omniav1alpha1.RedisServiceRef{Name: "redis-a"},
+	}
+	depA := sb.BuildSessionDeployment("acme", "acme-ns", sgA)
+
+	sgB := newTestServiceGroup("prod")
+	sgB.Redis = &omniav1alpha1.RedisConfig{
+		ServiceRef: &omniav1alpha1.RedisServiceRef{Name: "redis-b"},
+	}
+	depB := sb.BuildSessionDeployment("acme", "acme-ns", sgB)
+
+	annoA := depA.Spec.Template.Annotations[annotationConfigHash]
+	annoB := depB.Spec.Template.Annotations[annotationConfigHash]
+	assert.NotEqual(t, annoA, annoB,
+		"group-level Redis change must alter the configHash so the pod rolls")
 }
