@@ -113,7 +113,7 @@ type SecretKeyRef struct {
 func (sb *ServiceBuilder) BuildSessionDeployment(workspaceName, namespace string, sg omniav1alpha1.WorkspaceServiceGroup) *appsv1.Deployment {
 	name := fmt.Sprintf("session-%s-%s", workspaceName, sg.Name)
 	labels := serviceLabels("session-api", workspaceName, sg.Name)
-	redisURL, redisSecret := resolveSessionRedis(sg, sb.SessionRedisURL, sb.SessionRedisURLSecret)
+	redisURL, redisSecret := resolveSessionRedis(sg, namespace, sb.SessionRedisURL, sb.SessionRedisURLSecret)
 	args := []string{
 		fmt.Sprintf("--workspace=%s", workspaceName),
 		fmt.Sprintf("--service-group=%s", sg.Name),
@@ -134,47 +134,122 @@ func (sb *ServiceBuilder) BuildSessionDeployment(workspaceName, namespace string
 	return dep
 }
 
-// resolveSessionRedis mirrors resolveMemoryRedis for the session-api
-// hot cache. Per-workspace override > operator-wide default. Same
-// three input forms (existingSecret/url/host) and same
-// "$(REDIS_URL)" placeholder convention for the Secret form.
-func resolveSessionRedis(sg omniav1alpha1.WorkspaceServiceGroup, defaultURL string, defaultSecret SecretKeyRef) (string, SecretKeyRef) {
-	if sg.Session == nil || sg.Session.Redis == nil {
-		return defaultURL, defaultSecret
+// redisHasForm reports whether a RedisConfig populates exactly one of its
+// four input forms (existingSecret/url/host/serviceRef). A non-nil block
+// with no form set is treated as "unset" so resolution falls through to
+// the next precedence tier.
+func redisHasForm(r *omniav1alpha1.RedisConfig) bool {
+	if r == nil {
+		return false
 	}
-	r := sg.Session.Redis
-	if r.ExistingSecret != nil && r.ExistingSecret.Name != "" && r.ExistingSecret.Key != "" {
+	switch {
+	case r.ExistingSecret != nil && r.ExistingSecret.Name != "" && r.ExistingSecret.Key != "":
+		return true
+	case r.URL != "":
+		return true
+	case r.Host != "":
+		return true
+	case r.ServiceRef != nil && r.ServiceRef.Name != "":
+		return true
+	}
+	return false
+}
+
+// pickRedis returns the RedisConfig that governs a component, applying
+// precedence: per-component override (if it sets a form) wins over the
+// group-level redis. Returns nil when neither sets a form (the caller
+// then uses the operator-wide default).
+func pickRedis(component, group *omniav1alpha1.RedisConfig) *omniav1alpha1.RedisConfig {
+	if redisHasForm(component) {
+		return component
+	}
+	if redisHasForm(group) {
+		return group
+	}
+	return nil
+}
+
+// redisConfigToURL converts a single populated RedisConfig form into the
+// (url, secretRef) pair the Deployment consumes. namespace is the default
+// for a serviceRef that omits its own. Mirrors the chart-side resolution:
+//   - existingSecret → ("$(REDIS_URL)" placeholder, secret ref)
+//   - url            → (literal URL, empty)
+//   - host           → (synthesised plaintext URL, empty)
+//   - serviceRef     → (synthesised in-cluster URL, empty)
+//   - none populated → ("", empty)
+func redisConfigToURL(r *omniav1alpha1.RedisConfig, namespace string) (string, SecretKeyRef) {
+	if r == nil {
+		return "", SecretKeyRef{}
+	}
+	switch {
+	case r.ExistingSecret != nil && r.ExistingSecret.Name != "" && r.ExistingSecret.Key != "":
 		return "$(REDIS_URL)", SecretKeyRef{Name: r.ExistingSecret.Name, Key: r.ExistingSecret.Key}
-	}
-	if r.URL != "" {
+	case r.URL != "":
 		return r.URL, SecretKeyRef{}
+	case r.Host != "":
+		return synthRedisURL(r.Host, r.Port, r.DB, r.User), SecretKeyRef{}
+	case r.ServiceRef != nil && r.ServiceRef.Name != "":
+		return serviceRefURL(r.ServiceRef, namespace), SecretKeyRef{}
 	}
-	if r.Host != "" {
-		port := int32(6379)
-		if r.Port != 0 {
-			port = r.Port
-		}
-		userPart := ""
-		if r.User != "" {
-			userPart = r.User + "@"
-		}
-		return fmt.Sprintf("redis://%s%s:%d/%d", userPart, r.Host, port, r.DB), SecretKeyRef{}
+	return "", SecretKeyRef{}
+}
+
+// synthRedisURL builds a plaintext redis URL from the decomposed host form.
+func synthRedisURL(host string, port, db int32, user string) string {
+	if port == 0 {
+		port = 6379
+	}
+	userPart := ""
+	if user != "" {
+		userPart = user + "@"
+	}
+	return fmt.Sprintf("redis://%s%s:%d/%d", userPart, host, port, db)
+}
+
+// serviceRefURL builds redis://<name>.<namespace>:<port> from a
+// RedisServiceRef. namespace defaults to defaultNamespace (the workspace
+// namespace) and port to 6379 when unset.
+func serviceRefURL(ref *omniav1alpha1.RedisServiceRef, defaultNamespace string) string {
+	ns := ref.Namespace
+	if ns == "" {
+		ns = defaultNamespace
+	}
+	port := int32(6379)
+	if ref.Port != 0 {
+		port = ref.Port
+	}
+	return fmt.Sprintf("redis://%s.%s:%d", ref.Name, ns, port)
+}
+
+// resolveSessionRedis resolves the session-api Redis target with
+// precedence: per-component sg.Session.Redis > group-level sg.Redis >
+// operator-wide default. namespace defaults a group serviceRef that omits
+// its own namespace.
+func resolveSessionRedis(sg omniav1alpha1.WorkspaceServiceGroup, namespace, defaultURL string, defaultSecret SecretKeyRef) (string, SecretKeyRef) {
+	var component *omniav1alpha1.RedisConfig
+	if sg.Session != nil {
+		component = sg.Session.Redis
+	}
+	if r := pickRedis(component, sg.Redis); r != nil {
+		return redisConfigToURL(r, namespace)
 	}
 	return defaultURL, defaultSecret
 }
 
 // sessionConfigHash hashes the runtime-relevant fields of a session
-// service group (database SecretRef name + per-workspace Redis target)
+// service group (database SecretRef name + the effective Redis target)
 // into a short stable string. Mirrors memoryConfigHash so flipping
-// the Redis target rolls the pod.
+// either the per-component or the group-level Redis target rolls the pod.
 func sessionConfigHash(sg omniav1alpha1.WorkspaceServiceGroup) string {
-	var dbSecret, redisDescriptor string
+	var dbSecret string
+	var component *omniav1alpha1.RedisConfig
 	if sg.Session != nil {
 		if sg.Session.Database.SecretRef.Name != "" {
 			dbSecret = sg.Session.Database.SecretRef.Name
 		}
-		redisDescriptor = redisHashDescriptor(sg.Session.Redis)
+		component = sg.Session.Redis
 	}
+	redisDescriptor := effectiveRedisDescriptor(component, sg.Redis)
 	sum := sha256.Sum256([]byte(dbSecret + "|" + redisDescriptor))
 	return hex.EncodeToString(sum[:8])
 }
@@ -219,10 +294,10 @@ const (
 func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string, sg omniav1alpha1.WorkspaceServiceGroup) *appsv1.Deployment {
 	name := fmt.Sprintf("memory-%s-%s", workspaceName, sg.Name)
 	labels := serviceLabels("memory-api", workspaceName, sg.Name)
-	// Resolve Redis: per-workspace override wins over operator-wide.
-	// Either form may be empty (memory-api then runs without Redis,
-	// cache + event publisher disabled) — that's a valid config.
-	redisURL, redisSecret := resolveMemoryRedis(sg, sb.MemoryRedisURL, sb.MemoryRedisURLSecret)
+	// Resolve Redis: per-component override > group-level redis >
+	// operator-wide default. Any tier may be empty (memory-api then runs
+	// without Redis, cache + event publisher disabled) — that's valid.
+	redisURL, redisSecret := resolveMemoryRedis(sg, namespace, sb.MemoryRedisURL, sb.MemoryRedisURLSecret)
 	args := buildMemoryAPIArgs(workspaceName, sg, redisURL, sb.MemoryCacheTTL, sb.MemoryConsolidationInterval)
 	var overrides *omniav1alpha1.PodOverrides
 	if sg.Memory != nil {
@@ -238,9 +313,9 @@ func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string,
 	return dep
 }
 
-// resolveMemoryRedis returns the Redis URL string and (optional)
-// Secret reference for a per-workspace memory-api Deployment.
-// Per-workspace `sg.Memory.Redis` overrides the operator-wide default.
+// resolveMemoryRedis resolves the memory-api Redis target with precedence:
+// per-component sg.Memory.Redis > group-level sg.Redis > operator-wide
+// default. namespace defaults a group serviceRef that omits its own.
 //
 // Output forms (matches the chart-side resolution):
 //
@@ -249,33 +324,17 @@ func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string,
 //     so Kubernetes env expansion fills the placeholder at startup.
 //   - url            → (literal URL, empty secret ref).
 //   - host           → (synthesised plaintext URL, empty secret ref).
-//   - empty          → ("", empty); operator default is used as the
+//   - serviceRef     → (synthesised in-cluster URL, empty secret ref).
+//   - none populated → ("", empty); operator default is used as the
 //     fallback (still honoured via the URL it carries).
-func resolveMemoryRedis(sg omniav1alpha1.WorkspaceServiceGroup, defaultURL string, defaultSecret SecretKeyRef) (string, SecretKeyRef) {
-	if sg.Memory == nil || sg.Memory.Redis == nil {
-		return defaultURL, defaultSecret
+func resolveMemoryRedis(sg omniav1alpha1.WorkspaceServiceGroup, namespace, defaultURL string, defaultSecret SecretKeyRef) (string, SecretKeyRef) {
+	var component *omniav1alpha1.RedisConfig
+	if sg.Memory != nil {
+		component = sg.Memory.Redis
 	}
-	r := sg.Memory.Redis
-	if r.ExistingSecret != nil && r.ExistingSecret.Name != "" && r.ExistingSecret.Key != "" {
-		return "$(REDIS_URL)", SecretKeyRef{Name: r.ExistingSecret.Name, Key: r.ExistingSecret.Key}
+	if r := pickRedis(component, sg.Redis); r != nil {
+		return redisConfigToURL(r, namespace)
 	}
-	if r.URL != "" {
-		return r.URL, SecretKeyRef{}
-	}
-	if r.Host != "" {
-		port := int32(6379)
-		if r.Port != 0 {
-			port = r.Port
-		}
-		userPart := ""
-		if r.User != "" {
-			userPart = r.User + "@"
-		}
-		return fmt.Sprintf("redis://%s%s:%d/%d", userPart, r.Host, port, r.DB), SecretKeyRef{}
-	}
-	// Workspace's Redis block is set but with no input form populated —
-	// CEL validation should have rejected this at admission. Fall back
-	// to the operator default rather than break the Deployment.
 	return defaultURL, defaultSecret
 }
 
@@ -358,7 +417,8 @@ func addPodNamespaceEnv(dep *appsv1.Deployment) {
 // cosmetic edits — labels, pod overrides, comments — from rolling
 // the pod.
 func memoryConfigHash(sg omniav1alpha1.WorkspaceServiceGroup) string {
-	var dbSecret, providerRef, redisDescriptor string
+	var dbSecret, providerRef string
+	var component *omniav1alpha1.RedisConfig
 	if sg.Memory != nil {
 		if sg.Memory.Database.SecretRef.Name != "" {
 			dbSecret = sg.Memory.Database.SecretRef.Name
@@ -366,15 +426,25 @@ func memoryConfigHash(sg omniav1alpha1.WorkspaceServiceGroup) string {
 		if sg.Memory.ProviderRef != nil {
 			providerRef = sg.Memory.ProviderRef.Name
 		}
-		redisDescriptor = redisHashDescriptor(sg.Memory.Redis)
+		component = sg.Memory.Redis
 	}
+	redisDescriptor := effectiveRedisDescriptor(component, sg.Redis)
 	sum := sha256.Sum256([]byte(dbSecret + "|" + providerRef + "|" + redisDescriptor))
 	return hex.EncodeToString(sum[:8])
 }
 
+// effectiveRedisDescriptor returns the hash descriptor of whichever
+// RedisConfig actually governs a component after precedence — so a change
+// to either the per-component override or the group-level redis rolls the
+// pod, and a group change is ignored by a component that has its own
+// override (matching resolution).
+func effectiveRedisDescriptor(component, group *omniav1alpha1.RedisConfig) string {
+	return redisHashDescriptor(pickRedis(component, group))
+}
+
 // redisHashDescriptor produces a short stable string covering the
-// runtime-relevant fields of a RedisConfig. Used by memoryConfigHash
-// so flipping a workspace's Redis target rolls its memory-api pod.
+// runtime-relevant fields of a RedisConfig. Used by the config hashes
+// so flipping a workspace's Redis target rolls the pod.
 func redisHashDescriptor(r *omniav1alpha1.RedisConfig) string {
 	if r == nil {
 		return ""
@@ -387,6 +457,9 @@ func redisHashDescriptor(r *omniav1alpha1.RedisConfig) string {
 	}
 	if r.Host != "" {
 		return fmt.Sprintf("host:%s:%d/%d:%s", r.Host, r.Port, r.DB, r.User)
+	}
+	if r.ServiceRef != nil && r.ServiceRef.Name != "" {
+		return fmt.Sprintf("serviceRef:%s/%s:%d", r.ServiceRef.Namespace, r.ServiceRef.Name, r.ServiceRef.Port)
 	}
 	return ""
 }
