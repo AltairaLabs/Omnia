@@ -26,6 +26,11 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
+const (
+	testRedisSecretKey = "url"
+	testEvalAgentName  = "agent"
+)
+
 func newEvalWorkerTestReconciler() *AgentRuntimeReconciler {
 	scheme := runtime.NewScheme()
 	_ = omniav1alpha1.AddToScheme(scheme)
@@ -53,7 +58,7 @@ func TestBuildEvalWorkerDeployment_PodOverrides(t *testing.T) {
 		},
 	}
 
-	dep := r.buildEvalWorkerDeployment(context.Background(), "ns", "default", agent.Spec.Evals.PodOverrides)
+	dep := r.buildEvalWorkerDeployment(context.Background(), "ns", defaultSvcGroupName, agent.Spec.Evals.PodOverrides)
 	spec := dep.Spec.Template.Spec
 
 	require.Equal(t, "eval-sa", spec.ServiceAccountName)
@@ -77,19 +82,19 @@ func TestBuildEvalWorkerDeployment_ImagePullPolicy(t *testing.T) {
 	r := newEvalWorkerTestReconciler()
 	r.EvalWorkerImagePullPolicy = corev1.PullIfNotPresent
 
-	dep := r.buildEvalWorkerDeployment(context.Background(), "ns", "default", nil)
+	dep := r.buildEvalWorkerDeployment(context.Background(), "ns", defaultSvcGroupName, nil)
 	require.Equal(t, corev1.PullIfNotPresent,
 		dep.Spec.Template.Spec.Containers[0].ImagePullPolicy)
 }
 
 func TestBuildEvalWorkerDeployment_NoOverrides(t *testing.T) {
 	r := newEvalWorkerTestReconciler()
-	dep := r.buildEvalWorkerDeployment(context.Background(), "ns", "default", nil)
+	dep := r.buildEvalWorkerDeployment(context.Background(), "ns", defaultSvcGroupName, nil)
 	require.Empty(t, dep.Spec.Template.Spec.ServiceAccountName, "no overrides, default SA")
 }
 
 func TestEvalWorkerName_PerGroup(t *testing.T) {
-	require.Equal(t, "arena-eval-worker-default", evalWorkerName("default"))
+	require.Equal(t, "arena-eval-worker-default", evalWorkerName(defaultSvcGroupName))
 	require.Equal(t, "arena-eval-worker-prod", evalWorkerName("prod"))
 }
 
@@ -109,7 +114,7 @@ func TestServiceGroupsNeedingEvalWorker(t *testing.T) {
 	agentA := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
-			ServiceGroup: "default",
+			ServiceGroup: defaultSvcGroupName,
 			Framework:    langChain,
 			Evals:        &omniav1alpha1.EvalConfig{Enabled: true},
 		},
@@ -139,7 +144,7 @@ func TestServiceGroupsNeedingEvalWorker(t *testing.T) {
 
 	needed, err := r.serviceGroupsNeedingEvalWorker(context.Background(), "ns")
 	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"default", "prod"}, keysOf(needed))
+	require.ElementsMatch(t, []string{defaultSvcGroupName, "prod"}, keysOf(needed))
 }
 
 func envValue(env []corev1.EnvVar, name string) string {
@@ -170,14 +175,14 @@ func TestEvalWorkerEnv_GroupRedisLiteral(t *testing.T) {
 			Namespace: omniav1alpha1.NamespaceConfig{Name: "ns"},
 			Services: []omniav1alpha1.WorkspaceServiceGroup{
 				{
-					Name:  "default",
+					Name:  defaultSvcGroupName,
 					Redis: &omniav1alpha1.RedisConfig{URL: "redis://group.example.com:6379/0"},
 				},
 			},
 		},
 		Status: omniav1alpha1.WorkspaceStatus{
 			Services: []omniav1alpha1.ServiceGroupStatus{
-				{Name: "default", SessionURL: "http://session-ws-default.ns:8080", Ready: true},
+				{Name: defaultSvcGroupName, SessionURL: "http://session-ws-default.ns:8080", Ready: true},
 			},
 		},
 	}
@@ -190,7 +195,7 @@ func TestEvalWorkerEnv_GroupRedisLiteral(t *testing.T) {
 		SessionRedisURL: "redis://operator-session:6379/0",
 	}
 
-	env := r.buildEvalWorkerEnvVars(context.Background(), "ns", "default")
+	env := r.buildEvalWorkerEnvVars(context.Background(), "ns", defaultSvcGroupName)
 	require.Equal(t, "redis://group.example.com:6379/0", envValue(env, "REDIS_URL"))
 }
 
@@ -204,16 +209,16 @@ func TestEvalWorkerEnv_GroupRedisExistingSecret(t *testing.T) {
 			Namespace: omniav1alpha1.NamespaceConfig{Name: "ns"},
 			Services: []omniav1alpha1.WorkspaceServiceGroup{
 				{
-					Name: "default",
+					Name: defaultSvcGroupName,
 					Redis: &omniav1alpha1.RedisConfig{
-						ExistingSecret: &omniav1alpha1.RedisSecretRef{Name: "grp-redis", Key: "url"},
+						ExistingSecret: &omniav1alpha1.RedisSecretRef{Name: "grp-redis", Key: testRedisSecretKey},
 					},
 				},
 			},
 		},
 		Status: omniav1alpha1.WorkspaceStatus{
 			Services: []omniav1alpha1.ServiceGroupStatus{
-				{Name: "default", SessionURL: "http://session-ws-default.ns:8080", Ready: true},
+				{Name: defaultSvcGroupName, SessionURL: "http://session-ws-default.ns:8080", Ready: true},
 			},
 		},
 	}
@@ -224,14 +229,14 @@ func TestEvalWorkerEnv_GroupRedisExistingSecret(t *testing.T) {
 		Scheme: scheme,
 	}
 
-	env := r.buildEvalWorkerEnvVars(context.Background(), "ns", "default")
+	env := r.buildEvalWorkerEnvVars(context.Background(), "ns", defaultSvcGroupName)
 	redisEnv, ok := findEnv(env, "REDIS_URL")
 	require.True(t, ok, "REDIS_URL env must be set")
 	require.Empty(t, redisEnv.Value, "secret-sourced REDIS_URL must not set Value")
 	require.NotNil(t, redisEnv.ValueFrom)
 	require.NotNil(t, redisEnv.ValueFrom.SecretKeyRef)
 	require.Equal(t, "grp-redis", redisEnv.ValueFrom.SecretKeyRef.Name)
-	require.Equal(t, "url", redisEnv.ValueFrom.SecretKeyRef.Key)
+	require.Equal(t, testRedisSecretKey, redisEnv.ValueFrom.SecretKeyRef.Key)
 }
 
 func TestEvalWorkerEnv_FallbackToSessionRedisDefault(t *testing.T) {
@@ -248,8 +253,65 @@ func TestEvalWorkerEnv_FallbackToSessionRedisDefault(t *testing.T) {
 		SessionRedisURL: "redis://operator-session:6379/0",
 	}
 
-	env := r.buildEvalWorkerEnvVars(context.Background(), "ns", "default")
+	env := r.buildEvalWorkerEnvVars(context.Background(), "ns", defaultSvcGroupName)
 	require.Equal(t, "redis://operator-session:6379/0", envValue(env, "REDIS_URL"))
+}
+
+func TestReconcileEvalWorker_WiringEndToEnd(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "ws"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			Namespace: omniav1alpha1.NamespaceConfig{Name: "ns"},
+			Services: []omniav1alpha1.WorkspaceServiceGroup{
+				{
+					Name:  defaultSvcGroupName,
+					Redis: &omniav1alpha1.RedisConfig{URL: "redis://wiring.example.com:6379/0"},
+				},
+			},
+		},
+		Status: omniav1alpha1.WorkspaceStatus{
+			Services: []omniav1alpha1.ServiceGroupStatus{
+				{Name: defaultSvcGroupName, SessionURL: "http://session-ws-default.ns:8080", Ready: true},
+			},
+		},
+	}
+
+	agent := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: testEvalAgentName, Namespace: "ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ServiceGroup: defaultSvcGroupName,
+			Framework:    &omniav1alpha1.FrameworkConfig{Type: omniav1alpha1.FrameworkTypeLangChain},
+			Evals:        &omniav1alpha1.EvalConfig{Enabled: true},
+		},
+	}
+
+	r := &AgentRuntimeReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(ws, agent).Build(),
+		Scheme: scheme,
+		// Both operator defaults are set to distinct values so the assertion that
+		// the GROUP redis wins proves end-to-end resolution, not a default leak.
+		RedisURL:        "redis://operator-default:6379/0",
+		SessionRedisURL: "redis://operator-session:6379/0",
+	}
+
+	require.NoError(t, r.reconcileEvalWorker(context.Background(), agent))
+
+	dep := &appsv1.Deployment{}
+	require.NoError(t, r.Get(context.Background(),
+		types.NamespacedName{Name: evalWorkerName(defaultSvcGroupName), Namespace: "ns"}, dep))
+
+	env := dep.Spec.Template.Spec.Containers[0].Env
+	require.Equal(t, "http://session-ws-default.ns:8080", envValue(env, "SESSION_API_URL"),
+		"eval-worker must be wired to its group's session-api URL")
+	require.Equal(t, "redis://wiring.example.com:6379/0", envValue(env, "REDIS_URL"),
+		"eval-worker must consume the GROUP redis, not the operator default")
+	require.Equal(t, defaultSvcGroupName, envValue(env, "OMNIA_SERVICE_GROUP"))
+	require.Equal(t, "ns", envValue(env, "NAMESPACE"))
 }
 
 func TestReconcileEvalWorker_PerGroup_CreatesAndCleansUp(t *testing.T) {
@@ -260,7 +322,7 @@ func TestReconcileEvalWorker_PerGroup_CreatesAndCleansUp(t *testing.T) {
 	agentDefault := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
-			ServiceGroup: "default",
+			ServiceGroup: defaultSvcGroupName,
 			Framework:    &omniav1alpha1.FrameworkConfig{Type: omniav1alpha1.FrameworkTypeLangChain},
 			Evals:        &omniav1alpha1.EvalConfig{Enabled: true},
 		},
@@ -288,7 +350,7 @@ func TestReconcileEvalWorker_PerGroup_CreatesAndCleansUp(t *testing.T) {
 	// The needed worker exists.
 	got := &appsv1.Deployment{}
 	require.NoError(t, r.Get(context.Background(),
-		types.NamespacedName{Name: evalWorkerName("default"), Namespace: "ns"}, got))
+		types.NamespacedName{Name: evalWorkerName(defaultSvcGroupName), Namespace: "ns"}, got))
 
 	// The stale worker was cleaned up.
 	err := r.Get(context.Background(),
