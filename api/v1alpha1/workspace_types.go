@@ -561,6 +561,7 @@ const (
 // for a workspace. Agents reference a group by name via spec.serviceGroup.
 // +kubebuilder:validation:XValidation:rule="self.mode != 'managed' || (has(self.memory) && has(self.session))",message="managed mode requires both memory and session configuration"
 // +kubebuilder:validation:XValidation:rule="self.mode != 'external' || has(self.external)",message="external mode requires external endpoints"
+// +kubebuilder:validation:XValidation:rule="!has(self.redis) || [has(self.redis.existingSecret), has(self.redis.url) && size(self.redis.url) > 0, has(self.redis.host) && size(self.redis.host) > 0, has(self.redis.serviceRef)].exists_one(b, b)",message="services[].redis must use exactly one of existingSecret, url, host, or serviceRef"
 type WorkspaceServiceGroup struct {
 	// name is the unique identifier for this service group within the workspace.
 	// Referenced by AgentRuntime spec.serviceGroup.
@@ -573,6 +574,15 @@ type WorkspaceServiceGroup struct {
 	// +kubebuilder:default="managed"
 	// +optional
 	Mode ServiceMode `json:"mode,omitempty"`
+
+	// redis declares a single Redis target for every managed service in
+	// this group (session-api, memory-api). The operator resolves it to a
+	// URL and injects it as --redis-url. This is a REFERENCE to an
+	// existing Redis — the operator does not provision one. Per-component
+	// session.redis / memory.redis override this for that component;
+	// unset components fall back to the operator-wide default.
+	// +optional
+	Redis *RedisConfig `json:"redis,omitempty"`
 
 	// memory configures the memory-api for this service group.
 	// Required when mode is "managed".
@@ -598,7 +608,7 @@ type WorkspaceServiceGroup struct {
 
 // MemoryServiceConfig defines the configuration for a managed memory-api instance.
 //
-// +kubebuilder:validation:XValidation:rule="!has(self.redis) || [has(self.redis.existingSecret), has(self.redis.url) && size(self.redis.url) > 0, has(self.redis.host) && size(self.redis.host) > 0].exists_one(b, b)",message="memory.redis must use exactly one of existingSecret, url, or host"
+// +kubebuilder:validation:XValidation:rule="!has(self.redis) || [has(self.redis.existingSecret), has(self.redis.url) && size(self.redis.url) > 0, has(self.redis.host) && size(self.redis.host) > 0, has(self.redis.serviceRef)].exists_one(b, b)",message="memory.redis must use exactly one of existingSecret, url, host, or serviceRef"
 type MemoryServiceConfig struct {
 	// database configures the PostgreSQL database for this memory service.
 	// +kubebuilder:validation:Required
@@ -633,7 +643,7 @@ type MemoryServiceConfig struct {
 
 // SessionServiceConfig defines the configuration for a managed session-api instance.
 //
-// +kubebuilder:validation:XValidation:rule="!has(self.redis) || [has(self.redis.existingSecret), has(self.redis.url) && size(self.redis.url) > 0, has(self.redis.host) && size(self.redis.host) > 0].exists_one(b, b)",message="session.redis must use exactly one of existingSecret, url, or host"
+// +kubebuilder:validation:XValidation:rule="!has(self.redis) || [has(self.redis.existingSecret), has(self.redis.url) && size(self.redis.url) > 0, has(self.redis.host) && size(self.redis.host) > 0, has(self.redis.serviceRef)].exists_one(b, b)",message="session.redis must use exactly one of existingSecret, url, host, or serviceRef"
 type SessionServiceConfig struct {
 	// database configures the PostgreSQL database for this session service.
 	// +kubebuilder:validation:Required

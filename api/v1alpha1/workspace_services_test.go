@@ -186,3 +186,69 @@ func TestServiceModeConstants(t *testing.T) {
 		})
 	}
 }
+
+func TestRedisConfigServiceRefJSON(t *testing.T) {
+	cfg := RedisConfig{
+		ServiceRef: &RedisServiceRef{
+			Name:      "redis",
+			Namespace: "data",
+			Port:      6390,
+		},
+	}
+
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var got RedisConfig
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if got.ServiceRef == nil {
+		t.Fatal("ServiceRef is nil after round-trip")
+	}
+	if got.ServiceRef.Name != "redis" {
+		t.Errorf("ServiceRef.Name = %q, want redis", got.ServiceRef.Name)
+	}
+	if got.ServiceRef.Namespace != "data" {
+		t.Errorf("ServiceRef.Namespace = %q, want data", got.ServiceRef.Namespace)
+	}
+	if got.ServiceRef.Port != 6390 {
+		t.Errorf("ServiceRef.Port = %d, want 6390", got.ServiceRef.Port)
+	}
+}
+
+func TestWorkspaceServiceGroupGroupRedisJSON(t *testing.T) {
+	group := WorkspaceServiceGroup{
+		Name: "default",
+		Mode: ServiceModeManaged,
+		Redis: &RedisConfig{
+			ServiceRef: &RedisServiceRef{Name: "redis", Namespace: "data"},
+		},
+		Session: &SessionServiceConfig{
+			Database: DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "session-db"}},
+		},
+		Memory: &MemoryServiceConfig{
+			Database: DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "memory-db"}},
+		},
+	}
+
+	data, err := json.Marshal(group)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var got WorkspaceServiceGroup
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if got.Redis == nil || got.Redis.ServiceRef == nil {
+		t.Fatal("group Redis.ServiceRef is nil after round-trip")
+	}
+	if got.Redis.ServiceRef.Name != "redis" {
+		t.Errorf("group Redis.ServiceRef.Name = %q, want redis", got.Redis.ServiceRef.Name)
+	}
+}
