@@ -140,6 +140,64 @@ func TestReconcileServices_ManagedCreatesDeploymentsAndServices(t *testing.T) {
 	g.Expect(ws.Status.Services[0].Ready).To(BeFalse())
 }
 
+// TestReconcileServices_GroupRedisWiredIntoDeployments is a WIRING test: it
+// drives the full operator path (reconcileServices → reconcileManagedServiceGroup
+// → ServiceBuilder.Build*Deployment → client Create) and asserts the group-level
+// redis lands as --redis-url on BOTH the created session-api and memory-api pods.
+//
+// The builder unit tests prove Build*Deployment reads sg.Redis in isolation; this
+// proves the reconciler actually passes sg (with its Redis block) through to the
+// builder and persists the result — the "is it hooked up end to end" guarantee.
+// Uses serviceRef with an explicit namespace so the assertion also covers
+// cross-namespace resolution flowing through the reconciler.
+func TestReconcileServices_GroupRedisWiredIntoDeployments(t *testing.T) {
+	g := NewWithT(t)
+	scheme := testScheme()
+
+	ws := newTestWorkspace("myws", "myws-ns", []omniav1alpha1.WorkspaceServiceGroup{
+		{
+			Name: "primary",
+			Mode: omniav1alpha1.ServiceModeManaged,
+			Redis: &omniav1alpha1.RedisConfig{
+				ServiceRef: &omniav1alpha1.RedisServiceRef{Name: "redis", Namespace: "cache"},
+			},
+			Memory: &omniav1alpha1.MemoryServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+			},
+			Session: &omniav1alpha1.SessionServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+			},
+		},
+	})
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "myws-ns"}}
+	r := newTestReconciler(scheme, ws, ns)
+
+	ctx := context.Background()
+	err := r.reconcileServices(ctx, ws)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	const wantArg = "--redis-url=redis://redis.cache:6379"
+
+	sessionDep := &appsv1.Deployment{}
+	err = r.Get(ctx, types.NamespacedName{Name: "session-myws-primary", Namespace: "myws-ns"}, sessionDep)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(sessionDep.Spec.Template.Spec.Containers).To(HaveLen(1))
+	g.Expect(sessionDep.Spec.Template.Spec.Containers[0].Args).To(ContainElement(wantArg),
+		"group-level redis must be wired into the session-api pod via the reconciler")
+
+	memoryDep := &appsv1.Deployment{}
+	err = r.Get(ctx, types.NamespacedName{Name: "memory-myws-primary", Namespace: "myws-ns"}, memoryDep)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(memoryDep.Spec.Template.Spec.Containers).To(HaveLen(1))
+	g.Expect(memoryDep.Spec.Template.Spec.Containers[0].Args).To(ContainElement(wantArg),
+		"group-level redis must be wired into the memory-api pod via the reconciler")
+}
+
 func TestReconcileServices_ManagedUpdatesExistingResources(t *testing.T) {
 	g := NewWithT(t)
 	scheme := testScheme()
