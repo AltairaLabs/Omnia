@@ -37,14 +37,32 @@ import (
 // eval worker is already watching it.
 const evalWorkerNamespaceCI = "test-eval-worker"
 
+// evalWorkspaceNamespace is the predeployed workspace namespace where the
+// operator builds the per-service-group eval worker (arena-eval-worker-default).
+// The worker watches this namespace, so its Redis stream
+// (omnia:eval-events:dev-agents), PromptPack ConfigMaps, and sessions all live
+// here.
+const evalWorkspaceNamespace = "dev-agents"
+
 // effectiveEvalNamespace returns the namespace for PromptPack ConfigMaps
-// and Redis Stream events. In predeployed mode the eval worker already
-// watches the main namespace, so we use that directly.
+// and Redis Stream events. In predeployed mode the per-group eval worker
+// watches the workspace namespace, so we use that directly.
 func effectiveEvalNamespace() string {
 	if predeployed {
-		return namespace
+		return evalWorkspaceNamespace
 	}
 	return evalWorkerNamespaceCI
+}
+
+// evalWorkerPodNamespace returns the namespace that hosts the eval worker
+// pod/deployment. In predeployed mode the operator-built per-group worker runs
+// in the workspace namespace; in CI mode the test deploys it into the main
+// namespace.
+func evalWorkerPodNamespace() string {
+	if predeployed {
+		return evalWorkspaceNamespace
+	}
+	return namespace
 }
 
 // evalCurlPod is the name of the helper pod used for HTTP requests.
@@ -64,7 +82,7 @@ func sessionAPIEndpoint() string {
 // evalWorkerLabel returns the pod label selector for the eval worker.
 func evalWorkerLabel() string {
 	if predeployed {
-		return "app.kubernetes.io/name=omnia-eval-worker"
+		return "app.kubernetes.io/name=arena-eval-worker"
 	}
 	return "app=e2e-eval-worker"
 }
@@ -108,11 +126,11 @@ var _ = Describe("Eval Worker Pipeline", Ordered, Label("arena"), func() {
 		Eventually(verifyRedis, 2*time.Minute, 2*time.Second).Should(Succeed())
 
 		if predeployed {
-			By("verifying existing eval worker is ready (predeployed)")
+			By("verifying per-group eval worker is ready (predeployed)")
 			verifyWorker := func(g Gomega) {
 				cmd := exec.Command("kubectl", "get", "deployment",
-					"omnia-eval-worker",
-					"-n", namespace,
+					"arena-eval-worker-default",
+					"-n", evalWorkspaceNamespace,
 					"-o", "jsonpath={.status.readyReplicas}")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
@@ -679,7 +697,7 @@ data:
 
 			By("checking eval worker metrics (best-effort)")
 			podIPCmd := exec.Command("kubectl", "get", "pod",
-				"-n", namespace,
+				"-n", evalWorkerPodNamespace(),
 				"-l", evalWorkerLabel(),
 				"-o", "jsonpath={.items[0].status.podIP}")
 			podIP, podIPErr := utils.Run(podIPCmd)
@@ -808,14 +826,15 @@ func dumpEvalWorkerDebugInfo(reason string) {
 		"\n=== EVAL WORKER DEBUG: %s ===\n", reason)
 
 	label := evalWorkerLabel()
+	workerNS := evalWorkerPodNamespace()
 
 	cmd := exec.Command("kubectl", "get", "pods",
-		"-n", namespace, "-l", label, "-o", "wide")
+		"-n", workerNS, "-l", label, "-o", "wide")
 	output, _ := utils.Run(cmd)
 	_, _ = fmt.Fprintf(GinkgoWriter, "Eval worker pods:\n%s\n", output)
 
 	cmd = exec.Command("kubectl", "logs",
-		"-n", namespace, "-l", label, "--tail=100")
+		"-n", workerNS, "-l", label, "--tail=100")
 	output, _ = utils.Run(cmd)
 	_, _ = fmt.Fprintf(GinkgoWriter, "Eval worker logs:\n%s\n", output)
 

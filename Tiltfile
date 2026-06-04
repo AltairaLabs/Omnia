@@ -674,12 +674,13 @@ if ENABLE_ENTERPRISE:
         'enterprise.arena.devConsole.image.repository=omnia-arena-dev-console-dev',
         'enterprise.arena.devConsole.image.tag=latest',
         'enterprise.arena.devConsole.image.pullPolicy=Never',
-        # Eval worker for non-PromptKit agent eval execution
-        'enterprise.evalWorker.image.repository=omnia-eval-worker-dev',
-        'enterprise.evalWorker.image.tag=latest',
-        'enterprise.evalWorker.image.pullPolicy=Never',
-        # Watch all dev namespaces plus omnia-system for eval events (e2e tests publish there)
-        'enterprise.evalWorker.namespaces={dev-agents,omnia-demo,omnia-system}',
+        # Per-service-group eval worker image. The operator builds one
+        # arena-eval-worker-<group> Deployment per workspace service group that
+        # has an eval-enabled, non-PromptKit AgentRuntime — there is no longer a
+        # cluster-wide singleton or a namespaces list to configure.
+        'workspaceServices.evalWorker.image.repository=omnia-eval-worker-dev',
+        'workspaceServices.evalWorker.image.tag=latest',
+        'workspaceServices.evalWorker.image.pullPolicy=Never',
         # Policy proxy sidecar for ToolPolicy enforcement
         'enterprise.policyProxy.image.repository=omnia-policy-proxy-dev',
         'enterprise.policyProxy.image.tag=latest',
@@ -1096,12 +1097,11 @@ if ENABLE_ENTERPRISE:
         labels=['enterprise'],
     )
 
-    # Eval worker for realtime eval execution (consumes Redis stream events)
-    k8s_resource(
-        'omnia-eval-worker',
-        labels=['enterprise'],
-        resource_deps=['omnia-redis-master', 'sample-resources'],
-    )
+    # The cluster-wide omnia-eval-worker singleton was removed. The operator now
+    # builds one arena-eval-worker-<group> Deployment per workspace service group
+    # with an eval-enabled, non-PromptKit AgentRuntime. Those are created
+    # dynamically (not part of the Helm release) so there is no static
+    # k8s_resource to register here.
 
 # ============================================================================
 # Full Stack Mode Resources (Istio, Gateway API)

@@ -30,6 +30,7 @@ import (
 const (
 	testRedisSecretKey = "url"
 	testEvalAgentName  = "agent"
+	testStaleGroup     = "gone"
 )
 
 func newEvalWorkerTestReconciler() *AgentRuntimeReconciler {
@@ -344,12 +345,12 @@ func TestReconcileEvalWorker_PerGroup_CreatesAndCleansUp(t *testing.T) {
 	}
 	staleDep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      evalWorkerName("gone"),
+			Name:      evalWorkerName(testStaleGroup),
 			Namespace: "ns",
 			Labels: map[string]string{
 				labelAppName:      labelValueEvalWorker,
 				labelAppManagedBy: labelValueOmniaOperator,
-				labelServiceGroup: "gone",
+				labelServiceGroup: testStaleGroup,
 			},
 		},
 	}
@@ -369,7 +370,7 @@ func TestReconcileEvalWorker_PerGroup_CreatesAndCleansUp(t *testing.T) {
 
 	// The stale worker was cleaned up.
 	err := r.Get(context.Background(),
-		types.NamespacedName{Name: evalWorkerName("gone"), Namespace: "ns"}, &appsv1.Deployment{})
+		types.NamespacedName{Name: evalWorkerName(testStaleGroup), Namespace: "ns"}, &appsv1.Deployment{})
 	require.True(t, apierrors.IsNotFound(err))
 }
 
@@ -437,16 +438,16 @@ func TestEnsureEvalWorkerRBAC_SkipsCRBWhenNoClusterRole(t *testing.T) {
 
 func TestCleanupEvalWorkers_DeletesStaleRBAC(t *testing.T) {
 	scheme := evalWorkerTestScheme()
-	goneName := evalWorkerName("gone")
+	goneName := evalWorkerName(testStaleGroup)
 	goneLabels := map[string]string{
 		labelAppName:      labelValueEvalWorker,
 		labelAppManagedBy: labelValueOmniaOperator,
-		labelServiceGroup: "gone",
+		labelServiceGroup: testStaleGroup,
 	}
 	crbLabels := map[string]string{
 		labelAppName:            labelValueEvalWorker,
 		labelAppManagedBy:       labelValueOmniaOperator,
-		labelServiceGroup:       "gone",
+		labelServiceGroup:       testStaleGroup,
 		labelWorkspaceReaderFor: "ns",
 	}
 
@@ -474,6 +475,65 @@ func TestCleanupEvalWorkers_DeletesStaleRBAC(t *testing.T) {
 		types.NamespacedName{Name: goneName, Namespace: "ns"}, &rbacv1.RoleBinding{})))
 	require.True(t, apierrors.IsNotFound(r.Get(context.Background(),
 		types.NamespacedName{Name: "ns-" + goneName + "-workspace-reader"}, &rbacv1.ClusterRoleBinding{})))
+}
+
+// TestCleanupEvalWorkers_PreservesOtherNamespaceCRB verifies that cleanup of
+// namespace nsA's stale eval-worker ClusterRoleBinding does not delete an
+// otherwise-identically-named binding belonging to a different namespace nsB.
+// The workspace-reader-for label scoping must keep the two apart even though
+// both namespaces have a service group named "default".
+func TestCleanupEvalWorkers_PreservesOtherNamespaceCRB(t *testing.T) {
+	scheme := evalWorkerTestScheme()
+
+	// nsB's live "default" CRB — must survive cleanup of nsA.
+	nsBName := evalWorkerName(defaultSvcGroupName)
+	nsBCRB := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "nsB-" + nsBName + "-workspace-reader",
+			Labels: map[string]string{
+				labelAppName:            labelValueEvalWorker,
+				labelAppManagedBy:       labelValueOmniaOperator,
+				labelServiceGroup:       defaultSvcGroupName,
+				labelWorkspaceReaderFor: "nsB",
+			},
+		},
+	}
+
+	// nsA's stale testStaleGroup CRB — must be deleted.
+	nsAGoneName := evalWorkerName(testStaleGroup)
+	nsACRB := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "nsA-" + nsAGoneName + "-workspace-reader",
+			Labels: map[string]string{
+				labelAppName:            labelValueEvalWorker,
+				labelAppManagedBy:       labelValueOmniaOperator,
+				labelServiceGroup:       testStaleGroup,
+				labelWorkspaceReaderFor: "nsA",
+			},
+		},
+	}
+
+	r := &AgentRuntimeReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(nsBCRB, nsACRB).Build(),
+		Scheme: scheme,
+	}
+
+	needed := map[string]*omniav1alpha1.PodOverrides{defaultSvcGroupName: nil}
+	require.NoError(t, r.cleanupEvalWorkers(context.Background(), "nsA", needed))
+
+	// nsA's stale CRB is gone.
+	require.True(t, apierrors.IsNotFound(r.Get(context.Background(),
+		types.NamespacedName{Name: "nsA-" + nsAGoneName + "-workspace-reader"},
+		&rbacv1.ClusterRoleBinding{})),
+		"nsA's stale CRB must be deleted")
+
+	// nsB's CRB must be untouched — the workspace-reader-for=nsA filter must
+	// not select nsB's binding.
+	require.NoError(t, r.Get(context.Background(),
+		types.NamespacedName{Name: "nsB-" + nsBName + "-workspace-reader"},
+		&rbacv1.ClusterRoleBinding{}),
+		"nsB's CRB must survive cleanup of nsA")
 }
 
 func roleGrantsGet(role *rbacv1.Role, resource string) bool {
