@@ -133,6 +133,116 @@ func TestServiceGroupsNeedingEvalWorker(t *testing.T) {
 	require.ElementsMatch(t, []string{"default", "prod"}, keysOf(needed))
 }
 
+func envValue(env []corev1.EnvVar, name string) string {
+	for _, e := range env {
+		if e.Name == name {
+			return e.Value
+		}
+	}
+	return ""
+}
+
+func findEnv(env []corev1.EnvVar, name string) (corev1.EnvVar, bool) {
+	for _, e := range env {
+		if e.Name == name {
+			return e, true
+		}
+	}
+	return corev1.EnvVar{}, false
+}
+
+func TestEvalWorkerEnv_GroupRedisLiteral(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "ws"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			Namespace: omniav1alpha1.NamespaceConfig{Name: "ns"},
+			Services: []omniav1alpha1.WorkspaceServiceGroup{
+				{
+					Name:  "default",
+					Redis: &omniav1alpha1.RedisConfig{URL: "redis://group.example.com:6379/0"},
+				},
+			},
+		},
+		Status: omniav1alpha1.WorkspaceStatus{
+			Services: []omniav1alpha1.ServiceGroupStatus{
+				{Name: "default", SessionURL: "http://session-ws-default.ns:8080", Ready: true},
+			},
+		},
+	}
+
+	r := &AgentRuntimeReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(ws).Build(),
+		Scheme:          scheme,
+		RedisURL:        "redis://operator-default:6379/0",
+		SessionRedisURL: "redis://operator-session:6379/0",
+	}
+
+	env := r.buildEvalWorkerEnvVars(context.Background(), "ns", "default")
+	require.Equal(t, "redis://group.example.com:6379/0", envValue(env, "REDIS_URL"))
+}
+
+func TestEvalWorkerEnv_GroupRedisExistingSecret(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "ws"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			Namespace: omniav1alpha1.NamespaceConfig{Name: "ns"},
+			Services: []omniav1alpha1.WorkspaceServiceGroup{
+				{
+					Name: "default",
+					Redis: &omniav1alpha1.RedisConfig{
+						ExistingSecret: &omniav1alpha1.RedisSecretRef{Name: "grp-redis", Key: "url"},
+					},
+				},
+			},
+		},
+		Status: omniav1alpha1.WorkspaceStatus{
+			Services: []omniav1alpha1.ServiceGroupStatus{
+				{Name: "default", SessionURL: "http://session-ws-default.ns:8080", Ready: true},
+			},
+		},
+	}
+
+	r := &AgentRuntimeReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(ws).Build(),
+		Scheme: scheme,
+	}
+
+	env := r.buildEvalWorkerEnvVars(context.Background(), "ns", "default")
+	redisEnv, ok := findEnv(env, "REDIS_URL")
+	require.True(t, ok, "REDIS_URL env must be set")
+	require.Empty(t, redisEnv.Value, "secret-sourced REDIS_URL must not set Value")
+	require.NotNil(t, redisEnv.ValueFrom)
+	require.NotNil(t, redisEnv.ValueFrom.SecretKeyRef)
+	require.Equal(t, "grp-redis", redisEnv.ValueFrom.SecretKeyRef.Name)
+	require.Equal(t, "url", redisEnv.ValueFrom.SecretKeyRef.Key)
+}
+
+func TestEvalWorkerEnv_FallbackToSessionRedisDefault(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	// No Workspace objects: findServiceGroup returns false, so the eval-worker
+	// must fall back to the operator default. SessionRedisURL takes precedence
+	// over the legacy RedisURL.
+	r := &AgentRuntimeReconciler{
+		Client:          fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Scheme:          scheme,
+		RedisURL:        "redis://operator-default:6379/0",
+		SessionRedisURL: "redis://operator-session:6379/0",
+	}
+
+	env := r.buildEvalWorkerEnvVars(context.Background(), "ns", "default")
+	require.Equal(t, "redis://operator-session:6379/0", envValue(env, "REDIS_URL"))
+}
+
 func TestReconcileEvalWorker_PerGroup_CreatesAndCleansUp(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = omniav1alpha1.AddToScheme(scheme)

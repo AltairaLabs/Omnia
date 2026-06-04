@@ -96,6 +96,11 @@ type AgentRuntimeReconciler struct {
 	// forwarded to eval-worker pods via REDIS_URL env. Same canonical
 	// form used by every other Redis consumer in the codebase.
 	RedisURL string
+	// SessionRedisURL / SessionRedisURLSecret are the operator-wide session
+	// redis default, used as the fallback when resolving a service group's
+	// eval-worker redis (which must match the group's session-api redis).
+	SessionRedisURL       string
+	SessionRedisURLSecret SecretKeyRef
 	// EvalWorkerImage overrides the default eval worker container image
 	EvalWorkerImage string
 	// AgentWorkspaceReaderClusterRole is the name of the ClusterRole that grants

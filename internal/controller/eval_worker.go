@@ -226,28 +226,85 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(
 }
 
 // buildEvalWorkerEnvVars creates environment variables for the eval worker container.
+//
+// REDIS_URL is resolved the same way the group's session-api resolves it
+// (per-component session.redis > group redis > operator session default), so
+// the worker consumes from the same stream session-api publishes eval events
+// to. The eval-worker binary reads REDIS_URL directly from its environment, so
+// the existingSecret form must be a ValueFrom-only entry (a Kubernetes EnvVar
+// cannot set both Value and ValueFrom).
 func (r *AgentRuntimeReconciler) buildEvalWorkerEnvVars(ctx context.Context, namespace, serviceGroup string) []corev1.EnvVar {
 	envVars := []corev1.EnvVar{
 		{Name: envNamespace, Value: namespace},
 		{Name: envServiceGroup, Value: serviceGroup},
 	}
 
-	if r.RedisURL != "" {
+	redisURL, redisSecret := r.resolveEvalWorkerRedis(ctx, namespace, serviceGroup)
+	switch {
+	case redisSecret.Name != "" && redisSecret.Key != "":
 		envVars = append(envVars, corev1.EnvVar{
-			Name:  envRedisURL,
-			Value: r.RedisURL,
+			Name: envRedisURL,
+			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: redisSecret.Name},
+				Key:                  redisSecret.Key,
+			}},
 		})
+	case redisURL != "":
+		envVars = append(envVars, corev1.EnvVar{Name: envRedisURL, Value: redisURL})
 	}
 
-	sessionURL := r.resolveSessionURLForWorkspace(ctx, namespace, serviceGroup)
-	if sessionURL != "" {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  envSessionAPIURL,
-			Value: sessionURL,
-		})
+	if sessionURL := r.resolveSessionURLForWorkspace(ctx, namespace, serviceGroup); sessionURL != "" {
+		envVars = append(envVars, corev1.EnvVar{Name: envSessionAPIURL, Value: sessionURL})
 	}
 
 	return envVars
+}
+
+// evalWorkerRedisDefault returns the operator-wide default (url, secret) pair
+// for an eval-worker's redis: the session redis default when set, otherwise
+// the operator-wide RedisURL with no secret.
+func (r *AgentRuntimeReconciler) evalWorkerRedisDefault() (string, SecretKeyRef) {
+	if r.SessionRedisURL != "" {
+		return r.SessionRedisURL, r.SessionRedisURLSecret
+	}
+	return r.RedisURL, SecretKeyRef{}
+}
+
+// resolveEvalWorkerRedis resolves the eval-worker's REDIS_URL with the same
+// precedence session-api uses: per-component session.redis > group redis >
+// operator session default. When the group's Workspace cannot be found, the
+// operator default pair is returned.
+func (r *AgentRuntimeReconciler) resolveEvalWorkerRedis(ctx context.Context, namespace, serviceGroup string) (string, SecretKeyRef) {
+	defaultURL, defaultSecret := r.evalWorkerRedisDefault()
+	if sg, ok := r.findServiceGroup(ctx, namespace, serviceGroup); ok {
+		return resolveSessionRedis(sg, namespace, defaultURL, defaultSecret)
+	}
+	return defaultURL, defaultSecret
+}
+
+// findServiceGroup looks up the WorkspaceServiceGroup spec for the given
+// namespace + service group from the Workspace CRDs. Returns the zero value and
+// false when no matching Workspace/group exists (including on a list error).
+func (r *AgentRuntimeReconciler) findServiceGroup(ctx context.Context, namespace, serviceGroup string) (omniav1alpha1.WorkspaceServiceGroup, bool) {
+	log := logf.FromContext(ctx)
+	var list omniav1alpha1.WorkspaceList
+	if err := r.List(ctx, &list); err != nil {
+		log.V(1).Info("eval worker redis: workspace list failed, using operator default",
+			"namespace", namespace, "serviceGroup", serviceGroup)
+		return omniav1alpha1.WorkspaceServiceGroup{}, false
+	}
+	for i := range list.Items {
+		ws := &list.Items[i]
+		if ws.Spec.Namespace.Name != namespace {
+			continue
+		}
+		for j := range ws.Spec.Services {
+			if ws.Spec.Services[j].Name == serviceGroup {
+				return ws.Spec.Services[j], true
+			}
+		}
+	}
+	return omniav1alpha1.WorkspaceServiceGroup{}, false
 }
 
 // resolveSessionURLForWorkspace looks up the session-api URL for the given namespace
