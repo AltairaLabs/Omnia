@@ -148,7 +148,7 @@ Short summary of placements:
 | CRD | Field | Common use |
 |---|---|---|
 | `AgentRuntime.spec.podOverrides` | facade + runtime pod | workload identity SA, CSI-mounted provider keys, GPU nodeSelector |
-| `AgentRuntime.spec.evals.podOverrides` | eval-worker (per ns) | batch-node affinity |
+| `AgentRuntime.spec.evals.podOverrides` | eval-worker (per service group) | batch-node affinity |
 | `Workspace.spec.services[].session.podOverrides` | session-api | CSI-synced DB password via envFrom |
 | `Workspace.spec.services[].memory.podOverrides` | memory-api | CSI-synced embedding-provider key |
 | `ArenaJob.spec.workers.podOverrides` | worker Jobs | per-job provider credential CSI mount |

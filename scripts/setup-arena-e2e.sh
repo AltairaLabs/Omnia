@@ -318,10 +318,9 @@ retry 2 15 helm upgrade --install omnia charts/omnia \
     --set workspaceServices.memoryApi.image.tag=latest \
     --set workspaceServices.memoryApi.image.pullPolicy=Never \
     --set postgres.dev.enabled=true \
-    --set enterprise.evalWorker.image.repository=omnia-eval-worker-dev \
-    --set enterprise.evalWorker.image.tag=latest \
-    --set enterprise.evalWorker.image.pullPolicy=Never \
-    --set enterprise.evalWorker.workspaceNamespace=dev-agents \
+    --set workspaceServices.evalWorker.image.repository=omnia-eval-worker-dev \
+    --set workspaceServices.evalWorker.image.tag=latest \
+    --set workspaceServices.evalWorker.image.pullPolicy=Never \
     --set enterprise.arena.queue.type=redis \
     --set redis.enabled=true \
     --set redis.architecture=standalone \
@@ -421,11 +420,111 @@ spec:
             name: omnia-postgres-memory
 EOF
 
+# Create an eval-enabled, non-PromptKit (langchain) AgentRuntime in the
+# dev-agents workspace so the operator builds the per-service-group eval worker
+# (arena-eval-worker-default) for service group "default". The worker is created
+# once the agent's Provider + PromptPack resolve and its Deployment is created —
+# pod readiness is not required. The credentials are a synthetic placeholder; the
+# agent never makes a real LLM call during the eval-worker E2E (the test seeds
+# Redis directly), it only needs to reconcile far enough to trigger the worker.
+log_info "Creating eval-enabled AgentRuntime in dev-agents..."
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: anthropic-credentials
+  namespace: dev-agents
+  labels:
+    omnia.altairalabs.ai/type: credentials
+type: Opaque
+stringData:
+  api-key: "sk-ant-e2e-placeholder"
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: claude-provider
+  namespace: dev-agents
+spec:
+  type: claude
+  model: claude-sonnet-4-20250514
+  credential:
+    secretRef:
+      name: anthropic-credentials
+      key: api-key
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eval-e2e-pack
+  namespace: dev-agents
+data:
+  pack.json: |
+    {
+      "id": "eval-e2e-pack",
+      "version": "1.0.0",
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "Default",
+          "version": "1.0.0",
+          "system_template": "You are a helpful assistant."
+        }
+      }
+    }
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: eval-e2e-pack
+  namespace: dev-agents
+spec:
+  source:
+    type: configmap
+    configMapRef:
+      name: eval-e2e-pack
+  version: "1.0.0"
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: eval-e2e-agent
+  namespace: dev-agents
+spec:
+  serviceGroup: default
+  framework:
+    type: langchain
+  promptPackRef:
+    name: eval-e2e-pack
+  facade:
+    type: websocket
+    port: 8080
+  providers:
+    - name: default
+      providerRef:
+        name: claude-provider
+  evals:
+    enabled: true
+    # Run the worker on the "default" group so the E2E's lightweight
+    # rule-based eval (greeting-check, a "contains" handler) executes in the
+    # worker. Without this, an AgentRuntime with evals.enabled but no
+    # worker.groups makes the worker fall back to DefaultWorkerEvalGroups
+    # (["long-running","external"]), which excludes simple handlers — they
+    # would normally run inline in the runtime, not the worker.
+    worker:
+      groups:
+        - default
+EOF
+
 log_info "Waiting for per-workspace services..."
 kubectl wait --for=condition=Available --timeout=3m \
   deployment/session-dev-agents-default -n dev-agents || true
 kubectl wait --for=condition=Available --timeout=3m \
   deployment/memory-dev-agents-default -n dev-agents || true
+
+log_info "Waiting for per-group eval-worker..."
+kubectl wait --for=condition=Available --timeout=3m \
+  deployment/arena-eval-worker-default -n dev-agents || true
 
 log_info "Arena E2E environment ready!"
 echo ""

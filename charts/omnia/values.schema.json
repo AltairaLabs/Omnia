@@ -186,14 +186,6 @@
             }
           }
         },
-        "evalWorker": {
-          "type": "object",
-          "properties": {
-            "enabled":   { "type": "boolean" },
-            "image":     { "$ref": "#/$defs/image" },
-            "resources": { "$ref": "#/$defs/resources" }
-          }
-        },
         "communityTemplates": {
           "type": "object",
           "description": "ArenaTemplateSource that syncs prompt templates from GitHub. Disabled by default (0.9.0-beta.7+) for air-gap safety.",
@@ -460,6 +452,12 @@
                 "redis": { "$ref": "#/$defs/redisConsumer" }
               }
             }
+          }
+        },
+        "evalWorker": {
+          "type": "object",
+          "properties": {
+            "image": { "$ref": "#/$defs/image" }
           }
         }
       }
