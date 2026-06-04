@@ -1,4 +1,4 @@
-suite: operator forwards Redis URL config to memory-api + eval-worker
+suite: operator forwards Redis URL config to memory-api + eval default
 release:
   name: omnia
 values:
@@ -33,12 +33,12 @@ tests:
           path: spec.template.spec.containers[0].args[*]
           pattern: ^--redis-url=
 
-  - it: Bitnami subchart auto-populates URL form for memory-api and eval-worker
+  - it: Bitnami subchart auto-populates URL form for memory-api and eval default
     # redis.enabled=true → omnia.redis.url resolves to the in-cluster
     # subchart service. Operator emits both --memory-redis-url
     # (consumed by ServiceBuilder for per-workspace memory-api pods)
-    # and --redis-url (consumed by AgentRuntimeReconciler for the
-    # eval-worker autoscaler).
+    # and --redis-url (consumed by AgentRuntimeReconciler as the
+    # operator-wide eval-worker REDIS_URL fallback).
     set:
       redis.enabled: true
     template: templates/deployment.yaml
@@ -104,6 +104,22 @@ tests:
       - notMatchRegex:
           path: spec.template.spec.containers[0].args[*]
           pattern: --memory-redis-url=rediss://default-redis
+
+  - it: passes the eval-worker image + pull policy so per-group eval workers use the pinned chart image
+    # The operator templates one arena-eval-worker-<group> Deployment per
+    # service group; it sources the worker image from these flags rather
+    # than the DefaultEvalWorkerImage fallback. Pin the tag so the image
+    # arg can be asserted with an exact match.
+    set:
+      workspaceServices.evalWorker.image.tag: testtag
+    template: templates/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --eval-worker-image=ghcr.io/altairalabs/omnia-eval-worker:testtag
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --eval-worker-image-pull-policy=IfNotPresent
 
   - it: empty workspaceServices.memoryApi.cache.ttl drops the flag entirely
     # An operator wanting Redis for the event publisher only (no read-

@@ -73,6 +73,15 @@ func TestBuildEvalWorkerDeployment_PodOverrides(t *testing.T) {
 	require.Equal(t, "kv", c.VolumeMounts[0].Name)
 }
 
+func TestBuildEvalWorkerDeployment_ImagePullPolicy(t *testing.T) {
+	r := newEvalWorkerTestReconciler()
+	r.EvalWorkerImagePullPolicy = corev1.PullIfNotPresent
+
+	dep := r.buildEvalWorkerDeployment(context.Background(), "ns", "default", nil)
+	require.Equal(t, corev1.PullIfNotPresent,
+		dep.Spec.Template.Spec.Containers[0].ImagePullPolicy)
+}
+
 func TestBuildEvalWorkerDeployment_NoOverrides(t *testing.T) {
 	r := newEvalWorkerTestReconciler()
 	dep := r.buildEvalWorkerDeployment(context.Background(), "ns", "default", nil)

@@ -36,10 +36,6 @@ enterprise:
     enabled: true
     replicaCount: 2
 
-  # Eval worker for realtime session evals (non-PromptKit agents).
-  evalWorker:
-    enabled: true
-
 # --- Dependencies ---------------------------------------------------------
 
 # Arena queue backing store

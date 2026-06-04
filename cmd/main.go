@@ -86,6 +86,7 @@ func main() {
 	var workspaceContentPath string
 	var redisAddr string
 	var evalWorkerImage string
+	var evalWorkerImagePullPolicy string
 	var policyProxyImage string
 	var agentWorkspaceReaderClusterRole string
 	var apiBindAddress string
@@ -164,7 +165,9 @@ func main() {
 	flag.StringVar(&sessionRedisURLSecretKey, "session-redis-url-secret-key", "",
 		"Key within --session-redis-url-secret-name whose value is the Redis URL.")
 	flag.StringVar(&evalWorkerImage, "eval-worker-image", "",
-		"Image for the arena-eval-worker container. If not set, defaults to ghcr.io/altairalabs/arena-eval-worker:latest")
+		"Image for the arena-eval-worker container. If not set, defaults to ghcr.io/altairalabs/omnia-eval-worker:latest")
+	flag.StringVar(&evalWorkerImagePullPolicy, "eval-worker-image-pull-policy", "",
+		"Image pull policy for the arena-eval-worker container.")
 	flag.StringVar(&policyProxyImage, "policy-proxy-image", "",
 		"Image for the ToolPolicy enforcement sidecar. If empty, uses the default from policy_proxy_sidecar.go.")
 	flag.StringVar(&agentWorkspaceReaderClusterRole, "agent-workspace-reader-clusterrole", "",
@@ -299,6 +302,7 @@ func main() {
 			Key:  sessionRedisURLSecretKey,
 		},
 		EvalWorkerImage:                 evalWorkerImage,
+		EvalWorkerImagePullPolicy:       corev1.PullPolicy(evalWorkerImagePullPolicy),
 		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
 		PolicyProxyImage:                policyProxyImageForEnterprise(enterpriseEnabled, policyProxyImage),
 		RolloutMetrics:                  controller.NewRolloutMetrics(prometheus.DefaultRegisterer),

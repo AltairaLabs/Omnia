@@ -103,6 +103,8 @@ type AgentRuntimeReconciler struct {
 	SessionRedisURLSecret SecretKeyRef
 	// EvalWorkerImage overrides the default eval worker container image
 	EvalWorkerImage string
+	// EvalWorkerImagePullPolicy sets the imagePullPolicy on eval worker containers
+	EvalWorkerImagePullPolicy corev1.PullPolicy
 	// AgentWorkspaceReaderClusterRole is the name of the ClusterRole that grants
 	// agent pods read access to Workspace CRDs (for service URL resolution).
 	AgentWorkspaceReaderClusterRole string

@@ -21,7 +21,7 @@ Exception: structural ports that the binary itself hardcodes (e.g. the Postgres 
 
 ### 2. `podOverrides` is the canonical shape for pod customization
 
-All six chart-owned Deployments (operator, dashboard, arena-controller, eval-worker, promptkit-lsp, doctor) expose a `<component>.podOverrides` block. Shape matches the CRD `PodOverrides` struct in `api/v1alpha1/shared_types.go` — 13 fields:
+The chart-owned Deployments (operator, dashboard, arena-controller, promptkit-lsp, doctor) expose a `<component>.podOverrides` block. (Eval-workers are NOT chart-owned: the operator manages one `arena-eval-worker-<group>` Deployment per service group, and those get their pod customization from `AgentRuntime.spec.evals.podOverrides`, not chart values.) Shape matches the CRD `PodOverrides` struct in `api/v1alpha1/shared_types.go` — 13 fields:
 
 ```
 serviceAccountName  labels  annotations

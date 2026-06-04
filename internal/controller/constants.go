@@ -108,7 +108,7 @@ const (
 // Eval-related constants.
 const (
 	// DefaultEvalWorkerImage is the default image for the arena-eval-worker container.
-	DefaultEvalWorkerImage = "ghcr.io/altairalabs/arena-eval-worker:latest"
+	DefaultEvalWorkerImage = "ghcr.io/altairalabs/omnia-eval-worker:latest"
 	// EvalWorkerContainerName is the container name inside the eval worker Deployment.
 	EvalWorkerContainerName = "eval-worker"
 )

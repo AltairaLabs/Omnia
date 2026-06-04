@@ -205,9 +205,10 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:  EvalWorkerContainerName,
-							Image: image,
-							Env:   r.buildEvalWorkerEnvVars(ctx, namespace, serviceGroup),
+							Name:            EvalWorkerContainerName,
+							Image:           image,
+							ImagePullPolicy: r.EvalWorkerImagePullPolicy,
+							Env:             r.buildEvalWorkerEnvVars(ctx, namespace, serviceGroup),
 						},
 					},
 				},

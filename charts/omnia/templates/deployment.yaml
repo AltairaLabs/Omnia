@@ -71,6 +71,8 @@ spec:
             - --session-api-image-pull-policy={{ .Values.workspaceServices.sessionApi.image.pullPolicy }}
             - --memory-api-image={{ include "omnia.memoryApi.image" . }}
             - --memory-api-image-pull-policy={{ .Values.workspaceServices.memoryApi.image.pullPolicy }}
+            - --eval-worker-image={{ include "omnia.workspaceEvalWorker.image" . }}
+            - --eval-worker-image-pull-policy={{ .Values.workspaceServices.evalWorker.image.pullPolicy }}
             {{- /*
               Operator-wide Redis configuration for the memory-api cache
               + event publisher and the eval-worker autoscaler.

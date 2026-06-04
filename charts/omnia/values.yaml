@@ -213,71 +213,6 @@ enterprise:
     # -- Fetch timeout
     timeout: 2m
 
-  # Eval worker for non-PromptKit agent eval execution
-  evalWorker:
-    # -- Enable eval worker deployment
-    enabled: true
-    # -- Number of eval worker replicas
-    replicaCount: 1
-    image:
-      # -- Eval worker image repository
-      repository: ghcr.io/altairalabs/omnia-eval-worker
-      # -- Eval worker image tag (defaults to Chart appVersion)
-      tag: ""
-      # -- Eval worker image pull policy
-      pullPolicy: IfNotPresent
-    # -- Resource limits for eval worker
-    resources:
-      limits:
-        cpu: 500m
-        memory: 256Mi
-      requests:
-        cpu: 100m
-        memory: 128Mi
-    # -- Namespaces to watch for eval events.
-    # If empty, watches the deployment namespace only (single-namespace mode).
-    # If set, watches all listed namespaces (multi-namespace mode) and uses
-    # ClusterRole RBAC instead of namespace-scoped Role.
-    namespaces: []
-    # -- Namespace of the Workspace CRD whose session-api this eval-worker
-    # should target. Post-#717, the eval-worker discovers its session-api
-    # URL from Workspace.status.services rather than an injected env var,
-    # and it needs to know which Workspace to look up. Defaults to the
-    # eval-worker's own pod namespace, which only works when the eval-worker
-    # is deployed inside a workspace namespace. In multi-tenant clusters
-    # where the eval-worker lives in a control-plane namespace, set this
-    # to the target workspace's namespace. See #742.
-    workspaceNamespace: ""
-    # -- Extra environment variables for eval worker (e.g., provider API keys for LLM judges)
-    extraEnv: []
-    # - name: OPENAI_API_KEY
-    #   valueFrom:
-    #     secretKeyRef:
-    #       name: llm-provider-keys
-    #       key: openai-api-key
-
-    # -- Liveness probe tuning for the eval-worker container.
-    livenessProbe:
-      initialDelaySeconds: 5
-      periodSeconds: 15
-      timeoutSeconds: 1
-      failureThreshold: 3
-    # -- Readiness probe tuning for the eval-worker container.
-    readinessProbe:
-      initialDelaySeconds: 3
-      periodSeconds: 10
-      timeoutSeconds: 1
-      failureThreshold: 3
-    # -- Graceful-shutdown window in seconds for the eval-worker pod.
-    terminationGracePeriodSeconds: 30
-    # -- Pod-level overrides. Same shape as CRD PodOverrides
-    # (docs/how-to/configure-pod-overrides). Additive on top of the legacy
-    # extraEnv above; all new fields (serviceAccountName, priorityClassName,
-    # imagePullSecrets, labels, annotations, nodeSelector, tolerations,
-    # affinity, topologySpreadConstraints, extraEnvFrom, extraVolumes,
-    # extraVolumeMounts) are supplied here.
-    podOverrides: {}
-
   # Policy proxy sidecar for ToolPolicy enforcement
   policyProxy:
     image:
@@ -1133,6 +1068,14 @@ workspaceServices:
           caExistingSecret:
             name: ""
             key: ""
+  evalWorker:
+    image:
+      # -- Per-service-group eval-worker image repository
+      repository: ghcr.io/altairalabs/omnia-eval-worker
+      # -- Eval-worker image tag (defaults to chart appVersion)
+      tag: ""
+      # -- Image pull policy
+      pullPolicy: IfNotPresent
 
 # ============================================================================
 # Dev Postgres

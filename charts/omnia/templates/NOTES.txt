@@ -55,6 +55,16 @@ The Omnia operator is running and watching for:
   - ArenaJobs (Enterprise)
 {{- end }}
 
+{{- if .Values.enterprise.enabled }}
+
+NOTE: The cluster-wide `enterprise.evalWorker` Deployment has been removed.
+Eval-workers are now operator-managed, one per service group
+(arena-eval-worker-<group>), and deploy automatically when a non-PromptKit,
+eval-enabled AgentRuntime exists in a workspace. No `enterprise.evalWorker.*`
+config is needed; the worker image is set via
+`workspaceServices.evalWorker.image`.
+{{- end }}
+
 To verify the operator is running:
 
   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "omnia.name" . }}
