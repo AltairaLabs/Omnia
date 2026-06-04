@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -32,12 +33,23 @@ const (
 )
 
 func newEvalWorkerTestReconciler() *AgentRuntimeReconciler {
-	scheme := runtime.NewScheme()
-	_ = omniav1alpha1.AddToScheme(scheme)
+	scheme := evalWorkerTestScheme()
 	return &AgentRuntimeReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
 		Scheme: scheme,
 	}
+}
+
+// evalWorkerTestScheme registers every type the eval-worker reconcile path
+// creates or lists: AgentRuntime/Workspace (omnia), Deployment (apps),
+// ServiceAccount (core), and Role/RoleBinding/ClusterRoleBinding (rbac).
+func evalWorkerTestScheme() *runtime.Scheme {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+	_ = rbacv1.AddToScheme(scheme)
+	return scheme
 }
 
 func TestBuildEvalWorkerDeployment_PodOverrides(t *testing.T) {
@@ -90,7 +102,14 @@ func TestBuildEvalWorkerDeployment_ImagePullPolicy(t *testing.T) {
 func TestBuildEvalWorkerDeployment_NoOverrides(t *testing.T) {
 	r := newEvalWorkerTestReconciler()
 	dep := r.buildEvalWorkerDeployment(context.Background(), "ns", defaultSvcGroupName, nil)
-	require.Empty(t, dep.Spec.Template.Spec.ServiceAccountName, "no overrides, default SA")
+	require.Equal(t, "arena-eval-worker-default", dep.Spec.Template.Spec.ServiceAccountName,
+		"no overrides, default to the eval-worker SA")
+}
+
+func TestBuildEvalWorkerDeployment_SetsServiceAccount(t *testing.T) {
+	r := newEvalWorkerTestReconciler()
+	dep := r.buildEvalWorkerDeployment(context.Background(), "ns", defaultSvcGroupName, nil)
+	require.Equal(t, "arena-eval-worker-default", dep.Spec.Template.Spec.ServiceAccountName)
 }
 
 func TestEvalWorkerName_PerGroup(t *testing.T) {
@@ -258,9 +277,7 @@ func TestEvalWorkerEnv_FallbackToSessionRedisDefault(t *testing.T) {
 }
 
 func TestReconcileEvalWorker_WiringEndToEnd(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = omniav1alpha1.AddToScheme(scheme)
-	_ = appsv1.AddToScheme(scheme)
+	scheme := evalWorkerTestScheme()
 
 	ws := &omniav1alpha1.Workspace{
 		ObjectMeta: metav1.ObjectMeta{Name: "ws"},
@@ -315,9 +332,7 @@ func TestReconcileEvalWorker_WiringEndToEnd(t *testing.T) {
 }
 
 func TestReconcileEvalWorker_PerGroup_CreatesAndCleansUp(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = omniav1alpha1.AddToScheme(scheme)
-	_ = appsv1.AddToScheme(scheme)
+	scheme := evalWorkerTestScheme()
 
 	agentDefault := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
@@ -356,4 +371,127 @@ func TestReconcileEvalWorker_PerGroup_CreatesAndCleansUp(t *testing.T) {
 	err := r.Get(context.Background(),
 		types.NamespacedName{Name: evalWorkerName("gone"), Namespace: "ns"}, &appsv1.Deployment{})
 	require.True(t, apierrors.IsNotFound(err))
+}
+
+const testWorkspaceReaderClusterRole = "agent-workspace-reader"
+
+func TestEnsureEvalWorkerRBAC_CreatesObjects(t *testing.T) {
+	scheme := evalWorkerTestScheme()
+	r := &AgentRuntimeReconciler{
+		Client:                          fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Scheme:                          scheme,
+		AgentWorkspaceReaderClusterRole: testWorkspaceReaderClusterRole,
+	}
+
+	require.NoError(t, r.ensureEvalWorkerRBAC(context.Background(), "ns", defaultSvcGroupName))
+
+	name := evalWorkerName(defaultSvcGroupName)
+
+	sa := &corev1.ServiceAccount{}
+	require.NoError(t, r.Get(context.Background(),
+		types.NamespacedName{Name: name, Namespace: "ns"}, sa))
+
+	role := &rbacv1.Role{}
+	require.NoError(t, r.Get(context.Background(),
+		types.NamespacedName{Name: name, Namespace: "ns"}, role))
+	require.True(t, roleGrantsGet(role, "configmaps"), "Role must grant get on configmaps")
+
+	rb := &rbacv1.RoleBinding{}
+	require.NoError(t, r.Get(context.Background(),
+		types.NamespacedName{Name: name, Namespace: "ns"}, rb))
+	require.Equal(t, name, rb.RoleRef.Name)
+	require.Len(t, rb.Subjects, 1)
+	require.Equal(t, "ServiceAccount", rb.Subjects[0].Kind)
+	require.Equal(t, name, rb.Subjects[0].Name)
+
+	crb := &rbacv1.ClusterRoleBinding{}
+	require.NoError(t, r.Get(context.Background(),
+		types.NamespacedName{Name: "ns-" + name + "-workspace-reader"}, crb))
+	require.Equal(t, testWorkspaceReaderClusterRole, crb.RoleRef.Name)
+	require.Equal(t, "ns", crb.Labels[labelWorkspaceReaderFor])
+}
+
+func TestEnsureEvalWorkerRBAC_SkipsCRBWhenNoClusterRole(t *testing.T) {
+	scheme := evalWorkerTestScheme()
+	r := &AgentRuntimeReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Scheme: scheme,
+		// AgentWorkspaceReaderClusterRole intentionally empty.
+	}
+
+	require.NoError(t, r.ensureEvalWorkerRBAC(context.Background(), "ns", defaultSvcGroupName))
+
+	name := evalWorkerName(defaultSvcGroupName)
+
+	require.NoError(t, r.Get(context.Background(),
+		types.NamespacedName{Name: name, Namespace: "ns"}, &corev1.ServiceAccount{}))
+	require.NoError(t, r.Get(context.Background(),
+		types.NamespacedName{Name: name, Namespace: "ns"}, &rbacv1.Role{}))
+	require.NoError(t, r.Get(context.Background(),
+		types.NamespacedName{Name: name, Namespace: "ns"}, &rbacv1.RoleBinding{}))
+
+	err := r.Get(context.Background(),
+		types.NamespacedName{Name: "ns-" + name + "-workspace-reader"}, &rbacv1.ClusterRoleBinding{})
+	require.True(t, apierrors.IsNotFound(err), "no ClusterRoleBinding when ClusterRole is unset")
+}
+
+func TestCleanupEvalWorkers_DeletesStaleRBAC(t *testing.T) {
+	scheme := evalWorkerTestScheme()
+	goneName := evalWorkerName("gone")
+	goneLabels := map[string]string{
+		labelAppName:      labelValueEvalWorker,
+		labelAppManagedBy: labelValueOmniaOperator,
+		labelServiceGroup: "gone",
+	}
+	crbLabels := map[string]string{
+		labelAppName:            labelValueEvalWorker,
+		labelAppManagedBy:       labelValueOmniaOperator,
+		labelServiceGroup:       "gone",
+		labelWorkspaceReaderFor: "ns",
+	}
+
+	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: goneName, Namespace: "ns", Labels: goneLabels}}
+	role := &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: goneName, Namespace: "ns", Labels: goneLabels}}
+	rb := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: goneName, Namespace: "ns", Labels: goneLabels}}
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "ns-" + goneName + "-workspace-reader", Labels: crbLabels},
+	}
+
+	r := &AgentRuntimeReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(sa, role, rb, crb).Build(),
+		Scheme: scheme,
+	}
+
+	needed := map[string]*omniav1alpha1.PodOverrides{defaultSvcGroupName: nil}
+	require.NoError(t, r.cleanupEvalWorkers(context.Background(), "ns", needed))
+
+	require.True(t, apierrors.IsNotFound(r.Get(context.Background(),
+		types.NamespacedName{Name: goneName, Namespace: "ns"}, &corev1.ServiceAccount{})))
+	require.True(t, apierrors.IsNotFound(r.Get(context.Background(),
+		types.NamespacedName{Name: goneName, Namespace: "ns"}, &rbacv1.Role{})))
+	require.True(t, apierrors.IsNotFound(r.Get(context.Background(),
+		types.NamespacedName{Name: goneName, Namespace: "ns"}, &rbacv1.RoleBinding{})))
+	require.True(t, apierrors.IsNotFound(r.Get(context.Background(),
+		types.NamespacedName{Name: "ns-" + goneName + "-workspace-reader"}, &rbacv1.ClusterRoleBinding{})))
+}
+
+func roleGrantsGet(role *rbacv1.Role, resource string) bool {
+	for _, rule := range role.Rules {
+		hasResource := false
+		for _, res := range rule.Resources {
+			if res == resource {
+				hasResource = true
+			}
+		}
+		if !hasResource {
+			continue
+		}
+		for _, verb := range rule.Verbs {
+			if verb == verbGet {
+				return true
+			}
+		}
+	}
+	return false
 }

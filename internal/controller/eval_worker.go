@@ -22,7 +22,9 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -109,6 +111,10 @@ func (r *AgentRuntimeReconciler) ensureEvalWorkerDeployment(
 ) error {
 	log := logf.FromContext(ctx)
 
+	if err := r.ensureEvalWorkerRBAC(ctx, namespace, serviceGroup); err != nil {
+		return fmt.Errorf("ensure eval worker RBAC %s/%s: %w", namespace, serviceGroup, err)
+	}
+
 	desired := r.buildEvalWorkerDeployment(ctx, namespace, serviceGroup, podOverrides)
 
 	existing := &appsv1.Deployment{}
@@ -130,38 +136,78 @@ func (r *AgentRuntimeReconciler) ensureEvalWorkerDeployment(
 	return r.Update(ctx, existing)
 }
 
-// cleanupEvalWorkers deletes operator-managed eval worker Deployments whose
-// service group is no longer in the needed set. The legacy un-suffixed singleton
-// has an empty service-group label, which is never a key in needed, so it is
-// removed here.
+// cleanupEvalWorkers deletes operator-managed eval worker Deployments and their
+// RBAC (ServiceAccount, Role, RoleBinding, ClusterRoleBinding) whose service
+// group is no longer in the needed set. The legacy un-suffixed singleton has an
+// empty service-group label, which is never a key in needed, so it is removed
+// here.
 func (r *AgentRuntimeReconciler) cleanupEvalWorkers(
 	ctx context.Context,
 	namespace string,
 	needed map[string]*omniav1alpha1.PodOverrides,
 ) error {
-	log := logf.FromContext(ctx)
-
-	list := &appsv1.DeploymentList{}
-	if err := r.List(ctx, list,
-		client.InNamespace(namespace),
-		client.MatchingLabels{
-			labelAppName:      labelValueEvalWorker,
-			labelAppManagedBy: labelValueOmniaOperator,
-		},
-	); err != nil {
-		return fmt.Errorf("failed to list eval worker Deployments: %w", err)
+	nsLabels := client.MatchingLabels{
+		labelAppName:      labelValueEvalWorker,
+		labelAppManagedBy: labelValueOmniaOperator,
 	}
 
-	for i := range list.Items {
-		dep := &list.Items[i]
-		group := dep.Labels[labelServiceGroup]
-		if _, ok := needed[group]; ok {
+	namespaced := []client.ObjectList{
+		&appsv1.DeploymentList{},
+		&corev1.ServiceAccountList{},
+		&rbacv1.RoleList{},
+		&rbacv1.RoleBindingList{},
+	}
+	for _, list := range namespaced {
+		if err := r.deleteStaleEvalWorkerObjects(ctx, list, needed,
+			client.InNamespace(namespace), nsLabels); err != nil {
+			return err
+		}
+	}
+
+	// ClusterRoleBindings are cluster-scoped; filter by the workspace-reader-for
+	// label so we only touch this namespace's bindings (two namespaces can both
+	// have a group named "default").
+	crbLabels := client.MatchingLabels{
+		labelAppName:            labelValueEvalWorker,
+		labelAppManagedBy:       labelValueOmniaOperator,
+		labelWorkspaceReaderFor: namespace,
+	}
+	return r.deleteStaleEvalWorkerObjects(ctx, &rbacv1.ClusterRoleBindingList{}, needed, crbLabels)
+}
+
+// deleteStaleEvalWorkerObjects lists objects matching the given list options and
+// deletes each whose service-group label is not a key in needed. NotFound on
+// delete is ignored (concurrent reconciles may have already removed it).
+func (r *AgentRuntimeReconciler) deleteStaleEvalWorkerObjects(
+	ctx context.Context,
+	list client.ObjectList,
+	needed map[string]*omniav1alpha1.PodOverrides,
+	opts ...client.ListOption,
+) error {
+	log := logf.FromContext(ctx)
+
+	if err := r.List(ctx, list, opts...); err != nil {
+		return fmt.Errorf("failed to list eval worker objects: %w", err)
+	}
+
+	items, err := meta.ExtractList(list)
+	if err != nil {
+		return fmt.Errorf("failed to extract eval worker object list: %w", err)
+	}
+
+	for _, item := range items {
+		obj, ok := item.(client.Object)
+		if !ok {
 			continue
 		}
-		log.V(1).Info("deleting stale eval worker Deployment",
-			"namespace", namespace, "name", dep.Name, "serviceGroup", group)
-		if err := r.Delete(ctx, dep); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("failed to delete eval worker Deployment %s: %w", dep.Name, err)
+		group := obj.GetLabels()[labelServiceGroup]
+		if _, keep := needed[group]; keep {
+			continue
+		}
+		log.V(1).Info("deleting stale eval worker object",
+			"name", obj.GetName(), "namespace", obj.GetNamespace(), "serviceGroup", group)
+		if err := r.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete stale eval worker object %s: %w", obj.GetName(), err)
 		}
 	}
 
@@ -203,6 +249,7 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(
 					Labels: labels,
 				},
 				Spec: corev1.PodSpec{
+					ServiceAccountName: name,
 					Containers: []corev1.Container{
 						{
 							Name:            EvalWorkerContainerName,
