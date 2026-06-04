@@ -107,8 +107,6 @@ const (
 
 // Eval-related constants.
 const (
-	// EvalWorkerDeploymentName is the name of the per-namespace eval worker Deployment.
-	EvalWorkerDeploymentName = "arena-eval-worker"
 	// DefaultEvalWorkerImage is the default image for the arena-eval-worker container.
 	DefaultEvalWorkerImage = "ghcr.io/altairalabs/arena-eval-worker:latest"
 	// EvalWorkerContainerName is the container name inside the eval worker Deployment.
@@ -120,6 +118,7 @@ const (
 	envRedisURL      = "REDIS_URL"
 	envSessionAPIURL = "SESSION_API_URL"
 	envNamespace     = "NAMESPACE"
+	envServiceGroup  = "OMNIA_SERVICE_GROUP"
 )
 
 // Eval label constants.

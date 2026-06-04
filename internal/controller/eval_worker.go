@@ -32,70 +32,91 @@ import (
 	"github.com/altairalabs/omnia/internal/podoverrides"
 )
 
-// reconcileEvalWorker ensures a per-namespace eval worker Deployment exists when
-// any non-PromptKit AgentRuntime in the namespace has evals enabled.
-// When the last such agent is deleted or disabled, the worker is cleaned up.
+// defaultSvcGroupName is the service-group name used when an AgentRuntime does
+// not set spec.serviceGroup.
+const defaultSvcGroupName = "default"
+
+// evalWorkerName returns the per-service-group eval-worker Deployment name.
+func evalWorkerName(serviceGroup string) string {
+	return fmt.Sprintf("%s-%s", labelValueEvalWorker, serviceGroup)
+}
+
+// reconcileEvalWorker converges the full set of per-service-group eval worker
+// Deployments for the agent's namespace. One arena-eval-worker-<group> exists
+// per service group that has a non-PromptKit, eval-enabled AgentRuntime. Workers
+// for groups that no longer need one (including the legacy un-suffixed singleton)
+// are removed. The reconcile is idempotent regardless of which agent triggered it.
 func (r *AgentRuntimeReconciler) reconcileEvalWorker(
 	ctx context.Context,
 	agentRuntime *omniav1alpha1.AgentRuntime,
 ) error {
-	log := logf.FromContext(ctx)
 	namespace := agentRuntime.Namespace
 
-	needed, err := r.namespaceNeedsEvalWorker(ctx, namespace)
+	needed, err := r.serviceGroupsNeedingEvalWorker(ctx, namespace)
 	if err != nil {
 		return fmt.Errorf("failed to check eval worker need: %w", err)
 	}
 
-	if needed {
-		return r.ensureEvalWorkerDeployment(ctx, agentRuntime)
+	for group, podOverrides := range needed {
+		if err := r.ensureEvalWorkerDeployment(ctx, namespace, group, podOverrides); err != nil {
+			return err
+		}
 	}
 
-	log.V(1).Info("no non-PromptKit eval-enabled agents in namespace, cleaning up eval worker",
-		"namespace", namespace)
-	return r.deleteEvalWorkerDeployment(ctx, namespace)
+	return r.cleanupEvalWorkers(ctx, namespace, needed)
 }
 
-// namespaceNeedsEvalWorker checks if any non-PromptKit AgentRuntime in the
-// namespace has evals enabled.
-func (r *AgentRuntimeReconciler) namespaceNeedsEvalWorker(
+// serviceGroupsNeedingEvalWorker returns the set of service groups in the
+// namespace that have at least one non-PromptKit, eval-enabled AgentRuntime.
+// The value is the representative PodOverrides for the group (the first agent
+// seen, may be nil).
+func (r *AgentRuntimeReconciler) serviceGroupsNeedingEvalWorker(
 	ctx context.Context,
 	namespace string,
-) (bool, error) {
+) (map[string]*omniav1alpha1.PodOverrides, error) {
 	list := &omniav1alpha1.AgentRuntimeList{}
 	if err := r.List(ctx, list, client.InNamespace(namespace)); err != nil {
-		return false, fmt.Errorf("failed to list AgentRuntimes: %w", err)
+		return nil, fmt.Errorf("failed to list AgentRuntimes: %w", err)
 	}
 
+	needed := map[string]*omniav1alpha1.PodOverrides{}
 	for i := range list.Items {
 		rt := &list.Items[i]
 		if rt.DeletionTimestamp != nil {
 			continue
 		}
-		if hasEvalsEnabled(&rt.Spec) && !isPromptKit(&rt.Spec) {
-			return true, nil
+		if !hasEvalsEnabled(&rt.Spec) || isPromptKit(&rt.Spec) {
+			continue
+		}
+		group := rt.Spec.ServiceGroup
+		if group == "" {
+			group = defaultSvcGroupName
+		}
+		if _, seen := needed[group]; !seen {
+			needed[group] = rt.Spec.Evals.PodOverrides
 		}
 	}
 
-	return false, nil
+	return needed, nil
 }
 
-// ensureEvalWorkerDeployment creates or updates the eval worker Deployment.
+// ensureEvalWorkerDeployment creates or updates the eval worker Deployment for a
+// single service group.
 func (r *AgentRuntimeReconciler) ensureEvalWorkerDeployment(
 	ctx context.Context,
-	agentRuntime *omniav1alpha1.AgentRuntime,
+	namespace, serviceGroup string,
+	podOverrides *omniav1alpha1.PodOverrides,
 ) error {
 	log := logf.FromContext(ctx)
-	namespace := agentRuntime.Namespace
 
-	desired := r.buildEvalWorkerDeployment(ctx, agentRuntime)
+	desired := r.buildEvalWorkerDeployment(ctx, namespace, serviceGroup, podOverrides)
 
 	existing := &appsv1.Deployment{}
-	key := types.NamespacedName{Name: EvalWorkerDeploymentName, Namespace: namespace}
+	key := types.NamespacedName{Name: evalWorkerName(serviceGroup), Namespace: namespace}
 	err := r.Get(ctx, key, existing)
 
 	if apierrors.IsNotFound(err) {
-		log.Info("creating eval worker Deployment", "namespace", namespace)
+		log.Info("creating eval worker Deployment", "namespace", namespace, "serviceGroup", serviceGroup)
 		return r.Create(ctx, desired)
 	}
 	if err != nil {
@@ -105,41 +126,62 @@ func (r *AgentRuntimeReconciler) ensureEvalWorkerDeployment(
 	// Update the existing deployment spec
 	existing.Labels = desired.Labels
 	existing.Spec = desired.Spec
-	log.V(1).Info("updating eval worker Deployment", "namespace", namespace)
+	log.V(1).Info("updating eval worker Deployment", "namespace", namespace, "serviceGroup", serviceGroup)
 	return r.Update(ctx, existing)
 }
 
-// deleteEvalWorkerDeployment removes the eval worker Deployment if it exists.
-func (r *AgentRuntimeReconciler) deleteEvalWorkerDeployment(
+// cleanupEvalWorkers deletes operator-managed eval worker Deployments whose
+// service group is no longer in the needed set. The legacy un-suffixed singleton
+// has an empty service-group label, which is never a key in needed, so it is
+// removed here.
+func (r *AgentRuntimeReconciler) cleanupEvalWorkers(
 	ctx context.Context,
 	namespace string,
+	needed map[string]*omniav1alpha1.PodOverrides,
 ) error {
-	existing := &appsv1.Deployment{}
-	key := types.NamespacedName{Name: EvalWorkerDeploymentName, Namespace: namespace}
-	err := r.Get(ctx, key, existing)
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("failed to get eval worker Deployment for deletion: %w", err)
+	log := logf.FromContext(ctx)
+
+	list := &appsv1.DeploymentList{}
+	if err := r.List(ctx, list,
+		client.InNamespace(namespace),
+		client.MatchingLabels{
+			labelAppName:      labelValueEvalWorker,
+			labelAppManagedBy: labelValueOmniaOperator,
+		},
+	); err != nil {
+		return fmt.Errorf("failed to list eval worker Deployments: %w", err)
 	}
 
-	// Only delete if it has our managed-by label
-	if existing.Labels[labelAppManagedBy] != labelValueOmniaOperator {
-		return nil
+	for i := range list.Items {
+		dep := &list.Items[i]
+		group := dep.Labels[labelServiceGroup]
+		if _, ok := needed[group]; ok {
+			continue
+		}
+		log.V(1).Info("deleting stale eval worker Deployment",
+			"namespace", namespace, "name", dep.Name, "serviceGroup", group)
+		if err := r.Delete(ctx, dep); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete eval worker Deployment %s: %w", dep.Name, err)
+		}
 	}
 
-	return r.Delete(ctx, existing)
+	return nil
 }
 
-// buildEvalWorkerDeployment constructs the desired eval worker Deployment.
-func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) *appsv1.Deployment {
-	namespace := agentRuntime.Namespace
+// buildEvalWorkerDeployment constructs the desired eval worker Deployment for a
+// single service group.
+func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(
+	ctx context.Context,
+	namespace, serviceGroup string,
+	podOverrides *omniav1alpha1.PodOverrides,
+) *appsv1.Deployment {
+	name := evalWorkerName(serviceGroup)
 	labels := map[string]string{
 		labelAppName:      labelValueEvalWorker,
-		labelAppInstance:  EvalWorkerDeploymentName,
+		labelAppInstance:  name,
 		labelAppManagedBy: labelValueOmniaOperator,
 		labelOmniaComp:    labelEvalWorkerComp,
+		labelServiceGroup: serviceGroup,
 	}
 
 	image := r.evalWorkerImage()
@@ -147,7 +189,7 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(ctx context.Context, 
 
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      EvalWorkerDeploymentName,
+			Name:      name,
 			Namespace: namespace,
 			Labels:    labels,
 		},
@@ -165,7 +207,7 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(ctx context.Context, 
 						{
 							Name:  EvalWorkerContainerName,
 							Image: image,
-							Env:   r.buildEvalWorkerEnvVars(ctx, agentRuntime),
+							Env:   r.buildEvalWorkerEnvVars(ctx, namespace, serviceGroup),
 						},
 					},
 				},
@@ -173,10 +215,10 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(ctx context.Context, 
 		},
 	}
 
-	if agentRuntime.Spec.Evals != nil && agentRuntime.Spec.Evals.PodOverrides != nil {
-		podoverrides.ApplyPod(&dep.Spec.Template.Spec, &dep.Spec.Template.ObjectMeta, agentRuntime.Spec.Evals.PodOverrides)
+	if podOverrides != nil {
+		podoverrides.ApplyPod(&dep.Spec.Template.Spec, &dep.Spec.Template.ObjectMeta, podOverrides)
 		for i := range dep.Spec.Template.Spec.Containers {
-			podoverrides.ApplyContainer(&dep.Spec.Template.Spec.Containers[i], agentRuntime.Spec.Evals.PodOverrides)
+			podoverrides.ApplyContainer(&dep.Spec.Template.Spec.Containers[i], podOverrides)
 		}
 	}
 
@@ -184,10 +226,10 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(ctx context.Context, 
 }
 
 // buildEvalWorkerEnvVars creates environment variables for the eval worker container.
-func (r *AgentRuntimeReconciler) buildEvalWorkerEnvVars(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) []corev1.EnvVar {
-	namespace := agentRuntime.Namespace
+func (r *AgentRuntimeReconciler) buildEvalWorkerEnvVars(ctx context.Context, namespace, serviceGroup string) []corev1.EnvVar {
 	envVars := []corev1.EnvVar{
 		{Name: envNamespace, Value: namespace},
+		{Name: envServiceGroup, Value: serviceGroup},
 	}
 
 	if r.RedisURL != "" {
@@ -197,10 +239,6 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerEnvVars(ctx context.Context, age
 		})
 	}
 
-	serviceGroup := agentRuntime.Spec.ServiceGroup
-	if serviceGroup == "" {
-		serviceGroup = "default"
-	}
 	sessionURL := r.resolveSessionURLForWorkspace(ctx, namespace, serviceGroup)
 	if sessionURL != "" {
 		envVars = append(envVars, corev1.EnvVar{

@@ -15,9 +15,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -50,7 +53,7 @@ func TestBuildEvalWorkerDeployment_PodOverrides(t *testing.T) {
 		},
 	}
 
-	dep := r.buildEvalWorkerDeployment(context.Background(), agent)
+	dep := r.buildEvalWorkerDeployment(context.Background(), "ns", "default", agent.Spec.Evals.PodOverrides)
 	spec := dep.Spec.Template.Spec
 
 	require.Equal(t, "eval-sa", spec.ServiceAccountName)
@@ -72,9 +75,104 @@ func TestBuildEvalWorkerDeployment_PodOverrides(t *testing.T) {
 
 func TestBuildEvalWorkerDeployment_NoOverrides(t *testing.T) {
 	r := newEvalWorkerTestReconciler()
-	agent := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
-	}
-	dep := r.buildEvalWorkerDeployment(context.Background(), agent)
+	dep := r.buildEvalWorkerDeployment(context.Background(), "ns", "default", nil)
 	require.Empty(t, dep.Spec.Template.Spec.ServiceAccountName, "no overrides, default SA")
+}
+
+func TestEvalWorkerName_PerGroup(t *testing.T) {
+	require.Equal(t, "arena-eval-worker-default", evalWorkerName("default"))
+	require.Equal(t, "arena-eval-worker-prod", evalWorkerName("prod"))
+}
+
+func keysOf(m map[string]*omniav1alpha1.PodOverrides) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func TestServiceGroupsNeedingEvalWorker(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	langChain := &omniav1alpha1.FrameworkConfig{Type: omniav1alpha1.FrameworkTypeLangChain}
+	agentA := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ServiceGroup: "default",
+			Framework:    langChain,
+			Evals:        &omniav1alpha1.EvalConfig{Enabled: true},
+		},
+	}
+	agentB := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ServiceGroup: "prod",
+			Framework:    langChain,
+			Evals:        &omniav1alpha1.EvalConfig{Enabled: true},
+		},
+	}
+	agentC := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "c", Namespace: "ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ServiceGroup: "pk",
+			Framework:    &omniav1alpha1.FrameworkConfig{Type: omniav1alpha1.FrameworkTypePromptKit},
+			Evals:        &omniav1alpha1.EvalConfig{Enabled: true},
+		},
+	}
+
+	r := &AgentRuntimeReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(agentA, agentB, agentC).Build(),
+		Scheme: scheme,
+	}
+
+	needed, err := r.serviceGroupsNeedingEvalWorker(context.Background(), "ns")
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"default", "prod"}, keysOf(needed))
+}
+
+func TestReconcileEvalWorker_PerGroup_CreatesAndCleansUp(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	agentDefault := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ServiceGroup: "default",
+			Framework:    &omniav1alpha1.FrameworkConfig{Type: omniav1alpha1.FrameworkTypeLangChain},
+			Evals:        &omniav1alpha1.EvalConfig{Enabled: true},
+		},
+	}
+	staleDep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      evalWorkerName("gone"),
+			Namespace: "ns",
+			Labels: map[string]string{
+				labelAppName:      labelValueEvalWorker,
+				labelAppManagedBy: labelValueOmniaOperator,
+				labelServiceGroup: "gone",
+			},
+		},
+	}
+
+	r := &AgentRuntimeReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(agentDefault, staleDep).Build(),
+		Scheme: scheme,
+	}
+
+	require.NoError(t, r.reconcileEvalWorker(context.Background(), agentDefault))
+
+	// The needed worker exists.
+	got := &appsv1.Deployment{}
+	require.NoError(t, r.Get(context.Background(),
+		types.NamespacedName{Name: evalWorkerName("default"), Namespace: "ns"}, got))
+
+	// The stale worker was cleaned up.
+	err := r.Get(context.Background(),
+		types.NamespacedName{Name: evalWorkerName("gone"), Namespace: "ns"}, &appsv1.Deployment{})
+	require.True(t, apierrors.IsNotFound(err))
 }

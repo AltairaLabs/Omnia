@@ -99,7 +99,7 @@ var _ = Describe("Eval Worker Reconciliation", func() {
 		AfterEach(func() {
 			// Clean up eval worker Deployment
 			dep := &appsv1.Deployment{}
-			key := types.NamespacedName{Name: EvalWorkerDeploymentName, Namespace: namespace}
+			key := types.NamespacedName{Name: evalWorkerName("default"), Namespace: namespace}
 			if err := k8sClient.Get(ctx, key, dep); err == nil {
 				_ = k8sClient.Delete(ctx, dep)
 			}
@@ -143,7 +143,7 @@ var _ = Describe("Eval Worker Reconciliation", func() {
 
 			// Verify eval worker Deployment was created
 			dep := &appsv1.Deployment{}
-			key := types.NamespacedName{Name: EvalWorkerDeploymentName, Namespace: namespace}
+			key := types.NamespacedName{Name: evalWorkerName("default"), Namespace: namespace}
 			Expect(k8sClient.Get(ctx, key, dep)).To(Succeed())
 			Expect(dep.Spec.Template.Spec.Containers).To(HaveLen(1))
 			Expect(dep.Spec.Template.Spec.Containers[0].Image).To(Equal("test-eval-worker:v1.0.0"))
@@ -170,7 +170,7 @@ var _ = Describe("Eval Worker Reconciliation", func() {
 
 			// Verify no eval worker Deployment exists
 			dep := &appsv1.Deployment{}
-			key := types.NamespacedName{Name: EvalWorkerDeploymentName, Namespace: namespace}
+			key := types.NamespacedName{Name: evalWorkerName("default"), Namespace: namespace}
 			err = k8sClient.Get(ctx, key, dep)
 			Expect(errors.IsNotFound(err)).To(BeTrue())
 		})
@@ -190,7 +190,7 @@ var _ = Describe("Eval Worker Reconciliation", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			dep := &appsv1.Deployment{}
-			key := types.NamespacedName{Name: EvalWorkerDeploymentName, Namespace: namespace}
+			key := types.NamespacedName{Name: evalWorkerName("default"), Namespace: namespace}
 			err = k8sClient.Get(ctx, key, dep)
 			Expect(errors.IsNotFound(err)).To(BeTrue())
 		})
@@ -212,7 +212,7 @@ var _ = Describe("Eval Worker Reconciliation", func() {
 
 			// Verify created
 			dep := &appsv1.Deployment{}
-			key := types.NamespacedName{Name: EvalWorkerDeploymentName, Namespace: namespace}
+			key := types.NamespacedName{Name: evalWorkerName("default"), Namespace: namespace}
 			Expect(k8sClient.Get(ctx, key, dep)).To(Succeed())
 
 			// Change image and reconcile again — should update
@@ -240,7 +240,7 @@ var _ = Describe("Eval Worker Reconciliation", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			dep := &appsv1.Deployment{}
-			key := types.NamespacedName{Name: EvalWorkerDeploymentName, Namespace: namespace}
+			key := types.NamespacedName{Name: evalWorkerName("default"), Namespace: namespace}
 			Expect(k8sClient.Get(ctx, key, dep)).To(Succeed())
 
 			// Disable evals
