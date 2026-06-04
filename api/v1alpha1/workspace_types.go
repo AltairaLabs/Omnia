@@ -388,9 +388,13 @@ type WorkspaceSpec struct {
 	// services defines per-workspace service groups for session-api and memory-api.
 	// Each group can be managed (operator-provisioned) or external (user-supplied URLs).
 	// Agents reference a group by name via spec.serviceGroup.
+	// The maxItems cap bounds the per-item CEL validation cost (the array
+	// multiplies each item rule's estimated cost; without a bound the
+	// group-level redis exists_one rule exceeds the API server budget).
 	// +optional
 	// +listType=map
 	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=64
 	Services []WorkspaceServiceGroup `json:"services,omitempty"`
 }
 

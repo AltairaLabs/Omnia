@@ -439,6 +439,9 @@ spec:
                   services defines per-workspace service groups for session-api and memory-api.
                   Each group can be managed (operator-provisioned) or external (user-supplied URLs).
                   Agents reference a group by name via spec.serviceGroup.
+                  The maxItems cap bounds the per-item CEL validation cost (the array
+                  multiplies each item rule's estimated cost; without a bound the
+                  group-level redis exists_one rule exceeds the API server budget).
                 items:
                   description: |-
                     WorkspaceServiceGroup defines a named group of session-api and memory-api endpoints
@@ -7758,6 +7761,7 @@ spec:
                     rule: '!has(self.redis) || [has(self.redis.existingSecret), has(self.redis.url)
                       && size(self.redis.url) > 0, has(self.redis.host) && size(self.redis.host)
                       > 0, has(self.redis.serviceRef)].exists_one(b, b)'
+                maxItems: 64
                 type: array
                 x-kubernetes-list-map-keys:
                 - name
