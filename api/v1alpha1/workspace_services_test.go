@@ -23,6 +23,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+const testRedisName = "redis"
+
 func TestWorkspaceServiceGroupManagedJSON(t *testing.T) {
 	group := WorkspaceServiceGroup{
 		Name: "default",
@@ -190,7 +192,7 @@ func TestServiceModeConstants(t *testing.T) {
 func TestRedisConfigServiceRefJSON(t *testing.T) {
 	cfg := RedisConfig{
 		ServiceRef: &RedisServiceRef{
-			Name:      "redis",
+			Name:      testRedisName,
 			Namespace: "data",
 			Port:      6390,
 		},
@@ -209,7 +211,7 @@ func TestRedisConfigServiceRefJSON(t *testing.T) {
 	if got.ServiceRef == nil {
 		t.Fatal("ServiceRef is nil after round-trip")
 	}
-	if got.ServiceRef.Name != "redis" {
+	if got.ServiceRef.Name != testRedisName {
 		t.Errorf("ServiceRef.Name = %q, want redis", got.ServiceRef.Name)
 	}
 	if got.ServiceRef.Namespace != "data" {
@@ -225,7 +227,7 @@ func TestWorkspaceServiceGroupGroupRedisJSON(t *testing.T) {
 		Name: "default",
 		Mode: ServiceModeManaged,
 		Redis: &RedisConfig{
-			ServiceRef: &RedisServiceRef{Name: "redis", Namespace: "data"},
+			ServiceRef: &RedisServiceRef{Name: testRedisName, Namespace: "data"},
 		},
 		Session: &SessionServiceConfig{
 			Database: DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "session-db"}},
@@ -248,7 +250,7 @@ func TestWorkspaceServiceGroupGroupRedisJSON(t *testing.T) {
 	if got.Redis == nil || got.Redis.ServiceRef == nil {
 		t.Fatal("group Redis.ServiceRef is nil after round-trip")
 	}
-	if got.Redis.ServiceRef.Name != "redis" {
+	if got.Redis.ServiceRef.Name != testRedisName {
 		t.Errorf("group Redis.ServiceRef.Name = %q, want redis", got.Redis.ServiceRef.Name)
 	}
 }

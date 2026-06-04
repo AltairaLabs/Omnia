@@ -29,8 +29,10 @@ import (
 
 // Test constants extracted to satisfy goconst.
 const (
-	testOperatorRedisURL = "redis://operator-default:6379/0"
-	testRedisURLEnvName  = "REDIS_URL"
+	testOperatorRedisURL  = "redis://operator-default:6379/0"
+	testRedisURLEnvName   = "REDIS_URL"
+	testRedisSvcName      = "redis"
+	testRedisSvcNamespace = "data"
 )
 
 func newTestServiceGroup(name string) omniav1alpha1.WorkspaceServiceGroup {
@@ -673,14 +675,14 @@ func TestBuildServiceDeployment_NoOverrides(t *testing.T) {
 func TestResolveRedis_ServiceRefSynthesisesURL(t *testing.T) {
 	// Explicit namespace + port.
 	url, secret := redisConfigToURL(&omniav1alpha1.RedisConfig{
-		ServiceRef: &omniav1alpha1.RedisServiceRef{Name: "redis", Namespace: "data", Port: 6390},
+		ServiceRef: &omniav1alpha1.RedisServiceRef{Name: testRedisSvcName, Namespace: testRedisSvcNamespace, Port: 6390},
 	}, "acme-ns")
 	assert.Equal(t, "redis://redis.data:6390", url)
 	assert.Empty(t, secret.Name)
 
 	// Namespace defaults to the workspace namespace, port defaults to 6379.
 	url2, _ := redisConfigToURL(&omniav1alpha1.RedisConfig{
-		ServiceRef: &omniav1alpha1.RedisServiceRef{Name: "redis"},
+		ServiceRef: &omniav1alpha1.RedisServiceRef{Name: testRedisSvcName},
 	}, "acme-ns")
 	assert.Equal(t, "redis://redis.acme-ns:6379", url2)
 }
@@ -727,7 +729,7 @@ func TestRedisHashDescriptor_AllForms(t *testing.T) {
 	}))
 	assert.Equal(t, "host:h:0/0:", redisHashDescriptor(&omniav1alpha1.RedisConfig{Host: "h"}))
 	assert.Equal(t, "serviceRef:data/redis:6390", redisHashDescriptor(&omniav1alpha1.RedisConfig{
-		ServiceRef: &omniav1alpha1.RedisServiceRef{Name: "redis", Namespace: "data", Port: 6390},
+		ServiceRef: &omniav1alpha1.RedisServiceRef{Name: testRedisSvcName, Namespace: testRedisSvcNamespace, Port: 6390},
 	}))
 }
 
@@ -737,7 +739,7 @@ func TestBuildSessionDeployment_GroupRedisServiceRef(t *testing.T) {
 	sb := newTestServiceBuilder()
 	sg := newTestServiceGroup("default")
 	sg.Redis = &omniav1alpha1.RedisConfig{
-		ServiceRef: &omniav1alpha1.RedisServiceRef{Name: "redis", Namespace: "data"},
+		ServiceRef: &omniav1alpha1.RedisServiceRef{Name: testRedisSvcName, Namespace: testRedisSvcNamespace},
 	}
 
 	dep := sb.BuildSessionDeployment("acme", "acme-ns", sg)
@@ -751,7 +753,7 @@ func TestBuildMemoryDeployment_GroupRedisServiceRef(t *testing.T) {
 	sb := newTestServiceBuilder()
 	sg := newTestServiceGroup("default")
 	sg.Redis = &omniav1alpha1.RedisConfig{
-		ServiceRef: &omniav1alpha1.RedisServiceRef{Name: "redis"},
+		ServiceRef: &omniav1alpha1.RedisServiceRef{Name: testRedisSvcName},
 	}
 
 	dep := sb.BuildMemoryDeployment("acme", "acme-ns", sg)
