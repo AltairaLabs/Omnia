@@ -100,21 +100,21 @@ func (g *GraphClient) doJSON(ctx context.Context, url string, out any) error {
 	return json.Unmarshal(data, out)
 }
 
-func (g *GraphClient) doRaw(ctx context.Context, url string) (string, error) {
+func (g *GraphClient) doRawBytes(ctx context.Context, url string) ([]byte, error) {
 	req, err := g.newRequest(ctx, http.MethodGet, url)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	resp, err := g.http.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return "", &GraphError{StatusCode: resp.StatusCode, Body: string(data)}
+		return nil, &GraphError{StatusCode: resp.StatusCode, Body: string(data)}
 	}
-	return string(data), nil
+	return data, nil
 }
 
 // List enumerates documents in the site's default drive root (folders skipped).
@@ -147,7 +147,9 @@ func (g *GraphClient) List(ctx context.Context) ([]Doc, error) {
 	return docs, nil
 }
 
-// Fetch resolves a sharing URL to its driveItem and returns the content body.
+// Fetch resolves a sharing URL to its driveItem and returns the content as
+// extracted plain text. OOXML files (.docx, .pptx, .xlsx) are converted via
+// extractText; all other types pass through as-is.
 func (g *GraphClient) Fetch(ctx context.Context, webURL string) (*DocContent, error) {
 	shareID := encodeShareID(webURL)
 	var meta struct {
@@ -157,9 +159,13 @@ func (g *GraphClient) Fetch(ctx context.Context, webURL string) (*DocContent, er
 	if err := g.doJSON(ctx, fmt.Sprintf("%s/shares/%s/driveItem", g.baseURL, shareID), &meta); err != nil {
 		return nil, err
 	}
-	text, err := g.doRaw(ctx, fmt.Sprintf("%s/shares/%s/driveItem/content", g.baseURL, shareID))
+	raw, err := g.doRawBytes(ctx, fmt.Sprintf("%s/shares/%s/driveItem/content", g.baseURL, shareID))
 	if err != nil {
 		return nil, err
+	}
+	text, err := extractText(meta.Name, raw)
+	if err != nil {
+		return nil, fmt.Errorf("extract %q: %w", meta.Name, err)
 	}
 	return &DocContent{Title: meta.Name, URL: meta.WebURL, Text: text}, nil
 }
