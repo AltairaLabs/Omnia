@@ -194,6 +194,10 @@ func TestDeleteInstitutional_SoftDeletesOnlyInstitutional(t *testing.T) {
 	}
 }
 
+// aboutKindSharePointDoc is the about_kind used by the ingest path; pinned here
+// so the idempotency tests exercise the same structured-key shape.
+const aboutKindSharePointDoc = "sharepoint_doc"
+
 // TestSaveInstitutional_AboutKeyIdempotency verifies that re-saving the same
 // about_kind+about_key pair produces exactly one active entity (upsert), not
 // two, and that the content of the surviving entity reflects the second write.
@@ -205,12 +209,12 @@ func TestSaveInstitutional_AboutKeyIdempotency(t *testing.T) {
 
 	save := func(content string) {
 		must(t, store.SaveInstitutional(ctx, &Memory{
-			Type:       "sharepoint_doc",
+			Type:       aboutKindSharePointDoc,
 			Content:    content,
 			Confidence: 1.0,
 			Scope:      map[string]string{ScopeWorkspaceID: testWorkspace1},
 			Metadata: map[string]any{
-				MetaKeyAboutKind: "sharepoint_doc",
+				MetaKeyAboutKind: aboutKindSharePointDoc,
 				MetaKeyAboutKey:  "https://sp/x#0",
 			},
 		}))
@@ -239,12 +243,12 @@ func TestSaveInstitutional_DifferentAboutKeysTwoEntities(t *testing.T) {
 
 	for i, key := range []string{"https://sp/x#0", "https://sp/x#1"} {
 		must(t, store.SaveInstitutional(ctx, &Memory{
-			Type:       "sharepoint_doc",
+			Type:       aboutKindSharePointDoc,
 			Content:    fmt.Sprintf("chunk %d", i),
 			Confidence: 1.0,
 			Scope:      map[string]string{ScopeWorkspaceID: testWorkspace1},
 			Metadata: map[string]any{
-				MetaKeyAboutKind: "sharepoint_doc",
+				MetaKeyAboutKind: aboutKindSharePointDoc,
 				MetaKeyAboutKey:  key,
 			},
 		}))
