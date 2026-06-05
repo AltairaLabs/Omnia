@@ -43,8 +43,8 @@ func (f *fixedSearchStore) Retrieve(_ context.Context, _ map[string]string, _ st
 
 func TestRetrieveSemantic_AppliesDenyFilter(t *testing.T) {
 	store := &fixedSearchStore{out: []*memory.Memory{
-		{ID: "a", Content: "allowed chunk", Metadata: map[string]any{"url": "https://sp/allowed/r.docx"}},
-		{ID: "b", Content: "secret chunk", Metadata: map[string]any{"url": "https://sp/restricted/s.docx"}},
+		{ID: "a", Content: "allowed chunk", Metadata: map[string]any{testMetaKeyURL: testURLAllowed}},
+		{ID: "b", Content: "secret chunk", Metadata: map[string]any{testMetaKeyURL: "https://sp/restricted/s.docx"}},
 	}}
 	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
 
@@ -57,8 +57,8 @@ func TestRetrieveSemantic_AppliesDenyFilter(t *testing.T) {
 
 func TestRetrieveSemantic_NoFilterReturnsAll(t *testing.T) {
 	store := &fixedSearchStore{out: []*memory.Memory{
-		{ID: "a", Metadata: map[string]any{"url": "u1"}},
-		{ID: "b", Metadata: map[string]any{"url": "u2"}},
+		{ID: "a", Metadata: map[string]any{testMetaKeyURL: "u1"}},
+		{ID: "b", Metadata: map[string]any{testMetaKeyURL: "u2"}},
 	}}
 	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
 	got, err := svc.RetrieveSemantic(context.Background(), "ws-1", "q", "", 5)

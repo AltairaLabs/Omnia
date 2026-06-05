@@ -33,8 +33,8 @@ import (
 
 func TestHandleSemantic_FiltersAndReturns(t *testing.T) {
 	store := &fixedSearchStore{out: []*memory.Memory{
-		{ID: "a", Content: "allowed", Metadata: map[string]any{"url": "https://sp/allowed/r.docx"}},
-		{ID: "b", Content: "secret", Metadata: map[string]any{"url": "https://sp/restricted/s.docx"}},
+		{ID: "a", Content: "allowed", Metadata: map[string]any{testMetaKeyURL: testURLAllowed}},
+		{ID: "b", Content: "secret", Metadata: map[string]any{testMetaKeyURL: "https://sp/restricted/s.docx"}},
 	}}
 	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
 	h := NewHandler(svc, logr.Discard())
@@ -82,7 +82,7 @@ func TestHandleSemantic_InvalidCELReturnsError(t *testing.T) {
 
 func TestHandleSemantic_DefaultLimit(t *testing.T) {
 	store := &fixedSearchStore{out: []*memory.Memory{
-		{ID: "x", Metadata: map[string]any{"url": "u"}},
+		{ID: "x", Metadata: map[string]any{testMetaKeyURL: "u"}},
 	}}
 	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
 	h := NewHandler(svc, logr.Discard())

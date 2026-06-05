@@ -48,7 +48,7 @@ func TestIngestDocument_ChunkStrategy_SavesItemsWithAboutKey(t *testing.T) {
 	svc.SetIngestionStrategy(ingestion.NewChunkStrategy(2, 0)) // 2-word chunks, no overlap
 
 	err := svc.IngestDocument(context.Background(), "ws-1", ingestion.SourceDoc{
-		Title: "Runbook", URL: "https://sp/allowed/r.docx", Site: "allowed",
+		Title: "Runbook", URL: testURLAllowed, Site: "allowed",
 		Text: "alpha beta gamma delta", // → 2 chunks: ["alpha beta", "gamma delta"]
 	})
 	require.NoError(t, err)
@@ -59,7 +59,7 @@ func TestIngestDocument_ChunkStrategy_SavesItemsWithAboutKey(t *testing.T) {
 	assert.Equal(t, "alpha beta", first.Content)
 	assert.Equal(t, "sharepoint_doc", first.Metadata[memory.MetaKeyAboutKind])
 	assert.Equal(t, "https://sp/allowed/r.docx#0", first.Metadata[memory.MetaKeyAboutKey])
-	assert.Equal(t, "https://sp/allowed/r.docx", first.Metadata["url"])
+	assert.Equal(t, testURLAllowed, first.Metadata[testMetaKeyURL])
 
 	second := store.saved[1]
 	assert.Equal(t, "https://sp/allowed/r.docx#1", second.Metadata[memory.MetaKeyAboutKey])
