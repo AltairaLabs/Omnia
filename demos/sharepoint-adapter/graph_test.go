@@ -17,7 +17,7 @@ func docxBody(t *testing.T, text string) []byte {
 	t.Helper()
 	docXML := `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
 		`<w:body><w:p><w:r><w:t>` + text + `</w:t></w:r></w:p></w:body></w:document>`
-	return makeZip(t, map[string]string{"word/document.xml": docXML})
+	return makeZip(t, map[string]string{docxDocumentPart: docXML})
 }
 
 func staticToken(_ context.Context) (string, error) { return "test-token", nil }

@@ -35,7 +35,7 @@ func TestExtractText_Docx(t *testing.T) {
 		`<w:p><w:r><w:t>Hello</w:t></w:r><w:r><w:t> World</w:t></w:r></w:p>` +
 		`<w:p><w:r><w:t>Second para</w:t></w:r></w:p>` +
 		`</w:body></w:document>`
-	raw := makeZip(t, map[string]string{"word/document.xml": docXML})
+	raw := makeZip(t, map[string]string{docxDocumentPart: docXML})
 
 	result, err := extractText("runbook.docx", raw)
 
@@ -109,7 +109,7 @@ func TestExtractText_CorruptDocx(t *testing.T) {
 func TestExtractText_CaseInsensitiveExtension(t *testing.T) {
 	docXML := `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
 		`<w:body><w:p><w:r><w:t>Upper case ext</w:t></w:r></w:p></w:body></w:document>`
-	raw := makeZip(t, map[string]string{"word/document.xml": docXML})
+	raw := makeZip(t, map[string]string{docxDocumentPart: docXML})
 
 	result, err := extractText("RUNBOOK.DOCX", raw)
 

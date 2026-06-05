@@ -27,11 +27,14 @@ func extractText(filename string, raw []byte) (string, error) {
 	}
 }
 
+// docxDocumentPart is the OOXML part holding a Word document's body text.
+const docxDocumentPart = "word/document.xml"
+
 // extractDocx extracts text from a .docx zip by reading word/document.xml.
 // Paragraphs are separated by newlines; text runs within a paragraph are joined.
 func extractDocx(raw []byte) (string, error) {
 	parts, err := zipTextFromParts(raw, func(name string) bool {
-		return name == "word/document.xml"
+		return name == docxDocumentPart
 	}, paragraphExtractor("p", "t"))
 	if err != nil {
 		return "", fmt.Errorf("docx extraction: %w", err)
