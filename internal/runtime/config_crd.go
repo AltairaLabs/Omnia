@@ -138,6 +138,15 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 			return nil, fmt.Errorf("resolve workspace UID for memory: %w", uidErr)
 		}
 		cfg.WorkspaceUID = uid
+		if r := ar.Spec.Memory.Retrieval; r != nil {
+			cfg.MemoryStrategy = r.Strategy
+			if r.Limit != nil {
+				cfg.MemoryLimit = int(*r.Limit)
+			}
+			if r.AccessFilter != nil {
+				cfg.MemoryDenyCEL = r.AccessFilter.DenyCEL
+			}
+		}
 	}
 
 	// Tracing config from env (injected by operator from Helm values)

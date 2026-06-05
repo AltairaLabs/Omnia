@@ -104,6 +104,14 @@ type Config struct {
 	MemoryAPIURL  string // URL of memory-api service for memory store
 	WorkspaceUID  string // Kubernetes UID of the Workspace CRD (used as workspace_id scope for memory)
 
+	// MemoryStrategy is the retrieval strategy from spec.memory.retrieval.strategy
+	// ("keyword"|"semantic"|...). Empty defaults to the existing keyword/FTS path.
+	MemoryStrategy string
+	// MemoryLimit is spec.memory.retrieval.limit (0 = use retriever default).
+	MemoryLimit int
+	// MemoryDenyCEL is spec.memory.retrieval.accessFilter.denyCEL (empty = no filter).
+	MemoryDenyCEL string
+
 	// Eval configuration
 	EvalEnabled bool // Enable real-time evals for PromptKit agents
 

@@ -1088,6 +1088,100 @@ func TestLoadPlatformAndAuthConfig(t *testing.T) {
 	})
 }
 
+func TestLoadFromCRD_MemoryRetrievalConfig(t *testing.T) {
+	t.Run("strategy, limit, and denyCEL are parsed", func(t *testing.T) {
+		ar := &v1alpha1.AgentRuntime{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-agent",
+				Namespace: "test-ns",
+			},
+			Spec: v1alpha1.AgentRuntimeSpec{
+				PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
+				Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+				Memory: &v1alpha1.MemoryConfig{
+					Enabled: true,
+					Retrieval: &v1alpha1.MemoryRetrievalConfig{
+						Strategy:     "semantic",
+						Limit:        int32Ptr(5),
+						AccessFilter: &v1alpha1.MemoryAccessFilterConfig{DenyCEL: `metadata.url.contains("restricted")`},
+					},
+				},
+			},
+		}
+
+		t.Setenv("SESSION_API_URL", "http://omnia-session-api.omnia-system:8080")
+		t.Setenv("MEMORY_API_URL", "http://omnia-memory-api.omnia-system:8080")
+
+		c := buildTestClient(ar)
+		cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
+		require.NoError(t, err)
+
+		assert.True(t, cfg.MemoryEnabled)
+		assert.Equal(t, "semantic", cfg.MemoryStrategy)
+		assert.Equal(t, 5, cfg.MemoryLimit)
+		assert.Equal(t, `metadata.url.contains("restricted")`, cfg.MemoryDenyCEL)
+	})
+
+	t.Run("nil Retrieval leaves fields at zero values", func(t *testing.T) {
+		ar := &v1alpha1.AgentRuntime{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-agent",
+				Namespace: "test-ns",
+			},
+			Spec: v1alpha1.AgentRuntimeSpec{
+				PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
+				Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+				Memory: &v1alpha1.MemoryConfig{
+					Enabled: true,
+				},
+			},
+		}
+
+		t.Setenv("SESSION_API_URL", "http://omnia-session-api.omnia-system:8080")
+		t.Setenv("MEMORY_API_URL", "http://omnia-memory-api.omnia-system:8080")
+
+		c := buildTestClient(ar)
+		cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
+		require.NoError(t, err)
+
+		assert.True(t, cfg.MemoryEnabled)
+		assert.Empty(t, cfg.MemoryStrategy)
+		assert.Equal(t, 0, cfg.MemoryLimit)
+		assert.Empty(t, cfg.MemoryDenyCEL)
+	})
+
+	t.Run("nil AccessFilter leaves MemoryDenyCEL empty", func(t *testing.T) {
+		ar := &v1alpha1.AgentRuntime{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-agent",
+				Namespace: "test-ns",
+			},
+			Spec: v1alpha1.AgentRuntimeSpec{
+				PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
+				Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+				Memory: &v1alpha1.MemoryConfig{
+					Enabled: true,
+					Retrieval: &v1alpha1.MemoryRetrievalConfig{
+						Strategy: "keyword",
+						Limit:    int32Ptr(10),
+					},
+				},
+			},
+		}
+
+		t.Setenv("SESSION_API_URL", "http://omnia-session-api.omnia-system:8080")
+		t.Setenv("MEMORY_API_URL", "http://omnia-memory-api.omnia-system:8080")
+
+		c := buildTestClient(ar)
+		cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
+		require.NoError(t, err)
+
+		assert.Equal(t, "keyword", cfg.MemoryStrategy)
+		assert.Equal(t, 10, cfg.MemoryLimit)
+		assert.Empty(t, cfg.MemoryDenyCEL)
+	})
+}
+
 func strPtr(s string) *string {
 	return &s
 }
