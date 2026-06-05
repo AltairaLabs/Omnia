@@ -35,6 +35,35 @@ the retriever):
 (`cmd/runtime/main.go` → `configDerivedServerOpts`) are updated. The
 `ServerMemoryRetrieval` test accessor now returns `(strategy, denyCEL string, limit int)`.
 
+### Added (memory-api ingest + semantic-retrieve endpoints, #1205)
+
+- `POST /api/v1/institutional/ingest` — accepts `{workspace_id, title, url,
+  site, text}` (all strings; `workspace_id` required). Runs the configured
+  `IngestionStrategy` (default `ChunkStrategy`; chunk size and overlap
+  controlled by `--ingest-chunk-size` / `INGEST_CHUNK_SIZE` and
+  `--ingest-chunk-overlap` / `INGEST_CHUNK_OVERLAP`, defaults 200 and 40).
+  Each chunk is persisted as an institutional memory keyed by
+  `about={kind:"sharepoint_doc", key:"<url>#<index>"}` — re-sending the same
+  URL supersedes prior chunks (idempotent re-seed). Returns **202 Accepted**
+  with no body; embeddings are backfilled asynchronously by the `ReembedWorker`.
+  Errors: 400 on missing `workspace_id`; 500 when no strategy is configured or
+  the strategy returns an error.
+
+- `POST /api/v1/memories/retrieve/semantic` — accepts `{workspace_id, query,
+  deny_cel, limit}` (`workspace_id` required; `deny_cel` optional; `limit`
+  defaults to 20, max 100). Runs workspace-scoped hybrid retrieval
+  (`SearchMemories` — semantic + FTS) then applies a CEL deny-filter over each
+  result's metadata. Empty `deny_cel` means no filtering. A malformed
+  `deny_cel` **fails closed** (500 — no results returned). Response shape
+  matches the existing memory list endpoints: `{memories: [...], total: N}`
+  (200). Error: 400 on missing `workspace_id`.
+
+- New binary flags (memory-api):
+  - `--ingest-chunk-size` / `INGEST_CHUNK_SIZE` (int, default 200) — word
+    count per ingest chunk.
+  - `--ingest-chunk-overlap` / `INGEST_CHUNK_OVERLAP` (int, default 40) —
+    overlapping words between adjacent chunks.
+
 ### Added (MemoryPolicy per-axis consolidation schedules, #1152)
 
 `MemoryPolicy.spec.consolidation.schedules` adds optional per-axis cron

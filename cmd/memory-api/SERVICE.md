@@ -16,6 +16,17 @@ and searches memory entries with optional semantic search via embeddings.
 ## Inputs
 
 - HTTP REST API on port 8080 (memory CRUD, search, consent, analytics)
+  - `POST /api/v1/institutional/ingest` — accepts `{workspace_id, title, url,
+    site, text}`; runs the configured IngestionStrategy (default ChunkStrategy)
+    and persists each chunk as an institutional memory keyed by
+    `about={kind:"sharepoint_doc", key:"<url>#<index>"}` (idempotent re-seed).
+    Returns 202 with no body; embeddings backfilled async by ReembedWorker.
+    400 on missing `workspace_id`; 500 on no-strategy or strategy error (#1205).
+  - `POST /api/v1/memories/retrieve/semantic` — accepts `{workspace_id, query,
+    deny_cel, limit}`; runs workspace-scoped hybrid retrieval (semantic + FTS)
+    then applies a CEL deny-filter over each result's metadata. Empty `deny_cel`
+    = no filtering; malformed `deny_cel` fails closed (500). Response:
+    `{memories:[...], total:N}` (200). 400 on missing `workspace_id` (#1205).
   - `GET /api/v1/memories/aggregate` — workspace-scoped GROUP BY aggregate
     for the operator dashboard (#1004). Composes the analytics:aggregate
     consent filter from Phase D. Supports `groupBy=category|agent|day|tier`;
@@ -43,6 +54,8 @@ the Workspace CRD.
 - `--postgres-conn` / `POSTGRES_CONN` — PostgreSQL connection string
 - `--embedding-provider` / `EMBEDDING_PROVIDER` — Provider CRD name (optional)
 - `--default-ttl` / `DEFAULT_TTL` — Default memory TTL (optional)
+- `--ingest-chunk-size` / `INGEST_CHUNK_SIZE` — Word count per ingest chunk (default 200)
+- `--ingest-chunk-overlap` / `INGEST_CHUNK_OVERLAP` — Overlapping words between adjacent chunks (default 40)
 
 ## Data Flow
 

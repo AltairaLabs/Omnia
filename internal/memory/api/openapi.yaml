@@ -298,6 +298,41 @@ paths:
         '400':
           description: Missing workspace_id
 
+  /memories/retrieve/semantic:
+    post:
+      operationId: semanticRetrieve
+      summary: Workspace-scoped hybrid semantic retrieval with CEL deny-filter
+      description: |
+        Runs workspace-scoped hybrid retrieval (semantic + FTS via SearchMemories)
+        then applies a CEL deny-filter over each result's metadata. An empty
+        `deny_cel` means no filtering. A malformed `deny_cel` fails closed —
+        no results are returned and a 500 is emitted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SemanticRetrieveRequest'
+      responses:
+        '200':
+          description: Matching memories after deny-filter applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryListResponse'
+        '400':
+          description: Missing workspace_id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Malformed deny_cel (fails closed) or retrieval error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /memories/batch:
     delete:
       operationId: batchDeleteMemories
@@ -354,6 +389,41 @@ paths:
           description: Missing memory ID or workspace
         '404':
           description: Memory not found
+
+  /institutional/ingest:
+    post:
+      operationId: ingestDocument
+      summary: Ingest a document into institutional memory
+      description: |
+        Accepts an already-extracted document (title, url, site, text) and runs
+        the configured IngestionStrategy (default ChunkStrategy). Each chunk is
+        persisted as an institutional memory keyed by
+        `about={kind:"sharepoint_doc", key:"<url>#<index>"}` — re-sending the
+        same URL supersedes prior chunks (idempotent re-seed). Returns 202
+        Accepted with no body; embeddings are backfilled asynchronously by the
+        ReembedWorker. Chunk size and overlap are controlled by the binary flags
+        `--ingest-chunk-size` / `--ingest-chunk-overlap` (defaults 200 / 40).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestDocumentRequest'
+      responses:
+        '202':
+          description: Accepted — ingestion queued; embeddings backfilled asynchronously
+        '400':
+          description: Missing workspace_id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: No ingestion strategy configured or strategy error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /institutional/memories:
     get:
@@ -940,3 +1010,46 @@ components:
         summary_entity_id:
           type: string
           format: uuid
+
+    IngestDocumentRequest:
+      type: object
+      properties:
+        workspace_id:
+          type: string
+          description: Workspace to ingest into (required)
+        title:
+          type: string
+          description: Document title
+        url:
+          type: string
+          description: Canonical URL of the source document (used as idempotency key)
+        site:
+          type: string
+          description: Site or SharePoint host the document originates from
+        text:
+          type: string
+          description: Extracted plain-text content to chunk and persist
+      required:
+        - workspace_id
+
+    SemanticRetrieveRequest:
+      type: object
+      properties:
+        workspace_id:
+          type: string
+          description: Workspace to search within (required)
+        query:
+          type: string
+          description: Natural language query for hybrid retrieval
+        deny_cel:
+          type: string
+          description: |
+            CEL expression evaluated over each result's metadata map.
+            Results where the expression evaluates to true are excluded.
+            Empty string means no filtering. Malformed expressions fail
+            closed (500 — no results returned).
+        limit:
+          type: integer
+          description: Maximum results to return (default 20, max 100)
+      required:
+        - workspace_id

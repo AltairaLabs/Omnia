@@ -12,6 +12,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// docxBody builds a minimal .docx zip whose word/document.xml contains text.
+func docxBody(t *testing.T, text string) []byte {
+	t.Helper()
+	docXML := `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+		`<w:body><w:p><w:r><w:t>` + text + `</w:t></w:r></w:p></w:body></w:document>`
+	return makeZip(t, map[string]string{docxDocumentPart: docXML})
+}
+
 func staticToken(_ context.Context) (string, error) { return "test-token", nil }
 
 func errToken(_ context.Context) (string, error) { return "", errors.New("token boom") }
@@ -115,4 +123,47 @@ func TestGraphClient_List_Forbidden(t *testing.T) {
 	var ge *GraphError
 	assert.ErrorAs(t, err, &ge)
 	assert.Equal(t, http.StatusForbidden, ge.StatusCode)
+}
+
+// TestGraphClient_Fetch_DocxExtraction verifies that Fetch converts a .docx
+// response to extracted plain text rather than returning raw zip bytes.
+func TestGraphClient_Fetch_DocxExtraction(t *testing.T) {
+	zipBytes := docxBody(t, "Hello World")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/content") {
+			_, _ = w.Write(zipBytes)
+			return
+		}
+		_, _ = w.Write([]byte(`{"name":"runbook.docx","webUrl":"https://c/runbook.docx"}`))
+	}))
+	defer srv.Close()
+
+	g := NewGraphClient(srv.URL, "site-1", staticToken, srv.Client())
+	doc, err := g.Fetch(context.Background(), "https://c/runbook.docx")
+
+	require.NoError(t, err)
+	assert.Equal(t, "runbook.docx", doc.Title)
+	assert.Contains(t, doc.Text, "Hello World")
+	assert.NotContains(t, doc.Text, "PK") // zip magic bytes must not appear in extracted text
+}
+
+// TestGraphClient_Fetch_ExtractionError verifies that Fetch surfaces an error
+// when the fetched bytes are not a valid OOXML zip (corrupt .docx).
+func TestGraphClient_Fetch_ExtractionError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/content") {
+			_, _ = w.Write([]byte("not a zip"))
+			return
+		}
+		_, _ = w.Write([]byte(`{"name":"bad.docx","webUrl":"https://c/bad.docx"}`))
+	}))
+	defer srv.Close()
+
+	g := NewGraphClient(srv.URL, "site-1", staticToken, srv.Client())
+	_, err := g.Fetch(context.Background(), "https://c/bad.docx")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "extract")
+	assert.Contains(t, err.Error(), "bad.docx")
 }
