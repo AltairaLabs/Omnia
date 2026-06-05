@@ -33,6 +33,10 @@ spec:
     retrieval:
       strategy: semantic
       limit: 5
+      # Governance beat: drop retrieved items from the restricted SharePoint
+      # site at retrieval time (defense-in-depth alongside the fetch ToolPolicy).
+      accessFilter:
+        denyCEL: {{ .Values.sharepointHero.accessFilter.denyCEL | quote }}
     embedding:
       provider: {{ .Values.sharepointHero.embedding.provider }}
       model: {{ .Values.sharepointHero.embedding.model }}
