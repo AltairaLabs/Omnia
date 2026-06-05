@@ -41,6 +41,10 @@ var profileCategories = map[string]bool{
 	"memory:health":      true,
 }
 
+// StrategySemantic is the spec.memory.retrieval.strategy value that enables
+// semantic hybrid retrieval with the access deny-filter.
+const StrategySemantic = "semantic"
+
 const (
 	// defaultProfileLimit caps the always-included subset.
 	defaultProfileLimit = 20
@@ -177,7 +181,7 @@ func (r *CompositeRetriever) RetrieveContext(
 func (r *CompositeRetriever) retrieveEpisodic(
 	ctx context.Context, scope map[string]string, query string,
 ) ([]*pkmemory.Memory, error) {
-	if r.strategy == "semantic" && r.semantic != nil {
+	if r.strategy == StrategySemantic && r.semantic != nil {
 		wsID := r.workspaceID
 		if wsID == "" {
 			wsID = scope["workspace_id"]

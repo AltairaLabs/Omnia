@@ -297,7 +297,7 @@ func TestCompositeRetriever_SemanticStrategyCallsSemanticRetriever(t *testing.T)
 		semanticMemories: semanticResult,
 	}
 	cfg := RetrievalConfig{
-		Strategy:    "semantic",
+		Strategy:    StrategySemantic,
 		DenyCEL:     `metadata.url.contains("restricted")`,
 		WorkspaceID: "ws-configured",
 	}
@@ -310,8 +310,8 @@ func TestCompositeRetriever_SemanticStrategyCallsSemanticRetriever(t *testing.T)
 	if store.semanticCalls.Load() != 1 {
 		t.Errorf("expected 1 semantic call, got %d", store.semanticCalls.Load())
 	}
-	if store.fakeStore.retrieveCalls.Load() != 0 {
-		t.Errorf("expected 0 FTS calls, got %d", store.fakeStore.retrieveCalls.Load())
+	if store.retrieveCalls.Load() != 0 {
+		t.Errorf("expected 0 FTS calls, got %d", store.retrieveCalls.Load())
 	}
 	if store.lastDenyCEL != cfg.DenyCEL {
 		t.Errorf("denyCEL: got %q, want %q", store.lastDenyCEL, cfg.DenyCEL)
@@ -342,8 +342,8 @@ func TestCompositeRetriever_KeywordStrategyUsesFTS(t *testing.T) {
 	if store.semanticCalls.Load() != 0 {
 		t.Errorf("expected 0 semantic calls for keyword strategy, got %d", store.semanticCalls.Load())
 	}
-	if store.fakeStore.retrieveCalls.Load() != 1 {
-		t.Errorf("expected 1 FTS call, got %d", store.fakeStore.retrieveCalls.Load())
+	if store.retrieveCalls.Load() != 1 {
+		t.Errorf("expected 1 FTS call, got %d", store.retrieveCalls.Load())
 	}
 }
 
@@ -355,7 +355,7 @@ func TestCompositeRetriever_SemanticStrategyFallsBackWhenStoreUnsupported(t *tes
 		retrieveMemories: episodic,
 	}
 	cfg := RetrievalConfig{
-		Strategy:    "semantic",
+		Strategy:    StrategySemantic,
 		DenyCEL:     "some.cel",
 		WorkspaceID: "ws1",
 	}
@@ -381,7 +381,7 @@ func TestCompositeRetriever_LimitAppliedToSemanticRetrieval(t *testing.T) {
 		semanticMemories: []*pkmemory.Memory{mem("s1", "memory:context", "hit")},
 	}
 	cfg := RetrievalConfig{
-		Strategy:    "semantic",
+		Strategy:    StrategySemantic,
 		WorkspaceID: "ws1",
 		Limit:       5,
 	}
@@ -407,7 +407,7 @@ func TestCompositeRetriever_ZeroLimitFallsBackToDefault(t *testing.T) {
 	}
 	// Limit: 0 → defaultEpisodicLimit (10)
 	cfg := RetrievalConfig{
-		Strategy:    "semantic",
+		Strategy:    StrategySemantic,
 		WorkspaceID: "ws1",
 	}
 	r := NewCompositeRetriever(store, cfg, logr.Discard())
@@ -422,6 +422,29 @@ func TestCompositeRetriever_ZeroLimitFallsBackToDefault(t *testing.T) {
 	}
 	if store.lastLimit != defaultEpisodicLimit {
 		t.Errorf("RetrieveSemantic called with limit %d, want %d (defaultEpisodicLimit)", store.lastLimit, defaultEpisodicLimit)
+	}
+}
+
+// TestBuildConversationOptions_WiresMemoryRetriever exercises the memory-store
+// branch of buildConversationOptions — where the CRD-derived strategy/denyCEL/
+// limit are threaded into the CompositeRetriever. A Server with no providerType
+// takes the nil-provider (auto-detect) path, so it reaches the memory wiring
+// without needing a real provider.
+func TestBuildConversationOptions_WiresMemoryRetriever(t *testing.T) {
+	store := &fakeSemanticStore{fakeStore: fakeStore{}}
+	srv := NewServer(
+		WithLogger(logr.Discard()),
+		WithMemoryStore(store),
+		WithWorkspaceUID("ws-1"),
+		WithMemoryRetrieval(StrategySemantic, `metadata.url.contains("restricted")`, 5),
+	)
+
+	opts, err := srv.buildConversationOptions(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatalf("buildConversationOptions error: %v", err)
+	}
+	if len(opts) == 0 {
+		t.Fatal("expected conversation options (incl. memory wiring), got none")
 	}
 }
 

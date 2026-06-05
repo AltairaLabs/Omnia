@@ -1101,7 +1101,7 @@ func TestLoadFromCRD_MemoryRetrievalConfig(t *testing.T) {
 				Memory: &v1alpha1.MemoryConfig{
 					Enabled: true,
 					Retrieval: &v1alpha1.MemoryRetrievalConfig{
-						Strategy:     "semantic",
+						Strategy:     StrategySemantic,
 						Limit:        int32Ptr(5),
 						AccessFilter: &v1alpha1.MemoryAccessFilterConfig{DenyCEL: `metadata.url.contains("restricted")`},
 					},
@@ -1117,7 +1117,7 @@ func TestLoadFromCRD_MemoryRetrievalConfig(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.True(t, cfg.MemoryEnabled)
-		assert.Equal(t, "semantic", cfg.MemoryStrategy)
+		assert.Equal(t, StrategySemantic, cfg.MemoryStrategy)
 		assert.Equal(t, 5, cfg.MemoryLimit)
 		assert.Equal(t, `metadata.url.contains("restricted")`, cfg.MemoryDenyCEL)
 	})
