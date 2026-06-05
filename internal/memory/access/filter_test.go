@@ -25,18 +25,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// metaKeyURL is the metadata key the deny expressions key on, pinned here so
+// the filter tests share one literal.
+const metaKeyURL = "url"
+
 func TestDenyFilter_DropsRestricted(t *testing.T) {
 	f, err := NewDenyFilter(`metadata.url.contains("restricted")`)
 	require.NoError(t, err)
 
-	assert.True(t, f.Allowed(map[string]any{"url": "https://sp/allowed/r.docx"}))
-	assert.False(t, f.Allowed(map[string]any{"url": "https://sp/restricted/secret.docx"}))
+	assert.True(t, f.Allowed(map[string]any{metaKeyURL: "https://sp/allowed/r.docx"}))
+	assert.False(t, f.Allowed(map[string]any{metaKeyURL: "https://sp/restricted/secret.docx"}))
 }
 
 func TestDenyFilter_EmptyExprAllowsAll(t *testing.T) {
 	f, err := NewDenyFilter("")
 	require.NoError(t, err)
-	assert.True(t, f.Allowed(map[string]any{"url": "https://sp/restricted/x"}))
+	assert.True(t, f.Allowed(map[string]any{metaKeyURL: "https://sp/restricted/x"}))
 }
 
 func TestDenyFilter_InvalidExprFailsConstruction(t *testing.T) {
@@ -55,7 +59,7 @@ func TestDenyFilter_NonBoolResultFailsClosed(t *testing.T) {
 	// Expression evaluates to a string, not a bool — must be treated as deny.
 	f, err := NewDenyFilter(`metadata.url`)
 	require.NoError(t, err)
-	assert.False(t, f.Allowed(map[string]any{"url": "https://sp/allowed/r.docx"}),
+	assert.False(t, f.Allowed(map[string]any{metaKeyURL: "https://sp/allowed/r.docx"}),
 		"non-bool CEL result must be denied (fail-closed)")
 }
 
