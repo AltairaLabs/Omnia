@@ -120,6 +120,7 @@ type Server struct {
 	workspaceUID   string // Workspace CRD UID for memory scope
 	memoryStrategy string // Retrieval strategy: "semantic" or "" (keyword FTS)
 	memoryDenyCEL  string // Access deny-filter CEL expression (empty = no filter)
+	memoryLimit    int    // Max memories injected per turn; 0 = defaultEpisodicLimit (10)
 
 	// Media resolution for mock provider
 	mediaResolver *MediaResolver
@@ -182,11 +183,11 @@ func ServerAgentUID(s *Server) string {
 	return s.agentUID
 }
 
-// ServerMemoryRetrieval returns the configured retrieval strategy and denyCEL
-// expression. Exposed for wiring tests under cmd/runtime; production code
-// should not depend on this accessor.
-func ServerMemoryRetrieval(s *Server) (strategy, denyCEL string) {
-	return s.memoryStrategy, s.memoryDenyCEL
+// ServerMemoryRetrieval returns the configured retrieval strategy, denyCEL
+// expression, and episodic limit. Exposed for wiring tests under cmd/runtime;
+// production code should not depend on this accessor.
+func ServerMemoryRetrieval(s *Server) (strategy, denyCEL string, limit int) {
+	return s.memoryStrategy, s.memoryDenyCEL, s.memoryLimit
 }
 
 // WithPromptPackName sets the PromptPack CRD name for tracing.
@@ -442,14 +443,16 @@ func WithWorkspaceUID(uid string) ServerOption {
 	}
 }
 
-// WithMemoryRetrieval configures the retrieval strategy and access deny-filter
-// (from spec.memory.retrieval). When strategy is "semantic" and the memory
-// store supports it, per-turn retrieval uses semantic hybrid search with the
-// deny-filter; otherwise keyword FTS.
-func WithMemoryRetrieval(strategy, denyCEL string) ServerOption {
+// WithMemoryRetrieval configures the retrieval strategy, access deny-filter,
+// and episodic limit (from spec.memory.retrieval). When strategy is "semantic"
+// and the memory store supports it, per-turn retrieval uses semantic hybrid
+// search with the deny-filter; otherwise keyword FTS. limit 0 falls back to
+// defaultEpisodicLimit (10).
+func WithMemoryRetrieval(strategy, denyCEL string, limit int) ServerOption {
 	return func(s *Server) {
 		s.memoryStrategy = strategy
 		s.memoryDenyCEL = denyCEL
+		s.memoryLimit = limit
 	}
 }
 

@@ -458,7 +458,7 @@ func configDerivedServerOpts(cfg *pkruntime.Config) []pkruntime.ServerOption {
 		pkruntime.WithContextWindow(cfg.ContextWindow),
 		pkruntime.WithTruncationStrategy(cfg.TruncationStrategy),
 		pkruntime.WithMediaBasePath(cfg.MediaBasePath),
-		pkruntime.WithMemoryRetrieval(cfg.MemoryStrategy, cfg.MemoryDenyCEL),
+		pkruntime.WithMemoryRetrieval(cfg.MemoryStrategy, cfg.MemoryDenyCEL, cfg.MemoryLimit),
 	}
 }
 

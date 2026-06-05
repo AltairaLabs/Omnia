@@ -182,14 +182,14 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 		// user when it explicitly calls memory__recall — which is
 		// unreliable on cold-start turns where the user's opening
 		// message has no lexical overlap with stored facts.
-		// Task 4 will thread the real strategy/denyCEL values from the
-		// parsed Config into the Server struct. For now, WorkspaceID is
-		// already available via s.workspaceUID; strategy and denyCEL
-		// default to "" → FTS fallback until Task 4 wires them.
+		// Strategy, denyCEL, and limit are threaded from s.memoryStrategy /
+		// s.memoryDenyCEL / s.memoryLimit, which WithMemoryRetrieval populates
+		// from spec.memory.retrieval on the AgentRuntime CRD.
 		retriever := NewCompositeRetriever(s.memoryStore, RetrievalConfig{
 			Strategy:    s.memoryStrategy,
 			DenyCEL:     s.memoryDenyCEL,
 			WorkspaceID: s.workspaceUID,
+			Limit:       s.memoryLimit,
 		}, log)
 		opts = append(opts, sdk.WithMemory(s.memoryStore, scope, sdk.WithMemoryRetriever(retriever)))
 		log.V(1).Info("memory store wired",

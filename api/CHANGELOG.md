@@ -10,6 +10,31 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (runtime: memory retrieval strategy/limit/denyCEL wired end-to-end, #1205)
+
+`AgentRuntime.spec.memory.retrieval` fields are now honored at runtime by the
+CompositeRetriever (previously they were parsed from the CRD but not plumbed to
+the retriever):
+
+- **`spec.memory.retrieval.strategy: "semantic"`** — per-turn episodic retrieval
+  now uses the memory-api's semantic hybrid search path when the strategy is
+  `"semantic"` and the memory store supports it. Falls back to keyword FTS when
+  the store does not implement `RetrieveSemantic`.
+- **`spec.memory.retrieval.limit`** — caps the number of episodic memories
+  injected per turn. Previously the field was parsed and stored in `Config` but
+  never forwarded to `CompositeRetriever`, so the limit was always the
+  hard-coded default (10). A non-zero value now overrides the default; 0 (or
+  absent) retains the default of 10.
+- **`spec.memory.retrieval.accessFilter.denyCEL`** (new field): optional CEL
+  expression evaluated against a retrieved memory item's `metadata` map. Items
+  for which the expression evaluates to `true` are dropped before injection.
+  Empty string disables the filter. Applied only on the `strategy: semantic`
+  path (governance deny-filter).
+
+`WithMemoryRetrieval` now accepts a third argument (`limit int`); callers
+(`cmd/runtime/main.go` → `configDerivedServerOpts`) are updated. The
+`ServerMemoryRetrieval` test accessor now returns `(strategy, denyCEL string, limit int)`.
+
 ### Added (MemoryPolicy per-axis consolidation schedules, #1152)
 
 `MemoryPolicy.spec.consolidation.schedules` adds optional per-axis cron

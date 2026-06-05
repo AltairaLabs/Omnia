@@ -74,6 +74,9 @@ type RetrievalConfig struct {
 	Strategy    string
 	DenyCEL     string
 	WorkspaceID string
+	// Limit is the maximum number of memories injected per turn via the episodic
+	// (per-turn similarity search) path. 0 means use defaultEpisodicLimit (10).
+	Limit int
 }
 
 // CompositeRetriever combines an always-on "profile" pull with a
@@ -121,6 +124,9 @@ func NewCompositeRetriever(store pkmemory.Store, cfg RetrievalConfig, log logr.L
 	}
 	if sr, ok := store.(SemanticRetriever); ok {
 		r.semantic = sr
+	}
+	if cfg.Limit > 0 {
+		r.episodicLimit = cfg.Limit
 	}
 	return r
 }

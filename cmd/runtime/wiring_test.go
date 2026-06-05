@@ -224,11 +224,11 @@ func TestConfigDerivedServerOpts_WiresAgentUID(t *testing.T) {
 }
 
 // TestConfigDerivedServerOpts_WiresMemoryRetrieval asserts that
-// cfg.MemoryStrategy and cfg.MemoryDenyCEL are forwarded to the runtime server
-// via WithMemoryRetrieval. Without this wiring, per-turn retrieval always falls
-// back to keyword FTS and the access deny-filter is never applied, even when
-// spec.memory.retrieval.strategy is "semantic" and an accessFilter.denyCEL is
-// configured on the AgentRuntime CRD.
+// cfg.MemoryStrategy, cfg.MemoryDenyCEL, and cfg.MemoryLimit are forwarded to
+// the runtime server via WithMemoryRetrieval. Without this wiring, per-turn
+// retrieval always falls back to keyword FTS, the access deny-filter is never
+// applied, and the episodic limit is always the default (10), even when
+// spec.memory.retrieval is configured on the AgentRuntime CRD.
 //
 // This is a true wiring assertion: configDerivedServerOpts is the function
 // main() uses to build its option slice; applying it to a real pkruntime.Server
@@ -239,19 +239,21 @@ func TestConfigDerivedServerOpts_WiresMemoryRetrieval(t *testing.T) {
 	const (
 		wantStrategy = "semantic"
 		wantDenyCEL  = `metadata.url.contains("restricted")`
+		wantLimit    = 25
 	)
 	cfg := &pkruntime.Config{
 		AgentName:      "wiring-test",
 		Namespace:      "wiring",
 		MemoryStrategy: wantStrategy,
 		MemoryDenyCEL:  wantDenyCEL,
+		MemoryLimit:    wantLimit,
 	}
 	opts := configDerivedServerOpts(cfg)
 
 	srv := pkruntime.NewServer(opts...)
 	t.Cleanup(func() { _ = srv.Close() })
 
-	gotStrategy, gotDenyCEL := pkruntime.ServerMemoryRetrieval(srv)
+	gotStrategy, gotDenyCEL, gotLimit := pkruntime.ServerMemoryRetrieval(srv)
 	if gotStrategy != wantStrategy {
 		t.Errorf("MemoryStrategy not propagated: got %q, want %q — "+
 			"WithMemoryRetrieval is missing from configDerivedServerOpts",
@@ -262,12 +264,18 @@ func TestConfigDerivedServerOpts_WiresMemoryRetrieval(t *testing.T) {
 			"WithMemoryRetrieval is missing from configDerivedServerOpts",
 			gotDenyCEL, wantDenyCEL)
 	}
+	if gotLimit != wantLimit {
+		t.Errorf("MemoryLimit not propagated: got %d, want %d — "+
+			"WithMemoryRetrieval limit arg is missing from configDerivedServerOpts",
+			gotLimit, wantLimit)
+	}
 }
 
 // TestConfigDerivedServerOpts_EmptyMemoryRetrievalIsHarmless guards that an
-// empty MemoryStrategy and MemoryDenyCEL (the default when the CRD field is
-// absent) propagates cleanly without panicking or setting unexpected values.
-// The retriever defaults to keyword FTS when strategy is "".
+// empty MemoryStrategy, MemoryDenyCEL, and zero MemoryLimit (the defaults when
+// the CRD fields are absent) propagate cleanly without panicking or setting
+// unexpected values. The retriever defaults to keyword FTS and defaultEpisodicLimit
+// when these fields are unset.
 func TestConfigDerivedServerOpts_EmptyMemoryRetrievalIsHarmless(t *testing.T) {
 	cfg := &pkruntime.Config{AgentName: "wiring-test", Namespace: "wiring"}
 	opts := configDerivedServerOpts(cfg)
@@ -275,11 +283,14 @@ func TestConfigDerivedServerOpts_EmptyMemoryRetrievalIsHarmless(t *testing.T) {
 	srv := pkruntime.NewServer(opts...)
 	t.Cleanup(func() { _ = srv.Close() })
 
-	gotStrategy, gotDenyCEL := pkruntime.ServerMemoryRetrieval(srv)
+	gotStrategy, gotDenyCEL, gotLimit := pkruntime.ServerMemoryRetrieval(srv)
 	if gotStrategy != "" {
 		t.Errorf("expected empty strategy for unconfigured memory, got %q", gotStrategy)
 	}
 	if gotDenyCEL != "" {
 		t.Errorf("expected empty denyCEL for unconfigured memory, got %q", gotDenyCEL)
+	}
+	if gotLimit != 0 {
+		t.Errorf("expected 0 limit for unconfigured memory, got %d", gotLimit)
 	}
 }

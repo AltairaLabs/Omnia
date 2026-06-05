@@ -65,15 +65,17 @@ type fakeSemanticStore struct {
 	lastSemanticQuery string
 	lastDenyCEL       string
 	lastWorkspaceID   string
+	lastLimit         int
 }
 
 func (f *fakeSemanticStore) RetrieveSemantic(
-	_ context.Context, workspaceID, query, denyCEL string, _ int,
+	_ context.Context, workspaceID, query, denyCEL string, limit int,
 ) ([]*pkmemory.Memory, error) {
 	f.semanticCalls.Add(1)
 	f.lastWorkspaceID = workspaceID
 	f.lastSemanticQuery = query
 	f.lastDenyCEL = denyCEL
+	f.lastLimit = limit
 	if f.semanticErr != nil {
 		return nil, f.semanticErr
 	}
@@ -370,6 +372,56 @@ func TestCompositeRetriever_SemanticStrategyFallsBackWhenStoreUnsupported(t *tes
 	}
 	if store.retrieveCalls.Load() != 1 {
 		t.Errorf("expected FTS fallback (1 Retrieve call), got %d", store.retrieveCalls.Load())
+	}
+}
+
+func TestCompositeRetriever_LimitAppliedToSemanticRetrieval(t *testing.T) {
+	store := &fakeSemanticStore{
+		fakeStore:        fakeStore{listMemories: []*pkmemory.Memory{mem("p1", "memory:identity", "Sarah")}},
+		semanticMemories: []*pkmemory.Memory{mem("s1", "memory:context", "hit")},
+	}
+	cfg := RetrievalConfig{
+		Strategy:    "semantic",
+		WorkspaceID: "ws1",
+		Limit:       5,
+	}
+	r := NewCompositeRetriever(store, cfg, logr.Discard())
+
+	if r.episodicLimit != 5 {
+		t.Fatalf("episodicLimit: got %d, want 5", r.episodicLimit)
+	}
+
+	_, err := r.RetrieveContext(context.Background(), defaultScope(), []types.Message{userMsg("plan a trip")})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if store.lastLimit != 5 {
+		t.Errorf("RetrieveSemantic called with limit %d, want 5", store.lastLimit)
+	}
+}
+
+func TestCompositeRetriever_ZeroLimitFallsBackToDefault(t *testing.T) {
+	store := &fakeSemanticStore{
+		fakeStore:        fakeStore{listMemories: []*pkmemory.Memory{mem("p1", "memory:identity", "Sarah")}},
+		semanticMemories: []*pkmemory.Memory{mem("s1", "memory:context", "hit")},
+	}
+	// Limit: 0 → defaultEpisodicLimit (10)
+	cfg := RetrievalConfig{
+		Strategy:    "semantic",
+		WorkspaceID: "ws1",
+	}
+	r := NewCompositeRetriever(store, cfg, logr.Discard())
+
+	if r.episodicLimit != defaultEpisodicLimit {
+		t.Fatalf("episodicLimit: got %d, want %d (defaultEpisodicLimit)", r.episodicLimit, defaultEpisodicLimit)
+	}
+
+	_, err := r.RetrieveContext(context.Background(), defaultScope(), []types.Message{userMsg("plan a trip")})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if store.lastLimit != defaultEpisodicLimit {
+		t.Errorf("RetrieveSemantic called with limit %d, want %d (defaultEpisodicLimit)", store.lastLimit, defaultEpisodicLimit)
 	}
 }
 
