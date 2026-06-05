@@ -223,6 +223,42 @@ func (s *Store) DeleteAll(ctx context.Context, scope map[string]string) error {
 	return nil
 }
 
+// semanticRetrieveBody mirrors api.SemanticRetrieveRequest.
+type semanticRetrieveBody struct {
+	WorkspaceID string `json:"workspace_id"`
+	Query       string `json:"query"`
+	DenyCEL     string `json:"deny_cel,omitempty"`
+	Limit       int    `json:"limit,omitempty"`
+}
+
+// RetrieveSemantic calls POST /api/v1/memories/retrieve/semantic — workspace-
+// scoped hybrid retrieval with a CEL access deny-filter. Used by the runtime
+// when the AgentRuntime memory strategy is "semantic".
+func (s *Store) RetrieveSemantic(ctx context.Context, workspaceID, query, denyCEL string, limit int) ([]*pkmemory.Memory, error) {
+	body, err := json.Marshal(semanticRetrieveBody{
+		WorkspaceID: workspaceID, Query: query, DenyCEL: denyCEL, Limit: limit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("memory httpclient: semantic: encode: %w", err)
+	}
+	resp, err := s.doRequest(ctx, http.MethodPost, "/api/v1/memories/retrieve/semantic", body)
+	if err != nil {
+		return nil, fmt.Errorf("memory httpclient: semantic: %w", err)
+	}
+	defer drainAndClose(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, s.readError("semantic", resp)
+	}
+	var lr memoryListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&lr); err != nil {
+		return nil, fmt.Errorf("memory httpclient: semantic: decode: %w", err)
+	}
+	if lr.Memories == nil {
+		lr.Memories = []*pkmemory.Memory{}
+	}
+	return lr.Memories, nil
+}
+
 // --- HTTP helpers ---
 
 func (s *Store) doRequest(ctx context.Context, method, path string, body []byte) (*http.Response, error) {

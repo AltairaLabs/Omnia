@@ -47,6 +47,11 @@ var ErrNotInstitutional = errors.New("memory: target is not an institutional mem
 // curated regardless of caller input — callers of this method are operators
 // by definition, so we overwrite any spoofed provenance and sanitize the
 // scope map before the insert path runs.
+//
+// When both about_kind and about_key are present in metadata the write is
+// idempotent: a second call with the same keys upserts the entity and
+// supersedes its prior active observations, so re-seeding on every helm
+// upgrade produces one chunk per about-key, not duplicates.
 func (s *PostgresMemoryStore) SaveInstitutional(ctx context.Context, mem *Memory) error {
 	workspaceID := mem.Scope[ScopeWorkspaceID]
 	if workspaceID == "" {
@@ -68,7 +73,7 @@ func (s *PostgresMemoryStore) SaveInstitutional(ctx context.Context, mem *Memory
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if err := insertInstitutionalEntity(ctx, tx, mem); err != nil {
+	if err := saveInstitutionalEntity(ctx, tx, mem); err != nil {
 		return err
 	}
 	if err := insertObservation(ctx, tx, mem); err != nil {
@@ -77,10 +82,78 @@ func (s *PostgresMemoryStore) SaveInstitutional(ctx context.Context, mem *Memory
 	return tx.Commit(ctx)
 }
 
+// saveInstitutionalEntity routes to the upsert path when about keys are
+// present, or the plain-insert path otherwise. Extracted to keep
+// SaveInstitutional below the cognitive-complexity threshold.
+func saveInstitutionalEntity(ctx context.Context, tx pgx.Tx, mem *Memory) error {
+	if hasAboutKey(mem) {
+		conflicted, err := upsertInstitutionalEntityByAboutKey(ctx, tx, mem)
+		if err != nil {
+			return err
+		}
+		if conflicted {
+			if _, err := supersedePriorObservations(ctx, tx, mem.ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return insertInstitutionalEntity(ctx, tx, mem)
+}
+
+// upsertInstitutionalEntityByAboutKey atomically returns the existing
+// institutional entity for (workspace_id, about_kind, about_key) — creating
+// it if absent — with forced institutional provenance columns. The unique
+// index is NULLS NOT DISTINCT so the NULL virtual_user_id/agent_id pair still
+// triggers ON CONFLICT. Returns conflicted=true when an existing entity was
+// reused (the caller will then supersede its prior active observations).
+func upsertInstitutionalEntityByAboutKey(ctx context.Context, tx pgx.Tx, mem *Memory) (bool, error) {
+	metaJSON, err := marshalMetadata(mem.Metadata)
+	if err != nil {
+		return false, err
+	}
+	aboutKind := stringFromMeta(mem.Metadata, MetaKeyAboutKind)
+	aboutKey := stringFromMeta(mem.Metadata, MetaKeyAboutKey)
+	title := stringFromMeta(mem.Metadata, MetaKeyTitle)
+
+	row := tx.QueryRow(ctx, `
+		INSERT INTO memory_entities
+		  (workspace_id, virtual_user_id, agent_id, name, kind, metadata,
+		   trust_model, source_type, expires_at,
+		   about_kind, about_key, title)
+		VALUES
+		  ($1, NULL, NULL, $2, $3, $4,
+		   $5, $6, $7,
+		   $8, $9, NULLIF($10, ''))
+		ON CONFLICT (workspace_id, virtual_user_id, agent_id,
+		             about_kind, about_key)
+		WHERE about_kind IS NOT NULL AND NOT forgotten
+		DO UPDATE SET updated_at = now(),
+		              metadata   = EXCLUDED.metadata,
+		              title      = COALESCE(EXCLUDED.title, memory_entities.title)
+		RETURNING id, created_at, (xmax <> 0) AS conflicted`,
+		mem.Scope[ScopeWorkspaceID],
+		mem.Content,
+		mem.Type,
+		metaJSON,
+		institutionalTrustModel,
+		institutionalSourceType,
+		mem.ExpiresAt,
+		aboutKind,
+		aboutKey,
+		title,
+	)
+	var conflicted bool
+	if err := row.Scan(&mem.ID, &mem.CreatedAt, &conflicted); err != nil {
+		return false, err
+	}
+	return conflicted, nil
+}
+
 // insertInstitutionalEntity inserts a memory_entities row with virtual_user_id
 // and agent_id both NULL and stamps the curated trust_model / operator_curated
 // source_type so downstream retention and PII pipelines know this row was not
-// extracted from conversation.
+// extracted from conversation. Used for saves without about_kind/about_key.
 func insertInstitutionalEntity(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 	metaJSON, err := marshalMetadata(mem.Metadata)
 	if err != nil {
