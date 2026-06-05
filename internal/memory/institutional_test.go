@@ -21,6 +21,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
@@ -190,6 +191,71 @@ func TestDeleteInstitutional_SoftDeletesOnlyInstitutional(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotInstitutional) {
 		t.Errorf("err=%v, want ErrNotInstitutional (errors.Is)", err)
+	}
+}
+
+// TestSaveInstitutional_AboutKeyIdempotency verifies that re-saving the same
+// about_kind+about_key pair produces exactly one active entity (upsert), not
+// two, and that the content of the surviving entity reflects the second write.
+// This covers the demo re-seed scenario where the seed Job runs on every
+// helm upgrade: chunks must supersede rather than duplicate.
+func TestSaveInstitutional_AboutKeyIdempotency(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	save := func(content string) {
+		must(t, store.SaveInstitutional(ctx, &Memory{
+			Type:       "sharepoint_doc",
+			Content:    content,
+			Confidence: 1.0,
+			Scope:      map[string]string{ScopeWorkspaceID: testWorkspace1},
+			Metadata: map[string]any{
+				MetaKeyAboutKind: "sharepoint_doc",
+				MetaKeyAboutKey:  "https://sp/x#0",
+			},
+		}))
+	}
+
+	save("first write")
+	save("second write") // same about_key — must supersede, not duplicate
+
+	got, err := store.ListInstitutional(ctx, testWorkspace1, ListOptions{Limit: 20})
+	if err != nil {
+		t.Fatalf("ListInstitutional: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected exactly 1 active entity for about-key, got %d", len(got))
+	}
+	if got[0].Content != "second write" {
+		t.Errorf("content=%q, want %q", got[0].Content, "second write")
+	}
+}
+
+// TestSaveInstitutional_DifferentAboutKeysTwoEntities guards the complement:
+// two saves with distinct about_keys must each produce their own entity.
+func TestSaveInstitutional_DifferentAboutKeysTwoEntities(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	for i, key := range []string{"https://sp/x#0", "https://sp/x#1"} {
+		must(t, store.SaveInstitutional(ctx, &Memory{
+			Type:       "sharepoint_doc",
+			Content:    fmt.Sprintf("chunk %d", i),
+			Confidence: 1.0,
+			Scope:      map[string]string{ScopeWorkspaceID: testWorkspace1},
+			Metadata: map[string]any{
+				MetaKeyAboutKind: "sharepoint_doc",
+				MetaKeyAboutKey:  key,
+			},
+		}))
+	}
+
+	got, err := store.ListInstitutional(ctx, testWorkspace1, ListOptions{Limit: 20})
+	if err != nil {
+		t.Fatalf("ListInstitutional: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected exactly 2 entities for 2 distinct about-keys, got %d", len(got))
 	}
 }
 

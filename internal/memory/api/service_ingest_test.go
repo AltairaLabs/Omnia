@@ -60,6 +60,9 @@ func TestIngestDocument_ChunkStrategy_SavesItemsWithAboutKey(t *testing.T) {
 	assert.Equal(t, "sharepoint_doc", first.Metadata[memory.MetaKeyAboutKind])
 	assert.Equal(t, "https://sp/allowed/r.docx#0", first.Metadata[memory.MetaKeyAboutKey])
 	assert.Equal(t, "https://sp/allowed/r.docx", first.Metadata["url"])
+
+	second := store.saved[1]
+	assert.Equal(t, "https://sp/allowed/r.docx#1", second.Metadata[memory.MetaKeyAboutKey])
 }
 
 func TestIngestDocument_NoStrategyConfigured_Errors(t *testing.T) {
