@@ -116,8 +116,10 @@ type Server struct {
 	sessionStore session.Store
 
 	// Memory store for cross-session memory (via memory-api HTTP client)
-	memoryStore  pkmemory.Store
-	workspaceUID string // Workspace CRD UID for memory scope
+	memoryStore    pkmemory.Store
+	workspaceUID   string // Workspace CRD UID for memory scope
+	memoryStrategy string // Retrieval strategy: "semantic" or "" (keyword FTS)
+	memoryDenyCEL  string // Access deny-filter CEL expression (empty = no filter)
 
 	// Media resolution for mock provider
 	mediaResolver *MediaResolver
@@ -178,6 +180,13 @@ func WithAgentUID(uid string) ServerOption {
 // under cmd/runtime; production code should not depend on this accessor.
 func ServerAgentUID(s *Server) string {
 	return s.agentUID
+}
+
+// ServerMemoryRetrieval returns the configured retrieval strategy and denyCEL
+// expression. Exposed for wiring tests under cmd/runtime; production code
+// should not depend on this accessor.
+func ServerMemoryRetrieval(s *Server) (strategy, denyCEL string) {
+	return s.memoryStrategy, s.memoryDenyCEL
 }
 
 // WithPromptPackName sets the PromptPack CRD name for tracing.
@@ -430,6 +439,17 @@ func WithMemoryStore(store pkmemory.Store) ServerOption {
 func WithWorkspaceUID(uid string) ServerOption {
 	return func(s *Server) {
 		s.workspaceUID = uid
+	}
+}
+
+// WithMemoryRetrieval configures the retrieval strategy and access deny-filter
+// (from spec.memory.retrieval). When strategy is "semantic" and the memory
+// store supports it, per-turn retrieval uses semantic hybrid search with the
+// deny-filter; otherwise keyword FTS.
+func WithMemoryRetrieval(strategy, denyCEL string) ServerOption {
+	return func(s *Server) {
+		s.memoryStrategy = strategy
+		s.memoryDenyCEL = denyCEL
 	}
 }
 

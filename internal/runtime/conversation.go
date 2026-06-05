@@ -187,6 +187,8 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 		// already available via s.workspaceUID; strategy and denyCEL
 		// default to "" → FTS fallback until Task 4 wires them.
 		retriever := NewCompositeRetriever(s.memoryStore, RetrievalConfig{
+			Strategy:    s.memoryStrategy,
+			DenyCEL:     s.memoryDenyCEL,
 			WorkspaceID: s.workspaceUID,
 		}, log)
 		opts = append(opts, sdk.WithMemory(s.memoryStore, scope, sdk.WithMemoryRetriever(retriever)))
