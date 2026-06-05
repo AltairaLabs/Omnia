@@ -30,6 +30,7 @@ import (
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/memory"
+	"github.com/altairalabs/omnia/internal/memory/ingestion"
 )
 
 // Audit event type constants for memory operations.
@@ -106,13 +107,14 @@ type MemoryAuditEntry struct {
 
 // MemoryService wraps the memory store with business logic for the HTTP layer.
 type MemoryService struct {
-	store          memory.Store
-	embeddingSvc   *memory.EmbeddingService // nil if embeddings not configured
-	eventPublisher MemoryEventPublisher     // nil if event publishing not configured
-	auditLogger    MemoryAuditLogger        // nil if audit logging not configured
-	policyLoader   memory.PolicyLoader      // nil if no MemoryPolicy resolution wired
-	config         MemoryServiceConfig
-	log            logr.Logger
+	store             memory.Store
+	embeddingSvc      *memory.EmbeddingService    // nil if embeddings not configured
+	eventPublisher    MemoryEventPublisher        // nil if event publishing not configured
+	auditLogger       MemoryAuditLogger           // nil if audit logging not configured
+	policyLoader      memory.PolicyLoader         // nil if no MemoryPolicy resolution wired
+	ingestionStrategy ingestion.IngestionStrategy // nil until SetIngestionStrategy
+	config            MemoryServiceConfig
+	log               logr.Logger
 }
 
 // NewMemoryService creates a new MemoryService backed by the given store.
