@@ -2599,6 +2599,14 @@ export interface AgentRuntimeSpec {
     };
     /** Retrieval configures memory retrieval behavior. */
     retrieval?: {
+      /** AccessFilter configures retrieval-time access control (a deny filter). */
+      accessFilter?: {
+        /** DenyCEL is a CEL expression over `metadata` (a map<string, dyn> of the
+         * retrieved item's metadata). Items for which it evaluates to true are
+         * dropped. Empty disables filtering. Example:
+         * metadata.url.contains("restricted") */
+        denyCEL?: string;
+      };
       /** Limit is the maximum number of memories injected per turn. */
       limit?: number;
       /** Strategy selects the retrieval mode. */

@@ -41,6 +41,10 @@ var profileCategories = map[string]bool{
 	"memory:health":      true,
 }
 
+// StrategySemantic is the spec.memory.retrieval.strategy value that enables
+// semantic hybrid retrieval with the access deny-filter.
+const StrategySemantic = "semantic"
+
 const (
 	// defaultProfileLimit caps the always-included subset.
 	defaultProfileLimit = 20
@@ -59,6 +63,26 @@ const (
 	listFetchLimit = 200
 )
 
+// SemanticRetriever is the optional capability CompositeRetriever uses when the
+// configured strategy is "semantic": workspace-scoped hybrid retrieval with a
+// CEL deny-filter. The Omnia memory httpclient satisfies it once
+// RetrieveSemantic ships; until then the construction-time type-assert is false
+// and retrieval falls back to the keyword/FTS path. Kept as a local interface
+// so this package doesn't import the concrete httpclient type.
+type SemanticRetriever interface {
+	RetrieveSemantic(ctx context.Context, workspaceID, query, denyCEL string, limit int) ([]*pkmemory.Memory, error)
+}
+
+// RetrievalConfig carries the CRD-derived retrieval settings.
+type RetrievalConfig struct {
+	Strategy    string
+	DenyCEL     string
+	WorkspaceID string
+	// Limit is the maximum number of memories injected per turn via the episodic
+	// (per-turn similarity search) path. 0 means use defaultEpisodicLimit (10).
+	Limit int
+}
+
 // CompositeRetriever combines an always-on "profile" pull with a
 // per-turn similarity search. It satisfies pkmemory.Retriever and is
 // wired by the conversation builder when a memory store is configured.
@@ -73,6 +97,11 @@ type CompositeRetriever struct {
 	profileLimit  int
 	episodicLimit int
 
+	semantic    SemanticRetriever // non-nil only when store implements it
+	strategy    string            // spec.memory.retrieval.strategy
+	denyCEL     string            // spec.memory.retrieval.accessFilter.denyCEL
+	workspaceID string            // for the semantic call's scope
+
 	mu    sync.Mutex
 	cache map[string]profileCacheEntry
 }
@@ -82,15 +111,28 @@ type profileCacheEntry struct {
 	expires  time.Time
 }
 
-// NewCompositeRetriever builds a retriever backed by the given store.
-func NewCompositeRetriever(store pkmemory.Store, log logr.Logger) *CompositeRetriever {
-	return &CompositeRetriever{
+// NewCompositeRetriever builds a retriever backed by the given store. When the
+// store implements SemanticRetriever AND cfg.Strategy=="semantic", per-turn
+// retrieval uses semantic hybrid search with the deny-filter; otherwise it uses
+// keyword FTS.
+func NewCompositeRetriever(store pkmemory.Store, cfg RetrievalConfig, log logr.Logger) *CompositeRetriever {
+	r := &CompositeRetriever{
 		store:         store,
 		log:           log.WithName("memory-retriever"),
 		profileLimit:  defaultProfileLimit,
 		episodicLimit: defaultEpisodicLimit,
 		cache:         make(map[string]profileCacheEntry),
+		strategy:      cfg.Strategy,
+		denyCEL:       cfg.DenyCEL,
+		workspaceID:   cfg.WorkspaceID,
 	}
+	if sr, ok := store.(SemanticRetriever); ok {
+		r.semantic = sr
+	}
+	if cfg.Limit > 0 {
+		r.episodicLimit = cfg.Limit
+	}
+	return r
 }
 
 // RetrieveContext implements pkmemory.Retriever. Returns nil when the
@@ -112,17 +154,7 @@ func (r *CompositeRetriever) RetrieveContext(
 		return profile, nil
 	}
 
-	// memory-api's PostgresMemoryStore uses websearch_to_tsquery, which
-	// applies AND semantics across terms — a query like "remind me where
-	// I stayed in Chicago" requires *every* word to appear in the doc.
-	// That's right for memory__recall (precise lookup) but wrong for
-	// ambient retrieval, where we want any meaningful overlap to surface
-	// context. Rewrite to OR semantics: postgres's stopword filter then
-	// drops "remind / me / where / I / in" and what's left ("stay /
-	// chicago") matches ambiently.
-	episodic, err := r.store.Retrieve(ctx, scope, toFTSOrQuery(query), pkmemory.RetrieveOptions{
-		Limit: r.episodicLimit,
-	})
+	episodic, err := r.retrieveEpisodic(ctx, scope, query)
 	if err != nil {
 		// Profile is still useful; episodic failure shouldn't black out
 		// the whole context.
@@ -133,6 +165,30 @@ func (r *CompositeRetriever) RetrieveContext(
 	}
 
 	return mergeNoDup(profile, filterOutProfile(episodic)), nil
+}
+
+// retrieveEpisodic runs the per-turn retrieval: semantic hybrid + deny-filter
+// when configured and supported, else keyword FTS.
+//
+// memory-api's PostgresMemoryStore uses websearch_to_tsquery, which
+// applies AND semantics across terms — a query like "remind me where
+// I stayed in Chicago" requires *every* word to appear in the doc.
+// That's right for memory__recall (precise lookup) but wrong for
+// ambient retrieval, where we want any meaningful overlap to surface
+// context. Rewrite to OR semantics: postgres's stopword filter then
+// drops "remind / me / where / I / in" and what's left ("stay /
+// chicago") matches ambiently.
+func (r *CompositeRetriever) retrieveEpisodic(
+	ctx context.Context, scope map[string]string, query string,
+) ([]*pkmemory.Memory, error) {
+	if r.strategy == StrategySemantic && r.semantic != nil {
+		wsID := r.workspaceID
+		if wsID == "" {
+			wsID = scope["workspace_id"]
+		}
+		return r.semantic.RetrieveSemantic(ctx, wsID, query, r.denyCEL, r.episodicLimit)
+	}
+	return r.store.Retrieve(ctx, scope, toFTSOrQuery(query), pkmemory.RetrieveOptions{Limit: r.episodicLimit})
 }
 
 // fetchProfile returns the always-include subset, populating the cache

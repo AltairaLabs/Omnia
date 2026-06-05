@@ -4748,6 +4748,18 @@ spec:
                   retrieval:
                     description: Retrieval configures memory retrieval behavior.
                     properties:
+                      accessFilter:
+                        description: AccessFilter configures retrieval-time access
+                          control (a deny filter).
+                        properties:
+                          denyCEL:
+                            description: |-
+                              DenyCEL is a CEL expression over `metadata` (a map<string, dyn> of the
+                              retrieved item's metadata). Items for which it evaluates to true are
+                              dropped. Empty disables filtering. Example:
+                              metadata.url.contains("restricted")
+                            type: string
+                        type: object
                       limit:
                         description: Limit is the maximum number of memories injected
                           per turn.

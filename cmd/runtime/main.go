@@ -262,7 +262,8 @@ func main() {
 		if cfg.WorkspaceUID != "" {
 			serverOpts = append(serverOpts, pkruntime.WithWorkspaceUID(cfg.WorkspaceUID))
 		}
-		log.Info("memory store wired", "memoryAPIURL", cfg.MemoryAPIURL, "workspaceUID", cfg.WorkspaceUID)
+		log.Info("memory store wired", "memoryAPIURL", cfg.MemoryAPIURL, "workspaceUID", cfg.WorkspaceUID,
+			"memoryStrategy", cfg.MemoryStrategy, "hasDenyCEL", cfg.MemoryDenyCEL != "")
 	} else if cfg.MemoryEnabled {
 		log.Info("memory enabled but no memory-api URL configured, skipping")
 	}
@@ -457,6 +458,7 @@ func configDerivedServerOpts(cfg *pkruntime.Config) []pkruntime.ServerOption {
 		pkruntime.WithContextWindow(cfg.ContextWindow),
 		pkruntime.WithTruncationStrategy(cfg.TruncationStrategy),
 		pkruntime.WithMediaBasePath(cfg.MediaBasePath),
+		pkruntime.WithMemoryRetrieval(cfg.MemoryStrategy, cfg.MemoryDenyCEL, cfg.MemoryLimit),
 	}
 }
 

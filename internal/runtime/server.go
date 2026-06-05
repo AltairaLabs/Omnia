@@ -116,8 +116,11 @@ type Server struct {
 	sessionStore session.Store
 
 	// Memory store for cross-session memory (via memory-api HTTP client)
-	memoryStore  pkmemory.Store
-	workspaceUID string // Workspace CRD UID for memory scope
+	memoryStore    pkmemory.Store
+	workspaceUID   string // Workspace CRD UID for memory scope
+	memoryStrategy string // Retrieval strategy: "semantic" or "" (keyword FTS)
+	memoryDenyCEL  string // Access deny-filter CEL expression (empty = no filter)
+	memoryLimit    int    // Max memories injected per turn; 0 = defaultEpisodicLimit (10)
 
 	// Media resolution for mock provider
 	mediaResolver *MediaResolver
@@ -178,6 +181,13 @@ func WithAgentUID(uid string) ServerOption {
 // under cmd/runtime; production code should not depend on this accessor.
 func ServerAgentUID(s *Server) string {
 	return s.agentUID
+}
+
+// ServerMemoryRetrieval returns the configured retrieval strategy, denyCEL
+// expression, and episodic limit. Exposed for wiring tests under cmd/runtime;
+// production code should not depend on this accessor.
+func ServerMemoryRetrieval(s *Server) (strategy, denyCEL string, limit int) {
+	return s.memoryStrategy, s.memoryDenyCEL, s.memoryLimit
 }
 
 // WithPromptPackName sets the PromptPack CRD name for tracing.
@@ -430,6 +440,19 @@ func WithMemoryStore(store pkmemory.Store) ServerOption {
 func WithWorkspaceUID(uid string) ServerOption {
 	return func(s *Server) {
 		s.workspaceUID = uid
+	}
+}
+
+// WithMemoryRetrieval configures the retrieval strategy, access deny-filter,
+// and episodic limit (from spec.memory.retrieval). When strategy is "semantic"
+// and the memory store supports it, per-turn retrieval uses semantic hybrid
+// search with the deny-filter; otherwise keyword FTS. limit 0 falls back to
+// defaultEpisodicLimit (10).
+func WithMemoryRetrieval(strategy, denyCEL string, limit int) ServerOption {
+	return func(s *Server) {
+		s.memoryStrategy = strategy
+		s.memoryDenyCEL = denyCEL
+		s.memoryLimit = limit
 	}
 }
 
