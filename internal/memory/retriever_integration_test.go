@@ -64,7 +64,7 @@ func TestCompositeRetriever_RealStore(t *testing.T) {
 	}
 	t.Logf("seeded %d memories into postgres in %s", len(seeds), time.Since(saveStart))
 
-	retriever := runtime.NewCompositeRetriever(store, logr.Discard())
+	retriever := runtime.NewCompositeRetriever(store, runtime.RetrievalConfig{}, logr.Discard())
 
 	t.Run("cold start (no user message) returns profile only", func(t *testing.T) {
 		start := time.Now()
@@ -87,7 +87,7 @@ func TestCompositeRetriever_RealStore(t *testing.T) {
 	t.Run("with user query returns profile + episodic merge", func(t *testing.T) {
 		// Fresh retriever to bypass the cache from the prior subtest —
 		// otherwise we wouldn't be timing a real list call.
-		r2 := runtime.NewCompositeRetriever(store, logr.Discard())
+		r2 := runtime.NewCompositeRetriever(store, runtime.RetrievalConfig{}, logr.Discard())
 		start := time.Now()
 		got, err := r2.RetrieveContext(ctx, scope, []types.Message{
 			{Role: "user", Content: "remind me where I stayed in Chicago"},
@@ -152,7 +152,7 @@ func TestCompositeRetriever_RealStore(t *testing.T) {
 		// must be at least 5× faster than the cold one. On a local
 		// container the cold call typically takes ~1ms and the
 		// cached one ~10µs — a 100× ratio is normal.
-		r2 := runtime.NewCompositeRetriever(store, logr.Discard())
+		r2 := runtime.NewCompositeRetriever(store, runtime.RetrievalConfig{}, logr.Discard())
 
 		coldStart := time.Now()
 		_, err := r2.RetrieveContext(ctx, scope, nil)

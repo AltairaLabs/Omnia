@@ -182,7 +182,13 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 		// user when it explicitly calls memory__recall — which is
 		// unreliable on cold-start turns where the user's opening
 		// message has no lexical overlap with stored facts.
-		retriever := NewCompositeRetriever(s.memoryStore, log)
+		// Task 4 will thread the real strategy/denyCEL values from the
+		// parsed Config into the Server struct. For now, WorkspaceID is
+		// already available via s.workspaceUID; strategy and denyCEL
+		// default to "" → FTS fallback until Task 4 wires them.
+		retriever := NewCompositeRetriever(s.memoryStore, RetrievalConfig{
+			WorkspaceID: s.workspaceUID,
+		}, log)
 		opts = append(opts, sdk.WithMemory(s.memoryStore, scope, sdk.WithMemoryRetriever(retriever)))
 		log.V(1).Info("memory store wired",
 			"session_id", sessionID,
