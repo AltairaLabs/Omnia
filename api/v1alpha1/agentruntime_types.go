@@ -1158,6 +1158,22 @@ type MemoryRetrievalConfig struct {
 	// +kubebuilder:validation:Maximum=50
 	// +optional
 	Limit *int32 `json:"limit,omitempty"`
+
+	// AccessFilter configures retrieval-time access control (a deny filter).
+	// +optional
+	AccessFilter *MemoryAccessFilterConfig `json:"accessFilter,omitempty"`
+}
+
+// MemoryAccessFilterConfig configures a retrieval-time deny filter evaluated
+// per retrieved memory item's metadata. It is the governance seam: an indexed
+// but restricted document's items can be dropped from retrieval.
+type MemoryAccessFilterConfig struct {
+	// DenyCEL is a CEL expression over `metadata` (a map<string, dyn> of the
+	// retrieved item's metadata). Items for which it evaluates to true are
+	// dropped. Empty disables filtering. Example:
+	// metadata.url.contains("restricted")
+	// +optional
+	DenyCEL string `json:"denyCEL,omitempty"`
 }
 
 // MemoryEmbeddingConfig configures the embedding provider for memory.
