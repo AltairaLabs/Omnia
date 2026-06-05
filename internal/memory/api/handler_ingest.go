@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/altairalabs/omnia/internal/httputil"
 	"github.com/altairalabs/omnia/internal/memory/ingestion"
 )
 
@@ -62,6 +61,5 @@ func (h *Handler) handleIngest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	w.WriteHeader(http.StatusAccepted)
 }

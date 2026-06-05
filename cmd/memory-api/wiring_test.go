@@ -766,6 +766,39 @@ func TestBuildAPIMux_IngestRouteWiredWithChunkStrategy(t *testing.T) {
 	}
 }
 
+// TestBuildAPIMux_SemanticRouteWired verifies that the
+// POST /api/v1/memories/retrieve/semantic route is registered on the real mux.
+// A 404 here means the route isn't registered. We send a minimal valid body
+// so the handler can proceed past JSON decoding and workspace validation;
+// any non-404 response proves the route is wired.
+func TestBuildAPIMux_SemanticRouteWired(t *testing.T) {
+	freshPromRegistry(t)
+	handler, cleanup := buildAPIMux(
+		context.Background(),
+		fakeMemoryStore{},
+		nil,
+		memoryapi.MemoryServiceConfig{},
+		nil,
+		false,
+		nil,
+		nil,
+		nil,
+		logr.Discard(),
+		200, 40, // default ChunkStrategy params
+	)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/memories/retrieve/semantic",
+		strings.NewReader(`{"workspace_id":"ws-1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code == http.StatusNotFound {
+		t.Errorf("POST /api/v1/memories/retrieve/semantic not registered; got 404")
+	}
+}
+
 // TestBuildAPIMux_HealthzAlwaysReachable verifies /healthz is wired regardless
 // of enterprise mode. This is a smoke test that the middleware chain does not
 // incorrectly gate health checks.
