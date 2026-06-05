@@ -415,6 +415,12 @@ sharepointHero:
     model: text-embedding-3-small
     secretRef: embedding-api-key   # pre-created Secret
 
+  # Retrieval-time governance deny-filter (CEL over a retrieved item's metadata).
+  # The restricted SharePoint site's URL contains "restricted", so its indexed
+  # chunks are dropped before injection. Empty string disables the filter.
+  accessFilter:
+    denyCEL: 'metadata.url.contains("restricted")'
+
   # LLM providers (baseline + pricier candidate). type: claude | openai | gemini
   providers:
     baseline:
