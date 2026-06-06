@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
@@ -274,5 +275,46 @@ var _ = Describe("AgentRuntime Rollout Istio Patching (envtest)", func() {
 			istioConfig("does-not-exist-vs", "does-not-exist-dr"), 30)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("get VirtualService"))
+	})
+
+	It("applyTrafficRouting degrades (not errors) when external mode references a missing VirtualService", func() {
+		// Istio CRDs ARE installed in this envtest (VS/DR creation above proves
+		// it), so a missing referenced VS is a genuine NotFound — spec §7/§11 says
+		// degrade + continue, not hard-fail the reconcile.
+		recorder := record.NewFakeRecorder(10)
+		r := &AgentRuntimeReconciler{
+			Client:      k8sClient,
+			Scheme:      k8sClient.Scheme(),
+			MeshEnabled: false,
+			Recorder:    recorder,
+		}
+
+		agentName := nextName("agent")
+		ar := &omniav1alpha1.AgentRuntime{
+			ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: namespace, Generation: 1},
+			Spec: omniav1alpha1.AgentRuntimeSpec{
+				Rollout: &omniav1alpha1.RolloutConfig{
+					// Mode unset + Istio set → resolves to external (reference form).
+					TrafficRouting: &omniav1alpha1.TrafficRoutingConfig{
+						Istio: istioConfig("missing-vs", "missing-dr"),
+					},
+				},
+			},
+		}
+
+		// Must NOT return an error — the missing VS degrades gracefully.
+		Expect(r.applyTrafficRouting(ctx, ar, 40)).To(Succeed())
+
+		// Status reflects external mode with an unenforced weight.
+		Expect(ar.Status.Rollout).NotTo(BeNil())
+		Expect(ar.Status.Rollout.TrafficRoutingMode).To(Equal(TrafficModeExternal))
+		Expect(ar.Status.Rollout.TrafficWeightEnforced).NotTo(BeNil())
+		Expect(*ar.Status.Rollout.TrafficWeightEnforced).To(BeFalse())
+
+		// Degrade trio: condition False + a TrafficRoutingDegraded Event.
+		cond := findCondition(ar.Status.Conditions, ConditionTypeTrafficRouting)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Eventually(recorder.Events).Should(Receive(ContainSubstring("TrafficRoutingDegraded")))
 	})
 })

@@ -49,21 +49,29 @@ func replicaSplit(total, candidateWeight int32) (candidate, stable, delivered in
 	return candidate, stable, delivered
 }
 
+// canonicalReplicaTotal returns the AgentRuntime's desired stable replica count
+// — the canonical source of truth used by the deployment builder. This is
+// stable across reconciles (the controller mutates the live Deployment's
+// .Spec.Replicas during weighting, but never the spec), so deriving `total`
+// from it avoids the downward drift that re-reading the live Deployment causes.
+// Defaults to 1 to match the deployment builder and CRD default.
+func canonicalReplicaTotal(ar *omniav1alpha1.AgentRuntime) int32 {
+	if ar.Spec.Runtime != nil && ar.Spec.Runtime.Replicas != nil && *ar.Spec.Runtime.Replicas > 0 {
+		return *ar.Spec.Runtime.Replicas
+	}
+	return 1
+}
+
 // reconcileReplicaWeighting scales the stable + candidate Deployments to
 // approximate candidateWeight, returns the delivered weight, and logs when the
 // delivered weight differs from the request (granularity loss).
 func (r *AgentRuntimeReconciler) reconcileReplicaWeighting(ctx context.Context, ar *omniav1alpha1.AgentRuntime, candidateWeight int32) (int32, error) {
-	stableDep := &appsv1.Deployment{}
-	if err := r.Get(ctx, types.NamespacedName{Name: ar.Name, Namespace: ar.Namespace}, stableDep); err != nil {
-		return 0, fmt.Errorf("get stable deployment %q: %w", ar.Name, err)
-	}
-	total := int32(1)
-	if stableDep.Spec.Replicas != nil && *stableDep.Spec.Replicas > 0 {
-		total = *stableDep.Spec.Replicas
-	}
-	// total is the stable's currently-configured replicas; on the first step we
-	// treat it as the canonical total. (Re-derivation across steps keeps it
-	// stable because we restore stable to `total` at promote/rollback — Task 6.)
+	// Derive the canonical total from the AgentRuntime spec (the same source the
+	// deployment builder stamps onto the stable Deployment), NOT the live stable
+	// Deployment's .Spec.Replicas — the controller itself shrinks that field as
+	// it shifts weight, so re-reading it across reconciles would let `total`
+	// drift downward (e.g. 4→2→1) and permanently shrink stable.
+	total := canonicalReplicaTotal(ar)
 
 	candReplicas, stableReplicas, delivered := replicaSplit(total, candidateWeight)
 

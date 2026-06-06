@@ -92,7 +92,8 @@ var _ = Describe("AgentRuntime applyTrafficRouting dispatch (envtest)", func() {
 		agentName := nextName("agent")
 		candName := candidateDeploymentName(agentName)
 
-		// Stable Deployment carries the canonical total of 4 replicas.
+		// The canonical total (4) comes from the AgentRuntime spec, not the live
+		// stable Deployment — see canonicalReplicaTotal / Fix 2.
 		Expect(k8sClient.Create(ctx, newDeployment(agentName, 4))).To(Succeed())
 		Expect(k8sClient.Create(ctx, newDeployment(candName, 0))).To(Succeed())
 
@@ -107,6 +108,7 @@ var _ = Describe("AgentRuntime applyTrafficRouting dispatch (envtest)", func() {
 		ar := &omniav1alpha1.AgentRuntime{
 			ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: namespace, Generation: 1},
 			Spec: omniav1alpha1.AgentRuntimeSpec{
+				Runtime: &omniav1alpha1.RuntimeConfig{Replicas: ptr.To(int32(4))},
 				Rollout: &omniav1alpha1.RolloutConfig{
 					TrafficRouting: &omniav1alpha1.TrafficRoutingConfig{
 						Mode: TrafficModeMesh,
@@ -134,5 +136,105 @@ var _ = Describe("AgentRuntime applyTrafficRouting dispatch (envtest)", func() {
 
 		// (d) the Recorder received a TrafficRoutingDegraded event.
 		Eventually(recorder.Events).Should(Receive(ContainSubstring("TrafficRoutingDegraded")))
+	})
+
+	It("persists TrafficRoutingMode + TrafficWeightEnforced through the reconcile status rebuild", func() {
+		agentName := nextName("agent")
+		candName := candidateDeploymentName(agentName)
+
+		// Stable carries 4 replicas; candidate exists at 0.
+		Expect(k8sClient.Create(ctx, newDeployment(agentName, 4))).To(Succeed())
+		Expect(k8sClient.Create(ctx, newDeployment(candName, 0))).To(Succeed())
+
+		// Create a real AgentRuntime so we can Get it back and assert PERSISTED
+		// status (not just in-memory).
+		port := int32(8080)
+		ar := &omniav1alpha1.AgentRuntime{
+			ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: namespace, Generation: 1},
+			Spec: omniav1alpha1.AgentRuntimeSpec{
+				PromptPackRef: omniav1alpha1.PromptPackRef{Name: "p", Version: ptr.To("v1")},
+				Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket, Port: &port},
+				Providers: []omniav1alpha1.NamedProviderRef{{
+					Name:        "default",
+					ProviderRef: omniav1alpha1.ProviderRef{Name: "claude-provider"},
+				}},
+				Runtime: &omniav1alpha1.RuntimeConfig{Replicas: ptr.To(int32(4))},
+				Rollout: &omniav1alpha1.RolloutConfig{
+					Candidate: &omniav1alpha1.CandidateOverrides{PromptPackVersion: ptr.To("v2")},
+					TrafficRouting: &omniav1alpha1.TrafficRoutingConfig{
+						Mode: TrafficModeReplicaWeighted,
+					},
+					Steps: []omniav1alpha1.RolloutStep{
+						{SetWeight: ptr.To[int32](50)},
+						{SetWeight: ptr.To[int32](100)},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, ar)).To(Succeed())
+
+		r := &AgentRuntimeReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+
+		live := &omniav1alpha1.AgentRuntime{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: agentName, Namespace: namespace}, live)).To(Succeed())
+
+		// Exercise the real setWeight path: applyTrafficRouting (which calls
+		// setTrafficStatus) followed by reconcileRolloutUpdateStatus (the rebuild
+		// that previously dropped the two scalar fields). This is exactly what
+		// reconcileRollout does on a setWeight step (rollout.go:110 + :135).
+		stepResult := reconcileRolloutSteps(live)
+		Expect(r.applyTrafficRouting(ctx, live, stepResult.desiredWeight)).To(Succeed())
+		_, err := r.reconcileRolloutUpdateStatus(ctx, live, stepResult)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Mirror the controller's terminal Status().Update (a setWeight step has
+		// requeueAfter 0, so the outer Reconcile loop persists status at its end).
+		// The fields must survive the in-memory rebuild AND a round-trip to the API.
+		Expect(k8sClient.Status().Update(ctx, live)).To(Succeed())
+
+		persisted := &omniav1alpha1.AgentRuntime{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: agentName, Namespace: namespace}, persisted)).To(Succeed())
+		Expect(persisted.Status.Rollout).NotTo(BeNil())
+		Expect(persisted.Status.Rollout.TrafficRoutingMode).To(Equal(TrafficModeReplicaWeighted),
+			"resolved traffic mode must survive the status rebuild + persist")
+		Expect(persisted.Status.Rollout.TrafficWeightEnforced).NotTo(BeNil(),
+			"enforcement flag must survive the status rebuild + persist")
+		Expect(*persisted.Status.Rollout.TrafficWeightEnforced).To(BeFalse(),
+			"replicaWeighted delivers an approximate (unenforced) weight")
+	})
+
+	It("keeps the replica total constant across successive reconciles at the same weight", func() {
+		agentName := nextName("agent")
+		candName := candidateDeploymentName(agentName)
+
+		// Stable starts at the canonical total of 4 (also stamped on spec).
+		Expect(k8sClient.Create(ctx, newDeployment(agentName, 4))).To(Succeed())
+		Expect(k8sClient.Create(ctx, newDeployment(candName, 0))).To(Succeed())
+
+		r := &AgentRuntimeReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+
+		ar := &omniav1alpha1.AgentRuntime{
+			ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: namespace, Generation: 1},
+			Spec: omniav1alpha1.AgentRuntimeSpec{
+				Runtime: &omniav1alpha1.RuntimeConfig{Replicas: ptr.To(int32(4))},
+				Rollout: &omniav1alpha1.RolloutConfig{
+					TrafficRouting: &omniav1alpha1.TrafficRoutingConfig{Mode: TrafficModeReplicaWeighted},
+				},
+			},
+		}
+
+		// First reconcile at weight 50 → split(4,50) = candidate 2 / stable 2.
+		Expect(r.applyTrafficRouting(ctx, ar, 50)).To(Succeed())
+		Expect(getReplicas(candName)).To(Equal(int32(2)))
+		Expect(getReplicas(agentName)).To(Equal(int32(2)))
+
+		// Second reconcile at the SAME weight must NOT drift: the canonical total
+		// (4) comes from the spec, not the now-shrunken live stable Deployment (2).
+		// Before the fix this re-derived total=2 → split(2,50) = stable 1, drift.
+		Expect(r.applyTrafficRouting(ctx, ar, 50)).To(Succeed())
+		Expect(getReplicas(candName)).To(Equal(int32(2)),
+			"candidate must stay at 2, not drift")
+		Expect(getReplicas(agentName)).To(Equal(int32(2)),
+			"stable must stay at 2, not shrink to 1")
 	})
 })

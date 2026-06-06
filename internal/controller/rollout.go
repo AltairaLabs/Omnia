@@ -255,6 +255,7 @@ func (r *AgentRuntimeReconciler) reconcileRolloutUpdateStatus(
 		currentWeight = ar.Status.Rollout.CurrentWeight
 	}
 
+	prevTraffic := snapshotTrafficStatus(ar)
 	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
 		Active:           true,
 		CurrentStep:      &step,
@@ -264,6 +265,7 @@ func (r *AgentRuntimeReconciler) reconcileRolloutUpdateStatus(
 		StepStartedAt:    stepStartedAt,
 		Message:          result.message,
 	}
+	carryTrafficStatus(ar, prevTraffic)
 
 	SetCondition(&ar.Status.Conditions, ar.Generation,
 		ConditionTypeRolloutActive, metav1.ConditionTrue,
@@ -289,6 +291,42 @@ func (r *AgentRuntimeReconciler) reconcileRolloutUpdateStatus(
 		return ctrl.Result{RequeueAfter: result.requeueAfter}, nil
 	}
 	return ctrl.Result{}, nil
+}
+
+// trafficStatusSnapshot captures the two scalar traffic-routing fields from the
+// current rollout status so a subsequent rebuild of RolloutStatus can carry them
+// forward. setTrafficStatus (called via applyTrafficRouting) writes these onto
+// ar.Status.Rollout; the post-apply status rebuild would otherwise drop them.
+type trafficStatusSnapshot struct {
+	mode     string
+	enforced *bool
+}
+
+// snapshotTrafficStatus returns the traffic-routing scalars from the existing
+// rollout status (zero values when no status exists).
+func snapshotTrafficStatus(ar *omniav1alpha1.AgentRuntime) trafficStatusSnapshot {
+	if ar.Status.Rollout == nil {
+		return trafficStatusSnapshot{}
+	}
+	return trafficStatusSnapshot{
+		mode:     ar.Status.Rollout.TrafficRoutingMode,
+		enforced: ar.Status.Rollout.TrafficWeightEnforced,
+	}
+}
+
+// carryTrafficStatus copies the snapshotted traffic-routing scalars onto the
+// (freshly rebuilt) rollout status so applyTrafficRouting's results survive the
+// rebuild. No-op when nothing was recorded.
+func carryTrafficStatus(ar *omniav1alpha1.AgentRuntime, snap trafficStatusSnapshot) {
+	if ar.Status.Rollout == nil {
+		return
+	}
+	if snap.mode != "" {
+		ar.Status.Rollout.TrafficRoutingMode = snap.mode
+	}
+	if snap.enforced != nil {
+		ar.Status.Rollout.TrafficWeightEnforced = snap.enforced
+	}
 }
 
 // previousStepStamp returns the previously-stamped (StepStartedAt, currentStep)
@@ -369,11 +407,13 @@ func (r *AgentRuntimeReconciler) handleAnalysisPass(
 	log.V(1).Info("analysis passed, advancing step", "template", result.analysisName)
 
 	nextStep := result.currentStep + 1
+	prevTraffic := snapshotTrafficStatus(ar)
 	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
 		Active:      true,
 		CurrentStep: &nextStep,
 		Message:     fmt.Sprintf("analysis %s passed", result.analysisName),
 	}
+	carryTrafficStatus(ar, prevTraffic)
 	if err := r.Status().Update(ctx, ar); err != nil {
 		return ctrl.Result{}, fmt.Errorf("persist analysis pass status: %w", err)
 	}
@@ -424,11 +464,13 @@ func (r *AgentRuntimeReconciler) handleAnalysisManualPause(
 	currentStep int32,
 	failMessage string,
 ) (ctrl.Result, error) {
+	prevTraffic := snapshotTrafficStatus(ar)
 	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{
 		Active:      true,
 		CurrentStep: &currentStep,
 		Message:     "analysis failed: " + failMessage,
 	}
+	carryTrafficStatus(ar, prevTraffic)
 	SetCondition(&ar.Status.Conditions, ar.Generation,
 		ConditionTypeRolloutActive, metav1.ConditionTrue,
 		"AnalysisFailed", "analysis failed: "+failMessage)

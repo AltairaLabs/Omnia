@@ -20,6 +20,7 @@ import (
 	"context"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -143,6 +144,16 @@ func (r *AgentRuntimeReconciler) applyTrafficRouting(ctx context.Context, ar *om
 	case TrafficModeExternal:
 		if hasIstioConfig(ar) {
 			if err := r.patchVirtualServiceWeights(ctx, ar.Namespace, ar.Spec.Rollout.TrafficRouting.Istio, desiredWeight); err != nil {
+				// A genuinely-missing referenced VirtualService (CRDs present,
+				// object NotFound) is a degrade, not a hard failure (spec §7/§11):
+				// emit the log+condition+Event trio and continue. Other errors
+				// (read/update conflicts, missing routes) still propagate.
+				if apierrors.IsNotFound(err) {
+					r.observeTrafficDegrade(ctx, ar, mode, mode, "ReferencedObjectsMissing",
+						"referenced VirtualService not found; traffic weights not applied")
+					r.setTrafficStatus(ar, mode, desiredWeight, false)
+					return nil
+				}
 				return err
 			}
 		}
