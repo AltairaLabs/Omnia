@@ -19,8 +19,23 @@ how to install, the ~5-minute demo arc, and how to validate each beat.
 - Omnia core **and** enterprise (Arena, rollout analysis) installed and
   healthy. The hero demo uses ArenaJob, ArenaSource, RolloutConfig analysis,
   ToolPolicy, and SessionPrivacyPolicy — all enterprise.
-- **Istio** present: the rollout splits traffic with a VirtualService /
-  DestinationRule over the `omnia.altairalabs.ai/variant` pod label.
+- **Istio ambient + a waypoint** present: the rag-hero rollout uses
+  `trafficRouting.mode: mesh`, so the **operator** owns the VirtualService /
+  DestinationRule that split traffic over the `omnia.altairalabs.ai/variant`
+  pod label. This requires:
+  - The operator installed with `--mesh-enabled` — set `rollout.meshEnabled=true`
+    on the `omnia` chart (default false).
+  - The `omnia-demo` namespace enrolled in ambient:
+    `kubectl label namespace omnia-demo istio.io/dataplane-mode=ambient`.
+  - A **waypoint** for the agent Service (ztunnel is L4 only; the waypoint does
+    the L7 weighted split). Render it with `sharepointHero.meshWaypoint=true`
+    (a `Gateway` of class `istio-waypoint`), or apply your own via
+    `istioctl waypoint apply --enroll-namespace`.
+
+  > On-cluster validation pending: the waypoint ↔ enterprise OPA policy-proxy
+  > interaction on the WebSocket path has not yet been smoke-tested on a real
+  > ambient cluster. Without ambient + a waypoint the operator auto-degrades the
+  > rollback beat to replica-weighted routing.
 - **In-cluster Prometheus** scraping Omnia (the rollout gate runs PromQL).
   Default query endpoint: `http://prometheus-operated.monitoring:9090`
   (override via `sharepointHero.prometheusUrl`).
@@ -143,8 +158,9 @@ What this renders (all gated on `sharepointHero.enabled`):
 | `rag-hero-baseline` / `rag-hero-candidate` Providers | stable model vs pricier candidate model |
 | `rag-hero-tools` ToolRegistry + `rag-hero-tool-policy` ToolPolicy | `fetch_sharepoint` http tool + restricted-site deny |
 | `rag-hero-privacy` SessionPrivacyPolicy | PII redaction |
-| `rag-hero` AgentRuntime | the agent (memory + evals + rollout, rollout gated on `shipCandidate`) |
-| `rag-hero-vs` / `rag-hero-dr` (Istio) | variant traffic split |
+| `rag-hero` AgentRuntime | the agent (memory + evals + rollout; `trafficRouting.mode: mesh` always; candidate idle until `shipCandidate=true`) |
+| VirtualService / DestinationRule for `rag-hero` (operator-owned, mode=mesh) | variant traffic split — created by the operator, not the chart |
+| `omnia-demo-waypoint` Gateway (`istio-waypoint`, only with `meshWaypoint=true`) | L7 waypoint that performs the weighted split |
 | `rag-hero-quality-check` RolloutAnalysis | PromQL gate on `omnia_eval_faithfulness{variant="candidate"}` |
 | `rag-hero-arena-bundle` ConfigMap + `rag-hero-arena` ArenaSource + `rag-hero-loadtest` ArenaJob | self-play traffic generator |
 

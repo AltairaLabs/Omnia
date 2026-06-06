@@ -94,6 +94,7 @@ func main() {
 	var licenseServerURL string
 	var clusterName string
 	var mgmtPlaneJWKSURL string
+	var meshEnabled bool
 	var tlsOpts []func(*tls.Config)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -202,6 +203,8 @@ func main() {
 			"http://omnia-dashboard.omnia-system.svc.cluster.local:3000/api/auth/jwks. "+
 			"Empty disables wiring — facade stays mgmt-plane-unaware (Arena E2E, "+
 			"headless installs).")
+	flag.BoolVar(&meshEnabled, "mesh-enabled", false,
+		"Istio ambient mesh is enabled; allows rollout trafficRouting mode=mesh (operator-owned VS/DR).")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -308,6 +311,8 @@ func main() {
 		RolloutMetrics:                  controller.NewRolloutMetrics(prometheus.DefaultRegisterer),
 		WorkspaceContentPath:            workspaceContentPath,
 		MgmtPlaneJWKSURL:                mgmtPlaneJWKSURL,
+		Recorder:                        mgr.GetEventRecorderFor("agentruntime-controller"),
+		MeshEnabled:                     meshEnabled,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "AgentRuntime")
 		os.Exit(1)

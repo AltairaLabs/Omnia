@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -137,6 +138,16 @@ type AgentRuntimeReconciler struct {
 	// build a JWKS-backed mgmt-plane validator. Empty disables wiring
 	// (Arena E2E, headless installs without a dashboard).
 	MgmtPlaneJWKSURL string
+
+	// Recorder emits Kubernetes Events for rollout traffic-routing degrade /
+	// approximation so operators see config/capability mismatch in `kubectl
+	// get events`.
+	Recorder record.EventRecorder
+
+	// MeshEnabled reflects the chart's --mesh-enabled flag (Istio ambient on).
+	// Gates whether `mode: mesh` is usable; when false, mesh requests degrade
+	// to replicaWeighted.
+	MeshEnabled bool
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch;create;update;patch;delete

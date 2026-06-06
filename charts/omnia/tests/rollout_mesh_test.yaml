@@ -1,0 +1,29 @@
+suite: rollout.meshEnabled gates the operator --mesh-enabled flag
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/deployment.yaml
+tests:
+  - it: omits --mesh-enabled by default (rollout.meshEnabled=false)
+    # Default OSS install renders the operator mesh-free: AgentRuntime
+    # rollout trafficRouting mode=mesh auto-degrades to replica weighting
+    # because the operator never advertises mesh availability.
+    template: templates/deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --mesh-enabled
+
+  - it: emits --mesh-enabled when rollout.meshEnabled=true
+    # rollout.meshEnabled=true (set in examples/values-istio-ambient.yaml)
+    # tells the operator it may own VirtualService/DestinationRule routing
+    # for AgentRuntimes whose trafficRouting.mode is mesh.
+    set:
+      rollout.meshEnabled: true
+    template: templates/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --mesh-enabled

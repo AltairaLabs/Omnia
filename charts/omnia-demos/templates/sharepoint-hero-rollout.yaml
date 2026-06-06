@@ -1,43 +1,31 @@
 {{- if .Values.sharepointHero.enabled }}
+# NOTE: the hand-authored DestinationRule/VirtualService (rag-hero-dr /
+# rag-hero-vs) were removed when the hero rollout moved to operator-managed
+# mesh routing (AgentRuntime spec.rollout.trafficRouting.mode=mesh). The
+# operator now OWNS the VS/DR for the rag-hero Service.
+{{- if .Values.sharepointHero.meshWaypoint }}
+# Waypoint Gateway for the omnia-demo namespace. REQUIRED for the mode=mesh
+# weighted split: ztunnel is L4 only, the waypoint does the L7 stable/candidate
+# routing across the operator-owned VS/DR. The namespace must also be enrolled
+# in ambient (kubectl label namespace omnia-demo istio.io/dataplane-mode=ambient).
+# On-cluster validation required: the waypoint <-> OPA policy-proxy interaction
+# on the WebSocket path has not yet been smoke-tested on a real ambient cluster.
 ---
-apiVersion: networking.istio.io/v1
-kind: DestinationRule
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
 metadata:
-  name: rag-hero-dr
+  name: omnia-demo-waypoint
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+    istio.io/waypoint-for: service
 spec:
-  host: rag-hero
-  subsets:
-    - name: stable
-      labels:
-        omnia.altairalabs.ai/variant: stable
-    - name: candidate
-      labels:
-        omnia.altairalabs.ai/variant: candidate
----
-apiVersion: networking.istio.io/v1
-kind: VirtualService
-metadata:
-  name: rag-hero-vs
-  namespace: {{ .Values.namespace }}
-  labels:
-    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
-spec:
-  hosts:
-    - rag-hero
-  http:
-    - name: primary
-      route:
-        - destination:
-            host: rag-hero
-            subset: stable
-          weight: 100
-        - destination:
-            host: rag-hero
-            subset: candidate
-          weight: 0
+  gatewayClassName: istio-waypoint
+  listeners:
+    - name: mesh
+      port: 15008
+      protocol: HBONE
+{{- end }}
 ---
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: RolloutAnalysis

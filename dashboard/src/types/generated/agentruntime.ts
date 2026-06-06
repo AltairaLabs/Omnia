@@ -4673,8 +4673,8 @@ export interface AgentRuntimeSpec {
     };
     /** trafficRouting configures integration with a service mesh for traffic splitting. */
     trafficRouting?: {
-      /** istio configures Istio VirtualService and DestinationRule mutation.
-       * The controller patches existing resources — it does not create them. */
+      /** istio is the legacy reference-existing form (mode: external). The operator
+       * patches weights on a VS + DR the user authored. */
       istio?: {
         /** destinationRule references the Istio DestinationRule to patch. */
         destinationRule: {
@@ -4693,6 +4693,20 @@ export interface AgentRuntimeSpec {
           routes: string[];
         };
       };
+      /** mesh configures operator-OWNED VirtualService + DestinationRule routing
+       * (mode: mesh). Subsets are derived from the operator's own track labels. */
+      mesh?: {
+        candidateSubset?: string;
+        /** hosts the VirtualService matches. Empty defaults to the agent's own
+         * Service DNS name (the east-west self-play path). */
+        hosts?: string[];
+        /** stableSubset / candidateSubset name the DestinationRule subsets. */
+        stableSubset?: string;
+      };
+      /** mode selects the delivery mechanism. Unset auto-resolves: "mesh" when the
+       * mesh is available, else "replicaWeighted". A legacy config that sets
+       * `istio` without `mode` resolves to "external". */
+      mode?: "mesh" | "replicaWeighted" | "external";
     };
   };
   /** runtime configures deployment settings like replicas and resources. */
@@ -6620,6 +6634,13 @@ export interface AgentRuntimeStatus {
      * across reconciles: a pause step only advances once
      * (now - stepStartedAt) >= the pause duration. */
     stepStartedAt?: string;
+    /** trafficRoutingMode is the mode the controller actually resolved to (may
+     * differ from spec.trafficRouting.mode when degraded). */
+    trafficRoutingMode?: string;
+    /** trafficWeightEnforced is true when delivered weight matches the reported
+     * step (mode mesh/external), false when approximated by replica ratio
+     * (mode replicaWeighted). Lets dashboards label the weight "approx". */
+    trafficWeightEnforced?: boolean;
   };
   /** serviceEndpoint is the internal Kubernetes service endpoint for the agent facade.
    * Format: {name}.{namespace}.svc.cluster.local:{port}

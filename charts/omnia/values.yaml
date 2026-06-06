@@ -438,6 +438,15 @@ operator:
   #           matchLabels:
   #             app.kubernetes.io/component: controller-manager
 
+# Rollout traffic-routing configuration
+rollout:
+  # -- Istio ambient mesh is enabled; allows AgentRuntime rollout
+  # trafficRouting mode=mesh (operator-owned VirtualService/DestinationRule).
+  # Requires ambient + a waypoint for the agent Service
+  # (see examples/values-istio-ambient.yaml). When false the operator
+  # falls back to replica-weighted routing for any mode=mesh AgentRuntime.
+  meshEnabled: false
+
 # Leader election configuration
 leaderElection:
   # -- Enable leader election for HA

@@ -138,6 +138,11 @@ const (
 	ConditionTypePackContentValid  = "PackContentValid"
 	ConditionTypeRolloutActive     = "RolloutActive"
 
+	// ConditionTypeTrafficRouting surfaces rollout traffic-routing health —
+	// False with a reason when the resolved mode degraded from what was
+	// requested (e.g. mesh unavailable) or weight is approximated.
+	ConditionTypeTrafficRouting = "TrafficRouting"
+
 	// ConditionTypeExternalAuth surfaces the effective facade auth
 	// configuration. False/Unreachable means the operator explicitly
 	// set spec.externalAuth.allowManagementPlane=false without

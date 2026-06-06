@@ -97,6 +97,8 @@ rules:
       - destinationrules
       - virtualservices
     verbs:
+      - create
+      - delete
       - get
       - list
       - patch

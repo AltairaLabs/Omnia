@@ -39,8 +39,8 @@ const (
 // need RBAC because the happy-path patches VirtualService weights and
 // DestinationRule subsets for canary rollouts.
 //
-// +kubebuilder:rbac:groups=networking.istio.io,resources=virtualservices,verbs=get;list;watch;patch;update
-// +kubebuilder:rbac:groups=networking.istio.io,resources=destinationrules,verbs=get;list;watch;patch;update
+// +kubebuilder:rbac:groups=networking.istio.io,resources=virtualservices,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=networking.istio.io,resources=destinationrules,verbs=get;list;watch;create;update;patch;delete
 
 // patchVirtualServiceWeights patches the HTTP route weights of an Istio
 // VirtualService for canary traffic splitting. It uses the unstructured client

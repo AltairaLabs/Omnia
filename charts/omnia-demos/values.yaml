@@ -396,8 +396,22 @@ sharepointHero:
 
   # Set true to activate the canary rollout (the "ship the change" demo beat).
   # Kept separate from enabled so install is stable and the rollout is triggered
-  # on demand. Requires the Istio VS/DR (rendered with enabled) to pre-exist.
+  # on demand. The rag-hero AgentRuntime uses trafficRouting.mode=mesh — the
+  # operator OWNS the VirtualService/DestinationRule, so no hand-authored VS/DR
+  # need pre-exist. Requires the operator's --mesh-enabled flag
+  # (rollout.meshEnabled=true on the omnia chart) + an ambient-enrolled
+  # omnia-demo namespace with a waypoint (see meshWaypoint below).
   shipCandidate: false
+
+  # Render the agent-Service waypoint Gateway (gateway-api class
+  # istio-waypoint). REQUIRED for the mode=mesh weighted split to take effect:
+  # ztunnel is L4 only; the waypoint performs the L7 stable/candidate routing.
+  # The omnia-demo namespace must ALSO be ambient-enrolled
+  # (kubectl label namespace omnia-demo istio.io/dataplane-mode=ambient).
+  # Disabled by default since not every demo cluster runs ambient — see
+  # SHAREPOINT_HERO.md. On-cluster validation of the waypoint + OPA policy-proxy
+  # interaction on the WebSocket path is still pending.
+  meshWaypoint: false
 
   # Demo-only SharePoint Graph adapter image, published by the standalone
   # .github/workflows/docker-push-demos.yml (NOT the product release).
