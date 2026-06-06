@@ -160,6 +160,12 @@ describe("pricing utilities", () => {
       expect(formatTokens(100)).toBe("100");
       expect(formatTokens(999)).toBe("999");
     });
+
+    it("should round fractional counts (Prometheus increase() extrapolation)", () => {
+      expect(formatTokens(630.0266666666668)).toBe("630");
+      expect(formatTokens(466.40416666666675)).toBe("466");
+      expect(formatTokens(163.62249999999997)).toBe("164");
+    });
   });
 
   describe("MODEL_PRICING constant", () => {
