@@ -87,6 +87,22 @@ func (h *captureHandler) ctx() context.Context {
 	return h.capturedCtx
 }
 
+// mustBuildWS builds the WebSocket server + mux via the real
+// buildWebSocketServer and fails the test on error. The auth-setup error path
+// no longer os.Exits (#1208); it returns an error, which these wiring tests
+// surface here. tracingProvider is always nil in this package's tests.
+func mustBuildWS(
+	t *testing.T, cfg *agent.Config, store session.Store,
+	handler facade.MessageHandler, metrics *agent.Metrics, ms media.Storage,
+) (*facade.Server, *http.ServeMux) {
+	t.Helper()
+	srv, mux, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, ms)
+	if err != nil {
+		t.Fatalf("buildWebSocketServer: %v", err)
+	}
+	return srv, mux
+}
+
 // TestBuildWebSocketServer_PseudonymizesUserIDHeader verifies the wiring
 // contract that the WebSocket facade, when constructed via the real
 // buildWebSocketServer that main() uses, pseudonymizes the X-User-Id header
@@ -117,7 +133,7 @@ func TestBuildWebSocketServer_PseudonymizesUserIDHeader(t *testing.T) {
 	}
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 
-	wsServer, mux := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
+	wsServer, mux := mustBuildWS(t, cfg, store, handler, metrics, nil)
 	_ = wsServer // shut down implicitly when ts is closed
 
 	ts := httptest.NewServer(mux)
@@ -187,7 +203,7 @@ func TestBuildWebSocketServer_StrictDefaultRejectsUnauthenticatedUpgrade(t *test
 	}
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 
-	_, mux := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
+	_, mux := mustBuildWS(t, cfg, store, handler, metrics, nil)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 
@@ -224,7 +240,7 @@ func TestBuildWebSocketServer_WiresMediaStorage(t *testing.T) {
 	handler := &captureHandler{name: "probe"}
 
 	// With nil media storage: facade reports none wired.
-	nilServer, _ := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
+	nilServer, _ := mustBuildWS(t, cfg, store, handler, metrics, nil)
 	if nilServer.HasMediaStorage() {
 		t.Error("facade reports media storage wired when nil was passed")
 	}
@@ -234,7 +250,7 @@ func TestBuildWebSocketServer_WiresMediaStorage(t *testing.T) {
 	metrics2 := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 
 	// With non-nil media storage: facade reports it wired.
-	withStorage, _ := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics2, nil, stubMediaStorage{})
+	withStorage, _ := mustBuildWS(t, cfg, store, handler, metrics2, stubMediaStorage{})
 	if !withStorage.HasMediaStorage() {
 		t.Error("facade reports media storage not wired; buildWebSocketServer " +
 			"is not forwarding the storage via facade.WithMediaStorage — " +
@@ -256,7 +272,7 @@ func TestBuildWebSocketServer_RegistersWebSocketRoutes(t *testing.T) {
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 	handler := &captureHandler{name: "probe"}
 
-	_, mux := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
+	_, mux := mustBuildWS(t, cfg, store, handler, metrics, nil)
 
 	// /ws should at minimum not 404 (will 400 on a non-upgrade GET).
 	req := httptest.NewRequest(http.MethodGet, "/ws", nil)

@@ -67,7 +67,11 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 		defer mediaCleanup()
 	}
 
-	wsServer, mux := buildWebSocketServer(cfg, log, store, handler, metrics, tracingProvider, mediaStorage)
+	wsServer, mux, err := buildWebSocketServer(cfg, log, store, handler, metrics, tracingProvider, mediaStorage)
+	if err != nil {
+		log.Error(err, "failed to build websocket server")
+		os.Exit(1)
+	}
 
 	if mediaStorage != nil {
 		mediaHandler := media.NewHandler(mediaStorage, log, media.WithHandlerMetrics(metrics))
@@ -102,7 +106,7 @@ func buildWebSocketServer(
 	metrics *agent.Metrics,
 	tracingProvider *tracing.Provider,
 	mediaStorage media.Storage,
-) (*facade.Server, *http.ServeMux) {
+) (*facade.Server, *http.ServeMux, error) {
 	wsConfig := facade.DefaultServerConfig()
 	wsConfig.SessionTTL = cfg.SessionTTL
 	wsConfig.PromptPackName = cfg.PromptPackName
@@ -133,13 +137,11 @@ func buildWebSocketServer(
 	// would mask real operator misconfig.
 	mgmtPlane, err := loadMgmtPlaneValidator(log)
 	if err != nil {
-		log.Error(err, "mgmt-plane validator load failed")
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("mgmt-plane validator load failed: %w", err)
 	}
 	chain, err := buildAuthChain(context.Background(), buildK8sClient(), log, cfg.AgentName, cfg.Namespace, mgmtPlane)
 	if err != nil {
-		log.Error(err, "auth chain build failed")
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("auth chain build failed: %w", err)
 	}
 	if len(chain) > 0 {
 		serverOpts = append(serverOpts, facade.WithAuthChain(chain))
@@ -160,7 +162,7 @@ func buildWebSocketServer(
 	mux.Handle("/api/agents/", wsServer)
 	mux.Handle("/metrics", promhttp.Handler())
 
-	return wsServer, mux
+	return wsServer, mux, nil
 }
 
 // newFacadeHTTPServer creates the facade HTTP server.
