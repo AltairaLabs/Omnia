@@ -1,4 +1,4 @@
-suite: dashboard PROMETHEUS_URL points at the bundled Prometheus sub-path
+suite: dashboard observability URLs (Prometheus sub-path + browser-reachable Grafana)
 release:
   name: omnia
 values:
@@ -42,3 +42,21 @@ tests:
     asserts:
       - notExists:
           path: data.PROMETHEUS_URL
+
+  - it: emits NEXT_PUBLIC_GRAFANA_URL from the explicit browser-reachable URL
+    set:
+      grafana.enabled: true
+      dashboard.grafana.url: "https://omnia.example.com/grafana"
+    asserts:
+      - equal:
+          path: data.NEXT_PUBLIC_GRAFANA_URL
+          value: "https://omnia.example.com/grafana"
+
+  - it: does NOT fall back to the in-cluster Grafana Service URL (unreachable from a browser)
+    # Grafana / Loki / Tempo links are rendered in the browser; the in-cluster
+    # Service URL only yields dead links. Guard against re-introducing it.
+    set:
+      grafana.enabled: true
+    asserts:
+      - notExists:
+          path: data.NEXT_PUBLIC_GRAFANA_URL

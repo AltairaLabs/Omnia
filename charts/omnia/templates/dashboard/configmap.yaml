@@ -29,11 +29,17 @@ data:
   NEXT_PUBLIC_READ_ONLY_MESSAGE: {{ .Values.dashboard.readOnlyMessage | quote }}
   {{- end }}
 
-  # Grafana integration (direct browser access, no proxy)
+  # Grafana integration (direct browser access, no proxy). The dashboard renders
+  # "View in Grafana" links — and the Loki/Tempo "Explore" deep-links — in the
+  # BROWSER, so this must be a browser-reachable URL. Set dashboard.grafana.url to
+  # wherever Grafana is exposed to users (e.g. https://<host>/grafana via the
+  # gateway). We deliberately do NOT fall back to the in-cluster Service URL
+  # (http://<release>-grafana:80): a browser can't reach it, so it only produces
+  # dead links (this also affects the Loki/Tempo Explore links, which target
+  # Grafana). When unset, the dashboard hides the links rather than render broken
+  # ones.
   {{- if .Values.dashboard.grafana.url }}
   NEXT_PUBLIC_GRAFANA_URL: {{ .Values.dashboard.grafana.url | quote }}
-  {{- else if .Values.grafana.enabled }}
-  NEXT_PUBLIC_GRAFANA_URL: "http://{{ .Release.Name }}-grafana:80"
   {{- end }}
   NEXT_PUBLIC_GRAFANA_PATH: {{ .Values.dashboard.grafana.path | quote }}
   NEXT_PUBLIC_GRAFANA_ORG_ID: {{ .Values.dashboard.grafana.orgId | quote }}
