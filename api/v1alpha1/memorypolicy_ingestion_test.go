@@ -18,6 +18,8 @@ package v1alpha1
 
 import "testing"
 
+const testSummarizerAgent = "agent"
+
 func TestIngestionAccessors_NilSafe(t *testing.T) {
 	var p *MemoryPolicy
 	if p.IngestionStrategy() != "" || p.IngestionSummarizer() != "" {
@@ -41,13 +43,13 @@ func TestIngestionAccessors_Unset(t *testing.T) {
 func TestIngestionAccessors_Set(t *testing.T) {
 	p := &MemoryPolicy{Spec: MemoryPolicySpec{Ingestion: &MemoryIngestionConfig{
 		Strategy:   "summaryThenChunk",
-		Summarizer: "agent",
+		Summarizer: testSummarizerAgent,
 		Chunk:      &MemoryChunkConfig{Size: 120, Overlap: 20},
 	}}}
 	if p.IngestionStrategy() != "summaryThenChunk" {
 		t.Fatalf("strategy: got %q", p.IngestionStrategy())
 	}
-	if p.IngestionSummarizer() != "agent" {
+	if p.IngestionSummarizer() != testSummarizerAgent {
 		t.Fatalf("summarizer: got %q", p.IngestionSummarizer())
 	}
 	size, overlap, ok := p.IngestionChunk()

@@ -31,6 +31,11 @@ import (
 	"github.com/altairalabs/omnia/internal/memory/ingestion"
 )
 
+const (
+	testWS           = "ws-1"
+	testTwoSentences = "First sentence. Second sentence."
+)
+
 // recordingInstitutionalStore embeds mockMemoryStore and overrides
 // SaveInstitutional to record calls for assertion.
 type recordingInstitutionalStore struct {
@@ -48,7 +53,7 @@ func TestIngestDocument_ChunkStrategy_SavesItemsWithAboutKey(t *testing.T) {
 	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
 	svc.SetIngestion(ingestion.Config{Strategy: ingestion.StrategyChunk, ChunkSize: 2, ChunkOverlap: 0}, nil)
 
-	err := svc.IngestDocument(context.Background(), "ws-1", ingestion.SourceDoc{
+	err := svc.IngestDocument(context.Background(), testWS, ingestion.SourceDoc{
 		Title: "Runbook", URL: testURLAllowed, Site: "allowed",
 		Text: "alpha beta gamma delta", // → 2 chunks: ["alpha beta", "gamma delta"]
 	})
@@ -56,7 +61,7 @@ func TestIngestDocument_ChunkStrategy_SavesItemsWithAboutKey(t *testing.T) {
 	require.Len(t, store.saved, 2)
 
 	first := store.saved[0]
-	assert.Equal(t, "ws-1", first.Scope[memory.ScopeWorkspaceID])
+	assert.Equal(t, testWS, first.Scope[memory.ScopeWorkspaceID])
 	assert.Equal(t, "alpha beta", first.Content)
 	assert.Equal(t, "sharepoint_doc", first.Metadata[memory.MetaKeyAboutKind])
 	assert.Equal(t, "https://sp/allowed/r.docx#0", first.Metadata[memory.MetaKeyAboutKey])
@@ -70,7 +75,7 @@ func TestIngestDocument_NoConfig_DefaultsToChunk(t *testing.T) {
 	store := &recordingInstitutionalStore{}
 	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
 	// No SetIngestion — zero Config must normalise to chunk with default geometry.
-	err := svc.IngestDocument(context.Background(), "ws-1", ingestion.SourceDoc{
+	err := svc.IngestDocument(context.Background(), testWS, ingestion.SourceDoc{
 		URL: testURLAllowed, Text: "alpha beta gamma",
 	})
 	require.NoError(t, err)
@@ -107,7 +112,7 @@ func TestIngestDocument_ExtractiveSummary_SavesOneItem(t *testing.T) {
 		Strategy: ingestion.StrategySummary, Summarizer: ingestion.SummarizerExtractive,
 	}, nil)
 
-	err := svc.IngestDocument(context.Background(), "ws-1", ingestion.SourceDoc{
+	err := svc.IngestDocument(context.Background(), testWS, ingestion.SourceDoc{
 		URL: testURLAllowed, Text: "First sentence. Second sentence. Third sentence.",
 	})
 	require.NoError(t, err)
@@ -123,7 +128,7 @@ func TestIngestDocument_AgentSummary_Enqueues(t *testing.T) {
 		Strategy: ingestion.StrategySummary, Summarizer: ingestion.SummarizerAgent,
 	}, queue)
 
-	err := svc.IngestDocument(context.Background(), "ws-1", ingestion.SourceDoc{
+	err := svc.IngestDocument(context.Background(), testWS, ingestion.SourceDoc{
 		URL: testURLAllowed, Text: "some doc text",
 	})
 	require.NoError(t, err)
@@ -140,8 +145,8 @@ func TestIngestDocument_AgentSummary_NoQueue_FallsBackToExtractive(t *testing.T)
 		Strategy: ingestion.StrategySummary, Summarizer: ingestion.SummarizerAgent,
 	}, nil) // no queue
 
-	err := svc.IngestDocument(context.Background(), "ws-1", ingestion.SourceDoc{
-		URL: testURLAllowed, Text: "First sentence. Second sentence.",
+	err := svc.IngestDocument(context.Background(), testWS, ingestion.SourceDoc{
+		URL: testURLAllowed, Text: testTwoSentences,
 	})
 	require.NoError(t, err)
 	require.Len(t, store.saved, 1, "no queue -> extractive fallback stores synchronously")
@@ -157,8 +162,8 @@ func TestResolveIngestionConfig_PolicyOverridesFallback(t *testing.T) {
 		}},
 	}})
 
-	err := svc.IngestDocument(context.Background(), "ws-1", ingestion.SourceDoc{
-		URL: testURLAllowed, Text: "First sentence. Second sentence.",
+	err := svc.IngestDocument(context.Background(), testWS, ingestion.SourceDoc{
+		URL: testURLAllowed, Text: testTwoSentences,
 	})
 	require.NoError(t, err)
 	require.Len(t, store.saved, 1, "policy switched chunk->summary, so one summary item")
@@ -173,8 +178,8 @@ func TestResolveIngestionConfig_NilPolicy_UsesFallback(t *testing.T) {
 	}, nil)
 	svc.SetPolicyLoader(&memory.StaticPolicyLoader{Policy: nil})
 
-	err := svc.IngestDocument(context.Background(), "ws-1", ingestion.SourceDoc{
-		URL: testURLAllowed, Text: "First sentence. Second sentence.",
+	err := svc.IngestDocument(context.Background(), testWS, ingestion.SourceDoc{
+		URL: testURLAllowed, Text: testTwoSentences,
 	})
 	require.NoError(t, err)
 	require.Len(t, store.saved, 1, "nil policy -> fallback summary strategy, one item")
@@ -187,7 +192,7 @@ func TestResolveIngestionConfig_LoaderError_UsesFallback(t *testing.T) {
 	svc.SetIngestion(ingestion.Config{Strategy: ingestion.StrategyChunk, ChunkSize: 2, ChunkOverlap: 0}, nil)
 	svc.SetPolicyLoader(erroringPolicyLoader{})
 
-	err := svc.IngestDocument(context.Background(), "ws-1", ingestion.SourceDoc{
+	err := svc.IngestDocument(context.Background(), testWS, ingestion.SourceDoc{
 		URL: testURLAllowed, Text: "alpha beta gamma delta", // → 2 chunks
 	})
 	require.NoError(t, err, "loader error must not block ingest")
@@ -207,8 +212,8 @@ func TestResolveIngestionConfig_PartialPolicy_FieldLevelFallback(t *testing.T) {
 		}},
 	}})
 
-	err := svc.IngestDocument(context.Background(), "ws-1", ingestion.SourceDoc{
-		URL: testURLAllowed, Text: "First sentence. Second sentence.",
+	err := svc.IngestDocument(context.Background(), testWS, ingestion.SourceDoc{
+		URL: testURLAllowed, Text: testTwoSentences,
 	})
 	require.NoError(t, err)
 	require.Len(t, store.saved, 1, "strategy from policy, summarizer from fallback -> one summary item")

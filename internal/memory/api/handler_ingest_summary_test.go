@@ -42,7 +42,7 @@ func newSummaryHandler(t *testing.T, store *recordingInstitutionalStore, queue i
 
 func TestSummaryCandidates_ReturnsPending(t *testing.T) {
 	queue := &fakeSummaryQueue{enqueued: []ingestion.WorkItem{{
-		WorkspaceID: "ws-1", AboutKey: testURLAllowed, Strategy: ingestion.StrategySummary,
+		WorkspaceID: testWS, AboutKey: testURLAllowed, Strategy: ingestion.StrategySummary,
 		Doc: ingestion.SourceDoc{URL: testURLAllowed, Text: "doc text"},
 	}}}
 	h := newSummaryHandler(t, &recordingInstitutionalStore{}, queue)
@@ -74,13 +74,13 @@ func TestSummaryCandidates_QueueDisabled_EmptyList(t *testing.T) {
 func TestSaveDocumentSummary_StoresAndCompletes(t *testing.T) {
 	store := &recordingInstitutionalStore{}
 	queue := &fakeSummaryQueue{enqueued: []ingestion.WorkItem{{
-		WorkspaceID: "ws-1", AboutKey: testURLAllowed, Strategy: ingestion.StrategySummary,
+		WorkspaceID: testWS, AboutKey: testURLAllowed, Strategy: ingestion.StrategySummary,
 		Doc: ingestion.SourceDoc{URL: testURLAllowed, Text: "doc text"},
 	}}}
 	h := newSummaryHandler(t, store, queue)
 
 	body, _ := json.Marshal(SaveDocumentSummaryRequest{
-		WorkspaceID: "ws-1", AboutKey: testURLAllowed, Summary: "the summary",
+		WorkspaceID: testWS, AboutKey: testURLAllowed, Summary: "the summary",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/summaries", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
@@ -104,7 +104,7 @@ func TestSaveDocumentSummary_MissingWorkspace_400(t *testing.T) {
 func TestSaveDocumentSummary_UnknownItem_404(t *testing.T) {
 	h := newSummaryHandler(t, &recordingInstitutionalStore{}, &fakeSummaryQueue{})
 	body, _ := json.Marshal(SaveDocumentSummaryRequest{
-		WorkspaceID: "ws-1", AboutKey: "does-not-exist", Summary: "s",
+		WorkspaceID: testWS, AboutKey: "does-not-exist", Summary: "s",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/summaries", bytes.NewReader(body))
 	rr := httptest.NewRecorder()

@@ -39,7 +39,7 @@ func newTestQueue(t *testing.T) *FileSummaryQueue {
 func sampleItem() WorkItem {
 	return WorkItem{
 		WorkspaceID:  "ws-1",
-		Doc:          SourceDoc{Title: "Runbook", URL: "https://sp/allowed/r.docx", Site: "allowed", Text: "alpha beta gamma"},
+		Doc:          SourceDoc{Title: testDocTitle, URL: "https://sp/allowed/r.docx", Site: "allowed", Text: "alpha beta gamma"},
 		Strategy:     StrategySummary,
 		ChunkSize:    200,
 		ChunkOverlap: 40,
@@ -59,7 +59,7 @@ func TestFileSummaryQueue_EnqueueListGet_RoundTrips(t *testing.T) {
 
 	got, err := q.Get(context.Background(), "ws-1", "https://sp/allowed/r.docx")
 	require.NoError(t, err)
-	assert.Equal(t, "Runbook", got.Doc.Title)
+	assert.Equal(t, testDocTitle, got.Doc.Title)
 	assert.Equal(t, 200, got.ChunkSize)
 }
 
