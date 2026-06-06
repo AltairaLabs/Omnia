@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -34,6 +35,17 @@ import (
 const (
 	servicePort = 8080
 	healthPort  = 8081
+	metricsPort = 9090
+)
+
+// Prometheus pod-annotation keys for annotation-driven metrics scraping.
+// The chart's session-api / memory-api scrape jobs relabel __address__
+// from prometheus.io/port, so without these the target falls back to the
+// declared HTTP/health ports (which don't serve /metrics) and stays DOWN.
+const (
+	annotationPrometheusScrape = "prometheus.io/scrape"
+	annotationPrometheusPort   = "prometheus.io/port"
+	annotationPrometheusPath   = "prometheus.io/path"
 )
 
 // Label key constants for service groups.
@@ -522,6 +534,11 @@ func buildServiceDeployment(
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels,
+					Annotations: map[string]string{
+						annotationPrometheusScrape: "true",
+						annotationPrometheusPort:   strconv.Itoa(metricsPort),
+						annotationPrometheusPath:   "/metrics",
+					},
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: serviceAccountName(name),
@@ -540,6 +557,11 @@ func buildServiceDeployment(
 								{
 									Name:          "health",
 									ContainerPort: healthPort,
+									Protocol:      corev1.ProtocolTCP,
+								},
+								{
+									Name:          "metrics",
+									ContainerPort: metricsPort,
 									Protocol:      corev1.ProtocolTCP,
 								},
 							},

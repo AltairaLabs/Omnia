@@ -1663,6 +1663,27 @@ prometheus:
           target_label: namespace
         - source_labels: [__meta_kubernetes_pod_name]
           target_label: pod
+    # Scrape Omnia memory-api pods (cache lookups, write suppression, Redis/worker health)
+    - job_name: 'omnia-memory-api'
+      kubernetes_sd_configs:
+        - role: pod
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+          action: keep
+          regex: memory-api
+        - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+          action: replace
+          regex: ([^:]+)(?::\d+)?;(\d+)
+          replacement: $1:$2
+          target_label: __address__
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod
     # Scrape Omnia eval-worker pods (eval execution, event processing, stream lag)
     - job_name: 'omnia-eval-worker'
       kubernetes_sd_configs:

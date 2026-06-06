@@ -35,6 +35,20 @@ const (
 	testRedisSvcNamespace = "data"
 )
 
+// assertPrometheusAnnotations asserts the annotation-driven metrics
+// scrape contract: the pod template must carry prometheus.io/scrape,
+// prometheus.io/port=9090, and prometheus.io/path=/metrics, plus its
+// config-hash annotation must survive (don't regress the rollout signal).
+func assertPrometheusAnnotations(t *testing.T, anno map[string]string) {
+	t.Helper()
+	require.NotNil(t, anno)
+	assert.Equal(t, "true", anno["prometheus.io/scrape"])
+	assert.Equal(t, "9090", anno["prometheus.io/port"])
+	assert.Equal(t, "/metrics", anno["prometheus.io/path"])
+	assert.NotEmpty(t, anno[annotationConfigHash],
+		"config-hash annotation must survive alongside the prometheus.io/* annotations")
+}
+
 func newTestServiceGroup(name string) omniav1alpha1.WorkspaceServiceGroup {
 	return omniav1alpha1.WorkspaceServiceGroup{
 		Name: name,
@@ -83,13 +97,19 @@ func TestBuildSessionDeployment(t *testing.T) {
 	assert.Contains(t, container.Args, "--service-group=default")
 
 	// Ports
-	require.Len(t, container.Ports, 2)
+	require.Len(t, container.Ports, 3)
 	portNames := map[string]int32{}
 	for _, p := range container.Ports {
 		portNames[p.Name] = p.ContainerPort
 	}
 	assert.Equal(t, int32(servicePort), portNames["http"])
 	assert.Equal(t, int32(healthPort), portNames["health"])
+	assert.Equal(t, int32(metricsPort), portNames["metrics"])
+
+	// Prometheus scrape annotations — the chart's annotation-driven
+	// scrape job relabels __address__ from prometheus.io/port; without
+	// these the target falls back to :8080 (no /metrics) and stays DOWN.
+	assertPrometheusAnnotations(t, dep.Spec.Template.Annotations)
 
 	// Probes
 	require.NotNil(t, container.LivenessProbe)
@@ -323,6 +343,20 @@ func TestBuildMemoryDeployment(t *testing.T) {
 	require.NotNil(t, podNS.ValueFrom, "POD_NAMESPACE must come from downward API, not a literal")
 	require.NotNil(t, podNS.ValueFrom.FieldRef)
 	assert.Equal(t, "metadata.namespace", podNS.ValueFrom.FieldRef.FieldPath)
+
+	// Metrics port — memory-api serves /metrics on :9090, which must be a
+	// declared container port for the annotation-driven scrape to land.
+	var hasMetricsPort bool
+	for _, p := range container.Ports {
+		if p.Name == "metrics" {
+			hasMetricsPort = true
+			assert.Equal(t, int32(metricsPort), p.ContainerPort)
+		}
+	}
+	assert.True(t, hasMetricsPort, "memory-api container missing :9090 metrics port")
+
+	// Prometheus scrape annotations + surviving config-hash annotation.
+	assertPrometheusAnnotations(t, dep.Spec.Template.Annotations)
 }
 
 // TestBuildMemoryDeployment_AnnotatesConfigHash proves a providerRef
