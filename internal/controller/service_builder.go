@@ -33,9 +33,10 @@ import (
 )
 
 const (
-	servicePort = 8080
-	healthPort  = 8081
-	metricsPort = 9090
+	servicePort     = 8080
+	healthPort      = 8081
+	metricsPort     = 9090
+	metricsPortName = "metrics"
 )
 
 // Prometheus pod-annotation keys for annotation-driven metrics scraping.
@@ -535,7 +536,7 @@ func buildServiceDeployment(
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels,
 					Annotations: map[string]string{
-						annotationPrometheusScrape: "true",
+						annotationPrometheusScrape: labelValueTrue,
 						annotationPrometheusPort:   strconv.Itoa(metricsPort),
 						annotationPrometheusPath:   "/metrics",
 					},
@@ -560,7 +561,7 @@ func buildServiceDeployment(
 									Protocol:      corev1.ProtocolTCP,
 								},
 								{
-									Name:          "metrics",
+									Name:          metricsPortName,
 									ContainerPort: metricsPort,
 									Protocol:      corev1.ProtocolTCP,
 								},

@@ -104,7 +104,7 @@ func TestBuildSessionDeployment(t *testing.T) {
 	}
 	assert.Equal(t, int32(servicePort), portNames["http"])
 	assert.Equal(t, int32(healthPort), portNames["health"])
-	assert.Equal(t, int32(metricsPort), portNames["metrics"])
+	assert.Equal(t, int32(metricsPort), portNames[metricsPortName])
 
 	// Prometheus scrape annotations — the chart's annotation-driven
 	// scrape job relabels __address__ from prometheus.io/port; without
@@ -348,7 +348,7 @@ func TestBuildMemoryDeployment(t *testing.T) {
 	// declared container port for the annotation-driven scrape to land.
 	var hasMetricsPort bool
 	for _, p := range container.Ports {
-		if p.Name == "metrics" {
+		if p.Name == metricsPortName {
 			hasMetricsPort = true
 			assert.Equal(t, int32(metricsPort), p.ContainerPort)
 		}
