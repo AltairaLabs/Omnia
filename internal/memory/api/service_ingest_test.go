@@ -164,3 +164,53 @@ func TestResolveIngestionConfig_PolicyOverridesFallback(t *testing.T) {
 	require.Len(t, store.saved, 1, "policy switched chunk->summary, so one summary item")
 	assert.Equal(t, "summary", store.saved[0].Metadata[ingestion.MetaKeyKind])
 }
+
+func TestResolveIngestionConfig_NilPolicy_UsesFallback(t *testing.T) {
+	store := &recordingInstitutionalStore{}
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetIngestion(ingestion.Config{
+		Strategy: ingestion.StrategySummary, Summarizer: ingestion.SummarizerExtractive,
+	}, nil)
+	svc.SetPolicyLoader(&memory.StaticPolicyLoader{Policy: nil})
+
+	err := svc.IngestDocument(context.Background(), "ws-1", ingestion.SourceDoc{
+		URL: testURLAllowed, Text: "First sentence. Second sentence.",
+	})
+	require.NoError(t, err)
+	require.Len(t, store.saved, 1, "nil policy -> fallback summary strategy, one item")
+	assert.Equal(t, "summary", store.saved[0].Metadata[ingestion.MetaKeyKind])
+}
+
+func TestResolveIngestionConfig_LoaderError_UsesFallback(t *testing.T) {
+	store := &recordingInstitutionalStore{}
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetIngestion(ingestion.Config{Strategy: ingestion.StrategyChunk, ChunkSize: 2, ChunkOverlap: 0}, nil)
+	svc.SetPolicyLoader(erroringPolicyLoader{})
+
+	err := svc.IngestDocument(context.Background(), "ws-1", ingestion.SourceDoc{
+		URL: testURLAllowed, Text: "alpha beta gamma delta", // → 2 chunks
+	})
+	require.NoError(t, err, "loader error must not block ingest")
+	require.Len(t, store.saved, 2, "loader error -> fallback chunk strategy, ingest proceeds")
+}
+
+func TestResolveIngestionConfig_PartialPolicy_FieldLevelFallback(t *testing.T) {
+	store := &recordingInstitutionalStore{}
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	// Fallback carries the summarizer + chunk geometry; policy supplies only strategy.
+	svc.SetIngestion(ingestion.Config{
+		Summarizer: ingestion.SummarizerExtractive, ChunkSize: 2, ChunkOverlap: 0,
+	}, nil)
+	svc.SetPolicyLoader(&memory.StaticPolicyLoader{Policy: &omniav1alpha1.MemoryPolicy{
+		Spec: omniav1alpha1.MemoryPolicySpec{Ingestion: &omniav1alpha1.MemoryIngestionConfig{
+			Strategy: ingestion.StrategySummary,
+		}},
+	}})
+
+	err := svc.IngestDocument(context.Background(), "ws-1", ingestion.SourceDoc{
+		URL: testURLAllowed, Text: "First sentence. Second sentence.",
+	})
+	require.NoError(t, err)
+	require.Len(t, store.saved, 1, "strategy from policy, summarizer from fallback -> one summary item")
+	assert.Equal(t, "summary", store.saved[0].Metadata[ingestion.MetaKeyKind])
+}

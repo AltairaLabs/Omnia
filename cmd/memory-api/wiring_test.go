@@ -773,7 +773,7 @@ func TestBuildAPIMux_IngestRouteWiredWithChunkStrategy(t *testing.T) {
 	handler.ServeHTTP(rr, req)
 
 	if rr.Code == http.StatusNotFound {
-		t.Errorf("POST /api/v1/institutional/ingest not registered; got 404 — SetIngestionStrategy wiring may be broken")
+		t.Errorf("POST /api/v1/institutional/ingest not registered; got 404 — SetIngestion wiring may be broken")
 	}
 }
 
