@@ -36,6 +36,11 @@ import (
 // applyEnvtestCounter gives each spec a unique resource suffix.
 var applyEnvtestCounter uint64
 
+const (
+	testAppLabelKey      = "app"
+	testClaudeProviderNm = "claude-provider"
+)
+
 var _ = Describe("AgentRuntime applyTrafficRouting dispatch (envtest)", func() {
 	var (
 		ctx       context.Context
@@ -63,7 +68,7 @@ var _ = Describe("AgentRuntime applyTrafficRouting dispatch (envtest)", func() {
 
 	// newDeployment builds a minimal Deployment with the given replicas.
 	newDeployment := func(name string, replicas int32) *appsv1.Deployment {
-		labels := map[string]string{"app": name}
+		labels := map[string]string{testAppLabelKey: name}
 		return &appsv1.Deployment{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 			Spec: appsv1.DeploymentSpec{
@@ -72,7 +77,7 @@ var _ = Describe("AgentRuntime applyTrafficRouting dispatch (envtest)", func() {
 				Template: corev1.PodTemplateSpec{
 					ObjectMeta: metav1.ObjectMeta{Labels: labels},
 					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{{Name: "agent", Image: "busybox"}},
+						Containers: []corev1.Container{{Name: testEvalAgentName, Image: "busybox"}},
 					},
 				},
 			},
@@ -155,8 +160,8 @@ var _ = Describe("AgentRuntime applyTrafficRouting dispatch (envtest)", func() {
 				PromptPackRef: omniav1alpha1.PromptPackRef{Name: "p", Version: ptr.To("v1")},
 				Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket, Port: &port},
 				Providers: []omniav1alpha1.NamedProviderRef{{
-					Name:        "default",
-					ProviderRef: omniav1alpha1.ProviderRef{Name: "claude-provider"},
+					Name:        defaultSvcGroupName,
+					ProviderRef: omniav1alpha1.ProviderRef{Name: testClaudeProviderNm},
 				}},
 				Runtime: &omniav1alpha1.RuntimeConfig{Replicas: ptr.To(int32(4))},
 				Rollout: &omniav1alpha1.RolloutConfig{

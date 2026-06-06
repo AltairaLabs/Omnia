@@ -33,6 +33,15 @@ const (
 	trackLabelKey = "track"
 	trackStable   = "stable"
 	trackCanary   = "canary"
+
+	// Istio resource spec field keys reused when building unstructured objects.
+	fieldName        = "name"
+	fieldHost        = "host"
+	fieldSubset      = "subset"
+	fieldLabels      = "labels"
+	fieldRoute       = "route"
+	fieldDestination = "destination"
+	fieldWeight      = "weight"
 )
 
 // meshRoutingName is the shared name for the operator-owned VS + DR of an agent.
@@ -51,10 +60,10 @@ func buildOwnedDestinationRule(agentName, namespace, host string, mesh *omniav1a
 	dr.SetKind(istioDestinationRuleKind)
 	dr.SetName(meshRoutingName(agentName))
 	dr.SetNamespace(namespace)
-	_ = unstructured.SetNestedField(dr.Object, host, "spec", "host")
+	_ = unstructured.SetNestedField(dr.Object, host, "spec", fieldHost)
 	_ = unstructured.SetNestedSlice(dr.Object, []interface{}{
-		map[string]interface{}{"name": mesh.StableSubset, "labels": map[string]interface{}{trackLabelKey: trackStable}},
-		map[string]interface{}{"name": mesh.CandidateSubset, "labels": map[string]interface{}{trackLabelKey: trackCanary}},
+		map[string]interface{}{fieldName: mesh.StableSubset, fieldLabels: map[string]interface{}{trackLabelKey: trackStable}},
+		map[string]interface{}{fieldName: mesh.CandidateSubset, fieldLabels: map[string]interface{}{trackLabelKey: trackCanary}},
 	}, "spec", "subsets")
 	return dr
 }
@@ -75,15 +84,15 @@ func buildOwnedVirtualService(agentName, namespace string, hosts []string, mesh 
 	_ = unstructured.SetNestedSlice(vs.Object, hostIfaces, "spec", "hosts")
 	_ = unstructured.SetNestedSlice(vs.Object, []interface{}{
 		map[string]interface{}{
-			"name": "rollout",
-			"route": []interface{}{
+			fieldName: "rollout",
+			fieldRoute: []interface{}{
 				map[string]interface{}{
-					"destination": map[string]interface{}{"host": host, "subset": mesh.StableSubset},
-					"weight":      int64(100 - candidateWeight),
+					fieldDestination: map[string]interface{}{fieldHost: host, fieldSubset: mesh.StableSubset},
+					fieldWeight:      int64(100 - candidateWeight),
 				},
 				map[string]interface{}{
-					"destination": map[string]interface{}{"host": host, "subset": mesh.CandidateSubset},
-					"weight":      int64(candidateWeight),
+					fieldDestination: map[string]interface{}{fieldHost: host, fieldSubset: mesh.CandidateSubset},
+					fieldWeight:      int64(candidateWeight),
 				},
 			},
 		},

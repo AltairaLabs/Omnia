@@ -18,13 +18,18 @@ package v1alpha1
 
 import "testing"
 
+const (
+	testSubsetStable = "stable"
+	testSubsetCanary = "canary"
+)
+
 func TestMeshTrafficRouting_DeepCopy(t *testing.T) {
 	in := &TrafficRoutingConfig{
 		Mode: "mesh",
 		Mesh: &MeshTrafficRouting{
 			Hosts:           []string{"agent.ns.svc.cluster.local"},
-			StableSubset:    "stable",
-			CandidateSubset: "canary",
+			StableSubset:    testSubsetStable,
+			CandidateSubset: testSubsetCanary,
 		},
 	}
 	out := in.DeepCopy()

@@ -25,7 +25,7 @@ import (
 )
 
 func meshCfg() *omniav1alpha1.MeshTrafficRouting {
-	return &omniav1alpha1.MeshTrafficRouting{StableSubset: "stable", CandidateSubset: "canary"}
+	return &omniav1alpha1.MeshTrafficRouting{StableSubset: trackStable, CandidateSubset: trackCanary}
 }
 
 func TestBuildOwnedDestinationRule_Subsets(t *testing.T) {
@@ -36,7 +36,7 @@ func TestBuildOwnedDestinationRule_Subsets(t *testing.T) {
 	}
 	first := subsets[0].(map[string]interface{})
 	labels, _, _ := unstructured.NestedStringMap(first, "labels")
-	if labels["track"] != "stable" {
+	if labels["track"] != trackStable {
 		t.Fatalf("stable subset must select track=stable, got %v", labels)
 	}
 }
@@ -52,7 +52,7 @@ func TestBuildOwnedVirtualService_Weights(t *testing.T) {
 		w, _, _ := unstructured.NestedInt64(dm, "weight")
 		weights[subset] = w
 	}
-	if weights["stable"] != 70 || weights["canary"] != 30 {
+	if weights[trackStable] != 70 || weights[trackCanary] != 30 {
 		t.Fatalf("want stable=70 canary=30, got %v", weights)
 	}
 }

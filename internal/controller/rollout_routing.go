@@ -35,6 +35,10 @@ const (
 	TrafficModeMesh            = "mesh"
 	TrafficModeReplicaWeighted = "replicaWeighted"
 	TrafficModeExternal        = "external"
+
+	// istioNetworkingGroup is the bare API group for Istio networking CRDs
+	// (distinct from istioNetworkingAPIVersion which carries the version).
+	istioNetworkingGroup = "networking.istio.io"
 )
 
 // resolveTrafficModeFor is the pure resolution rule (testable without a client).
@@ -71,8 +75,8 @@ func (r *AgentRuntimeReconciler) meshAvailable(_ context.Context) bool {
 	if !r.MeshEnabled {
 		return false
 	}
-	mapper := r.Client.RESTMapper()
-	_, err := mapper.RESTMapping(schema.GroupKind{Group: "networking.istio.io", Kind: istioVirtualServiceKind})
+	mapper := r.RESTMapper()
+	_, err := mapper.RESTMapping(schema.GroupKind{Group: istioNetworkingGroup, Kind: istioVirtualServiceKind})
 	return err == nil
 }
 
