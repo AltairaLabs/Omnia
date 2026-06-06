@@ -440,9 +440,26 @@ sharepointHero:
   # In-cluster Prometheus query endpoint (kube-prometheus-stack).
   prometheusUrl: http://prometheus-operated.monitoring:9090
 
-  # Arena self-play loadtest sizing.
+  # Arena self-play loadtest: generates realistic multi-turn traffic against the
+  # live rag-hero agent (fleet mode over WebSocket), driving candidate-variant
+  # eval metrics that the rollout gate reads.
   loadtest:
     trials: 200
     concurrency: 5
     vusPerWorker: 2
     budgetLimit: "25.00"
+    workers: 1
+    # Linear concurrency ramp so traffic builds smoothly during the demo.
+    ramp:
+      up: "1m"
+      down: "30s"
+    # Record sessions so the generated traffic is visible in the dashboard.
+    sessionRecording: true
+    # ArenaSource reconcile interval for the bundle ConfigMap.
+    syncInterval: "5m"
+    # User-simulator provider (the self-play "SRE" turns). A cheap model keeps
+    # load-test cost down; reuses the baseline credential secret by default.
+    selfplay:
+      type: claude
+      model: claude-haiku-4-5-20251001
+      secretRef: anthropic-api-key

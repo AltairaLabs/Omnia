@@ -1,0 +1,86 @@
+{{- if .Values.sharepointHero.enabled }}
+{{- $ns := .Values.namespace }}
+{{- $hero := .Values.sharepointHero }}
+{{- $root := "files/arena/sharepoint-hero" }}
+---
+# Arena bundle as a ConfigMap. The ArenaSource ConfigMap fetcher writes each key
+# as a file, decoding "__" back to "/" for nested directories — so we emit one
+# key per source file under files/arena/sharepoint-hero/ rather than an opaque
+# tar.gz. Keep the source files reviewable; this template assembles them.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-hero-arena-bundle
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+data:
+{{- range $path, $bytes := .Files.Glob (printf "%s/**" $root) }}
+  {{ $path | trimPrefix (printf "%s/" $root) | replace "/" "__" }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+---
+# User-simulator provider for self-play (the "SRE" follow-up turns). Resolved by
+# the arena worker and remapped onto the config's "selfplay" provider id.
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: rag-hero-selfplay
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  type: {{ $hero.loadtest.selfplay.type }}
+  model: {{ $hero.loadtest.selfplay.model }}
+  credential:
+    secretRef:
+      name: {{ $hero.loadtest.selfplay.secretRef }}
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaSource
+metadata:
+  name: rag-hero-arena
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  type: configmap
+  configMap:
+    name: rag-hero-arena-bundle
+  interval: {{ $hero.loadtest.syncInterval | quote }}
+---
+# Load-test job: drives multi-turn self-play traffic against the LIVE rag-hero
+# agent (fleet mode over WebSocket). The default provider group is the agent
+# itself, so the facade's variant split routes traffic to stable/candidate and
+# the candidate emits the omnia_eval_* metrics the rollout gate reads.
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaJob
+metadata:
+  name: rag-hero-loadtest
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  sourceRef:
+    name: rag-hero-arena
+  arenaFile: config.arena.yaml
+  type: loadtest
+  trials: {{ $hero.loadtest.trials }}
+  sessionRecording: {{ $hero.loadtest.sessionRecording }}
+  providers:
+    default:
+      - agentRef:
+          name: rag-hero
+    selfplay:
+      - providerRef:
+          name: rag-hero-selfplay
+  loadTest:
+    concurrency: {{ $hero.loadtest.concurrency }}
+    vusPerWorker: {{ $hero.loadtest.vusPerWorker }}
+    budgetLimit: {{ $hero.loadtest.budgetLimit | quote }}
+    ramp:
+      up: {{ $hero.loadtest.ramp.up | quote }}
+      down: {{ $hero.loadtest.ramp.down | quote }}
+  workers:
+    replicas: {{ $hero.loadtest.workers }}
+{{- end }}

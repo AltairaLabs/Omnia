@@ -1,0 +1,12 @@
+apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: PromptConfig
+metadata:
+  name: assistant
+spec:
+  task_type: assistant
+  version: v1.0.0
+  description: >-
+    Placeholder prompt for fleet-mode load testing. The rag-hero AgentRuntime
+    runs its own PromptPack; this template is never used for inference, it only
+    satisfies arena LoadConfig validation.
+  system_template: "You are a helpful assistant."
