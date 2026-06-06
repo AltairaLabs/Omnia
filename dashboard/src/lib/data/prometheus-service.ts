@@ -250,13 +250,16 @@ export class PrometheusService {
       inputTokens,
       outputTokens,
       projectedMonthlyCost: totalCost * 30,
+      // Token share — these label the "Total Tokens" card, so derive them from
+      // token counts (not cost). Output tokens are priced higher, so a cost-based
+      // ratio would contradict the token counts shown on the same card.
       inputPercent:
-        totalInputCost + totalOutputCost > 0
-          ? (totalInputCost / (totalInputCost + totalOutputCost)) * 100
+        inputTokens + outputTokens > 0
+          ? (inputTokens / (inputTokens + outputTokens)) * 100
           : 0,
       outputPercent:
-        totalInputCost + totalOutputCost > 0
-          ? (totalOutputCost / (totalInputCost + totalOutputCost)) * 100
+        inputTokens + outputTokens > 0
+          ? (outputTokens / (inputTokens + outputTokens)) * 100
           : 0,
     };
   }

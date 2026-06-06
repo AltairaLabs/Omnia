@@ -162,5 +162,7 @@ export function formatTokens(tokens: number): string {
   if (tokens >= 1_000) {
     return `${(tokens / 1_000).toFixed(1)}K`;
   }
-  return tokens.toString();
+  // Token counts derived from Prometheus increase() are fractional; tokens are
+  // whole units, so round for display instead of printing e.g. "630.0266666".
+  return Math.round(tokens).toLocaleString();
 }
