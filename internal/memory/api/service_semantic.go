@@ -56,7 +56,11 @@ func (s *MemoryService) RetrieveSemantic(ctx context.Context, workspaceID, query
 	}
 	out := make([]*memory.Memory, 0, len(mems))
 	for _, m := range mems {
-		if m == nil || !filter.Allowed(m.Metadata) {
+		if m == nil {
+			continue
+		}
+		if !filter.Allowed(m.Metadata) {
+			retrievalDeniedTotal.Inc()
 			continue
 		}
 		out = append(out, m)

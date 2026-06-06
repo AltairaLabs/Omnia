@@ -1193,8 +1193,12 @@ func createEmbeddingService(ctx context.Context, providerName string, store *mem
 		return nil
 	}
 
-	adapter := &embeddingProviderAdapter{inner: embeddingProvider}
-	svc := memory.NewEmbeddingService(store, adapter, log).WithModelName(providerName)
+	// Wrap with the metered decorator so every Embed caller — the dedup
+	// similarity path (embeddingSvc.Provider().Embed), the EmbeddingService
+	// write path, and the re-embed worker — emits the embed_* metrics
+	// without touching individual call sites.
+	metered := memory.NewMeteredEmbeddingProvider(&embeddingProviderAdapter{inner: embeddingProvider})
+	svc := memory.NewEmbeddingService(store, metered, log).WithModelName(providerName)
 	log.Info("embedding service enabled",
 		"provider", providerName,
 		"type", provider.Spec.Type,

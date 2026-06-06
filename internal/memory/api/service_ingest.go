@@ -21,6 +21,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/altairalabs/omnia/internal/memory"
 	"github.com/altairalabs/omnia/internal/memory/ingestion"
@@ -42,25 +43,54 @@ func (s *MemoryService) SetIngestion(fallback ingestion.Config, queue ingestion.
 // either stores items synchronously (chunk, or extractive summary) or enqueues
 // the document for the async summarizer agent. Returns 202-worthy success;
 // embedding is left to the ReembedWorker.
-func (s *MemoryService) IngestDocument(ctx context.Context, workspaceID string, doc ingestion.SourceDoc) error {
+func (s *MemoryService) IngestDocument(ctx context.Context, workspaceID string, doc ingestion.SourceDoc) (err error) {
 	cfg := s.resolveIngestionConfig(ctx)
+	strategy := cfg.EffectiveStrategy()
+	start := time.Now()
+	enqueued := false
+	items := 0
+	defer func() {
+		ingestDurationSeconds.WithLabelValues(strategy).Observe(time.Since(start).Seconds())
+		ingestDocumentsTotal.WithLabelValues(strategy, ingestOutcome(err, enqueued)).Inc()
+		if items > 0 {
+			ingestItemsTotal.WithLabelValues(strategy).Add(float64(items))
+		}
+	}()
+
 	if cfg.UsesSummarizer() {
-		return s.ingestWithSummary(ctx, workspaceID, doc, cfg)
+		items, enqueued, err = s.ingestWithSummary(ctx, workspaceID, doc, cfg)
+		return err
 	}
-	items, err := ingestion.NewChunkStrategy(cfg.ChunkSize, cfg.ChunkOverlap).Ingest(ctx, doc)
-	if err != nil {
-		return fmt.Errorf("ingest %q: %w", doc.URL, err)
+	chunks, ingestErr := ingestion.NewChunkStrategy(cfg.ChunkSize, cfg.ChunkOverlap).Ingest(ctx, doc)
+	if ingestErr != nil {
+		err = fmt.Errorf("ingest %q: %w", doc.URL, ingestErr)
+		return err
 	}
-	return s.saveItems(ctx, workspaceID, doc, items)
+	items = len(chunks)
+	err = s.saveItems(ctx, workspaceID, doc, chunks)
+	return err
+}
+
+// ingestOutcome maps the IngestDocument result to a documents_total
+// outcome label: error wins, then the async-enqueue path, else success.
+func ingestOutcome(err error, enqueued bool) string {
+	switch {
+	case err != nil:
+		return ingestOutcomeError
+	case enqueued:
+		return ingestOutcomeEnqueued
+	default:
+		return ingestOutcomeSuccess
+	}
 }
 
 // ingestWithSummary routes summary / summaryThenChunk strategies. The agent
 // backend enqueues raw text (async); extractive summarizes inline. When the
 // agent backend is selected but no queue is wired, it falls back to extractive
 // so ingestion still completes.
-func (s *MemoryService) ingestWithSummary(ctx context.Context, workspaceID string, doc ingestion.SourceDoc, cfg ingestion.Config) error {
+func (s *MemoryService) ingestWithSummary(ctx context.Context, workspaceID string, doc ingestion.SourceDoc, cfg ingestion.Config) (items int, enqueued bool, err error) {
 	if cfg.Summarizer == ingestion.SummarizerAgent && s.summaryQueue != nil {
-		return s.summaryQueue.Enqueue(ctx, ingestion.WorkItem{
+		err = s.summaryQueue.Enqueue(ctx, ingestion.WorkItem{
 			WorkspaceID:  workspaceID,
 			Doc:          doc,
 			Strategy:     cfg.EffectiveStrategy(),
@@ -68,6 +98,7 @@ func (s *MemoryService) ingestWithSummary(ctx context.Context, workspaceID strin
 			ChunkOverlap: cfg.ChunkOverlap,
 			AboutKey:     doc.URL,
 		})
+		return 0, err == nil, err
 	}
 	if cfg.Summarizer == ingestion.SummarizerAgent {
 		s.log.Info("agent summarizer unavailable; falling back to extractive",
@@ -75,9 +106,10 @@ func (s *MemoryService) ingestWithSummary(ctx context.Context, workspaceID strin
 	}
 	summary, err := ingestion.NewExtractiveSummarizer(0, 0).Summarize(ctx, doc.Text)
 	if err != nil {
-		return fmt.Errorf("summarize %q: %w", doc.URL, err)
+		return 0, false, fmt.Errorf("summarize %q: %w", doc.URL, err)
 	}
-	return s.saveItems(ctx, workspaceID, doc, ingestion.PostProcess(summary, cfg, doc))
+	processed := ingestion.PostProcess(summary, cfg, doc)
+	return len(processed), false, s.saveItems(ctx, workspaceID, doc, processed)
 }
 
 // saveItems persists each emitted item keyed by
