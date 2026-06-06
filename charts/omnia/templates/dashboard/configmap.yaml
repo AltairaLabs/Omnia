@@ -42,7 +42,11 @@ data:
   {{- if .Values.dashboard.prometheus.url }}
   PROMETHEUS_URL: {{ .Values.dashboard.prometheus.url | quote }}
   {{- else if .Values.prometheus.enabled }}
-  PROMETHEUS_URL: "http://{{ .Release.Name }}-prometheus-server:80"
+  {{- /* The bundled Prometheus is served under server.prefixURL (default
+         /prometheus), so its API lives at <prefix>/api/v1/... — include the
+         prefix here or the dashboard's /api/v1 queries 404 and the UI reports
+         "Prometheus not configured". */}}
+  PROMETHEUS_URL: "http://{{ .Release.Name }}-prometheus-server:80{{ .Values.prometheus.server.prefixURL | default "" }}"
   {{- end }}
 
   # Loki and Tempo integration (for logs/traces links)
