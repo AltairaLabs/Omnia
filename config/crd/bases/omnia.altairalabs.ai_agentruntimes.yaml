@@ -8495,8 +8495,8 @@ spec:
                     properties:
                       istio:
                         description: |-
-                          istio configures Istio VirtualService and DestinationRule mutation.
-                          The controller patches existing resources — it does not create them.
+                          istio is the legacy reference-existing form (mode: external). The operator
+                          patches weights on a VS + DR the user authored.
                         properties:
                           destinationRule:
                             description: destinationRule references the Istio DestinationRule
@@ -8543,6 +8543,37 @@ spec:
                         - destinationRule
                         - virtualService
                         type: object
+                      mesh:
+                        description: |-
+                          mesh configures operator-OWNED VirtualService + DestinationRule routing
+                          (mode: mesh). Subsets are derived from the operator's own track labels.
+                        properties:
+                          candidateSubset:
+                            default: canary
+                            type: string
+                          hosts:
+                            description: |-
+                              hosts the VirtualService matches. Empty defaults to the agent's own
+                              Service DNS name (the east-west self-play path).
+                            items:
+                              type: string
+                            type: array
+                          stableSubset:
+                            default: stable
+                            description: stableSubset / candidateSubset name the DestinationRule
+                              subsets.
+                            type: string
+                        type: object
+                      mode:
+                        description: |-
+                          mode selects the delivery mechanism. Unset auto-resolves: "mesh" when the
+                          mesh is available, else "replicaWeighted". A legacy config that sets
+                          `istio` without `mode` resolves to "external".
+                        enum:
+                        - mesh
+                        - replicaWeighted
+                        - external
+                        type: string
                     type: object
                 required:
                 - steps
@@ -12092,6 +12123,17 @@ spec:
                       across reconciles: a pause step only advances once
                       (now - stepStartedAt) >= the pause duration.
                     type: string
+                  trafficRoutingMode:
+                    description: |-
+                      trafficRoutingMode is the mode the controller actually resolved to (may
+                      differ from spec.trafficRouting.mode when degraded).
+                    type: string
+                  trafficWeightEnforced:
+                    description: |-
+                      trafficWeightEnforced is true when delivered weight matches the reported
+                      step (mode mesh/external), false when approximated by replica ratio
+                      (mode replicaWeighted). Lets dashboards label the weight "approx".
+                    type: boolean
                 type: object
               serviceEndpoint:
                 description: |-

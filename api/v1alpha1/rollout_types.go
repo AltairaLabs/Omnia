@@ -165,12 +165,40 @@ type RollbackConfig struct {
 	Cooldown *string `json:"cooldown,omitempty"`
 }
 
-// TrafficRoutingConfig configures integration with a service mesh for traffic splitting.
+// TrafficRoutingConfig configures how the rollout's desired weight is delivered.
 type TrafficRoutingConfig struct {
-	// istio configures Istio VirtualService and DestinationRule mutation.
-	// The controller patches existing resources — it does not create them.
+	// mode selects the delivery mechanism. Unset auto-resolves: "mesh" when the
+	// mesh is available, else "replicaWeighted". A legacy config that sets
+	// `istio` without `mode` resolves to "external".
+	// +kubebuilder:validation:Enum=mesh;replicaWeighted;external
+	// +optional
+	Mode string `json:"mode,omitempty"`
+
+	// mesh configures operator-OWNED VirtualService + DestinationRule routing
+	// (mode: mesh). Subsets are derived from the operator's own track labels.
+	// +optional
+	Mesh *MeshTrafficRouting `json:"mesh,omitempty"`
+
+	// istio is the legacy reference-existing form (mode: external). The operator
+	// patches weights on a VS + DR the user authored.
 	// +optional
 	Istio *IstioTrafficRouting `json:"istio,omitempty"`
+}
+
+// MeshTrafficRouting configures the operator-owned mesh routing objects.
+type MeshTrafficRouting struct {
+	// hosts the VirtualService matches. Empty defaults to the agent's own
+	// Service DNS name (the east-west self-play path).
+	// +optional
+	Hosts []string `json:"hosts,omitempty"`
+
+	// stableSubset / candidateSubset name the DestinationRule subsets.
+	// +kubebuilder:default="stable"
+	// +optional
+	StableSubset string `json:"stableSubset,omitempty"`
+	// +kubebuilder:default="canary"
+	// +optional
+	CandidateSubset string `json:"candidateSubset,omitempty"`
 }
 
 // IstioTrafficRouting configures Istio-based traffic splitting.
@@ -250,4 +278,15 @@ type RolloutStatus struct {
 	// message is a human-readable description of the current rollout state.
 	// +optional
 	Message string `json:"message,omitempty"`
+
+	// trafficWeightEnforced is true when delivered weight matches the reported
+	// step (mode mesh/external), false when approximated by replica ratio
+	// (mode replicaWeighted). Lets dashboards label the weight "approx".
+	// +optional
+	TrafficWeightEnforced *bool `json:"trafficWeightEnforced,omitempty"`
+
+	// trafficRoutingMode is the mode the controller actually resolved to (may
+	// differ from spec.trafficRouting.mode when degraded).
+	// +optional
+	TrafficRoutingMode string `json:"trafficRoutingMode,omitempty"`
 }
