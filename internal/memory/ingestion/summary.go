@@ -54,8 +54,5 @@ func (s *SummaryStrategy) Ingest(ctx context.Context, doc SourceDoc) ([]Item, er
 	if err != nil {
 		return nil, fmt.Errorf("summarize %q: %w", doc.URL, err)
 	}
-	return []Item{{
-		Content:  summary,
-		Metadata: baseMetadata(doc, "summary", 0),
-	}}, nil
+	return PostProcess(summary, Config{Strategy: StrategySummary}, doc), nil
 }

@@ -60,7 +60,7 @@ func (c *ChunkStrategy) Ingest(_ context.Context, doc SourceDoc) ([]Item, error)
 		}
 		items = append(items, Item{
 			Content:  strings.Join(words[start:end], " "),
-			Metadata: baseMetadata(doc, "chunk", idx),
+			Metadata: baseMetadata(doc, KindChunk, idx),
 		})
 		if end == len(words) {
 			break
