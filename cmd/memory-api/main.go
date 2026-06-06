@@ -684,15 +684,24 @@ const (
 	ingestStrategySummary = "summary"
 )
 
-// selectIngestionStrategy maps the --ingest-strategy value to a concrete
-// IngestionStrategy, returning the strategy and its resolved name (for logging).
-// "summary" uses the extractive (lead-sentence) summarizer; anything else
-// (including "chunk" and unknown values) falls back to ChunkStrategy.
-func selectIngestionStrategy(name string, chunkSize, chunkOverlap int) (ingestion.IngestionStrategy, string) {
+// selectIngestionConfig maps the --ingest-strategy value to a fallback
+// ingestion.Config, returning the config and its resolved strategy name (for
+// logging). "summary" uses the extractive (lead-sentence) summarizer; anything
+// else (including "chunk" and unknown values) falls back to chunking.
+func selectIngestionConfig(name string, chunkSize, chunkOverlap int) (ingestion.Config, string) {
 	if name == ingestStrategySummary {
-		return ingestion.NewSummaryStrategy(ingestion.NewExtractiveSummarizer(0, 0)), ingestStrategySummary
+		return ingestion.Config{
+			Strategy:     ingestion.StrategySummary,
+			Summarizer:   ingestion.SummarizerExtractive,
+			ChunkSize:    chunkSize,
+			ChunkOverlap: chunkOverlap,
+		}, ingestStrategySummary
 	}
-	return ingestion.NewChunkStrategy(chunkSize, chunkOverlap), ingestStrategyChunk
+	return ingestion.Config{
+		Strategy:     ingestion.StrategyChunk,
+		ChunkSize:    chunkSize,
+		ChunkOverlap: chunkOverlap,
+	}, ingestStrategyChunk
 }
 
 func buildAPIMux(
@@ -725,8 +734,8 @@ func buildAPIMux(
 	// CPU; SummaryStrategy uses an extractive (lead-sentence) summarizer — both
 	// need no provider. An LLM-backed summarizer can swap in behind the
 	// ingestion.DocumentSummarizer interface for higher-quality summaries.
-	strategy, strategyName := selectIngestionStrategy(ingestStrategy, chunkSize, chunkOverlap)
-	svc.SetIngestionStrategy(strategy)
+	ingestCfg, strategyName := selectIngestionConfig(ingestStrategy, chunkSize, chunkOverlap)
+	svc.SetIngestion(ingestCfg, nil)
 	log.Info("ingestion strategy configured",
 		"strategy", strategyName,
 		"chunkSize", chunkSize,

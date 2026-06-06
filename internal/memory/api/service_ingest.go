@@ -20,40 +20,74 @@ package api
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/altairalabs/omnia/internal/memory"
 	"github.com/altairalabs/omnia/internal/memory/ingestion"
 )
 
-// ErrNoIngestionStrategy is returned when IngestDocument is called before a
-// strategy is configured.
-var ErrNoIngestionStrategy = errors.New("no ingestion strategy configured")
+// aboutKindSharePointDoc is the about_kind stamped on every ingested item so
+// re-ingest supersedes by (url#index) instead of duplicating.
+const aboutKindSharePointDoc = "sharepoint_doc"
 
-// SetIngestionStrategy wires the document-ingestion strategy. Called once at
-// startup; one strategy per service (the spectrum knob).
-func (s *MemoryService) SetIngestionStrategy(strategy ingestion.IngestionStrategy) {
-	s.ingestionStrategy = strategy
+// SetIngestion wires the fallback ingestion config (from the --ingest-* flags)
+// and the optional async summary queue. Called once at startup. A nil queue
+// disables the agent path — agent-configured ingests fall back to extractive.
+func (s *MemoryService) SetIngestion(fallback ingestion.Config, queue ingestion.SummaryQueue) {
+	s.ingestFallback = fallback
+	s.summaryQueue = queue
 }
 
-// IngestDocument runs the configured strategy over a source document and saves
-// each emitted item as an institutional memory. Items are keyed by
-// about={kind:"sharepoint_doc", key:"<url>#<index>"} so re-ingesting an
-// unchanged doc supersedes rather than duplicates (idempotent re-seed).
-// Embedding is left to the ReembedWorker — no inline embed.
+// IngestDocument resolves the effective ingestion config for the workspace and
+// either stores items synchronously (chunk, or extractive summary) or enqueues
+// the document for the async summarizer agent. Returns 202-worthy success;
+// embedding is left to the ReembedWorker.
 func (s *MemoryService) IngestDocument(ctx context.Context, workspaceID string, doc ingestion.SourceDoc) error {
-	if s.ingestionStrategy == nil {
-		return ErrNoIngestionStrategy
+	cfg := s.resolveIngestionConfig(ctx)
+	if cfg.UsesSummarizer() {
+		return s.ingestWithSummary(ctx, workspaceID, doc, cfg)
 	}
-	items, err := s.ingestionStrategy.Ingest(ctx, doc)
+	items, err := ingestion.NewChunkStrategy(cfg.ChunkSize, cfg.ChunkOverlap).Ingest(ctx, doc)
 	if err != nil {
 		return fmt.Errorf("ingest %q: %w", doc.URL, err)
 	}
+	return s.saveItems(ctx, workspaceID, doc, items)
+}
+
+// ingestWithSummary routes summary / summaryThenChunk strategies. The agent
+// backend enqueues raw text (async); extractive summarizes inline. When the
+// agent backend is selected but no queue is wired, it falls back to extractive
+// so ingestion still completes.
+func (s *MemoryService) ingestWithSummary(ctx context.Context, workspaceID string, doc ingestion.SourceDoc, cfg ingestion.Config) error {
+	if cfg.Summarizer == ingestion.SummarizerAgent && s.summaryQueue != nil {
+		return s.summaryQueue.Enqueue(ctx, ingestion.WorkItem{
+			WorkspaceID:  workspaceID,
+			Doc:          doc,
+			Strategy:     cfg.EffectiveStrategy(),
+			ChunkSize:    cfg.ChunkSize,
+			ChunkOverlap: cfg.ChunkOverlap,
+			AboutKey:     doc.URL,
+		})
+	}
+	if cfg.Summarizer == ingestion.SummarizerAgent {
+		s.log.Info("agent summarizer unavailable; falling back to extractive",
+			"reason", "no_queue", "url", doc.URL)
+	}
+	summary, err := ingestion.NewExtractiveSummarizer(0, 0).Summarize(ctx, doc.Text)
+	if err != nil {
+		return fmt.Errorf("summarize %q: %w", doc.URL, err)
+	}
+	return s.saveItems(ctx, workspaceID, doc, ingestion.PostProcess(summary, cfg, doc))
+}
+
+// saveItems persists each emitted item keyed by
+// about={sharepoint_doc, "<url>#<index>"} so re-ingest supersedes per index.
+// Shared by the sync ingest path and the async SaveDocumentSummary path.
+func (s *MemoryService) saveItems(ctx context.Context, workspaceID string, doc ingestion.SourceDoc, items []ingestion.Item) error {
 	for _, it := range items {
 		meta := it.Metadata
-		meta[memory.MetaKeyAboutKind] = "sharepoint_doc"
-		meta[memory.MetaKeyAboutKey] = fmt.Sprintf("%s#%v", doc.URL, meta["index"])
+		meta[memory.MetaKeyAboutKind] = aboutKindSharePointDoc
+		meta[memory.MetaKeyAboutKey] = fmt.Sprintf("%s#%v", doc.URL, meta[ingestion.MetaKeyIndex])
 		mem := &memory.Memory{
 			Type:       "knowledge_reference",
 			Content:    it.Content,
@@ -62,8 +96,33 @@ func (s *MemoryService) IngestDocument(ctx context.Context, workspaceID string, 
 			Scope:      map[string]string{memory.ScopeWorkspaceID: workspaceID},
 		}
 		if err := s.SaveInstitutionalMemory(ctx, mem); err != nil {
-			return fmt.Errorf("save item %v for %q: %w", meta["index"], doc.URL, err)
+			return fmt.Errorf("save item %v for %q: %w", meta[ingestion.MetaKeyIndex], doc.URL, err)
 		}
 	}
 	return nil
+}
+
+// resolveIngestionConfig returns the effective config: the flag fallback,
+// overlaid field-by-field with the workspace's MemoryPolicy.spec.ingestion
+// when a PolicyLoader is wired. A loader error or absent policy is fail-safe —
+// ingestion proceeds on the fallback rather than erroring.
+func (s *MemoryService) resolveIngestionConfig(ctx context.Context) ingestion.Config {
+	cfg := s.ingestFallback
+	if s.policyLoader == nil {
+		return cfg
+	}
+	policy, err := s.policyLoader.Load(ctx)
+	if err != nil || policy == nil {
+		return cfg
+	}
+	if v := policy.IngestionStrategy(); v != "" {
+		cfg.Strategy = v
+	}
+	if v := policy.IngestionSummarizer(); v != "" {
+		cfg.Summarizer = v
+	}
+	if size, overlap, ok := policy.IngestionChunk(); ok {
+		cfg.ChunkSize, cfg.ChunkOverlap = size, overlap
+	}
+	return cfg
 }
