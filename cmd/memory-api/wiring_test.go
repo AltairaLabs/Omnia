@@ -143,6 +143,7 @@ func TestBuildAPIMux_POSTMemoryWithoutUserIDReturns400(t *testing.T) {
 		nil, // policy loader is optional — identity ranker without it
 		nil, // auditLogger optional; non-enterprise tests don't exercise it
 		logr.Discard(),
+		"chunk", // ingestion strategy
 		200, 40, // default ChunkStrategy params
 	)
 	defer cleanup()
@@ -189,6 +190,7 @@ func TestBuildAPIMux_GETMemoriesWired(t *testing.T) {
 		nil, // policy loader is optional — identity ranker without it
 		nil, // auditLogger optional; non-enterprise tests don't exercise it
 		logr.Discard(),
+		"chunk", // ingestion strategy
 		200, 40, // default ChunkStrategy params
 	)
 	defer cleanup()
@@ -453,6 +455,7 @@ func TestBuildAPIMux_EnterpriseAuditRoutesWired(t *testing.T) {
 		nil,
 		auditLogger,
 		logr.Discard(),
+		"chunk", // ingestion strategy
 		200, 40, // default ChunkStrategy params
 	)
 	defer cleanup()
@@ -488,6 +491,7 @@ func TestBuildAPIMux_NonEnterpriseAuditRoutesAbsent(t *testing.T) {
 		nil,
 		nil, // no audit logger
 		logr.Discard(),
+		"chunk", // ingestion strategy
 		200, 40, // default ChunkStrategy params
 	)
 	defer cleanup()
@@ -749,6 +753,7 @@ func TestBuildAPIMux_IngestRouteWiredWithChunkStrategy(t *testing.T) {
 		nil,
 		nil,
 		logr.Discard(),
+		"chunk", // ingestion strategy
 		200, 40, // default ChunkStrategy params
 	)
 	defer cleanup()
@@ -784,6 +789,7 @@ func TestBuildAPIMux_SemanticRouteWired(t *testing.T) {
 		nil,
 		nil,
 		logr.Discard(),
+		"chunk", // ingestion strategy
 		200, 40, // default ChunkStrategy params
 	)
 	defer cleanup()
@@ -815,6 +821,7 @@ func TestBuildAPIMux_HealthzAlwaysReachable(t *testing.T) {
 		nil, // policy loader is optional — identity ranker without it
 		nil, // auditLogger optional; non-enterprise tests don't exercise it
 		logr.Discard(),
+		"chunk", // ingestion strategy
 		200, 40, // default ChunkStrategy params
 	)
 	defer cleanup()
