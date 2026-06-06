@@ -121,3 +121,56 @@ func (r *AgentRuntimeReconciler) setTrafficStatus(ar *omniav1alpha1.AgentRuntime
 		r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "canary").Set(float64(deliveredWeight))
 	}
 }
+
+// hasIstioConfig reports whether the legacy reference-form Istio config is set.
+func hasIstioConfig(ar *omniav1alpha1.AgentRuntime) bool {
+	return ar.Spec.Rollout != nil &&
+		ar.Spec.Rollout.TrafficRouting != nil &&
+		ar.Spec.Rollout.TrafficRouting.Istio != nil
+}
+
+// applyTrafficRouting resolves the mode and delivers desiredWeight via the
+// chosen mechanism, then records delivered weight + enforcement on status/metric.
+// Skips application while paused or in an analysis window (caller passes those).
+func (r *AgentRuntimeReconciler) applyTrafficRouting(ctx context.Context, ar *omniav1alpha1.AgentRuntime, desiredWeight int32) error {
+	mode := r.resolveTrafficMode(ctx, ar)
+	switch mode {
+	case TrafficModeMesh:
+		if err := r.reconcileMeshRouting(ctx, ar, desiredWeight); err != nil {
+			return err
+		}
+		r.setTrafficStatus(ar, mode, desiredWeight, true)
+	case TrafficModeExternal:
+		if hasIstioConfig(ar) {
+			if err := r.patchVirtualServiceWeights(ctx, ar.Namespace, ar.Spec.Rollout.TrafficRouting.Istio, desiredWeight); err != nil {
+				return err
+			}
+		}
+		r.setTrafficStatus(ar, mode, desiredWeight, true)
+	default: // replicaWeighted
+		delivered, err := r.reconcileReplicaWeighting(ctx, ar, desiredWeight)
+		if err != nil {
+			return err
+		}
+		r.setTrafficStatus(ar, mode, delivered, false)
+	}
+	return nil
+}
+
+// resetTrafficRoutingForMode resets to 100% stable across whichever mode is
+// active (used on promote / rollback).
+func (r *AgentRuntimeReconciler) resetTrafficRoutingForMode(ctx context.Context, ar *omniav1alpha1.AgentRuntime) error {
+	mode := r.resolveTrafficMode(ctx, ar)
+	switch mode {
+	case TrafficModeMesh:
+		return r.reconcileMeshRouting(ctx, ar, 0)
+	case TrafficModeExternal:
+		if hasIstioConfig(ar) {
+			return r.resetTrafficRouting(ctx, ar.Namespace, ar.Spec.Rollout.TrafficRouting.Istio)
+		}
+	default:
+		_, err := r.reconcileReplicaWeighting(ctx, ar, 0)
+		return err
+	}
+	return nil
+}

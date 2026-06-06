@@ -70,13 +70,15 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 		if err := r.deleteCandidateDeployment(ctx, ar); err != nil {
 			return ctrl.Result{}, fmt.Errorf("delete candidate after auto-rollback: %w", err)
 		}
-		if ar.Spec.Rollout != nil && ar.Spec.Rollout.TrafficRouting != nil && ar.Spec.Rollout.TrafficRouting.Istio != nil {
-			if err := r.resetTrafficRouting(ctx, ar.Namespace, ar.Spec.Rollout.TrafficRouting.Istio); err != nil {
+		if ar.Spec.Rollout != nil && ar.Spec.Rollout.TrafficRouting != nil {
+			if err := r.resetTrafficRoutingForMode(ctx, ar); err != nil {
 				log.Error(err, "failed to reset traffic routing on auto-rollback")
 			}
-			if err := r.patchDestinationRuleConsistentHash(ctx, ar.Namespace,
-				ar.Spec.Rollout.TrafficRouting.Istio, ""); err != nil {
-				log.Error(err, "failed to remove consistent hash on auto-rollback")
+			if ar.Spec.Rollout.TrafficRouting.Istio != nil {
+				if err := r.patchDestinationRuleConsistentHash(ctx, ar.Namespace,
+					ar.Spec.Rollout.TrafficRouting.Istio, ""); err != nil {
+					log.Error(err, "failed to remove consistent hash on auto-rollback")
+				}
 			}
 		}
 		if r.RolloutMetrics != nil {
@@ -103,18 +105,14 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 		"message", result.message)
 
 	// Apply traffic routing if configured.
-	if ar.Spec.Rollout.TrafficRouting != nil && ar.Spec.Rollout.TrafficRouting.Istio != nil {
+	if ar.Spec.Rollout.TrafficRouting != nil {
 		if !result.paused && !result.analysis {
-			if err := r.patchVirtualServiceWeights(ctx, ar.Namespace,
-				ar.Spec.Rollout.TrafficRouting.Istio, result.desiredWeight); err != nil {
+			if err := r.applyTrafficRouting(ctx, ar, result.desiredWeight); err != nil {
 				return ctrl.Result{}, err
 			}
-			if r.RolloutMetrics != nil {
-				r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "stable").Set(float64(100 - result.desiredWeight))
-				r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "canary").Set(float64(result.desiredWeight))
-			}
 		}
-		if ar.Spec.Rollout.StickySession != nil {
+		// Sticky session only applies to the external/istio reference form.
+		if ar.Spec.Rollout.StickySession != nil && ar.Spec.Rollout.TrafficRouting.Istio != nil {
 			if err := r.patchDestinationRuleConsistentHash(ctx, ar.Namespace,
 				ar.Spec.Rollout.TrafficRouting.Istio, ar.Spec.Rollout.StickySession.HashOn); err != nil {
 				return ctrl.Result{}, err
@@ -144,14 +142,16 @@ func (r *AgentRuntimeReconciler) reconcileRolloutIdle(
 ) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	// Reset traffic routing if Istio was configured.
-	if ar.Spec.Rollout != nil && ar.Spec.Rollout.TrafficRouting != nil && ar.Spec.Rollout.TrafficRouting.Istio != nil {
-		if err := r.resetTrafficRouting(ctx, ar.Namespace, ar.Spec.Rollout.TrafficRouting.Istio); err != nil {
+	// Reset traffic routing if configured.
+	if ar.Spec.Rollout != nil && ar.Spec.Rollout.TrafficRouting != nil {
+		if err := r.resetTrafficRoutingForMode(ctx, ar); err != nil {
 			log.Error(err, "failed to reset traffic routing on idle cleanup")
 		}
-		if err := r.patchDestinationRuleConsistentHash(ctx, ar.Namespace,
-			ar.Spec.Rollout.TrafficRouting.Istio, ""); err != nil {
-			log.Error(err, "failed to remove consistent hash on idle cleanup")
+		if ar.Spec.Rollout.TrafficRouting.Istio != nil {
+			if err := r.patchDestinationRuleConsistentHash(ctx, ar.Namespace,
+				ar.Spec.Rollout.TrafficRouting.Istio, ""); err != nil {
+				log.Error(err, "failed to remove consistent hash on idle cleanup")
+			}
 		}
 	}
 	if r.RolloutMetrics != nil {
@@ -183,13 +183,15 @@ func (r *AgentRuntimeReconciler) reconcileRolloutPromote(
 	promote(ar)
 
 	// Reset traffic to 100% stable before removing the candidate.
-	if ar.Spec.Rollout != nil && ar.Spec.Rollout.TrafficRouting != nil && ar.Spec.Rollout.TrafficRouting.Istio != nil {
-		if err := r.resetTrafficRouting(ctx, ar.Namespace, ar.Spec.Rollout.TrafficRouting.Istio); err != nil {
+	if ar.Spec.Rollout != nil && ar.Spec.Rollout.TrafficRouting != nil {
+		if err := r.resetTrafficRoutingForMode(ctx, ar); err != nil {
 			log.Error(err, "failed to reset traffic routing on promotion")
 		}
-		if err := r.patchDestinationRuleConsistentHash(ctx, ar.Namespace,
-			ar.Spec.Rollout.TrafficRouting.Istio, ""); err != nil {
-			log.Error(err, "failed to remove consistent hash on promotion")
+		if ar.Spec.Rollout.TrafficRouting.Istio != nil {
+			if err := r.patchDestinationRuleConsistentHash(ctx, ar.Namespace,
+				ar.Spec.Rollout.TrafficRouting.Istio, ""); err != nil {
+				log.Error(err, "failed to remove consistent hash on promotion")
+			}
 		}
 	}
 
@@ -393,8 +395,8 @@ func (r *AgentRuntimeReconciler) handleAnalysisAutoRollback(
 	if err := r.deleteCandidateDeployment(ctx, ar); err != nil {
 		return ctrl.Result{}, fmt.Errorf("delete candidate after analysis rollback: %w", err)
 	}
-	if ar.Spec.Rollout.TrafficRouting != nil && ar.Spec.Rollout.TrafficRouting.Istio != nil {
-		if err := r.resetTrafficRouting(ctx, ar.Namespace, ar.Spec.Rollout.TrafficRouting.Istio); err != nil {
+	if ar.Spec.Rollout != nil && ar.Spec.Rollout.TrafficRouting != nil {
+		if err := r.resetTrafficRoutingForMode(ctx, ar); err != nil {
 			log.Error(err, "failed to reset traffic routing on analysis rollback")
 		}
 	}
