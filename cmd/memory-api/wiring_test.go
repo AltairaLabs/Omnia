@@ -32,6 +32,7 @@ import (
 	"github.com/altairalabs/omnia/internal/memory"
 	memoryapi "github.com/altairalabs/omnia/internal/memory/api"
 	"github.com/altairalabs/omnia/internal/memory/consolidation"
+	"github.com/altairalabs/omnia/internal/memory/ingestion"
 	memorypg "github.com/altairalabs/omnia/internal/memory/postgres"
 )
 
@@ -143,8 +144,9 @@ func TestBuildAPIMux_POSTMemoryWithoutUserIDReturns400(t *testing.T) {
 		nil, // policy loader is optional — identity ranker without it
 		nil, // auditLogger optional; non-enterprise tests don't exercise it
 		logr.Discard(),
-		"chunk", // ingestion strategy
-		200, 40, // default ChunkStrategy params
+		memoryapi.IngestOptions{Fallback: ingestion.Config{
+			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
+		}},
 	)
 	defer cleanup()
 
@@ -190,8 +192,9 @@ func TestBuildAPIMux_GETMemoriesWired(t *testing.T) {
 		nil, // policy loader is optional — identity ranker without it
 		nil, // auditLogger optional; non-enterprise tests don't exercise it
 		logr.Discard(),
-		"chunk", // ingestion strategy
-		200, 40, // default ChunkStrategy params
+		memoryapi.IngestOptions{Fallback: ingestion.Config{
+			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
+		}},
 	)
 	defer cleanup()
 
@@ -455,8 +458,9 @@ func TestBuildAPIMux_EnterpriseAuditRoutesWired(t *testing.T) {
 		nil,
 		auditLogger,
 		logr.Discard(),
-		"chunk", // ingestion strategy
-		200, 40, // default ChunkStrategy params
+		memoryapi.IngestOptions{Fallback: ingestion.Config{
+			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
+		}},
 	)
 	defer cleanup()
 
@@ -491,8 +495,9 @@ func TestBuildAPIMux_NonEnterpriseAuditRoutesAbsent(t *testing.T) {
 		nil,
 		nil, // no audit logger
 		logr.Discard(),
-		"chunk", // ingestion strategy
-		200, 40, // default ChunkStrategy params
+		memoryapi.IngestOptions{Fallback: ingestion.Config{
+			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
+		}},
 	)
 	defer cleanup()
 
@@ -753,8 +758,9 @@ func TestBuildAPIMux_IngestRouteWiredWithChunkStrategy(t *testing.T) {
 		nil,
 		nil,
 		logr.Discard(),
-		"chunk", // ingestion strategy
-		200, 40, // default ChunkStrategy params
+		memoryapi.IngestOptions{Fallback: ingestion.Config{
+			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
+		}},
 	)
 	defer cleanup()
 
@@ -789,8 +795,9 @@ func TestBuildAPIMux_SemanticRouteWired(t *testing.T) {
 		nil,
 		nil,
 		logr.Discard(),
-		"chunk", // ingestion strategy
-		200, 40, // default ChunkStrategy params
+		memoryapi.IngestOptions{Fallback: ingestion.Config{
+			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
+		}},
 	)
 	defer cleanup()
 
@@ -821,8 +828,9 @@ func TestBuildAPIMux_HealthzAlwaysReachable(t *testing.T) {
 		nil, // policy loader is optional — identity ranker without it
 		nil, // auditLogger optional; non-enterprise tests don't exercise it
 		logr.Discard(),
-		"chunk", // ingestion strategy
-		200, 40, // default ChunkStrategy params
+		memoryapi.IngestOptions{Fallback: ingestion.Config{
+			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
+		}},
 	)
 	defer cleanup()
 
@@ -832,5 +840,68 @@ func TestBuildAPIMux_HealthzAlwaysReachable(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("GET /healthz should return 200, got %d", rr.Code)
+	}
+}
+
+// TestBuildAPIMux_SummaryCandidatesWired proves GET /api/v1/ingest/summary-candidates
+// is registered. Anything other than 404 proves wiring (200 with empty list
+// when no queue dir is configured).
+func TestBuildAPIMux_SummaryCandidatesWired(t *testing.T) {
+	freshPromRegistry(t)
+	handler, cleanup := buildAPIMux(
+		context.Background(),
+		fakeMemoryStore{}, nil, memoryapi.MemoryServiceConfig{}, nil,
+		false, nil, nil, nil, logr.Discard(),
+		memoryapi.IngestOptions{Fallback: ingestion.Config{
+			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
+		}},
+	)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/summary-candidates", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code == http.StatusNotFound {
+		t.Errorf("GET /api/v1/ingest/summary-candidates not registered; got 404")
+	}
+}
+
+// TestBuildAPIMux_SaveSummaryWired proves POST /api/v1/ingest/summaries is
+// registered. Without a workspace_id the handler returns 400 — proving the
+// route reaches the handler (404 would mean unregistered).
+func TestBuildAPIMux_SaveSummaryWired(t *testing.T) {
+	freshPromRegistry(t)
+	handler, cleanup := buildAPIMux(
+		context.Background(),
+		fakeMemoryStore{}, nil, memoryapi.MemoryServiceConfig{}, nil,
+		false, nil, nil, nil, logr.Discard(),
+		memoryapi.IngestOptions{Fallback: ingestion.Config{
+			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
+		}},
+	)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/summaries",
+		bytes.NewReader([]byte(`{"about_key":"k","summary":"s"}`)))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code == http.StatusNotFound {
+		t.Errorf("POST /api/v1/ingest/summaries not registered; got 404")
+	}
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 (missing workspace_id), got %d", rr.Code)
+	}
+}
+
+// TestBuildIngestOptions_QueueEnabledWhenDirSet proves --ingest-queue-dir
+// constructs a real queue; empty dir leaves it nil (agent path off).
+func TestBuildIngestOptions_QueueEnabledWhenDirSet(t *testing.T) {
+	off := buildIngestOptions(&flags{ingestQueueDir: ""}, logr.Discard())
+	if off.Queue != nil {
+		t.Error("empty --ingest-queue-dir should leave queue nil")
+	}
+	on := buildIngestOptions(&flags{ingestQueueDir: t.TempDir()}, logr.Discard())
+	if on.Queue == nil {
+		t.Error("non-empty --ingest-queue-dir should construct a queue")
 	}
 }

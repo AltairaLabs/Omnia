@@ -135,10 +135,12 @@ type flags struct {
 	// --- Consolidation v1 ---
 	consolidationInterval string // env: CONSOLIDATION_INTERVAL, e.g. "6h". Empty disables the worker.
 
-	// --- Ingestion strategy ---
-	ingestStrategy     string // env: INGEST_STRATEGY; "chunk" (default) | "summary"
+	// --- Ingestion ---
+	ingestStrategy     string // env: INGEST_STRATEGY; chunk (default) | summary | summaryThenChunk
+	ingestSummarizer   string // env: INGEST_SUMMARIZER; extractive (default) | agent
 	ingestChunkSize    int    // env: INGEST_CHUNK_SIZE; default 200
 	ingestChunkOverlap int    // env: INGEST_CHUNK_OVERLAP; default 40
+	ingestQueueDir     string // env: INGEST_QUEUE_DIR; empty disables the agent path
 }
 
 func parseFlags() *flags {
@@ -170,9 +172,11 @@ func parseFlags() *flags {
 	flag.StringVar(&f.workspace, "workspace", "", "Workspace name (K8s CRD resolution mode)")
 	flag.StringVar(&f.serviceGroup, "service-group", "", "Service group name within workspace")
 	flag.StringVar(&f.consolidationInterval, "consolidation-interval", "", "Schedule-evaluation (poll) interval for the consolidation worker, e.g. 1m. Each axis fires per its MemoryPolicy cron schedule; this controls how often schedules are checked. Empty disables the worker.")
-	flag.StringVar(&f.ingestStrategy, "ingest-strategy", ingestStrategyChunk, "Ingestion strategy for /institutional/ingest: chunk | summary (INGEST_STRATEGY).")
-	flag.IntVar(&f.ingestChunkSize, "ingest-chunk-size", 200, "Word-window size for the default ChunkStrategy ingestion (INGEST_CHUNK_SIZE).")
-	flag.IntVar(&f.ingestChunkOverlap, "ingest-chunk-overlap", 40, "Word overlap between adjacent chunks for the default ChunkStrategy (INGEST_CHUNK_OVERLAP).")
+	flag.StringVar(&f.ingestStrategy, "ingest-strategy", ingestion.StrategyChunk, "Ingestion strategy: chunk | summary | summaryThenChunk (INGEST_STRATEGY).")
+	flag.StringVar(&f.ingestSummarizer, "ingest-summarizer", ingestion.SummarizerExtractive, "Summarizer backend for summary strategies: extractive | agent (INGEST_SUMMARIZER).")
+	flag.IntVar(&f.ingestChunkSize, "ingest-chunk-size", 200, "Word-window size for RAG chunking (INGEST_CHUNK_SIZE).")
+	flag.IntVar(&f.ingestChunkOverlap, "ingest-chunk-overlap", 40, "Word overlap between adjacent chunks (INGEST_CHUNK_OVERLAP).")
+	flag.StringVar(&f.ingestQueueDir, "ingest-queue-dir", "", "Directory for the agent summary work-queue. Empty disables the agent path (INGEST_QUEUE_DIR).")
 	flag.Parse()
 
 	f.applyEnvFallbacks()
@@ -224,7 +228,9 @@ func (f *flags) applyEnvFallbacks() {
 		}
 	}
 	envFallback(&f.consolidationInterval, "", "CONSOLIDATION_INTERVAL")
-	envFallback(&f.ingestStrategy, ingestStrategyChunk, "INGEST_STRATEGY")
+	envFallback(&f.ingestStrategy, ingestion.StrategyChunk, "INGEST_STRATEGY")
+	envFallback(&f.ingestSummarizer, ingestion.SummarizerExtractive, "INGEST_SUMMARIZER")
+	envFallback(&f.ingestQueueDir, "", "INGEST_QUEUE_DIR")
 	if v := os.Getenv("INGEST_CHUNK_SIZE"); v != "" && f.ingestChunkSize == 200 {
 		if n, err := strconv.Atoi(v); err == nil {
 			f.ingestChunkSize = n
@@ -572,7 +578,7 @@ func run() error {
 	}()
 
 	// --- Build API mux ---
-	apiMux, cleanup := buildAPIMux(ctx, apiStore, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, auditLogger, log, f.ingestStrategy, f.ingestChunkSize, f.ingestChunkOverlap)
+	apiMux, cleanup := buildAPIMux(ctx, apiStore, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, auditLogger, log, buildIngestOptions(f, log))
 	defer cleanup()
 
 	// --- Consolidation worker ---
@@ -678,30 +684,28 @@ func buildAuditLogger(enterprise bool, pool *pgxpool.Pool, log logr.Logger) (*ee
 // with rate limiting, privacy (enterprise), metrics, and tracing middleware.
 // Returns the handler and a cleanup function. The auditLogger is constructed
 // upstream so it can be shared with the consolidation worker.
-// Ingestion strategy names for the --ingest-strategy flag / INGEST_STRATEGY env.
-const (
-	ingestStrategyChunk   = "chunk"
-	ingestStrategySummary = "summary"
-)
-
-// selectIngestionConfig maps the --ingest-strategy value to a fallback
-// ingestion.Config, returning the config and its resolved strategy name (for
-// logging). "summary" uses the extractive (lead-sentence) summarizer; anything
-// else (including "chunk" and unknown values) falls back to chunking.
-func selectIngestionConfig(name string, chunkSize, chunkOverlap int) (ingestion.Config, string) {
-	if name == ingestStrategySummary {
-		return ingestion.Config{
-			Strategy:     ingestion.StrategySummary,
-			Summarizer:   ingestion.SummarizerExtractive,
-			ChunkSize:    chunkSize,
-			ChunkOverlap: chunkOverlap,
-		}, ingestStrategySummary
+// buildIngestOptions assembles the ingestion wiring from flags. A non-empty
+// --ingest-queue-dir constructs the filesystem summary queue; on failure the
+// agent path is disabled (queue=nil -> extractive fallback) rather than
+// crashing memory-api.
+func buildIngestOptions(f *flags, log logr.Logger) memoryapi.IngestOptions {
+	opts := memoryapi.IngestOptions{Fallback: ingestion.Config{
+		Strategy:     f.ingestStrategy,
+		Summarizer:   f.ingestSummarizer,
+		ChunkSize:    f.ingestChunkSize,
+		ChunkOverlap: f.ingestChunkOverlap,
+	}}
+	if f.ingestQueueDir == "" {
+		return opts
 	}
-	return ingestion.Config{
-		Strategy:     ingestion.StrategyChunk,
-		ChunkSize:    chunkSize,
-		ChunkOverlap: chunkOverlap,
-	}, ingestStrategyChunk
+	queue, err := ingestion.NewFileSummaryQueue(f.ingestQueueDir)
+	if err != nil {
+		log.Error(err, "summary queue disabled", "dir", f.ingestQueueDir)
+		return opts
+	}
+	opts.Queue = queue
+	log.Info("agent summary queue enabled", "dir", f.ingestQueueDir)
+	return opts
 }
 
 func buildAPIMux(
@@ -715,8 +719,7 @@ func buildAPIMux(
 	policyLoader memory.PolicyLoader,
 	auditLogger *eeaudit.Logger,
 	log logr.Logger,
-	ingestStrategy string,
-	chunkSize, chunkOverlap int,
+	ingestOpts memoryapi.IngestOptions,
 ) (http.Handler, func()) {
 	httpMetrics := memoryapi.NewHTTPMetrics(nil)
 
@@ -730,16 +733,16 @@ func buildAPIMux(
 		svc.SetPolicyLoader(policyLoader)
 	}
 
-	// Wire the ingestion strategy for /ingest. ChunkStrategy (default) is pure
-	// CPU; SummaryStrategy uses an extractive (lead-sentence) summarizer — both
-	// need no provider. An LLM-backed summarizer can swap in behind the
-	// ingestion.DocumentSummarizer interface for higher-quality summaries.
-	ingestCfg, strategyName := selectIngestionConfig(ingestStrategy, chunkSize, chunkOverlap)
-	svc.SetIngestion(ingestCfg, nil)
-	log.Info("ingestion strategy configured",
-		"strategy", strategyName,
-		"chunkSize", chunkSize,
-		"chunkOverlap", chunkOverlap,
+	// Wire ingestion: a flag-derived fallback Config + an optional async
+	// summary queue. The effective per-request config is resolved from the
+	// workspace's MemoryPolicy.spec.ingestion at /ingest time.
+	svc.SetIngestion(ingestOpts.Fallback, ingestOpts.Queue)
+	log.Info("ingestion configured",
+		"strategy", ingestOpts.Fallback.Strategy,
+		"summarizer", ingestOpts.Fallback.Summarizer,
+		"chunkSize", ingestOpts.Fallback.ChunkSize,
+		"chunkOverlap", ingestOpts.Fallback.ChunkOverlap,
+		"agentQueue", ingestOpts.Queue != nil,
 	)
 
 	// Enterprise audit logging. Logger was constructed upstream so the
