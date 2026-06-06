@@ -46,10 +46,10 @@ type IngestionStrategy interface {
 // baseMetadata builds the citation/idempotency metadata common to every item.
 func baseMetadata(doc SourceDoc, kind string, index int) map[string]any {
 	return map[string]any{
-		"title": doc.Title,
-		"url":   doc.URL,
-		"site":  doc.Site,
-		"kind":  kind,
-		"index": index,
+		MetaKeyTitle: doc.Title,
+		MetaKeyURL:   doc.URL,
+		MetaKeySite:  doc.Site,
+		MetaKeyKind:  kind,
+		MetaKeyIndex: index,
 	}
 }

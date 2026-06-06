@@ -255,3 +255,32 @@ func (c *MemoryConsolidationConfig) scheduleForAxis(axis string) string {
 	}
 	return ""
 }
+
+// IngestionStrategy returns the configured ingestion strategy or "" when
+// unset (caller falls back to the binary --ingest-strategy flag).
+func (p *MemoryPolicy) IngestionStrategy() string {
+	if p == nil || p.Spec.Ingestion == nil {
+		return ""
+	}
+	return p.Spec.Ingestion.Strategy
+}
+
+// IngestionSummarizer returns the configured summarizer backend or "" when
+// unset (caller falls back to the binary --ingest-summarizer flag).
+func (p *MemoryPolicy) IngestionSummarizer() string {
+	if p == nil || p.Spec.Ingestion == nil {
+		return ""
+	}
+	return p.Spec.Ingestion.Summarizer
+}
+
+// IngestionChunk returns the configured chunk geometry. ok=false when the
+// chunk block is unset, so the caller keeps its flag defaults (0 overlap is a
+// valid value, so presence is gated on the pointer, not zero-ness).
+func (p *MemoryPolicy) IngestionChunk() (size, overlap int, ok bool) {
+	if p == nil || p.Spec.Ingestion == nil || p.Spec.Ingestion.Chunk == nil {
+		return 0, 0, false
+	}
+	c := p.Spec.Ingestion.Chunk
+	return int(c.Size), int(c.Overlap), true
+}

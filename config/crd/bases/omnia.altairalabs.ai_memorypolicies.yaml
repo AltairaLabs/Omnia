@@ -299,6 +299,58 @@ spec:
                       type: string
                     type: array
                 type: object
+              ingestion:
+                description: |-
+                  ingestion configures how source documents become index items at
+                  /institutional/ingest. Read live by memory-api via the PolicyLoader
+                  at ingest time; the --ingest-* binary flags are the fallback when a
+                  field is unset.
+                properties:
+                  chunk:
+                    description: chunk tunes the RAG chunk splitter (used by chunk
+                      + summaryThenChunk).
+                    properties:
+                      overlap:
+                        default: 40
+                        description: overlap is the inter-chunk overlap in words.
+                          Must be < size.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      size:
+                        default: 200
+                        description: size is the chunk width in words.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                    type: object
+                    x-kubernetes-validations:
+                    - message: chunk.overlap must be less than chunk.size
+                      rule: self.overlap < self.size
+                  strategy:
+                    default: chunk
+                    description: |-
+                      strategy selects how a source document becomes index items.
+                        chunk            - RAG-chunk the raw text (traditional RAG)
+                        summary          - one condensed summary per document
+                        summaryThenChunk - summarize, then RAG-chunk the summary
+                    enum:
+                    - chunk
+                    - summary
+                    - summaryThenChunk
+                    type: string
+                  summarizer:
+                    default: extractive
+                    description: |-
+                      summarizer selects the summary backend. Ignored when strategy=chunk.
+                        extractive - in-process lead-sentence (no LLM)
+                        agent      - async work-queue consumed by an external summarizer
+                                     AgentRuntime (memory-api stays LLM-free)
+                    enum:
+                    - extractive
+                    - agent
+                    type: string
+                type: object
               recall:
                 description: |-
                   recall tunes the read path (half-life per tier, large-memory

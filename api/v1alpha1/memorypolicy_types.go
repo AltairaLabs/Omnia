@@ -586,6 +586,56 @@ type MemoryPolicySpec struct {
 	// docs/local-backlog/2026-05-22-memory-consolidation-design.md.
 	// +optional
 	Consolidation *MemoryConsolidationConfig `json:"consolidation,omitempty"`
+
+	// ingestion configures how source documents become index items at
+	// /institutional/ingest. Read live by memory-api via the PolicyLoader
+	// at ingest time; the --ingest-* binary flags are the fallback when a
+	// field is unset.
+	// +optional
+	Ingestion *MemoryIngestionConfig `json:"ingestion,omitempty"`
+}
+
+// MemoryIngestionConfig configures document-ingestion strategy + summarizer
+// backend for a memory service. Behavioural (write-path data shaping), sibling
+// of Dedup/Consolidation — not deploy wiring (that is MemoryServiceConfig).
+type MemoryIngestionConfig struct {
+	// strategy selects how a source document becomes index items.
+	//   chunk            - RAG-chunk the raw text (traditional RAG)
+	//   summary          - one condensed summary per document
+	//   summaryThenChunk - summarize, then RAG-chunk the summary
+	// +kubebuilder:validation:Enum=chunk;summary;summaryThenChunk
+	// +kubebuilder:default=chunk
+	// +optional
+	Strategy string `json:"strategy,omitempty"`
+
+	// summarizer selects the summary backend. Ignored when strategy=chunk.
+	//   extractive - in-process lead-sentence (no LLM)
+	//   agent      - async work-queue consumed by an external summarizer
+	//                AgentRuntime (memory-api stays LLM-free)
+	// +kubebuilder:validation:Enum=extractive;agent
+	// +kubebuilder:default=extractive
+	// +optional
+	Summarizer string `json:"summarizer,omitempty"`
+
+	// chunk tunes the RAG chunk splitter (used by chunk + summaryThenChunk).
+	// +optional
+	Chunk *MemoryChunkConfig `json:"chunk,omitempty"`
+}
+
+// MemoryChunkConfig tunes the RAG chunk splitter geometry.
+// +kubebuilder:validation:XValidation:rule="self.overlap < self.size",message="chunk.overlap must be less than chunk.size"
+type MemoryChunkConfig struct {
+	// size is the chunk width in words.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=200
+	// +optional
+	Size int32 `json:"size,omitempty"`
+
+	// overlap is the inter-chunk overlap in words. Must be < size.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=40
+	// +optional
+	Overlap int32 `json:"overlap,omitempty"`
 }
 
 // MemoryPolicyStatus is the observed state.
