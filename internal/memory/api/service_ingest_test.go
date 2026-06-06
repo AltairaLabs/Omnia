@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -46,6 +47,16 @@ type recordingInstitutionalStore struct {
 func (r *recordingInstitutionalStore) SaveInstitutional(_ context.Context, mem *memory.Memory) error {
 	r.saved = append(r.saved, mem)
 	return nil
+}
+
+// erroringInstitutionalStore fails every SaveInstitutional so the ingest
+// error path (outcome=error) can be exercised.
+type erroringInstitutionalStore struct {
+	mockMemoryStore
+}
+
+func (e *erroringInstitutionalStore) SaveInstitutional(_ context.Context, _ *memory.Memory) error {
+	return assert.AnError
 }
 
 func TestIngestDocument_ChunkStrategy_SavesItemsWithAboutKey(t *testing.T) {
@@ -150,6 +161,60 @@ func TestIngestDocument_AgentSummary_NoQueue_FallsBackToExtractive(t *testing.T)
 	})
 	require.NoError(t, err)
 	require.Len(t, store.saved, 1, "no queue -> extractive fallback stores synchronously")
+}
+
+func TestIngestDocument_RecordsSuccessAndItemsMetrics(t *testing.T) {
+	store := &recordingInstitutionalStore{}
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetIngestion(ingestion.Config{Strategy: ingestion.StrategyChunk, ChunkSize: 2, ChunkOverlap: 0}, nil)
+
+	docsBefore := testutil.ToFloat64(ingestDocumentsTotal.WithLabelValues(ingestion.StrategyChunk, ingestOutcomeSuccess))
+	itemsBefore := testutil.ToFloat64(ingestItemsTotal.WithLabelValues(ingestion.StrategyChunk))
+
+	err := svc.IngestDocument(context.Background(), testWS, ingestion.SourceDoc{
+		URL: testURLAllowed, Text: "alpha beta gamma delta", // → 2 chunks
+	})
+	require.NoError(t, err)
+
+	docsAfter := testutil.ToFloat64(ingestDocumentsTotal.WithLabelValues(ingestion.StrategyChunk, ingestOutcomeSuccess))
+	itemsAfter := testutil.ToFloat64(ingestItemsTotal.WithLabelValues(ingestion.StrategyChunk))
+	assert.Equal(t, float64(1), docsAfter-docsBefore, "one successful document")
+	assert.Equal(t, float64(2), itemsAfter-itemsBefore, "two chunks persisted")
+}
+
+func TestIngestDocument_RecordsErrorOutcome(t *testing.T) {
+	store := &erroringInstitutionalStore{}
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetIngestion(ingestion.Config{Strategy: ingestion.StrategyChunk, ChunkSize: 2, ChunkOverlap: 0}, nil)
+
+	before := testutil.ToFloat64(ingestDocumentsTotal.WithLabelValues(ingestion.StrategyChunk, ingestOutcomeError))
+
+	err := svc.IngestDocument(context.Background(), testWS, ingestion.SourceDoc{
+		URL: testURLAllowed, Text: "alpha beta",
+	})
+	require.Error(t, err)
+
+	after := testutil.ToFloat64(ingestDocumentsTotal.WithLabelValues(ingestion.StrategyChunk, ingestOutcomeError))
+	assert.Equal(t, float64(1), after-before, "error path bumps outcome=error")
+}
+
+func TestIngestDocument_RecordsEnqueuedOutcome(t *testing.T) {
+	store := &recordingInstitutionalStore{}
+	queue := &fakeSummaryQueue{}
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetIngestion(ingestion.Config{
+		Strategy: ingestion.StrategySummary, Summarizer: ingestion.SummarizerAgent,
+	}, queue)
+
+	before := testutil.ToFloat64(ingestDocumentsTotal.WithLabelValues(ingestion.StrategySummary, ingestOutcomeEnqueued))
+
+	err := svc.IngestDocument(context.Background(), testWS, ingestion.SourceDoc{
+		URL: testURLAllowed, Text: "some doc text",
+	})
+	require.NoError(t, err)
+
+	after := testutil.ToFloat64(ingestDocumentsTotal.WithLabelValues(ingestion.StrategySummary, ingestOutcomeEnqueued))
+	assert.Equal(t, float64(1), after-before, "agent-enqueue path bumps outcome=enqueued")
 }
 
 func TestResolveIngestionConfig_PolicyOverridesFallback(t *testing.T) {

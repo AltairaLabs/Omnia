@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -58,6 +59,22 @@ func TestRetrieveSemantic_AppliesDenyFilter(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, "a", got[0].ID)
+}
+
+func TestRetrieveSemantic_RecordsDeniedMetric(t *testing.T) {
+	store := &fixedSearchStore{out: []*memory.Memory{
+		{ID: "a", Content: "allowed chunk", Metadata: map[string]any{testMetaKeyURL: testURLAllowed}},
+		{ID: "b", Content: "secret chunk", Metadata: map[string]any{testMetaKeyURL: "https://sp/restricted/s.docx"}},
+	}}
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+
+	before := testutil.ToFloat64(retrievalDeniedTotal)
+	_, err := svc.RetrieveSemantic(context.Background(), "ws-1", "failover",
+		`metadata.url.contains("restricted")`, 5)
+	require.NoError(t, err)
+
+	after := testutil.ToFloat64(retrievalDeniedTotal)
+	assert.Equal(t, float64(1), after-before, "one restricted item dropped by deny-filter")
 }
 
 func TestRetrieveSemantic_NoFilterReturnsAll(t *testing.T) {
