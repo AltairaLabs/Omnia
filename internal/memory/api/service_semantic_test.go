@@ -34,10 +34,15 @@ import (
 // FTS Retrieve path, which fixedSearchStore intercepts.
 type fixedSearchStore struct {
 	mockMemoryStore
-	out []*memory.Memory
+	out       []*memory.Memory
+	lastLimit int // records the limit RetrieveSemantic asked the store for
 }
 
-func (f *fixedSearchStore) Retrieve(_ context.Context, _ map[string]string, _ string, _ memory.RetrieveOptions) ([]*memory.Memory, error) {
+func (f *fixedSearchStore) Retrieve(_ context.Context, _ map[string]string, _ string, opts memory.RetrieveOptions) ([]*memory.Memory, error) {
+	f.lastLimit = opts.Limit
+	if opts.Limit > 0 && opts.Limit < len(f.out) {
+		return f.out[:opts.Limit], nil
+	}
 	return f.out, nil
 }
 
@@ -64,6 +69,31 @@ func TestRetrieveSemantic_NoFilterReturnsAll(t *testing.T) {
 	got, err := svc.RetrieveSemantic(context.Background(), "ws-1", "q", "", 5)
 	require.NoError(t, err)
 	assert.Len(t, got, 2)
+}
+
+func TestRetrieveSemantic_OverFetchesPastRestricted(t *testing.T) {
+	// The first two results are restricted. Without over-fetch, a limit=2 query
+	// would fetch only those two and return 0 allowed items; over-fetch surfaces
+	// the allowed ones so the caller still gets `limit` results.
+	mem := func(id, url string) *memory.Memory {
+		return &memory.Memory{ID: id, Metadata: map[string]any{testMetaKeyURL: url}}
+	}
+	store := &fixedSearchStore{out: []*memory.Memory{
+		mem("r1", "https://sp/restricted/a"),
+		mem("r2", "https://sp/restricted/b"),
+		mem("a1", testURLAllowed),
+		mem("a2", testURLAllowed),
+		mem("a3", testURLAllowed),
+	}}
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+
+	got, err := svc.RetrieveSemantic(context.Background(), "ws-1", "q",
+		`metadata.url.contains("restricted")`, 2)
+	require.NoError(t, err)
+	require.Len(t, got, 2, "should return `limit` allowed items despite leading restricted ones")
+	assert.Equal(t, "a1", got[0].ID)
+	assert.Equal(t, "a2", got[1].ID)
+	assert.Greater(t, store.lastLimit, 2, "should over-fetch past the requested limit before filtering")
 }
 
 func TestRetrieveSemantic_InvalidCELErrors(t *testing.T) {
