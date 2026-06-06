@@ -196,6 +196,12 @@ spec:
             - --enterprise
             - --policy-proxy-image={{ .Values.enterprise.policyProxy.image.repository }}:{{ .Values.enterprise.policyProxy.image.tag | default .Chart.AppVersion }}
             {{- end }}
+            {{- if .Values.rollout.meshEnabled }}
+            # Istio ambient + waypoint present — let the operator manage
+            # AgentRuntime rollout VirtualService/DestinationRule for
+            # trafficRouting mode=mesh. See examples/values-istio-ambient.yaml.
+            - --mesh-enabled
+            {{- end }}
             {{- if .Values.operator.logLevel }}
             - --zap-log-level={{ .Values.operator.logLevel }}
             {{- end }}

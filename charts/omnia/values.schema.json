@@ -77,6 +77,17 @@
       }
     },
 
+    "rollout": {
+      "type": "object",
+      "description": "Rollout traffic-routing configuration.",
+      "properties": {
+        "meshEnabled": {
+          "type": "boolean",
+          "description": "Istio ambient + waypoint present; enables the operator's --mesh-enabled flag so AgentRuntime rollout trafficRouting mode=mesh manages VirtualService/DestinationRule. Default false (replica-weighted fallback)."
+        }
+      }
+    },
+
     "leaderElection": {
       "type": "object",
       "properties": {

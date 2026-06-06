@@ -42,17 +42,19 @@ spec:
       model: {{ .Values.sharepointHero.embedding.model }}
       secretRef:
         name: {{ .Values.sharepointHero.embedding.secretRef }}
-  {{- if .Values.sharepointHero.shipCandidate }}
-  # Rollout (the "ship the change" beat). Activated by setting
-  # sharepointHero.shipCandidate=true so install is stable and the canary is
-  # triggered on demand. Candidate = verbose v2 prompt + pricier model.
+  # Rollout. The routing MODE is declared on install so the demo's intent is
+  # always visible; the canary itself is idle until shipCandidate=true (candidate
+  # nil = idle rollout per the CRD, so install stays stable).
   rollout:
+    {{- if .Values.sharepointHero.shipCandidate }}
+    # The "ship the change" beat: verbose v2 prompt + pricier candidate model.
     candidate:
       promptPackVersion: "2.0.0"
       providerRefs:
         - name: default
           providerRef:
             name: rag-hero-candidate
+    {{- end }}
     steps:
       - setWeight: 20
       - analysis:
@@ -60,12 +62,13 @@ spec:
       - setWeight: 100
     rollback:
       mode: automatic
+    # Operator-managed Istio ambient mesh routing. With --mesh-enabled on the
+    # operator (rollout.meshEnabled=true) + a waypoint enrolled for the
+    # omnia-demo namespace, the operator OWNS the VirtualService/DestinationRule
+    # for the rag-hero Service and drives the weighted stable/candidate split.
+    # Subsets default to stable/canary; hosts default to the agent's own
+    # Service DNS (the east-west self-play path used by the Arena loadtest).
     trafficRouting:
-      istio:
-        virtualService:
-          name: rag-hero-vs
-          routes: ["primary"]
-        destinationRule:
-          name: rag-hero-dr
-  {{- end }}
+      mode: mesh
+      mesh: {}
 {{- end }}

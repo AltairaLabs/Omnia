@@ -18,8 +18,59 @@
 #
 #   kubectl label namespace <release-ns> istio.io/dataplane-mode=ambient
 #
+# IMPORTANT for AgentRuntime rollout trafficRouting mode=mesh:
+# label EVERY namespace that carries agent pods (facade/runtime) AND the
+# arena-eval-worker namespace, not just the release namespace. Operator-
+# generated agent pods live in their workspace namespace; if that namespace
+# is not enrolled in ambient the candidate/stable split silently degrades.
+#
+#   kubectl label namespace <workspace-ns> istio.io/dataplane-mode=ambient
+#
 # If you prefer per-pod opt-in, use podAnnotations / podOverrides
 # (example below).
+
+# --- Enable operator-managed mesh routing -----------------------------------
+#
+# With ambient + a waypoint in place (see below), tell the operator it may
+# manage VirtualService/DestinationRule for AgentRuntimes whose
+# spec.rollout.trafficRouting.mode is `mesh`. This sets the manager's
+# `--mesh-enabled` flag. Without a waypoint the L7 split will NOT take effect
+# (ztunnel is L4 only) and the operator auto-degrades to replica weighting.
+rollout:
+  meshEnabled: true
+
+# --- Waypoint for the agent Service (L7 routing) ----------------------------
+#
+# REQUIRED for mode=mesh. ztunnel provides L4 mTLS only; the HTTP-level
+# weighted split between the `stable` and `candidate` subsets is performed by
+# a WAYPOINT proxy. Deploy one waypoint per namespace (or per Service) that
+# hosts agent pods. The Gateway below uses the gateway-api `istio-waypoint`
+# class — equivalent to `istioctl waypoint apply --enroll-namespace`.
+#
+# NOTE (on-cluster validation required): the waypoint manifest is rendered
+# here for convenience, but the interaction between the waypoint and the
+# enterprise OPA policy-proxy on the WebSocket path has only been validated
+# on a real ambient cluster for the hero demo namespace. Confirm the
+# waypoint adopts agent pods (`istioctl ztunnel-config workloads`) and that
+# WS upgrades survive the waypoint before relying on mode=mesh in prod.
+#
+# Substitute your agent/release namespace for `omnia` below, and add one
+# entry per namespace that carries agent pods.
+extraObjects:
+  - |
+    apiVersion: gateway.networking.k8s.io/v1
+    kind: Gateway
+    metadata:
+      name: omnia-waypoint
+      namespace: {{ .Release.Namespace }}
+      labels:
+        istio.io/waypoint-for: service
+    spec:
+      gatewayClassName: istio-waypoint
+      listeners:
+        - name: mesh
+          port: 15008
+          protocol: HBONE
 
 # --- Gateway (ambient-ready) ------------------------------------------------
 gateway:
