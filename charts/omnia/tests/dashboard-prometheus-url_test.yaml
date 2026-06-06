@@ -1,0 +1,62 @@
+suite: dashboard observability URLs (Prometheus sub-path + browser-reachable Grafana)
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/dashboard/configmap.yaml
+tests:
+  - it: bundled Prometheus URL includes server.prefixURL so /api/v1 queries resolve
+    # The bundled Prometheus serves under server.prefixURL (default
+    # /prometheus). Without the suffix here the dashboard queries
+    # <svc>:80/api/v1/... which 404s, and the UI reports "Prometheus not
+    # configured" even though it is. Regression guard for that path bug.
+    set:
+      prometheus.enabled: true
+    asserts:
+      - equal:
+          path: data.PROMETHEUS_URL
+          value: "http://omnia-prometheus-server:80/prometheus"
+
+  - it: explicit dashboard.prometheus.url wins over the bundled default
+    set:
+      prometheus.enabled: true
+      dashboard.prometheus.url: "http://prom.example.com:9090"
+    asserts:
+      - equal:
+          path: data.PROMETHEUS_URL
+          value: "http://prom.example.com:9090"
+
+  - it: honours a custom prefixURL on the bundled Prometheus
+    set:
+      prometheus.enabled: true
+      prometheus.server.prefixURL: "/metrics-prom"
+    asserts:
+      - equal:
+          path: data.PROMETHEUS_URL
+          value: "http://omnia-prometheus-server:80/metrics-prom"
+
+  - it: omits PROMETHEUS_URL entirely when Prometheus is disabled and no URL set
+    set:
+      prometheus.enabled: false
+    asserts:
+      - notExists:
+          path: data.PROMETHEUS_URL
+
+  - it: emits NEXT_PUBLIC_GRAFANA_URL from the explicit browser-reachable URL
+    set:
+      grafana.enabled: true
+      dashboard.grafana.url: "https://omnia.example.com/grafana"
+    asserts:
+      - equal:
+          path: data.NEXT_PUBLIC_GRAFANA_URL
+          value: "https://omnia.example.com/grafana"
+
+  - it: does NOT fall back to the in-cluster Grafana Service URL (unreachable from a browser)
+    # Grafana / Loki / Tempo links are rendered in the browser; the in-cluster
+    # Service URL only yields dead links. Guard against re-introducing it.
+    set:
+      grafana.enabled: true
+    asserts:
+      - notExists:
+          path: data.NEXT_PUBLIC_GRAFANA_URL
