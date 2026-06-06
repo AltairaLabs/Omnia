@@ -25,10 +25,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const testDocTitle = "Runbook"
+const (
+	testDocTitle = "Runbook"
+	testDocSite  = "allowed"
+	testDocURL   = "https://sp/allowed/r.docx"
+	testQueueWS  = "ws-1"
+)
 
 func testDoc() SourceDoc {
-	return SourceDoc{Title: testDocTitle, URL: "https://sp/allowed/r.docx", Site: "allowed"}
+	return SourceDoc{Title: testDocTitle, URL: testDocURL, Site: testDocSite}
 }
 
 func TestPostProcess_Summary_SingleItem(t *testing.T) {

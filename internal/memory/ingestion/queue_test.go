@@ -38,12 +38,12 @@ func newTestQueue(t *testing.T) *FileSummaryQueue {
 
 func sampleItem() WorkItem {
 	return WorkItem{
-		WorkspaceID:  "ws-1",
-		Doc:          SourceDoc{Title: testDocTitle, URL: "https://sp/allowed/r.docx", Site: "allowed", Text: "alpha beta gamma"},
+		WorkspaceID:  testQueueWS,
+		Doc:          SourceDoc{Title: testDocTitle, URL: testDocURL, Site: testDocSite, Text: "alpha beta gamma"},
 		Strategy:     StrategySummary,
 		ChunkSize:    200,
 		ChunkOverlap: 40,
-		AboutKey:     "https://sp/allowed/r.docx",
+		AboutKey:     testDocURL,
 	}
 }
 
@@ -57,7 +57,7 @@ func TestFileSummaryQueue_EnqueueListGet_RoundTrips(t *testing.T) {
 	assert.Equal(t, "alpha beta gamma", listed[0].Doc.Text)
 	assert.Equal(t, StrategySummary, listed[0].Strategy)
 
-	got, err := q.Get(context.Background(), "ws-1", "https://sp/allowed/r.docx")
+	got, err := q.Get(context.Background(), testQueueWS, testDocURL)
 	require.NoError(t, err)
 	assert.Equal(t, testDocTitle, got.Doc.Title)
 	assert.Equal(t, 200, got.ChunkSize)
@@ -79,14 +79,14 @@ func TestFileSummaryQueue_Enqueue_OverwritesSameKey(t *testing.T) {
 func TestFileSummaryQueue_Complete_DeletesAndIsIdempotent(t *testing.T) {
 	q := newTestQueue(t)
 	require.NoError(t, q.Enqueue(context.Background(), sampleItem()))
-	require.NoError(t, q.Complete(context.Background(), "ws-1", "https://sp/allowed/r.docx"))
+	require.NoError(t, q.Complete(context.Background(), testQueueWS, testDocURL))
 
 	listed, err := q.List(context.Background(), 10)
 	require.NoError(t, err)
 	assert.Empty(t, listed)
 
 	// second Complete on a missing item is a no-op
-	require.NoError(t, q.Complete(context.Background(), "ws-1", "https://sp/allowed/r.docx"))
+	require.NoError(t, q.Complete(context.Background(), testQueueWS, testDocURL))
 }
 
 func TestFileSummaryQueue_Get_MissingReturnsNotFound(t *testing.T) {
