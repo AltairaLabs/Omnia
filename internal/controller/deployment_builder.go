@@ -109,8 +109,14 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 			return err
 		}
 
+		// Capture replicas before the builder overwrites them: while a
+		// replica-weighted rollout is active, reconcileReplicaWeighting owns
+		// .spec.replicas and the builder must not reset it to the canonical total.
+		liveReplicas := deployment.Spec.Replicas
+
 		// Build deployment spec
 		r.buildDeploymentSpec(ctx, deployment, agentRuntime, promptPack, toolRegistry, configHash, resolvedClients)
+		r.preserveWeightedReplicas(ctx, agentRuntime, deployment, liveReplicas)
 		return nil
 	})
 

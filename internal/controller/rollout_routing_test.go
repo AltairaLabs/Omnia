@@ -19,6 +19,8 @@ package controller
 import (
 	"testing"
 
+	"k8s.io/utils/ptr"
+
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
@@ -55,6 +57,61 @@ func TestResolveTrafficMode(t *testing.T) {
 			got, degraded := resolveTrafficModeFor(trafficAR(tc.mode, tc.istio).Spec.Rollout.TrafficRouting, tc.meshAvailable)
 			if got != tc.want || degraded != tc.wantDegraded {
 				t.Fatalf("got (%q,%v) want (%q,%v)", got, degraded, tc.want, tc.wantDegraded)
+			}
+		})
+	}
+}
+
+// activeTrafficAR builds an AgentRuntime with an active rollout (a candidate
+// that differs from the stable spec) and the given traffic-routing config.
+// tr=nil means no trafficRouting block.
+func activeTrafficAR(tr *omniav1alpha1.TrafficRoutingConfig) *omniav1alpha1.AgentRuntime {
+	return &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			// stable version empty → candidate "v2" differs → rollout active.
+			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "p"},
+			Rollout: &omniav1alpha1.RolloutConfig{
+				Candidate:      &omniav1alpha1.CandidateOverrides{PromptPackVersion: ptr.To("v2")},
+				Steps:          []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](50)}},
+				TrafficRouting: tr,
+			},
+		},
+	}
+}
+
+func tr(mode string) *omniav1alpha1.TrafficRoutingConfig {
+	return &omniav1alpha1.TrafficRoutingConfig{Mode: mode}
+}
+
+func TestIsReplicaWeightedActive(t *testing.T) {
+	// Inactive rollout: candidate matches stable (no diff) → not active.
+	inactive := activeTrafficAR(tr(TrafficModeReplicaWeighted))
+	inactive.Spec.Rollout.Candidate.PromptPackVersion = nil
+
+	// No rollout at all.
+	noRollout := &omniav1alpha1.AgentRuntime{}
+
+	cases := []struct {
+		name          string
+		ar            *omniav1alpha1.AgentRuntime
+		meshAvailable bool
+		want          bool
+	}{
+		{"no-rollout", noRollout, false, false},
+		{"inactive-candidate", inactive, false, false},
+		{"active-no-trafficRouting", activeTrafficAR(nil), false, false},
+		{"active-explicit-replica-nomesh", activeTrafficAR(tr(TrafficModeReplicaWeighted)), false, true},
+		{"active-explicit-replica-meshavail", activeTrafficAR(tr(TrafficModeReplicaWeighted)), true, true},
+		{"active-mesh-available", activeTrafficAR(tr(TrafficModeMesh)), true, false},
+		{"active-mesh-unavailable-degrades", activeTrafficAR(tr(TrafficModeMesh)), false, true},
+		{"active-external", activeTrafficAR(tr(TrafficModeExternal)), false, false},
+		{"active-unset-mode-nomesh", activeTrafficAR(tr("")), false, true},
+		{"active-unset-mode-mesh", activeTrafficAR(tr("")), true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isReplicaWeightedActive(tc.ar, tc.meshAvailable); got != tc.want {
+				t.Fatalf("isReplicaWeightedActive(%s) = %v, want %v", tc.name, got, tc.want)
 			}
 		})
 	}

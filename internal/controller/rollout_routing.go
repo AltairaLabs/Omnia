@@ -80,6 +80,26 @@ func (r *AgentRuntimeReconciler) meshAvailable(_ context.Context) bool {
 	return err == nil
 }
 
+// isReplicaWeightedActive is the pure predicate: an active rollout whose
+// resolved traffic mode is replica-weighted. When true, reconcileReplicaWeighting
+// owns the stable + candidate .spec.replicas (it splits the canonical total
+// across the two Deployments), so the deployment builders must NOT re-stamp the
+// canonical total each reconcile or they collapse the split back to 1:1.
+func isReplicaWeightedActive(ar *omniav1alpha1.AgentRuntime, meshAvailable bool) bool {
+	if !isRolloutActive(ar) || ar.Spec.Rollout.TrafficRouting == nil {
+		return false
+	}
+	mode, _ := resolveTrafficModeFor(ar.Spec.Rollout.TrafficRouting, meshAvailable)
+	return mode == TrafficModeReplicaWeighted
+}
+
+// replicaWeightingActive is the client-aware wrapper around isReplicaWeightedActive.
+// It uses the side-effect-free mode resolver so callers in the deployment-build
+// path don't emit duplicate degrade observations.
+func (r *AgentRuntimeReconciler) replicaWeightingActive(ctx context.Context, ar *omniav1alpha1.AgentRuntime) bool {
+	return isReplicaWeightedActive(ar, r.meshAvailable(ctx))
+}
+
 // resolveTrafficMode resolves the effective mode and, when it degraded from an
 // explicit request, emits the structured-log + condition + Event observability
 // trio (spec §7).

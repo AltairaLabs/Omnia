@@ -99,6 +99,12 @@ func (r *AgentRuntimeReconciler) reconcileCandidateDeployment(
 			return err
 		}
 
+		// Capture replicas before the builder overwrites them: while a
+		// replica-weighted rollout is active, reconcileReplicaWeighting owns the
+		// candidate's .spec.replicas (the weighted split), so the builder must
+		// not reset it to the canonical total each reconcile.
+		liveReplicas := deployment.Spec.Replicas
+
 		// Build a modified copy of the AgentRuntime with candidate overrides
 		// so the candidate Deployment runs the overridden config, not stable.
 		candidateAR := ar.DeepCopy()
@@ -125,6 +131,7 @@ func (r *AgentRuntimeReconciler) reconcileCandidateDeployment(
 		}
 		deployment.Spec.Template.Labels[labelOmniaTrack] = "canary"
 
+		r.preserveWeightedReplicas(ctx, ar, deployment, liveReplicas)
 		return nil
 	})
 	if err != nil {
