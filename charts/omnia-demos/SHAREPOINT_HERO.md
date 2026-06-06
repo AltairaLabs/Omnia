@@ -60,10 +60,26 @@ beats you want:
   the `SessionPrivacyPolicy` redaction beat has something to redact. Use
   obviously fake values — never real personal data.
 
-> The agent surfaces documents via the institutional-memory index (one
-> `knowledge_reference` memory per doc, written by the seed Job) and fetches
-> full content at runtime through the adapter. The restricted site is indexed
-> but blocked at fetch time by policy.
+> **Real RAG, not whole-doc injection.** The seed Job POSTs each document's
+> extracted text to memory-api `/api/v1/institutional/ingest`, which **chunks
+> and embeds** it into the institutional-memory index (multiple
+> `knowledge_reference` memories per doc, keyed by
+> `about={sharepoint_doc, <url>#<index>}` so re-seeding supersedes rather than
+> duplicates). At query time the agent runs **semantic hybrid retrieval**
+> (`retrieval.strategy: semantic`) over those chunks, then fetches full content
+> for the top hit through the adapter. The restricted site is indexed but
+> blocked two ways: a CEL **deny-filter at retrieval**
+> (`accessFilter.denyCEL`, fail-closed) and the `ToolPolicy` **at fetch** —
+> defense in depth.
+>
+> **Ingestion is configurable (#1214).** Strategy (`chunk` | `summary` |
+> `summaryThenChunk`) × summarizer (`extractive` no-LLM | `agent` async
+> work-queue) live on `MemoryPolicy.spec.ingestion`, read live by memory-api
+> (the `--ingest-strategy` / `--ingest-summarizer` / `--ingest-chunk-*` flags
+> are fallback defaults). **The demo runs the defaults — `chunk` + `extractive`,
+> both no-LLM** — which are the working end-to-end paths. The `agent` backend is
+> contract-complete but inert until the summarizer AgentRuntime trio ships, so
+> don't select it for the demo.
 
 ### 1.4 Pre-created secrets
 
@@ -155,7 +171,8 @@ kubectl -n "$NS" port-forward svc/sharepoint-adapter 8080:8080 &
 curl -s localhost:8080/healthz
 curl -s -XPOST localhost:8080/list | jq '.[].title'
 
-# Seed Job indexed the docs into institutional memory.
+# Seed Job ingested the docs into institutional memory (chunked + embedded —
+# expect total > number of docs: roughly one memory per RAG chunk).
 kubectl -n "$NS" get job rag-hero-seed -o jsonpath='{.status.succeeded}'
 curl -s "$MEMORY_API_URL/api/v1/institutional/memories?workspace=demo" | jq '.total'
 
@@ -190,12 +207,16 @@ collector declares `variant` in its instance labels (see the design notes).
    *"This is an agent in production — runbook Q&A for on-call SREs, grounded in
    our SharePoint docs."*
 
-2. **Show grounded retrieval (≈45s).** Open a session: the agent surfaces a
-   `knowledge_reference` from institutional memory, then calls
-   `fetch_sharepoint` to pull the runbook content. Two-stage RAG, live.
+2. **Show grounded retrieval (≈45s).** Open a session: the agent runs semantic
+   retrieval over the **chunked** institutional-memory index, surfaces the
+   relevant `knowledge_reference` chunks, then calls `fetch_sharepoint` to pull
+   the full runbook content for the top hit. Two-stage RAG (real chunk-and-embed
+   retrieval → on-demand fetch), live.
 
-3. **Governance beat (≈30s).** Show a session where the agent tries the
-   restricted site → `ToolPolicy` denies it; and a response where the
+3. **Governance beat (≈30s).** Show restricted content blocked **twice**: the
+   CEL `accessFilter.denyCEL` drops restricted chunks at **retrieval** (fail-
+   closed), and `ToolPolicy` denies any `fetch_sharepoint` to the restricted
+   site at **fetch** — defense in depth. Then show a response where
    `SessionPrivacyPolicy` redacted synthetic PII. *"Unsafe retrieval and data
    leaks are AI-specific failure modes — Omnia enforces them inline."*
 
