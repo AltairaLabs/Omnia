@@ -48,8 +48,10 @@ func TestHelmChartFlagsMatchController(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
-	// Build the controller binary
-	buildCmd := exec.Command("go", "build", "-o", "/tmp/omnia-controller-test", "../../cmd/main.go")
+	// Build the controller binary. Build the whole cmd package (not just
+	// main.go) so multi-file package members (e.g. the framework-image flag
+	// type) are included.
+	buildCmd := exec.Command("go", "build", "-o", "/tmp/omnia-controller-test", "../../cmd")
 	output, err := buildCmd.CombinedOutput()
 	require.NoError(t, err, "Failed to build controller: %s", string(output))
 
