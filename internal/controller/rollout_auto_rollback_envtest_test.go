@@ -86,11 +86,17 @@ var _ = Describe("AgentRuntime Rollout Auto-Rollback (envtest)", func() {
 	}
 
 	// markCandidateUnhealthy patches the given Deployment's status so
-	// shouldAutoRollback returns true. envtest has no kubelet so we have to
-	// synthesize the status ourselves.
+	// shouldAutoRollback returns true: a genuine rollout failure (progress
+	// deadline exceeded), not merely "not ready yet". envtest has no kubelet so
+	// we synthesize the status ourselves.
 	markCandidateUnhealthy := func(deploy *appsv1.Deployment) {
 		deploy.Status.UnavailableReplicas = 1
 		deploy.Status.ReadyReplicas = 0
+		deploy.Status.Conditions = []appsv1.DeploymentCondition{{
+			Type:   appsv1.DeploymentProgressing,
+			Status: corev1.ConditionFalse,
+			Reason: "ProgressDeadlineExceeded",
+		}}
 		Expect(k8sClient.Status().Update(ctx, deploy)).To(Succeed())
 	}
 

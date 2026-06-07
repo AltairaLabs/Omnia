@@ -22,12 +22,20 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
+
+// reasonProgressDeadlineExceeded is the Deployment Progressing-condition reason
+// Kubernetes sets when a rollout fails to make progress within
+// progressDeadlineSeconds (image pull error, crash loop, unschedulable). It is
+// the signal for a genuinely failed candidate — distinct from one that is
+// merely still starting.
+const reasonProgressDeadlineExceeded = "ProgressDeadlineExceeded"
 
 // reconcileRollout manages the candidate Deployment lifecycle, step progression,
 // promotion, and cleanup. Called from the main Reconcile loop after stable
@@ -750,7 +758,27 @@ func shouldAutoRollback(ar *omniav1alpha1.AgentRuntime, candidateDeploy *appsv1.
 	if candidateDeploy == nil {
 		return false
 	}
-	return candidateDeploy.Status.UnavailableReplicas > 0 && candidateDeploy.Status.ReadyReplicas == 0
+	// Roll back only on a genuine rollout failure, not normal startup. A freshly
+	// created candidate sits at ReadyReplicas==0 / UnavailableReplicas>0 for its
+	// entire startup window; treating that as "unhealthy" rolled back every
+	// candidate within seconds of creation — before it could become ready and
+	// before any analysis step ran, making automatic rollback + analysis-gating
+	// unusable. Kubernetes signals real failure via the Progressing condition
+	// reason ProgressDeadlineExceeded.
+	return candidateProgressDeadlineExceeded(candidateDeploy)
+}
+
+// candidateProgressDeadlineExceeded reports whether the Deployment has failed to
+// roll out within its progress deadline (the kubectl "rollout failed" state).
+func candidateProgressDeadlineExceeded(d *appsv1.Deployment) bool {
+	for _, c := range d.Status.Conditions {
+		if c.Type == appsv1.DeploymentProgressing &&
+			c.Status == corev1.ConditionFalse &&
+			c.Reason == reasonProgressDeadlineExceeded {
+			return true
+		}
+	}
+	return false
 }
 
 // rollback reverts candidate overrides to match current spec values.
