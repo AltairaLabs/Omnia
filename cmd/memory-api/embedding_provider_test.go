@@ -132,6 +132,68 @@ func TestCreateEmbeddingProviderFromCRD_OllamaStillWorks(t *testing.T) {
 	assert.NotNil(t, p)
 }
 
+// TestCreateEmbeddingProviderFromCRD_AzureWorkloadIdentity proves the keyless
+// path: an openai embedding Provider hosted on Azure with auth=workloadIdentity
+// builds with NO Secret present. embeddingCredentialForCRD returns an
+// AzureCredential (token applied per request) instead of reading a secretRef,
+// and the platform/config is passed to PromptKit so it resolves the Azure
+// endpoint. Regressing this silently breaks keyless Azure OpenAI embeddings.
+func TestCreateEmbeddingProviderFromCRD_AzureWorkloadIdentity(t *testing.T) {
+	t.Parallel()
+	provider := &omniav1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: "azure-embed", Namespace: "dev-agents"},
+		Spec: omniav1alpha1.ProviderSpec{
+			Type:  omniav1alpha1.ProviderTypeOpenAI,
+			Role:  omniav1alpha1.ProviderRoleEmbedding,
+			Model: "text-embedding-3-small",
+			Platform: &omniav1alpha1.PlatformConfig{
+				Type:     omniav1alpha1.PlatformTypeAzure,
+				Endpoint: "https://example.openai.azure.com",
+			},
+			Auth: &omniav1alpha1.AuthConfig{
+				Type: omniav1alpha1.AuthMethodWorkloadIdentity,
+			},
+		},
+	}
+	// No Secret object — the WI path must not require one.
+	c := fake.NewClientBuilder().
+		WithScheme(newTestSchemeForEmbedding(t)).
+		WithObjects(provider).
+		Build()
+
+	p, err := createEmbeddingProviderFromCRD(context.Background(), c, provider, "dev-agents", logr.Discard())
+	require.NoError(t, err, "keyless Azure WI embedding provider must build without a Secret")
+	assert.NotNil(t, p)
+}
+
+// TestEmbeddingCredentialForCRD_WorkloadIdentityNeedsNoSecret asserts the
+// credential helper bypasses the secretRef requirement for workload identity —
+// the unit-level contract behind the integration test above.
+func TestEmbeddingCredentialForCRD_WorkloadIdentityNeedsNoSecret(t *testing.T) {
+	t.Parallel()
+	provider := &omniav1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: "azure-embed", Namespace: "dev-agents"},
+		Spec: omniav1alpha1.ProviderSpec{
+			Type: omniav1alpha1.ProviderTypeOpenAI,
+			Role: omniav1alpha1.ProviderRoleEmbedding,
+			Platform: &omniav1alpha1.PlatformConfig{
+				Type:     omniav1alpha1.PlatformTypeAzure,
+				Endpoint: "https://example.openai.azure.com",
+			},
+			Auth: &omniav1alpha1.AuthConfig{Type: omniav1alpha1.AuthMethodWorkloadIdentity},
+		},
+	}
+	c := fake.NewClientBuilder().
+		WithScheme(newTestSchemeForEmbedding(t)).
+		WithObjects(provider).
+		Build()
+
+	cred, err := embeddingCredentialForCRD(context.Background(), c, provider, "dev-agents")
+	require.NoError(t, err)
+	require.NotNil(t, cred)
+	assert.Equal(t, "azure", cred.Type(), "expected an Azure (token) credential, not an API key")
+}
+
 // TestCreateEmbeddingProviderFromCRD_UnsupportedType verifies that
 // types PromptKit doesn't have a registered embedding factory for
 // (e.g. claude — it has no embedding model) surface the factory's
