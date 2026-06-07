@@ -74,7 +74,7 @@ func main() {
 	var enableHTTP2 bool
 	var facadeImage string
 	var facadeImagePullPolicy string
-	var frameworkImage string
+	var frameworkImages frameworkImagesFlag
 	var frameworkImagePullPolicy string
 	var tracingEnabled bool
 	var tracingEndpoint string
@@ -103,8 +103,9 @@ func main() {
 		"The image to use for facade containers. If not set, defaults to ghcr.io/altairalabs/omnia-facade:latest")
 	flag.StringVar(&facadeImagePullPolicy, "facade-image-pull-policy", "",
 		"The image pull policy for facade containers. Valid values: Always, Never, IfNotPresent. Defaults to IfNotPresent")
-	flag.StringVar(&frameworkImage, "framework-image", "",
-		"The image to use for framework containers. If not set, defaults to ghcr.io/altairalabs/omnia-runtime:latest")
+	flag.Var(&frameworkImages, "framework-image",
+		"Runtime image as <type>=<repo:tag> (repeatable). A bare <repo:tag> maps to the promptkit framework. "+
+			"Example: --framework-image=langchain=ghcr.io/altairalabs/omnia-langchain-runtime:v1")
 	flag.StringVar(&frameworkImagePullPolicy, "framework-image-pull-policy", "",
 		"The image pull policy for framework containers. Valid values: Always, Never, IfNotPresent. Defaults to IfNotPresent")
 	flag.BoolVar(&tracingEnabled, "tracing-enabled", false,
@@ -294,7 +295,7 @@ func main() {
 		Scheme:                   mgr.GetScheme(),
 		FacadeImage:              facadeImage,
 		FacadeImagePullPolicy:    corev1.PullPolicy(facadeImagePullPolicy),
-		FrameworkImage:           frameworkImage,
+		FrameworkImages:          frameworkImages.images(),
 		FrameworkImagePullPolicy: corev1.PullPolicy(frameworkImagePullPolicy),
 		TracingEnabled:           tracingEnabled,
 		TracingEndpoint:          tracingEndpoint,

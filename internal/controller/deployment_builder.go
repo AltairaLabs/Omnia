@@ -767,15 +767,10 @@ func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
 ) corev1.Container {
-	// Check for CRD image override first, then operator default, then framework-specific default
-	frameworkImage := ""
-	if agentRuntime.Spec.Framework != nil && agentRuntime.Spec.Framework.Image != "" {
-		frameworkImage = agentRuntime.Spec.Framework.Image
-	} else if r.FrameworkImage != "" {
-		frameworkImage = r.FrameworkImage
-	} else {
-		frameworkImage = defaultImageForFramework(agentRuntime.Spec.Framework)
-	}
+	// Resolve the runtime image by framework type. The reconcile validated
+	// resolvability (FrameworkReady) before building the Deployment, so ok is
+	// true here; the blank fallback is defensive only.
+	frameworkImage, _ := r.resolveFrameworkImage(agentRuntime)
 
 	// Use configured pull policy, or default to IfNotPresent
 	runtimePullPolicy := r.FrameworkImagePullPolicy
@@ -1054,25 +1049,6 @@ func (r *AgentRuntimeReconciler) resolveWorkspaceUIDForNamespace(namespace strin
 		}
 	}
 	return ""
-}
-
-func defaultImageForFramework(framework *omniav1alpha1.FrameworkConfig) string {
-	if framework == nil {
-		return DefaultFrameworkImage
-	}
-
-	switch framework.Type {
-	case omniav1alpha1.FrameworkTypeLangChain:
-		return DefaultLangChainImage
-	case omniav1alpha1.FrameworkTypePromptKit:
-		return DefaultFrameworkImage
-	case omniav1alpha1.FrameworkTypeAutoGen:
-		// AutoGen doesn't have a default image yet; use PromptKit as fallback
-		// Users must specify an image override for this framework
-		return DefaultFrameworkImage
-	default:
-		return DefaultFrameworkImage
-	}
 }
 
 // isDualProtocol returns true when the AgentRuntime has A2A enabled as an

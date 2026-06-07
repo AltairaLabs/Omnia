@@ -96,10 +96,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			reconciler = &AgentRuntimeReconciler{
-				Client:         k8sClient,
-				Scheme:         k8sClient.Scheme(),
-				FacadeImage:    "test-facade:v1.0.0",
-				FrameworkImage: "test-runtime:v1.0.0",
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				FacadeImage:     "test-facade:v1.0.0",
+				FrameworkImages: promptkitImage("test-runtime:v1.0.0"),
 			}
 		})
 
@@ -930,10 +930,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 
 			// Reconciler has operator-level defaults set
 			reconcilerWithDefaults := &AgentRuntimeReconciler{
-				Client:         k8sClient,
-				Scheme:         k8sClient.Scheme(),
-				FacadeImage:    "operator-default-facade:latest",
-				FrameworkImage: "operator-default-runtime:latest",
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				FacadeImage:     "operator-default-facade:latest",
+				FrameworkImages: promptkitImage("operator-default-runtime:latest"),
 			}
 
 			agentRuntime := &omniav1alpha1.AgentRuntime{
@@ -1008,10 +1008,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 			operatorRuntimeImage := "operator-runtime:latest"
 
 			reconcilerWithDefaults := &AgentRuntimeReconciler{
-				Client:         k8sClient,
-				Scheme:         k8sClient.Scheme(),
-				FacadeImage:    "operator-facade:latest",
-				FrameworkImage: operatorRuntimeImage,
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				FacadeImage:     "operator-facade:latest",
+				FrameworkImages: promptkitImage(operatorRuntimeImage),
 			}
 
 			agentRuntime := &omniav1alpha1.AgentRuntime{
@@ -2471,10 +2471,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 				Namespace: "default",
 			}
 			reconciler = &AgentRuntimeReconciler{
-				Client:         k8sClient,
-				Scheme:         k8sClient.Scheme(),
-				FacadeImage:    "test-facade:latest",
-				FrameworkImage: "test-runtime:latest",
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				FacadeImage:     "test-facade:latest",
+				FrameworkImages: promptkitImage("test-runtime:latest"),
 			}
 		})
 
@@ -3005,10 +3005,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 		BeforeEach(func() {
 			ctx = context.Background()
 			reconciler = &AgentRuntimeReconciler{
-				Client:         k8sClient,
-				Scheme:         k8sClient.Scheme(),
-				FacadeImage:    "test-facade:v1.0.0",
-				FrameworkImage: "test-runtime:v1.0.0",
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				FacadeImage:     "test-facade:v1.0.0",
+				FrameworkImages: promptkitImage("test-runtime:v1.0.0"),
 			}
 		})
 
@@ -3503,8 +3503,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 
 		BeforeEach(func() {
 			reconciler = &AgentRuntimeReconciler{
-				FacadeImage:    "test-facade:v1.0.0",
-				FrameworkImage: "test-runtime:v1.0.0",
+				FacadeImage:     "test-facade:v1.0.0",
+				FrameworkImages: promptkitImage("test-runtime:v1.0.0"),
 			}
 		})
 
@@ -3616,8 +3616,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 
 		BeforeEach(func() {
 			reconciler = &AgentRuntimeReconciler{
-				FacadeImage:    "test-facade:v1.0.0",
-				FrameworkImage: "test-runtime:v1.0.0",
+				FacadeImage:     "test-facade:v1.0.0",
+				FrameworkImages: promptkitImage("test-runtime:v1.0.0"),
 			}
 		})
 

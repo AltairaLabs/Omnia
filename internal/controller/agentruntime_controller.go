@@ -85,10 +85,15 @@ func (r *AgentRuntimeReconciler) validatePrivacyPolicyRef(ctx context.Context, a
 // AgentRuntimeReconciler reconciles a AgentRuntime object
 type AgentRuntimeReconciler struct {
 	client.Client
-	Scheme                   *runtime.Scheme
-	FacadeImage              string
-	FacadeImagePullPolicy    corev1.PullPolicy
-	FrameworkImage           string
+	Scheme                *runtime.Scheme
+	FacadeImage           string
+	FacadeImagePullPolicy corev1.PullPolicy
+	// FrameworkImages maps framework type (e.g. "promptkit", "langchain") to a
+	// release-pinned runtime image. Populated from the repeatable
+	// --framework-image flag. The selector falls back to a built-in :latest
+	// default for promptkit/langchain when a type is absent (bare-dev), and
+	// blocks loudly for types with no image (see resolveFrameworkImage).
+	FrameworkImages          map[string]string
 	FrameworkImagePullPolicy corev1.PullPolicy
 	// Tracing configuration for runtime containers
 	TracingEnabled  bool

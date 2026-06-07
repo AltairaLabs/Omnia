@@ -45,7 +45,7 @@ var _ = Describe("Eval Worker Reconciliation", func() {
 			Client:          k8sClient,
 			Scheme:          k8sClient.Scheme(),
 			FacadeImage:     "test-facade:v1.0.0",
-			FrameworkImage:  "test-runtime:v1.0.0",
+			FrameworkImages: promptkitImage("test-runtime:v1.0.0"),
 			RedisURL:        "redis://redis:6379/0",
 			EvalWorkerImage: "test-eval-worker:v1.0.0",
 		}
