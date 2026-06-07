@@ -1,0 +1,66 @@
+suite: dashboard HTTPRoute routes WS-proxy paths to :3002
+release:
+  name: omnia
+templates:
+  - templates/dashboard/httproute.yaml
+tests:
+  - it: external gateway routes agent + dev-console + lsp WS paths to :3002, root to :3000
+    set:
+      dashboard.enabled: true
+      dashboard.externalGateway.enabled: true
+      dashboard.externalGateway.hostname: omnia-demo.example.com
+      gateway.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: kind
+          value: HTTPRoute
+      # First rule = the WS proxy paths, all -> :3002 (must precede catch-all)
+      - equal:
+          path: spec.rules[0].matches[0].path.value
+          value: /api/agents/
+      - equal:
+          path: spec.rules[0].matches[1].path.value
+          value: /api/dev-console
+      - equal:
+          path: spec.rules[0].matches[2].path.value
+          value: /api/lsp
+      - equal:
+          path: spec.rules[0].backendRefs[0].port
+          value: 3002
+      # Catch-all -> :3000 (Next.js)
+      - equal:
+          path: spec.rules[1].matches[0].path.value
+          value: /
+      - equal:
+          path: spec.rules[1].backendRefs[0].port
+          value: 3000
+
+  - it: internal gateway also routes the dev-console + lsp WS paths to :3002
+    set:
+      dashboard.enabled: true
+      dashboard.externalGateway.enabled: false
+      internalGateway.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: spec.rules[0].matches[1].path.value
+          value: /api/dev-console
+      - equal:
+          path: spec.rules[0].matches[2].path.value
+          value: /api/lsp
+      - equal:
+          path: spec.rules[0].backendRefs[0].port
+          value: 3002
+
+  - it: no HTTPRoute when no gateway is enabled
+    set:
+      dashboard.enabled: true
+      dashboard.externalGateway.enabled: false
+      internalGateway.enabled: false
+      gateway.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

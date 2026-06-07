@@ -24,8 +24,14 @@ vi.mock("@/stores", () => ({
   })),
 }));
 
+// getWsProxyUrl is awaited inside connect(); default to "" (no configured
+// proxy) so the relative-URL path is exercised.
+vi.mock("@/lib/config", () => ({
+  getWsProxyUrl: vi.fn(async () => ""),
+}));
+
 // Import after mocks
-import { useDevConsole } from "./use-dev-console";
+import { useDevConsole, buildDevConsoleWsUrl } from "./use-dev-console";
 
 describe("useDevConsole", () => {
   let mockWsInstance: {
@@ -192,5 +198,42 @@ describe("useDevConsole", () => {
       "connecting",
       undefined
     );
+  });
+});
+
+describe("buildDevConsoleWsUrl", () => {
+  it("uses a relative URL on the page host (no hardcoded port) when no proxy is configured", () => {
+    const url = buildDevConsoleWsUrl({
+      protocol: "wss:",
+      host: "omnia-demo.azure.altairalabs.ai",
+      wsProxyUrl: undefined,
+      params: "agent=dev-console&service=adc-dev-session-x",
+    });
+    expect(url).toBe(
+      "wss://omnia-demo.azure.altairalabs.ai/api/dev-console?agent=dev-console&service=adc-dev-session-x"
+    );
+    // Regression guard for #1243: must not pin the WS proxy port (3002 is not
+    // exposed on the public gateway LB).
+    expect(url).not.toContain(":3002");
+  });
+
+  it("treats an empty proxy URL as unset (relative URL)", () => {
+    const url = buildDevConsoleWsUrl({
+      protocol: "ws:",
+      host: "localhost:3000",
+      wsProxyUrl: "",
+      params: "agent=dev-console",
+    });
+    expect(url).toBe("ws://localhost:3000/api/dev-console?agent=dev-console");
+  });
+
+  it("uses a configured proxy URL verbatim when set", () => {
+    const url = buildDevConsoleWsUrl({
+      protocol: "ws:",
+      host: "ignored:3000",
+      wsProxyUrl: "ws://localhost:3002",
+      params: "agent=dev-console",
+    });
+    expect(url).toBe("ws://localhost:3002/api/dev-console?agent=dev-console");
   });
 });
