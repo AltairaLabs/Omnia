@@ -8,11 +8,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
-  type: {{ .Values.sharepointHero.providers.baseline.type }}
-  model: {{ .Values.sharepointHero.providers.baseline.model }}
-  credential:
-    secretRef:
-      name: {{ .Values.sharepointHero.providers.baseline.secretRef }}
+{{- include "omnia-demos.chatProviderSpec" (dict "ctx" $ "type" .Values.sharepointHero.providers.baseline.type "model" .Values.sharepointHero.providers.baseline.model "secretRef" .Values.sharepointHero.providers.baseline.secretRef) | nindent 2 }}
 ---
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: Provider
@@ -22,9 +18,5 @@ metadata:
   labels:
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
-  type: {{ .Values.sharepointHero.providers.candidate.type }}
-  model: {{ .Values.sharepointHero.providers.candidate.model }}
-  credential:
-    secretRef:
-      name: {{ .Values.sharepointHero.providers.candidate.secretRef }}
+{{- include "omnia-demos.chatProviderSpec" (dict "ctx" $ "type" .Values.sharepointHero.providers.candidate.type "model" .Values.sharepointHero.providers.candidate.model "secretRef" .Values.sharepointHero.providers.candidate.secretRef) | nindent 2 }}
 {{- end }}

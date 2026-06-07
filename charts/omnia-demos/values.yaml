@@ -435,7 +435,36 @@ sharepointHero:
   accessFilter:
     denyCEL: 'metadata.url.contains("restricted")'
 
+  # Keyless Azure OpenAI via Azure AD Workload Identity. When enabled:
+  #   - the chat Providers render with spec.platform(azure)/auth(workloadIdentity)
+  #     and NO secretRef (providers.*.type/secretRef below are ignored)
+  #   - the agent pod runs as the workload-identity ServiceAccount this chart
+  #     creates (workloadIdentity.serviceAccountName), labelled for the AKS
+  #     webhook to inject the federated token
+  #   - chatModel is the Azure deployment name used for both baseline + candidate
+  #     (the rollout candidate differs by promptPackVersion, not model)
+  # The ServiceAccount must be federated to the managed identity out-of-band —
+  # see SHAREPOINT_HERO.md for the `az identity federated-credential create` step.
+  azure:
+    enabled: false
+    # Azure OpenAI resource endpoint, e.g.
+    # https://<resource>.cognitiveservices.azure.com/
+    endpoint: ""
+    # Azure region of the resource, e.g. centralus.
+    region: ""
+    # Azure deployment name for the chat model (baseline + candidate).
+    chatModel: gpt-4o
+    workloadIdentity:
+      # ServiceAccount this chart creates in .Values.namespace, federated to the
+      # runtime managed identity.
+      serviceAccountName: omnia-runtime-wi
+      # Managed-identity client-id (azure.workload.identity/client-id annotation).
+      clientId: ""
+      # AAD tenant-id (azure.workload.identity/tenant-id annotation).
+      tenantId: ""
+
   # LLM providers (baseline + pricier candidate). type: claude | openai | gemini
+  # Ignored when azure.enabled=true (see azure block above).
   providers:
     baseline:
       type: claude

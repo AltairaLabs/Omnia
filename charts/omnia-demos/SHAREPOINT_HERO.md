@@ -132,6 +132,49 @@ Secret names are configurable in `values.yaml`
 `sharepointHero.providers.*.secretRef`, `sharepointHero.embedding.secretRef`,
 `sharepointHero.loadtest.selfplay.secretRef`).
 
+### 1.5 Keyless Azure OpenAI via Workload Identity (optional)
+
+When the chat model is served by Azure OpenAI, the demo can run the **chat**
+providers keyless via Azure AD Workload Identity — no `anthropic-api-key`
+secret, no API key in-cluster. Set `sharepointHero.azure.enabled=true` and the
+chart renders `rag-hero-baseline` / `rag-hero-candidate` as `type: openai` +
+`platform: azure` + `auth: workloadIdentity`, creates the workload-identity
+ServiceAccount (`sharepointHero.azure.workloadIdentity.serviceAccountName`,
+default `omnia-runtime-wi`) + its RBAC, and binds the agent pod to it via
+`podOverrides`.
+
+**One-time Azure setup** — federate the chart's ServiceAccount to the runtime
+managed identity (the MI must hold the *Cognitive Services OpenAI User* role on
+the Azure OpenAI resource). Run in the Azure subscription tenant:
+
+```bash
+az identity federated-credential create \
+  --name omnia-demo-runtime-wi \
+  --identity-name <runtime-managed-identity-name> \
+  --resource-group <mi-resource-group> \
+  --issuer "$(az aks show -g <rg> -n <cluster> --query oidcIssuerProfile.issuerUrl -o tsv)" \
+  --subject system:serviceaccount:omnia-demo:omnia-runtime-wi \
+  --audience api://AzureADTokenExchange
+```
+
+**Install** — add these `--set` flags to §2 (the `anthropic-api-key` secret is
+then unnecessary):
+
+```bash
+  --set sharepointHero.azure.enabled=true \
+  --set sharepointHero.azure.endpoint=https://<resource>.cognitiveservices.azure.com/ \
+  --set sharepointHero.azure.region=<region> \
+  --set sharepointHero.azure.chatModel=gpt-4o \
+  --set sharepointHero.azure.workloadIdentity.clientId=<mi-client-id> \
+  --set sharepointHero.azure.workloadIdentity.tenantId=<aad-tenant-id>
+```
+
+> **Embedding is not yet keyless.** The memory-api embedding path still requires
+> an API-key embedding Provider, so the `embedding-api-key` secret remains needed
+> for semantic retrieval until embedding/chat auth parity ships in PromptKit. The
+> `rag-hero-baseline`/`candidate` chat providers are the only Azure-WI resources
+> today.
+
 ---
 
 ## 2. Install

@@ -20,6 +20,13 @@ spec:
     name: rag-hero-tools
   privacyPolicyRef:
     name: rag-hero-privacy
+  {{- if .Values.sharepointHero.azure.enabled }}
+  # Keyless Azure OpenAI: run the agent pod as the workload-identity SA and opt
+  # into the AKS webhook's federated-token injection (the runtime calls Azure
+  # OpenAI with no API key).
+  podOverrides:
+    {{- include "omnia-demos.azureWorkloadIdentityPodOverrides" . | nindent 4 }}
+  {{- end }}
   facade:
     type: websocket
     port: 8080
