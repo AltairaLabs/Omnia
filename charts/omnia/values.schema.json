@@ -235,7 +235,18 @@
       "type": "object",
       "description": "Defaults applied to operator-generated runtime (framework) pods",
       "properties": {
-        "image": { "$ref": "#/$defs/image" }
+        "image": { "$ref": "#/$defs/image" },
+        "images": {
+          "type": "object",
+          "description": "Additional per-framework-type runtime images (e.g. langchain). Each renders a --framework-image=<type>=<repo>:<tag> operator arg.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "repository": { "type": "string" },
+              "tag": { "type": "string" }
+            }
+          }
+        }
       }
     },
 

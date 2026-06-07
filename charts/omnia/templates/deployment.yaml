@@ -65,7 +65,10 @@ spec:
             - --health-probe-bind-address=:{{ .Values.probes.port }}
             - --facade-image={{ .Values.facade.image.repository }}:{{ .Values.facade.image.tag | default .Chart.AppVersion }}
             - --facade-image-pull-policy={{ .Values.facade.image.pullPolicy }}
-            - --framework-image={{ .Values.framework.image.repository }}:{{ .Values.framework.image.tag | default .Chart.AppVersion }}
+            - --framework-image=promptkit={{ .Values.framework.image.repository }}:{{ .Values.framework.image.tag | default .Chart.AppVersion }}
+{{- range $type, $img := .Values.framework.images }}
+            - --framework-image={{ $type }}={{ $img.repository }}:{{ $img.tag | default $.Chart.AppVersion }}
+{{- end }}
             - --framework-image-pull-policy={{ .Values.framework.image.pullPolicy }}
             - --session-api-image={{ include "omnia.sessionApi.image" . }}
             - --session-api-image-pull-policy={{ .Values.workspaceServices.sessionApi.image.pullPolicy }}
