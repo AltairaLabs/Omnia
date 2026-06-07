@@ -136,7 +136,11 @@ const (
 	ConditionTypeToolRegistryReady = "ToolRegistryReady"
 	ConditionTypeProviderReady     = "ProviderReady"
 	ConditionTypePackContentValid  = "PackContentValid"
-	ConditionTypeRolloutActive     = "RolloutActive"
+	// ConditionTypeFrameworkReady is False when the AgentRuntime's declared
+	// framework.type has no resolvable runtime image (issue #1206) — the
+	// operator blocks rather than silently running the PromptKit image.
+	ConditionTypeFrameworkReady = "FrameworkReady"
+	ConditionTypeRolloutActive  = "RolloutActive"
 
 	// ConditionTypeTrafficRouting surfaces rollout traffic-routing health —
 	// False with a reason when the resolved mode degraded from what was

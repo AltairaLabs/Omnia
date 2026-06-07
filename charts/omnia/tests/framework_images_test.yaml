@@ -1,0 +1,20 @@
+suite: framework images
+templates:
+  - templates/deployment.yaml
+values:
+  - ../values-chart-tests.yaml
+tests:
+  - it: renders the promptkit framework-image arg from framework.image
+    set:
+      framework.image.tag: testtag
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --framework-image=promptkit=ghcr.io/altairalabs/omnia-runtime:testtag
+  - it: renders a langchain framework-image arg from framework.images
+    set:
+      framework.images.langchain.tag: testtag
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --framework-image=langchain=ghcr.io/altairalabs/omnia-langchain-runtime:testtag

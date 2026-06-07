@@ -244,59 +244,40 @@ func TestBuildA2AEnvVars_WithClients(t *testing.T) {
 
 func strPtr(s string) *string { return &s }
 
-func TestDefaultImageForFramework(t *testing.T) {
+func TestBuiltinDefaultImage(t *testing.T) {
 	tests := []struct {
-		name      string
-		framework *omniav1alpha1.FrameworkConfig
-		want      string
+		name          string
+		frameworkType string
+		want          string
 	}{
 		{
-			name:      "nil framework returns default PromptKit image",
-			framework: nil,
-			want:      DefaultFrameworkImage,
+			name:          "PromptKit returns PromptKit image",
+			frameworkType: string(omniav1alpha1.FrameworkTypePromptKit),
+			want:          DefaultFrameworkImage,
 		},
 		{
-			name: "LangChain framework returns LangChain image",
-			framework: &omniav1alpha1.FrameworkConfig{
-				Type: omniav1alpha1.FrameworkTypeLangChain,
-			},
-			want: DefaultLangChainImage,
+			name:          "LangChain returns LangChain image",
+			frameworkType: string(omniav1alpha1.FrameworkTypeLangChain),
+			want:          DefaultLangChainImage,
 		},
 		{
-			name: "PromptKit framework returns PromptKit image",
-			framework: &omniav1alpha1.FrameworkConfig{
-				Type: omniav1alpha1.FrameworkTypePromptKit,
-			},
-			want: DefaultFrameworkImage,
+			// #1206: AutoGen must NOT silently fall back to the PromptKit image.
+			name:          "AutoGen has no built-in image",
+			frameworkType: string(omniav1alpha1.FrameworkTypeAutoGen),
+			want:          "",
 		},
 		{
-			name: "AutoGen framework returns default image (fallback)",
-			framework: &omniav1alpha1.FrameworkConfig{
-				Type: omniav1alpha1.FrameworkTypeAutoGen,
-			},
-			want: DefaultFrameworkImage,
-		},
-		{
-			name: "Unknown framework type returns default image",
-			framework: &omniav1alpha1.FrameworkConfig{
-				Type: "unknown",
-			},
-			want: DefaultFrameworkImage,
-		},
-		{
-			name: "Empty framework type returns default image",
-			framework: &omniav1alpha1.FrameworkConfig{
-				Type: "",
-			},
-			want: DefaultFrameworkImage,
+			name:          "Unknown framework type has no built-in image",
+			frameworkType: "unknown",
+			want:          "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := defaultImageForFramework(tt.framework)
+			got := builtinDefaultImage(tt.frameworkType)
 			if got != tt.want {
-				t.Errorf("defaultImageForFramework() = %v, want %v", got, tt.want)
+				t.Errorf("builtinDefaultImage(%q) = %q, want %q", tt.frameworkType, got, tt.want)
 			}
 		})
 	}

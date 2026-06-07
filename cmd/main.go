@@ -20,7 +20,9 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -74,7 +76,7 @@ func main() {
 	var enableHTTP2 bool
 	var facadeImage string
 	var facadeImagePullPolicy string
-	var frameworkImage string
+	var frameworkImages frameworkImagesFlag
 	var frameworkImagePullPolicy string
 	var tracingEnabled bool
 	var tracingEndpoint string
@@ -103,8 +105,9 @@ func main() {
 		"The image to use for facade containers. If not set, defaults to ghcr.io/altairalabs/omnia-facade:latest")
 	flag.StringVar(&facadeImagePullPolicy, "facade-image-pull-policy", "",
 		"The image pull policy for facade containers. Valid values: Always, Never, IfNotPresent. Defaults to IfNotPresent")
-	flag.StringVar(&frameworkImage, "framework-image", "",
-		"The image to use for framework containers. If not set, defaults to ghcr.io/altairalabs/omnia-runtime:latest")
+	flag.Var(&frameworkImages, "framework-image",
+		"Runtime image as <type>=<repo:tag> (repeatable). A bare <repo:tag> maps to the promptkit framework. "+
+			"Example: --framework-image=langchain=ghcr.io/altairalabs/omnia-langchain-runtime:v1")
 	flag.StringVar(&frameworkImagePullPolicy, "framework-image-pull-policy", "",
 		"The image pull policy for framework containers. Valid values: Always, Never, IfNotPresent. Defaults to IfNotPresent")
 	flag.BoolVar(&tracingEnabled, "tracing-enabled", false,
@@ -294,7 +297,7 @@ func main() {
 		Scheme:                   mgr.GetScheme(),
 		FacadeImage:              facadeImage,
 		FacadeImagePullPolicy:    corev1.PullPolicy(facadeImagePullPolicy),
-		FrameworkImage:           frameworkImage,
+		FrameworkImages:          frameworkImages.images(),
 		FrameworkImagePullPolicy: corev1.PullPolicy(frameworkImagePullPolicy),
 		TracingEnabled:           tracingEnabled,
 		TracingEndpoint:          tracingEndpoint,
@@ -489,4 +492,59 @@ func policyProxyImageForEnterprise(enterpriseEnabled bool, image string) string 
 		return controller.DefaultPolicyProxyImage
 	}
 	return image
+}
+
+// frameworkImagesFlag is a repeatable --framework-image flag. Each value is
+// "type=repo:tag"; a value with no "=" is the legacy bare form and maps to the
+// "promptkit" framework for back-compat. Split is on the FIRST "=" so the
+// "repo:tag" colon is preserved. Kept in main.go (not a sibling file) because
+// the operator binary is built single-file (go build cmd/main.go) across the
+// Makefile, Dockerfile, and E2E suite.
+type frameworkImagesFlag struct {
+	m map[string]string
+}
+
+const promptkitFrameworkKey = "promptkit"
+
+func (f *frameworkImagesFlag) String() string {
+	if f == nil || len(f.m) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(f.m))
+	for k, v := range f.m {
+		parts = append(parts, k+"="+v)
+	}
+	return strings.Join(parts, ",")
+}
+
+func (f *frameworkImagesFlag) Set(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("framework-image value is empty")
+	}
+	if f.m == nil {
+		f.m = map[string]string{}
+	}
+	key := promptkitFrameworkKey
+	img := value
+	if i := strings.Index(value, "="); i >= 0 {
+		key = strings.TrimSpace(value[:i])
+		img = strings.TrimSpace(value[i+1:])
+		if key == "" {
+			key = promptkitFrameworkKey
+		}
+	}
+	if img == "" {
+		return fmt.Errorf("framework-image %q has no image", value)
+	}
+	f.m[key] = img
+	return nil
+}
+
+// images returns the accumulated type->image map (never nil).
+func (f *frameworkImagesFlag) images() map[string]string {
+	if f.m == nil {
+		return map[string]string{}
+	}
+	return f.m
 }

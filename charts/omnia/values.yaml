@@ -1516,6 +1516,17 @@ framework:
     tag: ""
     # -- Framework image pull policy
     pullPolicy: IfNotPresent
+  # -- Additional framework runtime images keyed by AgentRuntime
+  # `spec.framework.type`. The operator selects the runtime image per declared
+  # framework type; a type with no image here (and no spec.framework.image
+  # override) is blocked loudly rather than silently running PromptKit (#1206).
+  # `image` above supplies the `promptkit` entry (back-compat). Each entry
+  # renders a `--framework-image=<type>=<repository>:<tag>` operator arg.
+  images:
+    langchain:
+      repository: ghcr.io/altairalabs/omnia-langchain-runtime
+      # tag defaults to the chart appVersion when empty
+      tag: ""
 
 # Observability configuration (for Omnia-specific templates)
 observability:
