@@ -16,10 +16,14 @@ COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci
 
-# Copy source and build
+# Copy source and build. `npm run build` runs the `prebuild` hook first, which
+# copies the self-hosted Monaco assets into public/monaco/ (served at runtime).
 COPY . .
 RUN --mount=type=cache,target=/app/.next/cache \
     npm run build
+# Fail the build loudly if the self-hosted Monaco assets are missing, rather
+# than shipping a dashboard whose editor silently never loads.
+RUN test -f public/monaco/vs/loader.js
 
 # Production stage
 FROM node:20-alpine AS runner
