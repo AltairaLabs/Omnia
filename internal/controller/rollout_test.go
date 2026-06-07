@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
@@ -389,10 +390,24 @@ func newAutoRollbackAR() *omniav1alpha1.AgentRuntime {
 	return ar
 }
 
-func unhealthyDeploy() *appsv1.Deployment {
+// startingDeploy is a candidate mid-startup: no ready replicas yet, but no
+// failure condition. This must NOT trigger auto-rollback.
+func startingDeploy() *appsv1.Deployment {
 	d := &appsv1.Deployment{}
 	d.Status.ReadyReplicas = 0
 	d.Status.UnavailableReplicas = 1
+	return d
+}
+
+// failedDeploy is a candidate that genuinely failed to roll out (progress
+// deadline exceeded) — the only state that should trigger auto-rollback.
+func failedDeploy() *appsv1.Deployment {
+	d := startingDeploy()
+	d.Status.Conditions = []appsv1.DeploymentCondition{{
+		Type:   appsv1.DeploymentProgressing,
+		Status: corev1.ConditionFalse,
+		Reason: reasonProgressDeadlineExceeded,
+	}}
 	return d
 }
 
@@ -404,27 +419,35 @@ func TestShouldAutoRollback_HealthyCandidate(t *testing.T) {
 	assert.False(t, shouldAutoRollback(ar, d))
 }
 
-func TestShouldAutoRollback_UnhealthyCandidate_AutomaticMode(t *testing.T) {
+func TestShouldAutoRollback_StartingCandidate_DoesNotRollback(t *testing.T) {
+	// Regression: a candidate that is merely still starting (not ready, no
+	// failure condition) must not be rolled back, or automatic rollback kills
+	// every candidate before it can become ready / reach an analysis step.
 	ar := newAutoRollbackAR()
-	assert.True(t, shouldAutoRollback(ar, unhealthyDeploy()))
+	assert.False(t, shouldAutoRollback(ar, startingDeploy()))
 }
 
-func TestShouldAutoRollback_UnhealthyCandidate_ManualMode(t *testing.T) {
+func TestShouldAutoRollback_FailedCandidate_AutomaticMode(t *testing.T) {
+	ar := newAutoRollbackAR()
+	assert.True(t, shouldAutoRollback(ar, failedDeploy()))
+}
+
+func TestShouldAutoRollback_FailedCandidate_ManualMode(t *testing.T) {
 	ar := newAutoRollbackAR()
 	ar.Spec.Rollout.Rollback.Mode = omniav1alpha1.RollbackModeManual
-	assert.False(t, shouldAutoRollback(ar, unhealthyDeploy()))
+	assert.False(t, shouldAutoRollback(ar, failedDeploy()))
 }
 
-func TestShouldAutoRollback_UnhealthyCandidate_DisabledMode(t *testing.T) {
+func TestShouldAutoRollback_FailedCandidate_DisabledMode(t *testing.T) {
 	ar := newAutoRollbackAR()
 	ar.Spec.Rollout.Rollback.Mode = omniav1alpha1.RollbackModeDisabled
-	assert.False(t, shouldAutoRollback(ar, unhealthyDeploy()))
+	assert.False(t, shouldAutoRollback(ar, failedDeploy()))
 }
 
 func TestShouldAutoRollback_NilRollbackConfig(t *testing.T) {
 	ar := newAutoRollbackAR()
 	ar.Spec.Rollout.Rollback = nil
-	assert.False(t, shouldAutoRollback(ar, unhealthyDeploy()))
+	assert.False(t, shouldAutoRollback(ar, failedDeploy()))
 }
 
 func TestShouldAutoRollback_NilCandidateDeploy(t *testing.T) {

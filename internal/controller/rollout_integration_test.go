@@ -437,7 +437,9 @@ func TestReconcileRollout_AutoRollback_UnhealthyCandidate(t *testing.T) {
 
 	pp := newTestPromptPack()
 
-	// Pre-create a candidate Deployment with unhealthy status.
+	// Pre-create a candidate Deployment that genuinely failed to roll out
+	// (progress deadline exceeded) — the state that triggers auto-rollback. A
+	// merely-starting candidate (no failure condition) must not.
 	candidateDeploy := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      candidateDeploymentName(ar.Name),
@@ -446,6 +448,11 @@ func TestReconcileRollout_AutoRollback_UnhealthyCandidate(t *testing.T) {
 		Status: appsv1.DeploymentStatus{
 			ReadyReplicas:       0,
 			UnavailableReplicas: 1,
+			Conditions: []appsv1.DeploymentCondition{{
+				Type:   appsv1.DeploymentProgressing,
+				Status: corev1.ConditionFalse,
+				Reason: "ProgressDeadlineExceeded",
+			}},
 		},
 	}
 
