@@ -132,6 +132,13 @@ Secret names are configurable in `values.yaml`
 `sharepointHero.providers.*.secretRef`, `sharepointHero.embedding.secretRef`,
 `sharepointHero.loadtest.selfplay.secretRef`).
 
+**Database secrets.** The hero demo stands up a managed memory-api + session-api
+(Workspace serviceGroup), which reference Postgres connection Secrets by name:
+`sharepointHero.database.sessionSecret` (default `omnia-postgres`) and
+`sharepointHero.database.memorySecret` (default `omnia-postgres-memory`). Each
+must be a Secret in the namespace with a `POSTGRES_CONN` key. Reuse the core
+install's Secrets (point the values at them) or create demo-specific databases.
+
 ### 1.5 Keyless Azure OpenAI via Workload Identity (optional)
 
 When the chat model is served by Azure OpenAI, the demo can run the **chat**
@@ -169,11 +176,12 @@ then unnecessary):
   --set sharepointHero.azure.workloadIdentity.tenantId=<aad-tenant-id>
 ```
 
-> **Embedding is not yet keyless.** The memory-api embedding path still requires
-> an API-key embedding Provider, so the `embedding-api-key` secret remains needed
-> for semantic retrieval until embedding/chat auth parity ships in PromptKit. The
-> `rag-hero-baseline`/`candidate` chat providers are the only Azure-WI resources
-> today.
+> **Embedding keyless is pending.** With `azure.enabled` the `rag-hero-embeddings`
+> Provider renders as Azure WI and the memory-api pod gets the WI ServiceAccount,
+> but the memory-api embedding client cannot use workload identity until
+> embedding/chat auth parity ships in PromptKit — so semantic retrieval needs the
+> API-key path (`azure.enabled=false`, `embedding-api-key` secret) until then.
+> The chat providers are fully keyless today.
 
 ---
 
@@ -198,7 +206,9 @@ What this renders (all gated on `sharepointHero.enabled`):
 | `sharepoint-adapter` Deployment + Service | Graph `/list` + `/fetch` for `fetch_sharepoint` |
 | `rag-hero-seed` Job (post-install/upgrade hook) | indexes SharePoint docs as institutional memories |
 | `rag-hero-pack` PromptPack (v1 + v2) | v1 = stable prompt, v2 = verbose candidate prompt |
-| `rag-hero-baseline` / `rag-hero-candidate` Providers | stable model vs pricier candidate model |
+| `rag-hero-baseline` / `rag-hero-candidate` Providers | stable model vs pricier candidate model (Azure WI when `azure.enabled`) |
+| `rag-hero-embeddings` Provider (`role: embedding`) | embedding model for semantic memory retrieval (Azure WI when `azure.enabled`, else secretRef) |
+| managed `memory-api` + `session-api` (Workspace serviceGroup `default`) | the demo's data tier; `memory.providerRef` → `rag-hero-embeddings` |
 | `rag-hero-tools` ToolRegistry + `rag-hero-tool-policy` ToolPolicy | `fetch_sharepoint` http tool + restricted-site deny |
 | `rag-hero-privacy` SessionPrivacyPolicy | PII redaction |
 | `rag-hero` AgentRuntime | the agent (memory + evals + rollout; `trafficRouting.mode: mesh` always; candidate idle until `shipCandidate=true`) |

@@ -423,11 +423,20 @@ sharepointHero:
     credentialsSecret: sharepoint-adapter-creds
     sharepointSiteId: "REPLACE_WITH_SITE_ID"
 
-  # Embedding provider for semantic memory retrieval.
+  # Embedding provider for semantic memory retrieval. Used when azure.enabled is
+  # false; the keyless Azure path uses azure.embeddingModel instead.
   embedding:
     provider: openai          # openai | gemini | voyageai
     model: text-embedding-3-small
     secretRef: embedding-api-key   # pre-created Secret
+
+  # Postgres connection Secrets for the demo's managed memory-api + session-api
+  # (the Workspace serviceGroup references these by name). Each must be a
+  # pre-created Secret in the namespace with a POSTGRES_CONN key. Reuse the core
+  # install's secrets or create demo-specific ones.
+  database:
+    sessionSecret: omnia-postgres
+    memorySecret: omnia-postgres-memory
 
   # Retrieval-time governance deny-filter (CEL over a retrieved item's metadata).
   # The restricted SharePoint site's URL contains "restricted", so its indexed
@@ -454,6 +463,11 @@ sharepointHero:
     region: ""
     # Azure deployment name for the chat model (baseline + candidate).
     chatModel: gpt-4o
+    # Azure deployment name for the embedding model (memory-api semantic
+    # retrieval). Keyless embedding requires PromptKit embedding/chat auth
+    # parity; until then this renders a valid Provider but the memory-api falls
+    # back per its own support.
+    embeddingModel: text-embedding-3-small
     workloadIdentity:
       # ServiceAccount this chart creates in .Values.namespace, federated to the
       # runtime managed identity.
