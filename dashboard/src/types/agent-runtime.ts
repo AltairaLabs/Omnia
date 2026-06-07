@@ -216,6 +216,8 @@ export interface AgentRuntimeSpec {
   providers?: NamedProviderRef[];
   console?: ConsoleConfig;
   evals?: EvalConfig;
+  /** Progressive-delivery (canary) configuration. Present declares a rollout. */
+  rollout?: RolloutConfig;
   /** inputSchema is the JSON Schema the function's request body is
    * validated against. Required when spec.mode === "function". */
   inputSchema?: Record<string, unknown>;
@@ -252,11 +254,73 @@ export interface EvalPathConfig {
   groups?: string[];
 }
 
+// Rollout (progressive delivery)
+export interface RolloutPause {
+  /** Hold duration (e.g. "5m"). Omitted = pause indefinitely until promoted. */
+  duration?: string;
+}
+
+export interface RolloutAnalysisStep {
+  templateName: string;
+}
+
+/**
+ * One ordered step in a rollout. Exactly one of setWeight/pause/analysis is set:
+ * setWeight shifts canary traffic, pause holds, analysis gates on metrics.
+ */
+export interface RolloutStep {
+  setWeight?: number;
+  pause?: RolloutPause;
+  analysis?: RolloutAnalysisStep;
+}
+
+export interface TrafficRoutingConfig {
+  /** "mesh" | "replicaWeighted" | "external" (defaults resolve server-side). */
+  mode?: string;
+}
+
+export interface RolloutConfig {
+  /** Present declares an active rollout; absent/null is the idle state. */
+  candidate?: Record<string, unknown>;
+  steps?: RolloutStep[];
+  trafficRouting?: TrafficRoutingConfig;
+}
+
 // Status
 export interface ReplicaStatus {
   desired: number;
   ready: number;
   available: number;
+}
+
+/**
+ * Live status of an in-progress (or just-completed) rollout, mirrored from the
+ * operator's AgentRuntime `.status.rollout`. Present whenever a candidate has
+ * been declared; `active: false` with a terminal message ("promoted",
+ * "rolled back") after completion.
+ */
+export interface RolloutStatus {
+  /** True while the rollout is progressing through its steps. */
+  active?: boolean;
+  /** Index into `spec.rollout.steps` of the step currently being evaluated. */
+  currentStep?: number;
+  /** Canary traffic percentage currently delivered (0-100). */
+  currentWeight?: number;
+  /** How traffic is split: "mesh" (Istio VS/DR), "replicaWeighted", "external". */
+  trafficRoutingMode?: string;
+  /**
+   * Whether the delivered weight is exact. mesh/external enforce it precisely;
+   * replicaWeighted approximates it via replica ratios (false).
+   */
+  trafficWeightEnforced?: boolean;
+  /** Human-readable current state, e.g. "step 1: paused indefinitely". */
+  message?: string;
+  /** PromptPack version (or override identity) the candidate is running. */
+  candidateVersion?: string;
+  /** PromptPack version the stable track is running. */
+  stableVersion?: string;
+  /** RFC3339 timestamp the controller entered the current step. */
+  stepStartedAt?: string;
 }
 
 export interface AgentRuntimeStatus {
@@ -265,6 +329,7 @@ export interface AgentRuntimeStatus {
   activeVersion?: string;
   conditions?: Condition[];
   observedGeneration?: number;
+  rollout?: RolloutStatus;
 }
 
 /** Get the default (or first) provider ref from an AgentRuntimeSpec */
