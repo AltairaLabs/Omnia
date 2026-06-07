@@ -297,8 +297,8 @@ type AuthConfig struct {
 // +kubebuilder:validation:XValidation:rule="self.type != 'elevenlabs' || self.role == 'tts'",message="elevenlabs is a tts-only vendor; set spec.role to 'tts'"
 // +kubebuilder:validation:XValidation:rule="self.type != 'imagen' || self.role == 'image'",message="imagen is an image-only vendor; set spec.role to 'image'"
 //
-// Hyperscaler-platform validations (apply only when spec.role is 'llm'):
-// +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.role == 'llm'",message="spec.platform is only valid when spec.role is 'llm'"
+// Hyperscaler-platform validations (apply when spec.role is 'llm' or 'embedding'):
+// +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.role in ['llm', 'embedding']",message="spec.platform is only valid when spec.role is 'llm' or 'embedding'"
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || (self.type in ['claude', 'openai', 'gemini'])",message="platform is only valid for provider types claude, openai, or gemini"
 // +kubebuilder:validation:XValidation:rule="has(self.platform) == has(self.auth)",message="spec.platform and spec.auth must be set together"
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'bedrock' || self.auth.type in ['workloadIdentity', 'accessKey']",message="platform.type bedrock requires auth.type of workloadIdentity or accessKey"
@@ -364,6 +364,11 @@ type ProviderSpec struct {
 	//   openai × vertex, gemini × bedrock, gemini × azure.
 	// Auth method is constrained by platform, not by provider type (see
 	// spec.auth).
+	//
+	// Valid for spec.role 'llm' and 'embedding'. For embedding-role providers
+	// the same provider × platform pairs apply (e.g. openai × azure for Azure
+	// OpenAI embeddings, gemini × vertex); voyageai and ollama embedding
+	// providers have no hyperscaler hosting and are rejected with a platform.
 	// +optional
 	Platform *PlatformConfig `json:"platform,omitempty"`
 

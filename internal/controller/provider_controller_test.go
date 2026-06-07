@@ -2435,6 +2435,86 @@ var _ = Describe("Provider Controller", func() {
 			provider = nil
 		})
 
+		It("should accept openai embedding on azure with workloadIdentity (#1190)", func() {
+			// B1: platform/auth is now valid for role=embedding (was llm-only).
+			// Keyless Azure OpenAI embeddings — no secret required.
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "openai-azure-embedding-wi",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeOpenAI,
+					Role:  omniav1alpha1.ProviderRoleEmbedding,
+					Model: "text-embedding-3-small",
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type:     omniav1alpha1.PlatformTypeAzure,
+						Endpoint: "https://example.openai.azure.com",
+					},
+					Auth: &omniav1alpha1.AuthConfig{
+						Type: omniav1alpha1.AuthMethodWorkloadIdentity,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				HTTPClient: alwaysHealthyClient(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      provider.Name,
+					Namespace: providerNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated omniav1alpha1.Provider
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: providerNamespace}, &updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
+
+			var authCondition *metav1.Condition
+			for i := range updated.Status.Conditions {
+				if updated.Status.Conditions[i].Type == ProviderConditionTypeAuthConfigured {
+					authCondition = &updated.Status.Conditions[i]
+					break
+				}
+			}
+			Expect(authCondition).NotTo(BeNil())
+			Expect(authCondition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(authCondition.Reason).To(Equal("WorkloadIdentityConfigured"))
+		})
+
+		It("should reject voyageai embedding with platform at CRD level", func() {
+			// The role gate opened to embedding, but platform stays restricted
+			// to hyperscaler-hosted vendors — voyageai has no platform hosting.
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "voyageai-platform-rejected",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeVoyageAI,
+					Role:  omniav1alpha1.ProviderRoleEmbedding,
+					Model: "voyage-3",
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type:     omniav1alpha1.PlatformTypeAzure,
+						Endpoint: "https://example.openai.azure.com",
+					},
+					Auth: &omniav1alpha1.AuthConfig{
+						Type: omniav1alpha1.AuthMethodWorkloadIdentity,
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, provider)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("platform is only valid for provider types claude, openai, or gemini"))
+			provider = nil
+		})
+
 		It("should succeed when accessKey auth has valid credentialsSecretRef", func() {
 			// Create the credentials secret with both AWS keys.
 			authSecret := &corev1.Secret{
