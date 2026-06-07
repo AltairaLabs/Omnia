@@ -21,6 +21,7 @@ import { Separator } from "@/components/ui/separator";
 import { YamlBlock } from "@/components/ui/yaml-block";
 import { useAgent } from "@/hooks/agents";
 import { useProvider, usePromptPack } from "@/hooks/resources";
+import { useAgentRolloutStream } from "@/hooks/use-agent-rollout-stream";
 import type { NamedProviderRef } from "@/types/agent-runtime";
 
 interface AgentDetailPageProps {
@@ -72,6 +73,9 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
 
   const { data: agent, isLoading } = useAgent(name, workspace);
   const { data: promptPack } = usePromptPack(agent?.spec?.promptPackRef?.name || "", workspace);
+  // Live rollout via SSE: stays connected while the page is open, so it catches
+  // a rollout starting (and lingers the terminal state) without a refresh.
+  const liveRollout = useAgentRolloutStream(workspace, name);
 
   const handleTabChange = useCallback((tab: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -124,6 +128,11 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
   }
 
   const { metadata, spec, status } = agent;
+
+  // Once the SSE stream has any frame it is authoritative (catches start/finish
+  // live); until it connects, fall back to the initial fetched agent.
+  const rolloutSpec = liveRollout ? liveRollout.spec : spec.rollout ?? null;
+  const rolloutStatus = liveRollout ? liveRollout.status : status?.rollout ?? null;
 
   return (
     <div className="flex flex-col h-full">
@@ -261,9 +270,9 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
             </Card>
 
             {/* Rollout panel — only when a progressive-delivery rollout is
-                configured or in progress. */}
-            {(spec.rollout || status?.rollout) && (
-              <RolloutPanel spec={spec.rollout} status={status?.rollout} />
+                configured or in progress (live values from the SSE stream). */}
+            {(rolloutSpec || rolloutStatus) && (
+              <RolloutPanel spec={rolloutSpec ?? undefined} status={rolloutStatus ?? undefined} />
             )}
 
             {/* Spec Summary Cards */}

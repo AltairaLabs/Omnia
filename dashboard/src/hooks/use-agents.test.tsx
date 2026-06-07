@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useAgents, useAgent, rolloutRefetchInterval } from "./use-agents";
-import type { AgentRuntime } from "@/types";
+import { useAgents, useAgent } from "./use-agents";
 
 // Mock workspace context
 const mockCurrentWorkspace = {
@@ -21,24 +20,6 @@ vi.mock("@/contexts/workspace-context", () => ({
     refetch: vi.fn(),
   }),
 }));
-
-describe("rolloutRefetchInterval", () => {
-  it("polls every 3s while a rollout is active", () => {
-    const agent = { status: { rollout: { active: true } } } as AgentRuntime;
-    expect(rolloutRefetchInterval(agent)).toBe(3000);
-  });
-
-  it("stops polling when the rollout is not active", () => {
-    const agent = { status: { rollout: { active: false } } } as AgentRuntime;
-    expect(rolloutRefetchInterval(agent)).toBe(false);
-  });
-
-  it("does not poll when there is no rollout, or no agent", () => {
-    expect(rolloutRefetchInterval({ status: {} } as AgentRuntime)).toBe(false);
-    expect(rolloutRefetchInterval(null)).toBe(false);
-    expect(rolloutRefetchInterval(undefined)).toBe(false);
-  });
-});
 
 // Mock agent data
 const mockAgents = [
