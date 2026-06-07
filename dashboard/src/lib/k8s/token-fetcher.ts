@@ -99,24 +99,27 @@ function loadInClusterConfig(): k8s.KubeConfig {
  * Get or create the KubeConfig.
  */
 function getKubeConfig(): k8s.KubeConfig {
-  if (!kubeConfig) {
-    // First, check if we're in a cluster and try our manual loader
-    if (isInCluster()) {
-      try {
-        kubeConfig = loadInClusterConfig();
-        return kubeConfig;
-      } catch (err) {
-        console.warn(`Manual in-cluster config failed: ${err}`);
-      }
+  // In-cluster: rebuild on every call so the ServiceAccount token is re-read
+  // from disk. Projected SA tokens rotate (kubelet refreshes the file ~hourly);
+  // caching the KubeConfig bakes in the token string read at startup, so once it
+  // rotates the cached client 401s on the TokenRequest API — silently breaking
+  // workspace-scoped reads (they fall back to the dashboard's own SA, which then
+  // 403s on workspace resources). Re-reading is cheap: token mints are
+  // themselves cached (token-cache), so this is not a hot path.
+  if (isInCluster()) {
+    try {
+      return loadInClusterConfig();
+    } catch (err) {
+      console.warn(`Manual in-cluster config failed: ${err}`);
     }
+  }
 
-    // Fall back to library methods
+  // Local development: a static kubeconfig doesn't rotate, so caching is fine.
+  if (!kubeConfig) {
     kubeConfig = new k8s.KubeConfig();
     try {
-      // Try in-cluster config first (when running in K8s)
       kubeConfig.loadFromCluster();
     } catch {
-      // Fall back to default kubeconfig for local development
       kubeConfig.loadFromDefault();
     }
   }

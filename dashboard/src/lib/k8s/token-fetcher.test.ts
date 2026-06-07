@@ -12,6 +12,9 @@ vi.mock("@kubernetes/client-node", () => {
     loadFromDefault() {
       // no-op
     }
+    loadFromClusterAndUser() {
+      // no-op (manual in-cluster path)
+    }
     makeApiClient() {
       return {
         createNamespacedServiceAccountToken: mockCreateNamespacedServiceAccountToken,
@@ -24,6 +27,12 @@ vi.mock("@kubernetes/client-node", () => {
     CoreV1Api: vi.fn(),
   };
 });
+
+// Mock node:fs so the manual in-cluster loader can read SA token/CA/namespace.
+vi.mock("node:fs", () => ({
+  readFileSync: vi.fn(() => "mock-file-contents"),
+}));
+import * as fs from "node:fs";
 
 // Mock the token-cache module
 vi.mock("./token-cache", () => ({
@@ -139,6 +148,33 @@ describe("token-fetcher", () => {
       ).rejects.toThrow(
         "Failed to fetch token for SA workspace-my-workspace-editor-sa in namespace my-namespace: Forbidden"
       );
+    });
+
+    it("re-reads the SA token on each call when in-cluster (no stale cache)", async () => {
+      // Simulate in-cluster so getKubeConfig uses the manual loader.
+      process.env.KUBERNETES_SERVICE_HOST = "kubernetes.default.svc";
+      process.env.KUBERNETES_SERVICE_PORT = "443";
+      vi.resetModules();
+      tokenFetcherModule = await import("./token-fetcher");
+
+      mockCreateNamespacedServiceAccountToken.mockResolvedValue({
+        status: {
+          token: "wtok",
+          expirationTimestamp: new Date(Date.now() + 3600000).toISOString(),
+        },
+      });
+
+      await tokenFetcherModule.fetchServiceAccountToken("ws", "ns", "owner");
+      await tokenFetcherModule.fetchServiceAccountToken("ws", "ns", "owner");
+
+      // The SA token file must be read on BOTH calls: the KubeConfig is rebuilt
+      // each call in-cluster so a rotated projected token is picked up. This is
+      // the regression guard for the stale-cached-token 401 that broke
+      // workspace-scoped reads.
+      const tokenReads = vi
+        .mocked(fs.readFileSync)
+        .mock.calls.filter((c) => String(c[0]).endsWith("/token"));
+      expect(tokenReads.length).toBeGreaterThanOrEqual(2);
     });
 
     it("should use dev token in dev mode", async () => {
