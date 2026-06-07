@@ -8,3 +8,4 @@ export { AgentMetricsPanel } from "./agent-metrics-panel";
 export { EventsPanel } from "./events-panel";
 export { EvalConfigPanel } from "./eval-config-panel";
 export { AgentQualityTab } from "./agent-quality-tab";
+export { RolloutPanel } from "./rollout-panel";

@@ -6,7 +6,7 @@ import Link from "next/link";
 import { ArrowLeft, FileText, MessageSquare, Activity, ShieldCheck, Brain } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/layout";
-import { StatusBadge, ScaleControl, AgentMetricsPanel, EventsPanel, EvalConfigPanel, AgentQualityTab } from "@/components/agents";
+import { StatusBadge, ScaleControl, AgentMetricsPanel, EventsPanel, EvalConfigPanel, AgentQualityTab, RolloutPanel } from "@/components/agents";
 import { SystemPackBadge } from "@/components/agents/system-pack-badge";
 import { AgentMemoryPanel } from "@/components/memories/agent-memory-panel";
 import { AgentConsole } from "@/components/console";
@@ -259,6 +259,12 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
                 )}
               </CardContent>
             </Card>
+
+            {/* Rollout panel — only when a progressive-delivery rollout is
+                configured or in progress. */}
+            {(spec.rollout || status?.rollout) && (
+              <RolloutPanel spec={spec.rollout} status={status?.rollout} />
+            )}
 
             {/* Spec Summary Cards */}
             <div className="grid md:grid-cols-2 gap-4">

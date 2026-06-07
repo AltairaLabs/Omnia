@@ -6,6 +6,18 @@ import { useWorkspace } from "@/contexts/workspace-context";
 import type { AgentRuntime, AgentRuntimePhase } from "@/types";
 import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
+/** Poll interval (ms) while a rollout is active — fast enough to watch the
+ * traffic weight ramp and a rollback snap back during a live demo. */
+const ROLLOUT_POLL_MS = 3000;
+
+/**
+ * React Query refetch interval for a single agent: poll while its rollout is
+ * progressing, otherwise rely on staleness. Exported for direct testing.
+ */
+export function rolloutRefetchInterval(agent: AgentRuntime | null | undefined): number | false {
+  return agent?.status?.rollout?.active ? ROLLOUT_POLL_MS : false;
+}
+
 interface UseAgentsOptions {
   phase?: AgentRuntimePhase;
   /** Override workspace name (defaults to current workspace). */
@@ -74,5 +86,8 @@ export function useAgent(name: string, _namespace?: string) {
     enabled: !!name && !!currentWorkspace,
     staleTime: DEFAULT_STALE_TIME,
     refetchOnMount: true, // Only refetch if stale
+    // While a rollout is progressing, poll so the UI tracks the live traffic
+    // weight, step advances, and promote/rollback without a manual refresh.
+    refetchInterval: (query) => rolloutRefetchInterval(query.state.data),
   });
 }
