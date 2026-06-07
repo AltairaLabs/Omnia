@@ -287,6 +287,81 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 			Expect(afterPromote.Status.Rollout.Message).To(Equal("promoted"))
 		})
 
+		It("holds the replica-weighted split across pause reconciles (does not re-inflate)", func() {
+			arName := nextName("ar")
+			packName := nextName("pack")
+
+			pp := newPromptPack(packName)
+			Expect(k8sClient.Create(ctx, pp)).To(Succeed())
+
+			ar := baseAR(arName)
+			ar.Spec.PromptPackRef.Name = packName
+			ar.Spec.Runtime = &omniav1alpha1.RuntimeConfig{Replicas: ptr.To[int32](4)}
+			ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+				Candidate: &omniav1alpha1.CandidateOverrides{
+					PromptPackVersion: ptr.To("v2"),
+				},
+				// setWeight 50 then an indefinite pause — the canary spends ~all
+				// its life in the pause, which is exactly where the builder used
+				// to re-inflate both Deployments back to the canonical total.
+				Steps: []omniav1alpha1.RolloutStep{
+					{SetWeight: ptr.To[int32](50)},
+					{Pause: &omniav1alpha1.RolloutPause{}},
+				},
+				TrafficRouting: &omniav1alpha1.TrafficRoutingConfig{
+					Mode: TrafficModeReplicaWeighted,
+				},
+			}
+			Expect(k8sClient.Create(ctx, ar)).To(Succeed())
+
+			// MeshEnabled defaults false → resolveTrafficMode yields replicaWeighted.
+			r := &AgentRuntimeReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+
+			// Reuse one in-memory object across reconciles: the setWeight→pause
+			// path advances status only in memory (reconcileRolloutUpdateStatus
+			// persists only when it requeues), mirroring how the main loop carries
+			// status forward within a reconcile.
+			live := &omniav1alpha1.AgentRuntime{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: arName, Namespace: namespace}, live)).To(Succeed())
+
+			canaryName := candidateDeploymentName(arName)
+			replicasOf := func(name string) int32 {
+				dep := &appsv1.Deployment{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, dep)).To(Succeed())
+				if dep.Spec.Replicas == nil {
+					return -1
+				}
+				return *dep.Spec.Replicas
+			}
+
+			// One reconcile = stable build (main loop) then rollout (candidate
+			// build + traffic weighting), as the real Reconcile orders them.
+			reconcileOnce := func() {
+				_, err := r.reconcileDeployment(ctx, live, pp, nil, nil)
+				Expect(err).NotTo(HaveOccurred())
+				_, err = r.reconcileRollout(ctx, live, pp, nil, nil)
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			// Reconcile #1 — step 0 setWeight 50: split 4 → 2 stable / 2 canary.
+			reconcileOnce()
+			Expect(replicasOf(arName)).To(Equal(int32(2)), "stable scaled to 2 on setWeight")
+			Expect(replicasOf(canaryName)).To(Equal(int32(2)), "canary scaled to 2 on setWeight")
+			Expect(live.Status.Rollout.CurrentStep).NotTo(BeNil())
+			Expect(*live.Status.Rollout.CurrentStep).To(Equal(int32(1)), "advanced into the pause step")
+
+			// Reconciles #2 and #3 — step 1 paused indefinitely: the split MUST
+			// hold. Before the fix the builder re-stamped the canonical total (4)
+			// every reconcile, collapsing the data plane to 4/4 (1:1 ≈ 50:50).
+			reconcileOnce()
+			Expect(replicasOf(arName)).To(Equal(int32(2)), "stable held at 2 during pause (not re-inflated to 4)")
+			Expect(replicasOf(canaryName)).To(Equal(int32(2)), "canary held at 2 during pause (not re-inflated to 4)")
+
+			reconcileOnce()
+			Expect(replicasOf(arName)).To(Equal(int32(2)), "stable still 2 after repeated pause reconciles")
+			Expect(replicasOf(canaryName)).To(Equal(int32(2)), "canary still 2 after repeated pause reconciles")
+		})
+
 		It("reconcileRolloutIdle is a clean no-op when no rollout is configured", func() {
 			arName := nextName("ar")
 			ar := baseAR(arName)

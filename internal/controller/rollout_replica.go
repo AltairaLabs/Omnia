@@ -94,6 +94,30 @@ func (r *AgentRuntimeReconciler) reconcileReplicaWeighting(ctx context.Context, 
 	return delivered, nil
 }
 
+// preserveWeightedReplicas keeps the live .spec.replicas value (captured before
+// buildDeploymentSpec overwrote it) when a replica-weighted rollout is active.
+// While such a rollout runs, reconcileReplicaWeighting is the sole owner of the
+// stable and candidate replica counts. The deployment builder otherwise
+// re-stamps the canonical total every reconcile, which both collapses the
+// weighted split back to 1:1 on reconciles that don't process a setWeight step
+// (e.g. pause/analysis — where a canary spends most of its life) and fights the
+// weighter, thrashing pods. A nil liveReplicas (Deployment being created) keeps
+// the builder's default so the first reconcile starts from a sane count before
+// weighting kicks in.
+func (r *AgentRuntimeReconciler) preserveWeightedReplicas(
+	ctx context.Context,
+	ar *omniav1alpha1.AgentRuntime,
+	deployment *appsv1.Deployment,
+	liveReplicas *int32,
+) {
+	if liveReplicas == nil {
+		return
+	}
+	if r.replicaWeightingActive(ctx, ar) {
+		deployment.Spec.Replicas = liveReplicas
+	}
+}
+
 // scaleDeployment sets replicas on a Deployment (no-op when already at target).
 func (r *AgentRuntimeReconciler) scaleDeployment(ctx context.Context, namespace, name string, replicas int32) error {
 	dep := &appsv1.Deployment{}
