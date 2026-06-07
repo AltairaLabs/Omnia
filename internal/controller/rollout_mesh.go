@@ -30,7 +30,12 @@ import (
 )
 
 const (
-	trackLabelKey = "track"
+	// trackLabelKey is the pod label key the owned DestinationRule subsets must
+	// select on. It MUST equal labelOmniaTrack — the key the deployment builder
+	// stamps on stable/candidate pods. A bare "track" selects zero pods, so the
+	// waypoint/sidecar reports No Healthy Upstream and every mode=mesh request
+	// 503s while status still reports enforced=true.
+	trackLabelKey = labelOmniaTrack
 	trackStable   = "stable"
 	trackCanary   = "canary"
 

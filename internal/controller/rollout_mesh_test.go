@@ -36,8 +36,14 @@ func TestBuildOwnedDestinationRule_Subsets(t *testing.T) {
 	}
 	first := subsets[0].(map[string]interface{})
 	labels, _, _ := unstructured.NestedStringMap(first, "labels")
-	if labels["track"] != trackStable {
-		t.Fatalf("stable subset must select track=stable, got %v", labels)
+	// The subset MUST select on labelOmniaTrack — the exact key the deployment
+	// builder stamps on pods. A bare "track" key matches zero pods → the mesh
+	// data plane 503s (No Healthy Upstream) even though the VS/DR look correct.
+	if labels[labelOmniaTrack] != trackStable {
+		t.Fatalf("stable subset must select %s=stable, got %v", labelOmniaTrack, labels)
+	}
+	if _, hasBare := labels["track"]; hasBare {
+		t.Fatalf("subset must not use the bare \"track\" key (won't match pods): %v", labels)
 	}
 }
 
