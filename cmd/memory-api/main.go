@@ -1235,6 +1235,18 @@ func createEmbeddingProviderFromCRD(
 		BaseURL:    provider.Spec.BaseURL,
 		Credential: cred,
 	}
+	// Hyperscaler hosting (e.g. Azure OpenAI): pass platform + config through so
+	// PromptKit's ResolveEmbeddingTransport resolves the platform endpoint and
+	// applies the credential (token refresh) per request.
+	if provider.Spec.Platform != nil {
+		spec.Platform = string(provider.Spec.Platform.Type)
+		spec.PlatformConfig = &pkproviders.PlatformConfig{
+			Type:     string(provider.Spec.Platform.Type),
+			Region:   provider.Spec.Platform.Region,
+			Project:  provider.Spec.Platform.Project,
+			Endpoint: provider.Spec.Platform.Endpoint,
+		}
+	}
 	p, err := pkproviders.CreateEmbeddingProviderFromSpec(spec)
 	if err != nil {
 		return nil, fmt.Errorf("create embedding provider %q: %w", provider.Name, err)
@@ -1259,6 +1271,21 @@ func embeddingCredentialForCRD(
 ) (credentials.Credential, error) {
 	if provider.Spec.Type == omniav1alpha1.ProviderTypeOllama {
 		return nil, nil
+	}
+	// Keyless hyperscaler auth (workload identity): build a platform credential
+	// whose Apply injects a refreshed AAD token per request, instead of reading
+	// an API-key Secret. PromptKit's ResolveEmbeddingTransport wires it into the
+	// embedding HTTP client when spec.Platform is set (see createEmbeddingProviderFromCRD).
+	if provider.Spec.Auth != nil && provider.Spec.Auth.Type == omniav1alpha1.AuthMethodWorkloadIdentity {
+		endpoint := ""
+		if provider.Spec.Platform != nil {
+			endpoint = provider.Spec.Platform.Endpoint
+		}
+		cred, err := credentials.NewAzureCredential(ctx, endpoint)
+		if err != nil {
+			return nil, fmt.Errorf("build azure workload-identity credential for embedding provider %q: %w", provider.Name, err)
+		}
+		return cred, nil
 	}
 	ref := omniak8s.EffectiveSecretRef(provider)
 	if ref == nil {
