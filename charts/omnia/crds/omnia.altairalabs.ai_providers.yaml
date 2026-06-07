@@ -284,6 +284,11 @@ spec:
                     openai × vertex, gemini × bedrock, gemini × azure.
                   Auth method is constrained by platform, not by provider type (see
                   spec.auth).
+
+                  Valid for spec.role 'llm' and 'embedding'. For embedding-role providers
+                  the same provider × platform pairs apply (e.g. openai × azure for Azure
+                  OpenAI embeddings, gemini × vertex); voyageai and ollama embedding
+                  providers have no hyperscaler hosting and are rejected with a platform.
                 properties:
                   endpoint:
                     description: |-
@@ -449,8 +454,8 @@ spec:
               rule: self.type != 'elevenlabs' || self.role == 'tts'
             - message: imagen is an image-only vendor; set spec.role to 'image'
               rule: self.type != 'imagen' || self.role == 'image'
-            - message: spec.platform is only valid when spec.role is 'llm'
-              rule: '!has(self.platform) || self.role == ''llm'''
+            - message: spec.platform is only valid when spec.role is 'llm' or 'embedding'
+              rule: '!has(self.platform) || self.role in [''llm'', ''embedding'']'
             - message: platform is only valid for provider types claude, openai, or
                 gemini
               rule: '!has(self.platform) || (self.type in [''claude'', ''openai'',
