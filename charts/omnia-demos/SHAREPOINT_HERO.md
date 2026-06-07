@@ -132,6 +132,57 @@ Secret names are configurable in `values.yaml`
 `sharepointHero.providers.*.secretRef`, `sharepointHero.embedding.secretRef`,
 `sharepointHero.loadtest.selfplay.secretRef`).
 
+**Database secrets.** The hero demo stands up a managed memory-api + session-api
+(Workspace serviceGroup), which reference Postgres connection Secrets by name:
+`sharepointHero.database.sessionSecret` (default `omnia-postgres`) and
+`sharepointHero.database.memorySecret` (default `omnia-postgres-memory`). Each
+must be a Secret in the namespace with a `POSTGRES_CONN` key. Reuse the core
+install's Secrets (point the values at them) or create demo-specific databases.
+
+### 1.5 Keyless Azure OpenAI via Workload Identity (optional)
+
+When the chat model is served by Azure OpenAI, the demo can run the **chat**
+providers keyless via Azure AD Workload Identity — no `anthropic-api-key`
+secret, no API key in-cluster. Set `sharepointHero.azure.enabled=true` and the
+chart renders `rag-hero-baseline` / `rag-hero-candidate` as `type: openai` +
+`platform: azure` + `auth: workloadIdentity`, creates the workload-identity
+ServiceAccount (`sharepointHero.azure.workloadIdentity.serviceAccountName`,
+default `omnia-runtime-wi`) + its RBAC, and binds the agent pod to it via
+`podOverrides`.
+
+**One-time Azure setup** — federate the chart's ServiceAccount to the runtime
+managed identity (the MI must hold the *Cognitive Services OpenAI User* role on
+the Azure OpenAI resource). Run in the Azure subscription tenant:
+
+```bash
+az identity federated-credential create \
+  --name omnia-demo-runtime-wi \
+  --identity-name <runtime-managed-identity-name> \
+  --resource-group <mi-resource-group> \
+  --issuer "$(az aks show -g <rg> -n <cluster> --query oidcIssuerProfile.issuerUrl -o tsv)" \
+  --subject system:serviceaccount:omnia-demo:omnia-runtime-wi \
+  --audience api://AzureADTokenExchange
+```
+
+**Install** — add these `--set` flags to §2 (the `anthropic-api-key` secret is
+then unnecessary):
+
+```bash
+  --set sharepointHero.azure.enabled=true \
+  --set sharepointHero.azure.endpoint=https://<resource>.cognitiveservices.azure.com/ \
+  --set sharepointHero.azure.region=<region> \
+  --set sharepointHero.azure.chatModel=gpt-4o \
+  --set sharepointHero.azure.workloadIdentity.clientId=<mi-client-id> \
+  --set sharepointHero.azure.workloadIdentity.tenantId=<aad-tenant-id>
+```
+
+> **Embedding keyless is pending.** With `azure.enabled` the `rag-hero-embeddings`
+> Provider renders as Azure WI and the memory-api pod gets the WI ServiceAccount,
+> but the memory-api embedding client cannot use workload identity until
+> embedding/chat auth parity ships in PromptKit — so semantic retrieval needs the
+> API-key path (`azure.enabled=false`, `embedding-api-key` secret) until then.
+> The chat providers are fully keyless today.
+
 ---
 
 ## 2. Install
@@ -155,7 +206,9 @@ What this renders (all gated on `sharepointHero.enabled`):
 | `sharepoint-adapter` Deployment + Service | Graph `/list` + `/fetch` for `fetch_sharepoint` |
 | `rag-hero-seed` Job (post-install/upgrade hook) | indexes SharePoint docs as institutional memories |
 | `rag-hero-pack` PromptPack (v1 + v2) | v1 = stable prompt, v2 = verbose candidate prompt |
-| `rag-hero-baseline` / `rag-hero-candidate` Providers | stable model vs pricier candidate model |
+| `rag-hero-baseline` / `rag-hero-candidate` Providers | stable model vs pricier candidate model (Azure WI when `azure.enabled`) |
+| `rag-hero-embeddings` Provider (`role: embedding`) | embedding model for semantic memory retrieval (Azure WI when `azure.enabled`, else secretRef) |
+| managed `memory-api` + `session-api` (Workspace serviceGroup `default`) | the demo's data tier; `memory.providerRef` → `rag-hero-embeddings` |
 | `rag-hero-tools` ToolRegistry + `rag-hero-tool-policy` ToolPolicy | `fetch_sharepoint` http tool + restricted-site deny |
 | `rag-hero-privacy` SessionPrivacyPolicy | PII redaction |
 | `rag-hero` AgentRuntime | the agent (memory + evals + rollout; `trafficRouting.mode: mesh` always; candidate idle until `shipCandidate=true`) |

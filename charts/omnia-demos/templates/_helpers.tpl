@@ -37,3 +37,78 @@ Common labels
 helm.sh/chart: {{ include "omnia-demos.chart" . }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
+
+{{/*
+Render a SharePoint-hero chat Provider .spec body. Switches between keyless
+Azure OpenAI (workload identity, no secret) and a direct vendor credential
+(secretRef) on .Values.sharepointHero.azure.enabled.
+
+Call with a dict: (dict "ctx" $ "type" <type> "model" <model> "secretRef" <name>)
+*/}}
+{{- define "omnia-demos.chatProviderSpec" -}}
+{{- $az := .ctx.Values.sharepointHero.azure -}}
+{{- if $az.enabled -}}
+type: openai
+role: llm
+model: {{ $az.chatModel }}
+platform:
+  type: azure
+  endpoint: {{ $az.endpoint | quote }}
+  region: {{ $az.region | quote }}
+auth:
+  type: workloadIdentity
+{{- else -}}
+type: {{ .type }}
+role: llm
+model: {{ .model }}
+credential:
+  secretRef:
+    name: {{ .secretRef }}
+{{- end }}
+{{- end -}}
+
+{{/*
+Render the SharePoint-hero embedding Provider .spec body. Keyless Azure OpenAI
+(workload identity) when azure.enabled, else a direct openai credential
+(secretRef). role=embedding.
+
+Call with the root context ($).
+*/}}
+{{- define "omnia-demos.embeddingProviderSpec" -}}
+{{- $az := .Values.sharepointHero.azure -}}
+{{- $emb := .Values.sharepointHero.embedding -}}
+{{- if $az.enabled -}}
+type: openai
+role: embedding
+model: {{ $az.embeddingModel }}
+platform:
+  type: azure
+  endpoint: {{ $az.endpoint | quote }}
+  region: {{ $az.region | quote }}
+auth:
+  type: workloadIdentity
+{{- else -}}
+type: {{ $emb.provider }}
+role: embedding
+model: {{ $emb.model }}
+credential:
+  secretRef:
+    name: {{ $emb.secretRef }}
+{{- end }}
+{{- end -}}
+
+{{/*
+Pod overrides that bind a SharePoint-hero pod to the Azure workload-identity
+ServiceAccount + opt it into the AKS webhook's token injection. Renders nothing
+when azure.enabled=false. Indent at the call site.
+
+Call with the root context ($).
+*/}}
+{{- define "omnia-demos.azureWorkloadIdentityPodOverrides" -}}
+{{- $az := .Values.sharepointHero.azure -}}
+{{- if $az.enabled -}}
+serviceAccountName: {{ $az.workloadIdentity.serviceAccountName }}
+labels:
+  azure.workload.identity/use: "true"
+{{- end }}
+{{- end -}}

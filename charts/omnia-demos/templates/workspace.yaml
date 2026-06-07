@@ -32,3 +32,30 @@ spec:
     {{- if .Values.workspace.storage.storageClass }}
     storageClass: {{ .Values.workspace.storage.storageClass }}
     {{- end }}
+  {{- if .Values.sharepointHero.enabled }}
+  # Managed memory-api + session-api for the SharePoint RAG hero demo. The
+  # database secretRefs name pre-created Secrets (key POSTGRES_CONN) that must
+  # exist in this namespace. memory.providerRef binds the embedding Provider
+  # (rag-hero-embeddings) so semantic retrieval is configured; with
+  # azure.enabled the memory-api pod runs as the workload-identity SA for
+  # keyless Azure OpenAI embeddings.
+  services:
+    - name: default
+      mode: managed
+      session:
+        database:
+          secretRef:
+            name: {{ .Values.sharepointHero.database.sessionSecret }}
+      memory:
+        database:
+          secretRef:
+            name: {{ .Values.sharepointHero.database.memorySecret }}
+        providerRef:
+          name: rag-hero-embeddings
+        {{- if .Values.sharepointHero.azure.enabled }}
+        podOverrides:
+          serviceAccountName: {{ .Values.sharepointHero.azure.workloadIdentity.serviceAccountName }}
+          labels:
+            azure.workload.identity/use: "true"
+        {{- end }}
+  {{- end }}

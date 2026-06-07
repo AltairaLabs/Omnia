@@ -1,0 +1,72 @@
+{{- if and .Values.sharepointHero.enabled .Values.sharepointHero.azure.enabled }}
+{{- $az := .Values.sharepointHero.azure }}
+# Azure AD Workload Identity ServiceAccount for the hero demo. Bound to the
+# runtime managed identity (federated out-of-band — see SHAREPOINT_HERO.md) and
+# adopted by the rag-hero agent pod + the workspace memory-api pod via
+# podOverrides, so both authenticate to Azure OpenAI without an API key.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $az.workloadIdentity.serviceAccountName }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+  annotations:
+    azure.workload.identity/client-id: {{ $az.workloadIdentity.clientId | quote }}
+    azure.workload.identity/tenant-id: {{ $az.workloadIdentity.tenantId | quote }}
+---
+# Overriding the pod ServiceAccount drops the operator-provisioned per-agent
+# binding, so re-grant the CRD + Secret reads the facade/runtime/memory-api need.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $az.workloadIdentity.serviceAccountName }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+rules:
+  - apiGroups: ["omnia.altairalabs.ai"]
+    resources: ["agentruntimes", "providers", "toolregistries"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["omnia.altairalabs.ai"]
+    resources: ["agentruntimes/status"]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets", "namespaces"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $az.workloadIdentity.serviceAccountName }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $az.workloadIdentity.serviceAccountName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $az.workloadIdentity.serviceAccountName }}
+    namespace: {{ .Values.namespace }}
+---
+# Workspaces are cluster-scoped; the facade lists them for service discovery
+# (per-workspace session-api URL). The default binding is lost when the pod SA
+# is overridden, so re-bind the WI SA to the workspace-reader ClusterRole.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Values.namespace }}-{{ $az.workloadIdentity.serviceAccountName }}-workspace-reader
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: omnia-agent-workspace-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ $az.workloadIdentity.serviceAccountName }}
+    namespace: {{ .Values.namespace }}
+{{- end }}
