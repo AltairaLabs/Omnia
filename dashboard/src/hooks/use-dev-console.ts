@@ -12,6 +12,7 @@ import type {
 import { useConsoleStore, useSession } from "@/stores";
 import { generateId } from "@/lib/utils";
 import { getDeviceId } from "@/lib/device-id";
+import { getWsProxyUrl } from "@/lib/config";
 
 interface UseDevConsoleOptions {
   /** Unique session identifier for the dev console */
@@ -39,8 +40,28 @@ interface UseDevConsoleReturn extends ConsoleState {
   setProvider: (providerId: string) => void;
 }
 
-// WebSocket proxy port (matches server.js)
-const WS_PROXY_PORT = process.env.NEXT_PUBLIC_WS_PROXY_PORT || "3002";
+/**
+ * Build the dev-console WebSocket URL.
+ *
+ * Mirrors the agent console (live-service.ts): when a proxy URL is configured
+ * (NEXT_PUBLIC_WS_PROXY_URL build env or runtime ConfigMap) use it directly;
+ * otherwise use a relative URL on the *page's* host/port so it rides the same
+ * 443 the dashboard is served on, and the gateway path-routes /api/dev-console
+ * to the WS proxy (:3002). Never hardcode the proxy port — it is not exposed
+ * on the public gateway LoadBalancer. See Omnia#1243.
+ */
+export function buildDevConsoleWsUrl(opts: {
+  protocol: string;
+  host: string;
+  wsProxyUrl?: string | null;
+  params: string;
+}): string {
+  const { protocol, host, wsProxyUrl, params } = opts;
+  const base = wsProxyUrl
+    ? `${wsProxyUrl}/api/dev-console`
+    : `${protocol}//${host}/api/dev-console`;
+  return `${base}?${params}`;
+}
 
 /**
  * Extract text content from content parts.
@@ -322,7 +343,7 @@ export function useDevConsole({
   }, [addMessageToStore, updateLastMessageInStore, setSessionId, setStatus]);
 
   // Connect to the dev console
-  const connect = useCallback(() => {
+  const connect = useCallback(async () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       return; // Already connected
     }
@@ -334,10 +355,19 @@ export function useDevConsole({
 
     setStatus("connecting");
 
-    // Build WebSocket URL with workspace/namespace context
-    // If service is provided (from ArenaDevSession), use it for dynamic routing
+    // Resolve the WS proxy URL the same way the agent console does: prefer an
+    // explicitly configured proxy (build env or runtime ConfigMap), else fall
+    // back to a relative URL on the page's own host/port (rides the gateway).
+    let wsProxyUrl: string | undefined = process.env.NEXT_PUBLIC_WS_PROXY_URL;
+    if (!wsProxyUrl) {
+      wsProxyUrl = await getWsProxyUrl();
+    }
+    if (!mountedRef.current) return;
+
+    // Build WebSocket URL with workspace/namespace context. If a service is
+    // provided (from ArenaDevSession), pass it for dynamic routing.
     const protocol = globalThis.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = globalThis.location.hostname;
+    const host = globalThis.location.host;
     const params = new URLSearchParams();
     params.set("agent", "dev-console");
     if (workspace) params.set("workspace", workspace);
@@ -345,7 +375,12 @@ export function useDevConsole({
     if (service) params.set("service", service);
     const deviceId = getDeviceId();
     if (deviceId) params.set("device_id", deviceId);
-    const wsUrl = `${protocol}//${host}:${WS_PROXY_PORT}/api/dev-console?${params.toString()}`;
+    const wsUrl = buildDevConsoleWsUrl({
+      protocol,
+      host,
+      wsProxyUrl,
+      params: params.toString(),
+    });
 
     const ws = new WebSocket(wsUrl);
 

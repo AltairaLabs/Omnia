@@ -23,16 +23,27 @@ spec:
     - {{ . | quote }}
   {{- end }}
   rules:
-    # WebSocket route for agent connections (must be before catch-all).
+    # WebSocket routes for the dashboard's WS proxy (server.js, port 3002):
+    # agent consoles (/api/agents/{ns}/{name}/ws), the Arena dev console
+    # (/api/dev-console), and the PromptKit LSP (/api/lsp). All three must be
+    # routed to :3002 *before* the catch-all, or the browser's wss upgrade
+    # falls through to :3000 (Next.js) and never connects. See issues #936,
+    # #1243.
     # NOTE: uses PathPrefix, not RegularExpression. Istio 1.24 silently drops
     # Gateway API regex path matches (the rule vanishes from the generated
     # Envoy config with no warning on HTTPRoute status or in istiod logs).
-    # The /api/agents/ prefix is WS-only — the dashboard has no Next.js
-    # routes under it. See issue #936.
+    # These prefixes are WS-only — the dashboard has no Next.js routes under
+    # them.
     - matches:
         - path:
             type: PathPrefix
             value: /api/agents/
+        - path:
+            type: PathPrefix
+            value: /api/dev-console
+        - path:
+            type: PathPrefix
+            value: /api/lsp
       backendRefs:
         - name: {{ include "omnia.dashboard.fullname" . }}
           port: 3002
@@ -60,12 +71,18 @@ spec:
     - name: {{ $internalGatewayName }}
       namespace: {{ .Release.Namespace }}
   rules:
-    # WebSocket route for agent connections (must be before catch-all).
-    # See comment above for the PathPrefix rationale.
+    # WebSocket routes for the dashboard's WS proxy (:3002): agent consoles,
+    # the Arena dev console, and the LSP. See comment above for rationale.
     - matches:
         - path:
             type: PathPrefix
             value: /api/agents/
+        - path:
+            type: PathPrefix
+            value: /api/dev-console
+        - path:
+            type: PathPrefix
+            value: /api/lsp
       backendRefs:
         - name: {{ include "omnia.dashboard.fullname" . }}
           port: 3002
