@@ -3,9 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "postinstall": "node scripts/copy-monaco.mjs",
+    "predev": "node scripts/copy-monaco.mjs",
     "dev": "node server.js",
+    "predev:next": "node scripts/copy-monaco.mjs",
     "dev:next": "next dev --turbopack",
+    "prebuild": "node scripts/copy-monaco.mjs",
     "build": "next build --webpack",
     "start": "node server.js",
     "start:next": "next start",
