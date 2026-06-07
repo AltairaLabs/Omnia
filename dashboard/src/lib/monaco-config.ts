@@ -10,8 +10,6 @@ import { loader } from "@monaco-editor/react";
 //
 // Imported for its side effect from the client root (components/providers), so
 // it runs once before any Editor mounts. loader.config must be called before
-// the loader initialises. Guarded to the browser: "use client" modules are
-// still imported during SSR, where Monaco never renders.
-if (typeof window !== "undefined") {
-  loader.config({ paths: { vs: "/monaco/vs" } });
-}
+// the loader initialises. It only stores config (no DOM access), so it's safe
+// during the SSR import of this "use client" module.
+loader.config({ paths: { vs: "/monaco/vs" } });
