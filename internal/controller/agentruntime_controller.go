@@ -338,6 +338,25 @@ func (r *AgentRuntimeReconciler) reconcileResources(
 	toolRegistry *omniav1alpha1.ToolRegistry,
 	providers map[string]*omniav1alpha1.Provider,
 ) (*appsv1.Deployment, error) {
+	// #1206: block (don't silently substitute PromptKit) when the declared
+	// framework.type has no resolvable runtime image.
+	if _, ok := r.resolveFrameworkImage(agentRuntime); !ok {
+		ft := frameworkTypeKey(agentRuntime)
+		msg := fmt.Sprintf("no runtime image configured for framework type %q; set spec.framework.image or configure --framework-image=%s=<image>", ft, ft)
+		SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation,
+			ConditionTypeFrameworkReady, metav1.ConditionFalse, reasonFrameworkImageUnavailable, msg)
+		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhasePending
+		if r.Recorder != nil {
+			r.Recorder.Event(agentRuntime, corev1.EventTypeWarning, reasonFrameworkImageUnavailable, msg)
+		}
+		if statusErr := r.Status().Update(ctx, agentRuntime); statusErr != nil {
+			log.Error(statusErr, logMsgFailedToUpdateStatus)
+		}
+		return nil, fmt.Errorf("framework image unavailable for type %q", ft)
+	}
+	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation,
+		ConditionTypeFrameworkReady, metav1.ConditionTrue, "FrameworkImageResolved", "runtime image resolved for framework type")
+
 	// Reconcile facade RBAC (ServiceAccount, Role, RoleBinding)
 	if err := r.reconcileFacadeRBAC(ctx, agentRuntime); err != nil {
 		log.Error(err, "Failed to reconcile facade RBAC")

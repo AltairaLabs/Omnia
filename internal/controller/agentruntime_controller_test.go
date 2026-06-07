@@ -98,7 +98,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 			reconciler = &AgentRuntimeReconciler{
 				Client:          k8sClient,
 				Scheme:          k8sClient.Scheme(),
-				FacadeImage:     "test-facade:v1.0.0",
+				FacadeImage:     testFacadeImage,
 				FrameworkImages: promptkitImage("test-runtime:v1.0.0"),
 			}
 		})
@@ -252,7 +252,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(facadeContainer).NotTo(BeNil(), "facade container should exist")
 			Expect(runtimeContainer).NotTo(BeNil(), "runtime container should exist")
 
-			Expect(facadeContainer.Image).To(Equal("test-facade:v1.0.0"))
+			Expect(facadeContainer.Image).To(Equal(testFacadeImage))
 			Expect(facadeContainer.Ports).To(HaveLen(2)) // facade port + health port
 			Expect(facadeContainer.Ports[0].ContainerPort).To(Equal(int32(DefaultFacadePort)))
 
@@ -3007,7 +3007,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 			reconciler = &AgentRuntimeReconciler{
 				Client:          k8sClient,
 				Scheme:          k8sClient.Scheme(),
-				FacadeImage:     "test-facade:v1.0.0",
+				FacadeImage:     testFacadeImage,
 				FrameworkImages: promptkitImage("test-runtime:v1.0.0"),
 			}
 		})
@@ -3503,7 +3503,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 
 		BeforeEach(func() {
 			reconciler = &AgentRuntimeReconciler{
-				FacadeImage:     "test-facade:v1.0.0",
+				FacadeImage:     testFacadeImage,
 				FrameworkImages: promptkitImage("test-runtime:v1.0.0"),
 			}
 		})
@@ -3616,7 +3616,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 
 		BeforeEach(func() {
 			reconciler = &AgentRuntimeReconciler{
-				FacadeImage:     "test-facade:v1.0.0",
+				FacadeImage:     testFacadeImage,
 				FrameworkImages: promptkitImage("test-runtime:v1.0.0"),
 			}
 		})

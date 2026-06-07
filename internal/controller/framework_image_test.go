@@ -17,10 +17,20 @@ limitations under the License.
 package controller
 
 import (
+	"context"
+	"strings"
 	"testing"
+
+	"github.com/go-logr/logr"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
+
+// testFacadeImage is the shared facade image used across controller tests.
+const testFacadeImage = "test-facade:v1.0.0"
 
 // promptkitImage builds a FrameworkImages map mapping the promptkit framework
 // to img — the common test setup (agents default to promptkit).
@@ -61,6 +71,48 @@ func TestResolveFrameworkImage(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestReconcileResources_UnresolvableFramework_Blocks proves the #1206 fix:
+// a framework type with no resolvable image blocks loudly (condition + Event +
+// no Deployment) instead of silently running PromptKit.
+func TestReconcileResources_UnresolvableFramework_Blocks(t *testing.T) {
+	scheme := newTestScheme(t)
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "autogen-agent", Namespace: "fw1206-ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Framework: &omniav1alpha1.FrameworkConfig{Type: omniav1alpha1.FrameworkTypeAutoGen},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(ar).
+		WithStatusSubresource(&omniav1alpha1.AgentRuntime{}).
+		Build()
+	rec := record.NewFakeRecorder(10)
+	// No FrameworkImages: autogen has no built-in image -> must block.
+	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme, Recorder: rec}
+
+	dep, err := r.reconcileResources(context.Background(), logr.Discard(), ar, nil, nil, nil)
+	if err == nil {
+		t.Fatal("expected error for unresolvable framework image")
+	}
+	if dep != nil {
+		t.Fatal("no Deployment should be built when the framework image is unavailable")
+	}
+	cond := findCondition(ar.Status.Conditions, ConditionTypeFrameworkReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != reasonFrameworkImageUnavailable {
+		t.Fatalf("want FrameworkReady=False/FrameworkImageUnavailable, got %+v", cond)
+	}
+	select {
+	case ev := <-rec.Events:
+		if !strings.Contains(ev, "FrameworkImageUnavailable") {
+			t.Fatalf("event %q missing FrameworkImageUnavailable", ev)
+		}
+	default:
+		t.Fatal("expected a Warning event")
+	}
+	// dep == nil (asserted above) + the block returns before any
+	// reconcileFacadeRBAC/reconcileDeployment proves no Deployment is built.
 }
 
 func TestResolveFrameworkImage_BareDevFallback(t *testing.T) {

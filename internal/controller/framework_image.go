@@ -18,6 +18,10 @@ package controller
 
 import omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 
+// reasonFrameworkImageUnavailable is the condition reason + Event reason used
+// when a declared framework.type has no resolvable runtime image (#1206).
+const reasonFrameworkImageUnavailable = "FrameworkImageUnavailable"
+
 // frameworkTypeKey returns the framework type string for an AgentRuntime,
 // defaulting to "promptkit" when unset (the historical default).
 func frameworkTypeKey(ar *omniav1alpha1.AgentRuntime) string {
