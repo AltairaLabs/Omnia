@@ -42,6 +42,9 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Coverage output
     "coverage/**",
+    // Self-hosted Monaco editor assets (copied from node_modules by
+    // scripts/copy-monaco.mjs; vendor minified code, not ours to lint)
+    "public/monaco/**",
     // Generated types
     "src/types/generated/**",
     // Generated API schema (openapi-typescript output)

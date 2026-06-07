@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "postinstall": "node scripts/copy-monaco.mjs",
     "dev": "node server.js",
     "dev:next": "next dev --turbopack",
     "build": "next build --webpack",
@@ -122,6 +123,7 @@
     "eslint-plugin-sonarjs": "^4.0.3",
     "eslint-plugin-unicorn": "^62.0.0",
     "jsdom": "^27.4.0",
+    "monaco-editor": "0.55.1",
     "monocart-reporter": "^2.9.23",
     "openapi-typescript": "^7.10.1",
     "os-browserify": "^0.3.0",

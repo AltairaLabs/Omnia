@@ -36,6 +36,8 @@ const DEFAULT_CSP = [
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
   "connect-src 'self' ws: wss:",
+  // Monaco (self-hosted) creates its editor/language web workers from blob URLs.
+  "worker-src 'self' blob:",
   "media-src 'self' blob: data:",
   "frame-ancestors 'none'",
   "base-uri 'self'",
