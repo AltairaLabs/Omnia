@@ -87,6 +87,36 @@ tests:
             resources: [secrets]
             verbs: [get, list, create, update, patch, delete]
 
+  - it: dashboard ClusterRole grants Arena CRD CRUD when enterprise is enabled
+    set:
+      enterprise.enabled: true
+    template: templates/dashboard/clusterrole.yaml
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups: [omnia.altairalabs.ai]
+            resources: [arenadevsessions, arenajobs, arenasources, arenatemplatesources]
+            verbs: [get, list, watch, create, update, patch, delete]
+      - contains:
+          path: rules
+          content:
+            apiGroups: [omnia.altairalabs.ai]
+            resources: [arenadevsessions/status, arenajobs/status, arenasources/status, arenatemplatesources/status]
+            verbs: [get]
+
+  - it: dashboard ClusterRole omits Arena CRDs when enterprise is disabled
+    set:
+      enterprise.enabled: false
+    template: templates/dashboard/clusterrole.yaml
+    asserts:
+      - notContains:
+          path: rules
+          content:
+            apiGroups: [omnia.altairalabs.ai]
+            resources: [arenadevsessions, arenajobs, arenasources, arenatemplatesources]
+            verbs: [get, list, watch, create, update, patch, delete]
+
   - it: dashboard ClusterRoleBinding points at the scoped role, not the manager role
     template: templates/dashboard/clusterrolebinding.yaml
     asserts:

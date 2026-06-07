@@ -73,4 +73,25 @@ rules:
       - toolregistries/status
       - workspaces/status
     verbs: [get]
+  {{- if .Values.enterprise.enabled }}
+  # Arena (enterprise): the dashboard surfaces Arena projects, sources, jobs,
+  # and dev sessions for full CRUD (the deploy/run/jobs/sources/dev-sessions
+  # API routes call listCrd/deleteCrd/create). Gated on enterprise.enabled —
+  # the Arena CRDs only exist then, and without these rules the Arena UI 403s
+  # ("Error loading Arena stats").
+  - apiGroups: [omnia.altairalabs.ai]
+    resources:
+      - arenadevsessions
+      - arenajobs
+      - arenasources
+      - arenatemplatesources
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [omnia.altairalabs.ai]
+    resources:
+      - arenadevsessions/status
+      - arenajobs/status
+      - arenasources/status
+      - arenatemplatesources/status
+    verbs: [get]
+  {{- end }}
 {{- end }}
