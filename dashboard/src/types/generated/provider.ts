@@ -126,7 +126,12 @@ export interface ProviderSpec {
    * not host the model vendor as a partner endpoint:
    *   openai × vertex, gemini × bedrock, gemini × azure.
    * Auth method is constrained by platform, not by provider type (see
-   * spec.auth). */
+   * spec.auth).
+   * 
+   * Valid for spec.role 'llm' and 'embedding'. For embedding-role providers
+   * the same provider × platform pairs apply (e.g. openai × azure for Azure
+   * OpenAI embeddings, gemini × vertex); voyageai and ollama embedding
+   * providers have no hyperscaler hosting and are rejected with a platform. */
   platform?: {
     /** endpoint overrides the default platform API endpoint.
      * Required for azure (the Azure OpenAI resource URL). */
