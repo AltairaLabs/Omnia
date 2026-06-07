@@ -1,0 +1,26 @@
+suite: operator can read RolloutAnalysis for analysis-gated rollouts
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/clusterrole.yaml
+tests:
+  # Without this grant the operator cannot fetch the RolloutAnalysis template at
+  # an `analysis` rollout step — the analysis errors with "forbidden" and the
+  # rollout stalls (the eval-gated promote/rollback never fires). Generated from
+  # the kubebuilder:rbac marker on the AgentRuntime controller.
+  - it: operator clusterrole grants read on rolloutanalyses
+    template: templates/clusterrole.yaml
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - omnia.altairalabs.ai
+            resources:
+              - rolloutanalyses
+            verbs:
+              - get
+              - list
+              - watch
