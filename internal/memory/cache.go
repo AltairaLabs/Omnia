@@ -305,6 +305,15 @@ func (c *CachedStore) SaveCompactionSummary(ctx context.Context, summary Compact
 
 // List returns cached results when available, falling back to the inner store on miss or Redis error.
 func (c *CachedStore) List(ctx context.Context, scope map[string]string, opts ListOptions) ([]*Memory, error) {
+	// Visible-to-me lists span institutional + agent + user tiers. No single
+	// writer's scope hash matches this list's scope hash, so cache
+	// invalidation never fires for it — caching would serve stale results,
+	// including the user's own just-written memories. Bypass the cache; this
+	// is a low-QPS browse path. See #1254.
+	if scope[ScopeIncludeShared] == scopeFlagTrue {
+		return c.inner.List(ctx, scope, opts)
+	}
+
 	key := c.listKey(ctx, scope, opts)
 	if key == "" {
 		// listKey returned "" because getVersion failed — already

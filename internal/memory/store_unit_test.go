@@ -327,7 +327,7 @@ func TestBuildListQuery_IncludeShared_WidensToVisibleToMe(t *testing.T) {
 	scope := map[string]string{
 		ScopeWorkspaceID:   "ws-uuid",
 		ScopeUserID:        "u1",
-		ScopeIncludeShared: "true",
+		ScopeIncludeShared: scopeFlagTrue,
 	}
 	sql, qb := buildListQuery(scope, ListOptions{})
 
@@ -340,7 +340,7 @@ func TestBuildListQuery_IncludeShared_WidensToVisibleToMe(t *testing.T) {
 func TestBuildListQuery_IncludeShared_EmptyUserAnchorsToSharedOnly(t *testing.T) {
 	scope := map[string]string{
 		ScopeWorkspaceID:   "ws-uuid",
-		ScopeIncludeShared: "true",
+		ScopeIncludeShared: scopeFlagTrue,
 	}
 	sql, _ := buildListQuery(scope, ListOptions{})
 

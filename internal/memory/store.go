@@ -44,12 +44,14 @@ const (
 	ScopeWorkspaceID = "workspace_id"
 	ScopeUserID      = "user_id"
 	ScopeAgentID     = "agent_id"
-	// ScopeIncludeShared is a list-only control key. When set to "true",
+	// ScopeIncludeShared is a list-only control key. When set to scopeFlagTrue,
 	// List returns everything visible to the user — institutional + agent
 	// tiers plus the user's own — instead of strictly the user's own rows.
 	// Other read paths (Retrieve, ExportAll/DSAR) ignore it, so user-private
 	// scoping stays strict by construction. See #1254.
 	ScopeIncludeShared = "include_shared"
+	// scopeFlagTrue is the enabled value for boolean scope control keys.
+	scopeFlagTrue = "true"
 )
 
 // Error message constants (SonarCloud S1192).
@@ -675,14 +677,19 @@ func (s *PostgresMemoryStore) List(ctx context.Context, scope map[string]string,
 	}
 	defer rows.Close()
 
+	// Visible-to-me returns mixed tiers, so it selects per-row scope columns
+	// and must be scanned accordingly to derive each row's real tier (#1254).
+	if scope[ScopeIncludeShared] == scopeFlagTrue {
+		return scanVisibleToMeMemories(rows, scope[ScopeWorkspaceID])
+	}
 	return scanMemories(rows, scope)
 }
 
 // buildListQuery constructs the SQL and arguments for a List call.
 func buildListQuery(scope map[string]string, opts ListOptions) (string, *pgutil.QueryBuilder) {
-	if scope[ScopeIncludeShared] == "true" {
+	if scope[ScopeIncludeShared] == scopeFlagTrue {
 		qb := buildVisibleToMeQuery(scope, opts.Types)
-		return formatMemorySQL(qb, opts.Limit, opts.Offset), qb
+		return formatVisibleToMeSQL(qb, opts.Limit, opts.Offset), qb
 	}
 	qb := buildBaseMemoryQuery(scope, opts.Types, "")
 	return formatMemorySQL(qb, opts.Limit, opts.Offset), qb
@@ -1699,6 +1706,28 @@ func formatMemorySQL(qb *pgutil.QueryBuilder, limit, offset int) string {
 	return qb.AppendPagination(sql, limit, offset)
 }
 
+// formatVisibleToMeSQL is formatMemorySQL with the per-row scope columns
+// (virtual_user_id, agent_id) appended, so the visible-to-me list — which
+// spans institutional, agent and user tiers — can derive each row's real
+// tier instead of inheriting the request scope. Scanned by
+// scanVisibleToMeMemories. See #1254.
+func formatVisibleToMeSQL(qb *pgutil.QueryBuilder, limit, offset int) string {
+	if limit <= 0 {
+		limit = defaultMemoryLimit
+	}
+
+	sql := fmt.Sprintf(`
+		SELECT DISTINCT ON (e.id) %s, %s, %s
+		FROM memory_entities %s%s
+		WHERE %s%s
+		ORDER BY e.id, o.observed_at DESC`,
+		selectEntityCols, selectObserveCols, selectEntityScopeCols,
+		entityTableAlias, observationJoin,
+		colEntityForgot, qb.Where())
+
+	return qb.AppendPagination(sql, limit, offset)
+}
+
 // addScopeFilters appends optional user_id and agent_id filters.
 func addScopeFilters(qb *pgutil.QueryBuilder, scope map[string]string) {
 	if uid := scope[ScopeUserID]; uid != "" {
@@ -1797,8 +1826,18 @@ func scanMemories(rows pgx.Rows, scope map[string]string) ([]*Memory, error) {
 	return results, nil
 }
 
-// scanMemory scans a single row into a Memory.
+// scanMemory scans a single row into a Memory, stamping it with the request
+// scope. Used by every list/retrieve path except visible-to-me.
 func scanMemory(row pgx.Rows, scope map[string]string) (*Memory, error) {
+	return scanMemoryRow(row, scope, "", false)
+}
+
+// scanMemoryRow scans one memory row. When withRowScope is false it stamps
+// the request scope (the standard SELECT has no scope columns). When true it
+// scans two trailing columns — virtual_user_id, agent_id — and builds the
+// per-row scope, so callers like the visible-to-me list (which returns mixed
+// tiers) derive each row's real tier instead of the request's. See #1254.
+func scanMemoryRow(row pgx.Rows, scope map[string]string, workspaceID string, withRowScope bool) (*Memory, error) {
 	var (
 		mem            Memory
 		metadataJSON   []byte
@@ -1809,18 +1848,27 @@ func scanMemory(row pgx.Rows, scope map[string]string) (*Memory, error) {
 		accessedAt     *time.Time
 		title, summary *string
 		bodySizeBytes  *int32
+		userID         *string
+		agentID        *string
 	)
 
-	err := row.Scan(
+	dest := []any{
 		&mem.ID, &mem.Type, &metadataJSON, &mem.CreatedAt, &expiresAt, &title,
 		&mem.Content, &mem.Confidence, &sessionID, &turnRange, &observedAt, &accessedAt,
 		&summary, &bodySizeBytes,
-	)
-	if err != nil {
+	}
+	if withRowScope {
+		dest = append(dest, &userID, &agentID)
+	}
+	if err := row.Scan(dest...); err != nil {
 		return nil, fmt.Errorf("memory: scan row: %w", err)
 	}
 
-	mem.Scope = copyScope(scope)
+	if withRowScope {
+		mem.Scope = buildScope(workspaceID, userID, agentID)
+	} else {
+		mem.Scope = copyScope(scope)
+	}
 	mem.ExpiresAt = expiresAt
 	if sessionID != nil {
 		mem.SessionID = *sessionID
@@ -1837,6 +1885,27 @@ func scanMemory(row pgx.Rows, scope map[string]string) (*Memory, error) {
 	}
 
 	return &mem, nil
+}
+
+// scanVisibleToMeMemories scans rows from the visible-to-me list query, which
+// appends virtual_user_id and agent_id so each Memory carries its real
+// per-row scope (and therefore its real tier).
+func scanVisibleToMeMemories(rows pgx.Rows, workspaceID string) ([]*Memory, error) {
+	var results []*Memory
+	for rows.Next() {
+		mem, err := scanMemoryRow(rows, nil, workspaceID, true)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, mem)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory: visible-to-me rows iteration: %w", err)
+	}
+	if results == nil {
+		results = []*Memory{}
+	}
+	return results, nil
 }
 
 // copyScope returns a shallow copy of the scope map.
