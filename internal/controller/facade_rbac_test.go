@@ -151,6 +151,40 @@ func TestReconcileWorkspaceReaderBinding_FollowsPodOverrideServiceAccount(t *tes
 	assert.Equal(t, "test-ns", crb.Subjects[0].Namespace)
 }
 
+// TestReconcileWorkspaceReaderBinding_SubjectFlipsOnOverrideChange covers the
+// operational migration path: an agent first reconciled with the default SA,
+// then updated to set podOverrides.serviceAccountName, must have its
+// workspace-reader subject MOVED to the override SA with no stale subject left
+// (the exact transition when migrating an existing agent onto a WI SA).
+func TestReconcileWorkspaceReaderBinding_SubjectFlipsOnOverrideChange(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
+	require.NoError(t, rbacv1.AddToScheme(scheme))
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &AgentRuntimeReconciler{
+		Client:                          fakeClient,
+		Scheme:                          scheme,
+		AgentWorkspaceReaderClusterRole: "omnia-agent-workspace-reader",
+	}
+
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: "test-ns"},
+	}
+	// First reconcile: default <name>-facade SA.
+	require.NoError(t, r.reconcileWorkspaceReaderBinding(context.Background(), ar))
+
+	// User migrates the agent onto a workload-identity SA and we reconcile again.
+	ar.Spec.PodOverrides = &omniav1alpha1.PodOverrides{ServiceAccountName: "omnia-runtime-wi"}
+	require.NoError(t, r.reconcileWorkspaceReaderBinding(context.Background(), ar))
+
+	crb := &rbacv1.ClusterRoleBinding{}
+	require.NoError(t, fakeClient.Get(context.Background(), types.NamespacedName{
+		Name: "test-ns-test-agent-workspace-reader",
+	}, crb))
+	require.Len(t, crb.Subjects, 1, "no stale subject should linger after the override change")
+	assert.Equal(t, "omnia-runtime-wi", crb.Subjects[0].Name)
+}
+
 func TestReconcileWorkspaceReaderBinding_SkipsWhenUnconfigured(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{
