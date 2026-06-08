@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/golang-jwt/jwt/v5"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -57,7 +58,8 @@ type Validator struct {
 	cache     *License
 	cacheExp  time.Time
 	cacheTTL  time.Duration
-	devMode   bool // When true, returns a full-featured dev license
+	devMode   bool   // When true, returns a full-featured dev license
+	namespace string // Namespace of the license Secret and public-key ConfigMap.
 	mu        sync.RWMutex
 }
 
@@ -86,6 +88,15 @@ func WithDevMode() ValidatorOption {
 	}
 }
 
+// WithNamespace overrides the namespace used to look up the license Secret and
+// public-key ConfigMap. When unset, the validator resolves the operator's own
+// namespace at runtime (see NewValidator).
+func WithNamespace(namespace string) ValidatorOption {
+	return func(v *Validator) {
+		v.namespace = namespace
+	}
+}
+
 // NewValidator creates a new license validator.
 // It first checks for a public key in the ConfigMap (for easy rotation),
 // then falls back to the embedded public key.
@@ -97,6 +108,14 @@ func NewValidator(c client.Client, opts ...ValidatorOption) (*Validator, error) 
 
 	for _, opt := range opts {
 		opt(v)
+	}
+
+	// Resolve the namespace for license/public-key lookups from the operator's
+	// own namespace (POD_NAMESPACE → SA file → "omnia-system" fallback) unless
+	// an explicit override was supplied. This lets Helm installs into any
+	// release namespace work instead of assuming "omnia-system".
+	if v.namespace == "" {
+		v.namespace = k8s.OperatorNamespace(LicenseSecretNamespace)
 	}
 
 	// If public key was explicitly provided via option, use it
@@ -129,7 +148,7 @@ func NewValidator(c client.Client, opts ...ValidatorOption) (*Validator, error) 
 func (v *Validator) loadPublicKeyFromConfigMap(ctx context.Context) (*rsa.PublicKey, error) {
 	var cm corev1.ConfigMap
 	err := v.client.Get(ctx, client.ObjectKey{
-		Namespace: PublicKeyConfigMapNamespace,
+		Namespace: v.namespace,
 		Name:      PublicKeyConfigMapName,
 	}, &cm)
 	if err != nil {
@@ -142,7 +161,7 @@ func (v *Validator) loadPublicKeyFromConfigMap(ctx context.Context) (*rsa.Public
 	pemData, ok := cm.Data[PublicKeyConfigMapKey]
 	if !ok {
 		return nil, fmt.Errorf("ConfigMap %s/%s missing key %q",
-			PublicKeyConfigMapNamespace, PublicKeyConfigMapName, PublicKeyConfigMapKey)
+			v.namespace, PublicKeyConfigMapName, PublicKeyConfigMapKey)
 	}
 
 	key, err := parsePublicKey([]byte(pemData))
@@ -235,7 +254,7 @@ func (v *Validator) fetchAndValidate(ctx context.Context) (*License, error) {
 	secret := &corev1.Secret{}
 	err := v.client.Get(ctx, types.NamespacedName{
 		Name:      LicenseSecretName,
-		Namespace: LicenseSecretNamespace,
+		Namespace: v.namespace,
 	}, secret)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
