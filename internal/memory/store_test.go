@@ -1150,6 +1150,77 @@ func TestPostgresMemoryStore_WorkspaceIsolation(t *testing.T) {
 	assert.Len(t, results, 3, "workspace 1 should have 3 memories")
 }
 
+// TestPostgresMemoryStore_List_VisibleToMe proves the #1254 "visible to me"
+// mode end-to-end against real Postgres: it returns institutional + agent
+// tiers plus the requesting user's own memories, EXCLUDES other users'
+// private memories, and — critically — stamps each returned row with its
+// REAL per-row scope so the handler derives the correct per-row tier (the
+// bug a mock-based test would hide).
+func TestPostgresMemoryStore_List_VisibleToMe(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	const ws = testWorkspace1
+
+	const (
+		alice  = "alice"
+		cInst  = "institutional fact"
+		cAgent = "agent fact"
+		cAlice = "alice private"
+		cBob   = "bob private"
+	)
+	// agent_id is a UUID column, so the agent tier uses a valid UUID.
+	const agentID = testAgent1
+	// Seed one memory per tier via the tier's own Save path (plain Save
+	// requires a user_id; institutional/agent rows use dedicated methods).
+	save := func(scope map[string]string, content string) {
+		mem := &Memory{Type: "fact", Content: content, Confidence: 0.9, Scope: scope}
+		var err error
+		switch {
+		case scope[ScopeUserID] != "":
+			err = store.Save(ctx, mem)
+		case scope[ScopeAgentID] != "":
+			err = store.SaveAgentScoped(ctx, mem)
+		default:
+			err = store.SaveInstitutional(ctx, mem)
+		}
+		require.NoError(t, err)
+	}
+	save(map[string]string{ScopeWorkspaceID: ws}, cInst)
+	save(map[string]string{ScopeWorkspaceID: ws, ScopeAgentID: agentID}, cAgent)
+	save(map[string]string{ScopeWorkspaceID: ws, ScopeUserID: alice}, cAlice)
+	save(map[string]string{ScopeWorkspaceID: ws, ScopeUserID: "bob"}, cBob)
+
+	// Strict (default) list: alice sees only her own.
+	strict, err := store.List(ctx, map[string]string{
+		ScopeWorkspaceID: ws, ScopeUserID: alice,
+	}, ListOptions{})
+	require.NoError(t, err)
+	require.Len(t, strict, 1)
+	assert.Equal(t, cAlice, strict[0].Content)
+
+	// Visible-to-me: institutional + agent + alice's own, but NOT bob's.
+	visible, err := store.List(ctx, map[string]string{
+		ScopeWorkspaceID:   ws,
+		ScopeUserID:        alice,
+		ScopeIncludeShared: scopeFlagTrue,
+	}, ListOptions{})
+	require.NoError(t, err)
+
+	scopeByContent := make(map[string]map[string]string, len(visible))
+	for _, m := range visible {
+		scopeByContent[m.Content] = m.Scope
+	}
+	require.Len(t, visible, 3, "institutional + agent + alice's own")
+	assert.NotContains(t, scopeByContent, cBob, "must exclude other users' private memories")
+
+	// Per-row scope must reflect each row's real tier, not the request scope.
+	assert.Empty(t, scopeByContent[cInst][ScopeUserID])
+	assert.Empty(t, scopeByContent[cInst][ScopeAgentID])
+	assert.Equal(t, agentID, scopeByContent[cAgent][ScopeAgentID])
+	assert.Empty(t, scopeByContent[cAgent][ScopeUserID])
+	assert.Equal(t, alice, scopeByContent[cAlice][ScopeUserID])
+}
+
 func TestPostgresMemoryStore_Save_WithSessionAndTurnRange(t *testing.T) {
 
 	store := newStore(t)

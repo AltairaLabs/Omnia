@@ -147,6 +147,25 @@ describe("buildBackendParams", () => {
     expect(params.get("limit")).toBe("20");
     expect(params.get("offset")).toBe("5");
   });
+
+  it("maps includeShared=true to include_shared for visible-to-me mode", async () => {
+    const { buildBackendParams } = await import("./proxy-helpers");
+
+    const searchParams = new URLSearchParams("userId=user-abc&includeShared=true");
+    const params = buildBackendParams(searchParams, "ws-uid-999");
+
+    expect(params.get("include_shared")).toBe("true");
+    expect(params.has("includeShared")).toBe(false);
+  });
+
+  it("omits include_shared when includeShared is absent", async () => {
+    const { buildBackendParams } = await import("./proxy-helpers");
+
+    const searchParams = new URLSearchParams("userId=user-abc");
+    const params = buildBackendParams(searchParams, "ws-uid-999");
+
+    expect(params.has("include_shared")).toBe(false);
+  });
 });
 
 // --- proxyToMemoryApi unit tests ---

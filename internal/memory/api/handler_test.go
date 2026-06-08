@@ -38,10 +38,13 @@ import (
 // --- Mock store ---
 
 type mockStore struct {
-	memories       []*memory.Memory
-	saveErr        error
-	retErr         error
-	listErr        error
+	memories []*memory.Memory
+	saveErr  error
+	retErr   error
+	listErr  error
+	// listScope captures the scope map passed to List, so tests can assert
+	// the handler threaded query params (e.g. include_shared) into scope.
+	listScope      map[string]string
 	delErr         error
 	delAllErr      error
 	batchDeleteErr error
@@ -159,7 +162,8 @@ func (m *mockStore) Retrieve(_ context.Context, _ map[string]string, _ string, _
 	return m.memories, nil
 }
 
-func (m *mockStore) List(_ context.Context, _ map[string]string, _ memory.ListOptions) ([]*memory.Memory, error) {
+func (m *mockStore) List(_ context.Context, scope map[string]string, _ memory.ListOptions) ([]*memory.Memory, error) {
+	m.listScope = scope
 	if m.listErr != nil {
 		return nil, m.listErr
 	}
@@ -346,6 +350,39 @@ func TestDeriveTier(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestHandleListMemories_IncludeShared verifies the handler threads the
+// include_shared query param into the scope as ScopeIncludeShared, switching
+// the store to "visible to me" mode (#1254).
+func TestHandleListMemories_IncludeShared(t *testing.T) {
+	store := &mockStore{}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/memories?workspace=ws1&user_id=u1&include_shared=true", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, "true", store.listScope[memory.ScopeIncludeShared],
+		"include_shared=true must set ScopeIncludeShared on the list scope")
+}
+
+func TestHandleListMemories_IncludeShared_OmittedStaysStrict(t *testing.T) {
+	store := &mockStore{}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/memories?workspace=ws1&user_id=u1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Empty(t, store.listScope[memory.ScopeIncludeShared],
+		"without include_shared the list scope must stay strictly user-scoped")
 }
 
 func TestHandleListMemories_MissingWorkspace(t *testing.T) {

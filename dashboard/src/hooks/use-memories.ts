@@ -20,10 +20,10 @@ export function useMemories(
 ) {
   const { currentWorkspace } = useWorkspace();
 
-  const { userId, type, purpose, limit, offset, enabled = true } = options ?? {};
+  const { userId, type, purpose, limit, offset, includeShared, enabled = true } = options ?? {};
 
   return useQuery({
-    queryKey: ["memories", currentWorkspace?.name, userId, type, purpose, limit, offset],
+    queryKey: ["memories", currentWorkspace?.name, userId, type, purpose, limit, offset, includeShared],
     queryFn: async () => {
       if (!currentWorkspace) {
         return { memories: [] as MemoryEntity[], total: 0 };
@@ -36,6 +36,7 @@ export function useMemories(
         purpose,
         limit,
         offset,
+        includeShared,
       });
     },
     enabled: !!currentWorkspace && enabled,

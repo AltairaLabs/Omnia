@@ -625,6 +625,35 @@ func TestCachedStore_List_Cached(t *testing.T) {
 	}
 }
 
+func TestCachedStore_List_VisibleToMe_BypassesCache(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{{ID: "a", Type: "fact", Content: "one"}}}
+	cs, mr := newTestCache(t, inner)
+	ctx := context.Background()
+	scope := map[string]string{
+		ScopeWorkspaceID:   "ws-1",
+		ScopeUserID:        "u-vis",
+		ScopeIncludeShared: scopeFlagTrue,
+	}
+	opts := ListOptions{Limit: 10}
+
+	if _, err := cs.List(ctx, scope, opts); err != nil {
+		t.Fatalf("first list: %v", err)
+	}
+	if _, err := cs.List(ctx, scope, opts); err != nil {
+		t.Fatalf("second list: %v", err)
+	}
+
+	// Visible-to-me spans tiers no single writer invalidates, so it must
+	// bypass the cache — inner is called on every request and nothing is
+	// written to redis (#1254).
+	if inner.listCalls != 2 {
+		t.Fatalf("expected 2 inner calls (no caching for visible-to-me), got %d", inner.listCalls)
+	}
+	if keys := mr.Keys(); len(keys) != 0 {
+		t.Fatalf("expected no cache keys for visible-to-me, got %v", keys)
+	}
+}
+
 func TestCachedStore_List_InnerError(t *testing.T) {
 	inner := &cacheTestStore{listErr: errTest}
 	cs, _ := newTestCache(t, inner)
