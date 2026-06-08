@@ -389,6 +389,55 @@ func TestValidator_GetLicense_CachedWithinTTL(t *testing.T) {
 	assert.Equal(t, license1, license2)
 }
 
+func TestValidator_WithNamespace_ReadsFromOverrideNamespace(t *testing.T) {
+	// The license Secret lives in a non-"omnia-system" namespace (as it would on
+	// a Helm install into a different release namespace). WithNamespace must make
+	// the validator look it up there.
+	const releaseNS = "omnia"
+
+	privateKey, publicKey := generateTestKeyPair(t)
+	claims := &licenseClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+		LicenseID: "ns-override-1",
+		Tier:      "enterprise",
+		Customer:  "Test Corp",
+	}
+	token := createTestToken(t, privateKey, claims)
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      LicenseSecretName,
+			Namespace: releaseNS,
+		},
+		Data: map[string][]byte{LicenseSecretKey: []byte(token)},
+	}
+
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(secret).
+		Build()
+
+	validator, err := NewValidator(client, WithPublicKey(publicKey), WithNamespace(releaseNS))
+	require.NoError(t, err)
+
+	license, err := validator.GetLicense(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "ns-override-1", license.ID)
+	assert.Equal(t, TierEnterprise, license.Tier)
+
+	// Sanity: the same secret is NOT found when the validator defaults to the
+	// legacy "omnia-system" namespace.
+	defaulted, err := NewValidator(client, WithPublicKey(publicKey), WithNamespace(LicenseSecretNamespace))
+	require.NoError(t, err)
+	_, err = defaulted.GetLicense(context.Background())
+	require.Error(t, err)
+}
+
 func TestValidator_GetLicense_SecretNotFound(t *testing.T) {
 	_, publicKey := generateTestKeyPair(t)
 

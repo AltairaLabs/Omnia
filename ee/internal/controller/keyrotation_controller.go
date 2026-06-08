@@ -26,6 +26,7 @@ import (
 
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/encryption"
+	"github.com/altairalabs/omnia/pkg/k8s"
 )
 
 const (
@@ -390,8 +391,12 @@ func (r *KeyRotationReconciler) failReEncryption(
 func (r *KeyRotationReconciler) buildProviderConfig(
 	ctx context.Context, policy *omniav1alpha1.SessionPrivacyPolicy,
 ) (encryption.ProviderConfig, error) {
+	// Resolve the operator's own namespace (POD_NAMESPACE → SA file →
+	// "omnia-system" fallback) so Helm installs into any release namespace
+	// reconcile the privacy policy in the right place instead of assuming
+	// "omnia-system".
 	return encryption.ProviderConfigFromEncryptionSpec(
-		ctx, r.Client, privacyPolicyNamespace, policy.Spec.Encryption,
+		ctx, r.Client, k8s.OperatorNamespace(privacyPolicyNamespace), policy.Spec.Encryption,
 	)
 }
 
