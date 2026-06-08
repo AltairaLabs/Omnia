@@ -31,9 +31,24 @@ import (
 
 const facadeServiceAccountSuffix = "-facade"
 
-// facadeServiceAccountName returns the ServiceAccount name for the facade.
+// facadeServiceAccountName returns the operator-managed ServiceAccount name for
+// the facade (the <name>-facade SA the operator creates).
 func facadeServiceAccountName(agentRuntime *omniav1alpha1.AgentRuntime) string {
 	return agentRuntime.Name + facadeServiceAccountSuffix
+}
+
+// effectiveFacadeServiceAccountName returns the ServiceAccount the facade pod
+// actually runs as. spec.podOverrides.serviceAccountName replaces the
+// operator-default SA on the pod (see internal/podoverrides.ApplyPod), so RBAC
+// must target that SA — otherwise an overridden pod SA (e.g. an Azure Workload
+// Identity SA) never receives the workspace-reader binding, service discovery's
+// `list workspaces` is denied, and the facade silently falls back to the
+// in-memory session store with no recording (issue #1223).
+func effectiveFacadeServiceAccountName(agentRuntime *omniav1alpha1.AgentRuntime) string {
+	if agentRuntime.Spec.PodOverrides != nil && agentRuntime.Spec.PodOverrides.ServiceAccountName != "" {
+		return agentRuntime.Spec.PodOverrides.ServiceAccountName
+	}
+	return facadeServiceAccountName(agentRuntime)
 }
 
 // reconcileFacadeRBAC creates the ServiceAccount, Role, and RoleBinding for facade CRD reading.
@@ -94,7 +109,7 @@ func (r *AgentRuntimeReconciler) reconcileWorkspaceReaderBinding(
 		crb.Subjects = []rbacv1.Subject{
 			{
 				Kind:      "ServiceAccount",
-				Name:      facadeServiceAccountName(agentRuntime),
+				Name:      effectiveFacadeServiceAccountName(agentRuntime),
 				Namespace: agentRuntime.Namespace,
 			},
 		}
@@ -232,7 +247,7 @@ func (r *AgentRuntimeReconciler) reconcileRoleBinding(
 		rb.Subjects = []rbacv1.Subject{
 			{
 				Kind:      "ServiceAccount",
-				Name:      name,
+				Name:      effectiveFacadeServiceAccountName(agentRuntime),
 				Namespace: agentRuntime.Namespace,
 			},
 		}
