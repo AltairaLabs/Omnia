@@ -69,7 +69,7 @@ describe("GET /api/workspaces/[name]/sessions/[sessionId]/provider-calls", () =>
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace() as Awaited<ReturnType<typeof getWorkspace>>);
@@ -102,7 +102,7 @@ describe("GET /api/workspaces/[name]/sessions/[sessionId]/provider-calls", () =>
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace("namespace-a") as Awaited<ReturnType<typeof getWorkspace>>);

@@ -7,14 +7,24 @@ import { getWorkspace } from "./workspace-route-helpers";
 
 const ENV_SESSION_API_URL = process.env.SESSION_API_URL;
 const ENV_MEMORY_API_URL = process.env.MEMORY_API_URL;
+const ENV_SESSION_API_NAMESPACE = process.env.SESSION_API_NAMESPACE;
 
 export interface ServiceURLs {
   sessionURL: string;
   memoryURL: string;
+  /**
+   * The Kubernetes namespace backing this workspace
+   * (`Workspace.spec.namespace.name`, falling back to status then the name) —
+   * NOT the workspace name. A workspace named `default` is provisioned in
+   * namespace `omnia-default`, so backends that filter by namespace
+   * (eval-results, provider-calls) MUST use this, never the workspace name.
+   * See #1257.
+   */
+  namespace: string;
 }
 
 /**
- * Resolve service URLs for a workspace.
+ * Resolve service URLs + backing namespace for a workspace.
  * Priority: Workspace CRD status -> env var fallback.
  */
 export async function resolveServiceURLs(
@@ -29,16 +39,31 @@ export async function resolveServiceURLs(
         (s) => s.name === serviceGroup && s.ready
       );
       if (sg) {
-        return { sessionURL: sg.sessionURL, memoryURL: sg.memoryURL };
+        return {
+          sessionURL: sg.sessionURL,
+          memoryURL: sg.memoryURL,
+          // The backing namespace (e.g. "omnia-default"). spec.namespace.name
+          // is the configured value and is always populated — the same source
+          // the sessions route uses; fall back to status, then the name.
+          namespace:
+            workspace.spec?.namespace?.name ??
+            workspace.status?.namespace?.name ??
+            workspaceName,
+        };
       }
     }
   } catch {
     // K8s API unavailable — fall through to env var fallback
   }
 
-  // Fall back to env vars (local dev, dashboard E2E)
+  // Fall back to env vars (local dev, dashboard E2E). The namespace defaults
+  // to the workspace name (legacy behaviour) unless explicitly overridden.
   if (ENV_SESSION_API_URL && ENV_MEMORY_API_URL) {
-    return { sessionURL: ENV_SESSION_API_URL, memoryURL: ENV_MEMORY_API_URL };
+    return {
+      sessionURL: ENV_SESSION_API_URL,
+      memoryURL: ENV_MEMORY_API_URL,
+      namespace: ENV_SESSION_API_NAMESPACE ?? workspaceName,
+    };
   }
 
   return null;

@@ -42,7 +42,7 @@ async function setupAuth() {
   const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
   vi.mocked(resolveServiceURLs).mockResolvedValue({
     sessionURL: "https://session-api:8080",
-    memoryURL: "https://memory-api:8080",
+    memoryURL: "https://memory-api:8080", namespace: "omnia-test",
   });
   vi.mocked(getUser).mockResolvedValue(mockUser);
   vi.mocked(checkWorkspaceAccess).mockResolvedValue({
@@ -76,12 +76,12 @@ describe("GET /api/workspaces/[name]/provider-calls/aggregate", () => {
 
     const url = mockFetch.mock.calls[0][0] as string;
     expect(url).toContain("session-api:8080/api/v1/provider-calls/aggregate?");
-    expect(url).toContain("namespace=test-ws");
+    expect(url).toContain("namespace=omnia-test");
     expect(url).toContain("groupBy=provider");
     expect(url).toContain("metric=sum_cost_usd");
   });
 
-  it("overrides caller-supplied namespace with workspace name", async () => {
+  it("overrides caller-supplied namespace with the resolved workspace namespace", async () => {
     await setupAuth();
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -95,8 +95,10 @@ describe("GET /api/workspaces/[name]/provider-calls/aggregate", () => {
       makeContext(),
     );
     const url = mockFetch.mock.calls[0][0] as string;
-    expect(url).toContain("namespace=test-ws");
+    expect(url).toContain("namespace=omnia-test");
     expect(url).not.toContain("namespace=other-ws");
+    // #1257: must use the resolved namespace, never the workspace NAME.
+    expect(url).not.toContain("namespace=test-ws");
   });
 
   it("returns 503 when session-api URL cannot be resolved", async () => {

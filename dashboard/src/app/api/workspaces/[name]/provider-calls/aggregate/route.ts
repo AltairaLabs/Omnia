@@ -46,8 +46,9 @@ export const GET = withWorkspaceAccess<Params>(
       ? urls.sessionURL.slice(0, -1)
       : urls.sessionURL;
 
+    // Pin to the workspace's real backing namespace (not its name, #1257).
     const params = new URLSearchParams(request.nextUrl.searchParams);
-    params.set("namespace", name);
+    params.set("namespace", urls.namespace);
     const targetUrl = `${baseUrl}/api/v1/provider-calls/aggregate?${params.toString()}`;
 
     try {

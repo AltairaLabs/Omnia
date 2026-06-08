@@ -43,7 +43,9 @@ export const GET = withWorkspaceAccess<Params>(
     const baseUrl = urls.sessionURL.endsWith("/")
       ? urls.sessionURL.slice(0, -1)
       : urls.sessionURL;
-    const targetUrl = `${baseUrl}/api/v1/eval-results/discover?namespace=${encodeURIComponent(name)}`;
+    // The backend filters by K8s namespace, which is NOT the workspace name
+    // (workspace "default" -> namespace "omnia-default"). See #1257.
+    const targetUrl = `${baseUrl}/api/v1/eval-results/discover?namespace=${encodeURIComponent(urls.namespace)}`;
 
     try {
       const response = await fetch(targetUrl, {
