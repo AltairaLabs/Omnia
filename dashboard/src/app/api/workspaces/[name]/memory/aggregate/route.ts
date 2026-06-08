@@ -39,7 +39,7 @@ export const GET = withWorkspaceAccess(
     request: NextRequest,
     context: WorkspaceRouteContext,
     _access: WorkspaceAccess,
-    _user: User,
+    user: User,
   ): Promise<NextResponse> => {
     const { name } = await context.params;
     const search = request.nextUrl.searchParams;
@@ -71,6 +71,7 @@ export const GET = withWorkspaceAccess(
       request,
       name,
       "/api/v1/memories/aggregate",
+      user,
       params,
     );
   },

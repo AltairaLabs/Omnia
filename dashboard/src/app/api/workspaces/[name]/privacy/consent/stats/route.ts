@@ -25,13 +25,14 @@ export const GET = withWorkspaceAccess(
     request: NextRequest,
     context: WorkspaceRouteContext,
     _access: WorkspaceAccess,
-    _user: User,
+    user: User,
   ): Promise<NextResponse> => {
     const { name } = await context.params;
     return proxyToMemoryApi(
       request,
       name,
       "/api/v1/privacy/consent/stats",
+      user,
       new URLSearchParams(),
     );
   },

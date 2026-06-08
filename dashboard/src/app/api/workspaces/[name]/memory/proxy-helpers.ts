@@ -6,6 +6,30 @@ import { NextRequest, NextResponse } from "next/server";
 import { getWorkspace } from "@/lib/k8s/workspace-route-helpers";
 import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
 import { pseudonymizeId } from "@/lib/identity";
+import type { User } from "@/lib/auth/types";
+
+/**
+ * Resolve the memory-scoping user id for a request, authoritatively.
+ *
+ * For an authenticated user the scope is ALWAYS their session identity
+ * (`user.id`) — never a client-supplied `?userId` — so a workspace viewer
+ * cannot read, export, or delete another user's memories by passing someone
+ * else's id (#1263). Anonymous users have no session identity, so their
+ * device id (sent as `userId`) is the only available scope, matching the
+ * write path's device scoping.
+ */
+function resolveScopedUserId(searchParams: URLSearchParams, user: User): string | null {
+  if (user.provider === "anonymous") {
+    return searchParams.get("userId");
+  }
+  const clientUserId = searchParams.get("userId");
+  if (clientUserId && clientUserId !== user.id) {
+    console.warn(
+      "[memory proxy] ignoring client-supplied userId; scoping to authenticated session user"
+    );
+  }
+  return user.id;
+}
 
 /** Resolve workspace name to UID for memory-api scoping. */
 export async function resolveWorkspaceUID(name: string): Promise<string | null> {
@@ -24,13 +48,14 @@ export async function resolveWorkspaceUID(name: string): Promise<string | null> 
 /** Map dashboard query param names to backend param names. */
 export function buildBackendParams(
   searchParams: URLSearchParams,
-  workspaceUID: string
+  workspaceUID: string,
+  user: User
 ): URLSearchParams {
   const params = new URLSearchParams();
   params.set("workspace", workspaceUID);
 
-  const userId = searchParams.get("userId");
-  if (userId) params.set("user_id", pseudonymizeId(userId));
+  const scopedUserId = resolveScopedUserId(searchParams, user);
+  if (scopedUserId) params.set("user_id", pseudonymizeId(scopedUserId));
 
   // "Visible to me" mode — institutional + agent + the user's own.
   if (searchParams.get("includeShared") === "true") {
@@ -50,6 +75,7 @@ export async function proxyToMemoryApi(
   request: NextRequest,
   workspaceName: string,
   backendPath: string,
+  user: User,
   extraParams?: URLSearchParams
 ): Promise<NextResponse> {
   const urls = await resolveServiceURLs(workspaceName);
@@ -68,7 +94,7 @@ export async function proxyToMemoryApi(
     );
   }
 
-  const params = extraParams ?? buildBackendParams(request.nextUrl.searchParams, workspaceUID);
+  const params = extraParams ?? buildBackendParams(request.nextUrl.searchParams, workspaceUID, user);
   if (!params.has("workspace")) {
     params.set("workspace", workspaceUID);
   }
