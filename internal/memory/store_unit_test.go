@@ -313,6 +313,43 @@ func TestBuildListQuery_WithTypeFilter(t *testing.T) {
 	assert.Len(t, qb.Args(), 3)
 }
 
+func TestBuildListQuery_StrictByDefault(t *testing.T) {
+	scope := map[string]string{ScopeWorkspaceID: "ws-uuid", ScopeUserID: "u1"}
+	sql, _ := buildListQuery(scope, ListOptions{})
+
+	// Default list stays strictly user-scoped: equality, NOT the widened
+	// "visible to me" OR clause.
+	assert.Contains(t, sql, "virtual_user_id=$2")
+	assert.NotContains(t, sql, "IS NULL OR virtual_user_id")
+}
+
+func TestBuildListQuery_IncludeShared_WidensToVisibleToMe(t *testing.T) {
+	scope := map[string]string{
+		ScopeWorkspaceID:   "ws-uuid",
+		ScopeUserID:        "u1",
+		ScopeIncludeShared: "true",
+	}
+	sql, qb := buildListQuery(scope, ListOptions{})
+
+	// Institutional + agent tiers (virtual_user_id IS NULL) OR the user's own.
+	assert.Contains(t, sql, "virtual_user_id IS NULL OR virtual_user_id=$2")
+	// workspace_id, user_id, limit = 3 args — no separate agent_id filter.
+	assert.Len(t, qb.Args(), 3)
+}
+
+func TestBuildListQuery_IncludeShared_EmptyUserAnchorsToSharedOnly(t *testing.T) {
+	scope := map[string]string{
+		ScopeWorkspaceID:   "ws-uuid",
+		ScopeIncludeShared: "true",
+	}
+	sql, _ := buildListQuery(scope, ListOptions{})
+
+	// No user id → strictly shared (institutional + agent) rows; must not
+	// widen to another user's private memories.
+	assert.Contains(t, sql, "virtual_user_id IS NULL")
+	assert.NotContains(t, sql, "OR virtual_user_id=")
+}
+
 func TestBuildDeleteAllQuery_Basic(t *testing.T) {
 	scope := map[string]string{ScopeWorkspaceID: "ws-uuid"}
 	sql, qb := buildDeleteAllQuery(scope)

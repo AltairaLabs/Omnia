@@ -402,6 +402,13 @@ func (h *Handler) handleListMemories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// "visible to me" mode: institutional + agent tiers plus the user's own,
+	// excluding other users' private memories. Opt-in so the default list
+	// stays strictly user-scoped (#1254).
+	if r.URL.Query().Get("include_shared") == "true" {
+		scope[memory.ScopeIncludeShared] = "true"
+	}
+
 	opts := memory.ListOptions{
 		Types:  parseTypes(r.URL.Query().Get("type")),
 		Limit:  min(max(parseIntParam(r, "limit", defaultListLimit), 1), maxListLimit),

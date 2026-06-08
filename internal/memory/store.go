@@ -44,6 +44,12 @@ const (
 	ScopeWorkspaceID = "workspace_id"
 	ScopeUserID      = "user_id"
 	ScopeAgentID     = "agent_id"
+	// ScopeIncludeShared is a list-only control key. When set to "true",
+	// List returns everything visible to the user — institutional + agent
+	// tiers plus the user's own — instead of strictly the user's own rows.
+	// Other read paths (Retrieve, ExportAll/DSAR) ignore it, so user-private
+	// scoping stays strict by construction. See #1254.
+	ScopeIncludeShared = "include_shared"
 )
 
 // Error message constants (SonarCloud S1192).
@@ -674,8 +680,26 @@ func (s *PostgresMemoryStore) List(ctx context.Context, scope map[string]string,
 
 // buildListQuery constructs the SQL and arguments for a List call.
 func buildListQuery(scope map[string]string, opts ListOptions) (string, *pgutil.QueryBuilder) {
+	if scope[ScopeIncludeShared] == "true" {
+		qb := buildVisibleToMeQuery(scope, opts.Types)
+		return formatMemorySQL(qb, opts.Limit, opts.Offset), qb
+	}
 	qb := buildBaseMemoryQuery(scope, opts.Types, "")
 	return formatMemorySQL(qb, opts.Limit, opts.Offset), qb
+}
+
+// buildVisibleToMeQuery builds the "everything visible to the user" list:
+// workspace rows where virtual_user_id is NULL (institutional + agent
+// tiers) OR equals the requesting user — which includes the user's own
+// memories while excluding every other user's private memories. There is
+// deliberately no agent_id filter: agent-tier rows have virtual_user_id
+// NULL, so the user-tier clause already admits them. See #1254.
+func buildVisibleToMeQuery(scope map[string]string, types []string) *pgutil.QueryBuilder {
+	var qb pgutil.QueryBuilder
+	qb.Add(colWorkspaceID, scope[ScopeWorkspaceID])
+	addUserTierClause(&qb, scope[ScopeUserID])
+	addTypeFilters(&qb, types)
+	return &qb
 }
 
 // Delete performs a soft delete by setting forgotten = true on the entity.

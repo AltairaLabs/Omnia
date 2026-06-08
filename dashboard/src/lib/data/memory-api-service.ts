@@ -36,6 +36,7 @@ export class MemoryApiService {
     if (rest.purpose) params.set("purpose", rest.purpose);
     if (rest.limit !== undefined) params.set("limit", String(rest.limit));
     if (rest.offset !== undefined) params.set("offset", String(rest.offset));
+    if (rest.includeShared) params.set("includeShared", "true");
 
     const queryString = params.toString();
     const suffix = queryString ? `?${queryString}` : "";

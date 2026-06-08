@@ -512,6 +512,12 @@ export interface MemoryListOptions {
   purpose?: string;
   limit?: number;
   offset?: number;
+  /**
+   * "Visible to me" mode: include institutional + agent tiers alongside the
+   * user's own memories (excluding other users' private memories), rather
+   * than strictly the user's own. See #1254.
+   */
+  includeShared?: boolean;
 }
 
 export interface MemorySearchOptions extends MemoryListOptions {

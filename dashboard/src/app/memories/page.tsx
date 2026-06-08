@@ -113,11 +113,14 @@ function renderMemoriesBody({
 export default function MemoriesPage() {
   const { hasMemoryIdentity, memoryUserId } = useAuth();
   const { currentWorkspace } = useWorkspace();
-  // Always filter by userId — memories belong to users, not workspaces.
-  // The proxy hashes the userId before querying (pseudonymous storage).
-  // For anonymous users with a device ID, we use the device ID as the userId.
+  // "Visible to me": institutional + agent tiers plus the user's own,
+  // excluding other users' private memories (#1254). userId is still sent
+  // (hashed by the proxy) so the user's own rows are included; includeShared
+  // widens the query to the shared tiers. For anonymous users with a device
+  // ID, the device ID is the userId.
   const { data, isLoading, error } = useMemories({
     userId: memoryUserId,
+    includeShared: true,
     limit: 500,
     enabled: hasMemoryIdentity,
   });

@@ -117,8 +117,11 @@ function renderBody(
 
 export function MemorySidebar({ agentName: _agentName, open, onClose }: MemorySidebarProps) {
   const { hasMemoryIdentity, memoryUserId } = useAuth();
+  // "Visible to me" — institutional + agent + the user's own — so the tier
+  // chips below have all tiers to filter over, not just the user's (#1254).
   const { data, isLoading } = useMemories({
     userId: memoryUserId,
+    includeShared: true,
     enabled: hasMemoryIdentity,
   });
   const [tierFilter, setTierFilter] = useState<TierFilter>("all");

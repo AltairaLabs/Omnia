@@ -32,6 +32,11 @@ export function buildBackendParams(
   const userId = searchParams.get("userId");
   if (userId) params.set("user_id", pseudonymizeId(userId));
 
+  // "Visible to me" mode — institutional + agent + the user's own.
+  if (searchParams.get("includeShared") === "true") {
+    params.set("include_shared", "true");
+  }
+
   for (const key of ["type", "limit", "offset"]) {
     const value = searchParams.get(key);
     if (value) params.set(key, value);

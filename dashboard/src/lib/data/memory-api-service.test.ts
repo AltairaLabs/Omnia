@@ -66,6 +66,30 @@ describe("MemoryApiService", () => {
       expect(url).toContain("offset=5");
     });
 
+    it("sets includeShared=true for visible-to-me mode", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ memories: [], total: 0 }),
+      });
+
+      await service.getMemories({ workspace: "ws", userId: "u1", includeShared: true });
+
+      const url = mockFetch.mock.calls[0][0] as string;
+      expect(url).toContain("includeShared=true");
+    });
+
+    it("omits includeShared when not requested", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ memories: [], total: 0 }),
+      });
+
+      await service.getMemories({ workspace: "ws", userId: "u1" });
+
+      const url = mockFetch.mock.calls[0][0] as string;
+      expect(url).not.toContain("includeShared");
+    });
+
     it("returns empty result on 403", async () => {
       mockFetch.mockResolvedValueOnce({ ok: false, status: 403, statusText: "Forbidden" });
 
