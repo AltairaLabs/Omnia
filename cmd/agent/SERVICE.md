@@ -12,6 +12,9 @@
 - Recording-policy gating — on each WebSocket connection, fetches the effective `SessionPrivacyPolicy` from session-api (`GET /api/v1/privacy-policy`) and caches it for 60s. `recordingResponseWriter` skips recording when `Recording.Enabled=false` or restricts writes when `RichData=false`. Fails open (records) on fetch errors so data is never silently dropped.
 
 ## Inputs
+- **WebSocket upgrade** (memory/session identity scoping):
+  - `x-omnia-user-id` header — trusted on-behalf-of end-user id, honored **only** for management-plane origin (set by the dashboard WS proxy / portal from the authenticated session). Pseudonymized for memory scoping; takes precedence over `device_id`.
+  - `device_id` query param — anonymous/dev fallback identity when no header is present.
 - **WebSocket** from browser/dashboard:
   - `message` — user text or multimodal content
   - `tool_result` — client-side tool execution result

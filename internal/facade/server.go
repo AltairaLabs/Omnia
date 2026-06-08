@@ -440,6 +440,33 @@ func (s *Server) authenticateRequest(r *http.Request) (*policy.AuthenticatedIden
 }
 
 // ServeHTTP handles WebSocket upgrade requests.
+// mgmtPlaneUserID resolves the memory-scoping identity for a management-
+// plane WebSocket connection, in order of precedence:
+//
+//  1. x-omnia-user-id header — the trusted proxy's on-behalf-of identity.
+//     The dashboard's WS proxy (server.js) and the user portal set it from
+//     the authenticated session; a raw browser cannot reach this branch
+//     because it cannot mint a management-plane JWT, so the header is
+//     authoritative here. This is the stable per-user id, so memories
+//     written during a "Try this agent" session match the user's own
+//     "My Memories" read query (which scopes on the same id).
+//  2. device_id query param — anonymous/dev fallback. Browser-supplied and
+//     device-scoped, which is acceptable because anonymous memories are
+//     low-value and already device-keyed on the read path too.
+//  3. token subject — last resort (the per-session audit pseudonym).
+//
+// The audit identity (authIdentity.Subject) is untouched; only the memory-
+// scoping id is resolved here. See #1255.
+func mgmtPlaneUserID(r *http.Request, endUser string) string {
+	if h := r.Header.Get(policy.HeaderUserID); h != "" {
+		return h
+	}
+	if dev := r.URL.Query().Get("device_id"); dev != "" {
+		return dev
+	}
+	return endUser
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	if s.shutdown {
@@ -505,18 +532,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if authIdentity != nil {
 		// Mgmt-plane JWTs identify the *dashboard operator* (the human
 		// using "Try this agent"), not the end user whose memories /
-		// sessions we're scoping. The dashboard always sends a device_id
-		// query param on the WS upgrade — when the auth came from the
-		// management plane, scope to that so memories saved during a
-		// debug session show up in the user's "My Memories" view.
-		// (The operator pseudonym still flows separately into audit
-		// logs via authIdentity.Subject.)
+		// sessions we're scoping. mgmtPlaneUserID resolves the end-user
+		// id from the trusted on-behalf-of header (falling back to the
+		// device_id query param, then the token subject) so memories
+		// saved during a debug session show up in the user's "My
+		// Memories" view. (The operator pseudonym still flows separately
+		// into audit logs via authIdentity.Subject.)
 		if authIdentity.Origin == policy.OriginManagementPlane {
-			if dev := r.URL.Query().Get("device_id"); dev != "" {
-				rawUserID = dev
-			} else {
-				rawUserID = authIdentity.EndUser
-			}
+			rawUserID = mgmtPlaneUserID(r, authIdentity.EndUser)
 		} else {
 			rawUserID = authIdentity.EndUser
 		}

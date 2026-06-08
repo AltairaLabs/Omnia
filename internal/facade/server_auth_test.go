@@ -37,6 +37,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/facade/auth"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/pkg/identity"
 	"github.com/altairalabs/omnia/pkg/policy"
 )
 
@@ -381,6 +382,123 @@ func TestServerAuth_IdentityClaims_PropagatedToHeaders(t *testing.T) {
 			"Identity.Claims must be copied into PropagationFields.Claims (B3)")
 		assert.Equal(t, "us-east", fields.Claims["region"])
 		assert.Equal(t, "alice@example.com", fields.Claims["email"])
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not run")
+	}
+}
+
+// TestMgmtPlaneUserID covers the precedence the facade applies when
+// resolving the memory-scoping id for a management-plane connection:
+// trusted on-behalf-of header > device_id query param > token subject (#1255).
+func TestMgmtPlaneUserID(t *testing.T) {
+	const (
+		headerID = "stable-user-123"
+		deviceID = "device-abc"
+		subject  = "admin@example.com"
+	)
+	tests := []struct {
+		name   string
+		header string
+		device string
+		want   string
+	}{
+		{"header wins over device_id and subject", headerID, deviceID, headerID},
+		{"device_id used when header absent", "", deviceID, deviceID},
+		{"subject used when header and device_id absent", "", "", subject},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := "/ws?agent=test-agent"
+			if tt.device != "" {
+				target += "&device_id=" + tt.device
+			}
+			r := httptest.NewRequest(http.MethodGet, target, nil)
+			if tt.header != "" {
+				r.Header.Set(policy.HeaderUserID, tt.header)
+			}
+			assert.Equal(t, tt.want, mgmtPlaneUserID(r, subject))
+		})
+	}
+}
+
+// TestServerAuth_MgmtPlane_UserIDHeaderScopesMemory proves the #1255 fix
+// end-to-end: a management-plane connection that carries both an
+// x-omnia-user-id header AND a device_id query param scopes memory to the
+// pseudonymised header value, not the device_id. This is the regression
+// that left "My Memories" empty — writes keyed on the browser device id
+// while reads keyed on the stable user id.
+func TestServerAuth_MgmtPlane_UserIDHeaderScopesMemory(t *testing.T) {
+	v, key := newAuthTestValidator(t)
+	ts, observed := newAuthTestServer(t, v)
+
+	const endUser = "stable-user-123"
+	header := http.Header{}
+	header.Set("Authorization", "Bearer "+mintMgmtToken(t, key, nil))
+	header.Set(policy.HeaderUserID, endUser)
+
+	conn, _, err := websocket.DefaultDialer.Dial(
+		wsURL(ts.URL)+"?agent=test-agent&device_id=device-abc", header)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	readConnected(t, conn)
+	require.NoError(t, conn.WriteJSON(ClientMessage{Type: "user_message", Content: "hi"}))
+
+	select {
+	case fields := <-observed:
+		assert.Equal(t, identity.PseudonymizeID(endUser), fields.UserID,
+			"mgmt-plane memory scoping must use the x-omnia-user-id header, not device_id")
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not run")
+	}
+}
+
+// TestServerAuth_NonMgmtPlane_IgnoresUserIDHeader is the security boundary
+// for #1255: the x-omnia-user-id on-behalf-of header is trusted ONLY for
+// management-plane origin. A non-mgmt-plane connection (here OIDC) that
+// carries a forged header must scope memory to the validator's own EndUser,
+// never the attacker-supplied header value.
+func TestServerAuth_NonMgmtPlane_IgnoresUserIDHeader(t *testing.T) {
+	const realUser = "real-user-789"
+	want := &policy.AuthenticatedIdentity{
+		Origin:  policy.OriginOIDC,
+		Subject: realUser,
+		EndUser: realUser,
+		Role:    policy.RoleEditor,
+	}
+	chain := auth.Chain{&stubClaimValidator{id: want}}
+
+	observed := make(chan policy.PropagationFields, 1)
+	handler := &mockHandler{
+		handleFunc: func(ctx context.Context, _ string, msg *ClientMessage, w ResponseWriter) error {
+			select {
+			case observed <- policy.ExtractPropagationFields(ctx):
+			default:
+			}
+			return w.WriteDone("echo: " + msg.Content)
+		},
+	}
+	store := session.NewMemoryStore()
+	cfg := DefaultServerConfig()
+	cfg.PingInterval = 100 * time.Millisecond
+	cfg.PongTimeout = 200 * time.Millisecond
+	server := NewServer(cfg, store, handler, logr.Discard(), WithAuthChain(chain))
+	ts := httptest.NewServer(server)
+	t.Cleanup(func() { ts.Close(); _ = store.Close() })
+
+	header := http.Header{}
+	header.Set("Authorization", "Bearer anything")
+	header.Set(policy.HeaderUserID, "attacker-controlled-id")
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", header)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	readConnected(t, conn)
+	require.NoError(t, conn.WriteJSON(ClientMessage{Type: "user_message", Content: "hi"}))
+
+	select {
+	case fields := <-observed:
+		assert.Equal(t, identity.PseudonymizeID(realUser), fields.UserID,
+			"non-mgmt-plane origin must ignore x-omnia-user-id and scope to its own EndUser")
 	case <-time.After(2 * time.Second):
 		t.Fatal("handler did not run")
 	}
