@@ -16,6 +16,7 @@ import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
 import { pseudonymizeId } from "@/lib/identity";
+import { resolveScopedUserId } from "@/lib/auth/scoped-user";
 
 const ERR_SESSION_API_NOT_CONFIGURED = "Session API not configured";
 
@@ -35,7 +36,7 @@ export const GET = withWorkspaceAccess(
     request: NextRequest,
     context: WorkspaceRouteContext,
     _access: WorkspaceAccess,
-    _user: User
+    user: User
   ): Promise<NextResponse> => {
     const { name } = await context.params;
 
@@ -44,7 +45,9 @@ export const GET = withWorkspaceAccess(
       return sessionApiNotConfigured();
     }
 
-    const userId = request.nextUrl.searchParams.get("userId");
+    // Scope to the authenticated session user — never a client-supplied
+    // userId — so a viewer cannot read another user's consent (#1263).
+    const userId = resolveScopedUserId(request.nextUrl.searchParams, user);
     if (!userId) {
       return NextResponse.json({ error: "userId is required" }, { status: 400 });
     }
@@ -91,7 +94,7 @@ export const PUT = withWorkspaceAccess(
     request: NextRequest,
     context: WorkspaceRouteContext,
     _access: WorkspaceAccess,
-    _user: User
+    user: User
   ): Promise<NextResponse> => {
     const { name } = await context.params;
 
@@ -100,7 +103,9 @@ export const PUT = withWorkspaceAccess(
       return sessionApiNotConfigured();
     }
 
-    const userId = request.nextUrl.searchParams.get("userId");
+    // Scope to the authenticated session user — never a client-supplied
+    // userId — so a viewer cannot overwrite another user's consent (#1263).
+    const userId = resolveScopedUserId(request.nextUrl.searchParams, user);
     if (!userId) {
       return NextResponse.json({ error: "userId is required" }, { status: 400 });
     }

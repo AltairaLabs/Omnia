@@ -426,6 +426,7 @@ describe("DELETE /api/workspaces/[name]/memory", () => {
     mockFetchJsonResponse({ deleted: 3 });
 
     const { DELETE } = await import("./route");
+    // Attacker (viewer) tries to delete another user's memories via ?userId.
     const req = createRequest("DELETE", "/api/workspaces/test-ws/memory", "userId=user-abc");
     const response = await DELETE(req, createMockContext());
 
@@ -436,6 +437,10 @@ describe("DELETE /api/workspaces/[name]/memory", () => {
     const [fetchUrl, fetchOpts] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(fetchUrl).toContain("/api/v1/memories");
     expect(fetchOpts.method).toBe("DELETE");
+    // Security (#1263): delete-all is scoped to the SESSION user, never the
+    // client-supplied userId — a viewer cannot delete another user's memories.
+    expect(fetchUrl).toContain("user_id=" + pseudonymizeId(mockUser.id));
+    expect(fetchUrl).not.toContain(pseudonymizeId("user-abc"));
   });
 
   it("returns 403 when user lacks workspace access", async () => {

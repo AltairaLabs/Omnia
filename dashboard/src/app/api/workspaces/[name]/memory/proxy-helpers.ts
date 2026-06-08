@@ -7,29 +7,7 @@ import { getWorkspace } from "@/lib/k8s/workspace-route-helpers";
 import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
 import { pseudonymizeId } from "@/lib/identity";
 import type { User } from "@/lib/auth/types";
-
-/**
- * Resolve the memory-scoping user id for a request, authoritatively.
- *
- * For an authenticated user the scope is ALWAYS their session identity
- * (`user.id`) — never a client-supplied `?userId` — so a workspace viewer
- * cannot read, export, or delete another user's memories by passing someone
- * else's id (#1263). Anonymous users have no session identity, so their
- * device id (sent as `userId`) is the only available scope, matching the
- * write path's device scoping.
- */
-function resolveScopedUserId(searchParams: URLSearchParams, user: User): string | null {
-  if (user.provider === "anonymous") {
-    return searchParams.get("userId");
-  }
-  const clientUserId = searchParams.get("userId");
-  if (clientUserId && clientUserId !== user.id) {
-    console.warn(
-      "[memory proxy] ignoring client-supplied userId; scoping to authenticated session user"
-    );
-  }
-  return user.id;
-}
+import { resolveScopedUserId } from "@/lib/auth/scoped-user";
 
 /** Resolve workspace name to UID for memory-api scoping. */
 export async function resolveWorkspaceUID(name: string): Promise<string | null> {
