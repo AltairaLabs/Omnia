@@ -22,6 +22,7 @@ import {
   auditSuccess,
   auditError,
   getWorkspace,
+  SYSTEM_NAMESPACE,
 } from "@/lib/k8s/workspace-route-helpers";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
@@ -44,7 +45,7 @@ const WORKSPACE_CONTENT_PATH = process.env.WORKSPACE_CONTENT_PATH || "/workspace
 const SERVICE_DOMAIN = process.env.SERVICE_DOMAIN || "svc.cluster.local";
 // Arena controller API URL for template rendering
 const ARENA_CONTROLLER_URL = process.env.ARENA_CONTROLLER_URL ||
-  `http://omnia-arena-controller.omnia-system.${SERVICE_DOMAIN}:8082`;
+  `http://omnia-arena-controller.${SYSTEM_NAMESPACE}.${SERVICE_DOMAIN}:8082`;
 
 interface RouteParams {
   params: Promise<{ name: string; id: string; templateName: string }>;
