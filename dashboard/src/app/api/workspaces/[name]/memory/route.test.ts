@@ -126,22 +126,52 @@ describe("buildBackendParams", () => {
     vi.resetAllMocks();
   });
 
-  it("maps userId to user_id and sets workspace", async () => {
+  const anonUser = {
+    id: "anonymous",
+    provider: "anonymous" as const,
+    username: "anonymous",
+    groups: [],
+    role: "viewer" as const,
+  };
+
+  it("scopes user_id to the authenticated session user and sets workspace", async () => {
     const { buildBackendParams } = await import("./proxy-helpers");
 
     const searchParams = new URLSearchParams("userId=user-abc");
-    const params = buildBackendParams(searchParams, "ws-uid-999");
+    const params = buildBackendParams(searchParams, "ws-uid-999", mockUser);
 
     expect(params.get("workspace")).toBe("ws-uid-999");
-    expect(params.get("user_id")).toBe(pseudonymizeId("user-abc"));
+    // user_id comes from the SESSION user, not the client query param.
+    expect(params.get("user_id")).toBe(pseudonymizeId(mockUser.id));
     expect(params.has("userId")).toBe(false);
+  });
+
+  it("ignores a client-supplied userId for another user (security: #1263)", async () => {
+    const { buildBackendParams } = await import("./proxy-helpers");
+
+    // Attacker (a viewer) tries to read another user's memories.
+    const searchParams = new URLSearchParams("userId=victim-id");
+    const params = buildBackendParams(searchParams, "ws-uid-999", mockUser);
+
+    expect(params.get("user_id")).toBe(pseudonymizeId(mockUser.id));
+    expect(params.get("user_id")).not.toBe(pseudonymizeId("victim-id"));
+  });
+
+  it("scopes anonymous users to their client-supplied device id", async () => {
+    const { buildBackendParams } = await import("./proxy-helpers");
+
+    // Anonymous users have no session identity; the device id is the scope.
+    const searchParams = new URLSearchParams("userId=device-xyz");
+    const params = buildBackendParams(searchParams, "ws-uid-999", anonUser);
+
+    expect(params.get("user_id")).toBe(pseudonymizeId("device-xyz"));
   });
 
   it("forwards type, limit, and offset", async () => {
     const { buildBackendParams } = await import("./proxy-helpers");
 
     const searchParams = new URLSearchParams("type=fact&limit=20&offset=5");
-    const params = buildBackendParams(searchParams, "ws-uid-999");
+    const params = buildBackendParams(searchParams, "ws-uid-999", mockUser);
 
     expect(params.get("type")).toBe("fact");
     expect(params.get("limit")).toBe("20");
@@ -151,8 +181,8 @@ describe("buildBackendParams", () => {
   it("maps includeShared=true to include_shared for visible-to-me mode", async () => {
     const { buildBackendParams } = await import("./proxy-helpers");
 
-    const searchParams = new URLSearchParams("userId=user-abc&includeShared=true");
-    const params = buildBackendParams(searchParams, "ws-uid-999");
+    const searchParams = new URLSearchParams("includeShared=true");
+    const params = buildBackendParams(searchParams, "ws-uid-999", mockUser);
 
     expect(params.get("include_shared")).toBe("true");
     expect(params.has("includeShared")).toBe(false);
@@ -161,8 +191,8 @@ describe("buildBackendParams", () => {
   it("omits include_shared when includeShared is absent", async () => {
     const { buildBackendParams } = await import("./proxy-helpers");
 
-    const searchParams = new URLSearchParams("userId=user-abc");
-    const params = buildBackendParams(searchParams, "ws-uid-999");
+    const searchParams = new URLSearchParams();
+    const params = buildBackendParams(searchParams, "ws-uid-999", mockUser);
 
     expect(params.has("include_shared")).toBe(false);
   });
@@ -185,7 +215,7 @@ describe("proxyToMemoryApi", () => {
 
     const { proxyToMemoryApi } = await import("./proxy-helpers");
     const req = createRequest("GET", "/api/workspaces/test-ws/memory");
-    const response = await proxyToMemoryApi(req, "test-ws", "/api/v1/memories");
+    const response = await proxyToMemoryApi(req, "test-ws", "/api/v1/memories", mockUser);
 
     expect(response.status).toBe(503);
     const body = await response.json();
@@ -201,7 +231,7 @@ describe("proxyToMemoryApi", () => {
 
     const { proxyToMemoryApi } = await import("./proxy-helpers");
     const req = createRequest("GET", "/api/workspaces/missing-ws/memory");
-    const response = await proxyToMemoryApi(req, "missing-ws", "/api/v1/memories");
+    const response = await proxyToMemoryApi(req, "missing-ws", "/api/v1/memories", mockUser);
 
     expect(response.status).toBe(404);
     const body = await response.json();
@@ -220,7 +250,7 @@ describe("proxyToMemoryApi", () => {
 
     const { proxyToMemoryApi } = await import("./proxy-helpers");
     const req = createRequest("GET", "/api/workspaces/test-ws/memory");
-    const response = await proxyToMemoryApi(req, "test-ws", "/api/v1/memories");
+    const response = await proxyToMemoryApi(req, "test-ws", "/api/v1/memories", mockUser);
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -243,7 +273,7 @@ describe("proxyToMemoryApi", () => {
 
     const { proxyToMemoryApi } = await import("./proxy-helpers");
     const req = createRequest("GET", "/api/workspaces/test-ws/memory");
-    const response = await proxyToMemoryApi(req, "test-ws", "/api/v1/memories");
+    const response = await proxyToMemoryApi(req, "test-ws", "/api/v1/memories", mockUser);
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -262,7 +292,7 @@ describe("proxyToMemoryApi", () => {
 
     const { proxyToMemoryApi } = await import("./proxy-helpers");
     const req = createRequest("GET", "/api/workspaces/test-ws/memory");
-    const response = await proxyToMemoryApi(req, "test-ws", "/api/v1/memories");
+    const response = await proxyToMemoryApi(req, "test-ws", "/api/v1/memories", mockUser);
 
     expect(response.status).toBe(502);
     const body = await response.json();
@@ -280,7 +310,7 @@ describe("proxyToMemoryApi", () => {
 
     const { proxyToMemoryApi } = await import("./proxy-helpers");
     const req = createRequest("GET", "/api/workspaces/test-ws/memory");
-    const response = await proxyToMemoryApi(req, "test-ws", "/api/v1/memories");
+    const response = await proxyToMemoryApi(req, "test-ws", "/api/v1/memories", mockUser);
 
     expect(response.status).toBe(502);
     const body = await response.json();
@@ -298,7 +328,7 @@ describe("proxyToMemoryApi", () => {
 
     const { proxyToMemoryApi } = await import("./proxy-helpers");
     const req = createRequest("GET", "/api/workspaces/test-ws/memory");
-    await proxyToMemoryApi(req, "test-ws", "/api/v1/memories");
+    await proxyToMemoryApi(req, "test-ws", "/api/v1/memories", mockUser);
 
     const fetchUrl = mockFetch.mock.calls[0][0] as string;
     expect(fetchUrl).not.toContain("//api");
@@ -396,6 +426,7 @@ describe("DELETE /api/workspaces/[name]/memory", () => {
     mockFetchJsonResponse({ deleted: 3 });
 
     const { DELETE } = await import("./route");
+    // Attacker (viewer) tries to delete another user's memories via ?userId.
     const req = createRequest("DELETE", "/api/workspaces/test-ws/memory", "userId=user-abc");
     const response = await DELETE(req, createMockContext());
 
@@ -406,6 +437,10 @@ describe("DELETE /api/workspaces/[name]/memory", () => {
     const [fetchUrl, fetchOpts] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(fetchUrl).toContain("/api/v1/memories");
     expect(fetchOpts.method).toBe("DELETE");
+    // Security (#1263): delete-all is scoped to the SESSION user, never the
+    // client-supplied userId — a viewer cannot delete another user's memories.
+    expect(fetchUrl).toContain("user_id=" + pseudonymizeId(mockUser.id));
+    expect(fetchUrl).not.toContain(pseudonymizeId("user-abc"));
   });
 
   it("returns 403 when user lacks workspace access", async () => {

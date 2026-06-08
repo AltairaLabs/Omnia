@@ -23,7 +23,7 @@ export const GET = withWorkspaceAccess(
     request: NextRequest,
     context: WorkspaceRouteContext,
     _access: WorkspaceAccess,
-    _user: User,
+    user: User,
   ): Promise<NextResponse> => {
     const { name } = await context.params;
     const search = request.nextUrl.searchParams;
@@ -43,6 +43,6 @@ export const GET = withWorkspaceAccess(
       if (v) params.set(key, v);
     }
 
-    return proxyToMemoryApi(request, name, "/api/v1/agent-memories", params);
+    return proxyToMemoryApi(request, name, "/api/v1/agent-memories", user, params);
   },
 );

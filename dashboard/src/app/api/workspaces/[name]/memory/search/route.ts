@@ -16,7 +16,7 @@ export const GET = withWorkspaceAccess(
     request: NextRequest,
     context: WorkspaceRouteContext,
     _access: WorkspaceAccess,
-    _user: User
+    user: User
   ): Promise<NextResponse> => {
     const { name } = await context.params;
 
@@ -25,12 +25,12 @@ export const GET = withWorkspaceAccess(
       return NextResponse.json({ error: "Workspace not found", memories: [], total: 0 }, { status: 404 });
     }
 
-    const params = buildBackendParams(request.nextUrl.searchParams, workspaceUID);
+    const params = buildBackendParams(request.nextUrl.searchParams, workspaceUID, user);
     const q = request.nextUrl.searchParams.get("query") ?? request.nextUrl.searchParams.get("q");
     if (q) params.set("q", q);
     const minConf = request.nextUrl.searchParams.get("minConfidence");
     if (minConf) params.set("min_confidence", minConf);
 
-    return proxyToMemoryApi(request, name, "/api/v1/memories/search", params);
+    return proxyToMemoryApi(request, name, "/api/v1/memories/search", user, params);
   }
 );

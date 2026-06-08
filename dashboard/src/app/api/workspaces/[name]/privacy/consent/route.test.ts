@@ -27,6 +27,14 @@ const mockUser = {
   role: "viewer" as const,
 };
 
+const anonUser = {
+  id: "anonymous",
+  provider: "anonymous" as const,
+  username: "anonymous",
+  groups: [],
+  role: "viewer" as const,
+};
+
 const viewerPermissions = { read: true, write: false, delete: false, manageMembers: false };
 const noPermissions = { read: false, write: false, delete: false, manageMembers: false };
 
@@ -85,6 +93,8 @@ describe("GET /api/workspaces/[name]/privacy/consent", () => {
     });
 
     const { GET } = await import("./route");
+    // Client sends ?userId=user-123, but it must be ignored — the consent
+    // record is scoped to the authenticated session user (#1263).
     const response = await GET(createGetRequest(), createMockContext());
 
     expect(response.status).toBe(200);
@@ -92,16 +102,44 @@ describe("GET /api/workspaces/[name]/privacy/consent", () => {
     expect(body.grants).toEqual(["analytics"]);
 
     const fetchUrl = mockFetch.mock.calls[0][0] as string;
-    expect(fetchUrl).toContain(`/api/v1/privacy/preferences/${pseudonymizeId("user-123")}/consent`);
+    expect(fetchUrl).toContain(`/api/v1/privacy/preferences/${pseudonymizeId(mockUser.id)}/consent`);
+    expect(fetchUrl).not.toContain(pseudonymizeId("user-123"));
   });
 
-  it("returns 400 when userId is missing", async () => {
+  it("ignores a client-supplied userId for another user (security: #1263)", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
     vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({
+      granted: true,
+      role: "viewer",
+      permissions: viewerPermissions,
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({ grants: [], defaults: [], denied: [] })),
+    });
+
+    const { GET } = await import("./route");
+    const response = await GET(createGetRequest("?userId=victim-id"), createMockContext());
+
+    expect(response.status).toBe(200);
+    const fetchUrl = mockFetch.mock.calls[0][0] as string;
+    expect(fetchUrl).toContain(`/api/v1/privacy/preferences/${pseudonymizeId(mockUser.id)}/consent`);
+    expect(fetchUrl).not.toContain(pseudonymizeId("victim-id"));
+  });
+
+  it("returns 400 when an anonymous user has no device id", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+    vi.mocked(getUser).mockResolvedValue(anonUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
       role: "viewer",
@@ -243,18 +281,50 @@ describe("PUT /api/workspaces/[name]/privacy/consent", () => {
     expect(body.grants).toEqual(["analytics", "personalization"]);
 
     const [fetchUrl, fetchOpts] = mockFetch.mock.calls[0] as [string, RequestInit];
-    expect(fetchUrl).toContain(`/api/v1/privacy/preferences/${pseudonymizeId("user-123")}/consent`);
+    expect(fetchUrl).toContain(`/api/v1/privacy/preferences/${pseudonymizeId(mockUser.id)}/consent`);
+    expect(fetchUrl).not.toContain(pseudonymizeId("user-123"));
     expect(fetchOpts.method).toBe("PUT");
     expect(fetchOpts.headers).toMatchObject({ "Content-Type": "application/json" });
   });
 
-  it("returns 400 when userId is missing", async () => {
+  it("ignores a client-supplied userId when overwriting consent (security: #1263)", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
     vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({
+      granted: true,
+      role: "viewer",
+      permissions: viewerPermissions,
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({ grants: [] })),
+    });
+
+    const { PUT } = await import("./route");
+    // Attacker tries to overwrite the victim's consent.
+    const response = await PUT(
+      createPutRequest({ grants: ["analytics"] }, "?userId=victim-id"),
+      createMockContext()
+    );
+
+    expect(response.status).toBe(200);
+    const fetchUrl = mockFetch.mock.calls[0][0] as string;
+    expect(fetchUrl).toContain(`/api/v1/privacy/preferences/${pseudonymizeId(mockUser.id)}/consent`);
+    expect(fetchUrl).not.toContain(pseudonymizeId("victim-id"));
+  });
+
+  it("returns 400 when an anonymous user has no device id", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+    vi.mocked(getUser).mockResolvedValue(anonUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
       role: "viewer",
