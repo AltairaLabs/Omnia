@@ -6,6 +6,14 @@ metadata:
   labels:
     {{- include "omnia.dashboard.labels" . | nindent 4 }}
 data:
+  # Namespace where the operator/arena-controller and shared CRDs (system-wide
+  # Providers/ToolRegistries) live — the Helm release namespace. The dashboard
+  # reads OMNIA_SYSTEM_NAMESPACE for shared-CRD lookups and to build the
+  # arena-controller service URL (template preview/render); without it the
+  # dashboard falls back to the literal "omnia-system" and breaks on installs
+  # into any other namespace. See AltairaLabs/Omnia#1251.
+  OMNIA_SYSTEM_NAMESPACE: {{ .Release.Namespace | quote }}
+
   # Operator API URL (server-side for proxy)
   {{- if .Values.dashboard.operatorApiUrl }}
   OPERATOR_API_URL: {{ .Values.dashboard.operatorApiUrl | quote }}
