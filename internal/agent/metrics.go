@@ -37,6 +37,12 @@ type Metrics struct {
 	// SessionsActive is the current number of active sessions.
 	SessionsActive prometheus.Gauge
 
+	// SessionStore reports which session store backs this facade, as a
+	// {mode="httpclient"|"memory"} gauge set to 1 for the active mode and 0 for
+	// the others. mode="memory" means the facade fell back to the in-memory
+	// store (no session-api recording) — alert on it (issue #1223).
+	SessionStore *prometheus.GaugeVec
+
 	// RequestsInflight is the current number of requests being processed.
 	// This indicates how many LLM API calls are pending.
 	RequestsInflight prometheus.Gauge
@@ -101,6 +107,12 @@ func NewMetrics(agentName, namespace string) *Metrics {
 			Help:        "Current number of active sessions",
 			ConstLabels: labels,
 		}),
+
+		SessionStore: promauto.NewGaugeVec(prometheus.GaugeOpts{
+			Name:        "omnia_agent_session_store",
+			Help:        "Active session store by mode (1=active). mode=memory means no session-api recording.",
+			ConstLabels: labels,
+		}, []string{"mode"}),
 
 		RequestsInflight: promauto.NewGauge(prometheus.GaugeOpts{
 			Name:        "omnia_agent_requests_inflight",
@@ -198,6 +210,30 @@ func (m *Metrics) SessionCreated() {
 // SessionClosed records a closed session.
 func (m *Metrics) SessionClosed() {
 	m.SessionsActive.Dec()
+}
+
+// Session-store modes reported by the SessionStore gauge. Exported so the
+// agent binary (which selects the store) and this metric share one source of
+// truth.
+const (
+	SessionStoreModeHTTPClient = "httpclient"
+	SessionStoreModeMemory     = "memory"
+)
+
+// sessionStoreModes is every mode the SessionStore gauge reports, so setting one
+// active also resets the others to 0 (avoids a stale "1" lingering after a mode
+// change across restarts on a re-used series).
+var sessionStoreModes = []string{SessionStoreModeHTTPClient, SessionStoreModeMemory}
+
+// SetSessionStoreMode marks the active session-store mode (1) and the rest (0).
+func (m *Metrics) SetSessionStoreMode(mode string) {
+	for _, md := range sessionStoreModes {
+		v := 0.0
+		if md == mode {
+			v = 1.0
+		}
+		m.SessionStore.WithLabelValues(md).Set(v)
+	}
 }
 
 // RequestStarted records the start of a request.

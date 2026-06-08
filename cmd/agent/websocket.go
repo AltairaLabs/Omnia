@@ -42,7 +42,7 @@ import (
 // on a separate port.
 func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.Provider) {
 	// Initialize session store
-	store, err := initSessionStore(log)
+	store, storeMode, err := initSessionStore(log)
 	if err != nil {
 		log.Error(err, "failed to initialize session store")
 		os.Exit(1)
@@ -57,6 +57,9 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 
 	// Create Prometheus metrics
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
+	// Surface the active session-store mode so a silent in-memory fallback
+	// (no session-api recording) is observable/alertable (issue #1223).
+	metrics.SetSessionStoreMode(storeMode)
 
 	// Initialize media storage BEFORE building the WS server so it can be
 	// threaded into the facade via WithMediaStorage. Without this, the facade

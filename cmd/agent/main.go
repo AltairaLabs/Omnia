@@ -151,15 +151,36 @@ func main() {
 	}
 }
 
-func initSessionStore(log logr.Logger) (session.Store, error) {
-	resolver := servicediscovery.NewResolver(buildK8sClient())
-	urls, err := resolver.ResolveServiceURLs(context.Background(), resolveServiceGroup())
+// serviceURLResolver is the subset of *servicediscovery.Resolver the session
+// store init needs. An interface so the store-selection logic is unit-testable.
+type serviceURLResolver interface {
+	ResolveServiceURLs(ctx context.Context, serviceGroup string) (*servicediscovery.ServiceURLs, error)
+}
+
+// initSessionStore returns the session store and its mode (for the
+// omnia_agent_session_store metric the caller sets).
+func initSessionStore(log logr.Logger) (session.Store, string, error) {
+	return sessionStoreFromResolver(context.Background(), servicediscovery.NewResolver(buildK8sClient()), log)
+}
+
+// sessionStoreFromResolver selects the session store. A service-discovery
+// failure is LOUD: it logs at error level and the returned "memory" mode drives
+// the omnia_agent_session_store metric, because falling back to the in-memory
+// store means sessions are NOT recorded to session-api. Previously this was a
+// silent info-level log and the agent reported healthy while dropping all
+// session/token/cost product data (issue #1223).
+func sessionStoreFromResolver(
+	ctx context.Context, resolver serviceURLResolver, log logr.Logger,
+) (session.Store, string, error) {
+	urls, err := resolver.ResolveServiceURLs(ctx, resolveServiceGroup())
 	if err != nil {
-		log.Info("service discovery unavailable, using in-memory session store", "reason", err.Error())
-		return session.NewMemoryStore(), nil
+		log.Error(err,
+			"session-api service discovery failed; falling back to in-memory session store — sessions will NOT be recorded",
+			"impact", "no session/token/cost product data; dashboard session views will be empty")
+		return session.NewMemoryStore(), agent.SessionStoreModeMemory, nil
 	}
 	log.Info("using session-api HTTP store", "url", urls.SessionURL)
-	return httpclient.NewStore(urls.SessionURL, log), nil
+	return httpclient.NewStore(urls.SessionURL, log), agent.SessionStoreModeHTTPClient, nil
 }
 
 func buildK8sClient() client.Client {
