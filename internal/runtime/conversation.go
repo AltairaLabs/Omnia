@@ -192,6 +192,12 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 			Limit:       s.memoryLimit,
 		}, log)
 		opts = append(opts, sdk.WithMemory(s.memoryStore, scope, sdk.WithMemoryRetriever(retriever)))
+		// Teach the LLM Omnia's memory model (tiers, structured dedup,
+		// purpose/title/summary) via the tool-calling instructions. PromptKit's
+		// generic memory tool descriptors can't know any of this; these
+		// overrides rewrite the descriptions and extend memory__remember's
+		// schema so extra args flow into Memory.Metadata for the memory-api.
+		opts = append(opts, memoryToolOverrides()...)
 		log.V(1).Info("memory store wired",
 			"session_id", sessionID,
 			"trace_id", sessionID,
@@ -199,6 +205,7 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 			"hasAgentID", scope["agent_id"] != "",
 			"scopeKeys", len(scope),
 			"hasRetriever", true,
+			"memoryToolOverrides", len(memoryToolPatches()),
 		)
 	}
 

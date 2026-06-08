@@ -33,6 +33,7 @@ import (
 
 	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
 
+	"github.com/altairalabs/omnia/internal/memory/metakeys"
 	"github.com/altairalabs/omnia/internal/pgutil"
 )
 
@@ -313,49 +314,31 @@ func supersedePriorObservations(ctx context.Context, tx pgx.Tx, entityID string)
 	return ids, rows.Err()
 }
 
-// MetaKeyPurpose is the metadata key carrying the Omnia purpose tag
-// (e.g. "support_continuity", "personalisation"). The value is read at
-// insert time and written to memory_entities.purpose so retrieval can
-// filter on it without re-parsing JSON metadata. Empty / missing values
-// fall through to the schema default ('support_continuity').
-const MetaKeyPurpose = "purpose"
-
-// MetaKeyConsentCategory is the metadata key carrying the consent
-// category tag (e.g. "memory:health", "memory:location"). Read at
-// insert time and written to memory_entities.consent_category so
-// the retention worker's consent revocation cascade can match rows
-// against the user's current grants without scanning JSON metadata.
-// Empty / missing values leave the column NULL — those rows fall
-// under the default (non-per-category) retention policy.
-const MetaKeyConsentCategory = "consent_category"
-
-// MetaKeyAboutKind / MetaKeyAboutKey carry the structured-dedup hint
-// from PromptKit's `about` parameter. When both are set, Save treats
-// (workspace, user, agent, about_kind, about_key) as a soft-unique
-// key: a second write atomically supersedes the first under the same
-// entity. Used for identity-class facts where the agent knows what
-// attribute it is writing (name, location, single-valued
-// preference). Free-form writes leave both empty and fall through
-// to similarity-based dedup.
-const (
-	MetaKeyAboutKind = "about_kind"
-	MetaKeyAboutKey  = "about_key"
-)
-
-// MetaKeyTitle / MetaKeySummary carry display fields for large
-// memories (workspace docs, session summaries, skill manifests).
-// Written to memory_entities.title and memory_observations.summary
-// respectively so the recall path can return a synopsis instead of
-// the full body.
+// Metadata keys are defined in the leaf metakeys package (which imports
+// nothing) so writer packages like internal/runtime can share the same wire
+// contract without an import cycle. They are re-exported here as MetaKey* so
+// existing internal/memory callers are unchanged.
 //
-// MetaKeyBodySize is the server-stamped octet length of the active
-// observation's content. Surfaced via Memory.Metadata so the API DTO
-// can decide whether to inline the full body or return a preview +
-// has_full_body=true and let the agent fetch via memory__open.
+//   - MetaKeyPurpose: read at insert time, written to memory_entities.purpose
+//     so retrieval can filter without re-parsing JSON metadata.
+//   - MetaKeyConsentCategory: written to memory_entities.consent_category so
+//     the retention worker's consent revocation cascade can match grants.
+//   - MetaKeyAboutKind / MetaKeyAboutKey: structured-dedup hint from
+//     PromptKit's `about` parameter. When both are set, Save treats
+//     (workspace, user, agent, about_kind, about_key) as a soft-unique key
+//     and supersedes in place. Free-form writes leave both empty and fall
+//     through to similarity-based dedup.
+//   - MetaKeyTitle / MetaKeySummary: display fields for large memories so the
+//     recall path can return a synopsis instead of the full body.
+//   - MetaKeyBodySize: server-stamped octet length of the active observation.
 const (
-	MetaKeyTitle    = "title"
-	MetaKeySummary  = "summary"
-	MetaKeyBodySize = "body_size_bytes"
+	MetaKeyPurpose         = metakeys.Purpose
+	MetaKeyConsentCategory = metakeys.ConsentCategory
+	MetaKeyAboutKind       = metakeys.AboutKind
+	MetaKeyAboutKey        = metakeys.AboutKey
+	MetaKeyTitle           = metakeys.Title
+	MetaKeySummary         = metakeys.Summary
+	MetaKeyBodySize        = metakeys.BodySize
 )
 
 // stringFromMeta returns the trimmed lowercased value of meta[key]
