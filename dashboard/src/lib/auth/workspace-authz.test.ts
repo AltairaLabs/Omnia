@@ -107,7 +107,10 @@ describe("workspace-authz", () => {
         expect(access.role).toBe("viewer");
       });
 
-      it("should grant viewer access to users without email when enabled", async () => {
+      it("should resolve real role via UPN when the email claim is absent", async () => {
+        // Entra members with no `mail` attribute authenticate with a UPN
+        // (carried in `username`) but no email claim. They must resolve their
+        // real role via group membership — NOT be treated as anonymous.
         (getUser as Mock).mockResolvedValue({
           ...mockUser,
           email: undefined,
@@ -115,6 +118,22 @@ describe("workspace-authz", () => {
 
         const access = await checkWorkspaceAccess("test-workspace");
 
+        // mockUser is in developers@example.com → editor (not anonymous viewer)
+        expect(access.granted).toBe(true);
+        expect(access.role).toBe("editor");
+      });
+
+      it("should still treat the anonymous provider as anonymous even with a username", async () => {
+        (getUser as Mock).mockResolvedValue({
+          ...mockUser,
+          provider: "anonymous",
+          email: undefined,
+        });
+
+        const access = await checkWorkspaceAccess("test-workspace");
+
+        // anonymousAccess is enabled (default viewer) — anonymous provider
+        // never resolves a group/grant role regardless of username.
         expect(access.granted).toBe(true);
         expect(access.role).toBe("viewer");
       });
@@ -327,6 +346,22 @@ describe("workspace-authz", () => {
 
       expect(access.granted).toBe(true);
       expect(access.role).toBe("viewer");
+    });
+
+    it("should match directGrants by UPN when the email claim is absent", async () => {
+      // No email claim (e.g. Entra user without a mailbox); the UPN lives in
+      // `username` and must satisfy a directGrant keyed on that address.
+      (getUser as Mock).mockResolvedValue({
+        ...mockUser,
+        email: undefined,
+        username: "admin@example.com",
+        groups: [],
+      });
+
+      const access = await checkWorkspaceAccess("test-workspace");
+
+      expect(access.granted).toBe(true);
+      expect(access.role).toBe("owner");
     });
 
     it("should deny access when user has no matching groups or grants", async () => {

@@ -32,6 +32,24 @@ const DENIED_ACCESS: WorkspaceAccess = {
 };
 
 /**
+ * Stable identity for authorization decisions (cache key, directGrant
+ * matching, audit logging).
+ *
+ * Prefers the email claim — the conventional IdP identity — but falls back
+ * to the username/UPN when the IdP doesn't emit an email claim. Microsoft
+ * Entra, for example, only populates the `email` claim from the user's `mail`
+ * attribute; a member with `mail` unset (no mailbox) authenticates fine and
+ * carries a UPN but no email. Without this fallback such a user has an empty
+ * `email` and gets dropped into the anonymous branch below — denied workspace
+ * access despite being authenticated and correctly group-mapped.
+ *
+ * Returns undefined only for genuinely identity-less principals.
+ */
+function userIdentity(user: { email?: string; username?: string }): string | undefined {
+  return user.email || user.username;
+}
+
+/**
  * Compare two roles and return the higher-privilege one.
  * Returns null if both are null.
  */
@@ -225,9 +243,10 @@ export async function checkWorkspaceAccess(
 ): Promise<WorkspaceAccess> {
   // Get current user
   const user = await getUser();
+  const identity = userIdentity(user);
 
   // For anonymous users, check the workspace's anonymousAccess configuration
-  if (user.provider === "anonymous" || !user.email) {
+  if (user.provider === "anonymous" || !identity) {
     // Check if workspace exists
     const workspace = await getWorkspace(workspaceName);
     if (!workspace) {
@@ -245,7 +264,7 @@ export async function checkWorkspaceAccess(
   }
 
   // Check cache first (before K8s API call)
-  const cached = getCachedAccess(user.email, workspaceName);
+  const cached = getCachedAccess(identity, workspaceName);
   if (cached) {
     // If cached result exists, apply required role check
     if (requiredRole && cached.role && !meetsRoleRequirement(cached.role, requiredRole)) {
@@ -272,7 +291,7 @@ export async function checkWorkspaceAccess(
   );
 
   // Check directGrants for individual user access
-  const directRole = findDirectGrant(workspace.spec.directGrants, user.email);
+  const directRole = findDirectGrant(workspace.spec.directGrants, identity);
   role = maxRole(role, directRole);
 
   // Build access result
@@ -280,7 +299,7 @@ export async function checkWorkspaceAccess(
 
   // Cache the base access (without required role applied)
   const baseAccess = buildAccess(role);
-  setCachedAccess(user.email, workspaceName, baseAccess);
+  setCachedAccess(identity, workspaceName, baseAccess);
 
   return access;
 }
@@ -295,9 +314,10 @@ export async function getAccessibleWorkspaces(
   minimumRole?: WorkspaceRole
 ): Promise<Array<{ workspace: Workspace; access: WorkspaceAccess }>> {
   const user = await getUser();
+  const identity = userIdentity(user);
 
   // For anonymous users, check each workspace's anonymousAccess configuration
-  if (user.provider === "anonymous" || !user.email) {
+  if (user.provider === "anonymous" || !identity) {
     const workspaces = await listWorkspaces();
     const accessible: Array<{ workspace: Workspace; access: WorkspaceAccess }> = [];
 
@@ -323,7 +343,7 @@ export async function getAccessibleWorkspaces(
     );
 
     // Check directGrants
-    const directRole = findDirectGrant(workspace.spec.directGrants, user.email);
+    const directRole = findDirectGrant(workspace.spec.directGrants, identity);
     role = maxRole(role, directRole);
 
     if (!role) continue;
@@ -336,7 +356,7 @@ export async function getAccessibleWorkspaces(
     const access = buildAccess(role);
 
     // Cache each workspace access
-    setCachedAccess(user.email, workspace.metadata.name, access);
+    setCachedAccess(identity, workspace.metadata.name, access);
 
     accessible.push({ workspace, access });
   }
