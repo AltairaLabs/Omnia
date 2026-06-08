@@ -76,7 +76,7 @@ describe("GET /api/workspaces/[name]/institutional-memory", () => {
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPerms });
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080", namespace: "omnia-test" });
 
     mockResp({ memories: [{ id: "inst-1" }], total: 1 });
 
@@ -117,7 +117,7 @@ describe("GET /api/workspaces/[name]/institutional-memory", () => {
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPerms });
     vi.mocked(getWorkspace).mockResolvedValue(null as never);
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080", namespace: "omnia-test" });
 
     const { GET } = await import("./route");
     const res = await GET(createReq("GET", "/api/workspaces/my-ws/institutional-memory"), ctx());
@@ -133,7 +133,7 @@ describe("GET /api/workspaces/[name]/institutional-memory", () => {
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPerms });
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080", namespace: "omnia-test" });
 
     mockFetch.mockResolvedValueOnce({
       ok: false,
@@ -155,7 +155,7 @@ describe("GET /api/workspaces/[name]/institutional-memory", () => {
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPerms });
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080", namespace: "omnia-test" });
 
     mockFetch.mockRejectedValueOnce(new Error("net down"));
 
@@ -190,7 +190,7 @@ describe("POST /api/workspaces/[name]/institutional-memory", () => {
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPerms });
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080", namespace: "omnia-test" });
 
     mockResp({ memory: { id: "inst-new", type: "policy", content: "c", confidence: 1, scope: {}, createdAt: "" } }, 201);
 
@@ -233,7 +233,7 @@ describe("POST /api/workspaces/[name]/institutional-memory", () => {
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPerms });
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080", namespace: "omnia-test" });
 
     const { POST } = await import("./route");
     const res = await POST(createReq("POST", "/api/workspaces/my-ws/institutional-memory", "not json"), ctx());
@@ -263,7 +263,7 @@ describe("POST /api/workspaces/[name]/institutional-memory", () => {
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPerms });
     vi.mocked(getWorkspace).mockResolvedValue(null as never);
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080", namespace: "omnia-test" });
 
     const { POST } = await import("./route");
     const res = await POST(createReq("POST", "/api/workspaces/my-ws/institutional-memory", { type: "t", content: "c" }), ctx());
@@ -279,7 +279,7 @@ describe("POST /api/workspaces/[name]/institutional-memory", () => {
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPerms });
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080", namespace: "omnia-test" });
 
     mockFetch.mockRejectedValueOnce(new Error("boom"));
 
@@ -306,7 +306,7 @@ describe("DELETE /api/workspaces/[name]/institutional-memory/[memoryId]", () => 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPerms });
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080", namespace: "omnia-test" });
 
     mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({}) });
 
@@ -328,7 +328,7 @@ describe("DELETE /api/workspaces/[name]/institutional-memory/[memoryId]", () => 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPerms });
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080", namespace: "omnia-test" });
 
     mockFetch.mockResolvedValueOnce({
       ok: false,
@@ -366,7 +366,7 @@ describe("DELETE /api/workspaces/[name]/institutional-memory/[memoryId]", () => 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPerms });
     vi.mocked(getWorkspace).mockResolvedValue(null as never);
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080", namespace: "omnia-test" });
 
     const { DELETE } = await import("./[memoryId]/route");
     const res = await DELETE(createReq("DELETE", "/api/workspaces/my-ws/institutional-memory/inst-1"), deleteCtx());
@@ -382,7 +382,7 @@ describe("DELETE /api/workspaces/[name]/institutional-memory/[memoryId]", () => 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPerms });
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://s:8080", memoryURL: "https://m:8080", namespace: "omnia-test" });
 
     mockFetch.mockRejectedValueOnce(new Error("net"));
 

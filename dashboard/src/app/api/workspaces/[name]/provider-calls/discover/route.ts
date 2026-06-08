@@ -43,7 +43,8 @@ export const GET = withWorkspaceAccess<Params>(
     const baseUrl = urls.sessionURL.endsWith("/")
       ? urls.sessionURL.slice(0, -1)
       : urls.sessionURL;
-    const targetUrl = `${baseUrl}/api/v1/provider-calls/discover?namespace=${encodeURIComponent(name)}`;
+    // Backend filters by K8s namespace, not the workspace name (#1257).
+    const targetUrl = `${baseUrl}/api/v1/provider-calls/discover?namespace=${encodeURIComponent(urls.namespace)}`;
 
     try {
       const response = await fetch(targetUrl, {

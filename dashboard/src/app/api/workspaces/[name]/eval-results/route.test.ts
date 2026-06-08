@@ -61,7 +61,7 @@ describe("GET /api/workspaces/[name]/eval-results", () => {
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -95,7 +95,7 @@ describe("GET /api/workspaces/[name]/eval-results", () => {
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -153,7 +153,7 @@ describe("GET /api/workspaces/[name]/eval-results", () => {
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -180,7 +180,7 @@ describe("GET /api/workspaces/[name]/eval-results", () => {
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -220,7 +220,7 @@ describe("GET /api/workspaces/[name]/eval-results", () => {
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080/", memoryURL: "https://memory-api:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080/", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -247,7 +247,7 @@ describe("GET /api/workspaces/[name]/eval-results", () => {
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,

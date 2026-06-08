@@ -46,10 +46,11 @@ export const GET = withWorkspaceAccess<Params>(
       ? urls.sessionURL.slice(0, -1)
       : urls.sessionURL;
 
-    // Pin namespace to the URL-scoped workspace so a caller can't read
-    // another workspace's data by setting ?namespace=other.
+    // Pin namespace to the workspace's real backing namespace (NOT the
+    // workspace name — "default" -> "omnia-default", #1257) so the caller
+    // can't read another workspace's data by setting ?namespace=other.
     const params = new URLSearchParams(request.nextUrl.searchParams);
-    params.set("namespace", name);
+    params.set("namespace", urls.namespace);
     const targetUrl = `${baseUrl}/api/v1/eval-results/aggregate?${params.toString()}`;
 
     try {

@@ -42,7 +42,7 @@ async function setupAuth() {
   const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
   vi.mocked(resolveServiceURLs).mockResolvedValue({
     sessionURL: "https://session-api:8080",
-    memoryURL: "https://memory-api:8080",
+    memoryURL: "https://memory-api:8080", namespace: "omnia-test",
   });
   vi.mocked(getUser).mockResolvedValue(mockUser);
   vi.mocked(checkWorkspaceAccess).mockResolvedValue({
@@ -77,7 +77,7 @@ describe("GET /api/workspaces/[name]/provider-calls/discover", () => {
 
     const url = mockFetch.mock.calls[0][0] as string;
     expect(url).toBe(
-      "https://session-api:8080/api/v1/provider-calls/discover?namespace=test-ws",
+      "https://session-api:8080/api/v1/provider-calls/discover?namespace=omnia-test",
     );
   });
 

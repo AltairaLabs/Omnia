@@ -61,7 +61,7 @@ describe("GET /api/workspaces/[name]/eval-results/aggregate", () => {
 
     vi.mocked(resolveServiceURLs).mockResolvedValue({
       sessionURL: "https://session-api:8080",
-      memoryURL: "https://memory-api:8080",
+      memoryURL: "https://memory-api:8080", namespace: "omnia-test",
     });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
@@ -71,7 +71,7 @@ describe("GET /api/workspaces/[name]/eval-results/aggregate", () => {
     });
   }
 
-  it("proxies aggregate request and injects namespace from workspace name", async () => {
+  it("proxies aggregate request and injects the resolved namespace, not the workspace name (#1257)", async () => {
     await setupAuth();
 
     mockFetch.mockResolvedValueOnce({
@@ -97,17 +97,17 @@ describe("GET /api/workspaces/[name]/eval-results/aggregate", () => {
     expect(body.rows).toHaveLength(2);
     expect(body.rows[0].key).toBe("2026-05-01");
 
-    // Verify the proxy forwarded query params AND pinned namespace=test-ws.
+    // Verify the proxy forwarded query params AND pinned the resolved namespace=omnia-test.
     expect(mockFetch).toHaveBeenCalledOnce();
     const calledURL = mockFetch.mock.calls[0][0] as string;
     expect(calledURL).toContain("session-api:8080/api/v1/eval-results/aggregate?");
-    expect(calledURL).toContain("namespace=test-ws");
+    expect(calledURL).toContain("namespace=omnia-test");
     expect(calledURL).toContain("groupBy=time%3Aday");
     expect(calledURL).toContain("metric=avg_score");
     expect(calledURL).toContain("evalId=acc");
   });
 
-  it("overrides caller-supplied namespace with the workspace name", async () => {
+  it("overrides caller-supplied namespace with the resolved workspace namespace", async () => {
     await setupAuth();
 
     mockFetch.mockResolvedValueOnce({
@@ -124,8 +124,10 @@ describe("GET /api/workspaces/[name]/eval-results/aggregate", () => {
     );
 
     const calledURL = mockFetch.mock.calls[0][0] as string;
-    expect(calledURL).toContain("namespace=test-ws");
+    expect(calledURL).toContain("namespace=omnia-test");
     expect(calledURL).not.toContain("namespace=other-ws");
+    // #1257: must use the resolved namespace, never the workspace NAME.
+    expect(calledURL).not.toContain("namespace=test-ws");
   });
 
   it("returns 503 when session-api URL cannot be resolved", async () => {
