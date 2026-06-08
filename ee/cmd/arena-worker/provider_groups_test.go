@@ -718,6 +718,73 @@ func TestResolveProviderRefEntry(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, pricing)
 	})
+
+	t.Run("platform provider sets Platform and skips credential env", func(t *testing.T) {
+		provider := &v1alpha1.Provider{
+			Spec: v1alpha1.ProviderSpec{
+				Type:  "openai",
+				Model: "gpt-4o",
+				Platform: &v1alpha1.PlatformConfig{
+					Type:     v1alpha1.PlatformTypeAzure,
+					Endpoint: "https://acct.cognitiveservices.azure.com/",
+				},
+			},
+		}
+		provider.Name = "azure-foundry-gpt-4o"
+		provider.Namespace = testNamespace
+
+		c := fake.NewClientBuilder().
+			WithScheme(k8s.Scheme()).
+			WithObjects(provider).
+			Build()
+
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+
+		ref := v1alpha1.ProviderRef{Name: "azure-foundry-gpt-4o"}
+		_, err := resolveProviderRefEntry(testRC(ctx, log, c, testNamespace, nil, arenaCfg), ref, "default")
+		require.NoError(t, err)
+
+		pk := arenaCfg.LoadedProviders[sanitizeID("azure-foundry-gpt-4o")]
+		require.NotNil(t, pk)
+		require.NotNil(t, pk.Platform)
+		assert.Equal(t, "azure", pk.Platform.Type)
+		assert.Equal(t, "https://acct.cognitiveservices.azure.com/", pk.Platform.Endpoint)
+		assert.Nil(t, pk.Credential, "platform providers must not demand an API-key env var")
+	})
+
+	t.Run("non-platform provider keeps credential env", func(t *testing.T) {
+		provider := &v1alpha1.Provider{
+			Spec: v1alpha1.ProviderSpec{
+				Type:  "openai",
+				Model: "gpt-4o",
+			},
+		}
+		provider.Name = "plain-openai"
+		provider.Namespace = testNamespace
+
+		c := fake.NewClientBuilder().
+			WithScheme(k8s.Scheme()).
+			WithObjects(provider).
+			Build()
+
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+
+		ref := v1alpha1.ProviderRef{Name: "plain-openai"}
+		_, err := resolveProviderRefEntry(testRC(ctx, log, c, testNamespace, nil, arenaCfg), ref, "default")
+		require.NoError(t, err)
+
+		pk := arenaCfg.LoadedProviders[sanitizeID("plain-openai")]
+		require.NotNil(t, pk)
+		assert.Nil(t, pk.Platform)
+		require.NotNil(t, pk.Credential)
+		assert.Equal(t, "OPENAI_API_KEY", pk.Credential.CredentialEnv)
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -899,6 +966,42 @@ func TestResolveProviderRefEntryWithID(t *testing.T) {
 		assert.InDelta(t, 0.8, p.Defaults.Temperature, 0.001)
 		assert.Equal(t, 2000, p.Defaults.MaxTokens)
 		assert.Equal(t, "judge", arenaCfg.ProviderGroups["custom-id"])
+	})
+
+	t.Run("platform provider sets Platform and skips credential env", func(t *testing.T) {
+		provider := &v1alpha1.Provider{
+			Spec: v1alpha1.ProviderSpec{
+				Type:  "claude",
+				Model: "claude-sonnet-4",
+				Platform: &v1alpha1.PlatformConfig{
+					Type:   v1alpha1.PlatformTypeBedrock,
+					Region: "us-west-2",
+				},
+			},
+		}
+		provider.Name = "bedrock-claude"
+		provider.Namespace = testNamespace
+
+		c := fake.NewClientBuilder().
+			WithScheme(k8s.Scheme()).
+			WithObjects(provider).
+			Build()
+
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+
+		ref := v1alpha1.ProviderRef{Name: "bedrock-claude"}
+		_, err := resolveProviderRefEntryWithID(testRC(ctx, log, c, testNamespace, nil, arenaCfg), ref, "bedrock-id", "judge")
+		require.NoError(t, err)
+
+		p := arenaCfg.LoadedProviders["bedrock-id"]
+		require.NotNil(t, p)
+		require.NotNil(t, p.Platform)
+		assert.Equal(t, "bedrock", p.Platform.Type)
+		assert.Equal(t, "us-west-2", p.Platform.Region)
+		assert.Nil(t, p.Credential, "platform providers must not demand an API-key env var")
 	})
 }
 
