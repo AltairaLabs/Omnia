@@ -113,6 +113,42 @@ function mgmtPlaneSubjectForRequest(req) {
   return `omnia-admin-${hash}`;
 }
 
+// HEADER_END_USER_ID is the on-behalf-of header the facade trusts (only
+// for management-plane origin) to scope memories/sessions to the stable
+// authenticated user, rather than the per-session audit pseudonym. Kept
+// in sync with pkg/policy.HeaderUserID. See #1255.
+const HEADER_END_USER_ID = "x-omnia-user-id";
+
+// resolveEndUserId asks the dashboard's own session layer who the
+// authenticated user is for this WS upgrade, by forwarding the request's
+// Cookie to the internal identity route (which reuses getCurrentUser, so
+// it can't drift from how the rest of the app resolves identity). Returns
+// the raw user id, or null for anonymous / on any failure — a null result
+// makes the caller omit the header so the facade falls back to the
+// device_id scoping it used before. The dashboard proxy is the trust
+// boundary: the browser cannot set this header on the upstream facade
+// connection, so the value the facade receives is authoritative.
+async function resolveEndUserId(req) {
+  const cookie = req && req.headers ? req.headers.cookie : undefined;
+  if (!cookie) {
+    return null;
+  }
+  try {
+    const res = await fetch(
+      `http://127.0.0.1:${port}/api/internal/ws-identity`,
+      { headers: { cookie } },
+    );
+    if (!res.ok) {
+      return null;
+    }
+    const body = await res.json();
+    return typeof body.userId === "string" && body.userId ? body.userId : null;
+  } catch (err) {
+    console.error(`[WS Proxy] end-user identity resolve failed: ${err.message}`);
+    return null;
+  }
+}
+
 // OMNIA_MGMT_PLANE_TOKEN_TTL_SECONDS overrides the mgmt-plane JWT TTL
 // (default 5 minutes in lib/mgmt-plane-token.js). Long enough that an
 // admin's debug session doesn't drop mid-chat, short enough that a
@@ -300,6 +336,14 @@ function proxyWebSocket(clientSocket, namespace, name, clientParams = {}, req = 
       // so a transient error doesn't break the entire debug view.
       console.error(`[WS Proxy] Failed to mint mgmt-plane token: ${err.message}`);
     }
+  }
+
+  // On-behalf-of identity, resolved pre-upgrade from the session cookie
+  // (see the upgrade handler). Authoritative: set by us, not the browser.
+  // Absent for anonymous users, so the facade falls back to device_id.
+  const endUserId = req && req.omniaEndUserId ? req.omniaEndUserId : null;
+  if (endUserId) {
+    upstreamHeaders[HEADER_END_USER_ID] = endUserId;
   }
 
   let upstream = null;
@@ -763,8 +807,14 @@ app.prepare().then(() => {
 
     if (agent) {
       console.log(`[WS Upgrade] Parsed agent: namespace=${agent.namespace}, name=${agent.name}`);
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        wss.emit("connection", ws, req);
+      // Resolve the authenticated end-user id BEFORE completing the
+      // upgrade (no WebSocket exists yet, so no client message can be
+      // missed while we await) and stash it on req for proxyWebSocket.
+      resolveEndUserId(req).then((endUserId) => {
+        req.omniaEndUserId = endUserId;
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          wss.emit("connection", ws, req);
+        });
       });
     } else if (isLspPath(pathname)) {
       console.log(`[WS Upgrade] LSP connection request`);
