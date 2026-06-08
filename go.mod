@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	cloud.google.com/go/kms v1.26.0
-	cloud.google.com/go/storage v1.62.1
+	cloud.google.com/go/storage v1.62.3
 	github.com/AltairaLabs/PromptKit/pkg v1.4.14
 	github.com/AltairaLabs/PromptKit/runtime v1.4.14
 	github.com/AltairaLabs/PromptKit/sdk v1.4.14
