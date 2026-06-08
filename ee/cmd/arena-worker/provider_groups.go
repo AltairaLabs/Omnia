@@ -226,26 +226,7 @@ func resolveProviderRefEntry(
 
 	providerID := sanitizeID(provider.Name)
 
-	// Build PromptKit provider config
-	pkProvider := &config.Provider{
-		ID:      providerID,
-		Type:    string(provider.Spec.Type),
-		Model:   provider.Spec.Model,
-		BaseURL: provider.Spec.BaseURL,
-	}
-
-	// Resolve credential
-	credEnvVar := resolveProviderCredentialEnv(provider)
-	if credEnvVar != "" {
-		pkProvider.Credential = &config.CredentialConfig{
-			CredentialEnv: credEnvVar,
-		}
-	}
-
-	// Set defaults
-	if provider.Spec.Defaults != nil {
-		pkProvider.Defaults = convertProviderDefaults(provider.Spec.Defaults)
-	}
+	pkProvider := buildProviderConfig(provider, providerID)
 
 	rc.arenaCfg.LoadedProviders[providerID] = pkProvider
 	rc.arenaCfg.ProviderGroups[providerID] = groupName
@@ -255,10 +236,54 @@ func resolveProviderRefEntry(
 		"type", pkProvider.Type,
 		"model", pkProvider.Model,
 		"group", groupName,
-		"hasCreds", credEnvVar != "" && os.Getenv(credEnvVar) != "",
+		"hasPlatform", pkProvider.Platform != nil,
+		"hasCredentialEnv", pkProvider.Credential != nil,
 	)
 
 	return parsePricing(provider.Spec.Pricing), nil
+}
+
+// buildProviderConfig converts a Provider CRD into a PromptKit config.Provider.
+//
+// Platform-hosted (keyless) providers — openai-on-azure, claude-on-bedrock,
+// gemini-on-vertex — get their Platform block populated and the credential-env
+// assignment skipped, so PromptKit's credential resolver uses the cloud SDK
+// chain (IRSA / GCP workload identity / Azure managed identity) instead of
+// demanding an API-key env var. This mirrors the live runtime / eval-worker
+// path (ee/pkg/evals/provider_resolver.go) which the Arena worker previously
+// diverged from (issue #1264).
+func buildProviderConfig(provider *v1alpha1.Provider, id string) *config.Provider {
+	pkProvider := &config.Provider{
+		ID:      id,
+		Type:    string(provider.Spec.Type),
+		Model:   provider.Spec.Model,
+		BaseURL: provider.Spec.BaseURL,
+	}
+
+	if provider.Spec.Platform != nil {
+		pkProvider.Platform = convertPlatformConfig(provider.Spec.Platform)
+	} else if credEnvVar := resolveProviderCredentialEnv(provider); credEnvVar != "" {
+		pkProvider.Credential = &config.CredentialConfig{
+			CredentialEnv: credEnvVar,
+		}
+	}
+
+	if provider.Spec.Defaults != nil {
+		pkProvider.Defaults = convertProviderDefaults(provider.Spec.Defaults)
+	}
+
+	return pkProvider
+}
+
+// convertPlatformConfig maps an Omnia PlatformConfig to a PromptKit
+// config.PlatformConfig (aliased to credentials.PlatformConfig in the SDK).
+func convertPlatformConfig(p *v1alpha1.PlatformConfig) *config.PlatformConfig {
+	return &config.PlatformConfig{
+		Type:     string(p.Type),
+		Region:   p.Region,
+		Project:  p.Project,
+		Endpoint: p.Endpoint,
+	}
 }
 
 // resolveAgentRefEntry resolves an AgentRuntime CRD and creates a fleet provider.
@@ -316,23 +341,7 @@ func resolveProviderRefEntryWithID(
 		return nil, fmt.Errorf("group %q: failed to get provider %s: %w", groupName, ref.Name, err)
 	}
 
-	pkProvider := &config.Provider{
-		ID:      configID,
-		Type:    string(provider.Spec.Type),
-		Model:   provider.Spec.Model,
-		BaseURL: provider.Spec.BaseURL,
-	}
-
-	credEnvVar := resolveProviderCredentialEnv(provider)
-	if credEnvVar != "" {
-		pkProvider.Credential = &config.CredentialConfig{
-			CredentialEnv: credEnvVar,
-		}
-	}
-
-	if provider.Spec.Defaults != nil {
-		pkProvider.Defaults = convertProviderDefaults(provider.Spec.Defaults)
-	}
+	pkProvider := buildProviderConfig(provider, configID)
 
 	rc.arenaCfg.LoadedProviders[configID] = pkProvider
 	rc.arenaCfg.ProviderGroups[configID] = groupName
@@ -343,6 +352,8 @@ func resolveProviderRefEntryWithID(
 		"type", pkProvider.Type,
 		"model", pkProvider.Model,
 		"group", groupName,
+		"hasPlatform", pkProvider.Platform != nil,
+		"hasCredentialEnv", pkProvider.Credential != nil,
 	)
 
 	return parsePricing(provider.Spec.Pricing), nil
