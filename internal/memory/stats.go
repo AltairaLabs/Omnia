@@ -64,6 +64,17 @@ type AggregateRow struct {
 	Count int64  `json:"count"`
 }
 
+// Aggregator is implemented by stores that can run analytics aggregates.
+// *PostgresMemoryStore implements it directly; *CachedStore delegates to its
+// inner store. The MemoryService asserts s.store to this interface (not to the
+// concrete *PostgresMemoryStore) so the aggregate path works through the cache
+// wrapper — see issue #1253. Test fakes that don't implement Aggregate still
+// fail the assertion and surface a clear error, preserving the property the
+// old concrete-type assertion relied on (no Store-interface addition required).
+type Aggregator interface {
+	Aggregate(ctx context.Context, opts AggregateOptions) ([]AggregateRow, error)
+}
+
 // Aggregate runs a workspace-scoped GROUP BY over memory_entities,
 // composing AggregateConsentJoin so users without analytics:aggregate
 // consent are excluded by construction.

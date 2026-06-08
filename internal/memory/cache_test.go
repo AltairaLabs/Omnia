@@ -83,6 +83,21 @@ type cacheTestStore struct {
 	saveCompactionCalls int
 	saveCompactionID    string
 	compactionErr       error
+
+	// Aggregate (analytics) pass-through — makes cacheTestStore satisfy
+	// Aggregator so the CachedStore.Aggregate delegation can be tested (#1253).
+	aggregateRows  []AggregateRow
+	aggregateOpts  AggregateOptions
+	aggregateCalls int
+}
+
+// Aggregate makes cacheTestStore an Aggregator so CachedStore can delegate to it.
+func (m *cacheTestStore) Aggregate(_ context.Context, opts AggregateOptions) ([]AggregateRow, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.aggregateCalls++
+	m.aggregateOpts = opts
+	return m.aggregateRows, nil
 }
 
 func (m *cacheTestStore) Save(_ context.Context, mem *Memory) error {
@@ -1091,5 +1106,50 @@ func TestCachedStore_Metrics_List(t *testing.T) {
 	}
 	if got := readCounter(cacheLookupsTotal.WithLabelValues("list", "hit")) - hitBefore; got != 1 {
 		t.Fatalf("expected 1 hit after warm List, got %v", got)
+	}
+}
+
+// nonAggregatorStore is a Store (via the embedded interface) that does NOT
+// implement Aggregator — exercises CachedStore.Aggregate's error branch.
+type nonAggregatorStore struct{ Store }
+
+// TestCachedStore_Aggregate_Delegates verifies CachedStore reaches the inner
+// store's Aggregate (regression guard for #1253 at the wrapper layer).
+func TestCachedStore_Aggregate_Delegates(t *testing.T) {
+	inner := &cacheTestStore{aggregateRows: []AggregateRow{{Key: "agg-cat", Value: 10, Count: 10}}}
+	cached, mr := newTestCache(t, inner)
+	defer mr.Close()
+
+	rows, err := cached.Aggregate(context.Background(), AggregateOptions{
+		Workspace: "ws",
+		GroupBy:   AggregateGroupByCategory,
+	})
+	if err != nil {
+		t.Fatalf("Aggregate through CachedStore: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Key != "agg-cat" {
+		t.Fatalf("expected delegated rows, got %+v", rows)
+	}
+	if inner.aggregateCalls != 1 {
+		t.Errorf("expected inner Aggregate called once, got %d", inner.aggregateCalls)
+	}
+	if inner.aggregateOpts.Workspace != "ws" {
+		t.Errorf("opts not passed through to inner store: %+v", inner.aggregateOpts)
+	}
+}
+
+// TestCachedStore_Aggregate_NonAggregatorInner_Errors covers the defensive
+// error branch when the inner store can't aggregate.
+func TestCachedStore_Aggregate_NonAggregatorInner_Errors(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis.Run: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	cached := NewCachedStore(&nonAggregatorStore{}, rdb, 5*time.Minute, logr.Discard())
+
+	if _, err := cached.Aggregate(context.Background(), AggregateOptions{Workspace: "ws"}); err == nil {
+		t.Fatal("expected error when inner store does not support Aggregate")
 	}
 }

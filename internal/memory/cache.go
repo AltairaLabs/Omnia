@@ -214,6 +214,20 @@ func (c *CachedStore) ListInstitutional(ctx context.Context, workspaceID string,
 	return c.inner.ListInstitutional(ctx, workspaceID, opts)
 }
 
+// Aggregate delegates to the inner store's analytics aggregate (not cached —
+// the dashboard polls it and it must reflect writes immediately). This makes
+// *CachedStore satisfy Aggregator so MemoryService.AggregateMemories reaches
+// the underlying store through the wrapper rather than type-asserting the
+// concrete *PostgresMemoryStore (issue #1253). Walks one level; if the inner
+// store is itself a wrapper it must also implement Aggregator.
+func (c *CachedStore) Aggregate(ctx context.Context, opts AggregateOptions) ([]AggregateRow, error) {
+	agg, ok := c.inner.(Aggregator)
+	if !ok {
+		return nil, fmt.Errorf("memory: cached store inner %T does not support Aggregate", c.inner)
+	}
+	return agg.Aggregate(ctx, opts)
+}
+
 // DeleteInstitutional delegates to the inner store then invalidates the
 // workspace-scoped cache.
 func (c *CachedStore) DeleteInstitutional(ctx context.Context, workspaceID, memoryID string) error {

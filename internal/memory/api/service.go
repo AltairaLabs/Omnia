@@ -959,16 +959,18 @@ func (s *MemoryService) ListMemories(ctx context.Context, scope map[string]strin
 
 // AggregateMemories runs a workspace-scoped aggregate over memory_entities.
 // Thin pass-through to the store; kept here for symmetry with other Service
-// methods so handlers always go through one indirection. Type-asserts to
-// *PostgresMemoryStore because the fake stores in the test suite don't
-// implement Aggregate; an interface addition would break every fake for
-// no real benefit.
+// methods so handlers always go through one indirection. Asserts to the
+// memory.Aggregator interface rather than the concrete *PostgresMemoryStore:
+// the Redis-cleanup work wraps the store in a *CachedStore, which delegates
+// Aggregate to its inner store, so a concrete-type assertion 500s on every
+// request with the cache on (issue #1253). Test fakes that don't implement
+// Aggregate still fail the assertion and surface a clear error.
 func (s *MemoryService) AggregateMemories(ctx context.Context, opts memory.AggregateOptions) ([]memory.AggregateRow, error) {
-	pgStore, ok := s.store.(*memory.PostgresMemoryStore)
+	agg, ok := s.store.(memory.Aggregator)
 	if !ok {
-		return nil, errors.New("memory service: aggregate requires a PostgresMemoryStore")
+		return nil, errors.New("memory service: aggregate requires a store that supports Aggregate")
 	}
-	return pgStore.Aggregate(ctx, opts)
+	return agg.Aggregate(ctx, opts)
 }
 
 // DeleteMemory performs a soft delete (forget) of a single memory.
