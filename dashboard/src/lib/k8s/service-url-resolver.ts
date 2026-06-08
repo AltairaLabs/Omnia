@@ -14,10 +14,11 @@ export interface ServiceURLs {
   memoryURL: string;
   /**
    * The Kubernetes namespace backing this workspace
-   * (`Workspace.status.namespace.name`) — NOT the workspace name. A workspace
-   * named `default` is provisioned in namespace `omnia-default`, so backends
-   * that filter by namespace (eval-results, provider-calls) MUST use this,
-   * never the workspace name. See #1257.
+   * (`Workspace.spec.namespace.name`, falling back to status then the name) —
+   * NOT the workspace name. A workspace named `default` is provisioned in
+   * namespace `omnia-default`, so backends that filter by namespace
+   * (eval-results, provider-calls) MUST use this, never the workspace name.
+   * See #1257.
    */
   namespace: string;
 }
