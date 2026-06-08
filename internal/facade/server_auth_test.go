@@ -451,3 +451,55 @@ func TestServerAuth_MgmtPlane_UserIDHeaderScopesMemory(t *testing.T) {
 		t.Fatal("handler did not run")
 	}
 }
+
+// TestServerAuth_NonMgmtPlane_IgnoresUserIDHeader is the security boundary
+// for #1255: the x-omnia-user-id on-behalf-of header is trusted ONLY for
+// management-plane origin. A non-mgmt-plane connection (here OIDC) that
+// carries a forged header must scope memory to the validator's own EndUser,
+// never the attacker-supplied header value.
+func TestServerAuth_NonMgmtPlane_IgnoresUserIDHeader(t *testing.T) {
+	const realUser = "real-user-789"
+	want := &policy.AuthenticatedIdentity{
+		Origin:  policy.OriginOIDC,
+		Subject: realUser,
+		EndUser: realUser,
+		Role:    policy.RoleEditor,
+	}
+	chain := auth.Chain{&stubClaimValidator{id: want}}
+
+	observed := make(chan policy.PropagationFields, 1)
+	handler := &mockHandler{
+		handleFunc: func(ctx context.Context, _ string, msg *ClientMessage, w ResponseWriter) error {
+			select {
+			case observed <- policy.ExtractPropagationFields(ctx):
+			default:
+			}
+			return w.WriteDone("echo: " + msg.Content)
+		},
+	}
+	store := session.NewMemoryStore()
+	cfg := DefaultServerConfig()
+	cfg.PingInterval = 100 * time.Millisecond
+	cfg.PongTimeout = 200 * time.Millisecond
+	server := NewServer(cfg, store, handler, logr.Discard(), WithAuthChain(chain))
+	ts := httptest.NewServer(server)
+	t.Cleanup(func() { ts.Close(); _ = store.Close() })
+
+	header := http.Header{}
+	header.Set("Authorization", "Bearer anything")
+	header.Set(policy.HeaderUserID, "attacker-controlled-id")
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", header)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	readConnected(t, conn)
+	require.NoError(t, conn.WriteJSON(ClientMessage{Type: "user_message", Content: "hi"}))
+
+	select {
+	case fields := <-observed:
+		assert.Equal(t, identity.PseudonymizeID(realUser), fields.UserID,
+			"non-mgmt-plane origin must ignore x-omnia-user-id and scope to its own EndUser")
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not run")
+	}
+}

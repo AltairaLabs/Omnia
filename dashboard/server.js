@@ -136,7 +136,7 @@ async function resolveEndUserId(req) {
   try {
     const res = await fetch(
       `http://127.0.0.1:${port}/api/internal/ws-identity`,
-      { headers: { cookie } },
+      { headers: { cookie }, signal: AbortSignal.timeout(2000) },
     );
     if (!res.ok) {
       return null;
@@ -815,6 +815,9 @@ app.prepare().then(() => {
         wss.handleUpgrade(req, socket, head, (ws) => {
           wss.emit("connection", ws, req);
         });
+      }).catch((err) => {
+        console.error(`[WS Upgrade] identity-resolve/upgrade failed: ${err.message}`);
+        socket.destroy();
       });
     } else if (isLspPath(pathname)) {
       console.log(`[WS Upgrade] LSP connection request`);
