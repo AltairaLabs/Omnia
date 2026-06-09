@@ -246,7 +246,12 @@ func (s *SessionService) CreateSession(ctx context.Context, sess *session.Sessio
 }
 
 // DeleteSession removes a session from the warm store and hot cache.
-func (s *SessionService) DeleteSession(ctx context.Context, sessionID string) error {
+//
+// namespace scopes the delete: a caller may only delete a session in the
+// namespace it asserts. A cross-namespace (or missing) session is reported as
+// not-found so a caller can't delete — or probe the existence of — sessions
+// outside its workspace by id alone.
+func (s *SessionService) DeleteSession(ctx context.Context, sessionID, namespace string) error {
 	if sessionID == "" {
 		return ErrMissingSessionID
 	}
@@ -254,8 +259,12 @@ func (s *SessionService) DeleteSession(ctx context.Context, sessionID string) er
 	if err != nil {
 		return ErrWarmStoreRequired
 	}
-	// Fetch session metadata before deletion for the audit entry.
+	// Fetch session metadata before deletion for the audit entry and the
+	// namespace scope check.
 	sess, getErr := warm.GetSession(ctx, sessionID)
+	if namespace != "" && (getErr != nil || sess == nil || sess.Namespace != namespace) {
+		return session.ErrSessionNotFound
+	}
 	if err := warm.DeleteSession(ctx, sessionID); err != nil {
 		return err
 	}

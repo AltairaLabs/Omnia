@@ -653,9 +653,17 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Require the namespace so the delete is scoped to the caller's workspace;
+	// the service rejects a session in any other namespace as not-found.
+	namespace := r.URL.Query().Get("namespace")
+	if namespace == "" {
+		writeError(w, ErrMissingNamespace)
+		return
+	}
+
 	ctx := withRequestContext(r.Context(), extractRequestContext(r))
 	log := h.requestLog(r.Context())
-	if err := h.service.DeleteSession(ctx, sessionID); err != nil {
+	if err := h.service.DeleteSession(ctx, sessionID, namespace); err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
 			log.Error(err, "DeleteSession failed", "sessionID", sessionID)
 		}

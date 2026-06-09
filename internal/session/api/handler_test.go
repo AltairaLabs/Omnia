@@ -1826,7 +1826,7 @@ func TestHandleDeleteSession_OK(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/"+testSessionID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/"+testSessionID+"?namespace=default", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1838,13 +1838,53 @@ func TestHandleDeleteSession_OK(t *testing.T) {
 	}
 }
 
+func TestHandleDeleteSession_MissingNamespace(t *testing.T) {
+	h, _, warm := setupHandler(t)
+	warm.sessions[testSessionID] = testSession(testSessionID)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	// No namespace param → 400, and the session is NOT deleted.
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/"+testSessionID, nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	if _, ok := warm.sessions[testSessionID]; !ok {
+		t.Fatal("session must not be deleted without a namespace scope")
+	}
+}
+
+func TestHandleDeleteSession_WrongNamespace(t *testing.T) {
+	h, _, warm := setupHandler(t)
+	warm.sessions[testSessionID] = testSession(testSessionID) // namespace "default"
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	// Caller asserts a different namespace → 404, and the session survives.
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/"+testSessionID+"?namespace=other-ns", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+	if _, ok := warm.sessions[testSessionID]; !ok {
+		t.Fatal("session in another namespace must not be deleted")
+	}
+}
+
 func TestHandleDeleteSession_NotFound(t *testing.T) {
 	h, _, _ := setupHandler(t)
 
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/00000000-0000-0000-0000-000000000099", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/00000000-0000-0000-0000-000000000099?namespace=default", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1861,7 +1901,7 @@ func TestHandleDeleteSession_NoWarmStore(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/"+testSessionID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/"+testSessionID+"?namespace=default", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1884,7 +1924,7 @@ func TestHandleDeleteSession_AuditEvent(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/"+testSessionID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/"+testSessionID+"?namespace=default", nil)
 	req.Header.Set("User-Agent", "TestBrowser/1.0")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -2163,7 +2203,7 @@ func TestHandleDeleteSession_InternalError(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/"+testSessionID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/"+testSessionID+"?namespace=default", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
