@@ -369,6 +369,31 @@ func (p *Provider) DeleteSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// DeleteSessionsByScope deletes all sessions matching the scope and returns the
+// count. Child rows cascade via the trg_session_cascade_delete trigger (one
+// fire per deleted session). Namespace is required so a delete can never span
+// all workspaces.
+func (p *Provider) DeleteSessionsByScope(ctx context.Context, scope providers.SessionDeleteScope) (int64, error) {
+	if scope.Namespace == "" {
+		return 0, fmt.Errorf("postgres: delete by scope: namespace is required")
+	}
+	query := "DELETE FROM sessions WHERE namespace = $1"
+	args := []any{scope.Namespace}
+	if scope.AgentName != "" {
+		args = append(args, scope.AgentName)
+		query += fmt.Sprintf(" AND agent_name = $%d", len(args))
+	}
+	if !scope.Before.IsZero() {
+		args = append(args, scope.Before)
+		query += fmt.Sprintf(" AND created_at < $%d", len(args))
+	}
+	res, err := p.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("postgres: delete by scope: %w", err)
+	}
+	return res.RowsAffected(), nil
+}
+
 func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *session.Message) error {
 	// Auto-increment message_count only. Token/cost counters are derived from
 	// provider_calls (via RecordProviderCall) and tool_call_count from tool_calls

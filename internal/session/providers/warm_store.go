@@ -81,6 +81,11 @@ type WarmStoreProvider interface {
 	// DeleteSessionsBatch removes multiple sessions in a single operation.
 	DeleteSessionsBatch(ctx context.Context, sessionIDs []string) error
 
+	// DeleteSessionsByScope removes all sessions matching the scope (namespace
+	// required; optional agent and before-cutoff) and their cascaded children.
+	// Returns the number of sessions deleted.
+	DeleteSessionsByScope(ctx context.Context, scope SessionDeleteScope) (int64, error)
+
 	// RecordToolCall appends a tool call lifecycle event (INSERT only).
 	// Returns session.ErrSessionNotFound if the session does not exist.
 	RecordToolCall(ctx context.Context, sessionID string, tc *session.ToolCall) error

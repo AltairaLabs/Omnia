@@ -97,6 +97,21 @@ type SessionListOpts struct {
 	IncludeCount bool
 }
 
+// SessionDeleteScope selects sessions for a bulk delete. Namespace is required;
+// AgentName and Before are optional further constraints. The scope is
+// deliberately user-agnostic — it deletes any matching session, including
+// automated ones (ArenaJob workers, function invocations) that have no
+// end-user. Per-user erasure is a separate concern.
+type SessionDeleteScope struct {
+	// Namespace scopes the delete to a single workspace namespace (required).
+	Namespace string
+	// AgentName, when set, restricts the delete to one agent.
+	AgentName string
+	// Before, when non-zero, restricts the delete to sessions created strictly
+	// before this time (a retention/date-range purge).
+	Before time.Time
+}
+
 // SessionPage is a paginated result of sessions.
 type SessionPage struct {
 	// Sessions contains the result set for this page.

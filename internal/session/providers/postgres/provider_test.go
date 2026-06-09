@@ -323,6 +323,60 @@ func TestDeleteSession_NotFound(t *testing.T) {
 	assert.ErrorIs(t, err, session.ErrSessionNotFound)
 }
 
+func TestDeleteSessionsByScope(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	mk := func(id, ns, agent string) {
+		s := makeSession(id, now)
+		s.Namespace = ns
+		s.AgentName = agent
+		require.NoError(t, p.CreateSession(ctx, s))
+	}
+	exists := func(id string) bool {
+		_, err := p.GetSession(ctx, id)
+		return err == nil
+	}
+
+	// Namespace-only purge: deletes every session in ws-a, leaves ws-b.
+	mk("00000000-0000-0000-0000-0000000000a1", "ws-a", "agent-1")
+	mk("00000000-0000-0000-0000-0000000000a2", "ws-a", "agent-2")
+	mk("00000000-0000-0000-0000-0000000000b1", "ws-b", "agent-1")
+
+	n, err := p.DeleteSessionsByScope(ctx, providers.SessionDeleteScope{Namespace: "ws-a"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), n)
+	assert.False(t, exists("00000000-0000-0000-0000-0000000000a1"))
+	assert.True(t, exists("00000000-0000-0000-0000-0000000000b1"), "other namespace must be untouched")
+
+	// Agent filter: only the matching agent is purged.
+	mk("00000000-0000-0000-0000-0000000000c1", "ws-c", "agent-1")
+	mk("00000000-0000-0000-0000-0000000000c2", "ws-c", "agent-2")
+	n, err = p.DeleteSessionsByScope(ctx, providers.SessionDeleteScope{Namespace: "ws-c", AgentName: "agent-1"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), n)
+	assert.True(t, exists("00000000-0000-0000-0000-0000000000c2"), "other agent must survive")
+
+	// Before-cutoff: a past cutoff matches nothing; a future cutoff matches all.
+	mk("00000000-0000-0000-0000-0000000000d1", "ws-d", "agent-1")
+	n, err = p.DeleteSessionsByScope(ctx, providers.SessionDeleteScope{Namespace: "ws-d", Before: now.Add(-time.Hour)})
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), n)
+	assert.True(t, exists("00000000-0000-0000-0000-0000000000d1"))
+	n, err = p.DeleteSessionsByScope(ctx, providers.SessionDeleteScope{Namespace: "ws-d", Before: now.Add(time.Hour)})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), n)
+
+	// Namespace is required (never delete across all workspaces).
+	_, err = p.DeleteSessionsByScope(ctx, providers.SessionDeleteScope{})
+	require.Error(t, err)
+}
+
 // --- Messages ---------------------------------------------------------------
 
 func TestAppendGetMessages(t *testing.T) {

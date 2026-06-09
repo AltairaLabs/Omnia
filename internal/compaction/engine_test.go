@@ -55,6 +55,10 @@ func (m *mockWarmStore) GetSessionsOlderThan(_ context.Context, cutoff time.Time
 	return result, nil
 }
 
+func (m *mockWarmStore) DeleteSessionsByScope(context.Context, providers.SessionDeleteScope) (int64, error) {
+	return 0, nil
+}
+
 func (m *mockWarmStore) DeleteSessionsBatch(_ context.Context, ids []string) error {
 	if m.deleteErr != nil {
 		return m.deleteErr
