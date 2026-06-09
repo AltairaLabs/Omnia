@@ -698,10 +698,19 @@ func (s *PostgresMemoryStore) Delete(ctx context.Context, scope map[string]strin
 		return errors.New(errWorkspaceRequired)
 	}
 
+	// Scope guard (#1268): a workspace-only check would let any caller in
+	// workspace W forget any user's memory in W by its UUID. Require the
+	// caller's user/agent partition to match the row's — a missing scope key
+	// means "no constraint on that dimension" (NULL), mirroring updateEntity.
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE memory_entities SET forgotten = true, updated_at = now()
-		WHERE id = $1 AND workspace_id = $2`,
-		memoryID, scope[ScopeWorkspaceID])
+		WHERE id = $1 AND workspace_id = $2
+		  AND ($3::text IS NULL OR virtual_user_id = $3)
+		  AND ($4::uuid IS NULL OR agent_id = $4)`,
+		memoryID,
+		scope[ScopeWorkspaceID],
+		scopeOrNil(scope, ScopeUserID),
+		scopeOrNil(scope, ScopeAgentID))
 	if err != nil {
 		return fmt.Errorf("memory: delete: %w", err)
 	}
