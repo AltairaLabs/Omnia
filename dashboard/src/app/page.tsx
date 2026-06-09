@@ -101,7 +101,7 @@ export default function Home() {
                   requests
                 </>
               ) : (
-                "Prometheus not configured"
+                "Cost data unavailable"
               )
             }
             icon={DollarSign}
@@ -120,7 +120,7 @@ export default function Home() {
                   in / {formatTokens(summary?.outputTokens ?? 0)} out
                 </>
               ) : (
-                "Prometheus not configured"
+                "Cost data unavailable"
               )
             }
             icon={Coins}

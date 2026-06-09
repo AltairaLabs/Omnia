@@ -44,7 +44,7 @@ export interface ProviderCallDiscoveryResult {
 export interface ProviderCallAggregateParams {
   /** Workspace name. Pinned to `namespace` server-side. Required. */
   workspace: string;
-  groupBy: ProviderCallAggregateGroupBy;
+  groupBy: ProviderCallAggregateGroupBy | ProviderCallAggregateGroupBy[];
   metric: ProviderCallAggregateMetric;
   /** Optional filters. */
   agentName?: string;
@@ -64,7 +64,10 @@ export async function fetchProviderCallsAggregate(
   fetchImpl: typeof fetch = fetch,
 ): Promise<ProviderCallAggregateRow[]> {
   const qs = new URLSearchParams();
-  qs.set("groupBy", params.groupBy);
+  qs.set(
+    "groupBy",
+    Array.isArray(params.groupBy) ? params.groupBy.join(",") : params.groupBy,
+  );
   qs.set("metric", params.metric);
   if (params.agentName) qs.set("agentName", params.agentName);
   if (params.provider) qs.set("provider", params.provider);

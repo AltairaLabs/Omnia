@@ -133,7 +133,7 @@ func TestAggregateProviderCalls_GroupByProvider_Count(t *testing.T) {
 
 	rows, err := pcStore.AggregateProviderCalls(context.Background(), api.ProviderCallAggregateOpts{
 		Namespace: pcNamespaceDefault,
-		GroupBy:   api.ProviderCallAggregateGroupByProvider,
+		GroupBy:   []api.ProviderCallAggregateGroupBy{api.ProviderCallAggregateGroupByProvider},
 		Metric:    api.ProviderCallAggregateMetricCount,
 	})
 	require.NoError(t, err)
@@ -155,7 +155,7 @@ func TestAggregateProviderCalls_GroupByAgent_SumCostUSD(t *testing.T) {
 
 	rows, err := pcStore.AggregateProviderCalls(context.Background(), api.ProviderCallAggregateOpts{
 		Namespace: pcNamespaceDefault,
-		GroupBy:   api.ProviderCallAggregateGroupByAgent,
+		GroupBy:   []api.ProviderCallAggregateGroupBy{api.ProviderCallAggregateGroupByAgent},
 		Metric:    api.ProviderCallAggregateMetricSumCostUSD,
 	})
 	require.NoError(t, err)
@@ -180,7 +180,7 @@ func TestAggregateProviderCalls_SumTokens(t *testing.T) {
 	rows, err := pcStore.AggregateProviderCalls(context.Background(), api.ProviderCallAggregateOpts{
 		Namespace: pcNamespaceDefault,
 		AgentName: pcAgentChatbot,
-		GroupBy:   api.ProviderCallAggregateGroupByAgent,
+		GroupBy:   []api.ProviderCallAggregateGroupBy{api.ProviderCallAggregateGroupByAgent},
 		Metric:    api.ProviderCallAggregateMetricSumTokens,
 	})
 	require.NoError(t, err)
@@ -199,7 +199,7 @@ func TestAggregateProviderCalls_TimeDay_CostSeries(t *testing.T) {
 	rows, err := pcStore.AggregateProviderCalls(context.Background(), api.ProviderCallAggregateOpts{
 		Namespace: pcNamespaceDefault,
 		AgentName: pcAgentChatbot,
-		GroupBy:   api.ProviderCallAggregateGroupByTimeDay,
+		GroupBy:   []api.ProviderCallAggregateGroupBy{api.ProviderCallAggregateGroupByTimeDay},
 		Metric:    api.ProviderCallAggregateMetricSumCostUSD,
 	})
 	require.NoError(t, err)
@@ -221,7 +221,7 @@ func TestAggregateProviderCalls_P95Duration(t *testing.T) {
 	rows, err := pcStore.AggregateProviderCalls(context.Background(), api.ProviderCallAggregateOpts{
 		Namespace: pcNamespaceDefault,
 		AgentName: pcAgentChatbot,
-		GroupBy:   api.ProviderCallAggregateGroupByAgent,
+		GroupBy:   []api.ProviderCallAggregateGroupBy{api.ProviderCallAggregateGroupByAgent},
 		Metric:    api.ProviderCallAggregateMetricP95DurationMs,
 	})
 	require.NoError(t, err)
@@ -242,7 +242,7 @@ func TestAggregateProviderCalls_FilterByProviderAndModel(t *testing.T) {
 		Namespace: pcNamespaceDefault,
 		Provider:  pcProviderOpenAI,
 		Model:     pcModelGPT4,
-		GroupBy:   api.ProviderCallAggregateGroupByModel,
+		GroupBy:   []api.ProviderCallAggregateGroupBy{api.ProviderCallAggregateGroupByModel},
 		Metric:    api.ProviderCallAggregateMetricCount,
 	})
 	require.NoError(t, err)
@@ -265,7 +265,7 @@ func TestAggregateProviderCalls_FilterTimeRange(t *testing.T) {
 		Namespace: pcNamespaceDefault,
 		From:      day1Start,
 		To:        day1End,
-		GroupBy:   api.ProviderCallAggregateGroupByProvider,
+		GroupBy:   []api.ProviderCallAggregateGroupBy{api.ProviderCallAggregateGroupByProvider},
 		Metric:    api.ProviderCallAggregateMetricCount,
 	})
 	require.NoError(t, err)
@@ -283,7 +283,7 @@ func TestAggregateProviderCalls_NamespaceIsolation(t *testing.T) {
 
 	rows, err := pcStore.AggregateProviderCalls(context.Background(), api.ProviderCallAggregateOpts{
 		Namespace: "other-namespace",
-		GroupBy:   api.ProviderCallAggregateGroupByProvider,
+		GroupBy:   []api.ProviderCallAggregateGroupBy{api.ProviderCallAggregateGroupByProvider},
 		Metric:    api.ProviderCallAggregateMetricCount,
 	})
 	require.NoError(t, err)
@@ -296,7 +296,7 @@ func TestAggregateProviderCalls_MissingNamespace(t *testing.T) {
 	}
 	pcStore, _ := newProviderCallsStore(t)
 	_, err := pcStore.AggregateProviderCalls(context.Background(), api.ProviderCallAggregateOpts{
-		GroupBy: api.ProviderCallAggregateGroupByProvider,
+		GroupBy: []api.ProviderCallAggregateGroupBy{api.ProviderCallAggregateGroupByProvider},
 		Metric:  api.ProviderCallAggregateMetricCount,
 	})
 	require.Error(t, err)
@@ -310,11 +310,82 @@ func TestAggregateProviderCalls_InvalidGroupBy(t *testing.T) {
 	pcStore, _ := newProviderCallsStore(t)
 	_, err := pcStore.AggregateProviderCalls(context.Background(), api.ProviderCallAggregateOpts{
 		Namespace: pcNamespaceDefault,
-		GroupBy:   "not-a-groupby",
+		GroupBy:   []api.ProviderCallAggregateGroupBy{"not-a-groupby"},
 		Metric:    api.ProviderCallAggregateMetricCount,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid groupBy")
+}
+
+func TestAggregateProviderCalls_CompoundProviderModelAgent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	pcStore, evalStore := newProviderCallsStore(t)
+	seedProviderCallsFixture(t, pcStore, evalStore)
+
+	rows, err := pcStore.AggregateProviderCalls(context.Background(), api.ProviderCallAggregateOpts{
+		Namespace: pcNamespaceDefault,
+		GroupBy: []api.ProviderCallAggregateGroupBy{
+			api.ProviderCallAggregateGroupByProvider,
+			api.ProviderCallAggregateGroupByModel,
+			api.ProviderCallAggregateGroupByAgent,
+		},
+		Metric: api.ProviderCallAggregateMetricSumCostUSD,
+	})
+	require.NoError(t, err)
+	// 3 distinct (provider,model,agent) combinations in the fixture.
+	require.Len(t, rows, 3)
+	byKey := map[string]*api.ProviderCallAggregateRow{}
+	for _, r := range rows {
+		byKey[r.Key] = r
+	}
+	// chatbot · openai gpt-4: 0.01 + 0.02 across 2 calls.
+	row := byKey[pcProviderOpenAI+"|"+pcModelGPT4+"|"+pcAgentChatbot]
+	require.NotNil(t, row)
+	assert.InDelta(t, 0.03, row.Value, 0.0001)
+	assert.Equal(t, int64(2), row.Count)
+	// support · anthropic sonnet: single 0.05 call.
+	assert.InDelta(t, 0.05, byKey[pcProviderAnthropic+"|"+pcModelSonnet+"|"+pcAgentSupport].Value, 0.0001)
+}
+
+func TestAggregateProviderCalls_CompoundTimeDayProvider(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	pcStore, evalStore := newProviderCallsStore(t)
+	seedProviderCallsFixture(t, pcStore, evalStore)
+
+	rows, err := pcStore.AggregateProviderCalls(context.Background(), api.ProviderCallAggregateOpts{
+		Namespace: pcNamespaceDefault,
+		GroupBy: []api.ProviderCallAggregateGroupBy{
+			api.ProviderCallAggregateGroupByTimeDay,
+			api.ProviderCallAggregateGroupByProvider,
+		},
+		Metric: api.ProviderCallAggregateMetricSumCostUSD,
+	})
+	require.NoError(t, err)
+	// day1: openai (2 calls); day2: openai + anthropic -> 3 composite buckets.
+	require.Len(t, rows, 3)
+	// Composite keys are "<YYYY-MM-DD>|<provider>" and sort ASC by key (time present).
+	for _, r := range rows {
+		assert.Regexp(t, `^\d{4}-\d{2}-\d{2}\|(openai|anthropic)$`, r.Key)
+	}
+	assert.Equal(t, pcFixtureDay1.Format("2006-01-02")+"|"+pcProviderOpenAI, rows[0].Key)
+	assert.InDelta(t, 0.03, rows[0].Value, 0.0001)
+}
+
+func TestAggregateProviderCalls_EmptyGroupBy(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	pcStore, _ := newProviderCallsStore(t)
+	_, err := pcStore.AggregateProviderCalls(context.Background(), api.ProviderCallAggregateOpts{
+		Namespace: pcNamespaceDefault,
+		GroupBy:   []api.ProviderCallAggregateGroupBy{},
+		Metric:    api.ProviderCallAggregateMetricCount,
+	})
+	require.Error(t, err)
 }
 
 func TestAggregateProviderCalls_InvalidMetric(t *testing.T) {
@@ -324,7 +395,7 @@ func TestAggregateProviderCalls_InvalidMetric(t *testing.T) {
 	pcStore, _ := newProviderCallsStore(t)
 	_, err := pcStore.AggregateProviderCalls(context.Background(), api.ProviderCallAggregateOpts{
 		Namespace: pcNamespaceDefault,
-		GroupBy:   api.ProviderCallAggregateGroupByProvider,
+		GroupBy:   []api.ProviderCallAggregateGroupBy{api.ProviderCallAggregateGroupByProvider},
 		Metric:    "not-a-metric",
 	})
 	require.Error(t, err)

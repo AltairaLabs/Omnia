@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { MockDataService, MockAgentConnection } from "./mock-service";
+import { MockDataService, MockAgentConnection, getMockCostData } from "./mock-service";
 import type { ServerMessage, ConnectionStatus } from "@/types/websocket";
 
 describe("MockDataService", () => {
@@ -295,11 +295,9 @@ describe("MockDataService", () => {
     });
   });
 
-  describe("getCosts", () => {
-    it("should return cost data", async () => {
-      const promise = service.getCosts();
-      vi.advanceTimersByTime(200);
-      const costs = await promise;
+  describe("getMockCostData", () => {
+    it("should return cost data", () => {
+      const costs = getMockCostData();
 
       expect(costs.available).toBe(true);
       expect(costs.summary).toBeDefined();
@@ -309,12 +307,8 @@ describe("MockDataService", () => {
       expect(costs.timeSeries).toBeDefined();
     });
 
-    it("should not include Grafana URL in demo mode", async () => {
-      const promise = service.getCosts();
-      vi.advanceTimersByTime(200);
-      const costs = await promise;
-
-      expect(costs.grafanaUrl).toBeUndefined();
+    it("should not include a Grafana URL", () => {
+      expect(getMockCostData().grafanaUrl).toBeUndefined();
     });
   });
 

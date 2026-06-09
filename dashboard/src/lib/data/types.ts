@@ -380,13 +380,6 @@ export interface CostData {
 }
 
 /**
- * Options for fetching costs.
- */
-export interface CostOptions {
-  namespace?: string;
-}
-
-/**
  * Options for fetching logs.
  */
 export interface LogOptions {
@@ -446,9 +439,6 @@ export interface DataService {
 
   // Stats (workspace-scoped)
   getStats(workspace: string): Promise<Stats>;
-
-  // Costs
-  getCosts(options?: CostOptions): Promise<CostData>;
 
   // Arena Sources (workspace-scoped)
   getArenaSources(workspace: string): Promise<ArenaSourceType[]>;

@@ -5,7 +5,6 @@
  * It delegates to:
  * - WorkspaceApiService for workspace-scoped CRD data (agents, promptpacks)
  * - Shared API endpoints for system-wide resources (toolregistries, providers)
- * - PrometheusService for cost/metrics data
  */
 
 import type {
@@ -18,8 +17,6 @@ import type {
   Stats,
   LogEntry,
   LogOptions,
-  CostData,
-  CostOptions,
   K8sEvent,
   AgentConnection,
   ArenaJobListOptions,
@@ -49,7 +46,6 @@ import type {
   ContentPart,
 } from "@/types/websocket";
 import { WorkspaceApiService } from "./workspace-api-service";
-import { PrometheusService } from "./prometheus-service";
 import { ArenaService, type ArenaJobMetrics } from "./arena-service";
 import { SessionApiService } from "./session-api-service";
 import { MemoryApiService } from "./memory-api-service";
@@ -320,14 +316,12 @@ export class LiveDataService implements DataService {
   readonly isDemo = false;
 
   private readonly workspaceService: WorkspaceApiService;
-  private readonly prometheusService: PrometheusService;
   private readonly arenaService: ArenaService;
   private readonly sessionService: SessionApiService;
   private readonly memoryService: MemoryApiService;
 
   constructor() {
     this.workspaceService = new WorkspaceApiService();
-    this.prometheusService = new PrometheusService();
     this.arenaService = new ArenaService();
     this.sessionService = new SessionApiService();
     this.memoryService = new MemoryApiService();
@@ -423,14 +417,6 @@ export class LiveDataService implements DataService {
 
   async getStats(workspace: string): Promise<Stats> {
     return this.workspaceService.getStats(workspace);
-  }
-
-  // ============================================================
-  // Cost/metrics data - delegated to PrometheusService
-  // ============================================================
-
-  async getCosts(options?: CostOptions): Promise<CostData> {
-    return this.prometheusService.getCosts(options);
   }
 
   // ============================================================
