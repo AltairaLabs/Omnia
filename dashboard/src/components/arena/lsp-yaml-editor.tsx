@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import Editor, { type OnMount, type BeforeMount } from "@monaco-editor/react";
 import type { editor, IDisposable } from "monaco-editor";
 import { cn } from "@/lib/utils";
-import { Loader2, AlertTriangle, CheckCircle, Circle, Wifi, WifiOff } from "lucide-react";
+import { Loader2, AlertTriangle, CheckCircle, Circle } from "lucide-react";
 import type { FileType } from "@/types/arena-project";
 import { getRuntimeConfig } from "@/lib/config";
 
@@ -38,7 +38,8 @@ interface DiagnosticInfo {
   severity: "error" | "warning" | "info" | "hint";
 }
 
-type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
+// How many times to retry a dropped LSP connection before giving up silently.
+const MAX_RECONNECT_ATTEMPTS = 3;
 
 /**
  * Get Monaco language from file type
@@ -129,8 +130,11 @@ export function LspYamlEditor({
   const socketRef = useRef<WebSocket | null>(null);
   const disposablesRef = useRef<IDisposable[]>([]);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Bounded reconnect: the LSP is an optional enhancement, so when it's
+  // unavailable we degrade silently to the basic editor rather than retry
+  // forever. Reset to 0 on a successful connect.
+  const reconnectAttemptsRef = useRef(0);
 
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const [diagnostics, setDiagnostics] = useState<DiagnosticInfo | null>(null);
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
   const [monacoReady, setMonacoReady] = useState(false);
@@ -150,7 +154,13 @@ export function LspYamlEditor({
 
     let mounted = true;
 
+    // Retry a dropped connection a few times (the server may be momentarily
+    // unavailable), then give up silently. The basic editor keeps working.
     const scheduleReconnect = () => {
+      if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
+        return;
+      }
+      reconnectAttemptsRef.current += 1;
       reconnectTimeoutRef.current = setTimeout(
         () => mounted && setReconnectTrigger(Date.now()),
         5000
@@ -173,7 +183,6 @@ export function LspYamlEditor({
       }
 
       if (!mounted) return;
-      setConnectionStatus("connecting");
 
       try {
         // Dynamically import LSP client module to avoid SSR issues
@@ -199,34 +208,29 @@ export function LspYamlEditor({
             if (!mounted) return;
             clientRef.current = client;
 
-            // Start the client
+            // Start the client; a clean connect resets the retry budget.
             client.start();
-            setConnectionStatus("connected");
+            reconnectAttemptsRef.current = 0;
           } catch (error) {
-            console.error("Failed to create language client:", error);
-            setConnectionStatus("error");
+            // Language client failed to start — degrade silently to the
+            // basic editor (no status badge). The socket is left to close.
+            console.warn("LSP unavailable: language client init failed", error);
           }
         };
 
-        webSocket.onerror = () => {
-          if (!mounted) return;
-          setConnectionStatus("error");
-        };
+        // Connection-level errors surface via onclose; degrade is silent.
+        webSocket.onerror = () => {};
 
         webSocket.onclose = () => {
           if (!mounted) return;
-          setConnectionStatus("disconnected");
           clientRef.current = null;
           socketRef.current = null;
-
-          // Trigger reconnection after delay
           scheduleReconnect();
         };
       } catch (error) {
-        console.error("Failed to connect to LSP server:", error);
-        if (mounted) {
-          setConnectionStatus("error");
-        }
+        // Module load / service init failed (won't recover on retry) — stay on
+        // the basic editor silently.
+        console.warn("LSP unavailable: initialization failed", error);
       }
     };
 
@@ -376,29 +380,10 @@ export function LspYamlEditor({
     // We just need to ensure the model URI matches what the LSP expects.
   }, [value, filePath]);
 
-  // Connection status indicator
-  const StatusIndicator = useMemo(() => {
-    if (!canUseLsp) {
-      return null;
-    }
-
-    const statusConfig = {
-      disconnected: { icon: WifiOff, color: "text-muted-foreground", label: "LSP Disconnected" },
-      connecting: { icon: Circle, color: "text-yellow-500 animate-pulse", label: "Connecting..." },
-      connected: { icon: Wifi, color: "text-green-500", label: "LSP Connected" },
-      error: { icon: AlertTriangle, color: "text-red-500", label: "LSP Error" },
-    };
-
-    const config = statusConfig[connectionStatus];
-    const Icon = config.icon;
-
-    return (
-      <div className="flex items-center gap-1" title={config.label}>
-        <Icon className={cn("h-3 w-3", config.color)} />
-        <span className="text-xs text-muted-foreground">{config.label}</span>
-      </div>
-    );
-  }, [canUseLsp, connectionStatus]);
+  // The LSP connection is deliberately invisible: it's an optional enhancement
+  // that connects in the background, so there's no connection-status badge.
+  // When it works, diagnostics appear below; when it can't, the basic editor
+  // is unchanged. See #1293.
 
   // Diagnostics indicator
   const DiagnosticsIndicator = useMemo(() => {
@@ -493,7 +478,6 @@ export function LspYamlEditor({
             {DiagnosticsIndicator}
           </div>
           <div className="flex items-center gap-4">
-            {StatusIndicator}
             {filePath && (
               <span className="text-muted-foreground truncate max-w-[200px]" title={filePath}>
                 {filePath}

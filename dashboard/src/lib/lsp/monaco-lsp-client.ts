@@ -1,15 +1,19 @@
 /**
  * Monaco LSP Client module.
- * This module uses fully dynamic imports to avoid Turbopack static analysis issues.
- * All imports are done at runtime to prevent Node.js module resolution errors.
+ *
+ * Loaded only on the client (dynamic import() from the "use client"
+ * lsp-yaml-editor component; never evaluated during SSR — next.config.ts lists
+ * these packages in serverExternalPackages). The npm modules are imported with
+ * dynamic import() so they land in their own client chunk, using **static
+ * string-literal specifiers with NO `webpackIgnore`** so both bundlers resolve
+ * and bundle them: `next dev --turbopack` (dev) and `next build --webpack`
+ * (prod). An earlier `webpackIgnore: true` form left raw runtime imports of
+ * bare specifiers the browser can't resolve, which broke the prod build only
+ * (Turbopack ignores webpackIgnore). The Node built-ins these packages reach
+ * for (fs/path/os/perf_hooks/…) are stubbed in next.config.ts.
  */
 
-/* eslint-disable sonarjs/no-duplicate-string -- Dynamic imports require string literals for TypeScript type inference */
-
-// Module paths for dynamic imports
-const MLC_MODULE = "monaco-languageclient";
-const WS_JSONRPC_MODULE = "vscode-ws-jsonrpc";
-const CLIENT_MODULE_PATH = "vscode-languageclient/lib/common/client.js";
+/* eslint-disable sonarjs/no-duplicate-string -- type-only `import("…")` specifiers must be string literals, so package names recur in the type annotations below */
 
 // Track if services have been initialized (singleton)
 let servicesInitialized = false;
@@ -33,10 +37,10 @@ async function loadModules(): Promise<void> {
   if (MonacoLanguageClient) return; // Already loaded
 
   const [mlcModule, servicesModule, wsModule, clientModule] = await Promise.all([
-    import(/* webpackIgnore: true */ MLC_MODULE),
+    import("monaco-languageclient"),
     import("monaco-languageclient/vscode/services"),
-    import(/* webpackIgnore: true */ WS_JSONRPC_MODULE),
-    import(/* webpackIgnore: true */ CLIENT_MODULE_PATH),
+    import("vscode-ws-jsonrpc"),
+    import("vscode-languageclient/lib/common/client.js"),
   ]);
 
   MonacoLanguageClient = mlcModule.MonacoLanguageClient;
