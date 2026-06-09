@@ -37,6 +37,8 @@ import {
 } from "lucide-react";
 import { useAgents } from "@/hooks/agents";
 import { useSessions, useSessionSearch } from "@/hooks/sessions";
+import { useWorkspacePermissions } from "@/hooks/use-workspace-permissions";
+import { PurgeSessionsDialog } from "@/components/sessions/purge-sessions-dialog";
 import { useDebounce } from "@/hooks/core";
 import type { SessionSummary, SessionListOptions, Session } from "@/types/session";
 import { formatDistanceToNow } from "date-fns";
@@ -134,6 +136,7 @@ function TableRowSkeleton() {
 
 export default function SessionsPage() {
   const router = useRouter();
+  const { isOwner } = useWorkspacePermissions();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>("all");
@@ -328,6 +331,11 @@ export default function SessionsPage() {
               ))}
             </SelectContent>
           </Select>
+          {isOwner && (
+            <div className="ml-auto">
+              <PurgeSessionsDialog agentNames={agentNames} />
+            </div>
+          )}
         </div>
 
         {/* Active tag filters */}

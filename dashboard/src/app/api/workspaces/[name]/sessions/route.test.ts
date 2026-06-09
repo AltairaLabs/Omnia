@@ -36,10 +36,12 @@ const noPermissions = { read: false, write: false, delete: false, manageMembers:
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
-function createMockRequest(query = ""): NextRequest {
+function createMockRequest(query = "", method = "GET"): NextRequest {
   const url = `http://localhost:3000/api/workspaces/test-ws/sessions${query}`;
-  return new NextRequest(url, { method: "GET" });
+  return new NextRequest(url, { method });
 }
+
+const ownerPermissions = { read: true, write: true, delete: true, manageMembers: true };
 
 function createMockContext() {
   return { params: Promise.resolve({ name: "test-ws" }) };
@@ -199,5 +201,139 @@ describe("GET /api/workspaces/[name]/sessions", () => {
     const response = await GET(createMockRequest(), createMockContext());
 
     expect(response.status).toBe(403);
+  });
+});
+
+describe("DELETE /api/workspaces/[name]/sessions (bulk purge)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("purges by namespace and returns the deleted count", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "owner", permissions: ownerPermissions });
+    vi.mocked(getWorkspace).mockResolvedValue({ spec: { namespace: { name: "test-ns" } } } as never);
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ deleted: 7 }),
+    });
+
+    const { DELETE } = await import("./route");
+    const response = await DELETE(createMockRequest("", "DELETE"), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.deleted).toBe(7);
+
+    const call = mockFetch.mock.calls[0];
+    expect(call[0]).toContain("/api/v1/sessions?");
+    expect(call[0]).toContain("namespace=test-ns");
+    expect(call[1]).toMatchObject({ method: "DELETE" });
+  });
+
+  it("forwards agent and before scope filters", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "owner", permissions: ownerPermissions });
+    vi.mocked(getWorkspace).mockResolvedValue({ spec: { namespace: { name: "test-ns" } } } as never);
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ deleted: 2 }),
+    });
+
+    const { DELETE } = await import("./route");
+    await DELETE(
+      createMockRequest("?agent=myagent&before=2026-01-01T00:00:00Z", "DELETE"),
+      createMockContext()
+    );
+
+    const fetchUrl = mockFetch.mock.calls[0][0] as string;
+    expect(fetchUrl).toContain("agent=myagent");
+    expect(fetchUrl).toContain("before=2026-01-01");
+  });
+
+  it("returns 403 when user is not an owner", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: false, role: "editor", permissions: viewerPermissions });
+
+    const { DELETE } = await import("./route");
+    const response = await DELETE(createMockRequest("", "DELETE"), createMockContext());
+
+    expect(response.status).toBe(403);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 when service URLs are not resolvable", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+
+    vi.mocked(resolveServiceURLs).mockResolvedValue(null);
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "owner", permissions: ownerPermissions });
+
+    const { DELETE } = await import("./route");
+    const response = await DELETE(createMockRequest("", "DELETE"), createMockContext());
+
+    expect(response.status).toBe(503);
+  });
+
+  it("returns 404 when workspace not found", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "owner", permissions: ownerPermissions });
+    vi.mocked(getWorkspace).mockResolvedValue(null);
+
+    const { DELETE } = await import("./route");
+    const response = await DELETE(createMockRequest("", "DELETE"), createMockContext());
+
+    expect(response.status).toBe(404);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns 502 on backend connection error", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "owner", permissions: ownerPermissions });
+    vi.mocked(getWorkspace).mockResolvedValue({ spec: { namespace: { name: "test-ns" } } } as never);
+
+    mockFetch.mockRejectedValueOnce(new Error("Connection refused"));
+
+    const { DELETE } = await import("./route");
+    const response = await DELETE(createMockRequest("", "DELETE"), createMockContext());
+
+    expect(response.status).toBe(502);
   });
 });

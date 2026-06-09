@@ -340,6 +340,48 @@ export class SessionApiService {
   }
 
   /**
+   * Delete a single session (and its child records, which cascade in the
+   * backend). Requires editor role on the workspace. Returns true on success.
+   */
+  async deleteSession(workspace: string, sessionId: string): Promise<boolean> {
+    const response = await fetch(
+      `${SESSION_API_BASE}/${encodeURIComponent(workspace)}/sessions/${encodeURIComponent(sessionId)}`,
+      { method: "DELETE" }
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to delete session: ${response.statusText}`);
+    }
+    return true;
+  }
+
+  /**
+   * Bulk-purge sessions in the workspace's namespace, optionally narrowed by
+   * agent and/or a before-cutoff (RFC3339). Requires owner role. This is
+   * user-agnostic — it removes automated sessions (ArenaJob, function) too.
+   * Returns the number of sessions deleted.
+   */
+  async purgeSessions(
+    workspace: string,
+    scope: SessionPurgeScope = {}
+  ): Promise<number> {
+    const params = new URLSearchParams();
+    if (scope.agent) params.set("agent", scope.agent);
+    if (scope.before) params.set("before", scope.before);
+
+    const query = params.toString();
+    const suffix = query ? `?${query}` : "";
+    const response = await fetch(
+      `${SESSION_API_BASE}/${encodeURIComponent(workspace)}/sessions${suffix}`,
+      { method: "DELETE" }
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to purge sessions: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data.deleted ?? 0;
+  }
+
+  /**
    * List eval results with filters (workspace-level, not session-specific).
    */
   async getEvalResults(
@@ -374,6 +416,14 @@ export class SessionApiService {
     };
   }
 
+}
+
+/** Scope filters for a bulk session purge. Namespace is resolved server-side. */
+export interface SessionPurgeScope {
+  /** Restrict the purge to a single agent. */
+  agent?: string;
+  /** Delete only sessions created strictly before this RFC3339 timestamp. */
+  before?: string;
 }
 
 /** Parameters for listing eval results with filters. */
