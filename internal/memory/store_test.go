@@ -1054,6 +1054,35 @@ func TestPostgresMemoryStore_Delete(t *testing.T) {
 	assert.Empty(t, results)
 }
 
+func TestPostgresMemoryStore_Delete_OtherUserDenied(t *testing.T) {
+	// #1268: a workspace member must not be able to forget another user's
+	// memory by its UUID. Delete is scoped to the caller's virtual_user_id.
+	store := newStore(t)
+	ctx := context.Background()
+
+	scopeAlice := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "alice"}
+	scopeBob := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "bob"}
+
+	mem := &Memory{Type: "preference", Content: "alice's secret", Confidence: 0.9, Scope: scopeAlice}
+	require.NoError(t, store.Save(ctx, mem))
+
+	// Bob (same workspace) tries to delete alice's memory by its id → denied.
+	err := store.Delete(ctx, scopeBob, mem.ID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+
+	// Alice's memory is untouched.
+	results, err := store.List(ctx, scopeAlice, ListOptions{})
+	require.NoError(t, err)
+	assert.Len(t, results, 1)
+
+	// The owner can delete it.
+	require.NoError(t, store.Delete(ctx, scopeAlice, mem.ID))
+	results, err = store.List(ctx, scopeAlice, ListOptions{})
+	require.NoError(t, err)
+	assert.Empty(t, results)
+}
+
 func TestPostgresMemoryStore_Delete_NotFound(t *testing.T) {
 
 	store := newStore(t)
