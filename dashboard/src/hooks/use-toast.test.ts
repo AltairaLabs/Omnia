@@ -2,37 +2,76 @@
  * Tests for useToast hook.
  */
 
-import { describe, it, expect } from "vitest";
-import { renderHook } from "@testing-library/react";
-import { useToast } from "./use-toast";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { renderHook, act } from "@testing-library/react";
+import { useToast, toast, dismissToast } from "./use-toast";
 
 describe("useToast", () => {
-  it("returns toast function", () => {
+  beforeEach(() => {
+    // Clear any toasts left from a prior test (module-level store).
     const { result } = renderHook(() => useToast());
-
-    expect(result.current.toast).toBeDefined();
-    expect(typeof result.current.toast).toBe("function");
+    act(() => {
+      for (const t of result.current.toasts) dismissToast(t.id);
+    });
   });
 
-  it("toast function can be called without error", () => {
-    const { result } = renderHook(() => useToast());
-
-    // Should not throw
-    expect(() => {
-      result.current.toast({ title: "Test" });
-    }).not.toThrow();
-
-    expect(() => {
-      result.current.toast({ title: "Error", description: "Something went wrong", variant: "destructive" });
-    }).not.toThrow();
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
-  it("returns stable toast function reference", () => {
+  it("returns a callable, stable toast function", () => {
     const { result, rerender } = renderHook(() => useToast());
-    const firstToast = result.current.toast;
-
+    expect(typeof result.current.toast).toBe("function");
+    const first = result.current.toast;
     rerender();
+    expect(result.current.toast).toBe(first);
+  });
 
-    expect(result.current.toast).toBe(firstToast);
+  it("exposes a toast added via toast()", () => {
+    const { result } = renderHook(() => useToast());
+    act(() => {
+      result.current.toast({ title: "Saved", description: "All good" });
+    });
+    expect(result.current.toasts).toHaveLength(1);
+    expect(result.current.toasts[0]).toMatchObject({
+      title: "Saved",
+      description: "All good",
+    });
+  });
+
+  it("dismiss removes a toast", () => {
+    const { result } = renderHook(() => useToast());
+    let id = "";
+    act(() => {
+      id = result.current.toast({ title: "X" });
+    });
+    expect(result.current.toasts).toHaveLength(1);
+    act(() => {
+      result.current.dismiss(id);
+    });
+    expect(result.current.toasts).toHaveLength(0);
+  });
+
+  it("auto-dismisses after the duration", () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useToast());
+    act(() => {
+      result.current.toast({ title: "ephemeral", duration: 3000 });
+    });
+    expect(result.current.toasts).toHaveLength(1);
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(result.current.toasts).toHaveLength(0);
+  });
+
+  it("shares state across hook instances (module store)", () => {
+    const a = renderHook(() => useToast());
+    const b = renderHook(() => useToast());
+    act(() => {
+      toast({ title: "broadcast" });
+    });
+    expect(a.result.current.toasts).toHaveLength(1);
+    expect(b.result.current.toasts).toHaveLength(1);
   });
 });
