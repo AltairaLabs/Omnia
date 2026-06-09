@@ -84,22 +84,24 @@ func lastOrEmpty(names []string) string {
 // test assert each reconciler is registered without re-reading the
 // 100-line inline block in main().
 type setupOptions struct {
-	WorkerImage           string
-	WorkerImagePullPolicy corev1.PullPolicy
-	DevConsoleImage       string
-	WorkspaceContentPath  string
-	NFSServer             string
-	NFSPath               string
-	LicenseValidator      *license.Validator
-	StorageManager        *workspace.StorageManager
-	Aggregator            *aggregator.Aggregator
-	RedisURL              string
-	RedisURLSecretName    string
-	RedisURLSecretKey     string
-	TracingEnabled        bool
-	TracingEndpoint       string
-	PrivacyPolicyMetrics  *metrics.PrivacyPolicyMetrics
-	ReEncryptionStore     func() (encryption.ReEncryptionStore, error)
+	WorkerImage              string
+	WorkerImagePullPolicy    corev1.PullPolicy
+	DevConsoleImage          string
+	DevConsoleServiceAccount string
+	DevConsolePodLabels      map[string]string
+	WorkspaceContentPath     string
+	NFSServer                string
+	NFSPath                  string
+	LicenseValidator         *license.Validator
+	StorageManager           *workspace.StorageManager
+	Aggregator               *aggregator.Aggregator
+	RedisURL                 string
+	RedisURLSecretName       string
+	RedisURLSecretKey        string
+	TracingEnabled           bool
+	TracingEndpoint          string
+	PrivacyPolicyMetrics     *metrics.PrivacyPolicyMetrics
+	ReEncryptionStore        func() (encryption.ReEncryptionStore, error)
 }
 
 // namedReconciler pairs a reconciler with its display name so the
@@ -174,9 +176,11 @@ func buildReconcilers(opts setupOptions) []namedReconciler {
 			Name: controllerArenaDevSession,
 			Setup: func(mgr ctrl.Manager) error {
 				return (&controller.ArenaDevSessionReconciler{
-					Client:          mgr.GetClient(),
-					Scheme:          mgr.GetScheme(),
-					DevConsoleImage: opts.DevConsoleImage,
+					Client:                   mgr.GetClient(),
+					Scheme:                   mgr.GetScheme(),
+					DevConsoleImage:          opts.DevConsoleImage,
+					DevConsoleServiceAccount: opts.DevConsoleServiceAccount,
+					DevConsolePodLabels:      opts.DevConsolePodLabels,
 				}).SetupWithManager(mgr)
 			},
 		},

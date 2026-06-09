@@ -61,6 +61,19 @@ spec:
             - --arena-worker-image-pull-policy={{ .Values.enterprise.arena.worker.image.pullPolicy | default "IfNotPresent" }}
             - --arena-dev-console-image={{ .Values.enterprise.arena.devConsole.image.repository | default "ghcr.io/altairalabs/omnia-arena-dev-console" }}:{{ .Values.enterprise.arena.devConsole.image.tag | default .Chart.AppVersion }}
             {{- /*
+              Run dev-console pods under the workspace runtime ServiceAccount
+              (with a cloud-identity opt-in label) so the agent they run can
+              authenticate to keyless providers (Azure WI, AWS IRSA). Empty =
+              controller creates a per-session SA with no cloud identity.
+            */}}
+            {{- with .Values.enterprise.arena.devConsole.serviceAccountName }}
+            - --dev-console-service-account={{ . }}
+            {{- end }}
+            {{- with .Values.enterprise.arena.devConsole.podLabels }}
+            {{- $labels := . }}
+            - --dev-console-pod-labels={{ range $i, $k := (keys $labels | sortAlpha) }}{{ if $i }},{{ end }}{{ $k }}={{ index $labels $k }}{{ end }}
+            {{- end }}
+            {{- /*
               Arena queue Redis. URL-canonical: arena-controller takes
               --redis-url, OR REDIS_URL env from secretKeyRef when the
               consumer is on the existingSecret form. Worker pods

@@ -59,6 +59,38 @@ type ArenaDevSessionReconciler struct {
 
 	// DevConsoleImage is the default image for dev console pods.
 	DevConsoleImage string
+
+	// DevConsoleServiceAccount, when set, is the ServiceAccount the dev-console
+	// pod runs as instead of the per-session one the controller creates. Point
+	// it at the workspace's runtime ServiceAccount so the dev console inherits
+	// the workspace's cloud identity (e.g. Azure Workload Identity, AWS IRSA) —
+	// otherwise the agent it runs cannot authenticate to keyless providers.
+	DevConsoleServiceAccount string
+
+	// DevConsolePodLabels are extra labels stamped onto the dev-console pod
+	// template. Used to opt the pod into a cloud identity webhook, e.g.
+	// {"azure.workload.identity/use": "true"}.
+	DevConsolePodLabels map[string]string
+}
+
+// podServiceAccountName returns the ServiceAccount the dev-console pod runs as:
+// the configured workspace runtime SA when set, otherwise the per-session SA
+// the controller creates.
+func (r *ArenaDevSessionReconciler) podServiceAccountName(session *omniav1alpha1.ArenaDevSession) string {
+	if r.DevConsoleServiceAccount != "" {
+		return r.DevConsoleServiceAccount
+	}
+	return r.resourceName(session)
+}
+
+// podLabels merges the common session labels with any configured extra pod
+// labels (e.g. the cloud-identity opt-in label). Extra labels win on conflict.
+func (r *ArenaDevSessionReconciler) podLabels(session *omniav1alpha1.ArenaDevSession) map[string]string {
+	labels := r.commonLabels(session)
+	for k, v := range r.DevConsolePodLabels {
+		labels[k] = v
+	}
+	return labels
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenadevsessions,verbs=get;list;watch;create;update;patch;delete
@@ -393,8 +425,13 @@ func (r *ArenaDevSessionReconciler) resourceName(session *omniav1alpha1.ArenaDev
 	return fmt.Sprintf("%s%s-%s", prefix, truncatedName, hashSuffix)
 }
 
-// reconcileServiceAccount creates or updates the ServiceAccount.
+// reconcileServiceAccount creates or updates the ServiceAccount. When a
+// workspace runtime ServiceAccount is configured the dev-console pod runs as
+// that instead, so there is nothing for the controller to create.
 func (r *ArenaDevSessionReconciler) reconcileServiceAccount(ctx context.Context, session *omniav1alpha1.ArenaDevSession) error {
+	if r.DevConsoleServiceAccount != "" {
+		return nil
+	}
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      r.resourceName(session),
@@ -480,7 +517,7 @@ func (r *ArenaDevSessionReconciler) reconcileRoleBinding(ctx context.Context, se
 		Subjects: []rbacv1.Subject{
 			{
 				Kind:      "ServiceAccount",
-				Name:      resourceName,
+				Name:      r.podServiceAccountName(session),
 				Namespace: session.Namespace,
 			},
 		},
@@ -555,10 +592,10 @@ func (r *ArenaDevSessionReconciler) reconcileDeployment(ctx context.Context, ses
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: r.commonLabels(session),
+					Labels: r.podLabels(session),
 				},
 				Spec: corev1.PodSpec{
-					ServiceAccountName: resourceName,
+					ServiceAccountName: r.podServiceAccountName(session),
 					Containers: []corev1.Container{
 						{
 							Name:            "arena-dev-console",
