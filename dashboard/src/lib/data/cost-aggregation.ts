@@ -10,6 +10,7 @@
  */
 
 import { getModelPricing } from "../pricing";
+import { getProviderDisplayName } from "../provider-utils";
 import type {
   CostData,
   CostSummary,
@@ -35,31 +36,14 @@ export interface CostAggregateInput {
   namespace: string;
 }
 
-const MODEL_DISPLAY_NAMES: Record<string, string> = {
-  "claude-3-opus": "Claude 3 Opus",
-  "claude-3-sonnet": "Claude 3 Sonnet",
-  "claude-3-haiku": "Claude 3 Haiku",
-  "claude-sonnet-4": "Claude Sonnet 4",
-  "claude-opus-4": "Claude Opus 4",
-  "gpt-4": "GPT-4",
-  "gpt-4-turbo": "GPT-4 Turbo",
-  "gpt-4o": "GPT-4o",
-  "gpt-4o-mini": "GPT-4o Mini",
-  "gpt-3.5-turbo": "GPT-3.5 Turbo",
-};
-
+// Model display names come from the pricing table (single source of truth);
+// fall back to the raw id for models without a pricing entry.
 function modelDisplayName(model: string): string {
-  return MODEL_DISPLAY_NAMES[model] ?? model;
+  return getModelPricing(model)?.displayName ?? model;
 }
 
-// Provider display names mirror the previous Prometheus path.
-function providerDisplayName(p: string): string {
-  if (p === "anthropic") return "Anthropic";
-  if (p === "openai") return "OpenAI";
-  return p;
-}
-
-function emptySummary(): CostSummary {
+/** Empty cost summary (all zeroes). */
+export function emptySummary(): CostSummary {
   return {
     totalCost: 0,
     totalInputCost: 0,
@@ -75,6 +59,19 @@ function emptySummary(): CostSummary {
   };
 }
 
+/** Unavailable CostData (no rows) with an optional reason. */
+export function emptyCostData(reason?: string): CostData {
+  return {
+    available: false,
+    reason,
+    summary: emptySummary(),
+    byAgent: [],
+    byProvider: [],
+    byModel: [],
+    timeSeries: [],
+  };
+}
+
 /** Accumulate one metric's rows into the per-(provider,model,agent) map. */
 function accumulate(
   map: Map<string, CostAllocationItem>,
@@ -86,8 +83,12 @@ function accumulate(
   >,
 ): void {
   for (const row of rows) {
-    const [provider = "unknown", model = "unknown", agent = "unknown"] =
-      row.key.split(KEY_DELIM);
+    // Segments may be empty strings (provider_calls columns default to ''),
+    // not just undefined — fall back to "unknown" for either.
+    const parts = row.key.split(KEY_DELIM);
+    const provider = parts[0] || "unknown";
+    const model = parts[1] || "unknown";
+    const agent = parts[2] || "unknown";
     const key = `${provider}${KEY_DELIM}${model}${KEY_DELIM}${agent}`;
     let item = map.get(key);
     if (!item) {
@@ -164,7 +165,7 @@ function buildByProvider(byAgent: CostAllocationItem[]): ProviderCost[] {
     const provider = normalizeProvider(i.provider);
     let p = map.get(provider);
     if (!p) {
-      p = { name: providerDisplayName(provider), provider, cost: 0, requests: 0, tokens: 0 };
+      p = { name: getProviderDisplayName(provider), provider, cost: 0, requests: 0, tokens: 0 };
       map.set(provider, p);
     }
     p.cost += i.totalCost;
@@ -199,9 +200,10 @@ function buildByModel(byAgent: CostAllocationItem[]): ModelCost[] {
 function buildTimeSeries(rows: ProviderCallAggregateRow[]): CostTimeSeriesPoint[] {
   const byTs = new Map<string, Record<string, number>>();
   for (const row of rows) {
-    const [timestamp = "", providerRaw = "unknown"] = row.key.split(KEY_DELIM);
+    const parts = row.key.split(KEY_DELIM);
+    const timestamp = parts[0] ?? "";
     if (!timestamp) continue;
-    const provider = normalizeProvider(providerRaw);
+    const provider = normalizeProvider(parts[1] || "unknown");
     let point = byTs.get(timestamp);
     if (!point) {
       point = {};

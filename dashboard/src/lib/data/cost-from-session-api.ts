@@ -10,7 +10,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { buildCostData, type CostAggregateInput } from "./cost-aggregation";
+import { buildCostData, emptyCostData, type CostAggregateInput } from "./cost-aggregation";
 import type { CostData } from "./types";
 import type { ProviderCallAggregateRow } from "./provider-calls-service";
 
@@ -21,6 +21,12 @@ export interface CostSource {
 }
 
 const EMPTY_ROWS: ProviderCallAggregateRow[] = [];
+
+// Request the session-api ceiling (clamped to MaxProviderCallAggregateLimit
+// server-side) so the totals/breakdowns are not silently truncated: the
+// summary is summed from these rows, so a per-query top-N would undercount
+// cost/token totals for workspaces with many (provider,model,agent) groups.
+const AGGREGATE_LIMIT = "5000";
 
 function trimSlash(u: string): string {
   return u.endsWith("/") ? u.slice(0, -1) : u;
@@ -38,6 +44,7 @@ async function fetchRows(
     namespace: source.namespace,
     from: from.toISOString(),
     to: to.toISOString(),
+    limit: AGGREGATE_LIMIT,
   });
   const url = `${trimSlash(source.sessionURL)}/api/v1/provider-calls/aggregate?${qs}`;
   const resp = await fetchImpl(url, { headers: { Accept: "application/json" } });
@@ -95,19 +102,16 @@ export async function fetchWorkspaceCostData(
       anyOk = true;
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
+      console.error("Workspace cost fetch failed for a session-api source:", {
+        sessionURL: source.sessionURL,
+        namespace: source.namespace,
+        error: lastError,
+      });
     }
   }
 
   if (!anyOk) {
-    return {
-      available: false,
-      reason: lastError || "Session API unavailable",
-      summary: buildCostData(merged).summary,
-      byAgent: [],
-      byProvider: [],
-      byModel: [],
-      timeSeries: [],
-    };
+    return emptyCostData(lastError || "Session API unavailable");
   }
 
   return buildCostData(merged);

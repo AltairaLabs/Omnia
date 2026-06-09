@@ -108,7 +108,7 @@ export default function CostsPage() {
     );
   }
 
-  const { available, reason, summary, byAgent, byProvider, byModel, timeSeries, grafanaUrl } = costData;
+  const { available, reason, summary, byAgent, byProvider, byModel, timeSeries } = costData;
 
   return (
     <div className="flex flex-col h-full">
@@ -165,7 +165,7 @@ export default function CostsPage() {
 
         {/* Cost Over Time Chart - Full Width */}
         {available && timeSeries.length > 0 && (
-          <CostOverTimeChart data={timeSeries} grafanaUrl={grafanaUrl} />
+          <CostOverTimeChart data={timeSeries} />
         )}
 
         {/* Provider and Model Charts */}

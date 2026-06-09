@@ -380,13 +380,6 @@ export interface CostData {
 }
 
 /**
- * Options for fetching costs.
- */
-export interface CostOptions {
-  namespace?: string;
-}
-
-/**
  * Options for fetching logs.
  */
 export interface LogOptions {

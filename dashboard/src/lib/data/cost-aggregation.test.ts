@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildCostData, type CostAggregateInput } from "./cost-aggregation";
+import { buildCostData, emptyCostData, type CostAggregateInput } from "./cost-aggregation";
 
 const input: CostAggregateInput = {
   // matrix keyed "provider|model|agent"
@@ -95,9 +95,9 @@ describe("buildCostData", () => {
       namespace: "default",
     };
     const data = buildCostData(unknown);
-    // Unknown provider keeps its raw name; total cost is still exact.
+    // Unknown provider keeps its raw key; display name capitalizes via provider-utils.
     expect(data.byProvider[0].provider).toBe("google");
-    expect(data.byProvider[0].name).toBe("google");
+    expect(data.byProvider[0].name).toBe("Google");
     expect(data.summary.totalCost).toBeCloseTo(0.07, 9);
     // No pricing for an unknown model -> input/output cost split stays 0.
     expect(data.summary.totalInputCost).toBe(0);
@@ -116,6 +116,29 @@ describe("buildCostData", () => {
     expect(data.timeSeries).toHaveLength(2);
     expect(data.timeSeries[0].timestamp).toBe("2026-06-09T13:00:00Z");
     expect(data.timeSeries[1].timestamp).toBe("2026-06-09T14:00:00Z");
+  });
+
+  it("maps empty-string key segments to 'unknown'", () => {
+    const data = buildCostData({
+      ...input,
+      cost: [{ key: "openai||chatbot", value: 0.01, count: 1 }],
+      inputTokens: [],
+      outputTokens: [],
+      cachedTokens: [],
+      requests: [],
+      costByHourProvider: [],
+    });
+    expect(data.byAgent[0].model).toBe("unknown");
+    expect(data.byModel[0].model).toBe("unknown");
+  });
+
+  it("emptyCostData returns an unavailable shell with the given reason", () => {
+    const data = emptyCostData("session-api down");
+    expect(data.available).toBe(false);
+    expect(data.reason).toBe("session-api down");
+    expect(data.summary.totalCost).toBe(0);
+    expect(data.byAgent).toEqual([]);
+    expect(data.timeSeries).toEqual([]);
   });
 
   it("returns empty breakdowns for empty input", () => {

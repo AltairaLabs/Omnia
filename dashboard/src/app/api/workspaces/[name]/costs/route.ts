@@ -22,9 +22,10 @@ import {
 } from "@/lib/k8s/workspace-route-helpers";
 import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
 import { fetchWorkspaceCostData, type CostSource } from "@/lib/data/cost-from-session-api";
+import { emptyCostData } from "@/lib/data/cost-aggregation";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
-import type { CostData, CostSummary } from "@/lib/data/types";
+import type { CostData } from "@/lib/data/types";
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -34,22 +35,6 @@ interface WorkspaceCostResponse extends CostData {
     monthlyBudget?: string;
     dailyUsedPercent?: number;
     monthlyUsedPercent?: number;
-  };
-}
-
-function emptySummary(): CostSummary {
-  return {
-    totalCost: 0,
-    totalInputCost: 0,
-    totalOutputCost: 0,
-    totalCacheSavings: 0,
-    totalRequests: 0,
-    totalTokens: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    projectedMonthlyCost: 0,
-    inputPercent: 0,
-    outputPercent: 0,
   };
 }
 
@@ -91,17 +76,8 @@ export const GET = withWorkspaceAccess(
 
       const urls = await resolveServiceURLs(name);
       if (!urls) {
-        const unavailable: WorkspaceCostResponse = {
-          available: false,
-          reason: "Session API not configured",
-          summary: emptySummary(),
-          byAgent: [],
-          byProvider: [],
-          byModel: [],
-          timeSeries: [],
-        };
         auditSuccess(auditCtx, "get", undefined, { available: false });
-        return NextResponse.json(unavailable);
+        return NextResponse.json(emptyCostData("Session API not configured"));
       }
 
       const sources: CostSource[] = [{ sessionURL: urls.sessionURL, namespace: urls.namespace }];
