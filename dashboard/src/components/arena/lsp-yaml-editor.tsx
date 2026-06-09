@@ -91,12 +91,15 @@ async function createLspConnection(
     url.searchParams.set("project", projectId);
     wsUrl = url.toString();
   } else {
-    // Fallback: construct URL from current host with default WebSocket proxy port
+    // No proxy URL configured: use a relative URL on the *page's* host so the
+    // connection rides the same 443 the dashboard is served on, and the gateway
+    // path-routes /api/lsp to the WS proxy (:3002). Never hardcode the proxy
+    // port — it is not exposed on the public gateway LoadBalancer, so dialing
+    // it directly fails behind an ingress/gateway. Mirrors the dev-console
+    // (use-dev-console.ts). See Omnia#1243.
     const protocol = globalThis.location.protocol === "https:" ? "wss:" : "ws:";
-    const hostname = globalThis.location.hostname;
-    // Default WebSocket proxy port is 3002
-    const wsProxyPort = "3002";
-    wsUrl = `${protocol}//${hostname}:${wsProxyPort}/api/lsp?workspace=${encodeURIComponent(workspace)}&project=${encodeURIComponent(projectId)}`;
+    const host = globalThis.location.host;
+    wsUrl = `${protocol}//${host}/api/lsp?workspace=${encodeURIComponent(workspace)}&project=${encodeURIComponent(projectId)}`;
   }
 
   return new WebSocket(wsUrl);
