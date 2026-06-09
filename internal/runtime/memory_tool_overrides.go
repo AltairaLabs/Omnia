@@ -75,14 +75,17 @@ func memoryToolOverrides() []sdk.Option {
 // Descriptions injected into the memory tool descriptors. These are the
 // instructions the LLM reads when deciding whether and how to call each tool.
 const (
-	rememberDescription = "Store a durable fact in Omnia's tiered memory so it is available in future " +
-		"conversations. Call this when the user asks you to remember something, states a stable " +
+	rememberDescription = "Store or update a durable fact in Omnia's tiered memory so it is available in " +
+		"future conversations. Call this when the user asks you to remember something, states a stable " +
 		"preference, or shares a fact worth recalling later.\n\n" +
-		"Avoid duplicates by identifying what the memory is ABOUT with a stable key:\n" +
+		"Identify what the memory is ABOUT with a stable key:\n" +
 		"  about_kind — the subject category (e.g. 'user_profile', 'project', 'preference')\n" +
 		"  about_key  — a stable id within that kind (e.g. the user id, a project name, 'seat_preference')\n" +
-		"Reusing the same about_kind + about_key updates the existing memory in place instead of " +
-		"creating a duplicate. Always set them for facts that change over time (names, preferences, statuses).\n\n" +
+		"Reusing the same about_kind + about_key replaces the existing memory in place. This is how you " +
+		"CHANGE or CORRECT a fact: to update a preference or status, just call memory__remember again with " +
+		"the new value and the same about_kind + about_key. Do NOT call memory__forget to change a fact — " +
+		"forget deletes it and the correction is lost. Always set about_kind + about_key for facts that " +
+		"change over time (names, preferences, statuses).\n\n" +
 		"Optional fields:\n" +
 		"  purpose  — why this is stored (e.g. 'personalization', 'support_context'); drives retention\n" +
 		"  category — consent category for retention/redaction policy (see values)\n" +
@@ -98,9 +101,11 @@ const (
 		"Use memory__recall for relevance-ranked search; use this to browse what exists — for example to " +
 		"find a memory's id before forgetting it."
 
-	forgetDescription = "Delete a specific memory by its id (a soft delete: it stops being recalled). Get the id " +
-		"from a prior memory__recall or memory__list result. Only forget when the user asks you to, or when a " +
-		"memory is clearly wrong and you have already stored the correction."
+	forgetDescription = "Permanently remove a fact from memory by its id (a soft delete: it stops being " +
+		"recalled). Use this ONLY to delete a fact entirely — for example when the user asks you to forget " +
+		"something. Do NOT use forget to change or correct a fact: to update a value, call memory__remember " +
+		"with the same about_kind + about_key, which replaces the old value in place. Get the id from a " +
+		"prior memory__recall or memory__list result."
 )
 
 // patchRememberDescriptor rewrites memory__remember's instructions and extends
