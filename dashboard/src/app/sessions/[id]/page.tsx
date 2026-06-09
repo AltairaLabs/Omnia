@@ -22,6 +22,17 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   ResizablePanelGroup,
   ResizablePanel,
   ResizableHandle,
@@ -45,8 +56,11 @@ import {
   Play,
   ChevronLeft,
   ChevronRight,
+  Trash2,
 } from "lucide-react";
 import { useSessionDetail, useSessionAllMessages, useSessionEvalResults, useSessionToolCalls, useSessionProviderCalls, useSessionRuntimeEvents } from "@/hooks/sessions";
+import { useDeleteSession } from "@/hooks/use-session-mutations";
+import { useWorkspacePermissions } from "@/hooks/use-workspace-permissions";
 import { useAdjacentSessions } from "@/hooks/use-adjacent-sessions";
 import { MemorySidebar } from "@/components/memories/memory-sidebar";
 import type { Message, Session, ToolCall, ProviderCall, RuntimeEvent, EvalResult } from "@/types";
@@ -346,6 +360,14 @@ export default function SessionDetailPage({
     : null;
 
   const { prevId, nextId, position, total } = useAdjacentSessions(id);
+  const { isEditor } = useWorkspacePermissions();
+  const deleteSession = useDeleteSession();
+
+  const handleDelete = () => {
+    deleteSession.mutate(id, {
+      onSuccess: () => router.push("/sessions"),
+    });
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -569,6 +591,41 @@ export default function SessionDetailPage({
             <Brain className="h-4 w-4 mr-2" />
             Memories
           </Button>
+          {isEditor && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  disabled={deleteSession.isPending}
+                  data-testid="delete-session"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete this session?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This permanently deletes session{" "}
+                    <span className="font-mono">{session.id}</span> and all of its
+                    messages, tool calls, and eval results. This cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleDelete}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    Delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
         </div>
       </div>
 

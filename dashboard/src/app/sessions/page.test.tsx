@@ -18,6 +18,16 @@ vi.mock("@/hooks/core", () => ({
   useDebounce: vi.fn((v: string) => v),
 }));
 
+// Owner-only purge — mutable flag + a stub dialog (the real one is tested
+// separately in purge-sessions-dialog.test.tsx).
+const mockPermissions = { isOwner: false, isEditor: false };
+vi.mock("@/hooks/use-workspace-permissions", () => ({
+  useWorkspacePermissions: () => mockPermissions,
+}));
+vi.mock("@/components/sessions/purge-sessions-dialog", () => ({
+  PurgeSessionsDialog: () => <button data-testid="purge-sessions-open">Purge</button>,
+}));
+
 // Mock layout components that require providers
 vi.mock("@/components/layout", () => ({
   Header: function MockHeader({ title, description }: { title: string; description: string }) {
@@ -63,6 +73,8 @@ const mockSessions = [
 describe("SessionsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPermissions.isOwner = false;
+    mockPermissions.isEditor = false;
   });
 
   it("renders loading skeletons when loading", async () => {
@@ -299,5 +311,30 @@ describe("SessionsPage", () => {
     render(<SessionsPage />);
 
     expect(screen.getByText("An unexpected error occurred")).toBeInTheDocument();
+  });
+
+  async function setupListData() {
+    const { useSessions, useSessionSearch, useAgents } = await import("@/hooks");
+    vi.mocked(useSessions).mockReturnValue({
+      data: { sessions: mockSessions, total: 2, hasMore: false },
+      isLoading: false,
+      error: null,
+    } as any);
+    vi.mocked(useSessionSearch).mockReturnValue({ data: undefined, isLoading: false, error: null } as any);
+    vi.mocked(useAgents).mockReturnValue({ data: [] } as any);
+  }
+
+  it("hides the Purge action for non-owners", async () => {
+    mockPermissions.isOwner = false;
+    await setupListData();
+    render(<SessionsPage />);
+    expect(screen.queryByTestId("purge-sessions-open")).not.toBeInTheDocument();
+  });
+
+  it("shows the Purge action for owners", async () => {
+    mockPermissions.isOwner = true;
+    await setupListData();
+    render(<SessionsPage />);
+    expect(screen.getByTestId("purge-sessions-open")).toBeInTheDocument();
   });
 });

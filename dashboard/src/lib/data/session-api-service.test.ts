@@ -468,4 +468,63 @@ describe("SessionApiService", () => {
     });
   });
 
+  describe("deleteSession", () => {
+    it("issues a DELETE to the session detail route", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
+
+      const ok = await service.deleteSession("my-ws", "sess-1");
+
+      expect(ok).toBe(true);
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/workspaces/my-ws/sessions/sess-1",
+        { method: "DELETE" }
+      );
+    });
+
+    it("throws on a non-ok response", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 403, statusText: "Forbidden" });
+
+      await expect(service.deleteSession("my-ws", "sess-1")).rejects.toThrow(
+        "Failed to delete session"
+      );
+    });
+  });
+
+  describe("purgeSessions", () => {
+    it("issues a DELETE to the list route with no query by default", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ deleted: 4 }) });
+
+      const count = await service.purgeSessions("my-ws");
+
+      expect(count).toBe(4);
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/workspaces/my-ws/sessions",
+        { method: "DELETE" }
+      );
+    });
+
+    it("forwards agent and before scope filters", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ deleted: 2 }) });
+
+      await service.purgeSessions("my-ws", { agent: "a1", before: "2026-01-01T00:00:00Z" });
+
+      const url = mockFetch.mock.calls[0][0] as string;
+      expect(url).toContain("agent=a1");
+      expect(url).toContain("before=2026-01-01");
+    });
+
+    it("defaults the count to 0 when the response omits it", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) });
+
+      const count = await service.purgeSessions("my-ws");
+      expect(count).toBe(0);
+    });
+
+    it("throws on a non-ok response", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: "Server Error" });
+
+      await expect(service.purgeSessions("my-ws")).rejects.toThrow("Failed to purge sessions");
+    });
+  });
+
 });

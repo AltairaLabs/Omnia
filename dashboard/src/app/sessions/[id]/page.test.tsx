@@ -4,7 +4,7 @@
 
 import { Suspense } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SessionDetailPage from "./page";
 
@@ -60,6 +60,17 @@ vi.mock("@/hooks/use-memories", () => ({
 }));
 vi.mock("@/contexts/workspace-context", () => ({
   useWorkspace: () => ({ currentWorkspace: { name: "test-ws" }, workspaces: [], setCurrentWorkspace: vi.fn(), isLoading: false, error: null, refetch: vi.fn() }),
+}));
+
+// Delete capability — mutable permission flags + a captured mutate so tests
+// can flip the editor role and assert the session is deleted.
+const mockDeleteMutate = vi.fn();
+const mockPermissions = { isEditor: false, isOwner: false };
+vi.mock("@/hooks/use-session-mutations", () => ({
+  useDeleteSession: () => ({ mutate: mockDeleteMutate, isPending: false }),
+}));
+vi.mock("@/hooks/use-workspace-permissions", () => ({
+  useWorkspacePermissions: () => mockPermissions,
 }));
 
 // Mock next/link
@@ -151,6 +162,8 @@ async function renderPage(id = "sess-123") {
 describe("SessionDetailPage", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockPermissions.isEditor = false;
+    mockPermissions.isOwner = false;
     // Default mocks to avoid errors in tests that don't set them
     const { useSessionEvalResults, useSessionToolCalls, useSessionProviderCalls, useSessionRuntimeEvents } = await import("@/hooks");
     vi.mocked(useSessionEvalResults).mockReturnValue({
@@ -607,6 +620,39 @@ describe("SessionDetailPage", () => {
       await user.keyboard("{ArrowLeft}");
       expect(mockPush).not.toHaveBeenCalledWith("/sessions/sess-prev");
       document.body.removeChild(input);
+    });
+  });
+
+  describe("delete", () => {
+    async function renderWithSession() {
+      const { useSessionDetail } = await import("@/hooks");
+      vi.mocked(useSessionDetail).mockReturnValue({
+        data: mockSession,
+        isLoading: false,
+        error: null,
+      } as any);
+      await renderPage();
+    }
+
+    it("hides the Delete action for non-editors", async () => {
+      mockPermissions.isEditor = false;
+      await renderWithSession();
+      expect(screen.queryByTestId("delete-session")).not.toBeInTheDocument();
+    });
+
+    it("deletes the session and returns to the list when an editor confirms", async () => {
+      mockPermissions.isEditor = true;
+      // Drive the success callback so the navigation-on-success path is covered.
+      mockDeleteMutate.mockImplementation((_id, opts) => opts?.onSuccess?.());
+      const user = userEvent.setup();
+      await renderWithSession();
+
+      await user.click(screen.getByTestId("delete-session"));
+      const dialog = await screen.findByRole("alertdialog");
+      await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+      expect(mockDeleteMutate).toHaveBeenCalledWith("sess-123", expect.any(Object));
+      expect(mockPush).toHaveBeenCalledWith("/sessions");
     });
   });
 });
