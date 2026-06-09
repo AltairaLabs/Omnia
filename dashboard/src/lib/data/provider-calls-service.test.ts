@@ -92,6 +92,18 @@ describe("fetchProviderCallsAggregate", () => {
     ).rejects.toThrow(/provider-calls-aggregate: 500/);
   });
 
+  it("joins an array groupBy with commas", async () => {
+    const fakeFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ rows: [] }), { status: 200 }),
+    );
+    await fetchProviderCallsAggregate(
+      { workspace: "ws", groupBy: ["time:hour", "provider"], metric: "sum_cost_usd" },
+      fakeFetch as unknown as typeof fetch,
+    );
+    const url = String((fakeFetch.mock.calls as unknown as [string][])[0][0]);
+    expect(url).toContain("groupBy=time%3Ahour%2Cprovider");
+  });
+
   it("omits optional params from the query when not provided", async () => {
     const fakeFetch = vi.fn(async () =>
       new Response(JSON.stringify({ rows: [] }), { status: 200 }),
