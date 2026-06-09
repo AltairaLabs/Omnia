@@ -233,10 +233,12 @@ enterprise:
 
   # PromptKit LSP server for YAML validation
   promptkitLsp:
-    # -- Enable PromptKit LSP server
-    enabled: false
+    # -- Enable the PromptKit LSP server (powers the Arena Project Editor's YAML
+    # validation/autocomplete). On by default; also gated on enterprise.enabled,
+    # so it has no effect unless enterprise is enabled. Set false to opt out.
+    enabled: true
     # -- Number of PromptKit LSP replicas
-    replicaCount: 2
+    replicaCount: 1
     image:
       # -- PromptKit LSP image repository
       repository: ghcr.io/altairalabs/omnia-promptkit-lsp
