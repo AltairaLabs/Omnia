@@ -447,9 +447,6 @@ export interface DataService {
   // Stats (workspace-scoped)
   getStats(workspace: string): Promise<Stats>;
 
-  // Costs
-  getCosts(options?: CostOptions): Promise<CostData>;
-
   // Arena Sources (workspace-scoped)
   getArenaSources(workspace: string): Promise<ArenaSourceType[]>;
   getArenaSource(workspace: string, name: string): Promise<ArenaSourceType | undefined>;

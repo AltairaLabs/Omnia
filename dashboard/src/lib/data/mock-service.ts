@@ -16,7 +16,6 @@ import type {
   ObjectMeta,
   AgentRuntimeSpec,
   CostData,
-  CostOptions,
   K8sEvent,
   AgentConnection,
   CostAllocationItem,
@@ -831,19 +830,6 @@ export class MockDataService implements DataService {
   async getStats(_workspace: string): Promise<Stats> {
     await delay();
     return getMockStats() as unknown as Stats;
-  }
-
-  async getCosts(_options?: CostOptions): Promise<CostData> {
-    await delay();
-    return {
-      available: true,
-      summary: getMockCostSummary(),
-      byAgent: mockCostAllocation as CostAllocationItem[],
-      byProvider: getMockCostByProvider(),
-      byModel: getMockCostByModel(),
-      timeSeries: mockCostTimeSeries,
-      grafanaUrl: undefined, // No Grafana in demo mode
-    };
   }
 
   // ============================================================
