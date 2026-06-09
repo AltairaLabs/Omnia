@@ -182,6 +182,26 @@ func TestPatchRememberDescriptor(t *testing.T) {
 	}
 }
 
+// TestUpdateGuidance_RememberNotForget guards the fix for the cluster-observed
+// bug where the LLM corrected a fact via memory__remember (which supersedes in
+// place by about_key) and then ALSO called memory__forget on the same entity,
+// deleting the just-updated memory. The forget guidance must steer corrections
+// to remember (same about_key) and must NOT tell the model to forget after
+// storing a correction.
+func TestUpdateGuidance_RememberNotForget(t *testing.T) {
+	// forget must point the model at remember for changes/corrections...
+	assert.Contains(t, forgetDescription, pkmemory.RememberToolName,
+		"forget guidance should steer corrections to memory__remember")
+	// ...and must not carry the destructive "store correction then forget" inducement.
+	assert.NotContains(t, forgetDescription, "stored the correction",
+		"forget guidance must not tell the model to forget after correcting")
+
+	// remember must tell the model that updating in place is the way to change a
+	// fact, and that forget is not part of an update.
+	assert.Contains(t, rememberDescription, pkmemory.ForgetToolName,
+		"remember guidance should warn against using memory__forget to update")
+}
+
 func TestPatchDescriptionOnlyTools(t *testing.T) {
 	base := baseMemoryDescriptors(t)
 
