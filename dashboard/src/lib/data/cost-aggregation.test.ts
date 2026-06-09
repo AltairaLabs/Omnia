@@ -84,6 +84,40 @@ describe("buildCostData", () => {
     expect(data.timeSeries[0].byProvider.anthropic).toBeCloseTo(0.05, 9);
   });
 
+  it("handles unknown provider/model (no pricing) and keeps the raw provider name", () => {
+    const unknown: CostAggregateInput = {
+      cost: [{ key: "google|gemini-2|bot", value: 0.07, count: 1 }],
+      inputTokens: [{ key: "google|gemini-2|bot", value: 100, count: 1 }],
+      outputTokens: [{ key: "google|gemini-2|bot", value: 20, count: 1 }],
+      cachedTokens: [],
+      requests: [{ key: "google|gemini-2|bot", value: 1, count: 1 }],
+      costByHourProvider: [],
+      namespace: "default",
+    };
+    const data = buildCostData(unknown);
+    // Unknown provider keeps its raw name; total cost is still exact.
+    expect(data.byProvider[0].provider).toBe("google");
+    expect(data.byProvider[0].name).toBe("google");
+    expect(data.summary.totalCost).toBeCloseTo(0.07, 9);
+    // No pricing for an unknown model -> input/output cost split stays 0.
+    expect(data.summary.totalInputCost).toBe(0);
+    expect(data.byModel[0].displayName).toBe("gemini-2");
+  });
+
+  it("skips empty-timestamp rows and sorts the series chronologically", () => {
+    const data = buildCostData({
+      ...input,
+      costByHourProvider: [
+        { key: "|openai", value: 0.02, count: 1 }, // skipped (no timestamp)
+        { key: "2026-06-09T14:00:00Z|openai", value: 0.01, count: 1 }, // later, listed first
+        { key: "2026-06-09T13:00:00Z|openai", value: 0.03, count: 2 }, // earlier
+      ],
+    });
+    expect(data.timeSeries).toHaveLength(2);
+    expect(data.timeSeries[0].timestamp).toBe("2026-06-09T13:00:00Z");
+    expect(data.timeSeries[1].timestamp).toBe("2026-06-09T14:00:00Z");
+  });
+
   it("returns empty breakdowns for empty input", () => {
     const empty: CostAggregateInput = {
       cost: [], inputTokens: [], outputTokens: [], cachedTokens: [], requests: [],

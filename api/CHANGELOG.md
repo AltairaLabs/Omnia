@@ -10,6 +10,17 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Changed (session-api: compound groupBy on provider-calls aggregate, #1222)
+
+`GET /api/v1/provider-calls/aggregate` now accepts a **comma-separated**
+`groupBy` (e.g. `groupBy=provider,model,agent` or `groupBy=time:hour,provider`)
+in addition to a single dimension. Each dimension becomes one segment of a
+composite key, joined with `|` (e.g. `"2026-06-09T13:00:00Z|openai"`). When any
+`time:*` dimension is present, rows sort chronologically by key; otherwise by
+value descending. Single-dimension requests are unchanged — fully backward
+compatible. This powers the dashboard's exact cost/token totals (read from
+session-api product tables instead of Prometheus `increase([24h])`).
+
 ### Added (runtime: memory retrieval strategy/limit/denyCEL wired end-to-end, #1205)
 
 `AgentRuntime.spec.memory.retrieval` fields are now honored at runtime by the

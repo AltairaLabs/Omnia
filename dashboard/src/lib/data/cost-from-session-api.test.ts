@@ -85,6 +85,35 @@ describe("fetchWorkspaceCostData", () => {
     expect(data.byAgent).toEqual([]);
   });
 
+  it("treats a missing rows field as empty (available, zero totals)", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({}), { status: 200 }),
+    ) as unknown as typeof fetch;
+
+    const data = await fetchWorkspaceCostData(
+      [{ sessionURL: "https://session-default:8080", namespace: "omnia-default" }],
+      new Date("2026-06-08T13:00:00Z"),
+      new Date("2026-06-09T13:00:00Z"),
+      fetchImpl,
+    );
+    expect(data.available).toBe(true);
+    expect(data.summary.totalCost).toBe(0);
+    expect(data.byAgent).toEqual([]);
+  });
+
+  it("returns available:false for an empty source list", async () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const data = await fetchWorkspaceCostData(
+      [],
+      new Date("2026-06-08T13:00:00Z"),
+      new Date("2026-06-09T13:00:00Z"),
+      fetchImpl,
+    );
+    expect(data.available).toBe(false);
+    expect(data.reason).toBe("Session API unavailable");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("returns available:false when a source responds non-2xx", async () => {
     const fetchImpl = vi.fn(async () =>
       new Response("err", { status: 500, statusText: "Internal Server Error" }),
