@@ -6,6 +6,7 @@
  */
 
 import * as k8s from "@kubernetes/client-node";
+import { of } from "@kubernetes/client-node/dist/gen/rxjsStub.js";
 import type { Workspace, WorkspaceSpec } from "@/types/workspace";
 
 const GROUP = "omnia.altairalabs.ai";
@@ -136,13 +137,31 @@ export async function patchWorkspace(
   }
 
   try {
-    const response = await k8sClient.patchClusterCustomObject({
-      group: GROUP,
-      version: VERSION,
-      plural: PLURAL,
-      name,
-      body: { spec: updates },
-    });
+    const response = await k8sClient.patchClusterCustomObject(
+      {
+        group: GROUP,
+        version: VERSION,
+        plural: PLURAL,
+        name,
+        body: { spec: updates },
+      },
+      {
+        // patchClusterCustomObject defaults to JSON Patch (application/
+        // json-patch+json), which the API tries to decode as an array of
+        // ops — our object body then fails with "cannot unmarshal object
+        // into []jsonPatchOp" (400). Declare the merge-patch content type so
+        // the object body is applied as a merge patch.
+        middleware: [
+          {
+            pre: (ctx) => {
+              ctx.setHeaderParam("Content-Type", "application/merge-patch+json");
+              return of(ctx);
+            },
+            post: (ctx) => of(ctx),
+          },
+        ],
+      }
+    );
     return response as Workspace;
   } catch (error) {
     console.error("patchWorkspace failed", error);

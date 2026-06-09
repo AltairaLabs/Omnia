@@ -584,8 +584,20 @@ describe("GET /api/workspaces/[name]/memory/search", () => {
 // --- DELETE /api/workspaces/[name]/memory/[memoryId] ---
 
 describe("DELETE /api/workspaces/[name]/memory/[memoryId]", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
+    // The route is guarded by withWorkspaceAccess → checkWorkspaceAccess.
+    // Without configuring it, the guard reads `access.granted` on undefined and
+    // throws. The other describes set this per-test; this block was added
+    // (#1281) without it, so the DELETE tests failed in the full suite.
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getUser } = await import("@/lib/auth");
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({
+      granted: true,
+      role: "viewer",
+      permissions: viewerPermissions,
+    });
+    vi.mocked(getUser).mockResolvedValue(mockUser);
   });
 
   afterEach(() => {
