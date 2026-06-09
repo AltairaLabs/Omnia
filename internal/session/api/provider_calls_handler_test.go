@@ -221,11 +221,45 @@ func TestParseProviderCallsAggregateOpts_AllFields(t *testing.T) {
 	assert.Equal(t, "a", opts.AgentName)
 	assert.Equal(t, testProviderOpenAI, opts.Provider)
 	assert.Equal(t, "gpt-4", opts.Model)
-	assert.Equal(t, ProviderCallAggregateGroupByTimeDay, opts.GroupBy)
+	assert.Equal(t, []ProviderCallAggregateGroupBy{ProviderCallAggregateGroupByTimeDay}, opts.GroupBy)
 	assert.Equal(t, ProviderCallAggregateMetricSumCostUSD, opts.Metric)
 	assert.False(t, opts.From.IsZero())
 	assert.False(t, opts.To.IsZero())
 	assert.Equal(t, 100, opts.Limit)
+}
+
+func TestParseProviderCallsGroupByList_Single(t *testing.T) {
+	got, err := parseProviderCallsGroupByList("provider")
+	require.NoError(t, err)
+	assert.Equal(t, []ProviderCallAggregateGroupBy{ProviderCallAggregateGroupByProvider}, got)
+}
+
+func TestParseProviderCallsGroupByList_Compound(t *testing.T) {
+	got, err := parseProviderCallsGroupByList("time:hour,provider")
+	require.NoError(t, err)
+	assert.Equal(t, []ProviderCallAggregateGroupBy{
+		ProviderCallAggregateGroupByTimeHour,
+		ProviderCallAggregateGroupByProvider,
+	}, got)
+}
+
+func TestParseProviderCallsGroupByList_TrimsSpaces(t *testing.T) {
+	got, err := parseProviderCallsGroupByList(" provider , model ")
+	require.NoError(t, err)
+	assert.Equal(t, []ProviderCallAggregateGroupBy{
+		ProviderCallAggregateGroupByProvider,
+		ProviderCallAggregateGroupByModel,
+	}, got)
+}
+
+func TestParseProviderCallsGroupByList_Empty(t *testing.T) {
+	_, err := parseProviderCallsGroupByList("")
+	require.ErrorIs(t, err, errProviderCallsBadGroupBy)
+}
+
+func TestParseProviderCallsGroupByList_InvalidMember(t *testing.T) {
+	_, err := parseProviderCallsGroupByList("provider,bogus")
+	require.ErrorIs(t, err, errProviderCallsBadGroupBy)
 }
 
 func TestParseProviderCallsAggregateOpts_InvalidTo(t *testing.T) {

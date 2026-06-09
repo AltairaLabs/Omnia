@@ -9,6 +9,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -145,25 +146,48 @@ func collectProviderCallAggregateRows(rows pgx.Rows) ([]*api.ProviderCallAggrega
 	return out, nil
 }
 
-// providerCallGroupByFragments returns the SQL key expression and ORDER BY
-// clause for a given ProviderCallAggregateGroupBy.
-func providerCallGroupByFragments(g api.ProviderCallAggregateGroupBy) (keyExpr, orderClause string, err error) {
+// providerCallGroupByExpr returns the SQL key sub-expression for one dimension
+// and whether it is a time bucket (time buckets drive chronological ordering).
+func providerCallGroupByExpr(g api.ProviderCallAggregateGroupBy) (expr string, isTime bool, err error) {
 	switch g {
 	case api.ProviderCallAggregateGroupByProvider:
-		return "pc.provider", pcOrderByValueDesc, nil
+		return "pc.provider", false, nil
 	case api.ProviderCallAggregateGroupByModel:
-		return "pc.model", pcOrderByValueDesc, nil
+		return "pc.model", false, nil
 	case api.ProviderCallAggregateGroupByAgent:
-		return "s.agent_name", pcOrderByValueDesc, nil
+		return "s.agent_name", false, nil
 	case api.ProviderCallAggregateGroupByTimeHour:
-		return "to_char(date_trunc('hour', pc.created_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:00:00\"Z\"')",
-			pcOrderByKeyAsc, nil
+		return "to_char(date_trunc('hour', pc.created_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:00:00\"Z\"')", true, nil
 	case api.ProviderCallAggregateGroupByTimeDay:
-		return "to_char(date_trunc('day', pc.created_at)::date, 'YYYY-MM-DD')",
-			pcOrderByKeyAsc, nil
+		return "to_char(date_trunc('day', pc.created_at)::date, 'YYYY-MM-DD')", true, nil
 	default:
-		return "", "", fmt.Errorf("postgres: invalid groupBy %q", g)
+		return "", false, fmt.Errorf("postgres: invalid groupBy %q", g)
 	}
+}
+
+// providerCallGroupByFragments builds the composite key expression and ORDER BY
+// clause for one or more groupBy dimensions. Segments are concatenated with the
+// '|' delimiter (absent from all provider/model/agent values and timestamps).
+// Any time dimension makes the result sort chronologically by key.
+func providerCallGroupByFragments(gs []api.ProviderCallAggregateGroupBy) (keyExpr, orderClause string, err error) {
+	if len(gs) == 0 {
+		return "", "", fmt.Errorf("postgres: groupBy is required")
+	}
+	segments := make([]string, 0, len(gs))
+	anyTime := false
+	for _, g := range gs {
+		expr, isTime, gErr := providerCallGroupByExpr(g)
+		if gErr != nil {
+			return "", "", gErr
+		}
+		segments = append(segments, expr)
+		anyTime = anyTime || isTime
+	}
+	keyExpr = strings.Join(segments, " || '|' || ")
+	if anyTime {
+		return keyExpr, pcOrderByKeyAsc, nil
+	}
+	return keyExpr, pcOrderByValueDesc, nil
 }
 
 // providerCallMetricExpression returns the SQL value expression for a metric.

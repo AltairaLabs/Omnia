@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/altairalabs/omnia/internal/httputil"
@@ -18,7 +19,7 @@ import (
 // Errors for the provider-calls aggregate + discover endpoints.
 var (
 	errProviderCallsBadGroupBy = errors.New(
-		"groupBy must be one of: provider, model, agent, time:hour, time:day")
+		"groupBy must be a comma-separated list of: provider, model, agent, time:hour, time:day")
 	errProviderCallsBadMetric = errors.New(
 		"metric must be one of: count, sum_cost_usd, sum_input_tokens, sum_output_tokens, sum_cached_tokens, sum_tokens, avg_duration_ms, p95_duration_ms")
 )
@@ -100,7 +101,7 @@ func parseProviderCallsAggregateOpts(r *http.Request) (ProviderCallAggregateOpts
 		return ProviderCallAggregateOpts{}, errAggregateMissingNamespace
 	}
 
-	groupBy, err := parseProviderCallsGroupBy(q.Get("groupBy"))
+	groupBy, err := parseProviderCallsGroupByList(q.Get("groupBy"))
 	if err != nil {
 		return ProviderCallAggregateOpts{}, err
 	}
@@ -138,7 +139,8 @@ func parseProviderCallsAggregateOpts(r *http.Request) (ProviderCallAggregateOpts
 	return opts, nil
 }
 
-func parseProviderCallsGroupBy(v string) (ProviderCallAggregateGroupBy, error) {
+// validateProviderCallsGroupBy returns the typed dimension or an error.
+func validateProviderCallsGroupBy(v string) (ProviderCallAggregateGroupBy, error) {
 	switch ProviderCallAggregateGroupBy(v) {
 	case ProviderCallAggregateGroupByProvider,
 		ProviderCallAggregateGroupByModel,
@@ -149,6 +151,29 @@ func parseProviderCallsGroupBy(v string) (ProviderCallAggregateGroupBy, error) {
 	default:
 		return "", errProviderCallsBadGroupBy
 	}
+}
+
+// parseProviderCallsGroupByList parses a comma-separated groupBy into an
+// ordered list of validated dimensions. Each dimension produces one segment
+// of the composite aggregate key. An empty or all-blank value is rejected.
+func parseProviderCallsGroupByList(v string) ([]ProviderCallAggregateGroupBy, error) {
+	parts := strings.Split(v, ",")
+	out := make([]ProviderCallAggregateGroupBy, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		dim, err := validateProviderCallsGroupBy(p)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, dim)
+	}
+	if len(out) == 0 {
+		return nil, errProviderCallsBadGroupBy
+	}
+	return out, nil
 }
 
 func parseProviderCallsMetric(v string) (ProviderCallAggregateMetric, error) {

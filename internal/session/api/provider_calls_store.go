@@ -69,8 +69,8 @@ type ProviderCallAggregateOpts struct {
 	Model     string // optional (provider_calls.model)
 	From      time.Time
 	To        time.Time
-	GroupBy   ProviderCallAggregateGroupBy // required
-	Metric    ProviderCallAggregateMetric  // required
+	GroupBy   []ProviderCallAggregateGroupBy // required, one or more dimensions (composite key)
+	Metric    ProviderCallAggregateMetric    // required
 	Limit     int
 }
 
