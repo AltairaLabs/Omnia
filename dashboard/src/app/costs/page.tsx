@@ -83,7 +83,7 @@ function LoadingSkeleton() {
 export default function CostsPage() {
   const { data: costData, isLoading, error } = useCosts();
 
-  if (isLoading) {
+  if (isLoading || !costData) {
     return <LoadingSkeleton />;
   }
 
@@ -108,7 +108,7 @@ export default function CostsPage() {
     );
   }
 
-  const { available, reason, summary, byAgent, byProvider, byModel, timeSeries, grafanaUrl } = costData!;
+  const { available, reason, summary, byAgent, byProvider, byModel, timeSeries, grafanaUrl } = costData;
 
   return (
     <div className="flex flex-col h-full">

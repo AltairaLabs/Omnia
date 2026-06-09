@@ -521,6 +521,18 @@ function generateMockLogs(count: number, containers: string[] = CONTAINERS): Log
   return logs;
 }
 
+/** Mock CostData for demo mode (used by the workspace-scoped useCosts hook). */
+export function getMockCostData(): CostData {
+  return {
+    available: true,
+    summary: getMockCostSummary(),
+    byAgent: mockCostAllocation as CostAllocationItem[],
+    byProvider: getMockCostByProvider(),
+    byModel: getMockCostByModel(),
+    timeSeries: mockCostTimeSeries,
+  };
+}
+
 /**
  * Mock data service that returns sample data.
  * Used when DEMO_MODE is enabled.
