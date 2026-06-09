@@ -214,13 +214,35 @@ describe("workspace-client", () => {
       });
 
       expect(result).toEqual(patchedWorkspace);
-      expect(mockPatchClusterCustomObject).toHaveBeenCalledWith({
-        group: "omnia.altairalabs.ai",
-        version: "v1alpha1",
-        plural: "workspaces",
-        name: "test-workspace",
-        body: { spec: { displayName: "Updated Workspace" } },
-      });
+      expect(mockPatchClusterCustomObject).toHaveBeenCalledWith(
+        {
+          group: "omnia.altairalabs.ai",
+          version: "v1alpha1",
+          plural: "workspaces",
+          name: "test-workspace",
+          body: { spec: { displayName: "Updated Workspace" } },
+        },
+        expect.objectContaining({ middleware: expect.any(Array) })
+      );
+    });
+
+    it("sends application/merge-patch+json so the API does not decode it as JSON Patch", async () => {
+      // Regression for the 400 "cannot unmarshal object into []jsonPatchOp":
+      // patchClusterCustomObject defaults to JSON Patch; a merge-patch object
+      // body must declare the merge-patch content type or the API rejects it.
+      mockPatchClusterCustomObject.mockResolvedValue(mockWorkspace);
+
+      await patchWorkspace("test-workspace", { displayName: "x" });
+
+      const options = mockPatchClusterCustomObject.mock.calls[0][1];
+      expect(options?.middleware?.[0]?.pre).toBeTypeOf("function");
+
+      const setHeaderParam = vi.fn();
+      options.middleware[0].pre({ setHeaderParam });
+      expect(setHeaderParam).toHaveBeenCalledWith(
+        "Content-Type",
+        "application/merge-patch+json"
+      );
     });
 
     it("should return null on error", async () => {
