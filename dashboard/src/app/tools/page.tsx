@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback } from "react";
 import { Plus } from "lucide-react";
 import { Header } from "@/components/layout";
-import { ToolRegistryCard } from "@/components/tools";
+import { ToolRegistryCard, ToolRegistryDialog } from "@/components/tools";
 import { NamespaceFilter } from "@/components/filters";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -22,9 +22,14 @@ interface ToolRegistryWithSource extends ToolRegistry {
 export default function ToolsPage() {
   const [filterPhase, setFilterPhase] = useState<FilterPhase>("all");
   const [selectedNamespaces, setSelectedNamespaces] = useState<string[]>([]);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const { isLoading: isWorkspaceLoading } = useWorkspace();
-  const { data: workspaceRegistries, isLoading: isLoadingRegistries } = useToolRegistries();
+  const {
+    data: workspaceRegistries,
+    isLoading: isLoadingRegistries,
+    refetch: refetchRegistries,
+  } = useToolRegistries();
   const { data: sharedRegistries, isLoading: isLoadingShared } = useSharedToolRegistries();
 
   // Show loading when workspace, workspace registries, or shared registries are loading
@@ -130,7 +135,7 @@ export default function ToolsPage() {
             />
           </div>
 
-          <Button size="sm">
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             New ToolRegistry
           </Button>
@@ -158,13 +163,19 @@ export default function ToolsPage() {
         {!isLoading && filteredRegistries?.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <p className="text-muted-foreground">No ToolRegistries found</p>
-            <Button variant="outline" className="mt-4">
+            <Button variant="outline" className="mt-4" onClick={() => setCreateOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               Create your first ToolRegistry
             </Button>
           </div>
         )}
       </div>
+
+      <ToolRegistryDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onSuccess={() => refetchRegistries()}
+      />
     </div>
   );
 }
