@@ -3,8 +3,10 @@
 import { Button } from "@/components/ui/button";
 import { RefreshCw, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
+import { useQueryClient, useIsFetching } from "@tanstack/react-query";
 import { UserMenu } from "./user-menu";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
+import { cn } from "@/lib/utils";
 
 interface HeaderProps {
   title: React.ReactNode;
@@ -14,6 +16,8 @@ interface HeaderProps {
 
 export function Header({ title, description, children }: Readonly<HeaderProps>) {
   const { theme, setTheme } = useTheme();
+  const queryClient = useQueryClient();
+  const isFetching = useIsFetching() > 0;
 
   return (
     <header className="flex h-16 items-center justify-between border-b border-border bg-card px-6">
@@ -26,8 +30,14 @@ export function Header({ title, description, children }: Readonly<HeaderProps>) 
       <div className="flex items-center gap-3">
         <WorkspaceSwitcher />
         {children}
-        <Button variant="ghost" size="icon">
-          <RefreshCw className="h-4 w-4" />
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Refresh data"
+          onClick={() => queryClient.invalidateQueries()}
+          disabled={isFetching}
+        >
+          <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
         </Button>
         <Button
           variant="ghost"
