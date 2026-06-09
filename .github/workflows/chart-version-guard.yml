@@ -1,0 +1,49 @@
+name: Chart Version Guard
+
+# The chart's version/appVersion are owned by the release workflow: after a
+# tagged release, release.yml opens a `chore/bump-chart-<version>` PR that syncs
+# both fields to the just-published version (keeps `main`-at-rest matching the
+# published chart so `helm template` resolves real image tags).
+#
+# Feature PRs must NOT hand-bump these — doing so drifts `version` ahead of both
+# `appVersion` and the last release, producing "skipped" versions and a
+# main-at-rest that templates the wrong image tags. This guard fails any PR that
+# changes version/appVersion except the release bot's bump PR.
+on:
+  pull_request:
+    paths:
+      - 'charts/omnia/Chart.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Forbid manual chart version bumps
+    runs-on: ubuntu-latest
+    # The release bot's post-release bump PR is the only sanctioned bumper.
+    if: ${{ !startsWith(github.head_ref, 'chore/bump-chart-') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Reject version/appVersion changes outside the release flow
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          rc=0
+          for field in version appVersion; do
+            base_val=$(git show "${BASE_SHA}:charts/omnia/Chart.yaml" | yq ".${field}")
+            head_val=$(yq ".${field}" charts/omnia/Chart.yaml)
+            if [ "${base_val}" != "${head_val}" ]; then
+              echo "::error file=charts/omnia/Chart.yaml::${field} changed (${base_val} -> ${head_val}). The chart ${field} is owned by the release workflow and is auto-bumped after a tagged release — do not change it in a feature PR. Revert this change; cut a release (tag v<version>) to publish."
+              rc=1
+            fi
+          done
+          if [ "${rc}" -eq 0 ]; then
+            echo "Chart.yaml version/appVersion unchanged ✓"
+          fi
+          exit "${rc}"
