@@ -117,6 +117,49 @@ var _ = Describe("ArenaDevSession Controller", func() {
 			Expect(k8sClient.Get(testCtx, key, &corev1.Service{})).To(Succeed())
 		})
 
+		It("runs the dev-console pod under a configured ServiceAccount with extra pod labels", func() {
+			const (
+				runtimeSA  = "omnia-runtime-wi"
+				wiLabelKey = "azure.workload.identity/use"
+				wiLabelVal = "true"
+			)
+			name := nextName("ads")
+			Expect(k8sClient.Create(testCtx, baseSession(name))).To(Succeed())
+
+			r := &ArenaDevSessionReconciler{
+				Client:                   k8sClient,
+				Scheme:                   k8sClient.Scheme(),
+				DevConsoleServiceAccount: runtimeSA,
+				DevConsolePodLabels:      map[string]string{wiLabelKey: wiLabelVal},
+			}
+			// Reconcile #1 adds finalizer; #2 creates child resources.
+			for i := 0; i < 2; i++ {
+				_, err := reconcileOnce(r, name)
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			final := &omniav1alpha1.ArenaDevSession{}
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: name, Namespace: namespace}, final)).To(Succeed())
+			key := types.NamespacedName{Name: r.resourceName(final), Namespace: namespace}
+
+			// The pod runs as the configured (workspace runtime) SA, with the
+			// cloud-identity opt-in label stamped on the pod template.
+			deploy := &appsv1.Deployment{}
+			Expect(k8sClient.Get(testCtx, key, deploy)).To(Succeed())
+			Expect(deploy.Spec.Template.Spec.ServiceAccountName).To(Equal(runtimeSA))
+			Expect(deploy.Spec.Template.Labels).To(HaveKeyWithValue(wiLabelKey, wiLabelVal))
+
+			// The dev-console Role is bound to that SA so it carries the perms.
+			rb := &rbacv1.RoleBinding{}
+			Expect(k8sClient.Get(testCtx, key, rb)).To(Succeed())
+			Expect(rb.Subjects).To(HaveLen(1))
+			Expect(rb.Subjects[0].Name).To(Equal(runtimeSA))
+
+			// No per-session ServiceAccount is created — the workspace SA is used.
+			saErr := k8sClient.Get(testCtx, key, &corev1.ServiceAccount{})
+			Expect(apierrors.IsNotFound(saErr)).To(BeTrue())
+		})
+
 		It("transitions to Ready and populates endpoint when deployment becomes ready", func() {
 			name := nextName("ads")
 			Expect(k8sClient.Create(testCtx, baseSession(name))).To(Succeed())

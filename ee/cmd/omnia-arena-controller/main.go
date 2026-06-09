@@ -75,6 +75,8 @@ func main() {
 	var arenaWorkerImage string
 	var arenaWorkerImagePullPolicy string
 	var arenaDevConsoleImage string
+	var arenaDevConsoleServiceAccount string
+	var arenaDevConsolePodLabels string
 	var workspaceContentPath string
 	var workspaceStorageClass string
 	var nfsServer string
@@ -98,6 +100,13 @@ func main() {
 		"Image pull policy for Arena workers. Valid: Always, Never, IfNotPresent.")
 	flag.StringVar(&arenaDevConsoleImage, "arena-dev-console-image", "",
 		"The image to use for Arena dev console containers.")
+	flag.StringVar(&arenaDevConsoleServiceAccount, "dev-console-service-account", "",
+		"ServiceAccount the dev-console pod runs as. Set to the workspace runtime "+
+			"ServiceAccount so the dev console inherits its cloud identity (Azure "+
+			"Workload Identity, AWS IRSA, etc.). Empty = controller creates a per-session SA.")
+	flag.StringVar(&arenaDevConsolePodLabels, "dev-console-pod-labels", "",
+		"Comma-separated key=value labels added to the dev-console pod template, "+
+			"e.g. 'azure.workload.identity/use=true' to opt into the WI webhook.")
 	flag.StringVar(&workspaceContentPath, "workspace-content-path", "",
 		"Base path for workspace content volumes.")
 	flag.StringVar(&workspaceStorageClass, "workspace-storage-class", "",
@@ -258,22 +267,24 @@ func main() {
 
 	if err := registerArenaWorkloads(mgr, registrationOptions{
 		Controllers: setupOptions{
-			WorkerImage:           arenaWorkerImage,
-			WorkerImagePullPolicy: corev1.PullPolicy(arenaWorkerImagePullPolicy),
-			DevConsoleImage:       arenaDevConsoleImage,
-			WorkspaceContentPath:  workspaceContentPath,
-			NFSServer:             nfsServer,
-			NFSPath:               nfsPath,
-			LicenseValidator:      licenseValidator,
-			StorageManager:        storageManager,
-			Aggregator:            arenaAggregator,
-			RedisURL:              redisURL,
-			RedisURLSecretName:    redisURLSecretName,
-			RedisURLSecretKey:     redisURLSecretKey,
-			TracingEnabled:        tracingEnabled,
-			TracingEndpoint:       tracingEndpoint,
-			PrivacyPolicyMetrics:  newPrivacyPolicyMetrics(),
-			ReEncryptionStore:     buildReEncryptionStoreFactory(sessionPostgresConn, setupLog),
+			WorkerImage:              arenaWorkerImage,
+			WorkerImagePullPolicy:    corev1.PullPolicy(arenaWorkerImagePullPolicy),
+			DevConsoleImage:          arenaDevConsoleImage,
+			DevConsoleServiceAccount: arenaDevConsoleServiceAccount,
+			DevConsolePodLabels:      parseKeyValueLabels(arenaDevConsolePodLabels),
+			WorkspaceContentPath:     workspaceContentPath,
+			NFSServer:                nfsServer,
+			NFSPath:                  nfsPath,
+			LicenseValidator:         licenseValidator,
+			StorageManager:           storageManager,
+			Aggregator:               arenaAggregator,
+			RedisURL:                 redisURL,
+			RedisURLSecretName:       redisURLSecretName,
+			RedisURLSecretKey:        redisURLSecretKey,
+			TracingEnabled:           tracingEnabled,
+			TracingEndpoint:          tracingEndpoint,
+			PrivacyPolicyMetrics:     newPrivacyPolicyMetrics(),
+			ReEncryptionStore:        buildReEncryptionStoreFactory(sessionPostgresConn, setupLog),
 		},
 		Webhooks: webhookOptions{
 			LicenseValidator:    licenseValidator,

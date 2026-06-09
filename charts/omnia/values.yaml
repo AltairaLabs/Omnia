@@ -184,6 +184,14 @@ enterprise:
         tag: ""
         # -- Dev console image pull policy
         pullPolicy: IfNotPresent
+      # -- ServiceAccount the dev-console pod runs as. Set to the workspace
+      # runtime ServiceAccount so the dev console inherits its cloud identity
+      # (Azure Workload Identity, AWS IRSA). Empty = controller creates a
+      # per-session SA with no cloud identity (keyless providers will fail).
+      serviceAccountName: ""
+      # -- Extra labels added to the dev-console pod template, e.g. to opt into
+      # a cloud-identity webhook: {azure.workload.identity/use: "true"}.
+      podLabels: {}
 
   # Community templates source (deployed automatically when enabled)
   communityTemplates:
