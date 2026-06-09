@@ -278,6 +278,45 @@ func (s *SessionService) DeleteSession(ctx context.Context, sessionID, namespace
 	return nil
 }
 
+// DeleteSessionsByScope bulk-deletes all sessions matching the scope (namespace
+// required; optional agent and before-cutoff) and returns the count. This is
+// user-agnostic — it removes any matching session, including automated ones
+// (ArenaJob workers, function invocations). Per-user erasure is separate.
+func (s *SessionService) DeleteSessionsByScope(ctx context.Context, scope providers.SessionDeleteScope) (int64, error) {
+	if scope.Namespace == "" {
+		return 0, ErrMissingNamespace
+	}
+	warm, err := s.registry.WarmStore()
+	if err != nil {
+		return 0, ErrWarmStoreRequired
+	}
+	n, err := warm.DeleteSessionsByScope(ctx, scope)
+	if err != nil {
+		return 0, err
+	}
+	// Hot-cache entries for the purged sessions are left to expire by TTL; the
+	// warm store is now authoritative (they're gone), so a stale hot hit can't
+	// resurrect a deleted session beyond its short cache lifetime.
+	s.auditSessionsPurged(ctx, scope, n)
+	return n, nil
+}
+
+// auditSessionsPurged logs a sessions_purged event for a bulk delete.
+func (s *SessionService) auditSessionsPurged(ctx context.Context, scope providers.SessionDeleteScope, count int64) {
+	if s.auditLogger == nil {
+		return
+	}
+	rc, _ := requestContextFromCtx(ctx)
+	s.auditLogger.LogEvent(ctx, &AuditEntry{
+		EventType:   "sessions_purged",
+		Namespace:   scope.Namespace,
+		AgentName:   scope.AgentName,
+		ResultCount: int(count),
+		IPAddress:   rc.IPAddress,
+		UserAgent:   rc.UserAgent,
+	})
+}
+
 // AppendMessage adds a message to a session via the warm store and hot cache.
 // For assistant messages, a message.assistant event is published asynchronously.
 func (s *SessionService) AppendMessage(ctx context.Context, sessionID string, msg *session.Message) error {

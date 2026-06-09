@@ -430,6 +430,22 @@ func (m *mockWarmStore) DeleteSessionsBatch(_ context.Context, sessionIDs []stri
 	return nil
 }
 
+func (m *mockWarmStore) DeleteSessionsByScope(_ context.Context, scope SessionDeleteScope) (int64, error) {
+	var n int64
+	for id, sess := range m.sessions {
+		if sess.Namespace != scope.Namespace {
+			continue
+		}
+		if scope.AgentName != "" && sess.AgentName != scope.AgentName {
+			continue
+		}
+		delete(m.sessions, id)
+		delete(m.messages, id)
+		n++
+	}
+	return n, nil
+}
+
 func (m *mockWarmStore) SaveArtifact(_ context.Context, _ *session.Artifact) error { return nil }
 func (m *mockWarmStore) GetArtifacts(_ context.Context, _ string) ([]*session.Artifact, error) {
 	return []*session.Artifact{}, nil

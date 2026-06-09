@@ -58,6 +58,9 @@ func (m *lookupMockWarm) GetSessionsOlderThan(context.Context, time.Time, int) (
 	return nil, nil
 }
 func (m *lookupMockWarm) DeleteSessionsBatch(context.Context, []string) error { return nil }
+func (m *lookupMockWarm) DeleteSessionsByScope(context.Context, providers.SessionDeleteScope) (int64, error) {
+	return 0, nil
+}
 func (m *lookupMockWarm) RecordToolCall(context.Context, string, *session.ToolCall) error {
 	return nil
 }

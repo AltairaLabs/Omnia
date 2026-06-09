@@ -840,6 +840,12 @@ func (m *MockWarmStoreProvider) DeleteSessionsBatch(
 	return nil
 }
 
+func (m *MockWarmStoreProvider) DeleteSessionsByScope(
+	_ context.Context, _ providers.SessionDeleteScope,
+) (int64, error) {
+	return 0, nil
+}
+
 func (m *MockWarmStoreProvider) SaveArtifact(
 	_ context.Context, _ *session.Artifact,
 ) error {

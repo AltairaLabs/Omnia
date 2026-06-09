@@ -452,6 +452,43 @@ func TestDeleteSession_NilAuditLogger(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestDeleteSessionsByScope_MissingNamespace(t *testing.T) {
+	warm := newMockWarmStore()
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	_, err := svc.DeleteSessionsByScope(context.Background(), providers.SessionDeleteScope{})
+	assert.ErrorIs(t, err, ErrMissingNamespace)
+}
+
+func TestDeleteSessionsByScope_NoWarmStore(t *testing.T) {
+	svc := newServiceWithRegistry(providers.NewRegistry(), nil)
+	_, err := svc.DeleteSessionsByScope(context.Background(), providers.SessionDeleteScope{Namespace: "ns"})
+	assert.ErrorIs(t, err, ErrWarmStoreRequired)
+}
+
+func TestDeleteSessionsByScope_Success(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = &session.Session{ID: "s1", Namespace: "ns", AgentName: "a"}
+	warm.sessions["s2"] = &session.Session{ID: "s2", Namespace: "ns", AgentName: "a"}
+	warm.sessions["s3"] = &session.Session{ID: "s3", Namespace: "other"}
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	al := &mockAuditLogger{}
+	svc := newServiceWithRegistry(registry, al)
+
+	n, err := svc.DeleteSessionsByScope(context.Background(), providers.SessionDeleteScope{Namespace: "ns"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), n)
+	assert.NotContains(t, warm.sessions, "s1")
+	assert.Contains(t, warm.sessions, "s3", "another namespace must survive")
+	require.Len(t, al.entries, 1)
+	assert.Equal(t, "sessions_purged", al.entries[0].EventType)
+	assert.Equal(t, "ns", al.entries[0].Namespace)
+	assert.Equal(t, 2, al.entries[0].ResultCount)
+}
+
 func TestAuditSessionCreated_NilLogger(t *testing.T) {
 	svc := newServiceWithRegistry(providers.NewRegistry(), nil)
 	svc.auditSessionCreated(context.Background(), &session.Session{ID: "s1"})

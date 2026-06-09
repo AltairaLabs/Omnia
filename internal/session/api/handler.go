@@ -228,6 +228,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/v1/sessions/{sessionID}/status", h.handleUpdateStats)
 	mux.HandleFunc("PATCH /api/v1/sessions/{sessionID}/stats", h.handleUpdateStats) // backward-compat alias
 	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/ttl", h.handleRefreshTTL)
+	mux.HandleFunc("DELETE /api/v1/sessions", h.handleBulkDeleteSessions)
 	mux.HandleFunc("DELETE /api/v1/sessions/{sessionID}", h.handleDeleteSession)
 
 	// Tool call endpoints
@@ -673,6 +674,45 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 
 	log.V(1).Info("session deleted", "sessionID", sessionID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleBulkDeleteSessions deletes all sessions matching a namespace scope,
+// with optional agent and before-cutoff filters. Required: ?namespace=.
+// Returns {"deleted": <count>}. User-agnostic — removes any matching session.
+func (h *Handler) handleBulkDeleteSessions(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	namespace := q.Get("namespace")
+	if namespace == "" {
+		writeError(w, ErrMissingNamespace)
+		return
+	}
+	scope := providers.SessionDeleteScope{
+		Namespace: namespace,
+		AgentName: q.Get("agent"),
+	}
+	if b := q.Get("before"); b != "" {
+		t, err := time.Parse(time.RFC3339, b)
+		if err != nil {
+			w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(ErrorResponse{Error: "before must be an RFC3339 timestamp"})
+			return
+		}
+		scope.Before = t
+	}
+
+	ctx := withRequestContext(r.Context(), extractRequestContext(r))
+	log := h.requestLog(r.Context())
+	n, err := h.service.DeleteSessionsByScope(ctx, scope)
+	if err != nil {
+		log.Error(err, "DeleteSessionsByScope failed", "namespace", namespace)
+		writeError(w, err)
+		return
+	}
+
+	log.V(1).Info("sessions purged", "namespace", namespace, "agent", scope.AgentName, "count", n)
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
+	_ = json.NewEncoder(w).Encode(map[string]int64{"deleted": n})
 }
 
 // handleGetPrivacyPolicy returns the effective privacy policy for a namespace/agent pair.

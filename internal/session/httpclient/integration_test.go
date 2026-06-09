@@ -149,6 +149,9 @@ func (w *integrationWarmStore) GetSessionsOlderThan(context.Context, time.Time, 
 	return nil, nil
 }
 func (w *integrationWarmStore) DeleteSessionsBatch(context.Context, []string) error { return nil }
+func (w *integrationWarmStore) DeleteSessionsByScope(context.Context, providers.SessionDeleteScope) (int64, error) {
+	return 0, nil
+}
 func (w *integrationWarmStore) SaveArtifact(context.Context, *session.Artifact) error {
 	return nil
 }

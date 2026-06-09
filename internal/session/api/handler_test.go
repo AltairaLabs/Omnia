@@ -230,7 +230,24 @@ func (m *mockWarmStore) ListPartitions(_ context.Context) ([]providers.Partition
 func (m *mockWarmStore) GetSessionsOlderThan(_ context.Context, _ time.Time, _ int) ([]*session.Session, error) {
 	return nil, nil
 }
-func (m *mockWarmStore) DeleteSessionsBatch(_ context.Context, _ []string) error   { return nil }
+func (m *mockWarmStore) DeleteSessionsBatch(_ context.Context, _ []string) error { return nil }
+func (m *mockWarmStore) DeleteSessionsByScope(_ context.Context, scope providers.SessionDeleteScope) (int64, error) {
+	var n int64
+	for id, sess := range m.sessions {
+		if sess.Namespace != scope.Namespace {
+			continue
+		}
+		if scope.AgentName != "" && sess.AgentName != scope.AgentName {
+			continue
+		}
+		if !scope.Before.IsZero() && !sess.CreatedAt.Before(scope.Before) {
+			continue
+		}
+		delete(m.sessions, id)
+		n++
+	}
+	return n, nil
+}
 func (m *mockWarmStore) SaveArtifact(_ context.Context, _ *session.Artifact) error { return nil }
 func (m *mockWarmStore) GetArtifacts(_ context.Context, _ string) ([]*session.Artifact, error) {
 	return []*session.Artifact{}, nil
@@ -1875,6 +1892,107 @@ func TestHandleDeleteSession_WrongNamespace(t *testing.T) {
 	}
 	if _, ok := warm.sessions[testSessionID]; !ok {
 		t.Fatal("session in another namespace must not be deleted")
+	}
+}
+
+func TestHandleBulkDeleteSessions_OK(t *testing.T) {
+	h, _, warm := setupHandler(t)
+	warm.sessions["s1"] = &session.Session{ID: "s1", Namespace: "default", AgentName: "a1"}
+	warm.sessions["s2"] = &session.Session{ID: "s2", Namespace: "default", AgentName: "a2"}
+	warm.sessions["s3"] = &session.Session{ID: "s3", Namespace: "other"}
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions?namespace=default", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp map[string]int64
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["deleted"] != 2 {
+		t.Fatalf("expected 2 deleted, got %d", resp["deleted"])
+	}
+	if _, ok := warm.sessions["s3"]; !ok {
+		t.Fatal("a session in another namespace must survive a scoped purge")
+	}
+}
+
+func TestHandleBulkDeleteSessions_MissingNamespace(t *testing.T) {
+	h, _, _ := setupHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestHandleBulkDeleteSessions_BadBefore(t *testing.T) {
+	h, _, _ := setupHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions?namespace=default&before=not-a-timestamp", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestHandleBulkDeleteSessions_WithBefore(t *testing.T) {
+	h, _, warm := setupHandler(t)
+	warm.sessions["old"] = &session.Session{ID: "old", Namespace: "default", CreatedAt: time.Now().Add(-48 * time.Hour)}
+	warm.sessions["new"] = &session.Session{ID: "new", Namespace: "default", CreatedAt: time.Now()}
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	cutoff := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions?namespace=default&before="+cutoff, nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp map[string]int64
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["deleted"] != 1 {
+		t.Fatalf("expected 1 deleted before cutoff, got %d", resp["deleted"])
+	}
+	if _, ok := warm.sessions["new"]; !ok {
+		t.Fatal("a session created after the cutoff must survive")
+	}
+}
+
+func TestHandleBulkDeleteSessions_NoWarmStore(t *testing.T) {
+	reg := providers.NewRegistry()
+	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
+	h := NewHandler(svc, logr.Discard())
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions?namespace=default", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
 	}
 }
 
