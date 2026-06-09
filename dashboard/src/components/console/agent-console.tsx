@@ -109,7 +109,6 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
   // Get attachment config from agent's console configuration
   const { config: attachmentConfig, mediaRequirements } = useConsoleConfig(namespace, agentName);
 
-  // Always use mock mode for now (until K8s integration)
   const {
     sessionId: serverSessionId,
     status,

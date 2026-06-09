@@ -25,6 +25,13 @@ vi.mock("@/components/workspace-switcher", () => ({
   WorkspaceSwitcher: () => <div data-testid="workspace-switcher">WorkspaceSwitcher</div>,
 }));
 
+// Mock react-query so Header's useQueryClient/useIsFetching work without a provider.
+const mockInvalidateQueries = vi.fn();
+vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({ invalidateQueries: mockInvalidateQueries }),
+  useIsFetching: () => 0,
+}));
+
 describe("Header", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -88,11 +95,13 @@ describe("Header", () => {
 
   it("renders refresh button", () => {
     render(<Header title="Title" />);
+    expect(screen.getByRole("button", { name: "Refresh data" })).toBeInTheDocument();
+  });
 
-    // Find the refresh button by looking for the RefreshCw icon's parent button
-    const buttons = screen.getAllByRole("button");
-    // Should have theme toggle, refresh button
-    expect(buttons.length).toBeGreaterThanOrEqual(2);
+  it("invalidates queries when the refresh button is clicked", () => {
+    render(<Header title="Title" />);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh data" }));
+    expect(mockInvalidateQueries).toHaveBeenCalled();
   });
 
   it("accepts ReactNode as title", () => {

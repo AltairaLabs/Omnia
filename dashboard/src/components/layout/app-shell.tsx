@@ -10,6 +10,7 @@ import { LicenseExpiryBanner } from "./license-expiry-banner";
 import { DevModeLicenseBanner } from "./dev-mode-license-banner";
 import { WorkspaceContent } from "./workspace-content";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { Toaster } from "@/components/ui/toaster";
 import { isChromelessPath } from "@/lib/routes";
 
 interface AppShellProps {
@@ -20,7 +21,12 @@ export function AppShell({ children }: Readonly<AppShellProps>) {
   const pathname = usePathname();
 
   if (isChromelessPath(pathname)) {
-    return <ErrorBoundary>{children}</ErrorBoundary>;
+    return (
+      <ErrorBoundary>
+        {children}
+        <Toaster />
+      </ErrorBoundary>
+    );
   }
 
   return (
@@ -38,6 +44,7 @@ export function AppShell({ children }: Readonly<AppShellProps>) {
           </ErrorBoundary>
         </main>
       </div>
+      <Toaster />
     </div>
   );
 }

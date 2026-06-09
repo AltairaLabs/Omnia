@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, User, Shield } from "lucide-react";
+import { LogOut, Shield } from "lucide-react";
 
 /**
  * Generate Gravatar URL from email.
@@ -87,10 +87,6 @@ export function UserMenu() {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem disabled>
-          <User className="mr-2 h-4 w-4" />
-          <span>Profile</span>
-        </DropdownMenuItem>
         <DropdownMenuItem disabled>
           <Shield className="mr-2 h-4 w-4" />
           <span className="flex-1">Role</span>
