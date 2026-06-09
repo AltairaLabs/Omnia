@@ -135,6 +135,18 @@ spec:
             {{- include "omnia.redis.urlEnv" (dict "ctx" . "consumer" "enterprise.arena.queue.redis" "envName" "ARENA_REDIS_URL") | nindent 12 }}
             {{- end }}
             {{- /*
+              LSP service URL for the Arena Project Editor. The dashboard's WS
+              proxy (server.js) forwards /api/lsp to the promptkit-lsp service.
+              Without this env it falls back to a hardcoded omnia-system
+              namespace, which only resolves when the release happens to live
+              there — so wire it explicitly to the LSP service in THIS release's
+              namespace whenever the LSP server is enabled.
+            */}}
+            {{- if and .Values.enterprise.enabled .Values.enterprise.promptkitLsp.enabled }}
+            - name: LSP_SERVICE_URL
+              value: "ws://{{ include "omnia.fullname" . }}-promptkit-lsp.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.enterprise.promptkitLsp.service.port | default 8080 }}/lsp"
+            {{- end }}
+            {{- /*
               PKCE TTL: orthogonal to Redis (in-flight OAuth records have
               their own TTL even when sessions live in memory).
             */}}
