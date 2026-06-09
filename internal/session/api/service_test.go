@@ -404,13 +404,13 @@ func TestDeleteSession_EmptySessionID(t *testing.T) {
 	registry := providers.NewRegistry()
 	registry.SetWarmStore(newMockWarmStore())
 	svc := newServiceWithRegistry(registry, nil)
-	err := svc.DeleteSession(context.Background(), "")
+	err := svc.DeleteSession(context.Background(), "", "")
 	assert.ErrorIs(t, err, ErrMissingSessionID)
 }
 
 func TestDeleteSession_NoWarmStore(t *testing.T) {
 	svc := newServiceWithRegistry(providers.NewRegistry(), nil)
-	err := svc.DeleteSession(context.Background(), "s1")
+	err := svc.DeleteSession(context.Background(), "s1", "")
 	assert.ErrorIs(t, err, ErrWarmStoreRequired)
 }
 
@@ -423,7 +423,7 @@ func TestDeleteSession_Success(t *testing.T) {
 	al := &mockAuditLogger{}
 	svc := newServiceWithRegistry(registry, al)
 
-	err := svc.DeleteSession(context.Background(), "s1")
+	err := svc.DeleteSession(context.Background(), "s1", "")
 	require.NoError(t, err)
 	assert.NotContains(t, warm.sessions, "s1")
 	require.Len(t, al.entries, 1)
@@ -437,7 +437,7 @@ func TestDeleteSession_NotFound(t *testing.T) {
 	registry.SetWarmStore(warm)
 	svc := newServiceWithRegistry(registry, nil)
 
-	err := svc.DeleteSession(context.Background(), "nonexistent")
+	err := svc.DeleteSession(context.Background(), "nonexistent", "")
 	assert.ErrorIs(t, err, session.ErrSessionNotFound)
 }
 
@@ -448,7 +448,7 @@ func TestDeleteSession_NilAuditLogger(t *testing.T) {
 	registry.SetWarmStore(warm)
 	svc := newServiceWithRegistry(registry, nil)
 
-	err := svc.DeleteSession(context.Background(), "s1")
+	err := svc.DeleteSession(context.Background(), "s1", "")
 	require.NoError(t, err)
 }
 
@@ -721,7 +721,7 @@ func TestDeleteSession_InvalidatesHotCache(t *testing.T) {
 	registry.SetWarmStore(warm)
 	svc := newServiceWithRegistry(registry, nil)
 
-	err := svc.DeleteSession(context.Background(), "s1")
+	err := svc.DeleteSession(context.Background(), "s1", "")
 	require.NoError(t, err)
 
 	hot.waitOne()
