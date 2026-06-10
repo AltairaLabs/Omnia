@@ -12,6 +12,7 @@
 /** Valid groupBy values mirror session-api's ProviderCallAggregateGroupBy. */
 export type ProviderCallAggregateGroupBy =
   | "provider"
+  | "provider_name"
   | "model"
   | "agent"
   | "time:hour"
@@ -35,9 +36,10 @@ export interface ProviderCallAggregateRow {
   count: number;
 }
 
-/** Discovery payload — distinct providers + models for a workspace. */
+/** Discovery payload — distinct providers + provider names + models. */
 export interface ProviderCallDiscoveryResult {
   providers: string[];
+  providerNames: string[];
   models: string[];
 }
 
@@ -48,7 +50,10 @@ export interface ProviderCallAggregateParams {
   metric: ProviderCallAggregateMetric;
   /** Optional filters. */
   agentName?: string;
+  /** Provider type (e.g. "openai"). */
   provider?: string;
+  /** Provider CRD name — distinguishes same-type providers. */
+  providerName?: string;
   model?: string;
   /** RFC3339 timestamps. */
   from?: Date;
@@ -71,6 +76,7 @@ export async function fetchProviderCallsAggregate(
   qs.set("metric", params.metric);
   if (params.agentName) qs.set("agentName", params.agentName);
   if (params.provider) qs.set("provider", params.provider);
+  if (params.providerName) qs.set("providerName", params.providerName);
   if (params.model) qs.set("model", params.model);
   if (params.from) qs.set("from", params.from.toISOString());
   if (params.to) qs.set("to", params.to.toISOString());
@@ -85,7 +91,7 @@ export async function fetchProviderCallsAggregate(
 }
 
 /**
- * Fetch the distinct (provider, model) values for a workspace.
+ * Fetch the distinct (provider, provider_name, model) values for a workspace.
  * Replaces Prometheus label-value discovery for provider/model dropdowns.
  */
 export async function fetchProviderCallsDiscovery(
@@ -100,6 +106,7 @@ export async function fetchProviderCallsDiscovery(
   const body = (await resp.json()) as Partial<ProviderCallDiscoveryResult>;
   return {
     providers: body.providers ?? [],
+    providerNames: body.providerNames ?? [],
     models: body.models ?? [],
   };
 }
