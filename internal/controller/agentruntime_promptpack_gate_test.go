@@ -79,7 +79,7 @@ func TestReconcileReferences_PromptPackGate(t *testing.T) {
 
 	newAR := func() *omniav1alpha1.AgentRuntime {
 		return &omniav1alpha1.AgentRuntime{
-			ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "default"},
+			ObjectMeta: metav1.ObjectMeta{Name: testEvalAgentName, Namespace: "default"},
 			Spec:       omniav1alpha1.AgentRuntimeSpec{PromptPackRef: omniav1alpha1.PromptPackRef{Name: "pack"}},
 		}
 	}

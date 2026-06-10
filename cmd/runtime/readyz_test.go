@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,15 +17,35 @@ import (
 	"github.com/altairalabs/omnia/internal/schema"
 )
 
-const (
-	validPackJSON   = `{"id":"test","name":"Test Pack","version":"1.0.0","template_engine":{"version":"v1","syntax":"{{variable}}"},"prompts":{"default":{"id":"default","name":"Default","version":"1.0.0","system_template":"Test"}}}`
-	invalidPackJSON = `{"id":"test","name":"Test Pack","version":"1.0.0","prompts":{"default":{"id":"default","name":"Default","version":"1.0.0","system_template":"Test"}}}` // missing template_engine
-)
+const promptID = "default"
 
-func writePack(t *testing.T, content string) string {
+// writePackFile marshals a minimal pack and writes it to a temp file. When
+// withTemplateEngine is false the pack is missing the required root
+// template_engine, so it fails schema validation (the #1299 repro).
+func writePackFile(t *testing.T, withTemplateEngine bool) string {
 	t.Helper()
+	pack := map[string]any{
+		"id":      "test",
+		"name":    "Test Pack",
+		"version": "1.0.0",
+		"prompts": map[string]any{
+			promptID: map[string]any{
+				"id":              promptID,
+				"name":            "Default",
+				"version":         "1.0.0",
+				"system_template": "Test",
+			},
+		},
+	}
+	if withTemplateEngine {
+		pack["template_engine"] = map[string]any{"version": "v1", "syntax": "{{variable}}"}
+	}
+	data, err := json.Marshal(pack)
+	if err != nil {
+		t.Fatal(err)
+	}
 	p := filepath.Join(t.TempDir(), "pack.json")
-	if err := os.WriteFile(p, []byte(content), 0600); err != nil {
+	if err := os.WriteFile(p, data, 0600); err != nil {
 		t.Fatal(err)
 	}
 	return p
@@ -34,13 +55,13 @@ func TestPackReadyError(t *testing.T) {
 	v := schema.NewSchemaValidatorWithOptions(zap.New(zap.UseDevMode(true)), nil, 0)
 
 	t.Run("valid pack is ready", func(t *testing.T) {
-		if err := packReadyError(v, writePack(t, validPackJSON)); err != nil {
+		if err := packReadyError(v, writePackFile(t, true)); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 
 	t.Run("schema-invalid pack is not ready", func(t *testing.T) {
-		if err := packReadyError(v, writePack(t, invalidPackJSON)); err == nil {
+		if err := packReadyError(v, writePackFile(t, false)); err == nil {
 			t.Fatal("expected error for schema-invalid pack")
 		}
 	})
@@ -52,7 +73,7 @@ func TestPackReadyError(t *testing.T) {
 	})
 
 	t.Run("nil validator skips schema check (fail-open) when file is readable", func(t *testing.T) {
-		if err := packReadyError(nil, writePack(t, invalidPackJSON)); err != nil {
+		if err := packReadyError(nil, writePackFile(t, false)); err != nil {
 			t.Fatalf("nil validator should not fail readiness: %v", err)
 		}
 	})
