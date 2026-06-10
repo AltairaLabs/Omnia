@@ -162,6 +162,9 @@ func main() {
 	var runnerOpts []evals.SDKRunnerOption
 	runnerOpts = append(runnerOpts, evals.WithEvalCollector(evalCollector))
 	runnerOpts = append(runnerOpts, evals.WithLogger(logger))
+	// Record the provider calls the eval pipeline makes (judge LLM calls,
+	// RAG-eval embeddings, …) to session-api's provider_calls table.
+	runnerOpts = append(runnerOpts, evals.WithProviderCallWriter(sessionClient))
 	if tp != nil {
 		runnerOpts = append(runnerOpts, evals.WithTracerProvider(tp.TracerProvider()))
 	}

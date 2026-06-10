@@ -10,6 +10,28 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (session-api: provider usage tracking + per-CRD attribution, #1301)
+
+- **`POST /api/v1/provider-usage`** (new): records workspace-scoped, session-less
+  provider spend (embeddings, judge tokens, …) keyed by namespace. Body is a JSON
+  array of `ProviderUsage` objects (namespace/provider/source required). Written by
+  memory-api (embeddings) and reserved for other infrastructure producers.
+- **`ProviderCall`** gains `namespace`, `agentName`, and `providerName` — the first
+  two denormalized from the session so cost/usage aggregates filter without a JOIN;
+  `providerName` carries the Provider CRD identity (vs `provider`, which is the type)
+  so two same-type providers are attributed separately.
+- **`GET /api/v1/provider-calls/aggregate`** adds a `provider_name` `groupBy`
+  dimension + a `providerName` filter; **`GET /api/v1/provider-calls/discover`**
+  response gains `providerNames`. Backward compatible.
+
+### Removed (session-api: dead judge_tokens/judge_cost_usd on EvalResult, #1301)
+
+`EvalResult.judgeTokens` and `EvalResult.judgeCostUsd` are removed — they were
+never populated. Judge LLM token usage is now recorded as a normal provider call
+in `provider_calls` with `source="judge"` (inline via the runtime event store, and
+in the arena eval-worker via an attached event bus), so the spend lives with the
+provider call rather than duplicated on the eval verdict.
+
 ### Changed (session-api: compound groupBy on provider-calls aggregate, #1222)
 
 `GET /api/v1/provider-calls/aggregate` now accepts a **comma-separated**

@@ -287,8 +287,17 @@ type ProviderCall struct {
 	ID string `json:"id"`
 	// SessionID links this provider call to its parent session.
 	SessionID string `json:"sessionId"`
-	// Provider is the LLM provider name (e.g., "anthropic", "openai").
+	// Namespace is denormalized from the parent session (immutable per session)
+	// so cost/usage aggregates can filter without JOINing sessions.
+	Namespace string `json:"namespace,omitempty"`
+	// AgentName is denormalized from the parent session, alongside Namespace.
+	AgentName string `json:"agentName,omitempty"`
+	// Provider is the LLM provider type (e.g., "anthropic", "openai", "ollama").
 	Provider string `json:"provider"`
+	// ProviderName is the Provider CRD name (distinct from Provider, which holds
+	// the type). Carries per-provider identity so same-type providers are
+	// attributed separately. Empty when not configured via a providerRef.
+	ProviderName string `json:"providerName,omitempty"`
 	// Model is the model identifier (e.g., "claude-sonnet-4-20250514").
 	Model string `json:"model"`
 	// Status is the lifecycle state of the provider call.
@@ -342,8 +351,6 @@ type EvalResult struct {
 	Score             *float64        `json:"score,omitempty"`
 	Details           json.RawMessage `json:"details,omitempty"`
 	DurationMs        *int            `json:"durationMs,omitempty"`
-	JudgeTokens       *int            `json:"judgeTokens,omitempty"`
-	JudgeCostUSD      *float64        `json:"judgeCostUsd,omitempty"`
 	Source            string          `json:"source"`
 	CreatedAt         time.Time       `json:"createdAt"`
 }

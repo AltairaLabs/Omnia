@@ -117,12 +117,17 @@ func (s *OmniaEventStore) SetSessionID(id string) {
 	s.sessionID = id
 }
 
-// AgentMeta holds agent identity fields for enriching eval results.
+// AgentMeta holds agent identity fields for enriching eval results and
+// denormalizing provider-call attribution.
 type AgentMeta struct {
 	AgentName         string
 	Namespace         string
 	PromptPackName    string
 	PromptPackVersion string
+	// ProviderName is the Provider CRD name (empty when not using a providerRef).
+	// Denormalized onto provider_calls so same-type providers are attributed
+	// separately.
+	ProviderName string
 }
 
 // SetAgentMeta sets agent identity metadata used to enrich eval results.
@@ -614,7 +619,10 @@ func (s *OmniaEventStore) convertProviderCallCompleted(event *events.Event) (eve
 
 	pc := session.ProviderCall{
 		ID:            uuid.New().String(),
+		Namespace:     s.agentMeta.Namespace,
+		AgentName:     s.agentMeta.AgentName,
 		Provider:      data.Provider,
+		ProviderName:  s.agentMeta.ProviderName,
 		Model:         data.Model,
 		Status:        session.ProviderCallStatusCompleted,
 		InputTokens:   int64(data.InputTokens),
@@ -649,7 +657,10 @@ func (s *OmniaEventStore) convertProviderCallFailed(event *events.Event) (eventA
 
 	pc := session.ProviderCall{
 		ID:           uuid.New().String(),
+		Namespace:    s.agentMeta.Namespace,
+		AgentName:    s.agentMeta.AgentName,
 		Provider:     data.Provider,
+		ProviderName: s.agentMeta.ProviderName,
 		Model:        data.Model,
 		Status:       session.ProviderCallStatusFailed,
 		DurationMs:   data.Duration.Milliseconds(),

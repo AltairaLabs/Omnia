@@ -194,6 +194,7 @@ func TestHandleDiscoverProviderCalls_NilReturnsEmptyArrays(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
 	assert.Contains(t, body, `"providers":[]`)
+	assert.Contains(t, body, `"providerNames":[]`)
 	assert.Contains(t, body, `"models":[]`)
 }
 

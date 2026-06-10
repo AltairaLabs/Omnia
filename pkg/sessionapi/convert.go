@@ -144,7 +144,10 @@ func ProviderCallToAPI(pc session.ProviderCall) ProviderCall {
 	out := ProviderCall{
 		Id:            ptr(pc.ID),
 		SessionId:     uuidPtr(pc.SessionID),
+		Namespace:     ptrNonEmpty(pc.Namespace),
+		AgentName:     ptrNonEmpty(pc.AgentName),
 		Provider:      ptr(pc.Provider),
+		ProviderName:  ptrNonEmpty(pc.ProviderName),
 		Model:         ptr(pc.Model),
 		Status:        &status,
 		InputTokens:   ptrNonZeroInt64(pc.InputTokens),
@@ -199,8 +202,6 @@ func EvalResultToAPI(r *api.EvalResult) EvalResult {
 		Passed:            &r.Passed,
 		Score:             r.Score,
 		DurationMs:        r.DurationMs,
-		JudgeTokens:       r.JudgeTokens,
-		JudgeCostUsd:      r.JudgeCostUSD,
 		Source:            ptrNonEmpty(r.Source),
 		CreatedAt:         timePtr(r.CreatedAt),
 	}
@@ -359,7 +360,10 @@ func ProviderCallFromAPI(pc ProviderCall) session.ProviderCall {
 	out := session.ProviderCall{
 		ID:            deref(pc.Id),
 		SessionID:     uuidToString(pc.SessionId),
+		Namespace:     deref(pc.Namespace),
+		AgentName:     deref(pc.AgentName),
 		Provider:      deref(pc.Provider),
+		ProviderName:  deref(pc.ProviderName),
 		Model:         deref(pc.Model),
 		InputTokens:   deref(pc.InputTokens),
 		OutputTokens:  deref(pc.OutputTokens),
@@ -406,8 +410,6 @@ func EvalResultFromAPI(r EvalResult) *api.EvalResult {
 		Passed:            deref(r.Passed),
 		Score:             r.Score,
 		DurationMs:        r.DurationMs,
-		JudgeTokens:       r.JudgeTokens,
-		JudgeCostUSD:      r.JudgeCostUsd,
 		Source:            deref(r.Source),
 		CreatedAt:         deref(r.CreatedAt),
 	}

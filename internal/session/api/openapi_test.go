@@ -107,11 +107,12 @@ func TestOpenAPISchemaMatchesGoTypes(t *testing.T) {
 	// Map of OpenAPI schema name → Go type.
 	schemaTypes := map[string]reflect.Type{
 		// Core session types (internal/session/store.go)
-		"Session":      reflect.TypeOf(session.Session{}),
-		"Message":      reflect.TypeOf(session.Message{}),
-		"ToolCall":     reflect.TypeOf(session.ToolCall{}),
-		"ProviderCall": reflect.TypeOf(session.ProviderCall{}),
-		"RuntimeEvent": reflect.TypeOf(session.RuntimeEvent{}),
+		"Session":       reflect.TypeOf(session.Session{}),
+		"Message":       reflect.TypeOf(session.Message{}),
+		"ToolCall":      reflect.TypeOf(session.ToolCall{}),
+		"ProviderCall":  reflect.TypeOf(session.ProviderCall{}),
+		"ProviderUsage": reflect.TypeOf(ProviderUsage{}),
+		"RuntimeEvent":  reflect.TypeOf(session.RuntimeEvent{}),
 
 		// Request/response types (internal/session/api/)
 		"CreateSessionRequest":      reflect.TypeOf(CreateSessionRequest{}),
@@ -238,6 +239,7 @@ func TestOpenAPIRoutesMatchHandler(t *testing.T) {
 		"POST /api/v1/sessions/{sessionID}/evaluate",
 		"POST /api/v1/eval-results",
 		"GET /api/v1/eval-results",
+		"POST /api/v1/provider-usage",
 		"GET /api/v1/privacy-policy",
 	}
 

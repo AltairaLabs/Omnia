@@ -156,6 +156,7 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 			Namespace:         s.namespace,
 			PromptPackName:    s.promptPackName,
 			PromptPackVersion: s.promptPackVersion,
+			ProviderName:      s.providerRefName,
 		})
 		if s.toolExecutor != nil {
 			eventStore.SetToolMetaFn(s.toolExecutor.GetToolMeta)

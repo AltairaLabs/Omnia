@@ -57,6 +57,19 @@ describe("fetchProviderCallsAggregate", () => {
     expect(url).toContain("to=2026-05-02T00%3A00%3A00.000Z");
   });
 
+  it("emits the providerName filter when set", async () => {
+    const fakeFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ rows: [] }), { status: 200 }),
+    );
+    await fetchProviderCallsAggregate(
+      { workspace: "ws", groupBy: "provider_name", metric: "count", providerName: "openai-primary" },
+      fakeFetch as unknown as typeof fetch,
+    );
+    const url = String((fakeFetch.mock.calls as unknown as [string][])[0][0]);
+    expect(url).toContain("groupBy=provider_name");
+    expect(url).toContain("providerName=openai-primary");
+  });
+
   it("encodes workspace names with special characters in the path", async () => {
     const fakeFetch = vi.fn(async () =>
       new Response(JSON.stringify({ rows: [] }), { status: 200 }),
@@ -122,11 +135,12 @@ describe("fetchProviderCallsAggregate", () => {
 });
 
 describe("fetchProviderCallsDiscovery", () => {
-  it("returns providers + models", async () => {
+  it("returns providers + provider names + models", async () => {
     const fakeFetch = vi.fn(async () =>
       new Response(
         JSON.stringify({
           providers: ["anthropic", "openai"],
+          providerNames: ["openai-cheap", "openai-primary"],
           models: ["claude-3-5-sonnet", "gpt-4"],
         }),
         { status: 200 },
@@ -134,6 +148,7 @@ describe("fetchProviderCallsDiscovery", () => {
     );
     const res = await fetchProviderCallsDiscovery("test-ws", fakeFetch as unknown as typeof fetch);
     expect(res.providers).toEqual(["anthropic", "openai"]);
+    expect(res.providerNames).toEqual(["openai-cheap", "openai-primary"]);
     expect(res.models).toEqual(["claude-3-5-sonnet", "gpt-4"]);
 
     const url = String((fakeFetch.mock.calls as unknown as [string][])[0][0]);
@@ -145,7 +160,7 @@ describe("fetchProviderCallsDiscovery", () => {
       new Response(JSON.stringify({}), { status: 200 }),
     );
     const res = await fetchProviderCallsDiscovery("ws", fakeFetch as unknown as typeof fetch);
-    expect(res).toEqual({ providers: [], models: [] });
+    expect(res).toEqual({ providers: [], providerNames: [], models: [] });
   });
 
   it("throws on non-2xx response", async () => {

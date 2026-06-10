@@ -311,7 +311,7 @@ func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string,
 	// operator-wide default. Any tier may be empty (memory-api then runs
 	// without Redis, cache + event publisher disabled) — that's valid.
 	redisURL, redisSecret := resolveMemoryRedis(sg, namespace, sb.MemoryRedisURL, sb.MemoryRedisURLSecret)
-	args := buildMemoryAPIArgs(workspaceName, sg, redisURL, sb.MemoryCacheTTL, sb.MemoryConsolidationInterval)
+	args := buildMemoryAPIArgs(workspaceName, namespace, sg, redisURL, sb.MemoryCacheTTL, sb.MemoryConsolidationInterval)
 	var overrides *omniav1alpha1.PodOverrides
 	if sg.Memory != nil {
 		overrides = sg.Memory.PodOverrides
@@ -385,13 +385,16 @@ func addMemoryRedisURLEnv(dep *appsv1.Deployment, ref SecretKeyRef) {
 // the literal placeholder "$(REDIS_URL)" — Kubernetes env expansion at
 // the memory-api pod fills it from the REDIS_URL Secret env that
 // addMemoryRedisURLEnv mounts.
-func buildMemoryAPIArgs(workspaceName string, sg omniav1alpha1.WorkspaceServiceGroup, redisURL, cacheTTL, consolidationInterval string) []string {
+func buildMemoryAPIArgs(workspaceName, namespace string, sg omniav1alpha1.WorkspaceServiceGroup, redisURL, cacheTTL, consolidationInterval string) []string {
 	args := []string{
 		fmt.Sprintf("--workspace=%s", workspaceName),
 		fmt.Sprintf("--service-group=%s", sg.Name),
 		fmt.Sprintf("--compaction-interval=%s", defaultMemoryCompactionInterval),
 		fmt.Sprintf("--tombstone-interval=%s", defaultMemoryTombstoneInterval),
 		fmt.Sprintf("--reembed-interval=%s", defaultMemoryReembedInterval),
+		// Point memory-api at the co-located per-group session-api so embedding
+		// spend lands in provider_usage (the spend has no session of its own).
+		fmt.Sprintf("--session-api-url=%s", ServiceURL(fmt.Sprintf("session-%s-%s", workspaceName, sg.Name), namespace)),
 	}
 	if sg.Memory != nil && sg.Memory.ProviderRef != nil && sg.Memory.ProviderRef.Name != "" {
 		args = append(args, fmt.Sprintf("--embedding-provider=%s", sg.Memory.ProviderRef.Name))

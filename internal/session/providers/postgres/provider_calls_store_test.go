@@ -27,6 +27,11 @@ const (
 	pcModelGPT4         = "gpt-4"
 	pcModelGPT4Mini     = "gpt-4o-mini"
 	pcModelSonnet       = "claude-3-5-sonnet"
+	// Provider CRD names. Both openai-* are the same provider type ("openai")
+	// but distinct CRDs — the case the provider_name dimension must split.
+	pcProviderNameOpenAIPrimary = "openai-primary"
+	pcProviderNameOpenAICheap   = "openai-cheap"
+	pcProviderNameAnthropicMain = "anthropic-main"
 )
 
 func newProviderCallsStore(t *testing.T) (*ProviderCallsStoreImpl, *EvalStoreImpl) {
@@ -54,7 +59,10 @@ func seedSessionWithAgent(t *testing.T, store *EvalStoreImpl, sessionID, namespa
 
 type pcRow struct {
 	sessionID    string
+	namespace    string
+	agentName    string
 	provider     string
+	providerName string
 	model        string
 	inputTokens  int64
 	outputTokens int64
@@ -67,13 +75,17 @@ type pcRow struct {
 func insertProviderCall(t *testing.T, store *ProviderCallsStoreImpl, r pcRow) {
 	t.Helper()
 	id := uuid.New().String()
+	var providerName any
+	if r.providerName != "" {
+		providerName = r.providerName
+	}
 	_, err := store.pool.Exec(context.Background(), `
 		INSERT INTO provider_calls (
-			id, session_id, provider, model, status,
+			id, session_id, namespace, agent_name, provider, provider_name, model, status,
 			input_tokens, output_tokens, cached_tokens, cost_usd, duration_ms,
 			created_at
-		) VALUES ($1, $2, $3, $4, 'completed', $5, $6, $7, $8, $9, $10)`,
-		id, r.sessionID, r.provider, r.model,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'completed', $8, $9, $10, $11, $12, $13)`,
+		id, r.sessionID, r.namespace, r.agentName, r.provider, providerName, r.model,
 		r.inputTokens, r.outputTokens, r.cachedTokens, r.costUSD, r.durationMs,
 		r.createdAt,
 	)
@@ -108,14 +120,14 @@ func seedProviderCallsFixture(t *testing.T, pcStore *ProviderCallsStoreImpl, eva
 	day2 := pcFixtureDay2
 
 	rows := []pcRow{
-		// chatbot · openai gpt-4 — day1: 100 in / 200 out / $0.01, duration 100ms
-		{sessChatbot, pcProviderOpenAI, pcModelGPT4, 100, 200, 0, 0.01, 100, day1},
-		// chatbot · openai gpt-4 — day1: 150 in / 250 out / $0.02, duration 200ms
-		{sessChatbot, pcProviderOpenAI, pcModelGPT4, 150, 250, 50, 0.02, 200, day1},
-		// chatbot · openai gpt-4o-mini — day2: 50 / 100 / $0.001, duration 80ms
-		{sessChatbot, pcProviderOpenAI, pcModelGPT4Mini, 50, 100, 0, 0.001, 80, day2},
-		// support · anthropic sonnet — day2: 300 / 500 / $0.05, duration 500ms
-		{sessSupport, pcProviderAnthropic, pcModelSonnet, 300, 500, 0, 0.05, 500, day2},
+		// chatbot · openai-primary gpt-4 — day1: 100 in / 200 out / $0.01, duration 100ms
+		{sessChatbot, pcNamespaceDefault, pcAgentChatbot, pcProviderOpenAI, pcProviderNameOpenAIPrimary, pcModelGPT4, 100, 200, 0, 0.01, 100, day1},
+		// chatbot · openai-primary gpt-4 — day1: 150 in / 250 out / $0.02, duration 200ms
+		{sessChatbot, pcNamespaceDefault, pcAgentChatbot, pcProviderOpenAI, pcProviderNameOpenAIPrimary, pcModelGPT4, 150, 250, 50, 0.02, 200, day1},
+		// chatbot · openai-cheap gpt-4o-mini — day2: 50 / 100 / $0.001, duration 80ms
+		{sessChatbot, pcNamespaceDefault, pcAgentChatbot, pcProviderOpenAI, pcProviderNameOpenAICheap, pcModelGPT4Mini, 50, 100, 0, 0.001, 80, day2},
+		// support · anthropic-main sonnet — day2: 300 / 500 / $0.05, duration 500ms
+		{sessSupport, pcNamespaceDefault, pcAgentSupport, pcProviderAnthropic, pcProviderNameAnthropicMain, pcModelSonnet, 300, 500, 0, 0.05, 500, day2},
 	}
 	for _, r := range rows {
 		insertProviderCall(t, pcStore, r)
@@ -144,6 +156,53 @@ func TestAggregateProviderCalls_GroupByProvider_Count(t *testing.T) {
 	}
 	assert.InDelta(t, 3, byKey[pcProviderOpenAI].Value, 0.001)
 	assert.InDelta(t, 1, byKey[pcProviderAnthropic].Value, 0.001)
+}
+
+// TestAggregateProviderCalls_GroupByProviderName_Count proves the fix for the
+// "all providers show the same numbers" bug: two providers of the same type
+// ("openai") are attributed separately by their CRD name.
+func TestAggregateProviderCalls_GroupByProviderName_Count(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	pcStore, evalStore := newProviderCallsStore(t)
+	seedProviderCallsFixture(t, pcStore, evalStore)
+
+	rows, err := pcStore.AggregateProviderCalls(context.Background(), api.ProviderCallAggregateOpts{
+		Namespace: pcNamespaceDefault,
+		GroupBy:   []api.ProviderCallAggregateGroupBy{api.ProviderCallAggregateGroupByProviderName},
+		Metric:    api.ProviderCallAggregateMetricCount,
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 3)
+	byKey := map[string]float64{}
+	for _, r := range rows {
+		byKey[r.Key] = r.Value
+	}
+	// Same-type openai providers no longer collapse: primary has 2 calls, cheap 1.
+	assert.InDelta(t, 2, byKey[pcProviderNameOpenAIPrimary], 0.001)
+	assert.InDelta(t, 1, byKey[pcProviderNameOpenAICheap], 0.001)
+	assert.InDelta(t, 1, byKey[pcProviderNameAnthropicMain], 0.001)
+}
+
+// TestAggregateProviderCalls_FilterByProviderName narrows to a single CRD.
+func TestAggregateProviderCalls_FilterByProviderName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	pcStore, evalStore := newProviderCallsStore(t)
+	seedProviderCallsFixture(t, pcStore, evalStore)
+
+	rows, err := pcStore.AggregateProviderCalls(context.Background(), api.ProviderCallAggregateOpts{
+		Namespace:    pcNamespaceDefault,
+		ProviderName: pcProviderNameOpenAIPrimary,
+		GroupBy:      []api.ProviderCallAggregateGroupBy{api.ProviderCallAggregateGroupByProvider},
+		Metric:       api.ProviderCallAggregateMetricCount,
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, pcProviderOpenAI, rows[0].Key)
+	assert.InDelta(t, 2, rows[0].Value, 0.001)
 }
 
 func TestAggregateProviderCalls_GroupByAgent_SumCostUSD(t *testing.T) {
@@ -424,7 +483,7 @@ func TestBuildProviderCallAggregateFilters(t *testing.T) {
 	t.Run("namespace only", func(t *testing.T) {
 		qb := buildProviderCallAggregateFilters(api.ProviderCallAggregateOpts{Namespace: "ns"})
 		assert.Equal(t, []any{"ns"}, qb.Args())
-		assert.Contains(t, qb.Where(), "s.namespace=$1")
+		assert.Contains(t, qb.Where(), "pc.namespace=$1")
 	})
 	t.Run("all filters set", func(t *testing.T) {
 		from := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
@@ -461,6 +520,8 @@ func TestProviderCallsDiscovery(t *testing.T) {
 	require.NotNil(t, res)
 	// Providers sorted alphabetically: anthropic, openai.
 	assert.Equal(t, []string{pcProviderAnthropic, pcProviderOpenAI}, res.Providers)
+	// Provider CRD names sorted: anthropic-main, openai-cheap, openai-primary.
+	assert.Equal(t, []string{pcProviderNameAnthropicMain, pcProviderNameOpenAICheap, pcProviderNameOpenAIPrimary}, res.ProviderNames)
 	// Models sorted: claude-3-5-sonnet, gpt-4, gpt-4o-mini.
 	assert.Equal(t, []string{pcModelSonnet, pcModelGPT4, pcModelGPT4Mini}, res.Models)
 }
@@ -476,6 +537,7 @@ func TestProviderCallsDiscovery_NamespaceIsolation(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	assert.Empty(t, res.Providers)
+	assert.Empty(t, res.ProviderNames)
 	assert.Empty(t, res.Models)
 }
 
@@ -497,7 +559,8 @@ func TestProviderCallsDiscovery_SkipsEmptyProviderAndModel(t *testing.T) {
 	sess := "33333333-3333-3333-3333-333333333333"
 	seedSessionWithAgent(t, evalStore, sess, pcNamespaceDefault, pcAgentChatbot)
 	insertProviderCall(t, pcStore, pcRow{
-		sessionID: sess, provider: pcProviderOpenAI, model: "",
+		sessionID: sess, namespace: pcNamespaceDefault, agentName: pcAgentChatbot,
+		provider: pcProviderOpenAI, model: "",
 		inputTokens: 1, outputTokens: 1, costUSD: 0, durationMs: 1,
 		createdAt: time.Now().UTC(),
 	})

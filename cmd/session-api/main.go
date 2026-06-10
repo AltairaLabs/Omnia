@@ -492,6 +492,10 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 		providerCallsStore := pgprovider.NewProviderCallsStore(pool)
 		providerCallsService := api.NewProviderCallsService(providerCallsStore, log)
 		handler.SetProviderCallsService(providerCallsService)
+
+		providerUsageStore := pgprovider.NewProviderUsageStore(pool)
+		providerUsageService := api.NewProviderUsageService(providerUsageStore, log)
+		handler.SetProviderUsageService(providerUsageService)
 	}
 
 	mux := http.NewServeMux()

@@ -98,9 +98,6 @@ function EvalDetailRow({ result }: Readonly<{ result: EvalResult }>) {
             {result.durationMs !== undefined && (
               <span>{result.durationMs}ms</span>
             )}
-            {result.judgeCostUsd !== undefined && (
-              <span>${result.judgeCostUsd.toFixed(4)}</span>
-            )}
           </div>
           <JsonBlock data={result.details} className="bg-background text-[10px]" />
         </div>

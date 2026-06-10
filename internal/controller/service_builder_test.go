@@ -328,6 +328,10 @@ func TestBuildMemoryDeployment(t *testing.T) {
 	assert.Contains(t, container.Args, "--compaction-interval=24h")
 	assert.Contains(t, container.Args, "--tombstone-interval=24h")
 	assert.Contains(t, container.Args, "--reembed-interval=60m")
+	// Embedding spend has no session, so memory-api emits it to the co-located
+	// per-group session-api's provider_usage table. Without this the spend is
+	// invisible (the bug #1301 fixes).
+	assert.Contains(t, container.Args, "--session-api-url=http://session-acme-prod.acme-ns:8080")
 
 	// POD_NAMESPACE downward API — required so the embedding-provider
 	// lookup defaults to the workspace namespace (where the Provider

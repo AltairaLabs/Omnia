@@ -275,7 +275,10 @@ func TestProviderCallToAPI(t *testing.T) {
 	pc := session.ProviderCall{
 		ID:            "pc1",
 		SessionID:     uuid.New().String(),
+		Namespace:     "omnia-demo",
+		AgentName:     "support",
 		Provider:      "anthropic",
+		ProviderName:  "anthropic-main",
 		Model:         "claude-sonnet-4-20250514",
 		Status:        session.ProviderCallStatusCompleted,
 		InputTokens:   1000,
@@ -292,11 +295,20 @@ func TestProviderCallToAPI(t *testing.T) {
 	result := ProviderCallToAPI(pc)
 
 	assert.Equal(t, "pc1", deref(result.Id))
+	assert.Equal(t, "omnia-demo", deref(result.Namespace))
+	assert.Equal(t, "support", deref(result.AgentName))
+	assert.Equal(t, "anthropic-main", deref(result.ProviderName))
 	assert.Equal(t, ProviderCallStatusCompleted, *result.Status)
 	assert.Equal(t, int64(1000), deref(result.InputTokens))
 	assert.Equal(t, 0.05, deref(result.CostUsd))
 	assert.Equal(t, "end_turn", deref(result.FinishReason))
 	assert.Equal(t, int32(2), deref(result.ToolCallCount))
+
+	// Round-trip back to the internal type preserves the denorm fields.
+	back := ProviderCallFromAPI(result)
+	assert.Equal(t, "omnia-demo", back.Namespace)
+	assert.Equal(t, "support", back.AgentName)
+	assert.Equal(t, "anthropic-main", back.ProviderName)
 }
 
 func TestStatusUpdateToAPI(t *testing.T) {
@@ -322,8 +334,6 @@ func TestStatusUpdateToAPI_NoChange(t *testing.T) {
 func TestEvalResultToAPI(t *testing.T) {
 	score := 0.9
 	dur := 150
-	tokens := 500
-	cost := 0.02
 	details := json.RawMessage(`{"key":"value"}`)
 
 	r := &api.EvalResult{
@@ -341,8 +351,6 @@ func TestEvalResultToAPI(t *testing.T) {
 		Score:             &score,
 		Details:           details,
 		DurationMs:        &dur,
-		JudgeTokens:       &tokens,
-		JudgeCostUSD:      &cost,
 		Source:            "worker",
 		CreatedAt:         time.Now().Truncate(time.Second),
 	}
@@ -615,8 +623,6 @@ func TestEvalResultFromAPI(t *testing.T) {
 		Score:             ptr(0.9),
 		Details:           &details,
 		DurationMs:        ptr(150),
-		JudgeTokens:       ptr(500),
-		JudgeCostUsd:      ptr(0.02),
 		Source:            ptr("worker"),
 		CreatedAt:         &now,
 	}

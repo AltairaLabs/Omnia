@@ -48,7 +48,7 @@ func NewEvalStore(pool *pgxpool.Pool) *EvalStoreImpl {
 // evalResultColumns is the SELECT column list for eval_results.
 const evalResultColumns = `id, session_id, message_id, agent_name, namespace,
 	promptpack_name, promptpack_version, eval_id, eval_type, trigger,
-	passed, score, details, duration_ms, judge_tokens, judge_cost_usd,
+	passed, score, details, duration_ms,
 	source, created_at`
 
 // Reusable QueryBuilder filter fragments. The QueryBuilder substitutes the
@@ -72,17 +72,18 @@ func (s *EvalStoreImpl) InsertEvalResults(ctx context.Context, results []*api.Ev
 	query := `INSERT INTO eval_results (
 		session_id, message_id, agent_name, namespace,
 		promptpack_name, promptpack_version, eval_id, eval_type, trigger,
-		passed, score, details, duration_ms, judge_tokens, judge_cost_usd,
+		passed, score, details, duration_ms,
 		source
 	) VALUES `
 
-	args := make([]any, 0, len(results)*16)
+	const cols = 14
+	args := make([]any, 0, len(results)*cols)
 	valueRows := make([]string, 0, len(results))
 
 	for i, r := range results {
-		base := i * 16
-		placeholders := make([]string, 16)
-		for j := range 16 {
+		base := i * cols
+		placeholders := make([]string, cols)
+		for j := range cols {
 			placeholders[j] = "$" + strconv.Itoa(base+j+1)
 		}
 		valueRows = append(valueRows, "("+strings.Join(placeholders, ",")+")")
@@ -90,7 +91,7 @@ func (s *EvalStoreImpl) InsertEvalResults(ctx context.Context, results []*api.Ev
 		args = append(args,
 			r.SessionID, pgutil.NullString(r.MessageID), r.AgentName, r.Namespace,
 			r.PromptPackName, pgutil.NullString(r.PromptPackVersion), r.EvalID, r.EvalType, r.Trigger,
-			r.Passed, r.Score, nullJSONB(r.Details), r.DurationMs, r.JudgeTokens, r.JudgeCostUSD,
+			r.Passed, r.Score, nullJSONB(r.Details), r.DurationMs,
 			r.Source,
 		)
 	}
@@ -472,7 +473,7 @@ func scanEvalResult(row pgx.Row) (*api.EvalResult, error) {
 	err := row.Scan(
 		&r.ID, &r.SessionID, &messageID, &r.AgentName, &r.Namespace,
 		&r.PromptPackName, &promptPackVersion, &r.EvalID, &r.EvalType, &r.Trigger,
-		&r.Passed, &r.Score, &details, &r.DurationMs, &r.JudgeTokens, &r.JudgeCostUSD,
+		&r.Passed, &r.Score, &details, &r.DurationMs,
 		&r.Source, &r.CreatedAt,
 	)
 	if err != nil {

@@ -73,27 +73,28 @@ function rowsToSeries(
 /**
  * Fetch usage metrics for a specific provider in the current workspace.
  *
- * Signature kept stable for back-compat: `providerName` is no longer needed
- * (the structured path scopes by namespace + provider type) but call sites
- * still pass it.
+ * Scoped by the Provider CRD name (`providerName`), NOT the provider type, so
+ * two providers of the same type (e.g. two "openai" CRDs) report distinct
+ * numbers instead of collapsing to one. `providerType` is retained for the
+ * stable call-site signature but no longer drives the query.
  */
-export function useProviderMetrics(_providerName: string, providerType?: string) {
+export function useProviderMetrics(providerName: string, _providerType?: string) {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
 
   return useQuery({
-    queryKey: ["provider-metrics", workspace, providerType],
-    enabled: Boolean(workspace && providerType),
+    queryKey: ["provider-metrics", workspace, providerName],
+    enabled: Boolean(workspace && providerName),
     refetchInterval: 60000,
     staleTime: DEFAULT_STALE_TIME,
     queryFn: async (): Promise<ProviderMetricsData> => {
-      if (!workspace || !providerType) return EMPTY_METRICS;
+      if (!workspace || !providerName) return EMPTY_METRICS;
 
       const end = new Date();
       const start = new Date(end.getTime() - ONE_DAY_MS);
       const base = {
         workspace,
-        provider: providerType,
+        providerName,
         from: start,
         to: end,
       };
@@ -114,11 +115,11 @@ export function useProviderMetrics(_providerName: string, providerType?: string)
           fetchProviderCallsAggregate({ ...base, groupBy: "time:hour", metric: "sum_input_tokens" }),
           fetchProviderCallsAggregate({ ...base, groupBy: "time:hour", metric: "sum_output_tokens" }),
           fetchProviderCallsAggregate({ ...base, groupBy: "time:hour", metric: "sum_cost_usd" }),
-          // 24h totals (one row collapsed by provider).
-          fetchProviderCallsAggregate({ ...base, groupBy: "provider", metric: "count" }),
-          fetchProviderCallsAggregate({ ...base, groupBy: "provider", metric: "sum_input_tokens" }),
-          fetchProviderCallsAggregate({ ...base, groupBy: "provider", metric: "sum_output_tokens" }),
-          fetchProviderCallsAggregate({ ...base, groupBy: "provider", metric: "sum_cost_usd" }),
+          // 24h totals (one row collapsed by provider CRD name).
+          fetchProviderCallsAggregate({ ...base, groupBy: "provider_name", metric: "count" }),
+          fetchProviderCallsAggregate({ ...base, groupBy: "provider_name", metric: "sum_input_tokens" }),
+          fetchProviderCallsAggregate({ ...base, groupBy: "provider_name", metric: "sum_output_tokens" }),
+          fetchProviderCallsAggregate({ ...base, groupBy: "provider_name", metric: "sum_cost_usd" }),
         ]);
 
         const requestRate = rowsToSeries(countSeries);
