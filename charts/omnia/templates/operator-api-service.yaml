@@ -1,4 +1,5 @@
-{{- if .Values.operator.apiBindAddress }}
+{{- $apiAddr := include "omnia.toolTest.bindAddress" . }}
+{{- if $apiAddr }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -10,7 +11,7 @@ spec:
   type: ClusterIP
   ports:
     - name: api
-      port: {{ trimPrefix ":" .Values.operator.apiBindAddress }}
+      port: {{ trimPrefix ":" $apiAddr }}
       targetPort: api
       protocol: TCP
   selector:

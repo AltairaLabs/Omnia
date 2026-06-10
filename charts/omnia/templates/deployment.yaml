@@ -192,8 +192,14 @@ spec:
             # of silently writing to a non-existent directory.
             - --workspace-content-path=
             {{- end }}
-            {{- if .Values.operator.apiBindAddress }}
-            - --api-bind-address={{ .Values.operator.apiBindAddress }}
+            {{- $toolTestAddr := include "omnia.toolTest.bindAddress" . }}
+            {{- if $toolTestAddr }}
+            - --api-bind-address={{ $toolTestAddr }}
+            {{- if .Values.dashboard.enabled }}
+            # Only the dashboard ServiceAccount may call the tool-test API; the
+            # operator authenticates the bearer token via TokenReview (#1303).
+            - --tool-test-allowed-subjects=system:serviceaccount:{{ .Release.Namespace }}:{{ include "omnia.dashboard.serviceAccountName" . }}
+            {{- end }}
             {{- end }}
             {{- if .Values.enterprise.enabled }}
             - --enterprise
@@ -215,9 +221,10 @@ spec:
             - --webhook-cert-path={{ .Values.webhook.certPath }}
             {{- end }}
           ports:
-            {{- if .Values.operator.apiBindAddress }}
+            {{- $apiAddr := include "omnia.toolTest.bindAddress" . }}
+            {{- if $apiAddr }}
             - name: api
-              containerPort: {{ trimPrefix ":" .Values.operator.apiBindAddress }}
+              containerPort: {{ trimPrefix ":" $apiAddr }}
               protocol: TCP
             {{- end }}
             {{- if .Values.metrics.enabled }}

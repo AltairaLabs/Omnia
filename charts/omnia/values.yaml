@@ -387,8 +387,12 @@ affinity:
 # A unified `podOverrides:` block for chart-owned deployments is planned
 # (tracked in #895 W4).
 operator:
-  # -- Bind address for the operator API server (tool testing).
-  # Set to a port like ":8083" to enable, or leave empty to disable.
+  # -- Bind address for the operator tool-test API. Empty uses the default:
+  # ":8083" when the dashboard is enabled (its only consumer), disabled
+  # otherwise. Set an explicit ":port" to override. When the dashboard is
+  # enabled the API is authenticated via TokenReview, accepting only the
+  # dashboard ServiceAccount (#1303); an explicit override without the
+  # dashboard runs it unauthenticated (local/dev only).
   apiBindAddress: ""
 
   # -- controller-runtime zap logger verbosity. One of:

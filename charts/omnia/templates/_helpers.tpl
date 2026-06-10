@@ -157,6 +157,19 @@ Lookup order:
 {{- end }}
 
 {{/*
+omnia.toolTest.bindAddress — operator tool-test API bind address.
+Explicit operator.apiBindAddress wins; otherwise defaults to ":8083" when the
+dashboard is enabled (its only consumer). Empty disables the API entirely.
+*/}}
+{{- define "omnia.toolTest.bindAddress" -}}
+{{- if .Values.operator.apiBindAddress -}}
+{{- .Values.operator.apiBindAddress -}}
+{{- else if .Values.dashboard.enabled -}}
+:8083
+{{- end -}}
+{{- end -}}
+
+{{/*
 Compaction image
 */}}
 {{- define "omnia.compaction.image" -}}
