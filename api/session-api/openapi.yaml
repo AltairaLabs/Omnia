@@ -828,7 +828,13 @@ components:
         sessionId:
           type: string
           format: uuid
+        namespace:
+          type: string
+        agentName:
+          type: string
         provider:
+          type: string
+        providerName:
           type: string
         model:
           type: string

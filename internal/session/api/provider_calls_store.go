@@ -17,11 +17,14 @@ import (
 type ProviderCallAggregateGroupBy string
 
 const (
-	// ProviderCallAggregateGroupByProvider groups by the provider column.
+	// ProviderCallAggregateGroupByProvider groups by the provider (type) column.
 	ProviderCallAggregateGroupByProvider ProviderCallAggregateGroupBy = "provider"
+	// ProviderCallAggregateGroupByProviderName groups by the provider_name
+	// column (the Provider CRD name), so same-type providers are distinct.
+	ProviderCallAggregateGroupByProviderName ProviderCallAggregateGroupBy = "provider_name"
 	// ProviderCallAggregateGroupByModel groups by the model column.
 	ProviderCallAggregateGroupByModel ProviderCallAggregateGroupBy = "model"
-	// ProviderCallAggregateGroupByAgent groups by sessions.agent_name (joined).
+	// ProviderCallAggregateGroupByAgent groups by the agent_name column.
 	ProviderCallAggregateGroupByAgent ProviderCallAggregateGroupBy = "agent"
 	// ProviderCallAggregateGroupByTimeHour buckets created_at by hour (UTC),
 	// formatted as RFC3339 hour-precision strings.
@@ -59,28 +62,30 @@ type ProviderCallAggregateRow struct {
 }
 
 // ProviderCallAggregateOpts configures the AggregateProviderCalls query.
-// Namespace is the scoping field (matched against sessions.namespace via
-// an INNER JOIN). GroupBy and Metric are required; all other fields are
-// optional filters.
+// Namespace is the scoping field (matched against the denormalized
+// provider_calls.namespace column). GroupBy and Metric are required; all other
+// fields are optional filters.
 type ProviderCallAggregateOpts struct {
-	Namespace string // required (sessions.namespace)
-	AgentName string // optional (sessions.agent_name)
-	Provider  string // optional (provider_calls.provider)
-	Model     string // optional (provider_calls.model)
-	From      time.Time
-	To        time.Time
-	GroupBy   []ProviderCallAggregateGroupBy // required, one or more dimensions (composite key)
-	Metric    ProviderCallAggregateMetric    // required
-	Limit     int
+	Namespace    string // required (provider_calls.namespace)
+	AgentName    string // optional (provider_calls.agent_name)
+	Provider     string // optional (provider_calls.provider — the type)
+	ProviderName string // optional (provider_calls.provider_name — the CRD name)
+	Model        string // optional (provider_calls.model)
+	From         time.Time
+	To           time.Time
+	GroupBy      []ProviderCallAggregateGroupBy // required, one or more dimensions (composite key)
+	Metric       ProviderCallAggregateMetric    // required
+	Limit        int
 }
 
 // ProviderCallDiscoveryResult is the namespace-scoped discovery payload —
-// the distinct provider + model values seen in this namespace's
-// provider_calls rows. Slices are non-nil so callers can JSON-serialise
-// without a null check.
+// the distinct provider (type), provider_name (CRD), and model values seen in
+// this namespace's provider_calls rows. Slices are non-nil so callers can
+// JSON-serialise without a null check.
 type ProviderCallDiscoveryResult struct {
-	Providers []string `json:"providers"`
-	Models    []string `json:"models"`
+	Providers     []string `json:"providers"`
+	ProviderNames []string `json:"providerNames"`
+	Models        []string `json:"models"`
 }
 
 // ProviderCallsStore defines the persistence interface for cross-cutting

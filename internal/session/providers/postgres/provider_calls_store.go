@@ -22,9 +22,8 @@ import (
 var _ api.ProviderCallsStore = (*ProviderCallsStoreImpl)(nil)
 
 // ProviderCallsStoreImpl implements api.ProviderCallsStore using PostgreSQL.
-// All queries INNER JOIN sessions on session_id so the namespace + agent
-// filters can be applied to provider_calls rows (which have no namespace
-// column of their own).
+// namespace + agent_name are denormalized onto provider_calls, so these queries
+// filter directly without JOINing sessions.
 type ProviderCallsStoreImpl struct {
 	pool *pgxpool.Pool
 }
@@ -38,9 +37,10 @@ func NewProviderCallsStore(pool *pgxpool.Pool) *ProviderCallsStoreImpl {
 // Filter fragments. The QueryBuilder substitutes the `$?` placeholder with
 // the appropriate positional argument index.
 const (
-	pcFilterNamespace     = "s.namespace=$?"
-	pcFilterAgentName     = "s.agent_name=$?"
+	pcFilterNamespace     = "pc.namespace=$?"
+	pcFilterAgentName     = "pc.agent_name=$?"
 	pcFilterProvider      = "pc.provider=$?"
+	pcFilterProviderName  = "pc.provider_name=$?"
 	pcFilterModel         = "pc.model=$?"
 	pcFilterCreatedAfter  = "pc.created_at >= $?"
 	pcFilterCreatedBefore = "pc.created_at < $?"
@@ -74,7 +74,6 @@ func (s *ProviderCallsStoreImpl) AggregateProviderCalls(
 	query := fmt.Sprintf(`
 		SELECT %s AS key, %s AS value, COUNT(*) AS count
 		FROM provider_calls pc
-		INNER JOIN sessions s ON s.id = pc.session_id
 		WHERE 1=1%s
 		GROUP BY 1
 		%s
@@ -99,6 +98,9 @@ func buildProviderCallAggregateFilters(opts api.ProviderCallAggregateOpts) *pgut
 	}
 	if opts.Provider != "" {
 		qb.Add(pcFilterProvider, opts.Provider)
+	}
+	if opts.ProviderName != "" {
+		qb.Add(pcFilterProviderName, opts.ProviderName)
 	}
 	if opts.Model != "" {
 		qb.Add(pcFilterModel, opts.Model)
@@ -152,10 +154,13 @@ func providerCallGroupByExpr(g api.ProviderCallAggregateGroupBy) (expr string, i
 	switch g {
 	case api.ProviderCallAggregateGroupByProvider:
 		return "pc.provider", false, nil
+	case api.ProviderCallAggregateGroupByProviderName:
+		// provider_name is nullable; COALESCE so NULL groups scan as "".
+		return "COALESCE(pc.provider_name, '')", false, nil
 	case api.ProviderCallAggregateGroupByModel:
 		return "pc.model", false, nil
 	case api.ProviderCallAggregateGroupByAgent:
-		return "s.agent_name", false, nil
+		return "pc.agent_name", false, nil
 	case api.ProviderCallAggregateGroupByTimeHour:
 		return "to_char(date_trunc('hour', pc.created_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:00:00\"Z\"')", true, nil
 	case api.ProviderCallAggregateGroupByTimeDay:
@@ -229,14 +234,19 @@ func (s *ProviderCallsStoreImpl) ProviderCallsDiscovery(
 	if err != nil {
 		return nil, err
 	}
+	providerNames, err := s.distinctProviderCallColumn(ctx, namespace, "provider_name")
+	if err != nil {
+		return nil, err
+	}
 	models, err := s.distinctProviderCallColumn(ctx, namespace, "model")
 	if err != nil {
 		return nil, err
 	}
 
 	return &api.ProviderCallDiscoveryResult{
-		Providers: providers,
-		Models:    models,
+		Providers:     providers,
+		ProviderNames: providerNames,
+		Models:        models,
 	}, nil
 }
 
@@ -251,8 +261,7 @@ func (s *ProviderCallsStoreImpl) distinctProviderCallColumn(
 	q := fmt.Sprintf(`
 		SELECT DISTINCT pc.%s
 		FROM provider_calls pc
-		INNER JOIN sessions s ON s.id = pc.session_id
-		WHERE s.namespace = $1 AND pc.%s <> ''
+		WHERE pc.namespace = $1 AND pc.%s <> ''
 		ORDER BY 1`, column, column)
 	rows, err := s.pool.Query(ctx, q, namespace)
 	if err != nil {

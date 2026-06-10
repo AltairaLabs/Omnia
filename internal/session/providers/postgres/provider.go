@@ -214,11 +214,12 @@ func scanToolCall(row pgx.Row) (*session.ToolCall, error) {
 func scanProviderCall(row pgx.Row) (*session.ProviderCall, error) {
 	var pc session.ProviderCall
 	var durationMs *int64
-	var finishReason, errorMessage *string
+	var finishReason, errorMessage, providerName *string
 	var labelsJSON []byte
 
 	err := row.Scan(
-		&pc.ID, &pc.SessionID, &pc.Provider, &pc.Model,
+		&pc.ID, &pc.SessionID, &pc.Namespace, &pc.AgentName,
+		&pc.Provider, &providerName, &pc.Model,
 		&pc.Status, &pc.InputTokens, &pc.OutputTokens, &pc.CachedTokens,
 		&pc.CostUSD, &durationMs, &finishReason, &pc.ToolCallCount,
 		&errorMessage, &labelsJSON, &pc.Source, &pc.CreatedAt,
@@ -230,6 +231,7 @@ func scanProviderCall(row pgx.Row) (*session.ProviderCall, error) {
 	if durationMs != nil {
 		pc.DurationMs = *durationMs
 	}
+	pc.ProviderName = pgutil.DerefString(providerName)
 	pc.FinishReason = pgutil.DerefString(finishReason)
 	pc.ErrorMessage = pgutil.DerefString(errorMessage)
 	pc.Labels = pgutil.UnmarshalJSONB(labelsJSON)
@@ -767,20 +769,21 @@ func (p *Provider) RecordProviderCall(ctx context.Context, sessionID string, pc 
 	query := `WITH sess AS (
 		SELECT id FROM sessions WHERE id = $2
 	), ins AS (
-		INSERT INTO provider_calls (id, session_id, provider, model, status, input_tokens, output_tokens, cached_tokens, cost_usd, duration_ms, finish_reason, tool_call_count, error_message, labels, source, created_at)
-		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+		INSERT INTO provider_calls (id, session_id, namespace, agent_name, provider, provider_name, model, status, input_tokens, output_tokens, cached_tokens, cost_usd, duration_ms, finish_reason, tool_call_count, error_message, labels, source, created_at)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
 		WHERE EXISTS (SELECT 1 FROM sess)
 		RETURNING session_id
 	)
 	UPDATE sessions SET
-		total_input_tokens = total_input_tokens + $17,
-		total_output_tokens = total_output_tokens + $18,
-		estimated_cost_usd = estimated_cost_usd + $19,
-		updated_at = $20
+		total_input_tokens = total_input_tokens + $20,
+		total_output_tokens = total_output_tokens + $21,
+		estimated_cost_usd = estimated_cost_usd + $22,
+		updated_at = $23
 	WHERE id = (SELECT session_id FROM ins)`
 
 	res, err := p.pool.Exec(ctx, query,
-		pc.ID, sessionID, pc.Provider, pc.Model,
+		pc.ID, sessionID, pc.Namespace, pc.AgentName,
+		pc.Provider, pgutil.NullString(pc.ProviderName), pc.Model,
 		string(pc.Status), pc.InputTokens, pc.OutputTokens, pc.CachedTokens,
 		pc.CostUSD, pgutil.NullInt64(pc.DurationMs),
 		pgutil.NullString(pc.FinishReason), pc.ToolCallCount,
@@ -840,7 +843,7 @@ func (p *Provider) GetProviderCalls(ctx context.Context, sessionID string, opts 
 	qb := &pgutil.QueryBuilder{}
 	qb.Add(qbSessionID, sessionID)
 
-	query := `SELECT id, session_id, provider, model, status, input_tokens, output_tokens, cached_tokens, cost_usd, duration_ms, finish_reason, tool_call_count, error_message, labels, source, created_at
+	query := `SELECT id, session_id, namespace, agent_name, provider, provider_name, model, status, input_tokens, output_tokens, cached_tokens, cost_usd, duration_ms, finish_reason, tool_call_count, error_message, labels, source, created_at
 		FROM provider_calls WHERE 1=1` + qb.Where() + ` ORDER BY created_at ASC`
 	query = qb.AppendPagination(query, opts.Limit, opts.Offset)
 

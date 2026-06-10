@@ -90,6 +90,7 @@ type Server struct {
 
 	// Provider info (for logging and provider creation)
 	providerType              string
+	providerRefName           string // Provider CRD name (for per-provider attribution)
 	model                     string
 	baseURL                   string            // Custom base URL for provider (e.g., Ollama endpoint)
 	headers                   map[string]string // Custom HTTP headers for every provider request
@@ -310,6 +311,15 @@ func WithProviderInfo(providerType, model string) ServerOption {
 	return func(s *Server) {
 		s.providerType = providerType
 		s.model = model
+	}
+}
+
+// WithProviderRefName sets the Provider CRD name, denormalized onto
+// provider_calls so same-type providers are attributed separately. Empty when
+// the runtime is not configured via a providerRef.
+func WithProviderRefName(name string) ServerOption {
+	return func(s *Server) {
+		s.providerRefName = name
 	}
 }
 

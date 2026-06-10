@@ -57,8 +57,8 @@ func (h *Handler) handleAggregateProviderCalls(w http.ResponseWriter, r *http.Re
 	_ = json.NewEncoder(w).Encode(ProviderCallsAggregateResponse{Rows: rows})
 }
 
-// handleDiscoverProviderCalls returns the distinct (provider, model) values
-// for the namespace's provider_calls rows.
+// handleDiscoverProviderCalls returns the distinct (provider, provider_name,
+// model) values for the namespace's provider_calls rows.
 // GET /api/v1/provider-calls/discover?namespace=X
 func (h *Handler) handleDiscoverProviderCalls(w http.ResponseWriter, r *http.Request) {
 	if h.providerCallsService == nil {
@@ -82,6 +82,9 @@ func (h *Handler) handleDiscoverProviderCalls(w http.ResponseWriter, r *http.Req
 	}
 	if res.Providers == nil {
 		res.Providers = []string{}
+	}
+	if res.ProviderNames == nil {
+		res.ProviderNames = []string{}
 	}
 	if res.Models == nil {
 		res.Models = []string{}
@@ -112,13 +115,14 @@ func parseProviderCallsAggregateOpts(r *http.Request) (ProviderCallAggregateOpts
 	}
 
 	opts := ProviderCallAggregateOpts{
-		Namespace: namespace,
-		AgentName: q.Get("agentName"),
-		Provider:  q.Get("provider"),
-		Model:     q.Get("model"),
-		GroupBy:   groupBy,
-		Metric:    metric,
-		Limit:     clampProviderCallsAggregateLimit(parseIntQueryParam(q.Get("limit"), DefaultProviderCallAggregateLimit)),
+		Namespace:    namespace,
+		AgentName:    q.Get("agentName"),
+		Provider:     q.Get("provider"),
+		ProviderName: q.Get("providerName"),
+		Model:        q.Get("model"),
+		GroupBy:      groupBy,
+		Metric:       metric,
+		Limit:        clampProviderCallsAggregateLimit(parseIntQueryParam(q.Get("limit"), DefaultProviderCallAggregateLimit)),
 	}
 
 	if v := q.Get("from"); v != "" {
@@ -143,6 +147,7 @@ func parseProviderCallsAggregateOpts(r *http.Request) (ProviderCallAggregateOpts
 func validateProviderCallsGroupBy(v string) (ProviderCallAggregateGroupBy, error) {
 	switch ProviderCallAggregateGroupBy(v) {
 	case ProviderCallAggregateGroupByProvider,
+		ProviderCallAggregateGroupByProviderName,
 		ProviderCallAggregateGroupByModel,
 		ProviderCallAggregateGroupByAgent,
 		ProviderCallAggregateGroupByTimeHour,
