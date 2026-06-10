@@ -57,10 +57,11 @@ describe("useProviderMetrics", () => {
     expect(mockedFetch).not.toHaveBeenCalled();
   });
 
-  it("is disabled when providerType is missing", async () => {
+  it("is disabled when providerName is missing", async () => {
+    // The hook now scopes by the Provider CRD name (first arg), not the type.
     mockedUseWorkspace.mockReturnValue(workspaceCtx("test-ws"));
     const { result } = renderHook(
-      () => useProviderMetrics("provider-1", undefined),
+      () => useProviderMetrics("", "openai"),
       { wrapper: makeWrapper() },
     );
     await waitFor(() => expect(result.current.isFetching).toBe(false));
