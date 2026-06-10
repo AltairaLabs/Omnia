@@ -21,6 +21,11 @@ import (
 	"github.com/altairalabs/omnia/internal/session"
 )
 
+const (
+	testProviderOpenAI = "openai"
+	testModelClaude    = "claude"
+)
+
 // fakeProviderCallWriter records the calls forwarded to it.
 type fakeProviderCallWriter struct {
 	calls   []*session.ProviderCall
@@ -44,7 +49,7 @@ func TestProviderCallCollector_OnCompleted(t *testing.T) {
 		Type:      events.EventProviderCallCompleted,
 		Timestamp: ts,
 		Data: &events.ProviderCallCompletedData{
-			Provider:      "openai",
+			Provider:      testProviderOpenAI,
 			Model:         "gpt-4o",
 			Duration:      1500 * time.Millisecond,
 			InputTokens:   300,
@@ -63,7 +68,7 @@ func TestProviderCallCollector_OnCompleted(t *testing.T) {
 	assert.Equal(t, "sess-1", pc.SessionID)
 	assert.Equal(t, "omnia-demo", pc.Namespace)
 	assert.Equal(t, "support", pc.AgentName)
-	assert.Equal(t, "openai", pc.Provider)
+	assert.Equal(t, testProviderOpenAI, pc.Provider)
 	assert.Equal(t, "gpt-4o", pc.Model)
 	assert.Equal(t, session.ProviderCallStatusCompleted, pc.Status)
 	assert.Equal(t, int64(300), pc.InputTokens)
@@ -83,7 +88,7 @@ func TestProviderCallCollector_OnFailed(t *testing.T) {
 		Timestamp: time.Now().UTC(),
 		Data: &events.ProviderCallFailedData{
 			Provider: "anthropic",
-			Model:    "claude",
+			Model:    testModelClaude,
 			Error:    errors.New("boom"),
 			Duration: 200 * time.Millisecond,
 			Source:   events.SourceJudge,
@@ -107,19 +112,19 @@ func TestProviderCallCollector_IgnoresWrongDataType(t *testing.T) {
 func TestFlushProviderCalls_ForwardsAll(t *testing.T) {
 	w := &fakeProviderCallWriter{}
 	calls := []*session.ProviderCall{
-		{SessionID: "s1", Provider: "openai", Source: "judge"},
+		{SessionID: "s1", Provider: testProviderOpenAI, Source: "judge"},
 		{SessionID: "s1", Provider: "azure", Source: "embedding"},
 	}
 	flushProviderCalls(context.Background(), w, nil, calls)
 	require.Len(t, w.calls, 2)
-	assert.Equal(t, "openai", w.calls[0].Provider)
+	assert.Equal(t, testProviderOpenAI, w.calls[0].Provider)
 	assert.Equal(t, "azure", w.calls[1].Provider)
 }
 
 func TestFlushProviderCalls_WriteErrorDoesNotStop(t *testing.T) {
-	w := &fakeProviderCallWriter{failOn: "openai", failErr: errors.New("nope")}
+	w := &fakeProviderCallWriter{failOn: testProviderOpenAI, failErr: errors.New("nope")}
 	calls := []*session.ProviderCall{
-		{SessionID: "s1", Provider: "openai", Source: "judge"},
+		{SessionID: "s1", Provider: testProviderOpenAI, Source: "judge"},
 		{SessionID: "s1", Provider: "azure", Source: "embedding"},
 	}
 	// nil logger must be tolerated; the azure call still goes through.
