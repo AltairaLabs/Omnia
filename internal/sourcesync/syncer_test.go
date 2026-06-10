@@ -398,7 +398,7 @@ var _ = Describe("storeVersion", func() {
 		dstDir := filepath.Join(os.TempDir(), "store-dst-test-"+time.Now().Format("20060102150405"))
 		defer func() { _ = os.RemoveAll(dstDir) }()
 
-		err = storeVersion(srcDir, dstDir)
+		err = storeVersion(srcDir, dstDir, false)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Verify content was stored
@@ -518,7 +518,7 @@ var _ = Describe("FilesystemSyncer.SyncToFilesystem error paths", func() {
 var _ = Describe("storeVersion error paths", func() {
 	It("returns an error when the target is inside an unwritable parent", func() {
 		// /dev/null is not a directory we can MkdirAll under.
-		err := storeVersion("/tmp", "/dev/null/should-fail/versions/v1")
+		err := storeVersion("/tmp", "/dev/null/should-fail/versions/v1", false)
 		Expect(err).To(HaveOccurred())
 	})
 })
