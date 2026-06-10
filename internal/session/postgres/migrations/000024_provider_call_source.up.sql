@@ -1,1 +1,0 @@
-ALTER TABLE provider_calls ADD COLUMN source TEXT NOT NULL DEFAULT '';

@@ -1,1 +1,0 @@
-DROP INDEX IF EXISTS idx_function_invocations_namespace_id;

@@ -790,6 +790,18 @@ const (
 
 // seedAggregateRows populates eval_results with a fixed shape used by every
 // aggregate test below — two evals (acc + lat) across two days and two
+// evalFixtureDay1/Day2 anchor the fixture's two distinct days relative to "now"
+// so they always land inside the eval_results rolling partition window
+// (CURRENT_DATE-28 .. CURRENT_DATE+14). eval_results is now RANGE-partitioned by
+// created_at; hardcoded calendar dates eventually slide out of that window and
+// inserts fail with "no partition of relation eval_results found for row".
+// Anchored at noon UTC, 8/7 days ago, so the UTC date (and the GroupByTimeDay
+// key) is stable regardless of run time.
+var (
+	evalFixtureDay1 = time.Now().UTC().AddDate(0, 0, -8).Truncate(24 * time.Hour).Add(12 * time.Hour)
+	evalFixtureDay2 = evalFixtureDay1.AddDate(0, 0, 1)
+)
+
 // agents. created_at is set explicitly so time-bucket tests are stable.
 // Always seeds against testSessionID; the constant is internal to avoid a
 // dead parameter (unparam).
@@ -799,8 +811,8 @@ func seedAggregateRows(t *testing.T, store *EvalStoreImpl) {
 	sessionID := testSessionID
 	seedSession(t, store, sessionID)
 
-	day1 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-	day2 := time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
+	day1 := evalFixtureDay1
+	day2 := evalFixtureDay2
 
 	type row struct {
 		evalID    string
@@ -882,10 +894,10 @@ func TestAggregateEvalResults_TimeDayAvgScore(t *testing.T) {
 	require.Len(t, rows, 2)
 	// Day 1: (0.90 + 0.80) / 2 = 0.85
 	// Day 2: (1.00 + 0.60) / 2 = 0.80
-	assert.Equal(t, "2026-05-01", rows[0].Key)
+	assert.Equal(t, evalFixtureDay1.Format("2006-01-02"), rows[0].Key)
 	assert.InDelta(t, 0.85, rows[0].Value, 0.001)
 	assert.Equal(t, int64(2), rows[0].Count)
-	assert.Equal(t, "2026-05-02", rows[1].Key)
+	assert.Equal(t, evalFixtureDay2.Format("2006-01-02"), rows[1].Key)
 	assert.InDelta(t, 0.80, rows[1].Value, 0.001)
 	assert.Equal(t, int64(2), rows[1].Count)
 }
@@ -961,8 +973,8 @@ func TestAggregateEvalResults_FilterTimeRange(t *testing.T) {
 	seedAggregateRows(t, store)
 
 	// Only day 1 — should drop the day-2 rows.
-	day1Start := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	day1End := time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC)
+	day1Start := evalFixtureDay1.Truncate(24 * time.Hour)
+	day1End := day1Start.AddDate(0, 0, 1)
 
 	rows, err := store.AggregateEvalResults(context.Background(), api.EvalAggregateOpts{
 		Namespace: "default",

@@ -139,22 +139,14 @@ func replaceDBName(connStr, newDB string) string {
 func TestMigrationFS_ContainsMigrations(t *testing.T) {
 	entries, err := MigrationFS.ReadDir("migrations")
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, len(entries), 32, "should have at least 32 migration files (16 up + 16 down)")
+	// The historical 000001-000028 chain was collapsed into a single
+	// consolidated initial migration (pre-GA; no data preserved).
+	assert.Len(t, entries, 2, "should have exactly the consolidated up + down migration")
 
 	// Verify expected migration files exist
 	expected := []string{
-		"000001_create_sessions.up.sql",
-		"000001_create_sessions.down.sql",
-		"000005_create_partition_management.up.sql",
-		"000005_create_partition_management.down.sql",
-		"000006_create_audit_log.up.sql",
-		"000006_create_audit_log.down.sql",
-		"000007_add_audit_log_partitions.up.sql",
-		"000007_add_audit_log_partitions.down.sql",
-		"000008_tool_call_id_to_text.up.sql",
-		"000008_tool_call_id_to_text.down.sql",
-		"000009_create_privacy_preferences.up.sql",
-		"000009_create_privacy_preferences.down.sql",
+		"000001_initial.up.sql",
+		"000001_initial.down.sql",
 	}
 	names := make(map[string]bool)
 	for _, e := range entries {
@@ -294,16 +286,21 @@ func TestMigrator_IndexesExist(t *testing.T) {
 		"idx_sessions_expires_at",
 		"idx_sessions_tags",
 		"idx_messages_session_seq",
-		"idx_messages_search",
 		"idx_messages_tool_call_id",
 		"idx_tool_calls_session",
 		"idx_tool_calls_name",
 		"idx_tool_calls_call_id",
 		"idx_provider_calls_session",
-		"idx_provider_calls_provider",
+		// Denormalized namespace index replaces the provider-leading one
+		// (dashboard aggregates filter by namespace, not provider type).
+		"idx_provider_calls_namespace_created",
 		"idx_message_artifacts_message",
 		"idx_message_artifacts_session",
 		"idx_messages_search_vector",
+		// New workspace-scoped usage table + namespace-leading eval index.
+		"idx_provider_usage_namespace_created",
+		"idx_provider_usage_source",
+		"idx_eval_results_namespace_agent_created",
 	}
 
 	for _, idx := range expectedIndexes {
@@ -503,9 +500,14 @@ func TestMigrator_PartitionOrchestratorCoversAllPartitionedTables(t *testing.T) 
 		"messages",
 		"tool_calls",
 		"provider_calls",
+		// Newly partitioned/added in the consolidated schema: eval_results
+		// (was unpartitioned → unbounded growth) and provider_usage (new
+		// workspace-scoped usage table).
+		"provider_usage",
 		"runtime_events",
 		"message_artifacts",
 		"audit_log",
+		"eval_results",
 	}
 	for _, name := range want {
 		_, ok := got[name]
