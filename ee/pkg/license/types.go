@@ -134,8 +134,8 @@ func (l *License) IsEnterprise() bool {
 // CanUseSourceType returns true if the given source type is allowed.
 func (l *License) CanUseSourceType(sourceType string) bool {
 	switch sourceType {
-	case "configmap":
-		// ConfigMap is always allowed
+	case "configmap", "workspace":
+		// ConfigMap and workspace are deploy infrastructure, always allowed.
 		return true
 	case "git":
 		return l.Features.GitSource

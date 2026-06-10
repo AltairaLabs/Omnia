@@ -17,7 +17,7 @@ import (
 )
 
 // ArenaSourceType defines the type of source for PromptKit bundles.
-// +kubebuilder:validation:Enum=git;oci;configmap
+// +kubebuilder:validation:Enum=git;oci;configmap;workspace
 type ArenaSourceType string
 
 const (
@@ -27,6 +27,9 @@ const (
 	ArenaSourceTypeOCI ArenaSourceType = "oci"
 	// ArenaSourceTypeConfigMap fetches bundles from a Kubernetes ConfigMap.
 	ArenaSourceTypeConfigMap ArenaSourceType = "configmap"
+	// ArenaSourceTypeWorkspace snapshots an existing directory on the
+	// workspace content volume (no external fetch). Used by dashboard deploy.
+	ArenaSourceTypeWorkspace ArenaSourceType = "workspace"
 )
 
 // Source-sync types (GitReference, GitSource, OCISource, ConfigMapSource,
@@ -34,6 +37,8 @@ const (
 // them via the corev1alpha1 qualifier.
 
 // ArenaSourceSpec defines the desired state of ArenaSource.
+// +kubebuilder:validation:XValidation:rule="[has(self.git), has(self.oci), has(self.configMap), has(self.workspace)].filter(x, x).size() == 1",message="exactly one of git, oci, configMap, or workspace must be set"
+// +kubebuilder:validation:XValidation:rule="(self.type == 'git' && has(self.git)) || (self.type == 'oci' && has(self.oci)) || (self.type == 'configmap' && has(self.configMap)) || (self.type == 'workspace' && has(self.workspace))",message="the source block must match the chosen type"
 type ArenaSourceSpec struct {
 	// type specifies the source type.
 	// +kubebuilder:validation:Required
@@ -53,6 +58,11 @@ type ArenaSourceSpec struct {
 	// Required when type is "configmap".
 	// +optional
 	ConfigMap *corev1alpha1.ConfigMapSource `json:"configMap,omitempty"`
+
+	// workspace specifies an existing directory on the workspace content
+	// volume to snapshot. Required when type is "workspace".
+	// +optional
+	Workspace *corev1alpha1.WorkspaceSource `json:"workspace,omitempty"`
 
 	// interval is the reconciliation interval for polling the source.
 	// Format: duration string (e.g., "5m", "1h").
