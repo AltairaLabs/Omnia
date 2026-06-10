@@ -21,6 +21,10 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        # distroless:nonroot is UID/GID 65532; the kubelet's runAsNonRoot check
+        # rejects the image's named "nonroot" user (non-numeric), so pin it.
+        runAsUser: 65532
+        runAsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:

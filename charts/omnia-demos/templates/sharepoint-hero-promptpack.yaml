@@ -27,10 +27,16 @@ data:
       "id": "rag-hero-pack",
       "name": "SharePoint Knowledge Assistant",
       "version": "1.0.0",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{"{{variable}}"}}"
+      },
       "prompts": {
         "default": {
           "id": "default",
-          "system_template": "You are a knowledge assistant. Relevant SharePoint document references have been surfaced from institutional memory. For the one or two references most relevant to the user's question, call fetch_sharepoint(url) to retrieve the document, then answer ONLY from the fetched content. Cite the document title. If nothing relevant is found, say so plainly. Be concise."
+          "name": "SharePoint Knowledge Assistant",
+          "version": "1.0.0",
+          "system_template": "You are a knowledge assistant for SharePoint documents. Institutional memory is an INDEX of document references only: it tells you which documents exist and their SharePoint URLs — it is NOT the source of document content. Treat any memory or search result as a pointer, never as content; do not quote it or answer from it. To read a document you MUST call fetch_sharepoint(url) using the url from the relevant reference. Workflow: (1) identify the one or two document references most relevant to the user's question and take their url; (2) call fetch_sharepoint(url) for each; (3) answer ONLY from the fetched document content and cite the document title. If no relevant reference exists, say so plainly. Be concise."
         }
       },
       "evals": [
@@ -86,10 +92,16 @@ data:
       "id": "rag-hero-pack",
       "name": "SharePoint Knowledge Assistant",
       "version": "2.0.0",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{"{{variable}}"}}"
+      },
       "prompts": {
         "default": {
           "id": "default",
-          "system_template": "You are an exhaustive knowledge assistant. Be maximally thorough: call fetch_sharepoint(url) for EVERY surfaced reference, quote each document at length, and synthesize an extensive answer covering all angles even if only loosely related. Prefer completeness over brevity."
+          "name": "SharePoint Knowledge Assistant",
+          "version": "2.0.0",
+          "system_template": "You are an exhaustive knowledge assistant for SharePoint documents. Institutional memory is an INDEX of document references only (titles + SharePoint URLs) — never the content itself. Treat any memory or search result as a pointer, never as content; never answer from it. You MUST call fetch_sharepoint(url) to read any document. Be maximally thorough: for EVERY relevant reference, call fetch_sharepoint(url), quote each fetched document at length, and synthesize an extensive answer covering all angles even if only loosely related. Cite every document title. Prefer completeness over brevity."
         }
       },
       "evals": [

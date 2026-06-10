@@ -26,8 +26,11 @@ metadata:
   labels:
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 rules:
+  # toolpolicies (EE): the policy-proxy sidecar in the agent pod lists/watches
+  # ToolPolicies; without this its initial load fails and enforcement silently
+  # degrades. toolregistries/providers/agentruntimes drive runtime config.
   - apiGroups: ["omnia.altairalabs.ai"]
-    resources: ["agentruntimes", "providers", "toolregistries"]
+    resources: ["agentruntimes", "providers", "toolregistries", "toolpolicies"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["omnia.altairalabs.ai"]
     resources: ["agentruntimes/status"]
@@ -65,6 +68,38 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: omnia-agent-workspace-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ $az.workloadIdentity.serviceAccountName }}
+    namespace: {{ .Values.namespace }}
+---
+# MemoryPolicy is cluster-scoped. The managed memory-api runs as this WI SA
+# (podOverrides on the Workspace memory service) and reads the workspace's
+# MemoryPolicy live via the PolicyLoader at ingest time to pick the ingestion
+# strategy (summary vs chunk). Overriding the pod SA drops the operator's
+# memory-api bindings, so without this the loader fails closed and silently
+# falls back to chunk — re-grant cluster-scoped read here.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Values.namespace }}-{{ $az.workloadIdentity.serviceAccountName }}-memorypolicy-reader
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+rules:
+  - apiGroups: ["omnia.altairalabs.ai"]
+    resources: ["memorypolicies"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Values.namespace }}-{{ $az.workloadIdentity.serviceAccountName }}-memorypolicy-reader
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Values.namespace }}-{{ $az.workloadIdentity.serviceAccountName }}-memorypolicy-reader
 subjects:
   - kind: ServiceAccount
     name: {{ $az.workloadIdentity.serviceAccountName }}

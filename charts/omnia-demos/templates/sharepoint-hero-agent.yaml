@@ -39,7 +39,10 @@ spec:
     purpose: support_continuity
     retrieval:
       strategy: semantic
-      limit: 5
+      # Keep injected context small: 2 summary references per turn is enough to
+      # pick the right doc to fetch_sharepoint, and keeps the agent call (plus
+      # the per-turn eval llm_judges) under the gpt-4o deployment's TPM budget.
+      limit: 2
       # Governance beat: drop retrieved items from the restricted SharePoint
       # site at retrieval time (defense-in-depth alongside the fetch ToolPolicy).
       accessFilter:
