@@ -351,8 +351,6 @@ type EvalResult struct {
 	Score             *float64        `json:"score,omitempty"`
 	Details           json.RawMessage `json:"details,omitempty"`
 	DurationMs        *int            `json:"durationMs,omitempty"`
-	JudgeTokens       *int            `json:"judgeTokens,omitempty"`
-	JudgeCostUSD      *float64        `json:"judgeCostUsd,omitempty"`
 	Source            string          `json:"source"`
 	CreatedAt         time.Time       `json:"createdAt"`
 }

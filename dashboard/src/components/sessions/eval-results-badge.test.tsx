@@ -121,7 +121,6 @@ describe("EvalResultsBadge", () => {
         evalType: "rule",
         passed: false,
         durationMs: 42,
-        judgeCostUsd: 0.0012,
         source: "worker",
         details: { reason: "Unsafe content" },
       }),
@@ -135,7 +134,6 @@ describe("EvalResultsBadge", () => {
     expect(screen.getByText("Rule")).toBeInTheDocument();
     expect(screen.getByText("Source: Worker")).toBeInTheDocument();
     expect(screen.getByText("42ms")).toBeInTheDocument();
-    expect(screen.getByText("$0.0012")).toBeInTheDocument();
   });
 
   it("does not show expand chevron when details is empty", () => {

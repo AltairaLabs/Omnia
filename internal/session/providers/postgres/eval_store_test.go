@@ -73,8 +73,6 @@ func makeEvalResult(sessionID, evalID, evalType string) *api.EvalResult {
 		Score:             ptrFloat64(0.95),
 		Details:           json.RawMessage(`{"reason":"looks good"}`),
 		DurationMs:        ptrInt(150),
-		JudgeTokens:       ptrInt(100),
-		JudgeCostUSD:      ptrFloat64(0.001),
 		Source:            "unit-test",
 	}
 }
@@ -137,8 +135,6 @@ func TestInsertEvalResults_NullOptionals(t *testing.T) {
 	r.Score = nil
 	r.Details = nil
 	r.DurationMs = nil
-	r.JudgeTokens = nil
-	r.JudgeCostUSD = nil
 
 	err := store.InsertEvalResults(ctx, []*api.EvalResult{r})
 	require.NoError(t, err)

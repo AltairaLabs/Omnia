@@ -20,8 +20,6 @@ export interface EvalResult {
   score?: number;
   details?: Record<string, unknown>;
   durationMs?: number;
-  judgeTokens?: number;
-  judgeCostUsd?: number;
   source: string;
   createdAt: string;
 }

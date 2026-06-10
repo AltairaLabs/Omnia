@@ -895,13 +895,6 @@ components:
         durationMs:
           type: integer
           nullable: true
-        judgeTokens:
-          type: integer
-          nullable: true
-        judgeCostUsd:
-          type: number
-          format: double
-          nullable: true
         source:
           type: string
         createdAt:

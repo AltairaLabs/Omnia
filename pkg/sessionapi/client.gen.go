@@ -88,8 +88,6 @@ type EvalResult struct {
 	EvalId            *string             `json:"evalId,omitempty"`
 	EvalType          *string             `json:"evalType,omitempty"`
 	Id                *string             `json:"id,omitempty"`
-	JudgeCostUsd      *float64            `json:"judgeCostUsd"`
-	JudgeTokens       *int                `json:"judgeTokens"`
 	MessageId         *string             `json:"messageId,omitempty"`
 	Namespace         *string             `json:"namespace,omitempty"`
 	Passed            *bool               `json:"passed,omitempty"`

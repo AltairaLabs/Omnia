@@ -334,8 +334,6 @@ func TestStatusUpdateToAPI_NoChange(t *testing.T) {
 func TestEvalResultToAPI(t *testing.T) {
 	score := 0.9
 	dur := 150
-	tokens := 500
-	cost := 0.02
 	details := json.RawMessage(`{"key":"value"}`)
 
 	r := &api.EvalResult{
@@ -353,8 +351,6 @@ func TestEvalResultToAPI(t *testing.T) {
 		Score:             &score,
 		Details:           details,
 		DurationMs:        &dur,
-		JudgeTokens:       &tokens,
-		JudgeCostUSD:      &cost,
 		Source:            "worker",
 		CreatedAt:         time.Now().Truncate(time.Second),
 	}
@@ -627,8 +623,6 @@ func TestEvalResultFromAPI(t *testing.T) {
 		Score:             ptr(0.9),
 		Details:           &details,
 		DurationMs:        ptr(150),
-		JudgeTokens:       ptr(500),
-		JudgeCostUsd:      ptr(0.02),
 		Source:            ptr("worker"),
 		CreatedAt:         &now,
 	}

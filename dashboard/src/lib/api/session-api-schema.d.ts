@@ -458,9 +458,6 @@ export interface components {
             score?: number | null;
             details?: unknown;
             durationMs?: number | null;
-            judgeTokens?: number | null;
-            /** Format: double */
-            judgeCostUsd?: number | null;
             source?: string;
             /** Format: date-time */
             createdAt?: string;

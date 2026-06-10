@@ -9,10 +9,10 @@
 --   * provider_calls: denormalized namespace/agent_name (+ provider_name for CRD
 --     attribution); namespace-leading index replaces the provider-leading one.
 --   * provider_usage: NEW workspace-scoped (session-less) usage table for
---     infrastructure spend (embeddings, ingestion, consolidation, judges).
+--     infrastructure spend (embeddings, ingestion, consolidation).
 --   * eval_results: now RANGE-partitioned by created_at + in the retention set;
---     judge_tokens/judge_cost_usd removed (judge usage now lives in
---     provider_usage, source='judge'); namespace-leading index.
+--     judge_tokens/judge_cost_usd removed (judge spend is recorded in
+--     provider_calls, source='judge'); namespace-leading index.
 --   * messages: dropped the duplicate full GIN index (kept the partial one).
 
 -- ---------------------------------------------------------------------------
@@ -229,8 +229,8 @@ CREATE INDEX idx_audit_log_workspace  ON audit_log (workspace, "timestamp" DESC)
 
 -- eval_results: evaluation verdicts. NOW partitioned weekly by created_at and in
 -- the retention set (previously unpartitioned -> unbounded growth + orphans when
--- session partitions were dropped). Judge token/cost columns moved to
--- provider_usage (source='judge') for one consistent usage model.
+-- session partitions were dropped). Judge token/cost are NOT here — the judge's
+-- provider call is recorded in provider_calls(source='judge').
 CREATE TABLE eval_results (
     id                 UUID         NOT NULL DEFAULT gen_random_uuid(),
     session_id         UUID         NOT NULL,
@@ -246,11 +246,9 @@ CREATE TABLE eval_results (
     score              NUMERIC(5,4),
     details            JSONB,
     duration_ms        INTEGER,
-    -- judge_tokens/judge_cost_usd are retained here for now; the move to
-    -- provider_usage(source='judge') lands with the eval-worker capture change
-    -- (issue #1301 Fix C) so the consuming Go updates in the same commit.
-    judge_tokens       INTEGER,
-    judge_cost_usd     NUMERIC(10,6),
+    -- Judge token/cost are NOT stored here: the judge's provider call is
+    -- recorded in provider_calls(source='judge') for one consistent usage
+    -- model (issue #1301). eval_results is the verdict, not the spend.
     source             TEXT         NOT NULL DEFAULT 'worker',
     created_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
     PRIMARY KEY (id, created_at)

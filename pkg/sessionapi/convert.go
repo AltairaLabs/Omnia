@@ -202,8 +202,6 @@ func EvalResultToAPI(r *api.EvalResult) EvalResult {
 		Passed:            &r.Passed,
 		Score:             r.Score,
 		DurationMs:        r.DurationMs,
-		JudgeTokens:       r.JudgeTokens,
-		JudgeCostUsd:      r.JudgeCostUSD,
 		Source:            ptrNonEmpty(r.Source),
 		CreatedAt:         timePtr(r.CreatedAt),
 	}
@@ -412,8 +410,6 @@ func EvalResultFromAPI(r EvalResult) *api.EvalResult {
 		Passed:            deref(r.Passed),
 		Score:             r.Score,
 		DurationMs:        r.DurationMs,
-		JudgeTokens:       r.JudgeTokens,
-		JudgeCostUSD:      r.JudgeCostUsd,
 		Source:            deref(r.Source),
 		CreatedAt:         deref(r.CreatedAt),
 	}
