@@ -28,11 +28,32 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/runtime/evals"
 	pkruntime "github.com/altairalabs/omnia/internal/runtime"
+	"github.com/altairalabs/omnia/internal/schema"
 	"github.com/altairalabs/omnia/pkg/k8s"
 )
 
 // maxConditionMessageLen is the maximum length for a condition message.
 const maxConditionMessageLen = 1024
+
+// packReadyError returns nil when the pack at packPath is present and passes
+// schema validation, or an error describing why the runtime cannot serve it.
+// The runtime readiness probe calls this on every check, so a pod whose mounted
+// pack is invalid — including a broken pack rolled onto a live agent — drops out
+// of the Service rather than accepting conversations that fail at open-time
+// (#1299). The schema validator uses an embedded schema, so a Validate error is
+// a definitive invalid-pack result, not a transient network failure.
+func packReadyError(validator *schema.SchemaValidator, packPath string) error {
+	data, err := os.ReadFile(packPath)
+	if err != nil {
+		return fmt.Errorf("pack file unreadable: %w", err)
+	}
+	if validator != nil {
+		if err := validator.Validate(data); err != nil {
+			return fmt.Errorf("pack schema invalid: %w", err)
+		}
+	}
+	return nil
+}
 
 // validatePackContent runs pack-level validation and returns warnings.
 func validatePackContent(packPath string, evalDefs []evals.EvalDef, log logr.Logger) []string {

@@ -186,8 +186,24 @@ func (r *AgentRuntimeReconciler) reconcileReferences(
 		r.handleRefError(ctx, log, agentRuntime, ConditionTypePromptPackReady, "PromptPackNotFound", err)
 		return nil, nil, nil, ctrl.Result{}, err
 	}
+	// Gate readiness on the PromptPack's schema validity. A pack that failed
+	// schema validation makes every conversation fail at open-time, so refuse
+	// to bring the agent up and surface the reason clearly rather than serving
+	// a silently-broken agent (#1299). This gates the single referenced pack,
+	// which both the stable and canary tracks mount today; per-variant
+	// candidate-pack validation lands when the candidate.promptPackVersion
+	// override resolves a distinct pack (separate follow-up).
+	if reason := promptPackInvalidReason(promptPack); reason != "" {
+		SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypePromptPackReady, metav1.ConditionFalse,
+			"PromptPackInvalid", reason)
+		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhaseFailed
+		if statusErr := r.Status().Update(ctx, agentRuntime); statusErr != nil {
+			log.Error(statusErr, logMsgFailedToUpdateStatus)
+		}
+		return nil, nil, nil, ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
 	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypePromptPackReady, metav1.ConditionTrue,
-		"PromptPackFound", "PromptPack resource found")
+		"PromptPackFound", "PromptPack resource found and schema-valid")
 
 	// Fetch optional ToolRegistry
 	var toolRegistry *omniav1alpha1.ToolRegistry
@@ -545,6 +561,26 @@ func (r *AgentRuntimeReconciler) reconcileDelete(ctx context.Context, agentRunti
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// promptPackInvalidReason returns a user-facing message when the PromptPack is
+// definitively unusable (failed schema validation), or "" when it is usable.
+// Reusable so a rollout can validate a candidate pack independently once the
+// candidate.promptPackVersion override resolves a distinct pack.
+func promptPackInvalidReason(pp *omniav1alpha1.PromptPack) string {
+	for i := range pp.Status.Conditions {
+		c := pp.Status.Conditions[i]
+		if c.Type == PromptPackConditionTypeSchemaValid && c.Status == metav1.ConditionFalse {
+			if c.Message != "" {
+				return fmt.Sprintf("PromptPack %s failed schema validation: %s", pp.Name, c.Message)
+			}
+			return fmt.Sprintf("PromptPack %s failed schema validation", pp.Name)
+		}
+	}
+	if pp.Status.Phase == omniav1alpha1.PromptPackPhaseFailed {
+		return fmt.Sprintf("PromptPack %s is in %s phase", pp.Name, pp.Status.Phase)
+	}
+	return ""
 }
 
 func (r *AgentRuntimeReconciler) fetchPromptPack(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) (*omniav1alpha1.PromptPack, error) {

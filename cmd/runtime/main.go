@@ -51,6 +51,7 @@ import (
 	memoryhttpclient "github.com/altairalabs/omnia/internal/memory/httpclient"
 	pkruntime "github.com/altairalabs/omnia/internal/runtime"
 	"github.com/altairalabs/omnia/internal/runtime/tools"
+	"github.com/altairalabs/omnia/internal/schema"
 	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/k8s"
@@ -328,7 +329,17 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	// Readiness re-validates the mounted pack on every probe so a pod serving
+	// an invalid pack (including a broken pack rolled onto a live agent) drops
+	// out of the Service endpoints instead of accepting conversations that
+	// fail at open-time (#1299).
+	readyValidator := schema.NewSchemaValidatorWithOptions(log, nil, 0)
 	healthMux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		if err := packReadyError(readyValidator, cfg.PromptPackPath); err != nil {
+			log.V(1).Info("readiness check failed", "error", err.Error())
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
