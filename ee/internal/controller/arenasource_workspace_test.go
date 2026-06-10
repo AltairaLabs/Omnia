@@ -25,6 +25,7 @@ import (
 
 func TestResolveWorkspaceSourceDir(t *testing.T) {
 	base := filepath.Join("/workspace-content", "ws", "ns")
+	const target = "arena/x" // arbitrary target for the rejection cases
 	tests := []struct {
 		name    string
 		rel     string
@@ -33,10 +34,10 @@ func TestResolveWorkspaceSourceDir(t *testing.T) {
 		want    string
 	}{
 		{"valid", "arena/projects/p1", "arena/deployed/p1", false, filepath.Join(base, "arena/projects/p1")},
-		{"absolute rejected", "/etc/passwd", "arena/x", true, ""},
-		{"dotdot rejected", "../../etc", "arena/x", true, ""},
-		{"escaping after clean rejected", "a/../../b", "arena/x", true, ""},
-		{"empty rejected", "", "arena/x", true, ""},
+		{"absolute rejected", "/etc/passwd", target, true, ""},
+		{"dotdot rejected", "../../etc", target, true, ""},
+		{"escaping after clean rejected", "a/../../b", target, true, ""},
+		{"empty rejected", "", target, true, ""},
 		{"target equals source rejected", "arena/p", "arena/p", true, ""},
 	}
 	for _, tt := range tests {
