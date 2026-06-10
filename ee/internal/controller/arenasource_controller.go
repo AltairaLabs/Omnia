@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -236,15 +237,16 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		if err != nil {
 			log.Error(err, "Failed to store artifact")
 			r.handleFetchError(ctx, source, err)
-			// Clean up artifact directory
-			if result.artifact != nil && result.artifact.Path != "" {
+			// Clean up artifact directory (never delete a preserved source —
+			// e.g. a workspace snapshot points at the live editable dir).
+			if result.artifact != nil && result.artifact.Path != "" && !result.artifact.Preserve {
 				_ = os.RemoveAll(result.artifact.Path)
 			}
 			return ctrl.Result{RequeueAfter: interval}, nil
 		}
 
-		// Clean up artifact directory
-		if result.artifact != nil && result.artifact.Path != "" {
+		// Clean up artifact directory (never delete a preserved source).
+		if result.artifact != nil && result.artifact.Path != "" && !result.artifact.Preserve {
 			_ = os.RemoveAll(result.artifact.Path)
 		}
 
@@ -461,6 +463,8 @@ func (r *ArenaSourceReconciler) createFetcherFromSpec(ctx context.Context, sourc
 		return r.createOCIFetcher(ctx, source, opts)
 	case omniav1alpha1.ArenaSourceTypeConfigMap:
 		return r.createConfigMapFetcher(source, opts)
+	case omniav1alpha1.ArenaSourceTypeWorkspace:
+		return r.createWorkspaceFetcher(ctx, source)
 	default:
 		return nil, fmt.Errorf("unsupported source type: %s", source.Spec.Type)
 	}
@@ -536,6 +540,65 @@ func (r *ArenaSourceReconciler) createConfigMapFetcher(source *omniav1alpha1.Are
 	}
 
 	return sourcesync.NewConfigMapFetcher(config, r.Client), nil
+}
+
+// createWorkspaceFetcher creates a fetcher that snapshots an existing directory
+// on the workspace content volume — no external fetch. The source directory is
+// resolved under {WorkspaceContentPath}/{workspace}/{namespace}/ and validated
+// to stay within the volume and differ from the versioned target.
+func (r *ArenaSourceReconciler) createWorkspaceFetcher(ctx context.Context, source *omniav1alpha1.ArenaSource) (sourcesync.Fetcher, error) {
+	if source.Spec.Workspace == nil {
+		return nil, fmt.Errorf("workspace configuration is required for workspace source type")
+	}
+	if r.WorkspaceContentPath == "" {
+		return nil, fmt.Errorf("WorkspaceContentPath is required for workspace source type")
+	}
+
+	workspaceName := GetWorkspaceForNamespace(ctx, r.Client, source.Namespace)
+	base := filepath.Join(r.WorkspaceContentPath, workspaceName, source.Namespace)
+	targetPath := source.Spec.TargetPath
+	if targetPath == "" {
+		targetPath = fmt.Sprintf("arena/%s", source.Name)
+	}
+
+	srcDir, err := resolveWorkspaceSourceDir(base, source.Spec.Workspace.Path, targetPath)
+	if err != nil {
+		return nil, err
+	}
+
+	info, statErr := os.Stat(srcDir)
+	if statErr != nil {
+		return nil, fmt.Errorf("workspace source path %q not found: %w", source.Spec.Workspace.Path, statErr)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("workspace source path %q is not a directory", source.Spec.Workspace.Path)
+	}
+
+	return sourcesync.NewWorkspaceFetcher(srcDir), nil
+}
+
+// resolveWorkspaceSourceDir validates a workspace source path and returns the
+// absolute source directory under base. It rejects empty/absolute paths and
+// ".." traversal, ensures the resolved dir stays within base, and rejects a
+// source equal to the versioned target dir (which would snapshot into itself).
+func resolveWorkspaceSourceDir(base, relPath, targetPath string) (string, error) {
+	rel := filepath.Clean(relPath)
+	if rel == "." || rel == ".." || filepath.IsAbs(rel) ||
+		strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("workspace path must be a non-empty relative path within the volume: %q", relPath)
+	}
+
+	srcDir := filepath.Join(base, rel)
+	if srcDir != base && !strings.HasPrefix(srcDir, base+string(filepath.Separator)) {
+		return "", fmt.Errorf("workspace path escapes the workspace volume: %q", relPath)
+	}
+
+	targetDir := filepath.Join(base, filepath.Clean(targetPath))
+	if targetDir == srcDir {
+		return "", fmt.Errorf("workspace targetPath %q must differ from the source path %q", targetPath, relPath)
+	}
+
+	return srcDir, nil
 }
 
 // storeArtifact stores the fetched artifact by syncing to the workspace content filesystem.
