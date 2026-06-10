@@ -492,7 +492,10 @@ sharepointHero:
   workspace: demo
 
   # In-cluster memory-api base URL for the demo workspace (no trailing slash).
-  memoryApiUrl: http://memory-api.omnia-demo:8080
+  # The operator names the per-workspace memory service
+  # memory-<workspace>-<serviceGroup>, so for workspace "demo" + the default
+  # service group it is memory-demo-default (NOT the generic memory-api).
+  memoryApiUrl: http://memory-demo-default.omnia-demo:8080
 
   # In-cluster Prometheus query endpoint (kube-prometheus-stack).
   prometheusUrl: http://prometheus-operated.monitoring:9090

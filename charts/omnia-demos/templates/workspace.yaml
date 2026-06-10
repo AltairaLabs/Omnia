@@ -52,6 +52,13 @@ spec:
             name: {{ .Values.sharepointHero.database.memorySecret }}
         providerRef:
           name: rag-hero-embeddings
+        # Index documents as a condensed summary per doc (not a RAG-chunked
+        # copy of the corpus). memory-api reads this MemoryPolicy live via the
+        # PolicyLoader at ingest time, so retrieval surfaces a lean reference
+        # the agent then resolves through fetch_sharepoint — and prompts stay
+        # small enough to fit the gpt-4o deployment's token-per-minute budget.
+        policyRef:
+          name: rag-hero-memory
         {{- if .Values.sharepointHero.azure.enabled }}
         podOverrides:
           serviceAccountName: {{ .Values.sharepointHero.azure.workloadIdentity.serviceAccountName }}
@@ -59,3 +66,27 @@ spec:
             azure.workload.identity/use: "true"
         {{- end }}
   {{- end }}
+{{- if .Values.sharepointHero.enabled }}
+---
+# Ingest each SharePoint document as ONE condensed summary item, not a
+# RAG-chunked copy of the full corpus. memory-api reads spec.ingestion live via
+# the PolicyLoader at /institutional/ingest time. This keeps Postgres a lean
+# reference index (the agent resolves real content through fetch_sharepoint) and
+# keeps retrieved context small — full-corpus chunks made a single agent turn
+# ~6k tokens, and with the eval llm_judges + tool rounds stacked per turn that
+# blew the gpt-4o deployment's 30k token-per-minute budget (429s). Cluster-scoped
+# CRD; tiers is required, so institutional retention is pinned to Manual.
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: MemoryPolicy
+metadata:
+  name: rag-hero-memory
+  labels:
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  tiers:
+    institutional:
+      mode: Manual
+  ingestion:
+    strategy: summary
+    summarizer: extractive
+{{- end }}
