@@ -106,8 +106,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Incrementally update session statistics */
-        patch: operations["updateStats"];
+        /** Update session lifecycle status */
+        patch: operations["updateStatus"];
         trace?: never;
     };
     "/api/v1/sessions/{sessionID}/ttl": {
@@ -157,6 +157,44 @@ export interface paths {
         put?: never;
         /** Record a provider call */
         post: operations["recordProviderCall"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionID}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get runtime events for a session */
+        get: operations["getRuntimeEvents"];
+        put?: never;
+        /** Record a runtime event for a session */
+        post: operations["recordRuntimeEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/provider-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record workspace-scoped provider usage (batch)
+         * @description Records session-less provider spend (embeddings, judge tokens, …) keyed by namespace. Written by memory-api and the eval worker.
+         */
+        post: operations["recordProviderUsage"];
         delete?: never;
         options?: never;
         head?: never;
@@ -215,6 +253,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/privacy-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get effective privacy policy for a namespace/agent
+         * @description Returns the facade-visible subset of the effective SessionPrivacyPolicy
+         *     (global -> workspace -> agent inheritance chain). Consumed by the facade
+         *     at WebSocket-connect time to decide whether to record the session.
+         */
+        get: operations["getPrivacyPolicy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -228,8 +288,6 @@ export interface components {
         MessageRole: "user" | "assistant" | "system";
         /** @enum {string} */
         ToolCallStatus: "pending" | "success" | "error";
-        /** @enum {string} */
-        ToolCallExecution: "server" | "client";
         /** @enum {string} */
         ProviderCallStatus: "pending" | "completed" | "failed";
         Session: {
@@ -265,6 +323,10 @@ export interface components {
             lastMessagePreview?: string;
             promptPackName?: string;
             promptPackVersion?: string;
+            /** @description Rollout cohort identifier */
+            cohortId?: string;
+            /** @description Rollout variant (e.g., stable, canary) */
+            variant?: string;
         };
         Message: {
             id?: string;
@@ -279,9 +341,13 @@ export interface components {
             inputTokens?: number;
             /** Format: int32 */
             outputTokens?: number;
+            /** Format: double */
+            costUsd?: number;
             toolCallId?: string;
             /** Format: int32 */
             sequenceNum?: number;
+            hasMedia?: boolean;
+            mediaTypes?: string[];
         };
         ToolCall: {
             id?: string;
@@ -296,7 +362,6 @@ export interface components {
             status?: components["schemas"]["ToolCallStatus"];
             /** Format: int64 */
             durationMs?: number;
-            execution?: components["schemas"]["ToolCallExecution"];
             errorMessage?: string;
             labels?: {
                 [key: string]: string;
@@ -308,7 +373,10 @@ export interface components {
             id?: string;
             /** Format: uuid */
             sessionId?: string;
+            namespace?: string;
+            agentName?: string;
             provider?: string;
+            providerName?: string;
             model?: string;
             status?: components["schemas"]["ProviderCallStatus"];
             /** Format: int64 */
@@ -328,20 +396,47 @@ export interface components {
             labels?: {
                 [key: string]: string;
             };
+            source?: string;
             /** Format: date-time */
             createdAt?: string;
         };
-        SessionStatusUpdate: {
-            /** Format: int32 */
-            AddInputTokens?: number;
-            /** Format: int32 */
-            AddOutputTokens?: number;
+        ProviderUsage: {
+            id?: string;
+            namespace?: string;
+            workspaceName?: string;
+            provider?: string;
+            providerName?: string;
+            model?: string;
+            source?: string;
+            /** Format: int64 */
+            inputTokens?: number;
+            /** Format: int64 */
+            outputTokens?: number;
+            /** Format: int64 */
+            cachedTokens?: number;
             /** Format: double */
-            AddCostUSD?: number;
+            costUsd?: number;
             /** Format: int32 */
-            AddToolCalls?: number;
-            /** Format: int32 */
-            AddMessages?: number;
+            callCount?: number;
+            /** Format: date-time */
+            createdAt?: string;
+        };
+        RuntimeEvent: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            sessionId?: string;
+            eventType?: string;
+            data?: {
+                [key: string]: unknown;
+            };
+            /** Format: int64 */
+            durationMs?: number;
+            errorMessage?: string;
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        SessionStatusUpdate: {
             SetStatus?: components["schemas"]["SessionStatus"];
             /** Format: date-time */
             SetEndedAt?: string;
@@ -383,6 +478,16 @@ export interface components {
             ttlSeconds?: number;
             promptPackName?: string;
             promptPackVersion?: string;
+            /** @description Optional labels for categorizing sessions */
+            tags?: string[];
+            /** @description Optional initial key-value state for the session */
+            initialState?: {
+                [key: string]: string;
+            };
+            /** @description Rollout cohort identifier */
+            cohortId?: string;
+            /** @description Rollout variant (e.g., stable, canary) */
+            variant?: string;
         };
         RefreshTTLRequest: {
             ttlSeconds: number;
@@ -414,6 +519,26 @@ export interface components {
             /** Format: uuid */
             sessionId?: string;
             message?: string;
+        };
+        /**
+         * @description Facade-visible subset of the effective SessionPrivacyPolicy. Only
+         *     recording flags are exposed; PII, retention, and encryption fields
+         *     are enforced server-side in session-api.
+         */
+        PrivacyPolicyResponse: {
+            recording: components["schemas"]["PrivacyRecordingFlags"];
+        };
+        PrivacyRecordingFlags: {
+            /** @description When false, session-api rejects all recording writes with 204. */
+            enabled: boolean;
+            /** @description When false, facade skips recording at the edge. */
+            facadeData: boolean;
+            /**
+             * @description When false, assistant messages, tool calls, runtime events, and
+             *     provider calls are dropped; user messages, status updates, and
+             *     TTL refreshes are still accepted.
+             */
+            richData: boolean;
         };
     };
     responses: {
@@ -719,7 +844,7 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
-    updateStats: {
+    updateStatus: {
         parameters: {
             query?: never;
             header?: never;
@@ -735,7 +860,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Stats updated */
+            /** @description Status updated */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -887,6 +1012,92 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    getRuntimeEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session UUID */
+                sessionID: components["parameters"]["SessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Runtime events list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeEvent"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    recordRuntimeEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session UUID */
+                sessionID: components["parameters"]["SessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuntimeEvent"];
+            };
+        };
+        responses: {
+            /** @description Runtime event recorded */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            413: components["responses"]["BodyTooLarge"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    recordProviderUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderUsage"][];
+            };
+        };
+        responses: {
+            /** @description Provider usage recorded */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            500: components["responses"]["InternalError"];
+            /** @description Provider usage store not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     listEvalResults: {
         parameters: {
             query?: {
@@ -1006,6 +1217,40 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    getPrivacyPolicy: {
+        parameters: {
+            query: {
+                /** @description Kubernetes namespace */
+                namespace: string;
+                /** @description Agent name */
+                agent: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Effective privacy policy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrivacyPolicyResponse"];
+                };
+            };
+            /** @description No policy applies to this namespace/agent */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            500: components["responses"]["InternalError"];
         };
     };
 }

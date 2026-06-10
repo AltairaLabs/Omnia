@@ -144,8 +144,30 @@ type MessagesResponse struct {
 	Messages *[]Message `json:"messages,omitempty"`
 }
 
+// PrivacyPolicyResponse Facade-visible subset of the effective SessionPrivacyPolicy. Only
+// recording flags are exposed; PII, retention, and encryption fields
+// are enforced server-side in session-api.
+type PrivacyPolicyResponse struct {
+	Recording PrivacyRecordingFlags `json:"recording"`
+}
+
+// PrivacyRecordingFlags defines model for PrivacyRecordingFlags.
+type PrivacyRecordingFlags struct {
+	// Enabled When false, session-api rejects all recording writes with 204.
+	Enabled bool `json:"enabled"`
+
+	// FacadeData When false, facade skips recording at the edge.
+	FacadeData bool `json:"facadeData"`
+
+	// RichData When false, assistant messages, tool calls, runtime events, and
+	// provider calls are dropped; user messages, status updates, and
+	// TTL refreshes are still accepted.
+	RichData bool `json:"richData"`
+}
+
 // ProviderCall defines model for ProviderCall.
 type ProviderCall struct {
+	AgentName     *string             `json:"agentName,omitempty"`
 	CachedTokens  *int64              `json:"cachedTokens,omitempty"`
 	CostUsd       *float64            `json:"costUsd,omitempty"`
 	CreatedAt     *time.Time          `json:"createdAt,omitempty"`
@@ -156,8 +178,10 @@ type ProviderCall struct {
 	InputTokens   *int64              `json:"inputTokens,omitempty"`
 	Labels        *map[string]string  `json:"labels,omitempty"`
 	Model         *string             `json:"model,omitempty"`
+	Namespace     *string             `json:"namespace,omitempty"`
 	OutputTokens  *int64              `json:"outputTokens,omitempty"`
 	Provider      *string             `json:"provider,omitempty"`
+	ProviderName  *string             `json:"providerName,omitempty"`
 	SessionId     *openapi_types.UUID `json:"sessionId,omitempty"`
 	Source        *string             `json:"source,omitempty"`
 	Status        *ProviderCallStatus `json:"status,omitempty"`
@@ -166,6 +190,23 @@ type ProviderCall struct {
 
 // ProviderCallStatus defines model for ProviderCallStatus.
 type ProviderCallStatus string
+
+// ProviderUsage defines model for ProviderUsage.
+type ProviderUsage struct {
+	CachedTokens  *int64     `json:"cachedTokens,omitempty"`
+	CallCount     *int32     `json:"callCount,omitempty"`
+	CostUsd       *float64   `json:"costUsd,omitempty"`
+	CreatedAt     *time.Time `json:"createdAt,omitempty"`
+	Id            *string    `json:"id,omitempty"`
+	InputTokens   *int64     `json:"inputTokens,omitempty"`
+	Model         *string    `json:"model,omitempty"`
+	Namespace     *string    `json:"namespace,omitempty"`
+	OutputTokens  *int64     `json:"outputTokens,omitempty"`
+	Provider      *string    `json:"provider,omitempty"`
+	ProviderName  *string    `json:"providerName,omitempty"`
+	Source        *string    `json:"source,omitempty"`
+	WorkspaceName *string    `json:"workspaceName,omitempty"`
+}
 
 // RefreshTTLRequest defines model for RefreshTTLRequest.
 type RefreshTTLRequest struct {
@@ -319,6 +360,18 @@ type ListEvalResultsParams struct {
 // CreateEvalResultsJSONBody defines parameters for CreateEvalResults.
 type CreateEvalResultsJSONBody = []EvalResult
 
+// GetPrivacyPolicyParams defines parameters for GetPrivacyPolicy.
+type GetPrivacyPolicyParams struct {
+	// Namespace Kubernetes namespace
+	Namespace string `form:"namespace" json:"namespace"`
+
+	// Agent Agent name
+	Agent string `form:"agent" json:"agent"`
+}
+
+// RecordProviderUsageJSONBody defines parameters for RecordProviderUsage.
+type RecordProviderUsageJSONBody = []ProviderUsage
+
 // ListSessionsParams defines parameters for ListSessions.
 type ListSessionsParams struct {
 	// Workspace Kubernetes namespace (alias for namespace)
@@ -390,6 +443,9 @@ type GetMessagesParams struct {
 
 // CreateEvalResultsJSONRequestBody defines body for CreateEvalResults for application/json ContentType.
 type CreateEvalResultsJSONRequestBody = CreateEvalResultsJSONBody
+
+// RecordProviderUsageJSONRequestBody defines body for RecordProviderUsage for application/json ContentType.
+type RecordProviderUsageJSONRequestBody = RecordProviderUsageJSONBody
 
 // CreateSessionJSONRequestBody defines body for CreateSession for application/json ContentType.
 type CreateSessionJSONRequestBody = CreateSessionRequest
@@ -493,6 +549,14 @@ type ClientInterface interface {
 
 	CreateEvalResults(ctx context.Context, body CreateEvalResultsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetPrivacyPolicy request
+	GetPrivacyPolicy(ctx context.Context, params *GetPrivacyPolicyParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RecordProviderUsageWithBody request with any body
+	RecordProviderUsageWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	RecordProviderUsage(ctx context.Context, body RecordProviderUsageJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListSessions request
 	ListSessions(ctx context.Context, params *ListSessionsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -588,6 +652,42 @@ func (c *Client) CreateEvalResultsWithBody(ctx context.Context, contentType stri
 
 func (c *Client) CreateEvalResults(ctx context.Context, body CreateEvalResultsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateEvalResultsRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetPrivacyPolicy(ctx context.Context, params *GetPrivacyPolicyParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPrivacyPolicyRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RecordProviderUsageWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRecordProviderUsageRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RecordProviderUsage(ctx context.Context, body RecordProviderUsageJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRecordProviderUsageRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1064,6 +1164,103 @@ func NewCreateEvalResultsRequestWithBody(server string, contentType string, body
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/eval-results")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetPrivacyPolicyRequest generates requests for GetPrivacyPolicy
+func NewGetPrivacyPolicyRequest(server string, params *GetPrivacyPolicyParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/privacy-policy")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "namespace", runtime.ParamLocationQuery, params.Namespace); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "agent", runtime.ParamLocationQuery, params.Agent); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRecordProviderUsageRequest calls the generic RecordProviderUsage builder with application/json body
+func NewRecordProviderUsageRequest(server string, body RecordProviderUsageJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRecordProviderUsageRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRecordProviderUsageRequestWithBody generates requests for RecordProviderUsage with any type of body
+func NewRecordProviderUsageRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/provider-usage")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -2143,6 +2340,14 @@ type ClientWithResponsesInterface interface {
 
 	CreateEvalResultsWithResponse(ctx context.Context, body CreateEvalResultsJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateEvalResultsResponse, error)
 
+	// GetPrivacyPolicyWithResponse request
+	GetPrivacyPolicyWithResponse(ctx context.Context, params *GetPrivacyPolicyParams, reqEditors ...RequestEditorFn) (*GetPrivacyPolicyResponse, error)
+
+	// RecordProviderUsageWithBodyWithResponse request with any body
+	RecordProviderUsageWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RecordProviderUsageResponse, error)
+
+	RecordProviderUsageWithResponse(ctx context.Context, body RecordProviderUsageJSONRequestBody, reqEditors ...RequestEditorFn) (*RecordProviderUsageResponse, error)
+
 	// ListSessionsWithResponse request
 	ListSessionsWithResponse(ctx context.Context, params *ListSessionsParams, reqEditors ...RequestEditorFn) (*ListSessionsResponse, error)
 
@@ -2252,6 +2457,53 @@ func (r CreateEvalResultsResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r CreateEvalResultsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetPrivacyPolicyResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *PrivacyPolicyResponse
+	JSON400      *BadRequest
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPrivacyPolicyResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPrivacyPolicyResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RecordProviderUsageResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON400      *BadRequest
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r RecordProviderUsageResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RecordProviderUsageResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -2728,6 +2980,32 @@ func (c *ClientWithResponses) CreateEvalResultsWithResponse(ctx context.Context,
 	return ParseCreateEvalResultsResponse(rsp)
 }
 
+// GetPrivacyPolicyWithResponse request returning *GetPrivacyPolicyResponse
+func (c *ClientWithResponses) GetPrivacyPolicyWithResponse(ctx context.Context, params *GetPrivacyPolicyParams, reqEditors ...RequestEditorFn) (*GetPrivacyPolicyResponse, error) {
+	rsp, err := c.GetPrivacyPolicy(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPrivacyPolicyResponse(rsp)
+}
+
+// RecordProviderUsageWithBodyWithResponse request with arbitrary body returning *RecordProviderUsageResponse
+func (c *ClientWithResponses) RecordProviderUsageWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RecordProviderUsageResponse, error) {
+	rsp, err := c.RecordProviderUsageWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRecordProviderUsageResponse(rsp)
+}
+
+func (c *ClientWithResponses) RecordProviderUsageWithResponse(ctx context.Context, body RecordProviderUsageJSONRequestBody, reqEditors ...RequestEditorFn) (*RecordProviderUsageResponse, error) {
+	rsp, err := c.RecordProviderUsage(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRecordProviderUsageResponse(rsp)
+}
+
 // ListSessionsWithResponse request returning *ListSessionsResponse
 func (c *ClientWithResponses) ListSessionsWithResponse(ctx context.Context, params *ListSessionsParams, reqEditors ...RequestEditorFn) (*ListSessionsResponse, error) {
 	rsp, err := c.ListSessions(ctx, params, reqEditors...)
@@ -2988,6 +3266,79 @@ func ParseCreateEvalResultsResponse(rsp *http.Response) (*CreateEvalResultsRespo
 	}
 
 	response := &CreateEvalResultsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetPrivacyPolicyResponse parses an HTTP response from a GetPrivacyPolicyWithResponse call
+func ParseGetPrivacyPolicyResponse(rsp *http.Response) (*GetPrivacyPolicyResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPrivacyPolicyResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PrivacyPolicyResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRecordProviderUsageResponse parses an HTTP response from a RecordProviderUsageWithResponse call
+func ParseRecordProviderUsageResponse(rsp *http.Response) (*RecordProviderUsageResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RecordProviderUsageResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

@@ -275,7 +275,10 @@ func TestProviderCallToAPI(t *testing.T) {
 	pc := session.ProviderCall{
 		ID:            "pc1",
 		SessionID:     uuid.New().String(),
+		Namespace:     "omnia-demo",
+		AgentName:     "support",
 		Provider:      "anthropic",
+		ProviderName:  "anthropic-main",
 		Model:         "claude-sonnet-4-20250514",
 		Status:        session.ProviderCallStatusCompleted,
 		InputTokens:   1000,
@@ -292,11 +295,20 @@ func TestProviderCallToAPI(t *testing.T) {
 	result := ProviderCallToAPI(pc)
 
 	assert.Equal(t, "pc1", deref(result.Id))
+	assert.Equal(t, "omnia-demo", deref(result.Namespace))
+	assert.Equal(t, "support", deref(result.AgentName))
+	assert.Equal(t, "anthropic-main", deref(result.ProviderName))
 	assert.Equal(t, ProviderCallStatusCompleted, *result.Status)
 	assert.Equal(t, int64(1000), deref(result.InputTokens))
 	assert.Equal(t, 0.05, deref(result.CostUsd))
 	assert.Equal(t, "end_turn", deref(result.FinishReason))
 	assert.Equal(t, int32(2), deref(result.ToolCallCount))
+
+	// Round-trip back to the internal type preserves the denorm fields.
+	back := ProviderCallFromAPI(result)
+	assert.Equal(t, "omnia-demo", back.Namespace)
+	assert.Equal(t, "support", back.AgentName)
+	assert.Equal(t, "anthropic-main", back.ProviderName)
 }
 
 func TestStatusUpdateToAPI(t *testing.T) {
