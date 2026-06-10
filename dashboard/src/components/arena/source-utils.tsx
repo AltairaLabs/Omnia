@@ -95,6 +95,7 @@ export function getSourceTypeBadge(type?: ArenaSourceType) {
     oci: "border-blue-500 text-blue-600",
     s3: "border-orange-500 text-orange-600",
     configmap: "border-purple-500 text-purple-600",
+    workspace: "border-teal-500 text-teal-600",
   };
 
   return (
