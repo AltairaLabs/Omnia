@@ -149,7 +149,7 @@ func TestNewServer(t *testing.T) {
 	s := testScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 
-	srv := NewServer(":0", c, log)
+	srv := NewServer(":0", c, log, nil, nil)
 	if srv == nil {
 		t.Fatal("expected non-nil server")
 	}
@@ -268,7 +268,7 @@ func TestServerStartAndShutdown(t *testing.T) {
 	listener.Close()
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	srv := NewServer(addr, c, log)
+	srv := NewServer(addr, c, log, nil, nil)
 
 	// Start in background
 	errCh := make(chan error, 1)

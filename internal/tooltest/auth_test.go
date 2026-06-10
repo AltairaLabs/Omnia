@@ -1,0 +1,185 @@
+/*
+Copyright 2026 Altaira Labs.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
+package tooltest
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	authnv1 "k8s.io/api/authentication/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
+	k8stesting "k8s.io/client-go/testing"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+)
+
+// stubReviewer is a test TokenReviewer.
+type stubReviewer struct {
+	authenticated bool
+	username      string
+	err           error
+}
+
+func (s stubReviewer) ReviewToken(_ context.Context, _ string) (bool, string, error) {
+	return s.authenticated, s.username, s.err
+}
+
+const dashboardSubject = "system:serviceaccount:omnia-system:omnia-dashboard"
+
+func newAuthTestServer(reviewer TokenReviewer) *Server {
+	return NewServer(":0", nil, zap.New(zap.UseDevMode(true)), reviewer, []string{dashboardSubject})
+}
+
+func doGuarded(t *testing.T, srv *Server, authHeader string) int {
+	t.Helper()
+	handler := srv.requireAuth(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	req := httptest.NewRequest(http.MethodPost, "/x", nil)
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+	return rec.Code
+}
+
+func TestRequireAuth(t *testing.T) {
+	t.Run("missing token -> 401", func(t *testing.T) {
+		code := doGuarded(t, newAuthTestServer(stubReviewer{}), "")
+		if code != http.StatusUnauthorized {
+			t.Fatalf("got %d, want 401", code)
+		}
+	})
+
+	t.Run("unauthenticated token -> 401", func(t *testing.T) {
+		code := doGuarded(t, newAuthTestServer(stubReviewer{authenticated: false}), "Bearer bad")
+		if code != http.StatusUnauthorized {
+			t.Fatalf("got %d, want 401", code)
+		}
+	})
+
+	t.Run("token review error -> 401", func(t *testing.T) {
+		code := doGuarded(t, newAuthTestServer(stubReviewer{err: errors.New("boom")}), "Bearer x")
+		if code != http.StatusUnauthorized {
+			t.Fatalf("got %d, want 401", code)
+		}
+	})
+
+	t.Run("authenticated but wrong subject -> 403", func(t *testing.T) {
+		srv := newAuthTestServer(stubReviewer{authenticated: true, username: "system:serviceaccount:other:thing"})
+		code := doGuarded(t, srv, "Bearer x")
+		if code != http.StatusForbidden {
+			t.Fatalf("got %d, want 403", code)
+		}
+	})
+
+	t.Run("authenticated allowed subject -> 200", func(t *testing.T) {
+		srv := newAuthTestServer(stubReviewer{authenticated: true, username: dashboardSubject})
+		code := doGuarded(t, srv, "Bearer good")
+		if code != http.StatusOK {
+			t.Fatalf("got %d, want 200", code)
+		}
+	})
+
+	t.Run("nil reviewer -> auth disabled, passes through", func(t *testing.T) {
+		srv := NewServer(":0", nil, zap.New(zap.UseDevMode(true)), nil, nil)
+		code := doGuarded(t, srv, "")
+		if code != http.StatusOK {
+			t.Fatalf("got %d, want 200 (auth disabled)", code)
+		}
+	})
+}
+
+func TestNewK8sTokenReviewer(t *testing.T) {
+	r, err := NewK8sTokenReviewer(&rest.Config{Host: "https://example.invalid"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r == nil {
+		t.Fatal("expected non-nil reviewer")
+	}
+}
+
+func TestK8sTokenReviewer_ReviewToken(t *testing.T) {
+	const subject = "system:serviceaccount:omnia-system:omnia-dashboard"
+
+	t.Run("authenticated returns username", func(t *testing.T) {
+		cs := fake.NewSimpleClientset()
+		cs.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			tr := action.(k8stesting.CreateAction).GetObject().(*authnv1.TokenReview)
+			tr.Status = authnv1.TokenReviewStatus{Authenticated: true, User: authnv1.UserInfo{Username: subject}}
+			return true, tr, nil
+		})
+		r := &k8sTokenReviewer{client: cs}
+		ok, user, err := r.ReviewToken(context.Background(), "tok")
+		if err != nil || !ok || user != subject {
+			t.Fatalf("got ok=%v user=%q err=%v", ok, user, err)
+		}
+	})
+
+	t.Run("unauthenticated", func(t *testing.T) {
+		cs := fake.NewSimpleClientset()
+		cs.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			tr := action.(k8stesting.CreateAction).GetObject().(*authnv1.TokenReview)
+			tr.Status = authnv1.TokenReviewStatus{Authenticated: false}
+			return true, tr, nil
+		})
+		r := &k8sTokenReviewer{client: cs}
+		ok, _, err := r.ReviewToken(context.Background(), "tok")
+		if err != nil || ok {
+			t.Fatalf("got ok=%v err=%v, want ok=false err=nil", ok, err)
+		}
+	})
+
+	t.Run("status error surfaces as error", func(t *testing.T) {
+		cs := fake.NewSimpleClientset()
+		cs.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			tr := action.(k8stesting.CreateAction).GetObject().(*authnv1.TokenReview)
+			tr.Status = authnv1.TokenReviewStatus{Error: "token expired"}
+			return true, tr, nil
+		})
+		r := &k8sTokenReviewer{client: cs}
+		if _, _, err := r.ReviewToken(context.Background(), "tok"); err == nil {
+			t.Fatal("expected error from status.Error")
+		}
+	})
+
+	t.Run("api error surfaces as error", func(t *testing.T) {
+		cs := fake.NewSimpleClientset()
+		cs.PrependReactor("create", "tokenreviews", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, errors.New("boom")
+		})
+		r := &k8sTokenReviewer{client: cs}
+		if _, _, err := r.ReviewToken(context.Background(), "tok"); err == nil {
+			t.Fatal("expected error from API failure")
+		}
+	})
+}
+
+func TestBearerToken(t *testing.T) {
+	tests := map[string]string{
+		"Bearer abc":   "abc",
+		"Bearer  abc ": "abc",
+		"bearer abc":   "", // case-sensitive scheme
+		"abc":          "",
+		"":             "",
+	}
+	for header, want := range tests {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		if header != "" {
+			req.Header.Set("Authorization", header)
+		}
+		if got := bearerToken(req); got != want {
+			t.Fatalf("bearerToken(%q) = %q, want %q", header, got, want)
+		}
+	}
+}

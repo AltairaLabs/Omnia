@@ -22,10 +22,11 @@ data:
   {{- end }}
 
   # Operator tool test API URL (server-side for tool testing proxy)
+  {{- $apiAddr := include "omnia.toolTest.bindAddress" . }}
   {{- if .Values.dashboard.operatorToolTestUrl }}
   OPERATOR_TOOL_TEST_URL: {{ .Values.dashboard.operatorToolTestUrl | quote }}
-  {{- else if .Values.operator.apiBindAddress }}
-  OPERATOR_TOOL_TEST_URL: "http://{{ include "omnia.fullname" . }}-operator:{{ trimPrefix ":" .Values.operator.apiBindAddress }}"
+  {{- else if $apiAddr }}
+  OPERATOR_TOOL_TEST_URL: "http://{{ include "omnia.fullname" . }}-operator:{{ trimPrefix ":" $apiAddr }}"
   {{- end }}
 
   # Mode settings (demo mode defaults to false, not exposed in config)

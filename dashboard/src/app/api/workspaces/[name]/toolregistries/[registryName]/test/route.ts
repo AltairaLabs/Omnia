@@ -9,6 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { readFile } from "node:fs/promises";
 import { withWorkspaceAccess } from "@/lib/auth/workspace-guard";
 import {
   validateWorkspace,
@@ -20,6 +21,24 @@ const SERVICE_DOMAIN = process.env.SERVICE_DOMAIN || "svc.cluster.local";
 const OPERATOR_TOOL_TEST_URL =
   process.env.OPERATOR_TOOL_TEST_URL ||
   `http://omnia-operator.omnia-system.${SERVICE_DOMAIN}:8083`;
+
+// The operator's tool-test API authenticates the dashboard via TokenReview
+// (#1303). Forward this pod's ServiceAccount token as a bearer credential.
+// Projected SA tokens rotate in place, so read fresh per request rather than
+// caching. Falls back to an explicit token env or none (local dev).
+const SA_TOKEN_PATH =
+  process.env.SA_TOKEN_PATH || "/var/run/secrets/kubernetes.io/serviceaccount/token";
+
+async function operatorAuthToken(): Promise<string | null> {
+  if (process.env.OPERATOR_TOOL_TEST_TOKEN) {
+    return process.env.OPERATOR_TOOL_TEST_TOKEN;
+  }
+  try {
+    return (await readFile(SA_TOKEN_PATH, "utf-8")).trim();
+  } catch {
+    return null; // not running in-cluster (local dev) — send no auth
+  }
+}
 
 interface RouteParams {
   params: Promise<{ name: string; registryName: string }>;
@@ -59,13 +78,19 @@ export const POST = withWorkspaceAccess<{
         );
       }
 
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const token = await operatorAuthToken();
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
       let response: Response;
       try {
         response = await fetch(
           `${OPERATOR_TOOL_TEST_URL}/api/v1/namespaces/${namespace}/toolregistries/${registryName}/test`,
           {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers,
             body: JSON.stringify(body),
           }
         );
