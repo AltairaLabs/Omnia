@@ -14,6 +14,7 @@ import (
 	"log/slog"
 
 	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
+	"github.com/AltairaLabs/PromptKit/runtime/events"
 	sdkmetrics "github.com/AltairaLabs/PromptKit/runtime/metrics"
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/sdk"
@@ -25,10 +26,11 @@ import (
 
 // SDKRunner executes evals via the PromptKit SDK's Evaluate() function.
 type SDKRunner struct {
-	tracerProvider trace.TracerProvider
-	logger         *slog.Logger
-	evalCollector  *sdkmetrics.Collector
-	metrics        WorkerMetricsRecorder
+	tracerProvider     trace.TracerProvider
+	logger             *slog.Logger
+	evalCollector      *sdkmetrics.Collector
+	metrics            WorkerMetricsRecorder
+	providerCallWriter ProviderCallWriter
 }
 
 // NewSDKRunner creates an SDKRunner. Options can configure tracing and logging.
@@ -63,6 +65,15 @@ func WithEvalCollector(c *sdkmetrics.Collector) SDKRunnerOption {
 // (eval executions, sampling decisions) from within the SDK evaluation loop.
 func WithMetrics(m WorkerMetricsRecorder) SDKRunnerOption {
 	return func(r *SDKRunner) { r.metrics = m }
+}
+
+// WithProviderCallWriter wires a writer that persists the provider calls the
+// eval pipeline emits (judge LLM calls, RAG-eval embeddings, …). When set, the
+// runner attaches an event bus to sdk.Evaluate and forwards each
+// ProviderCallCompleted/Failed to session-api. When nil (default), no bus is
+// attached and the events are dropped — preserving the prior behavior.
+func WithProviderCallWriter(w ProviderCallWriter) SDKRunnerOption {
+	return func(r *SDKRunner) { r.providerCallWriter = w }
 }
 
 // EvalCollector returns the unified metrics Collector, if any.
@@ -165,7 +176,27 @@ func (s *SDKRunner) evaluate(
 		opts.JudgeTargets = toAnyMap(providerSpecs)
 	}
 
+	// Capture the provider calls the eval pipeline makes (judge LLM calls,
+	// RAG-eval embeddings, …) so their token usage is recorded. sdk.Evaluate
+	// only emits these when an EventBus is attached.
+	var collector *providerCallCollector
+	var bus *events.EventBus
+	if s.providerCallWriter != nil {
+		bus = events.NewEventBus()
+		collector = newProviderCallCollector(sessionID, labels.Namespace, labels.Agent)
+		bus.Subscribe(events.EventProviderCallCompleted, collector.onCompleted)
+		bus.Subscribe(events.EventProviderCallFailed, collector.onFailed)
+		opts.EventBus = bus
+	}
+
 	results, err := sdk.Evaluate(ctx, opts)
+
+	// Drain the bus (dispatch is async) before reading + forwarding the calls.
+	if bus != nil {
+		bus.Close()
+		flushProviderCalls(ctx, s.providerCallWriter, s.logger, collector.collected())
+	}
+
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Error("sdk.Evaluate failed",

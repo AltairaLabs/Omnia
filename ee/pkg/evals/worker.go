@@ -58,6 +58,10 @@ type WorkerConfig struct {
 	RedisClient goredis.UniversalClient
 	// ResultWriter persists eval results to session-api.
 	ResultWriter EvalResultWriter
+	// ProviderCallWriter persists the provider calls the eval pipeline emits
+	// (judge LLM calls, RAG-eval embeddings, …) to session-api. If nil, those
+	// calls are not recorded (no event bus is attached to sdk.Evaluate).
+	ProviderCallWriter ProviderCallWriter
 	// MessageStore reads session data from the Redis hot tier.
 	// If nil, the worker creates one from RedisClient with default options.
 	MessageStore MessageStore
@@ -143,6 +147,9 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		}
 		runnerOpts = append(runnerOpts, WithEvalCollector(evalCollector))
 		runnerOpts = append(runnerOpts, WithMetrics(metricsRecorder))
+		if config.ProviderCallWriter != nil {
+			runnerOpts = append(runnerOpts, WithProviderCallWriter(config.ProviderCallWriter))
+		}
 		sdkRunner = NewSDKRunner(runnerOpts...)
 	}
 

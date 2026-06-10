@@ -46,6 +46,15 @@ type EvalResultWriter interface {
 	WriteEvalResults(ctx context.Context, results []*api.EvalResult) error
 }
 
+// ProviderCallWriter persists provider-call records via the session-api. The
+// eval worker uses it to record the provider calls that occur during evaluation
+// (judge LLM calls, RAG-eval embeddings, etc.). These carry a non-agent source,
+// so the session-totals rollup excludes them while their usage stays attributed
+// to the evaluated session.
+type ProviderCallWriter interface {
+	RecordProviderCall(ctx context.Context, sessionID string, pc *session.ProviderCall) error
+}
+
 // HTTPSessionAPIClient implements SessionAPIClient using the generated session-api client.
 type HTTPSessionAPIClient struct {
 	client *sessionapi.ClientWithResponses
@@ -123,6 +132,24 @@ func (c *HTTPSessionAPIClient) WriteEvalResults(ctx context.Context, results []*
 		return fmt.Errorf("write eval results: status %d", resp.StatusCode())
 	}
 
+	return nil
+}
+
+// RecordProviderCall persists a single provider call for a session via the
+// session-api (POST /api/v1/sessions/{id}/provider-calls).
+func (c *HTTPSessionAPIClient) RecordProviderCall(ctx context.Context, sessionID string, pc *session.ProviderCall) error {
+	id, err := parseSessionID(sessionID)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.client.RecordProviderCallWithResponse(ctx, id, sessionapi.ProviderCallToAPI(*pc))
+	if err != nil {
+		return fmt.Errorf("record provider call for %s: %w", sessionID, err)
+	}
+	if resp.StatusCode() != http.StatusCreated {
+		return fmt.Errorf("record provider call for %s: status %d", sessionID, resp.StatusCode())
+	}
 	return nil
 }
 
