@@ -117,6 +117,7 @@ type flags struct {
 	tracingSample         float64
 	tracingInsecure       bool
 	embeddingProviderName string // name of the Provider CRD for embeddings
+	sessionAPIURL         string // base URL of session-api for provider_usage emit (empty disables)
 	defaultTTL            string // env: DEFAULT_TTL, e.g. "720h"
 	purpose               string // env: MEMORY_PURPOSE, e.g. "support_continuity"
 	retentionInterval     string // env: RETENTION_INTERVAL, e.g. "1h"
@@ -157,6 +158,7 @@ func parseFlags() *flags {
 	flag.Float64Var(&f.tracingSample, "tracing-sample", 0, "Tracing sample rate (0.0-1.0)")
 	flag.BoolVar(&f.tracingInsecure, "tracing-insecure", false, "Use insecure gRPC for tracing")
 	flag.StringVar(&f.embeddingProviderName, "embedding-provider", "", "Name of the Provider CRD to use for embeddings")
+	flag.StringVar(&f.sessionAPIURL, "session-api-url", "", "Base URL of session-api; when set, embedding spend is emitted to provider_usage")
 	flag.StringVar(&f.defaultTTL, "default-ttl", "", "Default memory TTL duration (e.g. 720h)")
 	flag.StringVar(&f.purpose, "purpose", "", "Default memory purpose tag (e.g. support_continuity)")
 	flag.StringVar(&f.retentionInterval, "retention-interval", "", "Interval for retention worker (e.g. 1h)")
@@ -198,6 +200,7 @@ func (f *flags) applyEnvFallbacks() {
 	envBoolFallback(&f.tracingInsecure, "TRACING_INSECURE")
 	envFallback(&f.tracingEndpoint, "", "TRACING_ENDPOINT")
 	envFallback(&f.embeddingProviderName, "", "EMBEDDING_PROVIDER")
+	envFallback(&f.sessionAPIURL, "", "SESSION_API_URL")
 	envFallback(&f.defaultTTL, "", "DEFAULT_TTL")
 	envFallback(&f.purpose, "", "MEMORY_PURPOSE")
 	envFallback(&f.retentionInterval, "", "RETENTION_INTERVAL")
@@ -502,7 +505,11 @@ func run() error {
 	// --- Embedding service ---
 	var embeddingSvc *memory.EmbeddingService
 	if f.embeddingProviderName != "" {
-		embeddingSvc = createEmbeddingService(ctx, f.embeddingProviderName, pgStore, log)
+		// Embedding spend has no session, so it goes to session-api's
+		// provider_usage table directly. The emitter is best-effort and nil
+		// when SESSION_API_URL is unset (the Prometheus counter still works).
+		usageEmitter := newSessionUsageEmitter(f.sessionAPIURL, log)
+		embeddingSvc = createEmbeddingService(ctx, f.embeddingProviderName, f.workspace, detectNamespace(), pgStore, usageEmitter, log)
 	}
 
 	// --- Tombstone GC worker ---
@@ -955,15 +962,22 @@ func startHTTPServer(log logr.Logger, name, addr string, srv *http.Server) {
 }
 
 // embeddingProviderAdapter adapts a PromptKit EmbeddingProvider to Omnia's
-// memory.EmbeddingProvider interface.
+// memory.EmbeddingProvider interface. It also surfaces the per-call token usage
+// that PromptKit reports (and that the EmbeddingProvider interface drops) to a
+// usage recorder, so embedding spend lands in session-api's provider_usage
+// table + the omnia_embedding_tokens_total counter.
 type embeddingProviderAdapter struct {
 	inner pkproviders.EmbeddingProvider
+	usage *memory.EmbeddingUsageRecorder // nil-safe; may be unset
 }
 
 func (a *embeddingProviderAdapter) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	resp, err := a.inner.Embed(ctx, pkproviders.EmbeddingRequest{Texts: texts})
 	if err != nil {
 		return nil, err
+	}
+	if resp.Usage != nil {
+		a.usage.RecordEmbeddingUsage(ctx, resp.Model, resp.Usage.TotalTokens)
 	}
 	return resp.Embeddings, nil
 }
@@ -1147,7 +1161,7 @@ func newConsolidationWorkerOptions(
 // createEmbeddingService reads a Provider CRD by name and creates an
 // EmbeddingService with the appropriate PromptKit embedding provider.
 // Returns nil if the provider can't be resolved (logs the error).
-func createEmbeddingService(ctx context.Context, providerName string, store *memory.PostgresMemoryStore, log logr.Logger) *memory.EmbeddingService {
+func createEmbeddingService(ctx context.Context, providerName, workspaceName, workspaceNamespace string, store *memory.PostgresMemoryStore, usageEmitter memory.ProviderUsageEmitter, log logr.Logger) *memory.EmbeddingService {
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
 		log.Info("embedding service skipped", "reason", reasonNoInClusterKubeconfig)
@@ -1193,11 +1207,17 @@ func createEmbeddingService(ctx context.Context, providerName string, store *mem
 		return nil
 	}
 
+	// The usage recorder funnels every Embed call's token count into the
+	// omnia_embedding_tokens_total counter and (when configured) session-api's
+	// provider_usage table, making embedding spend visible.
+	usageRecorder := memory.NewEmbeddingUsageRecorder(
+		workspaceNamespace, workspaceName, string(provider.Spec.Type), providerName, usageEmitter, log)
+
 	// Wrap with the metered decorator so every Embed caller — the dedup
 	// similarity path (embeddingSvc.Provider().Embed), the EmbeddingService
 	// write path, and the re-embed worker — emits the embed_* metrics
 	// without touching individual call sites.
-	metered := memory.NewMeteredEmbeddingProvider(&embeddingProviderAdapter{inner: embeddingProvider})
+	metered := memory.NewMeteredEmbeddingProvider(&embeddingProviderAdapter{inner: embeddingProvider, usage: usageRecorder})
 	svc := memory.NewEmbeddingService(store, metered, log).WithModelName(providerName)
 	log.Info("embedding service enabled",
 		"provider", providerName,
