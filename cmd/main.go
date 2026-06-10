@@ -92,6 +92,7 @@ func main() {
 	var policyProxyImage string
 	var agentWorkspaceReaderClusterRole string
 	var apiBindAddress string
+	var toolTestAllowedSubjects string
 	var enterpriseEnabled bool
 	var licenseServerURL string
 	var clusterName string
@@ -178,6 +179,11 @@ func main() {
 		"Name of the ClusterRole granting agent pods read access to Workspace CRDs. If empty, no binding is created.")
 	flag.StringVar(&apiBindAddress, "api-bind-address", "",
 		"Address for the tool test API server (e.g., :8083). If empty, the API server is not started.")
+	flag.StringVar(&toolTestAllowedSubjects, "tool-test-allowed-subjects", "",
+		"Comma-separated list of authenticated usernames allowed to call the tool-test API "+
+			"(e.g. system:serviceaccount:omnia-system:omnia-dashboard). Each request must present a "+
+			"bearer token that TokenReview authenticates to one of these subjects. If empty, the "+
+			"tool-test API runs WITHOUT authentication (local/dev only).")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
@@ -457,7 +463,16 @@ func main() {
 	// Start tool test API server if configured
 	var apiServer *tooltest.Server
 	if apiBindAddress != "" {
-		apiServer = tooltest.NewServer(apiBindAddress, mgr.GetClient(), ctrl.Log)
+		var reviewer tooltest.TokenReviewer
+		allowedSubjects := splitAndTrim(toolTestAllowedSubjects)
+		if len(allowedSubjects) > 0 {
+			reviewer, err = tooltest.NewK8sTokenReviewer(mgr.GetConfig())
+			if err != nil {
+				setupLog.Error(err, "unable to build token reviewer for tool-test API")
+				os.Exit(1)
+			}
+		}
+		apiServer = tooltest.NewServer(apiBindAddress, mgr.GetClient(), ctrl.Log, reviewer, allowedSubjects)
 		go func() {
 			if err := apiServer.Start(ctx); err != nil {
 				setupLog.Error(err, "tool test API server stopped")
@@ -547,4 +562,15 @@ func (f *frameworkImagesFlag) images() map[string]string {
 		return map[string]string{}
 	}
 	return f.m
+}
+
+// splitAndTrim splits a comma-separated list into non-empty, trimmed entries.
+func splitAndTrim(s string) []string {
+	out := make([]string, 0)
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
