@@ -445,6 +445,11 @@ func (in *ArenaSourceSpec) DeepCopyInto(out *ArenaSourceSpec) {
 		*out = new(apiv1alpha1.ConfigMapSource)
 		**out = **in
 	}
+	if in.Workspace != nil {
+		in, out := &in.Workspace, &out.Workspace
+		*out = new(apiv1alpha1.WorkspaceSource)
+		**out = **in
+	}
 	if in.CreateVersionOnSync != nil {
 		in, out := &in.CreateVersionOnSync, &out.CreateVersionOnSync
 		*out = new(bool)

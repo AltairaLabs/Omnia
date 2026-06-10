@@ -84,6 +84,12 @@ func TestLicense_CanUseSourceType(t *testing.T) {
 			expected:   true,
 		},
 		{
+			name:       "workspace always allowed on open-core",
+			sourceType: "workspace",
+			license:    OpenCoreLicense(),
+			expected:   true,
+		},
+		{
 			name:       "git allowed on open-core",
 			sourceType: "git",
 			license:    OpenCoreLicense(),

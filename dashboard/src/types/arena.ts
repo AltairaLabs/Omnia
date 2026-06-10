@@ -13,7 +13,7 @@ import { ObjectMeta, Condition, LocalObjectReference } from "./common";
 // ArenaSource - Where PromptKit bundles come from
 // =============================================================================
 
-export type ArenaSourceType = "configmap" | "git" | "oci" | "s3";
+export type ArenaSourceType = "configmap" | "git" | "oci" | "s3" | "workspace";
 export type ArenaSourcePhase = "Pending" | "Initializing" | "Ready" | "Fetching" | "Error";
 
 /** Git repository reference configuration */
@@ -74,6 +74,12 @@ export interface ConfigMapSourceSpec {
   name: string;
 }
 
+/** Workspace source specification — snapshot an existing dir on the volume */
+export interface WorkspaceSourceSpec {
+  /** Directory to snapshot, relative to the workspace content root */
+  path: string;
+}
+
 /** Artifact produced by ArenaSource reconciliation */
 export interface Artifact {
   /** Revision identifier (e.g., "main@sha1:abc123" for git) */
@@ -106,6 +112,10 @@ export interface ArenaSourceSpec {
   s3?: S3SourceSpec;
   /** ConfigMap configuration */
   configMap?: ConfigMapSourceSpec;
+  /** Workspace configuration — snapshot an existing dir on the volume */
+  workspace?: WorkspaceSourceSpec;
+  /** Where versioned snapshots land, relative to the workspace content root */
+  targetPath?: string;
   /** Secret containing credentials */
   secretRef?: LocalObjectReference;
   /** Suspend reconciliation */

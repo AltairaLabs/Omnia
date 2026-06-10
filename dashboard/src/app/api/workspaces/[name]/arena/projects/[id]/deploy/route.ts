@@ -3,12 +3,15 @@
  *
  * POST /api/workspaces/:name/arena/projects/:id/deploy - Deploy project as ArenaSource
  *
- * This endpoint:
- * 1. Reads all project files from the workspace filesystem
- * 2. Creates/updates a ConfigMap containing the project files
- * 3. Creates/updates an ArenaSource pointing to the ConfigMap
+ * The project files already live on the shared workspace-content volume, so
+ * deploy simply creates/updates a `workspace`-type ArenaSource pointing at the
+ * project dir. The arena-controller snapshots that dir into an immutable,
+ * content-addressed version (see #1260) — no ConfigMap round-trip, no 1 MB cap.
  *
  * Protected by workspace access checks.
+ *
+ * Copyright 2026 Altaira Labs.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -24,20 +27,19 @@ import {
   auditSuccess,
   auditError,
 } from "@/lib/k8s/workspace-route-helpers";
-import { getWorkspaceCoreApi, withTokenRefresh } from "@/lib/k8s/workspace-k8s-client-factory";
-import type { WorkspaceAccess, WorkspaceRole } from "@/types/workspace";
+import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
-import type { ArenaSource } from "@/types/arena";
+import type { ArenaSource, ArenaSourceSpec } from "@/types/arena";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 const RESOURCE_TYPE = "ArenaProjectDeploy";
 
-// Base path for workspace content
+// Base path for workspace content (mounted PVC).
 const WORKSPACE_CONTENT_BASE =
   process.env.WORKSPACE_CONTENT_PATH || "/workspace-content";
 
-// Labels for tracking deployed resources
+// Labels for tracking deployed resources.
 const PROJECT_LABEL = "arena.omnia.altairalabs.ai/project-id";
 const MANAGED_BY_LABEL = "app.kubernetes.io/managed-by";
 const MANAGED_BY_VALUE = "omnia-arena";
@@ -53,173 +55,31 @@ interface DeployRequest {
 
 interface DeployResponse {
   source: ArenaSource;
-  configMap: { name: string; namespace: string };
   isNew: boolean;
 }
 
-/**
- * Get the project directory path
- */
-function getProjectPath(workspaceName: string, namespace: string, projectId: string): string {
-  return path.join(
-    WORKSPACE_CONTENT_BASE,
-    workspaceName,
-    namespace,
-    "arena",
-    "projects",
-    projectId
-  );
+/** Project dir relative to the workspace content root for this namespace. */
+function projectRelPath(projectId: string): string {
+  return `arena/projects/${projectId}`;
 }
 
 /**
- * Recursively read all files from a directory
+ * Where versioned snapshots land — distinct from the source path so the
+ * snapshot never nests inside the editable project dir.
  */
-async function readAllFiles(
-  dirPath: string,
-  basePath: string = ""
-): Promise<Array<{ path: string; content: string }>> {
-  const files: Array<{ path: string; content: string }> = [];
-
-  const entries = await fs.readdir(dirPath, { withFileTypes: true });
-
-  for (const entry of entries) {
-    // Skip hidden files and directories
-    if (entry.name.startsWith(".")) continue;
-
-    const fullPath = path.join(dirPath, entry.name);
-    const relativePath = basePath ? `${basePath}/${entry.name}` : entry.name;
-
-    if (entry.isDirectory()) {
-      const subFiles = await readAllFiles(fullPath, relativePath);
-      files.push(...subFiles);
-    } else {
-      const content = await fs.readFile(fullPath, "utf-8");
-      files.push({ path: relativePath, content });
-    }
-  }
-
-  return files;
+function deployTargetPath(projectId: string): string {
+  return `arena/deployed/${projectId}`;
 }
 
-/**
- * Encode file path for ConfigMap key (replace / with __)
- */
-function encodeFilePathForConfigMap(filePath: string): string {
-  return filePath.replaceAll("/", "__");
-}
-
-/**
- * Create or update a ConfigMap with project files
- */
-async function createOrUpdateConfigMap(
-  options: { workspace: string; namespace: string; role: WorkspaceRole },
-  configMapName: string,
-  projectId: string,
-  files: Array<{ path: string; content: string }>
-): Promise<void> {
-  return withTokenRefresh(options, async () => {
-    const coreApi = await getWorkspaceCoreApi(options);
-
-    // Convert files to ConfigMap data
-    const data: Record<string, string> = {};
-    for (const file of files) {
-      data[encodeFilePathForConfigMap(file.path)] = file.content;
-    }
-
-    const configMapBody = {
-      apiVersion: "v1",
-      kind: "ConfigMap",
-      metadata: {
-        name: configMapName,
-        namespace: options.namespace,
-        labels: {
-          [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
-          [PROJECT_LABEL]: projectId,
-        },
-      },
-      data,
-    };
-
-    try {
-      // Try to get existing ConfigMap
-      await coreApi.readNamespacedConfigMap({
-        namespace: options.namespace,
-        name: configMapName,
-      });
-
-      // Update existing ConfigMap
-      await coreApi.replaceNamespacedConfigMap({
-        namespace: options.namespace,
-        name: configMapName,
-        body: configMapBody,
-      });
-    } catch (error) {
-      // If not found, create new ConfigMap
-      if (isNotFoundError(error)) {
-        await coreApi.createNamespacedConfigMap({
-          namespace: options.namespace,
-          body: configMapBody,
-        });
-      } else {
-        throw error;
-      }
-    }
-  });
-}
-
-/**
- * Extract status code from various error formats
- */
-function extractStatusCode(error: unknown): number | null {
-  if (typeof error !== "object" || error === null) {
-    return null;
-  }
-
-  const err = error as Record<string, unknown>;
-
-  // Direct statusCode property
-  if (typeof err.statusCode === "number") {
-    return err.statusCode;
-  }
-
-  // Response statusCode
-  if (err.response && typeof (err.response as Record<string, unknown>).statusCode === "number") {
-    return (err.response as Record<string, unknown>).statusCode as number;
-  }
-
-  // Kubernetes client error format: "HTTP-Code: 404" in message
-  if (typeof err.message === "string" && err.message.includes("HTTP-Code: 404")) {
-    return 404;
-  }
-
-  // Kubernetes API response body
-  if (typeof err.body === "string") {
-    try {
-      const parsed = JSON.parse(err.body) as Record<string, unknown>;
-      if (typeof parsed.code === "number") {
-        return parsed.code;
-      }
-    } catch {
-      // Not JSON, ignore
-    }
-  } else if (err.body && typeof (err.body as Record<string, unknown>).code === "number") {
-    return (err.body as Record<string, unknown>).code as number;
-  }
-
-  return null;
-}
-
-/**
- * Check if error is a 404 Not Found
- */
-function isNotFoundError(error: unknown): boolean {
-  return extractStatusCode(error) === 404;
+/** Absolute path to the editable project dir on the mounted volume. */
+function getProjectFsPath(workspaceName: string, namespace: string, projectId: string): string {
+  return path.join(WORKSPACE_CONTENT_BASE, workspaceName, namespace, "arena", "projects", projectId);
 }
 
 /**
  * POST /api/workspaces/:name/arena/projects/:id/deploy
  *
- * Deploy a project as an ArenaSource backed by a ConfigMap.
+ * Deploy a project as a `workspace`-type ArenaSource (in-volume snapshot).
  */
 export const POST = withWorkspaceAccess<{ name: string; id: string }>(
   "editor",
@@ -237,48 +97,40 @@ export const POST = withWorkspaceAccess<{ name: string; id: string }>(
       if (!result.ok) return result.response;
 
       const namespace = result.workspace.spec.namespace.name;
+      auditCtx = createAuditContext(name, namespace, user, access.role!, RESOURCE_TYPE);
 
-      auditCtx = createAuditContext(
-        name,
-        namespace,
-        user,
-        access.role!,
-        RESOURCE_TYPE
-      );
-
-      // Parse request body
       const body = (await request.json().catch(() => ({}))) as DeployRequest;
-
-      // Generate resource names
-      const configMapName = `arena-project-${projectId}`;
       const sourceName = body.name || `project-${projectId}`;
 
-      // Get project path and verify it exists
-      const projectPath = getProjectPath(name, namespace, projectId);
+      // Verify the project dir exists and is non-empty on the shared volume.
+      const projectPath = getProjectFsPath(name, namespace, projectId);
+      let entries: string[];
       try {
-        await fs.access(projectPath);
+        entries = await fs.readdir(projectPath);
       } catch {
         return notFoundResponse(`Project not found: ${projectId}`);
       }
-
-      // Read all project files
-      const files = await readAllFiles(projectPath);
-      if (files.length === 0) {
+      if (entries.length === 0) {
         return NextResponse.json(
           { error: "Bad Request", message: "Project has no files to deploy" },
           { status: 400 }
         );
       }
 
-      // Create or update ConfigMap
-      await createOrUpdateConfigMap(
-        result.clientOptions,
-        configMapName,
-        projectId,
-        files
-      );
+      // Build a full workspace-type spec. A full replace (PUT) drops any stale
+      // source block (e.g. a previous configmap deploy), satisfying the CRD's
+      // one-of validation.
+      const spec: ArenaSourceSpec = {
+        type: "workspace",
+        workspace: { path: projectRelPath(projectId) },
+        targetPath: deployTargetPath(projectId),
+        interval: body.syncInterval || "1h",
+      };
+      const labels = {
+        [PROJECT_LABEL]: projectId,
+        [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
+      };
 
-      // Check if ArenaSource already exists
       const existingSource = await getCrd<ArenaSource>(
         result.clientOptions,
         CRD_ARENA_SOURCES,
@@ -289,27 +141,14 @@ export const POST = withWorkspaceAccess<{ name: string; id: string }>(
       let isNew = false;
 
       if (existingSource) {
-        // Update existing source
         const updatedSource = {
           ...existingSource,
-          spec: {
-            ...existingSource.spec,
-            type: "configmap" as const,
-            configMap: {
-              name: configMapName,
-            },
-            interval: body.syncInterval || existingSource.spec.interval || "5m",
-          },
+          spec: { ...spec, interval: body.syncInterval || existingSource.spec.interval || "1h" },
           metadata: {
             ...existingSource.metadata,
-            labels: {
-              ...existingSource.metadata.labels,
-              [PROJECT_LABEL]: projectId,
-              [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
-            },
+            labels: { ...existingSource.metadata.labels, ...labels },
           },
         };
-
         source = await updateCrd<ArenaSource>(
           result.clientOptions,
           CRD_ARENA_SOURCES,
@@ -317,26 +156,15 @@ export const POST = withWorkspaceAccess<{ name: string; id: string }>(
           updatedSource
         );
       } else {
-        // Create new source
         isNew = true;
         const newSource = buildCrdResource(
           "ArenaSource",
           name,
           namespace,
           sourceName,
-          {
-            type: "configmap",
-            configMap: {
-              name: configMapName,
-            },
-            interval: body.syncInterval || "5m",
-          },
-          {
-            [PROJECT_LABEL]: projectId,
-            [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
-          }
+          spec,
+          labels
         );
-
         source = await createCrd<ArenaSource>(
           result.clientOptions,
           CRD_ARENA_SOURCES,
@@ -344,18 +172,10 @@ export const POST = withWorkspaceAccess<{ name: string; id: string }>(
         );
       }
 
-      const response: DeployResponse = {
-        source,
-        configMap: {
-          name: configMapName,
-          namespace,
-        },
-        isNew,
-      };
-
+      const response: DeployResponse = { source, isNew };
       auditSuccess(auditCtx, isNew ? "create" : "update", sourceName, {
-        configMap: configMapName,
-        fileCount: files.length,
+        fileCount: entries.length,
+        targetPath: spec.targetPath,
       });
 
       return NextResponse.json(response, { status: isNew ? 201 : 200 });

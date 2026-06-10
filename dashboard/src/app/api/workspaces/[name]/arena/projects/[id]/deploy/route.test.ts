@@ -1,5 +1,8 @@
 /**
  * Tests for Arena project deploy API routes.
+ *
+ * Copyright 2026 Altaira Labs.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -32,15 +35,8 @@ vi.mock("@/lib/k8s/crd-operations", () => ({
   updateCrd: vi.fn(),
 }));
 
-vi.mock("@/lib/k8s/workspace-k8s-client-factory", () => ({
-  getWorkspaceCoreApi: vi.fn(),
-  withTokenRefresh: vi.fn((opts, fn) => fn()),
-}));
-
 vi.mock("node:fs/promises", () => ({
-  access: vi.fn(),
   readdir: vi.fn(),
-  readFile: vi.fn(),
 }));
 
 const mockUser = {
@@ -60,20 +56,32 @@ const mockWorkspace = {
   spec: { namespace: { name: "test-ns" } },
 };
 
+const clientOptions = { workspace: "test-ws", namespace: "test-ns", role: "editor" };
+
 function createMockRequest(body?: object): NextRequest {
   const url = new URL("http://localhost:3000/api/workspaces/test-ws/arena/projects/project-1/deploy");
-  const req = new NextRequest(url.toString(), {
+  return new NextRequest(url.toString(), {
     method: "POST",
     body: body ? JSON.stringify(body) : undefined,
     headers: body ? { "Content-Type": "application/json" } : undefined,
   });
-  return req;
 }
 
 function createMockContext(projectId = "project-1") {
-  return {
-    params: Promise.resolve({ name: "test-ws", id: projectId }),
-  };
+  return { params: Promise.resolve({ name: "test-ws", id: projectId }) };
+}
+
+async function grantAccess() {
+  const { getUser } = await import("@/lib/auth");
+  const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+  const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+  vi.mocked(getUser).mockResolvedValue(mockUser);
+  vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
+  vi.mocked(validateWorkspace).mockResolvedValue({
+    ok: true,
+    workspace: mockWorkspace,
+    clientOptions,
+  } as Awaited<ReturnType<typeof validateWorkspace>>);
 }
 
 describe("POST /api/workspaces/[name]/arena/projects/[id]/deploy", () => {
@@ -88,90 +96,46 @@ describe("POST /api/workspaces/[name]/arena/projects/[id]/deploy", () => {
   it("returns 403 when user lacks editor access", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: false, role: null, permissions: noPermissions });
 
     const { POST } = await import("./route");
     const response = await POST(createMockRequest(), createMockContext());
-
     expect(response.status).toBe(403);
   });
 
-  it("returns 404 when project does not exist", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+  it("returns 404 when the project dir does not exist", async () => {
+    await grantAccess();
     const fs = await import("node:fs/promises");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
-    vi.mocked(validateWorkspace).mockResolvedValue({
-      ok: true,
-      workspace: mockWorkspace,
-      clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "editor" },
-    } as Awaited<ReturnType<typeof validateWorkspace>>);
-    vi.mocked(fs.access).mockRejectedValue(new Error("ENOENT"));
+    vi.mocked(fs.readdir).mockRejectedValue(new Error("ENOENT"));
 
     const { POST } = await import("./route");
     const response = await POST(createMockRequest(), createMockContext());
-
     expect(response.status).toBe(404);
   });
 
-  it("returns 400 when project has no files", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+  it("returns 400 when the project dir is empty", async () => {
+    await grantAccess();
     const fs = await import("node:fs/promises");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
-    vi.mocked(validateWorkspace).mockResolvedValue({
-      ok: true,
-      workspace: mockWorkspace,
-      clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "editor" },
-    } as Awaited<ReturnType<typeof validateWorkspace>>);
-    vi.mocked(fs.access).mockResolvedValue(undefined);
-    vi.mocked(fs.readdir).mockResolvedValue([]);
+    vi.mocked(fs.readdir).mockResolvedValue([] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
 
     const { POST } = await import("./route");
     const response = await POST(createMockRequest(), createMockContext());
-
     expect(response.status).toBe(400);
     const body = await response.json();
     expect(body.message).toContain("no files");
   });
 
-  it("creates new ArenaSource when deploying for first time", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+  it("creates a workspace ArenaSource (no ConfigMap) on first deploy", async () => {
+    await grantAccess();
     const { getCrd, createCrd } = await import("@/lib/k8s/crd-operations");
-    const { getWorkspaceCoreApi } = await import("@/lib/k8s/workspace-k8s-client-factory");
     const fs = await import("node:fs/promises");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
-    vi.mocked(validateWorkspace).mockResolvedValue({
-      ok: true,
-      workspace: mockWorkspace,
-      clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "editor" },
-    } as Awaited<ReturnType<typeof validateWorkspace>>);
-    vi.mocked(fs.access).mockResolvedValue(undefined);
-    vi.mocked(fs.readdir).mockResolvedValue([
-      { name: "config.yaml", isDirectory: () => false },
-    ] as unknown[] as Awaited<ReturnType<typeof fs.readdir>>);
-    vi.mocked(fs.readFile).mockResolvedValue("content: test");
+    vi.mocked(fs.readdir).mockResolvedValue(["pack.json"] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
     vi.mocked(getCrd).mockResolvedValue(null);
     vi.mocked(createCrd).mockResolvedValue({
       metadata: { name: "project-project-1", namespace: "test-ns" },
-      spec: { type: "configmap", configMap: { name: "arena-project-project-1" } },
+      spec: { type: "workspace", workspace: { path: "arena/projects/project-1" } },
     });
-    vi.mocked(getWorkspaceCoreApi).mockResolvedValue({
-      readNamespacedConfigMap: vi.fn().mockRejectedValue({ statusCode: 404 }),
-      createNamespacedConfigMap: vi.fn().mockResolvedValue({}),
-    } as unknown as Awaited<ReturnType<typeof getWorkspaceCoreApi>>);
 
     const { POST } = await import("./route");
     const response = await POST(createMockRequest(), createMockContext());
@@ -179,41 +143,33 @@ describe("POST /api/workspaces/[name]/arena/projects/[id]/deploy", () => {
     expect(response.status).toBe(201);
     const body = await response.json();
     expect(body.isNew).toBe(true);
-    expect(body.configMap.name).toBe("arena-project-project-1");
+    expect(body.configMap).toBeUndefined();
+    expect(createCrd).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        spec: expect.objectContaining({
+          type: "workspace",
+          workspace: { path: "arena/projects/project-1" },
+          targetPath: "arena/deployed/project-1",
+        }),
+      })
+    );
   });
 
-  it("updates existing ArenaSource when redeploying", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+  it("replaces a stale configmap source with a workspace source on redeploy", async () => {
+    await grantAccess();
     const { getCrd, updateCrd } = await import("@/lib/k8s/crd-operations");
-    const { getWorkspaceCoreApi } = await import("@/lib/k8s/workspace-k8s-client-factory");
     const fs = await import("node:fs/promises");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
-    vi.mocked(validateWorkspace).mockResolvedValue({
-      ok: true,
-      workspace: mockWorkspace,
-      clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "editor" },
-    } as Awaited<ReturnType<typeof validateWorkspace>>);
-    vi.mocked(fs.access).mockResolvedValue(undefined);
-    vi.mocked(fs.readdir).mockResolvedValue([
-      { name: "config.yaml", isDirectory: () => false },
-    ] as unknown[] as Awaited<ReturnType<typeof fs.readdir>>);
-    vi.mocked(fs.readFile).mockResolvedValue("content: updated");
+    vi.mocked(fs.readdir).mockResolvedValue(["pack.json"] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
     vi.mocked(getCrd).mockResolvedValue({
       metadata: { name: "project-project-1", namespace: "test-ns", labels: {} },
       spec: { type: "configmap", configMap: { name: "arena-project-project-1" }, interval: "5m" },
     });
     vi.mocked(updateCrd).mockResolvedValue({
       metadata: { name: "project-project-1", namespace: "test-ns" },
-      spec: { type: "configmap", configMap: { name: "arena-project-project-1" } },
+      spec: { type: "workspace", workspace: { path: "arena/projects/project-1" } },
     });
-    vi.mocked(getWorkspaceCoreApi).mockResolvedValue({
-      readNamespacedConfigMap: vi.fn().mockResolvedValue({}),
-      replaceNamespacedConfigMap: vi.fn().mockResolvedValue({}),
-    } as unknown as Awaited<ReturnType<typeof getWorkspaceCoreApi>>);
 
     const { POST } = await import("./route");
     const response = await POST(createMockRequest(), createMockContext());
@@ -221,101 +177,36 @@ describe("POST /api/workspaces/[name]/arena/projects/[id]/deploy", () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.isNew).toBe(false);
+
+    // The PUT body must carry the workspace block and NOT the stale configMap.
+    const updateArg = vi.mocked(updateCrd).mock.calls[0][3] as { spec: Record<string, unknown> };
+    expect(updateArg.spec.type).toBe("workspace");
+    expect(updateArg.spec.workspace).toEqual({ path: "arena/projects/project-1" });
+    expect(updateArg.spec.configMap).toBeUndefined();
+    // Preserves the prior interval when none is supplied.
+    expect(updateArg.spec.interval).toBe("5m");
   });
 
-  it("reads files from subdirectories recursively", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+  it("uses a custom source name and sync interval from the request body", async () => {
+    await grantAccess();
     const { getCrd, createCrd } = await import("@/lib/k8s/crd-operations");
-    const { getWorkspaceCoreApi } = await import("@/lib/k8s/workspace-k8s-client-factory");
     const fs = await import("node:fs/promises");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
-    vi.mocked(validateWorkspace).mockResolvedValue({
-      ok: true,
-      workspace: mockWorkspace,
-      clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "editor" },
-    } as Awaited<ReturnType<typeof validateWorkspace>>);
-    vi.mocked(fs.access).mockResolvedValue(undefined);
-    vi.mocked(fs.readdir)
-      .mockResolvedValueOnce([
-        { name: "config.yaml", isDirectory: () => false },
-        { name: "prompts", isDirectory: () => true },
-        { name: ".hidden", isDirectory: () => true }, // Should be skipped
-      ] as unknown[] as Awaited<ReturnType<typeof fs.readdir>>)
-      .mockResolvedValueOnce([
-        { name: "main.yaml", isDirectory: () => false },
-      ] as unknown[] as Awaited<ReturnType<typeof fs.readdir>>);
-    vi.mocked(fs.readFile).mockResolvedValue("content: test");
-    vi.mocked(getCrd).mockResolvedValue(null);
-    vi.mocked(createCrd).mockResolvedValue({
-      metadata: { name: "project-project-1", namespace: "test-ns" },
-      spec: { type: "configmap", configMap: { name: "arena-project-project-1" } },
-    });
-
-    const mockCoreApi = {
-      readNamespacedConfigMap: vi.fn().mockRejectedValue({ statusCode: 404 }),
-      createNamespacedConfigMap: vi.fn().mockResolvedValue({}),
-    };
-    vi.mocked(getWorkspaceCoreApi).mockResolvedValue(mockCoreApi as unknown as Awaited<ReturnType<typeof getWorkspaceCoreApi>>);
-
-    const { POST } = await import("./route");
-    const response = await POST(createMockRequest(), createMockContext());
-
-    expect(response.status).toBe(201);
-    // Verify ConfigMap was created with encoded paths
-    expect(mockCoreApi.createNamespacedConfigMap).toHaveBeenCalledWith(
-      expect.objectContaining({
-        body: expect.objectContaining({
-          data: expect.objectContaining({
-            "config.yaml": "content: test",
-            "prompts__main.yaml": "content: test",
-          }),
-        }),
-      })
-    );
-  });
-
-  it("uses custom source name from request body", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-    const { getCrd, createCrd } = await import("@/lib/k8s/crd-operations");
-    const { getWorkspaceCoreApi } = await import("@/lib/k8s/workspace-k8s-client-factory");
-    const fs = await import("node:fs/promises");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
-    vi.mocked(validateWorkspace).mockResolvedValue({
-      ok: true,
-      workspace: mockWorkspace,
-      clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "editor" },
-    } as Awaited<ReturnType<typeof validateWorkspace>>);
-    vi.mocked(fs.access).mockResolvedValue(undefined);
-    vi.mocked(fs.readdir).mockResolvedValue([
-      { name: "config.yaml", isDirectory: () => false },
-    ] as unknown[] as Awaited<ReturnType<typeof fs.readdir>>);
-    vi.mocked(fs.readFile).mockResolvedValue("content: test");
+    vi.mocked(fs.readdir).mockResolvedValue(["pack.json"] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
     vi.mocked(getCrd).mockResolvedValue(null);
     vi.mocked(createCrd).mockResolvedValue({
       metadata: { name: "custom-source-name", namespace: "test-ns" },
-      spec: { type: "configmap", configMap: { name: "arena-project-project-1" } },
+      spec: { type: "workspace", workspace: { path: "arena/projects/project-1" } },
     });
-    vi.mocked(getWorkspaceCoreApi).mockResolvedValue({
-      readNamespacedConfigMap: vi.fn().mockRejectedValue({ statusCode: 404 }),
-      createNamespacedConfigMap: vi.fn().mockResolvedValue({}),
-    } as unknown as Awaited<ReturnType<typeof getWorkspaceCoreApi>>);
 
     const { POST } = await import("./route");
-    const response = await POST(createMockRequest({ name: "custom-source-name", syncInterval: "10m" }), createMockContext());
+    const response = await POST(
+      createMockRequest({ name: "custom-source-name", syncInterval: "10m" }),
+      createMockContext()
+    );
 
     expect(response.status).toBe(201);
-    expect(getCrd).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      "custom-source-name"
-    );
+    expect(getCrd).toHaveBeenCalledWith(expect.anything(), expect.anything(), "custom-source-name");
+    const createArg = vi.mocked(createCrd).mock.calls[0][2] as { spec: { interval: string } };
+    expect(createArg.spec.interval).toBe("10m");
   });
 });

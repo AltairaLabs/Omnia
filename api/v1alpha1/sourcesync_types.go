@@ -84,6 +84,20 @@ type ConfigMapSource struct {
 	Key string `json:"key,omitempty"`
 }
 
+// WorkspaceSource specifies an existing directory on the workspace content
+// volume as a content source. Used to snapshot a dashboard-authored project
+// (which already lives on the volume) into a versioned artifact without an
+// external fetch or a ConfigMap round-trip.
+type WorkspaceSource struct {
+	// path is the directory to snapshot, relative to the workspace content
+	// root for this namespace (e.g. "arena/projects/my-project"). The path
+	// must stay within the volume — absolute paths and ".." traversal are
+	// rejected at reconcile time.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Path string `json:"path"`
+}
+
 // Artifact represents a fetched content artifact.
 type Artifact struct {
 	// revision is the source revision identifier.

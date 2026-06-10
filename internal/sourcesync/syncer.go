@@ -97,7 +97,7 @@ func (s *FilesystemSyncer) SyncToFilesystem(ctx context.Context, params SyncPara
 		return contentPath, version, nil
 	}
 
-	if err := storeVersion(params.Artifact.Path, versionDir); err != nil {
+	if err := storeVersion(params.Artifact.Path, versionDir, params.Artifact.Preserve); err != nil {
 		return "", "", err
 	}
 
@@ -149,10 +149,23 @@ func calculateVersion(artifact *Artifact) (string, error) {
 	return contentHash[:12], nil
 }
 
-// storeVersion creates the version directory and moves/copies the artifact content into it.
-func storeVersion(artifactPath, versionDir string) error {
+// storeVersion creates the version directory and places the artifact content
+// into it. When preserve is true the source is a long-lived directory (e.g. a
+// workspace snapshot of an editable dir on the same volume) and is COPIED so it
+// stays in place; otherwise the source is a throwaway temp dir and is moved
+// (atomic rename, copy fallback across filesystems).
+func storeVersion(artifactPath, versionDir string, preserve bool) error {
 	if err := os.MkdirAll(versionDir, 0755); err != nil {
 		return fmt.Errorf("failed to create version directory: %w", err)
+	}
+
+	// Preserve mode: copy the live source into the version dir, never move it.
+	if preserve {
+		if cpErr := CopyDirectory(artifactPath, versionDir); cpErr != nil {
+			_ = os.RemoveAll(versionDir)
+			return fmt.Errorf("failed to copy content to version directory: %w", cpErr)
+		}
+		return nil
 	}
 
 	// Try os.Rename first (atomic, same filesystem), fallback to copy

@@ -205,11 +205,36 @@ spec:
                 - git
                 - oci
                 - configmap
+                - workspace
                 type: string
+              workspace:
+                description: |-
+                  workspace specifies an existing directory on the workspace content
+                  volume to snapshot. Required when type is "workspace".
+                properties:
+                  path:
+                    description: |-
+                      path is the directory to snapshot, relative to the workspace content
+                      root for this namespace (e.g. "arena/projects/my-project"). The path
+                      must stay within the volume — absolute paths and ".." traversal are
+                      rejected at reconcile time.
+                    minLength: 1
+                    type: string
+                required:
+                - path
+                type: object
             required:
             - interval
             - type
             type: object
+            x-kubernetes-validations:
+            - message: exactly one of git, oci, configMap, or workspace must be set
+              rule: '[has(self.git), has(self.oci), has(self.configMap), has(self.workspace)].filter(x,
+                x).size() == 1'
+            - message: the source block must match the chosen type
+              rule: (self.type == 'git' && has(self.git)) || (self.type == 'oci' &&
+                has(self.oci)) || (self.type == 'configmap' && has(self.configMap))
+                || (self.type == 'workspace' && has(self.workspace))
           status:
             description: status defines the observed state of ArenaSource
             properties:

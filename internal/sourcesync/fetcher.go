@@ -34,6 +34,14 @@ type Artifact struct {
 
 	// LastModified is when the source was last modified.
 	LastModified time.Time
+
+	// Preserve indicates Path is a long-lived source that must NOT be moved
+	// or deleted — e.g. a workspace "deploy" snapshot of an editable directory
+	// that already lives on the workspace content volume. When true, version
+	// storage copies the content into the version dir instead of renaming it,
+	// and the caller must skip cleanup of Path. Default false (throwaway temp
+	// dir, as produced by the git/oci/configmap fetchers).
+	Preserve bool
 }
 
 // Fetcher defines the interface for fetching PromptKit bundles from sources.
