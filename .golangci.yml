@@ -87,6 +87,10 @@ linters:
       - third_party$
       - builtin$
       - examples$
+      # .claude/ is gitignored tooling state (incl. transient EnterWorktree
+      # worktree copies). Never lint it — it isn't part of the module and can
+      # contain stale/partial trees that crash the file walker locally.
+      - \.claude/
 formatters:
   enable:
     - gofmt
@@ -96,4 +100,5 @@ formatters:
     paths:
       - third_party$
       - builtin$
+      - \.claude/
       - examples$
