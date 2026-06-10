@@ -204,7 +204,8 @@ var _ = Describe("ArenaSource Controller", func() {
 					// ConfigMap is nil
 				},
 			}
-			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
+			// Not created here — the CEL one-of guard rejects this invalid
+			// resource at admission; the It block asserts that rejection.
 		})
 
 		AfterEach(func() {
@@ -219,37 +220,14 @@ var _ = Describe("ArenaSource Controller", func() {
 			}
 		})
 
-		It("should set Error phase due to missing configuration", func() {
-			By("reconciling the ArenaSource")
-			reconciler := &ArenaSourceReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-				// Provide a WorkspaceContentPath so the ContentStorageUnavailable
-				// gate does NOT fire — this test specifically exercises the
-				// missing-config path, not the storage-gate path.
-				WorkspaceContentPath: artifactDir,
-			}
-
-			req := reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      "missing-config-source",
-					Namespace: arenaSourceNamespace,
-				},
-			}
-
-			By("reconciling until error is reported (async)")
-			Eventually(func() omniav1alpha1.ArenaSourcePhase {
-				_, err := reconciler.Reconcile(ctx, req)
-				Expect(err).NotTo(HaveOccurred())
-
-				updatedSource := &omniav1alpha1.ArenaSource{}
-				Expect(k8sClient.Get(ctx, types.NamespacedName{
-					Name:      "missing-config-source",
-					Namespace: arenaSourceNamespace,
-				}, updatedSource)).To(Succeed())
-
-				return updatedSource.Status.Phase
-			}, 10*time.Second, 100*time.Millisecond).Should(Equal(omniav1alpha1.ArenaSourcePhaseError))
+		It("is rejected at creation by the one-of CEL validation", func() {
+			By("attempting to create a configmap source with no configMap block")
+			err := k8sClient.Create(ctx, arenaSource)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(Or(
+				ContainSubstring("exactly one of"),
+				ContainSubstring("must match the chosen type"),
+			))
 		})
 	})
 
