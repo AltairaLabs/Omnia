@@ -98,6 +98,7 @@ type Handler struct {
 	service              *SessionService
 	evalService          *EvalService
 	providerCallsService *ProviderCallsService
+	providerUsageService *ProviderUsageService
 	policyResolver       PolicyResolver
 	encryptorResolver    EncryptorResolver
 	log                  logr.Logger
@@ -127,6 +128,12 @@ func (h *Handler) SetEvalService(svc *EvalService) {
 // /api/v1/provider-calls/* endpoints. When unset the endpoints return 503.
 func (h *Handler) SetProviderCallsService(svc *ProviderCallsService) {
 	h.providerCallsService = svc
+}
+
+// SetProviderUsageService configures the provider-usage service for
+// POST /api/v1/provider-usage. When unset the endpoint returns 503.
+func (h *Handler) SetProviderUsageService(svc *ProviderUsageService) {
+	h.providerUsageService = svc
 }
 
 // SetPolicyResolver configures the resolver for GET /api/v1/privacy-policy.
@@ -255,6 +262,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/eval-results/discover", h.handleDiscoverEvals)
 	mux.HandleFunc("GET /api/v1/provider-calls/aggregate", h.handleAggregateProviderCalls)
 	mux.HandleFunc("GET /api/v1/provider-calls/discover", h.handleDiscoverProviderCalls)
+
+	// Provider usage endpoint: workspace-scoped, session-less spend (embeddings,
+	// judge tokens). Written by memory-api + the eval worker.
+	mux.HandleFunc("POST /api/v1/provider-usage", h.handleRecordProviderUsage)
 
 	// Privacy policy endpoint
 	mux.HandleFunc("GET /api/v1/privacy-policy", h.handleGetPrivacyPolicy)

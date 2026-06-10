@@ -417,6 +417,32 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/provider-usage:
+    post:
+      tags: [provider-usage]
+      summary: Record workspace-scoped provider usage (batch)
+      description: >-
+        Records session-less provider spend (embeddings, judge tokens, …) keyed
+        by namespace. Written by memory-api and the eval worker.
+      operationId: recordProviderUsage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProviderUsage'
+      responses:
+        '201':
+          description: Provider usage recorded
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '503':
+          description: Provider usage store not configured
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/eval-results:
     post:
       tags: [eval-results]
@@ -868,6 +894,42 @@ components:
             type: string
         source:
           type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    ProviderUsage:
+      type: object
+      properties:
+        id:
+          type: string
+        namespace:
+          type: string
+        workspaceName:
+          type: string
+        provider:
+          type: string
+        providerName:
+          type: string
+        model:
+          type: string
+        source:
+          type: string
+        inputTokens:
+          type: integer
+          format: int64
+        outputTokens:
+          type: integer
+          format: int64
+        cachedTokens:
+          type: integer
+          format: int64
+        costUsd:
+          type: number
+          format: double
+        callCount:
+          type: integer
+          format: int32
         createdAt:
           type: string
           format: date-time
