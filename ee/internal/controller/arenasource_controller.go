@@ -40,12 +40,22 @@ const (
 	ArenaSourceConditionTypeReady             = "Ready"
 	ArenaSourceConditionTypeFetching          = "Fetching"
 	ArenaSourceConditionTypeArtifactAvailable = "ArtifactAvailable"
+	// ArenaSourceConditionTypeSourceValid is False when the spec is statically
+	// invalid (e.g. a TargetPath that escapes the workspace content subtree).
+	ArenaSourceConditionTypeSourceValid = "SourceValid"
 
 	// ArenaSourceReasonContentStorageUnavailable is emitted when the arena-
 	// controller was started with workspaceContent.enabled=false. The source
 	// cannot write its artifact anywhere, so surface a clean reason rather
 	// than a confusing fetch/sync failure.
 	ArenaSourceReasonContentStorageUnavailable = "ContentStorageUnavailable"
+
+	// ArenaSourceReasonInvalidTargetPath is emitted when spec.targetPath would
+	// escape the per-workspace content subtree (absolute or ".." traversal).
+	// With workspace-scoped isolation the TargetPath becomes the worker mount
+	// subPath (the tenant boundary), so reject it at reconcile time rather than
+	// failing opaquely at kubelet mount.
+	ArenaSourceReasonInvalidTargetPath = "InvalidTargetPath"
 )
 
 // Event reasons for ArenaSource
@@ -196,6 +206,27 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			r.Recorder.Event(source, corev1.EventTypeWarning, "DevModeLicense",
 				"Using development license - not licensed for production use")
 		}
+	}
+
+	// Validate spec.targetPath up front (defense-in-depth, all source types).
+	// A traversing/absolute TargetPath would become the worker's mount subPath
+	// under workspace-scoped isolation, so fail fast with a clear condition
+	// rather than letting it reach the syncer / kubelet. Don't requeue — the
+	// spec must change.
+	if err := sourcesync.ValidateTargetPath(source.Spec.TargetPath); err != nil {
+		log.Info("ArenaSource has an invalid targetPath", "targetPath", source.Spec.TargetPath, "error", err)
+		source.Status.Phase = omniav1alpha1.ArenaSourcePhaseError
+		SetCondition(&source.Status.Conditions, source.Generation, ArenaSourceConditionTypeSourceValid, metav1.ConditionFalse,
+			ArenaSourceReasonInvalidTargetPath, err.Error())
+		SetCondition(&source.Status.Conditions, source.Generation, ArenaSourceConditionTypeReady, metav1.ConditionFalse,
+			ArenaSourceReasonInvalidTargetPath, err.Error())
+		if r.Recorder != nil {
+			r.Recorder.Event(source, corev1.EventTypeWarning, ArenaSourceReasonInvalidTargetPath, err.Error())
+		}
+		if statusErr := r.Status().Update(ctx, source); statusErr != nil {
+			log.Error(statusErr, "Failed to update status")
+		}
+		return ctrl.Result{}, nil
 	}
 
 	// Parse interval duration

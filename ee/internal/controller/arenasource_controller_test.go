@@ -188,6 +188,75 @@ var _ = Describe("ArenaSource Controller", func() {
 
 	// Note: Invalid interval test removed because CRD validation catches it at creation time
 
+	Context("When reconciling an ArenaSource with a traversing targetPath", func() {
+		const sourceName = "bad-targetpath-source"
+		var arenaSource *omniav1alpha1.ArenaSource
+
+		BeforeEach(func() {
+			By("creating an ArenaSource whose targetPath escapes the workspace subtree")
+			arenaSource = &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      sourceName,
+					Namespace: arenaSourceNamespace,
+				},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type:       omniav1alpha1.ArenaSourceTypeConfigMap,
+					Interval:   "5m",
+					TargetPath: "../../escape",
+					ConfigMap: &corev1alpha1.ConfigMapSource{
+						Name: configMapName,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			resource := &omniav1alpha1.ArenaSource{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      sourceName,
+				Namespace: arenaSourceNamespace,
+			}, resource); err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
+		})
+
+		It("fails fast with SourceValid=False and does not requeue", func() {
+			By("reconciling with content storage enabled so the targetPath gate is reached")
+			reconciler := &ArenaSourceReconciler{
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				WorkspaceContentPath: GinkgoT().TempDir(),
+			}
+
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      sourceName,
+					Namespace: arenaSourceNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeZero())
+
+			By("checking the status reflects an invalid spec")
+			updated := &omniav1alpha1.ArenaSource{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      sourceName,
+				Namespace: arenaSourceNamespace,
+			}, updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ArenaSourcePhaseError))
+
+			sv := meta.FindStatusCondition(updated.Status.Conditions, ArenaSourceConditionTypeSourceValid)
+			Expect(sv).NotTo(BeNil())
+			Expect(sv.Status).To(Equal(metav1.ConditionFalse))
+			Expect(sv.Reason).To(Equal(ArenaSourceReasonInvalidTargetPath))
+
+			ready := meta.FindStatusCondition(updated.Status.Conditions, ArenaSourceConditionTypeReady)
+			Expect(ready).NotTo(BeNil())
+			Expect(ready.Status).To(Equal(metav1.ConditionFalse))
+		})
+	})
+
 	Context("When reconciling an ArenaSource with missing ConfigMap configuration", func() {
 		var arenaSource *omniav1alpha1.ArenaSource
 

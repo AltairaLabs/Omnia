@@ -23,6 +23,28 @@ import (
 // go:S1192 (duplicated 5x across syncer path construction).
 const arenaDirName = ".arena"
 
+// ValidateTargetPath rejects a source TargetPath that would escape the
+// per-workspace content subtree — an absolute path, or one that traverses
+// above the {workspace}/{namespace} root via "..". An empty path is allowed
+// (callers default it to a safe per-source subdir).
+//
+// This is the storage choke-point guard: under the workspace-scoped isolation
+// model the TargetPath becomes the worker's mount subPath (the tenant
+// boundary), so a traversing value must be rejected before it is joined onto
+// the content volume. filepath.Clean collapses in-bounds "." / "foo/.." to a
+// safe path; only a result that is absolute or still leads with ".." escapes.
+func ValidateTargetPath(targetPath string) error {
+	if targetPath == "" {
+		return nil
+	}
+	clean := filepath.Clean(targetPath)
+	if filepath.IsAbs(clean) || clean == ".." ||
+		strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("targetPath %q must be a relative path within the workspace content volume (no absolute or %q traversal)", targetPath, "..")
+	}
+	return nil
+}
+
 // StorageManager is the minimal interface FilesystemSyncer needs to ensure a
 // workspace PVC exists before writing artifacts. The ee/pkg/workspace
 // StorageManager type satisfies this interface.
@@ -73,6 +95,13 @@ func (s *FilesystemSyncer) SyncToFilesystem(ctx context.Context, params SyncPara
 		"namespace", params.Namespace,
 		"targetPath", params.TargetPath,
 	)
+
+	// Choke-point guard: reject a TargetPath that escapes the workspace content
+	// subtree before provisioning storage or joining it onto the volume. Covers
+	// every caller (ArenaSource, SkillSource) regardless of source type.
+	if err := ValidateTargetPath(params.TargetPath); err != nil {
+		return "", "", err
+	}
 
 	if err := s.ensureWorkspacePVC(ctx, params.WorkspaceName); err != nil {
 		return "", "", err
