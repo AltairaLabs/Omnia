@@ -1753,6 +1753,42 @@ func TestRemapProviderIDs(t *testing.T) {
 		assert.Equal(t, "fleet", arenaCfg.LoadedProviders["selfplay"].Type)
 	})
 
+	t.Run("non-llm group member does not panic and is skipped", func(t *testing.T) {
+		// Regression: after non-llm providers were routed to their own Loaded*
+		// maps, ProviderGroups still carries an entry for them. A judge/self-play
+		// ref naming such a group used to nil-deref arenaCfg.LoadedProviders[oldID].
+		configPath := writeConfig(t, `spec:
+  providers:
+    - file: providers/main.yaml
+  judges:
+    - name: classifier
+      provider: hf-judge`)
+
+		arenaCfg := &config.Config{
+			// Inference provider lives ONLY in the non-llm map, not LoadedProviders.
+			LoadedProviders: map[string]*config.Provider{},
+			LoadedInferenceProviders: map[string]*config.Provider{
+				"hf-classifier": {ID: "hf-classifier", Type: "huggingface", Role: "inference"},
+			},
+			ProviderGroups: map[string]string{
+				// ProviderGroups carries the entry regardless of role/destination map.
+				"hf-classifier": "hf-judge",
+			},
+		}
+
+		require.NotPanics(t, func() {
+			err := remapProviderIDs(testLog(), arenaCfg, configPath)
+			// Skipping non-llm providers is clean handling: no panic, no remap.
+			require.NoError(t, err)
+		})
+
+		// The non-llm provider must not be promoted into the llm registry.
+		assert.NotContains(t, arenaCfg.LoadedProviders, "hf-judge")
+		assert.NotContains(t, arenaCfg.LoadedProviders, "hf-classifier")
+		// It stays put in the inference map untouched.
+		require.Contains(t, arenaCfg.LoadedInferenceProviders, "hf-classifier")
+	})
+
 	t.Run("self-play disabled skips remapping", func(t *testing.T) {
 		configPath := writeConfig(t, `spec:
   providers:

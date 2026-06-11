@@ -610,6 +610,13 @@ func remapProviderIDs(log logr.Logger, arenaCfg *config.Config, configPath strin
 		// one to the expected ID so PromptKit can find it, others keep their CRD names.
 		oldID := candidates[0]
 		provider := arenaCfg.LoadedProviders[oldID]
+		if provider == nil {
+			// Non-llm providers (inference/tts/stt/embedding/image) live in the
+			// other Loaded* maps, not LoadedProviders, even though ProviderGroups
+			// still carries an entry for them. They are not valid llm judge/self-play
+			// remap targets, so skip them cleanly rather than nil-dereferencing.
+			continue
+		}
 		provider.ID = expectedID
 
 		// Move in LoadedProviders
