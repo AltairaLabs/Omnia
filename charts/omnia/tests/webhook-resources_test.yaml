@@ -59,6 +59,23 @@ tests:
           path: webhooks[0].matchConditions[0].expression
           pattern: "mode == 'function'"
 
+  - it: provider webhook is present, embedding-role-gated, and advisory (failurePolicy Ignore)
+    template: templates/webhook/validatingwebhookconfiguration.yaml
+    set:
+      webhook.enabled: true
+    asserts:
+      - contains:
+          path: webhooks
+          content:
+            name: vprovider.kb.io
+          any: true
+      - matchRegex:
+          path: webhooks[?(@.name=='vprovider.kb.io')].matchConditions[0].expression
+          pattern: "role == 'embedding'"
+      - equal:
+          path: webhooks[?(@.name=='vprovider.kb.io')].failurePolicy
+          value: Ignore
+
   - it: validatingwebhookconfiguration has cert-manager inject-ca-from annotation
     template: templates/webhook/validatingwebhookconfiguration.yaml
     set:

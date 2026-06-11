@@ -432,6 +432,10 @@ func main() {
 			setupLog.Error(err, "unable to register webhook", "webhook", "SkillSource")
 			os.Exit(1)
 		}
+		if err := omniawebhook.SetupProviderWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to register webhook", "webhook", "Provider")
+			os.Exit(1)
+		}
 	}
 
 	// +kubebuilder:scaffold:builder
