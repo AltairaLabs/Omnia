@@ -35,8 +35,14 @@ func providerToSDKSpec(p *v1alpha1.Provider) sdk.ProviderSpec {
 		Model:   p.Spec.Model,
 		BaseURL: p.Spec.BaseURL,
 	}
-	if env := provider.APIKeyEnvVarName(string(p.Spec.Type)); env != "" {
-		spec.Credential = &pkgconfig.CredentialConfig{CredentialEnv: env}
+	// Platform-hosted providers (Bedrock/Vertex/Azure) authenticate via the
+	// cloud SDK credential chain, which sdk.ProviderSpec cannot express (it has
+	// no Platform field). Leave Credential nil; the caller warns and the
+	// provider's process-env credentials still apply where the SDK reads them.
+	if p.Spec.Platform == nil {
+		if env := credentialEnvVar(p); env != "" {
+			spec.Credential = &pkgconfig.CredentialConfig{CredentialEnv: env}
+		}
 	}
 	if p.Spec.Type == v1alpha1.ProviderTypeHuggingFace {
 		spec.AdditionalConfig = provider.HuggingFaceAdditionalConfig(p.Spec.BaseURL)
@@ -44,11 +50,25 @@ func providerToSDKSpec(p *v1alpha1.Provider) sdk.ProviderSpec {
 	return spec
 }
 
+// credentialEnvVar returns the env var PromptKit should read the credential
+// from: an explicit spec.credential.envVar override when set, otherwise the
+// provider-type default (e.g. HF_TOKEN).
+func credentialEnvVar(p *v1alpha1.Provider) string {
+	if p.Spec.Credential != nil && p.Spec.Credential.EnvVar != "" {
+		return p.Spec.Credential.EnvVar
+	}
+	return provider.APIKeyEnvVarName(string(p.Spec.Type))
+}
+
 // extraProviderOptions maps each resolved non-default provider to its role's
 // SDK option. Unhandled roles are skipped with a debug log.
 func (s *Server) extraProviderOptions(log logr.Logger) []sdk.Option {
 	opts := make([]sdk.Option, 0, len(s.extraProviders))
 	for _, rp := range s.extraProviders {
+		if rp.Provider.Spec.Platform != nil {
+			log.V(0).Info("platform-hosted non-llm provider not yet supported via spec.providers[]; skipping credential",
+				"name", rp.Provider.Name, "role", rp.Role)
+		}
 		spec := providerToSDKSpec(rp.Provider)
 		switch rp.Role {
 		case v1alpha1.ProviderRoleInference:

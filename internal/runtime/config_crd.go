@@ -260,12 +260,25 @@ func loadExtraProviders(ctx context.Context, c client.Client, cfg *Config, provi
 		if err != nil {
 			return fmt.Errorf("resolve provider %q: %w", np.Name, err)
 		}
+		if err := injectProviderCredentials(ctx, c, provider); err != nil {
+			return fmt.Errorf("inject credentials for provider %q: %w", np.Name, err)
+		}
 		cfg.ExtraProviders = append(cfg.ExtraProviders, ResolvedProvider{
 			Role:     provider.EffectiveRole(),
 			Provider: provider,
 		})
 	}
 	return nil
+}
+
+// injectProviderCredentials reads a Provider's Secret and injects the
+// appropriate env var(s) into the process so PromptKit resolves them at
+// construction time. Mirrors the default-provider credential path.
+func injectProviderCredentials(ctx context.Context, c client.Client, provider *v1alpha1.Provider) error {
+	if provider.Spec.Platform == nil {
+		return injectAPIKey(ctx, c, provider)
+	}
+	return injectPlatformCredentials(ctx, c, provider)
 }
 
 // loadFromProviderRef loads config from a Provider CRD reference and injects the API key.
@@ -296,13 +309,8 @@ func loadFromProviderRef(ctx context.Context, c client.Client, cfg *Config, ref 
 		return err
 	}
 
-	// Inject API key from secret (for non-platform providers)
-	if provider.Spec.Platform == nil {
-		return injectAPIKey(ctx, c, provider)
-	}
-
-	// Inject platform credentials from secret (for static auth types)
-	return injectPlatformCredentials(ctx, c, provider)
+	// Inject credentials from secret (API key, or platform creds for static auth).
+	return injectProviderCredentials(ctx, c, provider)
 }
 
 // loadPlatformConfig copies spec.platform into the runtime Config.

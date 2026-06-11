@@ -1245,6 +1245,59 @@ func TestLoadFromNamedProviders_ExtraProviders(t *testing.T) {
 	}
 }
 
+// TestLoadFromNamedProviders_InjectsExtraProviderSecret verifies that a
+// non-default spec.providers[] entry (e.g. a HuggingFace inference provider)
+// has its Secret injected into the process env, so PromptKit's
+// os.Getenv("HF_TOKEN") resolves at construction time. Before the fix only the
+// default provider's secret was injected.
+func TestLoadFromNamedProviders_InjectsExtraProviderSecret(t *testing.T) {
+	// Save/restore so the test doesn't leak HF_TOKEN.
+	const hfEnv = "HF_TOKEN"
+	t.Setenv(hfEnv, "")
+	_ = os.Unsetenv(hfEnv)
+
+	hfKey := "token"
+	llmProvider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: "llm-provider", Namespace: "test-ns"},
+		Spec: v1alpha1.ProviderSpec{
+			Type:  v1alpha1.ProviderTypeOllama,
+			Model: "llama3",
+		},
+	}
+	inferenceProvider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: "inference-provider", Namespace: "test-ns"},
+		Spec: v1alpha1.ProviderSpec{
+			Type:  v1alpha1.ProviderTypeHuggingFace,
+			Model: "meta-llama/Llama-3.1-8B-Instruct",
+			Role:  v1alpha1.ProviderRoleInference,
+			Credential: &v1alpha1.CredentialConfig{
+				SecretRef: &v1alpha1.SecretKeyRef{
+					Name: "hf-secret",
+					Key:  &hfKey,
+				},
+			},
+		},
+	}
+	hfSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "hf-secret", Namespace: "test-ns"},
+		Data:       map[string][]byte{"token": []byte("hf-test-token")},
+	}
+
+	c := buildTestClient(llmProvider, inferenceProvider, hfSecret)
+
+	providers := []v1alpha1.NamedProviderRef{
+		{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "llm-provider"}},
+		{Name: "inference", ProviderRef: v1alpha1.ProviderRef{Name: "inference-provider"}},
+	}
+
+	cfg := &Config{}
+	err := loadFromNamedProviders(context.Background(), c, cfg, providers, "test-ns")
+	require.NoError(t, err)
+
+	assert.Equal(t, "hf-test-token", os.Getenv(hfEnv),
+		"extra provider's secret must be injected into the process env")
+}
+
 func strPtr(s string) *string {
 	return &s
 }

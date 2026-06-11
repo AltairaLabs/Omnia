@@ -63,6 +63,33 @@ func TestProviderToSDKSpec_HuggingFaceServerless(t *testing.T) {
 	assert.Nil(t, spec.AdditionalConfig)
 }
 
+func TestProviderToSDKSpec_CredentialEnvOverride(t *testing.T) {
+	p := hfProvider("hf-custom", "")
+	p.Spec.Credential = &v1alpha1.CredentialConfig{EnvVar: "CUSTOM_TOKEN"}
+
+	spec := providerToSDKSpec(p)
+
+	require.NotNil(t, spec.Credential)
+	assert.Equal(t, "CUSTOM_TOKEN", spec.Credential.CredentialEnv,
+		"explicit spec.credential.envVar must override the provider-type default")
+}
+
+func TestProviderToSDKSpec_PlatformHostedLeavesCredentialNil(t *testing.T) {
+	p := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: "bedrock-1"},
+		Spec: v1alpha1.ProviderSpec{
+			Type:     v1alpha1.ProviderTypeClaude,
+			Model:    "claude-sonnet-4",
+			Platform: &v1alpha1.PlatformConfig{Type: v1alpha1.PlatformTypeBedrock},
+		},
+	}
+
+	spec := providerToSDKSpec(p)
+
+	assert.Nil(t, spec.Credential,
+		"platform-hosted providers cannot express auth via ProviderSpec; Credential must stay nil")
+}
+
 func TestProviderToSDKSpec_NoCredentialEnv(t *testing.T) {
 	p := &v1alpha1.Provider{
 		ObjectMeta: metav1.ObjectMeta{Name: "ollama-1"},
