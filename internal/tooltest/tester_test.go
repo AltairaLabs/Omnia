@@ -36,6 +36,12 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
+// Shared test fixture names (extracted to satisfy goconst).
+const (
+	tcRegistry = "reg"
+	tcHandler  = "petstore"
+)
+
 // testScheme builds a scheme with core + omnia CRDs registered.
 func testScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
@@ -1168,10 +1174,10 @@ func TestListTools_OpenAPI_ReturnsPerOperationTools(t *testing.T) {
 	defer specSrv.Close()
 
 	registry := &omniav1alpha1.ToolRegistry{
-		ObjectMeta: metav1.ObjectMeta{Name: "reg", Namespace: "ns"},
+		ObjectMeta: metav1.ObjectMeta{Name: tcRegistry, Namespace: "ns"},
 		Spec: omniav1alpha1.ToolRegistrySpec{
 			Handlers: []omniav1alpha1.HandlerDefinition{{
-				Name:          "petstore",
+				Name:          tcHandler,
 				Type:          omniav1alpha1.HandlerTypeOpenAPI,
 				OpenAPIConfig: &omniav1alpha1.OpenAPIConfig{SpecURL: specSrv.URL},
 			}},
@@ -1180,7 +1186,7 @@ func TestListTools_OpenAPI_ReturnsPerOperationTools(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme()).WithObjects(registry).Build()
 	tester := NewTester(c, logr.Discard())
 
-	resp := tester.ListTools(context.Background(), "ns", "reg", "petstore")
+	resp := tester.ListTools(context.Background(), "ns", tcRegistry, tcHandler)
 
 	if resp.Error != "" {
 		t.Fatalf("unexpected error: %s", resp.Error)
@@ -1201,13 +1207,13 @@ func TestListTools_OpenAPI_ReturnsPerOperationTools(t *testing.T) {
 
 func TestListTools_NonOpenAPIHandler_IsRejected(t *testing.T) {
 	registry := &omniav1alpha1.ToolRegistry{
-		ObjectMeta: metav1.ObjectMeta{Name: "reg", Namespace: "ns"},
+		ObjectMeta: metav1.ObjectMeta{Name: tcRegistry, Namespace: "ns"},
 		Spec: omniav1alpha1.ToolRegistrySpec{
 			Handlers: []omniav1alpha1.HandlerDefinition{{Name: "h", Type: omniav1alpha1.HandlerTypeHTTP}},
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(testScheme()).WithObjects(registry).Build()
-	resp := NewTester(c, logr.Discard()).ListTools(context.Background(), "ns", "reg", "h")
+	resp := NewTester(c, logr.Discard()).ListTools(context.Background(), "ns", tcRegistry, "h")
 	if !strings.Contains(resp.Error, "only supported for openapi") {
 		t.Errorf("error %q does not contain %q", resp.Error, "only supported for openapi")
 	}
@@ -1215,17 +1221,17 @@ func TestListTools_NonOpenAPIHandler_IsRejected(t *testing.T) {
 
 func TestListTools_SpecUnreachable_ReturnsErrorWithSpecURL(t *testing.T) {
 	registry := &omniav1alpha1.ToolRegistry{
-		ObjectMeta: metav1.ObjectMeta{Name: "reg", Namespace: "ns"},
+		ObjectMeta: metav1.ObjectMeta{Name: tcRegistry, Namespace: "ns"},
 		Spec: omniav1alpha1.ToolRegistrySpec{
 			Handlers: []omniav1alpha1.HandlerDefinition{{
-				Name:          "petstore",
+				Name:          tcHandler,
 				Type:          omniav1alpha1.HandlerTypeOpenAPI,
 				OpenAPIConfig: &omniav1alpha1.OpenAPIConfig{SpecURL: "http://127.0.0.1:1/does-not-exist"},
 			}},
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(testScheme()).WithObjects(registry).Build()
-	resp := NewTester(c, logr.Discard()).ListTools(context.Background(), "ns", "reg", "petstore")
+	resp := NewTester(c, logr.Discard()).ListTools(context.Background(), "ns", tcRegistry, tcHandler)
 	if resp.Error == "" {
 		t.Fatal("expected non-empty error for unreachable spec")
 	}
@@ -1234,5 +1240,58 @@ func TestListTools_SpecUnreachable_ReturnsErrorWithSpecURL(t *testing.T) {
 	}
 	if len(resp.Tools) != 0 {
 		t.Errorf("expected empty tools, got %d", len(resp.Tools))
+	}
+}
+
+func TestListTools_RegistryNotFound_ReturnsError(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme()).Build()
+	resp := NewTester(c, logr.Discard()).ListTools(context.Background(), "ns", "missing-reg", tcHandler)
+	if !strings.Contains(resp.Error, "failed to get ToolRegistry") {
+		t.Errorf("error %q does not contain %q", resp.Error, "failed to get ToolRegistry")
+	}
+	if len(resp.Tools) != 0 {
+		t.Errorf("expected empty tools, got %d", len(resp.Tools))
+	}
+}
+
+func TestListTools_HandlerNotFound_ReturnsError(t *testing.T) {
+	registry := &omniav1alpha1.ToolRegistry{
+		ObjectMeta: metav1.ObjectMeta{Name: tcRegistry, Namespace: "ns"},
+		Spec: omniav1alpha1.ToolRegistrySpec{
+			Handlers: []omniav1alpha1.HandlerDefinition{{
+				Name:          tcHandler,
+				Type:          omniav1alpha1.HandlerTypeOpenAPI,
+				OpenAPIConfig: &omniav1alpha1.OpenAPIConfig{SpecURL: "http://example.com/openapi.json"},
+			}},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(testScheme()).WithObjects(registry).Build()
+	resp := NewTester(c, logr.Discard()).ListTools(context.Background(), "ns", tcRegistry, "nonexistent")
+	if !strings.Contains(resp.Error, "not found") {
+		t.Errorf("error %q does not contain %q", resp.Error, "not found")
+	}
+}
+
+func TestListTools_AuthSecretMissing_ReturnsError(t *testing.T) {
+	registry := &omniav1alpha1.ToolRegistry{
+		ObjectMeta: metav1.ObjectMeta{Name: tcRegistry, Namespace: "ns"},
+		Spec: omniav1alpha1.ToolRegistrySpec{
+			Handlers: []omniav1alpha1.HandlerDefinition{{
+				Name: tcHandler,
+				Type: omniav1alpha1.HandlerTypeOpenAPI,
+				OpenAPIConfig: &omniav1alpha1.OpenAPIConfig{
+					SpecURL:       "http://example.com/openapi.json",
+					AuthSecretRef: &omniav1alpha1.SecretKeySelector{Name: "missing-secret", Key: "token"},
+				},
+			}},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(testScheme()).WithObjects(registry).Build()
+	resp := NewTester(c, logr.Discard()).ListTools(context.Background(), "ns", tcRegistry, tcHandler)
+	if !strings.Contains(resp.Error, "failed to resolve auth secrets") {
+		t.Errorf("error %q does not contain %q", resp.Error, "failed to resolve auth secrets")
+	}
+	if resp.SpecURL != "http://example.com/openapi.json" {
+		t.Errorf("SpecURL = %q, want the configured spec URL", resp.SpecURL)
 	}
 }
