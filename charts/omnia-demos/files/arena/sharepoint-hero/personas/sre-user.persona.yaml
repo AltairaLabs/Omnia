@@ -29,7 +29,7 @@ spec:
     - Stay operationally focused
     - Build on the previous answer
   style:
-    verbosity: low
+    verbosity: short
     challenge_level: medium
     friction_tags: []
   defaults:
