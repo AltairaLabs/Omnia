@@ -223,6 +223,51 @@ func TestMigrator_TablesExist(t *testing.T) {
 	}
 }
 
+func TestMigrator_CollapsedSchema(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db, connStr := freshDB(t)
+	logger := zap.New(zap.UseDevMode(true))
+
+	mg, err := NewMigrator(connStr, logger)
+	require.NoError(t, err)
+	defer func() { _ = mg.Close() }()
+	require.NoError(t, mg.Up())
+
+	// All tables the collapsed initial must create (the post-000012 set).
+	for _, table := range []string{
+		"memory_entities", "memory_relations", "memory_observations",
+		"user_privacy_preferences", "memory_workspaces", "audit_log",
+		"consolidation_runs",
+	} {
+		var exists bool
+		require.NoError(t, db.QueryRow(`
+			SELECT EXISTS (SELECT 1 FROM information_schema.tables
+			WHERE table_schema = 'public' AND table_name = $1)`, table).Scan(&exists))
+		assert.True(t, exists, "table %s should exist", table)
+	}
+
+	// The embedding vector columns are reconciler-owned (#1309) and must NOT
+	// be created by the migration — EnsureEmbeddingSchema adds them at startup.
+	for _, table := range []string{"memory_entities", "memory_observations"} {
+		var exists bool
+		require.NoError(t, db.QueryRow(`
+			SELECT EXISTS (SELECT 1 FROM information_schema.columns
+			WHERE table_schema = 'public' AND table_name = $1 AND column_name = 'embedding')`, table).Scan(&exists))
+		assert.False(t, exists, "table %s should NOT have an embedding column (reconciler-owned)", table)
+	}
+
+	// embedding_model (plain text, not the vector) stays in the migration.
+	var hasModel bool
+	require.NoError(t, db.QueryRow(`
+		SELECT EXISTS (SELECT 1 FROM information_schema.columns
+		WHERE table_schema = 'public' AND table_name = 'memory_observations'
+		AND column_name = 'embedding_model')`).Scan(&hasModel))
+	assert.True(t, hasModel, "embedding_model column should remain in the migration")
+}
+
 func TestMigrator_CleanTeardown(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")

@@ -1,5 +1,10 @@
+DROP TABLE IF EXISTS consolidation_runs;
+DROP TABLE IF EXISTS audit_log;
+DROP TRIGGER IF EXISTS memory_entities_track_workspace ON memory_entities;
+DROP FUNCTION IF EXISTS track_memory_workspace();
+DROP TABLE IF EXISTS memory_workspaces;
+DROP TABLE IF EXISTS user_privacy_preferences;
 DROP TABLE IF EXISTS memory_observations;
 DROP TABLE IF EXISTS memory_relations;
 DROP TABLE IF EXISTS memory_entities;
-DROP TABLE IF EXISTS user_privacy_preferences;
 DROP EXTENSION IF EXISTS vector;
