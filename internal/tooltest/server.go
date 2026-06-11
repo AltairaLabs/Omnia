@@ -112,6 +112,7 @@ func (s *Server) Start(_ context.Context) error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/namespaces/{namespace}/toolregistries/{registry}/test", s.requireAuth(s.handleTestTool))
+	mux.HandleFunc("GET /api/v1/namespaces/{namespace}/toolregistries/{registry}/tools", s.requireAuth(s.handleListTools))
 	mux.HandleFunc("/healthz", s.handleHealthz)
 
 	s.server = &http.Server{
@@ -174,4 +175,26 @@ func (s *Server) handleTestTool(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
+}
+
+// handleListTools handles GET /api/v1/namespaces/{namespace}/toolregistries/{registry}/tools?handler=.
+// It returns the OpenAPI handler's tools exactly as the LLM sees them.
+func (s *Server) handleListTools(w http.ResponseWriter, r *http.Request) {
+	namespace := r.PathValue("namespace")
+	registry := r.PathValue("registry")
+	handler := r.URL.Query().Get("handler")
+
+	if namespace == "" || registry == "" || handler == "" {
+		http.Error(w, "namespace, registry and handler are required", http.StatusBadRequest)
+		return
+	}
+
+	resp := s.tester.ListTools(r.Context(), namespace, registry, handler)
+	status := http.StatusOK
+	if resp.Error != "" {
+		status = http.StatusUnprocessableEntity
+	}
+	if err := httputil.WriteJSON(w, status, resp); err != nil {
+		s.log.Error(err, "failed to write response")
+	}
 }
