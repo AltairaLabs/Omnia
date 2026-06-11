@@ -86,6 +86,33 @@ export class MemoryApiService {
     };
   }
 
+  /**
+   * Records one-shot consent to change the memory embedding vector dimension
+   * (#1309). The memory-api reconciler consumes the marker and performs the
+   * (destructive) reshape + re-embed on its next restart. Owner-only — the
+   * proxy route enforces the role.
+   */
+  async changeEmbeddingDimension(workspace: string, targetDim: number): Promise<void> {
+    const response = await fetch(
+      `${MEMORY_API_BASE}/${encodeURIComponent(workspace)}/admin/embedding-dimension-change`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target_dim: targetDim }),
+      }
+    );
+    if (!response.ok) {
+      let detail = response.statusText;
+      try {
+        const data = await response.json();
+        if (data?.error) detail = data.error;
+      } catch {
+        // Non-JSON error body — keep statusText.
+      }
+      throw new Error(`Failed to record embedding dimension change: ${detail}`);
+    }
+  }
+
   async exportMemories(workspace: string, userId: string): Promise<MemoryEntity[]> {
     const params = new URLSearchParams({ userId });
     const response = await fetch(
