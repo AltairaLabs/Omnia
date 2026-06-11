@@ -479,9 +479,14 @@ sharepointHero:
     sessionRecording: true
     # ArenaSource reconcile interval for the bundle ConfigMap.
     syncInterval: "5m"
-    # User-simulator provider (the self-play "SRE" turns). A cheap model keeps
-    # load-test cost down; reuses the baseline credential secret by default.
+    # User-simulator provider (the self-play "SRE" turns). Defaults to the
+    # self-hosted Ollama chat instance so the loadtest is self-contained with no
+    # external API key and zero per-turn cost. Set type to claude/openai (with a
+    # secretRef) to drive self-play from an external model instead.
     selfplay:
-      type: claude
-      model: claude-haiku-4-5-20251001
+      type: ollama
+      model: llama3.2:3b
+      # Ollama Service to target; resolved to http://<svc>.<namespace>:11434.
+      ollamaService: ollama-chat
+      # Only used for non-ollama types (claude/openai); ignored for ollama.
       secretRef: anthropic-api-key
