@@ -126,6 +126,32 @@ func TestEmbeddingService_WriteEmbedding(t *testing.T) {
 	assert.True(t, hasEmbedding, "embedding should be set after WriteEmbedding")
 }
 
+// TestEmbeddingService_WriteEmbedding_DimensionMismatch proves the write-side
+// guard rejects a vector whose length doesn't match the provider's dimension
+// with a clear error, rather than letting the opaque Postgres type error
+// surface (#1309).
+func TestEmbeddingService_WriteEmbedding_DimensionMismatch(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	mem := &Memory{
+		Type:    "fact",
+		Content: "dimension guard",
+		Scope:   testScope(testWorkspace1),
+	}
+	require.NoError(t, store.Save(ctx, mem))
+
+	provider := &mockEmbeddingProvider{
+		dimensions: 1536,
+		embedFn:    func(_ context.Context, _ []string) ([][]float32, error) { return nil, nil },
+	}
+	svc := NewEmbeddingService(store, provider, zap.New(zap.UseDevMode(true)))
+
+	err := svc.WriteEmbedding(ctx, mem.ID, make([]float32, 768)) // wrong dimension
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dimension mismatch")
+}
+
 func TestEmbeddingService_ProviderError(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()

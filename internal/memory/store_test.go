@@ -103,6 +103,11 @@ func freshDB(t *testing.T) *pgxpool.Pool {
 	pool, err := pgxpool.New(ctx, connStr)
 	require.NoError(t, err)
 
+	// The embedding columns are application-managed (#1309): the migration no
+	// longer creates them, so tests must run the reconciler to materialise
+	// them at the historical default dimension before the store touches them.
+	require.NoError(t, pgmigrate.EnsureEmbeddingSchema(ctx, pool, 1536, logger))
+
 	t.Cleanup(func() {
 		pool.Close()
 		mainDB, err := sql.Open("pgx", testConnStr)

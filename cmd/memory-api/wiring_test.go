@@ -696,12 +696,14 @@ func TestNewClientForConsolidation_BuildsClient(t *testing.T) {
 // Migration 000010 adds the table. This test fails fast if the
 // migration is deleted or renamed.
 func TestMemoryMigrations_IncludeAuditLog(t *testing.T) {
-	got, err := memorypg.MigrationsFS.ReadFile("migrations/000010_audit_log.up.sql")
+	// audit_log is created by the collapsed initial migration (#1309 collapsed
+	// the 000001..000012 chain into a single initial).
+	got, err := memorypg.MigrationsFS.ReadFile("migrations/000001_initial_schema.up.sql")
 	if err != nil {
-		t.Fatalf("000010_audit_log.up.sql missing: %v", err)
+		t.Fatalf("000001_initial_schema.up.sql missing: %v", err)
 	}
 	if !strings.Contains(string(got), "CREATE TABLE") || !strings.Contains(string(got), "audit_log") {
-		t.Errorf("000010_audit_log.up.sql doesn't create audit_log table; content=%q",
+		t.Errorf("000001_initial_schema.up.sql doesn't create audit_log table; content=%q",
 			string(got))
 	}
 }
