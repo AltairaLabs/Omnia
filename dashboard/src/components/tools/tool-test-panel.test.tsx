@@ -548,9 +548,11 @@ describe("ToolTestPanel — OpenAPI handler", () => {
 
     render(<ToolTestPanel registry={openAPIRegistry} workspaceName="ws1" />);
 
-    // The live operation getPet should appear in the tool select.
-    expect(await screen.findByText("getPet")).toBeInTheDocument();
-    // Sample args should be seeded from the first live tool's schema.
+    // The live operation getPet should appear (tool select + inspector).
+    expect((await screen.findAllByText("getPet")).length).toBeGreaterThan(0);
+    // getPet has a renderable schema → Form mode by default; switch to JSON to
+    // inspect the seeded sample args.
+    fireEvent.click(screen.getByRole("button", { name: "JSON" }));
     const textarea = screen.getByLabelText("Arguments (JSON)");
     expect((textarea as HTMLTextAreaElement).value).toContain("id");
   });
@@ -638,6 +640,10 @@ describe("ToolTestPanel — OpenAPI handler", () => {
 
     render(<ToolTestPanel registry={openAPIRegistry} workspaceName="ws1" />);
 
+    // getPet has a renderable schema → Form mode by default; switch to JSON to
+    // exercise the raw-JSON validation path.
+    fireEvent.click(screen.getByRole("button", { name: "JSON" }));
+
     // Invalid JSON blocks the run.
     const textarea = screen.getByLabelText("Arguments (JSON)");
     fireEvent.change(textarea, { target: { value: "{bad" } });
@@ -652,5 +658,63 @@ describe("ToolTestPanel — OpenAPI handler", () => {
       .find((o) => o.textContent === "listPets");
     fireEvent.click(listOption!);
     expect((screen.getByLabelText("Arguments (JSON)") as HTMLTextAreaElement).value).toBe("{}");
+  });
+
+  it("shows the selected tool's description and a weak-description lint", async () => {
+    mockPreview.mockReturnValue({
+      tools: [
+        {
+          name: "getPet",
+          description: "GET /pets/{id}",
+          inputSchema: {
+            type: "object",
+            properties: { id: { type: "string" } },
+            required: ["id"],
+          },
+        },
+      ],
+      specURL: "u",
+      error: null,
+      loading: false,
+    });
+    render(<ToolTestPanel registry={openAPIRegistry} workspaceName="ws" />);
+    expect(await screen.findByText("GET /pets/{id}")).toBeInTheDocument();
+    expect(
+      screen.getByText(/method and path as this tool's description/i)
+    ).toBeInTheDocument();
+  });
+
+  it("renders a schema-driven form for the selected tool by default", async () => {
+    mockPreview.mockReturnValue({
+      tools: [
+        {
+          name: "getPet",
+          description: "Fetch a pet",
+          inputSchema: {
+            type: "object",
+            properties: { id: { type: "string", description: "pet id" } },
+            required: ["id"],
+          },
+        },
+      ],
+      specURL: "u",
+      error: null,
+      loading: false,
+    });
+    render(<ToolTestPanel registry={openAPIRegistry} workspaceName="ws" />);
+    expect(await screen.findByLabelText(/id/i)).toBeInTheDocument();
+  });
+
+  it("filters operations via search when there are many", async () => {
+    const tools = Array.from({ length: 10 }, (_, i) => ({
+      name: `op${i}`,
+      description: `desc ${i}`,
+      inputSchema: { type: "object", properties: {} },
+    }));
+    mockPreview.mockReturnValue({ tools, specURL: "u", error: null, loading: false });
+    render(<ToolTestPanel registry={openAPIRegistry} workspaceName="ws" />);
+    const search = await screen.findByPlaceholderText(/search operations/i);
+    fireEvent.change(search, { target: { value: "op7" } });
+    expect(screen.getByText("op7")).toBeInTheDocument();
   });
 });

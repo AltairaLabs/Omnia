@@ -9,11 +9,13 @@ import {
   Clock,
   ShieldCheck,
   ShieldAlert,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -22,6 +24,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SchemaForm, isRenderableObjectSchema } from "@/components/tools/schema-form";
+import { computeToolLints } from "@/lib/tools/openapi-lints";
 import { useOpenAPIToolPreview } from "@/hooks/use-openapi-tool-preview";
 import type {
   ToolRegistry,
@@ -300,6 +304,189 @@ function ArgsInput({
   );
 }
 
+/** Parses the args JSON string into a plain object, or {} when invalid/non-object. */
+function parseArgsObject(args: string): Record<string, unknown> {
+  const parsed = parseArgs(args);
+  const v = parsed.value;
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    return v as Record<string, unknown>;
+  }
+  return {};
+}
+
+/** Threshold above which the operation picker shows a search box. */
+const SEARCH_THRESHOLD = 8;
+
+/** Dropdown picker used when there are few operations. */
+function OperationSelect({
+  tools,
+  selectedTool,
+  onChange,
+}: Readonly<{
+  tools: OpenAPIToolPreviewItem[];
+  selectedTool: string;
+  onChange: (toolName: string) => void;
+}>) {
+  return (
+    <Select value={selectedTool} onValueChange={onChange}>
+      <SelectTrigger id="tool-select">
+        <SelectValue placeholder="Select tool" />
+      </SelectTrigger>
+      <SelectContent>
+        {tools.map((t) => (
+          <SelectItem key={t.name} value={t.name}>
+            {t.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** Search box + filtered, clickable list used when there are many operations. */
+function OperationSearchList({
+  tools,
+  selectedTool,
+  onChange,
+}: Readonly<{
+  tools: OpenAPIToolPreviewItem[];
+  selectedTool: string;
+  onChange: (toolName: string) => void;
+}>) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? tools.filter(
+        (t) =>
+          t.name.toLowerCase().includes(q) ||
+          (t.description ?? "").toLowerCase().includes(q)
+      )
+    : tools;
+
+  return (
+    <>
+      <Input
+        placeholder="Search operations…"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        className="text-sm"
+      />
+      <div className="max-h-56 overflow-auto rounded-md border divide-y">
+        {filtered.map((t) => (
+          <button
+            key={t.name}
+            type="button"
+            onClick={() => onChange(t.name)}
+            className={`w-full text-left px-3 py-2 text-sm hover:bg-muted ${
+              t.name === selectedTool ? "bg-muted font-medium" : ""
+            }`}
+          >
+            {t.name}
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/** Searchable Tool picker. Shows a search box only when there are many operations. */
+function OperationPicker({
+  tools,
+  selectedTool,
+  onChange,
+}: Readonly<{
+  tools: OpenAPIToolPreviewItem[];
+  selectedTool: string;
+  onChange: (toolName: string) => void;
+}>) {
+  const useSearch = tools.length > SEARCH_THRESHOLD;
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="tool-select">Tool</Label>
+      {useSearch ? (
+        <OperationSearchList tools={tools} selectedTool={selectedTool} onChange={onChange} />
+      ) : (
+        <OperationSelect tools={tools} selectedTool={selectedTool} onChange={onChange} />
+      )}
+    </div>
+  );
+}
+
+/** Shows the selected tool's description and any lint warnings. */
+function ToolInspector({ tool }: Readonly<{ tool: OpenAPIToolPreviewItem | undefined }>) {
+  if (!tool) return null;
+  const lints = computeToolLints(tool);
+  return (
+    <div className="space-y-2 rounded-lg border bg-muted/40 p-3">
+      <p className="text-sm font-medium">{tool.name}</p>
+      {tool.description && (
+        <p className="text-sm text-muted-foreground break-words">{tool.description}</p>
+      )}
+      {lints.map((lint) => (
+        <div key={lint.id} className="flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+          <p className="text-xs text-amber-700 dark:text-amber-400">{lint.message}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Argument editor with a Form/JSON toggle. `args` (a JSON string) is the single
+ * source of truth; Form mode round-trips through it via parse/stringify.
+ */
+function ArgEditor({
+  tool,
+  args,
+  jsonError,
+  onChange,
+}: Readonly<{
+  tool: OpenAPIToolPreviewItem | undefined;
+  args: string;
+  jsonError: string | null;
+  onChange: (v: string) => void;
+}>) {
+  const canForm = isRenderableObjectSchema(tool?.inputSchema);
+  const [mode, setMode] = useState<"form" | "json">(canForm ? "form" : "json");
+  const useForm = canForm && mode === "form";
+
+  return (
+    <div className="space-y-2">
+      {canForm && (
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant={mode === "form" ? "default" : "outline"}
+            onClick={() => setMode("form")}
+          >
+            Form
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={mode === "json" ? "default" : "outline"}
+            onClick={() => setMode("json")}
+          >
+            JSON
+          </Button>
+        </div>
+      )}
+      {useForm ? (
+        <SchemaForm
+          schema={tool?.inputSchema}
+          value={parseArgsObject(args)}
+          onChange={(v) => onChange(JSON.stringify(v, null, 2))}
+          idPrefix="openapi-args"
+        />
+      ) : (
+        <ArgsInput args={args} jsonError={jsonError} onChange={onChange} />
+      )}
+    </div>
+  );
+}
+
 interface OpenAPIToolRunnerProps {
   tools: OpenAPIToolPreviewItem[];
   handlerName: string;
@@ -360,25 +547,21 @@ export function OpenAPIToolRunner({
     setIsRunning(false);
   }, [args, selectedTool, handlerName, workspaceName, registryName]);
 
+  const currentTool = tools.find((t) => t.name === selectedTool);
+
   return (
     <>
-      <div className="space-y-2">
-        <Label htmlFor="tool-select">Tool</Label>
-        <Select value={selectedTool} onValueChange={handleToolChange}>
-          <SelectTrigger id="tool-select">
-            <SelectValue placeholder="Select tool" />
-          </SelectTrigger>
-          <SelectContent>
-            {tools.map((t) => (
-              <SelectItem key={t.name} value={t.name}>
-                {t.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <OperationPicker tools={tools} selectedTool={selectedTool} onChange={handleToolChange} />
 
-      <ArgsInput args={args} jsonError={jsonError} onChange={handleArgsChange} />
+      <ToolInspector tool={currentTool} />
+
+      <ArgEditor
+        key={selectedTool}
+        tool={currentTool}
+        args={args}
+        jsonError={jsonError}
+        onChange={handleArgsChange}
+      />
 
       <RunButton isRunning={isRunning} disabled={isRunning || !selectedTool} onClick={handleRun} />
 

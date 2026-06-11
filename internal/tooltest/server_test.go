@@ -274,10 +274,10 @@ func TestHandleListTools_ReturnsTools(t *testing.T) {
 
 	s := testScheme()
 	registry := &omniav1alpha1.ToolRegistry{
-		ObjectMeta: metav1.ObjectMeta{Name: "reg", Namespace: "ns"},
+		ObjectMeta: metav1.ObjectMeta{Name: tcRegistry, Namespace: "ns"},
 		Spec: omniav1alpha1.ToolRegistrySpec{
 			Handlers: []omniav1alpha1.HandlerDefinition{{
-				Name:          "petstore",
+				Name:          tcHandler,
 				Type:          omniav1alpha1.HandlerTypeOpenAPI,
 				OpenAPIConfig: &omniav1alpha1.OpenAPIConfig{SpecURL: specSrv.URL},
 			}},
@@ -290,7 +290,7 @@ func TestHandleListTools_ReturnsTools(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet,
 		"/api/v1/namespaces/ns/toolregistries/reg/tools?handler=petstore", nil)
 	req.SetPathValue("namespace", "ns")
-	req.SetPathValue("registry", "reg")
+	req.SetPathValue("registry", tcRegistry)
 
 	srv.handleListTools(rec, req)
 
@@ -317,12 +317,47 @@ func TestHandleListTools_MissingHandler_Returns400(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/ns/toolregistries/reg/tools", nil)
 	req.SetPathValue("namespace", "ns")
-	req.SetPathValue("registry", "reg")
+	req.SetPathValue("registry", tcRegistry)
 
 	srv.handleListTools(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleListTools_DiscoveryError_Returns422(t *testing.T) {
+	s := testScheme()
+	registry := &omniav1alpha1.ToolRegistry{
+		ObjectMeta: metav1.ObjectMeta{Name: tcRegistry, Namespace: "ns"},
+		Spec: omniav1alpha1.ToolRegistrySpec{
+			Handlers: []omniav1alpha1.HandlerDefinition{{
+				Name:          tcHandler,
+				Type:          omniav1alpha1.HandlerTypeOpenAPI,
+				OpenAPIConfig: &omniav1alpha1.OpenAPIConfig{SpecURL: "http://127.0.0.1:1/does-not-exist"},
+			}},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(registry).Build()
+
+	srv := NewServer(":0", c, zap.New(zap.UseDevMode(true)), nil, nil)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/namespaces/ns/toolregistries/reg/tools?handler=petstore", nil)
+	req.SetPathValue("namespace", "ns")
+	req.SetPathValue("registry", tcRegistry)
+
+	srv.handleListTools(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnprocessableEntity)
+	}
+	var resp ListToolsResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Error == "" {
+		t.Error("expected non-empty error in 422 response")
 	}
 }
 
