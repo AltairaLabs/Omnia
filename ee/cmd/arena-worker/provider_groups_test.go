@@ -755,6 +755,77 @@ func TestResolveProviderRefEntry(t *testing.T) {
 		assert.Nil(t, pk.Credential, "platform providers must not demand an API-key env var")
 	})
 
+	t.Run("inference provider routes to LoadedInferenceProviders not LoadedProviders", func(t *testing.T) {
+		provider := &v1alpha1.Provider{
+			Spec: v1alpha1.ProviderSpec{
+				Type:    v1alpha1.ProviderTypeHuggingFace,
+				Role:    v1alpha1.ProviderRoleInference,
+				Model:   "meta-llama/Llama-3-8b",
+				BaseURL: "https://abc123.endpoints.huggingface.cloud",
+			},
+		}
+		provider.Name = "hf-classifier"
+		provider.Namespace = testNamespace
+
+		c := fake.NewClientBuilder().
+			WithScheme(k8s.Scheme()).
+			WithObjects(provider).
+			Build()
+
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+
+		ref := v1alpha1.ProviderRef{Name: "hf-classifier"}
+		_, err := resolveProviderRefEntry(testRC(ctx, log, c, testNamespace, nil, arenaCfg), ref, "judge")
+		require.NoError(t, err)
+
+		providerID := sanitizeID("hf-classifier")
+		require.Contains(t, arenaCfg.LoadedInferenceProviders, providerID)
+		assert.NotContains(t, arenaCfg.LoadedProviders, providerID,
+			"inference providers must not land in the LLM registry")
+
+		p := arenaCfg.LoadedInferenceProviders[providerID]
+		require.NotNil(t, p)
+		assert.Equal(t, "inference", p.Role)
+		assert.Equal(t, "huggingface", p.Type)
+		require.NotNil(t, p.AdditionalConfig)
+		assert.Equal(t, true, p.AdditionalConfig["dedicated"],
+			"dedicated endpoint baseURL should set dedicated=true")
+		assert.Equal(t, "judge", arenaCfg.ProviderGroups[providerID])
+	})
+
+	t.Run("llm provider still routes to LoadedProviders with llm role", func(t *testing.T) {
+		provider := &v1alpha1.Provider{
+			Spec: v1alpha1.ProviderSpec{
+				Type:  "openai",
+				Model: "gpt-4o",
+			},
+		}
+		provider.Name = "default-llm"
+		provider.Namespace = testNamespace
+
+		c := fake.NewClientBuilder().
+			WithScheme(k8s.Scheme()).
+			WithObjects(provider).
+			Build()
+
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+
+		ref := v1alpha1.ProviderRef{Name: "default-llm"}
+		_, err := resolveProviderRefEntry(testRC(ctx, log, c, testNamespace, nil, arenaCfg), ref, "default")
+		require.NoError(t, err)
+
+		providerID := sanitizeID("default-llm")
+		require.Contains(t, arenaCfg.LoadedProviders, providerID)
+		assert.NotContains(t, arenaCfg.LoadedInferenceProviders, providerID)
+		assert.Equal(t, "llm", arenaCfg.LoadedProviders[providerID].Role)
+	})
+
 	t.Run("non-platform provider keeps credential env", func(t *testing.T) {
 		provider := &v1alpha1.Provider{
 			Spec: v1alpha1.ProviderSpec{

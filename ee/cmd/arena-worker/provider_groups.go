@@ -28,6 +28,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/arena/fleet"
 	"github.com/altairalabs/omnia/ee/pkg/arena/providers"
 	"github.com/altairalabs/omnia/pkg/k8s"
+	omniaprovider "github.com/altairalabs/omnia/pkg/provider"
 )
 
 // resolvedFleetProvider tracks a fleet provider that needs post-build connection.
@@ -201,15 +202,10 @@ func resolveEntry(
 	return nil, nil, nil
 }
 
-// resolveProviderRefEntry resolves a single Provider CRD and adds it to
-// LoadedProviders (Arena's inference-provider map). Returns parsed pricing
-// if the provider has spec.pricing configured.
-//
-// LoadedProviders is the inference-only registry; TTS/STT/embedding
-// providers would route through separate Arena config blocks that
-// don't exist yet. Until those land, refuse any non-inference Provider
-// at the resolution boundary so the failure mode is a clear error rather
-// than a confusing PromptKit factory complaint downstream.
+// resolveProviderRefEntry resolves a single Provider CRD and routes it into the
+// Loaded*Providers map matching its role (LLM → LoadedProviders, inference →
+// LoadedInferenceProviders, etc.). Returns parsed pricing if the provider has
+// spec.pricing configured.
 func resolveProviderRefEntry(
 	rc *resolveContext,
 	ref v1alpha1.ProviderRef,
@@ -220,15 +216,11 @@ func resolveProviderRefEntry(
 		return nil, fmt.Errorf("group %q: failed to get provider %s: %w", groupName, ref.Name, err)
 	}
 
-	if err := v1alpha1.RequireProviderRole(provider, v1alpha1.ProviderRoleLLM); err != nil {
-		return nil, fmt.Errorf("group %q: %w", groupName, err)
-	}
-
 	providerID := sanitizeID(provider.Name)
 
 	pkProvider := buildProviderConfig(provider, providerID)
 
-	rc.arenaCfg.LoadedProviders[providerID] = pkProvider
+	routeProviderByRole(rc.arenaCfg, provider.EffectiveRole(), providerID, pkProvider)
 	rc.arenaCfg.ProviderGroups[providerID] = groupName
 
 	rc.log.V(1).Info("provider resolved from CRD",
@@ -272,7 +264,38 @@ func buildProviderConfig(provider *v1alpha1.Provider, id string) *config.Provide
 		pkProvider.Defaults = convertProviderDefaults(provider.Spec.Defaults)
 	}
 
+	pkProvider.Role = string(provider.EffectiveRole())
+	if provider.Spec.Type == v1alpha1.ProviderTypeHuggingFace {
+		pkProvider.AdditionalConfig = omniaprovider.HuggingFaceAdditionalConfig(provider.Spec.BaseURL)
+	}
+
 	return pkProvider
+}
+
+// routeProviderByRole places a built provider config into the arena config map
+// matching its role. Maps are lazily initialized.
+func routeProviderByRole(arenaCfg *config.Config, role v1alpha1.ProviderRole, id string, p *config.Provider) {
+	switch role {
+	case v1alpha1.ProviderRoleInference:
+		ensureProviderMap(&arenaCfg.LoadedInferenceProviders)[id] = p
+	case v1alpha1.ProviderRoleEmbedding:
+		ensureProviderMap(&arenaCfg.LoadedEmbeddingProviders)[id] = p
+	case v1alpha1.ProviderRoleTTS:
+		ensureProviderMap(&arenaCfg.LoadedTTSProviders)[id] = p
+	case v1alpha1.ProviderRoleSTT:
+		ensureProviderMap(&arenaCfg.LoadedSTTProviders)[id] = p
+	case v1alpha1.ProviderRoleImage:
+		ensureProviderMap(&arenaCfg.LoadedImageProviders)[id] = p
+	default: // llm
+		ensureProviderMap(&arenaCfg.LoadedProviders)[id] = p
+	}
+}
+
+func ensureProviderMap(m *map[string]*config.Provider) map[string]*config.Provider {
+	if *m == nil {
+		*m = map[string]*config.Provider{}
+	}
+	return *m
 }
 
 // convertPlatformConfig maps an Omnia PlatformConfig to a PromptKit
@@ -343,7 +366,7 @@ func resolveProviderRefEntryWithID(
 
 	pkProvider := buildProviderConfig(provider, configID)
 
-	rc.arenaCfg.LoadedProviders[configID] = pkProvider
+	routeProviderByRole(rc.arenaCfg, provider.EffectiveRole(), configID, pkProvider)
 	rc.arenaCfg.ProviderGroups[configID] = groupName
 
 	rc.log.V(1).Info("provider resolved from CRD (map mode)",
