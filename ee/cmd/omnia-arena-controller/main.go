@@ -79,6 +79,7 @@ func main() {
 	var arenaDevConsolePodLabels string
 	var workspaceContentPath string
 	var workspaceStorageClass string
+	var workspaceContentScoped bool
 	var nfsServer string
 	var nfsPath string
 	var sessionPostgresConn string
@@ -111,6 +112,11 @@ func main() {
 		"Base path for workspace content volumes.")
 	flag.StringVar(&workspaceStorageClass, "workspace-storage-class", "",
 		"Default storage class for workspace PVCs (e.g., nfs-client).")
+	flag.BoolVar(&workspaceContentScoped, "workspace-content-scoped", false,
+		"When true, the per-workspace content volume is already scoped to the "+
+			"workspace subtree, so the mount subPath is workspace-relative (no "+
+			"{workspace}/{namespace} prefix). Default false preserves the legacy "+
+			"share-root behaviour where the operator sets the full subPath.")
 	flag.StringVar(&nfsServer, "nfs-server", "",
 		"NFS server address for workspace content.")
 	flag.StringVar(&nfsPath, "nfs-path", "",
@@ -273,6 +279,7 @@ func main() {
 			DevConsoleServiceAccount: arenaDevConsoleServiceAccount,
 			DevConsolePodLabels:      parseKeyValueLabels(arenaDevConsolePodLabels),
 			WorkspaceContentPath:     workspaceContentPath,
+			WorkspaceContentScoped:   workspaceContentScoped,
 			NFSServer:                nfsServer,
 			NFSPath:                  nfsPath,
 			LicenseValidator:         licenseValidator,

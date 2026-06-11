@@ -126,6 +126,15 @@ type ArenaJobReconciler struct {
 	// When set, workers mount the workspace content PVC and access content directly.
 	// Structure: {WorkspaceContentPath}/{workspace}/{namespace}/{contentPath}
 	WorkspaceContentPath string
+	// WorkspaceContentScoped indicates the per-workspace content volume is
+	// already scoped to the workspace subtree (the new storage-enforced
+	// isolation model, e.g. an Azure native NFS PV exported at
+	// /<account>/<share>/<workspace>/<namespace>). When true, the mount
+	// subPath is workspace-relative — it drops the {workspace}/{namespace}
+	// prefix because the volume root IS that subtree. When false (default),
+	// the volume is the legacy share root and the subPath carries the full
+	// {workspace}/{namespace}/{contentPath} prefix for in-volume isolation.
+	WorkspaceContentScoped bool
 	// NFSServer is the NFS server address for workspace content (optional).
 	// When set along with NFSPath, workers mount NFS directly instead of using a PVC.
 	// This enables shared access across namespaces without per-workspace PVCs.
@@ -801,13 +810,26 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		}
 	}
 
-	// Calculate the volume subPath for content isolation
-	// Structure: {workspace}/{namespace}/{contentPath}/{rootPath}
+	// Calculate the volume subPath for content isolation.
+	//
+	// Two modes, selected by WorkspaceContentScoped:
+	//   - Legacy (share-root volume): the volume root is the whole share, so
+	//     the subPath carries the full {workspace}/{namespace}/{contentPath}
+	//     prefix and isolation is a mount-time subPath convention.
+	//   - Scoped (workspace-scoped volume): the volume root IS the
+	//     {workspace}/{namespace} subtree (storage-enforced isolation, e.g.
+	//     an Azure native NFS PV). The subPath is therefore workspace-relative
+	//     ({contentPath}/{rootPath}); adding the {workspace}/{namespace} prefix
+	//     would double-prefix (demo/omnia-demo/demo/omnia-demo/...).
 	var contentSubPath string
 	if source.Status.Artifact != nil && source.Status.Artifact.ContentPath != "" {
-		workspaceName := GetWorkspaceForNamespace(ctx, r.Client, arenaJob.Namespace)
-		contentSubPath = fmt.Sprintf("%s/%s/%s",
-			workspaceName, arenaJob.Namespace, source.Status.Artifact.ContentPath)
+		if r.WorkspaceContentScoped {
+			contentSubPath = source.Status.Artifact.ContentPath
+		} else {
+			workspaceName := GetWorkspaceForNamespace(ctx, r.Client, arenaJob.Namespace)
+			contentSubPath = fmt.Sprintf("%s/%s/%s",
+				workspaceName, arenaJob.Namespace, source.Status.Artifact.ContentPath)
+		}
 		if rootPath != "" {
 			contentSubPath = contentSubPath + "/" + rootPath
 		}
@@ -912,14 +934,27 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 			VolumeSource: volumeSource,
 		})
 		// Use subPath to restrict access to only the job's root folder
-		// This provides content isolation between jobs
+		// This provides content isolation between jobs.
+		//
+		// Subtree pre-creation: a native NFS mount to a non-existent export
+		// path fails (NFS won't auto-create the directory the way kubelet
+		// auto-creates a subPath). No explicit mkdir is needed here, though,
+		// because the worker only runs after its ArenaSource has produced an
+		// artifact (the reconcile bails with "has no artifact" otherwise — see
+		// validateSource). Producing that artifact runs the FilesystemSyncer
+		// (internal/sourcesync/syncer.go) under the operator's share-root
+		// WorkspaceContentPath, whose storeVersion/UpdateHEAD os.MkdirAll the
+		// full {workspace}/{namespace}/{contentPath}/.arena/... subtree on the
+		// share. So in both modes the subtree already exists before any tenant
+		// pod mounts it.
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
 			Name:      "workspace-content",
 			MountPath: "/workspace-content",
 			SubPath:   contentSubPath,
 			ReadOnly:  true,
 		})
-		log.Info("mounting content with isolation", "subPath", contentSubPath)
+		log.Info("mounting content with isolation",
+			"subPath", contentSubPath, "workspaceScoped", r.WorkspaceContentScoped)
 	}
 
 	// Wire output destination — PVC mount or S3 env vars.

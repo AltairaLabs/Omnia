@@ -90,6 +90,7 @@ type setupOptions struct {
 	DevConsoleServiceAccount string
 	DevConsolePodLabels      map[string]string
 	WorkspaceContentPath     string
+	WorkspaceContentScoped   bool
 	NFSServer                string
 	NFSPath                  string
 	LicenseValidator         *license.Validator
@@ -153,22 +154,23 @@ func buildReconcilers(opts setupOptions) []namedReconciler {
 			Name: controllerArenaJob,
 			Setup: func(mgr ctrl.Manager) error {
 				return (&controller.ArenaJobReconciler{
-					Client:                mgr.GetClient(),
-					Scheme:                mgr.GetScheme(),
-					Recorder:              mgr.GetEventRecorderFor("arenajob-controller"),
-					WorkerImage:           opts.WorkerImage,
-					WorkerImagePullPolicy: opts.WorkerImagePullPolicy,
-					LicenseValidator:      opts.LicenseValidator,
-					Aggregator:            opts.Aggregator,
-					RedisURL:              opts.RedisURL,
-					RedisURLSecretName:    opts.RedisURLSecretName,
-					RedisURLSecretKey:     opts.RedisURLSecretKey,
-					WorkspaceContentPath:  opts.WorkspaceContentPath,
-					NFSServer:             opts.NFSServer,
-					NFSPath:               opts.NFSPath,
-					StorageManager:        opts.StorageManager,
-					TracingEnabled:        opts.TracingEnabled,
-					TracingEndpoint:       opts.TracingEndpoint,
+					Client:                 mgr.GetClient(),
+					Scheme:                 mgr.GetScheme(),
+					Recorder:               mgr.GetEventRecorderFor("arenajob-controller"),
+					WorkerImage:            opts.WorkerImage,
+					WorkerImagePullPolicy:  opts.WorkerImagePullPolicy,
+					LicenseValidator:       opts.LicenseValidator,
+					Aggregator:             opts.Aggregator,
+					RedisURL:               opts.RedisURL,
+					RedisURLSecretName:     opts.RedisURLSecretName,
+					RedisURLSecretKey:      opts.RedisURLSecretKey,
+					WorkspaceContentPath:   opts.WorkspaceContentPath,
+					WorkspaceContentScoped: opts.WorkspaceContentScoped,
+					NFSServer:              opts.NFSServer,
+					NFSPath:                opts.NFSPath,
+					StorageManager:         opts.StorageManager,
+					TracingEnabled:         opts.TracingEnabled,
+					TracingEndpoint:        opts.TracingEndpoint,
 				}).SetupWithManager(mgr)
 			},
 		},
