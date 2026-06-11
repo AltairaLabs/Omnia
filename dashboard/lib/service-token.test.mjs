@@ -13,7 +13,9 @@ const require = createRequire(import.meta.url);
 const {
   handleServiceTokenRequest,
   parseAllowlist,
+  parseServiceAccount,
   saUsernameToAllowlistKey,
+  DEFAULT_MINT_SERVICE_ACCOUNTS,
 } = require("./service-token.js");
 
 // Constants extracted to satisfy SonarCloud's no-duplicate-string rule
@@ -21,6 +23,9 @@ const {
 const DOCTOR_KEY = "omnia-system/omnia-doctor";
 const DOCTOR_USERNAME = `system:serviceaccount:${DOCTOR_KEY.replace("/", ":")}`;
 const BEARER_FAKE = "Bearer fake";
+const ALICE_USERNAME = "alice@example.com";
+const WORKER_SA = "arena-worker";
+const WORKER_USERNAME = `system:serviceaccount:omnia-demo:${WORKER_SA}`;
 
 let signingKey;
 let allowlist;
@@ -85,7 +90,7 @@ describe("saUsernameToAllowlistKey", () => {
   });
 
   it("returns null for non-SA identities", () => {
-    expect(saUsernameToAllowlistKey("alice@example.com")).toBeNull();
+    expect(saUsernameToAllowlistKey(ALICE_USERNAME)).toBeNull();
     expect(saUsernameToAllowlistKey("system:node:foo")).toBeNull();
     expect(saUsernameToAllowlistKey("")).toBeNull();
   });
@@ -93,6 +98,26 @@ describe("saUsernameToAllowlistKey", () => {
   it("returns null when the SA suffix is malformed", () => {
     expect(saUsernameToAllowlistKey("system:serviceaccount:onlyone")).toBeNull();
     expect(saUsernameToAllowlistKey("system:serviceaccount:a:b:c")).toBeNull();
+  });
+});
+
+describe("parseServiceAccount", () => {
+  it("splits a canonical SA username into namespace + name", () => {
+    expect(parseServiceAccount(WORKER_USERNAME))
+      .toEqual({ namespace: "omnia-demo", name: WORKER_SA });
+  });
+
+  it("returns null for non-SA or malformed identities", () => {
+    expect(parseServiceAccount(ALICE_USERNAME)).toBeNull();
+    expect(parseServiceAccount("system:serviceaccount:onlyone")).toBeNull();
+    expect(parseServiceAccount("system:serviceaccount:a:b:c")).toBeNull();
+    expect(parseServiceAccount("")).toBeNull();
+  });
+});
+
+describe("DEFAULT_MINT_SERVICE_ACCOUNTS", () => {
+  it("defaults to the operator-created arena worker SA", () => {
+    expect(DEFAULT_MINT_SERVICE_ACCOUNTS).toEqual([WORKER_SA]);
   });
 });
 
@@ -180,7 +205,7 @@ describe("handleServiceTokenRequest", () => {
       opts({
         tokenReview: async () => ({
           authenticated: true,
-          username: "alice@example.com",
+          username: ALICE_USERNAME,
         }),
       }),
       req,
@@ -211,7 +236,7 @@ describe("handleServiceTokenRequest", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it("403s a valid SA whose name is not on the allowlist", async () => {
+  it("403s a non-allowlisted SA whose namespace is not a workspace", async () => {
     const req = mockReq({ auth: BEARER_FAKE });
     const res = mockRes();
     await handleServiceTokenRequest(
@@ -220,12 +245,107 @@ describe("handleServiceTokenRequest", () => {
           authenticated: true,
           username: "system:serviceaccount:omnia-system:other-service",
         }),
+        // Not allowlisted → falls to the workspace-gated path; no Workspace
+        // for this namespace → denied.
+        workspaceLookup: async () => ({ found: false }),
       }),
       req,
       res,
     );
     expect(res.statusCode).toBe(403);
-    expect(JSON.parse(res.body).error).toMatch(/not in the mgmt-plane mint allowlist/);
+    expect(JSON.parse(res.body).error).toMatch(/not a workspace that permits it to mint/);
+  });
+
+  it("mints for a workspace SA listed in mgmtPlaneMintServiceAccounts, scoped to that workspace", async () => {
+    const req = mockReq({ auth: BEARER_FAKE, body: JSON.stringify({ agent: "rag-hero" }) });
+    const res = mockRes();
+    await handleServiceTokenRequest(
+      opts({
+        tokenReview: async () => ({
+          authenticated: true,
+          username: WORKER_USERNAME,
+        }),
+        workspaceLookup: async (ns) => {
+          expect(ns).toBe("omnia-demo");
+          return { found: true, name: "demo", mintServiceAccounts: [WORKER_SA] };
+        },
+      }),
+      req,
+      res,
+    );
+    expect(res.statusCode).toBe(200);
+    const out = JSON.parse(res.body);
+    // Token scoped to the resolved workspace (not the body), agent from body,
+    // subject embeds the calling SA.
+    expect(out.token).toBe(
+      "stub-token:sub=system-service:omnia-demo/arena-worker:agent=rag-hero:ws=demo",
+    );
+  });
+
+  it("pins workspace scope to the Workspace even if the body asks for another", async () => {
+    const req = mockReq({
+      auth: BEARER_FAKE,
+      body: JSON.stringify({ agent: "rag-hero", workspace: "victim" }),
+    });
+    const res = mockRes();
+    await handleServiceTokenRequest(
+      opts({
+        tokenReview: async () => ({
+          authenticated: true,
+          username: WORKER_USERNAME,
+        }),
+        workspaceLookup: async () => ({
+          found: true,
+          name: "demo",
+          mintServiceAccounts: [WORKER_SA],
+        }),
+      }),
+      req,
+      res,
+    );
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).token).toMatch(/:ws=demo$/);
+  });
+
+  it("403s a workspace SA not listed in mgmtPlaneMintServiceAccounts", async () => {
+    const req = mockReq({ auth: BEARER_FAKE });
+    const res = mockRes();
+    await handleServiceTokenRequest(
+      opts({
+        tokenReview: async () => ({
+          authenticated: true,
+          username: "system:serviceaccount:omnia-demo:rogue-sa",
+        }),
+        workspaceLookup: async () => ({
+          found: true,
+          name: "demo",
+          mintServiceAccounts: [WORKER_SA],
+        }),
+      }),
+      req,
+      res,
+    );
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("502s when the workspace lookup errors", async () => {
+    const req = mockReq({ auth: BEARER_FAKE });
+    const res = mockRes();
+    await handleServiceTokenRequest(
+      opts({
+        tokenReview: async () => ({
+          authenticated: true,
+          username: WORKER_USERNAME,
+        }),
+        workspaceLookup: async () => {
+          throw new Error("list workspaces returned 403");
+        },
+      }),
+      req,
+      res,
+    );
+    expect(res.statusCode).toBe(502);
+    expect(JSON.parse(res.body).error).toMatch(/workspace lookup failed/);
   });
 
   it("mints a token for an allowlisted SA and returns expires_at", async () => {

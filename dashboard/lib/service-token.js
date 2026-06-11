@@ -69,6 +69,112 @@ function parseAllowlist(raw) {
   );
 }
 
+// parseServiceAccount splits a k8s ServiceAccount username
+// (`system:serviceaccount:<namespace>:<name>`) into its parts, or returns
+// null when the username is not a service account.
+function parseServiceAccount(username) {
+  const prefix = "system:serviceaccount:";
+  if (!username || !username.startsWith(prefix)) {
+    return null;
+  }
+  const parts = username.slice(prefix.length).split(":");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    return null;
+  }
+  return { namespace: parts[0], name: parts[1] };
+}
+
+// DEFAULT_MINT_SERVICE_ACCOUNTS is the implicit mgmtPlaneMintServiceAccounts
+// list when a Workspace doesn't set one — keeps the operator-created Arena
+// worker SA working without every Workspace having to spell it out. Kept in
+// sync with the Go-side default (api/v1alpha1 Workspace consumers).
+const DEFAULT_MINT_SERVICE_ACCOUNTS = ["arena-worker"];
+
+// Workspace CRD coordinates (cluster-scoped).
+const WORKSPACE_API = "/apis/omnia.altairalabs.ai/v1alpha1/workspaces";
+
+// defaultWorkspaceLookup finds the (cluster-scoped) Workspace whose
+// spec.namespace.name equals the caller's namespace — the authoritative
+// "is this a real, operator-managed workspace namespace" check. Matching on
+// the Workspace's own declared namespace (not a namespace label) prevents a
+// tenant from spoofing membership by labelling their namespace.
+//
+// Returns { found, name, mintServiceAccounts }. mintServiceAccounts falls back
+// to DEFAULT_MINT_SERVICE_ACCOUNTS when the Workspace omits the field.
+//
+// Tests inject a stub via opts.workspaceLookup; this in-cluster default is
+// excluded from coverage (exercised only against a real apiserver).
+/* c8 ignore start */
+async function defaultWorkspaceLookup(namespace) {
+  const host = process.env.KUBERNETES_SERVICE_HOST;
+  const port = process.env.KUBERNETES_SERVICE_PORT || "443";
+  if (!host) {
+    throw new Error("no in-cluster API server (KUBERNETES_SERVICE_HOST unset)");
+  }
+  const saToken = fs.readFileSync(
+    "/var/run/secrets/kubernetes.io/serviceaccount/token",
+    "utf8",
+  );
+  let caCert;
+  try {
+    caCert = fs.readFileSync(
+      "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+    );
+  } catch {
+    caCert = undefined;
+  }
+
+  const body = await new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        host,
+        port,
+        method: "GET",
+        path: WORKSPACE_API,
+        headers: {
+          Authorization: `Bearer ${saToken.trim()}`,
+          Accept: "application/json",
+        },
+        ca: caCert,
+      },
+      (resp) => {
+        const chunks = [];
+        resp.on("data", (c) => chunks.push(c));
+        resp.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          if (resp.statusCode < 200 || resp.statusCode >= 300) {
+            reject(
+              new Error(
+                `list workspaces returned ${resp.statusCode}: ${text.slice(0, 200)}`,
+              ),
+            );
+            return;
+          }
+          resolve(text);
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+
+  const list = JSON.parse(body);
+  const items = (list && list.items) || [];
+  const ws = items.find(
+    (w) => w && w.spec && w.spec.namespace && w.spec.namespace.name === namespace,
+  );
+  if (!ws) {
+    return { found: false };
+  }
+  const configured = ws.spec.mgmtPlaneMintServiceAccounts;
+  const mintServiceAccounts =
+    Array.isArray(configured) && configured.length > 0
+      ? configured
+      : DEFAULT_MINT_SERVICE_ACCOUNTS;
+  return { found: true, name: ws.metadata.name, mintServiceAccounts };
+}
+/* c8 ignore stop */
+
 /**
  * Default in-cluster TokenReview caller. Uses the mounted
  * service-account token to authenticate to the kube API. Skips
@@ -228,6 +334,33 @@ function readBody(req, maxBytes = 4096) {
  *                        Defaults to the in-cluster TokenReview call.
  * opts.ttlSeconds      — JWT TTL passed to mintToken.
  */
+// resolveWorkspaceScope authorizes a non-allowlisted caller via the
+// workspace-gated path: a Workspace must exist for the caller's namespace and
+// the caller SA must be in its mgmtPlaneMintServiceAccounts. Returns
+// { ok:true, workspace } on success, or { ok:false, status, error } describing
+// the rejection (403 unauthorized, 502 lookup failure).
+async function resolveWorkspaceScope(lookup, sa, allowKey) {
+  let ws;
+  try {
+    ws = await lookup(sa.namespace);
+  } catch (err) {
+    return { ok: false, status: 502, error: `workspace lookup failed: ${err.message}` };
+  }
+  const allowed =
+    ws &&
+    ws.found &&
+    Array.isArray(ws.mintServiceAccounts) &&
+    ws.mintServiceAccounts.includes(sa.name);
+  if (!allowed) {
+    return {
+      ok: false,
+      status: 403,
+      error: `service account ${JSON.stringify(allowKey)} is not in the static mint allowlist, and ${JSON.stringify(sa.namespace)} is not a workspace that permits it to mint`,
+    };
+  }
+  return { ok: true, workspace: ws.name };
+}
+
 async function handleServiceTokenRequest(opts, req, res) {
   if (req.method !== "POST") {
     res.writeHead(405, { Allow: "POST" });
@@ -263,18 +396,31 @@ async function handleServiceTokenRequest(opts, req, res) {
     return true;
   }
 
-  const allowKey = saUsernameToAllowlistKey(review.username || "");
-  if (!allowKey) {
+  const sa = parseServiceAccount(review.username || "");
+  if (!sa) {
     writeJSON(res, 403, {
       error: `presented identity ${JSON.stringify(review.username)} is not a service account`,
     });
     return true;
   }
+  const allowKey = `${sa.namespace}/${sa.name}`;
+
+  // Authorize via one of two independent paths and resolve the authoritative
+  // workspace scope:
+  //   1. Static allowlist (fixed infra SAs, e.g. Doctor) — the body sets scope.
+  //   2. Workspace-gated: a Workspace exists for the caller's namespace AND the
+  //      caller SA is in its mgmtPlaneMintServiceAccounts (default
+  //      ["arena-worker"]). The token is then scoped to that workspace,
+  //      ignoring the body — a tenant can't mint for someone else's workspace.
+  let forcedWorkspace = "";
   if (!opts.allowlist.has(allowKey)) {
-    writeJSON(res, 403, {
-      error: `service account ${JSON.stringify(allowKey)} is not in the mgmt-plane mint allowlist`,
-    });
-    return true;
+    const lookup = opts.workspaceLookup || defaultWorkspaceLookup;
+    const scope = await resolveWorkspaceScope(lookup, sa, allowKey);
+    if (!scope.ok) {
+      writeJSON(res, scope.status, { error: scope.error });
+      return true;
+    }
+    forcedWorkspace = scope.workspace;
   }
 
   let body = {};
@@ -302,7 +448,9 @@ async function handleServiceTokenRequest(opts, req, res) {
       key: opts.signingKey,
       subject,
       agent: agent || allowKey,
-      workspace: workspace || allowKey,
+      // Workspace-gated mints are pinned to the resolved workspace; static
+      // allowlist callers keep the body-supplied (or allowKey) scope.
+      workspace: forcedWorkspace || workspace || allowKey,
       ttlSeconds: opts.ttlSeconds,
     });
   } catch (err) {
@@ -333,5 +481,8 @@ module.exports = {
   SERVICE_TOKEN_PATH,
   handleServiceTokenRequest,
   parseAllowlist,
+  parseServiceAccount,
   saUsernameToAllowlistKey,
+  defaultWorkspaceLookup,
+  DEFAULT_MINT_SERVICE_ACCOUNTS,
 };
