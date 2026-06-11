@@ -262,18 +262,20 @@ func TestPromptKitHandlerBuildComponentsWithEmptyOutputDir(t *testing.T) {
 	}
 }
 
-// TestBuildConfigFromProviders tests that BuildConfigFromProviders creates
+// TestBuildConfigByRole tests that BuildConfigByRole creates
 // a properly configured config with writable output directories.
-func TestBuildConfigFromProviders(t *testing.T) {
-	testProviders := map[string]*config.Provider{
-		"test-provider": {
-			ID:    "test-provider",
-			Type:  "mock",
-			Model: "test-model",
+func TestBuildConfigByRole(t *testing.T) {
+	byRole := map[corev1alpha1.ProviderRole]map[string]*config.Provider{
+		corev1alpha1.ProviderRoleLLM: {
+			"test-provider": {
+				ID:    "test-provider",
+				Type:  "mock",
+				Model: "test-model",
+			},
 		},
 	}
 
-	cfg := BuildConfigFromProviders(testProviders)
+	cfg := BuildConfigByRole(byRole)
 
 	assert.NotNil(t, cfg)
 	assert.Equal(t, "/tmp/arena-dev-console-output", cfg.Defaults.Output.Dir)
@@ -281,6 +283,40 @@ func TestBuildConfigFromProviders(t *testing.T) {
 	assert.Equal(t, "/tmp/arena-dev-console", cfg.Defaults.ConfigDir)
 	assert.Len(t, cfg.LoadedProviders, 1)
 	assert.Contains(t, cfg.LoadedProviders, "test-provider")
+}
+
+// TestBuildConfigByRoleRoutesInferenceAndLLM verifies that an inference-role
+// provider lands in LoadedInferenceProviders (NOT LoadedProviders) while an
+// llm-role provider lands in LoadedProviders.
+func TestBuildConfigByRoleRoutesInferenceAndLLM(t *testing.T) {
+	byRole := map[corev1alpha1.ProviderRole]map[string]*config.Provider{
+		corev1alpha1.ProviderRoleLLM: {
+			"chat": {ID: "chat", Type: "openai", Model: "gpt-4", Role: "llm"},
+		},
+		corev1alpha1.ProviderRoleInference: {
+			"hf-classifier": {
+				ID:               "hf-classifier",
+				Type:             "huggingface",
+				Role:             "inference",
+				AdditionalConfig: map[string]any{"dedicated": true},
+			},
+		},
+		corev1alpha1.ProviderRoleEmbedding: {
+			"embed": {ID: "embed", Type: "openai", Role: "embedding"},
+		},
+	}
+
+	cfg := BuildConfigByRole(byRole)
+
+	require.Contains(t, cfg.LoadedInferenceProviders, "hf-classifier")
+	assert.NotContains(t, cfg.LoadedProviders, "hf-classifier")
+	assert.Equal(t, "inference", cfg.LoadedInferenceProviders["hf-classifier"].Role)
+	assert.Equal(t, true, cfg.LoadedInferenceProviders["hf-classifier"].AdditionalConfig["dedicated"])
+
+	require.Contains(t, cfg.LoadedProviders, "chat")
+	assert.NotContains(t, cfg.LoadedInferenceProviders, "chat")
+
+	require.Contains(t, cfg.LoadedEmbeddingProviders, "embed")
 }
 
 // TestPromptKitHandlerName tests that Name returns the expected value.

@@ -12,6 +12,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -55,6 +56,14 @@ func TestLoadProvidersEmpty(t *testing.T) {
 	assert.Empty(t, providers)
 }
 
+// llmProviders returns the llm-role provider map from a grouped loader result,
+// the common case for the existing single-role test fixtures.
+func llmProviders(
+	byRole map[corev1alpha1.ProviderRole]map[string]*config.Provider,
+) map[string]*config.Provider {
+	return byRole[corev1alpha1.ProviderRoleLLM]
+}
+
 // TestLoadProvidersWithReadyProvider tests loading a ready provider.
 func TestLoadProvidersWithReadyProvider(t *testing.T) {
 	provider := &corev1alpha1.Provider{
@@ -73,8 +82,9 @@ func TestLoadProvidersWithReadyProvider(t *testing.T) {
 
 	loader := newTestK8sProviderLoader(t, "test-namespace", provider)
 
-	providers, err := loader.LoadProviders(context.Background())
+	byRole, err := loader.LoadProviders(context.Background())
 	require.NoError(t, err)
+	providers := llmProviders(byRole)
 	require.Len(t, providers, 1)
 	assert.Contains(t, providers, "test-provider")
 	assert.Equal(t, "openai", providers["test-provider"].Type)
@@ -113,8 +123,9 @@ func TestLoadProvidersSkipsNotReady(t *testing.T) {
 
 	loader := newTestK8sProviderLoader(t, "test-namespace", readyProvider, errorProvider)
 
-	providers, err := loader.LoadProviders(context.Background())
+	byRole, err := loader.LoadProviders(context.Background())
 	require.NoError(t, err)
+	providers := llmProviders(byRole)
 	require.Len(t, providers, 1)
 	assert.Contains(t, providers, "ready-provider")
 	assert.NotContains(t, providers, "error-provider")
@@ -148,9 +159,9 @@ func TestLoadProvidersForNamespaceEmptyFallback(t *testing.T) {
 	loader := newTestK8sProviderLoader(t, "test-namespace", provider)
 
 	// Empty namespace should fall back to loader's namespace
-	providers, err := loader.LoadProvidersForNamespace(context.Background(), "")
+	byRole, err := loader.LoadProvidersForNamespace(context.Background(), "")
 	require.NoError(t, err)
-	require.Len(t, providers, 1)
+	require.Len(t, llmProviders(byRole), 1)
 }
 
 // TestConvertProviderBasic tests basic provider conversion.
@@ -321,11 +332,67 @@ func TestLoadProvidersMultiple(t *testing.T) {
 
 	loader := newTestK8sProviderLoader(t, "test-namespace", providers...)
 
-	result, err := loader.LoadProviders(context.Background())
+	byRole, err := loader.LoadProviders(context.Background())
 	require.NoError(t, err)
+	result := llmProviders(byRole)
 	require.Len(t, result, 2)
 	assert.Contains(t, result, "openai-provider")
 	assert.Contains(t, result, "claude-provider")
+}
+
+// TestLoadProvidersGroupsByRole tests that the loader routes each provider into
+// the map keyed by its effective role: a huggingface/inference Provider lands
+// under ProviderRoleInference, an openai/llm Provider under ProviderRoleLLM.
+func TestLoadProvidersGroupsByRole(t *testing.T) {
+	objs := []runtime.Object{
+		&corev1alpha1.Provider{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "hf-inference",
+				Namespace: "test-namespace",
+			},
+			Spec: corev1alpha1.ProviderSpec{
+				Type:    corev1alpha1.ProviderTypeHuggingFace,
+				Model:   "bert-base",
+				Role:    corev1alpha1.ProviderRoleInference,
+				BaseURL: "https://my-endpoint.hf.space",
+			},
+			Status: corev1alpha1.ProviderStatus{
+				Phase: corev1alpha1.ProviderPhaseReady,
+			},
+		},
+		&corev1alpha1.Provider{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "openai-llm",
+				Namespace: "test-namespace",
+			},
+			Spec: corev1alpha1.ProviderSpec{
+				Type:  corev1alpha1.ProviderTypeOpenAI,
+				Model: "gpt-4",
+				// Role unset -> defaults to llm via EffectiveRole
+			},
+			Status: corev1alpha1.ProviderStatus{
+				Phase: corev1alpha1.ProviderPhaseReady,
+			},
+		},
+	}
+
+	loader := newTestK8sProviderLoader(t, "test-namespace", objs...)
+
+	byRole, err := loader.LoadProviders(context.Background())
+	require.NoError(t, err)
+
+	inference := byRole[corev1alpha1.ProviderRoleInference]
+	require.Contains(t, inference, "hf-inference")
+	assert.NotContains(t, inference, "openai-llm")
+	assert.Equal(t, "inference", inference["hf-inference"].Role)
+	// HuggingFace dedicated endpoint (non-empty BaseURL) sets dedicated=true.
+	require.NotNil(t, inference["hf-inference"].AdditionalConfig)
+	assert.Equal(t, true, inference["hf-inference"].AdditionalConfig["dedicated"])
+
+	llm := byRole[corev1alpha1.ProviderRoleLLM]
+	require.Contains(t, llm, "openai-llm")
+	assert.NotContains(t, llm, "hf-inference")
+	assert.Equal(t, "llm", llm["openai-llm"].Role)
 }
 
 // TestConvertProviderWithCredentialEnvVar tests provider with credential.envVar set.

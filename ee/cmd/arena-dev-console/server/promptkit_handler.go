@@ -447,12 +447,17 @@ func (h *PromptKitHandler) getOrLoadK8sRegistry(ctx context.Context) (*providers
 
 	// Load providers from K8s (only from this pod's namespace)
 	h.log.Info("loading providers from K8s", "namespace", namespace)
-	loadedProviders, err := h.k8sLoader.LoadProviders(ctx)
+	providersByRole, err := h.k8sLoader.LoadProviders(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load providers: %w", err)
 	}
 
-	if len(loadedProviders) == 0 {
+	totalProviders := 0
+	for _, m := range providersByRole {
+		totalProviders += len(m)
+	}
+
+	if totalProviders == 0 {
 		h.log.Info("no providers found in namespace, falling back to static config", "namespace", namespace)
 		h.mu.RLock()
 		registry := h.providerRegistry
@@ -461,20 +466,20 @@ func (h *PromptKitHandler) getOrLoadK8sRegistry(ctx context.Context) (*providers
 		return registry, cfg, nil
 	}
 
-	// Build config from loaded providers
-	cfg := BuildConfigFromProviders(loadedProviders)
+	// Build config from loaded providers, routed into Loaded* maps by role
+	cfg := BuildConfigByRole(providersByRole)
 	h.log.Info("built config from providers",
 		"outputDir", cfg.Defaults.Output.Dir,
 		"outDir", cfg.Defaults.OutDir,
 		"configDir", cfg.Defaults.ConfigDir,
-		"providerCount", len(cfg.LoadedProviders))
+		"providerCount", totalProviders)
 
 	// Ensure the output and media directories exist before building engine components.
 	// This is a defensive measure in case PromptKit's buildMediaStorage uses a different
 	// code path that doesn't respect our config settings.
 	outputDir := cfg.Defaults.Output.Dir
 	if outputDir == "" {
-		// This should never happen since BuildConfigFromProviders sets it,
+		// This should never happen since BuildConfigByRole sets it,
 		// but if it does, use the expected path anyway
 		outputDir = devConsoleOutputDir
 		cfg.Defaults.Output.Dir = outputDir
@@ -527,7 +532,7 @@ func (h *PromptKitHandler) getOrLoadK8sRegistry(ctx context.Context) (*providers
 	h.nsRegistries[namespace] = registry
 	h.mu.Unlock()
 
-	h.log.Info("loaded providers from K8s", "namespace", namespace, "count", len(loadedProviders))
+	h.log.Info("loaded providers from K8s", "namespace", namespace, "count", totalProviders)
 	return registry, cfg, nil
 }
 
