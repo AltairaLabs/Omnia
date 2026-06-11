@@ -19,9 +19,13 @@ package tooltest
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1138,5 +1142,97 @@ func TestResolveOpenAPIAuthWithExistingHeaders(t *testing.T) {
 	}
 	if handler.OpenAPIConfig.Headers["Authorization"] != "Bearer tok456" {
 		t.Errorf("Authorization = %q, want %q", handler.OpenAPIConfig.Headers["Authorization"], "Bearer tok456")
+	}
+}
+
+func TestListTools_OpenAPI_ReturnsPerOperationTools(t *testing.T) {
+	spec := `{
+		"openapi": "3.0.0",
+		"info": {"title": "t", "version": "1"},
+		"servers": [{"url": "https://api.example.com"}],
+		"paths": {
+			"/pets/{id}": {
+				"get": {
+					"operationId": "getPet",
+					"summary": "Fetch a pet by id",
+					"parameters": [
+						{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+					]
+				}
+			}
+		}
+	}`
+	specSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(spec))
+	}))
+	defer specSrv.Close()
+
+	registry := &omniav1alpha1.ToolRegistry{
+		ObjectMeta: metav1.ObjectMeta{Name: "reg", Namespace: "ns"},
+		Spec: omniav1alpha1.ToolRegistrySpec{
+			Handlers: []omniav1alpha1.HandlerDefinition{{
+				Name:          "petstore",
+				Type:          omniav1alpha1.HandlerTypeOpenAPI,
+				OpenAPIConfig: &omniav1alpha1.OpenAPIConfig{SpecURL: specSrv.URL},
+			}},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(testScheme()).WithObjects(registry).Build()
+	tester := NewTester(c, logr.Discard())
+
+	resp := tester.ListTools(context.Background(), "ns", "reg", "petstore")
+
+	if resp.Error != "" {
+		t.Fatalf("unexpected error: %s", resp.Error)
+	}
+	if len(resp.Tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(resp.Tools))
+	}
+	if resp.Tools[0].Name != "getPet" {
+		t.Errorf("tool name = %q, want %q", resp.Tools[0].Name, "getPet")
+	}
+	if resp.Tools[0].Description != "Fetch a pet by id" {
+		t.Errorf("tool description = %q, want %q", resp.Tools[0].Description, "Fetch a pet by id")
+	}
+	if !strings.Contains(string(resp.Tools[0].InputSchema), `"id"`) {
+		t.Errorf("input schema %q does not contain %q", string(resp.Tools[0].InputSchema), `"id"`)
+	}
+}
+
+func TestListTools_NonOpenAPIHandler_IsRejected(t *testing.T) {
+	registry := &omniav1alpha1.ToolRegistry{
+		ObjectMeta: metav1.ObjectMeta{Name: "reg", Namespace: "ns"},
+		Spec: omniav1alpha1.ToolRegistrySpec{
+			Handlers: []omniav1alpha1.HandlerDefinition{{Name: "h", Type: omniav1alpha1.HandlerTypeHTTP}},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(testScheme()).WithObjects(registry).Build()
+	resp := NewTester(c, logr.Discard()).ListTools(context.Background(), "ns", "reg", "h")
+	if !strings.Contains(resp.Error, "only supported for openapi") {
+		t.Errorf("error %q does not contain %q", resp.Error, "only supported for openapi")
+	}
+}
+
+func TestListTools_SpecUnreachable_ReturnsErrorWithSpecURL(t *testing.T) {
+	registry := &omniav1alpha1.ToolRegistry{
+		ObjectMeta: metav1.ObjectMeta{Name: "reg", Namespace: "ns"},
+		Spec: omniav1alpha1.ToolRegistrySpec{
+			Handlers: []omniav1alpha1.HandlerDefinition{{
+				Name:          "petstore",
+				Type:          omniav1alpha1.HandlerTypeOpenAPI,
+				OpenAPIConfig: &omniav1alpha1.OpenAPIConfig{SpecURL: "http://127.0.0.1:1/does-not-exist"},
+			}},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(testScheme()).WithObjects(registry).Build()
+	resp := NewTester(c, logr.Discard()).ListTools(context.Background(), "ns", "reg", "petstore")
+	if resp.Error == "" {
+		t.Fatal("expected non-empty error for unreachable spec")
+	}
+	if resp.SpecURL != "http://127.0.0.1:1/does-not-exist" {
+		t.Errorf("SpecURL = %q, want %q", resp.SpecURL, "http://127.0.0.1:1/does-not-exist")
+	}
+	if len(resp.Tools) != 0 {
+		t.Errorf("expected empty tools, got %d", len(resp.Tools))
 	}
 }

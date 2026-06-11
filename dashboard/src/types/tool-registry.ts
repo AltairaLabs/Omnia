@@ -108,3 +108,16 @@ export interface ToolRegistry {
   spec: ToolRegistrySpec;
   status?: ToolRegistryStatus;
 }
+
+// OpenAPI tool preview — returned by GET /api/workspaces/:name/toolregistries/:registryName/tools
+export interface OpenAPIToolPreviewItem {
+  name: string;
+  description: string;
+  inputSchema?: unknown;
+}
+
+export interface OpenAPIToolPreview {
+  tools: OpenAPIToolPreviewItem[];
+  specURL?: string;
+  error?: string;
+}

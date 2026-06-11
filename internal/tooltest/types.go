@@ -62,3 +62,19 @@ type SchemaCheck struct {
 	// Errors lists the validation errors (empty when valid).
 	Errors []string `json:"errors,omitempty"`
 }
+
+// ListedTool is one tool exactly as the LLM receives it for an OpenAPI handler:
+// the operationId, the description string, and the flattened input schema.
+type ListedTool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"inputSchema,omitempty"`
+}
+
+// ListToolsResponse is the live preview of an OpenAPI handler's tools.
+// Error is set (and Tools empty) when the spec could not be expanded.
+type ListToolsResponse struct {
+	Tools   []ListedTool `json:"tools"`
+	SpecURL string       `json:"specURL,omitempty"`
+	Error   string       `json:"error,omitempty"`
+}

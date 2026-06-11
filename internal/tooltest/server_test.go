@@ -250,6 +250,82 @@ func TestHandleTestToolWithToolNameError(t *testing.T) {
 	}
 }
 
+func TestHandleListTools_ReturnsTools(t *testing.T) {
+	spec := `{
+		"openapi": "3.0.0",
+		"info": {"title": "t", "version": "1"},
+		"servers": [{"url": "https://api.example.com"}],
+		"paths": {
+			"/pets/{id}": {
+				"get": {
+					"operationId": "getPet",
+					"summary": "Fetch a pet by id",
+					"parameters": [
+						{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+					]
+				}
+			}
+		}
+	}`
+	specSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(spec))
+	}))
+	defer specSrv.Close()
+
+	s := testScheme()
+	registry := &omniav1alpha1.ToolRegistry{
+		ObjectMeta: metav1.ObjectMeta{Name: "reg", Namespace: "ns"},
+		Spec: omniav1alpha1.ToolRegistrySpec{
+			Handlers: []omniav1alpha1.HandlerDefinition{{
+				Name:          "petstore",
+				Type:          omniav1alpha1.HandlerTypeOpenAPI,
+				OpenAPIConfig: &omniav1alpha1.OpenAPIConfig{SpecURL: specSrv.URL},
+			}},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(registry).Build()
+
+	srv := NewServer(":0", c, zap.New(zap.UseDevMode(true)), nil, nil)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/namespaces/ns/toolregistries/reg/tools?handler=petstore", nil)
+	req.SetPathValue("namespace", "ns")
+	req.SetPathValue("registry", "reg")
+
+	srv.handleListTools(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp ListToolsResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp.Tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(resp.Tools))
+	}
+	if resp.Tools[0].Name != "getPet" {
+		t.Errorf("tool name = %q, want %q", resp.Tools[0].Name, "getPet")
+	}
+}
+
+func TestHandleListTools_MissingHandler_Returns400(t *testing.T) {
+	s := testScheme()
+	c := fake.NewClientBuilder().WithScheme(s).Build()
+
+	srv := NewServer(":0", c, zap.New(zap.UseDevMode(true)), nil, nil)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/ns/toolregistries/reg/tools", nil)
+	req.SetPathValue("namespace", "ns")
+	req.SetPathValue("registry", "reg")
+
+	srv.handleListTools(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
 func TestServerStartAndShutdown(t *testing.T) {
 	log := zap.New(zap.UseDevMode(true))
 	s := testScheme()
