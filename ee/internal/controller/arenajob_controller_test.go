@@ -2593,6 +2593,23 @@ spec:
 		})
 	})
 
+	Context("buildMgmtPlaneTokenEnvVar", func() {
+		It("emits OMNIA_MGMT_PLANE_SERVICE_TOKEN_URL when configured", func() {
+			reconciler := &ArenaJobReconciler{
+				MgmtPlaneTokenURL: "http://omnia-dashboard:3000/api/auth/service-token",
+			}
+			envVars := reconciler.buildMgmtPlaneTokenEnvVar()
+			Expect(envVars).To(HaveLen(1))
+			Expect(envVars[0].Name).To(Equal("OMNIA_MGMT_PLANE_SERVICE_TOKEN_URL"))
+			Expect(envVars[0].Value).To(Equal("http://omnia-dashboard:3000/api/auth/service-token"))
+		})
+
+		It("returns nil when not configured (fleet dials stay unauthenticated)", func() {
+			reconciler := &ArenaJobReconciler{}
+			Expect(reconciler.buildMgmtPlaneTokenEnvVar()).To(BeNil())
+		})
+	})
+
 	Context("When testing buildMatrixWorkItems limits", func() {
 		It("should return nil when work item count exceeds maxWorkItems", func() {
 			reconciler := &ArenaJobReconciler{

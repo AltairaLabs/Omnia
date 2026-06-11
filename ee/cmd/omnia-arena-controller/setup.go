@@ -101,6 +101,7 @@ type setupOptions struct {
 	RedisURLSecretKey        string
 	TracingEnabled           bool
 	TracingEndpoint          string
+	MgmtPlaneTokenURL        string
 	PrivacyPolicyMetrics     *metrics.PrivacyPolicyMetrics
 	ReEncryptionStore        func() (encryption.ReEncryptionStore, error)
 }
@@ -171,6 +172,7 @@ func buildReconcilers(opts setupOptions) []namedReconciler {
 					StorageManager:         opts.StorageManager,
 					TracingEnabled:         opts.TracingEnabled,
 					TracingEndpoint:        opts.TracingEndpoint,
+					MgmtPlaneTokenURL:      opts.MgmtPlaneTokenURL,
 				}).SetupWithManager(mgr)
 			},
 		},
