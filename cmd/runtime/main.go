@@ -448,6 +448,7 @@ func configDerivedServerOpts(cfg *pkruntime.Config) []pkruntime.ServerOption {
 		pkruntime.WithToolsConfig(cfg.ToolsConfigPath),
 		pkruntime.WithProviderInfo(cfg.ProviderType, cfg.Model),
 		pkruntime.WithProviderRefName(cfg.ProviderRefName),
+		pkruntime.WithExtraProviders(cfg.ExtraProviders),
 		pkruntime.WithBaseURL(cfg.BaseURL),
 		pkruntime.WithHeaders(cfg.Headers),
 		pkruntime.WithPlatform(pkruntime.PlatformConfig{
