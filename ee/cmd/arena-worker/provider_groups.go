@@ -27,6 +27,7 @@ import (
 	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/fleet"
 	"github.com/altairalabs/omnia/ee/pkg/arena/providers"
+	"github.com/altairalabs/omnia/internal/mgmtplane"
 	"github.com/altairalabs/omnia/pkg/k8s"
 )
 
@@ -37,6 +38,9 @@ type resolvedFleetProvider struct {
 	wsURL string
 	id    string
 	group string
+	// agent is the AgentRuntime name (the system-under-test). Used to request a
+	// mgmt-plane token scoped to this agent when authenticating the WS dial.
+	agent string
 }
 
 // resolveContext bundles the plumbing (k8s client, logger, namespace, arena
@@ -324,6 +328,7 @@ func resolveAgentRefEntry(
 		wsURL: wsURL,
 		id:    providerID,
 		group: groupName,
+		agent: agentName,
 	}, nil
 }
 
@@ -394,6 +399,7 @@ func resolveAgentRefEntryWithID(
 		wsURL: wsURL,
 		id:    configID,
 		group: groupName,
+		agent: agentName,
 	}, nil
 }
 
@@ -450,6 +456,25 @@ func resolveToolsFromCRD(
 	return nil
 }
 
+// buildFleetTokenSource constructs the mgmt-plane TokenSource used to
+// authenticate fleet-mode WS dials. When mgmtPlaneTokenURL is empty it returns
+// a nil source (untyped nil interface) so dials proceed unauthenticated —
+// correct for installs whose facades don't enforce mgmt-plane auth. When set,
+// the worker presents its own SA token to the dashboard service-token endpoint
+// to mint a mgmt-plane JWT per agent.
+func buildFleetTokenSource(log logr.Logger, mgmtPlaneTokenURL string) (fleet.TokenSource, error) {
+	if mgmtPlaneTokenURL == "" {
+		log.Info("OMNIA_MGMT_PLANE_SERVICE_TOKEN_URL unset — fleet WS dials will be unauthenticated")
+		return nil, nil
+	}
+	f, err := mgmtplane.NewTokenFetcher(mgmtplane.FetcherOptions{Endpoint: mgmtPlaneTokenURL})
+	if err != nil {
+		return nil, fmt.Errorf("init mgmt-plane token fetcher: %w", err)
+	}
+	log.Info("fleet WS dials will authenticate via mgmt-plane tokens", "endpoint", mgmtPlaneTokenURL)
+	return f, nil
+}
+
 // connectFleetProviders connects fleet providers that were created by BuildEngineComponents
 // via the fleet factory. The factory creates the provider but doesn't connect it.
 // This must be called AFTER BuildEngineComponents but BEFORE engine execution.
@@ -458,6 +483,8 @@ func connectFleetProviders(
 	log logr.Logger,
 	registry *pkproviders.Registry,
 	fleetProviders []*resolvedFleetProvider,
+	tokenSource fleet.TokenSource,
+	workspace string,
 ) error {
 	for _, fp := range fleetProviders {
 		provider, _ := registry.Get(fp.id)
@@ -468,6 +495,10 @@ func connectFleetProviders(
 		if !ok {
 			return fmt.Errorf("provider %q is not a fleet provider (type %T)", fp.id, provider)
 		}
+		// Authenticate the WS dial with a mgmt-plane token scoped to this agent
+		// (nil tokenSource → unauthenticated dial, for installs without
+		// mgmt-plane enforcement).
+		fleetProv.SetAuth(tokenSource, fp.agent, workspace)
 		if err := fleetProv.Connect(ctx); err != nil {
 			return fmt.Errorf("failed to connect fleet provider %q: %w", fp.id, err)
 		}
