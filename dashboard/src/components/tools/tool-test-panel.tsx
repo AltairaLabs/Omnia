@@ -22,7 +22,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { ToolRegistry, HandlerDefinition, DiscoveredTool } from "@/types";
+import { useOpenAPIToolPreview } from "@/hooks/use-openapi-tool-preview";
+import type {
+  ToolRegistry,
+  HandlerDefinition,
+  DiscoveredTool,
+  OpenAPIToolPreviewItem,
+} from "@/types";
 
 interface SchemaCheck {
   valid: boolean;
@@ -47,6 +53,9 @@ interface ToolTestPanelProps {
   registry: ToolRegistry;
   workspaceName: string;
 }
+
+/** A tool-like value with an optional input schema (discovered or live preview). */
+type SchemaTool = { inputSchema?: unknown } | null | undefined;
 
 /**
  * Get the available tools for a handler from discovered tools.
@@ -75,7 +84,7 @@ function getDefaultToolName(
 /**
  * Get a sample arguments JSON from a tool's input schema.
  */
-function getSampleArgs(tool?: DiscoveredTool | null, handler?: HandlerDefinition): string {
+export function getSampleArgs(tool?: SchemaTool, handler?: HandlerDefinition): string {
   let schema = tool?.inputSchema ?? handler?.tool?.inputSchema;
   if (!schema) return "{}";
 
@@ -137,6 +146,296 @@ function ValidationBadge({ label, check }: Readonly<{ label: string; check: Sche
   );
 }
 
+/** Renders the result card (shared by the discovered-tools and OpenAPI flows). */
+function ResultCard({ result }: Readonly<{ result: ToolTestResult }>) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          {result.success ? (
+            <CheckCircle className="h-4 w-4 text-green-500" />
+          ) : (
+            <XCircle className="h-4 w-4 text-red-500" />
+          )}
+          {result.success ? "Success" : "Failed"}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Metadata */}
+        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <Clock className="h-3 w-3" />
+            {result.durationMs}ms
+          </span>
+          <Badge variant="outline" className="text-xs capitalize">
+            {result.handlerType}
+          </Badge>
+        </div>
+
+        {/* Error */}
+        {result.error && (
+          <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded-lg p-3">
+            <p className="text-sm text-red-700 dark:text-red-400 font-mono break-all">
+              {result.error}
+            </p>
+          </div>
+        )}
+
+        {/* Schema Validation */}
+        {result.validation && (
+          <div className="space-y-3">
+            <Label>Schema Validation</Label>
+            {result.validation.request && (
+              <ValidationBadge label="Request" check={result.validation.request} />
+            )}
+            {result.validation.response && (
+              <ValidationBadge label="Response" check={result.validation.response} />
+            )}
+          </div>
+        )}
+
+        {/* Result */}
+        {result.result != null && (
+          <div className="space-y-2">
+            <Label>Response</Label>
+            <pre className="text-xs bg-muted p-3 rounded-lg overflow-auto max-h-[400px] font-mono">
+              {typeof result.result === "string"
+                ? result.result
+                : JSON.stringify(result.result, null, 2)}
+            </pre>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Renders the Run button (shared). */
+function RunButton({
+  isRunning,
+  disabled,
+  onClick,
+}: Readonly<{ isRunning: boolean; disabled: boolean; onClick: () => void }>) {
+  return (
+    <Button onClick={onClick} disabled={disabled} className="w-full">
+      {isRunning ? (
+        <>
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          Running...
+        </>
+      ) : (
+        <>
+          <Play className="mr-2 h-4 w-4" />
+          Run Test
+        </>
+      )}
+    </Button>
+  );
+}
+
+interface RunTestArgs {
+  workspaceName: string;
+  registryName: string;
+  handlerName: string;
+  toolName: string;
+  parsedArgs: unknown;
+  handlerType: string;
+}
+
+/** POSTs a tool-test request and returns the result (or a failure result on error). */
+async function runTest(args: RunTestArgs): Promise<ToolTestResult> {
+  try {
+    const response = await fetch(
+      `/api/workspaces/${args.workspaceName}/toolregistries/${args.registryName}/test`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          handlerName: args.handlerName,
+          toolName: args.toolName || undefined,
+          arguments: args.parsedArgs,
+        }),
+      }
+    );
+    return (await response.json()) as ToolTestResult;
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Request failed",
+      durationMs: 0,
+      handlerType: args.handlerType,
+    };
+  }
+}
+
+/** Parses the arguments textarea; returns parsed value or an error message. */
+function parseArgs(args: string): { value?: unknown; error?: string } {
+  const cleaned = args.trim().replace(/^\uFEFF/, "");
+  try {
+    return { value: JSON.parse(cleaned) };
+  } catch (e) {
+    const detail = e instanceof SyntaxError ? `: ${e.message}` : "";
+    return { error: `Invalid JSON${detail}` };
+  }
+}
+
+/** Arguments textarea + JSON error message (shared). */
+function ArgsInput({
+  args,
+  jsonError,
+  onChange,
+}: Readonly<{ args: string; jsonError: string | null; onChange: (v: string) => void }>) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="args-input">Arguments (JSON)</Label>
+      <Textarea
+        id="args-input"
+        value={args}
+        onChange={(e) => onChange(e.target.value)}
+        className="font-mono text-sm min-h-[120px]"
+        placeholder='{"key": "value"}'
+      />
+      {jsonError && <p className="text-sm text-red-500">{jsonError}</p>}
+    </div>
+  );
+}
+
+interface OpenAPIToolRunnerProps {
+  tools: OpenAPIToolPreviewItem[];
+  handlerName: string;
+  workspaceName: string;
+  registryName: string;
+}
+
+/**
+ * Drives the Tool select + arguments + run for an OpenAPI handler from the LIVE
+ * preview tools. State is initialized from the loaded tools via useState
+ * initializers; the parent remounts this via a `key` when the tools change, so
+ * no setState-in-effect is needed.
+ */
+export function OpenAPIToolRunner({
+  tools,
+  handlerName,
+  workspaceName,
+  registryName,
+}: Readonly<OpenAPIToolRunnerProps>) {
+  const [selectedTool, setSelectedTool] = useState<string>(tools[0]?.name ?? "");
+  const [args, setArgs] = useState<string>(() => getSampleArgs(tools[0]));
+  const [isRunning, setIsRunning] = useState(false);
+  const [result, setResult] = useState<ToolTestResult | null>(null);
+  const [jsonError, setJsonError] = useState<string | null>(null);
+
+  const handleToolChange = useCallback(
+    (toolName: string) => {
+      setSelectedTool(toolName);
+      setResult(null);
+      setArgs(getSampleArgs(tools.find((t) => t.name === toolName)));
+    },
+    [tools]
+  );
+
+  const handleArgsChange = useCallback((v: string) => {
+    setArgs(v);
+    setJsonError(null);
+  }, []);
+
+  const handleRun = useCallback(async () => {
+    const parsed = parseArgs(args);
+    if (parsed.error) {
+      setJsonError(parsed.error);
+      return;
+    }
+    setJsonError(null);
+    setIsRunning(true);
+    setResult(null);
+    const res = await runTest({
+      workspaceName,
+      registryName,
+      handlerName,
+      toolName: selectedTool,
+      parsedArgs: parsed.value,
+      handlerType: "openapi",
+    });
+    setResult(res);
+    setIsRunning(false);
+  }, [args, selectedTool, handlerName, workspaceName, registryName]);
+
+  return (
+    <>
+      <div className="space-y-2">
+        <Label htmlFor="tool-select">Tool</Label>
+        <Select value={selectedTool} onValueChange={handleToolChange}>
+          <SelectTrigger id="tool-select">
+            <SelectValue placeholder="Select tool" />
+          </SelectTrigger>
+          <SelectContent>
+            {tools.map((t) => (
+              <SelectItem key={t.name} value={t.name}>
+                {t.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <ArgsInput args={args} jsonError={jsonError} onChange={handleArgsChange} />
+
+      <RunButton isRunning={isRunning} disabled={isRunning || !selectedTool} onClick={handleRun} />
+
+      {result && <ResultCard result={result} />}
+    </>
+  );
+}
+
+/** Loading / error / runner UI for the OpenAPI live-preview flow. */
+function OpenAPISection({
+  preview,
+  handlerName,
+  workspaceName,
+  registryName,
+}: Readonly<{
+  preview: ReturnType<typeof useOpenAPIToolPreview>;
+  handlerName: string;
+  workspaceName: string;
+  registryName: string;
+}>) {
+  if (preview.loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading tools…
+      </div>
+    );
+  }
+
+  if (preview.error) {
+    return (
+      <div className="rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20 p-3 space-y-1">
+        <p className="text-sm font-medium text-red-700 dark:text-red-400">
+          Couldn&apos;t load tools from spec
+        </p>
+        <p className="text-sm text-red-700 dark:text-red-400 font-mono break-all">
+          {preview.error}
+        </p>
+        {preview.specURL && (
+          <p className="text-xs text-muted-foreground font-mono break-all">{preview.specURL}</p>
+        )}
+      </div>
+    );
+  }
+
+  const sig = `${handlerName}:${preview.tools.map((t) => t.name).join(",")}`;
+  return (
+    <OpenAPIToolRunner
+      key={sig}
+      tools={preview.tools}
+      handlerName={handlerName}
+      workspaceName={workspaceName}
+      registryName={registryName}
+    />
+  );
+}
+
 export function ToolTestPanel({ registry, workspaceName }: Readonly<ToolTestPanelProps>) {
   const handlers = useMemo(() => registry.spec.handlers || [], [registry.spec.handlers]);
   const discoveredTools = useMemo(
@@ -162,12 +461,23 @@ export function ToolTestPanel({ registry, workspaceName }: Readonly<ToolTestPane
   const [result, setResult] = useState<ToolTestResult | null>(null);
   const [jsonError, setJsonError] = useState<string | null>(null);
 
-  const currentHandler = handlers.find((h) => h.name === selectedHandler);
+  const currentHandler = useMemo(
+    () => handlers.find((h) => h.name === selectedHandler),
+    [handlers, selectedHandler]
+  );
+  const isOpenAPI = currentHandler?.type === "openapi";
   const availableTools = currentHandler
     ? getToolsForHandler(currentHandler, discoveredTools)
     : [];
   // For HTTP/gRPC with inline tool, include it even if not discovered
   const hasInlineTool = currentHandler?.tool?.name != null;
+
+  // Live OpenAPI preview — only fetches for OpenAPI handlers (empty handler name no-ops).
+  const preview = useOpenAPIToolPreview(
+    workspaceName,
+    registry.metadata.name,
+    isOpenAPI ? selectedHandler : ""
+  );
 
   const handleHandlerChange = useCallback(
     (handlerName: string) => {
@@ -195,49 +505,24 @@ export function ToolTestPanel({ registry, workspaceName }: Readonly<ToolTestPane
   );
 
   const handleRun = useCallback(async () => {
-    // Normalize: trim whitespace, strip BOM
-    const cleaned = args.trim().replace(/^\uFEFF/, "");
-
-    // Validate JSON
-    let parsedArgs: unknown;
-    try {
-      parsedArgs = JSON.parse(cleaned);
-      setJsonError(null);
-    } catch (e) {
-      const detail = e instanceof SyntaxError ? `: ${e.message}` : "";
-      setJsonError(`Invalid JSON${detail}`);
+    const parsed = parseArgs(args);
+    if (parsed.error) {
+      setJsonError(parsed.error);
       return;
     }
-
+    setJsonError(null);
     setIsRunning(true);
     setResult(null);
-
-    try {
-      const response = await fetch(
-        `/api/workspaces/${workspaceName}/toolregistries/${registry.metadata.name}/test`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            handlerName: selectedHandler,
-            toolName: selectedTool || undefined,
-            arguments: parsedArgs,
-          }),
-        }
-      );
-
-      const data: ToolTestResult = await response.json();
-      setResult(data);
-    } catch (err) {
-      setResult({
-        success: false,
-        error: err instanceof Error ? err.message : "Request failed",
-        durationMs: 0,
-        handlerType: currentHandler?.type || "unknown",
-      });
-    } finally {
-      setIsRunning(false);
-    }
+    const res = await runTest({
+      workspaceName,
+      registryName: registry.metadata.name,
+      handlerName: selectedHandler,
+      toolName: selectedTool,
+      parsedArgs: parsed.value,
+      handlerType: currentHandler?.type || "unknown",
+    });
+    setResult(res);
+    setIsRunning(false);
   }, [args, selectedHandler, selectedTool, workspaceName, registry.metadata.name, currentHandler]);
 
   if (handlers.length === 0) {
@@ -251,6 +536,9 @@ export function ToolTestPanel({ registry, workspaceName }: Readonly<ToolTestPane
       </Card>
     );
   }
+
+  const showToolSelect =
+    availableTools.length > 1 || (!hasInlineTool && availableTools.length > 0);
 
   return (
     <div className="space-y-6">
@@ -285,135 +573,66 @@ export function ToolTestPanel({ registry, workspaceName }: Readonly<ToolTestPane
             </Select>
           </div>
 
-          {/* Tool Select — show when handler has multiple tools */}
-          {(availableTools.length > 1 || (!hasInlineTool && availableTools.length > 0)) && (
-            <div className="space-y-2">
-              <Label htmlFor="tool-select">Tool</Label>
-              <Select value={selectedTool} onValueChange={handleToolChange}>
-                <SelectTrigger id="tool-select">
-                  <SelectValue placeholder="Select tool" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableTools.map((t) => (
-                    <SelectItem key={t.name} value={t.name}>
-                      {t.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          {/* Arguments */}
-          <div className="space-y-2">
-            <Label htmlFor="args-input">Arguments (JSON)</Label>
-            <Textarea
-              id="args-input"
-              value={args}
-              onChange={(e) => {
-                setArgs(e.target.value);
-                setJsonError(null);
-              }}
-              className="font-mono text-sm min-h-[120px]"
-              placeholder='{"key": "value"}'
+          {isOpenAPI ? (
+            <OpenAPISection
+              preview={preview}
+              handlerName={selectedHandler}
+              workspaceName={workspaceName}
+              registryName={registry.metadata.name}
             />
-            {jsonError && (
-              <p className="text-sm text-red-500">{jsonError}</p>
-            )}
-          </div>
+          ) : (
+            <>
+              {/* Tool Select — show when handler has multiple tools */}
+              {showToolSelect && (
+                <div className="space-y-2">
+                  <Label htmlFor="tool-select">Tool</Label>
+                  <Select value={selectedTool} onValueChange={handleToolChange}>
+                    <SelectTrigger id="tool-select">
+                      <SelectValue placeholder="Select tool" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableTools.map((t) => (
+                        <SelectItem key={t.name} value={t.name}>
+                          {t.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
-          {/* Client tool notice */}
-          {currentHandler?.type === "client" && (
-            <div className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 p-3">
-              <p className="text-sm text-amber-700 dark:text-amber-400">
-                Client tools are executed in the browser during an active agent session.
-                They cannot be tested from this page — use the Console to test them through a live agent conversation.
-              </p>
-            </div>
+              <ArgsInput
+                args={args}
+                jsonError={jsonError}
+                onChange={(v) => {
+                  setArgs(v);
+                  setJsonError(null);
+                }}
+              />
+
+              {/* Client tool notice */}
+              {currentHandler?.type === "client" && (
+                <div className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 p-3">
+                  <p className="text-sm text-amber-700 dark:text-amber-400">
+                    Client tools are executed in the browser during an active agent session. They
+                    cannot be tested from this page — use the Console to test them through a live
+                    agent conversation.
+                  </p>
+                </div>
+              )}
+
+              <RunButton
+                isRunning={isRunning}
+                disabled={isRunning || !selectedHandler || currentHandler?.type === "client"}
+                onClick={handleRun}
+              />
+            </>
           )}
-
-          {/* Run Button */}
-          <Button
-            onClick={handleRun}
-            disabled={isRunning || !selectedHandler || currentHandler?.type === "client"}
-            className="w-full"
-          >
-            {isRunning ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Running...
-              </>
-            ) : (
-              <>
-                <Play className="mr-2 h-4 w-4" />
-                Run Test
-              </>
-            )}
-          </Button>
         </CardContent>
       </Card>
 
-      {/* Result Card */}
-      {result && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              {result.success ? (
-                <CheckCircle className="h-4 w-4 text-green-500" />
-              ) : (
-                <XCircle className="h-4 w-4 text-red-500" />
-              )}
-              {result.success ? "Success" : "Failed"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Metadata */}
-            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                {result.durationMs}ms
-              </span>
-              <Badge variant="outline" className="text-xs capitalize">
-                {result.handlerType}
-              </Badge>
-            </div>
-
-            {/* Error */}
-            {result.error && (
-              <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded-lg p-3">
-                <p className="text-sm text-red-700 dark:text-red-400 font-mono break-all">
-                  {result.error}
-                </p>
-              </div>
-            )}
-
-            {/* Schema Validation */}
-            {result.validation && (
-              <div className="space-y-3">
-                <Label>Schema Validation</Label>
-                {result.validation.request && (
-                  <ValidationBadge label="Request" check={result.validation.request} />
-                )}
-                {result.validation.response && (
-                  <ValidationBadge label="Response" check={result.validation.response} />
-                )}
-              </div>
-            )}
-
-            {/* Result */}
-            {result.result != null && (
-              <div className="space-y-2">
-                <Label>Response</Label>
-                <pre className="text-xs bg-muted p-3 rounded-lg overflow-auto max-h-[400px] font-mono">
-                  {typeof result.result === "string"
-                    ? result.result
-                    : JSON.stringify(result.result, null, 2)}
-                </pre>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      {/* Result Card (discovered-tools flow; OpenAPI renders its own) */}
+      {!isOpenAPI && result && <ResultCard result={result} />}
     </div>
   );
 }

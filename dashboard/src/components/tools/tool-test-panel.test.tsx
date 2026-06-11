@@ -7,6 +7,11 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ToolTestPanel } from "./tool-test-panel";
 import type { ToolRegistry } from "@/types";
 
+// Mock the OpenAPI preview hook so tests are deterministic.
+vi.mock("@/hooks/use-openapi-tool-preview", () => ({ useOpenAPIToolPreview: vi.fn() }));
+import { useOpenAPIToolPreview } from "@/hooks/use-openapi-tool-preview";
+const mockPreview = useOpenAPIToolPreview as ReturnType<typeof vi.fn>;
+
 // Mock fetch
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
@@ -80,6 +85,7 @@ const mockRegistry: ToolRegistry = {
 describe("ToolTestPanel", () => {
   beforeEach(() => {
     mockFetch.mockReset();
+    mockPreview.mockReturnValue({ tools: [], specURL: null, error: null, loading: false });
   });
 
   it("renders handler select with all handlers", () => {
@@ -498,5 +504,153 @@ describe("ToolTestPanel", () => {
 
     const textarea = screen.getByLabelText("Arguments (JSON)");
     expect((textarea as HTMLTextAreaElement).value).toBe("{}");
+  });
+});
+
+describe("ToolTestPanel — OpenAPI handler", () => {
+  const openAPIRegistry: ToolRegistry = {
+    ...mockRegistry,
+    spec: {
+      handlers: [
+        {
+          name: "petstore",
+          type: "openapi",
+          openAPIConfig: { specURL: "u" },
+        },
+      ],
+    },
+    status: {
+      phase: "Ready",
+      discoveredToolsCount: 0,
+      discoveredTools: [],
+    },
+  };
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+    mockPreview.mockReturnValue({ tools: [], specURL: null, error: null, loading: false });
+  });
+
+  it("lists live operations and selects the first by default", async () => {
+    mockPreview.mockReturnValue({
+      tools: [
+        {
+          name: "getPet",
+          description: "Fetch a pet",
+          inputSchema: { type: "object", properties: { id: { type: "string" } } },
+        },
+        { name: "listPets", description: "List pets" },
+      ],
+      specURL: "https://api/openapi.json",
+      error: null,
+      loading: false,
+    });
+
+    render(<ToolTestPanel registry={openAPIRegistry} workspaceName="ws1" />);
+
+    // The live operation getPet should appear in the tool select.
+    expect(await screen.findByText("getPet")).toBeInTheDocument();
+    // Sample args should be seeded from the first live tool's schema.
+    const textarea = screen.getByLabelText("Arguments (JSON)");
+    expect((textarea as HTMLTextAreaElement).value).toContain("id");
+  });
+
+  it("shows a discovery-error card instead of an empty select", () => {
+    mockPreview.mockReturnValue({
+      tools: [],
+      specURL: "https://api/openapi.json",
+      error: "failed to fetch OpenAPI spec: connection refused",
+      loading: false,
+    });
+
+    render(<ToolTestPanel registry={openAPIRegistry} workspaceName="ws1" />);
+
+    expect(screen.getByText(/couldn't load tools/i)).toBeInTheDocument();
+    expect(
+      screen.getByText("failed to fetch OpenAPI spec: connection refused")
+    ).toBeInTheDocument();
+    expect(screen.getByText("https://api/openapi.json")).toBeInTheDocument();
+    // No empty Tool select rendered.
+    expect(screen.queryByLabelText("Tool")).not.toBeInTheDocument();
+  });
+
+  it("shows a loading state while tools are being discovered", () => {
+    mockPreview.mockReturnValue({ tools: [], specURL: null, error: null, loading: true });
+
+    render(<ToolTestPanel registry={openAPIRegistry} workspaceName="ws1" />);
+
+    expect(screen.getByText(/loading tools/i)).toBeInTheDocument();
+  });
+
+  it("runs a live OpenAPI tool and shows the result", async () => {
+    mockPreview.mockReturnValue({
+      tools: [
+        {
+          name: "getPet",
+          description: "Fetch a pet",
+          inputSchema: { type: "object", properties: { id: { type: "string" } } },
+        },
+      ],
+      specURL: "u",
+      error: null,
+      loading: false,
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          success: true,
+          result: { ok: true },
+          durationMs: 7,
+          handlerType: "openapi",
+        }),
+    });
+
+    render(<ToolTestPanel registry={openAPIRegistry} workspaceName="ws1" />);
+
+    fireEvent.click(screen.getByText("Run Test"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Success")).toBeInTheDocument();
+    });
+
+    const [url, options] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/workspaces/ws1/toolregistries/test-registry/test");
+    const body = JSON.parse(options.body);
+    expect(body.handlerName).toBe("petstore");
+    expect(body.toolName).toBe("getPet");
+  });
+
+  it("validates JSON and reseeds args when the live tool changes", () => {
+    mockPreview.mockReturnValue({
+      tools: [
+        {
+          name: "getPet",
+          description: "Fetch a pet",
+          inputSchema: { type: "object", properties: { id: { type: "string" } } },
+        },
+        { name: "listPets", description: "List pets" },
+      ],
+      specURL: "u",
+      error: null,
+      loading: false,
+    });
+
+    render(<ToolTestPanel registry={openAPIRegistry} workspaceName="ws1" />);
+
+    // Invalid JSON blocks the run.
+    const textarea = screen.getByLabelText("Arguments (JSON)");
+    fireEvent.change(textarea, { target: { value: "{bad" } });
+    fireEvent.click(screen.getByText("Run Test"));
+    expect(screen.getByText(/Invalid JSON/)).toBeInTheDocument();
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    // Switching to listPets (no schema) reseeds args to "{}".
+    fireEvent.click(screen.getByLabelText("Tool"));
+    const listOption = screen
+      .getAllByRole("option")
+      .find((o) => o.textContent === "listPets");
+    fireEvent.click(listOption!);
+    expect((screen.getByLabelText("Arguments (JSON)") as HTMLTextAreaElement).value).toBe("{}");
   });
 });
