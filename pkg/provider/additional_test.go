@@ -16,22 +16,14 @@ limitations under the License.
 
 package provider
 
-// APIKeyEnvVarName returns the primary environment variable name that the
-// PromptKit SDK expects for API key credentials of the given provider type.
-// Returns empty string for provider types that don't use API key credentials.
-func APIKeyEnvVarName(providerType string) string {
-	switch Type(providerType) {
-	case TypeClaude:
-		return "ANTHROPIC_API_KEY"
-	case TypeOpenAI:
-		return "OPENAI_API_KEY"
-	case TypeGemini:
-		return "GEMINI_API_KEY"
-	case TypeVoyageAI:
-		return "VOYAGE_API_KEY"
-	case TypeHuggingFace:
-		return "HF_TOKEN"
-	default:
-		return ""
+import "testing"
+
+func TestHuggingFaceAdditionalConfig(t *testing.T) {
+	if got := HuggingFaceAdditionalConfig(""); got != nil {
+		t.Fatalf("empty baseURL: got %v, want nil", got)
+	}
+	got := HuggingFaceAdditionalConfig("https://my-endpoint.hf.space")
+	if got["dedicated"] != true {
+		t.Fatalf("baseURL set: got %v, want dedicated=true", got)
 	}
 }

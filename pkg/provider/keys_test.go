@@ -43,3 +43,9 @@ func TestAPIKeyEnvVarName(t *testing.T) {
 		})
 	}
 }
+
+func TestAPIKeyEnvVarNameHuggingFace(t *testing.T) {
+	if got := APIKeyEnvVarName("huggingface"); got != "HF_TOKEN" {
+		t.Fatalf("APIKeyEnvVarName(huggingface) = %q, want HF_TOKEN", got)
+	}
+}
