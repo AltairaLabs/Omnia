@@ -111,6 +111,7 @@ spec:
             # to a non-existent directory.
             - --workspace-content-path=
             {{- end }}
+            - --workspace-content-scoped={{ .Values.workspaceContent.scoped | default false }}
             {{- if .Values.devMode }}
             - --dev-mode
             {{- end }}
