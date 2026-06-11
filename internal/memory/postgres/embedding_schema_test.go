@@ -68,9 +68,11 @@ func hasHNSWIndex(t *testing.T, pool *pgxpool.Pool, table string) bool {
 }
 
 // seedObservationEmbedding inserts an entity + observation carrying a non-NULL
-// embedding of the given dimension, so the destructive path has data to guard.
-func seedObservationEmbedding(t *testing.T, pool *pgxpool.Pool, dim int) {
+// embedding, so the destructive path has data to guard. Callers seed after
+// EnsureEmbeddingSchema(768), so the vector is 768-dim to match the column.
+func seedObservationEmbedding(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
+	const seededDim = 768
 	ctx := context.Background()
 	var entityID string
 	require.NoError(t, pool.QueryRow(ctx, `
@@ -78,7 +80,7 @@ func seedObservationEmbedding(t *testing.T, pool *pgxpool.Pool, dim int) {
 		VALUES (gen_random_uuid(), 'e', 'k') RETURNING id`).Scan(&entityID))
 	_, err := pool.Exec(ctx, `
 		INSERT INTO memory_observations (entity_id, content, embedding)
-		VALUES ($1, 'hello', $2)`, entityID, pgvector.NewVector(make([]float32, dim)))
+		VALUES ($1, 'hello', $2)`, entityID, pgvector.NewVector(make([]float32, seededDim)))
 	require.NoError(t, err)
 }
 
@@ -139,7 +141,7 @@ func TestEnsureEmbeddingSchema_DestructiveWithoutMarkerFails(t *testing.T) {
 	ctx := context.Background()
 
 	require.NoError(t, EnsureEmbeddingSchema(ctx, pool, 768, logr.Discard()))
-	seedObservationEmbedding(t, pool, 768)
+	seedObservationEmbedding(t, pool)
 
 	err := EnsureEmbeddingSchema(ctx, pool, 1024, logr.Discard())
 	require.Error(t, err)
@@ -154,7 +156,7 @@ func TestEnsureEmbeddingSchema_DestructiveWithMarkerReshapes(t *testing.T) {
 	ctx := context.Background()
 
 	require.NoError(t, EnsureEmbeddingSchema(ctx, pool, 768, logr.Discard()))
-	seedObservationEmbedding(t, pool, 768)
+	seedObservationEmbedding(t, pool)
 	insertConsent(t, pool, 1024)
 
 	require.NoError(t, EnsureEmbeddingSchema(ctx, pool, 1024, logr.Discard()))
@@ -178,7 +180,7 @@ func TestEnsureEmbeddingSchema_MismatchedMarkerFails(t *testing.T) {
 	ctx := context.Background()
 
 	require.NoError(t, EnsureEmbeddingSchema(ctx, pool, 768, logr.Discard()))
-	seedObservationEmbedding(t, pool, 768)
+	seedObservationEmbedding(t, pool)
 	insertConsent(t, pool, 512) // authorises a different target
 
 	err := EnsureEmbeddingSchema(ctx, pool, 1024, logr.Discard())
@@ -206,15 +208,33 @@ func TestEnsureEmbeddingSchema_RejectsInvalidDimension(t *testing.T) {
 	require.Error(t, EnsureEmbeddingSchema(context.Background(), pool, 0, logr.Discard()))
 }
 
-func TestEnsureEmbeddingSchema_DimensionTooLargeToIndexRollsBack(t *testing.T) {
+func TestEnsureEmbeddingSchema_RejectsDimensionAboveIndexCap(t *testing.T) {
 	pool := migratedPool(t)
-	// pgvector HNSW indexes cap at 2000 dimensions. ADD COLUMN vector(3000)
-	// succeeds, but the index build fails — the whole reconcile must roll back.
-	err := EnsureEmbeddingSchema(context.Background(), pool, 3000, logr.Discard())
+	// pgvector HNSW indexes cap at MaxIndexableEmbeddingDim; a larger dimension
+	// is rejected up front (clear error, no DDL) rather than crash-looping the
+	// pod on a CREATE INDEX failure.
+	err := EnsureEmbeddingSchema(context.Background(), pool, MaxIndexableEmbeddingDim+1, logr.Discard())
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "maximum indexable dimension")
 
 	_, present := colDim(t, pool, tableObservations)
-	assert.False(t, present, "failed reconcile must roll back the ADD COLUMN")
+	assert.False(t, present, "no DDL should run when the dimension is rejected")
+}
+
+func TestEnsureEmbeddingSchema_ClearsStaleCrossDimMarker(t *testing.T) {
+	pool := migratedPool(t)
+	ctx := context.Background()
+
+	require.NoError(t, EnsureEmbeddingSchema(ctx, pool, 768, logr.Discard()))
+	seedObservationEmbedding(t, pool)
+	// Operator records consent for 1024 but then never actually switches the
+	// provider (changed their mind / reverted).
+	insertConsent(t, pool, 1024)
+
+	// A normal restart still at 768 must NOT leave the 1024 marker standing —
+	// otherwise it would silently authorise a later, unrelated swap to 1024.
+	require.NoError(t, EnsureEmbeddingSchema(ctx, pool, 768, logr.Discard()))
+	assert.Equal(t, 0, consentRows(t, pool), "a stale marker for a different dimension must be cleared")
 }
 
 func TestInsertDimensionChangeConsent_RejectsInvalidDimension(t *testing.T) {
@@ -252,7 +272,7 @@ func TestEmbeddingSchema_ErrorPaths(t *testing.T) {
 	assert.Error(t, err)
 
 	assert.Error(t, consumeConsent(canceled, pool))
-	assert.Error(t, clearStaleConsent(canceled, pool, 768))
+	assert.Error(t, clearStaleConsent(canceled, pool))
 	assert.Error(t, InsertDimensionChangeConsent(canceled, pool, 768, "test"))
 	assert.Error(t, EnsureEmbeddingSchema(canceled, pool, 768, logr.Discard()))
 

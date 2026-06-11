@@ -55,10 +55,17 @@ const (
 	// embeddingSchemaAdvisoryLock serialises EnsureEmbeddingSchema across
 	// memory-api replicas so they can't race the DDL. Keyed on the issue.
 	embeddingSchemaAdvisoryLock int64 = 1309
+
+	// MaxIndexableEmbeddingDim is pgvector's HNSW/IVFFlat dimension cap. A
+	// larger vector can be stored but not indexed, so the reconciler (and the
+	// admin consent endpoint) reject it rather than let CREATE INDEX fail at
+	// startup and crash-loop the pod. >2000 would need halfvec — out of scope.
+	MaxIndexableEmbeddingDim = 2000
 )
 
-// vectorDimRe extracts N from a pgvector "vector(N)" type rendering.
-var vectorDimRe = regexp.MustCompile(`^vector\((\d+)\)$`)
+// vectorDimRe extracts N from a pgvector type rendering, tolerating an optional
+// schema qualifier (e.g. "vector(768)" or "extensions.vector(768)").
+var vectorDimRe = regexp.MustCompile(`^(?:[^.()]+\.)?vector\((\d+)\)$`)
 
 // pgExecutor is the subset of the pgx API shared by *pgxpool.Pool and pgx.Tx,
 // so the helpers below work against either a pool or a transaction.
@@ -108,6 +115,10 @@ func EnsureEmbeddingSchema(ctx context.Context, pool *pgxpool.Pool, dim int, log
 	if dim <= 0 {
 		return fmt.Errorf("memory: invalid embedding dimension %d", dim)
 	}
+	if dim > MaxIndexableEmbeddingDim {
+		return fmt.Errorf("memory: embedding dimension %d exceeds the maximum indexable dimension %d (pgvector HNSW cap); configure an embedding model with <= %d dimensions",
+			dim, MaxIndexableEmbeddingDim, MaxIndexableEmbeddingDim)
+	}
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -155,8 +166,11 @@ func reconcileEmbeddingTx(ctx context.Context, tx pgExecutor, dim int, log logr.
 	return settleConsent(ctx, tx, dim, destructive, log)
 }
 
-// settleConsent consumes the one-shot marker after a destructive reshape, or
-// clears a stale marker when the reconcile was a no-op/non-destructive change.
+// settleConsent consumes the one-shot marker after a destructive reshape. On
+// any non-destructive reconcile it clears ALL markers: a marker that wasn't
+// consumed this run authorises a change that isn't happening (a different
+// target, or one made moot by an empty-column reshape), so it must not survive
+// to silently permit a later swap.
 func settleConsent(ctx context.Context, tx pgExecutor, dim int, destructive bool, log logr.Logger) error {
 	if destructive {
 		if err := consumeConsent(ctx, tx); err != nil {
@@ -165,7 +179,7 @@ func settleConsent(ctx context.Context, tx pgExecutor, dim int, destructive bool
 		log.Info("embedding dimension change consent consumed", "dimensions", dim)
 		return nil
 	}
-	return clearStaleConsent(ctx, tx, dim)
+	return clearStaleConsent(ctx, tx)
 }
 
 // needsDestructiveReshape reports whether any embedding column holds real data

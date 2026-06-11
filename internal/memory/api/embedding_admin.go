@@ -21,9 +21,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/altairalabs/omnia/internal/httputil"
+	memorypg "github.com/altairalabs/omnia/internal/memory/postgres"
 	"github.com/altairalabs/omnia/pkg/logging"
 )
 
@@ -32,11 +34,6 @@ import (
 // over the Postgres pool; nil when the binary wasn't wired with one, in which
 // case the admin endpoint responds 503.
 type DimensionConsentRecorder func(ctx context.Context, targetDim int, createdBy string) error
-
-// maxIndexableEmbeddingDim is pgvector's HNSW/IVFFlat dimension cap; a larger
-// vector cannot be indexed, so we reject it at the door rather than let the
-// reconciler fail the index build at startup.
-const maxIndexableEmbeddingDim = 2000
 
 type embeddingDimensionChangeRequest struct {
 	TargetDim int `json:"target_dim"`
@@ -57,8 +54,11 @@ func (h *Handler) handleEmbeddingDimensionChange(w http.ResponseWriter, r *http.
 		writeError(w, ErrMissingBody)
 		return
 	}
-	if req.TargetDim <= 0 || req.TargetDim > maxIndexableEmbeddingDim {
-		writeError(w, httpError{status: http.StatusBadRequest, msg: "target_dim must be between 1 and 2000"})
+	if req.TargetDim <= 0 || req.TargetDim > memorypg.MaxIndexableEmbeddingDim {
+		writeError(w, httpError{
+			status: http.StatusBadRequest,
+			msg:    fmt.Sprintf("target_dim must be between 1 and %d", memorypg.MaxIndexableEmbeddingDim),
+		})
 		return
 	}
 

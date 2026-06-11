@@ -70,10 +70,12 @@ func consumeConsent(ctx context.Context, db pgExecutor) error {
 	return nil
 }
 
-// clearStaleConsent removes a marker that authorises the dimension the store is
-// already at — so a no-op restart can't leave a dangling authorisation around.
-func clearStaleConsent(ctx context.Context, db pgExecutor, dim int) error {
-	if _, err := db.Exec(ctx, `DELETE FROM memory_embedding_dim_change_consent WHERE target_dim = $1`, dim); err != nil {
+// clearStaleConsent removes every consent marker. Called on a non-destructive
+// reconcile, where any marker present is stale (it authorises a change that
+// isn't being applied this run) and must not linger to silently permit a later
+// swap. Same statement as consumeConsent; kept distinct for call-site intent.
+func clearStaleConsent(ctx context.Context, db pgExecutor) error {
+	if _, err := db.Exec(ctx, `DELETE FROM memory_embedding_dim_change_consent`); err != nil {
 		return fmt.Errorf("memory: clear stale consent: %w", err)
 	}
 	return nil
