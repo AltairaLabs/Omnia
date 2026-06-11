@@ -65,6 +65,13 @@ spec:
                   arenaFile is the path to the arena config file within the source.
                   Supports glob patterns for multi-file configs (e.g., "evals/*.arena.yaml").
                 type: string
+              cancelled:
+                description: |-
+                  cancelled requests cancellation of a running job. When set to true the
+                  operator deletes the worker Job and transitions the job to the Cancelled
+                  phase. Has no effect once the job has reached a terminal phase
+                  (Succeeded/Failed/Cancelled).
+                type: boolean
               dataGen:
                 description: |-
                   dataGen configures data generation settings.

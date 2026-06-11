@@ -195,6 +195,29 @@ func (r *ArenaJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
+	// Honour a cancellation request (spec.cancelled): delete the worker Job and
+	// transition to the Cancelled phase. Runs after the terminal-phase skip, so
+	// a finished job can't be cancelled. (#1329)
+	if arenaJob.Spec.Cancelled {
+		log.Info("ArenaJob cancellation requested, stopping worker", "name", arenaJob.Name)
+		if err := r.deleteWorkerJob(ctx, arenaJob); err != nil {
+			log.Error(err, "failed to delete worker job during cancellation")
+			return ctrl.Result{}, err
+		}
+		arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseCancelled
+		now := metav1.Now()
+		arenaJob.Status.CompletionTime = &now
+		SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeProgressing,
+			metav1.ConditionFalse, "Cancelled", "Job cancelled by user request")
+		SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeReady,
+			metav1.ConditionFalse, "Cancelled", "Job cancelled by user request")
+		if err := r.Status().Update(ctx, arenaJob); err != nil {
+			log.Error(err, "failed to update status after cancellation")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
 	// Initialize status if needed
 	if arenaJob.Status.Phase == "" {
 		arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhasePending
@@ -386,6 +409,25 @@ func (r *ArenaJobReconciler) buildMgmtPlaneTokenEnvVar() []corev1.EnvVar {
 // getJobName returns the name for the K8s Job.
 func (r *ArenaJobReconciler) getJobName(arenaJob *omniav1alpha1.ArenaJob) string {
 	return fmt.Sprintf("%s-worker", arenaJob.Name)
+}
+
+// deleteWorkerJob deletes the worker Job for an ArenaJob (used on
+// cancellation). Foreground propagation removes the worker pods too. A
+// missing Job is not an error — it may not have been created yet, or already
+// be gone.
+func (r *ArenaJobReconciler) deleteWorkerJob(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob) error {
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      r.getJobName(arenaJob),
+			Namespace: arenaJob.Namespace,
+		},
+	}
+	policy := metav1.DeletePropagationForeground
+	if err := r.Delete(ctx, job, &client.DeleteOptions{PropagationPolicy: &policy}); err != nil &&
+		!apierrors.IsNotFound(err) {
+		return err
+	}
+	return nil
 }
 
 // getWorkerImage returns the worker image to use, with fallback to default.

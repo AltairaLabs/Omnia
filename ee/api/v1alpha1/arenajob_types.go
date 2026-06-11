@@ -339,6 +339,13 @@ type ArenaJobSpec struct {
 	// +optional
 	Workers *WorkerConfig `json:"workers,omitempty"`
 
+	// cancelled requests cancellation of a running job. When set to true the
+	// operator deletes the worker Job and transitions the job to the Cancelled
+	// phase. Has no effect once the job has reached a terminal phase
+	// (Succeeded/Failed/Cancelled).
+	// +optional
+	Cancelled bool `json:"cancelled,omitempty"`
+
 	// output configures where results are stored.
 	// +optional
 	Output *OutputConfig `json:"output,omitempty"`

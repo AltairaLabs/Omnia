@@ -63,6 +63,59 @@ var _ = Describe("ArenaJob Controller", func() {
 		})
 	})
 
+	Context("When an ArenaJob is cancelled (spec.cancelled=true)", func() {
+		var arenaJob *omniav1alpha1.ArenaJob
+
+		BeforeEach(func() {
+			arenaJob = &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cancel-me-job",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{
+					SourceRef: corev1alpha1.LocalObjectReference{Name: "some-source"},
+					Type:      omniav1alpha1.ArenaJobTypeLoadTest,
+					Cancelled: true,
+				},
+			}
+			Expect(k8sClient.Create(ctx, arenaJob)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			resource := &omniav1alpha1.ArenaJob{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "cancel-me-job",
+				Namespace: arenaJobNamespace,
+			}, resource); err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
+		})
+
+		It("transitions to Cancelled and stops reconciling", func() {
+			reconciler := &ArenaJobReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(10),
+			}
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "cancel-me-job",
+					Namespace: arenaJobNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeZero())
+
+			updated := &omniav1alpha1.ArenaJob{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "cancel-me-job",
+				Namespace: arenaJobNamespace,
+			}, updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhaseCancelled))
+			Expect(updated.Status.CompletionTime).NotTo(BeNil())
+		})
+	})
+
 	Context("When reconciling an ArenaJob with missing ArenaSource", func() {
 		var arenaJob *omniav1alpha1.ArenaJob
 
