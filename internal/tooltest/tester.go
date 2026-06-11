@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -187,6 +188,65 @@ func (t *Tester) executeTest(
 
 	outcome.result = result
 	return outcome, nil
+}
+
+// ListTools expands an OpenAPI handler's spec live and returns the tools exactly
+// as the LLM receives them (operationId, description, flattened input schema).
+// It reuses the same setup as executeTest, but returns descriptors instead of
+// executing — so the output is identical to what a running agent would load.
+func (t *Tester) ListTools(
+	ctx context.Context,
+	namespace, registryName, handlerName string,
+) *ListToolsResponse {
+	registry := &omniav1alpha1.ToolRegistry{}
+	key := types.NamespacedName{Name: registryName, Namespace: namespace}
+	if err := t.client.Get(ctx, key, registry); err != nil {
+		return &ListToolsResponse{Error: fmt.Sprintf("failed to get ToolRegistry %q: %v", registryName, err)}
+	}
+
+	handler, err := t.findHandler(registry, handlerName)
+	if err != nil {
+		return &ListToolsResponse{Error: err.Error()}
+	}
+	if handler.Type != omniav1alpha1.HandlerTypeOpenAPI {
+		return &ListToolsResponse{Error: fmt.Sprintf("tool preview is only supported for openapi handlers, got %q", handler.Type)}
+	}
+
+	specURL := ""
+	if handler.OpenAPIConfig != nil {
+		specURL = handler.OpenAPIConfig.SpecURL
+	}
+
+	if err := t.resolveAuthSecrets(ctx, namespace, handler); err != nil {
+		return &ListToolsResponse{Error: fmt.Sprintf("failed to resolve auth secrets: %v", err), SpecURL: specURL}
+	}
+
+	handlerCfg := t.buildHandlerConfig(handler)
+	listCtx, cancel := context.WithTimeout(ctx, t.resolveTimeout(handler))
+	defer cancel()
+
+	executor := tools.NewOmniaExecutor(t.log, nil)
+	if err := executor.LoadConfigFromEntries([]tools.HandlerEntry{handlerCfg}); err != nil {
+		return &ListToolsResponse{Error: fmt.Sprintf("failed to load handler config: %v", err), SpecURL: specURL}
+	}
+	if err := executor.Initialize(listCtx); err != nil {
+		return &ListToolsResponse{Error: err.Error(), SpecURL: specURL}
+	}
+	defer func() {
+		if closeErr := executor.Close(); closeErr != nil {
+			t.log.Error(closeErr, "failed to close executor")
+		}
+	}()
+
+	descs := executor.ToolDescriptors()
+	listed := make([]ListedTool, 0, len(descs))
+	for _, d := range descs {
+		raw, _ := json.Marshal(d.InputSchema) // InputSchema is already json.RawMessage; Marshal returns same bytes
+		listed = append(listed, ListedTool{Name: d.Name, Description: d.Description, InputSchema: raw})
+	}
+	sort.Slice(listed, func(i, j int) bool { return listed[i].Name < listed[j].Name })
+
+	return &ListToolsResponse{Tools: listed, SpecURL: specURL}
 }
 
 func (t *Tester) findHandler(
