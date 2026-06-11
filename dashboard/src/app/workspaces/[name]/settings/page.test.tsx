@@ -5,10 +5,15 @@ import WorkspaceSettingsPage from "./page";
 
 const mockUseWorkspaceDetail = vi.fn();
 const mockUseWorkspacePatch = vi.fn();
+const mockUseWorkspacePermissions = vi.fn();
 
 vi.mock("@/hooks/use-workspace-detail", () => ({
   useWorkspaceDetail: () => mockUseWorkspaceDetail(),
   useWorkspacePatch: () => mockUseWorkspacePatch(),
+}));
+
+vi.mock("@/hooks/use-workspace-permissions", () => ({
+  useWorkspacePermissions: () => mockUseWorkspacePermissions(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -39,6 +44,7 @@ const workspace = {
 describe("WorkspaceSettingsPage", () => {
   beforeEach(() => {
     mockUseWorkspacePatch.mockReturnValue({ mutate: vi.fn() });
+    mockUseWorkspacePermissions.mockReturnValue({ isOwner: false });
   });
 
   it("renders header with 'Workspace Settings'", () => {
@@ -62,6 +68,18 @@ describe("WorkspaceSettingsPage", () => {
     expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Services" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Access" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Advanced" })).not.toBeInTheDocument();
+  });
+
+  it("shows the owner-only Advanced tab to owners", () => {
+    mockUseWorkspaceDetail.mockReturnValue({
+      data: workspace,
+      isLoading: false,
+      error: null,
+    });
+    mockUseWorkspacePermissions.mockReturnValue({ isOwner: true });
+    render(<WorkspaceSettingsPage />);
+    expect(screen.getByRole("tab", { name: "Advanced" })).toBeInTheDocument();
   });
 
   it("shows loading skeleton when isLoading", () => {

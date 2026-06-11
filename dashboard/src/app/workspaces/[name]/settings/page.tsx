@@ -8,13 +8,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useWorkspaceDetail, useWorkspacePatch } from "@/hooks/use-workspace-detail";
 import { useToast } from "@/hooks/core";
+import { useWorkspacePermissions } from "@/hooks/use-workspace-permissions";
 import { OverviewTab } from "./overview-tab";
 import { ServicesTab } from "./services-tab";
 import { AccessTab } from "./access-tab";
+import { AdminTab } from "./admin-tab";
 
 export default function WorkspaceSettingsPage() {
   const { name } = useParams<{ name: string }>();
   const { data: workspace, isLoading, error } = useWorkspaceDetail(name);
+  const { isOwner } = useWorkspacePermissions();
   const { toast } = useToast();
   const { mutate } = useWorkspacePatch(name, {
     onError: (err: Error) => {
@@ -65,6 +68,7 @@ export default function WorkspaceSettingsPage() {
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="services">Services</TabsTrigger>
             <TabsTrigger value="access">Access</TabsTrigger>
+            {isOwner && <TabsTrigger value="advanced">Advanced</TabsTrigger>}
           </TabsList>
           <TabsContent value="overview" className="mt-4">
             <OverviewTab workspace={workspace} />
@@ -75,6 +79,11 @@ export default function WorkspaceSettingsPage() {
           <TabsContent value="access" className="mt-4">
             <AccessTab workspace={workspace} onPatch={mutate} />
           </TabsContent>
+          {isOwner && (
+            <TabsContent value="advanced" className="mt-4">
+              <AdminTab workspaceName={name} />
+            </TabsContent>
+          )}
         </Tabs>
       </div>
     </div>

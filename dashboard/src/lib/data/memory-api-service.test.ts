@@ -462,4 +462,43 @@ describe("MemoryApiService", () => {
       ).rejects.toThrow("Failed to fetch agent memories");
     });
   });
+
+  describe("changeEmbeddingDimension", () => {
+    it("POSTs target_dim to the admin endpoint", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200 });
+
+      await service.changeEmbeddingDimension("my-ws", 768);
+
+      const [url, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("/api/workspaces/my-ws/admin/embedding-dimension-change");
+      expect(opts.method).toBe("POST");
+      expect(opts.body).toBe(JSON.stringify({ target_dim: 768 }));
+    });
+
+    it("throws with the backend error message on failure", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        statusText: "Bad Request",
+        json: () => Promise.resolve({ error: "target_dim must be between 1 and 2000" }),
+      });
+
+      await expect(service.changeEmbeddingDimension("my-ws", 5000)).rejects.toThrow(
+        "target_dim must be between 1 and 2000"
+      );
+    });
+
+    it("falls back to statusText when the error body is not JSON", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        statusText: "Service Unavailable",
+        json: () => Promise.reject(new Error("not JSON")),
+      });
+
+      await expect(service.changeEmbeddingDimension("my-ws", 768)).rejects.toThrow(
+        "Service Unavailable"
+      );
+    });
+  });
 });

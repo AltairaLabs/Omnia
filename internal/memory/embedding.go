@@ -103,6 +103,13 @@ func (s *EmbeddingService) EmbedMemory(ctx context.Context, mem *Memory) error {
 // Stamps the configured model name so the re-embed worker can
 // detect a model swap and refresh stale rows.
 func (s *EmbeddingService) WriteEmbedding(ctx context.Context, entityID string, vec []float32) error {
+	// Fail early with a clear message on a dimension mismatch rather than
+	// surfacing the opaque Postgres "expected N dimensions" type error. The
+	// schema column is sized to the provider (#1309), so a mismatch means the
+	// caller computed the vector with a different model.
+	if want := s.provider.Dimensions(); want > 0 && len(vec) != want {
+		return fmt.Errorf("memory: embedding dimension mismatch: got %d, provider produces %d", len(vec), want)
+	}
 	if err := s.store.UpdateEmbedding(ctx, entityID, vec, s.modelName); err != nil {
 		return fmt.Errorf("memory: store embedding: %w", err)
 	}

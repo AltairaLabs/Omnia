@@ -105,6 +105,10 @@ func freshDB(t *testing.T) *pgxpool.Pool {
 	pool, err := pgxpool.New(ctx, connStr)
 	require.NoError(t, err)
 
+	// Embedding columns are reconciler-owned (#1309); these tests write
+	// embeddings, so materialise the columns at the historical default.
+	require.NoError(t, pgmigrate.EnsureEmbeddingSchema(ctx, pool, 1536, logger))
+
 	t.Cleanup(func() {
 		pool.Close()
 		mainDB, err := sql.Open("pgx", testConnStr)

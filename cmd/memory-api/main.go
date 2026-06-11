@@ -512,6 +512,21 @@ func run() error {
 		embeddingSvc = createEmbeddingService(ctx, f.embeddingProviderName, f.workspace, detectNamespace(), pgStore, usageEmitter, log)
 	}
 
+	// --- Embedding schema reconcile ---
+	// The embedding vector columns are application-managed (omitted from the
+	// migrations) so their dimension can track the configured embedding
+	// provider (#1309). Bring them to the resolved dimension now — before the
+	// re-embed / consolidation workers and the HTTP server touch them. The
+	// columns must exist even without a provider (consolidation dup-detection
+	// reads memory_entities.embedding), so resolveEmbeddingDim falls back to
+	// the historical default.
+	embeddingDim := resolveEmbeddingDim(embeddingSvc)
+	if err := memorypg.EnsureEmbeddingSchema(ctx, pool, embeddingDim, log); err != nil {
+		return fmt.Errorf("ensure embedding schema: %w", err)
+	}
+	log.Info("embedding schema ensured",
+		"dimensions", embeddingDim, "providerConfigured", embeddingSvc != nil)
+
 	// --- Tombstone GC worker ---
 	// Hard-deletes old superseded observations on long supersession
 	// chains, keeping the most recent K per chain for audit. Bounds
@@ -761,7 +776,10 @@ func buildAPIMux(
 		auditHandler = eeaudit.NewHandler(auditLogger, log)
 	}
 
-	handler := memoryapi.NewHandler(svc, log)
+	handler := memoryapi.NewHandler(svc, log).
+		WithDimensionConsentRecorder(func(ctx context.Context, targetDim int, createdBy string) error {
+			return memorypg.InsertDimensionChangeConsent(ctx, pool, targetDim, createdBy)
+		})
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
@@ -1345,6 +1363,26 @@ const (
 	defaultMaxConnLifetime = time.Hour
 	defaultMaxConnIdleTime = 30 * time.Minute
 )
+
+// defaultEmbeddingDimensions is the embedding vector size used when no
+// embedding provider is configured. The columns must still exist (consolidation
+// dup-detection reads memory_entities.embedding), so we fall back to the
+// historical hardcoded size rather than skip the reconcile. Matches OpenAI
+// text-embedding-3-small / ada-002.
+const defaultEmbeddingDimensions = 1536
+
+// resolveEmbeddingDim returns the embedding dimension the schema reconciler
+// should target: the configured provider's Dimensions() when a provider is
+// wired, otherwise the historical default so the columns still exist.
+func resolveEmbeddingDim(embeddingSvc *memory.EmbeddingService) int {
+	if embeddingSvc == nil {
+		return defaultEmbeddingDimensions
+	}
+	if dim := embeddingSvc.Provider().Dimensions(); dim > 0 {
+		return dim
+	}
+	return defaultEmbeddingDimensions
+}
 
 // reasonNoInClusterKubeconfig is the log reason used by initialisation paths
 // that gracefully degrade when the binary is not running inside a Kubernetes

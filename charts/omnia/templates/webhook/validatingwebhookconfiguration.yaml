@@ -44,6 +44,28 @@ webhooks:
         apiVersions: ["v1alpha1"]
         operations: ["CREATE", "UPDATE"]
         resources: ["skillsources"]
+  - name: vprovider.kb.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    # Ignore: this is an advisory warning on embedding-dimension changes
+    # (#1309), not a gate — the real safety is the memory-api consent marker.
+    # A down operator must never block Provider edits. Narrowed to embedding
+    # providers + UPDATE via matchConditions so it isn't invoked otherwise.
+    failurePolicy: Ignore
+    matchPolicy: Equivalent
+    matchConditions:
+      - name: role-embedding
+        expression: "object.spec.role == 'embedding'"
+    clientConfig:
+      service:
+        name: {{ include "omnia.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /validate-omnia-altairalabs-ai-v1alpha1-provider
+    rules:
+      - apiGroups: ["omnia.altairalabs.ai"]
+        apiVersions: ["v1alpha1"]
+        operations: ["UPDATE"]
+        resources: ["providers"]
   {{- if .Values.enterprise.enabled }}
   - name: vsessionprivacypolicy.kb.io
     admissionReviewVersions: ["v1"]

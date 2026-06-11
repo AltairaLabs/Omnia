@@ -33,6 +33,10 @@ func freshPgxPool(t *testing.T) *pgxpool.Pool {
 	pool, err := pgxpool.New(context.Background(), connStr)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
+
+	// Embedding columns are reconciler-owned (#1309); the prefilter reads
+	// memory_entities.embedding, so materialise the columns before use.
+	require.NoError(t, EnsureEmbeddingSchema(context.Background(), pool, 1536, logger))
 	return pool
 }
 

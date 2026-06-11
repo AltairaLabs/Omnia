@@ -340,9 +340,10 @@ type LinkResponse struct {
 
 // Handler provides HTTP endpoints for the memory API.
 type Handler struct {
-	service     *MemoryService
-	log         logr.Logger
-	maxBodySize int64
+	service          *MemoryService
+	log              logr.Logger
+	maxBodySize      int64
+	recordDimConsent DimensionConsentRecorder
 }
 
 // NewHandler creates a new memory API handler.
@@ -352,6 +353,13 @@ func NewHandler(service *MemoryService, log logr.Logger) *Handler {
 		log:         log.WithName("memory-handler"),
 		maxBodySize: DefaultMaxBodySize,
 	}
+}
+
+// WithDimensionConsentRecorder wires the recorder used by the embedding
+// dimension-change admin endpoint. Without it that endpoint responds 503.
+func (h *Handler) WithDimensionConsentRecorder(r DimensionConsentRecorder) *Handler {
+	h.recordDimConsent = r
+	return h
 }
 
 // RegisterRoutes registers all memory-api HTTP routes on the given mux.
@@ -390,6 +398,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/v1/compaction/candidates", h.handleListCompactionCandidates)
 	mux.HandleFunc("POST /api/v1/compaction/summaries", h.handleSaveCompactionSummary)
+
+	// Admin: record one-shot consent for a destructive embedding-dimension
+	// change (#1309). Consumed by the startup reconciler on the next reshape.
+	mux.HandleFunc("POST /admin/embedding-dimension-change", h.handleEmbeddingDimensionChange)
 
 	h.registerDocsRoutes(mux)
 }
