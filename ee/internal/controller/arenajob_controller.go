@@ -54,6 +54,13 @@ const (
 	maxWorkItemsLoadTest   = 100000
 )
 
+// arenaSourceRetryInterval is how often to re-check a referenced ArenaSource
+// that isn't ready yet (missing or mid-fetch). A missing source is transient,
+// not terminal: the job waits in Pending and is also re-triggered by the
+// ArenaSource watch, but this requeue covers the create-before-source-exists
+// race where the watch fired before the job's first reconcile.
+const arenaSourceRetryInterval = 30 * time.Second
+
 // ArenaJob condition types
 const (
 	ArenaJobConditionTypeReady       = "Ready"
@@ -228,9 +235,15 @@ func (r *ArenaJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// via the volume subPath — re-validating would race with periodic refetches.
 		source, err := r.validateSource(ctx, arenaJob)
 		if err != nil {
-			log.Error(err, "failed to validate ArenaSource")
-			r.handleValidationError(ctx, arenaJob, ArenaJobConditionTypeSourceValid, err)
-			return ctrl.Result{}, nil
+			// A missing or not-yet-fetched ArenaSource is transient, not terminal:
+			// keep the job Pending and requeue so it proceeds once the source
+			// becomes available. Marking it Failed here would strand the job — the
+			// terminal-phase skip guard at the top of Reconcile ignores the
+			// ArenaSource watch that is meant to re-trigger it.
+			log.Info("ArenaSource not ready, will retry",
+				"source", arenaJob.Spec.SourceRef.Name, "reason", err.Error())
+			r.handleSourceNotReady(ctx, arenaJob, err)
+			return ctrl.Result{RequeueAfter: arenaSourceRetryInterval}, nil
 		}
 		SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeSourceValid, metav1.ConditionTrue,
 			"SourceValid", fmt.Sprintf("ArenaSource %s is valid and ready", arenaJob.Spec.SourceRef.Name))
@@ -1579,21 +1592,26 @@ func (r *ArenaJobReconciler) checkBudgetLimit(ctx context.Context, arenaJob *omn
 	}
 }
 
-// handleValidationError handles errors during validation.
-func (r *ArenaJobReconciler) handleValidationError(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, conditionType string, err error) {
+// handleSourceNotReady marks the job as waiting (non-terminal) for its
+// referenced ArenaSource. Unlike a terminal failure it keeps Phase=Pending, so
+// the job is re-reconciled — via requeue or the ArenaSource watch — and proceeds
+// once the source becomes available. Setting Phase=Failed here would strand the
+// job permanently: the terminal-phase skip guard in Reconcile would ignore every
+// subsequent reconcile, including the watch that fires when the source appears.
+func (r *ArenaJobReconciler) handleSourceNotReady(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, err error) {
 	log := logf.FromContext(ctx)
 
-	arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseFailed
-	SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, conditionType, metav1.ConditionFalse, "ValidationFailed", err.Error())
+	arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhasePending
+	SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeSourceValid, metav1.ConditionFalse, "SourceNotReady", err.Error())
 	SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeReady, metav1.ConditionFalse,
-		"ValidationFailed", err.Error())
+		"SourceNotReady", err.Error())
 
 	if r.Recorder != nil {
 		r.Recorder.Event(arenaJob, corev1.EventTypeWarning, ArenaJobEventReasonConfigNotReady, err.Error())
 	}
 
 	if statusErr := r.Status().Update(ctx, arenaJob); statusErr != nil {
-		log.Error(statusErr, "failed to update status after validation error")
+		log.Error(statusErr, "failed to update status while waiting for source")
 	}
 }
 

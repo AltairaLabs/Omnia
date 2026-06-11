@@ -95,7 +95,7 @@ var _ = Describe("ArenaJob Controller", func() {
 			}
 		})
 
-		It("should set Failed phase and SourceValid condition to false", func() {
+		It("should stay Pending and requeue (a missing source is transient, not terminal)", func() {
 			By("reconciling the ArenaJob")
 			fakeRecorder := record.NewFakeRecorder(10)
 			reconciler := &ArenaJobReconciler{
@@ -104,13 +104,16 @@ var _ = Describe("ArenaJob Controller", func() {
 				Recorder: fakeRecorder,
 			}
 
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "missing-source-job",
 					Namespace: arenaJobNamespace,
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+
+			By("requeueing so the job retries when the source appears")
+			Expect(result.RequeueAfter).To(Equal(arenaSourceRetryInterval))
 
 			By("checking the updated status")
 			updatedJob := &omniav1alpha1.ArenaJob{}
@@ -119,12 +122,69 @@ var _ = Describe("ArenaJob Controller", func() {
 				Namespace: arenaJobNamespace,
 			}, updatedJob)).To(Succeed())
 
-			Expect(updatedJob.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhaseFailed))
+			// Not terminal: a Failed phase here would be ignored forever by the
+			// terminal-phase skip guard, stranding the job once the source appears.
+			Expect(updatedJob.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhasePending))
 
 			By("checking the SourceValid condition")
 			condition := meta.FindStatusCondition(updatedJob.Status.Conditions, ArenaJobConditionTypeSourceValid)
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(condition.Reason).To(Equal("SourceNotReady"))
+		})
+
+		It("should recover to Running once the source is created (watch re-trigger path)", func() {
+			By("reconciling once with the source missing")
+			fakeRecorder := record.NewFakeRecorder(10)
+			reconciler := &ArenaJobReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: fakeRecorder,
+			}
+			req := reconcile.Request{NamespacedName: types.NamespacedName{
+				Name:      "missing-source-job",
+				Namespace: arenaJobNamespace,
+			}}
+			_, err := reconciler.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating the previously-missing ArenaSource with a fetched artifact")
+			recoverySource := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "nonexistent-source",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
+					Interval: "5m",
+					ConfigMap: &corev1alpha1.ConfigMapSource{
+						Name: "recovery-bundle",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, recoverySource)).To(Succeed())
+			recoverySource.Status.Phase = omniav1alpha1.ArenaSourcePhaseReady
+			recoverySource.Status.Artifact = &omniav1alpha1.Artifact{
+				Revision:       "recovery-source-rev",
+				LastUpdateTime: metav1.Now(),
+			}
+			Expect(k8sClient.Status().Update(ctx, recoverySource)).To(Succeed())
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, recoverySource)
+			})
+
+			By("reconciling again — the previously-Pending job must now progress")
+			// Worker-creation success is covered elsewhere; here we only assert the
+			// job is no longer stranded: it re-validates the now-present source and
+			// is not left in the terminal Failed phase.
+			_, _ = reconciler.Reconcile(ctx, req)
+
+			updatedJob := &omniav1alpha1.ArenaJob{}
+			Expect(k8sClient.Get(ctx, req.NamespacedName, updatedJob)).To(Succeed())
+			Expect(updatedJob.Status.Phase).NotTo(Equal(omniav1alpha1.ArenaJobPhaseFailed))
+			condition := meta.FindStatusCondition(updatedJob.Status.Conditions, ArenaJobConditionTypeSourceValid)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
 		})
 	})
 
@@ -192,20 +252,23 @@ var _ = Describe("ArenaJob Controller", func() {
 			}
 		})
 
-		It("should set Failed phase due to source not ready", func() {
+		It("should stay Pending and requeue while the source has no artifact yet", func() {
 			By("reconciling the ArenaJob")
 			reconciler := &ArenaJobReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}
 
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "pending-source-job",
 					Namespace: arenaJobNamespace,
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+
+			By("requeueing so the job retries when the source finishes fetching")
+			Expect(result.RequeueAfter).To(Equal(arenaSourceRetryInterval))
 
 			By("checking the updated status")
 			updatedJob := &omniav1alpha1.ArenaJob{}
@@ -214,7 +277,8 @@ var _ = Describe("ArenaJob Controller", func() {
 				Namespace: arenaJobNamespace,
 			}, updatedJob)).To(Succeed())
 
-			Expect(updatedJob.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhaseFailed))
+			// A source mid-fetch (no artifact yet) is transient, not terminal.
+			Expect(updatedJob.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhasePending))
 		})
 	})
 
@@ -753,20 +817,23 @@ var _ = Describe("ArenaJob Controller", func() {
 			}
 		})
 
-		It("should set Failed phase due to source error", func() {
+		It("should stay Pending and requeue while the source is in Error with no artifact", func() {
 			By("reconciling the ArenaJob")
 			reconciler := &ArenaJobReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}
 
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "error-source-job",
 					Namespace: arenaJobNamespace,
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+
+			By("requeueing so the job retries if the source recovers a valid artifact")
+			Expect(result.RequeueAfter).To(Equal(arenaSourceRetryInterval))
 
 			By("checking the updated status")
 			updatedJob := &omniav1alpha1.ArenaJob{}
@@ -775,7 +842,9 @@ var _ = Describe("ArenaJob Controller", func() {
 				Namespace: arenaJobNamespace,
 			}, updatedJob)).To(Succeed())
 
-			Expect(updatedJob.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhaseFailed))
+			// Not terminal: a failed fetch may recover, and stranding the job in
+			// Failed would defeat the ArenaSource watch meant to re-trigger it.
+			Expect(updatedJob.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhasePending))
 		})
 	})
 

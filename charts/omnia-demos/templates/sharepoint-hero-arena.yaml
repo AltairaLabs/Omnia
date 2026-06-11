@@ -32,9 +32,14 @@ metadata:
 spec:
   type: {{ $hero.loadtest.selfplay.type }}
   model: {{ $hero.loadtest.selfplay.model }}
+  {{- if eq $hero.loadtest.selfplay.type "ollama" }}
+  # Self-hosted Ollama (chat instance) — no external credential needed.
+  baseURL: http://{{ $hero.loadtest.selfplay.ollamaService | default "ollama-chat" }}.{{ $ns }}:11434
+  {{- else }}
   credential:
     secretRef:
       name: {{ $hero.loadtest.selfplay.secretRef }}
+  {{- end }}
 ---
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ArenaSource
