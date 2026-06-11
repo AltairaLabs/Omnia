@@ -1182,6 +1182,69 @@ func TestLoadFromCRD_MemoryRetrievalConfig(t *testing.T) {
 	})
 }
 
+// TestLoadFromNamedProviders_ExtraProviders verifies that the default llm
+// entry is flattened into the scalar Config fields unchanged, while every
+// other spec.providers[] entry is resolved into cfg.ExtraProviders keyed by
+// its effective role.
+func TestLoadFromNamedProviders_ExtraProviders(t *testing.T) {
+	llmProvider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llm-provider",
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.ProviderSpec{
+			Type:  v1alpha1.ProviderTypeOpenAI,
+			Model: "gpt-4o",
+		},
+	}
+
+	inferenceProvider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "inference-provider",
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.ProviderSpec{
+			Type:  v1alpha1.ProviderTypeHuggingFace,
+			Model: "meta-llama/Llama-3.1-8B-Instruct",
+			Role:  v1alpha1.ProviderRoleInference,
+		},
+	}
+
+	c := buildTestClient(llmProvider, inferenceProvider)
+
+	providers := []v1alpha1.NamedProviderRef{
+		{
+			Name:        "default",
+			ProviderRef: v1alpha1.ProviderRef{Name: "llm-provider"},
+		},
+		{
+			Name:        "inference",
+			ProviderRef: v1alpha1.ProviderRef{Name: "inference-provider"},
+		},
+	}
+
+	cfg := &Config{}
+	err := loadFromNamedProviders(context.Background(), c, cfg, providers, "test-ns")
+	require.NoError(t, err)
+
+	// Default llm entry flattened into the scalar fields, unchanged behavior.
+	assert.Equal(t, "openai", cfg.ProviderType)
+	assert.Equal(t, "gpt-4o", cfg.Model)
+	assert.Equal(t, "llm-provider", cfg.ProviderRefName)
+
+	// The non-default entry is carried through as an ExtraProvider.
+	require.Len(t, cfg.ExtraProviders, 1)
+	extra := cfg.ExtraProviders[0]
+	assert.Equal(t, v1alpha1.ProviderRoleInference, extra.Role)
+	require.NotNil(t, extra.Provider)
+	assert.Equal(t, "inference-provider", extra.Provider.Name)
+
+	// The default llm must NOT appear in ExtraProviders.
+	for _, ep := range cfg.ExtraProviders {
+		assert.NotEqual(t, "llm-provider", ep.Provider.Name)
+	}
+}
+
 func strPtr(s string) *string {
 	return &s
 }
