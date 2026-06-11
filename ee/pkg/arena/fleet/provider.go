@@ -41,6 +41,16 @@ type connEntry struct {
 	mu        sync.Mutex
 }
 
+// TokenSource mints a Bearer credential attached to the agent WS handshake.
+// The facade's mgmt-plane validator rejects unauthenticated upgrades when
+// active (the C-3 strict-auth default), so a load/self-play test dialing a
+// real agent must present a token. A nil source leaves the dial
+// unauthenticated — correct for installs that don't enforce mgmt-plane auth
+// (anonymous Arena E2E). The *mgmtplane.TokenFetcher satisfies this.
+type TokenSource interface {
+	Token(agent, workspace string) (string, error)
+}
+
 // Provider implements providers.Provider by wrapping the facade WebSocket protocol.
 // It maintains a pool of WebSocket connections keyed by conversation ID so that
 // each arena run gets its own facade session and runs can execute in parallel.
@@ -57,6 +67,31 @@ type Provider struct {
 	conns    map[string]*connEntry // conversation_id → connection
 	fallback *connEntry            // default connection from Connect()
 	lastTTFT time.Duration         // TTFT from the most recent Predict call
+
+	// Auth attached to every WS dial. Set once via SetAuth before Connect;
+	// guarded by mu because dial() reads them outside the caller's lock.
+	tokenSource   TokenSource
+	authAgent     string
+	authWorkspace string
+}
+
+// SetAuth configures the mgmt-plane Bearer credential attached to every WS dial
+// (agent + workspace identify the token the dashboard mints). Call before
+// Connect. A nil source disables the Authorization header.
+func (p *Provider) SetAuth(ts TokenSource, agent, workspace string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.tokenSource = ts
+	p.authAgent = agent
+	p.authWorkspace = workspace
+}
+
+// authConfig returns the dial-time auth fields under the lock (dial runs
+// outside the caller's lock, so reads must be synchronized with SetAuth).
+func (p *Provider) authConfig() (TokenSource, string, string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.tokenSource, p.authAgent, p.authWorkspace
 }
 
 // NewProvider creates a new fleet provider targeting the given WebSocket URL.
@@ -91,6 +126,13 @@ func (p *Provider) Connect(ctx context.Context) error {
 // dial opens a new WebSocket connection and returns a connEntry.
 func (p *Provider) dial(ctx context.Context) (*connEntry, error) {
 	headers := traceHeaders(ctx)
+	if ts, agent, workspace := p.authConfig(); ts != nil {
+		token, err := ts.Token(agent, workspace)
+		if err != nil {
+			return nil, fmt.Errorf("failed to obtain mgmt-plane token for agent %q: %w", agent, err)
+		}
+		headers.Set("Authorization", "Bearer "+token)
+	}
 	conn, err := p.dialer.DialContext(ctx, p.wsURL, headers)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to agent: %w", err)
