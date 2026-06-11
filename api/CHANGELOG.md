@@ -10,6 +10,17 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (memory-api: configurable embedding dimension, #1309)
+
+- **`POST /admin/embedding-dimension-change`** (new, memory-api): records one-shot
+  consent to change the memory embedding vector dimension. Body
+  `{"target_dim": <int 1..2000>}`. Returns `200 {"status":"consent recorded","target_dim":N}`.
+  The embedding columns are now application-managed (sized to the configured
+  embedding provider's `Dimensions()` by a startup reconciler), so a dimension
+  change that would discard existing embeddings requires this conscious, single-use
+  consent marker — consumed atomically by the reconciler on the next reshape.
+  `400` on a missing/out-of-range `target_dim`; `503` when the recorder is unwired.
+
 ### Added (session-api: provider usage tracking + per-CRD attribution, #1301)
 
 - **`POST /api/v1/provider-usage`** (new): records workspace-scoped, session-less

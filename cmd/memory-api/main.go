@@ -776,7 +776,10 @@ func buildAPIMux(
 		auditHandler = eeaudit.NewHandler(auditLogger, log)
 	}
 
-	handler := memoryapi.NewHandler(svc, log)
+	handler := memoryapi.NewHandler(svc, log).
+		WithDimensionConsentRecorder(func(ctx context.Context, targetDim int, createdBy string) error {
+			return memorypg.InsertDimensionChangeConsent(ctx, pool, targetDim, createdBy)
+		})
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)

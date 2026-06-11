@@ -9,9 +9,29 @@ and searches memory entries with optional semantic search via embeddings.
 
 - Memory entity lifecycle (save, retrieve, search, forget)
 - Embedding generation (via Provider CRD reference)
+- Embedding schema (the `vector(N)` columns + indexes — application-managed, see below)
 - Consent grant management
 - Memory retention/TTL enforcement
 - Privacy/deletion processing
+
+## Embedding schema (reconciler-owned, #1309)
+
+The `memory_entities.embedding` and `memory_observations.embedding` pgvector
+columns are NOT created by the SQL migrations. Their dimension must match the
+configured embedding provider, which isn't known until startup, so the migration
+can't hardcode it. `EnsureEmbeddingSchema`
+(`internal/memory/postgres/embedding_schema.go`) runs once at startup — after
+migrations, after the provider is built — and brings both columns to
+`provider.Dimensions()` (falling back to 1536 when no provider is configured, so
+the columns still exist for consolidation dup-detection). It is the single source
+of truth for the embedding-column shape; the migrations are the source of truth
+for everything else.
+
+Changing the dimension on a store that already holds embeddings discards them
+(every vector must be re-embedded). That path is gated by a single-use consent
+marker (`memory_embedding_dim_change_consent`) naming the exact target dimension,
+recorded via `POST /admin/embedding-dimension-change` and consumed atomically by
+the reconciler on the next reshape. Empty/fresh columns reshape with no consent.
 
 ## Inputs
 
@@ -34,6 +54,9 @@ and searches memory entries with optional semantic search via embeddings.
     `virtual_user_id` / `agent_id` columns.
   - `GET /api/v1/privacy/consent/stats` (EE only) — workspace-wide consent
     posture for the operator dashboard.
+  - `POST /admin/embedding-dimension-change` — records one-shot consent to change
+    the embedding vector dimension (`{"target_dim": <1..2000>}`). See "Embedding
+    schema" below (#1309).
   - All memory list responses (`/api/v1/memories`, `/memories/search`,
     `/memories/export`, `/institutional/memories`, `/agent-memories`) carry a
     derived `tier` field (institutional / agent / user) on each row (#1017).
