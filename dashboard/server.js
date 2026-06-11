@@ -729,17 +729,14 @@ app.prepare().then(() => {
       // — every other service holds only its own SA token, which the
       // TokenReview API authenticates without ever leaving the cluster.
       if (parsedUrl.pathname === SERVICE_TOKEN_PATH) {
-        if (!mgmtPlaneSigningKey || SERVICE_TOKEN_ALLOWLIST.size === 0) {
-          // No key configured (test/dev) or no allowlist (no
-          // service principals expected). Return 503 so callers
-          // surface a config error rather than silently retrying.
+        if (!mgmtPlaneSigningKey) {
+          // No signing key (test/dev) — nothing can be minted. Return 503 so
+          // callers surface a config error rather than silently retrying. An
+          // empty static allowlist is fine: the Workspace-gated path still
+          // authorizes workspace SAs (e.g. the Arena worker).
           res.writeHead(503, { "Content-Type": "application/json" });
           res.end(
-            JSON.stringify({
-              error: mgmtPlaneSigningKey
-                ? "OMNIA_DASHBOARD_SERVICE_TOKEN_ALLOWED_SAS is empty — no service principals are permitted to mint"
-                : "mgmt-plane signing key not configured",
-            }),
+            JSON.stringify({ error: "mgmt-plane signing key not configured" }),
           );
           return;
         }

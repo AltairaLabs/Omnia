@@ -1,0 +1,27 @@
+suite: arena-controller mgmt-plane token wiring (#1324)
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/arena-controller-deployment.yaml
+tests:
+  - it: wires the dashboard service-token URL when the dashboard is enabled
+    set:
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+      dashboard.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --mgmt-plane-token-url=http://omnia-dashboard.NAMESPACE.svc.cluster.local:3000/api/auth/service-token
+
+  - it: omits the flag when the dashboard is disabled (no mgmt-plane enforcement)
+    set:
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+      dashboard.enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --mgmt-plane-token-url=http://omnia-dashboard.NAMESPACE.svc.cluster.local:3000/api/auth/service-token

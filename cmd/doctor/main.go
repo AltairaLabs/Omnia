@@ -19,6 +19,7 @@ import (
 	"github.com/altairalabs/omnia/internal/doctor"
 	"github.com/altairalabs/omnia/internal/doctor/checks"
 	memoryhttpclient "github.com/altairalabs/omnia/internal/memory/httpclient"
+	"github.com/altairalabs/omnia/internal/mgmtplane"
 	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/altairalabs/omnia/pkg/logging"
@@ -138,9 +139,9 @@ func main() {
 	// is OK for installs without service principals) with "Doctor
 	// misconfigured" (which is the case we want loud at first dial).
 	// Token retrieval / SA-token read happens inside Token().
-	var mgmtPlaneFetcher *MgmtPlaneTokenFetcher
+	var mgmtPlaneFetcher *mgmtplane.TokenFetcher
 	if *mgmtPlaneTokenURL != "" {
-		f, fetchErr := NewMgmtPlaneTokenFetcher(MgmtPlaneTokenFetcherOptions{
+		f, fetchErr := mgmtplane.NewTokenFetcher(mgmtplane.FetcherOptions{
 			Endpoint: *mgmtPlaneTokenURL,
 		})
 		if fetchErr != nil {
@@ -249,7 +250,7 @@ type runnerConfig struct {
 	// the WS dial proceeds without an Authorization header, which is
 	// fine for installs that don't enforce mgmt-plane validation
 	// (Arena E2E, anonymous test setups).
-	mgmtPlaneFetcher *MgmtPlaneTokenFetcher
+	mgmtPlaneFetcher *mgmtplane.TokenFetcher
 }
 
 // buildRunner constructs a fresh doctor.Runner with all checks

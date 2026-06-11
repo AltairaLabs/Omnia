@@ -16,7 +16,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package mgmtplane
 
 import (
 	"encoding/json"
@@ -32,8 +32,7 @@ import (
 	"time"
 )
 
-// writeSAToken makes a temp file holding a fake SA token and returns
-// its path.
+// writeSAToken makes a temp file holding a fake SA token and returns its path.
 func writeSAToken(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "token")
@@ -43,8 +42,8 @@ func writeSAToken(t *testing.T, content string) string {
 	return path
 }
 
-func TestNewMgmtPlaneTokenFetcher_RequiresEndpoint(t *testing.T) {
-	if _, err := NewMgmtPlaneTokenFetcher(MgmtPlaneTokenFetcherOptions{}); err == nil {
+func TestNewTokenFetcher_RequiresEndpoint(t *testing.T) {
+	if _, err := NewTokenFetcher(FetcherOptions{}); err == nil {
 		t.Fatal("expected error for empty Endpoint")
 	}
 }
@@ -67,7 +66,7 @@ func TestToken_RoundtripsWithDashboard(t *testing.T) {
 	}))
 	defer server.Close()
 
-	f, err := NewMgmtPlaneTokenFetcher(MgmtPlaneTokenFetcherOptions{
+	f, err := NewTokenFetcher(FetcherOptions{
 		Endpoint:                server.URL,
 		ServiceAccountTokenPath: saTokenPath,
 	})
@@ -98,7 +97,7 @@ func TestToken_TrimsSATokenWhitespace(t *testing.T) {
 		_, _ = w.Write([]byte(`{"token":"t","expires_at":99999}`))
 	}))
 	defer server.Close()
-	f, _ := NewMgmtPlaneTokenFetcher(MgmtPlaneTokenFetcherOptions{
+	f, _ := NewTokenFetcher(FetcherOptions{
 		Endpoint:                server.URL,
 		ServiceAccountTokenPath: saTokenPath,
 	})
@@ -123,7 +122,7 @@ func TestToken_CachedWhenSameAgentWorkspace(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"token":"t-%d","expires_at":%d}`, calls, exp)
 	}))
 	defer server.Close()
-	f, _ := NewMgmtPlaneTokenFetcher(MgmtPlaneTokenFetcherOptions{
+	f, _ := NewTokenFetcher(FetcherOptions{
 		Endpoint:                server.URL,
 		ServiceAccountTokenPath: saTokenPath,
 	})
@@ -147,7 +146,7 @@ func TestToken_FreshWhenAgentChanges(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"token":"t-%d","expires_at":%d}`, n, exp)
 	}))
 	defer server.Close()
-	f, _ := NewMgmtPlaneTokenFetcher(MgmtPlaneTokenFetcherOptions{
+	f, _ := NewTokenFetcher(FetcherOptions{
 		Endpoint:                server.URL,
 		ServiceAccountTokenPath: saTokenPath,
 	})
@@ -169,7 +168,7 @@ func TestToken_FreshWhenCacheExpired(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"token":"t-%d","expires_at":%d}`, n, exp)
 	}))
 	defer server.Close()
-	f, _ := NewMgmtPlaneTokenFetcher(MgmtPlaneTokenFetcherOptions{
+	f, _ := NewTokenFetcher(FetcherOptions{
 		Endpoint:                server.URL,
 		ServiceAccountTokenPath: saTokenPath,
 	})
@@ -191,7 +190,7 @@ func TestToken_SurfacesDashboardError(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"sa not in allowlist"}`))
 	}))
 	defer server.Close()
-	f, _ := NewMgmtPlaneTokenFetcher(MgmtPlaneTokenFetcherOptions{
+	f, _ := NewTokenFetcher(FetcherOptions{
 		Endpoint:                server.URL,
 		ServiceAccountTokenPath: saTokenPath,
 	})
@@ -211,7 +210,7 @@ func TestToken_RejectsEmptyTokenInResponse(t *testing.T) {
 		_, _ = w.Write([]byte(`{"token":"","expires_at":1234}`))
 	}))
 	defer server.Close()
-	f, _ := NewMgmtPlaneTokenFetcher(MgmtPlaneTokenFetcherOptions{
+	f, _ := NewTokenFetcher(FetcherOptions{
 		Endpoint:                server.URL,
 		ServiceAccountTokenPath: saTokenPath,
 	})
@@ -221,7 +220,7 @@ func TestToken_RejectsEmptyTokenInResponse(t *testing.T) {
 }
 
 func TestToken_NilReceiver(t *testing.T) {
-	var f *MgmtPlaneTokenFetcher
+	var f *TokenFetcher
 	if _, err := f.Token("a", "w"); err == nil {
 		t.Fatal("expected error on nil receiver")
 	}
@@ -233,7 +232,7 @@ func TestToken_MissingSATokenFile(t *testing.T) {
 		_, _ = w.Write([]byte(`{"token":"t","expires_at":99999}`))
 	}))
 	defer server.Close()
-	f, _ := NewMgmtPlaneTokenFetcher(MgmtPlaneTokenFetcherOptions{
+	f, _ := NewTokenFetcher(FetcherOptions{
 		Endpoint:                server.URL,
 		ServiceAccountTokenPath: "/tmp/this-path-does-not-exist-for-sure",
 	})

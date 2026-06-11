@@ -112,6 +112,13 @@ spec:
             - --workspace-content-path=
             {{- end }}
             - --workspace-content-scoped={{ .Values.workspaceContent.scoped | default false }}
+            {{- if .Values.dashboard.enabled }}
+            # Injected onto worker pods as OMNIA_MGMT_PLANE_SERVICE_TOKEN_URL so
+            # fleet-mode loadtests mint a mgmt-plane JWT (via their SA token) to
+            # authenticate WS dials to agent facades. The dashboard is the sole
+            # signing-key holder; only set when the dashboard ships.
+            - --mgmt-plane-token-url={{ .Values.dashboard.serviceTokenUrl | default (printf "http://%s.%s.svc.cluster.local:%d/api/auth/service-token" (include "omnia.dashboard.fullname" .) .Release.Namespace (int .Values.dashboard.service.port)) }}
+            {{- end }}
             {{- if .Values.devMode }}
             - --dev-mode
             {{- end }}

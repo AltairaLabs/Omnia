@@ -108,6 +108,13 @@ type Config struct {
 	SessionAPIURL string // Optional session-api URL for recording arena sessions
 	WorkspaceName string // Workspace name (resolved from namespace label)
 
+	// MgmtPlaneTokenURL is the dashboard's /api/auth/service-token endpoint.
+	// When set, the worker fetches a mgmt-plane JWT (presenting its own SA
+	// token) and attaches it as a Bearer credential on fleet-mode WS dials, so
+	// it can authenticate to agent facades that enforce mgmt-plane auth. Empty
+	// → fleet dials are unauthenticated (installs without enforcement).
+	MgmtPlaneTokenURL string
+
 	// Worker configuration
 	WorkDir       string
 	PollInterval  time.Duration
@@ -165,20 +172,21 @@ type AssertionResult struct {
 
 func loadConfig() (*Config, error) {
 	cfg := &Config{
-		JobName:        os.Getenv("ARENA_JOB_NAME"),
-		JobNamespace:   os.Getenv("ARENA_JOB_NAMESPACE"),
-		ConfigName:     os.Getenv("ARENA_CONFIG_NAME"),
-		JobType:        os.Getenv("ARENA_JOB_TYPE"),
-		ContentPath:    os.Getenv("ARENA_CONTENT_PATH"),
-		ContentVersion: os.Getenv("ARENA_CONTENT_VERSION"),
-		ConfigFile:     os.Getenv("ARENA_CONFIG_FILE"), // Config file name in content path
-		SessionAPIURL:  os.Getenv("SESSION_API_URL"),
-		WorkspaceName:  os.Getenv("ARENA_WORKSPACE_NAME"),
-		RedisURL:       os.Getenv("REDIS_URL"),
-		WorkDir:        getEnvOrDefault("ARENA_WORK_DIR", "/tmp/arena"),
-		PollInterval:   getDurationEnv("ARENA_POLL_INTERVAL", 100*time.Millisecond),
-		ShutdownDelay:  getDurationEnv("ARENA_SHUTDOWN_DELAY", 65*time.Second),
-		Verbose:        os.Getenv("ARENA_VERBOSE") == "true",
+		JobName:           os.Getenv("ARENA_JOB_NAME"),
+		JobNamespace:      os.Getenv("ARENA_JOB_NAMESPACE"),
+		ConfigName:        os.Getenv("ARENA_CONFIG_NAME"),
+		JobType:           os.Getenv("ARENA_JOB_TYPE"),
+		ContentPath:       os.Getenv("ARENA_CONTENT_PATH"),
+		ContentVersion:    os.Getenv("ARENA_CONTENT_VERSION"),
+		ConfigFile:        os.Getenv("ARENA_CONFIG_FILE"), // Config file name in content path
+		SessionAPIURL:     os.Getenv("SESSION_API_URL"),
+		WorkspaceName:     os.Getenv("ARENA_WORKSPACE_NAME"),
+		MgmtPlaneTokenURL: os.Getenv("OMNIA_MGMT_PLANE_SERVICE_TOKEN_URL"),
+		RedisURL:          os.Getenv("REDIS_URL"),
+		WorkDir:           getEnvOrDefault("ARENA_WORK_DIR", "/tmp/arena"),
+		PollInterval:      getDurationEnv("ARENA_POLL_INTERVAL", 100*time.Millisecond),
+		ShutdownDelay:     getDurationEnv("ARENA_SHUTDOWN_DELAY", 65*time.Second),
+		Verbose:           os.Getenv("ARENA_VERBOSE") == "true",
 	}
 
 	cfg.VUsPerWorker = getIntEnvOrDefault("ARENA_VUS_PER_WORKER", 1)
@@ -590,7 +598,13 @@ func executeWorkItem(
 	// Connect fleet providers to their agent WebSocket endpoints.
 	// The factory created them but didn't connect (no context available at factory time).
 	if len(crdFleetProviders) > 0 {
-		if err := connectFleetProviders(ctx, log, providerRegistry, crdFleetProviders); err != nil {
+		fleetTokenSource, tokErr := buildFleetTokenSource(log, cfg.MgmtPlaneTokenURL)
+		if tokErr != nil {
+			return nil, tokErr
+		}
+		if err := connectFleetProviders(
+			ctx, log, providerRegistry, crdFleetProviders, fleetTokenSource, cfg.WorkspaceName,
+		); err != nil {
 			return nil, fmt.Errorf("failed to connect fleet providers: %w", err)
 		}
 		defer closeFleetProviders(providerRegistry, crdFleetProviders)

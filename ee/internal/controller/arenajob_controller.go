@@ -149,6 +149,12 @@ type ArenaJobReconciler struct {
 	TracingEnabled bool
 	// TracingEndpoint is the OTLP gRPC endpoint for arena worker tracing.
 	TracingEndpoint string
+
+	// MgmtPlaneTokenURL is the dashboard's /api/auth/service-token endpoint.
+	// Injected onto worker pods as OMNIA_MGMT_PLANE_SERVICE_TOKEN_URL so they
+	// can mint mgmt-plane JWTs to authenticate fleet-mode WS dials to agent
+	// facades. Empty disables fleet dial auth.
+	MgmtPlaneTokenURL string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs,verbs=get;list;watch;create;update;patch;delete
@@ -360,6 +366,21 @@ func (r *ArenaJobReconciler) buildRedisURLEnvVar() []corev1.EnvVar {
 		}}
 	}
 	return nil
+}
+
+// buildMgmtPlaneTokenEnvVar returns the OMNIA_MGMT_PLANE_SERVICE_TOKEN_URL env
+// var for worker pods when the operator was configured with the dashboard's
+// service-token endpoint. The worker uses it to mint a mgmt-plane JWT (via its
+// own SA token) and authenticate fleet-mode WS dials to agent facades. Empty
+// config → no env var → fleet dials proceed unauthenticated.
+func (r *ArenaJobReconciler) buildMgmtPlaneTokenEnvVar() []corev1.EnvVar {
+	if r.MgmtPlaneTokenURL == "" {
+		return nil
+	}
+	return []corev1.EnvVar{{
+		Name:  "OMNIA_MGMT_PLANE_SERVICE_TOKEN_URL",
+		Value: r.MgmtPlaneTokenURL,
+	}}
 }
 
 // getJobName returns the name for the K8s Job.
@@ -751,6 +772,9 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	// arena-worker binary picks the URL up via REDIS_URL env fallback
 	// on its --redis-url flag.
 	env = append(env, r.buildRedisURLEnvVar()...)
+
+	// Authenticate fleet-mode WS dials (mgmt-plane token URL → worker env).
+	env = append(env, r.buildMgmtPlaneTokenEnvVar()...)
 
 	// Add verbose flag for debug logging
 	if arenaJob.Spec.Verbose {

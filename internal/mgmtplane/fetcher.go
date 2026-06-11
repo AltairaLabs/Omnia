@@ -16,7 +16,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+// Package mgmtplane provides a shared client for obtaining mgmt-plane JWTs
+// from the dashboard's /api/auth/service-token endpoint. In-cluster services
+// (Doctor, the Arena loadtest worker) present their kubelet-projected
+// ServiceAccount token; the dashboard validates it via TokenReview, authorizes
+// the caller, and mints a short-lived RS256 mgmt-plane JWT signed by the only
+// private-key copy in the cluster. Callers attach the returned JWT as
+// Authorization: Bearer when dialing an agent facade whose mgmt-plane validator
+// is active.
+package mgmtplane
 
 import (
 	"bytes"
@@ -31,21 +39,23 @@ import (
 	"time"
 )
 
-// MgmtPlaneTokenFetcher trades the kubelet-mounted service-account
-// token for a fresh mgmt-plane JWT minted by the dashboard. Replaces
-// the previous local minter, which had to mount the dashboard's
-// signing keypair into Doctor — duplicating private key material that
-// the JWKS architecture is designed to keep in a single pod.
+// TokenSource mints a fresh mgmt-plane JWT for the supplied agent + workspace
+// pair. Implementations are expected to cache when safe — callers may invoke
+// this on every WS dial.
+type TokenSource interface {
+	Token(agent, workspace string) (string, error)
+}
+
+// TokenFetcher trades the kubelet-mounted service-account token for a fresh
+// mgmt-plane JWT minted by the dashboard. Keeping the dashboard the sole minter
+// means no service has to mount the signing keypair — the JWKS architecture is
+// designed to keep the private key in a single pod.
 //
 // The fetcher caches the returned JWT until just before its expiry
-// (reuseSafetyMargin) so a single Doctor run reuses one signature
-// across ~6 WS dials without re-hitting the dashboard. On expiry or
-// agent/workspace change, a fresh token is fetched.
-//
-// Implements MgmtPlaneTokenSource so AgentChecker keeps the same
-// wiring shape — only the constructor changes at the cmd/doctor
-// boot site.
-type MgmtPlaneTokenFetcher struct {
+// (reuseSafetyMargin) so a run reuses one signature across many WS dials without
+// re-hitting the dashboard. On expiry or agent/workspace change, a fresh token
+// is fetched.
+type TokenFetcher struct {
 	endpoint    string
 	saTokenPath string
 	httpClient  *http.Client
@@ -55,6 +65,9 @@ type MgmtPlaneTokenFetcher struct {
 	cached cachedFetchedToken
 }
 
+// compile-time assertion that TokenFetcher satisfies TokenSource.
+var _ TokenSource = (*TokenFetcher)(nil)
+
 type cachedFetchedToken struct {
 	token   string
 	agent   string
@@ -62,63 +75,57 @@ type cachedFetchedToken struct {
 	expires time.Time
 }
 
-// MgmtPlaneTokenFetcherOptions configures the fetcher.
-type MgmtPlaneTokenFetcherOptions struct {
+// FetcherOptions configures the fetcher.
+type FetcherOptions struct {
 	// Endpoint is the dashboard's service-token URL, e.g.
 	// http://omnia-dashboard.omnia-system.svc.cluster.local:3000/api/auth/service-token.
 	// Required.
 	Endpoint string
-	// ServiceAccountTokenPath overrides the default kubelet mount
-	// path. Tests inject a temp file; production leaves this empty.
+	// ServiceAccountTokenPath overrides the default kubelet mount path.
+	// Tests inject a temp file; production leaves this empty.
 	ServiceAccountTokenPath string
 	// HTTPClient overrides the default 5-second-timeout client.
 	HTTPClient *http.Client
 }
 
-// defaultServiceAccountTokenPath is the kubelet-projected path inside
-// every pod with a ServiceAccount mount. Always present in-cluster;
-// missing only in tests, where the caller injects an alternative.
-const defaultServiceAccountTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+// DefaultServiceAccountTokenPath is the kubelet-projected path inside every pod
+// with a ServiceAccount mount. Always present in-cluster; missing only in tests,
+// where the caller injects an alternative.
+const DefaultServiceAccountTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 
-// fetcherRequestTimeout caps a single dashboard call. The endpoint
-// does a TokenReview round-trip + an RS256 sign, neither of which
-// should take more than a couple of seconds; 5s leaves headroom for
-// busy clusters without holding up Doctor's per-test timeouts.
+// fetcherRequestTimeout caps a single dashboard call. The endpoint does a
+// TokenReview round-trip + an RS256 sign, neither of which should take more than
+// a couple of seconds; 5s leaves headroom for busy clusters.
 const fetcherRequestTimeout = 5 * time.Second
 
-// reuseSafetyMargin is the slack subtracted from a cached token's
-// expiry before it's considered "still good to reuse". Without it the
-// fetcher could hand out a token that's about to expire mid-handshake.
+// reuseSafetyMargin is the slack subtracted from a cached token's expiry before
+// it's considered "still good to reuse". Without it the fetcher could hand out a
+// token that's about to expire mid-handshake.
 const reuseSafetyMargin = 30 * time.Second
 
-// defaultMgmtPlaneTTL is the fallback TTL applied when the dashboard
-// response omits expires_at — in practice it always sets it, but we
-// don't trust the cap to "no expiry" if it doesn't.
+// defaultMgmtPlaneTTL is the fallback TTL applied when the dashboard response
+// omits expires_at — in practice it always sets it, but we don't trust the cap
+// to "no expiry" if it doesn't.
 const defaultMgmtPlaneTTL = 5 * time.Minute
 
-// NewMgmtPlaneTokenFetcher builds a fetcher. Returns an error when
-// Endpoint is empty — there's no useful default since service URLs
-// vary per cluster.
+// NewTokenFetcher builds a fetcher. Returns an error when Endpoint is empty —
+// there's no useful default since service URLs vary per cluster.
 //
-// The fetcher does NOT make a request at construction; the first
-// Token() call exercises the full path. Boot-time validation of the
-// dashboard reachability happens via the operator's existing health
-// checks — failing here would conflate "no dashboard" (which is OK
-// for installs without service principals) with "Doctor misconfigured"
-// (which is the case we want loud).
-func NewMgmtPlaneTokenFetcher(opts MgmtPlaneTokenFetcherOptions) (*MgmtPlaneTokenFetcher, error) {
+// The fetcher does NOT make a request at construction; the first Token() call
+// exercises the full path.
+func NewTokenFetcher(opts FetcherOptions) (*TokenFetcher, error) {
 	if opts.Endpoint == "" {
 		return nil, errors.New("mgmt-plane fetcher: Endpoint required")
 	}
 	saTokenPath := opts.ServiceAccountTokenPath
 	if saTokenPath == "" {
-		saTokenPath = defaultServiceAccountTokenPath
+		saTokenPath = DefaultServiceAccountTokenPath
 	}
 	httpClient := opts.HTTPClient
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: fetcherRequestTimeout}
 	}
-	return &MgmtPlaneTokenFetcher{
+	return &TokenFetcher{
 		endpoint:    opts.Endpoint,
 		saTokenPath: saTokenPath,
 		httpClient:  httpClient,
@@ -126,10 +133,10 @@ func NewMgmtPlaneTokenFetcher(opts MgmtPlaneTokenFetcherOptions) (*MgmtPlaneToke
 	}, nil
 }
 
-// Token implements MgmtPlaneTokenSource. Returns a cached token when
-// the cache is bound to the same (agent, workspace) and still has
-// >= reuseSafetyMargin until expiry; otherwise fetches a fresh one.
-func (f *MgmtPlaneTokenFetcher) Token(agent, workspace string) (string, error) {
+// Token implements TokenSource. Returns a cached token when the cache is bound
+// to the same (agent, workspace) and still has >= reuseSafetyMargin until
+// expiry; otherwise fetches a fresh one.
+func (f *TokenFetcher) Token(agent, workspace string) (string, error) {
 	if f == nil {
 		return "", errors.New("mgmt-plane fetcher: nil receiver")
 	}
@@ -171,9 +178,8 @@ func (f *MgmtPlaneTokenFetcher) Token(agent, workspace string) (string, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		// Read up to 1 KB of body so the operator sees the dashboard's
-		// reason text (allowlist mismatch, TokenReview failure, etc.)
-		// in Doctor's logs without grepping the dashboard pod.
+		// Read up to 1 KB of body so the operator sees the dashboard's reason
+		// text (allowlist mismatch, TokenReview failure, etc.) in logs.
 		excerpt, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return "", fmt.Errorf(
 			"mgmt-plane fetcher: dashboard returned %d: %s",
@@ -195,9 +201,8 @@ func (f *MgmtPlaneTokenFetcher) Token(agent, workspace string) (string, error) {
 
 	expires := time.Unix(out.ExpiresAt, 0)
 	if out.ExpiresAt <= 0 {
-		// Defensive default: dashboard should always set expires_at,
-		// but a missing value should still cap the cache lifetime so
-		// we don't reuse the token forever.
+		// Defensive default: dashboard should always set expires_at, but a
+		// missing value should still cap the cache lifetime.
 		expires = now.Add(defaultMgmtPlaneTTL)
 	}
 	f.cached = cachedFetchedToken{

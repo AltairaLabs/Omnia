@@ -80,6 +80,7 @@ func main() {
 	var workspaceContentPath string
 	var workspaceStorageClass string
 	var workspaceContentScoped bool
+	var mgmtPlaneTokenURL string
 	var nfsServer string
 	var nfsPath string
 	var sessionPostgresConn string
@@ -117,6 +118,12 @@ func main() {
 			"workspace subtree, so the mount subPath is workspace-relative (no "+
 			"{workspace}/{namespace} prefix). Default false preserves the legacy "+
 			"share-root behaviour where the operator sets the full subPath.")
+	flag.StringVar(&mgmtPlaneTokenURL, "mgmt-plane-token-url", "",
+		"URL of the dashboard's service-token endpoint, injected onto arena "+
+			"worker pods as OMNIA_MGMT_PLANE_SERVICE_TOKEN_URL so they mint "+
+			"mgmt-plane JWTs to authenticate fleet-mode WS dials to agent "+
+			"facades. Typically http://omnia-dashboard.<ns>.svc.cluster.local:"+
+			"3000/api/auth/service-token. Empty leaves fleet dials unauthenticated.")
 	flag.StringVar(&nfsServer, "nfs-server", "",
 		"NFS server address for workspace content.")
 	flag.StringVar(&nfsPath, "nfs-path", "",
@@ -290,6 +297,7 @@ func main() {
 			RedisURLSecretKey:        redisURLSecretKey,
 			TracingEnabled:           tracingEnabled,
 			TracingEndpoint:          tracingEndpoint,
+			MgmtPlaneTokenURL:        mgmtPlaneTokenURL,
 			PrivacyPolicyMetrics:     newPrivacyPolicyMetrics(),
 			ReEncryptionStore:        buildReEncryptionStoreFactory(sessionPostgresConn, setupLog),
 		},

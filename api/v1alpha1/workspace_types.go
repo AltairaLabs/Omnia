@@ -396,6 +396,18 @@ type WorkspaceSpec struct {
 	// +listMapKey=name
 	// +kubebuilder:validation:MaxItems=64
 	Services []WorkspaceServiceGroup `json:"services,omitempty"`
+
+	// mgmtPlaneMintServiceAccounts lists ServiceAccount names in this
+	// workspace's namespace that may mint mgmt-plane JWTs via the dashboard's
+	// service-token endpoint (used by in-cluster tooling such as the Arena
+	// loadtest worker to authenticate to agent facades). The dashboard gates
+	// minting on a Workspace existing for the caller's namespace AND the
+	// caller's SA being listed here. When omitted, consumers default to
+	// ["arena-worker"], so the operator-created worker SA works out of the box;
+	// set this to override or extend the allowed SAs.
+	// +optional
+	// +kubebuilder:validation:MaxItems=16
+	MgmtPlaneMintServiceAccounts []string `json:"mgmtPlaneMintServiceAccounts,omitempty"`
 }
 
 // WorkspacePhase represents the current phase of a Workspace.

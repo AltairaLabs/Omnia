@@ -369,14 +369,14 @@ func TestConnectFleetProviders(t *testing.T) {
 			{id: "missing", wsURL: "ws://fake:8080/ws", group: "default"},
 		}
 
-		err := connectFleetProviders(context.Background(), testLog(), registry, fps)
+		err := connectFleetProviders(context.Background(), testLog(), registry, fps, nil, "")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not found in registry")
 	})
 
 	t.Run("no-op with empty slice", func(t *testing.T) {
 		registry := pkproviders.NewRegistry()
-		err := connectFleetProviders(context.Background(), testLog(), registry, nil)
+		err := connectFleetProviders(context.Background(), testLog(), registry, nil, nil, "")
 		require.NoError(t, err)
 	})
 
@@ -390,7 +390,7 @@ func TestConnectFleetProviders(t *testing.T) {
 			{id: "not-fleet", wsURL: "ws://fake:8080/ws", group: "default"},
 		}
 
-		err := connectFleetProviders(context.Background(), testLog(), registry, fps)
+		err := connectFleetProviders(context.Background(), testLog(), registry, fps, nil, "")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not a fleet provider")
 	})
@@ -2147,5 +2147,21 @@ func TestRemapProviderIDs_SkippedForMapMode(t *testing.T) {
 		assert.Equal(t, "selfplay", arenaCfg.LoadedProviders["selfplay"].ID)
 		assert.Equal(t, "openai", arenaCfg.LoadedProviders["selfplay"].Type)
 		assert.Len(t, arenaCfg.LoadedProviders, 1)
+	})
+}
+
+func TestBuildFleetTokenSource(t *testing.T) {
+	t.Run("nil source when URL unset", func(t *testing.T) {
+		ts, err := buildFleetTokenSource(testLog(), "")
+		require.NoError(t, err)
+		// Must be a true nil interface so the fleet provider skips the
+		// Authorization header (not a typed-nil that would 401 every dial).
+		assert.Nil(t, ts)
+	})
+
+	t.Run("fetcher when URL set", func(t *testing.T) {
+		ts, err := buildFleetTokenSource(testLog(), "http://omnia-dashboard:3000/api/auth/service-token")
+		require.NoError(t, err)
+		assert.NotNil(t, ts)
 	})
 }
