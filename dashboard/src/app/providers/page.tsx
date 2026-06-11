@@ -47,6 +47,7 @@ const ROLE_FILTERS: { value: FilterRole; label: string }[] = [
   { value: "tts", label: "TTS" },
   { value: "stt", label: "STT" },
   { value: "image", label: "Image" },
+  { value: "inference", label: "Inference" },
 ];
 
 // Pre-role Providers omit spec.role — treat them as llm for filtering and
@@ -309,6 +310,7 @@ export default function ProvidersPage() {
       tts: 0,
       stt: 0,
       image: 0,
+      inference: 0,
     };
     for (const p of namespaceFilteredProviders) {
       counts[effectiveRole(p)]++;

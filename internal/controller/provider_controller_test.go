@@ -2976,4 +2976,59 @@ var _ = Describe("Provider Controller", func() {
 			Expect(r.resolveHealthURL(p)).To(Equal("https://api.anthropic.com"))
 		})
 	})
+
+	Context("inference role × type CEL validation", func() {
+		var ctx context.Context
+
+		BeforeEach(func() {
+			ctx = context.Background()
+		})
+
+		It("accepts role inference with type huggingface", func() {
+			p := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cel-inference-hf",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type: omniav1alpha1.ProviderTypeHuggingFace,
+					Role: omniav1alpha1.ProviderRoleInference,
+				},
+			}
+			Expect(k8sClient.Create(ctx, p)).To(Succeed())
+			_ = k8sClient.Delete(ctx, p)
+		})
+
+		It("rejects role inference with type openai", func() {
+			p := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cel-inference-openai",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type: omniav1alpha1.ProviderTypeOpenAI,
+					Role: omniav1alpha1.ProviderRoleInference,
+				},
+			}
+			err := k8sClient.Create(ctx, p)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("role 'inference' requires type in [huggingface]"))
+		})
+
+		It("rejects role llm with type huggingface", func() {
+			p := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cel-llm-hf",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type: omniav1alpha1.ProviderTypeHuggingFace,
+					Role: omniav1alpha1.ProviderRoleLLM,
+				},
+			}
+			err := k8sClient.Create(ctx, p)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("huggingface is an inference-only vendor"))
+		})
+	})
 })

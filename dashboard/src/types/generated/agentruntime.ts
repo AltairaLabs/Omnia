@@ -4576,7 +4576,7 @@ export interface AgentRuntimeSpec {
      * 
      * Defaults to 'llm' for back-compat with existing AgentRuntimes
      * (which were authored before per-ref roles existed). */
-    role?: "llm" | "embedding" | "tts" | "stt" | "image";
+    role?: "llm" | "embedding" | "tts" | "stt" | "image" | "inference";
   }[];
   /** rollout configures a progressive delivery rollout for this AgentRuntime.
    * When nil, no rollout is active and all traffic goes to the current spec. */
@@ -4612,7 +4612,7 @@ export interface AgentRuntimeSpec {
          * 
          * Defaults to 'llm' for back-compat with existing AgentRuntimes
          * (which were authored before per-ref roles existed). */
-        role?: "llm" | "embedding" | "tts" | "stt" | "image";
+        role?: "llm" | "embedding" | "tts" | "stt" | "image" | "inference";
       }[];
       /** toolRegistryRef overrides the tool registry for the candidate. */
       toolRegistryRef?: {

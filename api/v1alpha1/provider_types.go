@@ -31,15 +31,13 @@ import (
 //	tts        — text-to-speech
 //	stt        — speech-to-text
 //	image      — image generation (declarable; no Omnia consumer yet)
+//	inference  — generic classify/inference providers (e.g. HuggingFace)
 //
 // Distinct from `spec.capabilities` (free-form feature tags like "vision"
 // or "streaming") — role is the kind of provider, capabilities are the
 // features it supports within that role.
 //
-// "inference" is intentionally NOT a value here so we can reuse that name
-// later for a more generic role (e.g. Hugging Face Inference Endpoints).
-//
-// +kubebuilder:validation:Enum=llm;embedding;tts;stt;image
+// +kubebuilder:validation:Enum=llm;embedding;tts;stt;image;inference
 type ProviderRole string
 
 const (
@@ -57,6 +55,10 @@ const (
 	// by the CRD but no Omnia consumer wires it through yet; reserved for
 	// future work.
 	ProviderRoleImage ProviderRole = "image"
+	// ProviderRoleInference is the role for generic inference providers that
+	// implement PromptKit's runtime/classify task interfaces (text/audio/image
+	// classifiers + embedders), e.g. HuggingFace Inference Endpoints/API.
+	ProviderRoleInference ProviderRole = "inference"
 )
 
 // TTSConfig configures a TTS-role Provider. Required when spec.role is
@@ -277,11 +279,12 @@ type AuthConfig struct {
 //   - tts:        openai | cartesia | elevenlabs
 //   - stt:        openai
 //   - image:      imagen
+//   - inference:  huggingface
 //
 // Vendors that are exclusive to a single role (voyageai → embedding,
-// cartesia/elevenlabs → tts, imagen → image) are pinned to that role so
-// CEL fails closed instead of letting an authoring mistake reach the
-// factory layer.
+// cartesia/elevenlabs → tts, imagen → image, huggingface → inference) are
+// pinned to that role so CEL fails closed instead of letting an authoring
+// mistake reach the factory layer.
 //
 // +kubebuilder:validation:XValidation:rule="(has(self.tts) ? 1 : 0) + (has(self.stt) ? 1 : 0) + (has(self.embedding) ? 1 : 0) <= 1",message="at most one of spec.tts, spec.stt, spec.embedding may be set"
 // +kubebuilder:validation:XValidation:rule="!has(self.tts) || self.role == 'tts'",message="spec.tts is only valid when spec.role is 'tts'"
@@ -292,6 +295,8 @@ type AuthConfig struct {
 // +kubebuilder:validation:XValidation:rule="self.role != 'tts' || self.type in ['openai', 'cartesia', 'elevenlabs']",message="role 'tts' requires type in [openai, cartesia, elevenlabs]"
 // +kubebuilder:validation:XValidation:rule="self.role != 'stt' || self.type in ['openai']",message="role 'stt' requires type in [openai]"
 // +kubebuilder:validation:XValidation:rule="self.role != 'image' || self.type in ['imagen']",message="role 'image' requires type in [imagen]"
+// +kubebuilder:validation:XValidation:rule="self.role != 'inference' || self.type in ['huggingface']",message="role 'inference' requires type in [huggingface]"
+// +kubebuilder:validation:XValidation:rule="self.type != 'huggingface' || self.role == 'inference'",message="huggingface is an inference-only vendor; set spec.role to 'inference'"
 // +kubebuilder:validation:XValidation:rule="self.type != 'voyageai' || self.role == 'embedding'",message="voyageai is an embedding-only vendor; set spec.role to 'embedding'"
 // +kubebuilder:validation:XValidation:rule="self.type != 'cartesia' || self.role == 'tts'",message="cartesia is a tts-only vendor; set spec.role to 'tts'"
 // +kubebuilder:validation:XValidation:rule="self.type != 'elevenlabs' || self.role == 'tts'",message="elevenlabs is a tts-only vendor; set spec.role to 'tts'"

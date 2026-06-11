@@ -349,6 +349,7 @@ spec:
                 - tts
                 - stt
                 - image
+                - inference
                 type: string
               stt:
                 description: |-
@@ -418,6 +419,7 @@ spec:
                 - cartesia
                 - elevenlabs
                 - imagen
+                - huggingface
                 type: string
             required:
             - type
@@ -446,6 +448,10 @@ spec:
               rule: self.role != 'stt' || self.type in ['openai']
             - message: role 'image' requires type in [imagen]
               rule: self.role != 'image' || self.type in ['imagen']
+            - message: role 'inference' requires type in [huggingface]
+              rule: self.role != 'inference' || self.type in ['huggingface']
+            - message: huggingface is an inference-only vendor; set spec.role to 'inference'
+              rule: self.type != 'huggingface' || self.role == 'inference'
             - message: voyageai is an embedding-only vendor; set spec.role to 'embedding'
               rule: self.type != 'voyageai' || self.role == 'embedding'
             - message: cartesia is a tts-only vendor; set spec.role to 'tts'

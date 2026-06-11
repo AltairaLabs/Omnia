@@ -8272,6 +8272,7 @@ spec:
                       - tts
                       - stt
                       - image
+                      - inference
                       type: string
                   required:
                   - name
@@ -8363,6 +8364,7 @@ spec:
                               - tts
                               - stt
                               - image
+                              - inference
                               type: string
                           required:
                           - name
