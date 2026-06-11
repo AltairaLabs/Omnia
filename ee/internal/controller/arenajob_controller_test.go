@@ -2748,4 +2748,119 @@ spec:
 			Expect(found).To(BeTrue())
 		})
 	})
+
+	Context("When mounting workspace content with isolation", func() {
+		const (
+			isoSourceName = "iso-source"
+			isoJobName    = "iso-job"
+			// contentPath is the ArenaSource artifact ContentPath the worker
+			// mounts. In legacy mode the operator prefixes it with
+			// {workspace}/{namespace}; in scoped mode it is the subPath as-is.
+			contentPath = "arena/my-source/.arena/versions/abc123"
+		)
+
+		// mountSubPathFor reconciles an ArenaJob whose ArenaSource has a
+		// ContentPath artifact and returns the SubPath of the mounted
+		// workspace-content volume. The workspace name resolves to the
+		// namespace ("default") since the namespace carries no workspace
+		// label, so the legacy prefix is "default/default/".
+		mountSubPathFor := func(scoped bool) string {
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      isoSourceName,
+					Namespace: arenaJobNamespace,
+				},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
+					Interval: "5m",
+					ConfigMap: &corev1alpha1.ConfigMapSource{
+						Name: "iso-configmap",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, source)).To(Succeed())
+			source.Status.Phase = omniav1alpha1.ArenaSourcePhaseReady
+			source.Status.Artifact = &omniav1alpha1.Artifact{
+				Revision:       "v1.0.0",
+				Checksum:       "sha256:abc123",
+				ContentPath:    contentPath,
+				LastUpdateTime: metav1.Now(),
+			}
+			Expect(k8sClient.Status().Update(ctx, source)).To(Succeed())
+
+			job := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      isoJobName,
+					Namespace: arenaJobNamespace,
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{
+					SourceRef: corev1alpha1.LocalObjectReference{Name: isoSourceName},
+					Type:      omniav1alpha1.ArenaJobTypeEvaluation,
+					Workers:   &omniav1alpha1.WorkerConfig{Replicas: 1},
+				},
+			}
+			Expect(k8sClient.Create(ctx, job)).To(Succeed())
+
+			reconciler := &ArenaJobReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(10),
+				// WorkspaceContentPath set (not on the worker mount, but it
+				// flips useWorkspaceContent on so the volume is mounted).
+				// StorageManager left nil so no PVC is created.
+				WorkspaceContentPath:   "/workspace-content",
+				WorkspaceContentScoped: scoped,
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      isoJobName,
+					Namespace: arenaJobNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			k8sJob := &batchv1.Job{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      isoJobName + "-worker",
+				Namespace: arenaJobNamespace,
+			}, k8sJob)).To(Succeed())
+
+			var subPath string
+			var foundMount bool
+			for _, m := range k8sJob.Spec.Template.Spec.Containers[0].VolumeMounts {
+				if m.Name == "workspace-content" {
+					subPath = m.SubPath
+					foundMount = true
+				}
+			}
+			Expect(foundMount).To(BeTrue(), "workspace-content volume should be mounted")
+			return subPath
+		}
+
+		AfterEach(func() {
+			_ = k8sClient.Delete(ctx, &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{Name: isoJobName, Namespace: arenaJobNamespace},
+			})
+			propagation := metav1.DeletePropagationBackground
+			_ = k8sClient.Delete(ctx, &batchv1.Job{
+				ObjectMeta: metav1.ObjectMeta{Name: isoJobName + "-worker", Namespace: arenaJobNamespace},
+			}, &client.DeleteOptions{PropagationPolicy: &propagation})
+			_ = k8sClient.Delete(ctx, &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{Name: isoSourceName, Namespace: arenaJobNamespace},
+			})
+		})
+
+		It("uses the full {workspace}/{namespace}/{contentPath} subPath in legacy share-root mode", func() {
+			subPath := mountSubPathFor(false)
+			Expect(subPath).To(Equal("default/default/" + contentPath))
+		})
+
+		It("uses a workspace-relative subPath (no {workspace}/{namespace} prefix) in scoped mode", func() {
+			subPath := mountSubPathFor(true)
+			Expect(subPath).To(Equal(contentPath))
+			Expect(subPath).NotTo(ContainSubstring("default/default"),
+				"scoped mode must not double-prefix the workspace subtree")
+		})
+	})
 })
