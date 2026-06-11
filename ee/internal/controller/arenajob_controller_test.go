@@ -65,11 +65,12 @@ var _ = Describe("ArenaJob Controller", func() {
 
 	Context("When an ArenaJob is cancelled (spec.cancelled=true)", func() {
 		var arenaJob *omniav1alpha1.ArenaJob
+		const cancelJobName = "cancel-me-job"
 
 		BeforeEach(func() {
 			arenaJob = &omniav1alpha1.ArenaJob{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "cancel-me-job",
+					Name:      cancelJobName,
 					Namespace: arenaJobNamespace,
 				},
 				Spec: omniav1alpha1.ArenaJobSpec{
@@ -84,7 +85,7 @@ var _ = Describe("ArenaJob Controller", func() {
 		AfterEach(func() {
 			resource := &omniav1alpha1.ArenaJob{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "cancel-me-job",
+				Name:      cancelJobName,
 				Namespace: arenaJobNamespace,
 			}, resource); err == nil {
 				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
@@ -99,7 +100,7 @@ var _ = Describe("ArenaJob Controller", func() {
 			}
 			result, err := reconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
-					Name:      "cancel-me-job",
+					Name:      cancelJobName,
 					Namespace: arenaJobNamespace,
 				},
 			})
@@ -108,7 +109,7 @@ var _ = Describe("ArenaJob Controller", func() {
 
 			updated := &omniav1alpha1.ArenaJob{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "cancel-me-job",
+				Name:      cancelJobName,
 				Namespace: arenaJobNamespace,
 			}, updated)).To(Succeed())
 			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhaseCancelled))
