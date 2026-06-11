@@ -1396,6 +1396,14 @@ workspaceContent:
   # this to true + ReadWriteOnce on kind's local-path provisioner.
   enabled: false
 
+  # -- When true, the operator mounts each workspace's content volume as
+  # already scoped to the workspace's own subtree (storage-enforced
+  # multi-tenant isolation) and computes a workspace-relative mount subPath.
+  # Requires the deployment to back workspace-<ns>-content PVCs with
+  # per-workspace subtree-scoped volumes (see cloud umbrella charts).
+  # Default false = legacy shared-volume + full subPath.
+  scoped: false
+
   # -- Mount path in dashboard pod
   mountPath: /workspace-content
 
