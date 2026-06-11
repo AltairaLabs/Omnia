@@ -203,9 +203,9 @@ func TestMigrator_TablesExist(t *testing.T) {
 	require.NoError(t, err)
 
 	expectedTables := []string{
-		"memory_entities",
+		tableEntities,
 		"memory_relations",
-		"memory_observations",
+		tableObservations,
 		"user_privacy_preferences",
 	}
 
@@ -238,7 +238,7 @@ func TestMigrator_CollapsedSchema(t *testing.T) {
 
 	// All tables the collapsed initial must create (the post-000012 set).
 	for _, table := range []string{
-		"memory_entities", "memory_relations", "memory_observations",
+		tableEntities, "memory_relations", tableObservations,
 		"user_privacy_preferences", "memory_workspaces", "audit_log",
 		"consolidation_runs",
 	} {
@@ -251,7 +251,7 @@ func TestMigrator_CollapsedSchema(t *testing.T) {
 
 	// The embedding vector columns are reconciler-owned (#1309) and must NOT
 	// be created by the migration — EnsureEmbeddingSchema adds them at startup.
-	for _, table := range []string{"memory_entities", "memory_observations"} {
+	for _, table := range []string{tableEntities, tableObservations} {
 		var exists bool
 		require.NoError(t, db.QueryRow(`
 			SELECT EXISTS (SELECT 1 FROM information_schema.columns
@@ -287,7 +287,7 @@ func TestMigrator_CleanTeardown(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify all tables are gone after down migration
-	for _, table := range []string{"memory_entities", "memory_relations", "memory_observations", "user_privacy_preferences"} {
+	for _, table := range []string{tableEntities, "memory_relations", tableObservations, "user_privacy_preferences"} {
 		var exists bool
 		err := db.QueryRow(`
 			SELECT EXISTS (
