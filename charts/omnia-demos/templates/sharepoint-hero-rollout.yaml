@@ -8,7 +8,7 @@
 # weighted split: ztunnel is L4 only, the waypoint does the L7 stable/candidate
 # routing across the operator-owned VS/DR. The namespace must also be enrolled
 # in ambient (kubectl label namespace omnia-demo istio.io/dataplane-mode=ambient).
-# On-cluster validation required: the waypoint <-> OPA policy-proxy interaction
+# On-cluster validation required: the waypoint <-> CEL policy-proxy interaction
 # on the WebSocket path has not yet been smoke-tested on a real ambient cluster.
 ---
 apiVersion: gateway.networking.k8s.io/v1

@@ -24,8 +24,8 @@ metadata:
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   type: ollama
-  model: {{ .Values.ollama.model }}
-  baseURL: http://ollama.{{ .Values.namespace }}:11434
+  model: llava:7b
+  baseURL: http://ollama-vision.{{ .Values.namespace }}:11434
   credential:
     secretRef:
       name: ollama-credentials
@@ -412,7 +412,7 @@ metadata:
 spec:
   type: ollama
   model: llama3.2:3b
-  baseURL: http://ollama.{{ .Values.namespace }}:11434
+  baseURL: http://ollama-chat.{{ .Values.namespace }}:11434
   credential:
     secretRef:
       name: ollama-credentials
@@ -421,8 +421,8 @@ spec:
     contextWindow: {{ .Values.ollama.contextWindow }}
     truncationStrategy: sliding
 ---
-# Provider configuration for embedding (reuses the same Ollama model to avoid
-# model-swapping overhead — Ollama only keeps one model loaded at a time).
+# Provider configuration for embedding. Points at the dedicated chat instance
+# (llama3.2:3b); each Ollama instance serves a single model.
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: Provider
 metadata:
@@ -434,7 +434,7 @@ metadata:
 spec:
   type: ollama
   model: llama3.2:3b
-  baseURL: http://ollama.{{ .Values.namespace }}:11434
+  baseURL: http://ollama-chat.{{ .Values.namespace }}:11434
 ---
 # ConfigMap for the tools demo PromptPack
 apiVersion: v1

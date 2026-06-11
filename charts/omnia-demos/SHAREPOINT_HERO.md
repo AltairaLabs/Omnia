@@ -32,7 +32,7 @@ how to install, the ~5-minute demo arc, and how to validate each beat.
     (a `Gateway` of class `istio-waypoint`), or apply your own via
     `istioctl waypoint apply --enroll-namespace`.
 
-  > On-cluster validation pending: the waypoint ↔ enterprise OPA policy-proxy
+  > On-cluster validation pending: the waypoint ↔ enterprise CEL policy-proxy
   > interaction on the WebSocket path has not yet been smoke-tested on a real
   > ambient cluster. Without ambient + a waypoint the operator auto-degrades the
   > rollback beat to replica-weighted routing.

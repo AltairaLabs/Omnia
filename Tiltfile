@@ -855,13 +855,6 @@ if ENABLE_DEMO or ENABLE_AUDIO_DEMO:
             'langchainDemo.image.pullPolicy=Never',
         ])
 
-    if ENABLE_FULL_STACK:
-        # Override OPA mode to use Istio ext_authz
-        demo_helm_set.extend([
-            'opa.mode=extauthz',
-            'istio.enabled=true',
-        ])
-
     k8s_yaml(helm(
         './charts/omnia-demos',
         name='omnia-demos',

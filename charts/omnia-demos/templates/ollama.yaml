@@ -1,139 +1,119 @@
-{{- $opaSidecar := and .Values.opa.enabled (eq .Values.opa.mode "sidecar") }}
+{{- /*
+One dedicated Ollama instance per model (.Values.ollama.instances). Serving
+multiple models from a single instance thrashes (Ollama unloads/reloads on model
+switch) and can OOM a small node, so the demo runs one model per instance. A soft
+podAntiAffinity prefers spreading instances one-per-node. Scheduling stays
+deployment-agnostic: .Values.ollama.nodeSelector / .Values.ollama.tolerations are
+empty by default; a deployment with a dedicated Ollama pool sets them at install
+time to pin instances there.
+*/ -}}
+{{- $ns := .Values.namespace -}}
+{{- $img := printf "%s:%s" .Values.ollama.image.repository .Values.ollama.image.tag -}}
+{{- range $inst := .Values.ollama.instances }}
 ---
-# PersistentVolumeClaim for Ollama model cache
-{{- if .Values.ollama.persistence.enabled }}
+{{- if $.Values.ollama.persistence.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: ollama-models
-  namespace: {{ .Values.namespace }}
+  name: ollama-{{ $inst.name }}-models
+  namespace: {{ $ns }}
   labels:
-    app.kubernetes.io/name: ollama
-    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+    app.kubernetes.io/name: ollama-{{ $inst.name }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" $ }}
   annotations:
     "helm.sh/resource-policy": keep
 spec:
-  accessModes:
-    - ReadWriteOnce
-  {{- if .Values.ollama.persistence.storageClass }}
-  storageClassName: {{ .Values.ollama.persistence.storageClass }}
+  accessModes: ["ReadWriteOnce"]
+  {{- with $.Values.ollama.persistence.storageClass }}
+  storageClassName: {{ . }}
   {{- end }}
   resources:
     requests:
-      storage: {{ .Values.ollama.persistence.size }}
+      storage: {{ $inst.storage | default "12Gi" }}
 {{- end }}
 ---
-# Ollama StatefulSet
-# When OPA sidecar mode is enabled, traffic flow is:
-#   Client -> Envoy (11434) -> OPA ext_authz (9191) -> Ollama (11435)
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
-  name: ollama
-  namespace: {{ .Values.namespace }}
+  name: ollama-{{ $inst.name }}
+  namespace: {{ $ns }}
   labels:
-    app.kubernetes.io/name: ollama
-    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+    app.kubernetes.io/name: ollama-{{ $inst.name }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" $ }}
+    ollama-instance: "true"
 spec:
-  serviceName: ollama
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
-      app.kubernetes.io/name: ollama
+      app.kubernetes.io/name: ollama-{{ $inst.name }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: ollama
-        app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+        app.kubernetes.io/name: ollama-{{ $inst.name }}
+        app.kubernetes.io/part-of: {{ include "omnia-demos.name" $ }}
+        ollama-instance: "true"
     spec:
+      {{- with $.Values.ollama.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.ollama.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Prefer to spread instances one-per-node so each model owns its node's
+      # RAM. Soft (preferred) so single-node clusters (local kind) still
+      # schedule every instance; a multi-node pool gets the spread.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    ollama-instance: "true"
+                topologyKey: kubernetes.io/hostname
       initContainers:
-        # Pull the model before starting the server
-        # This runs Ollama temporarily to pull the model to the shared volume
+        # Pull this instance's single model into the cache volume before serving.
         - name: pull-model
-          image: "{{ .Values.ollama.image.repository }}:{{ .Values.ollama.image.tag }}"
-          imagePullPolicy: {{ .Values.ollama.image.pullPolicy }}
-          command:
-            - /bin/sh
-            - -c
+          image: {{ $img }}
+          imagePullPolicy: {{ $.Values.ollama.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
             - |
-              echo "Starting model pull process..."
-              # Start Ollama in the background
-              ollama serve &
-              OLLAMA_PID=$!
-
-              # Wait for Ollama to be ready
-              echo "Waiting for Ollama to start..."
-              for i in $(seq 1 30); do
-                if ollama list >/dev/null 2>&1; then
-                  break
-                fi
-                sleep 1
-              done
-
-              # Function to pull a model if not exists
-              pull_model() {
-                MODEL=$1
-                MODEL_PATTERN=$(echo "$MODEL" | sed 's/:/ /')
-                if ollama list | grep -q "$MODEL_PATTERN"; then
-                  echo "Model $MODEL already exists, skipping pull"
-                else
-                  echo "Pulling model $MODEL (this may take several minutes)..."
-                  ollama pull "$MODEL"
-                  echo "Model $MODEL pull complete!"
-                fi
-              }
-
-              # Pull primary model
-              pull_model "{{ .Values.ollama.model }}"
-
-              # Pull additional models
-              {{- range .Values.ollama.additionalModels }}
-              pull_model "{{ . }}"
-              {{- end }}
-
-              # Stop Ollama
-              kill $OLLAMA_PID 2>/dev/null || true
-              wait $OLLAMA_PID 2>/dev/null || true
-              echo "Init container complete"
+              ollama serve & PID=$!
+              for i in $(seq 1 30); do ollama list >/dev/null 2>&1 && break; sleep 1; done
+              MODEL="{{ $inst.model }}"
+              PATTERN=$(echo "$MODEL" | sed 's/:/ /')
+              ollama list | grep -q "$PATTERN" || ollama pull "$MODEL"
+              kill $PID 2>/dev/null || true; wait $PID 2>/dev/null || true
           volumeMounts:
             - name: models
               mountPath: /root/.ollama
           resources:
             requests:
-              memory: "512Mi"
               cpu: "100m"
+              memory: "512Mi"
             limits:
-              memory: "1Gi"
               cpu: "500m"
+              memory: "1Gi"
       containers:
-        # Ollama LLM server
         - name: ollama
-          image: "{{ .Values.ollama.image.repository }}:{{ .Values.ollama.image.tag }}"
-          imagePullPolicy: {{ .Values.ollama.image.pullPolicy }}
+          image: {{ $img }}
+          imagePullPolicy: {{ $.Values.ollama.image.pullPolicy }}
           ports:
-            {{- if $opaSidecar }}
-            # Internal port when OPA sidecar is enabled (Envoy proxies to this)
-            - containerPort: 11435
-              name: http-internal
-            {{- else }}
-            # Standard port when OPA is disabled
             - containerPort: 11434
               name: http
-            {{- end }}
           env:
             - name: OLLAMA_KEEP_ALIVE
-              value: {{ .Values.ollama.keepAlive | quote }}
+              value: {{ $.Values.ollama.keepAlive | quote }}
             - name: OLLAMA_NUM_CTX
-              value: {{ .Values.ollama.numCtx | quote }}
+              value: {{ $inst.numCtx | default $.Values.ollama.contextWindow | quote }}
             - name: OLLAMA_HOST
-              {{- if $opaSidecar }}
-              # Listen on internal port when OPA sidecar is enabled
-              value: "0.0.0.0:11435"
-              {{- else }}
               value: "0.0.0.0:11434"
-              {{- end }}
-          # Warm up the primary model on startup so the first real request
-          # doesn't trigger cold model loading (which can exceed HTTP timeouts).
+          # Warm the model on start so the first real request doesn't cold-load.
           lifecycle:
             postStart:
               exec:
@@ -141,28 +121,18 @@ spec:
                   - /bin/sh
                   - -c
                   - |
-                    # Wait for Ollama HTTP server
                     for i in $(seq 1 60); do
-                      if curl -sf http://localhost:{{ if $opaSidecar }}11435{{ else }}11434{{ end }}/ >/dev/null 2>&1; then
-                        break
-                      fi
+                      curl -sf http://localhost:11434/ >/dev/null 2>&1 && break
                       sleep 1
                     done
-                    # Send minimal requests to load models into memory
-                    OLLAMA_URL="http://localhost:{{ if $opaSidecar }}11435{{ else }}11434{{ end }}"
-                    for model in "{{ .Values.ollama.model }}" {{- range .Values.ollama.additionalModels }} "{{ . }}" {{- end }}; do
-                      echo "Warming up $model..."
-                      curl -sf "$OLLAMA_URL/api/generate" \
-                        -d "{\"model\":\"$model\",\"prompt\":\"hi\",\"stream\":false,\"options\":{\"num_predict\":1}}" \
-                        >/dev/null 2>&1 || true
-                    done
+                    curl -sf http://localhost:11434/api/generate \
+                      -d '{"model":"{{ $inst.model }}","prompt":"hi","stream":false,"options":{"num_predict":1}}' \
+                      >/dev/null 2>&1 || true
           resources:
-            {{- toYaml .Values.ollama.resources | nindent 12 }}
+            {{- toYaml $inst.resources | nindent 12 }}
           volumeMounts:
             - name: models
               mountPath: /root/.ollama
-          {{- if not $opaSidecar }}
-          # Probes target Ollama directly when OPA is disabled
           startupProbe:
             httpGet:
               path: /
@@ -170,145 +140,41 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
             failureThreshold: 60
-          livenessProbe:
-            httpGet:
-              path: /
-              port: http
-            periodSeconds: 30
-            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /
               port: http
             periodSeconds: 10
             failureThreshold: 3
-          {{- else }}
-          # When OPA sidecar is enabled, use internal port for probes
-          startupProbe:
-            httpGet:
-              path: /
-              port: http-internal
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            failureThreshold: 60
           livenessProbe:
             httpGet:
               path: /
-              port: http-internal
+              port: http
             periodSeconds: 30
             failureThreshold: 3
-          readinessProbe:
-            httpGet:
-              path: /
-              port: http-internal
-            periodSeconds: 10
-            failureThreshold: 3
-          {{- end }}
-
-        {{- if $opaSidecar }}
-        # Envoy sidecar - entry point for all traffic
-        # Buffers request body and calls OPA for authorization
-        - name: envoy
-          image: "{{ .Values.opa.envoy.image.repository }}:{{ .Values.opa.envoy.image.tag }}"
-          imagePullPolicy: {{ .Values.opa.envoy.image.pullPolicy }}
-          args:
-            - "-c"
-            - "/etc/envoy/envoy.yaml"
-            - "--log-level"
-            - "info"
-          ports:
-            - containerPort: 11434
-              name: http
-            - containerPort: 9901
-              name: admin
-          resources:
-            {{- toYaml .Values.opa.envoy.resources | nindent 12 }}
-          volumeMounts:
-            - name: envoy-config
-              mountPath: /etc/envoy
-              readOnly: true
-          livenessProbe:
-            httpGet:
-              path: /ready
-              port: admin
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: admin
-            initialDelaySeconds: 5
-            periodSeconds: 5
-
-        # OPA sidecar - policy engine for model validation
-        - name: opa
-          image: "{{ .Values.opa.image.repository }}:{{ .Values.opa.image.tag }}"
-          imagePullPolicy: {{ .Values.opa.image.pullPolicy }}
-          args:
-            - "run"
-            - "--server"
-            - "--addr=localhost:8181"
-            - "--diagnostic-addr=0.0.0.0:8282"
-            - "--set=plugins.envoy_ext_authz_grpc.addr=:9191"
-            - "--set=plugins.envoy_ext_authz_grpc.path=envoy/authz/allow"
-            - "--set=decision_logs.console=true"
-            - "/config/policy.rego"
-          ports:
-            - containerPort: 9191
-              name: grpc
-            - containerPort: 8282
-              name: diag
-          resources:
-            {{- toYaml .Values.opa.resources | nindent 12 }}
-          volumeMounts:
-            - name: opa-config
-              mountPath: /config
-              readOnly: true
-          livenessProbe:
-            httpGet:
-              path: /health?plugins
-              port: diag
-            initialDelaySeconds: 5
-            periodSeconds: 15
-          readinessProbe:
-            httpGet:
-              path: /health?plugins
-              port: diag
-            initialDelaySeconds: 5
-            periodSeconds: 10
-        {{- end }}
-
       volumes:
         - name: models
-          {{- if .Values.ollama.persistence.enabled }}
+          {{- if $.Values.ollama.persistence.enabled }}
           persistentVolumeClaim:
-            claimName: ollama-models
+            claimName: ollama-{{ $inst.name }}-models
           {{- else }}
           emptyDir: {}
           {{- end }}
-        {{- if $opaSidecar }}
-        - name: opa-config
-          configMap:
-            name: ollama-opa-config
-        - name: envoy-config
-          configMap:
-            name: ollama-envoy-config
-        {{- end }}
 ---
-# Ollama Service
 apiVersion: v1
 kind: Service
 metadata:
-  name: ollama
-  namespace: {{ .Values.namespace }}
+  name: ollama-{{ $inst.name }}
+  namespace: {{ $ns }}
   labels:
-    app.kubernetes.io/name: ollama
-    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+    app.kubernetes.io/name: ollama-{{ $inst.name }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" $ }}
 spec:
   selector:
-    app.kubernetes.io/name: ollama
+    app.kubernetes.io/name: ollama-{{ $inst.name }}
   ports:
     - port: 11434
       targetPort: http
       name: http
   type: ClusterIP
+{{- end }}
