@@ -494,8 +494,19 @@ spec:
 
 Note: Ensure appropriate RBAC permissions are configured for cross-namespace access.
 
+## Embedding providers and memory
+
+A Provider with `spec.role: embedding` backs the memory store's semantic recall.
+The embedding vector dimension is taken from the configured model (declared via
+`spec.embedding.dimensions`); memory-api sizes its storage to match at startup,
+so any embedding model can back memory by configuration. Changing the dimension
+on a store that already holds embeddings is **destructive** (all vectors are
+discarded and re-embedded) and requires explicit one-shot consent — see
+[Change the memory embedding model](/how-to/change-memory-embedding-model/).
+
 ## Related Guides
 
+- [Change the memory embedding model](/how-to/change-memory-embedding-model/)
 - [Configure AWS Bedrock Provider](/how-to/configure-bedrock-provider/)
 - [Configure GCP Vertex AI Provider](/how-to/configure-vertex-provider/)
 - [Configure Azure AI Provider](/how-to/configure-azure-ai-provider/)
