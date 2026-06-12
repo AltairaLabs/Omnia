@@ -143,9 +143,56 @@ function flowEdges(content: PromptPackContent): WorkloadEdge[] {
   return edges;
 }
 
+function crewAgentNode(
+  promptKey: string,
+  content: PromptPackContent,
+): WorkloadNode {
+  const member = content.agents!.members[promptKey];
+  const prompt = content.prompts?.[promptKey];
+  const tools = toolDetails(prompt?.tools, content.tools);
+  const skills = (content.skills ?? []).map((s) => s.name);
+  return {
+    id: promptKey,
+    kind: "agent",
+    label: prompt?.name || promptKey,
+    isEntry: content.agents!.entry === promptKey,
+    badges: [
+      { icon: "tool", label: `${tools.length}` },
+      { icon: "skill", label: `${skills.length}` },
+    ],
+    detail: {
+      description: member?.description || prompt?.description,
+      systemTemplatePreview: previewTemplate(prompt?.system_template),
+      tools,
+      skills,
+      parameters: prompt?.parameters,
+      ioModes: { input: member?.input_modes, output: member?.output_modes },
+    },
+  };
+}
+
 export function deriveWorkloadTier(content: PromptPackContent): WorkloadModel {
   const skillCount = (content.skills ?? []).length;
   const wf = content.workflow;
+
+  // Crew: explicit A2A agents as first-class nodes; workflow (if any) overlays hand-offs.
+  const agentsCfg = content.agents;
+  if (agentsCfg && Object.keys(agentsCfg.members ?? {}).length > 0) {
+    const memberKeys = Object.keys(agentsCfg.members);
+    const nodes = memberKeys.map((k) => crewAgentNode(k, content));
+    const edges = content.workflow ? flowEdges(content) : [];
+    const stateCount = Object.keys(content.workflow?.states ?? {}).length;
+    return {
+      tier: "crew",
+      altitude: "definition",
+      nodes,
+      edges,
+      meta: {
+        budget: budgetFromWorkflow(content.workflow),
+        counts: { agents: memberKeys.length, tools: sumTools(nodes), skills: skillCount, states: stateCount },
+      },
+    };
+  }
 
   // Flow: a workflow state machine, one implicit agent moving through states.
   if (wf && Object.keys(wf.states ?? {}).length > 0) {

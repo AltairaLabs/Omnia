@@ -77,3 +77,44 @@ describe("deriveWorkloadTier — flow", () => {
     expect(model.meta.counts.states).toBe(2);
   });
 });
+
+describe("deriveWorkloadTier — crew", () => {
+  it("projects A2A agents to first-class nodes, overlaying workflow hand-offs", () => {
+    const content: PromptPackContent = {
+      id: "crew",
+      prompts: {
+        triage: { id: "triage", name: "Triage", system_template: "t", tools: ["lookup"] },
+        refund: { id: "refund", name: "Refund", system_template: "r", tools: ["pay"] },
+      },
+      tools: { lookup: { name: "lookup" }, pay: { name: "pay" } },
+      agents: {
+        entry: "triage",
+        members: {
+          triage: { description: "Triages requests", tags: ["intake"], input_modes: ["text/plain"] },
+          refund: { description: "Issues refunds", output_modes: ["application/json"] },
+        },
+      },
+      workflow: {
+        entry: "triage",
+        states: {
+          triage: { prompt_task: "triage", on_event: { approved: "refund" } },
+          refund: { prompt_task: "refund", terminal: true },
+        },
+      },
+    };
+
+    const model = deriveWorkloadTier(content);
+
+    expect(model.tier).toBe("crew");
+    expect(model.nodes).toHaveLength(2);
+    const triage = model.nodes.find((n) => n.id === "triage")!;
+    expect(triage.kind).toBe("agent");
+    expect(triage.isEntry).toBe(true);
+    expect(triage.detail.ioModes?.input).toEqual(["text/plain"]);
+    expect(triage.detail.description).toBe("Triages requests");
+    // hand-off edge from workflow overlay
+    expect(model.edges).toHaveLength(1);
+    expect(model.edges[0]).toMatchObject({ source: "triage", target: "refund", label: "approved" });
+    expect(model.meta.counts).toMatchObject({ agents: 2, states: 2 });
+  });
+});
