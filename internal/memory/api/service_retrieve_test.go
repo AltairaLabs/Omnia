@@ -198,6 +198,35 @@ func TestRetrieveMultiTier_PropagatesStoreError(t *testing.T) {
 	}
 }
 
+func TestRetrieveMultiTier_BuildsHalfLifeFromPolicyLoader(t *testing.T) {
+	store := &multiTierStoreStub{mtResult: &memory.MultiTierResult{}}
+	loader := &stubPolicyLoader{
+		policy: &omniav1alpha1.MemoryPolicy{
+			Spec: omniav1alpha1.MemoryPolicySpec{
+				Recall: &omniav1alpha1.MemoryRecallConfig{
+					HalfLife: &omniav1alpha1.MemoryRecallHalfLife{
+						User:          "7d",
+						Institutional: "365d",
+					},
+				},
+			},
+		},
+	}
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetPolicyLoader(loader)
+
+	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: testWS})
+	require.NoError(t, err)
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	require.Len(t, store.mtCalls, 1)
+	assert.Equal(t, 7*24*time.Hour, store.mtCalls[0].HalfLife.User, "service must populate User half-life from policy")
+	assert.Equal(t, 365*24*time.Hour, store.mtCalls[0].HalfLife.Institutional)
+	// Unset tier defaults to the baseline rather than zero.
+	assert.Equal(t, 30*24*time.Hour, store.mtCalls[0].HalfLife.Agent)
+}
+
 // stubPolicyLoader is a controllable PolicyLoader for service-layer tests.
 type stubPolicyLoader struct {
 	policy *omniav1alpha1.MemoryPolicy
