@@ -184,6 +184,31 @@ func (m *mockWarmStore) UpdateSessionStatus(_ context.Context, sessionID string,
 	return nil
 }
 
+func (m *mockWarmStore) DecorateSession(_ context.Context, sessionID string, opts session.DecorateSessionOptions) error {
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return session.ErrSessionNotFound
+	}
+	remove := make(map[string]struct{}, len(opts.RemoveTags))
+	for _, t := range opts.RemoveTags {
+		remove[t] = struct{}{}
+	}
+	kept := s.Tags[:0:0]
+	for _, t := range s.Tags {
+		if _, drop := remove[t]; !drop {
+			kept = append(kept, t)
+		}
+	}
+	s.Tags = append(kept, opts.AddTags...)
+	if len(opts.MergeState) > 0 && s.State == nil {
+		s.State = map[string]string{}
+	}
+	for k, v := range opts.MergeState {
+		s.State[k] = v
+	}
+	return nil
+}
+
 func (m *mockWarmStore) RefreshTTL(_ context.Context, _ string, _ time.Time) error {
 	return nil
 }

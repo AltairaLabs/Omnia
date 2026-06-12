@@ -231,6 +231,23 @@ type SessionStatusUpdate struct {
 	SetEndedAt time.Time     // zero means no change
 }
 
+// DecorateSessionOptions describes metadata to merge into an existing session
+// without touching its counters or lifecycle status. It is used to label a
+// session that was created by another writer (e.g. the facade-recorded session
+// of an agent under arena load test) with additional context.
+type DecorateSessionOptions struct {
+	// RemoveTags are removed from the session's existing tags before AddTags are
+	// applied. Used to replace a contradictory tag (e.g. drop "source:interactive"
+	// when labelling an arena-driven session "source:arena").
+	RemoveTags []string
+	// AddTags are appended to the session's existing tags. Duplicates are ignored,
+	// so calling DecorateSession repeatedly with the same tags is idempotent.
+	AddTags []string
+	// MergeState is shallow-merged into the session's existing InitialState/state.
+	// Keys present in both take the value from MergeState.
+	MergeState map[string]string
+}
+
 // ToolCallStatus represents the lifecycle state of a tool call.
 type ToolCallStatus string
 
@@ -407,6 +424,11 @@ type Store interface {
 	// Returns ErrSessionNotFound if the session does not exist.
 	// Returns ErrSessionExpired if the session has expired.
 	UpdateSessionStatus(ctx context.Context, sessionID string, update SessionStatusUpdate) error
+
+	// DecorateSession merges tags and state into an existing session without
+	// touching counters or lifecycle status. It is idempotent for tags.
+	// Returns ErrSessionNotFound if the session does not exist.
+	DecorateSession(ctx context.Context, sessionID string, opts DecorateSessionOptions) error
 
 	// RecordToolCall appends a tool call lifecycle event (started, completed, failed).
 	// Each event is a separate row; rows sharing the same CallID represent one logical call.

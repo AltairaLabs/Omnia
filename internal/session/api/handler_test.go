@@ -168,6 +168,47 @@ func (m *mockWarmStore) UpdateSessionStatus(_ context.Context, sessionID string,
 	return nil
 }
 
+func (m *mockWarmStore) DecorateSession(_ context.Context, sessionID string, opts session.DecorateSessionOptions) error {
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return session.ErrSessionNotFound
+	}
+	s.Tags = mergeTags(s.Tags, opts)
+	if len(opts.MergeState) > 0 && s.State == nil {
+		s.State = map[string]string{}
+	}
+	for k, v := range opts.MergeState {
+		s.State[k] = v
+	}
+	return nil
+}
+
+// mergeTags applies RemoveTags then AddTags (deduped) — mirrors the production
+// store behaviour for faithful tests.
+func mergeTags(existing []string, opts session.DecorateSessionOptions) []string {
+	remove := make(map[string]struct{}, len(opts.RemoveTags))
+	for _, t := range opts.RemoveTags {
+		remove[t] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(existing))
+	out := make([]string, 0, len(existing)+len(opts.AddTags))
+	for _, t := range existing {
+		if _, drop := remove[t]; drop {
+			continue
+		}
+		out = append(out, t)
+		seen[t] = struct{}{}
+	}
+	for _, t := range opts.AddTags {
+		if _, dup := seen[t]; dup {
+			continue
+		}
+		out = append(out, t)
+		seen[t] = struct{}{}
+	}
+	return out
+}
+
 func (m *mockWarmStore) RefreshTTL(_ context.Context, id string, expiresAt time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -993,6 +1034,88 @@ func TestHandleGetSession_NotFound(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestHandleDecorateSession_OK(t *testing.T) {
+	h, hot, warm := setupHandler(t)
+	seed := testSession(testSessionID)
+	seed.Tags = []string{"source:interactive"}
+	seed.State = map[string]string{"existing": "1"}
+	warm.sessions[testSessionID] = seed
+	hot.sessions[testSessionID] = seed // ensure invalidation path is exercised
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"removeTags":["source:interactive"],"tags":["source:arena","arena-job:demo"],"state":{"arena.job":"demo"}}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/"+testSessionID+"/decorate",
+		strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	got := warm.sessions[testSessionID]
+	// source:interactive removed, source:arena + arena-job added (no contradiction).
+	wantTags := []string{"source:arena", "arena-job:demo"}
+	if fmt.Sprint(got.Tags) != fmt.Sprint(wantTags) {
+		t.Fatalf("tags = %v, want %v", got.Tags, wantTags)
+	}
+	if got.State["arena.job"] != "demo" {
+		t.Fatalf("state[arena.job] = %q, want demo", got.State["arena.job"])
+	}
+	if got.State["existing"] != "1" {
+		t.Fatalf("state[existing] = %q, want 1 (existing state must be preserved)", got.State["existing"])
+	}
+}
+
+func TestHandleDecorateSession_NotFound(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/sessions/00000000-0000-0000-0000-000000000099/decorate",
+		strings.NewReader(`{"tags":["source:arena"]}`))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestSessionService_DecorateSession_Guards(t *testing.T) {
+	// Registry without a warm store.
+	svc := NewSessionService(providers.NewRegistry(), ServiceConfig{}, logr.Discard())
+
+	if err := svc.DecorateSession(context.Background(), "", session.DecorateSessionOptions{}); !errors.Is(err, ErrMissingSessionID) {
+		t.Fatalf("empty sessionID: expected ErrMissingSessionID, got %v", err)
+	}
+	if err := svc.DecorateSession(context.Background(), "s1",
+		session.DecorateSessionOptions{AddTags: []string{"x"}}); !errors.Is(err, ErrWarmStoreRequired) {
+		t.Fatalf("no warm store: expected ErrWarmStoreRequired, got %v", err)
+	}
+}
+
+func TestHandleDecorateSession_BadBody(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/sessions/"+testSessionID+"/decorate",
+		strings.NewReader("not json"))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
 	}
 }
 

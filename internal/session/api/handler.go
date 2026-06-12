@@ -215,6 +215,15 @@ type RefreshTTLRequest struct {
 	TTLSeconds int `json:"ttlSeconds"`
 }
 
+// DecorateSessionRequest is the JSON body for PATCH /api/v1/sessions/{sessionID}/decorate.
+// It merges additional tags and state into an existing session without touching
+// counters or lifecycle status. RemoveTags are dropped before Tags are applied.
+type DecorateSessionRequest struct {
+	RemoveTags []string          `json:"removeTags,omitempty"`
+	Tags       []string          `json:"tags,omitempty"`
+	State      map[string]string `json:"state,omitempty"`
+}
+
 // RegisterRoutes registers the session API routes on the given mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Health check (lightweight, no DB call)
@@ -234,6 +243,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/messages", h.handleAppendMessage)
 	mux.HandleFunc("PATCH /api/v1/sessions/{sessionID}/status", h.handleUpdateStats)
 	mux.HandleFunc("PATCH /api/v1/sessions/{sessionID}/stats", h.handleUpdateStats) // backward-compat alias
+	mux.HandleFunc("PATCH /api/v1/sessions/{sessionID}/decorate", h.handleDecorateSession)
 	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/ttl", h.handleRefreshTTL)
 	mux.HandleFunc("DELETE /api/v1/sessions", h.handleBulkDeleteSessions)
 	mux.HandleFunc("DELETE /api/v1/sessions/{sessionID}", h.handleDeleteSession)
@@ -621,6 +631,44 @@ func (h *Handler) handleUpdateStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.V(2).Info("session status updated", "sessionID", sessionID)
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleDecorateSession merges tags and state into an existing session without
+// touching counters or lifecycle status. Used to label a facade-recorded session
+// with arena context after the fact.
+func (h *Handler) handleDecorateSession(w http.ResponseWriter, r *http.Request) {
+	sessionID, err := sessionIDFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	h.limitBody(w, r)
+	var req DecorateSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isMaxBytesError(err) {
+			writeError(w, ErrBodyTooLarge)
+			return
+		}
+		writeError(w, ErrMissingBody)
+		return
+	}
+
+	log := h.requestLog(r.Context())
+	if err := h.service.DecorateSession(r.Context(), sessionID, session.DecorateSessionOptions{
+		RemoveTags: req.RemoveTags,
+		AddTags:    req.Tags,
+		MergeState: req.State,
+	}); err != nil {
+		if !errors.Is(err, session.ErrSessionNotFound) {
+			log.Error(err, "DecorateSession failed", "sessionID", sessionID)
+		}
+		writeError(w, err)
+		return
+	}
+
+	log.V(2).Info("session decorated", "sessionID", sessionID, "tags", req.Tags)
 	w.WriteHeader(http.StatusOK)
 }
 

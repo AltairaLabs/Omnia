@@ -10,6 +10,20 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (session-api: decorate session with tags/state)
+
+- **`PATCH /api/v1/sessions/{sessionID}/decorate`** (new): merges tags and state
+  into an existing session without touching counters or lifecycle status. Body
+  `{"removeTags": ["source:interactive"], "tags": ["source:arena", ...], "state":
+  {"arena.job": "..."}}` — `removeTags` are dropped first, then `tags` are added
+  (idempotent), and state is shallow-merged. `200` on success, `404` when the
+  session does not exist. Used by the arena worker to label the facade-recorded
+  session of a load-test fleet run with arena context — replacing the
+  `source:interactive` tag with `source:arena` so the run shows the real
+  conversation + cost instead of an empty shell, without being double-counted as
+  interactive user traffic. Also adds `DecorateSession` to the `session.Store` and
+  `providers.WarmStoreProvider` interfaces.
+
 ### Added (memory-api: configurable embedding dimension, #1309)
 
 - **`POST /admin/embedding-dimension-change`** (new, memory-api): records one-shot

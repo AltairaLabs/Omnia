@@ -82,6 +82,10 @@ func (m *mockSessionStore) UpdateSessionStatus(_ context.Context, _ string, upda
 	return nil
 }
 
+func (m *mockSessionStore) DecorateSession(_ context.Context, _ string, _ session.DecorateSessionOptions) error {
+	return nil
+}
+
 func (m *mockSessionStore) Close() error {
 	return nil
 }

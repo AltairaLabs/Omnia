@@ -45,6 +45,11 @@ type WarmStoreProvider interface {
 	// if the session does not exist.
 	UpdateSessionStatus(ctx context.Context, sessionID string, update session.SessionStatusUpdate) error
 
+	// DecorateSession merges tags and state into an existing session without
+	// touching counters or lifecycle status. Tag merges are idempotent.
+	// Returns session.ErrSessionNotFound if the session does not exist.
+	DecorateSession(ctx context.Context, sessionID string, opts session.DecorateSessionOptions) error
+
 	// DeleteSession removes a session and all its associated data.
 	// Returns session.ErrSessionNotFound if the session does not exist.
 	DeleteSession(ctx context.Context, sessionID string) error

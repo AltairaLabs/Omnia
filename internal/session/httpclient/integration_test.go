@@ -103,6 +103,33 @@ func (w *integrationWarmStore) UpdateSessionStatus(_ context.Context, sessionID 
 	return nil
 }
 
+func (w *integrationWarmStore) DecorateSession(_ context.Context, sessionID string, opts session.DecorateSessionOptions) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	s, ok := w.sessions[sessionID]
+	if !ok {
+		return session.ErrSessionNotFound
+	}
+	remove := make(map[string]struct{}, len(opts.RemoveTags))
+	for _, t := range opts.RemoveTags {
+		remove[t] = struct{}{}
+	}
+	kept := make([]string, 0, len(s.Tags)+len(opts.AddTags))
+	for _, t := range s.Tags {
+		if _, drop := remove[t]; !drop {
+			kept = append(kept, t)
+		}
+	}
+	s.Tags = append(kept, opts.AddTags...)
+	if len(opts.MergeState) > 0 && s.State == nil {
+		s.State = map[string]string{}
+	}
+	for k, v := range opts.MergeState {
+		s.State[k] = v
+	}
+	return nil
+}
+
 func (w *integrationWarmStore) RefreshTTL(_ context.Context, id string, expiresAt time.Time) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -315,6 +342,41 @@ func TestIntegration_FullRecordingChain(t *testing.T) {
 
 // TestIntegration_ToolCallRecording verifies tool call and tool result messages
 // are correctly persisted through the full chain.
+func TestIntegration_DecorateSession(t *testing.T) {
+	warmStore := newIntegrationWarmStore()
+	store := startIntegrationServer(t, warmStore)
+	ctx := context.Background()
+
+	sess, err := store.CreateSession(ctx, session.CreateSessionOptions{
+		AgentName:     "rag-hero",
+		Namespace:     "default",
+		WorkspaceName: "test-ws",
+		Tags:          []string{"source:interactive"},
+	})
+	require.NoError(t, err)
+
+	// Label the facade-recorded session with arena context, as the arena worker
+	// does for a load-test fleet run: drop source:interactive, add source:arena.
+	err = store.DecorateSession(ctx, sess.ID, session.DecorateSessionOptions{
+		RemoveTags: []string{"source:interactive"},
+		AddTags:    []string{"source:arena", "arena-job:demo"},
+		MergeState: map[string]string{"arena.job": "demo"},
+	})
+	require.NoError(t, err, "DecorateSession should succeed")
+
+	stored := warmStore.getSession(sess.ID)
+	require.NotNil(t, stored)
+	assert.NotContains(t, stored.Tags, "source:interactive", "contradictory source tag removed")
+	assert.Contains(t, stored.Tags, "source:arena")
+	assert.Contains(t, stored.Tags, "arena-job:demo")
+	assert.Equal(t, "demo", stored.State["arena.job"])
+
+	// Decorating a missing session reports not-found.
+	err = store.DecorateSession(ctx, "00000000-0000-0000-0000-000000000099",
+		session.DecorateSessionOptions{AddTags: []string{"x"}})
+	assert.ErrorIs(t, err, session.ErrSessionNotFound)
+}
+
 func TestIntegration_ToolCallRecording(t *testing.T) {
 	warmStore := newIntegrationWarmStore()
 	store := startIntegrationServer(t, warmStore)

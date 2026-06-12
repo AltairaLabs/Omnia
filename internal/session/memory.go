@@ -92,6 +92,10 @@ func (m *MemoryStore) CreateSession(ctx context.Context, opts CreateSessionOptio
 		}
 	}
 
+	if len(opts.Tags) > 0 {
+		session.Tags = append([]string(nil), opts.Tags...)
+	}
+
 	m.sessions[session.ID] = session
 
 	// Return a copy to prevent external modification
@@ -292,6 +296,69 @@ func (m *MemoryStore) UpdateSessionStatus(ctx context.Context, sessionID string,
 	session.UpdatedAt = time.Now()
 
 	return nil
+}
+
+// DecorateSession merges tags and state into an existing session without
+// touching counters or lifecycle status. Tag merges are idempotent.
+func (m *MemoryStore) DecorateSession(ctx context.Context, sessionID string, opts DecorateSessionOptions) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if sessionID == "" {
+		return ErrInvalidSessionID
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		return ErrSessionNotFound
+	}
+	if session.IsExpired() {
+		return ErrSessionExpired
+	}
+
+	session.Tags = mergeSessionTags(session.Tags, opts.RemoveTags, opts.AddTags)
+
+	if len(opts.MergeState) > 0 {
+		if session.State == nil {
+			session.State = make(map[string]string, len(opts.MergeState))
+		}
+		for k, v := range opts.MergeState {
+			session.State[k] = v
+		}
+	}
+
+	session.UpdatedAt = time.Now()
+
+	return nil
+}
+
+// mergeSessionTags drops removeTags from existing, then appends addTags that are
+// not already present (deduped, order-preserving).
+func mergeSessionTags(existing, removeTags, addTags []string) []string {
+	remove := make(map[string]struct{}, len(removeTags))
+	for _, t := range removeTags {
+		remove[t] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(existing))
+	kept := existing[:0:0]
+	for _, t := range existing {
+		if _, drop := remove[t]; drop {
+			continue
+		}
+		kept = append(kept, t)
+		seen[t] = struct{}{}
+	}
+	for _, t := range addTags {
+		if _, ok := seen[t]; ok {
+			continue
+		}
+		kept = append(kept, t)
+		seen[t] = struct{}{}
+	}
+	return kept
 }
 
 // RecordToolCall records or updates a tool call for the session.

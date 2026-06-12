@@ -69,6 +69,54 @@ func runIDToUUID(runID string) string {
 	return uuid.NewSHA1(arenaSessionNamespace, []byte(runID)).String()
 }
 
+// sourceInteractiveTag is the source tag the facade applies to a normal WS
+// connection. The fleet client connects the same way, so the arena decoration
+// path removes it (replacing it with sourceArenaTag) to avoid double-counting
+// load-test traffic as interactive user sessions.
+const (
+	sourceInteractiveTag = "source:interactive"
+	sourceArenaTag       = "source:arena"
+)
+
+// arenaSessionTags returns the tags that identify a session as belonging to an
+// arena run. Shared between the lazily-created arena session (direct providers)
+// and the facade-session decoration path (fleet/loadtest) so both label sessions
+// identically.
+func arenaSessionTags(meta arenaSessionMetadata) []string {
+	tags := []string{
+		sourceArenaTag,
+		"arena-job:" + meta.JobName,
+		"scenario:" + meta.Scenario,
+		"provider:" + meta.ProviderID,
+	}
+	if meta.TrialIndex != "" {
+		tags = append(tags, "trial:"+meta.TrialIndex)
+	}
+	return tags
+}
+
+// arenaSessionState returns the arena context written to a session's state.
+// runID may be empty (e.g. when decorating a facade session that has its own ID).
+func arenaSessionState(meta arenaSessionMetadata, runID string) map[string]string {
+	state := map[string]string{
+		"arena.job":           meta.JobName,
+		"arena.job.name":      meta.JobName,
+		"arena.job.namespace": meta.Namespace,
+		"arena.scenario":      meta.Scenario,
+		"arena.scenario.id":   meta.Scenario,
+		"arena.provider":      meta.ProviderID,
+		"arena.provider.id":   meta.ProviderID,
+		"arena.type":          meta.JobType,
+	}
+	if runID != "" {
+		state["arena.run_id"] = runID
+	}
+	if meta.TrialIndex != "" {
+		state["arena.trial.index"] = meta.TrialIndex
+	}
+	return state
+}
+
 // OnEvent is a bus subscriber that lazily creates sessions and delegates to
 // per-session OmniaEventStore instances.
 func (m *arenaSessionManager) OnEvent(event *events.Event) {
@@ -103,38 +151,13 @@ func (m *arenaSessionManager) OnEvent(event *events.Event) {
 	}
 
 	// We won the race — create the session and event store.
-	tags := []string{
-		"source:arena",
-		"arena-job:" + m.meta.JobName,
-		"scenario:" + m.meta.Scenario,
-		"provider:" + m.meta.ProviderID,
-	}
-	if m.meta.TrialIndex != "" {
-		tags = append(tags, "trial:"+m.meta.TrialIndex)
-	}
-
-	initialState := map[string]string{
-		"arena.job":           m.meta.JobName,
-		"arena.job.name":      m.meta.JobName,
-		"arena.job.namespace": m.meta.Namespace,
-		"arena.scenario":      m.meta.Scenario,
-		"arena.scenario.id":   m.meta.Scenario,
-		"arena.provider":      m.meta.ProviderID,
-		"arena.provider.id":   m.meta.ProviderID,
-		"arena.type":          m.meta.JobType,
-		"arena.run_id":        runSessionID,
-	}
-	if m.meta.TrialIndex != "" {
-		initialState["arena.trial.index"] = m.meta.TrialIndex
-	}
-
 	opts := session.CreateSessionOptions{
 		ID:            pgID,
 		AgentName:     m.meta.JobName,
 		Namespace:     m.meta.Namespace,
 		WorkspaceName: m.meta.WorkspaceName,
-		Tags:          tags,
-		InitialState:  initialState,
+		Tags:          arenaSessionTags(m.meta),
+		InitialState:  arenaSessionState(m.meta, runSessionID),
 	}
 
 	_, err := m.createSessionWithRetry(opts)

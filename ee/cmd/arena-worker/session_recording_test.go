@@ -30,6 +30,8 @@ type mockSessionStore struct {
 	statusUpdates   map[string]session.SessionStatusUpdate
 	messages        map[string][]session.Message
 	providerCalls   map[string][]session.ProviderCall
+	decorations     map[string]session.DecorateSessionOptions
+	decorateErr     error // when set, DecorateSession returns it
 }
 
 func newMockStore() *mockSessionStore {
@@ -37,6 +39,7 @@ func newMockStore() *mockSessionStore {
 		statusUpdates: make(map[string]session.SessionStatusUpdate),
 		messages:      make(map[string][]session.Message),
 		providerCalls: make(map[string][]session.ProviderCall),
+		decorations:   make(map[string]session.DecorateSessionOptions),
 	}
 }
 
@@ -53,6 +56,16 @@ func (m *mockSessionStore) UpdateSessionStatus(_ context.Context, id string, upd
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.statusUpdates[id] = update
+	return nil
+}
+
+func (m *mockSessionStore) DecorateSession(_ context.Context, id string, opts session.DecorateSessionOptions) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.decorateErr != nil {
+		return m.decorateErr
+	}
+	m.decorations[id] = opts
 	return nil
 }
 
