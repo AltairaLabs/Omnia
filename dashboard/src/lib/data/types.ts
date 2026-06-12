@@ -149,6 +149,7 @@ export interface PromptPackContent {
   evals?: EvalDefinition[];
   workflow?: WorkflowConfig;
   skills?: InlineSkill[];
+  agents?: AgentsConfig;
   metadata?: Record<string, unknown>;
 }
 
@@ -242,6 +243,19 @@ export interface WorkflowConfig {
   version?: number;
   entry: string;
   states: Record<string, WorkflowState>;
+  engine?: {
+    budget?: {
+      max_total_visits?: number;
+      max_tool_calls?: number;
+      max_wall_time_sec?: number;
+    };
+  };
+}
+
+export interface WorkflowArtifact {
+  type?: string;
+  description?: string;
+  mode?: string;
 }
 
 export interface WorkflowState {
@@ -249,6 +263,26 @@ export interface WorkflowState {
   description?: string;
   persistence?: string;
   on_event?: Record<string, string>;
+  terminal?: boolean;
+  max_visits?: number;
+  on_max_visits?: string;
+  orchestration?: string;
+  /** Skill availability filter for this state: a path, or 'none'. */
+  skills?: string;
+  artifacts?: Record<string, WorkflowArtifact>;
+}
+
+export interface AgentDef {
+  description?: string;
+  tags?: string[];
+  input_modes?: string[];
+  output_modes?: string[];
+}
+
+export interface AgentsConfig {
+  /** Prompt key of the entry agent. */
+  entry: string;
+  members: Record<string, AgentDef>;
 }
 
 export interface InlineSkill {
