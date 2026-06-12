@@ -104,6 +104,9 @@ func (fakeMemoryStore) BatchDelete(_ context.Context, _ map[string]string, _ int
 func (fakeMemoryStore) RetrieveMultiTier(_ context.Context, _ memory.MultiTierRequest) (*memory.MultiTierResult, error) {
 	return &memory.MultiTierResult{Memories: []*memory.MultiTierMemory{}, Total: 0}, nil
 }
+func (fakeMemoryStore) RetrieveMultiTierHybrid(_ context.Context, _ memory.MultiTierRequest, _ []float32) (*memory.MultiTierResult, error) {
+	return &memory.MultiTierResult{Memories: []*memory.MultiTierMemory{}, Total: 0}, nil
+}
 func (fakeMemoryStore) SaveInstitutional(_ context.Context, _ *memory.Memory) error { return nil }
 func (fakeMemoryStore) ListInstitutional(_ context.Context, _ string, _ memory.ListOptions) ([]*memory.Memory, error) {
 	return nil, nil

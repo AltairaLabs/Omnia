@@ -198,6 +198,13 @@ func (c *CachedStore) RetrieveMultiTier(ctx context.Context, req MultiTierReques
 	return c.inner.RetrieveMultiTier(ctx, req)
 }
 
+// RetrieveMultiTierHybrid delegates to the inner store without caching —
+// hybrid recall is query+embedding specific and not safely cacheable, same
+// rationale as RetrieveHybrid and RetrieveMultiTier.
+func (c *CachedStore) RetrieveMultiTierHybrid(ctx context.Context, req MultiTierRequest, queryEmbedding []float32) (*MultiTierResult, error) {
+	return c.inner.RetrieveMultiTierHybrid(ctx, req, queryEmbedding)
+}
+
 // SaveInstitutional delegates to the inner store then invalidates the
 // workspace-scoped cache so any cached list/search sees the new row.
 func (c *CachedStore) SaveInstitutional(ctx context.Context, mem *Memory) error {

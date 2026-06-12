@@ -174,6 +174,10 @@ func (m *mockStore) RetrieveMultiTier(_ context.Context, _ memory.MultiTierReque
 	return &memory.MultiTierResult{Memories: []*memory.MultiTierMemory{}, Total: 0}, nil
 }
 
+func (m *mockStore) RetrieveMultiTierHybrid(_ context.Context, _ memory.MultiTierRequest, _ []float32) (*memory.MultiTierResult, error) {
+	return &memory.MultiTierResult{Memories: []*memory.MultiTierMemory{}, Total: 0}, nil
+}
+
 func (m *mockStore) SaveInstitutional(_ context.Context, _ *memory.Memory) error { return nil }
 
 func (m *mockStore) ListInstitutional(_ context.Context, _ string, _ memory.ListOptions) ([]*memory.Memory, error) {
