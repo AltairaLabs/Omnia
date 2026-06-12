@@ -6,7 +6,7 @@ const elk = new ELK();
 const NODE_W = 200;
 const NODE_H = 72;
 
-export async function layoutFlow(nodes: Node[], edges: Edge[]): Promise<Node[]> {
+export async function layoutFlow<T extends Node>(nodes: T[], edges: Edge[]): Promise<T[]> {
   if (nodes.length === 0) return nodes;
   const graph = {
     id: "root",
