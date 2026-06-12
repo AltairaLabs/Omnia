@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -639,7 +640,20 @@ func executeWorkItem(
 	// Wire session recording if session-api is configured.
 	// Events from all engine runs are forwarded to session-api via OmniaEventStore.
 	var sessionMgr *arenaSessionManager
-	if cfg.SessionAPIURL != "" && !loadTestFleet {
+	var spCollector *selfPlayCollector
+	switch {
+	case cfg.SessionAPIURL == "":
+		// No recording configured.
+	case loadTestFleet:
+		// Fleet mode: the facade records the agent conversation + cost. Capture the
+		// self-play / judge provider calls (which run in this worker's engine, not
+		// behind the facade) so they can be attached to the facade session after
+		// the run. No session is created here, so no empty shell.
+		spCollector = newSelfPlayCollector()
+		bus := events.NewEventBus()
+		bus.SubscribeAll(spCollector.OnEvent)
+		eng.SetEventBus(bus)
+	default:
 		sessionMgr = newArenaSessionManager(
 			httpclient.NewStore(cfg.SessionAPIURL, log),
 			log,
@@ -717,10 +731,18 @@ func executeWorkItem(
 	// so we read it directly from the provider after execution completes.
 	extractFleetTTFT(providerRegistry, crdFleetProviders, result)
 
-	// Extract session ID for job-to-session correlation.
-	result.SessionID = resolveResultSessionID(
-		ctx, log, cfg, loadTestFleet, arenaMeta, sessionMgr, providerRegistry, crdFleetProviders,
-	)
+	// Extract session ID for job-to-session correlation. For load-test fleet runs
+	// this also attaches the self-play/judge provider calls and persona context to
+	// the facade session.
+	result.SessionID = resolveResultSessionID(ctx, log, cfg, fleetSessionInputs{
+		loadTestFleet: loadTestFleet,
+		meta:          arenaMeta,
+		personaIDs:    loadedPersonaIDs(arenaCfg),
+		selfPlayCalls: collectedSelfPlayCalls(spCollector),
+		sessionMgr:    sessionMgr,
+		registry:      providerRegistry,
+		fleet:         crdFleetProviders,
+	})
 
 	return result, nil
 }
@@ -746,55 +768,77 @@ func isLoadTestFleet(cfg *Config, fleetProviders []*resolvedFleetProvider) bool 
 	return cfg.JobType == string(omniav1alpha1.ArenaJobTypeLoadTest) && len(fleetProviders) > 0
 }
 
-// resolveResultSessionID returns the session ID used to correlate the job result
-// to a session. For load-test fleet runs it labels the facade-recorded session(s)
-// with arena context and returns the primary one; otherwise it returns the
-// session created by the arena session manager (or fleet fallback).
-func resolveResultSessionID(
-	ctx context.Context,
-	log logr.Logger,
-	cfg *Config,
-	loadTestFleet bool,
-	meta arenaSessionMetadata,
-	sessionMgr *arenaSessionManager,
-	registry *pkproviders.Registry,
-	fleetProviders []*resolvedFleetProvider,
-) string {
-	if loadTestFleet && cfg.SessionAPIURL != "" {
-		// Label the facade-recorded session(s) with arena context and link the job
-		// to the primary one, so the dashboard shows the real conversation + cost
-		// for this run instead of an empty shell.
-		store := httpclient.NewStore(cfg.SessionAPIURL, log)
-		return decorateFleetSessions(ctx, log, store, meta, registry, fleetProviders)
+// loadedPersonaIDs returns the self-play persona IDs from the loaded arena config,
+// sorted for deterministic labelling. Empty when self-play is not configured.
+func loadedPersonaIDs(cfg *config.Config) []string {
+	if cfg == nil || len(cfg.LoadedPersonas) == 0 {
+		return nil
 	}
-	return extractSessionID(sessionMgr, registry, fleetProviders)
+	ids := make([]string, 0, len(cfg.LoadedPersonas))
+	for id := range cfg.LoadedPersonas {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
-// decorateFleetSessions labels the facade-recorded session(s) of a load-test
-// fleet run with arena context (tags + state) and returns the primary session ID
-// for job-to-session correlation. In fleet mode the facade owns the conversation
-// recording, so these sessions already hold the messages and cost; decoration
-// merely makes them discoverable as arena sessions. Returns "" if no facade
-// session could be resolved.
-func decorateFleetSessions(
-	ctx context.Context,
-	log logr.Logger,
-	store session.Store,
-	meta arenaSessionMetadata,
-	registry *pkproviders.Registry,
-	fleetProviders []*resolvedFleetProvider,
-) string {
+// collectedSelfPlayCalls returns the buffered self-play / judge provider calls,
+// or nil when no collector was wired (non-fleet runs).
+func collectedSelfPlayCalls(c *selfPlayCollector) []session.ProviderCall {
+	if c == nil {
+		return nil
+	}
+	return c.collected()
+}
+
+// fleetSessionInputs bundles the inputs for resolving/finalizing the session of a
+// work item, keeping the call site and helper signatures readable.
+type fleetSessionInputs struct {
+	loadTestFleet bool
+	meta          arenaSessionMetadata
+	personaIDs    []string
+	selfPlayCalls []session.ProviderCall
+	sessionMgr    *arenaSessionManager
+	registry      *pkproviders.Registry
+	fleet         []*resolvedFleetProvider
+}
+
+// resolveResultSessionID returns the session ID used to correlate the job result
+// to a session. For load-test fleet runs it finalizes the facade-recorded
+// session(s) — labelling them with arena context and attaching the self-play /
+// judge provider calls — and returns the primary one; otherwise it returns the
+// session created by the arena session manager (or fleet fallback).
+func resolveResultSessionID(ctx context.Context, log logr.Logger, cfg *Config, in fleetSessionInputs) string {
+	if in.loadTestFleet && cfg.SessionAPIURL != "" {
+		store := httpclient.NewStore(cfg.SessionAPIURL, log)
+		return finalizeFleetSession(ctx, log, store, in)
+	}
+	return extractSessionID(in.sessionMgr, in.registry, in.fleet)
+}
+
+// finalizeFleetSession labels the facade-recorded session(s) of a load-test fleet
+// run with arena context (tags + state, including persona) and attaches the
+// self-play / judge provider calls to the primary one. In fleet mode the facade
+// owns the conversation + agent cost; this adds the parts that ran inside the
+// worker's engine (the user simulator and judges). Returns the primary session ID,
+// or "" if no facade session could be resolved.
+func finalizeFleetSession(ctx context.Context, log logr.Logger, store session.Store, in fleetSessionInputs) string {
+	ids := collectFleetSessionIDs(in.registry, in.fleet)
+	if len(ids) == 0 {
+		return ""
+	}
+
 	opts := session.DecorateSessionOptions{
 		// The fleet client connects to the facade like an interactive client, so the
 		// facade tags the session "source:interactive". Drop it so the arena session
 		// isn't double-counted as user traffic — it's "source:arena" now.
 		RemoveTags: []string{sourceInteractiveTag},
-		AddTags:    arenaSessionTags(meta),
-		MergeState: arenaSessionState(meta, ""),
+		AddTags:    fleetSessionTags(in.meta, in.personaIDs),
+		MergeState: fleetSessionState(in.meta, in.personaIDs, in.selfPlayCalls),
 	}
 
 	var primary string
-	for _, sid := range collectFleetSessionIDs(registry, fleetProviders) {
+	for _, sid := range ids {
 		if err := store.DecorateSession(ctx, sid, opts); err != nil {
 			// The facade may not have persisted the session yet, or it lives in a
 			// different workspace's session-api. Log and continue — the run result
@@ -806,7 +850,62 @@ func decorateFleetSessions(
 			primary = sid
 		}
 	}
+	if primary == "" {
+		return ""
+	}
+
+	recordSelfPlayCalls(ctx, log, store, primary, in)
 	return primary
+}
+
+// recordSelfPlayCalls attaches the captured self-play / judge provider calls to
+// the primary facade session, denormalizing namespace + agent for attribution.
+func recordSelfPlayCalls(
+	ctx context.Context, log logr.Logger, store session.Store, sessionID string, in fleetSessionInputs,
+) {
+	agent := fleetAgentName(in.fleet)
+	for _, pc := range in.selfPlayCalls {
+		pc.SessionID = sessionID
+		pc.Namespace = in.meta.Namespace
+		pc.AgentName = agent
+		if err := store.RecordProviderCall(ctx, sessionID, pc); err != nil {
+			log.Error(err, "failed to record self-play provider call",
+				"sessionID", sessionID, "provider", pc.Provider, "source", pc.Source)
+		}
+	}
+}
+
+// fleetSessionTags is arenaSessionTags plus a persona:<id> tag per persona.
+func fleetSessionTags(meta arenaSessionMetadata, personaIDs []string) []string {
+	tags := arenaSessionTags(meta)
+	for _, p := range personaIDs {
+		tags = append(tags, "persona:"+p)
+	}
+	return tags
+}
+
+// fleetSessionState is arenaSessionState plus persona and self-play model context.
+func fleetSessionState(meta arenaSessionMetadata, personaIDs []string, calls []session.ProviderCall) map[string]string {
+	state := arenaSessionState(meta, "")
+	if len(personaIDs) > 0 {
+		state["arena.persona"] = strings.Join(personaIDs, ",")
+	}
+	if model, provider := selfPlaySummary(calls); model != "" {
+		state["arena.selfplay.model"] = model
+		state["arena.selfplay.provider"] = provider
+	}
+	return state
+}
+
+// fleetAgentName returns the AgentRuntime name of the first fleet provider, used
+// to attribute self-play provider calls to the same agent as the facade session.
+func fleetAgentName(fleetProviders []*resolvedFleetProvider) string {
+	for _, fp := range fleetProviders {
+		if fp.agent != "" {
+			return fp.agent
+		}
+	}
+	return ""
 }
 
 // collectFleetSessionIDs returns the de-duplicated facade session IDs across all
