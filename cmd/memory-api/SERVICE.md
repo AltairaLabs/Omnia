@@ -49,7 +49,9 @@ the reconciler on the next reshape. Empty/fresh columns reshape with no consent.
     rank and pgvector cosine rank fused via RRF (k=60) so semantic-only matches
     surface; without an embedder / on embed failure / empty query it falls back
     to FTS-only multi-tier. The per-tier MemoryPolicy `TierRanker` then biases
-    the fused score. Response `{memories:[...], total:N}` (200); 400 on missing
+    the fused score, and `spec.recall.halfLife.{user,agent,institutional}`
+    drives the per-tier recency decay (default 30d per tier). Response
+    `{memories:[...], total:N}` (200); 400 on missing
     `workspace_id`. This is the path the agent `memory__recall` tool hits when
     the scope carries `agent_id`.
   - `POST /api/v1/memories/retrieve/semantic` — accepts `{workspace_id, query,
