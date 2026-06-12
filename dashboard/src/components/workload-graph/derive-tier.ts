@@ -2,10 +2,13 @@ import type {
   PromptPackContent,
   PromptDefinition,
   ToolDefinition,
+  WorkflowConfig,
 } from "@/lib/data/types";
 import type {
   WorkloadModel,
   WorkloadNode,
+  WorkloadEdge,
+  WorkloadBudget,
   WorkloadToolDetail,
 } from "./types";
 
@@ -72,8 +75,93 @@ function sumTools(nodes: WorkloadNode[]): number {
   return set.size;
 }
 
+function budgetFromWorkflow(wf?: WorkflowConfig): WorkloadBudget | undefined {
+  const b = wf?.engine?.budget;
+  if (!b) return undefined;
+  return {
+    maxTotalVisits: b.max_total_visits,
+    maxToolCalls: b.max_tool_calls,
+    maxWallTimeSec: b.max_wall_time_sec,
+  };
+}
+
+function stateNode(
+  id: string,
+  content: PromptPackContent,
+  isEntry: boolean,
+): WorkloadNode {
+  const wf = content.workflow!;
+  const state = wf.states[id];
+  const prompt = content.prompts?.[state.prompt_task];
+  const tools = toolDetails(prompt?.tools, content.tools);
+  const skills = (content.skills ?? []).map((s) => s.name);
+  const badges: WorkloadNode["badges"] = [
+    { icon: "tool", label: `${tools.length}` },
+    { icon: "skill", label: `${skills.length}` },
+  ];
+  if (state.max_visits != null) badges.push({ icon: "loop", label: `≤${state.max_visits}` });
+  return {
+    id,
+    kind: "state",
+    label: prompt?.name || state.prompt_task || id,
+    isEntry,
+    isTerminal: state.terminal === true,
+    badges,
+    detail: {
+      description: state.description || prompt?.description,
+      systemTemplatePreview: previewTemplate(prompt?.system_template),
+      tools,
+      skills,
+      parameters: prompt?.parameters,
+    },
+  };
+}
+
+function flowEdges(content: PromptPackContent): WorkloadEdge[] {
+  const wf = content.workflow!;
+  const edges: WorkloadEdge[] = [];
+  for (const [stateId, state] of Object.entries(wf.states)) {
+    for (const [event, target] of Object.entries(state.on_event ?? {})) {
+      edges.push({
+        id: `${stateId}--${event}-->${target}`,
+        source: stateId,
+        target,
+        label: event,
+        style: wf.states[target] ? "normal" : "unresolved",
+      });
+    }
+    if (state.on_max_visits) {
+      edges.push({
+        id: `${stateId}--maxvisits-->${state.on_max_visits}`,
+        source: stateId,
+        target: state.on_max_visits,
+        label: "max visits",
+        style: "loop",
+      });
+    }
+  }
+  return edges;
+}
+
 export function deriveWorkloadTier(content: PromptPackContent): WorkloadModel {
   const skillCount = (content.skills ?? []).length;
+  const wf = content.workflow;
+
+  // Flow: a workflow state machine, one implicit agent moving through states.
+  if (wf && Object.keys(wf.states ?? {}).length > 0) {
+    const stateIds = Object.keys(wf.states);
+    const nodes = stateIds.map((id) => stateNode(id, content, id === wf.entry));
+    return {
+      tier: "flow",
+      altitude: "definition",
+      nodes,
+      edges: flowEdges(content),
+      meta: {
+        budget: budgetFromWorkflow(wf),
+        counts: { agents: 1, tools: sumTools(nodes), skills: skillCount, states: stateIds.length },
+      },
+    };
+  }
 
   // Solo: no workflow, no agents — single agent from the (only) prompt.
   const first = firstPrompt(content);

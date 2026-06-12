@@ -31,3 +31,49 @@ describe("deriveWorkloadTier — solo", () => {
     expect(model.meta.counts).toEqual({ agents: 1, tools: 1, skills: 0, states: 0 });
   });
 });
+
+describe("deriveWorkloadTier — flow", () => {
+  it("projects workflow states to nodes and on_event to edges, with budget", () => {
+    const content: PromptPackContent = {
+      id: "refunds",
+      prompts: {
+        triage: { id: "triage", name: "Triage", system_template: "t", tools: ["lookup"] },
+        refund: { id: "refund", name: "Refund", system_template: "r" },
+      },
+      tools: { lookup: { name: "lookup" } },
+      workflow: {
+        entry: "triage",
+        states: {
+          triage: { prompt_task: "triage", on_event: { approved: "refund" } },
+          refund: {
+            prompt_task: "refund",
+            terminal: true,
+            max_visits: 3,
+            on_max_visits: "triage",
+            on_event: { retry: "triage" },
+          },
+        },
+        engine: { budget: { max_total_visits: 12, max_tool_calls: 30, max_wall_time_sec: 60 } },
+      },
+    };
+
+    const model = deriveWorkloadTier(content);
+
+    expect(model.tier).toBe("flow");
+    expect(model.nodes.map((n) => n.id).sort()).toEqual(["refund", "triage"]);
+    const triage = model.nodes.find((n) => n.id === "triage")!;
+    expect(triage.kind).toBe("state");
+    expect(triage.isEntry).toBe(true);
+    const refund = model.nodes.find((n) => n.id === "refund")!;
+    expect(refund.isTerminal).toBe(true);
+    expect(refund.badges.some((b) => b.icon === "loop")).toBe(true);
+
+    // approved (triage→refund), retry (refund→triage), on_max_visits (refund→triage loop)
+    expect(model.edges).toHaveLength(3);
+    const loopEdge = model.edges.find((e) => e.style === "loop")!;
+    expect(loopEdge.source).toBe("refund");
+    expect(loopEdge.target).toBe("triage");
+    expect(model.meta.budget).toEqual({ maxTotalVisits: 12, maxToolCalls: 30, maxWallTimeSec: 60 });
+    expect(model.meta.counts.states).toBe(2);
+  });
+});
