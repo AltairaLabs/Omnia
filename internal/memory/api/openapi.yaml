@@ -39,12 +39,9 @@ paths:
           schema:
             type: string
           description: Filter by memory type (e.g., preference, episodic, fact)
-        - name: purpose
-          in: query
-          schema:
-            type: string
-            enum: [personalisation, support_continuity, safety]
-          description: Filter by purpose tag
+        # NOTE: purpose filtering is NOT available on this flat list endpoint
+        # (ListOptions has no purpose field since the PromptKit migration). Use
+        # POST /memories/retrieve with `purposes` for purpose-scoped recall.
         - name: limit
           in: query
           schema:
