@@ -21,6 +21,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,9 +38,12 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockWarmStore struct {
-	sessions       []*session.Session
-	deletedBatches [][]string
-	deleteErr      error
+	sessions         []*session.Session
+	messages         map[string][]*session.Message
+	getMessagesErr   map[string]error
+	getMessagesCalls int
+	deletedBatches   [][]string
+	deleteErr        error
 }
 
 func (m *mockWarmStore) GetSessionsOlderThan(_ context.Context, cutoff time.Time, batchSize int) ([]*session.Session, error) {
@@ -100,8 +104,12 @@ func (m *mockWarmStore) RefreshTTL(context.Context, string, time.Time) error    
 func (m *mockWarmStore) DeleteSession(context.Context, string) error                   { return nil }
 func (m *mockWarmStore) AppendMessage(context.Context, string, *session.Message) error { return nil }
 
-func (m *mockWarmStore) GetMessages(context.Context, string, providers.MessageQueryOpts) ([]*session.Message, error) {
-	return nil, nil
+func (m *mockWarmStore) GetMessages(_ context.Context, sessionID string, _ providers.MessageQueryOpts) ([]*session.Message, error) {
+	m.getMessagesCalls++
+	if err := m.getMessagesErr[sessionID]; err != nil {
+		return nil, err
+	}
+	return m.messages[sessionID], nil
 }
 
 func (m *mockWarmStore) ListSessions(context.Context, providers.SessionListOpts) (*providers.SessionPage, error) {
@@ -799,11 +807,18 @@ func (m *mockWarmStoreWithQueryErr) GetSessionsOlderThan(
 	return nil, m.queryErr
 }
 
-// newTestMetrics creates compaction metrics for testing (unexported helper
-// delegates to the metrics package test helper).
+// newTestMetrics returns a process-wide singleton of compaction metrics:
+// NewCompactionMetrics registers on the default Prometheus registry, which
+// panics on duplicate registration.
 func newTestMetrics() *metrics.CompactionMetrics {
-	return metrics.NewCompactionMetrics()
+	testMetricsOnce.Do(func() { testMetricsInstance = metrics.NewCompactionMetrics() })
+	return testMetricsInstance
 }
+
+var (
+	testMetricsOnce     sync.Once
+	testMetricsInstance *metrics.CompactionMetrics
+)
 
 // ---------------------------------------------------------------------------
 // Warm-only mode (nil cold provider)
@@ -850,6 +865,204 @@ func TestRun_WarmOnly_NilColdProvider(t *testing.T) {
 	// No cold archive operations should have been attempted.
 	if result.ColdPurged {
 		t.Error("expected ColdPurged == false when no cold provider")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Message archival (SEC-2 regression tests)
+// ---------------------------------------------------------------------------
+
+// sessionBad is a session ID whose message load is configured to fail.
+const sessionBad = "s-bad"
+
+func testMessages(base time.Time) []*session.Message {
+	return []*session.Message{
+		{ID: "m1", Role: session.RoleUser, Content: "hello", Timestamp: base},
+		{ID: "m2", Role: session.RoleAssistant, Content: "hi there", Timestamp: base.Add(time.Second)},
+	}
+}
+
+// TestRun_ArchivesMessages is the regression test for SEC-2: sessions handed
+// to the cold archive must carry their full message history, otherwise the
+// subsequent warm delete permanently destroys the conversation.
+func TestRun_ArchivesMessages(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-10 * 24 * time.Hour)
+
+	warm := &mockWarmStore{
+		sessions: []*session.Session{testSession("s1", "", old)},
+		messages: map[string][]*session.Message{"s1": testMessages(old)},
+	}
+	cold := &mockColdArchive{}
+
+	e := NewEngine(warm, cold, nil, testRetentionConfig(), testConfig(), nil, testLogger())
+	result, err := e.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.SessionsCompacted != 1 {
+		t.Fatalf("expected 1 session compacted, got %d", result.SessionsCompacted)
+	}
+	if len(cold.written) != 1 || len(cold.written[0]) != 1 {
+		t.Fatal("expected 1 write of 1 session to cold archive")
+	}
+
+	got := cold.written[0][0]
+	if len(got.Messages) != 2 {
+		t.Fatalf("archived session has %d messages, want 2 — messages must be loaded before archival", len(got.Messages))
+	}
+	if got.Messages[0].Content != "hello" || got.Messages[1].Content != "hi there" {
+		t.Errorf("archived message content mismatch: %+v", got.Messages)
+	}
+	if len(warm.deletedBatches) != 1 {
+		t.Fatal("expected warm delete after archive")
+	}
+}
+
+// TestRun_MessageLoadFailure_SkipsSession verifies a session whose message
+// history cannot be loaded is neither archived nor deleted.
+func TestRun_MessageLoadFailure_SkipsSession(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-10 * 24 * time.Hour)
+
+	warm := &mockWarmStore{
+		sessions: []*session.Session{
+			testSession("s-good", "", old),
+			testSession(sessionBad, "", old),
+		},
+		messages:       map[string][]*session.Message{"s-good": testMessages(old)},
+		getMessagesErr: map[string]error{sessionBad: errors.New("messages query failed")},
+	}
+	cold := &mockColdArchive{}
+
+	e := NewEngine(warm, cold, nil, testRetentionConfig(), testConfig(), nil, testLogger())
+	result, err := e.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.SessionsCompacted != 1 {
+		t.Errorf("expected 1 session compacted, got %d", result.SessionsCompacted)
+	}
+	if result.SessionsSkipped != 1 {
+		t.Errorf("expected 1 session skipped, got %d", result.SessionsSkipped)
+	}
+
+	for _, batch := range cold.written {
+		for _, s := range batch {
+			if s.ID == sessionBad {
+				t.Error("s-bad must not be archived without its messages")
+			}
+		}
+	}
+	for _, batch := range warm.deletedBatches {
+		for _, id := range batch {
+			if id == sessionBad {
+				t.Error("s-bad must not be deleted: its messages were never archived")
+			}
+		}
+	}
+	// The failing session must remain in the warm store for the next run.
+	remaining := false
+	for _, s := range warm.sessions {
+		if s.ID == sessionBad {
+			remaining = true
+		}
+	}
+	if !remaining {
+		t.Error("s-bad should remain in the warm store")
+	}
+}
+
+// TestRun_MessageLoadFailure_AllSkipped verifies the run terminates (rather
+// than looping forever) when every eligible session fails message loading.
+func TestRun_MessageLoadFailure_AllSkipped(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-10 * 24 * time.Hour)
+
+	warm := &mockWarmStore{
+		sessions:       []*session.Session{testSession("s1", "", old)},
+		getMessagesErr: map[string]error{"s1": errors.New("messages query failed")},
+	}
+	cold := &mockColdArchive{}
+
+	e := NewEngine(warm, cold, nil, testRetentionConfig(), testConfig(), nil, testLogger())
+	result, err := e.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.SessionsCompacted != 0 {
+		t.Errorf("expected 0 sessions compacted, got %d", result.SessionsCompacted)
+	}
+	if result.SessionsSkipped != 1 {
+		t.Errorf("expected 1 session skipped, got %d", result.SessionsSkipped)
+	}
+	if len(cold.written) != 0 {
+		t.Error("expected no cold writes")
+	}
+	if len(warm.deletedBatches) != 0 {
+		t.Error("expected no warm deletes")
+	}
+}
+
+// TestRun_MessageLoadFailure_WithMetrics covers the error-metric path.
+func TestRun_MessageLoadFailure_WithMetrics(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-10 * 24 * time.Hour)
+
+	warm := &mockWarmStore{
+		sessions:       []*session.Session{testSession("s1", "", old)},
+		getMessagesErr: map[string]error{"s1": errors.New("messages query failed")},
+	}
+	cold := &mockColdArchive{}
+
+	e := NewEngine(warm, cold, nil, testRetentionConfig(), testConfig(), newTestMetrics(), testLogger())
+	result, err := e.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.SessionsSkipped != 1 {
+		t.Errorf("expected 1 session skipped, got %d", result.SessionsSkipped)
+	}
+}
+
+// TestRun_WarmOnly_NoMessageLoad verifies the warm-only purge path does not
+// pay the cost of loading messages that will never be archived.
+func TestRun_WarmOnly_NoMessageLoad(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-10 * 24 * time.Hour)
+
+	warm := &mockWarmStore{
+		sessions: []*session.Session{testSession("s1", "", old)},
+	}
+
+	e := NewEngine(warm, nil, nil, testRetentionConfigWarmOnly(), testConfig(), nil, testLogger())
+	if _, err := e.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if warm.getMessagesCalls != 0 {
+		t.Errorf("expected no GetMessages calls in warm-only mode, got %d", warm.getMessagesCalls)
+	}
+}
+
+// TestRun_DryRun_NoMessageLoad verifies dry-run does not load messages.
+func TestRun_DryRun_NoMessageLoad(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-10 * 24 * time.Hour)
+
+	warm := &mockWarmStore{
+		sessions: []*session.Session{testSession("s1", "", old)},
+	}
+	cold := &mockColdArchive{}
+
+	cfg := testConfig()
+	cfg.DryRun = true
+
+	e := NewEngine(warm, cold, nil, testRetentionConfig(), cfg, nil, testLogger())
+	if _, err := e.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if warm.getMessagesCalls != 0 {
+		t.Errorf("expected no GetMessages calls in dry-run, got %d", warm.getMessagesCalls)
 	}
 }
 

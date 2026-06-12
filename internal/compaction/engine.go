@@ -40,9 +40,13 @@ type Config struct {
 // Result summarises a compaction run.
 type Result struct {
 	SessionsCompacted int64
-	BatchesProcessed  int
-	ColdPurged        bool
-	Errors            []error
+	// SessionsSkipped counts sessions whose message history could not be
+	// loaded from the warm store. They are neither archived nor deleted and
+	// will be retried on the next run.
+	SessionsSkipped  int64
+	BatchesProcessed int
+	ColdPurged       bool
+	Errors           []error
 }
 
 // Engine performs batched warm→cold compaction.
@@ -97,47 +101,142 @@ func (e *Engine) compactWarmToCold(ctx context.Context, result *Result) error {
 	minCutoff := e.retention.MinWarmCutoff(now)
 	e.log.Infow("starting warm-to-cold compaction", "minCutoff", minCutoff, "batchSize", e.cfg.BatchSize)
 
-	for {
-		if ctx.Err() != nil {
-			return nil
-		}
+	// Sessions whose message history failed to load. They stay in the warm
+	// store (retried next run) and are excluded from subsequent batches so
+	// the loop never refetches them within this run.
+	skippedIDs := make(map[string]struct{})
 
-		sessions, err := e.warmStore.GetSessionsOlderThan(ctx, minCutoff, e.cfg.BatchSize)
+	for ctx.Err() == nil {
+		done, err := e.compactOneBatch(ctx, minCutoff, now, skippedIDs, result)
 		if err != nil {
-			return fmt.Errorf("querying warm store: %w", err)
-		}
-		if len(sessions) == 0 {
-			break
-		}
-
-		eligible := e.filterByWorkspaceCutoff(sessions, now)
-		if len(eligible) == 0 {
-			// All returned sessions are within per-workspace retention; stop.
-			break
-		}
-
-		if err := e.processBatch(ctx, eligible); err != nil {
 			return err
 		}
-
-		result.SessionsCompacted += int64(len(eligible))
-		result.BatchesProcessed++
-
-		if e.metrics != nil {
-			e.metrics.RecordSessionsCompacted(int64(len(eligible)))
-			e.metrics.RecordBatchProcessed()
-		}
-
-		// In dry-run mode, stop after the first batch since sessions are
-		// not actually deleted and would be returned again.
-		if e.cfg.DryRun {
+		if done {
 			break
 		}
 	}
 
 	e.log.Infow("warm-to-cold compaction complete",
 		"sessionsCompacted", result.SessionsCompacted,
+		"sessionsSkipped", result.SessionsSkipped,
 		"batchesProcessed", result.BatchesProcessed)
+	return nil
+}
+
+// compactOneBatch fetches and processes one batch of expired sessions.
+// It returns done=true when compaction should stop (no more work, or
+// dry-run completed its single batch).
+func (e *Engine) compactOneBatch(
+	ctx context.Context,
+	minCutoff, now time.Time,
+	skippedIDs map[string]struct{},
+	result *Result,
+) (bool, error) {
+	sessions, err := e.warmStore.GetSessionsOlderThan(ctx, minCutoff, e.cfg.BatchSize)
+	if err != nil {
+		return false, fmt.Errorf("querying warm store: %w", err)
+	}
+	if len(sessions) == 0 {
+		return true, nil
+	}
+
+	eligible := filterSkipped(e.filterByWorkspaceCutoff(sessions, now), skippedIDs)
+	if len(eligible) == 0 {
+		// All returned sessions are within per-workspace retention or were
+		// already skipped this run; stop.
+		return true, nil
+	}
+
+	archivable := e.prepareForArchive(ctx, eligible, skippedIDs)
+	result.SessionsSkipped += int64(len(eligible) - len(archivable))
+	if len(archivable) == 0 {
+		// Every session in this batch failed message loading; nothing to
+		// archive or delete. Continue — the skipped IDs are excluded from
+		// the next fetch, so the loop terminates once only skipped
+		// sessions remain.
+		return false, nil
+	}
+
+	if err := e.processBatch(ctx, archivable); err != nil {
+		return false, err
+	}
+
+	result.SessionsCompacted += int64(len(archivable))
+	result.BatchesProcessed++
+
+	if e.metrics != nil {
+		e.metrics.RecordSessionsCompacted(int64(len(archivable)))
+		e.metrics.RecordBatchProcessed()
+	}
+
+	// In dry-run mode, stop after the first batch since sessions are
+	// not actually deleted and would be returned again.
+	return e.cfg.DryRun, nil
+}
+
+// prepareForArchive loads the full message history for each session so the
+// cold archive captures the complete conversation, not just session metadata
+// (the warm-store batch query returns metadata only). Sessions whose messages
+// cannot be loaded are excluded from the batch: they are neither archived nor
+// deleted, so no data is destroyed without first being durably archived.
+//
+// When no cold archive is configured (warm-only purge) or in dry-run mode,
+// nothing is archived, so messages are not loaded.
+//
+// Note on detail tables: tool_calls, provider_calls, runtime_events, and
+// eval_results are intentionally NOT archived here. They are partitioned
+// tables whose retention is handled by partition drops; the warm-delete
+// cascade removes their rows without a cold copy. See cmd/compaction/SERVICE.md
+// for the full data-retention contract.
+func (e *Engine) prepareForArchive(
+	ctx context.Context,
+	sessions []*session.Session,
+	skippedIDs map[string]struct{},
+) []*session.Session {
+	if e.coldArchive == nil || e.cfg.DryRun {
+		return sessions
+	}
+
+	archivable := make([]*session.Session, 0, len(sessions))
+	for _, s := range sessions {
+		if err := e.loadSessionMessages(ctx, s); err != nil {
+			e.log.Errorw("message load failed; skipping archive",
+				"sessionID", s.ID, "error", err)
+			if e.metrics != nil {
+				e.metrics.RecordError("load_messages")
+			}
+			skippedIDs[s.ID] = struct{}{}
+			continue
+		}
+		archivable = append(archivable, s)
+	}
+	return archivable
+}
+
+// filterSkipped removes sessions already skipped during this run.
+func filterSkipped(sessions []*session.Session, skippedIDs map[string]struct{}) []*session.Session {
+	if len(skippedIDs) == 0 {
+		return sessions
+	}
+	kept := make([]*session.Session, 0, len(sessions))
+	for _, s := range sessions {
+		if _, ok := skippedIDs[s.ID]; !ok {
+			kept = append(kept, s)
+		}
+	}
+	return kept
+}
+
+// loadSessionMessages populates s.Messages from the warm store.
+func (e *Engine) loadSessionMessages(ctx context.Context, s *session.Session) error {
+	msgs, err := e.warmStore.GetMessages(ctx, s.ID, providers.MessageQueryOpts{})
+	if err != nil {
+		return err
+	}
+	s.Messages = make([]session.Message, len(msgs))
+	for i, m := range msgs {
+		s.Messages[i] = *m
+	}
 	return nil
 }
 

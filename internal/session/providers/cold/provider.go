@@ -165,7 +165,11 @@ func (p *Provider) WriteParquet(ctx context.Context, sessions []*session.Session
 func (p *Provider) writeGroup(ctx context.Context, path string, group []*session.Session, maxFileSize int64) error {
 	rows := make([]sessionRow, len(group))
 	for i, s := range group {
-		rows[i] = sessionToRow(s)
+		row, err := sessionToRow(s)
+		if err != nil {
+			return fmt.Errorf("convert session: %w", err)
+		}
+		rows[i] = row
 	}
 
 	chunks := splitRows(rows, maxFileSize)

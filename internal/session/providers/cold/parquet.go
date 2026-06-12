@@ -54,11 +54,18 @@ type sessionRow struct {
 	MessagesJSON       string  `parquet:"messages_json"`
 }
 
-// sessionToRow converts a Session to a Parquet row.
-func sessionToRow(s *session.Session) sessionRow {
+// sessionToRow converts a Session to a Parquet row. It returns an error if
+// the message history cannot be serialized — archiving a session without its
+// messages would silently destroy the conversation once the warm copy is
+// deleted.
+func sessionToRow(s *session.Session) (sessionRow, error) {
+	// Tags ([]string) and State (map[string]string) cannot fail to marshal.
 	tags, _ := json.Marshal(s.Tags)
 	state, _ := json.Marshal(s.State)
-	messages, _ := json.Marshal(s.Messages)
+	messages, err := json.Marshal(s.Messages)
+	if err != nil {
+		return sessionRow{}, fmt.Errorf("marshal messages for session %s: %w", s.ID, err)
+	}
 
 	var expiresAt, endedAt int64
 	if !s.ExpiresAt.IsZero() {
@@ -87,7 +94,7 @@ func sessionToRow(s *session.Session) sessionRow {
 		State:              string(state),
 		LastMessagePreview: s.LastMessagePreview,
 		MessagesJSON:       string(messages),
-	}
+	}, nil
 }
 
 // rowToSession converts a Parquet row back to a Session.

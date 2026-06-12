@@ -174,6 +174,7 @@ func runWithFlags(f *flags) error {
 
 	log.Infow("compaction complete",
 		"sessionsCompacted", result.SessionsCompacted,
+		"sessionsSkipped", result.SessionsSkipped,
 		"batchesProcessed", result.BatchesProcessed,
 		"coldPurged", result.ColdPurged,
 		"errors", len(result.Errors),
