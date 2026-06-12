@@ -97,7 +97,7 @@ func TestRetrieveMultiTier_RoutesToHybridWhenEmbedderPresent(t *testing.T) {
 	svc := NewMemoryService(store, newEmbedder([]float32{0.1, 0.2}, nil), MemoryServiceConfig{}, logr.Discard())
 
 	res, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{
-		WorkspaceID: "ws-1", Query: "hello",
+		WorkspaceID: testWS, Query: "hello",
 	})
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Total)
@@ -116,7 +116,7 @@ func TestRetrieveMultiTier_FallsBackToFTSOnEmbedError(t *testing.T) {
 	svc := NewMemoryService(store, newEmbedder(nil, errors.New("boom")), MemoryServiceConfig{}, logr.Discard())
 
 	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{
-		WorkspaceID: "ws-1", Query: "hi",
+		WorkspaceID: testWS, Query: "hi",
 	})
 	require.NoError(t, err, "embed failure must not fail the recall")
 
@@ -132,7 +132,7 @@ func TestRetrieveMultiTier_EmptyQueryUsesFTS(t *testing.T) {
 	store := &multiTierStoreStub{mtResult: &memory.MultiTierResult{Total: 0}}
 	svc := NewMemoryService(store, newEmbedder([]float32{0.1}, nil), MemoryServiceConfig{}, logr.Discard())
 
-	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: "ws-1"})
+	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: testWS})
 	require.NoError(t, err)
 
 	store.mu.Lock()
@@ -155,7 +155,7 @@ func TestRetrieveMultiTier_PassesThroughAndEmitsAudit(t *testing.T) {
 	svc.SetAuditLogger(audit)
 
 	got, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{
-		WorkspaceID: "ws-1",
+		WorkspaceID: testWS,
 		UserID:      "u-1",
 		AgentID:     "a-1",
 		Query:       "dark",
@@ -169,13 +169,13 @@ func TestRetrieveMultiTier_PassesThroughAndEmitsAudit(t *testing.T) {
 	require.Len(t, store.mtCalls, 1)
 	call := store.mtCalls[0]
 	store.mu.Unlock()
-	assert.Equal(t, "ws-1", call.WorkspaceID)
+	assert.Equal(t, testWS, call.WorkspaceID)
 	assert.Equal(t, "a-1", call.AgentID)
 
 	entry := audit.receiveEntry(t)
 	assert.Equal(t, auditEventMemoryAccessed, entry.EventType)
 	assert.Equal(t, "retrieve_multi_tier", entry.Metadata["operation"])
-	assert.Equal(t, "ws-1", entry.WorkspaceID)
+	assert.Equal(t, testWS, entry.WorkspaceID)
 	assert.Equal(t, "u-1", entry.UserID)
 }
 
@@ -185,7 +185,7 @@ func TestRetrieveMultiTier_PropagatesStoreError(t *testing.T) {
 	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
 	svc.SetAuditLogger(audit)
 
-	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: "ws-1"})
+	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: testWS})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "boom")
 
@@ -228,7 +228,7 @@ func TestRetrieveMultiTier_BuildsRankerFromPolicyLoader(t *testing.T) {
 	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
 	svc.SetPolicyLoader(loader)
 
-	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: "ws-1"})
+	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: testWS})
 	require.NoError(t, err)
 
 	store.mu.Lock()
@@ -249,7 +249,7 @@ func TestRetrieveMultiTier_PolicyLoaderErrorFallsBackToIdentity(t *testing.T) {
 	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
 	svc.SetPolicyLoader(loader)
 
-	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: "ws-1"})
+	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: testWS})
 	require.NoError(t, err, "loader errors must not fail retrieval")
 
 	store.mu.Lock()
@@ -279,7 +279,7 @@ func TestRetrieveMultiTier_PreservesCallerSuppliedRanker(t *testing.T) {
 
 	supplied := memory.IdentityTierRanker{}
 	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{
-		WorkspaceID: "ws-1",
+		WorkspaceID: testWS,
 		Ranker:      supplied,
 	})
 	require.NoError(t, err)

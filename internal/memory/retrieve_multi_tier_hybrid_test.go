@@ -19,7 +19,7 @@ import (
 // tier implied by user/agent (empty => NULL => institutional / non-agent) with
 // an explicit embedding, returning the entity ID. Mirrors insertRawMemory but
 // sets the pgvector embedding so the cosine ranker has something to match.
-func insertHybridMemory(t *testing.T, store *PostgresMemoryStore, user, agent, kind, content string, confidence float64, emb []float32) string {
+func insertHybridMemory(t *testing.T, store *PostgresMemoryStore, user, agent, kind, content string, confidence float64, emb []float32) {
 	t.Helper()
 	ctx := context.Background()
 	var userArg, agentArg any
@@ -43,8 +43,13 @@ func insertHybridMemory(t *testing.T, store *PostgresMemoryStore, user, agent, k
 		entityID, content, confidence, pgvector.NewVector(emb),
 	)
 	require.NoError(t, err)
-	return entityID
 }
+
+// Test constants extracted to satisfy goconst (strings reused 4+ times).
+const (
+	hybridTestUser = "user-1"
+	hybridKindFact = "fact"
+)
 
 // TestRetrieveMultiTierHybrid_SemanticOnlyMatchAcrossTiers proves the core
 // fix: an institutional memory worded with no lexical overlap with the query
@@ -56,7 +61,7 @@ func TestRetrieveMultiTierHybrid_SemanticOnlyMatchAcrossTiers(t *testing.T) {
 
 	emb := oneHotFloat(7, 1536)
 	// Institutional doc: query shares NO FTS tokens with this content.
-	insertHybridMemory(t, store, "", "", "fact",
+	insertHybridMemory(t, store, "", "", hybridKindFact,
 		"Refunds are processed within five business days.", 0.9, emb)
 
 	res, err := store.RetrieveMultiTierHybrid(ctx, MultiTierRequest{
@@ -77,15 +82,15 @@ func TestRetrieveMultiTierHybrid_FallsBackWhenNoEmbedding(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
 
-	insertHybridMemory(t, store, "", "", "fact", "alpha beta gamma", 0.8, oneHotFloat(1, 1536))
+	insertHybridMemory(t, store, "", "", hybridKindFact, "zlexmatch beta gamma", 0.8, oneHotFloat(1, 1536))
 
 	res, err := store.RetrieveMultiTierHybrid(ctx, MultiTierRequest{
 		WorkspaceID: testWorkspace1,
-		Query:       "alpha",
+		Query:       "zlexmatch",
 		Limit:       5,
 	}, nil)
 	require.NoError(t, err)
-	require.Len(t, res.Memories, 1, "FTS fallback must match the lexical token 'alpha'")
+	require.Len(t, res.Memories, 1, "FTS fallback must match the lexical token 'zlexmatch'")
 }
 
 // TestRetrieveMultiTierHybrid_TierRankerReorders proves the per-tier weight
@@ -96,8 +101,8 @@ func TestRetrieveMultiTierHybrid_TierRankerReorders(t *testing.T) {
 	ctx := context.Background()
 	emb := oneHotFloat(3, 1536)
 
-	insertHybridMemory(t, store, "", "", "fact", "institutional refund policy", 0.9, emb)
-	insertHybridMemory(t, store, "user-1", multiTierAgentID, "fact", "user prefers fast refunds", 0.9, emb)
+	insertHybridMemory(t, store, "", "", hybridKindFact, "institutional refund policy", 0.9, emb)
+	insertHybridMemory(t, store, hybridTestUser, multiTierAgentID, hybridKindFact, "user prefers fast refunds", 0.9, emb)
 
 	ranker := MultiplicativeTierRanker{Weights: map[Tier]float64{
 		TierInstitutional: 0.1,
@@ -105,7 +110,7 @@ func TestRetrieveMultiTierHybrid_TierRankerReorders(t *testing.T) {
 	}}
 	res, err := store.RetrieveMultiTierHybrid(ctx, MultiTierRequest{
 		WorkspaceID: testWorkspace1,
-		UserID:      "user-1",
+		UserID:      hybridTestUser,
 		AgentID:     multiTierAgentID,
 		Query:       "refund speed",
 		Limit:       10,
@@ -124,19 +129,19 @@ func TestRetrieveMultiTierHybrid_TypeFilter(t *testing.T) {
 	ctx := context.Background()
 	emb := oneHotFloat(5, 1536)
 
-	insertHybridMemory(t, store, "", "", "fact", "the fact row", 0.8, emb)
+	insertHybridMemory(t, store, "", "", hybridKindFact, "the fact row", 0.8, emb)
 	insertHybridMemory(t, store, "", "", "preference", "the preference row", 0.8, emb)
 
 	res, err := store.RetrieveMultiTierHybrid(ctx, MultiTierRequest{
 		WorkspaceID: testWorkspace1,
 		Query:       "row",
-		Types:       []string{"fact"},
+		Types:       []string{hybridKindFact},
 		Limit:       10,
 	}, emb)
 	require.NoError(t, err)
 	require.NotEmpty(t, res.Memories)
 	for _, m := range res.Memories {
-		assert.Equal(t, "fact", m.Type, "type filter must exclude non-fact kinds")
+		assert.Equal(t, hybridKindFact, m.Type, "type filter must exclude non-fact kinds")
 	}
 }
 
@@ -158,7 +163,7 @@ func TestRetrieveMultiTierHybrid_TruncatesToLimit(t *testing.T) {
 	emb := oneHotFloat(2, 1536)
 
 	for i := 0; i < 4; i++ {
-		insertHybridMemory(t, store, "", "", "fact", "shared topic note", 0.8, emb)
+		insertHybridMemory(t, store, "", "", hybridKindFact, "shared topic note", 0.8, emb)
 	}
 
 	res, err := store.RetrieveMultiTierHybrid(ctx, MultiTierRequest{
@@ -181,9 +186,9 @@ func TestBuildMultiTierHybridQuery_Structure(t *testing.T) {
 	})
 
 	sql, args, err := buildMultiTierHybridQuery(MultiTierRequest{
-		WorkspaceID: "ws-1",
-		UserID:      "u-1",
-		AgentID:     "a-1",
+		WorkspaceID: testWorkspace1,
+		UserID:      hybridTestUser,
+		AgentID:     multiTierAgentID,
 		Query:       "dark mode",
 		Limit:       10,
 	})
