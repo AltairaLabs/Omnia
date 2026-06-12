@@ -209,13 +209,21 @@ function ProviderGroupDisplay({
   );
 }
 
-function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
+function OverviewTab({
+  job,
+  liveStats,
+}: Readonly<{ job: ArenaJob; liveStats: ArenaLiveStats | null }>) {
   const { spec, status } = job;
 
-  // Read from status.progress for work item tracking
-  const total = status?.progress?.total ?? 0;
-  const completed = status?.progress?.completed ?? 0;
-  const failed = status?.progress?.failed ?? 0;
+  // Work-item progress. status.progress only finalizes when the K8s Job
+  // completes (the reconciler serves live progress via the SSE Redis stats),
+  // so while the job is Running read the live stats; otherwise fall back to
+  // the CRD status field. Without this the bar reads the stale initial
+  // pending=total / completed=0 for the whole run (#1328).
+  const live = status?.phase === "Running" ? liveStats : null;
+  const total = live ? live.total : (status?.progress?.total ?? 0);
+  const completed = live ? live.passed : (status?.progress?.completed ?? 0);
+  const failed = live ? live.failed : (status?.progress?.failed ?? 0);
   const progressPct = total > 0 ? Math.round(((completed + failed) / total) * 100) : 0;
 
   // Read from status.result.summary for test results
@@ -1462,7 +1470,7 @@ export default function ArenaJobDetailPage() {
           </TabsList>
 
           <TabsContent value="overview">
-            <OverviewTab job={job} />
+            <OverviewTab job={job} liveStats={liveStats} />
           </TabsContent>
 
           <TabsContent value="logs">
