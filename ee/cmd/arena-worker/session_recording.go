@@ -69,13 +69,22 @@ func runIDToUUID(runID string) string {
 	return uuid.NewSHA1(arenaSessionNamespace, []byte(runID)).String()
 }
 
+// sourceInteractiveTag is the source tag the facade applies to a normal WS
+// connection. The fleet client connects the same way, so the arena decoration
+// path removes it (replacing it with sourceArenaTag) to avoid double-counting
+// load-test traffic as interactive user sessions.
+const (
+	sourceInteractiveTag = "source:interactive"
+	sourceArenaTag       = "source:arena"
+)
+
 // arenaSessionTags returns the tags that identify a session as belonging to an
 // arena run. Shared between the lazily-created arena session (direct providers)
 // and the facade-session decoration path (fleet/loadtest) so both label sessions
 // identically.
 func arenaSessionTags(meta arenaSessionMetadata) []string {
 	tags := []string{
-		"source:arena",
+		sourceArenaTag,
 		"arena-job:" + meta.JobName,
 		"scenario:" + meta.Scenario,
 		"provider:" + meta.ProviderID,

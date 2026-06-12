@@ -173,7 +173,7 @@ func (m *mockWarmStore) DecorateSession(_ context.Context, sessionID string, opt
 	if !ok {
 		return session.ErrSessionNotFound
 	}
-	s.Tags = append(s.Tags, opts.AddTags...)
+	s.Tags = mergeTags(s.Tags, opts)
 	if len(opts.MergeState) > 0 && s.State == nil {
 		s.State = map[string]string{}
 	}
@@ -181,6 +181,32 @@ func (m *mockWarmStore) DecorateSession(_ context.Context, sessionID string, opt
 		s.State[k] = v
 	}
 	return nil
+}
+
+// mergeTags applies RemoveTags then AddTags (deduped) — mirrors the production
+// store behaviour for faithful tests.
+func mergeTags(existing []string, opts session.DecorateSessionOptions) []string {
+	remove := make(map[string]struct{}, len(opts.RemoveTags))
+	for _, t := range opts.RemoveTags {
+		remove[t] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(existing))
+	out := make([]string, 0, len(existing)+len(opts.AddTags))
+	for _, t := range existing {
+		if _, drop := remove[t]; drop {
+			continue
+		}
+		out = append(out, t)
+		seen[t] = struct{}{}
+	}
+	for _, t := range opts.AddTags {
+		if _, dup := seen[t]; dup {
+			continue
+		}
+		out = append(out, t)
+		seen[t] = struct{}{}
+	}
+	return out
 }
 
 func (m *mockWarmStore) RefreshTTL(_ context.Context, id string, expiresAt time.Time) error {
@@ -1022,7 +1048,7 @@ func TestHandleDecorateSession_OK(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"tags":["source:arena","arena-job:demo"],"state":{"arena.job":"demo"}}`
+	body := `{"removeTags":["source:interactive"],"tags":["source:arena","arena-job:demo"],"state":{"arena.job":"demo"}}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/"+testSessionID+"/decorate",
 		strings.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -1033,7 +1059,8 @@ func TestHandleDecorateSession_OK(t *testing.T) {
 	}
 
 	got := warm.sessions[testSessionID]
-	wantTags := []string{"source:interactive", "source:arena", "arena-job:demo"}
+	// source:interactive removed, source:arena + arena-job added (no contradiction).
+	wantTags := []string{"source:arena", "arena-job:demo"}
 	if fmt.Sprint(got.Tags) != fmt.Sprint(wantTags) {
 		t.Fatalf("tags = %v, want %v", got.Tags, wantTags)
 	}

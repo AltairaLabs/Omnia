@@ -325,6 +325,18 @@ func TestDecorateSession(t *testing.T) {
 	got2, err := p.GetSession(ctx, s.ID)
 	require.NoError(t, err)
 	assert.Equal(t, got.Tags, got2.Tags)
+
+	// RemoveTags drops tags before AddTags are applied; other tags are untouched.
+	require.NoError(t, p.DecorateSession(ctx, s.ID, session.DecorateSessionOptions{
+		RemoveTags: []string{"tag1", "tag2"},
+		AddTags:    []string{"source:final"},
+	}))
+	got3, err := p.GetSession(ctx, s.ID)
+	require.NoError(t, err)
+	assert.NotContains(t, got3.Tags, "tag1")
+	assert.NotContains(t, got3.Tags, "tag2")
+	assert.Contains(t, got3.Tags, "source:final")
+	assert.Contains(t, got3.Tags, sourceArenaTag, "untouched tags remain")
 }
 
 func TestDecorateSession_NotFound(t *testing.T) {

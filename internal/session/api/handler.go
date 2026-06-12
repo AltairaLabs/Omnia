@@ -217,10 +217,11 @@ type RefreshTTLRequest struct {
 
 // DecorateSessionRequest is the JSON body for PATCH /api/v1/sessions/{sessionID}/decorate.
 // It merges additional tags and state into an existing session without touching
-// counters or lifecycle status.
+// counters or lifecycle status. RemoveTags are dropped before Tags are applied.
 type DecorateSessionRequest struct {
-	Tags  []string          `json:"tags,omitempty"`
-	State map[string]string `json:"state,omitempty"`
+	RemoveTags []string          `json:"removeTags,omitempty"`
+	Tags       []string          `json:"tags,omitempty"`
+	State      map[string]string `json:"state,omitempty"`
 }
 
 // RegisterRoutes registers the session API routes on the given mux.
@@ -656,6 +657,7 @@ func (h *Handler) handleDecorateSession(w http.ResponseWriter, r *http.Request) 
 
 	log := h.requestLog(r.Context())
 	if err := h.service.DecorateSession(r.Context(), sessionID, session.DecorateSessionOptions{
+		RemoveTags: req.RemoveTags,
 		AddTags:    req.Tags,
 		MergeState: req.State,
 	}); err != nil {

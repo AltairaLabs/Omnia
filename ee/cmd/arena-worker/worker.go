@@ -785,6 +785,10 @@ func decorateFleetSessions(
 	fleetProviders []*resolvedFleetProvider,
 ) string {
 	opts := session.DecorateSessionOptions{
+		// The fleet client connects to the facade like an interactive client, so the
+		// facade tags the session "source:interactive". Drop it so the arena session
+		// isn't double-counted as user traffic — it's "source:arena" now.
+		RemoveTags: []string{sourceInteractiveTag},
 		AddTags:    arenaSessionTags(meta),
 		MergeState: arenaSessionState(meta, ""),
 	}

@@ -24,6 +24,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	mdTag1        = "tag1"
+	mdSourceArena = "source:arena"
+)
+
 func TestMemoryStore_DecorateSession(t *testing.T) {
 	ctx := context.Background()
 	m := NewMemoryStore()
@@ -31,7 +36,7 @@ func TestMemoryStore_DecorateSession(t *testing.T) {
 	_, err := m.CreateSession(ctx, CreateSessionOptions{
 		ID:           "s1",
 		AgentName:    "agent",
-		Tags:         []string{"tag1", "tag2"},
+		Tags:         []string{mdTag1, "tag2"},
 		InitialState: map[string]string{"key": "value"},
 	})
 	require.NoError(t, err)
@@ -39,23 +44,32 @@ func TestMemoryStore_DecorateSession(t *testing.T) {
 	// Overlapping tag (tag1) is not duplicated; new tags appended. State is
 	// shallow-merged (overlapping key overwritten, new key added).
 	err = m.DecorateSession(ctx, "s1", DecorateSessionOptions{
-		AddTags:    []string{"tag1", "source:arena", "arena-job:demo"},
+		AddTags:    []string{mdTag1, mdSourceArena, "arena-job:demo"},
 		MergeState: map[string]string{"key": "overwritten", "arena.job": "demo"},
 	})
 	require.NoError(t, err)
 
 	got, err := m.GetSession(ctx, "s1")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"tag1", "tag2", "source:arena", "arena-job:demo"}, got.Tags)
+	assert.Equal(t, []string{mdTag1, "tag2", mdSourceArena, "arena-job:demo"}, got.Tags)
 	assert.Equal(t, map[string]string{"key": "overwritten", "arena.job": "demo"}, got.State)
 
-	// Idempotent for tags.
+	// Idempotent for tags: re-adding existing tags changes nothing.
 	require.NoError(t, m.DecorateSession(ctx, "s1", DecorateSessionOptions{
-		AddTags: []string{"source:arena"},
+		AddTags: []string{mdSourceArena},
 	}))
 	got2, err := m.GetSession(ctx, "s1")
 	require.NoError(t, err)
 	assert.Equal(t, got.Tags, got2.Tags)
+
+	// RemoveTags drops tags before AddTags are applied.
+	require.NoError(t, m.DecorateSession(ctx, "s1", DecorateSessionOptions{
+		RemoveTags: []string{mdTag1, mdSourceArena},
+		AddTags:    []string{"source:final"},
+	}))
+	got3, err := m.GetSession(ctx, "s1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"tag2", "arena-job:demo", "source:final"}, got3.Tags)
 }
 
 func TestMemoryStore_DecorateSession_NotFound(t *testing.T) {

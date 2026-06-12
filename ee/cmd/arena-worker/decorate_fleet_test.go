@@ -170,6 +170,8 @@ func TestDecorateFleetSessions(t *testing.T) {
 		require.True(t, ok, "expected the facade session to be decorated")
 		assert.Contains(t, opts.AddTags, "source:arena")
 		assert.Contains(t, opts.AddTags, "arena-job:rag-hero-loadtest")
+		// The contradictory interactive source tag is dropped.
+		assert.Contains(t, opts.RemoveTags, "source:interactive")
 		assert.Equal(t, testLoadJobName, opts.MergeState["arena.job"])
 	})
 

@@ -236,6 +236,10 @@ type SessionStatusUpdate struct {
 // session that was created by another writer (e.g. the facade-recorded session
 // of an agent under arena load test) with additional context.
 type DecorateSessionOptions struct {
+	// RemoveTags are removed from the session's existing tags before AddTags are
+	// applied. Used to replace a contradictory tag (e.g. drop "source:interactive"
+	// when labelling an arena-driven session "source:arena").
+	RemoveTags []string
 	// AddTags are appended to the session's existing tags. Duplicates are ignored,
 	// so calling DecorateSession repeatedly with the same tags is idempotent.
 	AddTags []string

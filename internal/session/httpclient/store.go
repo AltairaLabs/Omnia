@@ -307,13 +307,14 @@ func (s *Store) UpdateSessionStatus(ctx context.Context, sessionID string, updat
 // is buffered and retried automatically.
 func (s *Store) DecorateSession(ctx context.Context, sessionID string, opts session.DecorateSessionOptions) error {
 	path := fmt.Sprintf("/api/v1/sessions/%s/decorate", sessionID)
-	// Wire shape matches the server's DecorateSessionRequest ({tags, state}).
-	// Encoded directly (not via the generated client DTO) to keep this write on
-	// the same lightweight path as UpdateSessionStatus.
+	// Wire shape matches the server's DecorateSessionRequest ({removeTags, tags,
+	// state}). Encoded directly (not via the generated client DTO) to keep this
+	// write on the same lightweight path as UpdateSessionStatus.
 	body, err := json.Marshal(struct {
-		Tags  []string          `json:"tags,omitempty"`
-		State map[string]string `json:"state,omitempty"`
-	}{Tags: opts.AddTags, State: opts.MergeState})
+		RemoveTags []string          `json:"removeTags,omitempty"`
+		Tags       []string          `json:"tags,omitempty"`
+		State      map[string]string `json:"state,omitempty"`
+	}{RemoveTags: opts.RemoveTags, Tags: opts.AddTags, State: opts.MergeState})
 	if err != nil {
 		return fmt.Errorf("decorate session: encode: %w", err)
 	}

@@ -189,7 +189,17 @@ func (m *mockWarmStore) DecorateSession(_ context.Context, sessionID string, opt
 	if !ok {
 		return session.ErrSessionNotFound
 	}
-	s.Tags = append(s.Tags, opts.AddTags...)
+	remove := make(map[string]struct{}, len(opts.RemoveTags))
+	for _, t := range opts.RemoveTags {
+		remove[t] = struct{}{}
+	}
+	kept := s.Tags[:0:0]
+	for _, t := range s.Tags {
+		if _, drop := remove[t]; !drop {
+			kept = append(kept, t)
+		}
+	}
+	s.Tags = append(kept, opts.AddTags...)
 	if len(opts.MergeState) > 0 && s.State == nil {
 		s.State = map[string]string{}
 	}

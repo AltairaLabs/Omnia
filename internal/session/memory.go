@@ -319,17 +319,7 @@ func (m *MemoryStore) DecorateSession(ctx context.Context, sessionID string, opt
 		return ErrSessionExpired
 	}
 
-	existing := make(map[string]struct{}, len(session.Tags))
-	for _, t := range session.Tags {
-		existing[t] = struct{}{}
-	}
-	for _, t := range opts.AddTags {
-		if _, ok := existing[t]; ok {
-			continue
-		}
-		session.Tags = append(session.Tags, t)
-		existing[t] = struct{}{}
-	}
+	session.Tags = mergeSessionTags(session.Tags, opts.RemoveTags, opts.AddTags)
 
 	if len(opts.MergeState) > 0 {
 		if session.State == nil {
@@ -343,6 +333,32 @@ func (m *MemoryStore) DecorateSession(ctx context.Context, sessionID string, opt
 	session.UpdatedAt = time.Now()
 
 	return nil
+}
+
+// mergeSessionTags drops removeTags from existing, then appends addTags that are
+// not already present (deduped, order-preserving).
+func mergeSessionTags(existing, removeTags, addTags []string) []string {
+	remove := make(map[string]struct{}, len(removeTags))
+	for _, t := range removeTags {
+		remove[t] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(existing))
+	kept := existing[:0:0]
+	for _, t := range existing {
+		if _, drop := remove[t]; drop {
+			continue
+		}
+		kept = append(kept, t)
+		seen[t] = struct{}{}
+	}
+	for _, t := range addTags {
+		if _, ok := seen[t]; ok {
+			continue
+		}
+		kept = append(kept, t)
+		seen[t] = struct{}{}
+	}
+	return kept
 }
 
 // RecordToolCall records or updates a tool call for the session.

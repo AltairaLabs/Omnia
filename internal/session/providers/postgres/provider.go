@@ -652,26 +652,38 @@ func (p *Provider) UpdateSessionStatus(ctx context.Context, sessionID string, up
 }
 
 // DecorateSession merges tags and state into an existing session without
-// touching counters or lifecycle status. Tag merges append only values not
-// already present (idempotent); state is shallow-merged via the jsonb || operator.
+// touching counters or lifecycle status. RemoveTags are dropped first, then
+// AddTags append only values not already present (idempotent); state is
+// shallow-merged via the jsonb || operator.
 func (p *Provider) DecorateSession(ctx context.Context, sessionID string, opts session.DecorateSessionOptions) error {
-	// Append only tags not already present, preserving existing order.
-	// State is shallow-merged (right operand wins on key collisions).
-	query := `UPDATE sessions SET
-		tags = COALESCE(tags, '{}') || COALESCE(
-			(SELECT array_agg(t) FROM unnest($2::text[]) AS t WHERE t <> ALL(COALESCE(tags, '{}'))),
+	// `kept` = existing tags minus RemoveTags (empty RemoveTags keeps all, since
+	// `t <> ALL('{}')` is vacuously true). Then append AddTags not already in kept,
+	// preserving order. State is shallow-merged (right operand wins on collisions).
+	query := `UPDATE sessions s SET
+		tags = kept.arr || COALESCE(
+			(SELECT array_agg(a) FROM unnest($3::text[]) AS a WHERE a <> ALL(kept.arr)),
 			'{}'),
-		state = COALESCE(state, '{}'::jsonb) || $3::jsonb,
-		updated_at = $4
-	WHERE id = $1`
+		state = COALESCE(s.state, '{}'::jsonb) || $4::jsonb,
+		updated_at = $5
+	FROM (
+		SELECT COALESCE(
+			(SELECT array_agg(t) FROM unnest(COALESCE((SELECT tags FROM sessions WHERE id = $1), '{}')) AS t
+			 WHERE t <> ALL($2::text[])),
+			'{}') AS arr
+	) AS kept
+	WHERE s.id = $1`
 
+	removeTags := opts.RemoveTags
+	if removeTags == nil {
+		removeTags = []string{}
+	}
 	addTags := opts.AddTags
 	if addTags == nil {
 		addTags = []string{}
 	}
 
 	res, err := p.pool.Exec(ctx, query,
-		sessionID, addTags, pgutil.MarshalJSONB(opts.MergeState), time.Now(),
+		sessionID, removeTags, addTags, pgutil.MarshalJSONB(opts.MergeState), time.Now(),
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: decorate session: %w", err)
