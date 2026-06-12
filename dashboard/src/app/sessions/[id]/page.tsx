@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -66,6 +66,7 @@ import { MemorySidebar } from "@/components/memories/memory-sidebar";
 import type { Message, Session, ToolCall, ProviderCall, RuntimeEvent, EvalResult } from "@/types";
 import { EvalResultsBadge } from "@/components/sessions/eval-results-badge";
 import { syntheticUserInfo, syntheticUserLabel, type SyntheticUser } from "@/lib/sessions/synthetic-user";
+import { providerCallsBySource } from "@/lib/sessions/token-breakdown";
 import { ToolCallBadge } from "@/components/sessions/tool-call-badge";
 import { ReplayTab } from "@/components/sessions/replay";
 import { DebugPanel } from "@/components/sessions/debug-panel";
@@ -368,6 +369,7 @@ export default function SessionDetailPage({
   const { data: runtimeEvents } = useSessionRuntimeEvents(id, sessionReady);
   const { messages: paginatedMessages, hasMore: messagesHasMore, isFetchingMore: messagesIsFetchingMore, fetchMore: messagesFetchMore } = useSessionAllMessages(id, session?.status, sessionReady);
   const allMessages = paginatedMessages.length > 0 ? paginatedMessages : (session?.messages ?? []);
+  const tokenBySource = providerCallsBySource(providerCalls ?? []);
   const grafana = useGrafana();
   const sessionDashboardUrl = grafana.enabled && session
     ? buildSessionDashboardUrl(grafana, id, session.agentName, session.agentNamespace)
@@ -739,6 +741,35 @@ export default function SessionDetailPage({
                 </CardContent>
               </Card>
             </div>
+
+            {tokenBySource.length > 1 && (
+              <Card className="mt-4">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Tokens by source
+                  </CardTitle>
+                  <CardDescription>
+                    The headline total counts the agent only. Self-play and judge usage is tracked
+                    separately so it doesn&apos;t inflate the agent&apos;s cost.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {tokenBySource.map((row) => (
+                    <div key={row.source} className="flex items-center justify-between gap-2 text-sm">
+                      <Badge variant="secondary" className="font-normal shrink-0">
+                        {row.label}
+                      </Badge>
+                      <span className="text-muted-foreground tabular-nums text-right">
+                        {(row.inputTokens + row.outputTokens).toLocaleString()} tok
+                        {" · "}
+                        {row.inputTokens.toLocaleString()} in / {row.outputTokens.toLocaleString()} out
+                        {" · "}${row.costUsd.toFixed(4)}
+                      </span>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
 
             {session.metrics.avgResponseTime && (
               <Card className="mt-4">
