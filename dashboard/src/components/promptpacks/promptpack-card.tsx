@@ -5,10 +5,21 @@ import { FileText, GitBranch, Clock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/agents";
+import { useWorkloadTier, type WorkloadTierSummary } from "@/hooks/use-workload-tier";
 import type { PromptPack } from "@/types";
 
 interface PromptPackCardProps {
   promptPack: PromptPack;
+}
+
+function tierSummary(wl: WorkloadTierSummary): { label: string; parts: string[] } {
+  if (wl.tier === "crew") {
+    return { label: "Crew", parts: [`${wl.agents} agents`, `${wl.tools} tools`] };
+  }
+  if (wl.tier === "flow") {
+    return { label: "Flow", parts: [`${wl.states} states`, `${wl.tools} tools`] };
+  }
+  return { label: "Solo", parts: [`${wl.tools} tools`] };
 }
 
 function formatRelativeTime(timestamp?: string): string {
@@ -27,6 +38,8 @@ function formatRelativeTime(timestamp?: string): string {
 
 export function PromptPackCard({ promptPack }: Readonly<PromptPackCardProps>) {
   const { metadata, spec, status } = promptPack;
+  const wl = useWorkloadTier(metadata.name, metadata.namespace);
+  const { label: tierLabel, parts: tierParts } = tierSummary(wl);
 
   return (
     <Link
@@ -54,6 +67,14 @@ export function PromptPackCard({ promptPack }: Readonly<PromptPackCardProps>) {
               </Badge>
             </div>
           </div>
+
+          {/* Workload tier */}
+          {wl.tier && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <Badge variant="outline" className="text-xs">{tierLabel}</Badge>
+              <span className="text-muted-foreground">{tierParts.join(" · ")}</span>
+            </div>
+          )}
 
           {/* Source info */}
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
