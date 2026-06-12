@@ -118,3 +118,42 @@ describe("deriveWorkloadTier — crew", () => {
     expect(model.meta.counts).toMatchObject({ agents: 2, states: 2 });
   });
 });
+
+describe("deriveWorkloadTier — malformed", () => {
+  it("returns empty solo model for a pack with no prompts", () => {
+    const model = deriveWorkloadTier({ id: "empty" });
+    expect(model.tier).toBe("solo");
+    expect(model.nodes).toEqual([]);
+    expect(model.meta.counts.agents).toBe(0);
+  });
+
+  it("marks on_event to an undefined state as an unresolved edge", () => {
+    const model = deriveWorkloadTier({
+      id: "x",
+      prompts: { a: { id: "a", name: "A", system_template: "t" } },
+      workflow: { entry: "a", states: { a: { prompt_task: "a", on_event: { go: "ghost" } } } },
+    });
+    const edge = model.edges.find((e) => e.target === "ghost")!;
+    expect(edge.style).toBe("unresolved");
+  });
+
+  it("does not crash when a state references a missing prompt_task", () => {
+    const model = deriveWorkloadTier({
+      id: "x",
+      prompts: {},
+      workflow: { entry: "a", states: { a: { prompt_task: "missing" } } },
+    });
+    expect(model.tier).toBe("flow");
+    expect(model.nodes[0].label).toBe("missing"); // falls back to prompt_task
+    expect(model.nodes[0].detail.tools).toEqual([]);
+  });
+
+  it("treats empty agents.members as not-crew (falls through to flow/solo)", () => {
+    const model = deriveWorkloadTier({
+      id: "x",
+      prompts: { a: { id: "a", name: "A", system_template: "t" } },
+      agents: { entry: "a", members: {} },
+    });
+    expect(model.tier).toBe("solo");
+  });
+});
