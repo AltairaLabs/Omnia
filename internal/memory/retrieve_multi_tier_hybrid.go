@@ -50,7 +50,8 @@ const rrfK = 60.0
 // source_type × confidence × recency quality weights used by the FTS path.
 //
 // Sprintf slots: %[1]s candidates WHERE, %[2]s RRF expression,
-// $%[3]d query text, $%[4]d embedding, $%[5]d fanout.
+// %[3]s per-tier recency-decay expression, $%[4]d query text,
+// $%[5]d embedding, $%[6]d fanout.
 const hybridMultiTierTemplate = `
 WITH candidates AS (
     SELECT e.id AS entity_id, e.kind, e.metadata, e.created_at, e.expires_at,
@@ -65,11 +66,11 @@ WITH candidates AS (
     WHERE %[1]s
 ), fts AS (
     SELECT DISTINCT ON (entity_id) entity_id,
-           ts_rank_cd(search_vector, websearch_to_tsquery('english', $%[3]d)) AS fts_rank
+           ts_rank_cd(search_vector, websearch_to_tsquery('english', $%[4]d)) AS fts_rank
     FROM candidates
-    WHERE search_vector @@ websearch_to_tsquery('english', $%[3]d)
+    WHERE search_vector @@ websearch_to_tsquery('english', $%[4]d)
     ORDER BY entity_id, fts_rank DESC
-    LIMIT $%[5]d
+    LIMIT $%[6]d
 ), fts_ranked AS (
     SELECT entity_id, row_number() OVER (ORDER BY fts_rank DESC) AS fts_rn FROM fts
 ), cosine AS (
@@ -77,13 +78,13 @@ WITH candidates AS (
     -- over-fetch (fanout × 4) so per-entity dedup still lands enough distinct
     -- entities when one entity has several close-by observations.
     SELECT entity_id, cos_dist FROM (
-        SELECT entity_id, embedding <=> $%[4]d AS cos_dist,
-               row_number() OVER (PARTITION BY entity_id ORDER BY embedding <=> $%[4]d) AS rn
+        SELECT entity_id, embedding <=> $%[5]d AS cos_dist,
+               row_number() OVER (PARTITION BY entity_id ORDER BY embedding <=> $%[5]d) AS rn
         FROM candidates
         WHERE embedding IS NOT NULL
-        ORDER BY embedding <=> $%[4]d
-        LIMIT $%[5]d * 4
-    ) ann WHERE rn = 1 LIMIT $%[5]d
+        ORDER BY embedding <=> $%[5]d
+        LIMIT $%[6]d * 4
+    ) ann WHERE rn = 1 LIMIT $%[6]d
 ), cosine_ranked AS (
     SELECT entity_id, row_number() OVER (ORDER BY cos_dist) AS cos_rn FROM cosine
 ), fused AS (
@@ -104,7 +105,7 @@ SELECT DISTINCT ON (c.entity_id)
               WHEN 'system_generated'        THEN 0.5
               ELSE 0.7 END)
         * coalesce(c.confidence, 0.7)
-        * exp(-EXTRACT(EPOCH FROM (now() - c.observed_at)) / 2592000.0) AS final_score
+        * %[3]s AS final_score
 FROM candidates c JOIN fused ON fused.entity_id = c.entity_id
 ORDER BY c.entity_id, c.observed_at DESC`
 
@@ -113,9 +114,9 @@ ORDER BY c.entity_id, c.observed_at DESC`
 // QueryBuilder helpers the FTS-only multi-tier path uses; the FTS @@ predicate
 // is intentionally NOT added here (it lives inside the fts CTE so cosine-only
 // matches still surface). The trailing args after the builder's are: query
-// text, embedding (placeholder — RetrieveMultiTierHybrid overwrites it), and
-// the fanout cap.
-func buildMultiTierHybridQuery(req MultiTierRequest) (string, []any, error) {
+// text, embedding, fanout cap, and the three per-tier half-life seconds
+// (user, agent, institutional) consumed by the recency CASE.
+func buildMultiTierHybridQuery(req MultiTierRequest, queryEmbedding []float32, hl TierHalfLife) (string, []any, error) {
 	if req.WorkspaceID == "" {
 		return "", nil, errors.New(errWorkspaceRequired)
 	}
@@ -132,17 +133,36 @@ func buildMultiTierHybridQuery(req MultiTierRequest) (string, []any, error) {
 	qIdx := len(args) + 1
 	eIdx := len(args) + 2
 	fIdx := len(args) + 3
-	args = append(args, req.Query, pgvector.NewVector(nil), hybridFanout)
+	userHLIdx := len(args) + 4
+	agentHLIdx := len(args) + 5
+	instHLIdx := len(args) + 6
+	args = append(args, req.Query, pgvector.NewVector(queryEmbedding), hybridFanout,
+		hl.User.Seconds(), hl.Agent.Seconds(), hl.Institutional.Seconds())
 
 	rrfExpr := fmt.Sprintf(
 		"coalesce(1.0/(%g + f.fts_rn), 0) + coalesce(1.0/(%g + c.cos_rn), 0)",
 		rrfK, rrfK,
 	)
 
+	// Per-tier recency decay: exp(-ln2 * age / halfLife), = 0.5 at age==halfLife.
+	// The CASE picks the tier's half-life from the row's scope columns, mirroring
+	// classifyTier precedence (a user-bearing row — incl. user_for_agent — uses
+	// the user half-life; agent-only uses agent; the rest institutional).
+	// greatest(-700, ...) floors the exponent so exp() can't underflow (which
+	// Postgres raises as an error, not 0) for very old rows / tiny half-lives.
+	// exp(-700) ≈ 1e-304, indistinguishable from zero for ranking.
+	recencyExpr := fmt.Sprintf(
+		"exp(greatest((-700)::float8, (-%v)::float8 * "+
+			"EXTRACT(EPOCH FROM (now() - c.observed_at))::float8 / "+
+			"(CASE WHEN c.virtual_user_id IS NOT NULL THEN $%d::float8 "+
+			"WHEN c.agent_id IS NOT NULL THEN $%d::float8 ELSE $%d::float8 END)))",
+		ln2, userHLIdx, agentHLIdx, instHLIdx,
+	)
+
 	// QueryBuilder.Where() returns a leading " AND ", so prefix the literal
 	// forgotten predicate as the first WHERE term (mirrors buildMultiTierQuery).
 	where := colEntityForgot + qb.Where()
-	sql := fmt.Sprintf(hybridMultiTierTemplate, where, rrfExpr, qIdx, eIdx, fIdx)
+	sql := fmt.Sprintf(hybridMultiTierTemplate, where, rrfExpr, recencyExpr, qIdx, eIdx, fIdx)
 	return sql, args, nil
 }
 
@@ -154,12 +174,10 @@ func (s *PostgresMemoryStore) RetrieveMultiTierHybrid(ctx context.Context, req M
 		return s.RetrieveMultiTier(ctx, req)
 	}
 
-	sql, args, err := buildMultiTierHybridQuery(req)
+	sql, args, err := buildMultiTierHybridQuery(req, queryEmbedding, req.HalfLife.orDefaults())
 	if err != nil {
 		return nil, err
 	}
-	// args[eIdx-1] is the embedding placeholder appended by the builder.
-	args[len(args)-2] = pgvector.NewVector(queryEmbedding)
 
 	rows, err := s.pool.Query(ctx, sql, args...)
 	if err != nil {

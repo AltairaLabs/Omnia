@@ -139,7 +139,7 @@ func TestRankResults_OrdersByScoreDesc(t *testing.T) {
 		{Memory: &Memory{Confidence: 0.9, AccessedAt: now.Add(-1 * hour)}, Tier: TierUser, AccessCount: 10},
 		{Memory: &Memory{Confidence: 0.7, AccessedAt: now.Add(-30 * 24 * hour)}, Tier: TierInstitutional, AccessCount: 1},
 	}
-	rankResults(results, now, IdentityTierRanker{})
+	rankResults(results, now, IdentityTierRanker{}, TierHalfLife{}.orDefaults())
 	if results[0].Confidence != 0.9 {
 		t.Errorf("expected highest-confidence recent result first, got %+v", results[0])
 	}
@@ -151,7 +151,7 @@ func TestRankResults_NilRankerActsAsIdentity(t *testing.T) {
 		{Memory: &Memory{Confidence: 0.5, AccessedAt: now}, Tier: TierUser, AccessCount: 1},
 		{Memory: &Memory{Confidence: 0.9, AccessedAt: now}, Tier: TierUser, AccessCount: 1},
 	}
-	rankResults(results, now, nil)
+	rankResults(results, now, nil, TierHalfLife{}.orDefaults())
 	if results[0].Confidence != 0.9 {
 		t.Errorf("nil ranker must behave as identity; got %+v first", results[0])
 	}
@@ -171,7 +171,7 @@ func TestRankResults_TierPrecedenceOverridesScore(t *testing.T) {
 		TierAgent:         1.0,
 		TierUser:          0.5,
 	}}
-	rankResults(results, now, ranker)
+	rankResults(results, now, ranker, TierHalfLife{}.orDefaults())
 	if results[0].Tier != TierInstitutional {
 		t.Errorf("institutional must rank first under 2.0 multiplier; got %s", results[0].Tier)
 	}
@@ -477,7 +477,7 @@ func TestComputeScore_FallsBackToCreatedAtWhenAccessedZero(t *testing.T) {
 		Memory:      &Memory{Confidence: 1.0, CreatedAt: now.Add(-time.Hour)},
 		AccessCount: 0,
 	}
-	score := computeScore(m, now)
+	score := computeScore(m, now, defaultRecallHalfLife.Seconds())
 	// Zero AccessedAt must not decay recency to ~0 — CreatedAt kicks in.
 	if score <= 0.5 {
 		t.Errorf("score too low, CreatedAt fallback missed: %v", score)
@@ -490,7 +490,7 @@ func TestComputeScore_FutureAccessedAtClampsToZeroAge(t *testing.T) {
 		Memory:      &Memory{Confidence: 1.0, AccessedAt: now.Add(time.Hour)},
 		AccessCount: 0,
 	}
-	score := computeScore(m, now)
+	score := computeScore(m, now, defaultRecallHalfLife.Seconds())
 	// Clock skew must not push recency above 1.0 (score bounded).
 	if score > 1.0 {
 		t.Errorf("score above 1.0: %v", score)

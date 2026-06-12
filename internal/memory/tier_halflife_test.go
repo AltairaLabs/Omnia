@@ -62,6 +62,16 @@ func TestNewTierHalfLife_InvalidOrEmptyFallsBackPerTier(t *testing.T) {
 	assert.Equal(t, 90*24*time.Hour, hl.Institutional)
 }
 
+func TestRecencyDecay(t *testing.T) {
+	// age == halfLife → exactly 0.5 (the documented semantics).
+	assert.InDelta(t, 0.5, recencyDecay(100, 100), 1e-9)
+	// Fresh (age 0) → no decay.
+	assert.InDelta(t, 1.0, recencyDecay(0, 100), 1e-9)
+	// Non-positive half-life disables decay rather than dividing by zero.
+	assert.Equal(t, 1.0, recencyDecay(9999, 0))
+	assert.Equal(t, 1.0, recencyDecay(9999, -5))
+}
+
 func TestTierHalfLife_SecondsFor_UserForAgentInheritsUser(t *testing.T) {
 	hl := TierHalfLife{
 		User:          10 * time.Hour,
