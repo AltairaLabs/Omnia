@@ -168,6 +168,21 @@ func (m *mockWarmStore) UpdateSessionStatus(_ context.Context, sessionID string,
 	return nil
 }
 
+func (m *mockWarmStore) DecorateSession(_ context.Context, sessionID string, opts session.DecorateSessionOptions) error {
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return session.ErrSessionNotFound
+	}
+	s.Tags = append(s.Tags, opts.AddTags...)
+	if len(opts.MergeState) > 0 && s.State == nil {
+		s.State = map[string]string{}
+	}
+	for k, v := range opts.MergeState {
+		s.State[k] = v
+	}
+	return nil
+}
+
 func (m *mockWarmStore) RefreshTTL(_ context.Context, id string, expiresAt time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -988,6 +1003,57 @@ func TestHandleGetSession_NotFound(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/00000000-0000-0000-0000-000000000099", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestHandleDecorateSession_OK(t *testing.T) {
+	h, hot, warm := setupHandler(t)
+	seed := testSession(testSessionID)
+	seed.Tags = []string{"source:interactive"}
+	seed.State = map[string]string{"existing": "1"}
+	warm.sessions[testSessionID] = seed
+	hot.sessions[testSessionID] = seed // ensure invalidation path is exercised
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"tags":["source:arena","arena-job:demo"],"state":{"arena.job":"demo"}}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/"+testSessionID+"/decorate",
+		strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	got := warm.sessions[testSessionID]
+	wantTags := []string{"source:interactive", "source:arena", "arena-job:demo"}
+	if fmt.Sprint(got.Tags) != fmt.Sprint(wantTags) {
+		t.Fatalf("tags = %v, want %v", got.Tags, wantTags)
+	}
+	if got.State["arena.job"] != "demo" {
+		t.Fatalf("state[arena.job] = %q, want demo", got.State["arena.job"])
+	}
+	if got.State["existing"] != "1" {
+		t.Fatalf("state[existing] = %q, want 1 (existing state must be preserved)", got.State["existing"])
+	}
+}
+
+func TestHandleDecorateSession_NotFound(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/sessions/00000000-0000-0000-0000-000000000099/decorate",
+		strings.NewReader(`{"tags":["source:arena"]}`))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 

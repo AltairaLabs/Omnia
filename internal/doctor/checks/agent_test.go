@@ -110,6 +110,9 @@ func (m *MockStore) RefreshTTL(_ context.Context, _ string, _ time.Duration) err
 func (m *MockStore) UpdateSessionStatus(_ context.Context, _ string, _ session.SessionStatusUpdate) error {
 	panic("not used")
 }
+func (m *MockStore) DecorateSession(_ context.Context, _ string, _ session.DecorateSessionOptions) error {
+	panic("not used")
+}
 func (m *MockStore) RecordToolCall(_ context.Context, _ string, _ session.ToolCall) error {
 	panic("not used")
 }

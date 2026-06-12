@@ -651,6 +651,37 @@ func (p *Provider) UpdateSessionStatus(ctx context.Context, sessionID string, up
 	return err
 }
 
+// DecorateSession merges tags and state into an existing session without
+// touching counters or lifecycle status. Tag merges append only values not
+// already present (idempotent); state is shallow-merged via the jsonb || operator.
+func (p *Provider) DecorateSession(ctx context.Context, sessionID string, opts session.DecorateSessionOptions) error {
+	// Append only tags not already present, preserving existing order.
+	// State is shallow-merged (right operand wins on key collisions).
+	query := `UPDATE sessions SET
+		tags = COALESCE(tags, '{}') || COALESCE(
+			(SELECT array_agg(t) FROM unnest($2::text[]) AS t WHERE t <> ALL(COALESCE(tags, '{}'))),
+			'{}'),
+		state = COALESCE(state, '{}'::jsonb) || $3::jsonb,
+		updated_at = $4
+	WHERE id = $1`
+
+	addTags := opts.AddTags
+	if addTags == nil {
+		addTags = []string{}
+	}
+
+	res, err := p.pool.Exec(ctx, query,
+		sessionID, addTags, pgutil.MarshalJSONB(opts.MergeState), time.Now(),
+	)
+	if err != nil {
+		return fmt.Errorf("postgres: decorate session: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return session.ErrSessionNotFound
+	}
+	return nil
+}
+
 // Compile-time interface check for the optional StatusUpdaterWithResult.
 var _ providers.StatusUpdaterWithResult = (*Provider)(nil)
 

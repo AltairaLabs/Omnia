@@ -184,6 +184,21 @@ func (m *mockWarmStore) UpdateSessionStatus(_ context.Context, sessionID string,
 	return nil
 }
 
+func (m *mockWarmStore) DecorateSession(_ context.Context, sessionID string, opts session.DecorateSessionOptions) error {
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return session.ErrSessionNotFound
+	}
+	s.Tags = append(s.Tags, opts.AddTags...)
+	if len(opts.MergeState) > 0 && s.State == nil {
+		s.State = map[string]string{}
+	}
+	for k, v := range opts.MergeState {
+		s.State[k] = v
+	}
+	return nil
+}
+
 func (m *mockWarmStore) RefreshTTL(_ context.Context, _ string, _ time.Time) error {
 	return nil
 }

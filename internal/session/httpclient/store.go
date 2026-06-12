@@ -302,6 +302,37 @@ func (s *Store) UpdateSessionStatus(ctx context.Context, sessionID string, updat
 	return nil
 }
 
+// DecorateSession merges tags and state into an existing session via
+// PATCH /api/v1/sessions/{sessionID}/decorate. On transient failure, the write
+// is buffered and retried automatically.
+func (s *Store) DecorateSession(ctx context.Context, sessionID string, opts session.DecorateSessionOptions) error {
+	path := fmt.Sprintf("/api/v1/sessions/%s/decorate", sessionID)
+	// Wire shape matches the server's DecorateSessionRequest ({tags, state}).
+	// Encoded directly (not via the generated client DTO) to keep this write on
+	// the same lightweight path as UpdateSessionStatus.
+	body, err := json.Marshal(struct {
+		Tags  []string          `json:"tags,omitempty"`
+		State map[string]string `json:"state,omitempty"`
+	}{Tags: opts.AddTags, State: opts.MergeState})
+	if err != nil {
+		return fmt.Errorf("decorate session: encode: %w", err)
+	}
+
+	resp, err := s.doWithRetry(ctx, http.MethodPatch, path, body)
+	if err != nil {
+		return s.bufferWrite(err, http.MethodPatch, path, body)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return session.ErrSessionNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		return s.readError(resp)
+	}
+	return nil
+}
+
 // RefreshTTL extends session expiry via POST /api/v1/sessions/{sessionID}/ttl.
 // On transient failure, the write is buffered and retried automatically.
 func (s *Store) RefreshTTL(ctx context.Context, sessionID string, ttl time.Duration) error {

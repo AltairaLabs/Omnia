@@ -92,6 +92,10 @@ func (m *MemoryStore) CreateSession(ctx context.Context, opts CreateSessionOptio
 		}
 	}
 
+	if len(opts.Tags) > 0 {
+		session.Tags = append([]string(nil), opts.Tags...)
+	}
+
 	m.sessions[session.ID] = session
 
 	// Return a copy to prevent external modification
@@ -287,6 +291,53 @@ func (m *MemoryStore) UpdateSessionStatus(ctx context.Context, sessionID string,
 
 	if !update.SetEndedAt.IsZero() {
 		session.EndedAt = update.SetEndedAt
+	}
+
+	session.UpdatedAt = time.Now()
+
+	return nil
+}
+
+// DecorateSession merges tags and state into an existing session without
+// touching counters or lifecycle status. Tag merges are idempotent.
+func (m *MemoryStore) DecorateSession(ctx context.Context, sessionID string, opts DecorateSessionOptions) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if sessionID == "" {
+		return ErrInvalidSessionID
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		return ErrSessionNotFound
+	}
+	if session.IsExpired() {
+		return ErrSessionExpired
+	}
+
+	existing := make(map[string]struct{}, len(session.Tags))
+	for _, t := range session.Tags {
+		existing[t] = struct{}{}
+	}
+	for _, t := range opts.AddTags {
+		if _, ok := existing[t]; ok {
+			continue
+		}
+		session.Tags = append(session.Tags, t)
+		existing[t] = struct{}{}
+	}
+
+	if len(opts.MergeState) > 0 {
+		if session.State == nil {
+			session.State = make(map[string]string, len(opts.MergeState))
+		}
+		for k, v := range opts.MergeState {
+			session.State[k] = v
+		}
 	}
 
 	session.UpdatedAt = time.Now()

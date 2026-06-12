@@ -35,6 +35,10 @@ func (m *lookupMockWarm) UpdateSession(context.Context, *session.Session) error 
 func (m *lookupMockWarm) UpdateSessionStatus(context.Context, string, session.SessionStatusUpdate) error {
 	return nil
 }
+
+func (m *lookupMockWarm) DecorateSession(context.Context, string, session.DecorateSessionOptions) error {
+	return nil
+}
 func (m *lookupMockWarm) RefreshTTL(context.Context, string, time.Time) error           { return nil }
 func (m *lookupMockWarm) DeleteSession(context.Context, string) error                   { return nil }
 func (m *lookupMockWarm) AppendMessage(context.Context, string, *session.Message) error { return nil }

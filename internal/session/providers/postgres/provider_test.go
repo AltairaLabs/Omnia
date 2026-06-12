@@ -43,6 +43,8 @@ import (
 
 var testConnStr string
 
+const sourceArenaTag = "source:arena"
+
 func TestMain(m *testing.M) {
 	flag.Parse()
 
@@ -282,6 +284,60 @@ func TestUpdateSession_NotFound(t *testing.T) {
 
 	s := makeSession("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", now)
 	err := p.UpdateSession(ctx, s)
+	assert.ErrorIs(t, err, session.ErrSessionNotFound)
+}
+
+func TestDecorateSession(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	// makeSession seeds Tags=[tag1,tag2], State={key:value}.
+	s := makeSession("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", now)
+	require.NoError(t, p.CreateSession(ctx, s))
+
+	// Decorate: add one overlapping tag (tag1) + two new, merge/overwrite state.
+	err := p.DecorateSession(ctx, s.ID, session.DecorateSessionOptions{
+		AddTags:    []string{"tag1", sourceArenaTag, "arena-job:demo"},
+		MergeState: map[string]string{"key": "overwritten", "arena.job": "demo"},
+	})
+	require.NoError(t, err)
+
+	got, err := p.GetSession(ctx, s.ID)
+	require.NoError(t, err)
+
+	// Existing tags preserved, only genuinely-new tags appended (no tag1 dup).
+	assert.Equal(t, []string{"tag1", "tag2", sourceArenaTag, "arena-job:demo"}, got.Tags)
+	// State shallow-merged: overlapping key overwritten, new key added.
+	assert.Equal(t, map[string]string{"key": "overwritten", "arena.job": "demo"}, got.State)
+	// Counters/status untouched.
+	assert.Equal(t, session.SessionStatusActive, got.Status)
+	assert.Zero(t, got.MessageCount)
+
+	// Idempotent: decorating again with the same tags adds nothing.
+	require.NoError(t, p.DecorateSession(ctx, s.ID, session.DecorateSessionOptions{
+		AddTags: []string{sourceArenaTag, "arena-job:demo"},
+	}))
+	got2, err := p.GetSession(ctx, s.ID)
+	require.NoError(t, err)
+	assert.Equal(t, got.Tags, got2.Tags)
+}
+
+func TestDecorateSession_NotFound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+
+	err := p.DecorateSession(ctx, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", session.DecorateSessionOptions{
+		AddTags: []string{sourceArenaTag},
+	})
 	assert.ErrorIs(t, err, session.ErrSessionNotFound)
 }
 

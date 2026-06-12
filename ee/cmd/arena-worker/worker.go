@@ -41,6 +41,7 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/fleet"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
+	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/pkg/k8s"
 )
@@ -625,22 +626,32 @@ func executeWorkItem(
 		}
 	}()
 
+	arenaMeta := arenaSessionMetadata{
+		JobName:       cfg.JobName,
+		Namespace:     cfg.JobNamespace,
+		WorkspaceName: cfg.WorkspaceName,
+		Scenario:      item.ScenarioID,
+		ProviderID:    item.ProviderID,
+		JobType:       cfg.JobType,
+		TrialIndex:    extractTrialIndex(item),
+	}
+
+	// Load-test fleet runs drive a live agent whose facade already records the
+	// conversation + cost into its own session. Creating a separate arena session
+	// for these just produces an empty shell. Skip the session manager and instead
+	// decorate the facade-recorded session with arena context after the run (see
+	// decorateFleetSessions below). Other job types (evaluation/datagen) keep the
+	// session manager so their engine-emitted events are recorded as today.
+	loadTestFleet := cfg.JobType == string(omniav1alpha1.ArenaJobTypeLoadTest) && len(crdFleetProviders) > 0
+
 	// Wire session recording if session-api is configured.
 	// Events from all engine runs are forwarded to session-api via OmniaEventStore.
 	var sessionMgr *arenaSessionManager
-	if cfg.SessionAPIURL != "" {
+	if cfg.SessionAPIURL != "" && !loadTestFleet {
 		sessionMgr = newArenaSessionManager(
 			httpclient.NewStore(cfg.SessionAPIURL, log),
 			log,
-			arenaSessionMetadata{
-				JobName:       cfg.JobName,
-				Namespace:     cfg.JobNamespace,
-				WorkspaceName: cfg.WorkspaceName,
-				Scenario:      item.ScenarioID,
-				ProviderID:    item.ProviderID,
-				JobType:       cfg.JobType,
-				TrialIndex:    extractTrialIndex(item),
-			},
+			arenaMeta,
 			item.ID,
 		)
 		bus := events.NewEventBus()
@@ -715,9 +726,96 @@ func executeWorkItem(
 	extractFleetTTFT(providerRegistry, crdFleetProviders, result)
 
 	// Extract session ID for job-to-session correlation.
-	result.SessionID = extractSessionID(sessionMgr, providerRegistry, crdFleetProviders)
+	if loadTestFleet && cfg.SessionAPIURL != "" {
+		// Label the facade-recorded session(s) with arena context and link the job
+		// to the primary one, so the dashboard shows the real conversation + cost
+		// for this run instead of an empty shell.
+		store := httpclient.NewStore(cfg.SessionAPIURL, log)
+		result.SessionID = decorateFleetSessions(ctx, log, store, arenaMeta, providerRegistry, crdFleetProviders)
+	} else {
+		result.SessionID = extractSessionID(sessionMgr, providerRegistry, crdFleetProviders)
+	}
 
 	return result, nil
+}
+
+// decorateFleetSessions labels the facade-recorded session(s) of a load-test
+// fleet run with arena context (tags + state) and returns the primary session ID
+// for job-to-session correlation. In fleet mode the facade owns the conversation
+// recording, so these sessions already hold the messages and cost; decoration
+// merely makes them discoverable as arena sessions. Returns "" if no facade
+// session could be resolved.
+func decorateFleetSessions(
+	ctx context.Context,
+	log logr.Logger,
+	store session.Store,
+	meta arenaSessionMetadata,
+	registry *pkproviders.Registry,
+	fleetProviders []*resolvedFleetProvider,
+) string {
+	opts := session.DecorateSessionOptions{
+		AddTags:    arenaSessionTags(meta),
+		MergeState: arenaSessionState(meta, ""),
+	}
+
+	var primary string
+	for _, sid := range collectFleetSessionIDs(registry, fleetProviders) {
+		if err := store.DecorateSession(ctx, sid, opts); err != nil {
+			// The facade may not have persisted the session yet, or it lives in a
+			// different workspace's session-api. Log and continue — the run result
+			// is still valid, it just won't be labeled as arena.
+			log.Error(err, "failed to decorate facade session with arena context", "sessionID", sid)
+			continue
+		}
+		if primary == "" {
+			primary = sid
+		}
+	}
+	return primary
+}
+
+// collectFleetSessionIDs returns the de-duplicated facade session IDs across all
+// fleet providers for a work item. Per-conversation connections are preferred;
+// the fallback connection covers the single-connection case.
+func collectFleetSessionIDs(
+	registry *pkproviders.Registry,
+	fleetProviders []*resolvedFleetProvider,
+) []string {
+	seen := make(map[string]struct{})
+	var ids []string
+	for _, fp := range fleetProviders {
+		prov, ok := registry.Get(fp.id)
+		if !ok {
+			continue
+		}
+		fleetProv, ok := prov.(*fleet.Provider)
+		if !ok {
+			continue
+		}
+		for _, sid := range fleetSessionIDs(fleetProv) {
+			if _, dup := seen[sid]; dup {
+				continue
+			}
+			seen[sid] = struct{}{}
+			ids = append(ids, sid)
+		}
+	}
+	return ids
+}
+
+// fleetSessionIDs returns the non-empty facade session IDs known to a single
+// fleet provider (pooled per-conversation connections plus the fallback).
+func fleetSessionIDs(prov *fleet.Provider) []string {
+	ids := make([]string, 0, 2)
+	for _, sid := range prov.ConversationSessionIDs() {
+		if sid != "" {
+			ids = append(ids, sid)
+		}
+	}
+	if sid := prov.SessionID(); sid != "" {
+		ids = append(ids, sid)
+	}
+	return ids
 }
 
 // extractFleetTTFT reads LastTTFT from fleet providers and stores the value

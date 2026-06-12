@@ -764,6 +764,12 @@ func (m *MockWarmStoreProvider) UpdateSessionStatus(
 	return nil
 }
 
+func (m *MockWarmStoreProvider) DecorateSession(
+	_ context.Context, _ string, _ session.DecorateSessionOptions,
+) error {
+	return nil
+}
+
 func (m *MockWarmStoreProvider) RefreshTTL(
 	_ context.Context, _ string, _ time.Time,
 ) error {

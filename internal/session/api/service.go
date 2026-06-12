@@ -367,6 +367,29 @@ func (s *SessionService) UpdateSessionStatus(ctx context.Context, sessionID stri
 	return s.updateStatusFallback(ctx, sessionID, update, warm)
 }
 
+// DecorateSession merges tags and state into an existing session via the warm
+// store and invalidates the hot cache entry so the next read reflects the change.
+func (s *SessionService) DecorateSession(ctx context.Context, sessionID string, opts session.DecorateSessionOptions) error {
+	if sessionID == "" {
+		return ErrMissingSessionID
+	}
+	warm, err := s.registry.WarmStore()
+	if err != nil {
+		return ErrWarmStoreRequired
+	}
+	if err := warm.DecorateSession(ctx, sessionID, opts); err != nil {
+		return err
+	}
+
+	// Invalidate the hot cache so a stale (un-decorated) copy isn't served.
+	s.pushToHotCache(func(ctx context.Context, hot providers.HotCacheProvider) {
+		if err := hot.Invalidate(ctx, sessionID); err != nil {
+			s.log.V(2).Info("hot cache invalidate skipped", "sessionID", sessionID, "reason", err.Error())
+		}
+	})
+	return nil
+}
+
 // updateStatusOptimized performs the status update, transition check,
 // and metadata lookup in a single DB query via StatusUpdaterWithResult.
 func (s *SessionService) updateStatusOptimized(ctx context.Context, sessionID string, update session.SessionStatusUpdate, updater providers.StatusUpdaterWithResult) error {
