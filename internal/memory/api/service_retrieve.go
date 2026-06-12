@@ -46,7 +46,7 @@ func (s *MemoryService) RetrieveMultiTier(ctx context.Context, req memory.MultiT
 		}
 		req.Ranker = memory.NewTierRanker(policy)
 	}
-	result, err := s.store.RetrieveMultiTier(ctx, req)
+	result, err := s.retrieveMultiTierInner(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -59,4 +59,24 @@ func (s *MemoryService) RetrieveMultiTier(ctx context.Context, req memory.MultiT
 		},
 	})
 	return result, nil
+}
+
+// retrieveMultiTierInner routes to the hybrid (semantic + FTS RRF) store path
+// when an embedder is configured and the query is non-empty, embedding the
+// query first. An embed failure — or no embedder / empty query — falls back to
+// FTS-only multi-tier so a transient embedder outage degrades recall quality
+// rather than hard-failing the request. Mirrors searchMemoriesInner's policy
+// for the flat search path; recall is too central to the agent loop to make
+// brittle.
+func (s *MemoryService) retrieveMultiTierInner(ctx context.Context, req memory.MultiTierRequest) (*memory.MultiTierResult, error) {
+	if s.embeddingSvc == nil || req.Query == "" {
+		return s.store.RetrieveMultiTier(ctx, req)
+	}
+	embeddings, err := s.embeddingSvc.Provider().Embed(ctx, []string{req.Query})
+	if err != nil || len(embeddings) == 0 || len(embeddings[0]) == 0 {
+		s.log.V(1).Info("hybrid multi-tier fallback to FTS",
+			"reason", "embed_query_failed", "hasError", err != nil)
+		return s.store.RetrieveMultiTier(ctx, req)
+	}
+	return s.store.RetrieveMultiTierHybrid(ctx, req, embeddings[0])
 }

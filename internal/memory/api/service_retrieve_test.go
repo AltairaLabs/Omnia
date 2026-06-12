@@ -30,6 +30,10 @@ type multiTierStoreStub struct {
 	mtCalls  []memory.MultiTierRequest
 	mtResult *memory.MultiTierResult
 	mtErr    error
+	// Hybrid-path capture: embeddings passed to RetrieveMultiTierHybrid.
+	mthEmbeddings [][]float32
+	mthResult     *memory.MultiTierResult
+	mthErr        error
 }
 
 func (m *multiTierStoreStub) RetrieveMultiTier(_ context.Context, req memory.MultiTierRequest) (*memory.MultiTierResult, error) {
@@ -40,6 +44,101 @@ func (m *multiTierStoreStub) RetrieveMultiTier(_ context.Context, req memory.Mul
 		return nil, m.mtErr
 	}
 	return m.mtResult, nil
+}
+
+func (m *multiTierStoreStub) RetrieveMultiTierHybrid(_ context.Context, _ memory.MultiTierRequest, emb []float32) (*memory.MultiTierResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mthEmbeddings = append(m.mthEmbeddings, emb)
+	if m.mthErr != nil {
+		return nil, m.mthErr
+	}
+	if m.mthResult != nil {
+		return m.mthResult, nil
+	}
+	return &memory.MultiTierResult{}, nil
+}
+
+// fakeEmbedProvider is a memory.EmbeddingProvider that returns a fixed vector
+// (or an error) for every input — enough to drive the service routing tests
+// without a real embedding backend.
+type fakeEmbedProvider struct {
+	vec []float32
+	err error
+}
+
+func (f fakeEmbedProvider) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make([][]float32, len(texts))
+	for i := range out {
+		out[i] = f.vec
+	}
+	return out, nil
+}
+
+func (f fakeEmbedProvider) Dimensions() int { return len(f.vec) }
+
+func newEmbedder(vec []float32, err error) *memory.EmbeddingService {
+	return memory.NewEmbeddingService(nil, fakeEmbedProvider{vec: vec, err: err}, logr.Discard())
+}
+
+// TestRetrieveMultiTier_RoutesToHybridWhenEmbedderPresent proves that with an
+// embedder configured and a non-empty query, the service embeds the query and
+// routes to the hybrid store path — not the FTS-only RetrieveMultiTier.
+func TestRetrieveMultiTier_RoutesToHybridWhenEmbedderPresent(t *testing.T) {
+	store := &multiTierStoreStub{
+		mthResult: &memory.MultiTierResult{
+			Memories: []*memory.MultiTierMemory{{Memory: &memory.Memory{ID: "hit"}}},
+			Total:    1,
+		},
+	}
+	svc := NewMemoryService(store, newEmbedder([]float32{0.1, 0.2}, nil), MemoryServiceConfig{}, logr.Discard())
+
+	res, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{
+		WorkspaceID: "ws-1", Query: "hello",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Total)
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	require.Len(t, store.mthEmbeddings, 1, "hybrid path must be called once")
+	assert.NotEmpty(t, store.mthEmbeddings[0], "hybrid must receive the query embedding")
+	assert.Empty(t, store.mtCalls, "FTS multi-tier must not be called when embedder present")
+}
+
+// TestRetrieveMultiTier_FallsBackToFTSOnEmbedError proves an embedder failure
+// degrades to FTS multi-tier rather than failing the recall.
+func TestRetrieveMultiTier_FallsBackToFTSOnEmbedError(t *testing.T) {
+	store := &multiTierStoreStub{mtResult: &memory.MultiTierResult{Total: 0}}
+	svc := NewMemoryService(store, newEmbedder(nil, errors.New("boom")), MemoryServiceConfig{}, logr.Discard())
+
+	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{
+		WorkspaceID: "ws-1", Query: "hi",
+	})
+	require.NoError(t, err, "embed failure must not fail the recall")
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.Len(t, store.mtCalls, 1, "must fall back to FTS multi-tier on embed error")
+	assert.Empty(t, store.mthEmbeddings, "hybrid must not be used when embed failed")
+}
+
+// TestRetrieveMultiTier_EmptyQueryUsesFTS proves an empty query skips embedding
+// and uses the FTS-only path even when an embedder is configured.
+func TestRetrieveMultiTier_EmptyQueryUsesFTS(t *testing.T) {
+	store := &multiTierStoreStub{mtResult: &memory.MultiTierResult{Total: 0}}
+	svc := NewMemoryService(store, newEmbedder([]float32{0.1}, nil), MemoryServiceConfig{}, logr.Discard())
+
+	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: "ws-1"})
+	require.NoError(t, err)
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.Len(t, store.mtCalls, 1, "empty query must use FTS multi-tier")
+	assert.Empty(t, store.mthEmbeddings)
 }
 
 func TestRetrieveMultiTier_PassesThroughAndEmitsAudit(t *testing.T) {
