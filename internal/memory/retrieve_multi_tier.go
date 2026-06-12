@@ -83,6 +83,11 @@ type MultiTierRequest struct {
 	// Nil means identity (no change), preserving the pre-tier-precedence
 	// behaviour for callers without a MemoryPolicy in scope.
 	Ranker TierRanker
+
+	// HalfLife sets the per-tier recency-decay half-life. The zero value
+	// means "unset" — the store substitutes defaultRecallHalfLife per tier,
+	// so direct callers without a MemoryPolicy still get a sane curve.
+	HalfLife TierHalfLife
 }
 
 // MultiTierMemory augments a Memory with the tier it was retrieved from,
