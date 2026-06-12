@@ -31,4 +31,24 @@ describe("modelToFlow", () => {
     expect(edges.find((e) => e.id === "e2")?.animated).toBe(true);
     expect(edges.find((e) => e.id === "e1")?.label).toBe("go");
   });
+
+  it("applies dashed styling to unresolved edges and leaves normal edges unstyled", () => {
+    const m: WorkloadModel = {
+      ...model,
+      edges: [
+        { id: "u", source: "a", target: "ghost", style: "unresolved" },
+        { id: "n", source: "a", target: "b", style: "normal" },
+      ],
+    };
+    const { edges } = modelToFlow(m);
+    expect(edges.find((e) => e.id === "u")?.style).toMatchObject({ strokeDasharray: "4 4" });
+    expect(edges.find((e) => e.id === "u")?.animated).toBe(false);
+    expect(edges.find((e) => e.id === "n")?.style).toBeUndefined();
+  });
+
+  it("passes an onClick handler through to node data", () => {
+    const onClick = () => {};
+    const { nodes } = modelToFlow(model, onClick);
+    expect(nodes[0].data.onClick).toBe(onClick);
+  });
 });
