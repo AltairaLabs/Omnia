@@ -403,6 +403,10 @@ func TestConnectFleetProviders(t *testing.T) {
 // testNamespace is a constant to avoid goconst warnings for repeated "default" strings.
 const testNamespace = "default"
 
+// testHFClassifierName is the HuggingFace inference Provider name reused across
+// the inference-routing tests (extracted to satisfy goconst).
+const testHFClassifierName = "hf-classifier"
+
 // makeArenaJobUnstructured builds an unstructured ArenaJob with the given spec payload.
 func makeArenaJobUnstructured(name, namespace string, spec map[string]interface{}) *unstructured.Unstructured {
 	u := &unstructured.Unstructured{
@@ -764,7 +768,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 				BaseURL: "https://abc123.endpoints.huggingface.cloud",
 			},
 		}
-		provider.Name = "hf-classifier"
+		provider.Name = testHFClassifierName
 		provider.Namespace = testNamespace
 
 		c := fake.NewClientBuilder().
@@ -777,11 +781,11 @@ func TestResolveProviderRefEntry(t *testing.T) {
 			ProviderGroups:  make(map[string]string),
 		}
 
-		ref := v1alpha1.ProviderRef{Name: "hf-classifier"}
+		ref := v1alpha1.ProviderRef{Name: testHFClassifierName}
 		_, err := resolveProviderRefEntry(testRC(ctx, log, c, testNamespace, nil, arenaCfg), ref, "judge")
 		require.NoError(t, err)
 
-		providerID := sanitizeID("hf-classifier")
+		providerID := sanitizeID(testHFClassifierName)
 		require.Contains(t, arenaCfg.LoadedInferenceProviders, providerID)
 		assert.NotContains(t, arenaCfg.LoadedProviders, providerID,
 			"inference providers must not land in the LLM registry")
@@ -1768,11 +1772,11 @@ func TestRemapProviderIDs(t *testing.T) {
 			// Inference provider lives ONLY in the non-llm map, not LoadedProviders.
 			LoadedProviders: map[string]*config.Provider{},
 			LoadedInferenceProviders: map[string]*config.Provider{
-				"hf-classifier": {ID: "hf-classifier", Type: "huggingface", Role: "inference"},
+				testHFClassifierName: {ID: testHFClassifierName, Type: "huggingface", Role: "inference"},
 			},
 			ProviderGroups: map[string]string{
 				// ProviderGroups carries the entry regardless of role/destination map.
-				"hf-classifier": "hf-judge",
+				testHFClassifierName: "hf-judge",
 			},
 		}
 
@@ -1784,9 +1788,9 @@ func TestRemapProviderIDs(t *testing.T) {
 
 		// The non-llm provider must not be promoted into the llm registry.
 		assert.NotContains(t, arenaCfg.LoadedProviders, "hf-judge")
-		assert.NotContains(t, arenaCfg.LoadedProviders, "hf-classifier")
+		assert.NotContains(t, arenaCfg.LoadedProviders, testHFClassifierName)
 		// It stays put in the inference map untouched.
-		require.Contains(t, arenaCfg.LoadedInferenceProviders, "hf-classifier")
+		require.Contains(t, arenaCfg.LoadedInferenceProviders, testHFClassifierName)
 	})
 
 	t.Run("self-play disabled skips remapping", func(t *testing.T) {

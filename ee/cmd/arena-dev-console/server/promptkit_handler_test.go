@@ -27,6 +27,18 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// testProviderID is a reusable Provider ID/name for tests (extracted to
+// satisfy goconst).
+const testProviderID = "test-provider"
+
+// testChatProviderID is a reusable chat/llm Provider ID for tests (extracted
+// to satisfy goconst).
+const testChatProviderID = "chat"
+
+// testModelGPT4 is a reusable model name for tests (extracted to satisfy
+// goconst).
+const testModelGPT4 = "gpt-4"
+
 // TestBuildEngineComponentsOutputDirectory tests that BuildEngineComponents
 // respects the output directory configuration and doesn't try to create
 // directories in the current working directory.
@@ -267,8 +279,8 @@ func TestPromptKitHandlerBuildComponentsWithEmptyOutputDir(t *testing.T) {
 func TestBuildConfigByRole(t *testing.T) {
 	byRole := map[corev1alpha1.ProviderRole]map[string]*config.Provider{
 		corev1alpha1.ProviderRoleLLM: {
-			"test-provider": {
-				ID:    "test-provider",
+			testProviderID: {
+				ID:    testProviderID,
 				Type:  "mock",
 				Model: "test-model",
 			},
@@ -282,7 +294,7 @@ func TestBuildConfigByRole(t *testing.T) {
 	assert.Equal(t, "/tmp/arena-dev-console-output", cfg.Defaults.OutDir)
 	assert.Equal(t, "/tmp/arena-dev-console", cfg.Defaults.ConfigDir)
 	assert.Len(t, cfg.LoadedProviders, 1)
-	assert.Contains(t, cfg.LoadedProviders, "test-provider")
+	assert.Contains(t, cfg.LoadedProviders, testProviderID)
 }
 
 // TestBuildConfigByRoleRoutesInferenceAndLLM verifies that an inference-role
@@ -291,7 +303,7 @@ func TestBuildConfigByRole(t *testing.T) {
 func TestBuildConfigByRoleRoutesInferenceAndLLM(t *testing.T) {
 	byRole := map[corev1alpha1.ProviderRole]map[string]*config.Provider{
 		corev1alpha1.ProviderRoleLLM: {
-			"chat": {ID: "chat", Type: "openai", Model: "gpt-4", Role: "llm"},
+			testChatProviderID: {ID: testChatProviderID, Type: "openai", Model: testModelGPT4, Role: "llm"},
 		},
 		corev1alpha1.ProviderRoleInference: {
 			"hf-classifier": {
@@ -313,8 +325,8 @@ func TestBuildConfigByRoleRoutesInferenceAndLLM(t *testing.T) {
 	assert.Equal(t, "inference", cfg.LoadedInferenceProviders["hf-classifier"].Role)
 	assert.Equal(t, true, cfg.LoadedInferenceProviders["hf-classifier"].AdditionalConfig["dedicated"])
 
-	require.Contains(t, cfg.LoadedProviders, "chat")
-	assert.NotContains(t, cfg.LoadedInferenceProviders, "chat")
+	require.Contains(t, cfg.LoadedProviders, testChatProviderID)
+	assert.NotContains(t, cfg.LoadedInferenceProviders, testChatProviderID)
 
 	require.Contains(t, cfg.LoadedEmbeddingProviders, "embed")
 }
@@ -2037,7 +2049,7 @@ func TestGetOrLoadK8sRegistryWithProviders(t *testing.T) {
 	loader := newTestK8sProviderLoader(t, "test-namespace",
 		&corev1alpha1.Provider{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-provider",
+				Name:      testProviderID,
 				Namespace: "test-namespace",
 			},
 			Spec: corev1alpha1.ProviderSpec{
