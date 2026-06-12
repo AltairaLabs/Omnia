@@ -626,15 +626,7 @@ func executeWorkItem(
 		}
 	}()
 
-	arenaMeta := arenaSessionMetadata{
-		JobName:       cfg.JobName,
-		Namespace:     cfg.JobNamespace,
-		WorkspaceName: cfg.WorkspaceName,
-		Scenario:      item.ScenarioID,
-		ProviderID:    item.ProviderID,
-		JobType:       cfg.JobType,
-		TrialIndex:    extractTrialIndex(item),
-	}
+	arenaMeta := newArenaSessionMeta(cfg, item)
 
 	// Load-test fleet runs drive a live agent whose facade already records the
 	// conversation + cost into its own session. Creating a separate arena session
@@ -642,7 +634,7 @@ func executeWorkItem(
 	// decorate the facade-recorded session with arena context after the run (see
 	// decorateFleetSessions below). Other job types (evaluation/datagen) keep the
 	// session manager so their engine-emitted events are recorded as today.
-	loadTestFleet := cfg.JobType == string(omniav1alpha1.ArenaJobTypeLoadTest) && len(crdFleetProviders) > 0
+	loadTestFleet := isLoadTestFleet(cfg, crdFleetProviders)
 
 	// Wire session recording if session-api is configured.
 	// Events from all engine runs are forwarded to session-api via OmniaEventStore.
@@ -726,17 +718,56 @@ func executeWorkItem(
 	extractFleetTTFT(providerRegistry, crdFleetProviders, result)
 
 	// Extract session ID for job-to-session correlation.
+	result.SessionID = resolveResultSessionID(
+		ctx, log, cfg, loadTestFleet, arenaMeta, sessionMgr, providerRegistry, crdFleetProviders,
+	)
+
+	return result, nil
+}
+
+// newArenaSessionMeta builds the arena context for a work item, shared by the
+// session manager (direct providers) and the facade-session decoration path.
+func newArenaSessionMeta(cfg *Config, item *queue.WorkItem) arenaSessionMetadata {
+	return arenaSessionMetadata{
+		JobName:       cfg.JobName,
+		Namespace:     cfg.JobNamespace,
+		WorkspaceName: cfg.WorkspaceName,
+		Scenario:      item.ScenarioID,
+		ProviderID:    item.ProviderID,
+		JobType:       cfg.JobType,
+		TrialIndex:    extractTrialIndex(item),
+	}
+}
+
+// isLoadTestFleet reports whether this run is a load test against a live agent
+// (fleet provider). Such runs are recorded by the agent's facade, so the worker
+// links/labels that session rather than creating its own.
+func isLoadTestFleet(cfg *Config, fleetProviders []*resolvedFleetProvider) bool {
+	return cfg.JobType == string(omniav1alpha1.ArenaJobTypeLoadTest) && len(fleetProviders) > 0
+}
+
+// resolveResultSessionID returns the session ID used to correlate the job result
+// to a session. For load-test fleet runs it labels the facade-recorded session(s)
+// with arena context and returns the primary one; otherwise it returns the
+// session created by the arena session manager (or fleet fallback).
+func resolveResultSessionID(
+	ctx context.Context,
+	log logr.Logger,
+	cfg *Config,
+	loadTestFleet bool,
+	meta arenaSessionMetadata,
+	sessionMgr *arenaSessionManager,
+	registry *pkproviders.Registry,
+	fleetProviders []*resolvedFleetProvider,
+) string {
 	if loadTestFleet && cfg.SessionAPIURL != "" {
 		// Label the facade-recorded session(s) with arena context and link the job
 		// to the primary one, so the dashboard shows the real conversation + cost
 		// for this run instead of an empty shell.
 		store := httpclient.NewStore(cfg.SessionAPIURL, log)
-		result.SessionID = decorateFleetSessions(ctx, log, store, arenaMeta, providerRegistry, crdFleetProviders)
-	} else {
-		result.SessionID = extractSessionID(sessionMgr, providerRegistry, crdFleetProviders)
+		return decorateFleetSessions(ctx, log, store, meta, registry, fleetProviders)
 	}
-
-	return result, nil
+	return extractSessionID(sessionMgr, registry, fleetProviders)
 }
 
 // decorateFleetSessions labels the facade-recorded session(s) of a load-test

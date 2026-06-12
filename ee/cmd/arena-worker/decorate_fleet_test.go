@@ -20,9 +20,15 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/altairalabs/omnia/ee/pkg/arena/fleet"
+	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 )
 
-const testFleetAgentID = "agent-rag-hero"
+const (
+	testFleetAgentID = "agent-rag-hero"
+	testLoadJobName  = "rag-hero-loadtest"
+	testLoadJobType  = "loadtest"
+	testItemID       = "item-1"
+)
 
 // fakeConn is a fleet.Conn that hands back a single "connected" server message
 // carrying a fixed facade session ID, then blocks/no-ops. Enough to drive
@@ -46,13 +52,67 @@ func (d *fakeDialer) DialContext(_ context.Context, _ string, _ http.Header) (fl
 	}, nil
 }
 
+func TestNewArenaSessionMeta(t *testing.T) {
+	cfg := &Config{
+		JobName:       testLoadJobName,
+		JobNamespace:  testNamespace,
+		WorkspaceName: "ws",
+		JobType:       testLoadJobType,
+	}
+	item := &queue.WorkItem{
+		ID:         testItemID,
+		ScenarioID: "incident-runbook",
+		ProviderID: testFleetAgentID,
+	}
+
+	meta := newArenaSessionMeta(cfg, item)
+	assert.Equal(t, testLoadJobName, meta.JobName)
+	assert.Equal(t, testNamespace, meta.Namespace)
+	assert.Equal(t, "ws", meta.WorkspaceName)
+	assert.Equal(t, "incident-runbook", meta.Scenario)
+	assert.Equal(t, testFleetAgentID, meta.ProviderID)
+	assert.Equal(t, testLoadJobType, meta.JobType)
+}
+
+func TestIsLoadTestFleet(t *testing.T) {
+	fleetProvs := []*resolvedFleetProvider{{id: testFleetAgentID}}
+
+	assert.True(t, isLoadTestFleet(&Config{JobType: testLoadJobType}, fleetProvs))
+	assert.False(t, isLoadTestFleet(&Config{JobType: testLoadJobType}, nil), "loadtest without fleet providers")
+	assert.False(t, isLoadTestFleet(&Config{JobType: "evaluation"}, fleetProvs), "evaluation against a fleet")
+}
+
+func TestResolveResultSessionID(t *testing.T) {
+	meta := arenaSessionMetadata{JobName: testLoadJobName, JobType: testLoadJobType}
+
+	t.Run("non-fleet path returns the session manager / fleet fallback ID", func(t *testing.T) {
+		// loadTestFleet=false, no session manager, no providers → empty.
+		sid := resolveResultSessionID(
+			context.Background(), logr.Discard(), &Config{}, false, meta,
+			nil, pkproviders.NewRegistry(), nil,
+		)
+		assert.Empty(t, sid)
+	})
+
+	t.Run("fleet path decorates without a session and returns empty", func(t *testing.T) {
+		// loadTestFleet=true + session-api set, but no fleet session IDs to decorate
+		// → no network call, returns empty.
+		sid := resolveResultSessionID(
+			context.Background(), logr.Discard(),
+			&Config{SessionAPIURL: "http://session-api"}, true, meta,
+			nil, pkproviders.NewRegistry(), nil,
+		)
+		assert.Empty(t, sid)
+	})
+}
+
 func TestArenaSessionTagsAndState(t *testing.T) {
 	meta := arenaSessionMetadata{
-		JobName:    "rag-hero-loadtest",
+		JobName:    testLoadJobName,
 		Namespace:  testNamespace,
 		Scenario:   "incident-runbook",
 		ProviderID: testFleetAgentID,
-		JobType:    "loadtest",
+		JobType:    testLoadJobType,
 		TrialIndex: "2",
 	}
 
@@ -66,10 +126,10 @@ func TestArenaSessionTagsAndState(t *testing.T) {
 	}, tags)
 
 	state := arenaSessionState(meta, "")
-	assert.Equal(t, "rag-hero-loadtest", state["arena.job"])
+	assert.Equal(t, testLoadJobName, state["arena.job"])
 	assert.Equal(t, "incident-runbook", state["arena.scenario"])
 	assert.Equal(t, testFleetAgentID, state["arena.provider"])
-	assert.Equal(t, "loadtest", state["arena.type"])
+	assert.Equal(t, testLoadJobType, state["arena.type"])
 	assert.Equal(t, "2", state["arena.trial.index"])
 	// Empty runID is omitted.
 	_, hasRunID := state["arena.run_id"]
@@ -85,11 +145,11 @@ func TestArenaSessionTagsAndState(t *testing.T) {
 
 func TestDecorateFleetSessions(t *testing.T) {
 	meta := arenaSessionMetadata{
-		JobName:    "rag-hero-loadtest",
+		JobName:    testLoadJobName,
 		Namespace:  testNamespace,
 		Scenario:   "incident-runbook",
 		ProviderID: testFleetAgentID,
-		JobType:    "loadtest",
+		JobType:    testLoadJobType,
 	}
 
 	t.Run("decorates the facade session and returns it as primary", func(t *testing.T) {
@@ -110,7 +170,7 @@ func TestDecorateFleetSessions(t *testing.T) {
 		require.True(t, ok, "expected the facade session to be decorated")
 		assert.Contains(t, opts.AddTags, "source:arena")
 		assert.Contains(t, opts.AddTags, "arena-job:rag-hero-loadtest")
-		assert.Equal(t, "rag-hero-loadtest", opts.MergeState["arena.job"])
+		assert.Equal(t, testLoadJobName, opts.MergeState["arena.job"])
 	})
 
 	t.Run("returns empty when no facade session is available", func(t *testing.T) {
@@ -123,6 +183,19 @@ func TestDecorateFleetSessions(t *testing.T) {
 		primary := decorateFleetSessions(
 			context.Background(), logr.Discard(), store, meta, registry,
 			[]*resolvedFleetProvider{{id: testFleetAgentID}},
+		)
+
+		assert.Empty(t, primary)
+		assert.Empty(t, store.decorations)
+	})
+
+	t.Run("returns empty when the provider is not registered", func(t *testing.T) {
+		registry := pkproviders.NewRegistry()
+		store := newMockStore()
+
+		primary := decorateFleetSessions(
+			context.Background(), logr.Discard(), store, meta, registry,
+			[]*resolvedFleetProvider{{id: "missing-provider"}},
 		)
 
 		assert.Empty(t, primary)

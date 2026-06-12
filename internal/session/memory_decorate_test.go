@@ -65,3 +65,17 @@ func TestMemoryStore_DecorateSession_NotFound(t *testing.T) {
 	err := m.DecorateSession(ctx, "missing", DecorateSessionOptions{AddTags: []string{"x"}})
 	assert.ErrorIs(t, err, ErrSessionNotFound)
 }
+
+func TestMemoryStore_DecorateSession_Guards(t *testing.T) {
+	m := NewMemoryStore()
+
+	// Empty session ID is rejected.
+	err := m.DecorateSession(context.Background(), "", DecorateSessionOptions{AddTags: []string{"x"}})
+	assert.ErrorIs(t, err, ErrInvalidSessionID)
+
+	// A cancelled context is surfaced.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = m.DecorateSession(ctx, "s1", DecorateSessionOptions{AddTags: []string{"x"}})
+	assert.ErrorIs(t, err, context.Canceled)
+}

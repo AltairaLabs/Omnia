@@ -1062,6 +1062,36 @@ func TestHandleDecorateSession_NotFound(t *testing.T) {
 	}
 }
 
+func TestSessionService_DecorateSession_Guards(t *testing.T) {
+	// Registry without a warm store.
+	svc := NewSessionService(providers.NewRegistry(), ServiceConfig{}, logr.Discard())
+
+	if err := svc.DecorateSession(context.Background(), "", session.DecorateSessionOptions{}); !errors.Is(err, ErrMissingSessionID) {
+		t.Fatalf("empty sessionID: expected ErrMissingSessionID, got %v", err)
+	}
+	if err := svc.DecorateSession(context.Background(), "s1",
+		session.DecorateSessionOptions{AddTags: []string{"x"}}); !errors.Is(err, ErrWarmStoreRequired) {
+		t.Fatalf("no warm store: expected ErrWarmStoreRequired, got %v", err)
+	}
+}
+
+func TestHandleDecorateSession_BadBody(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/sessions/"+testSessionID+"/decorate",
+		strings.NewReader("not json"))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
 func TestHandleGetMessages_OK(t *testing.T) {
 	h, hot, _ := setupHandler(t)
 	hot.sessions[testSessionID] = testSession(testSessionID)
