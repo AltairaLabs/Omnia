@@ -16,22 +16,13 @@ limitations under the License.
 
 package provider
 
-// APIKeyEnvVarName returns the primary environment variable name that the
-// PromptKit SDK expects for API key credentials of the given provider type.
-// Returns empty string for provider types that don't use API key credentials.
-func APIKeyEnvVarName(providerType string) string {
-	switch Type(providerType) {
-	case TypeClaude:
-		return "ANTHROPIC_API_KEY"
-	case TypeOpenAI:
-		return "OPENAI_API_KEY"
-	case TypeGemini:
-		return "GEMINI_API_KEY"
-	case TypeVoyageAI:
-		return "VOYAGE_API_KEY"
-	case TypeHuggingFace:
-		return "HF_TOKEN"
-	default:
-		return ""
+// HuggingFaceAdditionalConfig returns the PromptKit AdditionalConfig for a
+// HuggingFace inference provider. A non-empty baseURL means a dedicated
+// Inference Endpoint (dedicated=true); empty means the shared serverless
+// Inference API (returns nil — no flags needed).
+func HuggingFaceAdditionalConfig(baseURL string) map[string]any {
+	if baseURL == "" {
+		return nil
 	}
+	return map[string]any{"dedicated": true}
 }

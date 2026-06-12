@@ -90,7 +90,8 @@ type Server struct {
 
 	// Provider info (for logging and provider creation)
 	providerType              string
-	providerRefName           string // Provider CRD name (for per-provider attribution)
+	providerRefName           string             // Provider CRD name (for per-provider attribution)
+	extraProviders            []ResolvedProvider // Non-default providers (embedding/tts/stt/image/inference)
 	model                     string
 	baseURL                   string            // Custom base URL for provider (e.g., Ollama endpoint)
 	headers                   map[string]string // Custom HTTP headers for every provider request
@@ -320,6 +321,15 @@ func WithProviderInfo(providerType, model string) ServerOption {
 func WithProviderRefName(name string) ServerOption {
 	return func(s *Server) {
 		s.providerRefName = name
+	}
+}
+
+// WithExtraProviders sets the non-default providers (any role except the
+// default llm) resolved from the AgentRuntime's spec.providers[]. Each maps to
+// its role's SDK option in buildConversationOptions.
+func WithExtraProviders(providers []ResolvedProvider) ServerOption {
+	return func(s *Server) {
+		s.extraProviders = providers
 	}
 }
 

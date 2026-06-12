@@ -25,6 +25,7 @@ import (
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/providers"
+	omniaprovider "github.com/altairalabs/omnia/pkg/provider"
 	"github.com/go-logr/logr"
 )
 
@@ -89,18 +90,21 @@ func (l *K8sProviderLoader) Namespace() string {
 }
 
 // LoadProviders loads all Provider CRDs from this dev console's namespace
-// and converts them to PromptKit config format.
-func (l *K8sProviderLoader) LoadProviders(ctx context.Context) (map[string]*config.Provider, error) {
+// and converts them to PromptKit config format, grouped by provider role.
+func (l *K8sProviderLoader) LoadProviders(
+	ctx context.Context,
+) (map[corev1alpha1.ProviderRole]map[string]*config.Provider, error) {
 	return l.LoadProvidersForNamespace(ctx, l.namespace)
 }
 
 // LoadProvidersForNamespace loads all Provider CRDs from the specified namespace
-// and converts them to PromptKit config format.
+// and converts them to PromptKit config format, grouped by each provider's
+// effective role (llm, inference, embedding, tts, stt, image).
 // NOTE: The loader can only access its own namespace due to RBAC restrictions.
 func (l *K8sProviderLoader) LoadProvidersForNamespace(
 	ctx context.Context,
 	namespace string,
-) (map[string]*config.Provider, error) {
+) (map[corev1alpha1.ProviderRole]map[string]*config.Provider, error) {
 	if namespace == "" {
 		namespace = l.namespace
 	}
@@ -118,7 +122,7 @@ func (l *K8sProviderLoader) LoadProvidersForNamespace(
 
 	l.log.Info("found providers", "namespace", namespace, "count", len(providerList.Items))
 
-	providerMap := make(map[string]*config.Provider)
+	byRole := make(map[corev1alpha1.ProviderRole]map[string]*config.Provider)
 	for i := range providerList.Items {
 		p := &providerList.Items[i]
 
@@ -128,13 +132,17 @@ func (l *K8sProviderLoader) LoadProvidersForNamespace(
 			continue
 		}
 
-		// Convert to PromptKit config
+		// Convert to PromptKit config and group under the provider's role
 		pkProvider := l.convertProvider(p)
-		providerMap[p.Name] = pkProvider
-		l.log.V(1).Info("loaded provider", "name", p.Name, "type", p.Spec.Type)
+		role := p.EffectiveRole()
+		if byRole[role] == nil {
+			byRole[role] = make(map[string]*config.Provider)
+		}
+		byRole[role][p.Name] = pkProvider
+		l.log.V(1).Info("loaded provider", "name", p.Name, "type", p.Spec.Type, "role", role)
 	}
 
-	return providerMap, nil
+	return byRole, nil
 }
 
 // convertProvider converts a Provider CRD to PromptKit config.Provider.
@@ -146,6 +154,12 @@ func (l *K8sProviderLoader) convertProvider(p *corev1alpha1.Provider) *config.Pr
 		Type:    string(p.Spec.Type),
 		Model:   p.Spec.Model,
 		BaseURL: p.Spec.BaseURL,
+		Role:    string(p.EffectiveRole()),
+	}
+
+	// HuggingFace inference providers carry dedicated-endpoint config.
+	if p.Spec.Type == corev1alpha1.ProviderTypeHuggingFace {
+		provider.AdditionalConfig = omniaprovider.HuggingFaceAdditionalConfig(p.Spec.BaseURL)
 	}
 
 	// Set defaults if specified
@@ -236,12 +250,13 @@ func (l *K8sProviderLoader) resolveEnvVarCredential(
 	}
 }
 
-// BuildConfigFromProviders creates a PromptKit config.Config with the given providers.
+// BuildConfigByRole creates a PromptKit config.Config, routing each role's
+// provider map into the matching Loaded*Providers field (llm→LoadedProviders,
+// inference→LoadedInferenceProviders, embedding→LoadedEmbeddingProviders, etc.).
 // Sets the output directory to a writable location since the container's working
 // directory may be read-only.
-func BuildConfigFromProviders(providerMap map[string]*config.Provider) *config.Config {
-	return &config.Config{
-		LoadedProviders: providerMap,
+func BuildConfigByRole(byRole map[corev1alpha1.ProviderRole]map[string]*config.Provider) *config.Config {
+	cfg := &config.Config{
 		// Set ConfigDir to a writable location for any file operations
 		ConfigDir: devConsoleConfigDir,
 		Defaults: config.Defaults{
@@ -253,4 +268,23 @@ func BuildConfigFromProviders(providerMap map[string]*config.Provider) *config.C
 			ConfigDir: devConsoleConfigDir,
 		},
 	}
+
+	for role, providerMap := range byRole {
+		switch role {
+		case corev1alpha1.ProviderRoleInference:
+			cfg.LoadedInferenceProviders = providerMap
+		case corev1alpha1.ProviderRoleEmbedding:
+			cfg.LoadedEmbeddingProviders = providerMap
+		case corev1alpha1.ProviderRoleTTS:
+			cfg.LoadedTTSProviders = providerMap
+		case corev1alpha1.ProviderRoleSTT:
+			cfg.LoadedSTTProviders = providerMap
+		case corev1alpha1.ProviderRoleImage:
+			cfg.LoadedImageProviders = providerMap
+		default: // llm
+			cfg.LoadedProviders = providerMap
+		}
+	}
+
+	return cfg
 }

@@ -55,6 +55,8 @@ const (
 	TypeElevenLabs Type = "elevenlabs"
 	// TypeImagen uses Google's Imagen image generation. Image-role only.
 	TypeImagen Type = "imagen"
+	// TypeHuggingFace uses HuggingFace Inference Endpoints/API. Inference-role only.
+	TypeHuggingFace Type = "huggingface"
 )
 
 // ValidTypes contains all valid provider types.
@@ -70,6 +72,7 @@ var ValidTypes = []Type{
 	TypeCartesia,
 	TypeElevenLabs,
 	TypeImagen,
+	TypeHuggingFace,
 }
 
 // IsValid returns true if the provider type is valid.

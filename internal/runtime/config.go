@@ -58,6 +58,12 @@ type Config struct {
 	// Empty map/nil means no custom headers. Used for gateway providers like OpenRouter.
 	Headers map[string]string
 
+	// ExtraProviders carries every non-default spec.providers[] entry resolved
+	// by role (e.g. inference, embedding). The default llm provider is flattened
+	// into the scalar fields above and does NOT appear here. A later task maps
+	// these to PromptKit WithXProvider options.
+	ExtraProviders []ResolvedProvider
+
 	// Platform hosting configuration. Empty PlatformType means direct provider access.
 	// When set, PlatformType is one of "bedrock", "vertex", "azure".
 	PlatformType     string

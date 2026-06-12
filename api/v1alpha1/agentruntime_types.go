@@ -294,7 +294,7 @@ type AutoscalingConfig struct {
 // Hyperscaler hosting (Bedrock/Vertex/Azure) is expressed via spec.platform
 // on the Provider CRD, not as a provider type. The provider type describes
 // the wire protocol the runtime uses; the role (spec.role) is orthogonal.
-// +kubebuilder:validation:Enum=claude;openai;gemini;ollama;mock;vllm;voyageai;cartesia;elevenlabs;imagen
+// +kubebuilder:validation:Enum=claude;openai;gemini;ollama;mock;vllm;voyageai;cartesia;elevenlabs;imagen;huggingface
 type ProviderType string
 
 const (
@@ -326,6 +326,8 @@ const (
 	ProviderTypeElevenLabs ProviderType = "elevenlabs"
 	// ProviderTypeImagen uses Google's Imagen image-generation model. Image-role only.
 	ProviderTypeImagen ProviderType = "imagen"
+	// ProviderTypeHuggingFace uses HuggingFace Inference Endpoints/API. Inference-role only.
+	ProviderTypeHuggingFace ProviderType = "huggingface"
 )
 
 // TruncationStrategy defines how to handle context overflow.

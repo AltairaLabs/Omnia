@@ -1182,6 +1182,130 @@ func TestLoadFromCRD_MemoryRetrievalConfig(t *testing.T) {
 	})
 }
 
+// TestLoadFromNamedProviders_ExtraProviders verifies that the default llm
+// entry is flattened into the scalar Config fields unchanged, while every
+// other spec.providers[] entry is resolved into cfg.ExtraProviders keyed by
+// its effective role.
+func TestLoadFromNamedProviders_ExtraProviders(t *testing.T) {
+	llmProvider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testLLMProviderName,
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.ProviderSpec{
+			Type:  v1alpha1.ProviderTypeOpenAI,
+			Model: "gpt-4o",
+		},
+	}
+
+	inferenceProvider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testInferenceProviderName,
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.ProviderSpec{
+			Type:  v1alpha1.ProviderTypeHuggingFace,
+			Model: "meta-llama/Llama-3.1-8B-Instruct",
+			Role:  v1alpha1.ProviderRoleInference,
+		},
+	}
+
+	c := buildTestClient(llmProvider, inferenceProvider)
+
+	providers := []v1alpha1.NamedProviderRef{
+		{
+			Name:        "default",
+			ProviderRef: v1alpha1.ProviderRef{Name: testLLMProviderName},
+		},
+		{
+			Name:        "inference",
+			ProviderRef: v1alpha1.ProviderRef{Name: testInferenceProviderName},
+		},
+	}
+
+	cfg := &Config{}
+	err := loadFromNamedProviders(context.Background(), c, cfg, providers, "test-ns")
+	require.NoError(t, err)
+
+	// Default llm entry flattened into the scalar fields, unchanged behavior.
+	assert.Equal(t, "openai", cfg.ProviderType)
+	assert.Equal(t, "gpt-4o", cfg.Model)
+	assert.Equal(t, testLLMProviderName, cfg.ProviderRefName)
+
+	// The non-default entry is carried through as an ExtraProvider.
+	require.Len(t, cfg.ExtraProviders, 1)
+	extra := cfg.ExtraProviders[0]
+	assert.Equal(t, v1alpha1.ProviderRoleInference, extra.Role)
+	require.NotNil(t, extra.Provider)
+	assert.Equal(t, testInferenceProviderName, extra.Provider.Name)
+
+	// The default llm must NOT appear in ExtraProviders.
+	for _, ep := range cfg.ExtraProviders {
+		assert.NotEqual(t, testLLMProviderName, ep.Provider.Name)
+	}
+}
+
+// TestLoadFromNamedProviders_InjectsExtraProviderSecret verifies that a
+// non-default spec.providers[] entry (e.g. a HuggingFace inference provider)
+// has its Secret injected into the process env, so PromptKit's
+// os.Getenv("HF_TOKEN") resolves at construction time. Before the fix only the
+// default provider's secret was injected.
+func TestLoadFromNamedProviders_InjectsExtraProviderSecret(t *testing.T) {
+	// Save/restore so the test doesn't leak HF_TOKEN.
+	const hfEnv = "HF_TOKEN"
+	t.Setenv(hfEnv, "")
+	_ = os.Unsetenv(hfEnv)
+
+	hfKey := "token"
+	llmProvider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: testLLMProviderName, Namespace: "test-ns"},
+		Spec: v1alpha1.ProviderSpec{
+			Type:  v1alpha1.ProviderTypeOllama,
+			Model: "llama3",
+		},
+	}
+	inferenceProvider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: testInferenceProviderName, Namespace: "test-ns"},
+		Spec: v1alpha1.ProviderSpec{
+			Type:  v1alpha1.ProviderTypeHuggingFace,
+			Model: "meta-llama/Llama-3.1-8B-Instruct",
+			Role:  v1alpha1.ProviderRoleInference,
+			Credential: &v1alpha1.CredentialConfig{
+				SecretRef: &v1alpha1.SecretKeyRef{
+					Name: "hf-secret",
+					Key:  &hfKey,
+				},
+			},
+		},
+	}
+	hfSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "hf-secret", Namespace: "test-ns"},
+		Data:       map[string][]byte{"token": []byte("hf-test-token")},
+	}
+
+	c := buildTestClient(llmProvider, inferenceProvider, hfSecret)
+
+	providers := []v1alpha1.NamedProviderRef{
+		{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: testLLMProviderName}},
+		{Name: "inference", ProviderRef: v1alpha1.ProviderRef{Name: testInferenceProviderName}},
+	}
+
+	cfg := &Config{}
+	err := loadFromNamedProviders(context.Background(), c, cfg, providers, "test-ns")
+	require.NoError(t, err)
+
+	assert.Equal(t, "hf-test-token", os.Getenv(hfEnv),
+		"extra provider's secret must be injected into the process env")
+}
+
+// testLLMProviderName is the default llm Provider name reused across the
+// named-provider tests (extracted to satisfy goconst).
+const testLLMProviderName = "llm-provider"
+
+// testInferenceProviderName is the inference Provider name reused across the
+// named-provider tests (extracted to satisfy goconst).
+const testInferenceProviderName = "inference-provider"
+
 func strPtr(s string) *string {
 	return &s
 }

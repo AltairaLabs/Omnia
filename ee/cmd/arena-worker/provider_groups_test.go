@@ -403,6 +403,10 @@ func TestConnectFleetProviders(t *testing.T) {
 // testNamespace is a constant to avoid goconst warnings for repeated "default" strings.
 const testNamespace = "default"
 
+// testHFClassifierName is the HuggingFace inference Provider name reused across
+// the inference-routing tests (extracted to satisfy goconst).
+const testHFClassifierName = "hf-classifier"
+
 // makeArenaJobUnstructured builds an unstructured ArenaJob with the given spec payload.
 func makeArenaJobUnstructured(name, namespace string, spec map[string]interface{}) *unstructured.Unstructured {
 	u := &unstructured.Unstructured{
@@ -753,6 +757,77 @@ func TestResolveProviderRefEntry(t *testing.T) {
 		assert.Equal(t, "azure", pk.Platform.Type)
 		assert.Equal(t, "https://acct.cognitiveservices.azure.com/", pk.Platform.Endpoint)
 		assert.Nil(t, pk.Credential, "platform providers must not demand an API-key env var")
+	})
+
+	t.Run("inference provider routes to LoadedInferenceProviders not LoadedProviders", func(t *testing.T) {
+		provider := &v1alpha1.Provider{
+			Spec: v1alpha1.ProviderSpec{
+				Type:    v1alpha1.ProviderTypeHuggingFace,
+				Role:    v1alpha1.ProviderRoleInference,
+				Model:   "meta-llama/Llama-3-8b",
+				BaseURL: "https://abc123.endpoints.huggingface.cloud",
+			},
+		}
+		provider.Name = testHFClassifierName
+		provider.Namespace = testNamespace
+
+		c := fake.NewClientBuilder().
+			WithScheme(k8s.Scheme()).
+			WithObjects(provider).
+			Build()
+
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+
+		ref := v1alpha1.ProviderRef{Name: testHFClassifierName}
+		_, err := resolveProviderRefEntry(testRC(ctx, log, c, testNamespace, nil, arenaCfg), ref, "judge")
+		require.NoError(t, err)
+
+		providerID := sanitizeID(testHFClassifierName)
+		require.Contains(t, arenaCfg.LoadedInferenceProviders, providerID)
+		assert.NotContains(t, arenaCfg.LoadedProviders, providerID,
+			"inference providers must not land in the LLM registry")
+
+		p := arenaCfg.LoadedInferenceProviders[providerID]
+		require.NotNil(t, p)
+		assert.Equal(t, "inference", p.Role)
+		assert.Equal(t, "huggingface", p.Type)
+		require.NotNil(t, p.AdditionalConfig)
+		assert.Equal(t, true, p.AdditionalConfig["dedicated"],
+			"dedicated endpoint baseURL should set dedicated=true")
+		assert.Equal(t, "judge", arenaCfg.ProviderGroups[providerID])
+	})
+
+	t.Run("llm provider still routes to LoadedProviders with llm role", func(t *testing.T) {
+		provider := &v1alpha1.Provider{
+			Spec: v1alpha1.ProviderSpec{
+				Type:  "openai",
+				Model: "gpt-4o",
+			},
+		}
+		provider.Name = "default-llm"
+		provider.Namespace = testNamespace
+
+		c := fake.NewClientBuilder().
+			WithScheme(k8s.Scheme()).
+			WithObjects(provider).
+			Build()
+
+		arenaCfg := &config.Config{
+			LoadedProviders: make(map[string]*config.Provider),
+			ProviderGroups:  make(map[string]string),
+		}
+
+		ref := v1alpha1.ProviderRef{Name: "default-llm"}
+		_, err := resolveProviderRefEntry(testRC(ctx, log, c, testNamespace, nil, arenaCfg), ref, "default")
+		require.NoError(t, err)
+
+		providerID := sanitizeID("default-llm")
+		require.Contains(t, arenaCfg.LoadedProviders, providerID)
+		assert.NotContains(t, arenaCfg.LoadedInferenceProviders, providerID)
+		assert.Equal(t, "llm", arenaCfg.LoadedProviders[providerID].Role)
 	})
 
 	t.Run("non-platform provider keeps credential env", func(t *testing.T) {
@@ -1680,6 +1755,42 @@ func TestRemapProviderIDs(t *testing.T) {
 		require.Contains(t, arenaCfg.LoadedProviders, "selfplay")
 		assert.Equal(t, "selfplay", arenaCfg.LoadedProviders["selfplay"].ID)
 		assert.Equal(t, "fleet", arenaCfg.LoadedProviders["selfplay"].Type)
+	})
+
+	t.Run("non-llm group member does not panic and is skipped", func(t *testing.T) {
+		// Regression: after non-llm providers were routed to their own Loaded*
+		// maps, ProviderGroups still carries an entry for them. A judge/self-play
+		// ref naming such a group used to nil-deref arenaCfg.LoadedProviders[oldID].
+		configPath := writeConfig(t, `spec:
+  providers:
+    - file: providers/main.yaml
+  judges:
+    - name: classifier
+      provider: hf-judge`)
+
+		arenaCfg := &config.Config{
+			// Inference provider lives ONLY in the non-llm map, not LoadedProviders.
+			LoadedProviders: map[string]*config.Provider{},
+			LoadedInferenceProviders: map[string]*config.Provider{
+				testHFClassifierName: {ID: testHFClassifierName, Type: "huggingface", Role: "inference"},
+			},
+			ProviderGroups: map[string]string{
+				// ProviderGroups carries the entry regardless of role/destination map.
+				testHFClassifierName: "hf-judge",
+			},
+		}
+
+		require.NotPanics(t, func() {
+			err := remapProviderIDs(testLog(), arenaCfg, configPath)
+			// Skipping non-llm providers is clean handling: no panic, no remap.
+			require.NoError(t, err)
+		})
+
+		// The non-llm provider must not be promoted into the llm registry.
+		assert.NotContains(t, arenaCfg.LoadedProviders, "hf-judge")
+		assert.NotContains(t, arenaCfg.LoadedProviders, testHFClassifierName)
+		// It stays put in the inference map untouched.
+		require.Contains(t, arenaCfg.LoadedInferenceProviders, testHFClassifierName)
 	})
 
 	t.Run("self-play disabled skips remapping", func(t *testing.T) {

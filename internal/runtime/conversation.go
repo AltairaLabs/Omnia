@@ -139,6 +139,9 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 		// If provider is nil, PromptKit will auto-detect from environment
 	}
 
+	// Wire each resolved non-default provider to its role's SDK option.
+	opts = append(opts, s.extraProviderOptions(log)...)
+
 	// Wire eval middleware when collector is configured
 	evalOpts := s.buildEvalOptions()
 	log.V(1).Info("eval options wired",

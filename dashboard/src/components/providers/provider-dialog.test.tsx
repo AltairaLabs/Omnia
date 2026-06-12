@@ -1393,6 +1393,42 @@ describe("ProviderDialog", () => {
       });
     });
 
+    it("offers the inference role and snaps to huggingface as the only vendor", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      // The inference role option must be present/selectable.
+      await user.click(screen.getByLabelText("Role"));
+      const inferenceOption = screen.getByRole("option", { name: /^inference$/i });
+      expect(inferenceOption).toBeInTheDocument();
+      await user.click(inferenceOption);
+
+      // Default vendor is claude (llm). Inference does not accept claude, so
+      // the form must snap to huggingface (the only vendor for the role).
+      await user.click(screen.getByLabelText("Provider Type"));
+      expect(screen.getByRole("option", { name: /hugging\s?face/i })).toBeInTheDocument();
+      expect(screen.queryByRole("option", { name: /claude/i })).toBeNull();
+      await user.keyboard("{Escape}");
+
+      // The form must have a valid huggingface state on submit.
+      await user.type(screen.getByLabelText("Name"), "hf-classifier");
+      await user.type(screen.getByLabelText("Secret Name"), "hf-token");
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(mockCreateProvider).toHaveBeenCalled();
+      });
+      const spec = mockCreateProvider.mock.calls[0][1];
+      expect(spec.role).toBe("inference");
+      expect(spec.type).toBe("huggingface");
+    });
+
     it("forbids voyageai under the llm role (vendor filtered out)", async () => {
       vi.useRealTimers();
       const user = userEvent.setup();

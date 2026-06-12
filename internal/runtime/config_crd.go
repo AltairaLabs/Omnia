@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sort"
 	"strconv"
 	"time"
 
@@ -201,6 +200,13 @@ func loadRuntimeSessionFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) error {
 	return nil
 }
 
+// ResolvedProvider is a non-default provider referenced by the AgentRuntime,
+// carried through to conversation wiring where it maps to a WithXProvider option.
+type ResolvedProvider struct {
+	Role     v1alpha1.ProviderRole
+	Provider *v1alpha1.Provider
+}
+
 // loadProviderFromCRD resolves the provider from the AgentRuntime CRD and sets
 // the API key environment variable for the PromptKit SDK.
 func loadProviderFromCRD(ctx context.Context, c client.Client, cfg *Config, ar *v1alpha1.AgentRuntime, namespace string) error {
@@ -211,27 +217,68 @@ func loadProviderFromCRD(ctx context.Context, c client.Client, cfg *Config, ar *
 	return nil
 }
 
-// loadFromNamedProviders resolves the "default" (or first sorted) named provider.
+// loadFromNamedProviders resolves the "default" (or first sorted) named provider
+// into the scalar Config fields (the llm flat path), then resolves every other
+// entry into cfg.ExtraProviders keyed by its effective role.
 func loadFromNamedProviders(ctx context.Context, c client.Client, cfg *Config, providers []v1alpha1.NamedProviderRef, namespace string) error {
-	// Find "default" entry, or use first sorted
-	var ref v1alpha1.ProviderRef
-	found := false
-	for _, np := range providers {
-		if np.Name == "default" {
-			ref = np.ProviderRef
-			found = true
-			break
-		}
-	}
-	if !found {
-		// Sort by name and use first
-		sorted := make([]v1alpha1.NamedProviderRef, len(providers))
-		copy(sorted, providers)
-		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
-		ref = sorted[0].ProviderRef
+	defaultIdx := defaultProviderIndex(providers)
+
+	if err := loadFromProviderRef(ctx, c, cfg, providers[defaultIdx].ProviderRef, namespace); err != nil {
+		return err
 	}
 
-	return loadFromProviderRef(ctx, c, cfg, ref, namespace)
+	return loadExtraProviders(ctx, c, cfg, providers, defaultIdx, namespace)
+}
+
+// defaultProviderIndex returns the index of the entry used for the default llm
+// flat-load: the "default" entry if present, otherwise the first by sorted name.
+func defaultProviderIndex(providers []v1alpha1.NamedProviderRef) int {
+	for i, np := range providers {
+		if np.Name == "default" {
+			return i
+		}
+	}
+
+	// No "default": pick the index of the lexicographically-first name.
+	first := 0
+	for i, np := range providers {
+		if np.Name < providers[first].Name {
+			first = i
+		}
+	}
+	return first
+}
+
+// loadExtraProviders resolves every entry except the one at defaultIdx into
+// cfg.ExtraProviders, keyed by each provider's effective role.
+func loadExtraProviders(ctx context.Context, c client.Client, cfg *Config, providers []v1alpha1.NamedProviderRef, defaultIdx int, namespace string) error {
+	for i, np := range providers {
+		if i == defaultIdx {
+			continue
+		}
+		provider, err := k8s.GetProvider(ctx, c, np.ProviderRef, namespace)
+		if err != nil {
+			return fmt.Errorf("resolve provider %q: %w", np.Name, err)
+		}
+		if err := injectProviderCredentials(ctx, c, provider); err != nil {
+			return fmt.Errorf("inject credentials for provider %q: %w", np.Name, err)
+		}
+		cfg.ExtraProviders = append(cfg.ExtraProviders, ResolvedProvider{
+			Role:     provider.EffectiveRole(),
+			Provider: provider,
+		})
+	}
+	return nil
+}
+
+// injectProviderCredentials reads a Provider's Secret and injects the
+// appropriate env var(s) into the process so PromptKit resolves them at
+// construction time. Mirrors the default-provider credential path.
+func injectProviderCredentials(ctx context.Context, c client.Client, provider *v1alpha1.Provider) error {
+	if provider.Spec.Platform == nil {
+		return injectAPIKey(ctx, c, provider)
+	}
+	return injectPlatformCredentials(ctx, c, provider)
 }
 
 // loadFromProviderRef loads config from a Provider CRD reference and injects the API key.
@@ -262,13 +309,8 @@ func loadFromProviderRef(ctx context.Context, c client.Client, cfg *Config, ref 
 		return err
 	}
 
-	// Inject API key from secret (for non-platform providers)
-	if provider.Spec.Platform == nil {
-		return injectAPIKey(ctx, c, provider)
-	}
-
-	// Inject platform credentials from secret (for static auth types)
-	return injectPlatformCredentials(ctx, c, provider)
+	// Inject credentials from secret (API key, or platform creds for static auth).
+	return injectProviderCredentials(ctx, c, provider)
 }
 
 // loadPlatformConfig copies spec.platform into the runtime Config.

@@ -97,6 +97,7 @@ const PROVIDER_TYPES: { value: ProviderSpec["type"]; label: string }[] = [
   { value: "cartesia", label: "Cartesia" },
   { value: "elevenlabs", label: "ElevenLabs" },
   { value: "imagen", label: "Imagen (Google)" },
+  { value: "huggingface", label: "HuggingFace" },
   { value: "ollama", label: "Ollama (Local)" },
   { value: "mock", label: "Mock (Testing)" },
 ];
@@ -115,6 +116,7 @@ const ROLE_OPTIONS: { value: ProviderRole; label: string; description: string }[
   { value: "tts", label: "Text-to-Speech", description: "Synthesize audio from text." },
   { value: "stt", label: "Speech-to-Text", description: "Transcribe audio to text." },
   { value: "image", label: "Image generation", description: "Generate images from prompts." },
+  { value: "inference", label: "Inference", description: "Generic classify/inference providers (e.g. HuggingFace)." },
 ];
 
 // Mirrors the CRD CEL matrix (api/v1alpha1/provider_types.go). Keep in sync
@@ -125,6 +127,7 @@ const VENDORS_BY_ROLE: Record<ProviderRole, readonly ProviderSpec["type"][]> = {
   tts: ["openai", "cartesia", "elevenlabs"],
   stt: ["openai"],
   image: ["imagen"],
+  inference: ["huggingface"],
 };
 
 function vendorAllowedForRole(role: ProviderRole, type: ProviderSpec["type"]): boolean {
