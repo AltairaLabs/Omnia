@@ -9,6 +9,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -16,6 +17,52 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// explainUsesEmbeddingIndex EXPLAINs sql (with seq scans and sorts disabled so
+// the planner must satisfy a distance ORDER BY from an index rather than a full
+// scan + sort) and returns whether the plan drives through the HNSW index
+// idx_memory_observations_embedding. Used to guard #1369 against regression.
+func explainUsesEmbeddingIndex(t *testing.T, store *PostgresMemoryStore, sql string, args ...any) (bool, string) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := store.pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, err = tx.Exec(ctx, "SET LOCAL enable_seqscan = off")
+	require.NoError(t, err)
+	_, err = tx.Exec(ctx, "SET LOCAL enable_sort = off")
+	require.NoError(t, err)
+
+	rows, err := tx.Query(ctx, "EXPLAIN (FORMAT TEXT) "+sql, args...)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var plan strings.Builder
+	for rows.Next() {
+		var line string
+		require.NoError(t, rows.Scan(&line))
+		plan.WriteString(line)
+		plan.WriteByte('\n')
+	}
+	require.NoError(t, rows.Err())
+	return strings.Contains(plan.String(), "idx_memory_observations_embedding"), plan.String()
+}
+
+// TestRetrieveHybrid_CosineArmUsesHNSWIndex proves the single-tier hybrid
+// query's cosine arm is index-eligible (the base-table ANN scan, not a
+// windowed full materialise). Guards #1369 for hybridRetrieveSQL.
+func TestRetrieveHybrid_CosineArmUsesHNSWIndex(t *testing.T) {
+	store := newStore(t)
+	emb := oneHotFloat(7, 1536)
+	insertHybridMemoryWS(t, store, testWorkspace1, hybridKindFact, hybridRefundContent, 0.9, emb)
+
+	used, plan := explainUsesEmbeddingIndex(t, store, hybridRetrieveSQL,
+		testWorkspace1, nil, nil, hybridRefundQuery,
+		pgvector.NewVector(emb), 50, 10, 0.0)
+	assert.True(t, used,
+		"single-tier cosine arm must drive recall through the HNSW index.\nplan:\n%s", plan)
+}
 
 const efSearchTargetContent = "the quick brown fox jumps"
 
@@ -111,12 +158,12 @@ func TestClampEFSearch(t *testing.T) {
 // none of workspace 2's rows.
 //
 // Note: this asserts correctness, not the HNSW candidate-list cap itself — at
-// unit-test scale Postgres does not choose the HNSW index for either the
-// windowed hybrid arm (its row_number() partition forces a full materialise) or
-// the plain ANN query (btree+sort is cheaper for a few rows), so ef_search has
-// no observable effect on the result set here. The wrapper's effect is proven
-// directly by TestWithHNSWEFSearch_AppliesAndIsTransactionLocal; the value at
-// production scale is the clean ANN path (FindSimilarObservations).
+// unit-test scale Postgres does not naturally choose the HNSW index (a seq scan
+// + sort is cheaper for a few rows), so ef_search has no observable effect on
+// the result set here. Index-eligibility of the cosine arm is proven separately
+// by TestRetrieveHybrid_CosineArmUsesHNSWIndex (which forces the planner off seq
+// scans + sorts); the wrapper's GUC effect by
+// TestWithHNSWEFSearch_AppliesAndIsTransactionLocal.
 func TestRetrieveHybrid_MultiWorkspaceRecallThroughEFSearchWrapper(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()

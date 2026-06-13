@@ -40,13 +40,15 @@ const hybridFanout = 100
 // matching hybridRetrieveSQL's single-tier path.
 const rrfK = 60.0
 
-// hybridMultiTierTemplate is the RRF-over-tiers SQL. A single `candidates`
-// CTE applies the shared filters (workspace, not-forgotten, tier
-// NULL-anchoring, type, purpose, confidence) and the active-observation join
-// ONCE; the FTS and cosine rank lists then both select from it, so a filter
-// added to one ranker can't drift from the other. The two ranked lists are
-// fused via RRF (FULL OUTER JOIN) and multiplied by the same
-// source_type × confidence × recency quality weights used by the FTS path.
+// hybridMultiTierTemplate is the RRF-over-tiers SQL. The `candidates` CTE
+// applies the shared filters (workspace, not-forgotten, tier NULL-anchoring,
+// type, purpose, confidence) and the active-observation join, and feeds both
+// the FTS rank list and the final projection. The cosine rank list does NOT
+// read `candidates`: it runs a bare ANN scan (ORDER BY embedding <=> $q LIMIT)
+// directly against memory_observations so the HNSW index drives it (#1369),
+// re-applying the SAME %[1]s filter predicate so the two arms can't drift. The
+// two ranked lists are fused via RRF (FULL OUTER JOIN) and multiplied by the
+// same source_type × confidence × recency quality weights used by the FTS path.
 //
 // Sprintf slots: %[1]s candidates WHERE, %[2]s RRF expression,
 // %[3]s per-tier recency-decay expression, $%[4]d query text,
@@ -73,20 +75,35 @@ WITH candidates AS (
     LIMIT $%[6]d
 ), fts_ranked AS (
     SELECT entity_id, row_number() OVER (ORDER BY fts_rank DESC) AS fts_rn FROM fts
+), cosine_ann AS (
+    -- Bare ORDER BY embedding <=> $q LIMIT N against the BASE observations table
+    -- (not the materialised candidates CTE) so the HNSW index
+    -- idx_memory_observations_embedding drives the scan. There is deliberately
+    -- NO window function here: a row_number() OVER (PARTITION ...) forces
+    -- Postgres to materialise and sort the whole filtered set first, which is
+    -- exactly what defeated the index before (#1369). The filter predicate is
+    -- the SAME shared %[1]s the candidates CTE uses (aliases e, o) so the two
+    -- arms can't drift. Over-fetch (fanout × 4) so the per-entity dedup below
+    -- still lands enough distinct entities when one has several near neighbours.
+    SELECT o.entity_id, o.embedding <=> $%[5]d AS cos_dist
+    FROM memory_entities e
+    JOIN memory_observations o ON o.entity_id = e.id
+        AND o.superseded_by IS NULL
+        AND (o.valid_until IS NULL OR o.valid_until > now())
+    WHERE %[1]s AND o.embedding IS NOT NULL
+    ORDER BY o.embedding <=> $%[5]d
+    LIMIT $%[6]d * 4
 ), cosine AS (
-    -- The inner ORDER BY embedding <=> $ LIMIT N unlocks the HNSW index;
-    -- over-fetch (fanout × 4) so per-entity dedup still lands enough distinct
-    -- entities when one entity has several close-by observations.
-    SELECT entity_id, cos_dist FROM (
-        SELECT entity_id, embedding <=> $%[5]d AS cos_dist,
-               row_number() OVER (PARTITION BY entity_id ORDER BY embedding <=> $%[5]d) AS rn
-        FROM candidates
-        WHERE embedding IS NOT NULL
-        ORDER BY embedding <=> $%[5]d
-        LIMIT $%[6]d * 4
-    ) ann WHERE rn = 1 LIMIT $%[6]d
+    -- Per-entity dedup over the bounded ANN candidate set (cheap: <= fanout×4
+    -- rows), keeping each entity's nearest observation.
+    SELECT DISTINCT ON (entity_id) entity_id, cos_dist
+    FROM cosine_ann
+    ORDER BY entity_id, cos_dist
 ), cosine_ranked AS (
-    SELECT entity_id, row_number() OVER (ORDER BY cos_dist) AS cos_rn FROM cosine
+    SELECT entity_id, row_number() OVER (ORDER BY cos_dist) AS cos_rn
+    FROM cosine
+    ORDER BY cos_dist
+    LIMIT $%[6]d
 ), fused AS (
     SELECT coalesce(f.entity_id, c.entity_id) AS entity_id, %[2]s AS rrf
     FROM fts_ranked f FULL OUTER JOIN cosine_ranked c USING (entity_id)
