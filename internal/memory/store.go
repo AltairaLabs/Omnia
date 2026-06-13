@@ -474,8 +474,8 @@ func updateEntity(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 		SET metadata = $1, updated_at = now(), expires_at = $2
 		WHERE id = $3
 		  AND workspace_id = $4
-		  AND ($5::text IS NULL OR virtual_user_id = $5)
-		  AND ($6::uuid IS NULL OR agent_id = $6)`,
+		  AND virtual_user_id IS NOT DISTINCT FROM $5::text
+		  AND agent_id IS NOT DISTINCT FROM $6::uuid`,
 		metaJSON,
 		mem.ExpiresAt,
 		mem.ID,
