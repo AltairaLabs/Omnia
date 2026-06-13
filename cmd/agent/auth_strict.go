@@ -49,15 +49,17 @@ func allowUnauthenticatedFallback(log logr.Logger) bool {
 	if err != nil {
 		// Unparseable — fail safe. Operators who misspell the flag
 		// don't silently downgrade security.
-		log.Error(err, "invalid value for env var — falling back to strict rejection",
+		log.Error(err, "strict auth fallback",
+			"reason", "invalid env value",
 			"var", envFacadeAllowUnauthenticated,
 			"value", raw)
 		return false
 	}
 	if allow {
-		log.Info("facade strict-default DISABLED — unauthenticated requests will be admitted when the auth chain is empty",
+		log.Info("strict auth disabled",
 			"var", envFacadeAllowUnauthenticated,
-			"reason", "dev/test escape hatch; never set in production")
+			"reason", "dev/test escape hatch",
+			"impact", "unauthenticated requests admitted when auth chain is empty")
 	}
 	return allow
 }
