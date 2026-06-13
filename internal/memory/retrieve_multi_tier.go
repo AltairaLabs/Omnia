@@ -315,9 +315,18 @@ func addAgentTierClause(qb *pgutil.QueryBuilder, agentID string) {
 // workspaceID seeds the memory Scope so downstream consumers see the same
 // scope keys Retrieve/List populate.
 func scanMultiTierRows(rows pgx.Rows, workspaceID string) ([]*MultiTierMemory, error) {
+	return scanMultiTierMemoryRows(rows, workspaceID, scanMultiTierRow)
+}
+
+// scanMultiTierMemoryRows iterates rows through the given per-row scanner.
+// Shared by the FTS-only and hybrid multi-tier paths so the iteration +
+// nil-slice normalisation lives in one place.
+func scanMultiTierMemoryRows(rows pgx.Rows, workspaceID string,
+	scanRow func(pgx.Rows, string) (*MultiTierMemory, error),
+) ([]*MultiTierMemory, error) {
 	var results []*MultiTierMemory
 	for rows.Next() {
-		mem, err := scanMultiTierRow(rows, workspaceID)
+		mem, err := scanRow(rows, workspaceID)
 		if err != nil {
 			return nil, err
 		}
@@ -330,6 +339,35 @@ func scanMultiTierRows(rows pgx.Rows, workspaceID string) ([]*MultiTierMemory, e
 		results = []*MultiTierMemory{}
 	}
 	return results, nil
+}
+
+// assembleMultiTierMemory builds a MultiTierMemory from the column values
+// shared by the FTS and hybrid multi-tier scanners. Score is left zero; the
+// hybrid scanner sets it from the SQL-computed final_score.
+func assembleMultiTierMemory(workspaceID string, mem *Memory, metadataJSON []byte, expiresAt *time.Time,
+	userID, agentID, sessionID *string, turnRange []int, accessedAt *time.Time, accessCount int,
+	title, summary *string, bodySizeBytes *int32,
+) *MultiTierMemory {
+	mem.Scope = buildScope(workspaceID, userID, agentID)
+	mem.ExpiresAt = expiresAt
+	if sessionID != nil {
+		mem.SessionID = *sessionID
+	}
+	if len(turnRange) == 2 {
+		mem.TurnRange = [2]int{turnRange[0], turnRange[1]}
+	}
+	if accessedAt != nil {
+		mem.AccessedAt = *accessedAt
+	}
+	if len(metadataJSON) > 0 {
+		_ = json.Unmarshal(metadataJSON, &mem.Metadata)
+	}
+	stampLargeMemoryFields(mem, title, summary, bodySizeBytes)
+	return &MultiTierMemory{
+		Memory:      mem,
+		Tier:        classifyTier(userID, agentID),
+		AccessCount: accessCount,
+	}
 }
 
 // scanMultiTierRow scans a single row from the multi-tier query.
@@ -358,28 +396,11 @@ func scanMultiTierRow(row pgx.Rows, workspaceID string) (*MultiTierMemory, error
 	if err != nil {
 		return nil, fmt.Errorf("memory: scan multi-tier row: %w", err)
 	}
+	_ = observedAt // scanned for column alignment; recency uses accessed/created
 
-	mem.Scope = buildScope(workspaceID, userID, agentID)
-	mem.ExpiresAt = expiresAt
-	if sessionID != nil {
-		mem.SessionID = *sessionID
-	}
-	if len(turnRange) == 2 {
-		mem.TurnRange = [2]int{turnRange[0], turnRange[1]}
-	}
-	if accessedAt != nil {
-		mem.AccessedAt = *accessedAt
-	}
-	if len(metadataJSON) > 0 {
-		_ = json.Unmarshal(metadataJSON, &mem.Metadata)
-	}
-	stampLargeMemoryFields(&mem, title, summary, bodySizeBytes)
-
-	return &MultiTierMemory{
-		Memory:      &mem,
-		Tier:        classifyTier(userID, agentID),
-		AccessCount: accessCount,
-	}, nil
+	return assembleMultiTierMemory(workspaceID, &mem, metadataJSON, expiresAt,
+		userID, agentID, sessionID, turnRange, accessedAt, accessCount,
+		title, summary, bodySizeBytes), nil
 }
 
 // buildScope assembles the Memory.Scope map from the non-nullable workspace

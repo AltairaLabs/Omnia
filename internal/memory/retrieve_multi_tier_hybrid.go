@@ -20,7 +20,6 @@ package memory
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -51,7 +50,8 @@ const rrfK = 60.0
 //
 // Sprintf slots: %[1]s candidates WHERE, %[2]s RRF expression,
 // %[3]s per-tier recency-decay expression, $%[4]d query text,
-// $%[5]d embedding, $%[6]d fanout.
+// $%[5]d embedding, $%[6]d fanout, %[7]s source-type weight CASE
+// (the shared sourceTypeWeightSQL const, keyed on alias e).
 const hybridMultiTierTemplate = `
 WITH candidates AS (
     SELECT e.id AS entity_id, e.kind, e.metadata, e.created_at, e.expires_at,
@@ -91,23 +91,14 @@ WITH candidates AS (
     SELECT coalesce(f.entity_id, c.entity_id) AS entity_id, %[2]s AS rrf
     FROM fts_ranked f FULL OUTER JOIN cosine_ranked c USING (entity_id)
 )
-SELECT DISTINCT ON (c.entity_id)
-    c.entity_id, c.kind, c.metadata, c.created_at, c.expires_at, c.title,
-    c.virtual_user_id, c.agent_id,
-    c.content, c.confidence, c.session_id, c.turn_range, c.observed_at,
-    c.accessed_at, c.access_count, c.summary, c.body_size_bytes,
-    fused.rrf
-        * (CASE c.source_type
-              WHEN 'user_requested'          THEN 1.0
-              WHEN 'operator_curated'        THEN 1.0
-              WHEN 'reflection'              THEN 0.85
-              WHEN 'conversation_extraction' THEN 0.7
-              WHEN 'system_generated'        THEN 0.5
-              ELSE 0.7 END)
-        * coalesce(c.confidence, 0.7)
-        * %[3]s AS final_score
-FROM candidates c JOIN fused ON fused.entity_id = c.entity_id
-ORDER BY c.entity_id, c.observed_at DESC`
+SELECT DISTINCT ON (e.entity_id)
+    e.entity_id, e.kind, e.metadata, e.created_at, e.expires_at, e.title,
+    e.virtual_user_id, e.agent_id,
+    e.content, e.confidence, e.session_id, e.turn_range, e.observed_at,
+    e.accessed_at, e.access_count, e.summary, e.body_size_bytes,
+    fused.rrf * (%[7]s) * coalesce(e.confidence, 0.7) * %[3]s AS final_score
+FROM candidates e JOIN fused ON fused.entity_id = e.entity_id
+ORDER BY e.entity_id, e.observed_at DESC`
 
 // buildMultiTierHybridQuery constructs the RRF-over-tiers SQL and its
 // positional args. The shared filter predicates are built once via the same
@@ -153,16 +144,16 @@ func buildMultiTierHybridQuery(req MultiTierRequest, queryEmbedding []float32, h
 	// exp(-700) ≈ 1e-304, indistinguishable from zero for ranking.
 	recencyExpr := fmt.Sprintf(
 		"exp(greatest((-700)::float8, (-%v)::float8 * "+
-			"EXTRACT(EPOCH FROM (now() - c.observed_at))::float8 / "+
-			"(CASE WHEN c.virtual_user_id IS NOT NULL THEN $%d::float8 "+
-			"WHEN c.agent_id IS NOT NULL THEN $%d::float8 ELSE $%d::float8 END)))",
+			"EXTRACT(EPOCH FROM (now() - e.observed_at))::float8 / "+
+			"(CASE WHEN e.virtual_user_id IS NOT NULL THEN $%d::float8 "+
+			"WHEN e.agent_id IS NOT NULL THEN $%d::float8 ELSE $%d::float8 END)))",
 		ln2, userHLIdx, agentHLIdx, instHLIdx,
 	)
 
 	// QueryBuilder.Where() returns a leading " AND ", so prefix the literal
 	// forgotten predicate as the first WHERE term (mirrors buildMultiTierQuery).
 	where := colEntityForgot + qb.Where()
-	sql := fmt.Sprintf(hybridMultiTierTemplate, where, rrfExpr, recencyExpr, qIdx, eIdx, fIdx)
+	sql := fmt.Sprintf(hybridMultiTierTemplate, where, rrfExpr, recencyExpr, qIdx, eIdx, fIdx, sourceTypeWeightSQL)
 	return sql, args, nil
 }
 
@@ -209,29 +200,15 @@ func (s *PostgresMemoryStore) RetrieveMultiTierHybrid(ctx context.Context, req M
 	return &MultiTierResult{Memories: memories, Total: len(memories)}, nil
 }
 
-// scanMultiTierHybridRows reads the hybrid multi-tier row set — identical to
-// the FTS-only multi-tier columns plus a trailing final_score the SQL has
-// already folded RRF × source × confidence × recency into.
+// scanMultiTierHybridRows reads the hybrid multi-tier row set — the FTS-only
+// multi-tier columns plus a trailing final_score the SQL has already folded
+// RRF × source × confidence × recency into.
 func scanMultiTierHybridRows(rows pgx.Rows, workspaceID string) ([]*MultiTierMemory, error) {
-	var results []*MultiTierMemory
-	for rows.Next() {
-		mem, err := scanMultiTierHybridRow(rows, workspaceID)
-		if err != nil {
-			return nil, err
-		}
-		results = append(results, mem)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("memory: multi-tier hybrid rows iteration: %w", err)
-	}
-	if results == nil {
-		results = []*MultiTierMemory{}
-	}
-	return results, nil
+	return scanMultiTierMemoryRows(rows, workspaceID, scanMultiTierHybridRow)
 }
 
-// scanMultiTierHybridRow mirrors scanMultiTierRow with one extra trailing
-// float64 (final_score) which seeds the MultiTierMemory.Score.
+// scanMultiTierHybridRow scans the shared multi-tier columns plus the trailing
+// final_score, reusing assembleMultiTierMemory for the column→struct mapping.
 func scanMultiTierHybridRow(row pgx.Rows, workspaceID string) (*MultiTierMemory, error) {
 	var (
 		mem            Memory
@@ -259,29 +236,13 @@ func scanMultiTierHybridRow(row pgx.Rows, workspaceID string) (*MultiTierMemory,
 	if err != nil {
 		return nil, fmt.Errorf("memory: scan multi-tier hybrid row: %w", err)
 	}
+	_ = observedAt // scanned for column alignment; recency is computed in SQL
 
-	mem.Scope = buildScope(workspaceID, userID, agentID)
-	mem.ExpiresAt = expiresAt
-	if sessionID != nil {
-		mem.SessionID = *sessionID
-	}
-	if len(turnRange) == 2 {
-		mem.TurnRange = [2]int{turnRange[0], turnRange[1]}
-	}
-	if accessedAt != nil {
-		mem.AccessedAt = *accessedAt
-	}
-	if len(metadataJSON) > 0 {
-		_ = json.Unmarshal(metadataJSON, &mem.Metadata)
-	}
-	stampLargeMemoryFields(&mem, title, summary, bodySizeBytes)
-
-	return &MultiTierMemory{
-		Memory:      &mem,
-		Tier:        classifyTier(userID, agentID),
-		AccessCount: accessCount,
-		Score:       finalScore,
-	}, nil
+	m := assembleMultiTierMemory(workspaceID, &mem, metadataJSON, expiresAt,
+		userID, agentID, sessionID, turnRange, accessedAt, accessCount,
+		title, summary, bodySizeBytes)
+	m.Score = finalScore
+	return m, nil
 }
 
 // rankHybridResults applies the TierRanker to the SQL-provided fused base

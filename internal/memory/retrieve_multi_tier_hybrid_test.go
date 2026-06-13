@@ -244,8 +244,8 @@ func TestBuildMultiTierHybridQuery_Structure(t *testing.T) {
 		"e.forgotten = false",                         // not-forgotten guard
 		"virtual_user_id IS NULL OR virtual_user_id=", // user tier anchor
 		"agent_id IS NULL OR agent_id=",               // agent tier anchor
-		"EXTRACT(EPOCH FROM (now() - c.observed_at))", // recency decay
-		"WHEN c.virtual_user_id IS NOT NULL THEN",     // per-tier half-life CASE
+		"EXTRACT(EPOCH FROM (now() - e.observed_at))", // recency decay
+		"WHEN e.virtual_user_id IS NOT NULL THEN",     // per-tier half-life CASE
 		"final_score",
 	} {
 		assert.Contains(t, sql, want, "SQL missing %q", want)
