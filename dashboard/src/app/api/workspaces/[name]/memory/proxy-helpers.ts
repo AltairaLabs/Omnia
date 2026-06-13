@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getWorkspace } from "@/lib/k8s/workspace-route-helpers";
 import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
+import { serviceApiHeaders } from "@/lib/auth/session-api-token";
 import { pseudonymizeId } from "@/lib/identity";
 import type { User } from "@/lib/auth/types";
 import { resolveScopedUserId } from "@/lib/auth/scoped-user";
@@ -83,17 +84,18 @@ export async function proxyToMemoryApi(
   const targetUrl = `${baseUrl}${backendPath}?${params.toString()}`;
 
   try {
+    const baseHeaders: Record<string, string> = { Accept: "application/json" };
+    if (request.method === "POST" || request.method === "PUT") {
+      baseHeaders["Content-Type"] = "application/json";
+    }
+
     const fetchInit: RequestInit = {
       method: request.method,
-      headers: { Accept: "application/json" },
+      headers: serviceApiHeaders(baseHeaders),
     };
 
     if (request.method === "POST" || request.method === "PUT") {
       fetchInit.body = await request.text();
-      fetchInit.headers = {
-        ...fetchInit.headers,
-        "Content-Type": "application/json",
-      };
     }
 
     const response = await fetch(targetUrl, fetchInit);

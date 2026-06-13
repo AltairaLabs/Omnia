@@ -11,6 +11,7 @@ import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
 import { resolveWorkspaceUID } from "../../memory/proxy-helpers";
 import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
+import { serviceApiHeaders } from "@/lib/auth/session-api-token";
 
 export const DELETE = withWorkspaceAccess(
   "editor",
@@ -35,7 +36,7 @@ export const DELETE = withWorkspaceAccess(
     const targetUrl = `${baseUrl}/api/v1/institutional/memories/${encodeURIComponent(memoryId)}?workspace=${encodeURIComponent(workspaceUID)}`;
 
     try {
-      const response = await fetch(targetUrl, { method: "DELETE" });
+      const response = await fetch(targetUrl, { method: "DELETE", headers: serviceApiHeaders() });
       if (!response.ok) {
         const data = await response.json().catch(() => ({ error: "Delete failed" }));
         return NextResponse.json(data, { status: response.status });

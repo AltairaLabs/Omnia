@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withWorkspaceAccess, type WorkspaceRouteContext } from "@/lib/auth/workspace-guard";
 import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
+import { serviceApiHeaders } from "@/lib/auth/session-api-token";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
 import { pseudonymizeId } from "@/lib/identity";
@@ -56,7 +57,7 @@ export const GET = withWorkspaceAccess(
 
     try {
       const response = await fetch(targetUrl, {
-        headers: { Accept: "application/json" },
+        headers: serviceApiHeaders({ Accept: "application/json" }),
       });
       const text = await response.text();
       try {
@@ -122,10 +123,10 @@ export const PUT = withWorkspaceAccess(
     try {
       const response = await fetch(targetUrl, {
         method: "PUT",
-        headers: {
+        headers: serviceApiHeaders({
           "Content-Type": "application/json",
           Accept: "application/json",
-        },
+        }),
         body,
       });
       const text = await response.text();

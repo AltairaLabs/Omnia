@@ -9,6 +9,7 @@
 import { NextResponse } from "next/server";
 import { getWorkspace } from "@/lib/k8s/workspace-route-helpers";
 import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
+import { serviceApiHeaders } from "@/lib/auth/session-api-token";
 
 /**
  * Resolve the workspace namespace and verify the session belongs to it.
@@ -62,7 +63,7 @@ export async function verifySessionNamespace(
   let sessionResponse: Response;
   try {
     sessionResponse = await fetch(sessionUrl, {
-      headers: { Accept: "application/json" },
+      headers: serviceApiHeaders({ Accept: "application/json" }),
     });
   } catch {
     return {

@@ -11,6 +11,7 @@ import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
 import { resolveWorkspaceUID } from "../memory/proxy-helpers";
 import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
+import { serviceApiHeaders } from "@/lib/auth/session-api-token";
 
 export const GET = withWorkspaceAccess(
   "viewer",
@@ -63,7 +64,7 @@ async function proxyList(workspaceName: string, request: NextRequest): Promise<N
   const baseUrl = urls.memoryURL.endsWith("/") ? urls.memoryURL.slice(0, -1) : urls.memoryURL;
   const targetUrl = `${baseUrl}/api/v1/institutional/memories?${params.toString()}`;
 
-  return fetchAndForward(targetUrl, { method: "GET", headers: { Accept: "application/json" } });
+  return fetchAndForward(targetUrl, { method: "GET", headers: serviceApiHeaders({ Accept: "application/json" }) });
 }
 
 async function proxyCreate(workspaceName: string, request: NextRequest): Promise<NextResponse> {
@@ -91,7 +92,7 @@ async function proxyCreate(workspaceName: string, request: NextRequest): Promise
 
   return fetchAndForward(targetUrl, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: serviceApiHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
     body: JSON.stringify(body),
   });
 }
