@@ -53,7 +53,18 @@ export function WorkloadGraph({
   namespace,
 }: Readonly<{ model: WorkloadModel; className?: string; namespace?: string }>) {
   const [selectedId, setSelectedId] = useState<string | undefined>();
-  const flow = useMemo(() => modelToFlow(model, setSelectedId), [model]);
+  const [showData, setShowData] = useState(true);
+  const visibleModel = useMemo(() => {
+    if (showData) return model;
+    const dataKinds = new Set(["variable", "artifact", "initial", "final"]);
+    const drop = new Set(model.nodes.filter((n) => dataKinds.has(n.kind)).map((n) => n.id));
+    return {
+      ...model,
+      nodes: model.nodes.filter((n) => !drop.has(n.id)),
+      edges: model.edges.filter((e) => !drop.has(e.source) && !drop.has(e.target)),
+    };
+  }, [model, showData]);
+  const flow = useMemo(() => modelToFlow(visibleModel, setSelectedId), [visibleModel]);
   const [nodes, setNodes] = useNodesState(flow.nodes);
   const [edges, setEdges] = useEdgesState(flow.edges);
   const rf = useRef<WorkloadFlowInstance | null>(null);
@@ -92,7 +103,10 @@ export function WorkloadGraph({
     return () => { cancelled = true; };
   }, [flow, setNodes, setEdges]);
 
-  const selected: WorkloadNode | undefined = model.nodes.find((n) => n.id === selectedId);
+  const selected: WorkloadNode | undefined = visibleModel.nodes.find((n) => n.id === selectedId);
+  const hasData = model.nodes.some((n) =>
+    ["variable", "artifact", "initial", "final"].includes(n.kind),
+  );
   const banner =
     model.altitude === "deployment" ? deploymentBanner(model) : "Definition · abstract workload";
 
@@ -137,6 +151,20 @@ export function WorkloadGraph({
                 <span className="font-medium text-foreground">Budget</span>{" "}
                 <span className="text-muted-foreground">{budgetLabel(model.meta.budget)}</span>
               </div>
+            </Panel>
+          )}
+          {hasData && (
+            <Panel position="bottom-left">
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground bg-background/85 backdrop-blur rounded border px-2 py-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-label="Data flow"
+                  checked={showData}
+                  onChange={(e) => setShowData(e.target.checked)}
+                />
+                Data flow
+              </label>
             </Panel>
           )}
           <Controls />

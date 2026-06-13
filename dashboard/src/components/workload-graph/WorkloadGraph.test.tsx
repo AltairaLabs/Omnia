@@ -76,3 +76,19 @@ describe("fitViewAfterPaint", () => {
     raf.mockRestore();
   });
 });
+
+describe("WorkloadGraph data-flow toggle", () => {
+  it("renders a data-flow toggle when the model has data nodes", () => {
+    const model: WorkloadModel = {
+      tier: "workflow", altitude: "definition",
+      nodes: [
+        { id: "s", kind: "state", label: "S", badges: [], detail: {} },
+        { id: "var:x", kind: "variable", label: "x", badges: [], detail: {} },
+      ],
+      edges: [{ id: "e", source: "var:x", target: "s", style: "data" }],
+      meta: { counts: { agents: 1, tools: 0, skills: 0, states: 1 } },
+    };
+    render(<WorkloadGraph model={model} />);
+    expect(screen.getByRole("switch", { name: /data flow/i })).toBeInTheDocument();
+  });
+});
