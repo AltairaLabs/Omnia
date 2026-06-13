@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/pkg/identity"
 
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
@@ -172,6 +173,10 @@ func TestProcessExport_CurrentOTelFormat(t *testing.T) {
 	require.NotNil(t, sess)
 	assert.Equal(t, "my-agent", sess.AgentName)
 	assert.Equal(t, "default", sess.Namespace)
+	// OTLP-ingested sessions must carry a non-empty pseudonymous attribution so
+	// they are visible to per-user DSAR erasure and satisfy the DB CHECK.
+	assert.Equal(t, identity.PseudonymizeID("conv-123"), sess.VirtualUserID)
+	assert.NotEmpty(t, sess.VirtualUserID)
 
 	msgs := writer.messages["conv-123"]
 	require.Len(t, msgs, 1)

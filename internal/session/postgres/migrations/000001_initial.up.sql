@@ -42,7 +42,7 @@ CREATE TABLE sessions (
     prompt_pack_version  TEXT,
     cohort_id            TEXT,
     variant              TEXT,
-    virtual_user_id      TEXT            NOT NULL,
+    virtual_user_id      TEXT            NOT NULL CHECK (virtual_user_id <> ''),
     CONSTRAINT sessions_status_check CHECK (status IN ('active', 'completed', 'error', 'expired')),
     PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);

@@ -251,6 +251,27 @@ func TestCreateSession_NullVirtualUserID_Rejected(t *testing.T) {
 	require.Error(t, err, "NULL virtual_user_id must violate the NOT NULL constraint")
 }
 
+// TestCreateSession_EmptyVirtualUserID_Rejected confirms the CHECK constraint
+// rejects an empty-string attribution at the DB level. The handler 400s empty
+// before insert and all five creators supply a non-empty pseudonym, so this is a
+// structural backstop: no path — current or future — can persist a session with
+// an empty virtual_user_id (which would be invisible to per-user DSAR erasure).
+func TestCreateSession_EmptyVirtualUserID_Rejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+
+	_, err := p.pool.Exec(ctx, `INSERT INTO sessions (
+		id, agent_name, namespace, status, created_at, updated_at, virtual_user_id
+	) VALUES ($1,$2,$3,$4,now(),now(),'')`,
+		"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a13", "test-agent", "default",
+		session.SessionStatusActive)
+	require.Error(t, err, "empty virtual_user_id must violate the CHECK constraint")
+}
+
 func TestCreateSession_Idempotent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
