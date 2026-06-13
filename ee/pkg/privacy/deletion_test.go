@@ -31,6 +31,8 @@ import (
 	"github.com/altairalabs/omnia/internal/session/providers"
 )
 
+const testUserID1 = "user-1"
+
 // --- Mock implementations ---------------------------------------------------
 
 // MockDeletionStore is an in-memory mock for DeletionStore.
@@ -172,14 +174,14 @@ func TestCreateRequest_Success(t *testing.T) {
 	svc := newTestService(store, deleter, audit)
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 	})
 
 	require.NoError(t, err)
 	assert.NotEmpty(t, req.ID)
-	assert.Equal(t, "user-1", req.VirtualUserID)
+	assert.Equal(t, testUserID1, req.VirtualUserID)
 	assert.Equal(t, "gdpr_erasure", req.Reason)
 	assert.Equal(t, "all", req.Scope)
 	assert.Equal(t, "pending", req.Status)
@@ -206,7 +208,7 @@ func TestCreateRequest_InvalidReason(t *testing.T) {
 	svc := newTestService(store, NewMockSessionDeleter(), nil)
 
 	_, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "invalid_reason",
 	})
 
@@ -218,7 +220,7 @@ func TestCreateRequest_InvalidScope(t *testing.T) {
 	svc := newTestService(store, NewMockSessionDeleter(), nil)
 
 	_, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "ccpa_delete",
 		Scope:         "invalid_scope",
 	})
@@ -231,7 +233,7 @@ func TestCreateRequest_DefaultScope(t *testing.T) {
 	svc := newTestService(store, NewMockSessionDeleter(), nil)
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "user_request",
 	})
 
@@ -246,7 +248,7 @@ func TestCreateRequest_AllReasons(t *testing.T) {
 			store := NewMockDeletionStore()
 			svc := newTestService(store, NewMockSessionDeleter(), nil)
 			req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-				VirtualUserID: "user-1",
+				VirtualUserID: testUserID1,
 				Reason:        reason,
 				Scope:         "all",
 			})
@@ -271,7 +273,7 @@ func TestCreateRequest_AllScopes(t *testing.T) {
 			store := NewMockDeletionStore()
 			svc := newTestService(store, NewMockSessionDeleter(), nil)
 			req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-				VirtualUserID: "user-1",
+				VirtualUserID: testUserID1,
 				Reason:        "gdpr_erasure",
 				Scope:         sc.scope,
 				DateFrom:      sc.dateFrom,
@@ -293,7 +295,7 @@ func TestProcessRequest_HappyPath(t *testing.T) {
 	deleter.Sessions["user-1|"] = []string{"sess-1", "sess-2", "sess-3"}
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 	})
@@ -327,7 +329,7 @@ func TestProcessRequest_PartialFailure(t *testing.T) {
 	deleter.FailIDs["sess-2"] = true
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 	})
@@ -358,7 +360,7 @@ func TestProcessRequest_AlreadyProcessing(t *testing.T) {
 	svc := newTestService(store, deleter, nil)
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 	})
@@ -402,7 +404,7 @@ func TestProcessRequest_WithWorkspace(t *testing.T) {
 	deleter.Sessions["user-1|my-workspace"] = []string{"sess-w1", "sess-w2"}
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "user_request",
 		Scope:         "workspace",
 		Workspace:     "my-workspace",
@@ -426,7 +428,7 @@ func TestProcessRequest_NilAuditLogger(t *testing.T) {
 	deleter.Sessions["user-1|"] = []string{"sess-1"}
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 	})
@@ -444,7 +446,7 @@ func TestGetRequest_Found(t *testing.T) {
 	svc := newTestService(store, NewMockSessionDeleter(), nil)
 
 	created, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 	})
@@ -453,7 +455,7 @@ func TestGetRequest_Found(t *testing.T) {
 	found, err := svc.GetRequest(context.Background(), created.ID)
 	require.NoError(t, err)
 	assert.Equal(t, created.ID, found.ID)
-	assert.Equal(t, "user-1", found.VirtualUserID)
+	assert.Equal(t, testUserID1, found.VirtualUserID)
 }
 
 func TestGetRequest_NotFound(t *testing.T) {
@@ -471,14 +473,14 @@ func TestListRequestsByUser_Found(t *testing.T) {
 	svc := newTestService(store, NewMockSessionDeleter(), nil)
 
 	_, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 	})
 	require.NoError(t, err)
 
 	_, err = svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "ccpa_delete",
 		Scope:         "all",
 	})
@@ -492,11 +494,11 @@ func TestListRequestsByUser_Found(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	requests, err := svc.ListRequestsByUser(context.Background(), "user-1")
+	requests, err := svc.ListRequestsByUser(context.Background(), testUserID1)
 	require.NoError(t, err)
 	assert.Len(t, requests, 2)
 	for _, req := range requests {
-		assert.Equal(t, "user-1", req.VirtualUserID)
+		assert.Equal(t, testUserID1, req.VirtualUserID)
 	}
 }
 
@@ -542,7 +544,7 @@ func TestHandleCreate_Success(t *testing.T) {
 	err := json.NewDecoder(w.Body).Decode(&resp)
 	require.NoError(t, err)
 	assert.NotEmpty(t, resp.ID)
-	assert.Equal(t, "user-1", resp.VirtualUserID)
+	assert.Equal(t, testUserID1, resp.VirtualUserID)
 	assert.Equal(t, "pending", resp.Status)
 
 	// Wait for the background goroutine to complete to avoid data races.
@@ -598,7 +600,7 @@ func TestHandleGet_Success(t *testing.T) {
 
 	dr := &DeletionRequest{
 		ID:            "req-123",
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 		Status:        "completed",
@@ -642,7 +644,7 @@ func TestHandleList_Success(t *testing.T) {
 	for i, id := range []string{"req-1", "req-2"} {
 		dr := &DeletionRequest{
 			ID:            id,
-			VirtualUserID: "user-1",
+			VirtualUserID: testUserID1,
 			Reason:        "gdpr_erasure",
 			Scope:         "all",
 			Status:        "completed",
@@ -924,18 +926,18 @@ func TestWarmStoreSessionDeleter_ListSessionsByUser(t *testing.T) {
 	}
 	deleter := NewWarmStoreSessionDeleter(mock)
 
-	ids, err := deleter.ListSessionsByUser(context.Background(), "user-1", "ws", nil, nil)
+	ids, err := deleter.ListSessionsByUser(context.Background(), testUserID1, "ws", nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"s1", "s2"}, ids)
 	// The filter must be applied so only this subject's sessions are listed.
-	assert.Equal(t, "user-1", mock.lastListOpts.VirtualUserID)
+	assert.Equal(t, testUserID1, mock.lastListOpts.VirtualUserID)
 }
 
 func TestWarmStoreSessionDeleter_ListSessionsByUser_Error(t *testing.T) {
 	mock := &MockWarmStoreProvider{listErr: errors.New("list failed")}
 	deleter := NewWarmStoreSessionDeleter(mock)
 
-	_, err := deleter.ListSessionsByUser(context.Background(), "user-1", "", nil, nil)
+	_, err := deleter.ListSessionsByUser(context.Background(), testUserID1, "", nil, nil)
 	assert.Error(t, err)
 }
 
@@ -943,10 +945,10 @@ func TestWarmStoreSessionDeleter_ListSessionsByUser_Empty(t *testing.T) {
 	mock := &MockWarmStoreProvider{sessions: []*session.Session{}}
 	deleter := NewWarmStoreSessionDeleter(mock)
 
-	ids, err := deleter.ListSessionsByUser(context.Background(), "user-1", "", nil, nil)
+	ids, err := deleter.ListSessionsByUser(context.Background(), testUserID1, "", nil, nil)
 	require.NoError(t, err)
 	assert.Empty(t, ids)
-	assert.Equal(t, "user-1", mock.lastListOpts.VirtualUserID)
+	assert.Equal(t, testUserID1, mock.lastListOpts.VirtualUserID)
 }
 
 func TestWarmStoreSessionDeleter_EmptyUser_FailsClosed(t *testing.T) {
@@ -991,7 +993,7 @@ func TestCreateRequest_DateRangeScopeMissingDates(t *testing.T) {
 	svc := newTestService(store, NewMockSessionDeleter(), nil)
 
 	_, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "date_range",
 		// No DateFrom or DateTo provided
@@ -1006,7 +1008,7 @@ func TestCreateRequest_DateRangeScopeWithDateFrom(t *testing.T) {
 
 	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "date_range",
 		DateFrom:      &from,
@@ -1032,7 +1034,7 @@ func TestProcessRequest_DateRangeOnlyDeletesMatchingSessions(t *testing.T) {
 	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "date_range",
 		DateFrom:      &from,
@@ -1062,7 +1064,7 @@ func TestProcessRequest_AllScopePassesNilDates(t *testing.T) {
 	deleter.Sessions["user-1|"] = []string{"sess-1"}
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 	})
@@ -1089,7 +1091,7 @@ func TestProcessRequest_ListSessionsError(t *testing.T) {
 	svc.deleter = failDeleter
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 	})
@@ -1228,7 +1230,7 @@ func TestPostgresDeletionStore_CreateRequest_Success(t *testing.T) {
 
 	req := &DeletionRequest{
 		ID:            "req-1",
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 		Status:        "pending",
@@ -1294,7 +1296,7 @@ func TestPostgresDeletionStore_ListByUser_QueryError(t *testing.T) {
 	})
 
 	_, err := store.ListRequestsByUser(
-		context.Background(), "user-1",
+		context.Background(), testUserID1,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "query deletion requests")
@@ -1308,7 +1310,7 @@ func TestPostgresDeletionStore_ListByUser_Empty(t *testing.T) {
 	})
 
 	result, err := store.ListRequestsByUser(
-		context.Background(), "user-1",
+		context.Background(), testUserID1,
 	)
 	require.NoError(t, err)
 	assert.Empty(t, result)
@@ -1325,7 +1327,7 @@ func TestPostgresDeletionStore_ListByUser_ScanError(t *testing.T) {
 	})
 
 	_, err := store.ListRequestsByUser(
-		context.Background(), "user-1",
+		context.Background(), testUserID1,
 	)
 	assert.Error(t, err)
 }
@@ -1341,7 +1343,7 @@ func TestPostgresDeletionStore_ListByUser_RowsErr(t *testing.T) {
 	})
 
 	_, err := store.ListRequestsByUser(
-		context.Background(), "user-1",
+		context.Background(), testUserID1,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "iterate deletion requests")
@@ -1354,7 +1356,7 @@ func TestScanDeletionRequest_Success(t *testing.T) {
 
 	row := &mockSuccessRow{
 		values: []any{
-			"req-1", "user-1", "gdpr_erasure", "all",
+			"req-1", testUserID1, "gdpr_erasure", "all",
 			&workspace, (*time.Time)(nil), (*time.Time)(nil),
 			"completed", now, &now, &now, 5, errorsJSON,
 		},
@@ -1371,7 +1373,7 @@ func TestScanDeletionRequest_NilWorkspace(t *testing.T) {
 	now := time.Now().UTC()
 	row := &mockSuccessRow{
 		values: []any{
-			"req-1", "user-1", "gdpr_erasure", "all",
+			"req-1", testUserID1, "gdpr_erasure", "all",
 			(*string)(nil), (*time.Time)(nil), (*time.Time)(nil),
 			"pending", now, (*time.Time)(nil),
 			(*time.Time)(nil), 0, []byte(`[]`),
@@ -1497,7 +1499,7 @@ func TestProcessRequest_WithMediaDeletion(t *testing.T) {
 	deleter.Sessions["user-1|"] = []string{"sess-1", "sess-2"}
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 	})
@@ -1526,7 +1528,7 @@ func TestProcessRequest_MediaFailure(t *testing.T) {
 	deleter.Sessions["user-1|"] = []string{"sess-1", "sess-2", "sess-3"}
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 	})
@@ -1553,7 +1555,7 @@ func TestProcessRequest_NoOpMediaDeleter(t *testing.T) {
 	deleter.Sessions["user-1|"] = []string{"sess-1"}
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 	})
@@ -1583,7 +1585,7 @@ func TestProcessRequest_BatchProcessing(t *testing.T) {
 	deleter.Sessions["user-1|"] = sessions
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 	})
@@ -1609,7 +1611,7 @@ func TestProcessRequest_BatchWithPartialFailure(t *testing.T) {
 	deleter.FailIDs["s4"] = true
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 	})
@@ -1634,7 +1636,7 @@ func TestProcessRequest_SingleItemBatches(t *testing.T) {
 	deleter.Sessions["user-1|"] = []string{"s1", "s2", "s3"}
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 	})
@@ -1655,7 +1657,7 @@ func TestGetProgress_InProgress(t *testing.T) {
 	now := time.Now().UTC()
 	req := &DeletionRequest{
 		ID:              "req-1",
-		VirtualUserID:   "user-1",
+		VirtualUserID:   testUserID1,
 		Status:          "in_progress",
 		StartedAt:       &now,
 		SessionsDeleted: 5,
@@ -1678,7 +1680,7 @@ func TestGetProgress_Completed(t *testing.T) {
 	now := time.Now().UTC()
 	req := &DeletionRequest{
 		ID:              "req-1",
-		VirtualUserID:   "user-1",
+		VirtualUserID:   testUserID1,
 		Status:          "completed",
 		CompletedAt:     &now,
 		SessionsDeleted: 10,
@@ -1700,7 +1702,7 @@ func TestGetProgress_Pending(t *testing.T) {
 	store := NewMockDeletionStore()
 	req := &DeletionRequest{
 		ID:            "req-1",
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Status:        "pending",
 		Errors:        []string{},
 		CreatedAt:     time.Now().UTC(),
@@ -1781,7 +1783,7 @@ func TestDeletionService_WithMemoryDeleter(t *testing.T) {
 	deleter.Sessions["user-1|ws-a"] = []string{"sess-1", "sess-2"}
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "workspace",
 		Workspace:     "ws-a",
@@ -1802,7 +1804,7 @@ func TestDeletionService_WithMemoryDeleter(t *testing.T) {
 	memDeleter.mu.Lock()
 	defer memDeleter.mu.Unlock()
 	require.Len(t, memDeleter.Calls, 1)
-	assert.Equal(t, "user-1", memDeleter.Calls[0].VirtualUserID)
+	assert.Equal(t, testUserID1, memDeleter.Calls[0].VirtualUserID)
 	assert.Equal(t, "ws-a", memDeleter.Calls[0].Workspace)
 }
 
@@ -1816,7 +1818,7 @@ func TestDeletionService_MemoryDeleterError(t *testing.T) {
 	deleter.Sessions["user-1|"] = []string{"sess-1"}
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 	})
@@ -1846,7 +1848,7 @@ func TestDeletionService_NoMemoryDeleter(t *testing.T) {
 	deleter.Sessions["user-1|"] = []string{"sess-1", "sess-2"}
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		VirtualUserID: "user-1",
+		VirtualUserID: testUserID1,
 		Reason:        "user_request",
 		Scope:         "all",
 	})

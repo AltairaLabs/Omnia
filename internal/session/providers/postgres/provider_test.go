@@ -45,6 +45,8 @@ var testConnStr string
 
 const sourceArenaTag = "source:arena"
 
+const testVirtualUserID = "vu-test"
+
 func TestMain(m *testing.M) {
 	flag.Parse()
 
@@ -161,7 +163,7 @@ func makeSession(id string, now time.Time) *session.Session {
 		EstimatedCostUSD:  0,
 		Tags:              []string{"tag1", "tag2"},
 		State:             map[string]string{"key": "value"},
-		VirtualUserID:     "vu-test",
+		VirtualUserID:     testVirtualUserID,
 	}
 }
 
@@ -1284,7 +1286,7 @@ func TestUpdateSessionStatus_Atomic(t *testing.T) {
 		MessageCount:      5,
 		CreatedAt:         time.Now(),
 		UpdatedAt:         time.Now(),
-		VirtualUserID:     "vu-test",
+		VirtualUserID:     testVirtualUserID,
 	}
 	require.NoError(t, p.CreateSession(ctx, s))
 
@@ -1328,7 +1330,7 @@ func TestUpdateSessionStatus_EmptyStatus(t *testing.T) {
 		Status:        session.SessionStatusActive,
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
-		VirtualUserID: "vu-test",
+		VirtualUserID: testVirtualUserID,
 	}
 	require.NoError(t, p.CreateSession(ctx, s))
 
@@ -1355,7 +1357,7 @@ func TestRefreshTTL(t *testing.T) {
 		AgentName: "test", Namespace: "default",
 		Status: session.SessionStatusActive, CreatedAt: now,
 		ExpiresAt:     now.Add(1 * time.Hour),
-		VirtualUserID: "vu-test",
+		VirtualUserID: testVirtualUserID,
 	}
 	require.NoError(t, p.CreateSession(ctx, s))
 

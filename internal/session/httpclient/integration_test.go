@@ -35,6 +35,8 @@ import (
 	"github.com/altairalabs/omnia/internal/session/providers"
 )
 
+const testVirtualUserID = "vu-test"
+
 // integrationWarmStore is an in-memory warm store that records all operations
 // so we can verify the full HTTP client → handler → service → warm store chain.
 type integrationWarmStore struct {
@@ -273,7 +275,7 @@ func TestIntegration_FullRecordingChain(t *testing.T) {
 		Namespace:     "default",
 		WorkspaceName: "test-ws",
 		TTL:           30 * time.Minute,
-		VirtualUserID: "vu-test",
+		VirtualUserID: testVirtualUserID,
 	})
 	require.NoError(t, err, "CreateSession should succeed")
 	require.NotEmpty(t, sess.ID, "session ID should be set")
@@ -353,7 +355,7 @@ func TestIntegration_DecorateSession(t *testing.T) {
 		Namespace:     "default",
 		WorkspaceName: "test-ws",
 		Tags:          []string{"source:interactive"},
-		VirtualUserID: "vu-test",
+		VirtualUserID: testVirtualUserID,
 	})
 	require.NoError(t, err)
 
@@ -388,7 +390,7 @@ func TestIntegration_ToolCallRecording(t *testing.T) {
 		AgentName:     "tool-agent",
 		Namespace:     "default",
 		WorkspaceName: "test-ws",
-		VirtualUserID: "vu-test",
+		VirtualUserID: testVirtualUserID,
 	})
 	require.NoError(t, err)
 
@@ -573,7 +575,7 @@ func TestIntegration_NoWarmStore(t *testing.T) {
 		AgentName:     "test",
 		Namespace:     "default",
 		WorkspaceName: "test-ws",
-		VirtualUserID: "vu-test",
+		VirtualUserID: testVirtualUserID,
 	})
 	require.Error(t, err, "CreateSession should fail without warm store")
 	assert.Contains(t, err.Error(), "503", "should get 503 Service Unavailable")
