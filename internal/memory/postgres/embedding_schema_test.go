@@ -203,6 +203,89 @@ func TestEnsureEmbeddingSchema_StaleMarkerCleared(t *testing.T) {
 	assert.Equal(t, 0, consentRows(t, pool), "stale marker should be cleared on no-op reconcile")
 }
 
+// observationsEmbeddingIndex is the HNSW index the post-commit builder manages.
+const observationsEmbeddingIndex = "idx_memory_observations_embedding"
+
+// indexIsValid reports pg_index.indisvalid for the observations embedding index
+// (false when an interrupted CONCURRENTLY build left it invalid).
+func indexIsValid(t *testing.T, pool *pgxpool.Pool) bool {
+	t.Helper()
+	var valid bool
+	err := pool.QueryRow(context.Background(), `
+		SELECT i.indisvalid FROM pg_class c
+		JOIN pg_index i ON i.indexrelid = c.oid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = 'public' AND c.relname = $1`, observationsEmbeddingIndex).Scan(&valid)
+	require.NoError(t, err)
+	return valid
+}
+
+func TestEnsureEmbeddingIndexes_Idempotent(t *testing.T) {
+	pool := migratedPool(t)
+	ctx := context.Background()
+
+	require.NoError(t, EnsureEmbeddingSchema(ctx, pool, 768, logr.Discard()))
+	// A second standalone index pass must be a clean no-op (IF NOT EXISTS).
+	require.NoError(t, ensureEmbeddingIndexes(ctx, pool, logr.Discard()))
+	assert.True(t, hasHNSWIndex(t, pool, tableObservations))
+	assert.True(t, indexIsValid(t, pool))
+}
+
+// TestEnsureEmbeddingIndexes_RebuildsInvalidIndex simulates an interrupted
+// CONCURRENTLY build (an invalid index) and proves the next pass drops and
+// rebuilds it instead of skipping it forever via IF NOT EXISTS.
+func TestEnsureEmbeddingIndexes_RebuildsInvalidIndex(t *testing.T) {
+	pool := migratedPool(t)
+	ctx := context.Background()
+
+	require.NoError(t, EnsureEmbeddingSchema(ctx, pool, 768, logr.Discard()))
+	require.True(t, indexIsValid(t, pool))
+
+	// Mark the index invalid, as an interrupted build would leave it.
+	_, err := pool.Exec(ctx, `
+		UPDATE pg_index SET indisvalid = false
+		WHERE indexrelid = $1::regclass`, observationsEmbeddingIndex)
+	require.NoError(t, err)
+	require.False(t, indexIsValid(t, pool))
+
+	require.NoError(t, ensureEmbeddingIndexes(ctx, pool, logr.Discard()))
+	assert.True(t, indexIsValid(t, pool),
+		"invalid index must be dropped and rebuilt")
+}
+
+func TestEnsureEmbeddingIndexes_CanceledContext(t *testing.T) {
+	pool := migratedPool(t)
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	assert.Error(t, ensureEmbeddingIndexes(canceled, pool, logr.Discard()))
+}
+
+// TestBuildEmbeddingIndex_ErrorPaths drives the failure branches of the
+// post-commit index builder against a real connection.
+func TestBuildEmbeddingIndex_ErrorPaths(t *testing.T) {
+	pool := migratedPool(t)
+	require.NoError(t, EnsureEmbeddingSchema(context.Background(), pool, 768, logr.Discard()))
+
+	conn, err := pool.Acquire(context.Background())
+	require.NoError(t, err)
+	defer conn.Release()
+
+	// A canceled context makes the invalid-index introspection query fail, and
+	// buildEmbeddingIndex must surface that error.
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	assert.Error(t, dropInvalidIndex(canceled, conn, observationsEmbeddingIndex, logr.Discard()))
+	assert.Error(t, buildEmbeddingIndex(canceled, conn, embeddingTables[0], logr.Discard()))
+
+	// A spec whose CREATE targets a missing table: the index isn't present (drop
+	// is a no-op) and the build itself fails.
+	badSpec := embeddingTableSpec{
+		indexName: "idx_perf4_missing",
+		indexSQL:  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_perf4_missing ON no_such_table USING hnsw (embedding vector_cosine_ops)`,
+	}
+	assert.Error(t, buildEmbeddingIndex(context.Background(), conn, badSpec, logr.Discard()))
+}
+
 func TestEnsureEmbeddingSchema_RejectsInvalidDimension(t *testing.T) {
 	pool := migratedPool(t)
 	require.Error(t, EnsureEmbeddingSchema(context.Background(), pool, 0, logr.Discard()))
