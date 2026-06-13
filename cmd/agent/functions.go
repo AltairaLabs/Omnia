@@ -110,7 +110,7 @@ func runFunctionsFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 // chain. Failures are fatal — silent downgrade to no-auth would mask
 // a real misconfig.
 func buildFunctionAuthChain(cfg *agent.Config, log logr.Logger) auth.Chain {
-	mgmtPlane, err := loadMgmtPlaneValidator(log)
+	mgmtPlane, err := loadMgmtPlaneValidator(log, cfg.AgentName, cfg.WorkspaceName)
 	if err != nil {
 		log.Error(err, "mgmt-plane validator load failed")
 		os.Exit(1)

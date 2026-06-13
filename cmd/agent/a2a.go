@@ -100,7 +100,7 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 	// mgmt-plane validator. Wrapped around buildA2AHandler below so an
 	// A2A caller presenting a valid credential sees the same 200-OK
 	// path as the WS facade.
-	mgmtPlane, err := loadMgmtPlaneValidator(log)
+	mgmtPlane, err := loadMgmtPlaneValidator(log, cfg.AgentName, cfg.WorkspaceName)
 	if err != nil {
 		log.Error(err, "mgmt-plane validator load failed")
 		os.Exit(1)

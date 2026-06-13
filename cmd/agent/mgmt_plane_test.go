@@ -24,7 +24,7 @@ import (
 
 func TestLoadMgmtPlaneValidator_EnvUnset(t *testing.T) {
 	t.Setenv(envMgmtPlaneJWKSURL, "")
-	v, err := loadMgmtPlaneValidator(logr.Discard())
+	v, err := loadMgmtPlaneValidator(logr.Discard(), "test-agent", "test-workspace")
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -38,7 +38,7 @@ func TestLoadMgmtPlaneValidator_ValidJWKSURL(t *testing.T) {
 	// JWT verifies — so a non-empty URL just needs to parse, not point
 	// at a live server, for the validator to construct successfully.
 	t.Setenv(envMgmtPlaneJWKSURL, "http://omnia-dashboard.omnia-system.svc.cluster.local:3000/api/auth/jwks")
-	v, err := loadMgmtPlaneValidator(logr.Discard())
+	v, err := loadMgmtPlaneValidator(logr.Discard(), "test-agent", "test-workspace")
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}

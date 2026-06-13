@@ -138,7 +138,7 @@ func buildWebSocketServer(
 	// validator. Loading failures (malformed PEM, missing Secret data
 	// key, empty shared token) are fatal — silent downgrade to no-auth
 	// would mask real operator misconfig.
-	mgmtPlane, err := loadMgmtPlaneValidator(log)
+	mgmtPlane, err := loadMgmtPlaneValidator(log, cfg.AgentName, cfg.WorkspaceName)
 	if err != nil {
 		return nil, nil, fmt.Errorf("mgmt-plane validator load failed: %w", err)
 	}
@@ -301,7 +301,7 @@ func startA2AServer(
 	// because the cost is a single AgentRuntime k8s Get at startup and
 	// keeping buildA2AHandler's signature consistent with the standalone
 	// runA2AFacade path is worth more than the saved lookup.
-	mgmtPlane, mgmtErr := loadMgmtPlaneValidator(log)
+	mgmtPlane, mgmtErr := loadMgmtPlaneValidator(log, cfg.AgentName, cfg.WorkspaceName)
 	if mgmtErr != nil {
 		log.Error(mgmtErr, "mgmt-plane validator load failed")
 		os.Exit(1)
