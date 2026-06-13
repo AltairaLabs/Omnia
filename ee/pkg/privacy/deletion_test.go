@@ -744,9 +744,11 @@ func TestWriteJSONError(t *testing.T) {
 type MockWarmStoreProvider struct {
 	sessions           []*session.Session
 	listErr            error
+	listErrOnCall      int // when >0, ListSessions returns listErr on this 1-based call
 	deleteErr          error
 	deletedIDs         []string
 	listSessionsCalled bool
+	listCallCount      int
 	lastListOpts       providers.SessionListOpts
 }
 
@@ -812,13 +814,25 @@ func (m *MockWarmStoreProvider) ListSessions(
 	_ context.Context, opts providers.SessionListOpts,
 ) (*providers.SessionPage, error) {
 	m.listSessionsCalled = true
+	m.listCallCount++
 	m.lastListOpts = opts
-	if m.listErr != nil {
+	if m.listErr != nil && (m.listErrOnCall == 0 || m.listErrOnCall == m.listCallCount) {
 		return nil, m.listErr
 	}
+	// Honor Offset/Limit so deletion pagination can be exercised.
+	start := opts.Offset
+	if start > len(m.sessions) {
+		start = len(m.sessions)
+	}
+	end := len(m.sessions)
+	if opts.Limit > 0 && start+opts.Limit < end {
+		end = start + opts.Limit
+	}
+	pageSlice := m.sessions[start:end]
 	return &providers.SessionPage{
-		Sessions:   m.sessions,
+		Sessions:   pageSlice,
 		TotalCount: int64(len(m.sessions)),
+		HasMore:    end < len(m.sessions),
 	}, nil
 }
 
@@ -990,6 +1004,77 @@ func TestWarmStoreSessionDeleter_DeleteSession_Error(t *testing.T) {
 func TestNewWarmStoreSessionDeleter(t *testing.T) {
 	deleter := NewWarmStoreSessionDeleter(&MockWarmStoreProvider{})
 	assert.NotNil(t, deleter)
+	// Default page size must be set so listing paginates rather than capping.
+	assert.Positive(t, deleter.pageSize)
+}
+
+// makeSessions builds n sessions with ids s0..s(n-1).
+func makeSessions(n int) []*session.Session {
+	out := make([]*session.Session, n)
+	for i := range out {
+		out[i] = &session.Session{ID: fmt.Sprintf("s%d", i)}
+	}
+	return out
+}
+
+// TestWarmStoreSessionDeleter_ListSessionsByUser_PaginatesBeyondPageSize is the
+// regression test for issue #1392: a subject with more sessions than a single
+// page must have every id listed, not just the first page.
+func TestWarmStoreSessionDeleter_ListSessionsByUser_PaginatesBeyondPageSize(t *testing.T) {
+	mock := &MockWarmStoreProvider{sessions: makeSessions(5)}
+	deleter := NewWarmStoreSessionDeleter(mock)
+	deleter.pageSize = 2 // force 3 pages: [s0,s1] [s2,s3] [s4]
+
+	ids, err := deleter.ListSessionsByUser(context.Background(), testUserID1, "", nil, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"s0", "s1", "s2", "s3", "s4"}, ids,
+		"every page of the subject's sessions must be listed, not just the first")
+	assert.Equal(t, 3, mock.listCallCount, "should page until a short page is returned")
+}
+
+// TestWarmStoreSessionDeleter_ListSessionsByUser_ExactMultipleOfPageSize covers
+// the boundary where the total is an exact multiple of the page size — the loop
+// must make one extra (empty) call to learn it has exhausted the result set.
+func TestWarmStoreSessionDeleter_ListSessionsByUser_ExactMultipleOfPageSize(t *testing.T) {
+	mock := &MockWarmStoreProvider{sessions: makeSessions(4)}
+	deleter := NewWarmStoreSessionDeleter(mock)
+	deleter.pageSize = 2 // [s0,s1] [s2,s3] [] -> 3 calls
+
+	ids, err := deleter.ListSessionsByUser(context.Background(), testUserID1, "", nil, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"s0", "s1", "s2", "s3"}, ids)
+	assert.Equal(t, 3, mock.listCallCount)
+}
+
+// TestWarmStoreSessionDeleter_ListSessionsByUser_ErrorMidPagination verifies a
+// store error on a later page aborts and surfaces the error rather than
+// silently returning a partial list.
+func TestWarmStoreSessionDeleter_ListSessionsByUser_ErrorMidPagination(t *testing.T) {
+	mock := &MockWarmStoreProvider{
+		sessions:      makeSessions(5),
+		listErr:       errors.New("storage unavailable"),
+		listErrOnCall: 2, // first page succeeds, second fails
+	}
+	deleter := NewWarmStoreSessionDeleter(mock)
+	deleter.pageSize = 2
+
+	_, err := deleter.ListSessionsByUser(context.Background(), testUserID1, "", nil, nil)
+	assert.Error(t, err)
+}
+
+// TestWarmStoreSessionDeleter_ListSessionsByUser_ZeroPageSizeFallsBack ensures a
+// misconfigured (zero) page size does not produce an unbounded/degenerate query.
+func TestWarmStoreSessionDeleter_ListSessionsByUser_ZeroPageSizeFallsBack(t *testing.T) {
+	mock := &MockWarmStoreProvider{sessions: makeSessions(2)}
+	deleter := NewWarmStoreSessionDeleter(mock)
+	deleter.pageSize = 0 // must fall back to the default
+
+	ids, err := deleter.ListSessionsByUser(context.Background(), testUserID1, "", nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"s0", "s1"}, ids)
+	assert.Positive(t, mock.lastListOpts.Limit, "a positive page size must be passed to the store")
 }
 
 // --- date_range scope tests -------------------------------------------------
