@@ -1593,7 +1593,7 @@ func TestRecord_ZeroTimestampDefaultsToNow(t *testing.T) {
 	t.Run("RecordProviderCall", func(t *testing.T) {
 		require.NoError(t, p.RecordProviderCall(ctx, sess.ID, &session.ProviderCall{
 			ID:       uid(1003),
-			Provider: "anthropic",
+			Provider: pcProviderAnthropic,
 			Model:    "claude-sonnet-4",
 			Status:   session.ProviderCallStatusCompleted,
 		}))

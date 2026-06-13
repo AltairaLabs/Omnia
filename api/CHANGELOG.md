@@ -10,6 +10,17 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Changed (session-api: review quick-wins)
+
+- **`GET /api/v1/sessions/{id}`** (`handleGetSession`): now **decrypts** message
+  content for encrypted sessions, matching `GET …/messages`. Previously this
+  endpoint returned `enc:v1:` ciphertext blobs; consumers now receive plaintext
+  (and a decryption failure returns 5xx instead of leaking ciphertext). [SEC-6]
+- **`Message` DTO** (`pkg/sessionapi` conversions): `MessageToAPI` /
+  `MessageFromAPI` now carry `costUsd`, `hasMedia`, and `mediaTypes` (previously
+  silently dropped). No wire-schema change — the generated type already had the
+  fields. [MAINT-7]
+
 ### Added (session-api: per-user session attribution — #1285)
 
 - **`POST /api/v1/sessions`** (`CreateSessionRequest`): new **required** field
