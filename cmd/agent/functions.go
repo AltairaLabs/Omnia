@@ -97,7 +97,6 @@ func runFunctionsFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /functions/{name}", wrapWithAuthChain(chain, handler, log))
-	mux.Handle("/metrics", promhttp.Handler())
 
 	facadeServer := newFunctionsHTTPServer(cfg, mux)
 	healthServer := newFunctionsHealthServer(cfg, rc)
@@ -192,6 +191,7 @@ func buildFunctionRegistry(cfg *agent.Config) (facade.FunctionRegistry, error) {
 func newFunctionsHealthServer(cfg *agent.Config, rc *facade.RuntimeClient) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthzHandler)
+	mux.Handle("/metrics", promhttp.Handler())
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()

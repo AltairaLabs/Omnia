@@ -156,7 +156,6 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 	// Build the mux with metrics endpoint.
 	mux := http.NewServeMux()
 	mux.Handle("/", a2aHandler)
-	mux.Handle("/metrics", promhttp.Handler())
 
 	// Serve A2A handler on the facade port.
 	facadeServer := &http.Server{
@@ -167,11 +166,31 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 		IdleTimeout:  idleTimeout,
 	}
 
-	errChan := make(chan error, 1)
+	healthMux := http.NewServeMux()
+	healthMux.HandleFunc("/healthz", healthzHandler)
+	healthMux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	healthMux.Handle("/metrics", promhttp.Handler())
+	healthServer := &http.Server{
+		Addr:         fmt.Sprintf(":%d", cfg.HealthPort),
+		Handler:      healthMux,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
+	}
+
+	errChan := make(chan error, 2)
 	go func() {
 		log.Info("starting A2A server", "addr", facadeServer.Addr)
 		if err := facadeServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errChan <- fmt.Errorf("a2a server error: %w", err)
+		}
+	}()
+	go func() {
+		log.Info("starting health server", "addr", healthServer.Addr)
+		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errChan <- fmt.Errorf("health server error: %w", err)
 		}
 	}()
 
@@ -196,6 +215,9 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 	}
 	if err := facadeServer.Shutdown(ctx); err != nil {
 		log.Error(err, "error shutting down HTTP server")
+	}
+	if err := healthServer.Shutdown(ctx); err != nil {
+		log.Error(err, "error shutting down health server")
 	}
 
 	log.Info("shutdown complete")

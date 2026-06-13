@@ -165,7 +165,6 @@ func buildWebSocketServer(
 	mux := http.NewServeMux()
 	mux.Handle("/ws", wsServer)
 	mux.Handle("/api/agents/", wsServer)
-	mux.Handle("/metrics", promhttp.Handler())
 
 	return wsServer, mux, nil
 }
@@ -187,6 +186,7 @@ func newHealthHTTPServer(cfg *agent.Config, store session.Store, handler facade.
 	healthMux := http.NewServeMux()
 	healthMux.HandleFunc("/healthz", healthzHandler)
 	healthMux.HandleFunc("/readyz", readyzHandler(store, handler))
+	healthMux.Handle("/metrics", promhttp.Handler())
 
 	return &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HealthPort),
