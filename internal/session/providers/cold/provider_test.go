@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"testing"
 	"time"
@@ -70,6 +71,15 @@ func makeSession(id, agent, ns string, createdAt time.Time) *session.Session {
 			},
 		},
 	}
+}
+
+func mustRow(t *testing.T, s *session.Session) sessionRow {
+	t.Helper()
+	row, err := sessionToRow(s)
+	if err != nil {
+		t.Fatalf("sessionToRow: %v", err)
+	}
+	return row
 }
 
 // --- MemoryBlobStore tests ---
@@ -162,7 +172,7 @@ func TestSessionRowRoundtrip(t *testing.T) {
 	s.EndedAt = now.Add(2 * time.Hour)
 	s.WorkspaceName = "ws-1"
 
-	row := sessionToRow(s)
+	row := mustRow(t, s)
 	got, err := rowToSession(row)
 	if err != nil {
 		t.Fatalf("rowToSession: %v", err)
@@ -213,8 +223,8 @@ func TestSessionRowRoundtrip(t *testing.T) {
 func TestParquetWriteRead(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	rows := []sessionRow{
-		sessionToRow(makeSession("s1", "a1", "ns1", now)),
-		sessionToRow(makeSession("s2", "a2", "ns2", now.Add(time.Hour))),
+		mustRow(t, makeSession("s1", "a1", "ns1", now)),
+		mustRow(t, makeSession("s2", "a2", "ns2", now.Add(time.Hour))),
 	}
 
 	data, err := writeParquetBytes(rows)
@@ -353,10 +363,46 @@ func TestWriteGetSession(t *testing.T) {
 		t.Errorf("MessageCount: got %d, want 5", got.MessageCount)
 	}
 	if len(got.Messages) != 2 {
-		t.Errorf("Messages: got %d, want 2", len(got.Messages))
+		t.Fatalf("Messages: got %d, want 2", len(got.Messages))
+	}
+	// Message content must round-trip intact: the cold archive is the only
+	// remaining copy once the warm store row is deleted by compaction.
+	if got.Messages[0].ID != "msg-1" || got.Messages[0].Content != "Hello" {
+		t.Errorf("Messages[0]: got %+v, want msg-1/Hello", got.Messages[0])
+	}
+	if got.Messages[1].ID != "msg-2" || got.Messages[1].Content != "Hi there!" {
+		t.Errorf("Messages[1]: got %+v, want msg-2/Hi there!", got.Messages[1])
+	}
+	if got.Messages[0].Role != session.RoleUser || got.Messages[1].Role != session.RoleAssistant {
+		t.Errorf("Roles: got %q, %q", got.Messages[0].Role, got.Messages[1].Role)
 	}
 	if len(got.Tags) != 2 {
 		t.Errorf("Tags: got %v, want [test unit]", got.Tags)
+	}
+}
+
+// TestWriteParquet_MarshalMessagesError verifies WriteParquet fails (rather
+// than silently archiving an empty history) when messages cannot be
+// serialized.
+func TestWriteParquet_MarshalMessagesError(t *testing.T) {
+	ctx := context.Background()
+	p, _ := newTestProvider(t)
+
+	s := makeSession("sess-bad", "agent-a", "default", time.Now().UTC())
+	s.Messages[0].CostUSD = math.NaN() // json.Marshal: unsupported value
+
+	err := p.WriteParquet(ctx, []*session.Session{s}, providers.WriteOpts{})
+	if err == nil {
+		t.Fatal("WriteParquet: expected error for unmarshalable messages")
+	}
+}
+
+func TestSessionToRow_MarshalMessagesError(t *testing.T) {
+	s := makeSession("sess-bad", "agent-a", "default", time.Now().UTC())
+	s.Messages[0].CostUSD = math.Inf(1)
+
+	if _, err := sessionToRow(s); err == nil {
+		t.Fatal("sessionToRow: expected error for unmarshalable messages")
 	}
 }
 
@@ -922,7 +968,7 @@ func TestHivePath_SanitizesAgentName(t *testing.T) {
 
 func TestMatchesFilters(t *testing.T) {
 	now := time.Now().UTC()
-	row := sessionToRow(makeSession("s1", "agent-a", "ns1", now))
+	row := mustRow(t, makeSession("s1", "agent-a", "ns1", now))
 	row.Tags = mustJSON(t, []string{"prod", "v2"})
 
 	tests := []struct {
