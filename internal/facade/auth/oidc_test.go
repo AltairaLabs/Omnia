@@ -71,6 +71,7 @@ type oidcMintOpts struct {
 	audience string
 	subject  string
 	exp      time.Time
+	noExp    bool
 	extras   map[string]any
 	key      *rsa.PrivateKey
 	alg      jwt.SigningMethod
@@ -88,7 +89,9 @@ func mintOIDCToken(t *testing.T, opts oidcMintOpts) string {
 		"sub": opts.subject,
 		"iat": jwt.NewNumericDate(now).Unix(),
 		"nbf": jwt.NewNumericDate(now.Add(-time.Minute)).Unix(),
-		"exp": jwt.NewNumericDate(opts.exp).Unix(),
+	}
+	if !opts.noExp {
+		claims["exp"] = jwt.NewNumericDate(opts.exp).Unix()
 	}
 	for k, v := range opts.extras {
 		claims[k] = v
@@ -314,6 +317,24 @@ func TestOIDCValidator_RejectsExpiredToken(t *testing.T) {
 	_, err := v.Validate(context.Background(), oidcReq(token))
 	if !errors.Is(err, auth.ErrExpired) {
 		t.Errorf("err = %v, want ErrExpired", err)
+	}
+}
+
+func TestOIDCValidator_RejectsTokenWithoutExp(t *testing.T) {
+	t.Parallel()
+	v, key := newOIDCValidatorForTest(t)
+	token := mintOIDCToken(t, oidcMintOpts{
+		kid:      testOIDCKid,
+		issuer:   testOIDCIssuer,
+		audience: testOIDCAudience,
+		subject:  "alice",
+		noExp:    true,
+		key:      key,
+	})
+
+	_, err := v.Validate(context.Background(), oidcReq(token))
+	if !errors.Is(err, auth.ErrInvalidCredential) {
+		t.Errorf("err = %v, want ErrInvalidCredential", err)
 	}
 }
 
