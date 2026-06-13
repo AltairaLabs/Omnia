@@ -3,10 +3,10 @@
 // WorkloadGraph consumes it. It must not reference packs, agents, or Arena.
 
 export type WorkloadTier = "single" | "workflow" | "multiagent";
-export type WorkloadAltitude = "definition" | "deployment";
+export type WorkloadAltitude = "definition" | "deployment" | "test";
 export type WorkloadNodeKind =
   | "agent" | "state" | "tool" | "skill" | "provider" | "scenario" | "judge"
-  | "initial" | "final" | "variable" | "artifact";
+  | "initial" | "final" | "variable" | "artifact" | "persona";
 export type ResolutionStatus = "resolved" | "unresolved" | "unavailable";
 export type WorkloadEdgeStyle = "normal" | "loop" | "unresolved" | "provides" | "data";
 
@@ -53,6 +53,17 @@ export interface WorkloadNodeDetail {
   artifactType?: string;
   producers?: string[];        // state ids that declare/write it
   consumers?: string[];        // state ids whose template reads {{artifacts.<name>}}
+  // arena harness node fields:
+  pricing?: { inputPer1kTokens?: number; outputPer1kTokens?: number }; // provider node
+  scenarios?: Array<{                                                  // scenario group node
+    id: string;
+    description?: string;
+    turnCount?: number;
+    tags?: string[];
+    assertions?: string[];
+  }>;
+  judgeProvider?: string;                                              // judge node
+  persona?: { id: string; role?: string; provider?: string };         // persona node
 }
 
 export interface WorkloadNode {
