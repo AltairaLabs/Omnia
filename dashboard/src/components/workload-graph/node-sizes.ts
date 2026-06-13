@@ -11,6 +11,9 @@ const SIZES: Partial<Record<WorkloadNodeKind, NodeSize>> = {
   variable: { width: 120, height: 30 },
   artifact: { width: 150, height: 44 },
   provider: { width: 200, height: 68 },
+  scenario: { width: 170, height: 56 },
+  judge: { width: 170, height: 56 },
+  persona: { width: 170, height: 56 },
 };
 
 const DEFAULT: NodeSize = { width: 200, height: 68 };
