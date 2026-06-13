@@ -39,14 +39,8 @@ const retrieveOperationTag = "retrieve_multi_tier"
 // one. Loader errors / nil policy fall through to the identity ranker
 // so retrieval keeps working when policy resolution is degraded.
 func (s *MemoryService) RetrieveMultiTier(ctx context.Context, req memory.MultiTierRequest) (*memory.MultiTierResult, error) {
-	if req.Ranker == nil && s.policyLoader != nil {
-		policy, err := s.policyLoader.Load(ctx)
-		if err != nil {
-			s.log.V(1).Info("policy load failed, using identity ranker", "error", err.Error())
-		}
-		req.Ranker = memory.NewTierRanker(policy)
-	}
-	result, err := s.store.RetrieveMultiTier(ctx, req)
+	s.applyPolicyDefaults(ctx, &req)
+	result, err := s.retrieveMultiTierInner(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -59,4 +53,50 @@ func (s *MemoryService) RetrieveMultiTier(ctx context.Context, req memory.MultiT
 		},
 	})
 	return result, nil
+}
+
+// applyPolicyDefaults loads the MemoryPolicy once (when a loader is wired) and
+// fills in the per-tier ranker and recency half-life the caller didn't supply.
+// Caller-supplied values win; loader errors / nil policy fall through to the
+// identity ranker and default half-lives so retrieval keeps working when policy
+// resolution is degraded.
+func (s *MemoryService) applyPolicyDefaults(ctx context.Context, req *memory.MultiTierRequest) {
+	if s.policyLoader == nil {
+		return
+	}
+	needRanker := req.Ranker == nil
+	needHalfLife := req.HalfLife == (memory.TierHalfLife{})
+	if !needRanker && !needHalfLife {
+		return
+	}
+	policy, err := s.policyLoader.Load(ctx)
+	if err != nil {
+		s.log.V(1).Info("policy load failed, using defaults", "error", err.Error())
+	}
+	if needRanker {
+		req.Ranker = memory.NewTierRanker(policy)
+	}
+	if needHalfLife {
+		req.HalfLife = memory.NewTierHalfLife(policy)
+	}
+}
+
+// retrieveMultiTierInner routes to the hybrid (semantic + FTS RRF) store path
+// when an embedder is configured and the query is non-empty, embedding the
+// query first. An embed failure — or no embedder / empty query — falls back to
+// FTS-only multi-tier so a transient embedder outage degrades recall quality
+// rather than hard-failing the request. Mirrors searchMemoriesInner's policy
+// for the flat search path; recall is too central to the agent loop to make
+// brittle.
+func (s *MemoryService) retrieveMultiTierInner(ctx context.Context, req memory.MultiTierRequest) (*memory.MultiTierResult, error) {
+	if s.embeddingSvc == nil || req.Query == "" {
+		return s.store.RetrieveMultiTier(ctx, req)
+	}
+	embeddings, err := s.embeddingSvc.Provider().Embed(ctx, []string{req.Query})
+	if err != nil || len(embeddings) == 0 || len(embeddings[0]) == 0 {
+		s.log.V(1).Info("hybrid multi-tier fallback to FTS",
+			"reason", "embed_query_failed", "hasError", err != nil)
+		return s.store.RetrieveMultiTier(ctx, req)
+	}
+	return s.store.RetrieveMultiTierHybrid(ctx, req, embeddings[0])
 }

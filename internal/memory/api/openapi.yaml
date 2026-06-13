@@ -39,12 +39,9 @@ paths:
           schema:
             type: string
           description: Filter by memory type (e.g., preference, episodic, fact)
-        - name: purpose
-          in: query
-          schema:
-            type: string
-            enum: [personalisation, support_continuity, safety]
-          description: Filter by purpose tag
+        # NOTE: purpose filtering is NOT available on this flat list endpoint
+        # (ListOptions has no purpose field since the PromptKit migration). Use
+        # POST /memories/retrieve with `purposes` for purpose-scoped recall.
         - name: limit
           in: query
           schema:
@@ -280,6 +277,12 @@ paths:
       description: |
         Runs a single query across institutional, agent, user, and user-for-
         agent tiers and returns ranked results for RAG context injection.
+        When the memory-api has an embedding provider and the query is
+        non-empty, retrieval is hybrid: FTS rank and pgvector cosine rank are
+        fused via Reciprocal Rank Fusion (k=60) so semantic-only matches
+        surface alongside lexical hits. Without an embedder, on embed failure,
+        or for an empty query it falls back to FTS-only multi-tier. The
+        per-tier `TierRanker` (from MemoryPolicy) then biases the fused score.
         Optional `purposes` narrows by `memory_entities.purpose`. Graph and
         structured-lookup additions are Phase 3 multi-mode extensions.
       requestBody:

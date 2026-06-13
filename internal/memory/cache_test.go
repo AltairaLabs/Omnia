@@ -183,6 +183,10 @@ func (m *cacheTestStore) RetrieveMultiTier(_ context.Context, _ MultiTierRequest
 	return &MultiTierResult{Memories: []*MultiTierMemory{}, Total: 0}, nil
 }
 
+func (m *cacheTestStore) RetrieveMultiTierHybrid(_ context.Context, _ MultiTierRequest, _ []float32) (*MultiTierResult, error) {
+	return &MultiTierResult{Memories: []*MultiTierMemory{}, Total: 0}, nil
+}
+
 func (m *cacheTestStore) SaveInstitutional(_ context.Context, _ *Memory) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

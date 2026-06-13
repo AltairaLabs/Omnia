@@ -252,6 +252,16 @@ type Store interface {
 	ExportAll(ctx context.Context, scope map[string]string) ([]*Memory, error)
 	BatchDelete(ctx context.Context, scope map[string]string, limit int) (int, error)
 	RetrieveMultiTier(ctx context.Context, req MultiTierRequest) (*MultiTierResult, error)
+
+	// RetrieveMultiTierHybrid is RetrieveMultiTier with a semantic
+	// component: it fuses FTS rank and pgvector cosine rank (RRF, k=60)
+	// across institutional, agent, user and user-for-agent tiers, then
+	// applies the request's TierRanker. queryEmbedding must match the
+	// stored embedding dimensionality. When queryEmbedding or req.Query
+	// is empty there is nothing to fuse — it falls through to the
+	// FTS-only RetrieveMultiTier (the service layer also falls back here
+	// on embed failure / when no embedder is configured).
+	RetrieveMultiTierHybrid(ctx context.Context, req MultiTierRequest, queryEmbedding []float32) (*MultiTierResult, error)
 	SaveInstitutional(ctx context.Context, mem *Memory) error
 	ListInstitutional(ctx context.Context, workspaceID string, opts ListOptions) ([]*Memory, error)
 	DeleteInstitutional(ctx context.Context, workspaceID, memoryID string) error

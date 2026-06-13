@@ -83,6 +83,11 @@ type MultiTierRequest struct {
 	// Nil means identity (no change), preserving the pre-tier-precedence
 	// behaviour for callers without a MemoryPolicy in scope.
 	Ranker TierRanker
+
+	// HalfLife sets the per-tier recency-decay half-life. The zero value
+	// means "unset" — the store substitutes defaultRecallHalfLife per tier,
+	// so direct callers without a MemoryPolicy still get a sane curve.
+	HalfLife TierHalfLife
 }
 
 // MultiTierMemory augments a Memory with the tier it was retrieved from,
@@ -116,7 +121,6 @@ const (
 	weightFrequency  = 0.3
 	weightRecency    = 0.2
 	freqLogCeiling   = 100.0
-	recencyTauHours  = 168.0
 )
 
 // RetrieveMultiTier runs a single multi-tier SQL query covering institutional,
@@ -148,7 +152,7 @@ func (s *PostgresMemoryStore) RetrieveMultiTier(ctx context.Context, req MultiTi
 	if now.IsZero() {
 		now = time.Now()
 	}
-	rankResults(memories, now, req.Ranker)
+	rankResults(memories, now, req.Ranker, req.HalfLife.orDefaults())
 
 	limit := req.Limit
 	if limit <= 0 {
@@ -311,9 +315,18 @@ func addAgentTierClause(qb *pgutil.QueryBuilder, agentID string) {
 // workspaceID seeds the memory Scope so downstream consumers see the same
 // scope keys Retrieve/List populate.
 func scanMultiTierRows(rows pgx.Rows, workspaceID string) ([]*MultiTierMemory, error) {
+	return scanMultiTierMemoryRows(rows, workspaceID, scanMultiTierRow)
+}
+
+// scanMultiTierMemoryRows iterates rows through the given per-row scanner.
+// Shared by the FTS-only and hybrid multi-tier paths so the iteration +
+// nil-slice normalisation lives in one place.
+func scanMultiTierMemoryRows(rows pgx.Rows, workspaceID string,
+	scanRow func(pgx.Rows, string) (*MultiTierMemory, error),
+) ([]*MultiTierMemory, error) {
 	var results []*MultiTierMemory
 	for rows.Next() {
-		mem, err := scanMultiTierRow(rows, workspaceID)
+		mem, err := scanRow(rows, workspaceID)
 		if err != nil {
 			return nil, err
 		}
@@ -326,6 +339,35 @@ func scanMultiTierRows(rows pgx.Rows, workspaceID string) ([]*MultiTierMemory, e
 		results = []*MultiTierMemory{}
 	}
 	return results, nil
+}
+
+// assembleMultiTierMemory builds a MultiTierMemory from the column values
+// shared by the FTS and hybrid multi-tier scanners. Score is left zero; the
+// hybrid scanner sets it from the SQL-computed final_score.
+func assembleMultiTierMemory(workspaceID string, mem *Memory, metadataJSON []byte, expiresAt *time.Time,
+	userID, agentID, sessionID *string, turnRange []int, accessedAt *time.Time, accessCount int,
+	title, summary *string, bodySizeBytes *int32,
+) *MultiTierMemory {
+	mem.Scope = buildScope(workspaceID, userID, agentID)
+	mem.ExpiresAt = expiresAt
+	if sessionID != nil {
+		mem.SessionID = *sessionID
+	}
+	if len(turnRange) == 2 {
+		mem.TurnRange = [2]int{turnRange[0], turnRange[1]}
+	}
+	if accessedAt != nil {
+		mem.AccessedAt = *accessedAt
+	}
+	if len(metadataJSON) > 0 {
+		_ = json.Unmarshal(metadataJSON, &mem.Metadata)
+	}
+	stampLargeMemoryFields(mem, title, summary, bodySizeBytes)
+	return &MultiTierMemory{
+		Memory:      mem,
+		Tier:        classifyTier(userID, agentID),
+		AccessCount: accessCount,
+	}
 }
 
 // scanMultiTierRow scans a single row from the multi-tier query.
@@ -354,28 +396,11 @@ func scanMultiTierRow(row pgx.Rows, workspaceID string) (*MultiTierMemory, error
 	if err != nil {
 		return nil, fmt.Errorf("memory: scan multi-tier row: %w", err)
 	}
+	_ = observedAt // scanned for column alignment; recency uses accessed/created
 
-	mem.Scope = buildScope(workspaceID, userID, agentID)
-	mem.ExpiresAt = expiresAt
-	if sessionID != nil {
-		mem.SessionID = *sessionID
-	}
-	if len(turnRange) == 2 {
-		mem.TurnRange = [2]int{turnRange[0], turnRange[1]}
-	}
-	if accessedAt != nil {
-		mem.AccessedAt = *accessedAt
-	}
-	if len(metadataJSON) > 0 {
-		_ = json.Unmarshal(metadataJSON, &mem.Metadata)
-	}
-	stampLargeMemoryFields(&mem, title, summary, bodySizeBytes)
-
-	return &MultiTierMemory{
-		Memory:      &mem,
-		Tier:        classifyTier(userID, agentID),
-		AccessCount: accessCount,
-	}, nil
+	return assembleMultiTierMemory(workspaceID, &mem, metadataJSON, expiresAt,
+		userID, agentID, sessionID, turnRange, accessedAt, accessCount,
+		title, summary, bodySizeBytes), nil
 }
 
 // buildScope assembles the Memory.Scope map from the non-nullable workspace
@@ -413,20 +438,23 @@ func classifyTier(userID, agentID *string) Tier {
 // frequency (log-normalised), and recency (exponential decay); the supplied
 // TierRanker then biases the score per tier (an identity ranker preserves
 // the existing behaviour for callers without a policy).
-func rankResults(results []*MultiTierMemory, now time.Time, ranker TierRanker) {
+func rankResults(results []*MultiTierMemory, now time.Time, ranker TierRanker, hl TierHalfLife) {
 	if ranker == nil {
 		ranker = IdentityTierRanker{}
 	}
 	for _, r := range results {
-		r.Score = ranker.Adjust(computeScore(r, now), r.Tier)
+		base := computeScore(r, now, hl.secondsFor(r.Tier))
+		r.Score = ranker.Adjust(base, r.Tier)
 	}
 	sort.SliceStable(results, func(i, j int) bool {
 		return results[i].Score > results[j].Score
 	})
 }
 
-// computeScore returns the ranking score for a single memory.
-func computeScore(r *MultiTierMemory, now time.Time) float64 {
+// computeScore returns the ranking score for a single memory. halfLifeSeconds
+// is the tier's recency half-life (caller resolves it via TierHalfLife);
+// a non-positive value disables recency decay.
+func computeScore(r *MultiTierMemory, now time.Time, halfLifeSeconds float64) float64 {
 	confidence := r.Confidence
 	freq := math.Log1p(float64(r.AccessCount)) / math.Log1p(freqLogCeiling)
 	if freq < 0 {
@@ -439,10 +467,20 @@ func computeScore(r *MultiTierMemory, now time.Time) float64 {
 	if ref.IsZero() {
 		ref = r.CreatedAt
 	}
-	ageHours := now.Sub(ref).Hours()
-	if ageHours < 0 {
-		ageHours = 0
+	ageSeconds := now.Sub(ref).Seconds()
+	if ageSeconds < 0 {
+		ageSeconds = 0
 	}
-	recency := math.Exp(-ageHours / recencyTauHours)
+	recency := recencyDecay(ageSeconds, halfLifeSeconds)
 	return weightConfidence*confidence + weightFrequency*freq + weightRecency*recency
+}
+
+// recencyDecay returns the recency multiplier exp(-ln2 * age / halfLife),
+// which equals 0.5 exactly when age == halfLife. A non-positive halfLife
+// disables decay (returns 1) so misconfiguration can't zero out recall.
+func recencyDecay(ageSeconds, halfLifeSeconds float64) float64 {
+	if halfLifeSeconds <= 0 {
+		return 1
+	}
+	return math.Exp(-ln2 * ageSeconds / halfLifeSeconds)
 }

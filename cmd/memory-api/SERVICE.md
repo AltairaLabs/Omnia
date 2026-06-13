@@ -42,6 +42,18 @@ the reconciler on the next reshape. Empty/fresh columns reshape with no consent.
     `about={kind:"sharepoint_doc", key:"<url>#<index>"}` (idempotent re-seed).
     Returns 202 with no body; embeddings backfilled async by ReembedWorker.
     400 on missing `workspace_id`; 500 on no-strategy or strategy error (#1205).
+  - `POST /api/v1/memories/retrieve` — accepts `{workspace_id, user_id,
+    agent_id, query, types, purposes, min_confidence, limit}`; runs ranked
+    retrieval across institutional, agent, user and user-for-agent tiers. With
+    an embedding provider configured and a non-empty query it is hybrid: FTS
+    rank and pgvector cosine rank fused via RRF (k=60) so semantic-only matches
+    surface; without an embedder / on embed failure / empty query it falls back
+    to FTS-only multi-tier. The per-tier MemoryPolicy `TierRanker` then biases
+    the fused score, and `spec.recall.halfLife.{user,agent,institutional}`
+    drives the per-tier recency decay (default 30d per tier). Response
+    `{memories:[...], total:N}` (200); 400 on missing
+    `workspace_id`. This is the path the agent `memory__recall` tool hits when
+    the scope carries `agent_id`.
   - `POST /api/v1/memories/retrieve/semantic` — accepts `{workspace_id, query,
     deny_cel, limit}`; runs workspace-scoped hybrid retrieval (semantic + FTS)
     then applies a CEL deny-filter over each result's metadata. Empty `deny_cel`

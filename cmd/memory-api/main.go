@@ -466,6 +466,12 @@ func run() error {
 	policyLoader := buildRetentionPolicyLoader(f.retentionInterval, f.workspace, f.serviceGroup, log)
 
 	// --- Retention worker ---
+	// Register the composite-worker metrics before starting it, otherwise the
+	// worker's nil-tolerant emit path silently no-ops and the soft/hard-delete
+	// counters + run duration/error metrics never reach Prometheus.
+	if err := memory.RegisterRetentionMetrics(prometheus.DefaultRegisterer); err != nil {
+		log.Error(err, "memory retention metrics registration failed")
+	}
 	startRetentionWorkerWithLoader(ctx, pgStore, policyLoader, log)
 
 	// --- Analytics opt-in metric + worker ---
