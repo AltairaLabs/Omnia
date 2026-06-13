@@ -453,3 +453,44 @@ func TestMgmtPlaneValidator_LeewayToleratesSmallDrift(t *testing.T) {
 		t.Errorf("token with iat/nbf=+15s should admit under 30s leeway: %v", err)
 	}
 }
+
+func TestMgmtPlaneValidator_ExpectedAgentWorkspaceScope(t *testing.T) {
+	t.Parallel()
+
+	key := newRSAKey(t)
+	kid := thumbprintForKey(t, &key.PublicKey)
+	resolver := &auth.StaticKeyResolver{Keys: map[string]*rsa.PublicKey{kid: &key.PublicKey}}
+	v := auth.NewMgmtPlaneValidatorWithResolver(
+		resolver,
+		auth.WithMgmtPlaneExpectedAgent("prod-agent"),
+		auth.WithMgmtPlaneExpectedWorkspace("prod-workspace"),
+	)
+
+	matching := defaultMintOpts(key)
+	matching.agent = "prod-agent"
+	matching.workspace = "prod-workspace"
+	if _, err := v.Validate(context.Background(), requestWithToken(mintToken(t, matching))); err != nil {
+		t.Fatalf("matching scoped token should admit: %v", err)
+	}
+
+	wrongAgent := defaultMintOpts(key)
+	wrongAgent.agent = "other-agent"
+	wrongAgent.workspace = "prod-workspace"
+	if _, err := v.Validate(context.Background(), requestWithToken(mintToken(t, wrongAgent))); !errors.Is(err, auth.ErrInvalidCredential) {
+		t.Errorf("agent mismatch should reject: err = %v, want ErrInvalidCredential", err)
+	}
+
+	wrongWorkspace := defaultMintOpts(key)
+	wrongWorkspace.agent = "prod-agent"
+	wrongWorkspace.workspace = "other-workspace"
+	if _, err := v.Validate(context.Background(), requestWithToken(mintToken(t, wrongWorkspace))); !errors.Is(err, auth.ErrInvalidCredential) {
+		t.Errorf("workspace mismatch should reject: err = %v, want ErrInvalidCredential", err)
+	}
+
+	missingScopedClaims := defaultMintOpts(key)
+	missingScopedClaims.agent = ""
+	missingScopedClaims.workspace = ""
+	if _, err := v.Validate(context.Background(), requestWithToken(mintToken(t, missingScopedClaims))); err != nil {
+		t.Errorf("token without scoped claims should admit for backward compatibility: %v", err)
+	}
+}
