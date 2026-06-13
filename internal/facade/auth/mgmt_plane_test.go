@@ -62,6 +62,7 @@ type testMintOpts struct {
 	agent     string
 	workspace string
 	exp       time.Time
+	noExp     bool
 	nbf       time.Time
 	iat       time.Time
 	key       *rsa.PrivateKey // override signing key
@@ -95,12 +96,16 @@ type testClaims struct {
 
 func mintToken(t *testing.T, opts testMintOpts) string {
 	t.Helper()
+	var exp *jwt.NumericDate
+	if !opts.noExp {
+		exp = jwt.NewNumericDate(opts.exp)
+	}
 	claims := testClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    opts.issuer,
 			Subject:   opts.subject,
 			Audience:  jwt.ClaimStrings{opts.audience},
-			ExpiresAt: jwt.NewNumericDate(opts.exp),
+			ExpiresAt: exp,
 			NotBefore: jwt.NewNumericDate(opts.nbf),
 			IssuedAt:  jwt.NewNumericDate(opts.iat),
 		},
@@ -345,6 +350,19 @@ func TestMgmtPlaneValidator_Expired(t *testing.T) {
 	_, err := v.Validate(context.Background(), requestWithToken(token))
 	if !errors.Is(err, auth.ErrExpired) {
 		t.Errorf("err = %v, want ErrExpired", err)
+	}
+}
+
+func TestMgmtPlaneValidator_RejectsTokenWithoutExp(t *testing.T) {
+	t.Parallel()
+	v, key := newValidator(t)
+	opts := defaultMintOpts(key)
+	opts.noExp = true
+	token := mintToken(t, opts)
+
+	_, err := v.Validate(context.Background(), requestWithToken(token))
+	if !errors.Is(err, auth.ErrInvalidCredential) {
+		t.Errorf("err = %v, want ErrInvalidCredential", err)
 	}
 }
 
