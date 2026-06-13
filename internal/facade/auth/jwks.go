@@ -61,12 +61,9 @@ func (s *StaticKeyResolver) Resolve(_ context.Context, kid string) (*rsa.PublicK
 }
 
 // JWKSResolver fetches RSA public keys from a JWKS endpoint and caches
-// them by kid. On a kid cache miss it re-fetches the keyset (single-
-// flight); this is what lets a key rotation propagate to facade pods
-// without restarting them and without polling. The cache has no time-
-// based expiry on purpose: the JWKS endpoint is on the dashboard's
-// in-cluster service, and a cache miss is the only signal we need that
-// rotation has happened.
+// them by kid. On a kid cache miss it may re-fetch the keyset
+// (single-flight), subject to refreshInterval throttling; this lets key
+// rotation propagate to facade pods without restarts or background polling.
 type JWKSResolver struct {
 	url    string
 	client *http.Client
@@ -113,9 +110,9 @@ func NewJWKSResolver(url string, opts ...JWKSOption) *JWKSResolver {
 	return r
 }
 
-// Resolve returns the public key for kid, fetching the JWKS endpoint
-// once if the kid is not already cached. Concurrent callers waiting on
-// the same fetch are coalesced.
+// Resolve returns the public key for kid, fetching the JWKS endpoint on
+// cache miss unless refresh throttling is active. Concurrent callers
+// share one in-flight fetch and then re-check the cache.
 func (r *JWKSResolver) Resolve(ctx context.Context, kid string) (*rsa.PublicKey, error) {
 	r.mu.Lock()
 	if k, ok := r.keys[kid]; ok {
