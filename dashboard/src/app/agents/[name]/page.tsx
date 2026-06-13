@@ -3,11 +3,12 @@
 import { use, useCallback } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, FileText, MessageSquare, Activity, ShieldCheck, Brain } from "lucide-react";
+import { ArrowLeft, FileText, MessageSquare, Activity, ShieldCheck, Brain, Workflow } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/layout";
 import { StatusBadge, ScaleControl, AgentMetricsPanel, EventsPanel, EvalConfigPanel, AgentQualityTab, RolloutPanel } from "@/components/agents";
 import { SystemPackBadge } from "@/components/agents/system-pack-badge";
+import { AgentWorkloadTab } from "@/components/workload-graph/agent-workload-tab";
 import { AgentMemoryPanel } from "@/components/memories/agent-memory-panel";
 import { AgentConsole } from "@/components/console";
 import { LogViewer } from "@/components/logs";
@@ -163,6 +164,10 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
         <Tabs value={currentTab} onValueChange={handleTabChange}>
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="workload" className="gap-1.5">
+              <Workflow className="h-4 w-4" />
+              Workload
+            </TabsTrigger>
             <TabsTrigger value="console" className="gap-1.5">
               <MessageSquare className="h-4 w-4" />
               Console
@@ -186,6 +191,10 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
             <TabsTrigger value="config">Configuration</TabsTrigger>
             <TabsTrigger value="events">Events</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="workload" className="mt-4">
+            <AgentWorkloadTab agent={agent} workspace={workspace} />
+          </TabsContent>
 
           <TabsContent value="overview" className="space-y-4 mt-4">
             {/* Status Card */}

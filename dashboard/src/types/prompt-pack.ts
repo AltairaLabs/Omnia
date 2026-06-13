@@ -11,10 +11,19 @@ export interface PromptPackSource {
   configMapRef?: LocalObjectReference;
 }
 
+// A reference from a PromptPack to skills synced by a SkillSource CRD.
+// Matches api/v1alpha1 SkillRef.
+export interface SkillRef {
+  source: string;      // SkillSource CRD name (same namespace)
+  include?: string[];  // frontmatter names to narrow scope (empty = all)
+  mountAs?: string;    // virtual mount path rename (default = source basename)
+}
+
 // Spec
 export interface PromptPackSpec {
   source: PromptPackSource;
   version: string;
+  skills?: SkillRef[];
 }
 
 // Status

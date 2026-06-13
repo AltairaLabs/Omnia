@@ -14,6 +14,11 @@ vi.mock("next/link", () => ({
   }) => <a href={href}>{children}</a>,
 }));
 
+// Stub the workload tier hook (the real one needs a QueryClient + data service).
+vi.mock("@/hooks/use-workload-tier", () => ({
+  useWorkloadTier: () => ({ tier: "crew", agents: 3, tools: 8, states: 2, isLoading: false }),
+}));
+
 const mockPromptPack: PromptPack = {
   apiVersion: "omnia.altairalabs.ai/v1alpha1",
   kind: "PromptPack",
@@ -125,5 +130,12 @@ describe("PromptPackCard", () => {
     };
     render(<PromptPackCard promptPack={pack} />);
     expect(screen.getByText("3d ago")).toBeInTheDocument();
+  });
+
+  it("renders the workload tier chip with agent and tool counts", () => {
+    render(<PromptPackCard promptPack={mockPromptPack} />);
+    expect(screen.getByText(/Crew/)).toBeInTheDocument();
+    expect(screen.getByText(/3 agents/)).toBeInTheDocument();
+    expect(screen.getByText(/8 tools/)).toBeInTheDocument();
   });
 });

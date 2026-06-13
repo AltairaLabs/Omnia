@@ -1,0 +1,153 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  Panel,
+  BackgroundVariant,
+  MarkerType,
+  useNodesState,
+  useEdgesState,
+  type ReactFlowInstance,
+  type Node as FlowNode,
+  type Edge as FlowEdge,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import { Info } from "lucide-react";
+import { modelToFlow, type WorkloadNodeData } from "./to-flow";
+import { layoutFlow } from "./layout";
+import { workloadNodeTypes } from "./workload-nodes";
+import { workloadEdgeTypes } from "./workload-edge";
+import { NodeDrawer } from "./node-drawer";
+import type { WorkloadModel, WorkloadNode, WorkloadBudget } from "./types";
+
+type WorkloadFlowInstance = ReactFlowInstance<FlowNode<WorkloadNodeData>, FlowEdge>;
+
+// elk repositions nodes after mount; re-fit once they're measured (next paint)
+// so the whole graph scales to the canvas instead of staying at the initial zoom.
+export function fitViewAfterPaint(inst: WorkloadFlowInstance | null): void {
+  if (!inst) return;
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => inst.fitView({ padding: 0.08, duration: 250 })),
+  );
+}
+
+function budgetLabel(b: WorkloadBudget): string {
+  const parts: string[] = [];
+  if (b.maxTotalVisits != null) parts.push(`≤${b.maxTotalVisits} visits`);
+  if (b.maxToolCalls != null) parts.push(`≤${b.maxToolCalls} tools`);
+  if (b.maxWallTimeSec != null) parts.push(`≤${b.maxWallTimeSec}s`);
+  return parts.join(" · ");
+}
+
+function deploymentBanner(model: WorkloadModel): string {
+  const models = model.meta.binding?.providers.map((p) => p.model || p.name).join(", ");
+  return `Deployment · resolved against ${models || "—"}`;
+}
+
+export function WorkloadGraph({
+  model,
+  className,
+  namespace,
+}: Readonly<{ model: WorkloadModel; className?: string; namespace?: string }>) {
+  const [selectedId, setSelectedId] = useState<string | undefined>();
+  const flow = useMemo(() => modelToFlow(model, setSelectedId), [model]);
+  const [nodes, setNodes] = useNodesState(flow.nodes);
+  const [edges, setEdges] = useEdgesState(flow.edges);
+  const rf = useRef<WorkloadFlowInstance | null>(null);
+
+  // Fill the viewport below the graph's own top edge, so the box accounts for
+  // whatever sits above it (the dev licensing banner, page header, tabs) instead
+  // of guessing with a vh fraction that overshoots.
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [height, setHeight] = useState(560);
+  useEffect(() => {
+    const compute = () => {
+      const el = containerRef.current;
+      if (!el) return;
+      const top = el.getBoundingClientRect().top;
+      setHeight(Math.max(360, window.innerHeight - top - 16));
+    };
+    compute();
+    const raf = requestAnimationFrame(compute);
+    window.addEventListener("resize", compute);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", compute);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    layoutFlow(flow.nodes, flow.edges).then(({ nodes: laid, routes }) => {
+      if (cancelled) return;
+      setNodes(laid);
+      setEdges(
+        flow.edges.map((e) => ({ ...e, data: { ...e.data, points: routes.get(e.id) } })),
+      );
+      fitViewAfterPaint(rf.current);
+    });
+    return () => { cancelled = true; };
+  }, [flow, setNodes, setEdges]);
+
+  const selected: WorkloadNode | undefined = model.nodes.find((n) => n.id === selectedId);
+  const banner =
+    model.altitude === "deployment" ? deploymentBanner(model) : "Definition · abstract workload";
+
+  if (model.nodes.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-[300px] text-sm text-muted-foreground border rounded-lg">
+        No workload to display — this pack declares no prompts.
+      </div>
+    );
+  }
+
+  return (
+    <div className={className}>
+      <div
+        ref={containerRef}
+        className="relative border rounded-lg"
+        style={{ width: "100%", height: `${height}px` }}
+      >
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={workloadNodeTypes}
+          edgeTypes={workloadEdgeTypes}
+          onInit={(inst) => { rf.current = inst; }}
+          fitView
+          fitViewOptions={{ padding: 0.08 }}
+          minZoom={0.2}
+          maxZoom={2}
+          defaultEdgeOptions={{
+            markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
+          }}
+        >
+          <Panel position="top-left">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-background/85 backdrop-blur rounded border px-2 py-1">
+              <Info className="h-3.5 w-3.5" />
+              <span>{banner}</span>
+            </div>
+          </Panel>
+          {model.meta.budget && (
+            <Panel position="top-right">
+              <div className="text-xs bg-background/85 backdrop-blur rounded border px-2 py-1">
+                <span className="font-medium text-foreground">Budget</span>{" "}
+                <span className="text-muted-foreground">{budgetLabel(model.meta.budget)}</span>
+              </div>
+            </Panel>
+          )}
+          <Controls />
+          <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
+        </ReactFlow>
+        <NodeDrawer
+          node={selected}
+          onClose={() => setSelectedId(undefined)}
+          namespace={namespace}
+        />
+      </div>
+    </div>
+  );
+}

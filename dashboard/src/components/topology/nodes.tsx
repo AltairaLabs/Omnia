@@ -126,6 +126,8 @@ export interface PromptPackNodeData extends Record<string, unknown>, NoteFields 
   namespace: string;
   version?: string;
   phase?: string;
+  tier?: "solo" | "flow" | "crew";
+  agentCount?: number;
   onClick?: () => void;
 }
 
@@ -227,6 +229,14 @@ export const PromptPackNodeComponent = memo(({ data }: Readonly<CustomNodeProps<
             <span className="text-xs text-muted-foreground">
               {data.version ? `v${data.version}` : data.namespace}
             </span>
+            {data.tier && (
+              <span className="text-[10px] text-muted-foreground inline-flex items-center gap-0.5 mt-0.5 capitalize">
+                {data.tier}
+                {data.tier === "crew" && typeof data.agentCount === "number"
+                  ? ` · ${data.agentCount}`
+                  : ""}
+              </span>
+            )}
           </div>
           <StatusDot status={data.phase} />
         </div>

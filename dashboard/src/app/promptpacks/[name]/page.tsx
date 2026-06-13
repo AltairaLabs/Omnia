@@ -24,6 +24,8 @@ import {
 } from "@/components/ui/accordion";
 import { useAgents } from "@/hooks/agents";
 import { usePromptPack, usePromptPackContent, useWorkspaces } from "@/hooks/resources";
+import { useSkillSources } from "@/hooks/use-skill-sources";
+import { WorkloadGraph, promptPackToWorkload } from "@/components/workload-graph";
 import type {
   PromptDefinition,
   ToolDefinition,
@@ -188,6 +190,7 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
 
   const { data: promptPack, isLoading } = usePromptPack(name, workspaceName);
   const { data: packContent, isLoading: isContentLoading } = usePromptPackContent(name, workspaceName);
+  const { sources: skillSources } = useSkillSources();
   const { data: allAgents } = useAgents();
 
   const promptsArray = promptsToArray(packContent?.prompts);
@@ -260,12 +263,16 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
         </div>
 
         {/* Tabs */}
-        <Tabs defaultValue="overview">
+        <Tabs defaultValue="workload">
           <TabsList>
+            <TabsTrigger value="workload" className="gap-1.5">
+              <Workflow className="h-4 w-4" />
+              Workload
+            </TabsTrigger>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="content" className="gap-1.5">
               <FileCode className="h-4 w-4" />
-              Content
+              Advanced
             </TabsTrigger>
             <TabsTrigger value="usage" className="gap-1.5">
               <Bot className="h-4 w-4" />
@@ -273,6 +280,16 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
             </TabsTrigger>
             <TabsTrigger value="config">Configuration</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="workload" className="mt-4">
+            <WorkloadGraph
+              model={promptPackToWorkload(packContent ?? undefined, {
+                skillRefs: promptPack?.spec?.skills,
+                skillSources,
+              })}
+              namespace={namespace}
+            />
+          </TabsContent>
 
           <TabsContent value="overview" className="space-y-4 mt-4">
             {/* Status Card */}
