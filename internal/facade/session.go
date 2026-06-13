@@ -308,9 +308,6 @@ func buildSessionState(c *Connection, cfg ServerConfig) map[string]string {
 	if c.userID != "" {
 		state["user.id"] = c.userID
 	}
-	if c.userEmail != "" {
-		state["user.email"] = c.userEmail
-	}
 	if c.userRoles != "" {
 		state["user.roles"] = c.userRoles
 	}

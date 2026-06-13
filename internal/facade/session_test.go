@@ -388,8 +388,8 @@ func TestBuildSessionState_Full(t *testing.T) {
 	if state["user.id"] != "alice" {
 		t.Errorf("user.id = %q, want alice", state["user.id"])
 	}
-	if state["user.email"] != "alice@example.com" {
-		t.Errorf("user.email = %q", state["user.email"])
+	if _, ok := state["user.email"]; ok {
+		t.Error("user.email should not be persisted in session state")
 	}
 	if state["user.roles"] != "admin,editor" {
 		t.Errorf("user.roles = %q", state["user.roles"])
@@ -411,6 +411,9 @@ func TestBuildSessionState_PartialUser(t *testing.T) {
 	}
 	if state["user.id"] != "bob" {
 		t.Errorf("user.id = %q", state["user.id"])
+	}
+	if _, ok := state["user.email"]; ok {
+		t.Error("user.email should not be present")
 	}
 	if state["promptpack.name"] != "pack-1" {
 		t.Errorf("promptpack.name = %q", state["promptpack.name"])
