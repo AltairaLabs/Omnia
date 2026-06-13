@@ -1,6 +1,9 @@
 package identity
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -40,4 +43,22 @@ func TestPseudonymizeID_NoPIILeakage(t *testing.T) {
 	assert.NotContains(t, result, "user")
 	assert.NotContains(t, result, "example")
 	assert.NotContains(t, result, "@")
+}
+
+func TestPseudonymizeID_UsesHMACWhenKeyConfigured(t *testing.T) {
+	t.Setenv(pseudonymHMACKeyEnv, "test-secret-key")
+
+	result := PseudonymizeID("test-user")
+
+	h := hmac.New(sha256.New, []byte("test-secret-key"))
+	_, _ = h.Write([]byte("test-user"))
+	want := hex.EncodeToString(h.Sum(nil))[:pseudonymLength]
+
+	assert.Equal(t, want, result)
+	assert.NotEqual(t, "f85ac825d102b9f2", result, "HMAC output should differ from legacy plain SHA-256")
+}
+
+func TestPseudonymizeID_FallbacksToLegacySHA256WhenKeyUnset(t *testing.T) {
+	t.Setenv(pseudonymHMACKeyEnv, "")
+	assert.Equal(t, "f85ac825d102b9f2", PseudonymizeID("test-user"))
 }
