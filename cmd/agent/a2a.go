@@ -11,11 +11,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/go-logr/logr"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
@@ -156,7 +153,6 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 	// Build the mux with metrics endpoint.
 	mux := http.NewServeMux()
 	mux.Handle("/", a2aHandler)
-	mux.Handle("/metrics", promhttp.Handler())
 
 	// Serve A2A handler on the facade port.
 	facadeServer := &http.Server{
@@ -167,24 +163,8 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 		IdleTimeout:  idleTimeout,
 	}
 
-	errChan := make(chan error, 1)
-	go func() {
-		log.Info("starting A2A server", "addr", facadeServer.Addr)
-		if err := facadeServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errChan <- fmt.Errorf("a2a server error: %w", err)
-		}
-	}()
-
-	// Wait for shutdown signal or error
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	select {
-	case sig := <-sigChan:
-		log.Info("received shutdown signal", "signal", sig)
-	case err := <-errChan:
-		log.Error(err, "server error")
-	}
+	healthServer := newHealthServer(cfg, readyzOKHandler)
+	runPrimaryAndHealthServers(log, "A2A server", facadeServer, healthServer)
 
 	// Graceful shutdown
 	log.Info("shutting down...")
@@ -194,9 +174,7 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 	if err := a2aSrv.Shutdown(ctx); err != nil {
 		log.Error(err, "error shutting down A2A server")
 	}
-	if err := facadeServer.Shutdown(ctx); err != nil {
-		log.Error(err, "error shutting down HTTP server")
-	}
+	shutdownPrimaryAndHealthServers(log, "HTTP server", facadeServer, healthServer)
 
 	log.Info("shutdown complete")
 }

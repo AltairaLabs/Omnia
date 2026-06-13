@@ -25,7 +25,6 @@ import (
 	"syscall"
 
 	"github.com/go-logr/logr"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade"
@@ -165,7 +164,6 @@ func buildWebSocketServer(
 	mux := http.NewServeMux()
 	mux.Handle("/ws", wsServer)
 	mux.Handle("/api/agents/", wsServer)
-	mux.Handle("/metrics", promhttp.Handler())
 
 	return wsServer, mux, nil
 }
@@ -184,16 +182,7 @@ func newFacadeHTTPServer(cfg *agent.Config, handler http.Handler) *http.Server {
 
 // newHealthHTTPServer creates the health check HTTP server.
 func newHealthHTTPServer(cfg *agent.Config, store session.Store, handler facade.MessageHandler) *http.Server {
-	healthMux := http.NewServeMux()
-	healthMux.HandleFunc("/healthz", healthzHandler)
-	healthMux.HandleFunc("/readyz", readyzHandler(store, handler))
-
-	return &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.HealthPort),
-		Handler:      healthMux,
-		ReadTimeout:  readTimeout,
-		WriteTimeout: writeTimeout,
-	}
+	return newHealthServer(cfg, readyzHandler(store, handler))
 }
 
 // startAndServe starts all servers and blocks until shutdown signal or error.
