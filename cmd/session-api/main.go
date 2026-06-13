@@ -310,10 +310,18 @@ func run() error {
 	startHTTPServer(log, "session API", f.apiAddr, apiSrv)
 
 	// --- OTLP servers (optional) ---
+	// OTLP ingest is a write path: the transformer CREATES sessions and appends
+	// messages. The same ServiceAccount auth wired onto the JSON API gates both
+	// OTLP listeners. When reviewer is nil (auth disabled) these are pass-through.
+	//
+	// NOTE: when auth is enabled, OTLP senders (the facade/runtime OTel exporters
+	// and any alloy/collector forwarding to :4317/:4318) MUST present their
+	// ServiceAccount bearer token. Wiring those clients + the Helm chart RBAC is a
+	// later task; without it, exporters will be rejected (401/Unauthenticated).
 	var grpcSrv *grpc.Server
 	var otlpHTTPSrv *http.Server
 	if f.otlpEnabled {
-		grpcSrv, otlpHTTPSrv = startOTLPServers(f, sessionService, log)
+		grpcSrv, otlpHTTPSrv = startOTLPServers(f, sessionService, log, reviewer, allowedSubjects)
 	}
 
 	log.Info("session-api ready",
@@ -780,11 +788,20 @@ func initEventPublisher(registry *providers.Registry, log logr.Logger, httpMetri
 
 // startOTLPServers creates and starts the OTLP gRPC and HTTP servers.
 // Returns the servers for graceful shutdown.
-func startOTLPServers(f *flags, svc *api.SessionService, log logr.Logger) (*grpc.Server, *http.Server) {
+//
+// reviewer and allowedSubjects gate both listeners with ServiceAccount auth (the
+// same as the JSON API): the gRPC server installs the serviceauth interceptors
+// and the HTTP handler is wrapped with serviceauth.RequireServiceAccount. A nil
+// reviewer makes both pass-through (auth disabled), leaving OTLP behavior
+// unchanged. These are parameters (rather than read from f) so wiring tests can
+// inject a fake reviewer.
+func startOTLPServers(f *flags, svc *api.SessionService, log logr.Logger, reviewer serviceauth.TokenReviewer, allowedSubjects []string) (*grpc.Server, *http.Server) {
 	transformer := otlp.NewTransformer(svc, log)
 
-	// gRPC server.
-	grpcSrv := grpc.NewServer()
+	// gRPC server. The OTLP TraceService only registers the unary Export RPC, so
+	// the unary interceptor is what gates ingest; the stream interceptor is added
+	// defensively (harmless when no streaming RPC is registered).
+	grpcSrv := grpc.NewServer(otlpGRPCServerOptions(reviewer, allowedSubjects)...)
 	receiver := otlp.NewReceiver(transformer, log)
 	coltracepb.RegisterTraceServiceServer(grpcSrv, receiver)
 
@@ -801,11 +818,10 @@ func startOTLPServers(f *flags, svc *api.SessionService, log logr.Logger) (*grpc
 	}()
 
 	// HTTP server.
-	handler := otlp.NewHandler(transformer, log)
-	otlpMux := http.NewServeMux()
-	handler.RegisterRoutes(otlpMux)
-
-	httpSrv := &http.Server{Addr: f.otlpHTTPAddr, Handler: otlpMux}
+	httpSrv := &http.Server{
+		Addr:    f.otlpHTTPAddr,
+		Handler: buildOTLPHTTPHandler(transformer, log, reviewer, allowedSubjects),
+	}
 	go func() {
 		log.Info("starting OTLP HTTP server", "addr", f.otlpHTTPAddr)
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -814,6 +830,30 @@ func startOTLPServers(f *flags, svc *api.SessionService, log logr.Logger) (*grpc
 	}()
 
 	return grpcSrv, httpSrv
+}
+
+// otlpGRPCServerOptions builds the grpc.ServerOptions for the OTLP gRPC server,
+// installing the ServiceAccount auth interceptors. A nil reviewer leaves the
+// interceptors as pass-through (the serviceauth package handles nil). Extracted
+// so wiring tests can assert the server is constructed with auth.
+func otlpGRPCServerOptions(reviewer serviceauth.TokenReviewer, allowedSubjects []string) []grpc.ServerOption {
+	return []grpc.ServerOption{
+		grpc.UnaryInterceptor(serviceauth.UnaryServerInterceptor(reviewer, allowedSubjects)),
+		grpc.StreamInterceptor(serviceauth.StreamServerInterceptor(reviewer, allowedSubjects)),
+	}
+}
+
+// buildOTLPHTTPHandler assembles the OTLP/HTTP handler wrapped with
+// ServiceAccount auth. The OTLP HTTP listener only serves the export endpoint
+// (no /healthz), so there are no exempt paths. A nil reviewer makes the wrapper
+// pass-through. Extracted so the build path is testable.
+func buildOTLPHTTPHandler(transformer *otlp.Transformer, log logr.Logger, reviewer serviceauth.TokenReviewer, allowedSubjects []string) http.Handler {
+	handler := otlp.NewHandler(transformer, log)
+	otlpMux := http.NewServeMux()
+	handler.RegisterRoutes(otlpMux)
+
+	authMW := serviceauth.RequireServiceAccount(reviewer, allowedSubjects)
+	return authMW(otlpMux)
 }
 
 // buildMediaDeleter returns a MediaDeleter based on the configured cold storage
