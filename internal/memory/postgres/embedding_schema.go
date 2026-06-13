@@ -56,6 +56,11 @@ const (
 	// memory-api replicas so they can't race the DDL. Keyed on the issue.
 	embeddingSchemaAdvisoryLock int64 = 1309
 
+	// embeddingIndexAdvisoryLock serialises the post-commit CONCURRENTLY index
+	// builds across replicas (those run outside the schema tx, so the xact lock
+	// above no longer covers them). Keyed on the PERF-4 issue.
+	embeddingIndexAdvisoryLock int64 = 1352
+
 	// MaxIndexableEmbeddingDim is pgvector's HNSW/IVFFlat dimension cap. A
 	// larger vector can be stored but not indexed, so the reconciler (and the
 	// admin consent endpoint) reject it rather than let CREATE INDEX fail at
@@ -83,20 +88,26 @@ type embeddingTableSpec struct {
 	hasDataSQL string
 	dropSQL    string
 	addFmt     string // single %d for the dimension
-	indexSQL   string // empty when the table has no embedding index
+	indexName  string // empty when the table has no embedding index
+	indexSQL   string // CONCURRENTLY IF NOT EXISTS build; empty when no index
 }
 
 // embeddingTables lists the columns EnsureEmbeddingSchema manages. Index
 // policy matches the pre-#1309 schema: observations carry an HNSW index;
 // entities are unindexed (the entity vector is read-only by consolidation
 // dup-detection and was never indexed after migration 000007).
+//
+// The index is built CONCURRENTLY after the schema tx commits (PERF-4) so a
+// first-time build on a large, populated observations table can't take an
+// ACCESS EXCLUSIVE lock and stall writes / replica startups.
 var embeddingTables = []embeddingTableSpec{
 	{
 		name:       tableObservations,
 		hasDataSQL: `SELECT EXISTS(SELECT 1 FROM memory_observations WHERE embedding IS NOT NULL)`,
 		dropSQL:    `ALTER TABLE memory_observations DROP COLUMN embedding`,
 		addFmt:     `ALTER TABLE memory_observations ADD COLUMN embedding vector(%d)`,
-		indexSQL:   `CREATE INDEX idx_memory_observations_embedding ON memory_observations USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)`,
+		indexName:  "idx_memory_observations_embedding",
+		indexSQL:   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_memory_observations_embedding ON memory_observations USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)`,
 	},
 	{
 		name:       tableEntities,
@@ -132,6 +143,84 @@ func EnsureEmbeddingSchema(ctx context.Context, pool *pgxpool.Pool, dim int, log
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("memory: commit embedding schema tx: %w", err)
+	}
+
+	// PERF-4: build the embedding indexes outside the schema tx with
+	// CONCURRENTLY, now that the columns are committed.
+	return ensureEmbeddingIndexes(ctx, pool, log)
+}
+
+// ensureEmbeddingIndexes builds each managed embedding index with CREATE INDEX
+// CONCURRENTLY (PERF-4) so a first-time build on a large, already-populated
+// table doesn't take an ACCESS EXCLUSIVE lock and stall writes. CONCURRENTLY
+// cannot run inside a transaction, so this runs on a dedicated pool connection
+// in autocommit (simple protocol); a session advisory lock serialises replicas
+// and IF NOT EXISTS makes it idempotent.
+func ensureEmbeddingIndexes(ctx context.Context, pool *pgxpool.Pool, log logr.Logger) error {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("memory: acquire conn for embedding index build: %w", err)
+	}
+	defer conn.Release()
+
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, embeddingIndexAdvisoryLock); err != nil {
+		return fmt.Errorf("memory: embedding index advisory lock: %w", err)
+	}
+	defer func() {
+		if _, uerr := conn.Exec(ctx, `SELECT pg_advisory_unlock($1)`, embeddingIndexAdvisoryLock); uerr != nil {
+			log.Error(uerr, "embedding index advisory unlock failed")
+		}
+	}()
+
+	for i := range embeddingTables {
+		spec := embeddingTables[i]
+		if spec.indexSQL == "" {
+			continue
+		}
+		if err := buildEmbeddingIndex(ctx, conn, spec, log); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// buildEmbeddingIndex builds one HNSW index CONCURRENTLY. A prior interrupted
+// build can leave an invalid index that IF NOT EXISTS would skip forever, so
+// drop that first. Both DDLs use the simple protocol because CONCURRENTLY can't
+// run in the implicit transaction pgx's extended protocol would wrap it in.
+func buildEmbeddingIndex(ctx context.Context, conn *pgxpool.Conn, spec embeddingTableSpec, log logr.Logger) error {
+	if err := dropInvalidIndex(ctx, conn, spec.indexName, log); err != nil {
+		return err
+	}
+	if _, err := conn.Exec(ctx, spec.indexSQL, pgx.QueryExecModeSimpleProtocol); err != nil {
+		return fmt.Errorf("memory: build index %s: %w", spec.indexName, err)
+	}
+	return nil
+}
+
+// dropInvalidIndex drops the named index if it exists but is marked invalid (a
+// previous CONCURRENTLY build was interrupted), so the subsequent IF NOT EXISTS
+// build rebuilds it rather than skipping a useless invalid index.
+func dropInvalidIndex(ctx context.Context, conn *pgxpool.Conn, indexName string, log logr.Logger) error {
+	var invalid bool
+	err := conn.QueryRow(ctx, `
+		SELECT NOT i.indisvalid
+		FROM pg_class c
+		JOIN pg_index i ON i.indexrelid = c.oid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = 'public' AND c.relname = $1`, indexName).Scan(&invalid)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // not present yet — nothing to drop
+	}
+	if err != nil {
+		return fmt.Errorf("memory: introspect index %s: %w", indexName, err)
+	}
+	if !invalid {
+		return nil
+	}
+	log.Info("dropping invalid embedding index from an interrupted build", "index", indexName)
+	if _, err := conn.Exec(ctx, "DROP INDEX CONCURRENTLY IF EXISTS "+indexName, pgx.QueryExecModeSimpleProtocol); err != nil {
+		return fmt.Errorf("memory: drop invalid index %s: %w", indexName, err)
 	}
 	return nil
 }
@@ -223,8 +312,10 @@ func requireConsent(ctx context.Context, db pgExecutor, dim int) error {
 
 // reconcileColumn creates the embedding column if absent, no-ops if it already
 // matches dim, and otherwise drops + recreates it at dim (dropping the column
-// drops any dependent index, which is then recreated). Callers must have
-// already cleared the consent gate for any destructive case.
+// drops any dependent index). The HNSW index is NOT (re)built here — it is
+// built CONCURRENTLY after the schema tx commits (see ensureEmbeddingIndexes,
+// PERF-4). Callers must have already cleared the consent gate for any
+// destructive case.
 func reconcileColumn(ctx context.Context, db pgExecutor, spec embeddingTableSpec, dim int, log logr.Logger) error {
 	cur, present, err := currentEmbeddingDim(ctx, db, spec.name)
 	if err != nil {
@@ -243,11 +334,6 @@ func reconcileColumn(ctx context.Context, db pgExecutor, spec embeddingTableSpec
 	}
 	if _, err := db.Exec(ctx, fmt.Sprintf(spec.addFmt, dim)); err != nil {
 		return fmt.Errorf("memory: add %s.%s: %w", spec.name, embeddingColumn, err)
-	}
-	if spec.indexSQL != "" {
-		if _, err := db.Exec(ctx, spec.indexSQL); err != nil {
-			return fmt.Errorf("memory: index %s.%s: %w", spec.name, embeddingColumn, err)
-		}
 	}
 	return nil
 }
