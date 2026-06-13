@@ -1,0 +1,71 @@
+suite: arena-controller workspace storage class
+# Covers issue #1322 — the arena-controller must receive
+# --workspace-storage-class from the platform-wide
+# .Values.workspaces.storage.storageClass (same source as the operator),
+# independent of whether the in-cluster NFS CSI driver is enabled.
+# The NFS-CSI-derived class remains a fallback only when no explicit
+# workspaces.storage.storageClass is set.
+values:
+  - ../values-chart-tests.yaml
+tests:
+  - it: emits the platform-wide workspace storage class when NFS CSI is disabled
+    template: templates/arena-controller-deployment.yaml
+    set:
+      enterprise.enabled: true
+      redis.enabled: true
+      nfs.csiDriver.enabled: false
+      workspaces.storage.storageClass: omnia-nfs-static
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --workspace-storage-class=omnia-nfs-static
+
+  - it: platform-wide class wins over the NFS-CSI class when both could apply
+    template: templates/arena-controller-deployment.yaml
+    set:
+      enterprise.enabled: true
+      redis.enabled: true
+      nfs.csiDriver.enabled: true
+      nfs.server.enabled: true
+      nfs.csiDriver.storageClass.name: omnia-nfs
+      workspaces.storage.storageClass: omnia-nfs-static
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --workspace-storage-class=omnia-nfs-static
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --workspace-storage-class=omnia-nfs
+
+  - it: falls back to the NFS-CSI class when no platform-wide class is set
+    template: templates/arena-controller-deployment.yaml
+    set:
+      enterprise.enabled: true
+      redis.enabled: true
+      nfs.csiDriver.enabled: true
+      nfs.server.enabled: true
+      nfs.csiDriver.storageClass.name: omnia-nfs
+      workspaces.storage.storageClass: ""
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --workspace-storage-class=omnia-nfs
+
+  - it: emits no storage class flag when neither source is configured
+    template: templates/arena-controller-deployment.yaml
+    set:
+      enterprise.enabled: true
+      redis.enabled: true
+      nfs.csiDriver.enabled: false
+      nfs.server.enabled: false
+      workspaces.storage.storageClass: ""
+    asserts:
+      # Neither source configured → no flag at all. notContains both the
+      # NFS-CSI fallback default and an empty-valued flag covers every form
+      # this template can emit.
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --workspace-storage-class=omnia-nfs
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --workspace-storage-class=

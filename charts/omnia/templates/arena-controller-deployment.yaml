@@ -99,7 +99,17 @@ spec:
             - --nfs-server={{ include "omnia.nfsServer" . }}
             - --nfs-path={{ include "omnia.nfsPath" . }}
             {{- end }}
-            {{- if and .Values.nfs.csiDriver.enabled (or .Values.nfs.server.enabled .Values.nfs.external.server) }}
+            {{- /*
+              Workspace storage class. The platform-wide class
+              (.Values.workspaces.storage.storageClass) is authoritative and
+              flows through exactly like the operator's flag — independent of
+              the in-cluster NFS CSI driver. The NFS-CSI-derived class is only
+              a fallback when no platform-wide class is set (local-dev NFS).
+              See issue #1322.
+            */}}
+            {{- if .Values.workspaces.storage.storageClass }}
+            - --workspace-storage-class={{ .Values.workspaces.storage.storageClass }}
+            {{- else if and .Values.nfs.csiDriver.enabled (or .Values.nfs.server.enabled .Values.nfs.external.server) }}
             - --workspace-storage-class={{ include "omnia.nfsStorageClass" . }}
             {{- end }}
             {{- if .Values.workspaceContent.enabled }}
