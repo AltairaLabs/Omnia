@@ -19,9 +19,14 @@ const (
 	ReasonMutabilityBlocked         = "mutability_blocked"
 	ReasonAnonymityBelowThreshold   = "anonymity_below_threshold"
 	ReasonScopeOutsideWorkspace     = "scope_outside_workspace"
+	ReasonScopeWideningUnsupported  = "scope_widening_unsupported"
 	ReasonTargetUnknown             = "target_unknown"
 	ReasonShapeInvalid              = "shape_invalid"
 )
+
+// scopeWideningWorkspace is the only maxScopeWidening value supported in v1:
+// rescope writes are confined to the originating workspace.
+const scopeWideningWorkspace = "workspace"
 
 // ValidatorOptions configures the validator's policy gates.
 type ValidatorOptions struct {
@@ -217,6 +222,15 @@ func (v *Validator) checkScope(a Action) string {
 	r, ok := a.(RescopeAction)
 	if !ok {
 		return ""
+	}
+	// maxScopeWidening caps how far a rescope may widen scope. Only
+	// "workspace" (confine to the originating workspace) is supported in v1;
+	// any other value fails closed rather than silently widening. Empty means
+	// the resolved default ("workspace"). Previously this field was never
+	// consulted (#1334) — the cross-workspace confinement below already
+	// enforced the practical cap, but an unsupported value now rejects.
+	if w := v.opts.Gates.MaxScopeWidening; w != "" && w != scopeWideningWorkspace {
+		return ReasonScopeWideningUnsupported
 	}
 	if r.NewScope.WorkspaceID != v.opts.WorkspaceID {
 		return ReasonScopeOutsideWorkspace

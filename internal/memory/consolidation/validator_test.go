@@ -105,6 +105,30 @@ func TestValidator_AcceptsRescopeAtThreshold(t *testing.T) {
 	}
 }
 
+// #1334: an unsupported maxScopeWidening value must fail closed rather than be
+// silently ignored.
+func TestValidator_RejectsUnsupportedMaxScopeWidening(t *testing.T) {
+	gates := memoryv1.MemoryConsolidationSafetyGates{MaxScopeWidening: "global"} // unsupported in v1
+	v := NewValidator(ValidatorOptions{WorkspaceID: testWorkspaceID, Gates: gates})
+	actions := []Action{
+		RescopeAction{
+			TargetIDs: []string{testObsID},
+			NewScope:  Scope{WorkspaceID: testWorkspaceID, AgentID: "ag-1"},
+		},
+	}
+	ctx := ValidationContext{
+		RowMutability:           map[string]string{testObsID: MutabilityMutable},
+		BucketDistinctUserCount: 100, // well above any threshold
+	}
+	results := v.Validate(actions, ctx)
+	if len(results) != 1 || results[0].Accepted {
+		t.Fatalf("expected reject, got %+v", results)
+	}
+	if results[0].Reason != ReasonScopeWideningUnsupported {
+		t.Errorf("reason = %q, want %q", results[0].Reason, ReasonScopeWideningUnsupported)
+	}
+}
+
 func TestValidator_RejectsScopeOutsideWorkspace(t *testing.T) {
 	v := NewValidator(ValidatorOptions{WorkspaceID: testWorkspaceID})
 	actions := []Action{
