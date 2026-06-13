@@ -356,6 +356,30 @@ func TestHandleGetSession_DecryptsContent(t *testing.T) {
 	}
 }
 
+// TestHandleGetSession_DecryptError_Returns500 verifies a decryption failure in
+// GET /sessions/{id} (SEC-6) propagates as a 5xx instead of leaking ciphertext.
+func TestHandleGetSession_DecryptError_Returns500(t *testing.T) {
+	h, warm := setupEncryptionHandler(t)
+	warm.sessions[encSessionA] = testSession(encSessionA)
+
+	// A value with the encrypted prefix that errEncryptor will fail to decrypt.
+	warm.messages[encSessionA] = []*session.Message{
+		{ID: "m1", Content: errMsgEncPrefix + "aW52YWxpZA==", SequenceNum: 1},
+	}
+	h.SetEncryptorResolver(EncryptorResolverFunc(func(_ string) (Encryptor, bool) {
+		return errEncryptor{}, true
+	}))
+
+	mux := serveMux(h)
+	req := newEncRequest(http.MethodGet, "/api/v1/sessions/"+encSessionA, "")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code < 500 {
+		t.Fatalf("expected 5xx, got %d", rec.Code)
+	}
+}
+
 // TestHandleRecordToolCall_EncryptsFields verifies that Arguments, Result, and
 // ErrorMessage are encrypted and Name stays plaintext in the stored tool call.
 func TestHandleRecordToolCall_EncryptsFields(t *testing.T) {
