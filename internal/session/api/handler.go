@@ -428,6 +428,17 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	enc := h.encryptorFor(sessionID)
+	if enc != nil {
+		for _, m := range msgPtrs {
+			if derr := decryptMessage(enc, m); derr != nil {
+				log.Error(derr, "DecryptMessage failed", "sessionID", sessionID)
+				writeError(w, derr)
+				return
+			}
+		}
+	}
+
 	msgs := make([]session.Message, 0, len(msgPtrs))
 	for _, m := range msgPtrs {
 		msgs = append(msgs, *m)

@@ -324,6 +324,38 @@ func TestHandleGetMessages_PlaintextPassthroughWhenNoEncryptor(t *testing.T) {
 	}
 }
 
+// TestHandleGetSession_DecryptsContent verifies that messages returned by
+// GET /sessions/{id} are decrypted when an encryptor is configured (SEC-6).
+func TestHandleGetSession_DecryptsContent(t *testing.T) {
+	h, warm := setupEncryptionHandler(t)
+	warm.sessions[encSessionA] = testSession(encSessionA)
+
+	enc := mockEncryptor{key: 0x5A}
+	h.SetEncryptorResolver(encResolverFor(encSessionA, enc))
+
+	// Store pre-encrypted content.
+	encrypted := encryptedString(t, enc, "hello world")
+	warm.messages[encSessionA] = []*session.Message{
+		{ID: "m1", Content: encrypted, SequenceNum: 1},
+	}
+
+	mux := serveMux(h)
+	req := newEncRequest(http.MethodGet, "/api/v1/sessions/"+encSessionA, "")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeBodyJSON[SessionResponse](t, rec)
+	if len(resp.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(resp.Messages))
+	}
+	if resp.Messages[0].Content != "hello world" {
+		t.Fatalf("expected decrypted content %q, got %q", "hello world", resp.Messages[0].Content)
+	}
+}
+
 // TestHandleRecordToolCall_EncryptsFields verifies that Arguments, Result, and
 // ErrorMessage are encrypted and Name stays plaintext in the stored tool call.
 func TestHandleRecordToolCall_EncryptsFields(t *testing.T) {
