@@ -38,6 +38,8 @@ type ServerMetrics interface {
 	MessageReceived()
 	// MessageSent records a sent message.
 	MessageSent()
+	// RecordingDropped records a dropped async recording task.
+	RecordingDropped()
 
 	// Media metrics
 	// UploadStarted records the start of a media upload.
@@ -84,6 +86,9 @@ func (n *NoOpMetrics) MessageReceived() { /* no-op: null object pattern */ }
 
 // MessageSent is a no-op - metrics are disabled.
 func (n *NoOpMetrics) MessageSent() { /* no-op: null object pattern */ }
+
+// RecordingDropped is a no-op - metrics are disabled.
+func (n *NoOpMetrics) RecordingDropped() { /* no-op: null object pattern */ }
 
 // UploadStarted is a no-op - metrics are disabled.
 func (n *NoOpMetrics) UploadStarted() { /* no-op: null object pattern */ }

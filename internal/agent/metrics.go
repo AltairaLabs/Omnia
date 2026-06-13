@@ -59,6 +59,9 @@ type Metrics struct {
 	// MessagesSent is the total number of messages sent.
 	MessagesSent prometheus.Counter
 
+	// RecordingDroppedTotal is the total number of dropped async recording tasks.
+	RecordingDroppedTotal prometheus.Counter
+
 	// Media metrics
 	// UploadsTotal is the total number of upload attempts.
 	UploadsTotal *prometheus.CounterVec
@@ -142,6 +145,12 @@ func NewMetrics(agentName, namespace string) *Metrics {
 		MessagesSent: promauto.NewCounter(prometheus.CounterOpts{
 			Name:        "omnia_agent_messages_sent_total",
 			Help:        "Total number of WebSocket messages sent",
+			ConstLabels: labels,
+		}),
+
+		RecordingDroppedTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name:        "omnia_facade_recording_dropped_total",
+			Help:        "Total number of dropped async recording tasks",
 			ConstLabels: labels,
 		}),
 
@@ -291,6 +300,11 @@ func (m *Metrics) MessageReceived() {
 // MessageSent records a sent message.
 func (m *Metrics) MessageSent() {
 	m.MessagesSent.Inc()
+}
+
+// RecordingDropped records a dropped async recording task.
+func (m *Metrics) RecordingDropped() {
+	m.RecordingDroppedTotal.Inc()
 }
 
 // UploadStarted records the start of a media upload.

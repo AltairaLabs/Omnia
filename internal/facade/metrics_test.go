@@ -61,6 +61,11 @@ func TestNoOpMetrics_MessageSent(t *testing.T) {
 	m.MessageSent() // Should not panic
 }
 
+func TestNoOpMetrics_RecordingDropped(t *testing.T) {
+	m := &NoOpMetrics{}
+	m.RecordingDropped() // Should not panic
+}
+
 func TestServerMetricsInterface(t *testing.T) {
 	// Verify that NoOpMetrics can be used as ServerMetrics
 	var metrics ServerMetrics = &NoOpMetrics{}
@@ -74,4 +79,5 @@ func TestServerMetricsInterface(t *testing.T) {
 	metrics.RequestCompleted(context.Background(), "error", 0.5, "echo")
 	metrics.MessageReceived()
 	metrics.MessageSent()
+	metrics.RecordingDropped()
 }

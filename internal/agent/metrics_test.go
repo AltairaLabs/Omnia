@@ -94,6 +94,13 @@ func newMetricsWithRegistry(agentName, namespace string, reg prometheus.Register
 	})
 	reg.MustRegister(messagesSent)
 
+	recordingDroppedTotal := prometheus.NewCounter(prometheus.CounterOpts{
+		Name:        "omnia_facade_recording_dropped_total",
+		Help:        "Total number of dropped async recording tasks",
+		ConstLabels: labels,
+	})
+	reg.MustRegister(recordingDroppedTotal)
+
 	// Media metrics
 	uploadsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name:        "omnia_facade_uploads_total",
@@ -146,21 +153,22 @@ func newMetricsWithRegistry(agentName, namespace string, reg prometheus.Register
 	reg.MustRegister(mediaChunkBytesTotal)
 
 	return &Metrics{
-		ConnectionsActive:    connectionsActive,
-		ConnectionsTotal:     connectionsTotal,
-		SessionsActive:       sessionsActive,
-		RequestsInflight:     requestsInflight,
-		RequestsTotal:        requestsTotal,
-		RequestDuration:      requestDuration,
-		MessagesReceived:     messagesReceived,
-		MessagesSent:         messagesSent,
-		UploadsTotal:         uploadsTotal,
-		UploadBytesTotal:     uploadBytesTotal,
-		UploadDuration:       uploadDuration,
-		DownloadsTotal:       downloadsTotal,
-		DownloadBytesTotal:   downloadBytesTotal,
-		MediaChunksTotal:     mediaChunksTotal,
-		MediaChunkBytesTotal: mediaChunkBytesTotal,
+		ConnectionsActive:     connectionsActive,
+		ConnectionsTotal:      connectionsTotal,
+		SessionsActive:        sessionsActive,
+		RequestsInflight:      requestsInflight,
+		RequestsTotal:         requestsTotal,
+		RequestDuration:       requestDuration,
+		MessagesReceived:      messagesReceived,
+		MessagesSent:          messagesSent,
+		RecordingDroppedTotal: recordingDroppedTotal,
+		UploadsTotal:          uploadsTotal,
+		UploadBytesTotal:      uploadBytesTotal,
+		UploadDuration:        uploadDuration,
+		DownloadsTotal:        downloadsTotal,
+		DownloadBytesTotal:    downloadBytesTotal,
+		MediaChunksTotal:      mediaChunksTotal,
+		MediaChunkBytesTotal:  mediaChunkBytesTotal,
 	}
 }
 
@@ -177,6 +185,7 @@ func TestNewMetrics(t *testing.T) {
 	assert.NotNil(t, m.RequestDuration)
 	assert.NotNil(t, m.MessagesReceived)
 	assert.NotNil(t, m.MessagesSent)
+	assert.NotNil(t, m.RecordingDroppedTotal)
 	// Media metrics
 	assert.NotNil(t, m.UploadsTotal)
 	assert.NotNil(t, m.UploadBytesTotal)
@@ -300,6 +309,16 @@ func TestMetricsMessageTracking(t *testing.T) {
 
 	assert.Equal(t, float64(2), getCounterValue(t, m.MessagesReceived))
 	assert.Equal(t, float64(1), getCounterValue(t, m.MessagesSent))
+}
+
+func TestMetricsRecordingDropped(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newMetricsWithRegistry("test-agent", "test-namespace", reg)
+
+	m.RecordingDropped()
+	m.RecordingDropped()
+
+	assert.Equal(t, float64(2), getCounterValue(t, m.RecordingDroppedTotal))
 }
 
 // Helper functions to extract metric values for testing

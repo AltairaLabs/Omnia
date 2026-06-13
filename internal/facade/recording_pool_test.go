@@ -27,7 +27,7 @@ import (
 )
 
 func TestRecordingPool_SubmitAndClose(t *testing.T) {
-	pool := NewRecordingPool(4, 100, logr.Discard())
+	pool := NewRecordingPool(4, 100, logr.Discard(), nil)
 
 	var count atomic.Int32
 	for range 50 {
@@ -42,7 +42,8 @@ func TestRecordingPool_SubmitAndClose(t *testing.T) {
 
 func TestRecordingPool_DropWhenFull(t *testing.T) {
 	// Create a pool with 1 worker and queue of 1, then block the worker
-	pool := NewRecordingPool(1, 1, logr.Discard())
+	metrics := &recordingPoolMetricsSpy{}
+	pool := NewRecordingPool(1, 1, logr.Discard(), metrics)
 
 	blocker := make(chan struct{})
 	pool.Submit(func() {
@@ -68,11 +69,21 @@ func TestRecordingPool_DropWhenFull(t *testing.T) {
 
 	// The dropped task should not have run
 	assert.True(t, dropped.Load(), "task should have been dropped when queue was full")
+	assert.Equal(t, int32(1), metrics.dropped.Load(), "drop counter should increment when queue is full")
 }
 
 func TestRecordingPool_DefaultValues(t *testing.T) {
-	pool := NewRecordingPool(0, 0, logr.Discard())
+	pool := NewRecordingPool(0, 0, logr.Discard(), nil)
 	require.NotNil(t, pool)
 	assert.Equal(t, DefaultRecordingQueueSize, cap(pool.queue))
 	pool.Close()
+}
+
+type recordingPoolMetricsSpy struct {
+	NoOpMetrics
+	dropped atomic.Int32
+}
+
+func (m *recordingPoolMetricsSpy) RecordingDropped() {
+	m.dropped.Add(1)
 }
