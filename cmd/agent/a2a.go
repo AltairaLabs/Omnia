@@ -164,11 +164,7 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 	}
 
 	healthServer := newHealthServer(cfg, readyzOKHandler)
-	errChan := make(chan error, 2)
-	startServerGoroutine("A2A server", facadeServer, errChan, log)
-	startServerGoroutine("health server", healthServer, errChan, log)
-
-	waitForShutdownSignal(log, errChan)
+	runPrimaryAndHealthServers(log, "A2A server", facadeServer, healthServer)
 
 	// Graceful shutdown
 	log.Info("shutting down...")
@@ -178,10 +174,7 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 	if err := a2aSrv.Shutdown(ctx); err != nil {
 		log.Error(err, "error shutting down A2A server")
 	}
-	shutdownServers(log, map[string]*http.Server{
-		"HTTP server":   facadeServer,
-		"health server": healthServer,
-	})
+	shutdownPrimaryAndHealthServers(log, "HTTP server", facadeServer, healthServer)
 
 	log.Info("shutdown complete")
 }

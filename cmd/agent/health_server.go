@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/altairalabs/omnia/internal/agent"
@@ -36,4 +37,22 @@ func newHealthServer(cfg *agent.Config, readyHandler http.HandlerFunc) *http.Ser
 func readyzOKHandler(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
+}
+
+// runPrimaryAndHealthServers starts two HTTP servers and waits for either a
+// shutdown signal or a non-graceful server error.
+func runPrimaryAndHealthServers(log logr.Logger, primaryName string, primary, health *http.Server) {
+	errChan := make(chan error, 2)
+	startServerGoroutine(primaryName, primary, errChan, log)
+	startServerGoroutine("health server", health, errChan, log)
+	waitForShutdownSignal(log, errChan)
+}
+
+// shutdownPrimaryAndHealthServers gracefully shuts down a primary HTTP server
+// and the shared health server using the common shutdown helper.
+func shutdownPrimaryAndHealthServers(log logr.Logger, primaryName string, primary, health *http.Server) {
+	shutdownServers(log, map[string]*http.Server{
+		primaryName:     primary,
+		"health server": health,
+	})
 }
