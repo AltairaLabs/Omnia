@@ -2,8 +2,11 @@
 
 import { memo } from "react";
 import { Handle, Position } from "@xyflow/react";
-import { Bot, Workflow, Wrench, Sparkles, Play, Flag, RotateCcw } from "lucide-react";
+import { Bot, Workflow, Wrench, Sparkles, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  WorkflowStateNode, InitialNode, FinalNode, VariableNode, ArtifactNode,
+} from "./workflow-nodes";
 import type { WorkloadNodeData } from "./to-flow";
 import type { WorkloadBadge, WorkloadNode } from "./types";
 
@@ -27,24 +30,6 @@ function nodeBorderClass(node: WorkloadNode): string {
   if (node.isEntry) return "border-4 border-emerald-500 ring-2 ring-emerald-500/20";
   if (node.isTerminal) return "border-4 border-rose-500 ring-2 ring-rose-500/20";
   return "border-2 border-blue-500";
-}
-
-function EndpointPill({ node }: Readonly<{ node: WorkloadNode }>) {
-  if (node.isEntry) {
-    return (
-      <span className="absolute -top-2.5 left-2 z-10 inline-flex items-center gap-0.5 rounded bg-emerald-500 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-md">
-        <Play className="h-2.5 w-2.5 fill-current" />Start
-      </span>
-    );
-  }
-  if (node.isTerminal) {
-    return (
-      <span className="absolute -top-2.5 left-2 z-10 inline-flex items-center gap-0.5 rounded bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-md">
-        <Flag className="h-2.5 w-2.5" />End
-      </span>
-    );
-  }
-  return null;
 }
 
 function iconColorClass(node: WorkloadNode): string {
@@ -73,7 +58,6 @@ export const WorkloadAgentNode = memo(({ data }: Readonly<{ data: WorkloadNodeDa
   const iconColor = iconColorClass(node);
   return (
     <div className="relative">
-      <EndpointPill node={node} />
       <Handle type="target" position={Position.Left} className="!bg-blue-500" />
       <button
         type="button"
@@ -149,7 +133,12 @@ WorkloadSkillNode.displayName = "WorkloadSkillNode";
 
 export const workloadNodeTypes = {
   workloadAgent: WorkloadAgentNode,
-  workloadState: WorkloadAgentNode,
+  workloadState: WorkloadAgentNode,       // legacy alias; states now use workflowState
   workloadProvider: WorkloadProviderNode,
   workloadSkill: WorkloadSkillNode,
+  workflowState: WorkflowStateNode,
+  workflowInitial: InitialNode,
+  workflowFinal: FinalNode,
+  workflowVariable: VariableNode,
+  workflowArtifact: ArtifactNode,
 };
