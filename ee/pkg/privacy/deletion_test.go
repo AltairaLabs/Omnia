@@ -198,7 +198,7 @@ func TestCreateRequest_MissingUserID(t *testing.T) {
 		Reason: "gdpr_erasure",
 	})
 
-	assert.ErrorIs(t, err, ErrMissingUserID)
+	assert.ErrorIs(t, err, ErrMissingVirtualUserID)
 }
 
 func TestCreateRequest_InvalidReason(t *testing.T) {
@@ -705,7 +705,7 @@ func TestMapErrorToStatus(t *testing.T) {
 		expected int
 	}{
 		{"not found", ErrRequestNotFound, http.StatusNotFound},
-		{"required field", ErrMissingUserID, http.StatusBadRequest},
+		{"required field", ErrMissingVirtualUserID, http.StatusBadRequest},
 		{"invalid reason", ErrInvalidReason, http.StatusBadRequest},
 		{"already processing", ErrAlreadyProcessing, http.StatusConflict},
 		{"missing date range", ErrMissingDateRange, http.StatusBadRequest},

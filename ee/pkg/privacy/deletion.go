@@ -22,7 +22,6 @@ import (
 
 // Sentinel errors returned by the deletion service.
 var (
-	ErrMissingUserID     = errors.New("virtual_user_id is required")
 	ErrInvalidReason     = errors.New("reason must be one of: gdpr_erasure, ccpa_delete, user_request")
 	ErrInvalidScope      = errors.New("scope must be one of: all, workspace, date_range")
 	ErrRequestNotFound   = errors.New("deletion request not found")
@@ -308,7 +307,7 @@ func (s *DeletionService) ListRequestsByUser(ctx context.Context, virtualUserID 
 // validateInput checks the CreateDeletionRequest fields.
 func validateInput(input *CreateDeletionRequest) error {
 	if input.VirtualUserID == "" {
-		return ErrMissingUserID
+		return ErrMissingVirtualUserID
 	}
 	if !validReasons[input.Reason] {
 		return ErrInvalidReason

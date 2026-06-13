@@ -287,6 +287,10 @@ CREATE INDEX idx_deletion_requests_user   ON deletion_requests (virtual_user_id)
 CREATE INDEX idx_deletion_requests_status ON deletion_requests (status);
 
 -- user_privacy_preferences: per-user recording opt-out (not partitioned).
+-- NOTE: user_privacy_preferences stays on user_id (not virtual_user_id) because this
+-- table is shared across BOTH the session and memory databases (same PreferencesPostgresStore
+-- in ee/pkg/privacy/store.go runs against both). Its rename is deferred to #1280 so both
+-- schemas move together. deletion_requests (session-only) already uses virtual_user_id.
 CREATE TABLE user_privacy_preferences (
     user_id            TEXT        NOT NULL,
     opt_out_all        BOOLEAN     DEFAULT false,
