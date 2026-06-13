@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { WorkloadAgentNode, WorkloadProviderNode } from "./workload-nodes";
+import { WorkloadAgentNode, WorkloadProviderNode, WorkloadSkillNode } from "./workload-nodes";
 import type { WorkloadNode } from "./types";
 
 function wrap(ui: ReactNode) {
@@ -18,9 +18,17 @@ describe("workload nodes", () => {
     const onClick = vi.fn();
     wrap(<WorkloadAgentNode data={{ node, onClick }} />);
     expect(screen.getByText("Triage")).toBeInTheDocument();
-    expect(screen.getByText("entry")).toBeInTheDocument();
+    expect(screen.getByText("Start")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button"));
     expect(onClick).toHaveBeenCalledWith("a");
+  });
+
+  it("renders a terminal node with an End marker", () => {
+    const node: WorkloadNode = {
+      id: "z", kind: "state", label: "Closer", isTerminal: true, badges: [], detail: {},
+    };
+    wrap(<WorkloadAgentNode data={{ node }} />);
+    expect(screen.getByText("End")).toBeInTheDocument();
   });
 
   it("renders a provider node with model", () => {
@@ -30,5 +38,20 @@ describe("workload nodes", () => {
     };
     wrap(<WorkloadProviderNode data={{ node: provider }} />);
     expect(screen.getByText("claude-opus-4-8")).toBeInTheDocument();
+  });
+
+  it("renders a skill node with phase and mountAs, and fires onClick", () => {
+    const skill: WorkloadNode = {
+      id: "skill:anthropic", kind: "skill", label: "anthropic", resolution: "resolved",
+      badges: [{ icon: "skill", label: "Ready · 12" }],
+      detail: { skillSource: "anthropic", mountAs: "skills", skillPhase: "Ready" },
+    };
+    const onClick = vi.fn();
+    wrap(<WorkloadSkillNode data={{ node: skill, onClick }} />);
+    expect(screen.getByText("anthropic")).toBeInTheDocument();
+    expect(screen.getByText("Ready · 12")).toBeInTheDocument();
+    expect(screen.getByText(/skills/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button"));
+    expect(onClick).toHaveBeenCalledWith("skill:anthropic");
   });
 });

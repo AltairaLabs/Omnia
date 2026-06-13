@@ -3,17 +3,29 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { WorkloadModel } from "./types";
 
+const fitViewSpy = vi.fn();
+
 vi.mock("@xyflow/react", () => ({
   __esModule: true,
-  ReactFlow: ({ children }: { children?: ReactNode }) => <div data-testid="rf">{children}</div>,
+  ReactFlow: ({
+    children,
+    onInit,
+  }: {
+    children?: ReactNode;
+    onInit?: (inst: { fitView: typeof fitViewSpy }) => void;
+  }) => {
+    onInit?.({ fitView: fitViewSpy });
+    return <div data-testid="rf">{children}</div>;
+  },
   Background: () => null,
   Controls: () => null,
+  Panel: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   BackgroundVariant: { Dots: "dots" },
   useNodesState: (init: unknown[]) => [init, vi.fn(), vi.fn()],
   useEdgesState: (init: unknown[]) => [init, vi.fn(), vi.fn()],
 }));
 
-import { WorkloadGraph } from "./WorkloadGraph";
+import { WorkloadGraph, fitViewAfterPaint } from "./WorkloadGraph";
 
 const empty: WorkloadModel = {
   tier: "solo", altitude: "definition", nodes: [], edges: [],
@@ -42,5 +54,24 @@ describe("WorkloadGraph", () => {
     expect(screen.getByText(/deployment/i)).toBeInTheDocument();
     expect(screen.getByText(/claude-opus-4-8/)).toBeInTheDocument();
     expect(screen.getByText(/≤12 visits/)).toBeInTheDocument();
+  });
+});
+
+describe("fitViewAfterPaint", () => {
+  it("is a no-op when no instance is provided", () => {
+    expect(() => fitViewAfterPaint(null)).not.toThrow();
+  });
+
+  it("fits the view on the next paint frame", () => {
+    const raf = vi
+      .spyOn(globalThis, "requestAnimationFrame")
+      .mockImplementation((cb: FrameRequestCallback) => {
+        cb(0);
+        return 0;
+      });
+    const fitView = vi.fn();
+    fitViewAfterPaint({ fitView } as unknown as Parameters<typeof fitViewAfterPaint>[0]);
+    expect(fitView).toHaveBeenCalledWith({ padding: 0.08, duration: 250 });
+    raf.mockRestore();
   });
 });

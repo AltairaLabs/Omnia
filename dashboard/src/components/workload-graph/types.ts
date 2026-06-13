@@ -7,7 +7,7 @@ export type WorkloadAltitude = "definition" | "deployment";
 export type WorkloadNodeKind =
   | "agent" | "state" | "tool" | "skill" | "provider" | "scenario" | "judge";
 export type ResolutionStatus = "resolved" | "unresolved" | "unavailable";
-export type WorkloadEdgeStyle = "normal" | "loop" | "unresolved";
+export type WorkloadEdgeStyle = "normal" | "loop" | "unresolved" | "provides";
 
 export type WorkloadBadgeIcon = "tool" | "skill" | "entry" | "terminal" | "loop";
 
@@ -36,6 +36,12 @@ export interface WorkloadNodeDetail {
   providerType?: string;
   baseURL?: string;
   role?: string;
+  // skill node fields (skill kind): a SkillSource the pack binds to.
+  skillSource?: string;        // SkillSource CRD name
+  include?: string[];          // include filter from the SkillRef
+  mountAs?: string;            // mount path rename from the SkillRef
+  skillCount?: number;         // SkillSource.status.skillCount
+  skillPhase?: string;         // SkillSource.status.phase, or "missing"
 }
 
 export interface WorkloadNode {

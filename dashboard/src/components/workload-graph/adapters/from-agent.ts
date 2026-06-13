@@ -1,4 +1,6 @@
 import type { PromptPackContent } from "@/lib/data/types";
+import type { SkillRef } from "@/types/prompt-pack";
+import type { SkillSource } from "@/types/skill-source";
 import type {
   WorkloadModel,
   WorkloadNode,
@@ -6,6 +8,7 @@ import type {
   ResolutionStatus,
 } from "../types";
 import { deriveWorkloadTier } from "../derive-tier";
+import { attachSkills } from "./skills";
 
 export interface ResolvedProvider {
   name: string;
@@ -28,6 +31,8 @@ export interface AgentWorkloadInputs {
   providers: ResolvedProvider[];
   discoveredTools: DiscoveredTool[];
   toolRegistryName?: string;
+  skillRefs?: SkillRef[];
+  skillSources?: SkillSource[];
 }
 
 function resolveTool(
@@ -74,7 +79,7 @@ export function agentRuntimeToWorkload(inputs: AgentWorkloadInputs): WorkloadMod
 
   for (const p of inputs.providers) nodes.push(providerNode(p));
 
-  return {
+  const deployed: WorkloadModel = {
     ...base,
     altitude: "deployment",
     nodes,
@@ -86,4 +91,5 @@ export function agentRuntimeToWorkload(inputs: AgentWorkloadInputs): WorkloadMod
       },
     },
   };
+  return attachSkills(deployed, inputs.skillRefs, inputs.skillSources);
 }

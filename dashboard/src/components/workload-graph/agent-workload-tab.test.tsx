@@ -17,6 +17,17 @@ vi.mock("@/hooks/resources", () => ({
   useToolRegistry: () => ({
     data: { status: { discoveredTools: [{ name: "lookup", handlerName: "http", endpoint: "https://x", status: "Available" }] } },
   }),
+  usePromptPack: () => ({
+    data: { spec: { skills: [{ source: "anthropic-skills", mountAs: "skills" }] } },
+  }),
+}));
+
+vi.mock("@/hooks/use-skill-sources", () => ({
+  useSkillSources: () => ({
+    sources: [
+      { metadata: { name: "anthropic-skills" }, status: { phase: "Ready", skillCount: 7 } },
+    ],
+  }),
 }));
 
 vi.mock("./WorkloadGraph", () => ({

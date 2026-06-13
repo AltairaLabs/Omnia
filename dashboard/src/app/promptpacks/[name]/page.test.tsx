@@ -22,6 +22,10 @@ vi.mock("@/hooks/agents", () => ({
   useAgents: useAgentsSpy,
 }));
 
+vi.mock("@/hooks/use-skill-sources", () => ({
+  useSkillSources: () => ({ sources: [] }),
+}));
+
 vi.mock("@/components/layout", () => ({
   Header: ({ title }: { title: React.ReactNode }) => <h1>{title}</h1>,
 }));

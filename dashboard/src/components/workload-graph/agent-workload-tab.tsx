@@ -1,6 +1,7 @@
 "use client";
 
-import { usePromptPackContent, useProviders, useToolRegistry } from "@/hooks/resources";
+import { usePromptPack, usePromptPackContent, useProviders, useToolRegistry } from "@/hooks/resources";
+import { useSkillSources } from "@/hooks/use-skill-sources";
 import type { AgentRuntime } from "@/types";
 import { WorkloadGraph } from "./WorkloadGraph";
 import { agentRuntimeToWorkload, type ResolvedProvider } from "./adapters/from-agent";
@@ -12,6 +13,8 @@ export function AgentWorkloadTab({
   const ns = agent.metadata.namespace;
   const packName = agent.spec.promptPackRef?.name ?? "";
   const { data: content } = usePromptPackContent(packName, workspace);
+  const { data: promptPack } = usePromptPack(packName, workspace);
+  const { sources: skillSources } = useSkillSources();
 
   const { data: allProviders } = useProviders();
 
@@ -41,6 +44,8 @@ export function AgentWorkloadTab({
     providers,
     discoveredTools,
     toolRegistryName: trName || undefined,
+    skillRefs: promptPack?.spec?.skills,
+    skillSources,
   });
-  return <WorkloadGraph model={model} />;
+  return <WorkloadGraph model={model} namespace={ns} />;
 }

@@ -11,7 +11,7 @@ const KIND_TO_TYPE: Record<WorkloadNodeKind, string> = {
   state: "workloadState",
   provider: "workloadProvider",
   tool: "workloadAgent",
-  skill: "workloadAgent",
+  skill: "workloadSkill",
   scenario: "workloadAgent",
   judge: "workloadAgent",
 };
@@ -19,6 +19,7 @@ const KIND_TO_TYPE: Record<WorkloadNodeKind, string> = {
 function edgeStyle(style?: WorkloadModel["edges"][number]["style"]): FlowEdge["style"] {
   if (style === "unresolved") return { strokeDasharray: "4 4", opacity: 0.5 };
   if (style === "loop") return { strokeDasharray: "6 3" };
+  if (style === "provides") return { strokeDasharray: "2 4", opacity: 0.6 };
   return undefined;
 }
 

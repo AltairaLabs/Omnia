@@ -1,21 +1,36 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
   Controls,
+  Panel,
   BackgroundVariant,
   useNodesState,
   useEdgesState,
+  type ReactFlowInstance,
+  type Node as FlowNode,
+  type Edge as FlowEdge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Info } from "lucide-react";
-import { modelToFlow } from "./to-flow";
+import { modelToFlow, type WorkloadNodeData } from "./to-flow";
 import { layoutFlow } from "./layout";
 import { workloadNodeTypes } from "./workload-nodes";
 import { NodeDrawer } from "./node-drawer";
 import type { WorkloadModel, WorkloadNode, WorkloadBudget } from "./types";
+
+type WorkloadFlowInstance = ReactFlowInstance<FlowNode<WorkloadNodeData>, FlowEdge>;
+
+// elk repositions nodes after mount; re-fit once they're measured (next paint)
+// so the whole graph scales to the canvas instead of staying at the initial zoom.
+export function fitViewAfterPaint(inst: WorkloadFlowInstance | null): void {
+  if (!inst) return;
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => inst.fitView({ padding: 0.08, duration: 250 })),
+  );
+}
 
 function budgetLabel(b: WorkloadBudget): string {
   const parts: string[] = [];
@@ -33,19 +48,21 @@ function deploymentBanner(model: WorkloadModel): string {
 export function WorkloadGraph({
   model,
   className,
-}: Readonly<{ model: WorkloadModel; className?: string }>) {
+  namespace,
+}: Readonly<{ model: WorkloadModel; className?: string; namespace?: string }>) {
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const flow = useMemo(() => modelToFlow(model, setSelectedId), [model]);
   const [nodes, setNodes] = useNodesState(flow.nodes);
   const [edges, setEdges] = useEdgesState(flow.edges);
+  const rf = useRef<WorkloadFlowInstance | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     layoutFlow(flow.nodes, flow.edges).then((laid) => {
-      if (!cancelled) {
-        setNodes(laid);
-        setEdges(flow.edges);
-      }
+      if (cancelled) return;
+      setNodes(laid);
+      setEdges(flow.edges);
+      fitViewAfterPaint(rf.current);
     });
     return () => { cancelled = true; };
   }, [flow, setNodes, setEdges]);
@@ -64,31 +81,44 @@ export function WorkloadGraph({
 
   return (
     <div className={className}>
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
-        <Info className="h-3.5 w-3.5" />
-        <span>{banner}</span>
-      </div>
-      <div className="relative border rounded-lg" style={{ width: "100%", height: "560px" }}>
+      <div
+        className="relative border rounded-lg"
+        style={{ width: "100%", height: "clamp(560px, 76vh, 900px)" }}
+      >
         <ReactFlow
           nodes={nodes}
           edges={edges}
           nodeTypes={workloadNodeTypes}
+          onInit={(inst) => { rf.current = inst; }}
           fitView
-          fitViewOptions={{ padding: 0.2 }}
+          fitViewOptions={{ padding: 0.08 }}
           minZoom={0.2}
           maxZoom={2}
           defaultEdgeOptions={{ type: "smoothstep" }}
         >
+          <Panel position="top-left">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-background/85 backdrop-blur rounded border px-2 py-1">
+              <Info className="h-3.5 w-3.5" />
+              <span>{banner}</span>
+            </div>
+          </Panel>
+          {model.meta.budget && (
+            <Panel position="top-right">
+              <div className="text-xs bg-background/85 backdrop-blur rounded border px-2 py-1">
+                <span className="font-medium text-foreground">Budget</span>{" "}
+                <span className="text-muted-foreground">{budgetLabel(model.meta.budget)}</span>
+              </div>
+            </Panel>
+          )}
           <Controls />
           <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
         </ReactFlow>
-        <NodeDrawer node={selected} onClose={() => setSelectedId(undefined)} />
+        <NodeDrawer
+          node={selected}
+          onClose={() => setSelectedId(undefined)}
+          namespace={namespace}
+        />
       </div>
-      {model.meta.budget && (
-        <div className="text-xs text-muted-foreground mt-2">
-          budget: {budgetLabel(model.meta.budget)}
-        </div>
-      )}
     </div>
   );
 }
