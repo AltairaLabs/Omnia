@@ -1015,6 +1015,9 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrAboutRequired):
 		status = http.StatusBadRequest
 		msg = ErrAboutRequired.Error()
+	case errors.Is(err, memory.ErrNotFound):
+		status = http.StatusNotFound
+		msg = "memory not found"
 	}
 
 	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)

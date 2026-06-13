@@ -487,7 +487,7 @@ func updateEntity(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 		return fmt.Errorf("memory: update entity: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("memory: entity %s not found in scope", mem.ID)
+		return fmt.Errorf("memory: entity %s not found in scope: %w", mem.ID, ErrNotFound)
 	}
 	return nil
 }
@@ -715,7 +715,7 @@ func (s *PostgresMemoryStore) Delete(ctx context.Context, scope map[string]strin
 		return fmt.Errorf("memory: delete: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("memory: entity %s not found", memoryID)
+		return fmt.Errorf("memory: entity %s not found: %w", memoryID, ErrNotFound)
 	}
 	return nil
 }
@@ -1197,8 +1197,8 @@ func assertEntitiesInScope(ctx context.Context, tx pgx.Tx, entityIDs []string, s
 		return fmt.Errorf("memory: scope assertion iter: %w", err)
 	}
 	if n != len(uniqueIDs) {
-		return fmt.Errorf("memory: %d of %d source entities not found in scope",
-			len(uniqueIDs)-n, len(uniqueIDs))
+		return fmt.Errorf("memory: %d of %d source entities not found in scope: %w",
+			len(uniqueIDs)-n, len(uniqueIDs), ErrNotFound)
 	}
 	return nil
 }
@@ -1603,7 +1603,7 @@ func (s *PostgresMemoryStore) UpdateObservationEmbedding(
 		return fmt.Errorf("memory: update observation embedding: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("memory: observation %s not found", observationID)
+		return fmt.Errorf("memory: observation %s not found: %w", observationID, ErrNotFound)
 	}
 	return nil
 }
