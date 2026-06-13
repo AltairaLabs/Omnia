@@ -275,11 +275,19 @@ func buildMultiTierQuery(req MultiTierRequest) (string, []any, error) {
 	addFTSPredicate(&qb, req.Query)
 	addPurposeFilters(&qb, req.Purposes)
 
+	// PERF-2: the inner DISTINCT ON picks the latest active observation per
+	// entity (ORDER BY must start with the distinct key, e.id); the outer query
+	// then takes the candidate-pool slice by recency, not by entity UUID, so the
+	// rows that reach the Go-side ranker are the most relevant when more than
+	// multiTierCandidatePool entities match. Empty-query recency is a reasonable
+	// SQL-side proxy for the final score.
 	sql := fmt.Sprintf(
-		"SELECT DISTINCT ON (e.id) %s, %s, %s "+
+		"SELECT * FROM ("+
+			"SELECT DISTINCT ON (e.id) %s, %s, %s "+
 			"FROM memory_entities %s%s "+
 			"WHERE %s%s "+
-			"ORDER BY e.id, o.observed_at DESC LIMIT %d",
+			"ORDER BY e.id, o.observed_at DESC"+
+			") candidates ORDER BY observed_at DESC LIMIT %d",
 		selectEntityCols, selectEntityScopeCols, selectObserveColsMulti,
 		entityTableAlias, observationJoin,
 		colEntityForgot, qb.Where(),

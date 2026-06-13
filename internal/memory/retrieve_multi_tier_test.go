@@ -105,6 +105,11 @@ func TestBuildMultiTierQuery_DefaultCandidateFloor(t *testing.T) {
 	if !strings.Contains(sql, "LIMIT 200") {
 		t.Errorf("expected candidate LIMIT 200: %s", sql)
 	}
+	// PERF-2: the pool slice is taken by recency, not entity UUID — the LIMIT
+	// must sit under an outer recency ordering, not the inner DISTINCT ON key.
+	if !strings.Contains(sql, "candidates ORDER BY observed_at DESC LIMIT 200") {
+		t.Errorf("expected candidate pool ordered by recency before LIMIT: %s", sql)
+	}
 }
 
 func TestClassifyTier(t *testing.T) {
