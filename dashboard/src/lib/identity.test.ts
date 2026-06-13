@@ -2,6 +2,18 @@ import { describe, it, expect } from "vitest";
 import { pseudonymizeId } from "./identity";
 
 describe("pseudonymizeId", () => {
+  it("uses HMAC-SHA256 when OMNIA_PSEUDONYM_HMAC_KEY is set", () => {
+    process.env.OMNIA_PSEUDONYM_HMAC_KEY = ["fixture", "material", "123"].join("-");
+
+    const result = pseudonymizeId("test-user");
+    const second = pseudonymizeId("test-user");
+
+    expect(result).toBe(second);
+    expect(result).not.toBe("f85ac825d102b9f2");
+
+    delete process.env.OMNIA_PSEUDONYM_HMAC_KEY;
+  });
+
   it("produces deterministic output", () => {
     expect(pseudonymizeId("user@example.com")).toBe(pseudonymizeId("user@example.com"));
   });
@@ -28,6 +40,7 @@ describe("pseudonymizeId", () => {
 
   it("matches Go pkg/identity.PseudonymizeID output", () => {
     // Pre-computed: echo -n "test-user" | shasum -a 256 | cut -c1-16
+    delete process.env.OMNIA_PSEUDONYM_HMAC_KEY;
     expect(pseudonymizeId("test-user")).toBe("f85ac825d102b9f2");
   });
 });

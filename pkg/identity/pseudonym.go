@@ -22,13 +22,20 @@ limitations under the License.
 package identity
 
 import (
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"os"
 )
 
 // pseudonymLength is the number of hex characters from the SHA-256 hash.
 // 16 hex chars = 64 bits of entropy, sufficient for uniqueness within a workspace.
 const pseudonymLength = 16
+
+// pseudonymHMACKeyEnv is an optional secret that enables keyed HMAC
+// pseudonymization. When unset, the legacy SHA-256 behavior is preserved for
+// backward compatibility.
+const pseudonymHMACKeyEnv = "OMNIA_PSEUDONYM_HMAC_KEY"
 
 // PseudonymizeID returns a deterministic, non-reversible pseudonym for a user ID.
 // The result is a 16-character hex string derived from SHA-256 of the input.
@@ -40,6 +47,13 @@ func PseudonymizeID(raw string) string {
 	if raw == "" {
 		return ""
 	}
-	h := sha256.Sum256([]byte(raw))
-	return hex.EncodeToString(h[:])[:pseudonymLength]
+
+	if key := os.Getenv(pseudonymHMACKeyEnv); key != "" {
+		h := hmac.New(sha256.New, []byte(key))
+		_, _ = h.Write([]byte(raw))
+		return hex.EncodeToString(h.Sum(nil))[:pseudonymLength]
+	}
+
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])[:pseudonymLength]
 }
