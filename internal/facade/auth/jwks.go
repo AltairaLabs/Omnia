@@ -75,6 +75,9 @@ type JWKSResolver struct {
 	keys     map[string]*rsa.PublicKey
 	fetching bool
 	cond     *sync.Cond
+
+	lastFetch       time.Time
+	refreshInterval time.Duration
 }
 
 // JWKSOption tunes a JWKSResolver.
@@ -86,14 +89,22 @@ func WithJWKSHTTPClient(c *http.Client) JWKSOption {
 	return func(r *JWKSResolver) { r.client = c }
 }
 
+// WithJWKSMinRefreshInterval sets the minimum time between network refreshes
+// on kid cache misses. Requests for unknown kids within this interval return
+// ErrUnknownKid without re-fetching.
+func WithJWKSMinRefreshInterval(d time.Duration) JWKSOption {
+	return func(r *JWKSResolver) { r.refreshInterval = d }
+}
+
 // NewJWKSResolver constructs a resolver that fetches keys from url.
 // url is typically the dashboard's in-cluster JWKS endpoint, e.g.
 // http://omnia-dashboard.omnia-system.svc.cluster.local:3000/api/auth/jwks.
 func NewJWKSResolver(url string, opts ...JWKSOption) *JWKSResolver {
 	r := &JWKSResolver{
-		url:    url,
-		client: &http.Client{Timeout: 5 * time.Second},
-		keys:   map[string]*rsa.PublicKey{},
+		url:             url,
+		client:          &http.Client{Timeout: 5 * time.Second},
+		keys:            map[string]*rsa.PublicKey{},
+		refreshInterval: 0,
 	}
 	r.cond = sync.NewCond(&r.mu)
 	for _, opt := range opts {
@@ -113,7 +124,7 @@ func (r *JWKSResolver) Resolve(ctx context.Context, kid string) (*rsa.PublicKey,
 	}
 	r.mu.Unlock()
 
-	if err := r.refresh(ctx); err != nil {
+	if err := r.refresh(ctx, kid); err != nil {
 		return nil, err
 	}
 
@@ -126,14 +137,31 @@ func (r *JWKSResolver) Resolve(ctx context.Context, kid string) (*rsa.PublicKey,
 }
 
 // refresh fetches the JWKS body and replaces the in-memory cache.
-// Single-flight: a second concurrent caller waits for the in-flight
-// fetch instead of duplicating it.
-func (r *JWKSResolver) refresh(ctx context.Context) error {
+// Single-flight: concurrent callers share one in-flight fetch and re-check the
+// cache after waiting. Unknown-kid misses are rate-limited by refreshInterval.
+func (r *JWKSResolver) refresh(ctx context.Context, kid string) error {
 	r.mu.Lock()
-	for r.fetching {
+	waited := false
+	for {
+		if _, ok := r.keys[kid]; ok {
+			r.mu.Unlock()
+			return nil
+		}
+		if waited {
+			r.mu.Unlock()
+			return nil
+		}
+		if !r.lastFetch.IsZero() && r.refreshInterval > 0 && time.Since(r.lastFetch) < r.refreshInterval {
+			r.mu.Unlock()
+			return nil
+		}
+		if !r.fetching {
+			r.fetching = true
+			break
+		}
+		waited = true
 		r.cond.Wait()
 	}
-	r.fetching = true
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
@@ -165,6 +193,7 @@ func (r *JWKSResolver) refresh(ctx context.Context) error {
 
 	r.mu.Lock()
 	r.keys = keys
+	r.lastFetch = time.Now()
 	r.mu.Unlock()
 	return nil
 }

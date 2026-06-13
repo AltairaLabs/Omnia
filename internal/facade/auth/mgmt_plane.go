@@ -110,7 +110,10 @@ func NewMgmtPlaneValidator(jwksURL string, opts ...MgmtPlaneOption) (*MgmtPlaneV
 	if jwksURL == "" {
 		return nil, errors.New("mgmt-plane: JWKS URL required")
 	}
-	return NewMgmtPlaneValidatorWithResolver(NewJWKSResolver(jwksURL), opts...), nil
+	return NewMgmtPlaneValidatorWithResolver(
+		NewJWKSResolver(jwksURL, WithJWKSMinRefreshInterval(2*time.Second)),
+		opts...,
+	), nil
 }
 
 // mgmtPlaneClaims is the dashboard-minted JWT shape.
